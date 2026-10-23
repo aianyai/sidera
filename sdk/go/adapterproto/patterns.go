@@ -9,7 +9,7 @@ import (
 // Patterns of names with a fixed syntax, also used by the manifest. The schema
 // states the same expressions, which a test compares.
 const (
-	// AdapterIDPattern is the identifier of an adapter, such as "claude".
+	// AdapterIDPattern is the identifier of an adapter, such as "example".
 	AdapterIDPattern = `^[a-z0-9][a-z0-9-]{0,31}$`
 	// PresetNamePattern is the name of a runtime preset; its length is at most
 	// MaxPresetNameLen. It is the syntax the authorization of session creation

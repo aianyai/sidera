@@ -152,7 +152,7 @@ func TestPresetNameAndKeyRules(t *testing.T) {
 		}
 	}
 	for s, ok := range map[string]bool{
-		"claude": true, "a": true, "0": true, "chat-bridge": true, "a" + repeat("b", 31): true,
+		"example": true, "a": true, "0": true, "chat-bridge": true, "a" + repeat("b", 31): true,
 		"": false, "-a": false, "A": false, "a_b": false, "a.b": false, "a" + repeat("b", 32): false,
 	} {
 		if err := adapterproto.ValidateAdapterID(s); (err == nil) != ok {
