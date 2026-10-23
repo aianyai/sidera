@@ -10,6 +10,9 @@ checks that the model saw it before acknowledging for the agent.
 
 - A prompt is a short text without a body ("You have 3 new messages. Read them
   with recv."). Sender and body reach the model only through `recv`.
+- A message whose `recv`-stage authorization is currently Suspend is not a
+  waiting message: it counts toward no prompt, no blocked verdict and no
+  arrival time, because suspension means no lease, no prompt and no feedback.
 - Each endpoint has at most one unread prompt. A prompt is read when the
   endpoint calls `recv` after the prompt was delivered. While a prompt is unread
   or the session is busy, new messages add no prompt: the next prompt counts
@@ -61,7 +64,7 @@ checks that the model saw it before acknowledging for the agent.
   checked against the encoded output.
 - Whole messages are taken in queue order while they fit. A first message
   larger than the budget is handed out alone as `part k/n`; a plain `recv`
-  hands out the part after the ones already acknowledged, so it resumes the
+  hands out the first part not yet acknowledged, so it resumes the
   message, and fetching part k by number returns that part. Every part fits. A
   part that is not the last carries `"next":{"msg":"<id>","part":k+1}`, a
   provisional hint naming the next part; the CLI and the MCP tool each map it to
@@ -85,6 +88,10 @@ saved-to-file notice, if a Codex truncation marker appears (`Warning: truncated
 output`, `…N tokens truncated…`, `...N tokens truncated...`, and the same with
 `chars` or `bytes`), or if the output is simply not there. A marker counts only when the
 observed result has more of it than the expected output.
+
+The delivery side that these rules call into is described in
+[delivery](../delivery/README.md): `delivery.LeaseID` (the page identifier),
+`delivery.Record.NextPart()` and `delivery.Record.PossibleDuplicate(part)`.
 
 ## Why
 

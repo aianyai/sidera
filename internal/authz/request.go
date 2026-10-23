@@ -134,7 +134,7 @@ const (
 	// ReasonTrustDenied: connection trust is denied.
 	ReasonTrustDenied
 	// ReasonMalformedRequest: the request itself is malformed, or its trust
-	// state is unset.
+	// outcome is out of range.
 	ReasonMalformedRequest
 	// ReasonExplicitDeny: a deny rule covers the request.
 	ReasonExplicitDeny

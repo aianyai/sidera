@@ -43,7 +43,7 @@ single local revocation to each node, and each node answers with its own verdict
 from its own list, so one person can be allowed on one node and refused on
 another.
 
-A policy change is classified by the policy package (`authz.Change`): `Unchanged`
+A policy change is classified by the [policy](../policy/README.md) package (`authz.Change`): `Unchanged`
 and `Tighten` need manage, anything else (`Loosen`, an unset or unknown value)
 needs full control. An unclassifiable preset change counts as loosening. A preset change
 that removes or narrows a preset needs manage; adding or loosening one needs

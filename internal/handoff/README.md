@@ -17,7 +17,7 @@ to the delivery side, which calls into this package.
 | `PromptText(count)` | The wake-up text. No message body, ever. Provisional wording. |
 | `DecidePrompt(PromptInput, PromptParams, now)` | Whether to send a prompt now: send or hold, with a typed reason, the prompt kind to record and the count for the text. A hold may carry `RetryAt`, when to evaluate again. |
 | `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. |
-| `Pack(queue, delivery.LeaseID, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the one after the parts already acknowledged). |
+| `Pack(queue, delivery.LeaseID, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the first part not yet acknowledged). |
 | `Part(msg, k, delivery.LeaseID, Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
 | `CheckBeforeAck(runtime, observed, expected)` | Whether an adapter may acknowledge for the agent. |
 | `DefaultBudget()`, `PathBudgets()`, `EstimateTokens`, `UTF16Len` | The output budget and the units it is measured in. |
@@ -77,7 +77,7 @@ Delivery blocked:
 - Messages are taken in queue order while they fit; the first that does not
   fit ends the page. An oversized first message is handed out alone as
   `part k/n`, where k is `Message.NextPart` (0 or 1 means 1): a plain `recv`
-  resumes a chunked message after the parts already acknowledged, and `Part`
+  resumes a chunked message at the first part not yet acknowledged, and `Part`
   returns any other. Every part fits. A part that is not the last carries
   `"next":{"msg":"<id>","part":k+1}`, a provisional hint that is neutral to the
   front end: the CLI and the MCP tool each map it to their own call.
@@ -102,6 +102,14 @@ Before acknowledging:
 ## What the caller must guarantee
 
 - `now` is UTC and passed in; attempts are in ascending time order.
+- A message whose `recv`-stage authorization is currently Suspend is not a
+  waiting message and counts in none of `PromptInput.Pending`,
+  `PromptInput.LastArrivalAt` and `BlockedInput.OldestPendingAt`: suspension
+  means no lease, no prompt and no feedback.
+- A message whose `recv`-stage authorization is currently Suspend is not a
+  waiting message and counts in none of `PromptInput.Pending`,
+  `PromptInput.LastArrivalAt` and `BlockedInput.OldestPendingAt`: suspension
+  means no lease, no prompt and no feedback.
 - `Busy` is true from the moment a prompt is dispatched until its turn ends.
 - The caller records every prompt attempt, with the `Kind` that `DecidePrompt`
   returned, and stores the `BlockedReport` of each `BlockedNew`.

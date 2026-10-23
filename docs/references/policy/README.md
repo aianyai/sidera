@@ -40,8 +40,8 @@ set of nodes.
 
 **Three outcomes.** Allow, Suspend, Reject, each with a typed reason.
 
-- The caller supplies the sender's connection trust as the trust package's
-  outcome: allowed direct, allowed inherited, suspended or denied. Denied always
+- The caller supplies the sender's connection trust as the
+  [trust](../trust/README.md) package's outcome (`trust.Outcome`): allowed direct, allowed inherited, suspended or denied. Denied always
   gives Reject; it is the zero value, so an unset field is refused, and a value
   outside the four is rejected as malformed. For allowed and suspended alike the request shape, deny rules, restrictions, allow rules and
   the endpoint's declarations are then applied. A request that comes out as an

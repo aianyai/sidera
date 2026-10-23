@@ -75,8 +75,10 @@ type BlockedInput struct {
 	// Attempts is the endpoint's prompt attempts in ascending time order.
 	Attempts []Attempt
 	// OldestPendingAt is when the oldest message still waiting for the
-	// endpoint arrived; zero if none waits. Attempts before it belong to
-	// earlier messages and say nothing about the ones waiting now.
+	// endpoint arrived; zero if none waits. A message whose recv-stage
+	// authorization is currently Suspend is not waiting: suspension means no
+	// lease, no prompt and no feedback. Attempts before it belong to earlier
+	// messages and say nothing about the ones waiting now.
 	OldestPendingAt time.Time
 	Signals         Signals
 	// Reported is what the caller last reported; the caller stores the

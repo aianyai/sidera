@@ -106,9 +106,12 @@ correction and the blocked notice.
   the effects the outcome calls for.
 - `report_by` in a target record equals `ReportBy(accept_before)` and the
   envelope is otherwise valid; this package does not validate the envelope.
-- The authorization verdict is the policy's (`authz.Evaluate`), turned into an
-  `Authorization` by `IntakeAuthorization` for both `Intake` and `Handout`; a
-  caller never builds a denial's reason itself. The token check of an
+- The authorization verdict is the policy's (`authz.Evaluate`). `Intake` takes
+  it as an `Authorization` from `IntakeAuthorization`, which alone maps a
+  denial to the reason the sender hears; a caller never builds that reason
+  itself. `Handout` takes only the kind, `IntakeAuthorization(v).Kind`, and a
+  refusal at `recv` is always reported as `second_check_failed`, so no
+  specific rule is revealed. The token check of an
   acknowledgement is made by the caller and passed as `Ack.TokenMatches`.
 - The caller generates one `LeaseID` per `recv` (`NewLeaseID` with
   `crypto/rand.Reader` in production) and passes it to `Handout` for every

@@ -6,9 +6,12 @@ Time bounds shared by every contract package. At present one value:
 ## What
 
 `timing.ClockTolerance` is 2 minutes: the largest difference between two nodes'
-clocks that a time comparison tolerates. Every place where a node judges a
-timestamp produced on another node against its own clock adds or subtracts this
-bound, and no other.
+clocks that a time comparison tolerates. Wherever a comparison across nodes must
+allow for clock skew, this value is used and no other. Validity bounds of
+certificates, credentials and reachability proofs are compared without it: two
+minutes only moves a 30-day or 2-hour window, and a failure there is explicit
+(the certificate or proof is refused), not a silent disagreement about a
+deadline.
 
 ## Why
 
@@ -33,7 +36,7 @@ up on, is a protocol fork that no retry resolves.
 | Use | Code |
 | --- | ---- |
 | A voucher may be stamped at most this far ahead of the receiver's clock; part of the grace-period floor | `internal/trust` (`Vouchers.Accept`, `Evaluate`, `MinGracePeriod`) |
-| A delivery deadline may exceed the cap by this much; the expiry judgement and `report_by` add it | `internal/delivery` (`CheckIntake`, `ReportByOffset`, expiry in `timing.go`) |
+| A delivery deadline may exceed the cap by this much; the expiry judgement and `report_by` add it | `internal/delivery` (`Intake`, `ReportByOffset`, `ExpiryJudgeableAfter`) |
 | An offline directive's signing time may be this far ahead of now and this far before the node lost contact | `internal/admin` (`AcceptDirective`) |
 
 The value itself: `internal/timing/timing.go`. Test: `TestClockTolerance`.

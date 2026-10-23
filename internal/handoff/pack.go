@@ -31,8 +31,8 @@ type Message struct {
 	PossiblyDuplicate bool
 	// NextPart is the part the next plain recv hands out when the message is
 	// larger than one page: the delivery side sets it from
-	// delivery.Record.NextPart(), the number after the last part the model
-	// acknowledged. 0 and 1 both mean from the start, so a message that was never handed out, or fits
+	// delivery.Record.NextPart(), the first part not yet acknowledged. 0 and 1
+	// both mean from the start, so a message that was never handed out, or fits
 	// whole, needs no value.
 	NextPart int
 }

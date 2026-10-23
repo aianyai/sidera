@@ -104,9 +104,12 @@ type PromptInput struct {
 	Trigger PromptTrigger
 	// Pending is the number of messages queued for the endpoint that still
 	// have something not handed out: a message handed out in parts counts until
-	// its last part has been.
+	// its last part has been. A message whose recv-stage authorization is
+	// currently Suspend is not a waiting message and is not counted: suspension
+	// means no lease, no prompt and no feedback.
 	Pending int
-	// LastArrivalAt is when the newest queued message arrived.
+	// LastArrivalAt is when the newest waiting message arrived; a suspended
+	// message is not waiting (see Pending).
 	LastArrivalAt time.Time
 	// LastRecvAt is when the endpoint last called recv; zero if never.
 	LastRecvAt time.Time

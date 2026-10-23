@@ -89,7 +89,8 @@ beyond now plus cap plus tolerance is rejected as out of range; denied
 authorization is rejected with the reason the denial carries (a denial without
 one is invalid input); suspended authorization is a non-final result and the
 sender keeps retrying until the deadline. `IntakeAuthorization` is the single
-place where the policy's verdict becomes that authorization:
+place where the verdict of the [policy](../policy/README.md) becomes that
+authorization:
 
 | Policy verdict | Authorization |
 | -------------- | ------------- |
@@ -102,6 +103,10 @@ place where the policy's verdict becomes that authorization:
 | reject: endpoint hidden | deny, `endpoint_missing` |
 | reject: any reason not listed | deny, `unauthorized` |
 | an outcome that is none of the three | the zero authorization, refused by `Intake` and `Handout` as invalid input |
+
+The mapping is used only at intake. At `recv`, `Handout` takes only the kind
+(`IntakeAuthorization(v).Kind`), and a refusal there is always reported as
+`second_check_failed`, so no specific rule is revealed.
 
 A hidden endpoint is reported as not existing, so the sender cannot tell it from
 an endpoint that is absent, and all the rules that refuse without a declaration
@@ -197,9 +202,10 @@ the dedup record and returned on every repeat.
 - **The rejection reason is carried by the denial, from one mapping.** The policy
   knows why it denied; collapsing every denial to one reason would hide from the
   sender whether to retry, fix its request or give up. The mapping from policy
-  reason to rejection reason lives in `IntakeAuthorization` alone, so intake and
-  the second check at `recv` cannot tell a sender two different things about the
-  same refusal.
+  reason to rejection reason lives in `IntakeAuthorization` alone, so no caller
+  of intake can tell a sender a reason of its own. At `recv` a denial is always
+  `second_check_failed`, so the sender learns that the check failed and not
+  which rule refused it.
 - **One rule for applying a report.** If every caller turned the report into
   events itself, one of them would apply the receipt and forget the block, and a
   block reported while the receipt was still unknown would never be told.

@@ -45,9 +45,11 @@ func (a Authorization) validate() error {
 }
 
 // IntakeAuthorization is the single mapping from the policy's verdict to the
-// input of Intake and Handout: an allow is AuthorizationAllow, a suspension is
+// input of Intake: an allow is AuthorizationAllow, a suspension is
 // AuthorizationSuspend, and a rejection is AuthorizationDeny carrying the
-// RejectReason the sender is told.
+// RejectReason the sender is told. Handout takes only the Kind of the result:
+// a refusal at recv is always RejectSecondCheckFailed, so no specific rule is
+// revealed.
 //
 // The reasons map as follows, so the sender hears why it was refused without
 // learning more than it may:
