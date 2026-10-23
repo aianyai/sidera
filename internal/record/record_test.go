@@ -163,6 +163,14 @@ func TestDecodeRejects(t *testing.T) {
 		lo, hi = hi, lo
 	}
 	keyPlus := func(b []byte) []byte { return cborw.mapOf(cborw.uint(1), b, cborw.uint(2), cborw.bstr(sig)) }
+	smallOrderItem := sigItem(mustHexBytes(t, "0100000000000000000000000000000000000000000000000000000000000000"), sig)
+	repeatItem := func(n int, item []byte) [][]byte {
+		out := make([][]byte, n)
+		for i := range out {
+			out[i] = item
+		}
+		return out
+	}
 	rows := []struct {
 		rule string
 		in   []byte
@@ -227,6 +235,12 @@ func TestDecodeRejects(t *testing.T) {
 		{"over-long type", envelope(strings.Repeat("t", MaxTypeLen+1), payload, sigItem(pub1, sig)), DefaultMaxInput, ErrType},
 		{"empty payload", envelope(pairType, nil, sigItem(pub1, sig)), DefaultMaxInput, ErrPayload},
 		{"no signatures", envelope(pairType, payload), DefaultMaxInput, ErrSignatureCount},
+		// Every key below is small order, so converting any of them fails with a
+		// key error. The count error winning shows that no key was converted
+		// first: surplus signatures cost the decoder no curve work.
+		{"too many signatures are refused before any key is decoded", envelope(pairType, payload, repeatItem(MaxSignatures+1, smallOrderItem)...), DefaultMaxInput, ErrSignatureCount},
+		{"far too many signatures are refused before any key is decoded", envelope(pairType, payload, repeatItem(500, smallOrderItem)...), DefaultMaxInput, ErrSignatureCount},
+		{"the largest allowed number of signatures reaches key decoding", envelope(pairType, payload, repeatItem(MaxSignatures, smallOrderItem)...), DefaultMaxInput, ident.ErrKeySmallOrder},
 		{"more than the allowed number of signatures", envelope(pairType, payload, items(MaxSignatures+1)...), DefaultMaxInput, ErrSignatureCount},
 		{"the same signer twice", envelope(pairType, payload, sigItem(pub1, sig), sigItem(pub1, sig)), DefaultMaxInput, ErrDuplicateSigner},
 		{"signatures not sorted by encoded key", envelope(pairType, payload, sigItem(hi, sig), sigItem(lo, sig)), DefaultMaxInput, ErrSignatureOrder},

@@ -188,6 +188,17 @@ func sortSignatures(s []Signature) {
 	sort.Slice(s, func(i, j int) bool { return bytes.Compare(sortKey(s[i].Key), sortKey(s[j].Key)) < 0 })
 }
 
+// checkSignatureCount enforces 1 to MaxSignatures signatures. Decode calls it
+// before it converts any public key, because converting a key decodes a curve
+// point: a hostile record within the size limit could otherwise make the
+// decoder do hundreds of point decodings for a record it is going to refuse.
+func checkSignatureCount(n int) error {
+	if n < 1 || n > MaxSignatures {
+		return fmt.Errorf("%w: %d, want 1..%d", ErrSignatureCount, n, MaxSignatures)
+	}
+	return nil
+}
+
 func checkTypeString(typ string) error {
 	if typ == "" || len(typ) > MaxTypeLen {
 		return fmt.Errorf("%w: length %d, want 1..%d", ErrType, len(typ), MaxTypeLen)
@@ -206,8 +217,8 @@ func (r Record) shape() error {
 	if len(r.Payload) == 0 {
 		return fmt.Errorf("%w: empty payload", ErrPayload)
 	}
-	if n := len(r.Signatures); n < 1 || n > MaxSignatures {
-		return fmt.Errorf("%w: %d", ErrSignatureCount, n)
+	if err := checkSignatureCount(len(r.Signatures)); err != nil {
+		return err
 	}
 	var prev []byte
 	for i, s := range r.Signatures {
@@ -247,6 +258,9 @@ func (r Record) Encode() ([]byte, error) {
 func Decode(data []byte, maxLen int) (Record, error) {
 	var w recordWire
 	if err := UnmarshalStrict(data, &w, maxLen); err != nil {
+		return Record{}, err
+	}
+	if err := checkSignatureCount(len(w.Signatures)); err != nil {
 		return Record{}, err
 	}
 	r := Record{Type: w.Type, Payload: w.Payload, Signatures: make([]Signature, len(w.Signatures))}

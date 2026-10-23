@@ -99,7 +99,10 @@ every slot is filled by exactly one signature and every signature fills a slot.
 3. The value is encoded again with the deterministic options (nil slices as
    empty byte strings, tags refused). If the bytes differ from the input, the
    input is refused.
-4. For the envelope: signature count, key validity, strictly ascending order.
+4. For the envelope: signature count first, then key validity, then strictly
+   ascending order. The count is checked before any key is converted because
+   converting a key decodes a curve point, and a hostile record within the size
+   limit holds hundreds of signature items.
    For a payload: the record type's own conversion, which refuses values that
    are well formed but invalid.
 
