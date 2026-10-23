@@ -20,5 +20,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [timing](timing/README.md) | Time bounds every node applies identically: the clock tolerance shared by trust, delivery and administration |
 | [preauth](preauth/README.md) | What a peer may do before and after the certificate exchange: connection states, the protocol access table, the exchange messages, the state decision and the connection accounting |
 | [adapter-claude](adapter-claude/README.md) | The Claude adapter's session-creation state machine: crash-safe start, retry and readiness without a second process or session |
+| [adapter-protocol](adapter-protocol/README.md) | How the daemon and an adapter process talk: the SDK module, and the peer layer (line framing, queues, overload, cancellation, write timeout, the effect rule of error responses) |
 
 Language: everything in this directory is English.

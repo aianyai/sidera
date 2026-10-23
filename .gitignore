@@ -31,10 +31,6 @@ coverage.html
 *.prof
 *.pprof
 
-# Local workspace (usually a personal setup for multi-module development)
-go.work
-go.work.sum
-
 # Dependencies (remove this line if you commit the output of `go mod vendor`)
 /vendor/
 
