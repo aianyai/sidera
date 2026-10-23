@@ -332,6 +332,69 @@ in `fuzz_test.go` (`FuzzDecodeStatement`, `FuzzPayloads`, `FuzzStatementRoundTri
 `FuzzClassifyCounts`). The package `README.md` lists entry points and what callers
 must guarantee.
 
+### Trust records
+
+Package `internal/credential`. Four record types carry trust between nodes. Every
+one is a deterministic CBOR map with integer keys; times are Unix seconds,
+counters start at 1, and an optional field is left out and never written as 0.
+A node ID is its 32 bytes; the two ends of an edge are always in ascending byte
+order, so the same facts give the same bytes.
+
+| Type | Payload | Signed by |
+| ---- | ------- | --------- |
+| `sidera/trust-credential/1` | `{1: end a, 2: end b, 3: created_at, 4?: not_after, 5: nonce (16 bytes)}` | the identity keys of both ends |
+| `sidera/trust-credential-revocation/1` | `{1: the revoked credential's payload (bytes)}` | the identity key of either end of that credential, one signature |
+| `sidera/online-voucher/1` | `{1: issuer, 2: edge (credential digest), 3: issued_at, 4: counter}` | the issuer's network key |
+| `sidera/offline-directive/1` | `{1: addressed node, 2: credential digest, 3: end a, 4: end b, 5: signed_at, 6: device certificate (a record)}` | the device key of the attached certificate |
+
+- **Credential.** The two ends differ and ascend; `not_after`, when present, is
+  after `created_at`; the nonce is 16 bytes and not all zero, so two
+  credentials between the same nodes in the same second differ. The credential
+  digest is the record digest, which the signatures do not cover, so it is known
+  to both sides before either signs. The pairing protocol builds the payload
+  independently on each side from facts both hold: the initiator signs first with
+  `Seal`, the target checks the partial record with `VerifyPartial`, compares the
+  payload with its own and completes it with `CoSign`. A credential without
+  `not_after` never expires (the key is left out; `trust` reads the zero time as
+  "never"). An expired credential is still a valid record: `trust` judges its end.
+- **Revocation.** It embeds the credential's payload, not only its digest. The
+  verifier decodes the payload strictly, recomputes the digest and requires the
+  signer to be one of the two ends the payload shows. A stored revocation is
+  therefore safe: a record naming only a digest could not be checked against
+  anyone, and a third party that had seen a digest could cut that edge for good.
+  Exactly one signature is accepted. The type string includes the credential
+  type it embeds.
+- **Voucher.** It carries the issuer's node ID because the signer rule needs it:
+  the network key is bound to a node through the accepted certificate
+  (`NetworkKeyOf`). It carries no validity period; the verifier computes validity
+  from `issued_at`, its clock and its grace period, so a future-dated voucher is
+  `trust.Vouchers.Accept`'s to refuse. That the issuer is an end of the credential
+  the digest names is checked by `CheckVoucher`, which needs the credential.
+- **Directive.** The type fixes the kind: revoke one trust edge. The attached
+  certificate is checked when the directive is decoded (signed by the root key of
+  the person it names), and the directive must be signed by that certificate's
+  device key; whether the person is on the node's list, the level, and the
+  certificate's window at the signing time are `admin`'s decisions. The claimed
+  ends are compared with the credential by `trust.ApplyDirective`, not here. The
+  directive yields the `admin.Directive` (kind, node, signing time, person, cap
+  and window of the certificate, with the two revocation flags filled by the
+  caller) and the `trust.EdgeRevocationDirective`.
+
+Why these shapes: a credential revocation that embeds the payload makes the
+signer check possible and the digest unforgeable by the sender; a fixed order of
+the ends gives one encoding per edge, so a digest names one credential; the
+directive embeds the certificate so that a node that has been offline can check
+the whole chain from the directive alone, and it carries the claimed ends so that
+a directive for an edge the node is not part of is recognised without the
+credential.
+
+Where: `internal/credential` (`credential.go`, `revocation.go`, `voucher.go`,
+`directive.go`). Tests: `golden_test.go` (vectors computed with an independent
+implementation), `credential_test.go`, `revocation_test.go`, `voucher_test.go`,
+`directive_test.go` (rules, signers, every bit protected), `e2e_test.go` (the
+records through `admin` and `trust`), `property_test.go` (payload bytes against
+an oracle), `fuzz_test.go`.
+
 ## Why
 
 - **Deterministic CBOR with a re-encode comparison.** Revocations are kept by
