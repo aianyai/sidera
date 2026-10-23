@@ -64,8 +64,10 @@ set of nodes).
 
 ## Evaluation order
 
-1. Connection trust, given by the caller. Denied gives `Reject`. An unset state is
-   `Reject` (malformed), never a pass. Allowed and suspended both go on.
+1. Connection trust, a `trust.Outcome` given by the caller. `trust.Denied` gives
+   `Reject`; it is the zero value, so an unset field fails closed. A value
+   outside the four outcomes is `Reject` (malformed). `AllowedDirect`,
+   `AllowedInherited` and `Suspended` go on.
 2. Request shape, including the stage. A malformed request is `Reject`.
 3. Explicit deny rules give `Reject(ExplicitDeny)`.
 4. Restrictions and allow rules. If no allow rule grants the request, or a
@@ -180,9 +182,9 @@ control may loosen).
 
 ## What the caller must guarantee
 
-- Connection trust is computed by the trust rules and is current. The
-  `ConnectionTrust` type here is a local stand-in carrying only the three
-  outcomes and whether the sender is a direct or an inherited member.
+- Connection trust is the trust package's verdict (`trust.Evaluate`) and is
+  current. `Request.Trust` is a `trust.Outcome`: `AllowedDirect` is read as a
+  direct sender, `AllowedInherited` and `Suspended` as an inherited one.
 - `Stage` says which check is being made.
 - `Reply` is true only after the reply evidence was verified.
 - `Now` is the caller's clock reading in UTC; the same request at the same time

@@ -4,36 +4,8 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/trust"
 )
-
-// TrustState is the connection-trust verdict about the sender, computed by the
-// trust rules and handed in by the caller.
-//
-// This is a minimal local stand-in for the trust package's result: only the
-// three outcomes and the direct/inherited distinction are read here.
-type TrustState uint8
-
-// The three trust outcomes. The zero value is invalid, so a caller that forgets
-// to fill it in is told off instead of being let through.
-const (
-	// TrustAllowed: the sender is a cluster member.
-	TrustAllowed TrustState = iota + 1
-	// TrustSuspended: the sender would be a member but a guarantee on the path
-	// has lapsed; it can recover without anyone acting.
-	TrustSuspended
-	// TrustDenied: the sender is not a member, or was revoked or released.
-	TrustDenied
-)
-
-// ConnectionTrust is the trust input of a request.
-type ConnectionTrust struct {
-	State TrustState
-	// Direct is true when the sender is a directly trusted node and false when
-	// it is a member through inheritance. It is read when State is TrustAllowed.
-	// A suspended sender is always treated as inherited, whatever Direct says: a
-	// direct tie whose guarantee has lapsed is not a direct tie while it lapsed.
-	Direct bool
-}
 
 // Sender names who is asking: a node, and the endpoint on it when the request
 // comes from one. Node-level requests, such as a directory query or a relay
@@ -86,8 +58,11 @@ const (
 // intake, and again when the body is handed out by recv.
 type Request struct {
 	// Now is the evaluation time (UTC). The caller reads the clock.
-	Now   time.Time
-	Trust ConnectionTrust
+	Now time.Time
+	// Trust is the trust package's verdict about the sender. Its zero value is
+	// trust.Denied, so a caller that forgets to fill it in is refused, not let
+	// through.
+	Trust trust.Outcome
 	// Stage says which check this is. See Stage.
 	Stage Stage
 

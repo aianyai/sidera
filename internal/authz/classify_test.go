@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/trust"
 )
 
 func TestClassify(t *testing.T) {
@@ -402,14 +403,14 @@ func requestGrid() []Request {
 	var out []Request
 	for _, n := range nodes {
 		for _, e := range endpoints {
-			for _, direct := range []bool{false, true} {
+			for _, tr := range []trust.Outcome{trust.AllowedInherited, trust.AllowedDirect} {
 				for _, tg := range targets {
 					for _, a := range Actions {
 						if !a.appliesTo(tg.Kind) {
 							continue
 						}
 						for _, now := range times {
-							r := Request{Now: now, Trust: ConnectionTrust{State: TrustAllowed, Direct: direct}, Stage: StageIntake,
+							r := Request{Now: now, Trust: tr, Stage: StageIntake,
 								Sender: Sender{Node: n, Endpoint: e}, Action: a, Target: tg, Preset: "p1"}
 							switch a {
 							case ActionMessageSend:

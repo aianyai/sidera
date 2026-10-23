@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/trust"
 )
 
 func randomDeclaration(rng *rand.Rand) Declaration {
@@ -33,7 +34,7 @@ func TestDeniedTrustAlwaysRejects(t *testing.T) {
 		p := randomPolicy(t, rng)
 		for k := 0; k < 50; k++ {
 			r := randomRequest(rng, grid)
-			r.Trust = ConnectionTrust{State: TrustDenied}
+			r.Trust = trust.Denied
 			if got := Evaluate(p, r); got.Outcome != OutcomeReject || got.Reason != ReasonTrustDenied {
 				t.Fatalf("denied trust gave %v/%v for %+v", got.Outcome, got.Reason, r)
 			}
@@ -63,9 +64,9 @@ func TestSuspendedTrustSuspendsExactlyWhatWouldBeAllowed(t *testing.T) {
 		p := randomPolicy(t, rng)
 		for k := 0; k < 100; k++ {
 			r := randomRequest(rng, grid)
-			r.Trust = ConnectionTrust{State: TrustSuspended, Direct: rng.Intn(2) == 0}
+			r.Trust = trust.Suspended
 			got := Evaluate(p, r)
-			r.Trust = ConnectionTrust{State: TrustAllowed, Direct: false}
+			r.Trust = trust.AllowedInherited
 			plain := Evaluate(p, r)
 			if plain.Outcome == OutcomeAllow {
 				suspends++

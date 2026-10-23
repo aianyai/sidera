@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/trust"
 )
 
 // query is the part of a request that the rule list reads.
@@ -117,9 +118,9 @@ func (p Policy) decide(q query) decision {
 // once, so a deny rule or a lost grant is not left queued behind a lapsed
 // guarantee.
 func Evaluate(p Policy, r Request) Verdict {
-	switch r.Trust.State {
-	case TrustAllowed, TrustSuspended:
-	case TrustDenied:
+	switch r.Trust {
+	case trust.AllowedDirect, trust.AllowedInherited, trust.Suspended:
+	case trust.Denied:
 		return verdictFor(ReasonTrustDenied)
 	default:
 		return verdictFor(ReasonMalformedRequest)
@@ -136,7 +137,7 @@ func Evaluate(p Policy, r Request) Verdict {
 	if reason, declined := r.declinedBy(reply); declined {
 		return verdictFor(reason)
 	}
-	if r.Trust.State == TrustSuspended {
+	if r.Trust == trust.Suspended {
 		return verdictFor(ReasonTrustSuspended)
 	}
 
@@ -160,7 +161,7 @@ func Evaluate(p Policy, r Request) Verdict {
 func (r Request) query() query {
 	return query{
 		now:    r.Now,
-		direct: r.Trust.State == TrustAllowed && r.Trust.Direct,
+		direct: r.Trust == trust.AllowedDirect,
 		sender: r.Sender,
 		action: r.Action,
 		target: r.Target,

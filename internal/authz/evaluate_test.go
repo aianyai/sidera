@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/trust"
 )
 
 func TestEvaluate(t *testing.T) {
@@ -42,13 +43,15 @@ func TestEvaluate(t *testing.T) {
 			with(send(), func(r *Request) { r.Trust = suspended; r.Reply = true }), ReasonTrustSuspended},
 		{"suspended trust: the sender counts as inherited, so a direct-only allow does not grant",
 			mustPolicy(t, Allow(DirectTrusted(), allEps, ActionMessageSend, Conditions{})),
-			with(send(), func(r *Request) { r.Trust = ConnectionTrust{State: TrustSuspended, Direct: true} }), ReasonNotAuthorized},
+			with(send(), func(r *Request) { r.Trust = trust.Suspended }), ReasonNotAuthorized},
 		{"denied trust rejects even when the policy allows", DefaultPolicy(),
-			with(send(), func(r *Request) { r.Trust = ConnectionTrust{State: TrustDenied} }), ReasonTrustDenied},
+			with(send(), func(r *Request) { r.Trust = trust.Denied }), ReasonTrustDenied},
 		{"denied trust is not lifted by a reply permission", tightened,
-			with(send(), func(r *Request) { r.Trust = ConnectionTrust{State: TrustDenied}; r.Reply = true }), ReasonTrustDenied},
-		{"unset trust state is rejected instead of trusted", DefaultPolicy(),
-			with(send(), func(r *Request) { r.Trust = ConnectionTrust{} }), ReasonMalformedRequest},
+			with(send(), func(r *Request) { r.Trust = trust.Denied; r.Reply = true }), ReasonTrustDenied},
+		{"unset trust is the zero outcome, which is denied: an unset field fails closed", DefaultPolicy(),
+			with(send(), func(r *Request) { r.Trust = 0 }), ReasonTrustDenied},
+		{"an out-of-range trust outcome is rejected instead of trusted", DefaultPolicy(),
+			with(send(), func(r *Request) { r.Trust = trust.Outcome(99) }), ReasonMalformedRequest},
 
 		// The default policy.
 		{"default policy: member sends a message to any endpoint", DefaultPolicy(), send(), ReasonGranted},
@@ -545,7 +548,7 @@ func TestEvaluateTwoChecks(t *testing.T) {
 		}
 	})
 	t.Run("trust revoked between the checks: recv rejects", func(t *testing.T) {
-		den := with(req, func(r *Request) { r.Trust = ConnectionTrust{State: TrustDenied} })
+		den := with(req, func(r *Request) { r.Trust = trust.Denied })
 		if got := Evaluate(loose, den); got.Outcome != OutcomeReject {
 			t.Fatalf("recv = %v, want reject", got.Outcome)
 		}
@@ -565,13 +568,13 @@ func TestDefaultPolicyGrantsEveryActionOnEveryObject(t *testing.T) {
 			if !a.appliesTo(k) {
 				continue
 			}
-			for _, trust := range []ConnectionTrust{allowed, inherited} {
-				r := Request{Now: t0, Trust: trust, Stage: StageIntake, Sender: Sender{Node: node(3)}, Action: a, Target: Target{Kind: k}, Preset: "any"}
+			for _, tr := range []trust.Outcome{allowed, inherited} {
+				r := Request{Now: t0, Trust: tr, Stage: StageIntake, Sender: Sender{Node: node(3)}, Action: a, Target: Target{Kind: k}, Preset: "any"}
 				if k != TargetNode {
 					r.Target.Endpoint = ep(5)
 				}
 				if got := Evaluate(p, r); got.Reason != ReasonGranted {
-					t.Errorf("%v on %v (direct=%v): %v", a, k, trust.Direct, got.Reason)
+					t.Errorf("%v on %v (trust=%v): %v", a, k, tr, got.Reason)
 				}
 			}
 		}

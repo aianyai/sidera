@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/trust"
 )
 
 func node(i byte) ident.NodeID {
@@ -41,9 +42,9 @@ func mustPolicy(t testing.TB, rules ...Rule) Policy {
 }
 
 var (
-	allowed   = ConnectionTrust{State: TrustAllowed, Direct: true}
-	inherited = ConnectionTrust{State: TrustAllowed, Direct: false}
-	suspended = ConnectionTrust{State: TrustSuspended}
+	allowed   = trust.AllowedDirect
+	inherited = trust.AllowedInherited
+	suspended = trust.Suspended
 )
 
 // send builds a message.send request from node 1 (endpoint 1) to local

@@ -40,9 +40,10 @@ set of nodes.
 
 **Three outcomes.** Allow, Suspend, Reject, each with a typed reason.
 
-- The caller supplies the sender's connection trust: allowed, suspended or
-  denied. Denied always gives Reject, and an unset state is rejected. For allowed
-  and suspended alike the request shape, deny rules, restrictions, allow rules and
+- The caller supplies the sender's connection trust as the trust package's
+  outcome: allowed direct, allowed inherited, suspended or denied. Denied always
+  gives Reject; it is the zero value, so an unset field is refused, and a value
+  outside the four is rejected as malformed. For allowed and suspended alike the request shape, deny rules, restrictions, allow rules and
   the endpoint's declarations are then applied. A request that comes out as an
   allow is Suspend when trust is suspended; one that comes out as a refusal is
   refused with that reason. A suspended sender counts as an inherited member.
@@ -181,7 +182,7 @@ Tighten, because it stops their replies.
 | ---------------------------------------------------- | ---------------------------------------------------------------- |
 | Rule types, conditions, rate selection order and containment | `internal/authz/rule.go`                                  |
 | Policy, validation, default policy                   | `internal/authz/policy.go`                                       |
-| Request, verdict, reasons, trust input               | `internal/authz/request.go`                                      |
+| Request, verdict, reasons                             | `internal/authz/request.go`                                      |
 | Evaluation                                           | `internal/authz/evaluate.go`                                     |
 | Change classification                                | `internal/authz/classify.go`                                     |
 | Exempt traffic                                       | `internal/authz/traffic.go`                                      |
