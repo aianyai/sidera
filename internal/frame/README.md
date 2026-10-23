@@ -23,7 +23,8 @@ for the reasoning and the list of domains in use.
   record signatures and digests, and any later construction call `Frame`.
 - **A domain starts with `sidera/` and is at most 63 bytes.** The length is the
   first byte of the framed input, so it is a value below 64 and cannot equal
-  the first byte of what libp2p signs with the same key.
+  the first byte, always a letter, of the text-prefixed payloads libp2p signs
+  with the same key.
 - **Domains are declared with `frame.Domain("...")`** as package-level
   variables, with a string literal. A package picks the domain for each purpose
   it hashes or signs and puts a version at the end (`.../1`); a changed

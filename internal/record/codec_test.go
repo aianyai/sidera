@@ -1,8 +1,11 @@
 package record
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,6 +178,33 @@ func TestStrictUnmarshal(t *testing.T) {
 			err := UnmarshalStrict(r.in, &v, DefaultMaxInput)
 			if !errors.Is(err, r.want) && !(r.want == nil && err == nil) {
 				t.Fatalf("error = %v, want %v", err, r.want)
+			}
+		})
+	}
+}
+
+// The decoder allows 32 levels of arrays, maps and tags and refuses deeper
+// input before it looks at the target type. Decoding into an empty interface
+// shows the limit itself, without a struct type refusing the shape first.
+func TestNestingLimit(t *testing.T) {
+	nested := func(levels int) []byte { return append(bytes.Repeat([]byte{0x81}, levels), 0x00) }
+	for _, levels := range []int{1, 31, 32} {
+		t.Run(fmt.Sprintf("%d levels are accepted and read back identically", levels), func(t *testing.T) {
+			var v any
+			if err := UnmarshalStrict(nested(levels), &v, DefaultMaxInput); err != nil {
+				t.Fatal(err)
+			}
+			if again, err := MarshalCanonical(v); err != nil || !bytes.Equal(again, nested(levels)) {
+				t.Fatalf("re-encoding: %v", err)
+			}
+		})
+	}
+	for _, levels := range []int{33, 100, 5000} {
+		t.Run(fmt.Sprintf("%d levels are refused", levels), func(t *testing.T) {
+			var v any
+			err := UnmarshalStrict(nested(levels), &v, DefaultMaxInput)
+			if !errors.Is(err, ErrMalformed) || !strings.Contains(err.Error(), "nested level") {
+				t.Fatalf("error = %v", err)
 			}
 		})
 	}

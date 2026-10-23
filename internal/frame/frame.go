@@ -19,9 +19,9 @@ const (
 	DomainPrefix = "sidera/"
 	// MaxDomainLen bounds a domain. Its length is the first byte of every
 	// framed input, so a bound below 64 keeps that byte a single varint byte
-	// below 64: it cannot equal 'n' (110) or 'l' (108), the first bytes of the
-	// payloads libp2p signs with the same network key in its Noise and TLS
-	// handshakes.
+	// below 64: it cannot equal the first byte, always a letter, of the
+	// text-prefixed payloads libp2p signs with the same network key (the Noise,
+	// TLS and HTTP peer-ID authentication handshakes).
 	MaxDomainLen = 63
 )
 

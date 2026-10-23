@@ -373,15 +373,30 @@ func TestDecodeRejects(t *testing.T) {
 		{"small-order public key (order 8)",
 			envelope(pairType, payload, sigItem(mustHexBytes(t, "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05"), sig)),
 			DefaultMaxInput, ident.ErrKeySmallOrder},
-		{"nesting deeper than the limit",
+		{"array headers with nothing behind them (truncated input)",
 			cborw.mapOf(cborw.uint(1), cborw.tstr(pairType), cborw.uint(2), cborw.bstr(payload), cborw.uint(3), bytes.Repeat([]byte{0x81}, 20)),
 			DefaultMaxInput, ErrMalformed},
+		{"nesting within the limit is refused by its type, not by the limit",
+			cborw.mapOf(cborw.uint(1), cborw.tstr(pairType), cborw.uint(2), cborw.bstr(payload), cborw.uint(3), append(bytes.Repeat([]byte{0x81}, 20), 0x00)),
+			DefaultMaxInput, ErrMalformed},
+		{"nesting deeper than the limit of 32 levels",
+			cborw.mapOf(cborw.uint(1), cborw.tstr(pairType), cborw.uint(2), cborw.bstr(payload), cborw.uint(3), append(bytes.Repeat([]byte{0x81}, 40), 0x00)),
+			DefaultMaxInput, ErrMalformed},
+	}
+	// Rows whose cause is told apart from other rows with the same sentinel by
+	// the library's message.
+	cause := map[string]string{
+		"nesting within the limit is refused by its type, not by the limit": "cannot unmarshal array",
+		"nesting deeper than the limit of 32 levels":                        "exceeded max nested level 32",
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
 			rec, err := Decode(r.in, r.max)
 			if !errors.Is(err, r.want) && !(r.want == nil && err == nil) {
 				t.Fatalf("error = %v, want %v", err, r.want)
+			}
+			if want := cause[r.rule]; want != "" && (err == nil || !strings.Contains(err.Error(), want)) {
+				t.Fatalf("error = %v, want it to mention %q", err, want)
 			}
 			if err == nil {
 				back, err := rec.Encode()

@@ -227,18 +227,24 @@ the same record with a short window.
 - **Signature domain and the network key's other signatures.** The same network
   key also signs libp2p's own material. A signature made for one purpose must
   never be valid for another, so the signed bytes of this format cannot equal
-  anything libp2p signs with that key:
-  - libp2p's signed-envelope format uses the same length-prefixed layout, but
-    with its own domain strings (for example `libp2p-peer-record`). The layout
-    is prefix-free, so two messages are equal only if their domains are equal,
-    and ours is `sidera/record-sig`.
-  - The Noise handshake signs a payload that begins with the bytes
-    `noise-libp2p-static-key:` and the TLS handshake one that begins with
-    `libp2p-tls-handshake:`; they start with `n` (110) and `l` (108). Our signed
-    bytes start with the length of the domain, a value below 64, so the first
-    bytes differ.
-  Ed25519 context strings were not used because libp2p's key interface has a
-  single-argument `Sign`.
+  anything libp2p signs with that key. libp2p uses two kinds of signing input,
+  and each is separated from ours on its own:
+  - *Text-prefixed inputs.* The Noise handshake signs a payload that begins with
+    `noise-libp2p-static-key:`, the TLS handshake one that begins with
+    `libp2p-tls-handshake:`, and the HTTP peer-ID authentication handshake one
+    that begins with `libp2p-PeerID`. Every such prefix is text that begins with a
+    letter (`n` 110, `l` 108), so the first byte is at least 65. Our signed bytes start with the
+    length of the domain, a value below 64, so the first bytes differ. This holds
+    for any signing input that starts with a letter, which includes any text
+    prefix libp2p adds later.
+  - *Framed inputs.* libp2p's signed-envelope format uses the same
+    length-prefixed layout, but with its own domain strings (for example
+    `libp2p-peer-record`). The layout is prefix-free, so two messages are equal
+    only if their domains are equal, and ours is `sidera/record-sig`.
+  The argument depends on both kinds being the only ones: a libp2p feature that
+  signs with the host key and starts with a byte below 64 and is not framed with
+  a domain would need a new look. Ed25519 context strings were not used because
+  libp2p's key interface has a single-argument `Sign`.
 - **Why not the alternatives.** *Protobuf*: its own documentation says
   serialization is not and cannot be canonical, and the Go library does not
   promise stability across versions. *COSE*: it could carry several signatures,
@@ -298,23 +304,30 @@ the same record with a short window.
 
 ## Where
 
-- `internal/frame/frame.go`: `Frame`, `Domain`; `domains_test.go` is the check that every domain in the module is valid and distinct.
-- `internal/record/record.go`: envelope, signed bytes, digest, `Sign`, `CoSign`,
-  `Decode`, `Encode`, `Signer`.
-- `internal/record/descriptor.go`: `Descriptor`, signer slots, `Seal`, `Verify`,
-  `VerifyPartial`.
+- `internal/frame/frame.go`: `Frame`, `Domain`; `domains_test.go` is the check
+  that every domain in the module is valid and distinct.
+- `internal/record/record.go`: envelope, signed bytes, digest, `Sign`, `Decode`,
+  `Encode`, `Signer`.
+- `internal/record/descriptor.go`: `Descriptor`, signer slots (`NodeIdentityKey`,
+  `PersonRootKey`, `NetworkKeyOf`, `BindingError`), `Seal`, `Verify`,
+  `VerifyPartial`, `CoSign`, `Verified`, `Partial`.
 - `internal/record/codec.go`: hardened decoding options and `UnmarshalStrict`.
 - `internal/record/timeconv.go`, `level.go`: the conversions.
 - `internal/record/networkcert.go`, `devicecert.go`: the two certificates,
-  `DecideSerial`, `NetworkKeyBelongs`, `AdminCert`.
-- Tests: `golden_test.go` (hand-written vectors with CBOR diagnostic notation and
-  signatures from RFC 8032 keys), `record_test.go` (`TestGoldenPairRecord`,
-  `TestPartialSignatures`, `TestDecodeRejects`, `TestVerifyRejects`,
-  `TestEveryBitOfARecordIsProtected`, `TestEnvelopeRules`),
-  `codec_test.go` (`TestStrictUnmarshal`, `TestTimeConversion`, `TestLevelTable`,
-  `TestOptionalFieldsInAnExternalRecordType`), `certs_test.go`
-  (`TestNetworkKeyCertificateRules`, `TestDecideSerial`, `TestNetworkKeyBelongs`,
-  `TestRotatingTheNetworkKeyKeepsTheNodeID`, `TestDeviceCertificateRules`,
-  `TestDeviceCertificateToAdminFacts`), `fuzz_test.go` (decoders, payloads, the
-  strict codec, time conversion).
+  `IssueNetworkKeyCertificate`, `IssueDeviceCertificate`, `SerialSeen`,
+  `DecideSerial`, `AcceptedNetworkKey`, `NetworkKeyBelongs`, `AdminCert`.
+- Tests: `golden_test.go` (hand-written vectors with CBOR diagnostic notation,
+  identifiers, digests and signatures computed with an independent
+  implementation from RFC 8032 keys), `record_test.go` (`TestGoldenPairRecord`,
+  `TestPartialSignatures`, `TestCoSign`, `TestDecodeRejects`, `TestVerifyRejects`,
+  `TestEveryBitOfARecordIsProtected`, `TestEnvelopeRules`,
+  `TestSealRunsTheDecodingPath`, `TestSignerFailuresAreCaughtAtTheSigner`),
+  `codec_test.go` (`TestStrictUnmarshal`, `TestNestingLimit`,
+  `TestTimeConversion`, `TestLevelTable`, `TestOptionalFieldsInAnExternalRecordType`),
+  `certs_test.go` (`TestNetworkKeyCertificateRules`, `TestDecideSerial`,
+  `TestNetworkKeyBelongs`, `TestNetworkKeySignedRecords`,
+  `TestRotatingTheNetworkKeyKeepsTheNodeID`, `TestRolesAreSeparated`,
+  `TestIssuedCertificatesAreBackdatedByTheClockTolerance`,
+  `TestDeviceCertificateRules`, `TestDeviceCertificateToAdminFacts`),
+  `fuzz_test.go` (decoders, payloads, the strict codec, time conversion).
 - `internal/record/README.md`: entry points and what callers must guarantee.
