@@ -19,6 +19,7 @@ type model struct {
 	creds     []Credential
 	revoked   map[CredentialDigest]bool
 	locRev    map[ident.NodeID]bool
+	retired   map[ident.NodeID]bool
 	declared  map[ident.NodeID]bool
 	vouchers  []Voucher // all vouchers ever offered, unique counter per slot
 	accepts   bool
@@ -31,6 +32,7 @@ func genModel(r *rand.Rand) model {
 	m := model{
 		revoked:  map[CredentialDigest]bool{},
 		locRev:   map[ident.NodeID]bool{},
+		retired:  map[ident.NodeID]bool{},
 		declared: map[ident.NodeID]bool{},
 		accepts:  r.IntN(5) != 0,
 		grace:    MinGracePeriod + time.Duration(r.IntN(10))*time.Minute,
@@ -72,6 +74,11 @@ func genModel(r *rand.Rand) model {
 			m.locRev[node(n)] = true
 		}
 	}
+	for _, n := range m.universe {
+		if r.IntN(6) == 0 {
+			m.retired[node(n)] = true
+		}
+	}
 	return m
 }
 
@@ -88,6 +95,14 @@ func (m model) events() []event {
 	}
 	for n := range m.locRev {
 		evs = append(evs, func(v *View) { v.LocallyRevoked[n] = struct{}{} })
+	}
+	for n := range m.retired {
+		evs = append(evs, func(v *View) {
+			if v.Retired == nil {
+				v.Retired = NodeSet{}
+			}
+			v.Retired[n] = struct{}{}
+		})
 	}
 	for n, b := range m.declared {
 		evs = append(evs, func(v *View) { v.DeclaredAcceptsInheritance[n] = b })
@@ -137,8 +152,10 @@ func (m model) voucherOK(issuer ident.NodeID, edge CredentialDigest) bool {
 }
 
 // expected recomputes the verdict outcome and the paths from the raw records.
-func (m model) expected(local, target ident.NodeID, accepts bool) (Outcome, []string) {
-	if local == target || m.locRev[target] {
+// With honourRetired false it ignores the retired set, which shows what the
+// retirement changed.
+func (m model) expected(local, target ident.NodeID, accepts, honourRetired bool) (Outcome, []string) {
+	if local == target || m.locRev[target] || (honourRetired && m.retired[target]) {
 		return Denied, nil
 	}
 	var direct []string
@@ -154,7 +171,7 @@ func (m model) expected(local, target ident.NodeID, accepts bool) (Outcome, []st
 	var good, pending []string
 	for _, mb := range m.universe {
 		via := node(mb)
-		if via == local || via == target || m.locRev[via] || !accepts || !m.declared[target] {
+		if via == local || via == target || m.locRev[via] || (honourRetired && m.retired[via]) || !accepts || !m.declared[target] {
 			continue
 		}
 		for _, c1 := range m.creds {
@@ -201,6 +218,7 @@ const propertyRuns = 1000
 // recomputation from the raw records, and no path exceeds two edges.
 func TestPropertyVerdictsMatchRecomputation(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
+	var retiredTarget, retiredIntermediate, retiredDirectParty int
 	for run := 0; run < propertyRuns; run++ {
 		m := genModel(r)
 		evs := m.events()
@@ -215,9 +233,33 @@ func TestPropertyVerdictsMatchRecomputation(t *testing.T) {
 			if !reflect.DeepEqual(a, b) {
 				t.Fatalf("run %d target %d: order changed the verdict: %+v vs %+v", run, tb, a, b)
 			}
-			wantOutcome, wantPaths := m.expected(node(m.localByte), target, m.accepts)
+			wantOutcome, wantPaths := m.expected(node(m.localByte), target, m.accepts, true)
 			if a.Outcome != wantOutcome || !slices.Equal(pathStrings(a), wantPaths) {
 				t.Fatalf("run %d target %d: got %v %v, want %v %v", run, tb, a.Outcome, pathStrings(a), wantOutcome, wantPaths)
+			}
+			// What retirement changed, judged against the same records read
+			// with the retired set ignored. A retired target must be named as
+			// retired, and a verdict may carry that reason only if some
+			// node is retired.
+			withoutOutcome, _ := m.expected(node(m.localByte), target, m.accepts, false)
+			changed := withoutOutcome != wantOutcome
+			if m.retired[target] && target != node(m.localByte) && a.Reason != ReasonRetired {
+				t.Fatalf("run %d target %d: retired target got reason %v", run, tb, a.Reason)
+			}
+			if a.Reason == ReasonRetired && len(m.retired) == 0 {
+				t.Fatalf("run %d target %d: retired reason with no retired node", run, tb)
+			}
+			if changed && m.retired[target] {
+				retiredTarget++
+				for _, c := range m.creds {
+					if linked(c, node(m.localByte), target) && m.credOK(c) {
+						retiredDirectParty++
+						break
+					}
+				}
+			}
+			if changed && !m.retired[target] {
+				retiredIntermediate++
 			}
 			for _, p := range a.Paths {
 				if len(p.Credentials) < 1 || len(p.Credentials) > 2 {
@@ -227,6 +269,23 @@ func TestPropertyVerdictsMatchRecomputation(t *testing.T) {
 			if (a.Outcome == Denied) != (len(a.Paths) == 0) {
 				t.Fatalf("run %d target %d: %v with %d paths", run, tb, a.Outcome, len(a.Paths))
 			}
+		}
+	}
+	// The generator must reach every retired role often enough for the
+	// oracle's retired rules to matter.
+	t.Logf("retired as target: %d, as intermediate: %d, as direct party: %d", retiredTarget, retiredIntermediate, retiredDirectParty)
+	// An intermediate changes a verdict only when a viable inherited path ran
+	// through it and no other route replaced that path, which is rarer.
+	for _, c := range []struct {
+		role      string
+		got, want int
+	}{
+		{"target", retiredTarget, 100},
+		{"intermediate", retiredIntermediate, 40},
+		{"direct party", retiredDirectParty, 100},
+	} {
+		if c.got < c.want {
+			t.Fatalf("retired as %s changed only %d verdicts, want at least %d", c.role, c.got, c.want)
 		}
 	}
 }
@@ -242,6 +301,10 @@ func TestPropertyRevocationNeverGrantsTrust(t *testing.T) {
 			after.RevokedCredentials[m.creds[r.IntN(len(m.creds))].Digest] = struct{}{}
 		}
 		after.LocallyRevoked[node(m.universe[r.IntN(len(m.universe))])] = struct{}{}
+		if after.Retired == nil {
+			after.Retired = NodeSet{}
+		}
+		after.Retired[node(m.universe[r.IntN(len(m.universe))])] = struct{}{}
 		// A directive revokes one more edge of the local node.
 		for _, c := range after.credentialsOf(after.Local) {
 			if r.IntN(2) == 0 {
@@ -269,7 +332,10 @@ func TestPropertyTwoSidesAgree(t *testing.T) {
 	r := rand.New(rand.NewPCG(5, 6))
 	for run := 0; run < propertyRuns; run++ {
 		m := genModel(r)
+		// A node's own retirement is not read, so the two sides agree only when
+		// nobody is retired.
 		m.locRev = map[ident.NodeID]bool{}
+		m.retired = map[ident.NodeID]bool{}
 		evs := m.events()
 		for _, ab := range m.universe {
 			for _, cb := range m.universe {
@@ -296,4 +362,37 @@ func viaSet(v Verdict) []byte {
 	out := viaOf(v.Paths)
 	slices.Sort(out)
 	return out
+}
+
+// A nil and an empty retired set are both "nobody is retired": every function
+// that reads the view answers exactly as it did before the set existed, which
+// the oracle with the retired set ignored stands for.
+func TestPropertyEmptyRetiredSetChangesNothing(t *testing.T) {
+	r := rand.New(rand.NewPCG(7, 8))
+	for run := 0; run < propertyRuns; run++ {
+		m := genModel(r)
+		evs := m.events()
+		nilSet := m.build(m.localByte, evs)
+		nilSet.Retired = nil
+		emptySet := m.build(m.localByte, evs)
+		emptySet.Retired = NodeSet{}
+		for _, tb := range m.universe {
+			target := node(tb)
+			a, b := Evaluate(nilSet, target, m.now), Evaluate(emptySet, target, m.now)
+			wantOutcome, wantPaths := m.expected(node(m.localByte), target, m.accepts, false)
+			if !reflect.DeepEqual(a, b) || a.Outcome != wantOutcome || !slices.Equal(pathStrings(a), wantPaths) || a.Reason == ReasonRetired {
+				t.Fatalf("run %d target %d: nil %+v, empty %+v, want %v %v", run, tb, a, b, wantOutcome, wantPaths)
+			}
+			if !reflect.DeepEqual(EvictionProgress(nilSet, target, m.now), EvictionProgress(emptySet, target, m.now)) {
+				t.Fatalf("run %d target %d: eviction differs between a nil and an empty set", run, tb)
+			}
+		}
+		if !slices.Equal(VouchableEdges(nilSet, m.now), VouchableEdges(emptySet, m.now)) {
+			t.Fatalf("run %d: vouchable edges differ between a nil and an empty set", run)
+		}
+		s := IssuanceState{Starting: true, Synced: NodeSet{}, Unreachable: NodeSet{}}
+		if !reflect.DeepEqual(IssuanceGate(nilSet, s, m.now), IssuanceGate(emptySet, s, m.now)) {
+			t.Fatalf("run %d: issuance gate differs between a nil and an empty set", run)
+		}
+	}
 }

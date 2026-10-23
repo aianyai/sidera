@@ -76,14 +76,16 @@ func ClearLocallyRevoked(v View, x ident.NodeID, now time.Time) ClearEffect {
 }
 
 // VouchableEdges returns the digests of the direct edges for which the local
-// node issues vouchers at now: usable credentials whose other end is not
-// locally revoked. A locally revoked party is excluded even while the
-// credential revocation is still unsigned or unpropagated.
+// node issues vouchers at now: usable credentials whose other end is neither
+// locally revoked nor retired. A locally revoked party is excluded even while
+// the credential revocation is still unsigned or unpropagated. A retired party
+// is excluded because a voucher for its edge would help nobody: no node accepts
+// trust through a retired intermediate.
 func VouchableEdges(v View, now time.Time) []CredentialDigest {
 	var out []CredentialDigest
 	for _, c := range v.credentialsOf(v.Local) {
 		other, _ := c.other(v.Local)
-		if v.usable(c, now) && !v.locallyRevoked(other) {
+		if v.usable(c, now) && !v.locallyRevoked(other) && !v.retired(other) {
 			out = append(out, c.Digest)
 		}
 	}

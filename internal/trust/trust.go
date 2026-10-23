@@ -140,6 +140,13 @@ type View struct {
 	Settings Settings
 	// LocallyRevoked holds the nodes the local owner stopped trusting.
 	LocallyRevoked NodeSet
+	// Retired holds the nodes whose identity key published a verified
+	// self-revocation statement. Such an identity is void for good: it is
+	// never trusted, not even through a path, and no credential with it can
+	// carry trust. Unlike LocallyRevoked, no owner decides it and nothing
+	// clears it. An empty or nil set means no node is retired. The local
+	// node's own entry is not read: the decisions are about the other nodes.
+	Retired NodeSet
 	// Credentials are the mutual-trust credentials within two hops of Local:
 	// Local's own and those of Local's direct trust parties. Digests are
 	// unique.
@@ -178,6 +185,11 @@ func (v View) credential(d CredentialDigest) (Credential, bool) {
 func (v View) locallyRevoked(n ident.NodeID) bool {
 	_, revoked := v.LocallyRevoked[n]
 	return revoked
+}
+
+func (v View) retired(n ident.NodeID) bool {
+	_, retired := v.Retired[n]
+	return retired
 }
 
 // credentialsOf returns the credentials in which n is an end, ordered by

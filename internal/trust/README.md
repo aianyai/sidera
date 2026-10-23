@@ -16,9 +16,9 @@ reasons behind the rules.
 | `ValidateGracePeriod`, `MinGracePeriod`, `DefaultGracePeriod` | The grace period floor (6 minutes) and default (10 minutes). The floor includes `timing.ClockTolerance`, which lives in [`internal/timing`](../timing/README.md). |
 | `RevokeLocally(View, x) RevocationEffects`        | What revoking `x` locally does: set membership, stop vouching, revoke credentials.            |
 | `ClearLocallyRevoked(View, x, now) ClearEffect`   | Whether clearing an entry leaves a new pairing necessary.                                     |
-| `VouchableEdges(View, now)`                       | The direct edges the local node issues vouchers for.                                          |
+| `VouchableEdges(View, now)`                       | The direct edges the local node issues vouchers for: usable, and the other end neither locally revoked nor retired. |
 | `IssuanceGate(View, IssuanceState, now) IssuanceVerdict` | Whether the node may issue vouchers after a start, a restore or a long loss of contact. It derives the direct parties and the grace period from the view. |
-| `EvictionProgress(View, x, now) Eviction`         | Direct parties of `x` that still hold a credential with it, dependent paths, completeness.    |
+| `EvictionProgress(View, x, now) Eviction`         | Direct parties of `x` that still hold a credential with it, dependent paths, completeness. A retired `x`, or a retired party of `x`, counts for nothing. |
 | `NewEdgeAudience(View, a, b, now)`                | Nodes whose owners are told about a new edge.                                                 |
 | `ApplyDirective(View, EdgeRevocationDirective)`   | Whether a verified offline directive concerns this node and what it revokes. The only place that decides this: it also refuses a directive whose claimed ends differ from the credential's. |
 
@@ -41,6 +41,23 @@ reasons behind the rules.
 - **Suspended** means: some path fails only because a voucher is missing, stale
   or stamped too far ahead of the verifier's clock. It recovers when a fresh
   voucher arrives. Every other failure is `Denied`.
+- **Retired nodes.** `View.Retired` holds the nodes whose identity key published
+  a verified self-revocation statement. Retirement is permanent and is nobody's
+  decision: nothing clears it. A retired node is never trusted, directly or by
+  inheritance, and is never the intermediate of a path; the verdict is `Denied`
+  with `ReasonRetired`, which beats `ReasonLocallyRevoked` when both apply and,
+  for an intermediate, is reported only when no other path fails for a reason
+  that could still change. It is not `Suspended` even if its vouchers are stale.
+  The local node issues no vouchers for an edge whose other end is retired. The
+  issuance gate does not wait for a retired party. Eviction of a retired node is
+  complete at once; a retired party of another node is not waited for and paths
+  through a retired node are not dependencies, so a node reachable only through
+  a retired party is complete too. `RevokeLocally`, `ApplyDirective`,
+  `Vouchers.Accept`, `ClearLocallyRevoked` and `NewEdgeAudience` answer as
+  before: revoking and directives only ever revoke, `Accept` sees no view, and
+  the last two are open questions (see the skipped tests in `retired_test.go`).
+  The local node's own entry in the set is not read. A nil or empty set retires
+  nobody.
 - **Computed, never stored.** `Evaluate` is a pure function of the `View`; the
   order in which records reached the view does not matter.
 - **Local revocation** puts the node in the locally revoked set. The set beats
@@ -90,6 +107,9 @@ reasons behind the rules.
 
 - Every record in the `View` has been verified: signatures, signer standing,
   domain separation and digests. This package never sees keys or encodings.
+- `View.Retired` holds only nodes whose self-revocation statement has been
+  verified (the signature, that it is the node's own key), and a node never
+  leaves it.
 - Credential digests in the view are unique; `Vouchers` holds only the latest
   voucher per issuer and edge (use `Vouchers.Accept`, called with the time of receipt); `Settings.GracePeriod`
   passed `ValidateGracePeriod`.

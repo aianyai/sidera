@@ -120,6 +120,14 @@ func (w *world) revokeNode(x byte) *world {
 	return w
 }
 
+func (w *world) retire(x byte) *world {
+	if w.v.Retired == nil {
+		w.v.Retired = NodeSet{}
+	}
+	w.v.Retired[node(x)] = struct{}{}
+	return w
+}
+
 // threeNodeChain is the standard chain A-B-C seen from A: both inheritance
 // switches on, every voucher fresh.
 func threeNodeChain() *world {

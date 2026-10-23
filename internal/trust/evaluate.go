@@ -78,6 +78,11 @@ const (
 	ReasonIntermediateLocallyRevoked // the intermediate is in the locally revoked set
 	ReasonInheritanceDisabled        // the local node or the target refuses inheritance
 	ReasonDeclarationUnknown         // the target's declaration is not known, so its switch is unknown
+	// ReasonRetired: the target, or the intermediate of a candidate path, is a
+	// retired node. As the target it ends the evaluation at once, like
+	// ReasonSelf and ReasonLocallyRevoked, and takes precedence over the
+	// latter. It is last in the list so the values of the others stay put.
+	ReasonRetired
 )
 
 var reasonNames = map[Reason]string{
@@ -95,6 +100,7 @@ var reasonNames = map[Reason]string{
 	ReasonIntermediateLocallyRevoked: "intermediate-locally-revoked",
 	ReasonInheritanceDisabled:        "inheritance-disabled",
 	ReasonDeclarationUnknown:         "declaration-unknown",
+	ReasonRetired:                    "retired",
 }
 
 func (r Reason) String() string {
@@ -105,17 +111,21 @@ func (r Reason) String() string {
 }
 
 // denialRank orders the reasons of failed candidate paths; larger is more
-// specific. Only the reasons a single candidate path can fail with appear.
+// specific. Only the reasons a single candidate path can fail with appear. A
+// retired intermediate ranks lowest: nothing can ever revive that path, so any
+// other path's failure says more about what could still change.
 func denialRank(r Reason) int {
 	switch r {
-	case ReasonCredentialRevoked:
+	case ReasonRetired:
 		return 1
-	case ReasonCredentialExpired:
+	case ReasonCredentialRevoked:
 		return 2
-	case ReasonIntermediateLocallyRevoked:
+	case ReasonCredentialExpired:
 		return 3
-	case ReasonInheritanceDisabled, ReasonDeclarationUnknown:
+	case ReasonIntermediateLocallyRevoked:
 		return 4
+	case ReasonInheritanceDisabled, ReasonDeclarationUnknown:
+		return 5
 	}
 	return 0
 }
@@ -147,13 +157,17 @@ type Verdict struct {
 //
 // Direct trust needs a usable credential and never vouchers. Inherited trust
 // needs, for at least one intermediate M: usable credentials local-M and
-// M-target, M not locally revoked, inheritance accepted by the local settings
-// and by the target's declaration, and a voucher from M for each of the two
-// edges that is neither too old nor stamped ahead of the clock tolerance. A target in the
-// locally revoked set is refused whatever the credentials say.
+// M-target, M neither retired nor locally revoked, inheritance accepted by the
+// local settings and by the target's declaration, and a voucher from M for each
+// of the two edges that is neither too old nor stamped ahead of the clock
+// tolerance. A retired target is refused whatever the credentials say, and so
+// is a target in the locally revoked set.
 func Evaluate(v View, target ident.NodeID, now time.Time) Verdict {
 	if target == v.Local {
 		return Verdict{Outcome: Denied, Reason: ReasonSelf}
+	}
+	if v.retired(target) {
+		return Verdict{Outcome: Denied, Reason: ReasonRetired}
 	}
 	if v.locallyRevoked(target) {
 		return Verdict{Outcome: Denied, Reason: ReasonLocallyRevoked}
@@ -235,6 +249,9 @@ func (v View) credentialFault(c Credential, now time.Time) Reason {
 // trust, or ReasonNone. The checks run from permanent to recoverable, so a
 // voucher reason is returned only when nothing else is wrong with the path.
 func (v View) inheritedFault(first, second Credential, via, target ident.NodeID, now time.Time) Reason {
+	if v.retired(via) {
+		return ReasonRetired
+	}
 	for _, c := range []Credential{first, second} {
 		if r := v.credentialFault(c, now); r != ReasonNone {
 			return r

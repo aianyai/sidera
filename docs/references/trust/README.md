@@ -60,11 +60,24 @@ is never accepted as an intermediate. If X is a direct party, the node also stop
 vouching for that edge at once and revokes the credential. Clearing the entry
 restores nothing when the credential is revoked: the nodes must pair again.
 
+**Retired nodes.** A node whose identity key published a verified
+self-revocation statement is retired. The identity is void for good: the node
+re-joins under a new identity and nothing migrates. The trust view carries the
+set of retired nodes, and a retired node is never trusted, directly or by
+inheritance, and is never the intermediate of an inherited path. Its verdict is
+a denial with its own reason, separate from a revoked credential and from local
+revocation. The local node issues no vouchers for an edge whose other end is
+retired, and neither the issuance gate nor eviction waits for a retired party.
+An empty set retires nobody.
+
 **Eviction.** Evicting X means every direct party of X revokes its own
 credential with X. Progress lists the parties that still hold an unrevoked
 credential with X, the inherited paths that rest on X, and stays incomplete as
 long as any party remains. A suspended path is not an eviction: it comes back
-when its intermediate is online again unless the credential was revoked.
+when its intermediate is online again unless the credential was revoked. A
+retired X is complete at once. A credential with a retired node carries no
+trust, so it is neither outstanding nor a dependency, and a node reachable only
+through a retired party is complete as well.
 
 **New-edge notification.** When an edge between A and B appears, the owners of A,
 B and their direct parties (within the local view) are told. It informs and never
@@ -119,6 +132,26 @@ revoke; it can neither create trust nor loosen anything.
 - **Local revocation beats paths.** Otherwise a node revoked by its former
   partner could come back through a third node the partner also trusts, and the
   owner's intent would be undone by a graph the owner does not control.
+- **Retirement is its own input.** "A void identity carries no trust" is a trust
+  rule and lives here. Folding it into revoked credentials would put credentials
+  in that set that nobody revoked, and leaving it to callers would repeat the
+  rule at every call site. Local revocation is the owner's choice and can be
+  cleared; retirement is the key holder's, is permanent and cannot be.
+- **Retirement beats local revocation in the reason.** Both refuse the node, but
+  retirement is the fact that never changes, so it is the one worth naming.
+- **A retired intermediate ranks lowest among path failures.** Nothing can revive
+  that path, so a failure on another path, which could still change, says more
+  about what to do. Its check also runs before the credential checks: the path
+  is void whatever its credentials say. It is a denial, never a suspension, even
+  with stale vouchers, because no fresh voucher can bring it back.
+- **No vouchers, no waiting, no dependency for a retired node.** A voucher for
+  its edge helps nobody, since nobody accepts trust through it. A void identity
+  will never sync or revoke, so a gate or an eviction that waited for it would
+  never finish. Eviction therefore counts only credentials that can still carry
+  trust.
+- **Revocation effects and directives are unchanged.** Revoking a retired node
+  locally, or its credential by directive, is harmless tidying that only takes
+  trust away, so those answers do not change.
 - **Suspended is not denied.** An offline intermediate is a recoverable fault.
   Calling it denial would make senders drop messages that merely need to wait.
 - **Eviction is complete only when every direct party revoked.** A credential can
@@ -152,7 +185,8 @@ revoke; it can neither create trust nor loosen anything.
 
 ## Where
 
-- `internal/trust/trust.go`: constants, `Settings`, `View`, record shapes.
+- `internal/trust/trust.go`: constants, `Settings`, `View` (with `Retired`),
+  record shapes.
 - `internal/trust/evaluate.go`: `Evaluate`, `Verdict`, `Outcome`, `Reason`.
 - `internal/trust/voucher.go`: `Vouchers.Accept`, `VoucherFromFuture`.
 - `internal/trust/revocation.go`: `RevokeLocally`, `ClearLocallyRevoked`,
@@ -166,4 +200,8 @@ revoke; it can neither create trust nor loosen anything.
   `TestIssuanceGate`, eviction, audience, `TestApplyDirective`),
   `property_test.go` (random graphs and evaluation times, order independence,
   recomputation from raw records, revocation never grants trust, two sides
-  agree).
+  agree, an empty retired set changes nothing) and `retired_test.go`
+  (`TestEvaluateRetired`, `TestVouchableEdgesRetired`, `TestIssuanceGateRetired`,
+  `TestEvictionProgressRetired`, `TestRetiredLeavesOtherDecisionsUnchanged`,
+  and the skipped open questions for a retired local node, clearing and the
+  new-edge audience).

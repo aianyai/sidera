@@ -85,13 +85,15 @@ func (s IssuanceState) RequiresSync(grace time.Duration) bool {
 }
 
 // directParties returns the nodes at the other end of a usable local
-// credential, deduplicated and ordered.
+// credential, deduplicated and ordered. Retired nodes are left out: a void
+// identity has no revocations worth syncing and would hold the gate shut for
+// as long as it stays unreachable.
 func (v View) directParties(now time.Time) []ident.NodeID {
 	seen := NodeSet{}
 	var out []ident.NodeID
 	for _, c := range v.credentialsOf(v.Local) {
 		party, _ := c.other(v.Local)
-		if _, dup := seen[party]; dup || !v.usable(c, now) {
+		if _, dup := seen[party]; dup || !v.usable(c, now) || v.retired(party) {
 			continue
 		}
 		seen[party] = struct{}{}

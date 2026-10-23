@@ -15,7 +15,8 @@ type PartyCredentials struct {
 }
 
 // Eviction is the progress of evicting a node, as far as the local two-hop
-// view shows.
+// view shows. Credentials with a retired node carry no trust and are not part
+// of it: they are neither outstanding nor a dependency.
 type Eviction struct {
 	Target ident.NodeID
 	// Unrevoked are the direct trust parties of Target (the local node
@@ -36,15 +37,21 @@ type Eviction struct {
 
 // EvictionProgress reports how far the eviction of x has come at now. Parties
 // beyond the local two-hop view are invisible to it.
+//
+// A retired x is complete at once, with nothing outstanding. A retired party of
+// x is not waited for either: its credential with x cannot carry trust, and a
+// void identity will never revoke anything. So a node that was reachable only
+// through a retired party reports complete too, which is true: no path to it
+// is left.
 func EvictionProgress(v View, x ident.NodeID, now time.Time) Eviction {
 	e := Eviction{Target: x}
 
 	byParty := map[ident.NodeID][]CredentialDigest{}
 	for _, c := range v.credentialsOf(x) {
-		if !v.usable(c, now) {
+		party, _ := c.other(x)
+		if !v.usable(c, now) || v.retired(x) || v.retired(party) {
 			continue
 		}
-		party, _ := c.other(x)
 		byParty[party] = append(byParty[party], c.Digest)
 	}
 	for party, ds := range byParty {
@@ -60,17 +67,17 @@ func EvictionProgress(v View, x ident.NodeID, now time.Time) Eviction {
 
 // inheritedStructure lists the two-edge paths local-via-to over usable
 // credentials for which keep returns true, ignoring vouchers, settings and
-// the locally revoked set.
+// the locally revoked set. Paths through or to a retired node are left out.
 func inheritedStructure(v View, now time.Time, keep func(via, to ident.NodeID) bool) []Path {
 	var out []Path
 	for _, first := range v.credentialsOf(v.Local) {
 		via, _ := first.other(v.Local)
-		if !v.usable(first, now) {
+		if !v.usable(first, now) || v.retired(via) {
 			continue
 		}
 		for _, second := range v.credentialsOf(via) {
 			to, _ := second.other(via)
-			if to == v.Local || !v.usable(second, now) || !keep(via, to) {
+			if to == v.Local || v.retired(to) || !v.usable(second, now) || !keep(via, to) {
 				continue
 			}
 			out = append(out, Path{Via: via, To: to, Credentials: []CredentialDigest{first.Digest, second.Digest}})
