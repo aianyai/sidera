@@ -48,7 +48,7 @@ func TestGoldenNetworkKeyCertificate(t *testing.T) {
 	if v.Payload != cert {
 		t.Fatalf("payload = %+v, want %+v", v.Payload, cert)
 	}
-	if got := v.Payload.Node.String(); got != "node130llww2yztfmjn2fsslfx45qzye83306u3q7nzfs300qvxly7wpqgs2d9f" {
+	if got := v.Payload.Node.String(); got != "node1ufd2fh9u0xuwcjwzt4fu97hafsmw754hz0exug8e7as824s67qwsw4tkv5" {
 		t.Fatalf("node text = %s", got)
 	}
 }

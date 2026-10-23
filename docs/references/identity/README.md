@@ -38,12 +38,13 @@ signature has one encoding too.
 ### Derivation
 
 ```
-NodeID   = SHA-256("sidera/id/node/1"   || tag || key bytes)
-PersonID = SHA-256("sidera/id/person/1" || tag || key bytes)
+NodeID   = SHA-256(Frame("sidera/id/node/1",   tag, key bytes))
+PersonID = SHA-256(Frame("sidera/id/person/1", tag, key bytes))
 ```
 
-`tag` is the one-byte algorithm tag. The key bytes are the canonical key
-bytes.
+`Frame` is the one framing rule of the project: the domain and every field,
+each behind its uvarint length (see [records](../records/README.md)). `tag` is
+the one-byte algorithm tag. The key bytes are the canonical key bytes.
 
 ### Text form
 
@@ -109,9 +110,11 @@ The parser accepts exactly one text per identifier:
   same small integer the record format carries. The domain differs between
   nodes and people so that a single key used in both roles gives two unrelated
   identifiers, and it is versioned so that changing the derivation means a new
-  domain and cannot silently re-label existing identifiers. The domain is not
-  length-prefixed: the two domains are fixed strings of different lengths and the
-  rest of the input has a fixed length per algorithm, so the input is unambiguous.
+  domain and cannot silently re-label existing identifiers. The input goes
+  through the same `Frame` as record signatures and digests, with the domain and
+  each field behind its length: one joining rule for everything that is hashed
+  or signed, so no derivation has to argue on its own that its input is
+  unambiguous, and a domain added later cannot be a prefix of these.
 - **Canonical keys only.** The standard library's point decoding accepts
   non-canonical encodings of the same point, so hashing "whatever 32 bytes
   arrived" would let an attacker create a second identifier for a key they do
@@ -133,7 +136,8 @@ The parser accepts exactly one text per identifier:
 - `internal/ident/bech32m.go`: the bech32m codec and the canonical-text check.
 - `internal/ident/key.go`: `PublicKey`, `Algorithm`, the canonical-point and
   small-order checks.
-- `internal/ident/derive.go`: `NodeIDFromKey` and `PersonIDFromKey`.
+- `internal/ident/derive.go`: `NodeIDFromKey` and `PersonIDFromKey`; the
+  derivation domains are listed in the domain table of the records reference.
 - Tests: `ident_test.go` (identifier rules, text vectors computed with an
   independent implementation, `TestParseKindRules`), `bech32m_test.go`
   (specification vectors), `key_test.go` (key rules, an oracle that decodes

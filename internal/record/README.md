@@ -36,10 +36,13 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   `{1: public key, 2: signature}`, strictly ascending by the encoded public key,
   one to eight of them, no signer twice. A public key is `{1: algorithm, 2:
   bytes}`: Ed25519 only, canonical, not small order.
-- **Signed bytes and digest.** `uvarint(len(domain)) || domain || uvarint(len(type))
-  || type || uvarint(len(payload)) || payload`, with `SigningDomain` for
-  signatures and `DigestDomain` for the digest. The digest does not cover
-  signatures, so partial and complete forms of a record share it.
+- **Signed bytes and digest.** `frame.Frame(domain, type, payload)`, that is
+  `uvarint(len(domain)) || domain || uvarint(len(type)) || type ||
+  uvarint(len(payload)) || payload`, with the signing domain for signatures and
+  the digest domain for the digest (the digest is the SHA-256 of the framed
+  bytes). The digest does not cover signatures, so partial and complete forms
+  of a record share it. The domains are declared with `frame.Domain`; the
+  records reference lists every domain of the project.
 - **No registry.** A record type is a `Descriptor`, built with `NewDescriptor`
   and exported by the package that defines the type. A record verifies only
   against the descriptor whose type string it carries. The type string includes
@@ -95,6 +98,6 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 
 ## Dependencies
 
-The standard library, `ident`, `admin` (for the level and the device-certificate
+The standard library, `frame`, `ident`, `admin` (for the level and the device-certificate
 facts) and `github.com/fxamacker/cbor/v2` v2.9.6 (v2.9.5 is retracted). Nothing
 else; in particular no libp2p.

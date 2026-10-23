@@ -72,6 +72,29 @@ func personOf(t testing.TB, s Signer) ident.PersonID {
 	return id
 }
 
+// The two record domains as the format document spells them. They are written
+// out here, and not taken from the package, so that a changed domain fails.
+const (
+	testSigningDomain = "sidera/record-sig"
+	testDigestDomain  = "sidera/record-digest"
+)
+
+// framedByHand writes domain, type and payload, each behind a one-byte length.
+// A length is one varint byte only below 128, so longer parts are refused: the
+// helper is for short test inputs, and it does not share code with the package.
+func framedByHand(t testing.TB, domain, typ string, payload []byte) []byte {
+	t.Helper()
+	var out []byte
+	for _, part := range [][]byte{[]byte(domain), []byte(typ), payload} {
+		if len(part) >= 128 {
+			t.Fatalf("framedByHand: part of %d bytes", len(part))
+		}
+		out = append(out, byte(len(part)))
+		out = append(out, part...)
+	}
+	return out
+}
+
 var (
 	epoch   = time.Unix(1700000000, 0).UTC()
 	endTime = time.Unix(1702592000, 0).UTC()

@@ -3,6 +3,7 @@ package record
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"errors"
 	"math/big"
 	"strings"
@@ -282,7 +283,7 @@ func TestVerifyRejects(t *testing.T) {
 	sigOf := func(n int, domain string) Signature {
 		priv := rfcPriv(t, n)
 		pub, _ := ident.NewPublicKey(ident.AlgorithmEd25519, priv.Public().(ed25519.PublicKey))
-		msg := frame(domain, pairType, payload)
+		msg := framedByHand(t, domain, pairType, payload)
 		return Signature{Key: pub, Sig: ed25519.Sign(priv, msg)}
 	}
 	sortedPair := func(a, b Signature) Record {
@@ -319,17 +320,17 @@ func TestVerifyRejects(t *testing.T) {
 		}
 	})
 	t.Run("a signature over another signing domain does not verify", func(t *testing.T) {
-		for _, d := range []string{"sidera/other", "libp2p-peer-record", DigestDomain} {
-			if _, err := Verify(pairDescriptor, sortedPair(sigOf(1, d), sigOf(2, SigningDomain))); !errors.Is(err, ErrSignature) {
+		for _, d := range []string{"sidera/other", "libp2p-peer-record", testDigestDomain} {
+			if _, err := Verify(pairDescriptor, sortedPair(sigOf(1, d), sigOf(2, testSigningDomain))); !errors.Is(err, ErrSignature) {
 				t.Fatalf("domain %q: error = %v", d, err)
 			}
 		}
-		if _, err := Verify(pairDescriptor, sortedPair(sigOf(1, SigningDomain), sigOf(2, SigningDomain))); err != nil {
+		if _, err := Verify(pairDescriptor, sortedPair(sigOf(1, testSigningDomain), sigOf(2, testSigningDomain))); err != nil {
 			t.Fatalf("control: %v", err)
 		}
 	})
 	t.Run("the same signer twice is refused", func(t *testing.T) {
-		s := sigOf(1, SigningDomain)
+		s := sigOf(1, testSigningDomain)
 		if _, err := Verify(pairDescriptor, withSigs(s, s)); !errors.Is(err, ErrDuplicateSigner) {
 			t.Fatalf("error = %v", err)
 		}
@@ -338,16 +339,16 @@ func TestVerifyRejects(t *testing.T) {
 		}
 	})
 	t.Run("a signature scalar written as S+L is refused", func(t *testing.T) {
-		s := sigOf(1, SigningDomain)
+		s := sigOf(1, testSigningDomain)
 		s.Sig = addGroupOrder(s.Sig)
-		if _, err := Verify(pairDescriptor, sortedPair(s, sigOf(2, SigningDomain))); !errors.Is(err, ErrSignature) {
+		if _, err := Verify(pairDescriptor, sortedPair(s, sigOf(2, testSigningDomain))); !errors.Is(err, ErrSignature) {
 			t.Fatalf("error = %v", err)
 		}
 	})
 	t.Run("a flipped signature bit is refused", func(t *testing.T) {
-		s := sigOf(1, SigningDomain)
+		s := sigOf(1, testSigningDomain)
 		s.Sig[10] ^= 1
-		if _, err := Verify(pairDescriptor, sortedPair(s, sigOf(2, SigningDomain))); !errors.Is(err, ErrSignature) {
+		if _, err := Verify(pairDescriptor, sortedPair(s, sigOf(2, testSigningDomain))); !errors.Is(err, ErrSignature) {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -479,11 +480,30 @@ func TestEveryBitOfARecordIsProtected(t *testing.T) {
 }
 
 func TestEnvelopeRules(t *testing.T) {
-	t.Run("signing domain is a sidera/ constant shorter than 64 bytes", func(t *testing.T) {
-		for _, d := range []string{SigningDomain, DigestDomain} {
-			if !strings.HasPrefix(d, "sidera/") || len(d) >= 64 {
-				t.Fatalf("domain %q", d)
-			}
+	t.Run("signed bytes and digest are the domain, type and payload, each behind its length", func(t *testing.T) {
+		payload := []byte{1, 2, 3}
+		wantSigned := framedByHand(t, testSigningDomain, "x/1", payload)
+		if got := SignedBytes("x/1", payload); !bytes.Equal(got, wantSigned) {
+			t.Fatalf("SignedBytes = %x, want %x", got, wantSigned)
+		}
+		wantDigest := sha256.Sum256(framedByHand(t, testDigestDomain, "x/1", payload))
+		if got := DigestOf("x/1", payload); got != Digest(wantDigest) {
+			t.Fatalf("DigestOf = %s, want %x", got, wantDigest)
+		}
+	})
+	t.Run("the framing of signed bytes and digest is the one the format always had", func(t *testing.T) {
+		// A network-key certificate payload, its signed bytes and digest as
+		// first written down, before the framing moved into package frame.
+		// Recomputed with the independent reference implementation.
+		const typ = "sidera/network-key-cert/1"
+		payload := mustHexBytes(t, "a50158208bfff7394412d3b94d49843e935680113278c5fae441e989308bde061be4f38202a201010258203d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c0301041a6553f100051a657b7e00")
+		const wantSigned = "117369646572612f7265636f72642d736967197369646572612f6e6574776f726b2d6b65792d636572742f3159a50158208bfff7394412d3b94d49843e935680113278c5fae441e989308bde061be4f38202a201010258203d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c0301041a6553f100051a657b7e00"
+		const wantDigest = "fa7d58c643363d6ba9c2fceec7f84ad56f051e561f6aac8f14b1b064a7816a0f"
+		if got := SignedBytes(typ, payload); !bytes.Equal(got, mustHexBytes(t, wantSigned)) {
+			t.Fatalf("SignedBytes = %x", got)
+		}
+		if got := DigestOf(typ, payload).String(); got != wantDigest {
+			t.Fatalf("DigestOf = %s", got)
 		}
 	})
 	t.Run("signed bytes start with a length below 64, never n or l", func(t *testing.T) {
@@ -493,11 +513,14 @@ func TestEnvelopeRules(t *testing.T) {
 		}
 	})
 	t.Run("signing and digest domains differ", func(t *testing.T) {
-		if SigningDomain == DigestDomain {
+		if testSigningDomain == testDigestDomain {
 			t.Fatal("same domain")
 		}
 		if DigestOf("x/1", []byte{1}) == (Digest{}) {
 			t.Fatal("zero digest")
+		}
+		if bytes.Equal(SignedBytes("x/1", []byte{1}), framedByHand(t, testDigestDomain, "x/1", []byte{1})) {
+			t.Fatal("signed bytes use the digest domain")
 		}
 	})
 	t.Run("the digest changes with the type and with the payload", func(t *testing.T) {

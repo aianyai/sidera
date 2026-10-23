@@ -50,18 +50,31 @@ is why one rule serves identifier derivation, record signatures, record digests
 and any later signed construction: a new domain cannot collide with an old one,
 and no construction has to argue separately that its own joining is unambiguous.
 
+### Domains in use
+
+This table is the one list of the domains of the project. Each is declared
+with `frame.Domain` in the package named, and a test of package `frame` fails
+if two are equal. The type strings of record types (for example
+`sidera/device-cert/1`) are not domains: they are a field inside the signed
+bytes of the record domain.
+
+| Domain                 | Package  | Purpose                                              | Framed fields                 |
+| ---------------------- | -------- | ---------------------------------------------------- | ----------------------------- |
+| `sidera/id/node/1`     | `ident`  | Derivation of a node identifier from its identity key | algorithm tag, key bytes      |
+| `sidera/id/person/1`   | `ident`  | Derivation of a person identifier from its root key   | algorithm tag, key bytes      |
+| `sidera/record-sig`    | `record` | The bytes every signer of a record signs              | type, payload                 |
+| `sidera/record-digest` | `record` | The signature-free digest of a record                 | type, payload                 |
+
 ### Signed bytes and digest
 
 ```
-signed = uvarint(len(D)) || D || uvarint(len(type)) || type || uvarint(len(payload)) || payload
-D      = "sidera/record-sig"
-digest = SHA-256 of the same layout with D = "sidera/record-digest"
+signed = Frame("sidera/record-sig",    type, payload)
+digest = SHA-256(Frame("sidera/record-digest", type, payload))
 ```
 
-Both domains start with `sidera/` and are shorter than 64 bytes; the build
-fails if one grows past that. The digest covers type and payload and no
-signature, so a record has one digest whatever signatures are attached and
-however a signature might be re-encoded.
+The digest covers type and payload and no signature, so a record has one
+digest whatever signatures are attached and however a signature might be
+re-encoded.
 
 ### Record types
 

@@ -4,35 +4,24 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"sort"
 
+	"github.com/aianyai/sidera/internal/frame"
 	"github.com/aianyai/sidera/internal/ident"
 )
 
 // Domains. A signature or digest covers the domain first, so a signature made
 // for a record can never be read as a signature over anything else that uses
 // the same key, and a digest of a record is never equal to a hash used for
-// another purpose.
-//
-// Both domains start with "sidera/" and are shorter than 64 bytes. The second
-// property matters: the signed bytes begin with the domain's length as a
-// one-byte varint, so they begin with a value below 64, while the payloads that
-// libp2p signs with the same network key begin with 'n' (110, the Noise static
-// key proof) or 'l' (108, the TLS handshake proof), and libp2p's own envelopes
-// begin with the length of their (different) domain. See the records reference.
-const (
-	SigningDomain = "sidera/record-sig"
-	DigestDomain  = "sidera/record-digest"
-)
-
-// A domain of 64 bytes or more would not fit the first-byte argument above;
-// these lines stop the build if one ever grows.
-const (
-	_ = uint(63 - len(SigningDomain))
-	_ = uint(63 - len(DigestDomain))
+// another purpose. The domain rules (the sidera/ prefix, less than 64 bytes)
+// and the distinctness of all domains are enforced by package frame; see the
+// records reference for why the length bound matters for libp2p's own
+// signatures made with the same network key.
+var (
+	signingDomain = frame.Domain("sidera/record-sig")
+	digestDomain  = frame.Domain("sidera/record-digest")
 )
 
 // Limits of the envelope.
@@ -71,7 +60,7 @@ type Record struct {
 	Signatures []Signature
 }
 
-// Digest is the SHA-256 of a record's type and payload under DigestDomain. It
+// Digest is the SHA-256 of a record's type and payload under the digest domain. It
 // does not cover the signatures, so every complete or partial form of a record
 // has the same digest and a malleable signature cannot create a second one.
 // Its underlying type is [32]byte, so a digest converts directly to the
@@ -84,27 +73,14 @@ func (d Digest) String() string { return hex.EncodeToString(d[:]) }
 // IsZero reports whether d is the unset zero digest.
 func (d Digest) IsZero() bool { return d == Digest{} }
 
-// frame builds uvarint(len(domain)) || domain || uvarint(len(typ)) || typ ||
-// uvarint(len(payload)) || payload. Every field is length-prefixed, so two
-// different (domain, type, payload) triples can never produce the same bytes.
-func frame(domain, typ string, payload []byte) []byte {
-	out := make([]byte, 0, len(domain)+len(typ)+len(payload)+3*binary.MaxVarintLen64)
-	out = binary.AppendUvarint(out, uint64(len(domain)))
-	out = append(out, domain...)
-	out = binary.AppendUvarint(out, uint64(len(typ)))
-	out = append(out, typ...)
-	out = binary.AppendUvarint(out, uint64(len(payload)))
-	return append(out, payload...)
-}
-
 // SignedBytes returns the bytes every signer of a record signs.
 func SignedBytes(typ string, payload []byte) []byte {
-	return frame(SigningDomain, typ, payload)
+	return frame.Frame(signingDomain, []byte(typ), payload)
 }
 
 // DigestOf returns the digest of a record with the given type and payload.
 func DigestOf(typ string, payload []byte) Digest {
-	return sha256.Sum256(frame(DigestDomain, typ, payload))
+	return sha256.Sum256(frame.Frame(digestDomain, []byte(typ), payload))
 }
 
 // Digest returns the record's digest.

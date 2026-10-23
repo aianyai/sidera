@@ -20,8 +20,8 @@ for the reasoning.
   encoding on the curve, and not a small-order point. `AlgorithmP256` is
   reserved and refused. `PublicKey.Verify(msg, sig)` is the one place a
   signature is checked.
-- `NodeIDFromKey(k)` and `PersonIDFromKey(k)` derive an identifier: SHA-256 over
-  a domain string, the one-byte algorithm tag and the canonical key bytes. The
+- `NodeIDFromKey(k)` and `PersonIDFromKey(k)` derive an identifier: SHA-256 of
+  `frame.Frame(domain, algorithm tag as one byte, canonical key bytes)`. The
   node and person domains differ, so one key yields unrelated identifiers in
   the two roles.
 
@@ -59,7 +59,9 @@ identifiers and `ErrAlgorithm`, `ErrKeyLength`, `ErrKeyNotCanonical` or
   A non-canonical encoding, a point not on the curve and a small-order point are
   refused when the key is built; the signature check additionally refuses a
   non-canonical signature scalar.
-- `ident` imports nothing from the other contract packages. The key type lives
+- `ident` imports no contract package except the dependency-free
+  [`frame`](../frame/README.md), whose one framing rule builds the derivation
+  input and which declares the derivation domains. The key type lives
   here, and not next to the record format, because derivation takes a key and a
   derivation that depended on the record package would invert the dependency
   direction.
