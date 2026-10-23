@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"math/big"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -55,7 +56,7 @@ func TestGoldenPairRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Payload != p || !v.Complete || len(v.Signers) != 2 || v.Digest.String() != goldenPairCompleteDigest {
+	if v.Payload != p || len(v.Signers) != 2 || v.Digest.String() != goldenPairCompleteDigest {
 		t.Fatalf("verified = %+v", v)
 	}
 }
@@ -84,11 +85,41 @@ func TestPartialSignatures(t *testing.T) {
 	})
 	t.Run("VerifyPartial accepts it and reports it incomplete", func(t *testing.T) {
 		v, err := VerifyPartial(pairDescriptor, first)
-		if err != nil || v.Complete {
+		if err != nil || v.Complete() {
 			t.Fatalf("VerifyPartial = %+v, %v", v, err)
 		}
 		if v.Digest.String() != goldenPairFirstOnlyDigest || v.Digest != first.Digest() {
 			t.Fatal("digest of the partial record is not the digest of the record")
+		}
+	})
+	t.Run("a partial result lists the slots in the rule's order with who filled them", func(t *testing.T) {
+		v, err := VerifyPartial(pairDescriptor, first)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []SlotState{{Signed: true, Signer: s1.Public()}, {}}
+		if len(v.Slots) != 2 || v.Slots[0] != want[0] || v.Slots[1] != want[1] || v.Payload != p {
+			t.Fatalf("Slots = %+v", v.Slots)
+		}
+		recv, _ := Decode(goldenPairComplete, DefaultMaxInput)
+		v, err = VerifyPartial(pairDescriptor, recv)
+		if err != nil || !v.Complete() {
+			t.Fatalf("complete record: %+v, %v", v, err)
+		}
+		// The record lists key 2 first, but slot 0 is the first node's slot.
+		if v.Slots[0].Signer != s1.Public() || v.Slots[1].Signer != s2.Public() {
+			t.Fatalf("slots are not in the rule's order: %+v", v.Slots)
+		}
+	})
+	t.Run("a partial result cannot stand in for a verified one", func(t *testing.T) {
+		pt := reflect.TypeOf(VerifyPartial[pairRecord]).Out(0)
+		vt := reflect.TypeOf(Verify[pairRecord]).Out(0)
+		if pt == vt || pt.AssignableTo(vt) || pt.ConvertibleTo(vt) {
+			t.Fatalf("%v can be used as %v", pt, vt)
+		}
+		// A complete record is still only a Partial until Verify accepts it.
+		if _, err := Verify(pairDescriptor, first); !errors.Is(err, ErrIncomplete) {
+			t.Fatalf("Verify of an incomplete record: %v", err)
 		}
 	})
 	t.Run("the digest does not depend on how many signatures are attached", func(t *testing.T) {

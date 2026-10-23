@@ -17,7 +17,7 @@ for the format and the reasons behind it. Identifiers and keys come from
 | `Signer`, `NewEd25519Signer`                      | The signing interface callers inject, and an in-memory implementation.                                     |
 | `Sign`, `Record.CoSign`                           | Sign a raw payload; append a second party's signature to a partial record.                                |
 | `Descriptor[P]`, `NewDescriptor`                  | One record type: type string, payload codec, signer rule. Exported by the package that defines the type.  |
-| `Seal`, `Verify`, `VerifyPartial`                 | Encode and sign a typed payload; check a complete record; check a record that may still lack signers.     |
+| `Seal`, `Verify`, `VerifyPartial`                 | Encode and sign a typed payload; check a complete record (`Verified[P]`); check a record that may still lack signers (`Partial[P]`). |
 | `SignedBytes`, `DigestOf`, `Record.Digest`        | The bytes that are signed and the signature-free digest.                                                  |
 | `SignerSlot`, `NodeIdentityKey`, `PersonRootKey`, `NetworkKeyOf`, `BindingError` | Signer slots: "the key that derives this node / person identifier", "the network key `NetworkKeyBelongs` accepts for this node". A refusal by `NetworkKeyOf` is a `*BindingError` with the specific reason. |
 | `TimeToWire`, `TimeFromWire`, `OptionalTime*`, `RequireCounter`, `LevelToWire`, `LevelFromWire` | The one place wire times, counters and levels are converted. |
@@ -69,6 +69,12 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   `ErrSignerNotAllowed` and a `*BindingError` whose `Binding` is the specific
   reason (expired, not yet valid, key mismatch, node mismatch, revoked, no
   certificate); read it with `errors.As`.
+- **Partial is not verified.** `Verify` is the only function that returns a
+  `Verified[P]`. `VerifyPartial` returns a `Partial[P]`: the payload, the digest
+  and, per slot in the rule's order, whether it is signed and by whom. The two
+  types do not convert into each other, so a record that still lacks a signer can
+  never be handed on as verified by mistake; a complete `Partial` is still
+  checked again by `Verify`.
 - **Partial signatures.** The first party calls `Seal` (or `Sign`) with its
   signer and sends the encoded record. The second party decodes it, calls
   `VerifyPartial`, then `CoSign`. The signature of an injected `Signer` is

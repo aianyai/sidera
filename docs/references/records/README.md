@@ -91,7 +91,10 @@ The signer rule is a list of **slots**. A slot is a function of a public key
 that returns nil when the key may fill it and a reason when it may not ("the key
 whose derived node identifier is X"). `Verify` accepts a record only if every
 slot is filled by exactly one signature and every signature fills a slot.
-`VerifyPartial` accepts empty slots and says which are filled.
+`VerifyPartial` accepts empty slots and says which are filled. It returns a
+`Partial` (payload, digest, one signed/unsigned entry per slot in the rule's
+order), a type of its own; only `Verify` returns a `Verified`, so a record that
+still lacks a signer cannot be passed on as verified.
 
 A rule that depends on the caller is stated with the slot built for that
 context. `NetworkKeyOf(node, accepted, now)` accepts the keys `NetworkKeyBelongs`
@@ -243,6 +246,12 @@ the same record with a short window.
   and let an older certificate, and its key, return. A conflict is judged by
   digest and not by key, so a second certificate with the same key and another
   window under one serial is caught too.
+- **Partial is a type of its own.** The same result type with a "complete" flag
+  would let a caller who forgets the flag treat a half-signed two-party
+  credential as verified, a failure that compiles and passes every test with
+  complete records. Two types make the mistake a compile error. Slot states are
+  reported in the rule's order, not the record's, because the record sorts
+  signatures by key bytes and that order says nothing about who is missing.
 - **Network-key slots are built per verification, with reasons.** Whether a
   key is a node's network key depends on the certificate accepted now, on its
   revocation and on the time. A descriptor created once could not hold that,

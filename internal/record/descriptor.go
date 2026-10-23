@@ -163,17 +163,47 @@ func (d Descriptor[P]) valid() bool {
 	return d.typ != "" && d.decode != nil && d.encode != nil && d.signers != nil
 }
 
-// Verified is the result of checking a record against its descriptor. The
-// payload is trustworthy only as far as the record type's signer rule: the
-// signers were allowed, and their signatures verify.
+// Verified is the result of checking a complete record against its descriptor:
+// every slot of the signer rule is filled by an allowed signer whose signature
+// verifies. Only Verify returns it. A record that may still lack signers is
+// checked with VerifyPartial, which returns a Partial, a different type that
+// cannot be used where a Verified is expected.
 type Verified[P any] struct {
 	Payload P
 	Digest  Digest
 	// Signers are the keys that signed, in the record's order.
 	Signers []ident.PublicKey
-	// Complete reports that every slot of the signer rule is filled. It is
-	// always true from Verify; VerifyPartial may return false.
-	Complete bool
+}
+
+// SlotState says whether one slot of a signer rule is filled and by whom.
+type SlotState struct {
+	// Signed reports that a signature fills the slot.
+	Signed bool
+	// Signer is the key that fills the slot; the zero key if Signed is false.
+	Signer ident.PublicKey
+}
+
+// Partial is the result of checking a record that may still be waiting for
+// signers: every signature present verifies and every signer present is
+// allowed, but slots may be empty. It is not a Verified: nothing of it may be
+// acted on as a statement of the record's signers until Verify accepts the
+// complete record.
+type Partial[P any] struct {
+	Payload P
+	Digest  Digest
+	// Slots holds one entry per slot of the signer rule, in the rule's order.
+	Slots []SlotState
+}
+
+// Complete reports that every slot is filled. A complete Partial is still not a
+// Verified; pass the record to Verify for that.
+func (p Partial[P]) Complete() bool {
+	for _, s := range p.Slots {
+		if !s.Signed {
+			return false
+		}
+	}
+	return true
 }
 
 // Seal encodes payload and signs it with signers, which must be keys the
@@ -190,9 +220,9 @@ func Seal[P any](d Descriptor[P], payload P, signers ...Signer) (Record, error) 
 	// Refuse a signer that the rule would refuse, so the mistake shows here and
 	// not at the far end.
 	slots := d.signers(payload)
-	used := make([]bool, len(slots))
+	state := make([]SlotState, len(slots))
 	for _, s := range signers {
-		if err := assign(slots, used, s.Public()); err != nil {
+		if err := assign(slots, state, s.Public()); err != nil {
 			return Record{}, fmt.Errorf("%s: %w", d.typ, err)
 		}
 	}
@@ -202,73 +232,69 @@ func Seal[P any](d Descriptor[P], payload P, signers ...Signer) (Record, error) 
 // Verify checks that r is a complete, correctly signed record of the type d
 // describes and returns its payload.
 func Verify[P any](d Descriptor[P], r Record) (Verified[P], error) {
-	v, err := verify(d, r)
+	p, err := VerifyPartial(d, r)
 	if err != nil {
 		return Verified[P]{}, err
 	}
-	if !v.Complete {
+	if !p.Complete() {
 		return Verified[P]{}, fmt.Errorf("%w: %s", ErrIncomplete, d.typ)
 	}
-	return v, nil
+	signers := make([]ident.PublicKey, len(r.Signatures))
+	for i, s := range r.Signatures {
+		signers[i] = s.Key
+	}
+	return Verified[P]{Payload: p.Payload, Digest: p.Digest, Signers: signers}, nil
 }
 
 // VerifyPartial is Verify for a record that may still be waiting for other
 // signers: every signature present must verify and every signer present must
-// be allowed, but slots may be empty. Verified.Complete tells which case it is.
-// The second party of a two-party record uses it to check what the first party
-// signed before adding its own signature.
-func VerifyPartial[P any](d Descriptor[P], r Record) (Verified[P], error) {
-	return verify(d, r)
-}
-
-func verify[P any](d Descriptor[P], r Record) (Verified[P], error) {
+// be allowed, but slots may be empty. The result is a Partial, which says which
+// slots are filled and cannot stand in for a Verified. The second party of a
+// two-party record uses it to check what the first party signed before adding
+// its own signature.
+func VerifyPartial[P any](d Descriptor[P], r Record) (Partial[P], error) {
 	if !d.valid() {
-		return Verified[P]{}, ErrDescriptor
+		return Partial[P]{}, ErrDescriptor
 	}
 	if r.Type != d.typ {
-		return Verified[P]{}, fmt.Errorf("%w: got %q, want %q", ErrType, r.Type, d.typ)
+		return Partial[P]{}, fmt.Errorf("%w: got %q, want %q", ErrType, r.Type, d.typ)
 	}
 	if err := r.shape(); err != nil {
-		return Verified[P]{}, err
+		return Partial[P]{}, err
 	}
 	p, err := d.decode(r.Payload)
 	if err != nil {
-		return Verified[P]{}, err
+		return Partial[P]{}, err
 	}
 	slots := d.signers(p)
-	used := make([]bool, len(slots))
-	signers := make([]ident.PublicKey, len(r.Signatures))
+	state := make([]SlotState, len(slots))
 	for i, s := range r.Signatures {
-		if err := assign(slots, used, s.Key); err != nil {
-			return Verified[P]{}, fmt.Errorf("signature %d: %w", i, err)
+		if err := assign(slots, state, s.Key); err != nil {
+			return Partial[P]{}, fmt.Errorf("signature %d: %w", i, err)
 		}
-		signers[i] = s.Key
 	}
 	msg := SignedBytes(r.Type, r.Payload)
 	for i, s := range r.Signatures {
 		if !s.Key.Verify(msg, s.Sig) {
-			return Verified[P]{}, fmt.Errorf("%w: signature %d", ErrSignature, i)
+			return Partial[P]{}, fmt.Errorf("%w: signature %d", ErrSignature, i)
 		}
 	}
-	complete := true
-	for _, u := range used {
-		complete = complete && u
-	}
-	return Verified[P]{Payload: p, Digest: r.Digest(), Signers: signers, Complete: complete}, nil
+	return Partial[P]{Payload: p, Digest: r.Digest(), Slots: state}, nil
 }
 
-// assign puts k into the first free slot that accepts it. When none does, the
-// error wraps ErrSignerNotAllowed and the specific reasons the free slots gave
-// (a plain "not the key this slot names" is not worth repeating).
-func assign(slots []SignerSlot, used []bool, k ident.PublicKey) error {
+// assign puts k into the first free slot that accepts it and records it in
+// state. When none does, the error wraps ErrSignerNotAllowed and the specific
+// reasons the free slots gave (a plain "not the key this slot names" is not
+// worth repeating).
+func assign(slots []SignerSlot, state []SlotState, k ident.PublicKey) error {
 	var reasons []error
 	for i, slot := range slots {
-		if used[i] {
+		if state[i].Signed {
 			continue
 		}
 		err := slot(k)
 		if err == nil {
-			used[i] = true
+			state[i] = SlotState{Signed: true, Signer: k}
 			return nil
 		}
 		if !errors.Is(err, errNotTheKey) {
