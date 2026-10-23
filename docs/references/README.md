@@ -17,5 +17,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [delivery](delivery/README.md) | Delivery states and transitions, deadlines and retention, pull leases and acknowledgements, deduplication, sender feedback. |
 | [handoff](handoff/README.md) | Wake-up prompts, blocked-delivery detection, what one `recv` prints (output budget, paging, parts) and the check before acknowledging |
 | [timing](timing/README.md) | Time bounds every node applies identically: the clock tolerance shared by trust, delivery and administration |
+| [adapter-claude](adapter-claude/README.md) | The Claude adapter's session-creation state machine: crash-safe start, retry and readiness without a second process or session |
 
 Language: everything in this directory is English.
