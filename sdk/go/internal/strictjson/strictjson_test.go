@@ -79,6 +79,11 @@ func TestDecode(t *testing.T) {
 		{"rejects a value that is not an object", `[]`, "expected an object"},
 		{"rejects truncated input", `{"name":`, "strictjson"},
 		{"rejects an unknown text value through the type", base + `,"level":"medium"}`, "strictjson"},
+		{"rejects a duplicate key", `{"name":"a","name":"b","count":0,"items":[]}`, "name: duplicate key"},
+		{"rejects a duplicate key in a nested object", base + `,"sub":{"n":1,"n":2}}`, "sub.n: duplicate key"},
+		{"rejects a duplicate key in a list element", `{"name":"a","count":0,"items":[{"n":1},{"n":1,"n":1}]}`, "items[1].n: duplicate key"},
+		{"rejects a duplicate key inside a raw message", base + `,"raw":{"k":1,"k":2}}`, "raw.k: duplicate key"},
+		{"accepts the same key in different objects", `{"name":"a","count":0,"items":[{"n":1},{"n":1}],"sub":{"n":1}}`, ""},
 		{"accepts a known text value", base + `,"level":"low"}`, ""},
 	}
 	for _, tc := range tests {

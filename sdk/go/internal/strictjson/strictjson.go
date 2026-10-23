@@ -14,6 +14,8 @@
 //     always accepted for a bool.
 //   - The input is one valid UTF-8 JSON value with nothing after it, and unknown
 //     fields are errors.
+//   - No object has the same key twice, at any depth. Parsers disagree about
+//     which duplicate wins, and a message must mean one thing to every reader.
 //
 // Positions typed json.RawMessage or any are opaque: they keep whatever JSON
 // the sender wrote, null included, and the owner validates them. A type with its
@@ -58,6 +60,9 @@ func Decode(data []byte, v any) error {
 	if !utf8.Valid(data) {
 		return &Error{Msg: "input is not valid UTF-8"}
 	}
+	if err := noDuplicateKeys(data); err != nil {
+		return err
+	}
 	tree, err := parseTree(data)
 	if err != nil {
 		return err
@@ -71,6 +76,52 @@ func Decode(data []byte, v any) error {
 		return &Error{Msg: err.Error()}
 	}
 	return nil
+}
+
+// noDuplicateKeys reports the first object that has a key twice.
+func noDuplicateKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	var scan func(path string) error
+	scan = func(path string) error {
+		tok, err := dec.Token()
+		if err != nil {
+			return &Error{Msg: err.Error()}
+		}
+		d, ok := tok.(json.Delim)
+		if !ok {
+			return nil
+		}
+		switch d {
+		case '{':
+			seen := map[string]bool{}
+			for dec.More() {
+				kt, err := dec.Token()
+				if err != nil {
+					return &Error{Msg: err.Error()}
+				}
+				k := kt.(string)
+				if seen[k] {
+					return &Error{Path: join(path, k), Msg: "duplicate key"}
+				}
+				seen[k] = true
+				if err := scan(join(path, k)); err != nil {
+					return err
+				}
+			}
+		case '[':
+			for i := 0; dec.More(); i++ {
+				if err := scan(fmt.Sprintf("%s[%d]", path, i)); err != nil {
+					return err
+				}
+			}
+		}
+		_, err = dec.Token() // the closing delimiter
+		if err != nil {
+			return &Error{Msg: err.Error()}
+		}
+		return nil
+	}
+	return scan("")
 }
 
 func parseTree(data []byte) (any, error) {
