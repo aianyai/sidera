@@ -2,6 +2,7 @@ package create
 
 import (
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -9,16 +10,19 @@ import (
 type Action int
 
 const (
-	// ActionStartNew: start a turn process with --session-id <uuid> and give it
-	// the first prompt. Chosen only when no process runs and the session file
+	// ActionStartNew: start a turn process with --session-id <uuid>, giving it
+	// the first prompt with the launch, then commit State.Started with the
+	// process at once. Chosen only when no process runs and the session file
 	// does not exist.
 	ActionStartNew Action = iota + 1
-	// ActionStartResume: start a turn process with --resume <uuid> and give it
-	// the first prompt. Chosen when the session file exists, because
-	// --session-id fails on an existing session.
+	// ActionStartResume: start a turn process with --resume <uuid>, giving it
+	// the first prompt with the launch, then commit State.Started at once.
+	// Chosen when the session file exists, because --session-id fails on an
+	// existing session.
 	ActionStartResume
 	// ActionWait: a turn process of the session runs; start nothing and decide
-	// again when it ends or on the next observation.
+	// again when it ends, when the clock passes Decision.RecheckBy, or on the
+	// next observation, whichever comes first.
 	ActionWait
 	// ActionRecordProcess: a turn process was found whose PID was never
 	// recorded. Commit Decision.Process with State.Started.
@@ -27,22 +31,34 @@ const (
 	ActionMarkUUIDSeen
 	// ActionMarkReady: commit State.Ready together with the control reply.
 	ActionMarkReady
-	// ActionDone: the attempt is ready and its reply was committed; nothing to do.
+	// ActionDone: the attempt is final and its reply was committed (ready, or
+	// failed with Decision.FailReason); nothing to do.
 	ActionDone
-	// ActionFail: the attempt failed for good; report the reason in the
-	// control reply. Whatever process is still running is not touched.
+	// ActionFail: the attempt failed for good; commit State.Failed with
+	// Decision.Reason together with the failure reply. Whatever process is
+	// still running is not touched, and no process is started for this uuid
+	// afterwards.
 	ActionFail
+	// ActionControlUnknown: more than one process works on the session, or a
+	// process that is not the adapter's does. Like ActionFail it ends the
+	// attempt for good (commit State.Failed with Decision.Reason), and nothing
+	// is started or touched. In the same transaction the caller marks the
+	// session's control as unknown and notifies the local owner;
+	// Decision.Processes lists every process seen.
+	ActionControlUnknown
 )
 
 var actionNames = map[Action]string{
 	ActionStartNew: "StartNew", ActionStartResume: "StartResume", ActionWait: "Wait",
 	ActionRecordProcess: "RecordProcess", ActionMarkUUIDSeen: "MarkUUIDSeen",
 	ActionMarkReady: "MarkReady", ActionDone: "Done", ActionFail: "Fail",
+	ActionControlUnknown: "ControlUnknown",
 }
 
 func (a Action) String() string { return nameOf(actionNames, a, "Action") }
 
-// Reason says why Decide chose its action.
+// Reason says why Decide chose its action. The reasons that fail an attempt are
+// persisted in State.FailReason, so their numbers never change.
 type Reason int
 
 const (
@@ -57,14 +73,13 @@ const (
 	ReasonRecordWithoutFirstPrompt
 	// ReasonTurnRunning: the recorded turn process is alive.
 	ReasonTurnRunning
-	// ReasonMultipleProcesses: more than one distinct process carries the uuid.
+	// ReasonMultipleProcesses: more than one distinct process carries the
+	// uuid. Fails the attempt as control unknown, even when the first prompt
+	// is already in the record: a second writer is a second writer.
 	ReasonMultipleProcesses
 	// ReasonProcessFoundByCommandLine: a process with the uuid on its command
 	// line runs and is not the recorded one.
 	ReasonProcessFoundByCommandLine
-	// ReasonProcessFoundInRegistry: only the runtime's registry names a
-	// process for this session, and the process table confirms it.
-	ReasonProcessFoundInRegistry
 	// ReasonSessionRecordHasID: the session file contains the uuid.
 	ReasonSessionRecordHasID
 	// ReasonFirstPromptRecorded: the first prompt is in the session record.
@@ -72,23 +87,49 @@ const (
 	// ReasonAlreadyReady: the attempt reached the ready stage earlier.
 	ReasonAlreadyReady
 	// ReasonStartTimedOut: a turn process ran longer than StartTimeout without
-	// the first prompt reaching the session record.
+	// the first prompt reaching the session record. Fails the attempt.
 	ReasonStartTimedOut
 	// ReasonStartsExhausted: MaxStarts processes ended without the first
-	// prompt reaching the session record.
+	// prompt reaching the session record. Fails the attempt.
 	ReasonStartsExhausted
+	// ReasonOutsideWriter: the runtime's registry names a live process for
+	// this session that is neither the recorded process nor lists the uuid on
+	// its command line, so someone else works on the session (the user resumed
+	// it by hand). Fails the attempt as control unknown.
+	ReasonOutsideWriter
+	// ReasonAlreadyFailed: the attempt failed earlier; Decision.FailReason is
+	// the reason it failed with.
+	ReasonAlreadyFailed
 )
 
 var reasonNames = map[Reason]string{
 	ReasonNotStarted: "NotStarted", ReasonProcessEndedWithoutSession: "ProcessEndedWithoutSession",
 	ReasonRecordWithoutFirstPrompt: "RecordWithoutFirstPrompt", ReasonTurnRunning: "TurnRunning",
 	ReasonMultipleProcesses: "MultipleProcesses", ReasonProcessFoundByCommandLine: "ProcessFoundByCommandLine",
-	ReasonProcessFoundInRegistry: "ProcessFoundInRegistry", ReasonSessionRecordHasID: "SessionRecordHasID",
+	ReasonSessionRecordHasID:  "SessionRecordHasID",
 	ReasonFirstPromptRecorded: "FirstPromptRecorded", ReasonAlreadyReady: "AlreadyReady",
 	ReasonStartTimedOut: "StartTimedOut", ReasonStartsExhausted: "StartsExhausted",
+	ReasonOutsideWriter: "OutsideWriter", ReasonAlreadyFailed: "AlreadyFailed",
 }
 
 func (r Reason) String() string { return nameOf(reasonNames, r, "Reason") }
+
+// endsAttempt reports whether r is a reason an attempt can fail with: the
+// reasons of ActionFail and ActionControlUnknown.
+func (r Reason) endsAttempt() bool {
+	switch r {
+	case ReasonStartTimedOut, ReasonStartsExhausted, ReasonMultipleProcesses, ReasonOutsideWriter:
+		return true
+	}
+	return false
+}
+
+// ControlUnknown reports whether r is a reason that leaves the session's
+// control unknown: the failure of ActionControlUnknown, which the caller marks
+// on the session and notifies to the local owner, unlike the plain failures.
+func (r Reason) ControlUnknown() bool {
+	return r == ReasonMultipleProcesses || r == ReasonOutsideWriter
+}
 
 func nameOf[K ~int](names map[K]string, k K, kind string) string {
 	if n, ok := names[k]; ok {
@@ -103,19 +144,33 @@ type Decision struct {
 	Reason Reason
 	// Process is the process to record; set for ActionRecordProcess only.
 	Process Process
+	// Processes are all processes seen, ordered by PID; set for
+	// ActionControlUnknown only.
+	Processes []Process
+	// RecheckBy is a time in Unix seconds; set for ActionWait only. The
+	// caller decides again when its clock passes it, even if no turn ended:
+	// the wait ends in a timeout then. At RecheckBy itself the turn has run
+	// exactly StartTimeout and has not yet timed out.
+	RecheckBy int64
+	// FailReason is the stored reason the attempt failed with; set for
+	// ActionDone with ReasonAlreadyFailed only.
+	FailReason Reason
 }
 
 // Decide returns the next step of a creation attempt.
 //
 // Whatever has already run, a second turn process for the session is never
-// started and --session-id is never used once the session file exists. A
-// process counts as running when the process table lists it with the uuid on
-// its command line, when the runtime's registry names it and the table
-// confirms it by PID and start time, or when it is the recorded process and
-// the PID is still held with the recorded start time. A PID that is alive
-// with another start time is a reused number and counts as nothing.
+// started, --session-id is never used once the session file exists, and a
+// failed attempt never starts anything or becomes ready. A process counts as
+// running when the process table lists it with the uuid on its command line,
+// when it is the recorded process and the PID is still held with the recorded
+// start, or when the runtime's registry names it and the table confirms it by
+// PID and start. A PID that is alive with another start is a reused number and
+// counts as nothing.
 //
-// The order of the rules is the order of the evidence: first make sure no
+// The order of the rules is the order of the evidence: first make sure that
+// exactly one writer exists (more than one, or a writer that is not ours, ends
+// the attempt as control unknown, whatever the record says), then that no
 // running process goes unrecorded (so every later step knows the writer), then
 // take readiness from the session record, and only when nothing runs and the
 // record lacks the first prompt start a process.
@@ -133,23 +188,25 @@ func Decide(s State, o Observations, p Params, now time.Time) (Decision, error) 
 		return Decision{}, fmt.Errorf("%w: now is unset", ErrInvalidInput)
 	}
 
-	if s.Stage == StageReady {
+	switch s.Stage {
+	case StageReady:
 		return Decision{Action: ActionDone, Reason: ReasonAlreadyReady}, nil
+	case StageFailed:
+		return Decision{Action: ActionDone, Reason: ReasonAlreadyFailed, FailReason: s.FailReason}, nil
 	}
 
-	running, err := runningProcesses(s, o)
+	running, outsideWriter, err := runningProcesses(s, o)
 	if err != nil {
 		return Decision{}, err
 	}
-	if len(running) > 1 {
-		return Decision{Action: ActionWait, Reason: ReasonMultipleProcesses}, nil
+	switch {
+	case outsideWriter:
+		return Decision{Action: ActionControlUnknown, Reason: ReasonOutsideWriter, Processes: running}, nil
+	case len(running) > 1:
+		return Decision{Action: ActionControlUnknown, Reason: ReasonMultipleProcesses, Processes: running}, nil
 	}
-	if len(running) == 1 && !running[0].process.Same(s.Process) {
-		reason := ReasonProcessFoundInRegistry
-		if running[0].viaCommandLine {
-			reason = ReasonProcessFoundByCommandLine
-		}
-		return Decision{Action: ActionRecordProcess, Reason: reason, Process: running[0].process}, nil
+	if len(running) == 1 && !running[0].Same(s.Process) {
+		return Decision{Action: ActionRecordProcess, Reason: ReasonProcessFoundByCommandLine, Process: running[0]}, nil
 	}
 
 	switch {
@@ -160,10 +217,10 @@ func Decide(s State, o Observations, p Params, now time.Time) (Decision, error) 
 	}
 
 	if len(running) == 1 {
-		if now.Sub(running[0].process.StartTime) > p.StartTimeout {
+		if now.Sub(time.Unix(running[0].StartUnix, 0)) > p.StartTimeout {
 			return Decision{Action: ActionFail, Reason: ReasonStartTimedOut}, nil
 		}
-		return Decision{Action: ActionWait, Reason: ReasonTurnRunning}, nil
+		return Decision{Action: ActionWait, Reason: ReasonTurnRunning, RecheckBy: running[0].StartUnix + ceilSeconds(p.StartTimeout)}, nil
 	}
 
 	if s.Starts >= p.MaxStarts {
@@ -179,45 +236,52 @@ func Decide(s State, o Observations, p Params, now time.Time) (Decision, error) 
 	}
 }
 
-type runningProcess struct {
-	process        Process
-	viaCommandLine bool
-}
+func ceilSeconds(d time.Duration) int64 { return int64((d + time.Second - 1) / time.Second) }
 
-// runningProcesses returns the distinct processes that run for the session.
-// The same process reported by several sources counts once; one PID with two
-// start times in a single snapshot cannot be true and is refused.
-func runningProcesses(s State, o Observations) ([]runningProcess, error) {
-	var out []runningProcess
-	add := func(p Process, viaCommandLine bool) error {
-		for i := range out {
-			if out[i].process.Same(p) {
-				out[i].viaCommandLine = out[i].viaCommandLine || viaCommandLine
+// runningProcesses returns the distinct processes that run for the session,
+// ordered by PID, and whether the registry names one that is not ours. The same
+// process reported by several sources counts once; one PID with two starts in
+// a single snapshot cannot be true and is refused. A process found through the
+// registry is recorded with the process table's start, not the entry's.
+func runningProcesses(s State, o Observations) (out []Process, outsideWriter bool, err error) {
+	add := func(p Process) error {
+		for _, q := range out {
+			if q.Same(p) {
 				return nil
 			}
-			if out[i].process.PID == p.PID {
+			if q.PID == p.PID {
 				return fmt.Errorf("%w: PID %d appears with two start times in one snapshot", ErrInvalidInput, p.PID)
 			}
 		}
-		out = append(out, runningProcess{process: p, viaCommandLine: viaCommandLine})
+		out = append(out, p)
 		return nil
 	}
 	for _, p := range o.Running {
-		if err := add(p, true); err != nil {
-			return nil, err
+		if err := add(p); err != nil {
+			return nil, false, err
+		}
+	}
+	if !s.Process.IsZero() && o.Recorded.Alive && o.Recorded.StartUnix == s.Process.StartUnix {
+		if err := add(s.Process); err != nil {
+			return nil, false, err
 		}
 	}
 	for _, e := range o.Registry {
-		if e.SessionID == s.SessionID && e.confirmed() {
-			if err := add(Process{PID: e.PID, StartTime: e.StartTime}, false); err != nil {
-				return nil, err
-			}
+		if e.SessionID != s.SessionID || !e.confirmed() {
+			continue
+		}
+		p := Process{PID: e.PID, StartUnix: e.Current.StartUnix}
+		known := false
+		for _, q := range out {
+			known = known || q.Same(p)
+		}
+		if !known {
+			outsideWriter = true
+		}
+		if err := add(p); err != nil {
+			return nil, false, err
 		}
 	}
-	if !s.Process.IsZero() && o.Recorded.Alive && sameStart(o.Recorded.StartTime, s.Process.StartTime) {
-		if err := add(s.Process, false); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].PID < out[j].PID })
+	return out, outsideWriter, nil
 }
