@@ -43,6 +43,11 @@ var (
 	ErrIncomplete = errors.New("required signatures are missing")
 	// ErrDescriptor reports a zero or malformed Descriptor. It fails closed.
 	ErrDescriptor = errors.New("invalid record descriptor")
+	// ErrRoleSeparation reports a certificate that names one key in two roles: a
+	// network key that is also the node's identity key, or a device key that is
+	// also the person's root key. A key in two roles lets the weaker use
+	// (a network connection, a device) expose the stronger one.
+	ErrRoleSeparation = errors.New("key used in two roles")
 	// ErrTime reports a time that cannot be put on the wire or read from it.
 	ErrTime = errors.New("invalid time")
 	// ErrLevel reports a level outside the wire table.

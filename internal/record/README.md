@@ -22,10 +22,10 @@ for the format and the reasons behind it. Identifiers and keys come from
 | `SignerSlot`, `NodeIdentityKey`, `PersonRootKey`, `NetworkKeyOf`, `BindingError` | Signer slots: "the key that derives this node / person identifier", "the network key `NetworkKeyBelongs` accepts for this node". A refusal by `NetworkKeyOf` is a `*BindingError` with the specific reason. |
 | `TimeToWire`, `TimeFromWire`, `OptionalTime*`, `RequireCounter`, `LevelToWire`, `LevelFromWire` | The one place wire times, counters and levels are converted. |
 | `MarshalCanonical`, `UnmarshalStrict`             | The canonical codec for payload wire structs defined elsewhere.                                            |
-| `NetworkKeyCertificate` and `NetworkKeyCertificateDescriptor` | Node ID, network public key, serial, validity; signed by the identity key.                    |
+| `NetworkKeyCertificate`, `NetworkKeyCertificateDescriptor`, `IssueNetworkKeyCertificate` | Node ID, network public key, serial, validity; signed by the identity key. The issue constructor sets `NotBefore` back by the clock tolerance. |
 | `SerialSeen`, `SerialSeenOf(v)`, `DecideSerial(seen, incoming)` | The highest serial seen for a node with the digest of the certificate seen at it; accept, stale, conflict, wrong node or invalid for a new verified certificate. |
 | `AcceptedNetworkKey`, `NetworkKeyBelongs(accepted, node, key, now)` | The accepted certificate and its revocation flag; the one answer to "is this network key this node's key": every network-key record relies on it. |
-| `DeviceCertificate`, `DeviceCertificateDescriptor`, `DeviceCertificate.AdminCert()` | Person ID, device key, level cap, validity; signed by the root key; conversion to `admin.DeviceCert`. |
+| `DeviceCertificate`, `DeviceCertificateDescriptor`, `IssueDeviceCertificate`, `DeviceCertificate.AdminCert()` | Person ID, device key, level cap, validity; signed by the root key; conversion to `admin.DeviceCert`. The issue constructor sets `NotBefore` back by the clock tolerance. |
 
 Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 
@@ -93,6 +93,18 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   (`NetworkKeyCertificate.ValidityAt`, `NetworkKeyBelongs`). A binding answer is
   one of ok, no certificate, node mismatch, key mismatch, not yet valid, expired
   or revoked.
+- **Issuing.** Certificates are issued with `IssueNetworkKeyCertificate` and
+  `IssueDeviceCertificate`, which set `NotBefore` to the issue time minus
+  `timing.ClockTolerance` (whole seconds). A higher serial replaces the old
+  certificate immediately and validity is compared without tolerance, so a peer
+  whose clock is up to the tolerance behind would otherwise find the node
+  unverifiable after every renewal; a device certificate issued moments ago
+  would likewise be refused as not yet valid. The comparison rules themselves are
+  unchanged. Hand-built certificates are legal too; they just lack this margin.
+- **Role separation.** A network-key certificate whose network key derives to
+  its own node ID (the network key is the identity key) and a device certificate
+  whose device key derives to its own person ID (the device key is the root key)
+  are refused, on sealing and on receiving, with `ErrRoleSeparation`.
 - **Highest serial seen.** `SerialSeen` is its own state, apart from the
   accepted certificate: the serial and the digest of the certificate seen at it.
   A higher serial is accepted, a lower one or the very same certificate is

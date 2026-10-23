@@ -81,3 +81,7 @@ func RequireCounter(v uint64) error {
 	}
 	return nil
 }
+
+// wholeSeconds returns t in UTC cut to whole seconds, which is the precision of
+// every wire time: a value built with it reads back equal from the wire.
+func wholeSeconds(t time.Time) time.Time { return time.Unix(t.Unix(), 0).UTC() }

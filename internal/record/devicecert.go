@@ -6,6 +6,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // DeviceCertificateType is the type string of a device certificate. A
@@ -28,6 +29,23 @@ type DeviceCertificate struct {
 	// them: administration judges them, sometimes at the signing time of an
 	// offline directive rather than now.
 	NotBefore, NotAfter time.Time
+}
+
+// IssueDeviceCertificate builds the certificate a person's root key issues at
+// issuedAt for a device key. NotBefore is issuedAt minus the clock tolerance,
+// not issuedAt itself, for the reason given at IssueNetworkKeyCertificate:
+// validity is compared without tolerance, so a verifier whose clock is behind
+// by up to the tolerance would otherwise refuse a certificate issued moments
+// ago as not yet valid. The result is sealed with Seal, which refuses invalid
+// values.
+func IssueDeviceCertificate(person ident.PersonID, deviceKey ident.PublicKey, maxLevel admin.Level, issuedAt, notAfter time.Time) DeviceCertificate {
+	return DeviceCertificate{
+		Person:    person,
+		DeviceKey: deviceKey,
+		MaxLevel:  maxLevel,
+		NotBefore: wholeSeconds(issuedAt).Add(-timing.ClockTolerance),
+		NotAfter:  wholeSeconds(notAfter),
+	}
 }
 
 type deviceCertificateWire struct {
@@ -85,7 +103,10 @@ var DeviceCertificateDescriptor = NewDescriptor(DeviceCertificateType,
 	func(c DeviceCertificate) []SignerSlot { return []SignerSlot{PersonRootKey(c.Person)} },
 )
 
-// checkDeviceCertificate holds the rules of the certificate. Only the decoding
+// checkDeviceCertificate holds the rules of the certificate: the fields are set,
+// the window is not empty, and the device key is not the person's root key (a
+// device holding the root key could certify further devices and its loss would
+// be the loss of the person). Only the decoding
 // side calls it; encoding reaches it through the descriptor, which decodes what
 // it wrote.
 func checkDeviceCertificate(person ident.PersonID, key ident.PublicKey, notBefore, notAfter int64) error {
@@ -97,6 +118,9 @@ func checkDeviceCertificate(person ident.PersonID, key ident.PublicKey, notBefor
 	}
 	if notAfter <= notBefore {
 		return fmt.Errorf("%w: not_after must be after not_before", ErrTime)
+	}
+	if derived, err := ident.PersonIDFromKey(key); err == nil && derived == person {
+		return fmt.Errorf("%w: the device key is the root key of the person", ErrRoleSeparation)
 	}
 	return nil
 }

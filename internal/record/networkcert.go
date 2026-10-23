@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // NetworkKeyCertificateType is the type string of a network-key certificate.
@@ -27,6 +28,23 @@ type NetworkKeyCertificate struct {
 	// NotBefore and NotAfter bound the validity: valid from NotBefore, expired
 	// at NotAfter, compared without tolerance.
 	NotBefore, NotAfter time.Time
+}
+
+// IssueNetworkKeyCertificate builds the certificate a node issues at issuedAt
+// for its network key. NotBefore is issuedAt minus the clock tolerance, not
+// issuedAt itself: a higher serial replaces the old certificate at once, and
+// validity is compared without tolerance, so a peer whose clock runs up to the
+// tolerance behind would otherwise find the new certificate not yet valid and
+// the node unverifiable after every renewal. The result is sealed with Seal,
+// which refuses invalid values.
+func IssueNetworkKeyCertificate(node ident.NodeID, networkKey ident.PublicKey, serial uint64, issuedAt, notAfter time.Time) NetworkKeyCertificate {
+	return NetworkKeyCertificate{
+		Node:       node,
+		NetworkKey: networkKey,
+		Serial:     serial,
+		NotBefore:  wholeSeconds(issuedAt).Add(-timing.ClockTolerance),
+		NotAfter:   wholeSeconds(notAfter),
+	}
 }
 
 type networkKeyCertificateWire struct {
@@ -77,7 +95,9 @@ var NetworkKeyCertificateDescriptor = NewDescriptor(NetworkKeyCertificateType,
 )
 
 // checkNetworkKeyCertificate holds the rules of the certificate: the fields are
-// set and the window is not empty. Only the decoding side calls it; encoding
+// set, the window is not empty, and the network key is not the node's identity
+// key (a key in both roles would let a compromised connection key sign
+// certificates for the node). Only the decoding side calls it; encoding
 // reaches it through the descriptor, which decodes what it wrote.
 func checkNetworkKeyCertificate(node ident.NodeID, key ident.PublicKey, serial uint64, notBefore, notAfter int64) error {
 	if node.IsZero() {
@@ -91,6 +111,9 @@ func checkNetworkKeyCertificate(node ident.NodeID, key ident.PublicKey, serial u
 	}
 	if notAfter <= notBefore {
 		return fmt.Errorf("%w: not_after must be after not_before", ErrTime)
+	}
+	if derived, err := ident.NodeIDFromKey(key); err == nil && derived == node {
+		return fmt.Errorf("%w: the network key is the identity key of the node", ErrRoleSeparation)
 	}
 	return nil
 }

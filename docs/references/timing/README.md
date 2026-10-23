@@ -38,5 +38,6 @@ up on, is a protocol fork that no retry resolves.
 | A voucher may be stamped at most this far ahead of the receiver's clock; part of the grace-period floor | `internal/trust` (`Vouchers.Accept`, `Evaluate`, `MinGracePeriod`) |
 | A delivery deadline may exceed the cap by this much; the expiry judgement and `report_by` add it | `internal/delivery` (`Intake`, `ReportByOffset`, `ExpiryJudgeableAfter`) |
 | An offline directive's signing time may be this far ahead of now and this far before the node lost contact | `internal/admin` (`AcceptDirective`) |
+| A certificate is issued valid from this long before its issue time, because validity is compared without tolerance and a higher serial replaces the old certificate at once | `internal/record` (`IssueNetworkKeyCertificate`, `IssueDeviceCertificate`) |
 
 The value itself: `internal/timing/timing.go`. Test: `TestClockTolerance`.

@@ -158,6 +158,14 @@ key and not a peer identifier, so the contract packages do not depend on libp2p.
 
 - **Validity** is judged by `record`, with no tolerance: valid from `not_before`,
   expired at `not_after`. `not_after` must be after `not_before`.
+- **Issuing.** `IssueNetworkKeyCertificate` sets `not_before` to the issue time
+  minus `timing.ClockTolerance`. The comparison stays strict, so without the
+  margin a peer whose clock is behind by up to the tolerance would hold a higher
+  serial that replaced the old certificate immediately and yet is not valid yet:
+  the node would be unverifiable for that peer after every renewal.
+- **Roles.** The network key must not derive to the certificate's own node ID. A
+  connection key that was also the identity key would let anyone who compromised
+  a connection sign certificates for the node.
 - **Serial**: peers accept only the highest serial seen (`DecideSerial`). The
   state is `SerialSeen`: the highest serial and the digest of the certificate
   seen at it, kept apart from the certificate currently accepted. Higher is
@@ -189,6 +197,13 @@ the same record with a short window.
 
 - `record` does not judge the window: administration judges it, sometimes at the
   signing time of an offline directive rather than at the time of the check.
+- **Issuing.** `IssueDeviceCertificate` sets `not_before` to the issue time minus
+  `timing.ClockTolerance`, for the reason given for the network-key certificate:
+  the window is compared without tolerance, and a certificate that starts at the
+  issue time is refused as not yet valid by a verifier whose clock is behind.
+- **Roles.** The device key must not derive to the certificate's own person ID:
+  a device that held the root key could certify further devices, and its loss
+  would be the loss of the person.
 - `DeviceCertificate.AdminCert()` yields the signature-derived part of
   `admin.DeviceCert`: the cap and the window as written. The two revocation flags
   are false; the revocation records fill them in before the value is used.

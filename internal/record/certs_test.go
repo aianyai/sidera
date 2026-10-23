@@ -8,6 +8,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 func netCert(t *testing.T, identity, network Signer, serial uint64) NetworkKeyCertificate {
@@ -643,6 +644,129 @@ func TestNetworkKeySignedRecords(t *testing.T) {
 			if (err == nil) != (want == BindingOK) {
 				t.Fatalf("%s: slot error %v, binding %v", r.rule, err, want)
 			}
+		}
+	})
+}
+
+// A key serves one role. A network key equal to the identity key, or a device
+// key equal to the root key, is refused when the certificate is sealed and when
+// it is received.
+func TestRolesAreSeparated(t *testing.T) {
+	t.Run("a network key that is the node's identity key is refused", func(t *testing.T) {
+		identity := rfcSigner(t, 1)
+		c := netCert(t, identity, identity, 1)
+		if _, err := Seal(NetworkKeyCertificateDescriptor, c, identity); !errors.Is(err, ErrRoleSeparation) || !errors.Is(err, ErrPayload) {
+			t.Fatalf("Seal error = %v", err)
+		}
+		// The receiving side, from a hand-written payload signed by the identity key.
+		payload := cborw.mapOf(cborw.uint(1), cborw.bstr(c.Node.Bytes()), cborw.uint(2), cborw.key(1, identity.Public().Bytes()), cborw.uint(3), cborw.uint(1), cborw.uint(4), cborw.uint(1700000000), cborw.uint(5), cborw.uint(1702592000))
+		rec, err := Sign(NetworkKeyCertificateType, payload, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Verify(NetworkKeyCertificateDescriptor, rec); !errors.Is(err, ErrRoleSeparation) {
+			t.Fatalf("Verify error = %v", err)
+		}
+	})
+	t.Run("a network key that is another node's identity key is allowed", func(t *testing.T) {
+		identity, network := rfcSigner(t, 1), rfcSigner(t, 2)
+		if _, err := Seal(NetworkKeyCertificateDescriptor, netCert(t, identity, network, 1), identity); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("a device key that is the person's root key is refused", func(t *testing.T) {
+		root := rfcSigner(t, 3)
+		c := devCert(t, root, root, admin.LevelManage)
+		if _, err := Seal(DeviceCertificateDescriptor, c, root); !errors.Is(err, ErrRoleSeparation) || !errors.Is(err, ErrPayload) {
+			t.Fatalf("Seal error = %v", err)
+		}
+		payload := cborw.mapOf(cborw.uint(1), cborw.bstr(c.Person.Bytes()), cborw.uint(2), cborw.key(1, root.Public().Bytes()), cborw.uint(3), cborw.uint(2), cborw.uint(4), cborw.uint(1700000000), cborw.uint(5), cborw.uint(1700007200))
+		rec, err := Sign(DeviceCertificateType, payload, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Verify(DeviceCertificateDescriptor, rec); !errors.Is(err, ErrRoleSeparation) {
+			t.Fatalf("Verify error = %v", err)
+		}
+	})
+	t.Run("a device key that is the same key as the node's identity key is a different role and is allowed", func(t *testing.T) {
+		// The person ID and the node ID of one key differ, so only the person's
+		// own root key is excluded from the device role.
+		root, device := rfcSigner(t, 3), rfcSigner(t, 1)
+		if _, err := Seal(DeviceCertificateDescriptor, devCert(t, root, device, admin.LevelView), root); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// A certificate is valid from the instant its NotBefore says and a higher
+// serial replaces the old certificate at once, so a certificate must not start
+// at the issue time: a verifier whose clock is up to the tolerance behind would
+// find the node unverifiable after every renewal.
+func TestIssuedCertificatesAreBackdatedByTheClockTolerance(t *testing.T) {
+	issued := epoch.Add(1500 * time.Millisecond) // 1700000001.5: the sub-second part is cut
+	end := issued.Add(30 * 24 * time.Hour)
+
+	t.Run("network-key certificate", func(t *testing.T) {
+		identity, network := rfcSigner(t, 1), rfcSigner(t, 2)
+		c := IssueNetworkKeyCertificate(nodeOf(t, identity), network.Public(), 4, issued, end)
+		if want := time.Unix(1700000001, 0).UTC().Add(-timing.ClockTolerance); !c.NotBefore.Equal(want) { // issue time cut to the second, minus the tolerance
+			t.Fatalf("NotBefore = %v, want %v", c.NotBefore, want)
+		}
+		if c.Serial != 4 || c.NetworkKey != network.Public() || c.Node != nodeOf(t, identity) || !c.NotAfter.Equal(end.Truncate(time.Second)) {
+			t.Fatalf("certificate = %+v", c)
+		}
+		v := verifiedNetCert(t, identity, c) // sealed, decoded and verified: the issued value is valid
+		if v.Payload != c {
+			t.Fatalf("read back %+v, want %+v", v.Payload, c)
+		}
+		acc := AcceptedNetworkKey{Cert: &c}
+		node, key := c.Node, network.Public()
+		for _, row := range []struct {
+			rule string
+			now  time.Time
+			want Binding
+		}{
+			{"a verifier whose clock is behind by the tolerance accepts the certificate at the issue time", issued.Add(-timing.ClockTolerance), BindingOK},
+			{"a verifier more than the tolerance behind does not", issued.Add(-timing.ClockTolerance - time.Second), BindingNotYetValid},
+			{"a verifier on time accepts it", issued, BindingOK},
+		} {
+			if got := NetworkKeyBelongs(acc, node, key, row.now); got != row.want {
+				t.Errorf("%s: %v, want %v", row.rule, got, row.want)
+			}
+		}
+	})
+	t.Run("device certificate", func(t *testing.T) {
+		root, device := rfcSigner(t, 3), rfcSigner(t, 2)
+		c := IssueDeviceCertificate(personOf(t, root), device.Public(), admin.LevelManage, issued, end)
+		if want := time.Unix(1700000001, 0).UTC().Add(-timing.ClockTolerance); !c.NotBefore.Equal(want) { // issue time cut to the second, minus the tolerance
+			t.Fatalf("NotBefore = %v, want %v", c.NotBefore, want)
+		}
+		if c.MaxLevel != admin.LevelManage || c.DeviceKey != device.Public() || c.Person != personOf(t, root) || !c.NotAfter.Equal(end.Truncate(time.Second)) {
+			t.Fatalf("certificate = %+v", c)
+		}
+		rec, err := Seal(DeviceCertificateDescriptor, c, root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := Verify(DeviceCertificateDescriptor, rec)
+		if err != nil || v.Payload != c {
+			t.Fatalf("Verify = %+v, %v", v, err)
+		}
+		list, _ := admin.NewList([]admin.Entry{{Person: c.Person, Level: admin.LevelFullControl}})
+		at := func(now time.Time) admin.Level { return admin.EffectiveLevel(list, c.Person, c.AdminCert(), now).Level }
+		if got := at(issued.Add(-timing.ClockTolerance)); got != admin.LevelManage {
+			t.Fatalf("a verifier behind by the tolerance sees level %v", got)
+		}
+		if got := at(issued.Add(-timing.ClockTolerance - time.Second)); got != admin.LevelNone {
+			t.Fatalf("a verifier further behind sees level %v", got)
+		}
+	})
+	t.Run("an unset issue time is refused when sealing", func(t *testing.T) {
+		identity, network := rfcSigner(t, 1), rfcSigner(t, 2)
+		c := IssueNetworkKeyCertificate(nodeOf(t, identity), network.Public(), 1, time.Time{}, end)
+		if _, err := Seal(NetworkKeyCertificateDescriptor, c, identity); !errors.Is(err, ErrTime) {
+			t.Fatalf("error = %v", err)
 		}
 	})
 }
