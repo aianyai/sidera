@@ -1,0 +1,32 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.recv",
+  "note": "page label not matching pattern",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "page": {
+        "lease": "0123456789abcdef0123456789abcdef",
+        "messages": [
+          {
+            "id": "m",
+            "from": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+            "part": {
+              "index": 1,
+              "total": 2,
+              "label": "first",
+              "next": {
+                "msg": "m",
+                "part": 2
+              }
+            },
+            "body": "x"
+          }
+        ],
+        "more": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "prompt.persisted",
+  "note": "attempt missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "prompt.persisted",
+    "params": {
+      "endpoint": "22222222222222222222222222222222"
+    }
+  }
+}

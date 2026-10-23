@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sidera.invalid/adapter/v1/message.schema.json",
+  "title": "Sidera adapter protocol v1: one message",
+  "description": "A JSON-RPC 2.0 message as it travels on one line: a request, a notification, a success response or an error response. This schema knows nothing about methods; methods.schema.json refines params and result per method. Batches are not accepted.",
+  "oneOf": [
+    { "$ref": "#/$defs/Request" },
+    { "$ref": "#/$defs/Notification" },
+    { "$ref": "#/$defs/Success" },
+    { "$ref": "#/$defs/Failure" }
+  ],
+  "$defs": {
+    "Request": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "method", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "types.schema.json#/$defs/RequestID" },
+        "method": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "params": { "type": "object" }
+      }
+    },
+    "Notification": {
+      "type": "object",
+      "required": ["jsonrpc", "method", "params"],
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "method": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "params": { "type": "object" }
+      }
+    },
+    "Success": {
+      "type": "object",
+      "required": ["jsonrpc", "id", "result"],
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "$ref": "types.schema.json#/$defs/RequestID" },
+        "result": { "type": "object" }
+      }
+    },
+    "Failure": {
+      "description": "The id is null when the request could not be read far enough to find it.",
+      "type": "object",
+      "required": ["jsonrpc", "id", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "jsonrpc": { "const": "2.0" },
+        "id": { "oneOf": [{ "$ref": "types.schema.json#/$defs/RequestID" }, { "type": "null" }] },
+        "error": { "$ref": "#/$defs/ErrorObject" }
+      }
+    },
+    "ErrorCode": {
+      "description": "Every error code of the protocol. The title is the code's name.",
+      "oneOf": [
+        { "const": -32700, "title": "parse_error" },
+        { "const": -32600, "title": "invalid_request" },
+        { "const": -32601, "title": "method_not_found" },
+        { "const": -32602, "title": "invalid_params" },
+        { "const": -32603, "title": "internal_error" },
+        { "const": -32001, "title": "overloaded" },
+        { "const": -32002, "title": "shutting_down" },
+        { "const": -32003, "title": "not_initialized" },
+        { "const": -32004, "title": "line_too_long" },
+        { "const": -32022, "title": "unsupported_protocol_version" },
+        { "const": -32800, "title": "request_cancelled" },
+        { "const": 1001, "title": "unknown_endpoint" },
+        { "const": 1002, "title": "wrong_endpoint_kind" },
+        { "const": 1003, "title": "capability_not_declared" },
+        { "const": 1004, "title": "unknown_attempt" },
+        { "const": 1005, "title": "attempt_conflict" },
+        { "const": 1006, "title": "checkpoint_too_large" },
+        { "const": 1007, "title": "endpoint_limit" },
+        { "const": 1008, "title": "invalid_address" },
+        { "const": 1009, "title": "send_refused" },
+        { "const": 1010, "title": "lease_unknown" },
+        { "const": 1011, "title": "instance_locked" }
+      ]
+    },
+    "ErrorObject": {
+      "description": "Data is present exactly for the three codes that define a shape for it.",
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "#/$defs/ErrorCode" },
+        "message": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "data": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "code": { "const": -32022 } }, "required": ["code"] },
+          "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/UnsupportedVersionData" } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": 1008 } }, "required": ["code"] },
+          "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/InvalidAddressData" } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": 1009 } }, "required": ["code"] },
+          "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/SendRefusedData" } } }
+        },
+        {
+          "if": { "properties": { "code": { "not": { "enum": [-32022, 1008, 1009] } } }, "required": ["code"] },
+          "then": { "properties": { "data": false } }
+        }
+      ]
+    },
+    "UnsupportedVersionData": {
+      "type": "object",
+      "required": ["requested", "supported"],
+      "additionalProperties": false,
+      "properties": {
+        "requested": { "$ref": "types.schema.json#/$defs/Range" },
+        "supported": { "$ref": "types.schema.json#/$defs/Range" }
+      }
+    },
+    "InvalidAddressData": {
+      "type": "object",
+      "required": ["field"],
+      "additionalProperties": false,
+      "properties": { "field": { "type": "string", "minLength": 1, "maxLength": 128 } }
+    },
+    "SendRefusedData": {
+      "type": "object",
+      "required": ["reason"],
+      "additionalProperties": false,
+      "properties": { "reason": { "$ref": "types.schema.json#/$defs/ReasonWord" } }
+    }
+  }
+}

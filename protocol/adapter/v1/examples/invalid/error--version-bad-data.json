@@ -1,0 +1,20 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "both ranges are required",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": -32022,
+      "message": "no common version",
+      "data": {
+        "requested": {
+          "min": 2,
+          "max": 3
+        }
+      }
+    }
+  }
+}

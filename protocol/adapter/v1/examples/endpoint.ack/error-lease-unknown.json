@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 121,
+  "error": {
+    "code": 1010,
+    "message": "the lease does not belong to this endpoint"
+  }
+}

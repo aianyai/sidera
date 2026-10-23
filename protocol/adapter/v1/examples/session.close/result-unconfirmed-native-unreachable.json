@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 71,
+  "result": {
+    "outcome": "close_unconfirmed",
+    "reason": "native_unreachable"
+  }
+}

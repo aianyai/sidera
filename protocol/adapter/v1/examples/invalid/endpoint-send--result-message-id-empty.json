@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.send",
+  "note": "message id empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "message_id": ""
+    }
+  }
+}

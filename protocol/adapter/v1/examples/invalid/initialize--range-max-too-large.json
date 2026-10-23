@@ -1,0 +1,24 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "initialize",
+  "note": "range max too large",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocol": {
+        "min": 1,
+        "max": 65536
+      },
+      "daemon": {
+        "version": "0.1.0"
+      },
+      "instance": {
+        "id": "work",
+        "lock_path": "/x/lock"
+      }
+    }
+  }
+}

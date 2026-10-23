@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 31,
+  "result": {
+    "outcome": "failed",
+    "reason": "preset_invalid",
+    "detail": "project_dir does not exist"
+  }
+}

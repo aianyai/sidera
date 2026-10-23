@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.ack",
+  "note": "no items",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "items": []
+    }
+  }
+}

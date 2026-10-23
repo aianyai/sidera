@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "a message is needed",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": -32603,
+      "message": ""
+    }
+  }
+}

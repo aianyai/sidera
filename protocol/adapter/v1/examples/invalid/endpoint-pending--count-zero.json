@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "endpoint.pending",
+  "note": "count zero",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "endpoint.pending",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "count": 0
+    }
+  }
+}

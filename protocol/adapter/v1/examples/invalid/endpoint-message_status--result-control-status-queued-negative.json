@@ -1,0 +1,24 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.message_status",
+  "note": "control status queued negative",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "recipients": [
+        {
+          "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+          "state": "queued"
+        }
+      ],
+      "control_reply": {
+        "signal": "endpoint.status",
+        "activity": "idle",
+        "queued": -1,
+        "as_of": 1792713600
+      }
+    }
+  }
+}

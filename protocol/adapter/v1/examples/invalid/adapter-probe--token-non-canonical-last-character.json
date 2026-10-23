@@ -1,0 +1,21 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "adapter.probe",
+  "note": "token non-canonical last character",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "adapter.probe",
+    "params": {
+      "tool_probes": [
+        {
+          "preset": "default",
+          "frontend": "cli",
+          "token": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVB",
+          "env": {}
+        }
+      ]
+    }
+  }
+}

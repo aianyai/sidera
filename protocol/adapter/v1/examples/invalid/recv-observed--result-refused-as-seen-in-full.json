@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "recv.observed",
+  "note": "refused as seen in full",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "refused",
+      "reason": "seen_in_full",
+      "items": []
+    }
+  }
+}

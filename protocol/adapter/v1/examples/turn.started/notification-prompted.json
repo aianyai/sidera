@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "method": "turn.started",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "turn": "turn_0042",
+    "attempt": "c5d4e3f2-a1b0-4912-b3c4-d5e6f7081920",
+    "process": {
+      "pid": 48213,
+      "start_key": "linux:2417733:6e1f0c7a-90d4-4b3e-a1b2-77c8d9e0f1a2",
+      "started_at_ms": 1792713595000,
+      "container": {
+        "kind": "systemd_unit",
+        "name": "sidera-session-22.scope"
+      }
+    },
+    "at_ms": 1792713600000
+  }
+}

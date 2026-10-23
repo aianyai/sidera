@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "result": {
+    "outcome": "indeterminate",
+    "grounds": {
+      "code": "native_unreachable"
+    }
+  }
+}

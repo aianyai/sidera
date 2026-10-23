@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 135,
+  "error": {
+    "code": 1008,
+    "message": "the address cannot be parsed",
+    "data": {
+      "field": "to[1]"
+    }
+  }
+}

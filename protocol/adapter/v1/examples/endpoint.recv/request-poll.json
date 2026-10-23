@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 110,
+  "method": "endpoint.recv",
+  "params": {
+    "endpoint": "44444444444444444444444444444444"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 114,
+  "error": {
+    "code": 1002,
+    "message": "session endpoints are read by their agent"
+  }
+}

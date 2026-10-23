@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "prompt.reconcile",
+  "note": "absent with indeterminate grounds",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "provably_absent",
+      "grounds": {
+        "code": "turn_running"
+      }
+    }
+  }
+}

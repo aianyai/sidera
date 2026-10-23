@@ -1,0 +1,21 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "recv.observed",
+  "note": "refused with items",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "refused",
+      "reason": "truncated",
+      "items": [
+        {
+          "message_id": "m",
+          "part": 1,
+          "ack": "recorded"
+        }
+      ]
+    }
+  }
+}

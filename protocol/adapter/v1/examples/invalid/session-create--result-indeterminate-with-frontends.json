@@ -1,0 +1,19 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.create",
+  "note": "indeterminate with frontends",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "indeterminate",
+      "grounds": {
+        "code": "turn_running"
+      },
+      "frontends": [
+        "cli"
+      ]
+    }
+  }
+}

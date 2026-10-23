@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the field is required",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": 1008,
+      "message": "bad address",
+      "data": {}
+    }
+  }
+}

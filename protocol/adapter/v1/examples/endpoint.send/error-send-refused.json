@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 136,
+  "error": {
+    "code": 1009,
+    "message": "too many recipients",
+    "data": {
+      "reason": "too_many_recipients"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "adapter.probe",
+  "note": "dependency state unknown",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "auth": "valid",
+      "dependencies": [
+        {
+          "name": "git",
+          "state": "old"
+        }
+      ],
+      "presets": [],
+      "tool_probes": []
+    }
+  }
+}

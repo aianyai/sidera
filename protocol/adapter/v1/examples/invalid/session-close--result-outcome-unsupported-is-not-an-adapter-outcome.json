@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.close",
+  "note": "outcome unsupported is not an adapter outcome",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "unsupported"
+    }
+  }
+}

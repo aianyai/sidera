@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.recv",
+  "note": "result not wrapped",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "lease": "0123456789abcdef0123456789abcdef",
+      "messages": [],
+      "more": 0
+    }
+  }
+}

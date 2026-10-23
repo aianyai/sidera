@@ -1,0 +1,22 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "initialize",
+  "note": "protocol version zero",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocol_version": 0,
+      "adapter": {
+        "id": "example",
+        "version": "0.3.1"
+      },
+      "capabilities": {
+        "direct": {
+          "max_endpoints": 5
+        }
+      }
+    }
+  }
+}

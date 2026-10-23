@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.message_status",
+  "note": "no recipients",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "recipients": []
+    }
+  }
+}

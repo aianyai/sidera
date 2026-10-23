@@ -1,0 +1,29 @@
+{
+  "jsonrpc": "2.0",
+  "method": "adapter.availability",
+  "params": {
+    "conditions": [
+      {
+        "condition": "runtime_auth",
+        "since_ms": 1792713540000,
+        "detail": "token expired"
+      },
+      {
+        "condition": "native_unavailable",
+        "endpoints": [
+          "22222222222222222222222222222222",
+          "33333333333333333333333333333333"
+        ],
+        "since_ms": 1792713570000
+      },
+      {
+        "condition": "dependency_missing",
+        "detail": "systemd-run not found"
+      },
+      {
+        "condition": "version_untested",
+        "detail": "runtime 3.0.0 is outside every tested range"
+      }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 91,
+  "method": "recv.observed",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "lease": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+    "frontend": "mcp",
+    "observed": "{\"lease\":\"f0e1d2c3b4a5968778695a4b3c2d1e0f\",\"messages\":[],\"more\":0}\n"
+  }
+}

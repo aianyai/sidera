@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.ack",
+  "note": "no items",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.ack",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "lease": "0123456789abcdef0123456789abcdef",
+      "items": []
+    }
+  }
+}

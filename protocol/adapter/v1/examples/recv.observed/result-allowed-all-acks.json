@@ -1,0 +1,40 @@
+{
+  "jsonrpc": "2.0",
+  "id": 91,
+  "result": {
+    "verdict": "allowed",
+    "reason": "seen_in_full",
+    "items": [
+      {
+        "message_id": "m-1",
+        "part": 1,
+        "ack": "recorded"
+      },
+      {
+        "message_id": "m-1",
+        "part": 2,
+        "ack": "completed"
+      },
+      {
+        "message_id": "m-2",
+        "part": 1,
+        "ack": "duplicate"
+      },
+      {
+        "message_id": "m-3",
+        "part": 1,
+        "ack": "refused_no_handout"
+      },
+      {
+        "message_id": "m-4",
+        "part": 1,
+        "ack": "refused_lease"
+      },
+      {
+        "message_id": "m-5",
+        "part": 1,
+        "ack": "too_late"
+      }
+    ]
+  }
+}

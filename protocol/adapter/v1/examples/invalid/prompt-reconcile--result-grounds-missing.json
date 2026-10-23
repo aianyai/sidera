@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "prompt.reconcile",
+  "note": "grounds missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "indeterminate"
+    }
+  }
+}

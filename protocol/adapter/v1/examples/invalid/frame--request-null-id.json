@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a request needs a real id",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": null,
+    "method": "ping",
+    "params": {}
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 100,
+  "method": "endpoint.register",
+  "params": {
+    "key": "chat:alice",
+    "display_name": "Alice (chat)"
+  }
+}

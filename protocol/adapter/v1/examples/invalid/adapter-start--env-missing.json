@@ -1,0 +1,26 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "adapter.start",
+  "note": "env missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "adapter.start",
+    "params": {
+      "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "config": {},
+      "presets": [],
+      "sessions": [
+        {
+          "endpoint": "22222222222222222222222222222222",
+          "preset": "default",
+          "native_ref": "sess_1",
+          "turn_active": false,
+          "tool_access": {}
+        }
+      ],
+      "direct_endpoints": []
+    }
+  }
+}

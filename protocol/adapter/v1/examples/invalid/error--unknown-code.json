@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the code is not in the table",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": 9999,
+      "message": "x"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 60,
+  "method": "session.interrupt",
+  "params": {
+    "endpoint": "22222222222222222222222222222222"
+  }
+}

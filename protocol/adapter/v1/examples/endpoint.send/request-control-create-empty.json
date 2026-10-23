@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 133,
+  "method": "endpoint.send",
+  "params": {
+    "endpoint": "44444444444444444444444444444444",
+    "to": [
+      "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111"
+    ],
+    "content_type": "text/plain",
+    "body": "",
+    "control": {
+      "signal": "session.create",
+      "params": {
+        "preset": "review.readonly"
+      }
+    }
+  }
+}

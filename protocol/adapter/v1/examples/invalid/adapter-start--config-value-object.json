@@ -1,0 +1,20 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "adapter.start",
+  "note": "config value object",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "adapter.start",
+    "params": {
+      "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "config": {
+        "x": {}
+      },
+      "presets": [],
+      "sessions": [],
+      "direct_endpoints": []
+    }
+  }
+}

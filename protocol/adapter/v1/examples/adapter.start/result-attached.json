@@ -1,0 +1,32 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "sessions": [
+      {
+        "endpoint": "22222222222222222222222222222222",
+        "state": "attached",
+        "turn_active": true,
+        "process": {
+          "pid": 48213,
+          "start_key": "linux:2417733:6e1f0c7a-90d4-4b3e-a1b2-77c8d9e0f1a2",
+          "started_at_ms": 1792713595000,
+          "container": {
+            "kind": "systemd_unit",
+            "name": "sidera-session-22.scope"
+          }
+        }
+      },
+      {
+        "endpoint": "33333333333333333333333333333333",
+        "state": "unreachable",
+        "turn_active": false
+      },
+      {
+        "endpoint": "66666666666666666666666666666666",
+        "state": "lost",
+        "turn_active": false
+      }
+    ]
+  }
+}

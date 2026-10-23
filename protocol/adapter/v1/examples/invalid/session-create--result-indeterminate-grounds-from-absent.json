@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.create",
+  "note": "indeterminate grounds from absent",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "indeterminate",
+      "grounds": {
+        "code": "never_dispatched"
+      }
+    }
+  }
+}

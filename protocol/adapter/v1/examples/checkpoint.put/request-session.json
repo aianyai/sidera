@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "id": 41,
+  "method": "checkpoint.put",
+  "params": {
+    "scope": "session",
+    "id": "22222222222222222222222222222222",
+    "state": {
+      "phase": "ready",
+      "cursor": {
+        "file": "rollout-01HZX3.jsonl",
+        "offset": 18234
+      }
+    }
+  }
+}

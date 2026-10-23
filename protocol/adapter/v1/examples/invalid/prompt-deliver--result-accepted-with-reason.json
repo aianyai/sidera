@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "prompt.deliver",
+  "note": "accepted with reason",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "stage": "accepted",
+      "reason": "busy"
+    }
+  }
+}

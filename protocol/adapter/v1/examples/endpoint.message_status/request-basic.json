@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 140,
+  "method": "endpoint.message_status",
+  "params": {
+    "endpoint": "44444444444444444444444444444444",
+    "message_id": "m-91c4"
+  }
+}

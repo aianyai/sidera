@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 113,
+  "method": "endpoint.recv",
+  "params": {
+    "endpoint": "44444444444444444444444444444444",
+    "message_id": "m-big",
+    "part": 2
+  }
+}

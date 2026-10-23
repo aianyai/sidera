@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 151,
+  "error": {
+    "code": -32001,
+    "message": "the request queue is full"
+  }
+}

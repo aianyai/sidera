@@ -1,0 +1,18 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.create",
+  "note": "created with repeated frontends",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "created",
+      "native_ref": "s",
+      "frontends": [
+        "cli",
+        "cli"
+      ]
+    }
+  }
+}

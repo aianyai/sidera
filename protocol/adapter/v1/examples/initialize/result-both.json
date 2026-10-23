@@ -1,0 +1,24 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocol_version": 2,
+    "adapter": {
+      "id": "hybrid",
+      "version": "2.0.0-beta.1"
+    },
+    "capabilities": {
+      "runtime": {
+        "interrupt": false,
+        "ack_on_behalf": false,
+        "server_requests": true,
+        "frontends": [
+          "mcp"
+        ]
+      },
+      "direct": {
+        "max_endpoints": 1000
+      }
+    }
+  }
+}

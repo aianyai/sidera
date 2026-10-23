@@ -1,0 +1,20 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "adapter.probe",
+  "note": "runtime tested missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "runtime": {
+        "name": "r",
+        "version": "1"
+      },
+      "auth": "valid",
+      "dependencies": [],
+      "presets": [],
+      "tool_probes": []
+    }
+  }
+}

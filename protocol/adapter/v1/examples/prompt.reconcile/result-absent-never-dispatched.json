@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 81,
+  "result": {
+    "verdict": "provably_absent",
+    "grounds": {
+      "code": "never_dispatched"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.interrupt",
+  "note": "refused without reason",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "stage": "refused"
+    }
+  }
+}

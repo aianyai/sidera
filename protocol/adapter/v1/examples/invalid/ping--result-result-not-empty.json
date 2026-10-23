@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "ping",
+  "note": "result not empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "ok": true
+    }
+  }
+}

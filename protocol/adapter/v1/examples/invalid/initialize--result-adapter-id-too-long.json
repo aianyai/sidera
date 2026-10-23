@@ -1,0 +1,22 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "initialize",
+  "note": "adapter id too long",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocol_version": 1,
+      "adapter": {
+        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "version": "0.3.1"
+      },
+      "capabilities": {
+        "direct": {
+          "max_endpoints": 5
+        }
+      }
+    }
+  }
+}

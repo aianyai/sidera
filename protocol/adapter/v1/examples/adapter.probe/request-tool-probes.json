@@ -1,0 +1,26 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "adapter.probe",
+  "params": {
+    "tool_probes": [
+      {
+        "preset": "default",
+        "frontend": "cli",
+        "token": "NGC-MSAeaf7aoO7ouZl_XHwpmf2v5ZMlPNZUr0361xQ",
+        "env": {
+          "SIDERA_PROBE_TOKEN": "NGC-MSAeaf7aoO7ouZl_XHwpmf2v5ZMlPNZUr0361xQ",
+          "SIDERA_ENDPOINT_TOKEN": "NGC-MSAeaf7aoO7ouZl_XHwpmf2v5ZMlPNZUr0361xQ"
+        }
+      },
+      {
+        "preset": "default",
+        "frontend": "mcp",
+        "token": "J6Cus_7pIy-K8iEfnuSRxbEL7LVWO_web5NCfsvI_ik",
+        "env": {
+          "SIDERA_PROBE_TOKEN": "J6Cus_7pIy-K8iEfnuSRxbEL7LVWO_web5NCfsvI_ik"
+        }
+      }
+    ]
+  }
+}

@@ -2,6 +2,12 @@ module github.com/aianyai/sidera
 
 go 1.26
 
-require github.com/fxamacker/cbor/v2 v2.9.6
+require (
+	github.com/fxamacker/cbor/v2 v2.9.6
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
+)
 
-require github.com/x448/float16 v0.8.4 // indirect
+require (
+	github.com/x448/float16 v0.8.4 // indirect
+	golang.org/x/text v0.14.0 // indirect
+)

@@ -1,0 +1,23 @@
+{
+  "expect": "both",
+  "kind": "manifest",
+  "method": "",
+  "note": "manifest version missing",
+  "document": {
+    "id": "minimal",
+    "version": "1.0.0",
+    "protocol": {
+      "min": 1,
+      "max": 1
+    },
+    "entry": {
+      "program": "sidera-adapter-minimal"
+    },
+    "platforms": [
+      {
+        "os": "linux",
+        "arch": "amd64"
+      }
+    ]
+  }
+}

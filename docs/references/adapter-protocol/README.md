@@ -509,3 +509,59 @@ automatic update of the runtime, while a wrong reconciliation can only end as
   `TestPlatformAndRequirementRules`, `TestTestedRangeRules`,
   `TestConfigFieldRules`, `TestBudgetRules`, `TestAckMarkerShape`, `TestParse`,
   `FuzzParse`.
+
+## Schema and conformance
+
+### What
+
+`protocol/adapter/v1` holds four hand-written JSON Schema 2020-12 files (message,
+types, methods, manifest) and golden messages under `examples/`. They are the
+definition an adapter in another language implements; see
+[protocol/README.md](../../../protocol/README.md) for the files and conventions.
+The Go types in `sdk/go` are not generated from them and do not generate them;
+tests keep the two in agreement.
+
+`protocol/conformance_test.go` (package `protocol_test`, in the root module so the
+SDK module keeps no dependencies) checks:
+
+1. every golden message is accepted by the schema, and each sits in the directory
+   of its method with the right kind;
+2. every golden message decodes strictly into the Go type of its method, passes
+   the Go validation and encodes back to the same data;
+3. the method set, directions and kinds, every enum, the error codes with their
+   names and the patterns are the same in the schema and in Go; every method has a
+   request and a result example; every enum value and error code appears in an
+   example, counted per Go type by reflection, not by string;
+4. every invalid example is rejected at the layer it names;
+5. a differential test mutates every golden document (about 30,000 mutants per
+   run, from a fixed seed, with counts of each outcome asserted) and `FuzzDifferential`
+   does the same with the fuzzer's inputs: whatever Go accepts the schema accepts
+   and the reverse, except for the rules the schema cannot state, which Go must
+   report as such;
+6. the output of `handoff.Pack` and `handoff.Part`, for whole messages, resumed
+   and last parts, duplicates and empty queues, is a valid `RecvPage` to both the
+   schema and the Go type;
+7. the platform vocabulary of the manifest covers every platform the Go
+   toolchain lists.
+
+### Why
+
+- **The schema is the source of truth, written by hand.** Tools that generate a
+  schema from Go types make the Go types the truth, and tools that generate Go
+  from a schema do not support `oneOf` with `const`, which the method list needs.
+- **A differential test, not only examples.** Examples prove the cases someone
+  thought of. Two independent implementations (a schema validator and the Go
+  decoder) agreeing on hundreds of thousands of mutated documents find the cases
+  nobody thought of: it found a repeated key that Go and the validator read
+  differently.
+- **Go may be stricter, never looser.** A message Go accepts must be valid for
+  every other implementation. The few rules a schema cannot express are the only
+  exceptions, and they are listed and marked so the test can tell them from a
+  mistake.
+- **The validator is a test dependency of the root module only.** It is not a
+  dependency of the SDK or the daemon.
+
+### Where
+
+- `protocol/conformance_test.go`, `differential_test.go`, `recvpage_test.go`,
+  `oracle_test.go`, `helpers_test.go`.

@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.close",
+  "note": "unconfirmed without reason",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "close_unconfirmed"
+    }
+  }
+}

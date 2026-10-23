@@ -1,0 +1,26 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "session.create",
+  "note": "attempt uppercase",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "session.create",
+    "params": {
+      "attempt": "6F1C2A4E-8B3D-4C5A-9E7F-0A1B2C3D4E5F",
+      "runtime_endpoint": "11111111111111111111111111111111",
+      "session_endpoint": "22222222222222222222222222222222",
+      "preset": "default",
+      "first_prompt": {
+        "attempt": "0b9e7d52-3c41-4f8a-8d6e-5a7c9b1e2f30",
+        "text": "hi"
+      },
+      "tool_access": {
+        "env": {
+          "SIDERA_ENDPOINT_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "jsonrpc": "2.0",
+  "id": 112,
+  "result": {
+    "page": {
+      "lease": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "messages": [
+        {
+          "id": "m-big",
+          "from": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+          "possibly_duplicate": true,
+          "part": {
+            "index": 3,
+            "total": 3,
+            "label": "part 3/3"
+          },
+          "body": "... and the end."
+        }
+      ],
+      "more": 0
+    }
+  }
+}

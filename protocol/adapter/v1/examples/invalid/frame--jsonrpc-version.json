@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "the version member must be 2.0",
+  "document": {
+    "jsonrpc": "1.0",
+    "id": 1,
+    "method": "ping",
+    "params": {}
+  }
+}

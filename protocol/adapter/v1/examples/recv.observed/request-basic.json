@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 90,
+  "method": "recv.observed",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "lease": "0123456789abcdef0123456789abcdef",
+    "frontend": "cli",
+    "observed": "{\"lease\":\"0123456789abcdef0123456789abcdef\",\"messages\":[{\"id\":\"m-7f3a\",\"from\":\"b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222\",\"body\":\"Please run the migration.\"}],\"more\":0}\n"
+  }
+}

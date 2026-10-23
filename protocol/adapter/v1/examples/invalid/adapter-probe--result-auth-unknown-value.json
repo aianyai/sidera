@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "adapter.probe",
+  "note": "auth unknown value",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "auth": "maybe",
+      "dependencies": [],
+      "presets": [],
+      "tool_probes": []
+    }
+  }
+}

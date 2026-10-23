@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.message_status",
+  "note": "message id missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.message_status",
+    "params": {
+      "endpoint": "44444444444444444444444444444444"
+    }
+  }
+}

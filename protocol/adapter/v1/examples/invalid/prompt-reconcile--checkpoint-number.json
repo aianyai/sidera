@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "prompt.reconcile",
+  "note": "checkpoint number",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "prompt.reconcile",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "attempt": "c5d4e3f2-a1b0-4912-b3c4-d5e6f7081920",
+      "checkpoint": 5
+    }
+  }
+}

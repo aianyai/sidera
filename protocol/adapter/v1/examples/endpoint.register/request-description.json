@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 101,
+  "method": "endpoint.register",
+  "params": {
+    "key": "chat:bob",
+    "display_name": "Bob",
+    "description": "Bob, reachable through the team chat bridge"
+  }
+}

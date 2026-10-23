@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.recv",
+  "note": "page missing more",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "page": {
+        "lease": "0123456789abcdef0123456789abcdef",
+        "messages": []
+      }
+    }
+  }
+}

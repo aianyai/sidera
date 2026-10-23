@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 32,
+  "result": {
+    "outcome": "failed",
+    "reason": "runtime_auth"
+  }
+}

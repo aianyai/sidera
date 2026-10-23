@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 80,
+  "result": {
+    "verdict": "found",
+    "turn": {
+      "ref": "turn_0042",
+      "state": "failed"
+    },
+    "grounds": {
+      "code": "attempt_in_record"
+    }
+  }
+}

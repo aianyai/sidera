@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 22,
+  "result": {
+    "outcome": "created",
+    "native_ref": "sess_01HZX4",
+    "frontends": [
+      "cli"
+    ],
+    "detail": "process identity not available on this platform"
+  }
+}

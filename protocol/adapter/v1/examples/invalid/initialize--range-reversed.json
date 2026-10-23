@@ -1,0 +1,24 @@
+{
+  "expect": "go",
+  "kind": "request",
+  "method": "initialize",
+  "note": "range reversed",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocol": {
+        "min": 3,
+        "max": 2
+      },
+      "daemon": {
+        "version": "0.1.0"
+      },
+      "instance": {
+        "id": "work",
+        "lock_path": "/x/lock"
+      }
+    }
+  }
+}

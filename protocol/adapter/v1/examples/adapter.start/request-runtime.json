@@ -1,0 +1,156 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "adapter.start",
+  "params": {
+    "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "runtime_endpoint": "11111111111111111111111111111111",
+    "config": {
+      "home": "/home/dev/.example",
+      "verbose": true,
+      "retries": 3,
+      "extra_args": [
+        "--quiet",
+        "--no-color"
+      ]
+    },
+    "presets": [
+      {
+        "name": "default",
+        "config": {
+          "project_dir": "/home/dev/projects/api",
+          "model": "standard"
+        }
+      },
+      {
+        "name": "review.readonly",
+        "config": {
+          "project_dir": "/home/dev/projects/api",
+          "model": "standard",
+          "read_only": true
+        }
+      }
+    ],
+    "sessions": [
+      {
+        "endpoint": "22222222222222222222222222222222",
+        "preset": "default",
+        "native_ref": "sess_01HZX3",
+        "process": {
+          "pid": 48213,
+          "start_key": "linux:2417733:6e1f0c7a-90d4-4b3e-a1b2-77c8d9e0f1a2",
+          "started_at_ms": 1792713595000,
+          "container": {
+            "kind": "systemd_unit",
+            "name": "sidera-session-22.scope"
+          }
+        },
+        "turn_active": true,
+        "tool_access": {
+          "env": {
+            "SIDERA_ENDPOINT_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+          }
+        },
+        "checkpoint": {
+          "phase": "ready",
+          "last_attempt": "6f1c2a4e-8b3d-4c5a-9e7f-0a1b2c3d4e5f"
+        }
+      },
+      {
+        "endpoint": "33333333333333333333333333333333",
+        "preset": "review.readonly",
+        "native_ref": "sess_01HZX9",
+        "turn_active": false,
+        "tool_access": {
+          "env": {
+            "SIDERA_ENDPOINT_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+          }
+        },
+        "process": {
+          "pid": 51002,
+          "start_key": "darwin:1792713000.482113:boot-5",
+          "container": {
+            "kind": "launchd_job",
+            "name": "dev.sidera.session.33"
+          }
+        }
+      },
+      {
+        "endpoint": "66666666666666666666666666666666",
+        "preset": "default",
+        "native_ref": "sess_01HZY1",
+        "turn_active": false,
+        "tool_access": {
+          "env": {
+            "SIDERA_ENDPOINT_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+          }
+        },
+        "process": {
+          "pid": 4412,
+          "start_key": "windows:133805004000000000",
+          "container": {
+            "kind": "windows_job",
+            "name": "sidera-session-44"
+          }
+        }
+      },
+      {
+        "endpoint": "77777777777777777777777777777777",
+        "preset": "default",
+        "native_ref": "sess_01HZY2",
+        "turn_active": false,
+        "tool_access": {
+          "env": {
+            "SIDERA_ENDPOINT_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+          }
+        },
+        "process": {
+          "pid": 900,
+          "start_key": "linux:1:boot",
+          "container": {
+            "kind": "process_group",
+            "name": "4410"
+          }
+        }
+      },
+      {
+        "endpoint": "88888888888888888888888888888888",
+        "preset": "default",
+        "native_ref": "sess_01HZY3",
+        "turn_active": false,
+        "tool_access": {
+          "env": {
+            "SIDERA_ENDPOINT_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+          }
+        },
+        "process": {
+          "pid": 901,
+          "start_key": "windows:133805004000001",
+          "container": {
+            "kind": "scheduled_task",
+            "name": "SideraSession55"
+          }
+        }
+      },
+      {
+        "endpoint": "99999999999999999999999999999999",
+        "preset": "default",
+        "native_ref": "sess_01HZY4",
+        "turn_active": false,
+        "tool_access": {
+          "env": {
+            "SIDERA_ENDPOINT_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+          }
+        },
+        "process": {
+          "pid": 902,
+          "start_key": "linux:2:boot",
+          "container": {
+            "kind": "none"
+          }
+        }
+      }
+    ],
+    "direct_endpoints": []
+  }
+}

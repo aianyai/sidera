@@ -1,0 +1,635 @@
+// Package protocol_test keeps the hand-written JSON Schema of the adapter
+// protocol, its golden messages and the Go types in the SDK in agreement. The
+// schema and the golden messages are the source of truth for other languages;
+// these tests are what stops the Go side from drifting from them.
+package protocol_test
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os/exec"
+	"reflect"
+	"regexp"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/manifest"
+)
+
+// positive reports whether the example is a message or manifest that must be
+// accepted.
+func (e example) positive() bool { return e.Kind != "invalid" }
+
+// TestGoldenMessagesValid: every positive example is accepted by the schemas.
+func TestGoldenMessagesValid(t *testing.T) {
+	methods := methodByName(t)
+	count := map[string]int{}
+	for _, ex := range loadExamples(t) {
+		if !ex.positive() {
+			continue
+		}
+		t.Run(ex.Path, func(t *testing.T) {
+			method := ""
+			switch ex.Kind {
+			case "manifest", "error":
+			case "request", "result", "notification":
+				sm, ok := methods[methodOfDir(t, ex.Dir)]
+				if !ok {
+					t.Fatalf("directory %q is not a method", ex.Dir)
+				}
+				method = sm.Name
+				if ex.Kind == "notification" && !sm.Notification || ex.Kind != "notification" && sm.Notification {
+					t.Fatalf("a %s example for %s, which is a %s", ex.Kind, sm.Name, map[bool]string{true: "notification", false: "request"}[sm.Notification])
+				}
+			default:
+				t.Fatalf("unknown example kind %q", ex.Kind)
+			}
+			if err := schemaVerdict(t, ex.Kind, method, ex.Raw); err != nil {
+				t.Fatalf("the schema rejects %s: %v", ex.Path, err)
+			}
+			if method != "" && ex.Kind != "result" {
+				var f frame
+				if err := json.Unmarshal(ex.Raw, &f); err != nil || f.Method != method {
+					t.Fatalf("example is in the directory of %s but carries method %q", method, f.Method)
+				}
+			}
+			count[ex.Kind]++
+		})
+	}
+	if count["request"] == 0 || count["result"] == 0 || count["error"] == 0 || count["notification"] == 0 || count["manifest"] == 0 {
+		t.Fatalf("an example kind is missing: %v", count)
+	}
+}
+
+func methodOfDir(tb testing.TB, dir string) string {
+	tb.Helper()
+	for _, sm := range schemaMethods(tb) {
+		if dirOf(sm.Name) == dir {
+			return sm.Name
+		}
+	}
+	return dir
+}
+
+// decodedExample is a positive example decoded into its Go value.
+type decodedExample struct {
+	example
+	value any
+}
+
+// decodePositive decodes every positive example into the Go type of its method
+// and checks the value encodes back to the same data.
+func decodePositive(t *testing.T) []decodedExample {
+	t.Helper()
+	var out []decodedExample
+	for _, ex := range loadExamples(t) {
+		if !ex.positive() {
+			continue
+		}
+		var f frame
+		method := ""
+		if ex.Kind != "manifest" {
+			if err := json.Unmarshal(ex.Raw, &f); err != nil {
+				t.Fatalf("%s: %v", ex.Path, err)
+			}
+			method = f.Method
+			if ex.Kind == "result" {
+				method = methodOfDir(t, ex.Dir)
+			}
+		}
+		var (
+			value   any
+			encoded []byte
+			orig    []byte
+			err     error
+		)
+		switch ex.Kind {
+		case "manifest":
+			var m manifest.Manifest
+			m, err = manifest.Parse(ex.Raw)
+			value, orig = m, ex.Raw
+			if err == nil {
+				encoded, err = json.Marshal(m)
+			}
+		case "error":
+			var e adapterproto.ErrorObject
+			e, err = decodeError(f.Error)
+			value, orig = e, f.Error
+			if err == nil {
+				encoded, err = json.Marshal(e)
+			}
+		default:
+			info, ok := adapterproto.Lookup(method)
+			if !ok {
+				t.Fatalf("%s: no Go method %q", ex.Path, method)
+			}
+			var v adapterproto.Message
+			if ex.Kind == "result" {
+				v, err = info.DecodeResult(f.Result)
+				orig = f.Result
+			} else {
+				v, err = info.DecodeParams(f.Params)
+				orig = f.Params
+			}
+			value = v
+			if err == nil {
+				encoded, err = adapterproto.Encode(v)
+			}
+		}
+		if err != nil {
+			t.Errorf("%s: the Go side rejects a golden message: %v", ex.Path, err)
+			continue
+		}
+		same, err := equalJSON(orig, encoded)
+		if err != nil || !same {
+			t.Errorf("%s: round trip changed the message\n  was: %s\n  now: %s", ex.Path, compact(orig), compact(encoded))
+			continue
+		}
+		out = append(out, decodedExample{ex, value})
+	}
+	return out
+}
+
+func compact(b []byte) string {
+	var x any
+	if json.Unmarshal(b, &x) != nil {
+		return string(b)
+	}
+	out, _ := json.Marshal(x)
+	return string(out)
+}
+
+// TestGoldenMessagesRoundTrip: every positive example decodes strictly into the
+// Go type of its method, passes the Go validation and encodes back to the same
+// data.
+func TestGoldenMessagesRoundTrip(t *testing.T) {
+	if got := decodePositive(t); len(got) == 0 {
+		t.Fatal("nothing decoded")
+	}
+}
+
+// TestSchemaMethodsMatchGo: the methods, directions and kinds the schema lists are
+// exactly the ones Go lists, and every method has the examples it needs.
+func TestSchemaMethodsMatchGo(t *testing.T) {
+	fromSchema := schemaMethods(t)
+	goMethods := adapterproto.Methods()
+	if len(fromSchema) != len(goMethods) {
+		t.Fatalf("schema has %d methods, Go has %d", len(fromSchema), len(goMethods))
+	}
+	byName := map[string]adapterproto.MethodInfo{}
+	for _, m := range goMethods {
+		byName[m.Name] = m
+	}
+	for _, sm := range fromSchema {
+		m, ok := byName[sm.Name]
+		if !ok {
+			t.Errorf("method %s is in the schema, not in Go", sm.Name)
+			continue
+		}
+		if string(m.Direction) != sm.Direction {
+			t.Errorf("%s: schema direction %q, Go %q", sm.Name, sm.Direction, m.Direction)
+		}
+		if m.Notification != sm.Notification {
+			t.Errorf("%s: schema notification=%v, Go %v", sm.Name, sm.Notification, m.Notification)
+		}
+		if (m.NewResult() == nil) != sm.Notification {
+			t.Errorf("%s: a notification has no result type, a request has one", sm.Name)
+		}
+	}
+	// The constant names are the method names the schema uses.
+	consts := []string{
+		adapterproto.MethodInitialize, adapterproto.MethodPing, adapterproto.MethodCancelRequest, adapterproto.MethodShutdown,
+		adapterproto.MethodAdapterStart, adapterproto.MethodAdapterProbe, adapterproto.MethodAdapterAvailability,
+		adapterproto.MethodSessionCreate, adapterproto.MethodCheckpointPut, adapterproto.MethodPromptDeliver,
+		adapterproto.MethodPromptPersisted, adapterproto.MethodTurnStarted, adapterproto.MethodTurnEnded,
+		adapterproto.MethodSessionInterrupt, adapterproto.MethodSessionClose, adapterproto.MethodPromptReconcile,
+		adapterproto.MethodRecvObserved, adapterproto.MethodNativeRequestHandled, adapterproto.MethodEndpointRegister,
+		adapterproto.MethodEndpointUnregister, adapterproto.MethodEndpointPending, adapterproto.MethodEndpointRecv,
+		adapterproto.MethodEndpointAck, adapterproto.MethodEndpointSend, adapterproto.MethodEndpointMessageStatus,
+	}
+	if len(consts) != len(fromSchema) {
+		t.Errorf("%d method constants, %d methods", len(consts), len(fromSchema))
+	}
+	for _, c := range consts {
+		if _, ok := byName[c]; !ok {
+			t.Errorf("constant %q is not a method", c)
+		}
+	}
+
+	have := map[string]map[string]int{}
+	for _, ex := range loadExamples(t) {
+		if have[ex.Dir] == nil {
+			have[ex.Dir] = map[string]int{}
+		}
+		have[ex.Dir][ex.Kind]++
+	}
+	for _, sm := range fromSchema {
+		d := dirOf(sm.Name)
+		if sm.Notification {
+			if have[d]["notification"] == 0 {
+				t.Errorf("%s has no notification example", sm.Name)
+			}
+			continue
+		}
+		if have[d]["request"] == 0 || have[d]["result"] == 0 {
+			t.Errorf("%s needs a request and a result example, has %v", sm.Name, have[d])
+		}
+	}
+}
+
+// TestSchemaEnumsMatchGo: every enum of the schema has the values of the Go enum
+// of the same name, and every Go enum is in the schema.
+func TestSchemaEnumsMatchGo(t *testing.T) {
+	defs := sub(t, rawSchema(t, "types"), "$defs")
+	goEnums := adapterproto.EnumTables()
+	schemaEnums := map[string][]string{}
+	for name, d := range defs {
+		if e, ok := d.(map[string]any)["enum"].([]any); ok {
+			for _, v := range e {
+				schemaEnums[name] = append(schemaEnums[name], v.(string))
+			}
+		}
+	}
+	for name, want := range goEnums {
+		got, ok := schemaEnums[name]
+		if !ok {
+			t.Errorf("Go enum %s is not defined in the schema", name)
+			continue
+		}
+		if !sameSet(got, want) {
+			t.Errorf("enum %s: schema %v, Go %v", name, sorted(got), sorted(want))
+		}
+	}
+	for name := range schemaEnums {
+		if _, ok := goEnums[name]; !ok {
+			t.Errorf("schema enum %s has no Go enum", name)
+		}
+	}
+}
+
+func sorted(s []string) []string {
+	out := append([]string(nil), s...)
+	sort.Strings(out)
+	return out
+}
+
+func sameSet(a, b []string) bool { return reflect.DeepEqual(sorted(a), sorted(b)) }
+
+// controlEnum lists the values a Go control enum accepts, in code order.
+func controlEnum(t reflect.Type) []string {
+	var out []string
+	for i := 1; i < 256; i++ {
+		v := reflect.New(t).Elem()
+		v.SetUint(uint64(i))
+		if v.Interface().(interface{ Valid() bool }).Valid() {
+			out = append(out, v.Interface().(fmt.Stringer).String())
+		}
+	}
+	return out
+}
+
+var controlEnums = map[string]reflect.Type{
+	"ControlCreateOutcome":    reflect.TypeFor[adapterproto.ControlCreateOutcome](),
+	"ControlCreateReason":     reflect.TypeFor[adapterproto.ControlCreateReason](),
+	"ControlCloseOutcome":     reflect.TypeFor[adapterproto.ControlCloseOutcome](),
+	"ControlCloseReason":      reflect.TypeFor[adapterproto.ControlCloseReason](),
+	"ControlInterruptOutcome": reflect.TypeFor[adapterproto.ControlInterruptOutcome](),
+	"ControlInterruptReason":  reflect.TypeFor[adapterproto.ControlInterruptReason](),
+	"ControlActivity":         reflect.TypeFor[adapterproto.ControlActivity](),
+	"ControlCondition":        reflect.TypeFor[adapterproto.ControlCondition](),
+}
+
+// TestSchemaControlReplyMatchesGo: the enums written inline in the control reply
+// definition are the string tables of the Go control enums.
+func TestSchemaControlReplyMatchesGo(t *testing.T) {
+	branches := sub(t, rawSchema(t, "types"), "$defs", "ControlReply")["oneOf"].([]any)
+	enumAt := func(branch int, prop string) []string {
+		p := branches[branch].(map[string]any)["properties"].(map[string]any)[prop].(map[string]any)
+		if items, ok := p["items"].(map[string]any); ok {
+			p = items
+		}
+		var out []string
+		for _, v := range p["enum"].([]any) {
+			out = append(out, v.(string))
+		}
+		return out
+	}
+	want := []struct {
+		branch int
+		prop   string
+		goEnum string
+	}{
+		{0, "outcome", "ControlCreateOutcome"}, {0, "reason", "ControlCreateReason"},
+		{1, "outcome", "ControlCloseOutcome"}, {1, "reason", "ControlCloseReason"},
+		{2, "outcome", "ControlInterruptOutcome"}, {2, "reason", "ControlInterruptReason"},
+		{3, "activity", "ControlActivity"}, {3, "conditions", "ControlCondition"},
+	}
+	for _, w := range want {
+		got, exp := enumAt(w.branch, w.prop), controlEnum(controlEnums[w.goEnum])
+		if !sameSet(got, exp) {
+			t.Errorf("%s: schema %v, Go %v", w.goEnum, sorted(got), sorted(exp))
+		}
+	}
+	// The codes are the numbers a binary encoding will use: 1-based and dense.
+	for name, typ := range controlEnums {
+		names := controlEnum(typ)
+		for i, n := range names {
+			v := reflect.New(typ).Elem()
+			v.SetUint(uint64(i + 1))
+			if v.Interface().(fmt.Stringer).String() != n {
+				t.Errorf("%s: code %d is not the %dth name", name, i+1, i+1)
+			}
+		}
+	}
+	signals := rawSchema(t, "types")["$defs"].(map[string]any)["ControlSignal"].(map[string]any)["enum"].([]any)
+	for i, b := range branches {
+		if got := b.(map[string]any)["title"]; got != signals[i] {
+			t.Errorf("control reply branch %d is for %v, the signal list says %v", i, got, signals[i])
+		}
+	}
+}
+
+// TestSchemaErrorCodesMatchGo: the error codes and their names.
+func TestSchemaErrorCodesMatchGo(t *testing.T) {
+	list := sub(t, rawSchema(t, "message"), "$defs", "ErrorCode")["oneOf"].([]any)
+	got := map[int]string{}
+	for _, e := range list {
+		m := e.(map[string]any)
+		got[int(m["const"].(float64))] = m["title"].(string)
+	}
+	want := map[int]string{}
+	for _, c := range adapterproto.ErrorCodes() {
+		want[c.Code] = c.Name
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("error codes differ:\n schema %v\n Go     %v", got, want)
+	}
+	// Written out independently: the JSON-RPC codes and the protocol's own.
+	independent := map[int]string{
+		-32700: "parse_error", -32600: "invalid_request", -32601: "method_not_found", -32602: "invalid_params", -32603: "internal_error",
+		-32001: "overloaded", -32002: "shutting_down", -32003: "not_initialized", -32004: "line_too_long", -32022: "unsupported_protocol_version",
+		-32800: "request_cancelled", 1001: "unknown_endpoint", 1002: "wrong_endpoint_kind", 1003: "capability_not_declared",
+		1004: "unknown_attempt", 1005: "attempt_conflict", 1006: "checkpoint_too_large", 1007: "endpoint_limit", 1008: "invalid_address",
+		1009: "send_refused", 1010: "lease_unknown", 1011: "instance_locked",
+	}
+	if !reflect.DeepEqual(want, independent) {
+		t.Errorf("Go error codes differ from the expected table:\n Go       %v\n expected %v", want, independent)
+	}
+	for code, name := range map[int]int{adapterproto.CodeParseError: 0, adapterproto.CodeOverloaded: 0, adapterproto.CodeInstanceLocked: 0} {
+		_ = name
+		if !adapterproto.KnownCode(code) {
+			t.Errorf("constant %d is not a known code", code)
+		}
+	}
+}
+
+// TestSchemaPatternsMatchGo: the patterns of the schema are the Go patterns.
+func TestSchemaPatternsMatchGo(t *testing.T) {
+	defs := sub(t, rawSchema(t, "types"), "$defs")
+	for name, want := range adapterproto.Patterns() {
+		d, ok := defs[name].(map[string]any)
+		if !ok {
+			t.Errorf("pattern %s is not defined in the schema", name)
+			continue
+		}
+		if got, _ := d["pattern"].(string); got != want {
+			t.Errorf("pattern %s:\n schema %s\n Go     %s", name, got, want)
+		}
+	}
+	for name, d := range defs {
+		if _, has := d.(map[string]any)["pattern"]; has {
+			if _, ok := adapterproto.Patterns()[name]; !ok {
+				t.Errorf("schema pattern %s is not in Go", name)
+			}
+		}
+	}
+}
+
+// TestManifestVocabulariesMatchSchema: the manifest's enums and the platform
+// vocabularies.
+func TestManifestVocabulariesMatchSchema(t *testing.T) {
+	raw := rawSchema(t, "manifest")
+	list := func(v any) []string {
+		var out []string
+		for _, e := range v.([]any) {
+			out = append(out, e.(string))
+		}
+		return out
+	}
+	defs := sub(t, raw, "$defs")
+	pairs := map[string][]string{
+		"GOOS":      manifest.KnownOS(),
+		"GOARCH":    manifest.KnownArch(),
+		"FieldType": toStrings(manifest.FieldTypes()),
+	}
+	for name, want := range pairs {
+		if got := list(defs[name].(map[string]any)["enum"]); !sameSet(got, want) {
+			t.Errorf("%s: schema %v, Go %v", name, sorted(got), sorted(want))
+		}
+	}
+	item := sub(t, raw, "properties", "budgets", "items", "properties")
+	if got := list(item["frontend"].(map[string]any)["enum"]); !sameSet(got, toStrings(manifest.BudgetFrontends())) {
+		t.Errorf("budget frontends: schema %v", got)
+	}
+	if got := list(item["unit"].(map[string]any)["enum"]); !sameSet(got, toStrings(manifest.Units())) {
+		t.Errorf("budget units: schema %v", got)
+	}
+	if got := sub(t, raw, "properties", "budgets", "items", "properties", "limit")["maximum"]; got != float64(manifest.MaxBudgetLimit) {
+		t.Errorf("budget limit maximum: schema %v, Go %d", got, manifest.MaxBudgetLimit)
+	}
+}
+
+func toStrings[T ~string](in []T) []string {
+	out := make([]string, len(in))
+	for i, v := range in {
+		out[i] = string(v)
+	}
+	return out
+}
+
+// TestPlatformVocabularyCoversToolchain: every operating system and architecture
+// the Go toolchain builds for is in the vocabulary. Skipped when the go command
+// cannot be run.
+func TestPlatformVocabularyCoversToolchain(t *testing.T) {
+	out, err := exec.Command("go", "tool", "dist", "list").Output()
+	if err != nil {
+		t.Skipf("go tool dist list: %v", err)
+	}
+	oses, arches := map[string]bool{}, map[string]bool{}
+	for _, o := range manifest.KnownOS() {
+		oses[o] = true
+	}
+	for _, a := range manifest.KnownArch() {
+		arches[a] = true
+	}
+	n := 0
+	for _, pair := range strings.Fields(string(out)) {
+		os, arch, _ := strings.Cut(pair, "/")
+		n++
+		if !oses[os] || !arches[arch] {
+			t.Errorf("the toolchain builds for %s, outside the vocabulary", pair)
+		}
+	}
+	if n < 20 {
+		t.Fatalf("only %d platforms listed", n)
+	}
+}
+
+// goEnumValues walks a decoded value and records, per enum type, the values it
+// holds.
+func goEnumValues(v reflect.Value, seen map[string]map[string]bool) {
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if !v.IsNil() {
+			goEnumValues(v.Elem(), seen)
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if v.Type().Field(i).IsExported() {
+				goEnumValues(v.Field(i), seen)
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			goEnumValues(v.Index(i), seen)
+		}
+	case reflect.Map:
+		for _, k := range v.MapKeys() {
+			goEnumValues(v.MapIndex(k), seen)
+		}
+	case reflect.String:
+		record(v, v.String(), seen)
+	case reflect.Uint8:
+		if s, ok := v.Interface().(fmt.Stringer); ok {
+			record(v, s.String(), seen)
+		}
+	}
+}
+
+func record(v reflect.Value, text string, seen map[string]map[string]bool) {
+	t := v.Type()
+	if t.Name() == "" || t.PkgPath() == "" || t.PkgPath() == "builtin" {
+		return
+	}
+	key := t.Name()
+	if strings.HasSuffix(t.PkgPath(), "/manifest") {
+		key = "manifest." + key
+	} else if !strings.HasSuffix(t.PkgPath(), "/adapterproto") {
+		return
+	}
+	if seen[key] == nil {
+		seen[key] = map[string]bool{}
+	}
+	seen[key][text] = true
+}
+
+// TestEveryEnumValueAppearsInAnExample: each value of each enum appears, as a
+// value of that enum, in at least one golden message.
+func TestEveryEnumValueAppearsInAnExample(t *testing.T) {
+	seen := map[string]map[string]bool{}
+	for _, d := range decodePositive(t) {
+		goEnumValues(reflect.ValueOf(d.value), seen)
+	}
+	expect := map[string][]string{}
+	for name, vals := range adapterproto.EnumTables() {
+		expect[name] = vals
+	}
+	for name, typ := range controlEnums {
+		expect[name] = controlEnum(typ)
+	}
+	expect["manifest.FieldType"] = toStrings(manifest.FieldTypes())
+	expect["manifest.Frontend"] = toStrings(manifest.BudgetFrontends())
+	expect["manifest.Unit"] = toStrings(manifest.Units())
+	for name, vals := range expect {
+		for _, v := range vals {
+			if !seen[name][v] {
+				t.Errorf("no golden message holds %s = %q", name, v)
+			}
+		}
+	}
+}
+
+// TestEveryErrorCodeAppearsInAnExample: each error code has an example.
+func TestEveryErrorCodeAppearsInAnExample(t *testing.T) {
+	seen := map[int]bool{}
+	for _, d := range decodePositive(t) {
+		if e, ok := d.value.(adapterproto.ErrorObject); ok {
+			seen[e.Code] = true
+		}
+	}
+	for _, c := range adapterproto.ErrorCodes() {
+		if !seen[c.Code] {
+			t.Errorf("no golden error holds code %d (%s)", c.Code, c.Name)
+		}
+	}
+}
+
+// TestInvalidExamples: every invalid example is rejected at the layer it says.
+// "schema": the schema rejects it. "go": the schema cannot state the rule, so
+// the schema accepts it and the Go validation rejects it with a rule beyond the
+// schema. "both": the schema and Go reject it. Whatever the schema rejects, Go
+// rejects too, except at frame level, where the peer decodes frames and the
+// message types never see them.
+func TestInvalidExamples(t *testing.T) {
+	counts := map[string]int{}
+	seenName := map[string]bool{}
+	for _, ex := range loadExamples(t) {
+		if ex.Dir != "invalid" {
+			continue
+		}
+		var wrapper struct {
+			Expect   string          `json:"expect"`
+			Kind     string          `json:"kind"`
+			Method   string          `json:"method"`
+			Note     string          `json:"note"`
+			Document json.RawMessage `json:"document"`
+		}
+		if err := json.Unmarshal(ex.Raw, &wrapper); err != nil {
+			t.Fatalf("%s: %v", ex.Path, err)
+		}
+		if seenName[wrapper.Note+"|"+wrapper.Kind+"|"+wrapper.Method] {
+			t.Errorf("%s: duplicate case %q", ex.Path, wrapper.Note)
+		}
+		seenName[wrapper.Note+"|"+wrapper.Kind+"|"+wrapper.Method] = true
+		counts[wrapper.Expect]++
+		t.Run(ex.Name, func(t *testing.T) {
+			schemaErr := schemaVerdict(t, wrapper.Kind, wrapper.Method, wrapper.Document)
+			_, goErr := goVerdict(wrapper.Kind, wrapper.Method, wrapper.Document)
+			switch wrapper.Expect {
+			case "both":
+				if schemaErr == nil {
+					t.Errorf("%s (%s): the schema accepts it", ex.Name, wrapper.Note)
+				}
+				if goErr == nil {
+					t.Errorf("%s (%s): Go accepts it", ex.Name, wrapper.Note)
+				}
+			case "schema":
+				if schemaErr == nil {
+					t.Errorf("%s (%s): the schema accepts it", ex.Name, wrapper.Note)
+				}
+				if wrapper.Kind != "frame" && goErr == nil {
+					t.Errorf("%s (%s): Go is looser than the schema", ex.Name, wrapper.Note)
+				}
+			case "go":
+				if schemaErr != nil {
+					t.Errorf("%s (%s): the schema rejects it, so expect should not be \"go\": %v", ex.Name, wrapper.Note, schemaErr)
+				}
+				if goErr == nil {
+					t.Errorf("%s (%s): Go accepts it", ex.Name, wrapper.Note)
+				} else if !errors.Is(goErr, adapterproto.ErrBeyondSchema) {
+					t.Errorf("%s (%s): Go rejects it for a rule the schema could state: %v", ex.Name, wrapper.Note, goErr)
+				}
+			default:
+				t.Errorf("%s: unknown expect %q", ex.Name, wrapper.Expect)
+			}
+		})
+	}
+	if counts["both"] < 100 || counts["schema"] == 0 || counts["go"] < 10 {
+		t.Errorf("too few invalid cases: %v", counts)
+	}
+}
+
+var numberRE = regexp.MustCompile(`^-?[0-9]+$`)

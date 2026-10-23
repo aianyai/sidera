@@ -1,0 +1,24 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "initialize",
+  "note": "version too long",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocol": {
+        "min": 1,
+        "max": 1
+      },
+      "daemon": {
+        "version": "vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv"
+      },
+      "instance": {
+        "id": "work",
+        "lock_path": "/x/lock"
+      }
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "turn.ended",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "turn": "turn_0042",
+    "final": "completed",
+    "at_ms": 1792713645000
+  }
+}

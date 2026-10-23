@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32022,
+    "message": "no common protocol version",
+    "data": {
+      "requested": {
+        "min": 2,
+        "max": 3
+      },
+      "supported": {
+        "min": 1,
+        "max": 1
+      }
+    }
+  }
+}

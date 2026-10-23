@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "ping",
+  "note": "ping takes no params",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "ping",
+    "params": {
+      "x": 1
+    }
+  }
+}

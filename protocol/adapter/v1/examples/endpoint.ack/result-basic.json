@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": 120,
+  "result": {
+    "items": [
+      {
+        "message_id": "m-7f3a",
+        "part": 1,
+        "ack": "completed"
+      },
+      {
+        "message_id": "m-7f3b",
+        "part": 1,
+        "ack": "duplicate"
+      }
+    ]
+  }
+}

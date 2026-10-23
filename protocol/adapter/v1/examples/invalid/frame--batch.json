@@ -1,0 +1,20 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a batch is not a message",
+  "document": [
+    {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "ping",
+      "params": {}
+    },
+    {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "ping",
+      "params": {}
+    }
+  ]
+}

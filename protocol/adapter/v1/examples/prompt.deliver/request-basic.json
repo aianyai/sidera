@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 50,
+  "method": "prompt.deliver",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "attempt": "c5d4e3f2-a1b0-4912-b3c4-d5e6f7081920",
+    "text": "You have 2 new messages. Read them with recv."
+  }
+}

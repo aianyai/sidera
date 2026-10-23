@@ -1,0 +1,23 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.message_status",
+  "note": "control reply with fields of another signal",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "recipients": [
+        {
+          "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+          "state": "queued"
+        }
+      ],
+      "control_reply": {
+        "signal": "session.close",
+        "outcome": "closed",
+        "activity": "idle"
+      }
+    }
+  }
+}

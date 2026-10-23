@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 83,
+  "error": {
+    "code": 1004,
+    "message": "no such attempt"
+  }
+}

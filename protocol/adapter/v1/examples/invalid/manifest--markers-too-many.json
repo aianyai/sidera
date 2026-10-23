@@ -1,0 +1,127 @@
+{
+  "expect": "both",
+  "kind": "manifest",
+  "method": "",
+  "note": "markers too many",
+  "document": {
+    "manifest_version": 1,
+    "id": "minimal",
+    "version": "1.0.0",
+    "protocol": {
+      "min": 1,
+      "max": 1
+    },
+    "entry": {
+      "program": "sidera-adapter-minimal"
+    },
+    "platforms": [
+      {
+        "os": "linux",
+        "arch": "amd64"
+      }
+    ],
+    "ack_markers": {
+      "replaced": [
+        {
+          "literal": "m0"
+        },
+        {
+          "literal": "m1"
+        },
+        {
+          "literal": "m2"
+        },
+        {
+          "literal": "m3"
+        },
+        {
+          "literal": "m4"
+        },
+        {
+          "literal": "m5"
+        },
+        {
+          "literal": "m6"
+        },
+        {
+          "literal": "m7"
+        },
+        {
+          "literal": "m8"
+        },
+        {
+          "literal": "m9"
+        },
+        {
+          "literal": "m10"
+        },
+        {
+          "literal": "m11"
+        },
+        {
+          "literal": "m12"
+        },
+        {
+          "literal": "m13"
+        },
+        {
+          "literal": "m14"
+        },
+        {
+          "literal": "m15"
+        },
+        {
+          "literal": "m16"
+        },
+        {
+          "literal": "m17"
+        },
+        {
+          "literal": "m18"
+        },
+        {
+          "literal": "m19"
+        },
+        {
+          "literal": "m20"
+        },
+        {
+          "literal": "m21"
+        },
+        {
+          "literal": "m22"
+        },
+        {
+          "literal": "m23"
+        },
+        {
+          "literal": "m24"
+        },
+        {
+          "literal": "m25"
+        },
+        {
+          "literal": "m26"
+        },
+        {
+          "literal": "m27"
+        },
+        {
+          "literal": "m28"
+        },
+        {
+          "literal": "m29"
+        },
+        {
+          "literal": "m30"
+        },
+        {
+          "literal": "m31"
+        },
+        {
+          "literal": "m32"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "expect": "go",
+  "kind": "result",
+  "method": "endpoint.recv",
+  "note": "page next names another message",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "page": {
+        "lease": "0123456789abcdef0123456789abcdef",
+        "messages": [
+          {
+            "id": "m",
+            "from": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+            "part": {
+              "index": 1,
+              "total": 3,
+              "label": "part 1/3",
+              "next": {
+                "msg": "other",
+                "part": 2
+              }
+            },
+            "body": "x"
+          }
+        ],
+        "more": 0
+      }
+    }
+  }
+}

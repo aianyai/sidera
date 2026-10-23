@@ -1,0 +1,160 @@
+{
+  "manifest_version": 1,
+  "id": "example",
+  "version": "0.3.1",
+  "protocol": {
+    "min": 1,
+    "max": 1
+  },
+  "entry": {
+    "program": "bin/sidera-adapter-example",
+    "args": [
+      "--stdio"
+    ]
+  },
+  "platforms": [
+    {
+      "os": "darwin",
+      "arch": "arm64"
+    },
+    {
+      "os": "darwin",
+      "arch": "amd64"
+    },
+    {
+      "os": "linux",
+      "arch": "amd64"
+    },
+    {
+      "os": "linux",
+      "arch": "arm64"
+    },
+    {
+      "os": "windows",
+      "arch": "amd64"
+    }
+  ],
+  "requires": [
+    {
+      "program": "example-runtime",
+      "os": [
+        "darwin",
+        "linux",
+        "windows"
+      ]
+    },
+    {
+      "program": "systemd-run",
+      "os": [
+        "linux"
+      ]
+    },
+    {
+      "program": "git"
+    }
+  ],
+  "tested": [
+    {
+      "runtime": "example-runtime",
+      "min": "2.1.306",
+      "max": "2.1.308"
+    },
+    {
+      "runtime": "example-runtime",
+      "min": "2.2.0-rc.1",
+      "max": "2.2.0"
+    }
+  ],
+  "config": {
+    "instance": [
+      {
+        "key": "home",
+        "type": "directory",
+        "title": "Runtime home directory",
+        "description": "Where the runtime keeps its state.",
+        "required": true
+      },
+      {
+        "key": "verbose",
+        "type": "boolean",
+        "title": "Verbose logging",
+        "default": false
+      },
+      {
+        "key": "retries",
+        "type": "integer",
+        "title": "Start retries",
+        "default": 3,
+        "min": 0,
+        "max": 10
+      },
+      {
+        "key": "log_level",
+        "type": "enum",
+        "title": "Log level",
+        "options": [
+          "debug",
+          "info",
+          "warn"
+        ],
+        "default": "info"
+      },
+      {
+        "key": "extra_args",
+        "type": "string_list",
+        "title": "Extra runtime arguments",
+        "default": []
+      }
+    ],
+    "preset": [
+      {
+        "key": "project_dir",
+        "type": "directory",
+        "title": "Project directory",
+        "description": "The directory the session works in. It is fixed per preset.",
+        "required": true
+      },
+      {
+        "key": "model",
+        "type": "string",
+        "title": "Model",
+        "default": "standard"
+      },
+      {
+        "key": "read_only",
+        "type": "boolean",
+        "title": "Read-only session"
+      }
+    ]
+  },
+  "budgets": [
+    {
+      "frontend": "cli",
+      "unit": "chars",
+      "limit": 27000
+    },
+    {
+      "frontend": "mcp",
+      "unit": "tokens",
+      "limit": 22500
+    }
+  ],
+  "ack_markers": {
+    "replaced": [
+      {
+        "literal": "[result saved to file]"
+      },
+      {
+        "regexp": "^Output (was )?saved to [^\\n]+$"
+      }
+    ],
+    "truncated": [
+      {
+        "literal": "... [truncated]"
+      },
+      {
+        "regexp": "\\.\\.\\. \\d+ more (lines|chars)"
+      }
+    ]
+  }
+}

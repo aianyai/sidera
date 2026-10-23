@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the code is an integer",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": "1001",
+      "message": "x"
+    }
+  }
+}

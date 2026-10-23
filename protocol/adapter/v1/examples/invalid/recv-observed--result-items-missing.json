@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "recv.observed",
+  "note": "items missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "refused",
+      "reason": "replaced"
+    }
+  }
+}

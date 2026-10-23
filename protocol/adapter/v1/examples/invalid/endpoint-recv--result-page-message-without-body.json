@@ -1,0 +1,22 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.recv",
+  "note": "page message without body",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "page": {
+        "lease": "0123456789abcdef0123456789abcdef",
+        "messages": [
+          {
+            "id": "m",
+            "from": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222"
+          }
+        ],
+        "more": 0
+      }
+    }
+  }
+}

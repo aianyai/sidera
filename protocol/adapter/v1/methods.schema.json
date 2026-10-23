@@ -1,0 +1,641 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sidera.invalid/adapter/v1/methods.schema.json",
+  "title": "Sidera adapter protocol v1: methods",
+  "description": "The params and result of every method. 'requests' and 'notifications' are each a oneOf discriminated by the const of 'method'; a request's x-result names the definition of its result, and x-direction says which peer may send the method. A required list or map may be empty but is never absent; an optional one is omitted instead of sent empty. Rules marked 'Go only' cannot be stated in JSON Schema.",
+  "oneOf": [
+    { "$ref": "#/$defs/requests" },
+    { "$ref": "#/$defs/notifications" }
+  ],
+  "$defs": {
+    "requests": {
+      "oneOf": [
+        { "x-direction": "daemon_to_adapter", "x-result": "initialize.result", "required": ["method", "params"], "properties": { "method": { "const": "initialize" }, "params": { "$ref": "#/$defs/initialize.params" } } },
+        { "x-direction": "both", "x-result": "empty", "required": ["method", "params"], "properties": { "method": { "const": "ping" }, "params": { "$ref": "#/$defs/empty" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "empty", "required": ["method", "params"], "properties": { "method": { "const": "shutdown" }, "params": { "$ref": "#/$defs/empty" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "adapter.start.result", "required": ["method", "params"], "properties": { "method": { "const": "adapter.start" }, "params": { "$ref": "#/$defs/adapter.start.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "adapter.probe.result", "required": ["method", "params"], "properties": { "method": { "const": "adapter.probe" }, "params": { "$ref": "#/$defs/adapter.probe.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "session.create.result", "required": ["method", "params"], "properties": { "method": { "const": "session.create" }, "params": { "$ref": "#/$defs/session.create.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "empty", "required": ["method", "params"], "properties": { "method": { "const": "checkpoint.put" }, "params": { "$ref": "#/$defs/checkpoint.put.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "prompt.deliver.result", "required": ["method", "params"], "properties": { "method": { "const": "prompt.deliver" }, "params": { "$ref": "#/$defs/prompt.deliver.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "session.interrupt.result", "required": ["method", "params"], "properties": { "method": { "const": "session.interrupt" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "session.close.result", "required": ["method", "params"], "properties": { "method": { "const": "session.close" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "prompt.reconcile.result", "required": ["method", "params"], "properties": { "method": { "const": "prompt.reconcile" }, "params": { "$ref": "#/$defs/prompt.reconcile.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "recv.observed.result", "required": ["method", "params"], "properties": { "method": { "const": "recv.observed" }, "params": { "$ref": "#/$defs/recv.observed.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.register.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.register" }, "params": { "$ref": "#/$defs/endpoint.register.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "empty", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.unregister" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.recv.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.recv" }, "params": { "$ref": "#/$defs/endpoint.recv.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.ack.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.ack" }, "params": { "$ref": "#/$defs/endpoint.ack.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.send.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.send" }, "params": { "$ref": "#/$defs/endpoint.send.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.message_status.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.message_status" }, "params": { "$ref": "#/$defs/endpoint.message_status.params" } } }
+      ]
+    },
+    "notifications": {
+      "oneOf": [
+        { "x-direction": "both", "required": ["method", "params"], "properties": { "method": { "const": "$/cancel_request" }, "params": { "$ref": "#/$defs/cancel_request.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "adapter.availability" }, "params": { "$ref": "#/$defs/adapter.availability.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "prompt.persisted" }, "params": { "$ref": "#/$defs/prompt.persisted.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "turn.started" }, "params": { "$ref": "#/$defs/turn.started.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "turn.ended" }, "params": { "$ref": "#/$defs/turn.ended.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "native_request.handled" }, "params": { "$ref": "#/$defs/native_request.handled.params" } } },
+        { "x-direction": "daemon_to_adapter", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.pending" }, "params": { "$ref": "#/$defs/endpoint.pending.params" } } }
+      ]
+    },
+
+    "empty": { "type": "object", "additionalProperties": false },
+    "endpoint.only.params": {
+      "type": "object",
+      "required": ["endpoint"],
+      "additionalProperties": false,
+      "properties": { "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" } }
+    },
+
+    "cancel_request.params": {
+      "type": "object",
+      "required": ["request_id"],
+      "additionalProperties": false,
+      "properties": { "request_id": { "$ref": "types.schema.json#/$defs/RequestID" } }
+    },
+
+    "initialize.params": {
+      "type": "object",
+      "required": ["protocol", "daemon", "instance"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol": { "$ref": "types.schema.json#/$defs/Range" },
+        "daemon": {
+          "type": "object",
+          "required": ["version"],
+          "additionalProperties": false,
+          "properties": { "version": { "type": "string", "minLength": 1, "maxLength": 64 } }
+        },
+        "instance": {
+          "type": "object",
+          "required": ["id", "lock_path"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "lock_path": { "type": "string", "minLength": 1, "maxLength": 4096 }
+          }
+        }
+      }
+    },
+    "initialize.result": {
+      "type": "object",
+      "required": ["protocol_version", "adapter", "capabilities"],
+      "additionalProperties": false,
+      "properties": {
+        "protocol_version": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "adapter": {
+          "type": "object",
+          "required": ["id", "version"],
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "types.schema.json#/$defs/AdapterID" },
+            "version": { "$ref": "types.schema.json#/$defs/SemVer" }
+          }
+        },
+        "capabilities": { "$ref": "types.schema.json#/$defs/Capabilities" }
+      }
+    },
+
+    "adapter.start.params": {
+      "type": "object",
+      "required": ["node", "config", "presets", "sessions", "direct_endpoints"],
+      "additionalProperties": false,
+      "properties": {
+        "node": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "runtime_endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "config": { "$ref": "types.schema.json#/$defs/ConfigValues" },
+        "presets": { "type": "array", "items": { "$ref": "types.schema.json#/$defs/PresetConfig" } },
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["endpoint", "preset", "native_ref", "turn_active", "tool_access"],
+            "additionalProperties": false,
+            "properties": {
+              "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+              "preset": { "$ref": "types.schema.json#/$defs/PresetName" },
+              "native_ref": { "$ref": "types.schema.json#/$defs/NativeRef" },
+              "process": { "$ref": "types.schema.json#/$defs/ProcessIdentity" },
+              "turn_active": { "type": "boolean" },
+              "tool_access": { "$ref": "types.schema.json#/$defs/ToolAccess" },
+              "checkpoint": { "$ref": "types.schema.json#/$defs/State" }
+            }
+          }
+        },
+        "direct_endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["endpoint", "key"],
+            "additionalProperties": false,
+            "properties": {
+              "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+              "key": { "type": "string", "minLength": 1, "maxLength": 128 }
+            }
+          }
+        }
+      }
+    },
+    "adapter.start.result": {
+      "type": "object",
+      "required": ["sessions"],
+      "additionalProperties": false,
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["endpoint", "state", "turn_active"],
+            "additionalProperties": false,
+            "properties": {
+              "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+              "state": { "$ref": "types.schema.json#/$defs/AttachState" },
+              "turn_active": { "type": "boolean" },
+              "process": { "$ref": "types.schema.json#/$defs/ProcessIdentity" }
+            }
+          }
+        }
+      }
+    },
+
+    "adapter.probe.params": {
+      "type": "object",
+      "required": ["tool_probes"],
+      "additionalProperties": false,
+      "properties": {
+        "tool_probes": {
+          "type": "array", "maxItems": 256,
+          "items": {
+            "type": "object",
+            "required": ["preset", "frontend", "token", "env"],
+            "additionalProperties": false,
+            "properties": {
+              "preset": { "$ref": "types.schema.json#/$defs/PresetName" },
+              "frontend": { "$ref": "types.schema.json#/$defs/Frontend" },
+              "token": { "$ref": "types.schema.json#/$defs/Token" },
+              "env": { "$ref": "types.schema.json#/$defs/Env" }
+            }
+          }
+        }
+      }
+    },
+    "adapter.probe.result": {
+      "type": "object",
+      "required": ["auth", "dependencies", "presets", "tool_probes"],
+      "additionalProperties": false,
+      "properties": {
+        "runtime": {
+          "type": "object",
+          "required": ["name", "version", "tested"],
+          "additionalProperties": false,
+          "properties": {
+            "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "version": { "type": "string", "minLength": 1, "maxLength": 64 },
+            "tested": { "type": "boolean" }
+          }
+        },
+        "auth": { "$ref": "types.schema.json#/$defs/AuthState" },
+        "dependencies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "state"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "state": { "$ref": "types.schema.json#/$defs/DependencyState" },
+              "detail": { "$ref": "types.schema.json#/$defs/Detail" }
+            }
+          }
+        },
+        "presets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "usable"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "$ref": "types.schema.json#/$defs/PresetName" },
+              "usable": { "type": "boolean" },
+              "problems": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "types.schema.json#/$defs/Detail" } }
+            }
+          }
+        },
+        "tool_probes": {
+          "type": "array", "maxItems": 256,
+          "items": {
+            "type": "object",
+            "required": ["preset", "frontend", "outcome"],
+            "additionalProperties": false,
+            "properties": {
+              "preset": { "$ref": "types.schema.json#/$defs/PresetName" },
+              "frontend": { "$ref": "types.schema.json#/$defs/Frontend" },
+              "outcome": { "$ref": "types.schema.json#/$defs/ProbeOutcome" },
+              "method": { "$ref": "types.schema.json#/$defs/ProbeMethod" },
+              "detail": { "$ref": "types.schema.json#/$defs/Detail" }
+            }
+          }
+        }
+      }
+    },
+
+    "adapter.availability.params": {
+      "type": "object",
+      "required": ["conditions"],
+      "additionalProperties": false,
+      "properties": {
+        "conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["condition"],
+            "additionalProperties": false,
+            "properties": {
+              "condition": { "$ref": "types.schema.json#/$defs/AvailabilityCondition" },
+              "endpoints": { "type": "array", "minItems": 1, "items": { "$ref": "types.schema.json#/$defs/EndpointRef" } },
+              "since_ms": { "$ref": "types.schema.json#/$defs/TimestampMS" },
+              "detail": { "$ref": "types.schema.json#/$defs/Detail" }
+            }
+          }
+        }
+      }
+    },
+
+    "session.create.params": {
+      "type": "object",
+      "required": ["attempt", "runtime_endpoint", "session_endpoint", "preset", "first_prompt", "tool_access"],
+      "additionalProperties": false,
+      "properties": {
+        "attempt": { "$ref": "types.schema.json#/$defs/AttemptID" },
+        "runtime_endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "session_endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "preset": { "$ref": "types.schema.json#/$defs/PresetName" },
+        "first_prompt": {
+          "type": "object",
+          "required": ["attempt", "text"],
+          "additionalProperties": false,
+          "properties": {
+            "attempt": { "$ref": "types.schema.json#/$defs/AttemptID" },
+            "text": { "type": "string", "minLength": 1, "maxLength": 8192 }
+          }
+        },
+        "tool_access": { "$ref": "types.schema.json#/$defs/ToolAccess" },
+        "checkpoint": { "$ref": "types.schema.json#/$defs/State" }
+      }
+    },
+    "session.create.result": {
+      "description": "created names the native session and the front ends set up; failed says why; indeterminate gives the grounds and may already know the native session.",
+      "type": "object",
+      "required": ["outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": { "$ref": "types.schema.json#/$defs/CreateOutcome" },
+        "native_ref": { "$ref": "types.schema.json#/$defs/NativeRef" },
+        "process": { "$ref": "types.schema.json#/$defs/ProcessIdentity" },
+        "frontends": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "types.schema.json#/$defs/Frontend" } },
+        "reason": { "$ref": "types.schema.json#/$defs/CreateFailure" },
+        "grounds": { "$ref": "types.schema.json#/$defs/Grounds" },
+        "detail": { "$ref": "types.schema.json#/$defs/Detail" }
+      },
+      "oneOf": [
+        {
+          "properties": { "outcome": { "const": "created" }, "reason": false, "grounds": false },
+          "required": ["native_ref", "frontends"]
+        },
+        {
+          "properties": { "outcome": { "const": "failed" }, "native_ref": false, "process": false, "frontends": false, "grounds": false },
+          "required": ["reason"]
+        },
+        {
+          "properties": {
+            "outcome": { "const": "indeterminate" },
+            "reason": false,
+            "frontends": false,
+            "grounds": {
+              "properties": { "code": { "enum": ["turn_running", "record_unreadable", "native_unreachable", "runtime_version_untested"] } }
+            }
+          },
+          "required": ["grounds"]
+        }
+      ]
+    },
+
+    "checkpoint.put.params": {
+      "type": "object",
+      "required": ["scope", "id", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "scope": { "$ref": "types.schema.json#/$defs/CheckpointScope" },
+        "id": { "type": "string" },
+        "state": { "$ref": "types.schema.json#/$defs/State" }
+      },
+      "oneOf": [
+        { "properties": { "scope": { "const": "attempt" }, "id": { "$ref": "types.schema.json#/$defs/AttemptID" } } },
+        { "properties": { "scope": { "const": "session" }, "id": { "$ref": "types.schema.json#/$defs/EndpointRef" } } }
+      ]
+    },
+
+    "prompt.deliver.params": {
+      "type": "object",
+      "required": ["endpoint", "attempt", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "attempt": { "$ref": "types.schema.json#/$defs/AttemptID" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 8192 }
+      }
+    },
+    "prompt.deliver.result": {
+      "type": "object",
+      "required": ["stage"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": { "$ref": "types.schema.json#/$defs/PromptStage" },
+        "reason": { "$ref": "types.schema.json#/$defs/PromptRefusal" }
+      },
+      "oneOf": [
+        { "properties": { "stage": { "const": "refused" } }, "required": ["reason"] },
+        { "properties": { "stage": { "enum": ["accepted", "persisted"] }, "reason": false } }
+      ]
+    },
+    "prompt.persisted.params": {
+      "type": "object",
+      "required": ["endpoint", "attempt"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "attempt": { "$ref": "types.schema.json#/$defs/AttemptID" }
+      }
+    },
+
+    "turn.started.params": {
+      "type": "object",
+      "required": ["endpoint", "turn", "at_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "turn": { "$ref": "types.schema.json#/$defs/TurnRef" },
+        "attempt": { "$ref": "types.schema.json#/$defs/AttemptID" },
+        "process": { "$ref": "types.schema.json#/$defs/ProcessIdentity" },
+        "at_ms": { "$ref": "types.schema.json#/$defs/TimestampMS" }
+      }
+    },
+    "turn.ended.params": {
+      "type": "object",
+      "required": ["endpoint", "turn", "final", "at_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "turn": { "$ref": "types.schema.json#/$defs/TurnRef" },
+        "final": { "$ref": "types.schema.json#/$defs/TurnFinal" },
+        "at_ms": { "$ref": "types.schema.json#/$defs/TimestampMS" }
+      }
+    },
+
+    "session.interrupt.result": {
+      "type": "object",
+      "required": ["stage"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": { "$ref": "types.schema.json#/$defs/InterruptStage" },
+        "reason": { "$ref": "types.schema.json#/$defs/InterruptRefusal" }
+      },
+      "oneOf": [
+        { "properties": { "stage": { "const": "refused" } }, "required": ["reason"] },
+        { "properties": { "stage": { "enum": ["requested", "stopped", "not_running"] }, "reason": false } }
+      ]
+    },
+    "session.close.result": {
+      "type": "object",
+      "required": ["outcome"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": { "$ref": "types.schema.json#/$defs/CloseOutcome" },
+        "reason": { "$ref": "types.schema.json#/$defs/CloseReason" }
+      },
+      "oneOf": [
+        { "properties": { "outcome": { "const": "close_unconfirmed" } }, "required": ["reason"] },
+        { "properties": { "outcome": { "const": "closed" }, "reason": false } }
+      ]
+    },
+
+    "prompt.reconcile.params": {
+      "type": "object",
+      "required": ["endpoint", "attempt"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "attempt": { "$ref": "types.schema.json#/$defs/AttemptID" },
+        "checkpoint": { "$ref": "types.schema.json#/$defs/State" }
+      }
+    },
+    "prompt.reconcile.result": {
+      "description": "found reports the turn; the grounds code belongs to the verdict.",
+      "type": "object",
+      "required": ["verdict", "grounds"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": { "$ref": "types.schema.json#/$defs/ReconcileVerdict" },
+        "turn": { "$ref": "types.schema.json#/$defs/TurnReport" },
+        "grounds": { "$ref": "types.schema.json#/$defs/Grounds" }
+      },
+      "oneOf": [
+        {
+          "properties": { "verdict": { "const": "found" }, "grounds": { "properties": { "code": { "const": "attempt_in_record" } } } },
+          "required": ["turn"]
+        },
+        {
+          "properties": {
+            "verdict": { "const": "provably_absent" }, "turn": false,
+            "grounds": { "properties": { "code": { "enum": ["record_complete_without_attempt", "never_dispatched"] } } }
+          }
+        },
+        {
+          "properties": {
+            "verdict": { "const": "indeterminate" }, "turn": false,
+            "grounds": { "properties": { "code": { "enum": ["turn_running", "record_unreadable", "native_unreachable", "runtime_version_untested"] } } }
+          }
+        }
+      ]
+    },
+
+    "recv.observed.params": {
+      "type": "object",
+      "required": ["endpoint", "lease", "frontend", "observed"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "lease": { "$ref": "types.schema.json#/$defs/LeaseRef" },
+        "frontend": { "$ref": "types.schema.json#/$defs/Frontend" },
+        "observed": { "type": "string" }
+      }
+    },
+    "recv.observed.result": {
+      "type": "object",
+      "required": ["verdict", "reason", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "verdict": { "$ref": "types.schema.json#/$defs/AckVerdict" },
+        "reason": { "$ref": "types.schema.json#/$defs/AckReason" },
+        "items": { "type": "array", "maxItems": 1024, "items": { "$ref": "types.schema.json#/$defs/PartAck" } }
+      },
+      "oneOf": [
+        { "properties": { "verdict": { "const": "allowed" }, "reason": { "const": "seen_in_full" }, "items": { "minItems": 1 } } },
+        { "properties": { "verdict": { "const": "refused" }, "reason": { "enum": ["replaced", "truncated", "content_mismatch", "unknown_lease"] }, "items": { "maxItems": 0 } } }
+      ]
+    },
+
+    "native_request.handled.params": {
+      "type": "object",
+      "required": ["endpoint", "method", "disposition", "at_ms"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "method": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "disposition": { "$ref": "types.schema.json#/$defs/Disposition" },
+        "at_ms": { "$ref": "types.schema.json#/$defs/TimestampMS" }
+      }
+    },
+
+    "endpoint.register.params": {
+      "type": "object",
+      "required": ["key", "display_name"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 }
+      }
+    },
+    "endpoint.register.result": {
+      "type": "object",
+      "required": ["endpoint"],
+      "additionalProperties": false,
+      "properties": { "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" } }
+    },
+    "endpoint.pending.params": {
+      "type": "object",
+      "required": ["endpoint", "count"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "count": { "type": "integer", "minimum": 1, "maximum": 2147483647 }
+      }
+    },
+    "endpoint.recv.params": {
+      "description": "message_id and part go together: they fetch one specific part.",
+      "type": "object",
+      "required": ["endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "wait_s": { "type": "integer", "minimum": 0, "maximum": 30 },
+        "message_id": { "$ref": "types.schema.json#/$defs/MessageID" },
+        "part": { "$ref": "types.schema.json#/$defs/PartNumber" }
+      },
+      "dependentRequired": { "message_id": ["part"], "part": ["message_id"] }
+    },
+    "endpoint.recv.result": {
+      "type": "object",
+      "required": ["page"],
+      "additionalProperties": false,
+      "properties": { "page": { "$ref": "types.schema.json#/$defs/RecvPage" } }
+    },
+    "endpoint.ack.params": {
+      "type": "object",
+      "required": ["endpoint", "lease", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "lease": { "$ref": "types.schema.json#/$defs/LeaseRef" },
+        "items": { "type": "array", "minItems": 1, "maxItems": 1024, "items": { "$ref": "types.schema.json#/$defs/PartRef" } }
+      }
+    },
+    "endpoint.ack.result": {
+      "type": "object",
+      "required": ["items"],
+      "additionalProperties": false,
+      "properties": {
+        "items": { "type": "array", "minItems": 1, "maxItems": 1024, "items": { "$ref": "types.schema.json#/$defs/PartAck" } }
+      }
+    },
+    "endpoint.send.params": {
+      "description": "The body of a session.create control message is its initial message; an empty body means none.",
+      "type": "object",
+      "required": ["endpoint", "to", "content_type", "body"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "to": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "types.schema.json#/$defs/Address" } },
+        "content_type": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "body": { "type": "string" },
+        "reply_to": { "$ref": "types.schema.json#/$defs/MessageID" },
+        "thread": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "disclose_recipients": { "type": "boolean" },
+        "accept_before_s": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
+        "control": {
+          "type": "object",
+          "required": ["signal"],
+          "additionalProperties": false,
+          "properties": {
+            "signal": { "$ref": "types.schema.json#/$defs/ControlSignal" },
+            "params": {
+              "type": "object",
+              "required": ["preset"],
+              "additionalProperties": false,
+              "properties": { "preset": { "$ref": "types.schema.json#/$defs/PresetName" } }
+            }
+          },
+          "oneOf": [
+            { "properties": { "signal": { "const": "session.create" } }, "required": ["params"] },
+            { "properties": { "signal": { "enum": ["session.close", "session.interrupt", "endpoint.status"] }, "params": false } }
+          ]
+        },
+        "idempotency_key": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "endpoint.send.result": {
+      "type": "object",
+      "required": ["message_id"],
+      "additionalProperties": false,
+      "properties": { "message_id": { "$ref": "types.schema.json#/$defs/MessageID" } }
+    },
+    "endpoint.message_status.params": {
+      "type": "object",
+      "required": ["endpoint", "message_id"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "message_id": { "$ref": "types.schema.json#/$defs/MessageID" }
+      }
+    },
+    "endpoint.message_status.result": {
+      "type": "object",
+      "required": ["recipients"],
+      "additionalProperties": false,
+      "properties": {
+        "recipients": {
+          "type": "array", "minItems": 1, "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["to", "state"],
+            "additionalProperties": false,
+            "properties": {
+              "to": { "$ref": "types.schema.json#/$defs/Address" },
+              "state": { "$ref": "types.schema.json#/$defs/DeliveryState" },
+              "reason": { "$ref": "types.schema.json#/$defs/RejectReason" }
+            },
+            "oneOf": [
+              { "properties": { "state": { "const": "rejected" } }, "required": ["reason"] },
+              { "properties": { "state": { "enum": ["queued", "accepted", "delivered", "expired_unconfirmed", "delivery_unknown", "closed_unconfirmed"] }, "reason": false } }
+            ]
+          }
+        },
+        "control_reply": { "$ref": "types.schema.json#/$defs/ControlReply" }
+      }
+    }
+  }
+}

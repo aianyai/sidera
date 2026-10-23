@@ -1,0 +1,32 @@
+{
+  "expect": "both",
+  "kind": "manifest",
+  "method": "",
+  "note": "markers unknown key",
+  "document": {
+    "manifest_version": 1,
+    "id": "minimal",
+    "version": "1.0.0",
+    "protocol": {
+      "min": 1,
+      "max": 1
+    },
+    "entry": {
+      "program": "sidera-adapter-minimal"
+    },
+    "platforms": [
+      {
+        "os": "linux",
+        "arch": "amd64"
+      }
+    ],
+    "ack_markers": {
+      "replaced": [
+        {
+          "literal": "a",
+          "flags": "i"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "recv.observed",
+  "note": "allowed without items",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "allowed",
+      "reason": "seen_in_full",
+      "items": []
+    }
+  }
+}

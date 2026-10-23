@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "method": "native_request.handled",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "method": "item/commandExecution/requestApproval",
+    "disposition": "rejected_by_preset",
+    "at_ms": 1792713612000
+  }
+}

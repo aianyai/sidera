@@ -1,0 +1,32 @@
+{
+  "jsonrpc": "2.0",
+  "id": 140,
+  "result": {
+    "recipients": [
+      {
+        "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+        "state": "queued"
+      },
+      {
+        "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/33333333333333333333333333333333",
+        "state": "accepted"
+      },
+      {
+        "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/44444444444444444444444444444444",
+        "state": "delivered"
+      },
+      {
+        "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/55555555555555555555555555555555",
+        "state": "expired_unconfirmed"
+      },
+      {
+        "to": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1/22222222222222222222222222222222",
+        "state": "delivery_unknown"
+      },
+      {
+        "to": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1/33333333333333333333333333333333",
+        "state": "closed_unconfirmed"
+      }
+    ]
+  }
+}

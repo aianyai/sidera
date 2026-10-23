@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.recv",
+  "note": "wait negative",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.recv",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "wait_s": -1
+    }
+  }
+}

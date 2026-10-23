@@ -1,0 +1,20 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "prompt.reconcile",
+  "note": "absent with turn",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "provably_absent",
+      "turn": {
+        "ref": "t",
+        "state": "failed"
+      },
+      "grounds": {
+        "code": "never_dispatched"
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "adapter.start",
+  "note": "session state unknown",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "sessions": [
+        {
+          "endpoint": "22222222222222222222222222222222",
+          "state": "gone",
+          "turn_active": false
+        }
+      ]
+    }
+  }
+}

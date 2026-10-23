@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "native_request.handled",
+  "note": "disposition unknown",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "native_request.handled",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "method": "m",
+      "disposition": "ignored",
+      "at_ms": 1792713600000
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "runtime": {
+      "name": "example-runtime",
+      "version": "2.1.307",
+      "tested": true
+    },
+    "auth": "valid",
+    "dependencies": [
+      {
+        "name": "example-runtime",
+        "state": "ok"
+      },
+      {
+        "name": "systemd-run",
+        "state": "ok"
+      }
+    ],
+    "presets": [
+      {
+        "name": "default",
+        "usable": true
+      },
+      {
+        "name": "review.readonly",
+        "usable": true
+      }
+    ],
+    "tool_probes": [
+      {
+        "preset": "default",
+        "frontend": "cli",
+        "outcome": "ran",
+        "method": "sandboxed"
+      },
+      {
+        "preset": "default",
+        "frontend": "mcp",
+        "outcome": "ran",
+        "method": "unsandboxed",
+        "detail": "the sandbox does not cover the MCP server"
+      }
+    ]
+  }
+}

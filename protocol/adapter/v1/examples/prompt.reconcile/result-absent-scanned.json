@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 80,
+  "result": {
+    "verdict": "provably_absent",
+    "grounds": {
+      "code": "record_complete_without_attempt",
+      "detail": "scanned 812 records after the writer stopped"
+    }
+  }
+}

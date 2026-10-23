@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.recv",
+  "note": "message without part",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.recv",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "message_id": "m"
+    }
+  }
+}

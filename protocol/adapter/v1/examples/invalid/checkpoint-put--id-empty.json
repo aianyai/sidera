@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "checkpoint.put",
+  "note": "id empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "checkpoint.put",
+    "params": {
+      "scope": "session",
+      "id": "",
+      "state": {}
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "result": {
+    "auth": "unknown",
+    "dependencies": [],
+    "presets": [],
+    "tool_probes": []
+  }
+}

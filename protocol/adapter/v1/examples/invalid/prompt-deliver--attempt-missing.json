@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "prompt.deliver",
+  "note": "attempt missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "prompt.deliver",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "text": "You have 2 new messages. Read them with recv."
+    }
+  }
+}

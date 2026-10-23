@@ -1,0 +1,28 @@
+{
+  "jsonrpc": "2.0",
+  "id": 142,
+  "result": {
+    "recipients": [
+      {
+        "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111",
+        "state": "delivered"
+      }
+    ],
+    "control_reply": {
+      "signal": "endpoint.status",
+      "activity": "idle",
+      "queued": 0,
+      "presets": [
+        {
+          "name": "default",
+          "available": true
+        },
+        {
+          "name": "review.readonly",
+          "available": false
+        }
+      ],
+      "as_of": 1792713600
+    }
+  }
+}

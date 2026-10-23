@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.register",
+  "note": "key empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.register",
+    "params": {
+      "key": "",
+      "display_name": "x"
+    }
+  }
+}

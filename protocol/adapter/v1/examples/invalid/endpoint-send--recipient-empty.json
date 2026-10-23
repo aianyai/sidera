@@ -1,0 +1,19 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.send",
+  "note": "recipient empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.send",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "to": [
+        ""
+      ],
+      "content_type": "text/plain",
+      "body": "x"
+    }
+  }
+}

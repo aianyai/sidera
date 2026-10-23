@@ -1,0 +1,21 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "adapter.start",
+  "params": {
+    "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+    "config": {},
+    "presets": [],
+    "sessions": [],
+    "direct_endpoints": [
+      {
+        "endpoint": "44444444444444444444444444444444",
+        "key": "chat:alice"
+      },
+      {
+        "endpoint": "55555555555555555555555555555555",
+        "key": "chat:bob"
+      }
+    ]
+  }
+}

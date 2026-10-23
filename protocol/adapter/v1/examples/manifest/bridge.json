@@ -1,0 +1,61 @@
+{
+  "manifest_version": 1,
+  "id": "chat-bridge",
+  "version": "1.2.0-beta.2+exp.sha.5114f85",
+  "protocol": {
+    "min": 1,
+    "max": 2
+  },
+  "entry": {
+    "program": "sidera-adapter-chat-bridge.exe",
+    "args": [
+      "serve",
+      "--stdio"
+    ]
+  },
+  "platforms": [
+    {
+      "os": "windows",
+      "arch": "amd64"
+    },
+    {
+      "os": "windows",
+      "arch": "arm64"
+    },
+    {
+      "os": "freebsd",
+      "arch": "riscv64"
+    }
+  ],
+  "config": {
+    "instance": [
+      {
+        "key": "workspace",
+        "type": "string",
+        "title": "Chat workspace"
+      },
+      {
+        "key": "channels",
+        "type": "string_list",
+        "title": "Channels to bridge",
+        "required": true,
+        "default": [
+          "general"
+        ]
+      },
+      {
+        "key": "poll_s",
+        "type": "integer",
+        "title": "Poll interval",
+        "min": 1
+      }
+    ]
+  },
+  "budgets": [
+    {
+      "frontend": "direct",
+      "unit": "chars",
+      "limit": 4000
+    }
+  ]
+}

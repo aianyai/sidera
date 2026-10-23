@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "prompt.deliver",
+  "note": "stage unknown",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "stage": "sent"
+    }
+  }
+}

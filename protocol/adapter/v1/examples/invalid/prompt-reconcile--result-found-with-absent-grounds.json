@@ -1,0 +1,20 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "prompt.reconcile",
+  "note": "found with absent grounds",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "found",
+      "turn": {
+        "ref": "t",
+        "state": "running"
+      },
+      "grounds": {
+        "code": "never_dispatched"
+      }
+    }
+  }
+}

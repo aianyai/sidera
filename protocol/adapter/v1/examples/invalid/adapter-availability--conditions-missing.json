@@ -1,0 +1,11 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "adapter.availability",
+  "note": "conditions missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "adapter.availability",
+    "params": {}
+  }
+}

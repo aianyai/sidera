@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "checkpoint.put",
+  "note": "attempt scope with endpoint id",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "checkpoint.put",
+    "params": {
+      "scope": "attempt",
+      "id": "22222222222222222222222222222222",
+      "state": {}
+    }
+  }
+}

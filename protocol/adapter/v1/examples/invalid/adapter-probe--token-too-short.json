@@ -1,0 +1,21 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "adapter.probe",
+  "note": "token too short",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "adapter.probe",
+    "params": {
+      "tool_probes": [
+        {
+          "preset": "default",
+          "frontend": "cli",
+          "token": "abc",
+          "env": {}
+        }
+      ]
+    }
+  }
+}

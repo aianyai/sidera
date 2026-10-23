@@ -1,0 +1,48 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "runtime": {
+      "name": "example-runtime",
+      "version": "3.0.0",
+      "tested": false
+    },
+    "auth": "invalid",
+    "dependencies": [
+      {
+        "name": "example-runtime",
+        "state": "wrong_version",
+        "detail": "found 3.0.0, need 2.x"
+      },
+      {
+        "name": "systemd-run",
+        "state": "missing"
+      }
+    ],
+    "presets": [
+      {
+        "name": "default",
+        "usable": false,
+        "problems": [
+          "project_dir does not exist",
+          "runtime credentials are invalid"
+        ]
+      }
+    ],
+    "tool_probes": [
+      {
+        "preset": "default",
+        "frontend": "cli",
+        "outcome": "not_run",
+        "detail": "preset is not usable"
+      },
+      {
+        "preset": "default",
+        "frontend": "mcp",
+        "outcome": "failed",
+        "method": "native_turn",
+        "detail": "the probe turn never reached the daemon"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "adapter.availability",
+  "note": "endpoints empty list",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "adapter.availability",
+    "params": {
+      "conditions": [
+        {
+          "condition": "runtime_auth",
+          "endpoints": []
+        }
+      ]
+    }
+  }
+}

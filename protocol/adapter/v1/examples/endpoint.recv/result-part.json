@@ -1,0 +1,26 @@
+{
+  "jsonrpc": "2.0",
+  "id": 111,
+  "result": {
+    "page": {
+      "lease": "f0e1d2c3b4a5968778695a4b3c2d1e0f",
+      "messages": [
+        {
+          "id": "m-big",
+          "from": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+          "part": {
+            "index": 1,
+            "total": 3,
+            "label": "part 1/3",
+            "next": {
+              "msg": "m-big",
+              "part": 2
+            }
+          },
+          "body": "First third of a long message ..."
+        }
+      ],
+      "more": 1
+    }
+  }
+}

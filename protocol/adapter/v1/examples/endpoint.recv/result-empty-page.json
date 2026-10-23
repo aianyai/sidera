@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 110,
+  "result": {
+    "page": {
+      "lease": "0123456789abcdef0123456789abcdef",
+      "messages": [],
+      "more": 0
+    }
+  }
+}

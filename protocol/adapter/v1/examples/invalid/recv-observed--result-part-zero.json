@@ -1,0 +1,21 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "recv.observed",
+  "note": "part zero",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "allowed",
+      "reason": "seen_in_full",
+      "items": [
+        {
+          "message_id": "m",
+          "part": 0,
+          "ack": "recorded"
+        }
+      ]
+    }
+  }
+}

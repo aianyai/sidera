@@ -1,0 +1,16 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "result": {
+    "protocol_version": 1,
+    "adapter": {
+      "id": "chat-bridge",
+      "version": "1.0.0"
+    },
+    "capabilities": {
+      "direct": {
+        "max_endpoints": 50
+      }
+    }
+  }
+}

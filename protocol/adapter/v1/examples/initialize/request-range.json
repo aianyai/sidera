@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "protocol": {
+      "min": 1,
+      "max": 3
+    },
+    "daemon": {
+      "version": "0.4.0-rc.1+build.7"
+    },
+    "instance": {
+      "id": "work",
+      "lock_path": "C:\\Users\\dev\\AppData\\Local\\sidera\\adapters\\work\\instance.lock"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 152,
+  "error": {
+    "code": -32003,
+    "message": "initialize has not completed"
+  }
+}

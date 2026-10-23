@@ -1,0 +1,22 @@
+{
+  "jsonrpc": "2.0",
+  "id": 142,
+  "result": {
+    "recipients": [
+      {
+        "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111",
+        "state": "delivered"
+      }
+    ],
+    "control_reply": {
+      "signal": "endpoint.status",
+      "activity": "busy",
+      "queued": 3,
+      "conditions": [
+        "server_request_rejected",
+        "version_untested"
+      ],
+      "as_of": 1792713600
+    }
+  }
+}

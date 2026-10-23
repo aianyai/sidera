@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "error": {
+    "code": -32002,
+    "message": "shutdown has begun"
+  }
+}

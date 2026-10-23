@@ -1,0 +1,406 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sidera.invalid/adapter/v1/types.schema.json",
+  "title": "Sidera adapter protocol v1: shared types",
+  "description": "Definitions shared by the method schemas. A rule marked 'Go only' cannot be stated in JSON Schema; the Go validators enforce it and the conformance tests list those cases.",
+  "$defs": {
+    "EndpointRef": {
+      "description": "An endpoint of this node. Opaque: the daemon hands it out and the adapter hands it back unchanged.",
+      "type": "string", "minLength": 1, "maxLength": 128
+    },
+    "Address": {
+      "description": "A sender or recipient, '<node>/<endpoint>'. Opaque to the SDK; only the daemon checks the syntax.",
+      "type": "string", "minLength": 1, "maxLength": 128
+    },
+    "MessageID": {
+      "description": "Identifier of a message. Opaque.",
+      "type": "string", "minLength": 1, "maxLength": 128
+    },
+    "AttemptID": {
+      "description": "Number of a creation or prompt attempt: a lowercase UUID version 4.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "LeaseRef": {
+      "description": "Identifier of one page handed out by a recv: 32 lowercase hexadecimal characters, not all zero.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$",
+      "not": { "const": "00000000000000000000000000000000" }
+    },
+    "Token": {
+      "description": "32 random bytes in unpadded base64url.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"
+    },
+    "NativeRef": {
+      "description": "The adapter's own reference to a native session. Opaque to the daemon.",
+      "type": "string", "minLength": 1, "maxLength": 256
+    },
+    "TurnRef": {
+      "description": "The adapter's own reference to a turn. Opaque to the daemon.",
+      "type": "string", "minLength": 1, "maxLength": 256
+    },
+    "TimestampMS": {
+      "description": "Unix milliseconds, UTC. For display and diagnosis; the daemon judges time by its own clock.",
+      "type": "integer", "minimum": 1, "maximum": 9007199254740991
+    },
+    "Detail": {
+      "description": "Free text for people.",
+      "type": "string", "minLength": 1, "maxLength": 1024
+    },
+    "Range": {
+      "description": "A closed range of protocol versions. Go only: min is not greater than max.",
+      "type": "object",
+      "required": ["min", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "min": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "max": { "type": "integer", "minimum": 1, "maximum": 65535 }
+      }
+    },
+    "RequestID": {
+      "description": "A request identifier: an integer or a string.",
+      "oneOf": [
+        { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        { "type": "string", "minLength": 1, "maxLength": 128 }
+      ]
+    },
+    "AdapterID": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$"
+    },
+    "PresetName": {
+      "type": "string", "minLength": 1, "maxLength": 64,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "SemVer": {
+      "description": "A Semantic Versioning 2.0.0 version whose major, minor and patch have at most nine digits.",
+      "type": "string", "maxLength": 64,
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})\\.(0|[1-9][0-9]{0,8})(?:-((?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\\+([0-9a-zA-Z-]+(?:\\.[0-9a-zA-Z-]+)*))?$"
+    },
+    "ConfigKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "EnvName": {
+      "type": "string", "maxLength": 128,
+      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+    },
+    "ReasonWord": {
+      "description": "A short snake_case word.",
+      "type": "string", "minLength": 1, "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "Env": {
+      "description": "Environment variables to inject.",
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/EnvName" },
+      "additionalProperties": { "type": "string", "maxLength": 4096 }
+    },
+    "ConfigValue": {
+      "description": "A configuration value: a string, an integer, a boolean or a list of strings.",
+      "oneOf": [
+        { "type": "string", "maxLength": 4096 },
+        { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        { "type": "boolean" },
+        { "type": "array", "maxItems": 256, "items": { "type": "string", "maxLength": 4096 } }
+      ]
+    },
+    "ConfigValues": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": { "$ref": "#/$defs/ConfigKey" },
+      "additionalProperties": { "$ref": "#/$defs/ConfigValue" }
+    },
+    "State": {
+      "description": "Opaque adapter state stored by the daemon. Go only: at most 16384 bytes as compact JSON.",
+      "type": "object"
+    },
+
+    "Frontend": { "type": "string", "enum": ["cli", "mcp"] },
+    "ContainerKind": { "type": "string", "enum": ["systemd_unit", "process_group", "launchd_job", "windows_job", "scheduled_task", "none"] },
+    "AuthState": { "type": "string", "enum": ["valid", "invalid", "unknown"] },
+    "DependencyState": { "type": "string", "enum": ["ok", "missing", "wrong_version"] },
+    "ProbeOutcome": { "type": "string", "enum": ["ran", "not_run", "failed"] },
+    "ProbeMethod": { "type": "string", "enum": ["sandboxed", "unsandboxed", "native_turn"] },
+    "AvailabilityCondition": { "type": "string", "enum": ["runtime_auth", "native_unavailable", "dependency_missing", "version_untested"] },
+    "AttachState": { "type": "string", "enum": ["attached", "unreachable", "lost"] },
+    "CreateOutcome": { "type": "string", "enum": ["created", "failed", "indeterminate"] },
+    "CreateFailure": { "type": "string", "enum": ["preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error"] },
+    "CheckpointScope": { "type": "string", "enum": ["attempt", "session"] },
+    "PromptStage": { "type": "string", "enum": ["accepted", "persisted", "refused"] },
+    "PromptRefusal": { "type": "string", "enum": ["busy", "runtime_auth", "native_unavailable", "session_lost", "control_unknown"] },
+    "TurnFinal": { "type": "string", "enum": ["completed", "interrupted", "failed"] },
+    "InterruptStage": { "type": "string", "enum": ["requested", "stopped", "not_running", "refused"] },
+    "InterruptRefusal": { "type": "string", "enum": ["native_unreachable", "native_error"] },
+    "CloseOutcome": { "type": "string", "enum": ["closed", "close_unconfirmed"] },
+    "CloseReason": { "type": "string", "enum": ["turn_still_running", "native_unreachable"] },
+    "ReconcileVerdict": { "type": "string", "enum": ["found", "provably_absent", "indeterminate"] },
+    "TurnState": { "type": "string", "enum": ["running", "completed", "interrupted", "failed"] },
+    "GroundsCode": {
+      "type": "string",
+      "enum": ["attempt_in_record", "record_complete_without_attempt", "never_dispatched", "turn_running", "record_unreadable", "native_unreachable", "runtime_version_untested"]
+    },
+    "AckVerdict": { "type": "string", "enum": ["allowed", "refused"] },
+    "AckReason": { "type": "string", "enum": ["seen_in_full", "replaced", "truncated", "content_mismatch", "unknown_lease"] },
+    "ItemAck": { "type": "string", "enum": ["recorded", "completed", "duplicate", "refused_no_handout", "refused_lease", "too_late"] },
+    "Disposition": { "type": "string", "enum": ["preset", "rejected_by_preset", "rejected_unknown", "late"] },
+    "DeliveryState": {
+      "type": "string",
+      "enum": ["queued", "accepted", "delivered", "rejected", "expired_unconfirmed", "delivery_unknown", "closed_unconfirmed"]
+    },
+    "RejectReason": {
+      "type": "string",
+      "enum": ["unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired", "backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range"]
+    },
+    "ControlSignal": { "type": "string", "enum": ["session.create", "session.close", "session.interrupt", "endpoint.status"] },
+
+    "Container": {
+      "description": "What isolates a native process from the adapter. A process with kind none has no name; every other kind has one.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["kind"],
+          "additionalProperties": false,
+          "properties": { "kind": { "const": "none" } }
+        },
+        {
+          "type": "object",
+          "required": ["kind", "name"],
+          "additionalProperties": false,
+          "properties": {
+            "kind": { "enum": ["systemd_unit", "process_group", "launchd_job", "windows_job", "scheduled_task"] },
+            "name": { "type": "string", "minLength": 1, "maxLength": 256 }
+          }
+        }
+      ]
+    },
+    "ProcessIdentity": {
+      "description": "One native process, in a form that survives PID reuse and restarts of the adapter and the daemon. The daemon stores and shows it and hands it back to a reconnecting adapter.",
+      "type": "object",
+      "required": ["pid", "start_key"],
+      "additionalProperties": false,
+      "properties": {
+        "pid": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "start_key": { "description": "Opaque; compared only for equality.", "type": "string", "minLength": 1, "maxLength": 64 },
+        "started_at_ms": { "$ref": "#/$defs/TimestampMS" },
+        "container": { "$ref": "#/$defs/Container" }
+      }
+    },
+    "ToolAccess": {
+      "description": "What a session needs to reach the channel's tools: environment variables the adapter injects.",
+      "type": "object",
+      "required": ["env"],
+      "additionalProperties": false,
+      "properties": { "env": { "$ref": "#/$defs/Env" } }
+    },
+    "Capabilities": {
+      "description": "What an adapter declares it supports. An absent runtime or direct part means the adapter provides no such endpoints.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "runtime": {
+          "type": "object",
+          "required": ["interrupt", "ack_on_behalf", "server_requests", "frontends"],
+          "additionalProperties": false,
+          "properties": {
+            "interrupt": { "type": "boolean" },
+            "ack_on_behalf": { "type": "boolean" },
+            "server_requests": { "type": "boolean" },
+            "frontends": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/Frontend" } }
+          }
+        },
+        "direct": {
+          "type": "object",
+          "required": ["max_endpoints"],
+          "additionalProperties": false,
+          "properties": { "max_endpoints": { "type": "integer", "minimum": 1, "maximum": 1000 } }
+        }
+      }
+    },
+    "Grounds": {
+      "type": "object",
+      "required": ["code"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "#/$defs/GroundsCode" },
+        "detail": { "$ref": "#/$defs/Detail" }
+      }
+    },
+    "TurnReport": {
+      "type": "object",
+      "required": ["ref", "state"],
+      "additionalProperties": false,
+      "properties": {
+        "ref": { "$ref": "#/$defs/TurnRef" },
+        "state": { "$ref": "#/$defs/TurnState" }
+      }
+    },
+    "PartRef": {
+      "type": "object",
+      "required": ["message_id", "part"],
+      "additionalProperties": false,
+      "properties": {
+        "message_id": { "$ref": "#/$defs/MessageID" },
+        "part": { "$ref": "#/$defs/PartNumber" }
+      }
+    },
+    "PartAck": {
+      "type": "object",
+      "required": ["message_id", "part", "ack"],
+      "additionalProperties": false,
+      "properties": {
+        "message_id": { "$ref": "#/$defs/MessageID" },
+        "part": { "$ref": "#/$defs/PartNumber" },
+        "ack": { "$ref": "#/$defs/ItemAck" }
+      }
+    },
+    "PartNumber": { "type": "integer", "minimum": 1, "maximum": 1000000 },
+    "RecvPage": {
+      "description": "What one recv hands out, in the JSON shape the recv command prints. Go only: a part's label reads 'part index/total', index is not beyond total, next is present exactly on every part but the last, names this message and points at part index+1.",
+      "type": "object",
+      "required": ["lease", "messages", "more"],
+      "additionalProperties": false,
+      "properties": {
+        "lease": { "$ref": "#/$defs/LeaseRef" },
+        "messages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "from", "body"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "$ref": "#/$defs/MessageID" },
+              "from": { "$ref": "#/$defs/Address" },
+              "possibly_duplicate": { "type": "boolean" },
+              "part": {
+                "type": "object",
+                "required": ["index", "total", "label"],
+                "additionalProperties": false,
+                "properties": {
+                  "index": { "$ref": "#/$defs/PartNumber" },
+                  "total": { "$ref": "#/$defs/PartNumber" },
+                  "label": { "type": "string", "pattern": "^part [0-9]+/[0-9]+$" },
+                  "next": {
+                    "type": "object",
+                    "required": ["msg", "part"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "msg": { "$ref": "#/$defs/MessageID" },
+                      "part": { "$ref": "#/$defs/PartNumber" }
+                    }
+                  }
+                }
+              },
+              "body": { "type": "string" }
+            }
+          }
+        },
+        "more": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+      }
+    },
+    "PresetConfig": {
+      "type": "object",
+      "required": ["name", "config"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/PresetName" },
+        "config": { "$ref": "#/$defs/ConfigValues" }
+      }
+    },
+    "ControlReply": {
+      "description": "The reply to a control signal, with the signal named beside its fields. Go only: conditions are in ascending order; presets are sorted by name.",
+      "oneOf": [
+        {
+          "title": "session.create",
+          "type": "object",
+          "required": ["signal", "outcome"],
+          "additionalProperties": false,
+          "properties": {
+            "signal": { "const": "session.create" },
+            "outcome": { "enum": ["created", "unconfirmed", "failed"] },
+            "session_endpoint": { "$ref": "#/$defs/EndpointRef" },
+            "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "ready_timeout", "adapter_lost"] }
+          },
+          "oneOf": [
+            {
+              "properties": { "outcome": { "const": "created" }, "reason": false },
+              "required": ["session_endpoint"]
+            },
+            {
+              "properties": { "outcome": { "const": "unconfirmed" }, "reason": { "enum": ["ready_timeout", "adapter_lost"] } },
+              "required": ["session_endpoint", "reason"]
+            },
+            {
+              "properties": {
+                "outcome": { "const": "failed" },
+                "session_endpoint": false,
+                "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error"] }
+              },
+              "required": ["reason"]
+            }
+          ]
+        },
+        {
+          "title": "session.close",
+          "type": "object",
+          "required": ["signal", "outcome"],
+          "additionalProperties": false,
+          "properties": {
+            "signal": { "const": "session.close" },
+            "outcome": { "enum": ["closed", "close_unconfirmed", "unsupported"] },
+            "reason": { "enum": ["turn_still_running", "adapter_offline", "native_unreachable"] }
+          },
+          "oneOf": [
+            { "properties": { "outcome": { "const": "close_unconfirmed" } }, "required": ["reason"] },
+            { "properties": { "outcome": { "enum": ["closed", "unsupported"] }, "reason": false } }
+          ]
+        },
+        {
+          "title": "session.interrupt",
+          "type": "object",
+          "required": ["signal", "outcome"],
+          "additionalProperties": false,
+          "properties": {
+            "signal": { "const": "session.interrupt" },
+            "outcome": { "enum": ["stopped", "requested", "not_running", "failed", "unsupported"] },
+            "reason": { "enum": ["adapter_offline", "native_unreachable", "native_error"] }
+          },
+          "oneOf": [
+            { "properties": { "outcome": { "const": "failed" } }, "required": ["reason"] },
+            { "properties": { "outcome": { "enum": ["stopped", "requested", "not_running", "unsupported"] }, "reason": false } }
+          ]
+        },
+        {
+          "title": "endpoint.status",
+          "type": "object",
+          "required": ["signal", "activity", "queued", "as_of"],
+          "additionalProperties": false,
+          "properties": {
+            "signal": { "const": "endpoint.status" },
+            "activity": { "enum": ["idle", "busy", "unknown"] },
+            "queued": { "type": "integer", "minimum": 0, "maximum": 2147483647 },
+            "conditions": {
+              "type": "array", "minItems": 1, "uniqueItems": true,
+              "items": { "enum": ["adapter_offline", "runtime_auth", "native_unavailable", "server_request_rejected", "control_unknown", "version_untested"] }
+            },
+            "presets": {
+              "type": "array", "minItems": 1,
+              "items": {
+                "type": "object",
+                "required": ["name", "available"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": { "$ref": "#/$defs/PresetName" },
+                  "available": { "type": "boolean" }
+                }
+              }
+            },
+            "as_of": { "description": "Unix seconds.", "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+          }
+        }
+      ]
+    }
+  }
+}

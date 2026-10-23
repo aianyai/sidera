@@ -1,0 +1,23 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "adapter.probe",
+  "note": "probe method unknown",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "auth": "valid",
+      "dependencies": [],
+      "presets": [],
+      "tool_probes": [
+        {
+          "preset": "default",
+          "frontend": "cli",
+          "outcome": "ran",
+          "method": "magic"
+        }
+      ]
+    }
+  }
+}

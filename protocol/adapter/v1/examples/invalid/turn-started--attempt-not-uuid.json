@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "turn.started",
+  "note": "attempt not uuid",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "turn.started",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "turn": "t",
+      "attempt": "x",
+      "at_ms": 1792713600000
+    }
+  }
+}

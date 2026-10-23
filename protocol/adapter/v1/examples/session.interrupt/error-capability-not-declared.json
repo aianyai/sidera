@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 62,
+  "error": {
+    "code": 1003,
+    "message": "the adapter did not declare interrupt"
+  }
+}

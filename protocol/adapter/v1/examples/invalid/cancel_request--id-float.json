@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "$/cancel_request",
+  "note": "id float",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "$/cancel_request",
+    "params": {
+      "request_id": 1.5
+    }
+  }
+}

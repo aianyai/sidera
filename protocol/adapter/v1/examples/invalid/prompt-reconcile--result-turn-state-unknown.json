@@ -1,0 +1,20 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "prompt.reconcile",
+  "note": "turn state unknown",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "verdict": "found",
+      "turn": {
+        "ref": "t",
+        "state": "paused"
+      },
+      "grounds": {
+        "code": "attempt_in_record"
+      }
+    }
+  }
+}

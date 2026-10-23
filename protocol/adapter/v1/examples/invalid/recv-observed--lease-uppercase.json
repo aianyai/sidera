@@ -1,0 +1,17 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "recv.observed",
+  "note": "lease uppercase",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "recv.observed",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "lease": "0123456789ABCDEF0123456789ABCDEF",
+      "frontend": "cli",
+      "observed": "x"
+    }
+  }
+}

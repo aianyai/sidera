@@ -1,0 +1,20 @@
+{
+  "jsonrpc": "2.0",
+  "id": 132,
+  "method": "endpoint.send",
+  "params": {
+    "endpoint": "44444444444444444444444444444444",
+    "to": [
+      "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/11111111111111111111111111111111"
+    ],
+    "content_type": "text/plain",
+    "body": "Fix the flaky test in the billing package.",
+    "control": {
+      "signal": "session.create",
+      "params": {
+        "preset": "default"
+      }
+    },
+    "idempotency_key": "chat-evt-88214"
+  }
+}

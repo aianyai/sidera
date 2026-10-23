@@ -1,0 +1,12 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "session.frobnicate",
+  "note": "no such method",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "session.frobnicate",
+    "params": {}
+  }
+}

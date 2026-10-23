@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sidera.invalid/adapter/v1/manifest.schema.json",
+  "title": "Sidera adapter package manifest",
+  "description": "sidera-adapter.json, at the root of an adapter package. Go only (the manifest package enforces them): a tested range has min not above max in SemVer order; a field default lies within the field's options or min and max, and min is not above max; the keys of one group of fields are distinct; the frontends of the budgets are distinct. The text of an ack marker is checked by the daemon when it admits the adapter, not here.",
+  "type": "object",
+  "required": ["manifest_version", "id", "version", "protocol", "entry", "platforms"],
+  "additionalProperties": false,
+  "properties": {
+    "manifest_version": { "const": 1 },
+    "id": { "$ref": "types.schema.json#/$defs/AdapterID" },
+    "version": {
+      "description": "The adapter's own version. The adapter reports the same version in initialize.",
+      "$ref": "types.schema.json#/$defs/SemVer"
+    },
+    "protocol": {
+      "description": "The range of protocol versions the adapter implements.",
+      "$ref": "types.schema.json#/$defs/Range"
+    },
+    "entry": {
+      "description": "How to start the adapter. The program is a path inside the package: not absolute, no '..' segment.",
+      "type": "object",
+      "required": ["program"],
+      "additionalProperties": false,
+      "properties": {
+        "program": {
+          "type": "string", "minLength": 1, "maxLength": 256,
+          "not": {
+            "anyOf": [
+              { "pattern": "^[/\\\\]" },
+              { "pattern": "^[A-Za-z]:" },
+              { "pattern": "(^|[/\\\\])\\.\\.($|[/\\\\])" }
+            ]
+          }
+        },
+        "args": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "type": "string", "maxLength": 1024 } }
+      }
+    },
+    "platforms": {
+      "description": "The operating systems and architectures the package is built for, in Go's GOOS and GOARCH vocabulary.",
+      "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["os", "arch"],
+        "additionalProperties": false,
+        "properties": {
+          "os": { "$ref": "#/$defs/GOOS" },
+          "arch": { "$ref": "#/$defs/GOARCH" }
+        }
+      }
+    },
+    "requires": {
+      "description": "Programs the adapter needs, for display and the install check. The probe is what proves they work.",
+      "type": "array", "minItems": 1, "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["program"],
+        "additionalProperties": false,
+        "properties": {
+          "program": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "os": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/GOOS" } }
+        }
+      }
+    },
+    "tested": {
+      "description": "Closed ranges of native runtime versions the adapter was tested against, compared as SemVer.",
+      "type": "array", "minItems": 1, "maxItems": 64,
+      "items": {
+        "type": "object",
+        "required": ["runtime", "min", "max"],
+        "additionalProperties": false,
+        "properties": {
+          "runtime": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "min": { "$ref": "types.schema.json#/$defs/SemVer" },
+          "max": { "$ref": "types.schema.json#/$defs/SemVer" }
+        }
+      }
+    },
+    "config": {
+      "description": "The configuration the adapter takes: per instance and per preset.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "instance": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/Field" } },
+        "preset": { "type": "array", "minItems": 1, "maxItems": 64, "items": { "$ref": "#/$defs/Field" } }
+      }
+    },
+    "budgets": {
+      "description": "Output budget of recv per front end. A front end without a budget gets the default.",
+      "type": "array", "minItems": 1, "maxItems": 3,
+      "items": {
+        "type": "object",
+        "required": ["frontend", "unit", "limit"],
+        "additionalProperties": false,
+        "properties": {
+          "frontend": { "enum": ["cli", "mcp", "direct"] },
+          "unit": { "enum": ["chars", "tokens"] },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 131072 }
+        }
+      }
+    },
+    "ack_markers": {
+      "description": "How the runtime shows a replaced or cut tool result, so a refused acknowledgement can say why.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "replaced": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/Marker" } },
+        "truncated": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/Marker" } }
+      }
+    }
+  },
+  "$defs": {
+    "GOOS": {
+      "enum": ["aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris", "wasip1", "windows", "zos"]
+    },
+    "GOARCH": {
+      "enum": ["386", "amd64", "amd64p32", "arm", "armbe", "arm64", "arm64be", "loong64", "mips", "mipsle", "mips64", "mips64le", "mips64p32", "mips64p32le", "ppc", "ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64", "wasm"]
+    },
+    "FieldType": { "enum": ["string", "integer", "boolean", "enum", "directory", "string_list"] },
+    "Marker": {
+      "description": "A literal substring or an RE2 regular expression, exactly one.",
+      "oneOf": [
+        {
+          "type": "object", "required": ["literal"], "additionalProperties": false,
+          "properties": { "literal": { "type": "string", "maxLength": 1024 } }
+        },
+        {
+          "type": "object", "required": ["regexp"], "additionalProperties": false,
+          "properties": { "regexp": { "type": "string", "maxLength": 1024 } }
+        }
+      ]
+    },
+    "Field": {
+      "description": "One configuration field. A directory must be an absolute path that exists; the daemon checks that when it validates a value.",
+      "type": "object",
+      "required": ["key", "type", "title"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "$ref": "types.schema.json#/$defs/ConfigKey" },
+        "type": { "$ref": "#/$defs/FieldType" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "required": { "type": "boolean" },
+        "default": {},
+        "min": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "max": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
+        "options": {
+          "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "enum" } }, "required": ["type"] },
+          "then": { "required": ["options"] },
+          "else": { "properties": { "options": false } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "integer" } }, "required": ["type"] },
+          "else": { "properties": { "min": false, "max": false } }
+        },
+        {
+          "if": { "properties": { "type": { "enum": ["string", "directory", "enum"] } }, "required": ["type"] },
+          "then": { "properties": { "default": { "type": "string", "maxLength": 4096 } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "integer" } }, "required": ["type"] },
+          "then": { "properties": { "default": { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "boolean" } }, "required": ["type"] },
+          "then": { "properties": { "default": { "type": "boolean" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "string_list" } }, "required": ["type"] },
+          "then": { "properties": { "default": { "type": "array", "maxItems": 256, "items": { "type": "string", "maxLength": 4096 } } } }
+        }
+      ]
+    }
+  }
+}

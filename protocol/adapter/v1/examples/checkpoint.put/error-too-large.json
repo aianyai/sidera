@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 42,
+  "error": {
+    "code": 1006,
+    "message": "checkpoint exceeds 16384 bytes"
+  }
+}

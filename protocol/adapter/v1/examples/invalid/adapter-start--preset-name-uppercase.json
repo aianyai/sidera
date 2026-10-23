@@ -1,0 +1,23 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "adapter.start",
+  "note": "preset name uppercase",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "adapter.start",
+    "params": {
+      "node": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+      "config": {},
+      "presets": [
+        {
+          "name": "Default",
+          "config": {}
+        }
+      ],
+      "sessions": [],
+      "direct_endpoints": []
+    }
+  }
+}

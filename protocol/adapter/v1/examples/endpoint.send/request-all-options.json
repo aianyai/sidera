@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 131,
+  "method": "endpoint.send",
+  "params": {
+    "endpoint": "44444444444444444444444444444444",
+    "to": [
+      "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+      "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/55555555555555555555555555555555"
+    ],
+    "content_type": "text/markdown",
+    "body": "Status of **the build**?",
+    "reply_to": "m-7f3a",
+    "thread": "build-117",
+    "disclose_recipients": true,
+    "accept_before_s": 3600,
+    "idempotency_key": "chat-evt-88213"
+  }
+}

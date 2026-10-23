@@ -1,0 +1,16 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "native_request.handled",
+  "note": "method empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "native_request.handled",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "method": "",
+      "disposition": "preset",
+      "at_ms": 1792713600000
+    }
+  }
+}

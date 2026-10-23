@@ -1,0 +1,12 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "adapter.probe",
+  "note": "tool probes missing",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "adapter.probe",
+    "params": {}
+  }
+}

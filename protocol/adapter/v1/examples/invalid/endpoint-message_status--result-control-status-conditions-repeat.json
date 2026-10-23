@@ -1,0 +1,28 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "endpoint.message_status",
+  "note": "control status conditions repeat",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "recipients": [
+        {
+          "to": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+          "state": "queued"
+        }
+      ],
+      "control_reply": {
+        "signal": "endpoint.status",
+        "activity": "idle",
+        "queued": 0,
+        "conditions": [
+          "runtime_auth",
+          "runtime_auth"
+        ],
+        "as_of": 1792713600
+      }
+    }
+  }
+}

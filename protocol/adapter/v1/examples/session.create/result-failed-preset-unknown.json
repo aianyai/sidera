@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 30,
+  "result": {
+    "outcome": "failed",
+    "reason": "preset_unknown"
+  }
+}

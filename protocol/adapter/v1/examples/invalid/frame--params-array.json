@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "params is always an object",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "ping",
+    "params": []
+  }
+}

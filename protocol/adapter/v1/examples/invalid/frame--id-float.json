@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "an id is an integer or a string",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1.5,
+    "method": "ping",
+    "params": {}
+  }
+}

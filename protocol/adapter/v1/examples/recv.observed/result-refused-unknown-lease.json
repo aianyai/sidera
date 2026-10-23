@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 92,
+  "result": {
+    "verdict": "refused",
+    "reason": "unknown_lease",
+    "items": []
+  }
+}
