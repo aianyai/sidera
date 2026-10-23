@@ -72,7 +72,8 @@
         "type": "directory",
         "title": "Runtime home directory",
         "description": "Where the runtime keeps its state.",
-        "required": true
+        "required": true,
+        "default": "/opt/example"
       },
       {
         "key": "verbose",
@@ -104,6 +105,15 @@
         "type": "string_list",
         "title": "Extra runtime arguments",
         "default": []
+      },
+      {
+        "key": "channel",
+        "type": "enum",
+        "title": "Release channel",
+        "options": [
+          "stable"
+        ],
+        "default": "stable"
       }
     ],
     "preset": [

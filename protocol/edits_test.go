@@ -185,8 +185,9 @@ func TestDifferentialSingleEdits(t *testing.T) {
 
 // constraints are the limits the schemas state for a position of a document.
 type constraints struct {
-	lengths map[int]bool   // string lengths, item counts and property counts
-	numbers map[int64]bool // numeric limits
+	lengths map[int]bool    // string lengths, item counts and property counts
+	numbers map[int64]bool  // numeric limits
+	strings map[string]bool // the strings the schema names as members of an enum or as a const
 }
 
 // schemaIndex resolves references among the four schema files and finds the
@@ -282,12 +283,22 @@ func (x *schemaIndex) descend(nodes []node, step any) []node {
 }
 
 func (x *schemaIndex) limits(nodes []node) constraints {
-	c := constraints{lengths: map[int]bool{}, numbers: map[int64]bool{}}
+	c := constraints{lengths: map[int]bool{}, numbers: map[int64]bool{}, strings: map[string]bool{}}
 	for _, n := range nodes {
 		var all []node
 		x.expand(n, nil, &all)
 		for _, e := range all {
 			m := e.body.(map[string]any)
+			if list, ok := m["enum"].([]any); ok {
+				for _, v := range list {
+					if str, ok := v.(string); ok {
+						c.strings[str] = true
+					}
+				}
+			}
+			if str, ok := m["const"].(string); ok {
+				c.strings[str] = true
+			}
 			for k, v := range m {
 				f, ok := v.(float64)
 				if !ok {
@@ -342,6 +353,9 @@ func TestDifferentialBoundaries(t *testing.T) {
 				var values []any
 				switch old := at(tree, p).(type) {
 				case string:
+					for member := range lim.strings {
+						values = append(values, member)
+					}
 					for l := range lim.lengths {
 						for d := -1; d <= 1; d++ {
 							if n := l + d; n >= 0 && n <= 9000 {
@@ -399,6 +413,7 @@ func TestDifferentialBoundaries(t *testing.T) {
 						}
 					}
 				}
+				values = append(values, discovered(tg, tree, p, at(tree, p))...)
 				for _, v := range values {
 					doc := deepCopy(tree)
 					put(doc, p, v)
@@ -420,4 +435,165 @@ func TestDifferentialBoundaries(t *testing.T) {
 	if c.total < 8000 || c.accept < 3000 || c.reject < 2000 || c.beyond < 100 {
 		t.Errorf("too few boundary documents reached: %+v", c)
 	}
+}
+
+// edge finds where acceptance of a family of values, indexed by an integer, starts
+// and stops, by bisection: from is an index whose value is accepted, [min, max]
+// the range to search. It returns the smallest and the largest accepted index
+// found, and whether the family has a lower and an upper edge inside the range.
+// It assumes acceptance is an interval, which holds for limits.
+func edge(from, min, max int, accept func(int) bool) (lo, hi int, hasLo, hasHi bool) {
+	lo, hi = from, from
+	if !accept(max) {
+		l, h := from, max // accept(l), !accept(h)
+		for h-l > 1 {
+			m := l + (h-l)/2
+			if accept(m) {
+				l = m
+			} else {
+				h = m
+			}
+		}
+		hi, hasHi = l, true
+	}
+	if !accept(min) {
+		l, h := min, from // !accept(l), accept(h)
+		for h-l > 1 {
+			m := l + (h-l)/2
+			if accept(m) {
+				h = m
+			} else {
+				l = m
+			}
+		}
+		lo, hasLo = h, true
+	}
+	return
+}
+
+// discovered returns the values one below, at and one above the edges of what the
+// Go side accepts at a position, found by bisection, so that a limit the schema
+// lacks or states differently is probed even though the schema does not mention
+// it.
+func discovered(tg target, tree any, p pos, old any) []any {
+	goAccepts := func(v any) bool {
+		doc := deepCopy(tree)
+		put(doc, p, v)
+		raw, err := json.Marshal(doc)
+		if err != nil || !inDomain(raw) {
+			return false
+		}
+		_, err = tg.Go(raw)
+		return err == nil
+	}
+	var variant func(n int) any
+	var from, min, max int
+	switch x := old.(type) {
+	case string:
+		from, min, max = len([]rune(x)), 0, 9000
+		runes := []rune(x)
+		variant = func(n int) any {
+			if n <= len(runes) {
+				return string(runes[:n])
+			}
+			return x + strings.Repeat("a", n-len(runes))
+		}
+	case []any:
+		if len(x) == 0 {
+			return nil
+		}
+		from, min, max = len(x), 0, 1100
+		variant = func(n int) any {
+			arr := make2(n)
+			for k := range arr {
+				arr[k] = deepCopy(x[k%len(x)])
+			}
+			return arr
+		}
+	case json.Number:
+		n, err := x.Int64()
+		if err != nil {
+			return nil
+		}
+		// The numbers are searched as offsets from the original value, in two scales.
+		return discoveredNumbers(goAccepts, n)
+	case map[string]any:
+		if len(x) == 0 {
+			return nil
+		}
+		keys := make([]string, 0, len(x))
+		for k := range x {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		from, min, max = len(x), 0, 1100
+		variant = func(n int) any {
+			m := map[string]any{}
+			for _, k := range keys {
+				if len(m) < n {
+					m[k] = deepCopy(x[k])
+				}
+			}
+			for k := 0; len(m) < n; k++ {
+				m[fmt.Sprintf("%s_%d", keys[0], k)] = deepCopy(x[keys[0]])
+			}
+			return m
+		}
+	default:
+		return nil
+	}
+	if !goAccepts(variant(from)) {
+		return nil
+	}
+	lo, hi, hasLo, hasHi := edge(from, min, max, func(n int) bool { return goAccepts(variant(n)) })
+	var out []any
+	if hasHi {
+		out = append(out, variant(hi), variant(hi+1))
+	}
+	if hasLo {
+		out = append(out, variant(lo), variant(lo-1))
+	}
+	return out
+}
+
+func make2(n int) []any {
+	if n < 0 {
+		n = 0
+	}
+	return make([]any, n)
+}
+
+// discoveredNumbers bisects the edges of an integer position on both sides.
+func discoveredNumbers(goAccepts func(any) bool, anchor int64) []any {
+	const bound = int64(1) << 54
+	accept := func(n int64) bool { return goAccepts(json.Number(fmt.Sprint(n))) }
+	if !accept(anchor) {
+		return nil
+	}
+	var out []any
+	if !accept(bound) {
+		l, h := anchor, bound
+		for h-l > 1 {
+			m := l + (h-l)/2
+			if accept(m) {
+				l = m
+			} else {
+				h = m
+			}
+		}
+		out = append(out, json.Number(fmt.Sprint(l)), json.Number(fmt.Sprint(l+1)))
+	}
+	if !accept(-bound) {
+		l, h := -bound, anchor
+		for h-l > 1 {
+			m := l + (h-l)/2
+			if accept(m) {
+				h = m
+			} else {
+				l = m
+			}
+		}
+		out = append(out, json.Number(fmt.Sprint(h)), json.Number(fmt.Sprint(h-1)))
+	}
+	return out
 }

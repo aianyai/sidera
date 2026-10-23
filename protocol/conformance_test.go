@@ -708,3 +708,62 @@ func TestUniqueArrayLimits(t *testing.T) {
 		})
 	}
 }
+
+// TestMessageShapeMatchesMethodKind: a request method needs an id and a
+// notification method must not have one, for every method.
+func TestMessageShapeMatchesMethodKind(t *testing.T) {
+	checked := map[string]int{}
+	for _, ex := range loadExamples(t) {
+		if ex.Kind != "request" && ex.Kind != "notification" {
+			continue
+		}
+		var doc map[string]any
+		if err := json.Unmarshal(ex.Raw, &doc); err != nil {
+			t.Fatal(err)
+		}
+		if ex.Kind == "request" {
+			delete(doc, "id")
+		} else {
+			doc["id"] = 99
+		}
+		raw, _ := json.Marshal(doc)
+		if err := schemaVerdict(t, "message", "", raw); err == nil {
+			t.Errorf("%s: the schema accepts the %s with the wrong shape: %s", ex.Path, ex.Kind, raw)
+		}
+		checked[doc["method"].(string)]++
+	}
+	if len(checked) != len(adapterproto.Methods()) {
+		t.Errorf("checked %d methods, the protocol has %d", len(checked), len(adapterproto.Methods()))
+	}
+}
+
+// TestFieldLimits: the lists of configuration fields hold 64 fields with distinct
+// keys at most.
+func TestFieldLimits(t *testing.T) {
+	build := func(group string, n int) []byte {
+		var fs []map[string]any
+		for i := 0; i < n; i++ {
+			fs = append(fs, map[string]any{"key": fmt.Sprintf("k%d", i), "type": "boolean", "title": "T"})
+		}
+		doc := map[string]any{
+			"manifest_version": 1, "id": "x", "version": "1.0.0", "protocol": map[string]int{"min": 1, "max": 1},
+			"entry": map[string]string{"program": "p"}, "platforms": []map[string]string{{"os": "linux", "arch": "amd64"}},
+			"config": map[string]any{group: fs},
+		}
+		b, _ := json.Marshal(doc)
+		return b
+	}
+	for _, group := range []string{"instance", "preset"} {
+		for _, tc := range []struct {
+			n  int
+			ok bool
+		}{{1, true}, {64, true}, {65, false}} {
+			raw := build(group, tc.n)
+			schemaErr := schemaVerdict(t, "manifest", "", raw)
+			_, goErr := manifest.Parse(raw)
+			if (schemaErr == nil) != tc.ok || (goErr == nil) != tc.ok {
+				t.Errorf("%d %s fields: schema %v, Go %v, want ok=%v", tc.n, group, schemaErr, goErr, tc.ok)
+			}
+		}
+	}
+}

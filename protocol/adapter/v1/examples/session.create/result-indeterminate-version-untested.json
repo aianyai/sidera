@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 21,
+  "result": {
+    "outcome": "indeterminate",
+    "grounds": {
+      "code": "runtime_version_untested",
+      "detail": "runtime 3.0.0 is outside every tested range"
+    }
+  }
+}
