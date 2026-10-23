@@ -91,6 +91,10 @@ func TestCheckBeforeAck(t *testing.T) {
 		{"both kinds of marker present: replaced wins", both, savedNotice + "…9 tokens truncated…", out, AckRefused, AckReplaced},
 
 		// Content mismatch.
+		{"an empty expected output is refused: the stored output is missing", both, out, "", AckRefused, AckContentMismatch},
+		{"an expected output of only whitespace is refused", noMarkers, out, " \n\t", AckRefused, AckContentMismatch},
+		{"an empty expected output and an empty result are refused", noMarkers, "", "", AckRefused, AckContentMismatch},
+		{"an empty expected output is a mismatch even beside a replacement notice", replacingRuntime, savedNotice, "", AckRefused, AckContentMismatch},
 		{"a result cut in the middle without a marker is a mismatch", cuttingRuntime, out[:30], out, AckRefused, AckContentMismatch},
 		{"an unrelated result is a mismatch", both, "command not found: recv", out, AckRefused, AckContentMismatch},
 		{"an empty result is a mismatch", both, "", out, AckRefused, AckContentMismatch},

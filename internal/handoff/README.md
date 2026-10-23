@@ -114,8 +114,11 @@ Before acknowledging:
   result has more occurrences of a marker of that list than the expected output
   (replaced markers are judged first; zero-width matches are not counted), and with `AckContentMismatch` when the
   expected output is not in the observed result in full. Otherwise it allows
-  (`AckSeenInFull`). Without declared markers only the content decides: the
-  output seen in full is allowed, anything else is a mismatch. There is no
+  (`AckSeenInFull`). An expected output that is empty after trimming is always
+  refused as a mismatch: a page's output is never empty, so it means the stored
+  output is missing, and every text contains the empty text.
+  Without declared markers only the content decides: the output seen in full is
+  allowed, anything else is a mismatch. There is no
   "unknown runtime" refusal, because containment of the expected output is what
   proves that the model saw it; the markers only give a refusal its cause and
   also refuse a result that carries a notice beside the whole output.

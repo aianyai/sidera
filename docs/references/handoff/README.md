@@ -98,9 +98,12 @@ of markers, each marker a literal substring or an RE2 regular expression. The
 check refuses with the replaced reason, then the truncated reason, when the
 observed result has more occurrences of a marker than the expected output (a
 zero-width match is not an occurrence), and with the mismatch reason when the
-output is simply not there. Declarations are
-validated once: an empty marker, a marker with both forms, a regular expression
-that does not compile and one that matches the empty text are errors.
+output is simply not there. Declarations are validated once: an empty marker, a
+marker with both forms, a regular expression that does not compile and one that
+matches the empty text are errors.
+
+An expected output that is empty after trimming is refused as a mismatch before
+anything else is compared.
 
 The observed text must be what the model received as the tool result, never a
 full output that the runtime saved elsewhere. An adapter that cannot obtain the
@@ -229,6 +232,11 @@ The delivery side that these rules call into is described in
   prompt and hold back the first real message by the minimum interval. One is
   sent per created session, which authorization and the rate of session
   creation already bound.
+- **An empty expected output is refused.** The output of a page is never empty,
+  so an empty value means the stored output is missing. Every text contains the
+  empty text, so the containment test would accept anything, and acknowledging
+  would silently lose a message that was never compared. Refusing costs a
+  redelivery and makes the missing output visible.
 - **Acknowledge only after comparing.** Acknowledging a message the model did
   not read loses it: the sender is told it was delivered and nobody reads it. A
   refused acknowledgement costs a redelivery marked as possibly duplicate.

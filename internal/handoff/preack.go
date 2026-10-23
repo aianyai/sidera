@@ -160,16 +160,25 @@ const (
 // a runtime that declares no markers is still held to it: different content is
 // refused, and the output seen in full is accepted.
 //
+// An expected output that is empty after trimming is refused as a mismatch,
+// whatever was observed: the output of a page is never empty, so an empty
+// value means the stored output is missing, and every text contains the empty
+// text, so acknowledging would lose a message silently.
+//
 // observed is the text of the tool result as the model received it, and
 // expected is Page.Output.
 func CheckBeforeAck(markers MarkerSet, observed, expected string) (AckVerdict, AckReason) {
+	want := strings.TrimSpace(expected)
+	if want == "" {
+		return AckRefused, AckContentMismatch
+	}
 	if exceeds(markers.replaced, observed, expected) {
 		return AckRefused, AckReplaced
 	}
 	if exceeds(markers.truncated, observed, expected) {
 		return AckRefused, AckTruncated
 	}
-	if !strings.Contains(observed, strings.TrimSpace(expected)) {
+	if !strings.Contains(observed, want) {
 		return AckRefused, AckContentMismatch
 	}
 	return AckAllowed, AckSeenInFull
