@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/ident"
 )
 
@@ -36,7 +37,7 @@ func TestValidateRequest(t *testing.T) {
 		{"a configuration change with an expected version is well formed",
 			Request{ID: id, Op: Operation{Kind: OpEditDeclaration}, ExpectedVersion: 3}, ReasonOK},
 		{"a policy change is a configuration change",
-			Request{ID: id, Op: Operation{Kind: OpChangePolicy, PolicyChange: PolicyChangeTightening}}, ReasonMissingExpectedVersion},
+			Request{ID: id, Op: Operation{Kind: OpChangePolicy, PolicyChange: authz.Tighten}}, ReasonMissingExpectedVersion},
 		{"a missing operation ID is reported before a missing version",
 			Request{Op: Operation{Kind: OpChangeRelaySettings}}, ReasonMissingOperationID},
 		{"trust-edge operations carry no version",

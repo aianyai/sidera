@@ -43,7 +43,9 @@ single local revocation to each node, and each node answers with its own verdict
 from its own list, so one person can be allowed on one node and refused on
 another.
 
-An unclassifiable policy or preset change counts as loosening. A preset change
+A policy change is classified by the policy package (`authz.Change`): `Unchanged`
+and `Tighten` need manage, anything else (`Loosen`, an unset or unknown value)
+needs full control. An unclassifiable preset change counts as loosening. A preset change
 that removes or narrows a preset needs manage; adding or loosening one needs
 full control. An operation outside the catalogue, a requirement the code does
 not know, or an unknown kind of caller, is denied to everyone.
@@ -143,7 +145,8 @@ neither file nor probe results.
   person does not fully trust must not be able to do more than that machine
   deserves, however high the person's standing is, and a high cap must not raise
   a low list level. Taking the minimum satisfies both.
-- **Unclassified policy and preset changes count as loosening.** Refusing a harmless change
+- **Unclassified policy and preset changes count as loosening.** The policy
+  classification has no valid zero value, so an unset field falls here. Refusing a harmless change
   costs a retry by someone with more authority; allowing a loosening one by
   mistake hands out rights.
 - **Directive authority at execution, certificate window at signing.** The node

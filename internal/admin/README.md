@@ -28,7 +28,7 @@ Actors are `LocalOwner()` or `RemotePerson(personID, DeviceCert)`.
 | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | view          | `OpRead`, `OpQueryOperationResult` (the requester's own results).                                                                                                                                                           |
 | manage        | Revoke trust; locally revoke a node; reject a trust request; disable inheritance; shorten the grace period; tighten policy; remove or narrow a preset; manage endpoints and sessions; edit declaration fields; relay settings; switch LAN discovery on or off; issue an offline directive. |
-| full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter; add or loosen a preset; loosen policy. An unclassified policy or preset change counts as loosening. |
+| full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter; add or loosen a preset; loosen policy. A policy change is manage only when the policy package classifies it `Unchanged` or `Tighten`; `Loosen`, an unset or an unknown classification, and an unclassified preset change count as loosening. |
 | local owner   | `OpModifyAuthorizedList`.                                                                                                                                                                                                   |
 
 A batch local revocation is the CLI sending `OpLocallyRevokeNode` to each node;
@@ -104,10 +104,12 @@ own `KeyFor`, so nobody sees another person's results.
   declaration fields that have no operation of their own; flipping inheritance
   through the declaration is `OpEnableInheritance` or `OpDisableInheritance`,
   and relay settings are `OpChangeRelaySettings`.
-- Policy changes are classified (`PolicyChangeClass`) by the policy rules. The
-  local type stands in until the policy package is integrated. Preset changes
-  are classified by the caller (`PresetChangeClass`) from the preset before and
-  after.
+- `Operation.PolicyChange` is an `authz.Change`, the policy package's own
+  classification of the change (`authz.Classify`). `Unchanged` and `Tighten`
+  need manage; `Loosen`, the zero value (not a classification) and any value out
+  of range need full control, so a caller that forgets the field never gets
+  manage. Preset changes are classified by the caller (`PresetChangeClass`) from
+  the preset before and after.
 - `Fingerprint` is a collision-resistant digest of the whole request.
   Stored results are filed under `RequestKey` (person plus operation ID).
 - The signature format of a reachability proof is outside this package;

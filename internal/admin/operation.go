@@ -1,5 +1,7 @@
 package admin
 
+import "github.com/aianyai/sidera/internal/authz"
+
 // OpKind names an administrative operation.
 type OpKind int
 
@@ -84,31 +86,15 @@ const (
 	OpModifyAuthorizedList
 )
 
-// PolicyChangeClass is the effect of a policy change, as classified by the
-// policy rules. This package does not inspect policies; it only needs to know
-// whether a change loosens.
-type PolicyChangeClass int
-
-const (
-	// PolicyChangeUnclassified is the zero value: the change could not be
-	// classified. It is treated as loosening, because denying a harmless change
-	// is cheap and allowing a loosening one by mistake is not.
-	PolicyChangeUnclassified PolicyChangeClass = iota
-	// PolicyChangeTightening only narrows what is allowed.
-	PolicyChangeTightening
-	// PolicyChangeLoosening widens what is allowed.
-	PolicyChangeLoosening
-)
-
 // PresetChangeClass is the effect of a preset change, classified by the caller
-// from the preset before and after. It has the same shape as
-// PolicyChangeClass.
+// from the preset before and after. It has the same shape as authz.Change:
+// the zero value is not a classification.
 type PresetChangeClass int
 
 const (
 	// PresetChangeUnclassified is the zero value: the change could not be
-	// classified. It is treated as loosening, like an unclassified policy
-	// change.
+	// classified. It is treated as loosening, like an unset policy
+	// classification.
 	PresetChangeUnclassified PresetChangeClass = iota
 	// PresetChangeNarrowing removes a preset or narrows an existing one.
 	PresetChangeNarrowing
@@ -120,9 +106,10 @@ const (
 // depends on.
 type Operation struct {
 	Kind OpKind
-	// PolicyChange classifies the change for OpChangePolicy and is ignored for
-	// every other kind.
-	PolicyChange PolicyChangeClass
+	// PolicyChange is the policy package's classification of the change, for
+	// OpChangePolicy; it is ignored for every other kind. Its zero value is not
+	// a classification, so an operation that leaves it unset needs full control.
+	PolicyChange authz.Change
 	// PresetChange classifies the change for OpChangePreset and is ignored for
 	// every other kind.
 	PresetChange PresetChangeClass
@@ -173,7 +160,9 @@ func RequirementOf(op Operation) (Requirement, bool) {
 		OpSetLANDiscovery, OpIssueOfflineDirective:
 		return RequireManage, true
 	case OpChangePolicy:
-		if op.PolicyChange == PolicyChangeTightening {
+		// Only a change known not to loosen is manage: Loosen, an unset
+		// classification and any value out of range need full control.
+		if op.PolicyChange == authz.Unchanged || op.PolicyChange == authz.Tighten {
 			return RequireManage, true
 		}
 		return RequireFullControl, true

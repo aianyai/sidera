@@ -3,6 +3,8 @@ package admin
 import (
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/authz"
 )
 
 // catalogue is the complete operation catalogue with the requirement each
@@ -22,7 +24,8 @@ var catalogue = []struct {
 	{"rejecting a trust request needs manage", Operation{Kind: OpRejectTrustRequest}, RequireManage},
 	{"disabling inheritance needs manage", Operation{Kind: OpDisableInheritance}, RequireManage},
 	{"shortening the grace period needs manage", Operation{Kind: OpShortenGracePeriod}, RequireManage},
-	{"tightening policy needs manage", Operation{Kind: OpChangePolicy, PolicyChange: PolicyChangeTightening}, RequireManage},
+	{"tightening policy needs manage", Operation{Kind: OpChangePolicy, PolicyChange: authz.Tighten}, RequireManage},
+	{"a policy change that moves nothing needs manage", Operation{Kind: OpChangePolicy, PolicyChange: authz.Unchanged}, RequireManage},
 	{"managing endpoints and sessions needs manage", Operation{Kind: OpManageEndpointSession}, RequireManage},
 	{"editing the declaration needs manage", Operation{Kind: OpEditDeclaration}, RequireManage},
 	{"changing relay settings needs manage", Operation{Kind: OpChangeRelaySettings}, RequireManage},
@@ -39,9 +42,9 @@ var catalogue = []struct {
 	{"adding or loosening a preset needs full control", Operation{Kind: OpChangePreset, PresetChange: PresetChangeLoosening}, RequireFullControl},
 	{"an unclassifiable preset change counts as loosening", Operation{Kind: OpChangePreset, PresetChange: PresetChangeUnclassified}, RequireFullControl},
 	{"an out-of-range preset classification counts as loosening", Operation{Kind: OpChangePreset, PresetChange: 99}, RequireFullControl},
-	{"loosening policy needs full control", Operation{Kind: OpChangePolicy, PolicyChange: PolicyChangeLoosening}, RequireFullControl},
-	{"an unclassifiable policy change counts as loosening", Operation{Kind: OpChangePolicy, PolicyChange: PolicyChangeUnclassified}, RequireFullControl},
-	{"an out-of-range policy classification counts as loosening", Operation{Kind: OpChangePolicy, PolicyChange: 99}, RequireFullControl},
+	{"loosening policy needs full control", Operation{Kind: OpChangePolicy, PolicyChange: authz.Loosen}, RequireFullControl},
+	{"a policy change with the classification unset (zero value) needs full control", Operation{Kind: OpChangePolicy}, RequireFullControl},
+	{"an out-of-range policy classification needs full control", Operation{Kind: OpChangePolicy, PolicyChange: 99}, RequireFullControl},
 
 	// The list itself belongs to the local owner.
 	{"modifying the authorized-persons list is for the local owner only", Operation{Kind: OpModifyAuthorizedList}, RequireLocalOwner},
@@ -378,7 +381,9 @@ func TestAcceptanceScenarioManageLevel(t *testing.T) {
 		{"manage cannot enable inheritance", Operation{Kind: OpEnableInheritance}, false},
 		{"manage cannot extend the grace period", Operation{Kind: OpExtendGracePeriod}, false},
 		{"manage cannot clear a locally-revoked record", Operation{Kind: OpClearLocallyRevoked}, false},
-		{"manage cannot loosen policy", Operation{Kind: OpChangePolicy, PolicyChange: PolicyChangeLoosening}, false},
+		{"manage cannot loosen policy", Operation{Kind: OpChangePolicy, PolicyChange: authz.Loosen}, false},
+		{"manage cannot change policy with the classification unset", Operation{Kind: OpChangePolicy}, false},
+		{"manage cannot change policy with an out-of-range classification", Operation{Kind: OpChangePolicy, PolicyChange: 99}, false},
 		{"manage can revoke trust", Operation{Kind: OpRevokeTrust}, true},
 		{"manage can locally revoke a node", Operation{Kind: OpLocallyRevokeNode}, true},
 		{"manage can reject a trust request", Operation{Kind: OpRejectTrustRequest}, true},
@@ -387,7 +392,8 @@ func TestAcceptanceScenarioManageLevel(t *testing.T) {
 		{"manage can query the result of its own operation", Operation{Kind: OpQueryOperationResult}, true},
 		{"manage can disable inheritance", Operation{Kind: OpDisableInheritance}, true},
 		{"manage can shorten the grace period", Operation{Kind: OpShortenGracePeriod}, true},
-		{"manage can tighten policy", Operation{Kind: OpChangePolicy, PolicyChange: PolicyChangeTightening}, true},
+		{"manage can tighten policy", Operation{Kind: OpChangePolicy, PolicyChange: authz.Tighten}, true},
+		{"manage can apply a policy change that moves nothing", Operation{Kind: OpChangePolicy, PolicyChange: authz.Unchanged}, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -432,7 +438,7 @@ func TestFullControlMayLoosenPolicy(t *testing.T) {
 	a := person(t, 1)
 	list := mustList(t, Entry{Person: a, Level: LevelFullControl})
 	actor := RemotePerson(a, validCert(LevelFullControl))
-	for _, class := range []PolicyChangeClass{PolicyChangeLoosening, PolicyChangeTightening, PolicyChangeUnclassified} {
+	for _, class := range []authz.Change{authz.Loosen, authz.Tighten, authz.Unchanged, 0, 99} {
 		if !Authorize(list, actor, Operation{Kind: OpChangePolicy, PolicyChange: class}, t0).Allowed {
 			t.Fatalf("full control must be allowed to change policy (class %d)", class)
 		}
