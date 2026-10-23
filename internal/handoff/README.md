@@ -17,8 +17,8 @@ to the delivery side, which calls into this package.
 | `PromptText(count)` | The wake-up text. No message body, ever. Provisional wording. |
 | `DecidePrompt(PromptInput, PromptParams, now)` | Whether to send a prompt now: send or hold, with a typed reason, the prompt kind to record and the count for the text. A hold may carry `RetryAt`, when to evaluate again. |
 | `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. |
-| `Pack(queue, lease, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the one after the parts already acknowledged). |
-| `Part(msg, k, lease, Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
+| `Pack(queue, delivery.LeaseID, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the one after the parts already acknowledged). |
+| `Part(msg, k, delivery.LeaseID, Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
 | `CheckBeforeAck(runtime, observed, expected)` | Whether an adapter may acknowledge for the agent. |
 | `DefaultBudget()`, `PathBudgets()`, `EstimateTokens`, `UTF16Len` | The output budget and the units it is measured in. |
 
@@ -117,11 +117,12 @@ Before acknowledging:
 - `Part` is called with the budget `Pack` used for part 1. The cut points depend
   on the message and the budget, so changing the budget between the two changes
   the parts.
-- The lease passed to `Pack` and `Part` is the ID the delivery side generated: at
-  most `MaxLeaseLen` (32) bytes of plain text that JSON does not escape, as an
-  identifier is. A longer one is rejected.
-- `Message.NextPart` is filled by the delivery side from the parts of the message
-  the model acknowledged: the number after the last one. It is 0 for a message
-  never handed out in parts.
+- The lease passed to `Pack` and `Part` is a `delivery.LeaseID`, the ID the
+  delivery side generated. A page prints it as its text form, `MaxLeaseLen`
+  (`delivery.LeaseIDTextLen`, 32) lowercase hex characters, which JSON does not
+  escape. The zero `LeaseID` is rejected (`ErrLeaseUnset`).
+- `Message.NextPart` is filled from `delivery.Record.NextPart()`: the number
+  after the last part the model acknowledged. It is 0 for a message never handed
+  out in parts.
 - `PromptParams` has no default: `MaxPerHour` and `MinInterval` are undecided and
   must be configured.

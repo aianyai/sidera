@@ -88,7 +88,25 @@ Intake of a new request: a deadline already past is rejected as expired; one
 beyond now plus cap plus tolerance is rejected as out of range; denied
 authorization is rejected with the reason the denial carries (a denial without
 one is invalid input); suspended authorization is a non-final result and the
-sender keeps retrying until the deadline.
+sender keeps retrying until the deadline. `IntakeAuthorization` is the single
+place where the policy's verdict becomes that authorization:
+
+| Policy verdict | Authorization |
+| -------------- | ------------- |
+| allow (granted, reply permission) | allow |
+| suspend (trust suspended) | suspend |
+| reject: trust denied, explicit deny, not authorized, preset not allowed | deny, `unauthorized` |
+| reject: body too large | deny, `too_large` |
+| reject: endpoint paused, refuses several recipients, sender not accepted | deny, `endpoint_declined` |
+| reject: malformed request | deny, `malformed` |
+| reject: endpoint hidden | deny, `endpoint_missing` |
+| reject: any reason not listed | deny, `unauthorized` |
+| an outcome that is none of the three | the zero authorization, refused by `Intake` and `Handout` as invalid input |
+
+A hidden endpoint is reported as not existing, so the sender cannot tell it from
+an endpoint that is absent, and all the rules that refuse without a declaration
+by the endpoint are reported alike as `unauthorized`, so the sender does not
+learn which rule refused it.
 
 ### Leases, acknowledgements, chunks
 
@@ -96,10 +114,15 @@ sender keeps retrying until the deadline.
 endpoint has an active turn and never lives beyond 15 minutes in total. An
 expired lease returns the message to the queue flagged as a possible duplicate;
 after the fourth lease expires unacknowledged the delivery is `delivery_unknown`.
-A repeated `recv` by the same endpoint first gets back the messages it holds a
-live lease on, flagged as possible duplicates, under the same lease. An
-acknowledgement needs the owning endpoint's token, stays valid after the lease
-expired, and corrects `delivery_unknown`. A message handed out as n chunks is
+Each lease has a `LeaseID`, 16 random bytes shown as 32 lowercase hex
+characters, generated when the lease is issued from an injected random source;
+the page `recv` prints carries it. A repeated `recv` by the same endpoint first
+gets back the messages it holds a live lease on, flagged as possible duplicates,
+under the same lease and the same ID. An acknowledgement needs the owning
+endpoint's token and names a lease issued for that message; one that names none
+(never issued, or unset) is refused and changes nothing. It stays valid after the
+lease expired, even after a redelivery issued a newer lease, and corrects
+`delivery_unknown`. A message handed out as n chunks is
 `delivered` only when all n are acknowledged; only a chunk that was handed out
 can be acknowledged, and the first chunk not yet acknowledged is the next one
 to hand out. At `recv`, suspended authorization skips the message (no lease, no
@@ -167,9 +190,12 @@ the dedup record and returned on every repeat.
   report a body the agent never fully received. For the same reason
   `delivery_unknown` needs a hand-out and an acknowledgement needs a chunk that
   was handed out.
-- **The rejection reason is chosen by the caller.** The policy knows why it
-  denied; collapsing every denial to one reason would hide from the sender
-  whether to retry, fix its request or give up.
+- **The rejection reason is carried by the denial, from one mapping.** The policy
+  knows why it denied; collapsing every denial to one reason would hide from the
+  sender whether to retry, fix its request or give up. The mapping from policy
+  reason to rejection reason lives in `IntakeAuthorization` alone, so intake and
+  the second check at `recv` cannot tell a sender two different things about the
+  same refusal.
 - **One rule for applying a report.** If every caller turned the report into
   events itself, one of them would apply the receipt and forget the block, and a
   block reported while the receipt was still unknown would never be told.
@@ -177,6 +203,14 @@ the dedup record and returned on every repeat.
   for what is missing.
 - **Tokens.** Only the endpoint a message is for may settle its lease, so another
   session sharing a project directory cannot mark messages delivered.
+- **An acknowledgement names a lease issued for the message, not only the latest.**
+  Matching the latest lease alone would refuse the acknowledgement of an agent
+  that read a page whose lease expired and was replaced by a redelivery; the
+  agent did see the chunk, so the message would be handed out a third time. The
+  record keeps every ID it issued (at most four) and accepts any of them.
+- **Lease IDs are random, not counters.** An ID that could be guessed would let an
+  acknowledgement name a lease it never held; 16 random bytes cannot be guessed,
+  and the randomness is injected so tests and replays stay deterministic.
 - **Dedup keys include the recipient.** One message to several endpoints on one
   node is several deliveries, each with its own state.
 - **Retention equals `report_by`.** A retry after `report_by` cannot reach the
@@ -206,9 +240,15 @@ the dedup record and returned on every repeat.
 - `internal/delivery/lease.go`: `Handout`, `Renew`, `Ack`, `NextPart`,
   `SortForRecv`. Tests:
   `TestHandout`, `TestHandoutLeaseTimes`, `TestHandoutInputs`, `TestRenew`,
-  `TestLeaseExpiry`, `TestAck`, `TestChunkedAck`, `TestSortForRecv`.
+  `TestLeaseExpiry`, `TestAck`, `TestChunkedAck`, `TestSortForRecv`,
+  `TestLeaseIDs`, `TestAckLease`.
+- `internal/delivery/leaseid.go`: `LeaseID`, `NewLeaseID`, `ParseLeaseID`.
+  Tests: `TestNewLeaseID`, `TestLeaseIDText`, `TestParseLeaseID`.
 - `internal/delivery/authorization.go`, `internal/delivery/intake.go`:
-  `Authorization`, `Intake`. Test: `TestIntake`.
+  `Authorization`, `IntakeAuthorization`, `Intake`. Tests: `TestIntake`,
+  `TestIntakeAuthorization`, `TestIntakeAuthorizationRejectReasons`,
+  `TestIntakeAuthorizationMapsEveryReason` (fails when a policy reason has no
+  explicit mapping).
 - `internal/delivery/dedup.go`: deduplication. Tests: `TestCheckDedup`,
   `TestDedupReply`.
 - `internal/delivery/merge.go`: merge keys, `FeedbackQueue`. Tests:

@@ -50,11 +50,11 @@ func TestScenarioNormalDeliveryIsSilent(t *testing.T) {
 	var all []Feedback
 	src, fbs := pull(t, src, tgt, at(2*time.Second))
 	all = append(all, fbs...)
-	tgt, res, _ := tgt.Handout(at(time.Minute), AuthorizationAllow, 1, 1)
+	tgt, res, _ := tgt.Handout(at(time.Minute), AuthorizationAllow, 1, 1, testRand)
 	if res.Action != HandoutGranted {
 		t.Fatal(res)
 	}
-	tgt, _, _, _ = tgt.Ack(at(2*time.Minute), Ack{Part: 1, TokenMatches: true})
+	tgt, _, _, _ = ackUnder(tgt, at(2*time.Minute), Ack{Part: 1, TokenMatches: true})
 	src, fbs = pull(t, src, tgt, at(3*time.Minute))
 	all = append(all, fbs...)
 	if src.State != StateDelivered || len(all) != 0 {
@@ -117,8 +117,8 @@ func TestScenarioExpiredThenCorrectedOnce(t *testing.T) {
 	all = append(all, kindsOf(out.Feedback)...)
 	// The target had the message all along and delivers it.
 	tgt, _ := NewTargetRecord(at(9*time.Minute), ab, src.ReportBy, DefaultEndpointMaxQueue)
-	tgt, _, _ = tgt.Handout(at(20*time.Minute), AuthorizationAllow, 1, 1)
-	tgt, _, _, _ = tgt.Ack(at(21*time.Minute), Ack{Part: 1, TokenMatches: true})
+	tgt, _, _ = tgt.Handout(at(20*time.Minute), AuthorizationAllow, 1, 1, testRand)
+	tgt, _, _, _ = ackUnder(tgt, at(21*time.Minute), Ack{Part: 1, TokenMatches: true})
 	for i := 0; i < 3; i++ {
 		var fbs []Feedback
 		src, fbs = pull(t, src, tgt, at(time.Hour+time.Duration(i)*time.Minute))
@@ -185,7 +185,7 @@ func TestScenarioLeaseRenewalBeyondCapEndsUnknownOnce(t *testing.T) {
 	tgt, _ := NewTargetRecord(at(time.Minute), ab, src.ReportBy, 2*time.Hour)
 	now := at(time.Minute)
 	for lease := 0; lease < MaxLeases; lease++ {
-		tgt, _, _ = tgt.Handout(now, AuthorizationAllow, 1, 1)
+		tgt, _, _ = tgt.Handout(now, AuthorizationAllow, 1, 1, testRand)
 		// The agent keeps working, so the lease is renewed up to its cap and never acknowledged.
 		for i := 0; i < 10; i++ {
 			now = now.Add(2 * time.Minute)
@@ -231,7 +231,7 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 		var all []Feedback
 		for i := 2; i < 6; i++ {
 			var res HandoutResult
-			tgt, res, _ = tgt.Handout(at(time.Duration(i)*time.Minute), AuthorizationSuspend, 1, 1)
+			tgt, res, _ = tgt.Handout(at(time.Duration(i)*time.Minute), AuthorizationSuspend, 1, 1, testRand)
 			if res.Action != HandoutSkipped || tgt.Lease.Active || tgt.Sub != SubNone {
 				t.Fatalf("round %d: %+v", i, res)
 			}
@@ -239,8 +239,8 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 			src, fbs = pull(t, src, tgt, at(time.Duration(i)*time.Minute))
 			all = append(all, fbs...)
 		}
-		tgt, res, _ := tgt.Handout(at(10*time.Minute), AuthorizationAllow, 1, 1)
-		tgt, _, _, _ = tgt.Ack(at(11*time.Minute), Ack{Part: 1, TokenMatches: true})
+		tgt, res, _ := tgt.Handout(at(10*time.Minute), AuthorizationAllow, 1, 1, testRand)
+		tgt, _, _, _ = ackUnder(tgt, at(11*time.Minute), Ack{Part: 1, TokenMatches: true})
 		src, fbs := pull(t, src, tgt, at(12*time.Minute))
 		all = append(all, fbs...)
 		if res.Action != HandoutGranted || src.State != StateDelivered || len(all) != 0 {
@@ -250,7 +250,7 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 	t.Run("a suspension lasting to the queue time ends as backlog expiry", func(t *testing.T) {
 		src := NewSourceRecord(ab)
 		tgt, _ := NewTargetRecord(at(time.Minute), ab, src.ReportBy, DefaultEndpointMaxQueue)
-		tgt, _, _ = tgt.Handout(at(10*time.Minute), AuthorizationSuspend, 1, 1)
+		tgt, _, _ = tgt.Handout(at(10*time.Minute), AuthorizationSuspend, 1, 1, testRand)
 		tgt, _, _ = tgt.Tick(at(time.Minute + DefaultEndpointMaxQueue))
 		if tgt.State != StateRejected || tgt.Reject != RejectBacklogExpired {
 			t.Errorf("target %s/%s", tgt.State, tgt.Reject)
@@ -259,7 +259,7 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 	t.Run("revocation, local revoke or tightening reject at recv and the sender is told", func(t *testing.T) {
 		src := NewSourceRecord(ab)
 		tgt, _ := NewTargetRecord(at(time.Minute), ab, src.ReportBy, DefaultEndpointMaxQueue)
-		tgt, res, _ := tgt.Handout(at(2*time.Minute), AuthorizationDeny, 1, 1)
+		tgt, res, _ := tgt.Handout(at(2*time.Minute), AuthorizationDeny, 1, 1, testRand)
 		src, fbs := pull(t, src, tgt, at(3*time.Minute))
 		if res.Action != HandoutDenied || src.State != StateRejected || src.Reject != RejectSecondCheckFailed || !sameKinds(kindsOf(fbs), []Kind{KindRejected}) {
 			t.Errorf("res %+v source %s/%s feedback %v", res, src.State, src.Reject, fbs)
@@ -271,8 +271,8 @@ func TestScenarioPull(t *testing.T) {
 	ab := at(10 * time.Minute)
 	t.Run("a recv cut off mid-call is answered at once by the same endpoint, flagged as possible duplicate", func(t *testing.T) {
 		tgt, _ := NewTargetRecord(t0, ab, ReportBy(ab), DefaultEndpointMaxQueue)
-		tgt, first, _ := tgt.Handout(at(time.Minute), AuthorizationAllow, 1, 1)
-		_, retry, _ := tgt.Handout(at(time.Minute+5*time.Second), AuthorizationAllow, 1, 1)
+		tgt, first, _ := tgt.Handout(at(time.Minute), AuthorizationAllow, 1, 1, testRand)
+		_, retry, _ := tgt.Handout(at(time.Minute+5*time.Second), AuthorizationAllow, 1, 1, testRand)
 		if first.PossibleDuplicate || retry.Action != HandoutResent || !retry.PossibleDuplicate {
 			t.Errorf("first %+v retry %+v", first, retry)
 		}
@@ -284,7 +284,7 @@ func TestScenarioPull(t *testing.T) {
 		redeliveries := 0
 		for i := 0; i < 10 && tgt.State == StateAccepted; i++ {
 			var res HandoutResult
-			tgt, res, _ = tgt.Handout(now, AuthorizationAllow, 1, 1)
+			tgt, res, _ = tgt.Handout(now, AuthorizationAllow, 1, 1, testRand)
 			if res.Action != HandoutGranted {
 				t.Fatalf("round %d: %+v", i, res)
 			}
@@ -306,8 +306,8 @@ func TestScenarioPull(t *testing.T) {
 	})
 	t.Run("another endpoint's token cannot acknowledge the lease", func(t *testing.T) {
 		tgt, _ := NewTargetRecord(t0, ab, ReportBy(ab), DefaultEndpointMaxQueue)
-		tgt, _, _ = tgt.Handout(at(time.Minute), AuthorizationAllow, 1, 1)
-		tgt, v, _, _ := tgt.Ack(at(2*time.Minute), Ack{Part: 1, TokenMatches: false})
+		tgt, _, _ = tgt.Handout(at(time.Minute), AuthorizationAllow, 1, 1, testRand)
+		tgt, v, _, _ := ackUnder(tgt, at(2*time.Minute), Ack{Part: 1, TokenMatches: false})
 		if v != AckRefusedToken || tgt.State != StateAccepted || !tgt.Lease.Active {
 			t.Errorf("verdict %v state %s", v, tgt.State)
 		}
@@ -372,7 +372,7 @@ func TestScenarioForcedClosure(t *testing.T) {
 		return r
 	}
 	denied := func(t *testing.T, r Record, now time.Duration) Record {
-		r, res, err := r.Handout(at(now), AuthorizationDeny, 1, 1)
+		r, res, err := r.Handout(at(now), AuthorizationDeny, 1, 1, testRand)
 		if err != nil || res.Action != HandoutDenied {
 			t.Fatalf("%+v %v", res, err)
 		}

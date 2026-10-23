@@ -9,11 +9,26 @@ import (
 	"testing"
 	"unicode/utf8"
 
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 )
 
 // testLease stands in for the lease ID the delivery side generates.
-const testLease = "lease-0123456789abcdef"
+var testLease = mustLeaseID(0x0123456789abcdef)
+
+// mustLeaseID returns the lease ID whose last eight bytes are n, so a test can
+// name several distinct IDs.
+func mustLeaseID(n uint64) delivery.LeaseID {
+	var b [delivery.LeaseIDLen]byte
+	for i := 0; i < 8; i++ {
+		b[delivery.LeaseIDLen-1-i] = byte(n >> (8 * i))
+	}
+	id, err := delivery.ParseLeaseID(fmt.Sprintf("%x", b))
+	if err != nil {
+		panic(err)
+	}
+	return id
+}
 
 func testAddress(t testing.TB) ident.Address {
 	t.Helper()
@@ -87,7 +102,7 @@ func checkPage(t testing.TB, p Page, b Budget) shownPage {
 		t.Fatalf("output measures %d, over the budget %d", size, b.Limit)
 	}
 	s := decode(t, p)
-	if s.Lease != testLease {
+	if s.Lease != testLease.String() {
 		t.Fatalf("the page carries lease %q, want %q", s.Lease, testLease)
 	}
 	if len(s.Messages) != len(p.HandedOut) {
@@ -155,7 +170,7 @@ func TestPackEmptyQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(p.Output), "{\"lease\":\""+testLease+"\",\"messages\":[],\"more\":0}\n"; got != want {
+	if got, want := string(p.Output), "{\"lease\":\""+testLease.String()+"\",\"messages\":[],\"more\":0}\n"; got != want {
 		t.Fatalf("output %q, want %q", got, want)
 	}
 	if len(p.HandedOut) != 0 || p.Remaining != 0 || p.ExitCode != ExitOK {
@@ -535,18 +550,17 @@ func TestPartsDoNotDependOnThePossiblyDuplicateFlag(t *testing.T) {
 	}
 }
 
-// The delivery side generates the lease ID, so its length is bounded rather
-// than known: the cut points reserve the longest lease and so stay the same
-// whichever one a page carries.
+// The cut points reserve the room of a lease ID, so they stay the same
+// whichever lease a page carries.
 func TestPartsDoNotDependOnTheLease(t *testing.T) {
 	m := msg(t, "m1", strings.Repeat("lease ", 4_000))
 	b := Budget{UnitChars, 2_000}
-	leases := []string{"", "a", testLease, strings.Repeat("L", MaxLeaseLen)}
+	leases := []delivery.LeaseID{mustLeaseID(1), testLease, mustLeaseID(^uint64(0))}
 	var want []string
 	for i, lease := range leases {
 		first, err := Pack([]Message{m}, lease, b)
 		if err != nil {
-			t.Fatalf("lease %q: %v", lease, err)
+			t.Fatalf("lease %v: %v", lease, err)
 		}
 		n := first.HandedOut[0].Parts
 		if n < 2 {
@@ -555,44 +569,47 @@ func TestPartsDoNotDependOnTheLease(t *testing.T) {
 		for k := 1; k <= n; k++ {
 			p, err := Part(m, k, lease, b)
 			if err != nil {
-				t.Fatalf("lease %q part %d: %v", lease, k, err)
+				t.Fatalf("lease %v part %d: %v", lease, k, err)
 			}
 			if size := b.Measure(string(p.Output)); size > b.Limit {
-				t.Fatalf("lease %q part %d measures %d, over the budget %d", lease, k, size, b.Limit)
+				t.Fatalf("lease %v part %d measures %d, over the budget %d", lease, k, size, b.Limit)
 			}
 			var s shownPage
 			if err := json.Unmarshal(p.Output, &s); err != nil {
 				t.Fatal(err)
 			}
-			if s.Lease != lease {
+			if s.Lease != lease.String() {
 				t.Fatalf("part %d carries lease %q, want %q", k, s.Lease, lease)
 			}
 			if i == 0 {
 				want = append(want, s.Messages[0].Body)
 			} else if k > len(want) || s.Messages[0].Body != want[k-1] {
-				t.Fatalf("lease %q cuts part %d differently from lease %q", lease, k, leases[0])
+				t.Fatalf("lease %v cuts part %d differently from lease %v", lease, k, leases[0])
 			}
 		}
 		if i > 0 && n != len(want) {
-			t.Fatalf("lease %q makes %d parts, lease %q makes %d", lease, n, leases[0], len(want))
+			t.Fatalf("lease %v makes %d parts, lease %v makes %d", lease, n, leases[0], len(want))
 		}
 	}
 }
 
 func TestLeaseLength(t *testing.T) {
 	m := msg(t, "m1", "short")
-	long := strings.Repeat("L", MaxLeaseLen+1)
-	if MaxLeaseLen != 32 {
-		t.Fatalf("MaxLeaseLen = %d", MaxLeaseLen)
+	if MaxLeaseLen != delivery.LeaseIDTextLen || len(testLease.String()) != MaxLeaseLen {
+		t.Fatalf("MaxLeaseLen = %d, LeaseIDTextLen = %d, a lease is %d characters", MaxLeaseLen, delivery.LeaseIDTextLen, len(testLease.String()))
 	}
-	if _, err := Pack([]Message{m}, long, DefaultBudget()); !errors.Is(err, ErrLeaseTooLong) {
-		t.Fatalf("Pack with a lease of %d bytes: %v", len(long), err)
+	if _, err := Pack([]Message{m}, delivery.LeaseID{}, DefaultBudget()); !errors.Is(err, ErrLeaseUnset) {
+		t.Fatalf("Pack with an unset lease: %v", err)
 	}
-	if _, err := Part(m, 1, long, DefaultBudget()); !errors.Is(err, ErrLeaseTooLong) {
-		t.Fatalf("Part with a lease of %d bytes: %v", len(long), err)
+	if _, err := Part(m, 1, delivery.LeaseID{}, DefaultBudget()); !errors.Is(err, ErrLeaseUnset) {
+		t.Fatalf("Part with an unset lease: %v", err)
 	}
-	if _, err := Pack([]Message{m}, long[1:], DefaultBudget()); err != nil {
-		t.Fatalf("a lease of exactly MaxLeaseLen is accepted: %v", err)
+	p, err := Pack([]Message{m}, testLease, DefaultBudget())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := decode(t, p); len(s.Lease) != MaxLeaseLen {
+		t.Fatalf("the page carries a lease of %d characters, want MaxLeaseLen = %d", len(s.Lease), MaxLeaseLen)
 	}
 }
 

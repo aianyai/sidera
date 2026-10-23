@@ -22,7 +22,7 @@ const (
 var requiredPaths = []string{
 	"renewed", "renew refused: no active turn", "renew refused: cap reached", "requeue",
 	"delivery_unknown by lease count", "delivery_unknown by settle deadline",
-	"hand-out skipped", "hand-out denied", "ack recorded",
+	"hand-out skipped", "hand-out denied", "ack recorded", "ack refused: lease",
 	"source expired", "feedback expired_corrected", "feedback unknown_corrected", "feedback blocked_recovered",
 	"delivery_unknown by backlog deadline", "delivery_unknown by denied hand-out", "delivery_unknown by closed endpoint",
 	"rejected by backlog deadline", "delivered",
@@ -286,7 +286,7 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 				if rng.Intn(4) != 0 && auth == AuthorizationDeny {
 					auth = AuthorizationAllow
 				}
-				n, res, err := tgt.Handout(now, auth, chunks, 1+rng.Intn(chunks))
+				n, res, err := tgt.Handout(now, auth, chunks, 1+rng.Intn(chunks), rng)
 				if err != nil {
 					fail("Handout: %v", err)
 				}
@@ -322,11 +322,17 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 				if given := handedOutParts(tgt); len(given) > 0 && rng.Intn(3) != 0 {
 					part = given[rng.Intn(len(given))]
 				}
-				n, v, out, err := tgt.Ack(now, Ack{Part: part, TokenMatches: rng.Intn(6) != 0})
+				a := Ack{Part: part, Lease: tgt.Lease.current(), TokenMatches: rng.Intn(6) != 0}
+				if rng.Intn(8) == 0 {
+					a.Lease = LeaseID{}
+				}
+				n, v, out, err := tgt.Ack(now, a)
 				if err != nil {
 					fail("Ack: %v", err)
 				}
 				switch v {
+				case AckRefusedLease:
+					paths["ack refused: lease"]++
 				case AckRecorded:
 					paths["ack recorded"]++
 				case AckCompleted:

@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"time"
 )
@@ -13,6 +14,10 @@ type Lease struct {
 	// Handouts counts the leases issued so far: the first hand-out and its
 	// redeliveries.
 	Handouts int
+	// IDs holds the identifier of every lease issued so far, oldest first; the
+	// last one is the outstanding lease or, when none is outstanding, the most
+	// recent. An acknowledgement must name one of them.
+	IDs []LeaseID
 	// Active is set while a lease is outstanding.
 	Active bool
 	// IssuedAt is when the outstanding (or last) lease was issued.
@@ -29,6 +34,26 @@ type Lease struct {
 	Chunks    int
 	HandedOut []bool
 	Acked     []bool
+}
+
+// current returns the identifier of the outstanding lease or, when none is
+// outstanding, of the most recent one; the zero ID before the first lease.
+func (l Lease) current() LeaseID {
+	if len(l.IDs) == 0 {
+		return LeaseID{}
+	}
+	return l.IDs[len(l.IDs)-1]
+}
+
+// issued reports whether id is the identifier of a lease issued for this
+// message. The unset ID never is.
+func (l Lease) issued(id LeaseID) bool {
+	for _, have := range l.IDs {
+		if have == id {
+			return !id.IsZero()
+		}
+	}
+	return false
 }
 
 // HandoutAction says what recv does with one message.
@@ -68,6 +93,9 @@ type HandoutResult struct {
 	Action HandoutAction
 	// PossibleDuplicate tells the agent the message may have been seen before.
 	PossibleDuplicate bool
+	// Lease is the identifier of the lease the body is handed out under
+	// (granted and resent); the page recv prints carries it.
+	Lease LeaseID
 	// ExpiresAt is when the lease runs out (granted and resent).
 	ExpiresAt time.Time
 	Reason    UnavailableReason
@@ -91,7 +119,11 @@ func (r Record) HoldsLiveLease(now time.Time) bool {
 // The second authorization check is made here, at the moment the body would be
 // handed out. A suspended check leaves the message untouched. A denied check
 // closes the delivery as closeForcibly does.
-func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int) (Record, HandoutResult, error) {
+//
+// rand supplies the randomness of a new lease's identifier (see NewLeaseID) and
+// is read only when a new lease is issued; a failing source returns an error
+// and leaves the record as it was.
+func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int, rand io.Reader) (Record, HandoutResult, error) {
 	if r.Side != SideTarget {
 		return r, HandoutResult{}, fmt.Errorf("%w: only the target hands out bodies", ErrWrongSide)
 	}
@@ -114,6 +146,14 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int)
 		n, out, err := r.closeForcibly(RejectSecondCheckFailed)
 		return n, HandoutResult{Action: HandoutDenied, Outcome: out}, err
 	}
+	live := r.HoldsLiveLease(now)
+	var id LeaseID
+	if !live {
+		var err error
+		if id, err = NewLeaseID(rand); err != nil {
+			return r, HandoutResult{}, err
+		}
+	}
 	if r.Lease.Chunks == 0 {
 		r.Lease.Chunks = chunks
 		r.Lease.HandedOut = make([]bool, chunks)
@@ -122,9 +162,10 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int)
 	handedOut := append([]bool(nil), r.Lease.HandedOut...)
 	handedOut[part-1] = true
 	r.Lease.HandedOut = handedOut
-	if r.HoldsLiveLease(now) {
-		return r, HandoutResult{Action: HandoutResent, PossibleDuplicate: true, ExpiresAt: r.Lease.ExpiresAt}, nil
+	if live {
+		return r, HandoutResult{Action: HandoutResent, PossibleDuplicate: true, Lease: r.Lease.current(), ExpiresAt: r.Lease.ExpiresAt}, nil
 	}
+	r.Lease.IDs = append(append([]LeaseID(nil), r.Lease.IDs...), id)
 	r.Lease.Handouts++
 	r.Lease.Active = true
 	r.Lease.IssuedAt = now
@@ -132,6 +173,7 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int)
 	return r, HandoutResult{
 		Action:            HandoutGranted,
 		PossibleDuplicate: r.Lease.PossibleDuplicate,
+		Lease:             id,
 		ExpiresAt:         r.Lease.ExpiresAt,
 	}, nil
 }
@@ -215,6 +257,11 @@ func (r Record) Renew(now time.Time, activeTurn bool) (Record, RenewResult) {
 type Ack struct {
 	// Part is the chunk, counted from 1.
 	Part int
+	// Lease is the identifier of the lease the chunk was handed out under, as
+	// the page printed it. It must be one of the leases issued for this
+	// message: an acknowledgement that names none of them is not about this
+	// message's hand-outs.
+	Lease LeaseID
 	// TokenMatches states that the acknowledgement carries the token of the
 	// endpoint the message is for. The caller verifies the token; nobody else's
 	// acknowledgement counts.
@@ -238,6 +285,9 @@ const (
 	// AckRefusedNoHandout: that chunk was never handed out, so there is nothing
 	// to acknowledge.
 	AckRefusedNoHandout
+	// AckRefusedLease: the lease ID is unset or was never issued for this
+	// message.
+	AckRefusedLease
 	// AckTooLate: the delivery already ended as rejected or closed_unconfirmed.
 	AckTooLate
 )
@@ -245,10 +295,13 @@ const (
 // Ack records the acknowledgement of one chunk. An acknowledgement stays valid
 // after its lease has run out and even after the delivery was declared
 // delivery_unknown: the agent did see the chunk, and the late acknowledgement
-// is the fact that corrects the unknown. Only a chunk that was handed out can
-// be acknowledged: an acknowledgement for anything else would deliver a body
-// the agent never received. The delivery becomes delivered when every chunk is
-// acknowledged, not before.
+// is the fact that corrects the unknown. The acknowledgement names the lease
+// the chunk was handed out under; any lease issued for the message counts, the
+// outstanding one or an earlier one, because the chunk was seen under whichever
+// lease carried it and a redelivery in between does not unsee it. Only a chunk
+// that was handed out can be acknowledged: an acknowledgement for anything else
+// would deliver a body the agent never received. The delivery becomes
+// delivered when every chunk is acknowledged, not before.
 func (r Record) Ack(now time.Time, a Ack) (Record, AckVerdict, Outcome, error) {
 	if r.Side != SideTarget {
 		return r, 0, Outcome{}, fmt.Errorf("%w: only the target settles leases", ErrWrongSide)
@@ -267,6 +320,9 @@ func (r Record) Ack(now time.Time, a Ack) (Record, AckVerdict, Outcome, error) {
 	}
 	if r.Lease.Chunks == 0 {
 		return r, AckRefusedNoHandout, Outcome{}, nil
+	}
+	if !r.Lease.issued(a.Lease) {
+		return r, AckRefusedLease, Outcome{}, nil
 	}
 	if a.Part < 1 || a.Part > r.Lease.Chunks {
 		return r, 0, Outcome{}, fmt.Errorf("%w: part %d of %d", ErrInvalidInput, a.Part, r.Lease.Chunks)

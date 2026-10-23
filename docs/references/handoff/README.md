@@ -51,7 +51,8 @@ checks that the model saw it before acknowledging for the agent.
 ### `recv` output
 
 - One JSON document and a newline, `{"lease":...,"messages":[...],"more":N}`.
-  The page carries the ID of the lease the delivery side took for it. Sender
+  The page carries the ID of the lease the delivery side took for it, a
+  `delivery.LeaseID` printed as 32 lowercase hex characters; the zero ID is refused. Sender
   fields (`id`, `from`) are separate fields from `body`; a message handed out
   again carries `possibly_duplicate`. Encoded with HTML escaping off and
   non-ASCII text as is; Go always escapes U+2028 and U+2029.
@@ -121,7 +122,8 @@ observed result has more of it than the expected output.
 - **A plain `recv` resumes a chunked message.** Otherwise every `recv` would hand
   out part 1 again, and a model that simply calls `recv` would never get past
   it. The delivery side knows which parts were acknowledged and passes the next
-  one in; this package only cuts.
+  one in (`Message.NextPart`, taken from `delivery.Record.NextPart()`); this
+  package only cuts.
 - **A retry instant on the holds that wait for the minimum interval.** A message
   that arrives inside the interval raises no event when the interval ends, so
   without the instant it would be woken only by the next unrelated arrival or
