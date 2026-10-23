@@ -1,9 +1,21 @@
 # Adapter protocol
 
-How the daemon and an adapter process talk. The adapter's SDK lives in its own
-Go module, `github.com/aianyai/sidera/sdk/go`, which depends on the standard
-library only and is imported by the daemon and by third-party adapters alike.
-This document has one part per layer.
+How the Sidera daemon talks to an adapter: a separate program that drives a
+native agent runtime (Claude Code, Codex) or bridges a chat tool to the channel.
+The daemon starts the adapter and the two exchange newline-delimited JSON-RPC 2.0
+over the adapter's standard input and output; standard error is for logs. One
+process is one adapter instance. The peers are symmetric: either may send
+requests and notifications. "D to A" below means the daemon calls the adapter and
+"A to D" the other way.
+
+The SDK lives in its own Go module, `github.com/aianyai/sidera/sdk/go`, which
+depends on the standard library only and is imported by the daemon and by
+third-party adapters alike. The frames are handled by `sdk/go/peer`; the
+messages, enums, application error codes and manifest are defined in the packages
+`adapterproto` and `manifest` and, for other languages, by the JSON Schema under
+`protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`.
+This document has one part per layer: the peer layer, then the messages and
+methods, the control signals and the native process identity.
 
 ## Peer layer
 
@@ -178,3 +190,258 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | No bodies in logs | `TestLogsNeverContainMessageBodies` |
 | Many concurrent calls both ways against an independent wire model | `TestConcurrentCallsInBothDirections` |
 | Frame reader and classifier against separate oracles | `TestFrameReader`, `TestClassify`, `FuzzFrameReader`, `FuzzClassify` |
+
+## Messages and methods
+
+### What
+
+Method names are `noun.verb`; `$/` marks a protocol-level method with no business
+meaning. Field names are snake_case. Timestamps an adapter reports are Unix
+milliseconds (`*_ms`) and serve display and diagnosis only: the daemon judges time
+by the clock it reads when a message arrives.
+
+The result of a request carries every fact the daemon acts on. An error response
+only says the request was not understood or not allowed.
+
+| Method | Direction | Kind | Params | Result |
+| ------ | --------- | ---- | ------ | ------ |
+| `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
+| `ping` | both | request | none | none |
+| `$/cancel_request` | both | notification | `request_id` | |
+| `shutdown` | D to A | request | none | none |
+| `adapter.start` | D to A | request | `node`, `runtime_endpoint?`, `config`, `presets`, `sessions`, `direct_endpoints` | `sessions` (`endpoint`, `state`, `turn_active`, `process?`) |
+| `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?`, `auth`, `dependencies`, `presets`, `tool_probes` |
+| `adapter.availability` | A to D | notification | `conditions`: a full snapshot, empty when all is well | |
+| `session.create` | D to A | request | `attempt`, `runtime_endpoint`, `session_endpoint`, `preset`, `first_prompt`, `tool_access`, `checkpoint?` | `outcome` created, failed or indeterminate, with the fields each needs |
+| `checkpoint.put` | A to D | request | `scope` (attempt or session), `id`, `state` (object, at most 16 KiB compact) | none; answered once the state is durable |
+| `prompt.deliver` | D to A | request | `endpoint`, `attempt`, `text` | `stage` accepted, persisted or refused, `reason` with a refusal |
+| `prompt.persisted` | A to D | notification | `endpoint`, `attempt` | |
+| `turn.started` | A to D | notification | `endpoint`, `turn`, `attempt?`, `process?`, `at_ms` | |
+| `turn.ended` | A to D | notification | `endpoint`, `turn`, `final`, `at_ms` | |
+| `session.interrupt` | D to A | request | `endpoint` | `stage` requested, stopped, not_running or refused |
+| `session.close` | D to A | request | `endpoint` | `outcome` closed or close_unconfirmed |
+| `prompt.reconcile` | D to A | request | `endpoint`, `attempt`, `checkpoint?` | `verdict`, `turn?`, `grounds` |
+| `recv.observed` | A to D | request | `endpoint`, `lease`, `frontend`, `observed` | `verdict`, `reason`, `items` |
+| `native_request.handled` | A to D | notification | `endpoint`, `method`, `disposition`, `at_ms` | |
+| `endpoint.register` | A to D | request | `key`, `display_name`, `description?` | `endpoint` |
+| `endpoint.unregister` | A to D | request | `endpoint` | none |
+| `endpoint.pending` | D to A | notification | `endpoint`, `count` | |
+| `endpoint.recv` | A to D | request | `endpoint`, `wait_s?`, `message_id?` with `part?` | `page` |
+| `endpoint.ack` | A to D | request | `endpoint`, `lease`, `items` | `items` with the outcome of each |
+| `endpoint.send` | A to D | request | `endpoint`, `to`, `content_type`, `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
+| `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
+
+Identifiers: `EndpointRef` and `Address` are opaque strings of 1 to 128
+characters, handed out by the daemon and returned unchanged; the SDK never parses
+them. `AttemptID` is a lowercase UUID version 4. `LeaseRef` is 32 lowercase hex
+characters, not all zero. `Token` is 32 random bytes in unpadded base64url.
+`NativeRef` and `TurnRef` are opaque strings of up to 256 characters that only the
+adapter interprets.
+
+**Version negotiation.** A version is a positive integer and each side announces a
+closed range. The adapter picks the highest version in both. With no overlap it
+answers `-32022` with `data` `{requested, supported}`, each a range. Inside a
+negotiated version nothing is added that an older reader would misread: new
+behaviour is a new capability the peer declares first, or a new version.
+
+**Strict decoding.** Within a version an unknown field is `-32602`. The same rule
+makes a field name that differs in case, `null`, a missing required field, a
+repeated key and an explicit empty value for an optional field errors: they
+would otherwise let two implementations read one message two ways.
+
+**Instance lock.** The adapter takes an exclusive lock on `instance.lock_path`
+before it answers `initialize`, and answers `1011` when it cannot. A hung old
+process and its replacement therefore never control sessions at once; the lock
+dies with the process. Before `initialize` only `initialize`, `ping` and
+`$/cancel_request` are accepted; anything else is `-32003`.
+
+**Prompt delivery.** The daemon records the attempt as dispatching before it
+sends `prompt.deliver`. The adapter delivers `text` unchanged (it may append one
+line with the attempt identifier as a fallback for reconciliation). `accepted`
+means the runtime took the prompt but has not made it durable; the adapter must
+then send `prompt.persisted`, or the daemon reconciles. `refused` means certainly
+nothing was delivered. `turn.started.attempt` also proves the attempt reached the
+session.
+
+**Reconciliation.** `prompt.reconcile` answers whether an attempt reached the
+runtime. The `grounds.code` belongs to the verdict: `found` goes with
+`attempt_in_record` and carries the turn; `provably_absent` with
+`record_complete_without_attempt` (the writer has stopped and the whole record was
+scanned) or `never_dispatched` (the checkpoint shows the runtime was never
+called); `indeterminate` with `turn_running`, `record_unreadable`,
+`native_unreachable` or `runtime_version_untested`.
+
+**Turns.** Each turn has exactly one `turn.started` and one `turn.ended`,
+correlated by `turn`. Turns the runtime starts itself (an automatic continuation,
+work triggered by background activity) are reported the same way. A turn caused
+by a prompt names the attempt.
+
+**Acknowledging on the agent's behalf.** `recv.observed` carries the text of a
+`recv` tool result as the model received it, read from the runtime's durable
+record, with the lease the result names. The daemon decides whether that proves
+the model saw the page and, if so, settles every part of it; the adapter may only
+do this for session endpoints it owns. A refusal (`replaced`, `truncated`,
+`content_mismatch`, `unknown_lease`) leaves the page for an explicit
+acknowledgement.
+
+**Server requests.** An adapter answers every request the native runtime sends it
+locally, from the preset, or refuses it within one second; it never asks the
+daemon, because approvals do not go through the channel. Unknown methods are
+refused. Each one is reported with `native_request.handled`; `disposition` is
+`preset`, `rejected_by_preset`, `rejected_unknown` or `late`.
+
+**Direct endpoints.** An adapter that reads messages itself (a chat bridge)
+registers endpoints with `endpoint.register`, identified by a key it chooses; the
+same key always gets the same endpoint. It reads with `endpoint.recv`, which
+returns the `RecvPage` that `handoff` prints, and settles with `endpoint.ack`.
+
+**Errors.** Codes `-32700` to `-32600` and `-32603` are JSON-RPC's; `-32001`
+to `-32004`, `-32022` and `-32800` are the implementation-defined range; `1001`
+to `1011` are the protocol's own:
+
+| Code | Name | Meaning |
+| ---- | ---- | ------- |
+| -32700 | parse_error | invalid JSON or UTF-8; the connection continues |
+| -32600 | invalid_request | not an object, a batch, no `jsonrpc`, bad or reused id |
+| -32601 | method_not_found | unknown method, or not valid in this direction |
+| -32602 | invalid_params | breaks the schema or has an unknown field |
+| -32603 | internal_error | the handler failed; the outcome is unknown |
+| -32001 | overloaded | refused before queueing; the handler did not run |
+| -32002 | shutting_down | shutdown has begun |
+| -32003 | not_initialized | before `initialize` |
+| -32004 | line_too_long | sent just before the connection closes |
+| -32022 | unsupported_protocol_version | `data`: `{requested, supported}` |
+| -32800 | request_cancelled | cancelled; the outcome is unknown unless the method says otherwise |
+| 1001 | unknown_endpoint | the endpoint does not exist or is not this connection's |
+| 1002 | wrong_endpoint_kind | the endpoint's kind cannot be used with this method |
+| 1003 | capability_not_declared | the method needs a capability that was not declared |
+| 1004 | unknown_attempt | the attempt identifier is unknown |
+| 1005 | attempt_conflict | the same attempt identifier with different parameters |
+| 1006 | checkpoint_too_large | the checkpoint exceeds 16 KiB |
+| 1007 | endpoint_limit | the direct-endpoint limit is reached |
+| 1008 | invalid_address | an address cannot be parsed; `data`: `{field}` |
+| 1009 | send_refused | the local intake refused the message; `data`: `{reason}`, a snake_case word |
+| 1010 | lease_unknown | the lease does not belong to the endpoint |
+| 1011 | instance_locked | another process holds the instance lock |
+
+An error response means the request had no effect, except `-32603`, `-32800`,
+and the absence of a response (timeout, closed connection), which leave the
+outcome unknown. Only for the methods with side effects (`session.create`,
+`prompt.deliver`, `session.interrupt`, `session.close`) does an unknown outcome
+call for reconciliation or an idempotent retry.
+
+### Why
+
+- **Results carry the semantics, errors only misuse.** A refusal the daemon must
+  act on (a prompt that was certainly not delivered) is a result with a reason, so
+  it can never be mistaken for a transport failure whose outcome is unknown.
+- **The version is an integer range.** One round trip lets both sides give up old
+  versions explicitly, and the error data shows both ranges. A minor version has
+  no meaning on a wire where additions go through capabilities.
+- **Strictness fails closed.** A lenient reader that ignores an unknown field
+  silently does the wrong thing when the field was a safety restriction.
+- **Identifiers stay opaque.** The adapter never parses them, so copying their
+  syntax into the SDK would only make a second place to keep in step with the
+  daemon, for the benefit of an earlier error message.
+- **Rejected:** per-request version metadata (the connection is long-lived and
+  stateful, so one negotiation is enough); streaming the model's output (the
+  channel does not read it); forwarding permission requests to the daemon
+  (approvals are the adapter's, from the preset).
+
+### Where
+
+- `sdk/go/adapterproto`: `methods.go` (the table), `version.go` (negotiation),
+  `codes.go` (error codes), `enums.go`, `lifecycle.go`, `session.go`, `prompt.go`,
+  `recv.go`, `endpoints.go` (the messages), `decode.go` (`Decode`, `Encode`),
+  `validate.go`.
+- `sdk/go/internal/strictjson`: the strict decoder.
+- Tests: `TestNegotiate`, `TestMethodTable`, `TestErrorCodeTable`,
+  `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
+  `FuzzDecodeMessages`.
+
+## Control signals
+
+### What
+
+A message can carry a control signal for its target endpoint instead of text for
+its agent. The values below are defined as protocol types in `adapterproto`, with
+the integer a binary encoding will carry and the name a JSON reply uses. Every
+enum is a small integer from 1; 0 is never valid; a field that does not apply is
+absent.
+
+`control.session.create` (target: a runtime endpoint). Parameter: the preset name,
+1 to 64 characters of `[a-z0-9][a-z0-9._-]*`. The initial message is the body of
+the carrying message; an empty body means none. Reply:
+
+| Field | Values | Present |
+| ----- | ------ | ------- |
+| `outcome` | 1 created (readiness shown), 2 unconfirmed (may exist; no readiness before the deadline), 3 failed (certainly not created) | always |
+| `session_endpoint` | the endpoint allocated for the session | outcome 1 or 2 |
+| `reason` | failed: 1 preset_unknown, 2 preset_unavailable, 3 adapter_offline, 4 runtime_auth, 5 native_unavailable, 6 native_error; unconfirmed: 7 ready_timeout, 8 adapter_lost | outcome 2 or 3, from its group |
+
+`control.session.close` (target: a session endpoint), no parameters. Reply
+`outcome`: 1 closed, 2 close_unconfirmed, 3 unsupported; `reason` only with 2:
+1 turn_still_running, 2 adapter_offline, 3 native_unreachable.
+
+`control.session.interrupt` (target: a session endpoint), no parameters. Reply
+`outcome`: 1 stopped, 2 requested, 3 not_running, 4 failed, 5 unsupported; `reason`
+only with 4: 1 adapter_offline, 2 native_unreachable, 3 native_error. Stopping a
+turn does not undo its side effects.
+
+`control.endpoint.status` (target: any endpoint), no parameters, answered by the
+daemon alone from what it has observed:
+
+| Field | Meaning |
+| ----- | ------- |
+| `activity` | 1 idle, 2 busy, 3 unknown (the adapter is offline and the last report cannot be checked) |
+| `queued` | messages waiting, not counting those paused by authorization |
+| `conditions` | ascending, no repeats, omitted when empty: 1 adapter_offline, 2 runtime_auth, 3 native_unavailable, 4 server_request_rejected, 5 control_unknown, 6 version_untested |
+| `presets` | `name`, `available`, sorted by name; runtime endpoints only |
+| `as_of` | Unix seconds |
+
+In JSON (the `control_reply` of `endpoint.message_status`) a reply is one object
+with `signal` beside its fields, and enums are their names.
+
+### Why
+
+- `version_untested` is a sixth condition because an untested runtime version must
+  show in the status without stopping the endpoint.
+- A creation that times out is `unconfirmed` and not `failed` because a session
+  may exist; the pre-allocated endpoint is returned either way so a retry cannot
+  create a second one.
+- One reply per signal, with `requested` and `stopped` as values of the same
+  field, because a second report later would need a second record; `status`
+  answers the question afterwards.
+
+### Where
+
+- `sdk/go/adapterproto/control.go`; tests `TestControlEnumCodes`,
+  `TestControlCreateReplyRules`, `TestControlStatusReplyRules`,
+  `TestControlReplyJSON`.
+
+## Native process identity
+
+### What
+
+`ProcessIdentity` appears in the result of `session.create`, in `turn.started`
+and in the session entries of `adapter.start` (both ways), and is kept in
+checkpoints. The daemon never reads the process table: it stores and shows the
+fields and hands them back to an adapter that reconnects.
+
+| Field | What it is for |
+| ----- | -------------- |
+| `pid` (1 to 2^32-1) | Find the process: to tell whether it is busy, to signal it, to take it over after a restart |
+| `start_key` (opaque, at most 64 characters, compared only for equality) | With `pid`, one process instance, so a reused PID is not mistaken for it. Built from the platform's raw start value and the boot identity (Linux: the start time from `/proc/<pid>/stat` and the boot id; macOS: the start seconds and microseconds from `proc_pidinfo`; Windows: the creation time), and in the same format across adapter versions |
+| `started_at_ms` | An approximate start time for people; never used in a decision |
+| `container.kind` | `systemd_unit`, `process_group`, `launchd_job`, `windows_job`, `scheduled_task` or `none`: how the process was isolated so it outlives the adapter |
+| `container.name` (at most 256 characters; absent for `none`) | The unit, group, job or task name: the daemon checks it differs from its own unit or group and warns the owner when it does not; orphan cleanup takes the whole group; it also serves diagnosis |
+
+### Why
+
+A PID alone is reused; the start key makes the pair unique without the daemon
+reading platform-specific process tables, which stay in the adapter.
+
+### Where
+
+- `sdk/go/adapterproto/lifecycle.go` (`ProcessIdentity`, `Container`); test
+  `TestProcessIdentityRules`.
