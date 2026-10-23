@@ -2,6 +2,7 @@ package trust
 
 import (
 	"fmt"
+	"maps"
 	"math/rand/v2"
 	"reflect"
 	"slices"
@@ -218,7 +219,7 @@ const propertyRuns = 1000
 // recomputation from the raw records, and no path exceeds two edges.
 func TestPropertyVerdictsMatchRecomputation(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
-	var retiredTarget, retiredIntermediate, retiredDirectParty int
+	var retiredTarget, retiredIntermediate, retiredDirectParty, suspendedToDenied int
 	for run := 0; run < propertyRuns; run++ {
 		m := genModel(r)
 		evs := m.events()
@@ -260,6 +261,9 @@ func TestPropertyVerdictsMatchRecomputation(t *testing.T) {
 			}
 			if changed && !m.retired[target] {
 				retiredIntermediate++
+				if withoutOutcome == Suspended && wantOutcome == Denied {
+					suspendedToDenied++
+				}
 			}
 			for _, p := range a.Paths {
 				if len(p.Credentials) < 1 || len(p.Credentials) > 2 {
@@ -273,9 +277,12 @@ func TestPropertyVerdictsMatchRecomputation(t *testing.T) {
 	}
 	// The generator must reach every retired role often enough for the
 	// oracle's retired rules to matter.
-	t.Logf("retired as target: %d, as intermediate: %d, as direct party: %d", retiredTarget, retiredIntermediate, retiredDirectParty)
+	t.Logf("retired as target: %d, as intermediate: %d (of which suspended to denied: %d), as direct party: %d", retiredTarget, retiredIntermediate, suspendedToDenied, retiredDirectParty)
 	// An intermediate changes a verdict only when a viable inherited path ran
-	// through it and no other route replaced that path, which is rarer.
+	// through it and no other route replaced that path, which is rarer. The
+	// bound on suspended paths turned denied is about half of the 40 this seed
+	// reaches: those are the paths that would have recovered with a fresh
+	// voucher and cannot recover once their intermediate is retired.
 	for _, c := range []struct {
 		role      string
 		got, want int
@@ -283,6 +290,7 @@ func TestPropertyVerdictsMatchRecomputation(t *testing.T) {
 		{"target", retiredTarget, 100},
 		{"intermediate", retiredIntermediate, 40},
 		{"direct party", retiredDirectParty, 100},
+		{"intermediate, a suspended path turned denied", suspendedToDenied, 20},
 	} {
 		if c.got < c.want {
 			t.Fatalf("retired as %s changed only %d verdicts, want at least %d", c.role, c.got, c.want)
@@ -327,15 +335,18 @@ func TestPropertyRevocationNeverGrantsTrust(t *testing.T) {
 
 // When two nodes see the same records and no local revocations, each one's
 // verdict about the other agrees, including when the two inheritance switches
-// differ.
+// differ and whatever intermediates are retired.
+//
+// A retired end breaks the symmetry on purpose. The retired node's own entry is
+// never read, so it sees the other node exactly as if it were not retired; the
+// other node sees it as Denied with ReasonRetired. For such pairs the two
+// outcomes are compared with that specification instead of with each other.
 func TestPropertyTwoSidesAgree(t *testing.T) {
 	r := rand.New(rand.NewPCG(5, 6))
+	var agreeing, retiredIntermediateMattered, retiredSideSeen, otherSideSeen int
 	for run := 0; run < propertyRuns; run++ {
 		m := genModel(r)
-		// A node's own retirement is not read, so the two sides agree only when
-		// nobody is retired.
 		m.locRev = map[ident.NodeID]bool{}
-		m.retired = map[ident.NodeID]bool{}
 		evs := m.events()
 		for _, ab := range m.universe {
 			for _, cb := range m.universe {
@@ -347,13 +358,63 @@ func TestPropertyTwoSidesAgree(t *testing.T) {
 				va.Settings.AcceptsInheritance = m.declared[a]
 				vc.Settings.AcceptsInheritance = m.declared[c]
 				ac, ca := Evaluate(va, c, m.now), Evaluate(vc, a, m.now)
-				if ac.Outcome != ca.Outcome {
-					t.Fatalf("run %d: %d about %d is %v but %d about %d is %v", run, ab, cb, ac.Outcome, cb, ab, ca.Outcome)
+				if !m.retired[a] && !m.retired[c] {
+					agreeing++
+					if ac.Outcome != ca.Outcome {
+						t.Fatalf("run %d: %d about %d is %v but %d about %d is %v", run, ab, cb, ac.Outcome, cb, ab, ca.Outcome)
+					}
+					if got, want := viaSet(ac), viaSet(ca); !slices.Equal(got, want) {
+						t.Fatalf("run %d: %d and %d disagree on intermediates: %v vs %v", run, ab, cb, got, want)
+					}
+					// A retired intermediate stays in the comparison; count the
+					// pairs where it changed the answer.
+					if without, _ := m.expected(a, c, m.declared[a], false); without != ac.Outcome {
+						retiredIntermediateMattered++
+					}
+					continue
 				}
-				if got, want := viaSet(ac), viaSet(ca); !slices.Equal(got, want) {
-					t.Fatalf("run %d: %d and %d disagree on intermediates: %v vs %v", run, ab, cb, got, want)
+				for _, side := range []struct {
+					from, about byte
+					got         Verdict
+				}{{ab, cb, ac}, {cb, ab, ca}} {
+					if m.retired[node(side.about)] {
+						// The other side sees the retired node as retired.
+						otherSideSeen++
+						if side.got.Outcome != Denied || side.got.Reason != ReasonRetired {
+							t.Fatalf("run %d: %d about retired %d is %+v", run, side.from, side.about, side.got)
+						}
+						continue
+					}
+					// The retired side: the oracle reads the records with that
+					// node taken out of the retired set, and its own entry must
+					// make no difference.
+					retiredSideSeen++
+					active := m
+					active.retired = maps.Clone(m.retired)
+					delete(active.retired, node(side.from))
+					wantOutcome, wantPaths := active.expected(node(side.from), node(side.about), m.declared[node(side.from)], true)
+					if side.got.Outcome != wantOutcome || !slices.Equal(pathStrings(side.got), wantPaths) {
+						t.Fatalf("run %d: retired %d about %d is %v %v, want %v %v", run, side.from, side.about, side.got.Outcome, pathStrings(side.got), wantOutcome, wantPaths)
+					}
 				}
 			}
+		}
+	}
+	t.Logf("agreeing pairs: %d, of which a retired intermediate mattered: %d; retired side about the other: %d; other side about the retired: %d", agreeing, retiredIntermediateMattered, retiredSideSeen, otherSideSeen)
+	// Each bound is about half of what this seed reaches (7877, 175, 2958 and
+	// 3534), so a generator change that thins a path out fails loudly while a
+	// small drift does not.
+	for _, c := range []struct {
+		what      string
+		got, want int
+	}{
+		{"agreeing pairs", agreeing, 4000},
+		{"pairs where a retired intermediate changed the answer", retiredIntermediateMattered, 80},
+		{"retired side judged", retiredSideSeen, 1500},
+		{"other side judged", otherSideSeen, 1700},
+	} {
+		if c.got < c.want {
+			t.Fatalf("%s: %d, want at least %d", c.what, c.got, c.want)
 		}
 	}
 }
@@ -364,9 +425,10 @@ func viaSet(v Verdict) []byte {
 	return out
 }
 
-// A nil and an empty retired set are both "nobody is retired": every function
-// that reads the view answers exactly as it did before the set existed, which
-// the oracle with the retired set ignored stands for.
+// A nil and an empty retired set are both "nobody is retired": Evaluate answers
+// as the oracle does with the retired set ignored, and never with ReasonRetired.
+// Only Evaluate is compared with an oracle; the other functions read the set the
+// same way, and a nil map and an empty map are indistinguishable to a lookup.
 func TestPropertyEmptyRetiredSetChangesNothing(t *testing.T) {
 	r := rand.New(rand.NewPCG(7, 8))
 	for run := 0; run < propertyRuns; run++ {
@@ -378,21 +440,13 @@ func TestPropertyEmptyRetiredSetChangesNothing(t *testing.T) {
 		emptySet.Retired = NodeSet{}
 		for _, tb := range m.universe {
 			target := node(tb)
-			a, b := Evaluate(nilSet, target, m.now), Evaluate(emptySet, target, m.now)
 			wantOutcome, wantPaths := m.expected(node(m.localByte), target, m.accepts, false)
-			if !reflect.DeepEqual(a, b) || a.Outcome != wantOutcome || !slices.Equal(pathStrings(a), wantPaths) || a.Reason == ReasonRetired {
-				t.Fatalf("run %d target %d: nil %+v, empty %+v, want %v %v", run, tb, a, b, wantOutcome, wantPaths)
+			for name, v := range map[string]View{"nil": nilSet, "empty": emptySet} {
+				got := Evaluate(v, target, m.now)
+				if got.Outcome != wantOutcome || !slices.Equal(pathStrings(got), wantPaths) || got.Reason == ReasonRetired {
+					t.Fatalf("run %d target %d: %s set gave %+v, want %v %v", run, tb, name, got, wantOutcome, wantPaths)
+				}
 			}
-			if !reflect.DeepEqual(EvictionProgress(nilSet, target, m.now), EvictionProgress(emptySet, target, m.now)) {
-				t.Fatalf("run %d target %d: eviction differs between a nil and an empty set", run, tb)
-			}
-		}
-		if !slices.Equal(VouchableEdges(nilSet, m.now), VouchableEdges(emptySet, m.now)) {
-			t.Fatalf("run %d: vouchable edges differ between a nil and an empty set", run)
-		}
-		s := IssuanceState{Starting: true, Synced: NodeSet{}, Unreachable: NodeSet{}}
-		if !reflect.DeepEqual(IssuanceGate(nilSet, s, m.now), IssuanceGate(emptySet, s, m.now)) {
-			t.Fatalf("run %d: issuance gate differs between a nil and an empty set", run)
 		}
 	}
 }

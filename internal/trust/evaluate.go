@@ -65,11 +65,13 @@ const (
 	// the clock advances.
 	ReasonVoucherFuture
 
-	// Reasons of Denied verdicts. ReasonSelf and ReasonLocallyRevoked end the
-	// evaluation at once. The rest are the failures of candidate paths, listed
-	// from least to most specific: when several paths fail for different
-	// reasons the most specific one is reported, because it names what would
-	// have to change for some path to work.
+	// Reasons of Denied verdicts. ReasonSelf, ReasonLocallyRevoked and
+	// ReasonRetired end the evaluation at once when they concern the target.
+	// The rest are the failures of candidate paths: when several paths fail
+	// for different reasons the one ranked highest by denialRank is reported,
+	// because it names what would have to change for some path to work.
+	// ReasonRetired is appended after the others so that their values stay
+	// unchanged; its rank is the lowest, whatever its position here.
 	ReasonSelf                       // the target is the local node
 	ReasonLocallyRevoked             // the target is in the locally revoked set
 	ReasonNoPath                     // no credential path to the target at all
@@ -81,7 +83,7 @@ const (
 	// ReasonRetired: the target, or the intermediate of a candidate path, is a
 	// retired node. As the target it ends the evaluation at once, like
 	// ReasonSelf and ReasonLocallyRevoked, and takes precedence over the
-	// latter. It is last in the list so the values of the others stay put.
+	// latter.
 	ReasonRetired
 )
 

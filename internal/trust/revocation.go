@@ -57,13 +57,19 @@ type ClearEffect struct {
 	// must pair again. When false, clearing may restore trust, directly
 	// through a usable credential or by inheritance.
 	NewPairingRequired bool
+	// Retired says the node is a retired node. Its identity is void for good,
+	// so clearing the entry restores nothing and no pairing can bring it back:
+	// only a new identity, a different node ID, can join. NewPairingRequired is
+	// always false when Retired is true, because a new pairing with a retired
+	// identity is not the way forward.
+	Retired bool
 }
 
 // ClearLocallyRevoked decides the effect of removing x from the locally
 // revoked set. Who is allowed to do it is decided elsewhere: clearing
 // loosens, so it is a privileged operation.
 func ClearLocallyRevoked(v View, x ident.NodeID, now time.Time) ClearEffect {
-	e := ClearEffect{WasRevoked: v.locallyRevoked(x)}
+	e := ClearEffect{WasRevoked: v.locallyRevoked(x), Retired: v.retired(x)}
 	had, usable := false, false
 	for _, c := range v.credentialsOf(v.Local) {
 		if other, _ := c.other(v.Local); other == x {
@@ -71,7 +77,7 @@ func ClearLocallyRevoked(v View, x ident.NodeID, now time.Time) ClearEffect {
 			usable = usable || v.usable(c, now)
 		}
 	}
-	e.NewPairingRequired = had && !usable
+	e.NewPairingRequired = had && !usable && !e.Retired
 	return e
 }
 

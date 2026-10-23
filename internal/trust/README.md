@@ -15,11 +15,11 @@ reasons behind the rules.
 | `Vouchers.Accept(Voucher, now) VoucherDecision`   | Keep a voucher only if it is not stamped beyond `now + timing.ClockTolerance` and its counter is greater than the stored one for that issuer and edge. |
 | `ValidateGracePeriod`, `MinGracePeriod`, `DefaultGracePeriod` | The grace period floor (6 minutes) and default (10 minutes). The floor includes `timing.ClockTolerance`, which lives in [`internal/timing`](../timing/README.md). |
 | `RevokeLocally(View, x) RevocationEffects`        | What revoking `x` locally does: set membership, stop vouching, revoke credentials.            |
-| `ClearLocallyRevoked(View, x, now) ClearEffect`   | Whether clearing an entry leaves a new pairing necessary.                                     |
+| `ClearLocallyRevoked(View, x, now) ClearEffect`   | Whether clearing an entry leaves a new pairing necessary, and whether `x` is retired (then it never is: only a new identity can join). |
 | `VouchableEdges(View, now)`                       | The direct edges the local node issues vouchers for: usable, and the other end neither locally revoked nor retired. |
 | `IssuanceGate(View, IssuanceState, now) IssuanceVerdict` | Whether the node may issue vouchers after a start, a restore or a long loss of contact. It derives the direct parties and the grace period from the view. |
 | `EvictionProgress(View, x, now) Eviction`         | Direct parties of `x` that still hold a credential with it, dependent paths, completeness. A retired `x`, or a retired party of `x`, counts for nothing. |
-| `NewEdgeAudience(View, a, b, now)`                | Nodes whose owners are told about a new edge.                                                 |
+| `NewEdgeAudience(View, a, b, now)`                | Nodes whose owners are told about a new edge: the ends and their direct parties, retired nodes left out. |
 | `ApplyDirective(View, EdgeRevocationDirective)`   | Whether a verified offline directive concerns this node and what it revokes. The only place that decides this: it also refuses a directive whose claimed ends differ from the credential's. |
 
 ## Rules
@@ -52,12 +52,18 @@ reasons behind the rules.
   issuance gate does not wait for a retired party. Eviction of a retired node is
   complete at once; a retired party of another node is not waited for and paths
   through a retired node are not dependencies, so a node reachable only through
-  a retired party is complete too. `RevokeLocally`, `ApplyDirective`,
-  `Vouchers.Accept`, `ClearLocallyRevoked` and `NewEdgeAudience` answer as
-  before: revoking and directives only ever revoke, `Accept` sees no view, and
-  the last two are open questions (see the skipped tests in `retired_test.go`).
-  The local node's own entry in the set is not read. A nil or empty set retires
-  nobody.
+  a retired party is complete too. `RevokeLocally`, `ApplyDirective` and
+  `Vouchers.Accept` answer as before: revoking and directives only ever revoke
+  and `Accept` sees no view. `ClearLocallyRevoked` sets `ClearEffect.Retired` for
+  a retired node and then never asks for a new pairing: a retired identity
+  cannot come back through a new pairing, only a new identity (a different node
+  ID) can join. `NewEdgeAudience` leaves retired nodes out, the ends of the edge
+  included, but still tells the other parties of a retired end: an edge with a
+  retired end means a stolen identity key is signing new credentials, which they
+  must hear.
+  The local node's own entry in the set is never read by any function here. A
+  retired local identity is the caller's to handle: it refuses to run under it.
+  A nil or empty set retires nobody.
 - **Computed, never stored.** `Evaluate` is a pure function of the `View`; the
   order in which records reached the view does not matter.
 - **Local revocation** puts the node in the locally revoked set. The set beats
@@ -110,6 +116,9 @@ reasons behind the rules.
 - `View.Retired` holds only nodes whose self-revocation statement has been
   verified (the signature, that it is the node's own key), and a node never
   leaves it.
+- The caller refuses to run under a retired local identity. This package never
+  reads the local node's own entry in `View.Retired`, so a daemon that kept
+  running under a void identity would go on deciding as if it were valid.
 - Credential digests in the view are unique; `Vouchers` holds only the latest
   voucher per issuer and edge (use `Vouchers.Accept`, called with the time of receipt); `Settings.GracePeriod`
   passed `ValidateGracePeriod`.

@@ -58,7 +58,10 @@ minutes, default 10 minutes; smaller values are rejected.
 The set expresses the owner's intent and no path overrides it: X is refused and
 is never accepted as an intermediate. If X is a direct party, the node also stops
 vouching for that edge at once and revokes the credential. Clearing the entry
-restores nothing when the credential is revoked: the nodes must pair again.
+restores nothing when the credential is revoked: the nodes must pair again. A
+retired node is the exception: it cannot come back through a new pairing at all,
+only a new identity (a different node ID) can join, so the answer to clearing
+says the node is retired and never asks for a new pairing.
 
 **Retired nodes.** A node whose identity key published a verified
 self-revocation statement is retired. The identity is void for good: the node
@@ -81,7 +84,10 @@ through a retired party is complete as well.
 
 **New-edge notification.** When an edge between A and B appears, the owners of A,
 B and their direct parties (within the local view) are told. It informs and never
-blocks.
+blocks. Retired nodes are left out, the ends included: a retired identity has no
+owner to tell and its key may be in an attacker's hands. A retired end's
+credentials still count, so its other parties are told: an edge with a retired
+end means a stolen identity key is signing new credentials.
 
 **Voucher issuance gate.** A node issues no vouchers until it has synced
 revocations and trust graph with its direct parties and carried out pending
@@ -140,8 +146,9 @@ revoke; it can neither create trust nor loosen anything.
 - **Retirement beats local revocation in the reason.** Both refuse the node, but
   retirement is the fact that never changes, so it is the one worth naming.
 - **A retired intermediate ranks lowest among path failures.** Nothing can revive
-  that path, so a failure on another path, which could still change, says more
-  about what to do. Its check also runs before the credential checks: the path
+  that path, while a revoked credential can be replaced by a new pairing and a
+  retired identity cannot be replaced at all, so a failure on another path says
+  more about what to do. Its check also runs before the credential checks: the path
   is void whatever its credentials say. It is a denial, never a suspension, even
   with stale vouchers, because no fresh voucher can bring it back.
 - **No vouchers, no waiting, no dependency for a retired node.** A voucher for
@@ -149,6 +156,18 @@ revoke; it can neither create trust nor loosen anything.
   will never sync or revoke, so a gate or an eviction that waited for it would
   never finish. Eviction therefore counts only credentials that can still carry
   trust.
+- **The local node's own retirement is never read.** Every decision here is about
+  the other nodes. A node whose own identity is void must not keep running, and
+  that is the caller's to enforce; answering differently inside the package
+  would spread the same rule over every function. It is therefore decided in
+  one place, the lookup of the retired set, which never reports the local node.
+- **Clearing a retired node says so and asks for no pairing.** The caller needs
+  to tell the owner that nothing can restore this identity; "pair again" would
+  send them to a pairing that cannot succeed.
+- **The new-edge audience skips retired nodes but not their parties.** Telling a
+  retired identity the topology may leak it to whoever holds the key, yet the
+  parties of a retired end are the ones who must learn that its key signs new
+  credentials.
 - **Revocation effects and directives are unchanged.** Revoking a retired node
   locally, or its credential by directive, is harmless tidying that only takes
   trust away, so those answers do not change.
@@ -200,8 +219,9 @@ revoke; it can neither create trust nor loosen anything.
   `TestIssuanceGate`, eviction, audience, `TestApplyDirective`),
   `property_test.go` (random graphs and evaluation times, order independence,
   recomputation from raw records, revocation never grants trust, two sides
-  agree, an empty retired set changes nothing) and `retired_test.go`
+  agree except across a retired end, which is judged asymmetrically, an empty
+  retired set changes nothing) and `retired_test.go`
   (`TestEvaluateRetired`, `TestVouchableEdgesRetired`, `TestIssuanceGateRetired`,
   `TestEvictionProgressRetired`, `TestRetiredLeavesOtherDecisionsUnchanged`,
-  and the skipped open questions for a retired local node, clearing and the
-  new-edge audience).
+  `TestRetiredLocalNodeIsNeverRead`, `TestClearLocallyRevokedRetired` and
+  `TestNewEdgeAudienceRetired`).

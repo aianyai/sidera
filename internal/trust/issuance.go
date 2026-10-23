@@ -67,8 +67,8 @@ type IssuanceState struct {
 type IssuanceVerdict struct {
 	Allowed bool
 	Reason  IssuanceReason
-	// WaitingFor lists the direct parties that are neither synced nor
-	// unreachable, in order.
+	// WaitingFor lists the direct parties that are neither synced, unreachable
+	// nor retired, in order.
 	WaitingFor []ident.NodeID
 }
 
@@ -87,7 +87,8 @@ func (s IssuanceState) RequiresSync(grace time.Duration) bool {
 // directParties returns the nodes at the other end of a usable local
 // credential, deduplicated and ordered. Retired nodes are left out: a void
 // identity has no revocations worth syncing and would hold the gate shut for
-// as long as it stays unreachable.
+// as long as it stays unreachable. The gate therefore waits only for parties
+// that are neither synced, unreachable nor retired.
 func (v View) directParties(now time.Time) []ident.NodeID {
 	seen := NodeSet{}
 	var out []ident.NodeID

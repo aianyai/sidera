@@ -44,12 +44,15 @@ type Eviction struct {
 // through a retired party reports complete too, which is true: no path to it
 // is left.
 func EvictionProgress(v View, x ident.NodeID, now time.Time) Eviction {
+	if v.retired(x) {
+		return Eviction{Target: x, Complete: true}
+	}
 	e := Eviction{Target: x}
 
 	byParty := map[ident.NodeID][]CredentialDigest{}
 	for _, c := range v.credentialsOf(x) {
 		party, _ := c.other(x)
-		if !v.usable(c, now) || v.retired(x) || v.retired(party) {
+		if !v.usable(c, now) || v.retired(party) {
 			continue
 		}
 		byParty[party] = append(byParty[party], c.Digest)
@@ -91,6 +94,12 @@ func inheritedStructure(v View, now time.Time, keep func(via, to ident.NodeID) b
 // edge between a and b appeared: a, b and the direct trust parties of both,
 // as far as the local view shows, ordered by node. It only informs; it never
 // blocks the edge.
+//
+// Retired nodes are left out, the ends a and b included: a retired identity
+// has no owner to tell, and its key may be in an attacker's hands, so telling
+// it the topology would leak it. A retired end's credentials still count, so
+// its parties are told: a new edge with a retired end means a stolen identity
+// key is signing new credentials, which is exactly what they must hear.
 func NewEdgeAudience(v View, a, b ident.NodeID, now time.Time) []ident.NodeID {
 	set := map[ident.NodeID]struct{}{a: {}, b: {}}
 	for _, end := range []ident.NodeID{a, b} {
@@ -103,7 +112,9 @@ func NewEdgeAudience(v View, a, b ident.NodeID, now time.Time) []ident.NodeID {
 	}
 	out := make([]ident.NodeID, 0, len(set))
 	for n := range set {
-		out = append(out, n)
+		if !v.retired(n) {
+			out = append(out, n)
+		}
 	}
 	sortNodes(out)
 	return out

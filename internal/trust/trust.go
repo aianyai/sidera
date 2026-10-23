@@ -145,7 +145,9 @@ type View struct {
 	// never trusted, not even through a path, and no credential with it can
 	// carry trust. Unlike LocallyRevoked, no owner decides it and nothing
 	// clears it. An empty or nil set means no node is retired. The local
-	// node's own entry is not read: the decisions are about the other nodes.
+	// node's own entry is never read, so it changes no answer of this package:
+	// a retired local identity is the caller's to handle, and the caller
+	// refuses to run under it.
 	Retired NodeSet
 	// Credentials are the mutual-trust credentials within two hops of Local:
 	// Local's own and those of Local's direct trust parties. Digests are
@@ -187,7 +189,14 @@ func (v View) locallyRevoked(n ident.NodeID) bool {
 	return revoked
 }
 
+// retired reports whether n is a retired node. The local node never is, here:
+// every decision of this package is about the other nodes, and a retired local
+// identity is refused by the caller before any of them is asked. Answering
+// false for it at this one place keeps every function from reading the entry.
 func (v View) retired(n ident.NodeID) bool {
+	if n == v.Local {
+		return false
+	}
 	_, retired := v.Retired[n]
 	return retired
 }

@@ -188,17 +188,142 @@ func TestRetiredLeavesOtherDecisionsUnchanged(t *testing.T) {
 	})
 }
 
-// Decisions that retirement may or may not change: they need a product ruling,
-// so the tests stay skipped until it is made.
-
-func TestRetiredLocalNodeRefusesEverything(t *testing.T) {
-	t.Skip("open question: when the local node is itself retired, should Evaluate refuse every target? Today the local node's own entry in Retired is not read, so a retired node keeps deciding as before. A retired local node is void and re-joins under a new identity, so its decisions may have to be refused wholesale; that is a product ruling")
+// The local node's own entry in the retired set is never read: a retired local
+// identity is refused by the caller, and every decision here is about the other
+// nodes. With the entry present each function answers exactly as without it.
+func TestRetiredLocalNodeIsNeverRead(t *testing.T) {
+	// A is local with direct parties B, X and an expired one (Y, byte 8); C
+	// hangs off B and D off X, so A reaches C and D by inheritance.
+	build := func() *world {
+		return newWorld(nA).edge(1, nA, nB).edge(2, nB, nC).edge(3, nA, nX).edge(4, nX, nD).edge(5, nA, 8).expiring(5, t0.Add(-time.Minute)).acceptAll().vouchAll()
+	}
+	// The second base retires another node as well, so the rows also show that
+	// the local entry does not disturb a view that does retire someone.
+	bases := []struct {
+		name string
+		base func() *world
+	}{
+		{"nobody else retired", build},
+		{"another node retired", func() *world { return build().retire(nC) }},
+	}
+	starting := IssuanceState{Starting: true, Synced: NodeSet{}, Unreachable: NodeSet{}}
+	for _, b := range bases {
+		t.Run(b.name, func(t *testing.T) {
+			plain, withLocal := b.base().v, b.base().retire(nA).v
+			if _, ok := withLocal.Retired[node(nA)]; !ok {
+				t.Fatal("the local node is not in the retired set")
+			}
+			for _, target := range []byte{nA, nB, nC, nD, nX, 8, 7} {
+				if got, want := Evaluate(withLocal, node(target), t0), Evaluate(plain, node(target), t0); !reflect.DeepEqual(got, want) {
+					t.Errorf("Evaluate %d: got %+v, want %+v", target, got, want)
+				}
+				// The local node as the target and as a party (X and B hold a
+				// credential with it) are both in this loop.
+				if got, want := EvictionProgress(withLocal, node(target), t0), EvictionProgress(plain, node(target), t0); !reflect.DeepEqual(got, want) {
+					t.Errorf("EvictionProgress %d: got %+v, want %+v", target, got, want)
+				}
+				if got, want := ClearLocallyRevoked(withLocal, node(target), t0), ClearLocallyRevoked(plain, node(target), t0); got != want {
+					t.Errorf("ClearLocallyRevoked %d: got %+v, want %+v", target, got, want)
+				}
+				if got, want := NewEdgeAudience(withLocal, node(nA), node(target), t0), NewEdgeAudience(plain, node(nA), node(target), t0); !slices.Equal(got, want) {
+					t.Errorf("NewEdgeAudience %d: got %v, want %v", target, got, want)
+				}
+			}
+			if got, want := VouchableEdges(withLocal, t0), VouchableEdges(plain, t0); !slices.Equal(got, want) {
+				t.Errorf("VouchableEdges: got %v, want %v", got, want)
+			}
+			if got, want := IssuanceGate(withLocal, starting, t0), IssuanceGate(plain, starting, t0); !reflect.DeepEqual(got, want) {
+				t.Errorf("IssuanceGate: got %+v, want %+v", got, want)
+			}
+		})
+	}
+	// Expected values written out, so the rows above cannot agree on a wrong
+	// answer: the local node keeps deciding as before.
+	t.Run("the local node still trusts its direct party and reaches the inherited one", func(t *testing.T) {
+		v := build().retire(nA).v
+		if got := Evaluate(v, node(nB), t0); got.Outcome != AllowedDirect {
+			t.Fatalf("direct party: %+v", got)
+		}
+		if got := Evaluate(v, node(nC), t0); got.Outcome != AllowedInherited {
+			t.Fatalf("inherited: %+v", got)
+		}
+	})
+	t.Run("the local node is a party X still waits for, and the target of its own eviction", func(t *testing.T) {
+		v := build().retire(nA).v
+		var parties []byte
+		for _, p := range EvictionProgress(v, node(nX), t0).Unrevoked {
+			parties = append(parties, nodeByte(p.Party))
+		}
+		if !slices.Equal(parties, []byte{nA, nD}) {
+			t.Fatalf("parties of X: %v", parties)
+		}
+		if e := EvictionProgress(v, node(nA), t0); e.Complete || len(e.Unrevoked) != 2 {
+			t.Fatalf("eviction of the local node: %+v", e)
+		}
+	})
+	t.Run("vouchers are still issued and the gate still waits", func(t *testing.T) {
+		v := build().retire(nA).v
+		if got := VouchableEdges(v, t0); !slices.Equal(got, digests(1, 3)) {
+			t.Fatalf("vouchable: %v", got)
+		}
+		if got := IssuanceGate(v, starting, t0); got.Allowed || !slices.Equal(got.WaitingFor, nodes(nB, nX)) {
+			t.Fatalf("gate: %+v", got)
+		}
+	})
 }
 
+// Clearing the entry of a retired node restores nothing and a new pairing does
+// not help: the identity is void, so only a new node ID can join.
 func TestClearLocallyRevokedRetired(t *testing.T) {
-	t.Skip("open question: for a retired node, ClearLocallyRevoked says no new pairing is required while a usable credential remains, although clearing restores nothing and pairing again would fail. Should ClearEffect say the node is void? Adding a field to ClearEffect is a change to the contract and a product ruling")
+	rows := []struct {
+		rule  string
+		world func() *world
+		want  ClearEffect
+	}{
+		{"a retired node with a usable credential is reported retired", func() *world { return newWorld(nA).edge(1, nA, nB).revokeNode(nB).retire(nB) }, ClearEffect{WasRevoked: true, Retired: true}},
+		{"a retired node with a revoked credential needs no new pairing: pairing again would not bring it back", func() *world { return newWorld(nA).edge(1, nA, nB).revokeCred(1).revokeNode(nB).retire(nB) }, ClearEffect{WasRevoked: true, Retired: true}},
+		{"a retired node with an expired credential needs no new pairing", func() *world { return newWorld(nA).edge(1, nA, nB).expiring(1, t0).revokeNode(nB).retire(nB) }, ClearEffect{WasRevoked: true, Retired: true}},
+		{"a retired node that was never revoked locally is still reported retired", func() *world { return newWorld(nA).edge(1, nA, nB).revokeCred(1).retire(nB) }, ClearEffect{Retired: true}},
+		{"a retired node without any credential is reported retired", func() *world { return newWorld(nA).revokeNode(nB).retire(nB) }, ClearEffect{WasRevoked: true, Retired: true}},
+		{"a node that is not retired still needs a new pairing after its credential was revoked", func() *world { return newWorld(nA).edge(1, nA, nB).revokeCred(1).revokeNode(nB).retire(nC) }, ClearEffect{WasRevoked: true, NewPairingRequired: true}},
+		{"a node that is not retired with a usable credential needs nothing", func() *world { return newWorld(nA).edge(1, nA, nB).revokeNode(nB).retire(nC) }, ClearEffect{WasRevoked: true}},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			if got := ClearLocallyRevoked(r.world().v, node(nB), t0); got != r.want {
+				t.Fatalf("got %+v, want %+v", got, r.want)
+			}
+		})
+	}
 }
 
+// A retired node is not told about a new edge, but the other parties of a
+// retired end still are: an edge with a retired end means a stolen identity key
+// is signing new credentials, which they must hear.
 func TestNewEdgeAudienceRetired(t *testing.T) {
-	t.Skip("open question: should the audience of a new edge leave out retired nodes (their key may be in an attacker's hands, so telling them the topology leaks it), and should an edge with a retired end be announced at all? Today retirement does not change the audience. That is a product ruling")
+	// The new edge is B-D. B has parties A and C, D has parties C and E (byte 7).
+	base := func() *world {
+		return newWorld(nA).edge(1, nA, nB).edge(2, nB, nC).edge(3, nC, nD).edge(4, nD, 7)
+	}
+	rows := []struct {
+		rule  string
+		world func() *world
+		want  []byte
+	}{
+		{"without retirement everyone around the edge is told", base, []byte{nA, nB, nC, nD, 7}},
+		{"a retired end b is absent and the other parties of b are present", func() *world { return base().retire(nD) }, []byte{nA, nB, nC, 7}},
+		{"a retired end a is absent and the other parties of a are present", func() *world { return base().retire(nB) }, []byte{nA, nC, nD, 7}},
+		{"with both ends retired their parties are still told", func() *world { return base().retire(nB).retire(nD) }, []byte{nA, nC, 7}},
+		{"a retired party of an end is absent", func() *world { return base().retire(nC) }, []byte{nA, nB, nD, 7}},
+		{"a retired node elsewhere changes nothing", func() *world { return base().retire(nX) }, []byte{nA, nB, nC, nD, 7}},
+		{"a retired end with a revoked credential tells that party nothing: only usable credentials count", func() *world { return base().revokeCred(1).retire(nB) }, []byte{nC, nD, 7}},
+		{"an empty retired set changes nothing", func() *world { w := base(); w.v.Retired = NodeSet{}; return w }, []byte{nA, nB, nC, nD, 7}},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			if got := NewEdgeAudience(r.world().v, node(nB), node(nD), t0); !slices.Equal(got, nodes(r.want...)) {
+				t.Fatalf("got %v, want %v", got, nodes(r.want...))
+			}
+		})
+	}
 }
