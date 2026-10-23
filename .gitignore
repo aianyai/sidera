@@ -6,6 +6,10 @@ CLAUDE.local.md
 .worktree/
 .worktrees/
 
+# Local probes and throwaway prototypes; their findings feed design decisions
+# but the code itself is never shipped.
+/probes/
+
 # ============================================
 # Go
 # ============================================
