@@ -53,12 +53,17 @@ identifiers and `ErrAlgorithm`, `ErrKeyLength`, `ErrKeyNotCanonical` or
 - Every identifier has exactly one text. The parser accepts only lowercase
   bech32m with the expected prefix and data length, zero padding bits and the
   bech32m checksum constant (not the older bech32 one), and re-encodes the
-  result to compare. A string of another kind, such as a person text where a
-  node is expected, fails with `ErrPrefix`.
+  result to compare. A well-formed string of another kind, such as a person text where a
+  node is expected, fails with `ErrPrefix`; a damaged string fails at whichever earlier check it breaks first (length, character range, case, separator, alphabet, checksum).
 - Every key has exactly one accepted encoding, so one key has one identifier.
   A non-canonical encoding, a point not on the curve and a small-order point are
-  refused when the key is built; the signature check additionally refuses a
-  non-canonical signature scalar.
+  refused when the key is built. Mixed-order points (prime-order part plus a
+  small-order part) are not refused: one secret may stand behind up to eight
+  keys and identifiers, which grants nothing because anyone can create unlimited
+  identities anyway, and no third party can forge or re-encode a signature.
+- The signature check refuses a non-canonical signature scalar, so a third party
+  cannot re-encode a valid signature. The signer can still produce several valid
+  signatures of one message, so a signature never identifies a statement.
 - `ident` imports no contract package except the dependency-free
   [`frame`](../frame/README.md), whose one framing rule builds the derivation
   input and which declares the derivation domains. The key type lives

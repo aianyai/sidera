@@ -91,7 +91,12 @@ func (k PublicKey) IsZero() bool { return k.alg == AlgorithmNone }
 
 // Verify reports whether sig is a valid signature of msg under k. It is false
 // for the zero key and for a signature that is not in canonical form (the
-// scalar part must be reduced), so a signature has exactly one valid encoding.
+// scalar part must be reduced), so a third party who holds a valid signature
+// cannot derive a second valid encoding of it. That is all it promises about
+// uniqueness: the signer can produce several different valid signatures of one
+// message (a different nonce gives a different R), so nothing may identify a
+// signed statement by its signature; records are identified by their digest,
+// which does not cover signatures.
 func (k PublicKey) Verify(msg, sig []byte) bool {
 	if k.alg != AlgorithmEd25519 || len(sig) != ed25519.SignatureSize {
 		return false
@@ -134,6 +139,18 @@ var smallOrderEncodings = [8][Ed25519KeyLen]byte{
 // public key: y must be reduced, the point must be on the curve, and the
 // encoding of x = 0 must not carry the sign bit. A key that passes has exactly
 // one valid encoding. Small-order points are refused last.
+//
+// Mixed-order points (a point of the prime-order subgroup plus a non-zero point
+// of the small torsion subgroup) pass: they are valid curve points with a
+// canonical encoding, and rejecting them would take a prime-order subgroup check
+// that costs a scalar multiplication per key for no gain. One secret scalar can
+// therefore stand behind up to eight different public keys, and so behind eight
+// identifiers. That gives nobody anything: an attacker can create as many
+// unrelated identities as they like by generating keys, a signature made for one
+// of the eight keys is not valid for another (the challenge hash covers the
+// public key's bytes), and a third party can neither
+// forge a signature nor produce a second encoding of one (the scalar of a
+// signature is checked to be reduced).
 func checkEd25519(b []byte) error {
 	var le [Ed25519KeyLen]byte
 	copy(le[:], b)
@@ -151,10 +168,11 @@ func checkEd25519(b []byte) error {
 	v := new(big.Int).Mul(curveD, y2)
 	v.Add(v, big.NewInt(1))
 	v.Mod(v, fieldP)
+	// v is never zero: v = 0 would need y^2 = -1/d, and -1/d is not a square
+	// modulo p (d is not a square, -1 is a square because p = 1 mod 4, and the
+	// inverse of a non-square is a non-square). ModInverse therefore always
+	// succeeds; a test checks the claim.
 	vInv := new(big.Int).ModInverse(v, fieldP)
-	if vInv == nil {
-		return ErrKeyNotCanonical
-	}
 	x2 := new(big.Int).Mul(u, vInv)
 	x2.Mod(x2, fieldP)
 	x := new(big.Int).Exp(x2, sqrtExponent, fieldP)

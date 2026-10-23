@@ -298,3 +298,32 @@ func TestSmallOrderListIsTheTorsionSubgroup(t *testing.T) {
 		}
 	}
 }
+
+// The decoder divides by d*y^2 + 1 without a zero check. That is sound only if
+// -1/d is not a square modulo p, so no y gives a zero denominator. The check
+// uses Euler's criterion with constants written out here: a number a is a square
+// modulo an odd prime p exactly when a^((p-1)/2) = 1, and a non-square when it
+// is p-1.
+func TestDecoderDenominatorIsNeverZero(t *testing.T) {
+	p, _ := new(big.Int).SetString("57896044618658097711785492504343953926634992332820282019728792003956564819949", 10) // 2^255 - 19
+	d, _ := new(big.Int).SetString("37095705934669439343138083508754565189542113879843219016388785533085940283555", 10) // -121665/121666 mod p
+	half := new(big.Int).Rsh(new(big.Int).Sub(p, big.NewInt(1)), 1)
+	euler := func(a *big.Int) *big.Int { return new(big.Int).Exp(a, half, p) }
+	minusOne := new(big.Int).Sub(p, big.NewInt(1))
+	if got := euler(minusOne); got.Cmp(big.NewInt(1)) != 0 {
+		t.Fatalf("-1 should be a square modulo p, Euler symbol %v", got)
+	}
+	if got := euler(d); got.Cmp(minusOne) != 0 {
+		t.Fatalf("d should not be a square modulo p, Euler symbol %v", got)
+	}
+	dInv := new(big.Int).ModInverse(d, p)
+	target := new(big.Int).Mul(minusOne, dInv) // -1/d
+	target.Mod(target, p)
+	if got := euler(target); got.Cmp(minusOne) != 0 {
+		t.Fatalf("-1/d should not be a square modulo p, Euler symbol %v", got)
+	}
+	// The constant in the decoder is the same number.
+	if curveD.Cmp(d) != 0 || fieldP.Cmp(p) != 0 {
+		t.Fatal("the decoder's d or p differs from the constants of this test")
+	}
+}

@@ -32,8 +32,23 @@ refused today, 0 is "none". `NewPublicKey` accepts a key only if
 3. the point is not one of the eight points of order 1, 2, 4 or 8.
 
 `PublicKey.Verify` additionally depends on the standard library's Ed25519
-verification, which refuses a signature whose scalar is not reduced, so each
-signature has one encoding too.
+verification, which refuses a signature whose scalar is not reduced. That makes a
+valid signature non-malleable for a third party: nobody who merely holds it can
+produce a second valid encoding. It does not make the signature unique for a
+message: the signer can make many different valid signatures of one message, so
+a signed statement is identified by its digest (see records), never by its
+signature.
+
+Mixed-order keys are not rejected. A key whose point is a prime-order point plus
+a non-zero small-order point is a valid curve point with a canonical encoding,
+and screening it out takes a scalar multiplication per key. The consequence is
+that one secret scalar can stand behind up to eight public keys and so eight
+identifiers. That grants nothing: anyone can create as many unrelated
+identities as they like by generating keys, a signature made for one of the eight
+keys does not verify under another (the challenge hash covers the public key
+bytes), and no third party can forge a signature or re-encode one. Only the
+eight points of small order themselves are refused, because a key of small order
+verifies signatures for many messages.
 
 ### Derivation
 
@@ -64,8 +79,13 @@ The parser accepts exactly one text per identifier:
 
 - lowercase only (BIP 350 allows an all-uppercase form; it is refused, so one
   value does not have two texts);
-- the expected prefix (a `person` text where a node is expected fails with a
-  prefix error before anything else is read);
+- the expected prefix (a `person` text where a node is expected fails with
+  `ErrPrefix`, but only after the checks that come before it: total length, the
+  character range, lowercase, the separator and a checksum-length tail, the
+  alphabet and the bech32m checksum. Only a well-formed bech32m string of
+  another kind gets as far as the prefix check; a damaged one fails earlier with
+  the earlier error. After the prefix come the padding bits, the canonical
+  re-encoding and finally the data length);
 - the expected data length, zero padding bits, and the bech32m checksum constant
   (a string with the older bech32 constant fails the checksum);
 - after decoding, the identifier is encoded again and compared with the input.
@@ -142,6 +162,7 @@ The parser accepts exactly one text per identifier:
   independent implementation, `TestParseKindRules`), `bech32m_test.go`
   (specification vectors), `key_test.go` (key rules, an oracle that decodes
   points with a separate method, and a derivation of the torsion list from the
-  curve equation), `derive_test.go` (derived identifiers for the RFC 8032 test
+  curve equation, and `TestDecoderDenominatorIsNeverZero`, which backs the
+  decoder's omission of a zero check), `derive_test.go` (derived identifiers for the RFC 8032 test
   keys), `fuzz_test.go` (every parser and the key constructor).
 - `internal/ident/README.md`: entry points and invariants of the package.
