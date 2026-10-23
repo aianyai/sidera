@@ -282,6 +282,36 @@ func VerifyPartial[P any](d Descriptor[P], r Record) (Partial[P], error) {
 	return Partial[P]{Payload: p, Digest: r.Digest(), Slots: state}, nil
 }
 
+// CoSign adds s's signature to r, a record of the type d describes that is
+// still waiting for signers. The first party signs with Seal and sends the
+// record; the second party calls CoSign on what it received. Before signing,
+// CoSign verifies the record against d as VerifyPartial does, so a signer is
+// never made to put a signature next to a payload or signatures it has not
+// checked, and it requires s to fill an empty slot of the signer rule: a signer
+// the rule does not allow, a signer that has already signed and a record whose
+// slots are all filled are refused. A zero Record is refused. The result may
+// still be incomplete (a rule with more than two slots); check it with Verify or
+// VerifyPartial.
+func CoSign[P any](d Descriptor[P], r Record, s Signer) (Record, error) {
+	partial, err := VerifyPartial(d, r)
+	if err != nil {
+		return Record{}, err
+	}
+	pub := s.Public()
+	if pub.IsZero() {
+		return Record{}, fmt.Errorf("%w: signer has no key", ErrKey)
+	}
+	for _, have := range r.Signatures {
+		if have.Key == pub {
+			return Record{}, ErrDuplicateSigner
+		}
+	}
+	if err := assign(d.signers(partial.Payload), partial.Slots, pub); err != nil {
+		return Record{}, fmt.Errorf("%s: %w", d.typ, err)
+	}
+	return r.withSignature(s)
+}
+
 // assign puts k into the first free slot that accepts it and records it in
 // state. When none does, the error wraps ErrSignerNotAllowed and the specific
 // reasons the free slots gave (a plain "not the key this slot names" is not

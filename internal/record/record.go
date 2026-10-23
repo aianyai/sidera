@@ -86,8 +86,10 @@ func DigestOf(typ string, payload []byte) Digest {
 // Digest returns the record's digest.
 func (r Record) Digest() Digest { return DigestOf(r.Type, r.Payload) }
 
-// Sign builds a record signed by all of signers. Pass a single signer for a
-// record that a second party will co-sign (see CoSign).
+// Sign builds a record signed by all of signers over a raw payload, without
+// any record type's rules. Typed records are made with Seal, and a second party
+// adds its signature with CoSign, which checks the record against its
+// descriptor first.
 func Sign(typ string, payload []byte, signers ...Signer) (Record, error) {
 	if err := checkTypeString(typ); err != nil {
 		return Record{}, err
@@ -98,7 +100,7 @@ func Sign(typ string, payload []byte, signers ...Signer) (Record, error) {
 	r := Record{Type: typ, Payload: append([]byte(nil), payload...)}
 	for _, s := range signers {
 		var err error
-		if r, err = r.CoSign(s); err != nil {
+		if r, err = r.withSignature(s); err != nil {
 			return Record{}, err
 		}
 	}
@@ -108,11 +110,10 @@ func Sign(typ string, payload []byte, signers ...Signer) (Record, error) {
 	return r, nil
 }
 
-// CoSign returns a copy of r with s's signature added. The first party signs
-// with Sign and sends the record; the second party verifies it with
-// VerifyPartial, then calls CoSign. The signature is checked before it is
-// added, so a broken Signer fails here and not at the far end.
-func (r Record) CoSign(s Signer) (Record, error) {
+// withSignature returns a copy of r with s's signature added in key order. The
+// signature is checked before it is added, so a broken Signer fails at its own
+// side. It knows nothing of the record type; CoSign and Sign decide who may sign.
+func (r Record) withSignature(s Signer) (Record, error) {
 	pub := s.Public()
 	if pub.IsZero() {
 		return Record{}, fmt.Errorf("%w: signer has no key", ErrKey)
@@ -128,7 +129,7 @@ func (r Record) CoSign(s Signer) (Record, error) {
 	msg := SignedBytes(r.Type, r.Payload)
 	sig, err := s.Sign(msg)
 	if err != nil {
-		return Record{}, fmt.Errorf("%w: %v", ErrSigner, err)
+		return Record{}, fmt.Errorf("%w: %w", ErrSigner, err)
 	}
 	if !pub.Verify(msg, sig) {
 		return Record{}, fmt.Errorf("%w: signature does not verify under the signer's key", ErrSigner)

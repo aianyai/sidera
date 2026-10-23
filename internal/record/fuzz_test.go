@@ -34,9 +34,11 @@ func FuzzDecodeRecord(f *testing.F) {
 		_, _ = VerifyPartial(pairDescriptor, rec)
 		_, _ = VerifyPartial(noteDescriptor, rec)
 		// A decoded record may be co-signed and encoded again.
-		if more, err := rec.CoSign(seedSigner(t, 5)); err == nil {
-			if _, err := more.Encode(); err != nil {
-				t.Fatalf("co-signed record does not encode: %v", err)
+		for _, n := range []int{1, 2} {
+			if more, err := CoSign(pairDescriptor, rec, rfcSigner(t, n)); err == nil {
+				if _, err := more.Encode(); err != nil {
+					t.Fatalf("co-signed record does not encode: %v", err)
+				}
 			}
 		}
 	})

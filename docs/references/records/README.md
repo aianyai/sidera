@@ -140,12 +140,14 @@ One set of functions converts them for every record type.
 ### Partial signatures
 
 Records that two parties sign are built in two steps. The first party seals the
-record with its own signer and sends it; the second party decodes it, checks it
-with `VerifyPartial` (every present signature is valid and allowed), and appends
-its signature with `CoSign`. The digest is the same at every step, so the second
-party signs exactly what the first one signed and both can compute the digest
-of the final credential before it is complete. `Verify` passes only when the
-signer set is complete.
+record with its own signer and sends it; the second party decodes it and calls
+`CoSign(descriptor, record, signer)`. `CoSign` verifies the record against the
+descriptor first (every present signature is valid and allowed, the payload is
+valid), then requires the new signer to fill an empty slot, and appends the
+signature. The digest is the same at every step, so the second party signs
+exactly what the first one signed and both can compute the digest of the final
+credential before it is complete. `Verify` passes only when the signer set is
+complete.
 
 ### Network-key certificate
 
@@ -246,6 +248,11 @@ the same record with a short window.
   and let an older certificate, and its key, return. A conflict is judged by
   digest and not by key, so a second certificate with the same key and another
   window under one serial is caught too.
+- **Co-signing goes through the descriptor.** A co-signer who appended a
+  signature to whatever record it was handed would put its key next to a payload
+  it never read and next to signatures nobody checked, and could fill a slot the
+  type does not give it. Verifying first, and assigning the signer to an empty
+  slot, makes co-signing the same check as verification plus one more signature.
 - **Partial is a type of its own.** The same result type with a "complete" flag
   would let a caller who forgets the flag treat a half-signed two-party
   credential as verified, a failure that compiles and passes every test with

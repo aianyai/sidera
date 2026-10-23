@@ -135,7 +135,7 @@ func TestPartialSignatures(t *testing.T) {
 		if _, err := VerifyPartial(pairDescriptor, recv); err != nil {
 			t.Fatal(err)
 		}
-		done, err := recv.CoSign(s2)
+		done, err := CoSign(pairDescriptor, recv, s2)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -148,7 +148,7 @@ func TestPartialSignatures(t *testing.T) {
 		}
 	})
 	t.Run("a signer cannot sign the same record twice", func(t *testing.T) {
-		if _, err := first.CoSign(s1); !errors.Is(err, ErrDuplicateSigner) {
+		if _, err := CoSign(pairDescriptor, first, s1); !errors.Is(err, ErrDuplicateSigner) {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -164,6 +164,85 @@ func TestPartialSignatures(t *testing.T) {
 		}
 		if _, err := VerifyPartial(pairDescriptor, rec); !errors.Is(err, ErrSignerNotAllowed) {
 			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestCoSign(t *testing.T) {
+	p := pairOf(t)
+	s1, s2, s3 := rfcSigner(t, 1), rfcSigner(t, 2), rfcSigner(t, 3)
+	first, err := Seal(pairDescriptor, p, s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete, err := CoSign(pairDescriptor, first, s2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flipped := Record{Type: first.Type, Payload: first.Payload, Signatures: []Signature{{Key: first.Signatures[0].Key, Sig: append([]byte(nil), first.Signatures[0].Sig...)}}}
+	flipped.Signatures[0].Sig[3] ^= 1
+	samePayload := cborw.mapOf(cborw.uint(1), cborw.bstr(p.First.Bytes()), cborw.uint(2), cborw.bstr(p.First.Bytes()))
+	badPayload, err := Sign(pairType, samePayload, s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherType, err := Seal(pairDescriptorV2, p, s1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreignSigner, err := Sign(pairType, first.Payload, s3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []struct {
+		rule string
+		d    Descriptor[pairRecord]
+		rec  Record
+		by   Signer
+		want error // nil: the record comes out verifying
+	}{
+		{"the second party fills the empty slot", pairDescriptor, first, s2, nil},
+		{"a zero record is refused", pairDescriptor, Record{}, s2, ErrType},
+		{"a record of another type is refused", pairDescriptor, otherType, s2, ErrType},
+		{"a record whose signature does not verify is refused", pairDescriptor, flipped, s2, ErrSignature},
+		{"a record whose payload the type refuses is refused", pairDescriptor, badPayload, s2, ErrPayload},
+		{"a record already signed by a key the rule does not allow is refused", pairDescriptor, foreignSigner, s2, ErrSignerNotAllowed},
+		{"a signer the rule does not allow is refused", pairDescriptor, first, s3, ErrSignerNotAllowed},
+		{"a signer that has already signed is refused", pairDescriptor, first, s1, ErrDuplicateSigner},
+		{"a record with every slot filled takes no further signature", pairDescriptor, complete, s3, ErrSignerNotAllowed},
+		{"a signer without a key is refused", pairDescriptor, first, brokenSigner{}, ErrKey},
+		{"the zero descriptor fails closed", Descriptor[pairRecord]{}, first, s2, ErrDescriptor},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			got, err := CoSign(r.d, r.rec, r.by)
+			if r.want != nil {
+				if !errors.Is(err, r.want) {
+					t.Fatalf("error = %v, want %v", err, r.want)
+				}
+				if len(got.Signatures) != 0 || got.Type != "" {
+					t.Fatal("a refused co-signing returned a record")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Verify(r.d, got); err != nil {
+				t.Fatalf("co-signed record does not verify: %v", err)
+			}
+		})
+	}
+	t.Run("the input record is not changed", func(t *testing.T) {
+		if len(first.Signatures) != 1 {
+			t.Fatalf("input has %d signatures", len(first.Signatures))
+		}
+	})
+	t.Run("the signer's own error is kept", func(t *testing.T) {
+		offline := errors.New("hsm offline")
+		_, err := CoSign(pairDescriptor, first, brokenSigner{pub: s2.Public(), err: offline})
+		if !errors.Is(err, ErrSigner) || !errors.Is(err, offline) {
+			t.Fatalf("error = %v, want ErrSigner wrapping the signer's error", err)
 		}
 	})
 }
@@ -398,7 +477,7 @@ func TestVerifyRejects(t *testing.T) {
 		}
 	})
 	t.Run("a third, unrelated signer is refused", func(t *testing.T) {
-		r, _ := good.CoSign(s3)
+		r, _ := Sign(pairType, payload, s1, s2, s3)
 		if _, err := Verify(pairDescriptor, r); !errors.Is(err, ErrSignerNotAllowed) {
 			t.Fatalf("error = %v", err)
 		}
@@ -620,6 +699,8 @@ type brokenSigner struct {
 func (b brokenSigner) Public() ident.PublicKey     { return b.pub }
 func (b brokenSigner) Sign([]byte) ([]byte, error) { return b.sig, b.err }
 
+var errSignerOffline = errors.New("hsm offline")
+
 func TestSignerFailuresAreCaughtAtTheSigner(t *testing.T) {
 	good := rfcSigner(t, 1)
 	rows := []struct {
@@ -627,7 +708,8 @@ func TestSignerFailuresAreCaughtAtTheSigner(t *testing.T) {
 		s    Signer
 		want error
 	}{
-		{"a signer that errors", brokenSigner{pub: good.Public(), err: errors.New("hsm offline")}, ErrSigner},
+		{"a signer that errors", brokenSigner{pub: good.Public(), err: errSignerOffline}, ErrSigner},
+		{"a signer that errors keeps its own error", brokenSigner{pub: good.Public(), err: errSignerOffline}, errSignerOffline},
 		{"a signer that returns a short signature", brokenSigner{pub: good.Public(), sig: []byte{1}}, ErrSigner},
 		{"a signer that returns a signature of another key", brokenSigner{pub: good.Public(), sig: make([]byte, 64)}, ErrSigner},
 		{"a signer without a key", brokenSigner{}, ErrKey},

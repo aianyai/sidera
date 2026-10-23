@@ -15,7 +15,7 @@ for the format and the reasons behind it. Identifiers and keys come from
 | `Record`, `Signature`                             | The envelope `{1: type, 2: payload, 3: signatures}`.                                                       |
 | `Decode(data, maxLen)`, `Record.Encode()`         | Strict decoding with an input-size limit (`DefaultMaxInput` is 64 KiB) and canonical encoding.             |
 | `Signer`, `NewEd25519Signer`                      | The signing interface callers inject, and an in-memory implementation.                                     |
-| `Sign`, `Record.CoSign`                           | Sign a raw payload; append a second party's signature to a partial record.                                |
+| `Sign`, `CoSign(d, r, signer)`                    | Sign a raw payload; verify a partial record against its descriptor and append a second party's signature to an empty slot. |
 | `Descriptor[P]`, `NewDescriptor`                  | One record type: type string, payload codec, signer rule. Exported by the package that defines the type.  |
 | `Seal`, `Verify`, `VerifyPartial`                 | Encode and sign a typed payload; check a complete record (`Verified[P]`); check a record that may still lack signers (`Partial[P]`). |
 | `SignedBytes`, `DigestOf`, `Record.Digest`        | The bytes that are signed and the signature-free digest.                                                  |
@@ -77,8 +77,12 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   checked again by `Verify`.
 - **Partial signatures.** The first party calls `Seal` (or `Sign`) with its
   signer and sends the encoded record. The second party decodes it, calls
-  `VerifyPartial`, then `CoSign`. The signature of an injected `Signer` is
-  checked when it is made, so a broken signer fails at its own side.
+  `CoSign(descriptor, record, signer)`, which verifies the record as
+  `VerifyPartial` does and requires the new signer to fill an empty slot; a zero
+  record, a signer the rule does not allow, a signer that already signed and a
+  record with every slot filled are refused. The signature of an injected
+  `Signer` is checked when it is made, so a broken signer fails at its own side,
+  and the error wraps both `ErrSigner` and the signer's own error.
 - **Times, counters, levels.** Required times are positive Unix seconds up to
   year 9999; optional times are left out, never written as 0; counters and serials
   start at 1; levels are 1 view, 2 manage, 3 full control and are required on a
