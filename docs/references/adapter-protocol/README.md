@@ -445,3 +445,67 @@ reading platform-specific process tables, which stay in the adapter.
 
 - `sdk/go/adapterproto/lifecycle.go` (`ProcessIdentity`, `Container`); test
   `TestProcessIdentityRules`.
+
+## Manifest
+
+### What
+
+`sidera-adapter.json` sits at the root of an adapter package. The daemon reads it
+to install an adapter and to admit one. `sdk/go/manifest` parses and validates it.
+
+```json
+{
+  "manifest_version": 1,
+  "id": "example",
+  "version": "0.3.1",
+  "protocol": {"min": 1, "max": 1},
+  "entry": {"program": "bin/sidera-adapter-example", "args": ["--stdio"]},
+  "platforms": [{"os": "darwin", "arch": "arm64"}, {"os": "linux", "arch": "amd64"}],
+  "requires": [{"program": "example-runtime", "os": ["darwin", "linux"]}],
+  "tested": [{"runtime": "example-runtime", "min": "2.1.306", "max": "2.1.308"}],
+  "budgets": [{"frontend": "cli", "unit": "chars", "limit": 27000},
+              {"frontend": "mcp", "unit": "tokens", "limit": 22500}],
+  "ack_markers": {"replaced": [{"literal": "[result saved to file]"}],
+                  "truncated": [{"regexp": "\\.\\.\\. \\d+ more lines"}]}
+}
+```
+
+Optional lists and objects are omitted when empty; an explicit empty one is an
+error.
+
+The rules are in [sdk/go/manifest/README.md](../../../sdk/go/manifest/README.md).
+In short: `id` and `version` are checked as the adapter reports them in
+`initialize`, and must equal them; the protocol range and the adapter's
+announcement are checked against each other; `tested` ranges are closed SemVer
+ranges; configuration uses a small field vocabulary; budgets map to the output
+budget of `recv` for that front end, and a front end without one gets the default.
+
+A native version outside the tested ranges still runs. It produces an
+availability condition `version_untested`, shown to the owner and in the status of
+the endpoints, but it is not blocked: blocking would disconnect users after every
+automatic update of the runtime, while a wrong reconciliation can only end as
+"cannot tell".
+
+### Why
+
+- **A small field vocabulary, not JSON Schema.** The daemon validates
+  configuration at run time and builds forms from it; a full schema engine would
+  make a validation library a run-time dependency of the daemon, for roughly a
+  hundred lines of checks. The examples elsewhere (extension manifests of other
+  agent tools) use small vocabularies too.
+- **No "secret" type.** Native credentials are read by the adapter from their
+  native place; they never enter Sidera's configuration.
+- **Markers are data, and compiled once.** The runtime-specific notice that
+  stands in for a tool result belongs to the adapter, so it is declared in the
+  manifest; the check that a marker is usable lives in `handoff` where it is
+  applied, and the manifest package only parses its shape.
+- **The budget is declared per front end** because the runtime shows different
+  amounts through different tool paths; the author subtracts the safety margin so
+  the daemon uses the limit as given.
+
+### Where
+
+- `sdk/go/manifest/manifest.go`; tests `TestIdentityRules`, `TestEntryRules`,
+  `TestPlatformAndRequirementRules`, `TestTestedRangeRules`,
+  `TestConfigFieldRules`, `TestBudgetRules`, `TestAckMarkerShape`, `TestParse`,
+  `FuzzParse`.
