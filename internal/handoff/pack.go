@@ -24,14 +24,16 @@ type Message struct {
 	ID   string
 	From ident.Address
 	Body string
-	// PossiblyDuplicate marks a message that was handed out before and not
-	// acknowledged.
+	// PossiblyDuplicate marks the part this page hands out as one that was
+	// handed out before and not acknowledged: the delivery side sets it from
+	// delivery.Record.PossibleDuplicate(part), for the part Pack hands out
+	// (NextPart, or 1) or the part k that Part is asked for.
 	PossiblyDuplicate bool
 	// NextPart is the part the next plain recv hands out when the message is
 	// larger than one page: the delivery side sets it from
 	// delivery.Record.NextPart(), the number after the last part the model
-	// acknowledged. 0 and 1 both mean from the start, so a message that was never
-	// handed out, or fits whole, needs no value.
+	// acknowledged. 0 and 1 both mean from the start, so a message that was never handed out, or fits
+	// whole, needs no value.
 	NextPart int
 }
 
@@ -73,10 +75,12 @@ var (
 )
 
 // Pack builds the output of recv for the messages queued for an endpoint, in
-// queue order, within the budget. lease is the ID of the lease the delivery side
-// took for what the page hands out; the page carries it as MaxLeaseLen
-// lowercase hex characters, which JSON does not escape. The zero LeaseID is
-// refused with ErrLeaseUnset: a page without a lease could not be acknowledged.
+// queue order, within the budget. lease is the identifier the caller generated
+// for this recv, the one it passes to delivery.Record.Handout for every entry of
+// Page.HandedOut; the page carries it as MaxLeaseLen lowercase hex characters,
+// which JSON does not escape. The zero LeaseID is refused with ErrLeaseUnset,
+// also for an empty queue: the caller generates the identifier before it packs,
+// so a page always has one and its wire shape does not vary.
 //
 // It takes whole messages while they fit. The first message that does not fit
 // ends the page and stays queued for the next recv; the order of the queue is
@@ -255,7 +259,7 @@ func pow10(n int) int {
 
 // wirePage is the JSON document recv prints.
 type wirePage struct {
-	// Lease is the ID of the lease on what Messages holds.
+	// Lease is the page identifier the caller generated for this recv.
 	Lease    string        `json:"lease"`
 	Messages []wireMessage `json:"messages"`
 	// More is the number of queued messages not in Messages.

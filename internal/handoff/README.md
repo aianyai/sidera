@@ -68,8 +68,8 @@ Delivery blocked:
 `recv` output:
 
 - The output is one JSON document and a newline:
-  `{"lease":"...","messages":[...],"more":N}`. `lease` is the ID of the lease the
-  delivery side took for what the page hands out. Sender fields (`id`, `from`,
+  `{"lease":"...","messages":[...],"more":N}`. `lease` is the page identifier
+  the caller generated for this `recv` (`delivery.LeaseID`). Sender fields (`id`, `from`,
   and `possibly_duplicate` and `part` when they apply) are separate from `body`.
   It is encoded with `SetEscapeHTML(false)`: non-ASCII text is emitted as is,
   except U+2028 and U+2029, which Go always escapes.
@@ -117,12 +117,24 @@ Before acknowledging:
 - `Part` is called with the budget `Pack` used for part 1. The cut points depend
   on the message and the budget, so changing the budget between the two changes
   the parts.
-- The lease passed to `Pack` and `Part` is a `delivery.LeaseID`, the ID the
-  delivery side generated. A page prints it as its text form, `MaxLeaseLen`
+- The order of one `recv` on the delivery side
+  ([delivery](../delivery/README.md)):
+  1. Generate one `delivery.LeaseID` for the `recv` (`delivery.NewLeaseID`).
+     This is done even when the queue is empty: `Pack` refuses the zero
+     `LeaseID` (`ErrLeaseUnset`) for every queue, so a page always carries an
+     identifier and its shape does not vary.
+  2. Fill `Message.PossiblyDuplicate` from `delivery.Record.PossibleDuplicate(part)`
+     for the part the page will hand out (the `Message.NextPart` part for
+     `Pack`, `k` for `Part`), and `Message.NextPart` from
+     `delivery.Record.NextPart()`: the first part not yet acknowledged, 1 before
+     the first hand-out.
+  3. Call `Pack` or `Part` with that lease.
+  4. Call `delivery.Record.Handout` with the same lease for every entry of
+     `Page.HandedOut`. One `recv` hands a page out under one lease, so the
+     acknowledgement that names the page's identifier is accepted for each of
+     its entries.
+- A page prints the lease as its text form, `MaxLeaseLen`
   (`delivery.LeaseIDTextLen`, 32) lowercase hex characters, which JSON does not
-  escape. The zero `LeaseID` is rejected (`ErrLeaseUnset`).
-- `Message.NextPart` is filled from `delivery.Record.NextPart()`: the number
-  after the last part the model acknowledged. It is 0 for a message never handed
-  out in parts.
+  escape.
 - `PromptParams` has no default: `MaxPerHour` and `MinInterval` are undecided and
   must be configured.

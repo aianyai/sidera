@@ -1,7 +1,6 @@
 package delivery
 
 import (
-	"bytes"
 	"errors"
 	"testing"
 	"time"
@@ -28,19 +27,19 @@ func TestHandout(t *testing.T) {
 			time.Minute, AuthorizationDeny, 1, HandoutDenied, false, UnavailableNone, StateRejected, 0},
 		{"a second recv by the same endpoint returns its leased message flagged as duplicate", func(t *testing.T) Record {
 			r := targetRecord(t, t0, time.Hour)
-			r, _, _ = r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, testRand)
+			r, _, _ = r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, freshLease())
 			return r
 		}, 2 * time.Minute, AuthorizationAllow, 1, HandoutResent, true, UnavailableNone, StateAccepted, 1},
 		{"suspension also skips a message the endpoint already holds", func(t *testing.T) Record {
 			r := targetRecord(t, t0, time.Hour)
-			r, _, _ = r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, testRand)
+			r, _, _ = r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, freshLease())
 			return r
 		}, 2 * time.Minute, AuthorizationSuspend, 1, HandoutSkipped, false, UnavailableNone, StateAccepted, 1},
 		{"a message past its backlog deadline is not handed out", func(t *testing.T) Record { return targetRecord(t, t0, 30*time.Minute) },
 			30 * time.Minute, AuthorizationAllow, 1, HandoutUnavailable, false, UnavailableDue, StateAccepted, 0},
 		{"a lease past its expiry is not resent", func(t *testing.T) Record {
 			r := targetRecord(t, t0, time.Hour)
-			r, _, _ = r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, testRand)
+			r, _, _ = r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, freshLease())
 			return r
 		}, 6 * time.Minute, AuthorizationAllow, 1, HandoutUnavailable, false, UnavailableDue, StateAccepted, 1},
 		{"a delivered message is not handed out", func(t *testing.T) Record {
@@ -57,7 +56,7 @@ func TestHandout(t *testing.T) {
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
-			rec, res, err := r.prepare(t).Handout(t0.Add(r.now), r.auth, r.chunks, 1, testRand)
+			rec, res, err := r.prepare(t).Handout(t0.Add(r.now), r.auth, r.chunks, 1, freshLease())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,15 +73,15 @@ func TestHandout(t *testing.T) {
 func TestHandoutLeaseTimes(t *testing.T) {
 	t.Run("a lease lasts five minutes", func(t *testing.T) {
 		r := targetRecord(t, t0, time.Hour)
-		_, res, _ := r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, testRand)
+		_, res, _ := r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, freshLease())
 		if want := at(6 * time.Minute); !res.ExpiresAt.Equal(want) {
 			t.Errorf("expires %v, want %v", res.ExpiresAt, want)
 		}
 	})
 	t.Run("a resend keeps the original lease", func(t *testing.T) {
 		r := targetRecord(t, t0, time.Hour)
-		r, first, _ := r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, testRand)
-		_, again, _ := r.Handout(at(3*time.Minute), AuthorizationAllow, 1, 1, testRand)
+		r, first, _ := r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, freshLease())
+		_, again, _ := r.Handout(at(3*time.Minute), AuthorizationAllow, 1, 1, freshLease())
 		if !again.ExpiresAt.Equal(first.ExpiresAt) {
 			t.Errorf("expiry changed from %v to %v", first.ExpiresAt, again.ExpiresAt)
 		}
@@ -108,7 +107,7 @@ func TestHandoutInputs(t *testing.T) {
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
-			if _, _, err := r.rec(t).Handout(at(2*time.Minute), r.auth, r.n, r.part, testRand); err == nil {
+			if _, _, err := r.rec(t).Handout(at(2*time.Minute), r.auth, r.n, r.part, freshLease()); err == nil {
 				t.Error("want an error")
 			}
 		})
@@ -118,7 +117,7 @@ func TestHandoutInputs(t *testing.T) {
 func TestRenew(t *testing.T) {
 	leased := func(t *testing.T) Record {
 		r := targetRecord(t, t0, 2*time.Hour)
-		r, _, err := r.Handout(t0, AuthorizationAllow, 1, 1, testRand)
+		r, _, err := r.Handout(t0, AuthorizationAllow, 1, 1, freshLease())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -180,22 +179,22 @@ func TestRenew(t *testing.T) {
 func TestLeaseExpiry(t *testing.T) {
 	t.Run("an expired lease returns the message to the queue flagged as possible duplicate", func(t *testing.T) {
 		r := targetRecord(t, t0, 2*time.Hour)
-		r, _, _ = r.Handout(t0, AuthorizationAllow, 1, 1, testRand)
+		r, _, _ = r.Handout(t0, AuthorizationAllow, 1, 1, freshLease())
 		r, outs, err := r.Tick(at(5 * time.Minute))
 		if err != nil || len(outs) != 1 || !outs[0].Requeued {
 			t.Fatalf("outs %+v err %v", outs, err)
 		}
-		if r.State != StateAccepted || r.Lease.Active || !r.Lease.PossibleDuplicate {
+		if r.State != StateAccepted || r.Lease.Active || !r.PossibleDuplicate(1) {
 			t.Errorf("record %+v", r)
 		}
-		r, res, _ := r.Handout(at(6*time.Minute), AuthorizationAllow, 1, 1, testRand)
+		r, res, _ := r.Handout(at(6*time.Minute), AuthorizationAllow, 1, 1, freshLease())
 		if res.Action != HandoutGranted || !res.PossibleDuplicate || r.Lease.Handouts != 2 {
 			t.Errorf("redelivery %+v handouts %d", res, r.Lease.Handouts)
 		}
 	})
 	t.Run("a lease still running is left alone", func(t *testing.T) {
 		r := targetRecord(t, t0, 2*time.Hour)
-		r, _, _ = r.Handout(t0, AuthorizationAllow, 1, 1, testRand)
+		r, _, _ = r.Handout(t0, AuthorizationAllow, 1, 1, freshLease())
 		r2, outs, _ := r.Tick(at(5*time.Minute - time.Second))
 		if len(outs) != 0 || !r2.Lease.Active {
 			t.Errorf("outs %+v", outs)
@@ -207,7 +206,7 @@ func TestLeaseExpiry(t *testing.T) {
 		for lease := 1; lease <= MaxLeases; lease++ {
 			var res HandoutResult
 			var err error
-			r, res, err = r.Handout(now, AuthorizationAllow, 1, 1, testRand)
+			r, res, err = r.Handout(now, AuthorizationAllow, 1, 1, freshLease())
 			if err != nil || res.Action != HandoutGranted {
 				t.Fatalf("lease %d: %+v %v", lease, res, err)
 			}
@@ -230,7 +229,7 @@ func TestLeaseExpiry(t *testing.T) {
 		r := targetRecord(t, t0, 2*time.Hour)
 		now := t0
 		for lease := 1; lease <= MaxLeases; lease++ {
-			r, _, _ = r.Handout(now, AuthorizationAllow, 1, 1, testRand)
+			r, _, _ = r.Handout(now, AuthorizationAllow, 1, 1, freshLease())
 			for i := 0; i < 5; i++ {
 				now = now.Add(4 * time.Minute)
 				r, _ = r.Renew(now, true)
@@ -252,7 +251,7 @@ func TestLeaseExpiry(t *testing.T) {
 			t.Fatal(err)
 		}
 		settle := SettleBy(r.ReportBy)
-		r, _, _ = r.Handout(settle.Add(-time.Minute), AuthorizationAllow, 1, 1, testRand)
+		r, _, _ = r.Handout(settle.Add(-time.Minute), AuthorizationAllow, 1, 1, freshLease())
 		r, outs, _ := r.Tick(settle)
 		if r.State != StateDeliveryUnknown || len(outs) != 1 {
 			t.Errorf("state %s outs %+v", r.State, outs)
@@ -293,7 +292,7 @@ func TestAck(t *testing.T) {
 			now = now.Add(LeaseDuration)
 			r, _, _ = r.Tick(now)
 			if i < MaxLeases-1 {
-				r, _, _ = r.Handout(now, AuthorizationAllow, 1, 1, testRand)
+				r, _, _ = r.Handout(now, AuthorizationAllow, 1, 1, freshLease())
 			}
 		}
 		if r.State != StateDeliveryUnknown {
@@ -418,7 +417,7 @@ func TestChunkedAck(t *testing.T) {
 		r := start(t)
 		r, _, _, _ = ackUnder(r, at(time.Minute), good(1))
 		r, _, _ = r.Tick(at(5 * time.Minute))
-		r, _, _ = r.Handout(at(6*time.Minute), AuthorizationAllow, 3, 1, testRand)
+		r, _, _ = r.Handout(at(6*time.Minute), AuthorizationAllow, 3, 1, freshLease())
 		if !r.Lease.Acked[0] {
 			t.Error("chunk 1 lost its acknowledgement")
 		}
@@ -482,7 +481,7 @@ func TestSortForRecv(t *testing.T) {
 	mk := func(leased bool) Record {
 		r := targetRecord(t, t0, time.Hour)
 		if leased {
-			r, _, _ = r.Handout(t0, AuthorizationAllow, 1, 1, testRand)
+			r, _, _ = r.Handout(t0, AuthorizationAllow, 1, 1, freshLease())
 		}
 		return r
 	}
@@ -511,44 +510,130 @@ func TestSortForRecv(t *testing.T) {
 	})
 }
 
-func TestLeaseIDs(t *testing.T) {
-	t.Run("a new lease carries a fresh identifier that the result reports", func(t *testing.T) {
+func TestPossibleDuplicatePerPart(t *testing.T) {
+	// handedOut returns what Handout reports for chunk part at the given time.
+	handedOut := func(t *testing.T, r Record, now time.Time, part int) (Record, HandoutResult) {
+		t.Helper()
+		n, res, err := r.Handout(now, AuthorizationAllow, 3, part, freshLease())
+		if err != nil || (res.Action != HandoutGranted && res.Action != HandoutResent) {
+			t.Fatalf("Handout(part %d): %+v %v", part, res, err)
+		}
+		return n, res
+	}
+	t.Run("a chunk never handed out is not a possible duplicate, whatever became of the others", func(t *testing.T) {
 		r := targetRecord(t, t0, 2*time.Hour)
-		r, first, err := r.Handout(t0, AuthorizationAllow, 1, 1, testRand)
-		if err != nil || first.Lease.IsZero() || first.Lease != r.Lease.current() {
-			t.Fatalf("result %+v current %v err %v", first, r.Lease.current(), err)
+		r = handOut(t, r, at(time.Minute), 3, 1)
+		r, _, _, _ = ackUnder(r, at(time.Minute), Ack{Part: 1, TokenMatches: true})
+		r, res := handedOut(t, r, at(2*time.Minute), 2)
+		if res.PossibleDuplicate || r.PossibleDuplicate(3) {
+			t.Errorf("part 2 reported %v, part 3 reported %v", res.PossibleDuplicate, r.PossibleDuplicate(3))
+		}
+		if !r.PossibleDuplicate(2) {
+			t.Error("part 2 was handed out but is not reported as seen")
+		}
+	})
+	t.Run("after the lease ran out, the parts not yet handed out are still not possible duplicates", func(t *testing.T) {
+		r := targetRecord(t, t0, 2*time.Hour)
+		r = handOut(t, r, t0, 3, 1)
+		r, _, _, _ = ackUnder(r, t0, Ack{Part: 1, TokenMatches: true})
+		r, _, _ = r.Tick(at(LeaseDuration))
+		for _, part := range []int{2, 3} {
+			var res HandoutResult
+			r, res = handedOut(t, r, at(LeaseDuration), part)
+			if res.PossibleDuplicate {
+				t.Errorf("part %d at its first hand-out is reported as a possible duplicate", part)
+			}
+		}
+	})
+	t.Run("a chunk handed out under a lease that ran out is a possible duplicate when handed out again", func(t *testing.T) {
+		r := targetRecord(t, t0, 2*time.Hour)
+		r = handOut(t, r, t0, 3, 1)
+		r, _, _ = r.Tick(at(LeaseDuration))
+		_, res := handedOut(t, r, at(LeaseDuration), 1)
+		if res.Action != HandoutGranted || !res.PossibleDuplicate {
+			t.Errorf("redelivery %+v", res)
+		}
+	})
+	t.Run("the query is false for chunks out of range and before any hand-out", func(t *testing.T) {
+		r := targetRecord(t, t0, 2*time.Hour)
+		if r.PossibleDuplicate(1) {
+			t.Error("reported before any hand-out")
+		}
+		r = handOut(t, r, t0, 3, 1)
+		if r.PossibleDuplicate(0) || r.PossibleDuplicate(4) || r.PossibleDuplicate(-1) {
+			t.Error("reported for a chunk out of range")
+		}
+	})
+}
+
+func TestLeaseIDs(t *testing.T) {
+	t.Run("a new lease records the identifier the caller passed and the result reports it", func(t *testing.T) {
+		r := targetRecord(t, t0, 2*time.Hour)
+		page := freshLease()
+		r, first, err := r.Handout(t0, AuthorizationAllow, 1, 1, page)
+		if err != nil || first.Lease != page || len(r.Lease.IDs) != 1 || r.Lease.IDs[0] != page {
+			t.Fatalf("result %+v ids %v err %v", first, r.Lease.IDs, err)
 		}
 		r, _, _ = r.Tick(at(LeaseDuration))
-		_, second, err := r.Handout(at(LeaseDuration), AuthorizationAllow, 1, 1, testRand)
-		if err != nil || second.Action != HandoutGranted || second.Lease.IsZero() || second.Lease == first.Lease {
-			t.Errorf("redelivery lease %v, first %v, err %v", second.Lease, first.Lease, err)
+		next := freshLease()
+		r, second, err := r.Handout(at(LeaseDuration), AuthorizationAllow, 1, 1, next)
+		if err != nil || second.Action != HandoutGranted || second.Lease != next || len(r.Lease.IDs) != 2 {
+			t.Errorf("redelivery %+v ids %v err %v", second, r.Lease.IDs, err)
 		}
 	})
-	t.Run("a resend reports the outstanding lease and reads no randomness", func(t *testing.T) {
+	t.Run("a resend under a live lease records its page and leaves the lease alone", func(t *testing.T) {
 		r := targetRecord(t, t0, 2*time.Hour)
-		r, first, _ := r.Handout(t0, AuthorizationAllow, 1, 1, testRand)
-		r, again, err := r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, nil)
-		if err != nil || again.Action != HandoutResent || again.Lease != first.Lease || len(r.Lease.IDs) != 1 {
-			t.Errorf("result %+v ids %v err %v", again, r.Lease.IDs, err)
+		r, first, _ := r.Handout(t0, AuthorizationAllow, 1, 1, freshLease())
+		page := freshLease()
+		again, res, err := r.Handout(at(time.Minute), AuthorizationAllow, 1, 1, page)
+		if err != nil || res.Action != HandoutResent || res.Lease != page || res.Lease == first.Lease {
+			t.Fatalf("result %+v err %v", res, err)
+		}
+		if len(again.Lease.IDs) != 2 || !again.Lease.issued(page) || !again.Lease.issued(first.Lease) {
+			t.Errorf("ids %v", again.Lease.IDs)
+		}
+		if again.Lease.Handouts != r.Lease.Handouts || !again.Lease.ExpiresAt.Equal(r.Lease.ExpiresAt) || !again.Lease.IssuedAt.Equal(r.Lease.IssuedAt) {
+			t.Errorf("lease changed: %+v then %+v", r.Lease, again.Lease)
 		}
 	})
-	t.Run("randomness that fails leaves the record as it was", func(t *testing.T) {
+	t.Run("a page already recorded is not recorded twice", func(t *testing.T) {
 		r := targetRecord(t, t0, 2*time.Hour)
-		after, res, err := r.Handout(t0, AuthorizationAllow, 2, 1, bytes.NewReader(nil))
-		if err == nil || res.Action != 0 || after.Lease.Handouts != 0 || after.Lease.Chunks != 0 || len(after.Lease.IDs) != 0 || after.Lease.Active {
+		page := freshLease()
+		r, _, _ = r.Handout(t0, AuthorizationAllow, 2, 1, page)
+		r, res, err := r.Handout(t0, AuthorizationAllow, 2, 2, page)
+		if err != nil || res.Action != HandoutResent || res.Lease != page || len(r.Lease.IDs) != 1 {
+			t.Errorf("result %+v ids %v err %v", res, r.Lease.IDs, err)
+		}
+	})
+	t.Run("an unset lease is invalid input and leaves the record as it was", func(t *testing.T) {
+		r := targetRecord(t, t0, 2*time.Hour)
+		after, res, err := r.Handout(t0, AuthorizationAllow, 2, 1, LeaseID{})
+		if !errors.Is(err, ErrInvalidInput) || res.Action != 0 || after.Lease.Handouts != 0 || after.Lease.Chunks != 0 || len(after.Lease.IDs) != 0 || after.Lease.Active {
 			t.Errorf("result %+v lease %+v err %v", res, after.Lease, err)
 		}
 	})
-	t.Run("an all-zero source is refused", func(t *testing.T) {
-		_, _, err := targetRecord(t, t0, 2*time.Hour).Handout(t0, AuthorizationAllow, 1, 1, bytes.NewReader(make([]byte, LeaseIDLen)))
-		if !errors.Is(err, ErrLeaseIDZero) {
-			t.Errorf("err %v", err)
+	t.Run("a suspended or denied hand-out records no identifier", func(t *testing.T) {
+		for _, auth := range []AuthorizationKind{AuthorizationSuspend, AuthorizationDeny} {
+			after, _, err := targetRecord(t, t0, 2*time.Hour).Handout(t0, auth, 1, 1, freshLease())
+			if err != nil || len(after.Lease.IDs) != 0 {
+				t.Errorf("authorization %d: ids %v err %v", auth, after.Lease.IDs, err)
+			}
 		}
 	})
-	t.Run("a suspended or denied hand-out reads no randomness", func(t *testing.T) {
-		for _, auth := range []AuthorizationKind{AuthorizationSuspend, AuthorizationDeny} {
-			if _, _, err := targetRecord(t, t0, 2*time.Hour).Handout(t0, auth, 1, 1, nil); err != nil {
-				t.Errorf("authorization %d: %v", auth, err)
+	t.Run("records handed out on one page are all acknowledged with the page's identifier", func(t *testing.T) {
+		page := freshLease()
+		var recs [2]Record
+		for i := range recs {
+			rec, res, err := targetRecord(t, t0, 2*time.Hour).Handout(t0, AuthorizationAllow, 1, 1, page)
+			if err != nil || res.Action != HandoutGranted || res.Lease != page {
+				t.Fatalf("record %d: %+v %v", i, res, err)
+			}
+			recs[i] = rec
+		}
+		for i, rec := range recs {
+			got, v, _, err := rec.Ack(at(time.Minute), Ack{Part: 1, Lease: page, TokenMatches: true})
+			if err != nil || v != AckCompleted || got.State != StateDelivered {
+				t.Errorf("record %d: verdict %v state %s err %v", i, v, got.State, err)
 			}
 		}
 	})
@@ -556,7 +641,7 @@ func TestLeaseIDs(t *testing.T) {
 
 func TestAckLease(t *testing.T) {
 	leased := func(t *testing.T) (Record, LeaseID) {
-		r, res, err := targetRecord(t, t0, 2*time.Hour).Handout(t0, AuthorizationAllow, 2, 1, testRand)
+		r, res, err := targetRecord(t, t0, 2*time.Hour).Handout(t0, AuthorizationAllow, 2, 1, freshLease())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -571,14 +656,14 @@ func TestAckLease(t *testing.T) {
 		lease func(l LeaseID) LeaseID
 		want  AckVerdict
 	}{
-		{"the outstanding lease is accepted", func(l LeaseID) LeaseID { return l }, AckCompleted},
-		{"an identifier never issued for the message is refused", func(LeaseID) LeaseID { return other }, AckRefusedLease},
+		{"the page the part was handed out on is accepted", func(l LeaseID) LeaseID { return l }, AckCompleted},
+		{"an identifier of no page the message was handed out on is refused", func(LeaseID) LeaseID { return other }, AckRefusedLease},
 		{"an unset identifier is refused", func(LeaseID) LeaseID { return LeaseID{} }, AckRefusedLease},
 	}
 	for _, row := range rows {
 		t.Run(row.rule, func(t *testing.T) {
 			r, l := leased(t)
-			r = handOut(t, r, t0, 2, 2)
+			r, _, _ = r.Handout(t0, AuthorizationAllow, 2, 2, l) // the same page carries part 2
 			r, _, _, _ = r.Ack(at(time.Minute), Ack{Part: 1, Lease: l, TokenMatches: true})
 			got, v, _, err := r.Ack(at(time.Minute), Ack{Part: 2, Lease: row.lease(l), TokenMatches: true})
 			if err != nil || v != row.want {
@@ -592,7 +677,7 @@ func TestAckLease(t *testing.T) {
 	t.Run("the lease of an expired lease is accepted after the message was redelivered under a new one", func(t *testing.T) {
 		r, first := leased(t)
 		r, _, _ = r.Tick(at(LeaseDuration))
-		r, res, _ := r.Handout(at(LeaseDuration), AuthorizationAllow, 2, 1, testRand)
+		r, res, _ := r.Handout(at(LeaseDuration), AuthorizationAllow, 2, 1, freshLease())
 		if res.Action != HandoutGranted || res.Lease == first {
 			t.Fatalf("redelivery %+v", res)
 		}

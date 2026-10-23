@@ -130,6 +130,7 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 	}
 
 	var tgt *Record
+	var pages []LeaseID // every page identifier a hand-out used
 	var q FeedbackQueue
 	reportedCount := map[Kind]int{}
 	visits := []State{StateQueued} // the states the source went through, in order
@@ -286,9 +287,18 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 				if rng.Intn(4) != 0 && auth == AuthorizationDeny {
 					auth = AuthorizationAllow
 				}
-				n, res, err := tgt.Handout(now, auth, chunks, 1+rng.Intn(chunks), rng)
+				// Every hand-out is a page of its own here: one identifier each.
+				page, part := freshLease(), 1+rng.Intn(chunks)
+				wasDup := tgt.PossibleDuplicate(part)
+				n, res, err := tgt.Handout(now, auth, chunks, part, page)
 				if err != nil {
 					fail("Handout: %v", err)
+				}
+				if res.Action == HandoutGranted || res.Action == HandoutResent {
+					if res.Lease != page || !n.Lease.issued(page) || res.PossibleDuplicate != wasDup {
+						fail("Handout %+v: page %v, ids %v, was a possible duplicate %v", res, page, n.Lease.IDs, wasDup)
+					}
+					pages = append(pages, page)
 				}
 				switch res.Action {
 				case HandoutSkipped:
@@ -323,6 +333,10 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 					part = given[rng.Intn(len(given))]
 				}
 				a := Ack{Part: part, Lease: tgt.Lease.current(), TokenMatches: rng.Intn(6) != 0}
+				if len(pages) > 0 {
+					// Any page the message was handed out on is a valid name.
+					a.Lease = pages[rng.Intn(len(pages))]
+				}
 				if rng.Intn(8) == 0 {
 					a.Lease = LeaseID{}
 				}

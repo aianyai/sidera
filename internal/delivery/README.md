@@ -15,8 +15,8 @@ reasons behind the rules.
 | `NewSourceRecord`, `NewTargetRecord` | Create the sender's or the recipient node's `Record` of a delivery. |
 | `Record.Apply(now, Event)` | Applies one fact or occurrence. Returns the new record and an `Outcome` (applied or ignored with a reason, the transition, and the feedback to give). |
 | `Record.Tick(now)` | Everything due by time alone: lease expiry, backlog expiry, the settle deadline, closing after `report_by`. |
-| `Record.Handout`, `Renew`, `Ack`, `NextPart`, `SortForRecv` | The pull lease: hand a chunk of a message out under a lease, renew the lease, acknowledge chunks, name the chunk to hand out next. |
-| `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A lease's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
+| `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
+| `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A page's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
 | `Record.StatusReport`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery, and the one rule by which the sender applies it. |
 | `Intake(now, acceptBefore, Authorization)` | Target-side validation of the delivery deadline plus the authorization verdict (kind and, for a denial, the reason), for a request deduplication found new. |
 | `IntakeAuthorization(authz.Verdict)` | The one mapping from the policy's verdict to an `Authorization`: allow, suspend, or a denial with the `RejectReason` the sender hears. |
@@ -110,12 +110,20 @@ correction and the blocked notice.
   `Authorization` by `IntakeAuthorization` for both `Intake` and `Handout`; a
   caller never builds a denial's reason itself. The token check of an
   acknowledgement is made by the caller and passed as `Ack.TokenMatches`.
-- `Handout` takes the randomness for a new lease's ID as an `io.Reader`
-  (`crypto/rand.Reader` in production) and reads it only when it issues a new
-  lease. The page `recv` prints carries `HandoutResult.Lease`, and the
-  acknowledgement hands the same ID back in `Ack.Lease`; the ID of a lease never
-  issued for the message is refused (`AckRefusedLease`), while any lease issued
-  for it counts, expired or not.
+- The caller generates one `LeaseID` per `recv` (`NewLeaseID` with
+  `crypto/rand.Reader` in production) and passes it to `Handout` for every
+  chunk the page hands out, because one `recv` hands a page out under one lease
+  and the page prints one identifier. `Handout` records it in `Lease.IDs` (a
+  zero one is `ErrInvalidInput`) and returns it as `HandoutResult.Lease`; a
+  re-send under a live lease records it too and leaves the lease times alone.
+  The acknowledgement hands the identifier back in `Ack.Lease`; one under which
+  no chunk of the message was handed out is refused (`AckRefusedLease`), while
+  any that was counts, expired or not. The order of one `recv`, with the
+  handoff package, is in [handoff](../handoff/README.md).
+- `HandoutResult.PossibleDuplicate` and `Record.PossibleDuplicate(part)` are per
+  chunk: true only for a chunk handed out before. The caller fills the
+  `possibly_duplicate` flag of a page from `Record.PossibleDuplicate(part)`
+  before it packs.
 - The caller splits bodies into chunks and passes the count and the chunk it is
   handing out (starting from `NextPart`) to `Handout`; the count is fixed at
   the first hand-out. Only chunks handed out can be acknowledged.

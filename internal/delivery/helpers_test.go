@@ -84,15 +84,14 @@ func targetRecord(t *testing.T, acceptedAt time.Time, maxQueue time.Duration) Re
 // unless recv would really give the body out.
 func handOut(t *testing.T, r Record, now time.Time, chunks, part int) Record {
 	t.Helper()
-	n, res, err := r.Handout(now, AuthorizationAllow, chunks, part, testRand)
+	n, res, err := r.Handout(now, AuthorizationAllow, chunks, part, freshLease())
 	if err != nil || (res.Action != HandoutGranted && res.Action != HandoutResent) {
 		t.Fatalf("Handout(part %d of %d) at %v: %+v %v", part, chunks, now.Sub(t0), res, err)
 	}
 	return n
 }
 
-// handOutAll hands out every chunk of a body, the first under a new lease and
-// the rest under it.
+// handOutAll hands out every chunk of a body, each on a page of its own.
 func handOutAll(t *testing.T, r Record, now time.Time, chunks int) Record {
 	t.Helper()
 	for part := 1; part <= chunks; part++ {
@@ -147,8 +146,26 @@ func (c *counterReader) Read(p []byte) (int, error) {
 // testRand is the randomness every test uses for lease IDs.
 var testRand = &counterReader{}
 
-// ackUnder acknowledges as the agent would: with the lease the record last
-// issued, unless the acknowledgement names one itself.
+// freshLease returns a new page identifier, as a caller generates one per recv.
+func freshLease() LeaseID {
+	id, err := NewLeaseID(testRand)
+	if err != nil {
+		panic(err)
+	}
+	return id
+}
+
+// current returns the identifier of the page the message was last handed out
+// on; the zero ID before the first hand-out.
+func (l Lease) current() LeaseID {
+	if len(l.IDs) == 0 {
+		return LeaseID{}
+	}
+	return l.IDs[len(l.IDs)-1]
+}
+
+// ackUnder acknowledges as the agent would: with the page the record was last
+// handed out on, unless the acknowledgement names one itself.
 func ackUnder(r Record, now time.Time, a Ack) (Record, AckVerdict, Outcome, error) {
 	if a.Lease.IsZero() {
 		a.Lease = r.Lease.current()

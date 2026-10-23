@@ -23,11 +23,12 @@ var (
 	ErrLeaseIDText = errors.New("delivery: lease ID is not 32 lowercase hex characters")
 )
 
-// LeaseID identifies one lease of one message. The target generates it when it
-// issues the lease (see NewLeaseID); the agent's side hands it back with an
-// acknowledgement, and the target accepts the acknowledgement only if the ID
-// belongs to a lease issued for that message. The zero value means "unset" and
-// is never a valid ID.
+// LeaseID identifies the page one recv hands out. The target generates it once
+// per recv (see NewLeaseID), whatever number of messages the page holds, and
+// passes it to Handout for each of them; the agent's side hands it back with an
+// acknowledgement, and the target accepts the acknowledgement only if the ID is
+// one under which a part of that message was handed out. The zero value means
+// "unset" and is never a valid ID.
 type LeaseID struct{ b [LeaseIDLen]byte }
 
 // NewLeaseID reads a new random LeaseID from r. Callers pass crypto/rand.Reader;

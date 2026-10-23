@@ -601,6 +601,9 @@ func TestLeaseLength(t *testing.T) {
 	if _, err := Pack([]Message{m}, delivery.LeaseID{}, DefaultBudget()); !errors.Is(err, ErrLeaseUnset) {
 		t.Fatalf("Pack with an unset lease: %v", err)
 	}
+	if _, err := Pack(nil, delivery.LeaseID{}, DefaultBudget()); !errors.Is(err, ErrLeaseUnset) {
+		t.Fatalf("Pack of an empty queue with an unset lease: %v", err)
+	}
 	if _, err := Part(m, 1, delivery.LeaseID{}, DefaultBudget()); !errors.Is(err, ErrLeaseUnset) {
 		t.Fatalf("Part with an unset lease: %v", err)
 	}

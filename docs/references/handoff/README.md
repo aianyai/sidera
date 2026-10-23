@@ -51,10 +51,11 @@ checks that the model saw it before acknowledging for the agent.
 ### `recv` output
 
 - One JSON document and a newline, `{"lease":...,"messages":[...],"more":N}`.
-  The page carries the ID of the lease the delivery side took for it, a
-  `delivery.LeaseID` printed as 32 lowercase hex characters; the zero ID is refused. Sender
-  fields (`id`, `from`) are separate fields from `body`; a message handed out
-  again carries `possibly_duplicate`. Encoded with HTML escaping off and
+  The page carries one identifier, a `delivery.LeaseID` the caller generated
+  for this `recv` and printed as 32 lowercase hex characters; the zero ID is
+  refused, also for an empty queue, so a page always has one. Sender fields
+  (`id`, `from`) are separate fields from `body`; a part handed out before
+  carries `possibly_duplicate`. Encoded with HTML escaping off and
   non-ASCII text as is; Go always escapes U+2028 and U+2029.
 - The budget is in the unit of the runtime path (characters or tokens) and is
   checked against the encoded output.
@@ -66,7 +67,10 @@ checks that the model saw it before acknowledging for the agent.
   provisional hint naming the next part; the CLI and the MCP tool each map it to
   their own call.
 - Only the messages and parts that fit completely are reported as handed out.
-  Leasing and acknowledging them is the delivery side's.
+  Leasing and acknowledging them is the delivery side's: it generates the
+  identifier before packing, fills the possibly-duplicate flag of each part from
+  `delivery.Record.PossibleDuplicate(part)`, and passes the same identifier to
+  `delivery.Record.Handout` for every entry of the page.
 - The exit code is 0 whenever messages are handed out.
 - Budgets of the runtime paths: Claude Bash success 30,000 characters, Claude
   Bash failure 10,000 characters, Claude MCP 25,000 tokens, Codex 10,000 tokens.

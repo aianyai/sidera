@@ -2,7 +2,6 @@ package delivery
 
 import (
 	"fmt"
-	"io"
 	"sort"
 	"time"
 )
@@ -14,9 +13,8 @@ type Lease struct {
 	// Handouts counts the leases issued so far: the first hand-out and its
 	// redeliveries.
 	Handouts int
-	// IDs holds the identifier of every lease issued so far, oldest first; the
-	// last one is the outstanding lease or, when none is outstanding, the most
-	// recent. An acknowledgement must name one of them.
+	// IDs holds every page identifier under which some part of this message was
+	// handed out, oldest first. An acknowledgement must name one of them.
 	IDs []LeaseID
 	// Active is set while a lease is outstanding.
 	Active bool
@@ -24,9 +22,6 @@ type Lease struct {
 	IssuedAt time.Time
 	// ExpiresAt is when the outstanding lease runs out unless renewed.
 	ExpiresAt time.Time
-	// PossibleDuplicate is set when the message may already have been seen:
-	// its previous lease ran out without an acknowledgement.
-	PossibleDuplicate bool
 	// Chunks is the number of chunks the body is handed out in; 0 until the
 	// first hand-out. HandedOut[i] says whether chunk i+1 was ever handed out
 	// and Acked[i] whether it was acknowledged; only a chunk that was handed
@@ -36,17 +31,8 @@ type Lease struct {
 	Acked     []bool
 }
 
-// current returns the identifier of the outstanding lease or, when none is
-// outstanding, of the most recent one; the zero ID before the first lease.
-func (l Lease) current() LeaseID {
-	if len(l.IDs) == 0 {
-		return LeaseID{}
-	}
-	return l.IDs[len(l.IDs)-1]
-}
-
-// issued reports whether id is the identifier of a lease issued for this
-// message. The unset ID never is.
+// issued reports whether id is an identifier under which some part of this
+// message was handed out. The unset ID never is.
 func (l Lease) issued(id LeaseID) bool {
 	for _, have := range l.IDs {
 		if have == id {
@@ -91,10 +77,12 @@ const (
 // HandoutResult is what recv must do for one message.
 type HandoutResult struct {
 	Action HandoutAction
-	// PossibleDuplicate tells the agent the message may have been seen before.
+	// PossibleDuplicate tells the agent this part of the message may have been
+	// seen before (granted and resent); it is Record.PossibleDuplicate as it
+	// stood before this hand-out.
 	PossibleDuplicate bool
-	// Lease is the identifier of the lease the body is handed out under
-	// (granted and resent); the page recv prints carries it.
+	// Lease is the identifier the caller passed (granted and resent): the one
+	// the page recv prints carries.
 	Lease LeaseID
 	// ExpiresAt is when the lease runs out (granted and resent).
 	ExpiresAt time.Time
@@ -120,15 +108,19 @@ func (r Record) HoldsLiveLease(now time.Time) bool {
 // handed out. A suspended check leaves the message untouched. A denied check
 // closes the delivery as closeForcibly does.
 //
-// rand supplies the randomness of a new lease's identifier (see NewLeaseID) and
-// is read only when a new lease is issued; a failing source returns an error
-// and leaves the record as it was.
-func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int, rand io.Reader) (Record, HandoutResult, error) {
+// lease is the identifier of the page this hand-out belongs to. The caller
+// generates it once per recv, because one recv hands out a whole page, possibly
+// several messages, under one lease and the page prints one identifier. Handout
+// records it in Lease.IDs, so an acknowledgement that names it is accepted for
+// every part handed out on that page; a zero lease is ErrInvalidInput. A new
+// lease or a re-send under a live lease records it alike; the lease's times
+// and the hand-out count change only when a new lease is issued.
+func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int, lease LeaseID) (Record, HandoutResult, error) {
 	if r.Side != SideTarget {
 		return r, HandoutResult{}, fmt.Errorf("%w: only the target hands out bodies", ErrWrongSide)
 	}
-	if !auth.valid() || chunks < 1 || part < 1 || part > chunks {
-		return r, HandoutResult{}, fmt.Errorf("%w: authorization %d, part %d of %d chunks", ErrInvalidInput, auth, part, chunks)
+	if !auth.valid() || chunks < 1 || part < 1 || part > chunks || lease.IsZero() {
+		return r, HandoutResult{}, fmt.Errorf("%w: authorization %d, part %d of %d chunks, lease %s", ErrInvalidInput, auth, part, chunks, lease)
 	}
 	if r.Lease.Chunks != 0 && r.Lease.Chunks != chunks {
 		return r, HandoutResult{}, fmt.Errorf("%w: chunk count changed from %d to %d", ErrInvalidInput, r.Lease.Chunks, chunks)
@@ -147,35 +139,39 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int,
 		return n, HandoutResult{Action: HandoutDenied, Outcome: out}, err
 	}
 	live := r.HoldsLiveLease(now)
-	var id LeaseID
-	if !live {
-		var err error
-		if id, err = NewLeaseID(rand); err != nil {
-			return r, HandoutResult{}, err
-		}
-	}
 	if r.Lease.Chunks == 0 {
 		r.Lease.Chunks = chunks
 		r.Lease.HandedOut = make([]bool, chunks)
 		r.Lease.Acked = make([]bool, chunks)
 	}
+	dup := r.PossibleDuplicate(part)
 	handedOut := append([]bool(nil), r.Lease.HandedOut...)
 	handedOut[part-1] = true
 	r.Lease.HandedOut = handedOut
-	if live {
-		return r, HandoutResult{Action: HandoutResent, PossibleDuplicate: true, Lease: r.Lease.current(), ExpiresAt: r.Lease.ExpiresAt}, nil
+	if !r.Lease.issued(lease) {
+		r.Lease.IDs = append(append([]LeaseID(nil), r.Lease.IDs...), lease)
 	}
-	r.Lease.IDs = append(append([]LeaseID(nil), r.Lease.IDs...), id)
+	if live {
+		return r, HandoutResult{Action: HandoutResent, PossibleDuplicate: dup, Lease: lease, ExpiresAt: r.Lease.ExpiresAt}, nil
+	}
 	r.Lease.Handouts++
 	r.Lease.Active = true
 	r.Lease.IssuedAt = now
 	r.Lease.ExpiresAt = now.Add(LeaseDuration)
 	return r, HandoutResult{
 		Action:            HandoutGranted,
-		PossibleDuplicate: r.Lease.PossibleDuplicate,
-		Lease:             id,
+		PossibleDuplicate: dup,
+		Lease:             lease,
 		ExpiresAt:         r.Lease.ExpiresAt,
 	}, nil
+}
+
+// PossibleDuplicate reports whether chunk part, counted from 1, may already
+// have been seen: it was handed out before. A chunk never handed out is not a
+// possible duplicate, whatever happened to the other chunks of the message.
+// Handout returns the value as it stood before the hand-out it records.
+func (r Record) PossibleDuplicate(part int) bool {
+	return part >= 1 && part <= len(r.Lease.HandedOut) && r.Lease.HandedOut[part-1]
 }
 
 // NextPart returns the first chunk, counted from 1, that was not acknowledged
@@ -257,10 +253,9 @@ func (r Record) Renew(now time.Time, activeTurn bool) (Record, RenewResult) {
 type Ack struct {
 	// Part is the chunk, counted from 1.
 	Part int
-	// Lease is the identifier of the lease the chunk was handed out under, as
-	// the page printed it. It must be one of the leases issued for this
-	// message: an acknowledgement that names none of them is not about this
-	// message's hand-outs.
+	// Lease is the identifier of the page the chunk was handed out on, as the
+	// page printed it. It must be one of Lease.IDs: an acknowledgement that
+	// names none of them is not about this message's hand-outs.
 	Lease LeaseID
 	// TokenMatches states that the acknowledgement carries the token of the
 	// endpoint the message is for. The caller verifies the token; nobody else's
@@ -285,8 +280,8 @@ const (
 	// AckRefusedNoHandout: that chunk was never handed out, so there is nothing
 	// to acknowledge.
 	AckRefusedNoHandout
-	// AckRefusedLease: the lease ID is unset or was never issued for this
-	// message.
+	// AckRefusedLease: the lease ID is unset or names no page this message was
+	// handed out on.
 	AckRefusedLease
 	// AckTooLate: the delivery already ended as rejected or closed_unconfirmed.
 	AckTooLate
@@ -295,10 +290,10 @@ const (
 // Ack records the acknowledgement of one chunk. An acknowledgement stays valid
 // after its lease has run out and even after the delivery was declared
 // delivery_unknown: the agent did see the chunk, and the late acknowledgement
-// is the fact that corrects the unknown. The acknowledgement names the lease
-// the chunk was handed out under; any lease issued for the message counts, the
-// outstanding one or an earlier one, because the chunk was seen under whichever
-// lease carried it and a redelivery in between does not unsee it. Only a chunk
+// is the fact that corrects the unknown. The acknowledgement names the page
+// the chunk was handed out on; any page the message was handed out on counts,
+// the latest one or an earlier one, because the chunk was seen on whichever
+// page carried it and a redelivery in between does not unsee it. Only a chunk
 // that was handed out can be acknowledged: an acknowledgement for anything else
 // would deliver a body the agent never received. The delivery becomes
 // delivered when every chunk is acknowledged, not before.

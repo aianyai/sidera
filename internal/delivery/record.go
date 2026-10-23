@@ -485,7 +485,6 @@ func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 				}
 			} else {
 				r.Lease.Active = false
-				r.Lease.PossibleDuplicate = true
 				outs = append(outs, Outcome{Result: ResultApplied, From: StateAccepted, To: StateAccepted, Requeued: true})
 			}
 		}
