@@ -14,13 +14,13 @@ to the delivery side, which calls into this package.
 
 | Function | Decides |
 | -------- | ------- |
-| `PromptText(count)` | The wake-up text. No message body, ever. Provisional wording. |
+| `PromptText(count)`, `NewSessionPromptText` | The wake-up text for waiting messages, and the first prompt of a session created without an initial message. No message body, ever. Provisional wording. |
 | `DecidePrompt(PromptInput, PromptParams, now)` | Whether to send a prompt now: send or hold, with a typed reason, the prompt kind to record and the count for the text. A hold may carry `RetryAt`, when to evaluate again. |
 | `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. |
 | `Pack(queue, delivery.LeaseID, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the first part not yet acknowledged). |
 | `Part(msg, k, delivery.LeaseID, Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
-| `CheckBeforeAck(runtime, observed, expected)` | Whether an adapter may acknowledge for the agent. |
-| `DefaultBudget()`, `PathBudgets()`, `EstimateTokens`, `UTF16Len` | The output budget and the units it is measured in. |
+| `AckMarkers.Compile()` then `CheckBeforeAck(MarkerSet, observed, expected)` | Whether an adapter may acknowledge for the agent. The markers are the adapter's declaration of how its runtime shows a replaced or cut result; the package knows no runtime. |
+| `Budget`, `DefaultBudget()`, `EstimateTokens`, `UTF16Len` | The output budget, the conservative default used when an adapter declares none, and the units budgets are measured in. |
 
 ## Rules
 
@@ -89,15 +89,36 @@ Delivery blocked:
 - Only what `Page.HandedOut` lists fits completely and may be leased and
   acknowledged. `Page.ExitCode` is 0.
 - `EstimateTokens` is the UTF-8 byte count, an upper bound on any tokenizer's
-  count. `DefaultBudget` is the smallest runtime limit less 10 percent, in that
-  unit: 9,000.
+  count.
+- The package names no runtime and holds no per-runtime limit. Each adapter
+  declares the budget of each front end it serves, and the caller passes it to
+  `Pack` and `Part`. `DefaultBudget` is for a front end whose adapter declares
+  none: the smallest visible limit among the output paths measured
+  (`SmallestVisibleLimit`, 10,000 tokens or characters, comparable because the
+  estimate never falls below the character count) less a safety margin of 10
+  percent (`SafetyMarginPercent`): 9,000 tokens (`DefaultBudgetLimit`). A
+  runtime that shows less than that must declare a smaller budget.
 
 Before acknowledging:
 
-- Refuse when Claude replaced the result with a saved-to-file notice, when a
-  Codex truncation marker appears, or when the expected output is not in the
-  observed result in full. A marker counts only if the observed result has more
-  of it than the expected output.
+- The adapter declares `AckMarkers`: `Replaced` markers for a notice that stands
+  in for the result (for example "saved to a file") and `Truncated` markers for
+  the place where the runtime cut it. A `Marker` is a literal substring
+  (`Literal`) or an RE2 regular expression (`Regexp`, Go `regexp`, linear
+  time); exactly one is set.
+- `AckMarkers.Compile` validates the declaration once and returns a
+  `MarkerSet`: an empty marker, both fields set, a regular expression that does
+  not compile and one that matches the empty text are errors wrapping
+  `ErrInvalidMarker`. The zero `MarkerSet` declares nothing.
+- `CheckBeforeAck` refuses with `AckReplaced` or `AckTruncated` when the observed
+  result has more occurrences of a marker of that list than the expected output
+  (replaced markers are judged first), and with `AckContentMismatch` when the
+  expected output is not in the observed result in full. Otherwise it allows
+  (`AckSeenInFull`). Without declared markers only the content decides: the
+  output seen in full is allowed, anything else is a mismatch. There is no
+  "unknown runtime" refusal, because containment of the expected output is what
+  proves that the model saw it; the markers only give a refusal its cause and
+  also refuse a result that carries a notice beside the whole output.
 
 ## What the caller must guarantee
 
@@ -122,6 +143,9 @@ Before acknowledging:
   never made.
 - `Message.From` is the sender the channel authenticated and `Body` is valid
   UTF-8.
+- Marker and budget declarations come from the adapter's manifest; the caller
+  compiles the markers once when the adapter is admitted and rejects the
+  adapter if that fails.
 - `Part` is called with the budget `Pack` used for part 1. The cut points depend
   on the message and the budget, so changing the budget between the two changes
   the parts.

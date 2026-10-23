@@ -46,13 +46,22 @@ func (p PromptParams) Validate() error {
 // no message body: the body and the sender reach the model only through recv,
 // so a sender cannot put words into the session by way of the prompt. The
 // wording is provisional. count is the number of waiting messages and must be
-// at least 1; DecidePrompt never asks for a prompt otherwise.
+// at least 1; DecidePrompt never asks for a prompt otherwise. A session created
+// without an initial message has no message to count: its first prompt is
+// NewSessionPromptText.
 func PromptText(count int) string {
 	if count == 1 {
 		return "You have 1 new message. Read it with recv."
 	}
 	return fmt.Sprintf("You have %d new messages. Read them with recv.", count)
 }
+
+// NewSessionPromptText is the prompt that starts a session created without an
+// initial message. It is the first input of the session, so it tells the agent
+// that nothing waits and how messages will reach it. Like PromptText it carries
+// no message body. The wording is provisional.
+const NewSessionPromptText = "This session is new and no message is waiting yet. " +
+	"When you are told that new messages have arrived, read them with recv."
 
 // AttemptOutcome is what is known about one attempt to send a prompt into a
 // session.

@@ -83,22 +83,17 @@ func TestEstimateTokensNeverUndercounts(t *testing.T) {
 	}
 }
 
-func TestPathBudgets(t *testing.T) {
-	want := map[Path]Budget{
-		PathClaudeBashSuccess: {UnitChars, 30_000},
-		PathClaudeBashFailure: {UnitChars, 10_000},
-		PathClaudeMCP:         {UnitTokens, 25_000},
-		PathCodex:             {UnitTokens, 10_000},
-	}
-	got := PathBudgets()
-	if len(got) != len(want) {
-		t.Fatalf("%d paths, want %d", len(got), len(want))
-	}
-	for _, pb := range got {
-		if want[pb.Path] != pb.Budget {
-			t.Errorf("%s: got %+v, want %+v", pb.Path, pb.Budget, want[pb.Path])
-		}
-	}
+// The visible limits the default budget is derived from, as measured on two
+// runtimes. They are test data: the package declares none, an adapter's
+// manifest does. The unit is the one the runtime path counts in.
+var visibleLimits = []struct {
+	name   string
+	budget Budget
+}{
+	{"bash success, inline", Budget{UnitChars, 30_000}},
+	{"bash failure, head and tail", Budget{UnitChars, 10_000}},
+	{"tool server result", Budget{UnitTokens, 25_000}},
+	{"tool output cut in the middle", Budget{UnitTokens, 10_000}},
 }
 
 func TestDefaultBudget(t *testing.T) {
@@ -108,6 +103,17 @@ func TestDefaultBudget(t *testing.T) {
 	}
 	if err := got.validate(); err != nil {
 		t.Fatal(err)
+	}
+	// The constants it is derived from agree with the visible limits.
+	smallest := visibleLimits[0].budget.Limit
+	for _, vl := range visibleLimits {
+		smallest = min(smallest, vl.budget.Limit)
+	}
+	if SmallestVisibleLimit != smallest {
+		t.Fatalf("SmallestVisibleLimit = %d, want %d", SmallestVisibleLimit, smallest)
+	}
+	if DefaultBudgetLimit != smallest-smallest/10 {
+		t.Fatalf("DefaultBudgetLimit = %d, want %d", DefaultBudgetLimit, smallest-smallest/10)
 	}
 }
 
@@ -121,9 +127,9 @@ func TestDefaultBudgetFitsEveryPath(t *testing.T) {
 		if def.Measure(s) > def.Limit {
 			t.Fatal("test text is over the default budget")
 		}
-		for _, pb := range PathBudgets() {
-			if size := pb.Budget.Measure(s); size > pb.Budget.Limit {
-				t.Fatalf("text within the default budget measures %d on %s, limit %d", size, pb.Path, pb.Budget.Limit)
+		for _, vl := range visibleLimits {
+			if size := vl.budget.Measure(s); size > vl.budget.Limit {
+				t.Fatalf("text within the default budget measures %d on %s, limit %d", size, vl.name, vl.budget.Limit)
 			}
 		}
 	}

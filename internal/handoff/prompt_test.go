@@ -2,6 +2,7 @@ package handoff
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -33,6 +34,22 @@ func TestPromptText(t *testing.T) {
 				t.Fatalf("PromptText(%d) = %q, want %q", r.count, got, r.want)
 			}
 		})
+	}
+}
+
+func TestNewSessionPromptText(t *testing.T) {
+	const want = "This session is new and no message is waiting yet. When you are told that new messages have arrived, read them with recv."
+	if NewSessionPromptText != want {
+		t.Fatalf("NewSessionPromptText = %q, want %q", NewSessionPromptText, want)
+	}
+	// Like every prompt it carries no message body and names the tool.
+	if !strings.Contains(NewSessionPromptText, "recv") {
+		t.Fatal("the prompt does not name recv")
+	}
+	for _, n := range []int{1, 2} {
+		if NewSessionPromptText == PromptText(n) {
+			t.Fatalf("the new-session prompt equals PromptText(%d)", n)
+		}
 	}
 }
 

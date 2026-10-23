@@ -10,9 +10,9 @@ import (
 type Unit int
 
 const (
-	// UnitChars counts UTF-16 code units, which is how a JavaScript string
-	// (the host of the Claude tools) measures its length. A rune outside the
-	// basic plane costs 2.
+	// UnitChars counts UTF-16 code units, which is how a runtime hosted in
+	// JavaScript measures the length of a string. A rune outside the basic
+	// plane costs 2.
 	UnitChars Unit = iota + 1
 	// UnitTokens counts the conservative token estimate of EstimateTokens.
 	UnitTokens
@@ -76,65 +76,33 @@ func UTF16Len(s string) int {
 // a redelivery; the estimate prefers the extra parts to the redelivery.
 func EstimateTokens(s string) int { return len(s) }
 
-// Path names one way a tool result reaches a model.
-type Path string
+// SmallestVisibleLimit is the smallest limit, in the units of Budget, on what
+// a model is shown of one tool result among the output paths of the runtimes
+// Sidera has been measured against: 10,000 tokens. Limits in characters and in
+// tokens compare because EstimateTokens never returns less than UTF16Len: a
+// text whose estimate fits a limit L in either unit has at most L characters
+// and at most L real tokens, so the smallest limit is safe on every such path
+// at once.
+const SmallestVisibleLimit = 10_000
 
-const (
-	PathClaudeBashSuccess Path = "claude-bash-success"
-	PathClaudeBashFailure Path = "claude-bash-failure"
-	PathClaudeMCP         Path = "claude-mcp"
-	PathCodex             Path = "codex"
-)
-
-// PathBudget is the limit on what the model sees of a result on one path.
-type PathBudget struct {
-	Path   Path
-	Budget Budget
-}
-
-// PathBudgets returns the visible limit of every known path, in the unit that
-// path counts in. They are data about the runtimes, to be revised as the
-// runtimes change; the figures are those measured on Claude Code 2.1.308 and
-// Codex 0.163.0.
-//
-//   - Claude Bash success: about 30,000 characters inline; more is saved to a
-//     file and the model sees a path and a short preview.
-//   - Claude Bash failure (non-zero exit code): about 10,000 characters,
-//     keeping head and tail only.
-//   - Claude MCP tool: 25,000 tokens.
-//   - Codex: 10,000 tokens, cut in the middle.
-func PathBudgets() []PathBudget {
-	return []PathBudget{
-		{PathClaudeBashSuccess, Budget{UnitChars, 30_000}},
-		{PathClaudeBashFailure, Budget{UnitChars, 10_000}},
-		{PathClaudeMCP, Budget{UnitTokens, 25_000}},
-		{PathCodex, Budget{UnitTokens, 10_000}},
-	}
-}
-
-// SafetyMarginPercent is the share of the smallest path limit that
-// DefaultBudget gives up. The runtimes wrap a result in text of their own
-// (status lines, tags, a preview header) that counts against the limit but is
-// not in the output, and their limits are measured on one version and may
-// move; a tenth leaves room for both, which is far more than the wrappers
-// seen so far take.
+// SafetyMarginPercent is the share of SmallestVisibleLimit that the default
+// budget gives up. The runtimes wrap a result in text of their own (status
+// lines, tags, a preview header) that counts against the limit but is not in
+// the output, and their limits are measured on one version and may move; a
+// tenth leaves room for both, which is far more than the wrappers seen so far
+// take.
 const SafetyMarginPercent = 10
 
-// DefaultBudget returns the budget that is safe on every path of PathBudgets
-// at once, in tokens.
-//
-// Limits in characters and in tokens can be compared because EstimateTokens
-// never returns less than UTF16Len: a text whose estimate fits a limit L in
-// either unit has at most L characters and at most L real tokens. The result
-// is therefore the smallest of the limits, less the safety margin.
+// DefaultBudgetLimit is the limit of DefaultBudget: SmallestVisibleLimit less
+// SafetyMarginPercent, 9,000.
+const DefaultBudgetLimit = SmallestVisibleLimit * (100 - SafetyMarginPercent) / 100
+
+// DefaultBudget returns the conservative budget for a front end whose adapter
+// declares none, in tokens. It is safe on every path measured (see
+// SmallestVisibleLimit). A runtime whose visible limit is smaller than that
+// must declare its own budget; the default does not adapt to it.
 func DefaultBudget() Budget {
-	smallest := 0
-	for _, pb := range PathBudgets() {
-		if smallest == 0 || pb.Budget.Limit < smallest {
-			smallest = pb.Budget.Limit
-		}
-	}
-	return Budget{UnitTokens, smallest * (100 - SafetyMarginPercent) / 100}
+	return Budget{UnitTokens, DefaultBudgetLimit}
 }
 
 // runeStarts returns the byte offset of every rune of s, followed by len(s).

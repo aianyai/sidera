@@ -10,6 +10,11 @@ checks that the model saw it before acknowledging for the agent.
 
 - A prompt is a short text without a body ("You have 3 new messages. Read them
   with recv."). Sender and body reach the model only through `recv`.
+- A session created without an initial message has nothing to count, so its
+  first prompt is a fixed text that says no message waits yet and that new ones
+  are read with `recv` once the agent is told they arrived
+  (`NewSessionPromptText`). With an initial message the first prompt is the
+  ordinary one for one message.
 - A message whose `recv`-stage authorization is currently Suspend is not a
   waiting message: it counts toward no prompt, no blocked verdict and no
   arrival time, because suspension means no lease, no prompt and no feedback.
@@ -75,19 +80,25 @@ checks that the model saw it before acknowledging for the agent.
   `delivery.Record.PossibleDuplicate(part)`, and passes the same identifier to
   `delivery.Record.Handout` for every entry of the page.
 - The exit code is 0 whenever messages are handed out.
-- Budgets of the runtime paths: Claude Bash success 30,000 characters, Claude
-  Bash failure 10,000 characters, Claude MCP 25,000 tokens, Codex 10,000 tokens.
-  The default budget is 9,000 estimated tokens.
+- The budget is not fixed by this package. Each adapter declares the budget of
+  each front end it serves (a unit and a limit), and the caller passes it in.
+  For a front end with no declaration there is a default of 9,000 estimated
+  tokens: the smallest visible limit among the output paths measured, 10,000,
+  less a margin of 10 percent. A runtime that shows less must declare less.
 - The token estimate is the number of UTF-8 bytes of the output.
 
 ### Before acknowledging
 
 An adapter acknowledges for the agent only if the observed tool result contains
-the expected output in full. It refuses if Claude replaced the result with a
-saved-to-file notice, if a Codex truncation marker appears (`Warning: truncated
-output`, `…N tokens truncated…`, `...N tokens truncated...`, and the same with
-`chars` or `bytes`), or if the output is simply not there. A marker counts only when the
-observed result has more of it than the expected output.
+the expected output in full. It declares, as data, how its runtime shows a
+result that was replaced (a notice such as "saved to a file") and one that was
+cut (a warning line, or an inserted "N tokens truncated" text). Each is a list
+of markers, each marker a literal substring or an RE2 regular expression. The
+check refuses with the replaced reason, then the truncated reason, when the
+observed result has more occurrences of a marker than the expected output, and
+with the mismatch reason when the output is simply not there. Declarations are
+validated once: an empty marker, a marker with both forms, a regular expression
+that does not compile and one that matches the empty text are errors.
 
 The delivery side that these rules call into is described in
 [delivery](../delivery/README.md): `delivery.LeaseID` (the page identifier),
@@ -162,13 +173,44 @@ The delivery side that these rules call into is described in
 - **A margin of 10 percent.** Runtimes add their own text around a result
   (status lines, tags) and their limits are measured on one version and may
   move; a tenth is far more than the wrappers seen so far take.
+- **A default budget from the smallest visible limit.** It applies where an
+  adapter declares nothing, so it must be safe on every path measured: the
+  smallest limit, less the margin. Limits in characters and in tokens compare
+  because the estimate is never below the character count.
 - **JSON without escaping.** Escaping Chinese text as `\uXXXX` multiplies its
   encoded size by two or more and HTML escaping inflates `<`, `>` and `&`, both
   silently eating the budget. Go's encoder still escapes U+2028 and U+2029,
   which are rare; the budget is checked against the encoded output, so they cost
   size, not correctness.
-- **Exit code 0.** Claude shows only about 10,000 characters of the output of a
-  command that fails, so a delivery must never exit non-zero.
+- **Exit code 0.** A runtime may show far less of the output of a command that
+  fails (about 10,000 characters on one measured path), so a delivery must never
+  exit non-zero.
+- **Markers and budgets are the adapter's data, not the core's code.** The way a
+  runtime marks a replaced or cut result, and how much of a result the model
+  sees, belong to that runtime and change with its versions. Naming runtimes in
+  the core would make every new runtime and every upstream change a change to a
+  package that all adapters share. The adapter declares both and the core only
+  compares. Rejected: a table of runtimes in the core (the situation this
+  replaces), and one fixed set of markers for all runtimes (a marker of one
+  runtime would be matched against another's output, and a message that
+  discusses it would be refused).
+- **No "unknown runtime" refusal.** With no markers declared the check cannot
+  name a cause, but it can still tell whether the model saw the output: only if
+  the output is contained in full. Refusing everything for lack of markers would
+  turn a missing declaration into messages that are never acknowledged, and
+  accepting without comparing would lose messages. Containment is the rule that
+  protects the message; markers refine the cause. A result that holds the whole
+  output beside a declared notice is still refused, as the notice says the
+  model may not have seen it; an adapter that declares no markers loses that
+  extra caution and relies on containment alone.
+- **Regular expressions that match the empty text are rejected.** Such a marker
+  is found at every position, so it would refuse every result. RE2 is used
+  because its matching time is linear in the text, which matters as the markers
+  come from an adapter package.
+- **A fixed first prompt for a session with no initial message.** The session
+  needs a first input so that there is evidence it is ready, but there is no
+  message to count. The text says nothing waits and how messages will be
+  announced; it has no body, like every prompt.
 - **Acknowledge only after comparing.** Acknowledging a message the model did
   not read loses it: the sender is told it was delivered and nobody reads it. A
   refused acknowledgement costs a redelivery marked as possibly duplicate.
@@ -179,12 +221,14 @@ The delivery side that these rules call into is described in
 ## Where
 
 - `internal/handoff/prompt.go`: prompt text, parameters, `DecidePrompt`.
-  Tests: `TestDecidePrompt`, `TestPromptScenario*`, `TestPromptParamsValidate`.
+  Tests: `TestPromptText`, `TestNewSessionPromptText`, `TestDecidePrompt`,
+  `TestPromptScenario*`, `TestPromptParamsValidate`.
 - `internal/handoff/blocked.go`: `AssessBlocked`. Tests: `TestAssessBlocked`,
   `TestAssessBlockedReportsOnceAndRecoversOnce`.
-- `internal/handoff/budget.go`: units, the token estimate, runtime path limits,
-  `DefaultBudget`. Tests: `TestEstimateTokens*`, `TestPathBudgets`,
-  `TestDefaultBudget*`.
+- `internal/handoff/budget.go`: units, the token estimate, `DefaultBudget` and
+  the constants it derives from. Tests: `TestEstimateTokens*`,
+  `TestDefaultBudget`, `TestDefaultBudgetFitsEveryPath` (the limits of the
+  measured runtimes are test data there).
 - `internal/handoff/pack.go`: `Pack`, `Part`, the JSON form. Tests:
   `TestPackPaging`, `TestPackEncoding`, `TestPackFiveLargeMessages`,
   `TestPackChineseAndEnglishAreMeasuredInTheirOwnUnits`, `TestPartErrors`,
@@ -193,5 +237,8 @@ The delivery side that these rules call into is described in
   `TestPartsDoNotDependOnTheLease`, `TestLeaseLength`,
   `TestPackContinuesAChunkedMessage`, `TestPackProperties`,
   `TestExitCodeIsZeroWhenMessagesAreHandedOut`.
-- `internal/handoff/preack.go`: `CheckBeforeAck`. Tests: `TestCheckBeforeAck`.
+- `internal/handoff/preack.go`: `AckMarkers`, `Marker`, `MarkerSet`,
+  `CheckBeforeAck`. Tests: `TestCheckBeforeAck` (the markers of two runtimes
+  are test data), `TestCheckBeforeAckZeroMarkerSet`, `TestCompileMarkers`,
+  `TestCheckBeforeAckAcceptsPackedOutput`, `TestCheckBeforeAckProperties`.
 - `internal/handoff/README.md`: entry points and what the caller must guarantee.

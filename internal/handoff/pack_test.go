@@ -350,18 +350,23 @@ func TestPackFiveLargeMessages(t *testing.T) {
 		_, size := utf8.DecodeLastRuneInString(chinese)
 		chinese = chinese[:len(chinese)-size]
 	}
-	var paths []PathBudget
-	paths = append(paths, PathBudgets()...)
-	paths = append(paths, PathBudget{"default", DefaultBudget()})
+	type namedBudget struct {
+		name   string
+		budget Budget
+	}
+	paths := []namedBudget{{"default", DefaultBudget()}}
+	for _, vl := range visibleLimits {
+		paths = append(paths, namedBudget{vl.name, vl.budget})
+	}
 
 	for _, lang := range []struct{ name, body string }{{"english", english}, {"chinese", chinese}} {
 		for _, pb := range paths {
-			t.Run(lang.name+"/"+string(pb.Path), func(t *testing.T) {
+			t.Run(lang.name+"/"+pb.name, func(t *testing.T) {
 				var queue []Message
 				for i := 1; i <= 5; i++ {
 					queue = append(queue, msg(t, fmt.Sprintf("m%d", i), lang.body))
 				}
-				b := pb.Budget
+				b := pb.budget
 				seen := 0
 				for len(queue) > 0 {
 					p, err := Pack(queue, testLease, b)

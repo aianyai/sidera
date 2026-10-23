@@ -14,8 +14,9 @@ import (
 )
 
 // ExitOK is the exit code of a recv that hands out at least one message. A
-// non-zero code would make Claude show only about 10,000 characters of the
-// output, so a recv that delivers must never use one.
+// non-zero code can make a runtime show only a small part of the output (about
+// 10,000 characters on one of the measured paths), so a recv that delivers must
+// never use one.
 const ExitOK = 0
 
 // Message is a queued message as recv hands it out. The caller guarantees that
