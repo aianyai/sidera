@@ -11,5 +11,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | Topic | Scope |
 | ----- | ----- |
 | [identity](identity/README.md) | Identifiers for nodes, people and endpoints; later identity keys, certificates and signed records |
+| [trust](trust/README.md) | Direct and inherited trust, online vouchers and the grace period, local revocation, eviction, offline revoke directives |
 
 Language: everything in this directory is English.
