@@ -2,6 +2,7 @@
 
 ## Start here
 
+- `docs/references/README.md` — engineering references by topic, the authoritative description of the code as committed. Read the relevant topic before touching a subsystem.
 - Before editing code in a directory, read its `README.md` and those of its parents: they capture local conventions, invariants and entry points that the code alone does not show.
 
 ## Rules
@@ -16,14 +17,14 @@
 - **A dependency has to earn its place**: Finding a library that solves the problem is not a reason to add it. A library is taken only when every one of these holds: the problem is not simple enough to solve in a few lines of our own; the library's scope, transitive dependencies included, is about the size of our problem, so a large library is never brought in for one small piece of it; its license allows bundling and redistribution under ours; and it is actively maintained and widely used, so it is less likely to break under us than our own code would be. When any of these fails, write the code and record in the proposal which test the library failed.
 - Everything in the repository is English: code, comments, commit messages, docs.
 - Tests follow the product. When a change makes a test awkward, rewrite the test; how easy something is to test never decides a product choice.
-- Every change to a protocol, format or rule updates the matching documentation in the same commit; a change that alters a directory's entry points, invariants or local conventions updates that directory's `README.md` in the same commit.
+- Every change to a protocol, format or rule updates the matching `docs/references/<topic>/` document in the same commit; a subsystem's first code adds its topic in the commit that lands it; a change that alters a directory's entry points, invariants or local conventions updates that directory's `README.md` in the same commit.
 - Every reference must resolve for a future reader. Code, comments, docs and commit messages never cite the planning documents — their location, task or finding numbers, phase names or other working labels — nor another repository; none of it is in this history. Write the reason itself: what a guard prevents and why, never which item asked for it. An issue or PR link is fine when the sentence states the decision it records.
 
 ## Git workflow
 
 - To move or rename a tracked file, use `git mv`; never delete and recreate.
 - Every change is developed by default in a git worktree on its own branch, however small. It is made directly on `main` in the main checkout only when the developer asks for that in the current conversation, and changes already made in the main checkout are committed there rather than moved to a worktree. The main checkout never creates or switches to another branch: work there stays on `main`. Work that produces no commit needs no worktree.
-- Commit messages: Conventional Commits (`feat(api): …`, `fix(web): …`, `docs: …`).
+- Commit messages: Conventional Commits (`feat(api): …`, `fix(web): …`, `docs(references): …`).
 - Commit bodies carry what the diff cannot: why a non-obvious choice was made, and what breaks if someone undoes it. Omit the body when the subject line is the whole story.
 
 ## Local Instructions
