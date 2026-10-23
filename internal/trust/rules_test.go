@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 func TestValidateGracePeriod(t *testing.T) {
@@ -56,9 +57,9 @@ func TestVoucherAccept(t *testing.T) {
 		{"a regressed counter is rejected even with a newer timestamp", []Voucher{v(5, 0)}, v(4, time.Minute), false, VoucherCounterNotAdvancing, 5},
 		{"counter zero is acceptable as a first voucher", nil, v(0, 0), true, VoucherAccepted, 0},
 		{"a greater counter wins even with an older timestamp", []Voucher{v(5, 0)}, v(6, -time.Hour), true, VoucherAccepted, 6},
-		{"a voucher stamped exactly the clock tolerance ahead of the receipt time is accepted", nil, v(1, ClockTolerance), true, VoucherAccepted, 1},
-		{"a voucher stamped one nanosecond beyond the tolerance is rejected and stores nothing", nil, v(1, ClockTolerance+time.Nanosecond), false, VoucherFromFuture, 0},
-		{"a future voucher with a higher counter does not replace the stored one", []Voucher{v(5, 0)}, v(9, ClockTolerance+time.Nanosecond), false, VoucherFromFuture, 5},
+		{"a voucher stamped exactly the clock tolerance ahead of the receipt time is accepted", nil, v(1, timing.ClockTolerance), true, VoucherAccepted, 1},
+		{"a voucher stamped one nanosecond beyond the tolerance is rejected and stores nothing", nil, v(1, timing.ClockTolerance+time.Nanosecond), false, VoucherFromFuture, 0},
+		{"a future voucher with a higher counter does not replace the stored one", []Voucher{v(5, 0)}, v(9, timing.ClockTolerance+time.Nanosecond), false, VoucherFromFuture, 5},
 		{"the future check comes before the counter check", []Voucher{v(5, 0)}, v(4, time.Hour), false, VoucherFromFuture, 5},
 	}
 	for _, r := range rows {

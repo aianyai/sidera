@@ -1,6 +1,10 @@
 package delivery
 
-import "time"
+import (
+	"time"
+
+	"github.com/aianyai/sidera/internal/timing"
+)
 
 // IntakeOutcome is the target's answer to a first-time request.
 type IntakeOutcome uint8
@@ -30,8 +34,8 @@ type IntakeVerdict struct {
 //
 // A deadline that has passed is refused so a stale request cannot start a
 // delivery nobody waits for. A deadline further away than now plus
-// MaxAcceptBefore plus ClockTolerance is refused so a sender cannot make the
-// target keep records for longer than the protocol allows. The checks on the
+// MaxAcceptBefore plus the clock tolerance is refused so a sender cannot make
+// the target keep records for longer than the protocol allows. The checks on the
 // deadline come before authorization: a suspension can only be retried until
 // the deadline, and an expired request has none left. A refusal is reported
 // with the reason the authorization carries.
@@ -44,7 +48,7 @@ func Intake(now, acceptBefore time.Time, auth Authorization) (IntakeVerdict, err
 		return IntakeVerdict{Outcome: IntakeReject, Reject: RejectMalformed}, nil
 	case now.After(acceptBefore):
 		return IntakeVerdict{Outcome: IntakeReject, Reject: RejectExpired}, nil
-	case acceptBefore.After(now.Add(MaxAcceptBefore + ClockTolerance)):
+	case acceptBefore.After(now.Add(MaxAcceptBefore + timing.ClockTolerance)):
 		return IntakeVerdict{Outcome: IntakeReject, Reject: RejectDeadlineOutOfRange}, nil
 	}
 	switch auth.Kind {

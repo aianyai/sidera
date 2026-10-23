@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // Timing values shared by every node. They are protocol constants because the
@@ -27,13 +28,10 @@ const (
 	// VoucherPushBudget is the time allowed for one hop to deliver a voucher to
 	// a direct trust party.
 	VoucherPushBudget = 1 * time.Minute
-	// ClockTolerance is the clock difference between two nodes that is
-	// tolerated when judging a voucher's issue time.
-	ClockTolerance = 2 * time.Minute
 	// MinGracePeriod is the shortest accepted grace period. A shorter one could
 	// reject a voucher that is merely in flight or stamped by a slightly fast
 	// clock, suspending healthy paths.
-	MinGracePeriod = VoucherIssuePeriod + VoucherPushBudget + ClockTolerance
+	MinGracePeriod = VoucherIssuePeriod + VoucherPushBudget + timing.ClockTolerance
 	// DefaultGracePeriod is the grace period of a node that never changed it.
 	DefaultGracePeriod = 10 * time.Minute
 )

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 var (
@@ -27,8 +29,8 @@ func TestIntake(t *testing.T) {
 		{"a valid request with allowed authorization is accepted", now.Add(DefaultAcceptBefore), allow, IntakeAccept, RejectNone},
 		{"a deadline exactly now is still acceptable", now, allow, IntakeAccept, RejectNone},
 		{"a deadline already past is rejected as expired", now.Add(-time.Second), allow, IntakeReject, RejectExpired},
-		{"a deadline at now plus cap plus tolerance is acceptable", now.Add(MaxAcceptBefore + ClockTolerance), allow, IntakeAccept, RejectNone},
-		{"a deadline beyond now plus cap plus tolerance is rejected", now.Add(MaxAcceptBefore + ClockTolerance + time.Second), allow, IntakeReject, RejectDeadlineOutOfRange},
+		{"a deadline at now plus cap plus tolerance is acceptable", now.Add(MaxAcceptBefore + timing.ClockTolerance), allow, IntakeAccept, RejectNone},
+		{"a deadline beyond now plus cap plus tolerance is rejected", now.Add(MaxAcceptBefore + timing.ClockTolerance + time.Second), allow, IntakeReject, RejectDeadlineOutOfRange},
 		{"a missing deadline is malformed", time.Time{}, allow, IntakeReject, RejectMalformed},
 		{"denied authorization is rejected as unauthorized", now.Add(DefaultAcceptBefore), deny(RejectUnauthorized), IntakeReject, RejectUnauthorized},
 		{"suspended authorization is a non-final result, not a rejection", now.Add(DefaultAcceptBefore), suspend, IntakeSuspended, RejectNone},

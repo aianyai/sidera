@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // Outcome is the class of a trust decision. The zero value is Denied, so an
@@ -268,7 +269,7 @@ func (v View) voucherFault(issuer ident.NodeID, edge CredentialDigest, now time.
 	switch {
 	case !ok:
 		return ReasonVoucherMissing
-	case vo.IssuedAt.After(now.Add(ClockTolerance)):
+	case vo.IssuedAt.After(now.Add(timing.ClockTolerance)):
 		// Vouchers.Accept rejects these on receipt, so this only happens when
 		// the verifier's clock moved back since.
 		return ReasonVoucherFuture

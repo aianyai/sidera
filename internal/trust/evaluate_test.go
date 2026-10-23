@@ -3,6 +3,8 @@ package trust
 import (
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 type evalRow struct {
@@ -101,8 +103,8 @@ func TestEvaluateVouchers(t *testing.T) {
 		{"a voucher exactly one grace period old is valid", func() *world { return threeNodeChain().vouch(nB, 2, grace) }, nC, time.Time{}, AllowedInherited, ReasonInherited, []byte{nB}},
 		{"a voucher older than the grace period suspends", func() *world { return threeNodeChain().vouch(nB, 2, grace+time.Nanosecond) }, nC, time.Time{}, Suspended, ReasonVoucherStale, []byte{nB}},
 		{"a stale voucher on the first edge suspends", func() *world { return threeNodeChain().vouch(nB, 1, grace+time.Second) }, nC, time.Time{}, Suspended, ReasonVoucherStale, []byte{nB}},
-		{"a voucher stamped within the clock tolerance ahead is valid", func() *world { return threeNodeChain().vouch(nB, 2, -ClockTolerance) }, nC, time.Time{}, AllowedInherited, ReasonInherited, []byte{nB}},
-		{"a voucher stamped beyond the clock tolerance ahead suspends, as after the verifier's clock moved back since receipt", func() *world { return threeNodeChain().vouch(nB, 2, -ClockTolerance-time.Nanosecond) }, nC, time.Time{}, Suspended, ReasonVoucherFuture, []byte{nB}},
+		{"a voucher stamped within the clock tolerance ahead is valid", func() *world { return threeNodeChain().vouch(nB, 2, -timing.ClockTolerance) }, nC, time.Time{}, AllowedInherited, ReasonInherited, []byte{nB}},
+		{"a voucher stamped beyond the clock tolerance ahead suspends, as after the verifier's clock moved back since receipt", func() *world { return threeNodeChain().vouch(nB, 2, -timing.ClockTolerance-time.Nanosecond) }, nC, time.Time{}, Suspended, ReasonVoucherFuture, []byte{nB}},
 		{"a missing voucher suspends", func() *world { w := threeNodeChain(); delete(w.v.Vouchers, VoucherKey{node(nB), dig(2)}); return w }, nC, time.Time{}, Suspended, ReasonVoucherMissing, []byte{nB}},
 		{"a voucher from the local node does not stand in for the intermediate's", func() *world {
 			w := threeNodeChain()
@@ -203,8 +205,8 @@ func TestEvaluateIssuerClockSkew(t *testing.T) {
 		want         Outcome
 		wantReason   Reason
 	}{
-		{"issuer clock exactly at the tolerance ahead: still valid at grace plus tolerance", ClockTolerance, grace + ClockTolerance, true, AllowedInherited, ReasonInherited},
-		{"issuer clock exactly at the tolerance ahead: suspended right after grace plus tolerance", ClockTolerance, grace + ClockTolerance + time.Nanosecond, true, Suspended, ReasonVoucherStale},
+		{"issuer clock exactly at the tolerance ahead: still valid at grace plus tolerance", timing.ClockTolerance, grace + timing.ClockTolerance, true, AllowedInherited, ReasonInherited},
+		{"issuer clock exactly at the tolerance ahead: suspended right after grace plus tolerance", timing.ClockTolerance, grace + timing.ClockTolerance + time.Nanosecond, true, Suspended, ReasonVoucherStale},
 		{"issuer clock correct: suspended right after the grace period", 0, grace + time.Nanosecond, true, Suspended, ReasonVoucherStale},
 		{"issuer clock one hour fast: the voucher is rejected and the intermediate is suspended from the start", time.Hour, 0, false, Suspended, ReasonVoucherMissing},
 		{"issuer clock one hour fast: still suspended an hour later, when the stamp has come into range", time.Hour, time.Hour, false, Suspended, ReasonVoucherMissing},

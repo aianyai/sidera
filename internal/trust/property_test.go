@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // model holds the raw records of a random scenario, independently of View, so
@@ -125,14 +126,14 @@ func linked(c Credential, x, y ident.NodeID) bool {
 func (m model) voucherOK(issuer ident.NodeID, edge CredentialDigest) bool {
 	var best *Voucher
 	for i, vo := range m.vouchers {
-		if vo.IssuedAt.After(t0.Add(ClockTolerance)) {
+		if vo.IssuedAt.After(t0.Add(timing.ClockTolerance)) {
 			continue
 		}
 		if vo.Issuer == issuer && vo.Edge == edge && (best == nil || vo.Counter > best.Counter) {
 			best = &m.vouchers[i]
 		}
 	}
-	return best != nil && !best.IssuedAt.After(m.now.Add(ClockTolerance)) && m.now.Sub(best.IssuedAt) <= m.grace
+	return best != nil && !best.IssuedAt.After(m.now.Add(timing.ClockTolerance)) && m.now.Sub(best.IssuedAt) <= m.grace
 }
 
 // expected recomputes the verdict outcome and the paths from the raw records.

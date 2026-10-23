@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 func TestAcceptDirective(t *testing.T) {
@@ -32,7 +33,7 @@ func TestAcceptDirective(t *testing.T) {
 		return d
 	}
 	nearNow := func(d *Directive) {
-		d.SignedAt = t0.Add(DefaultParams().ClockTolerance)
+		d.SignedAt = t0.Add(timing.ClockTolerance)
 		d.Cert.NotBefore = t0.Add(-time.Hour)
 		d.Cert.NotAfter = t0.Add(time.Hour)
 	}
@@ -120,7 +121,7 @@ func TestAcceptDirective(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := AcceptDirective(self, tc.list, tc.d, offlineSince, tc.now, DefaultParams())
+			got := AcceptDirective(self, tc.list, tc.d, offlineSince, tc.now)
 			if got != tc.want {
 				t.Fatalf("verdict = %+v, want %+v", got, tc.want)
 			}
@@ -132,7 +133,7 @@ func TestAcceptDirectiveWithUnsetLocalNodeRejects(t *testing.T) {
 	mgr := person(t, 10)
 	list := mustList(t, Entry{Person: mgr, Level: LevelManage})
 	d := Directive{Kind: DirectiveRevokeTrustEdge, SignedAt: t0, Signer: mgr, Cert: validCert(LevelManage)}
-	got := AcceptDirective(ident.NodeID{}, list, d, t0.Add(-time.Hour), t0, DefaultParams())
+	got := AcceptDirective(ident.NodeID{}, list, d, t0.Add(-time.Hour), t0)
 	if got.Disposition != DispositionReject {
 		t.Fatalf("verdict = %+v, want reject", got)
 	}
@@ -142,7 +143,7 @@ func TestAcceptDirectiveWithoutOfflineSinceRejects(t *testing.T) {
 	self, mgr := node(t, 1), person(t, 10)
 	list := mustList(t, Entry{Person: mgr, Level: LevelManage})
 	d := Directive{Kind: DirectiveRevokeTrustEdge, Node: self, SignedAt: t0, Signer: mgr, Cert: validCert(LevelManage)}
-	got := AcceptDirective(self, list, d, time.Time{}, t0, DefaultParams())
+	got := AcceptDirective(self, list, d, time.Time{}, t0)
 	want := DirectiveVerdict{DispositionReject, ReasonOfflineSinceMissing}
 	if got != want {
 		t.Fatalf("verdict = %+v, want %+v", got, want)
@@ -155,7 +156,7 @@ func TestAcceptDirectiveSigningTimeAgainstOfflineWindow(t *testing.T) {
 	self := node(t, 1)
 	mgr := person(t, 10)
 	list := mustList(t, Entry{Person: mgr, Level: LevelManage})
-	tol := DefaultParams().ClockTolerance
+	tol := timing.ClockTolerance
 	offlineSince := t0.Add(-30 * time.Minute)
 
 	// signed returns a directive claiming to be signed at the given time with a
@@ -192,16 +193,10 @@ func TestAcceptDirectiveSigningTimeAgainstOfflineWindow(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := AcceptDirective(self, list, tc.d, offlineSince, t0, DefaultParams())
+			got := AcceptDirective(self, list, tc.d, offlineSince, t0)
 			if got != tc.want {
 				t.Fatalf("verdict = %+v, want %+v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestDefaultParams(t *testing.T) {
-	if got := DefaultParams().ClockTolerance; got != 2*time.Minute {
-		t.Fatalf("ClockTolerance = %v, want 2m", got)
 	}
 }

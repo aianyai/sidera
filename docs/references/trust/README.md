@@ -39,7 +39,7 @@ grows, but no expiry. The verifier computes validity itself:
 period`. The verifier keeps only the latest voucher per issuer and edge and
 rejects a counter that does not advance. It also rejects at receipt a voucher
 stamped beyond its clock plus the tolerance, and stores nothing of it. The grace period is at least issue
-period (3 min) + one-hop push budget (1 min) + clock tolerance (2 min) = 6
+period (3 min) + one-hop push budget (1 min) + clock tolerance (2 min, shared: [timing](../timing/README.md)) = 6
 minutes, default 10 minutes; smaller values are rejected.
 
 **Verdicts.** `Evaluate` returns one of four outcomes with a typed reason:

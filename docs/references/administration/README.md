@@ -67,7 +67,7 @@ returns it checks the directive in this order, and the first failure decides:
 
 1. it carries a signing time;
 2. the claimed signing time is not later than now plus the clock tolerance
-   (default 2 minutes);
+   (2 minutes, `timing.ClockTolerance`, see [timing](../timing/README.md));
 3. the claimed signing time is not earlier than the moment this node itself
    recorded as losing contact, minus the clock tolerance;
 4. it is addressed to this node;
@@ -211,7 +211,7 @@ neither file nor probe results.
   `EffectiveLevel`.
 - `internal/admin/operation.go`, `authorize.go`: catalogue, `RequirementOf`,
   `Authorize`.
-- `internal/admin/directive.go`: `AcceptDirective`, `Params`.
+- `internal/admin/directive.go`: `AcceptDirective`.
 - `internal/admin/reachability.go`: `MayIssueReachabilityProof`,
   `CheckReachabilityProof`.
 - `internal/admin/request.go`: operation IDs, versions, replay, `KeyFor`.
@@ -231,7 +231,7 @@ neither file nor probe results.
   - `directive_test.go`: `TestAcceptDirective`,
     `TestAcceptDirectiveWithUnsetLocalNodeRejects`,
     `TestAcceptDirectiveWithoutOfflineSinceRejects`,
-    `TestAcceptDirectiveSigningTimeAgainstOfflineWindow`, `TestDefaultParams`.
+    `TestAcceptDirectiveSigningTimeAgainstOfflineWindow`.
   - `reachability_test.go`: `TestMayIssueReachabilityProof`,
     `TestCheckReachabilityProof`.
   - `request_test.go`: `TestValidateRequest`, `TestEveryConfigChangeIsSideEffecting`,

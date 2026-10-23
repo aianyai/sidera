@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // DirectiveKind is what an offline administrative directive asks for.
@@ -58,19 +59,6 @@ type DirectiveVerdict struct {
 	Reason      Reason
 }
 
-// Params are the tunable values of this package.
-type Params struct {
-	// ClockTolerance absorbs clock differences between machines. A directive's
-	// signing time may be at most this far ahead of the local clock and at most
-	// this far before the moment this node lost contact.
-	ClockTolerance time.Duration
-}
-
-// DefaultParams returns the decided values.
-func DefaultParams() Params {
-	return Params{ClockTolerance: 2 * time.Minute}
-}
-
 // AcceptDirective decides whether this node (local) executes an offline
 // directive when it comes back online, at now. offlineSince is the time this
 // node itself recorded as losing contact; it is a parameter, not a field of
@@ -112,7 +100,7 @@ func DefaultParams() Params {
 // revoked: the caller must then run the trust package's applicability check,
 // which resolves the credential digest the directive names and decides whether
 // it belongs to an edge of this node.
-func AcceptDirective(local ident.NodeID, list List, d Directive, offlineSince, now time.Time, p Params) DirectiveVerdict {
+func AcceptDirective(local ident.NodeID, list List, d Directive, offlineSince, now time.Time) DirectiveVerdict {
 	reject := func(r Reason) DirectiveVerdict { return DirectiveVerdict{Disposition: DispositionReject, Reason: r} }
 
 	if offlineSince.IsZero() {
@@ -121,9 +109,9 @@ func AcceptDirective(local ident.NodeID, list List, d Directive, offlineSince, n
 	switch {
 	case d.SignedAt.IsZero():
 		return reject(ReasonDirectiveSignedAtMissing)
-	case d.SignedAt.After(now.Add(p.ClockTolerance)):
+	case d.SignedAt.After(now.Add(timing.ClockTolerance)):
 		return reject(ReasonDirectiveSignedInFuture)
-	case d.SignedAt.Before(offlineSince.Add(-p.ClockTolerance)):
+	case d.SignedAt.Before(offlineSince.Add(-timing.ClockTolerance)):
 		return reject(ReasonDirectiveSignedBeforeOffline)
 	}
 	if local.IsZero() || d.Node != local {

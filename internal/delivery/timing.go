@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // Decided timing values. They are protocol constants, not node settings: the
@@ -39,8 +41,6 @@ const (
 	// ReportBySafetyMargin is how long before ReportBy the target must already
 	// have settled every delivery, so the sender can still pull the result.
 	ReportBySafetyMargin = 5 * time.Minute
-	// ClockTolerance is the allowed difference between two nodes' clocks.
-	ClockTolerance = 2 * time.Minute
 )
 
 // MaxLeases is how many leases one message can receive: the first hand-out and
@@ -54,7 +54,7 @@ const MaxRedeliveryPeriod = MaxLeases * LeaseRenewalCap
 
 // ReportByOffset is the distance from accept_before to report_by: the longest
 // queue time, then the longest time under leases, then the clock tolerance.
-const ReportByOffset = MaxQueueCap + MaxRedeliveryPeriod + ClockTolerance
+const ReportByOffset = MaxQueueCap + MaxRedeliveryPeriod + timing.ClockTolerance
 
 // ReportBy returns the time until which the sender keeps pulling the state of a
 // delivery whose delivery deadline is acceptBefore. After it every delivery
@@ -127,5 +127,5 @@ func BacklogDeadline(acceptedAt, reportBy time.Time, endpointMaxQueue time.Durat
 // delivery expired_unconfirmed, provided an active query after that instant
 // found no receipt. The tolerance covers a target clock that runs behind.
 func ExpiryJudgeableAfter(acceptBefore time.Time) time.Time {
-	return acceptBefore.Add(ClockTolerance)
+	return acceptBefore.Add(timing.ClockTolerance)
 }

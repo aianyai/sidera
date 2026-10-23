@@ -16,5 +16,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [administration](administration/README.md) | Who may administer a node: authorized-persons list, levels, operation catalogue, offline directives, management request semantics |
 | [delivery](delivery/README.md) | Delivery states and transitions, deadlines and retention, pull leases and acknowledgements, deduplication, sender feedback. |
 | [handoff](handoff/README.md) | Wake-up prompts, blocked-delivery detection, what one `recv` prints (output budget, paging, parts) and the check before acknowledging |
+| [timing](timing/README.md) | Time bounds every node applies identically: the clock tolerance shared by trust, delivery and administration |
 
 Language: everything in this directory is English.

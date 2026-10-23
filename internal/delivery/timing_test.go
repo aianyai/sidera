@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 func TestReportByDerivation(t *testing.T) {
@@ -46,7 +48,7 @@ func TestDecidedValues(t *testing.T) {
 		{"lease duration", LeaseDuration, 5 * time.Minute},
 		{"lease life cap", LeaseRenewalCap, 15 * time.Minute},
 		{"report_by safety margin", ReportBySafetyMargin, 5 * time.Minute},
-		{"clock tolerance", ClockTolerance, 2 * time.Minute},
+		{"clock tolerance", timing.ClockTolerance, 2 * time.Minute},
 		{"max redeliveries", time.Duration(MaxRedeliveries), 3},
 	}
 	for _, r := range rows {

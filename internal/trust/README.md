@@ -12,8 +12,8 @@ reasons behind the rules.
 | Function or type                                  | Answers                                                                                       |
 | ------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | `Evaluate(View, target, now) Verdict`             | Is `target` trusted: `AllowedDirect`, `AllowedInherited`, `Suspended` or `Denied`, with a `Reason` and the `Paths` (credential digests) the trust rests on. |
-| `Vouchers.Accept(Voucher, now) VoucherDecision`   | Keep a voucher only if it is not stamped beyond `now + ClockTolerance` and its counter is greater than the stored one for that issuer and edge. |
-| `ValidateGracePeriod`, `MinGracePeriod`, `DefaultGracePeriod` | The grace period floor (6 minutes) and default (10 minutes).                      |
+| `Vouchers.Accept(Voucher, now) VoucherDecision`   | Keep a voucher only if it is not stamped beyond `now + timing.ClockTolerance` and its counter is greater than the stored one for that issuer and edge. |
+| `ValidateGracePeriod`, `MinGracePeriod`, `DefaultGracePeriod` | The grace period floor (6 minutes) and default (10 minutes). The floor includes `timing.ClockTolerance`, which lives in [`internal/timing`](../timing/README.md). |
 | `RevokeLocally(View, x) RevocationEffects`        | What revoking `x` locally does: set membership, stop vouching, revoke credentials.            |
 | `ClearLocallyRevoked(View, x, now) ClearEffect`   | Whether clearing an entry leaves a new pairing necessary.                                     |
 | `VouchableEdges(View, now)`                       | The direct edges the local node issues vouchers for.                                          |
@@ -51,7 +51,7 @@ reasons behind the rules.
   was revoked (`NewPairingRequired`); who may clear is decided elsewhere.
 - **Vouchers.** `Vouchers.Accept` keeps only the latest voucher per issuer and
   edge, and rejects a counter that does not advance. It also rejects, at
-  receipt, a voucher stamped beyond `now + ClockTolerance` (`VoucherFromFuture`),
+  receipt, a voucher stamped beyond `now + timing.ClockTolerance` (`VoucherFromFuture`),
   before looking at the counter, and stores nothing of it. Otherwise an issuer
   whose clock runs fast would have its last voucher become valid later, once the
   receiver's clock reaches the stamp, after the issuer went offline, bringing an

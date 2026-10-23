@@ -13,8 +13,7 @@ for the reasoning behind the rules.
 | `EffectiveLevel(list, person, cert, now) Standing`                      | A remote person's rights now: the lower of the list level and the certificate cap.                        |
 | `Authorize(list, actor, op, now) Verdict`                               | Allow or deny one operation, with a `Reason`.                                                             |
 | `RequirementOf(op) (Requirement, bool)`                                 | The operation catalogue: which level, or the local owner alone, an operation needs.                       |
-| `AcceptDirective(local, list, d, offlineSince, now, p)` | Execute, reject, or only warn about an offline directive.                                                |
-| `Params`, `DefaultParams()`                                             | The tunable values (clock tolerance).                                                                     |
+| `AcceptDirective(local, list, d, offlineSince, now)`                    | Execute, reject, or only warn about an offline directive.                                                 |
 | `MayIssueReachabilityProof(list, person, notAfter, now) ProofVerdict`   | May this node issue a reachability proof to this person, valid until `notAfter`.                          |
 | `CheckReachabilityProof(p, node, requester, now) ProofVerdict`          | Does this proof let this requester query this node's reachability records now.                            |
 | `NewOperationID(r io.Reader) (OperationID, error)`                      | A random operation ID from an injected source; all-zero is refused.                                       |
@@ -54,8 +53,9 @@ every node answers with its own verdict from its own list.
   only finds candidates and admits no one, so it needs manage in both
   directions.
 - An offline directive is checked in this order, and the first failure decides:
-  it has a signing time that is not later than now plus the clock tolerance and
-  not earlier than the moment this node lost contact minus the clock tolerance;
+  it has a signing time that is not later than now plus the clock tolerance
+  (`timing.ClockTolerance`) and not earlier than the moment this node lost
+  contact minus the clock tolerance;
   it addresses this node; its kind is "revoke trust edge"; only then the
   signer's standing: on the current list with at least the level the catalogue
   requires for issuing a directive, after the certificate cap. A structurally

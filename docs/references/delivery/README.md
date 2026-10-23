@@ -65,7 +65,7 @@ parameters without defaults; notices over the cap are held, not dropped.
 | endpoint queue time | default 30 min, protocol cap 2 h |
 | lease | 5 min; total life at most 15 min; at most 3 redeliveries (4 leases) |
 | safety margin | 5 min |
-| clock tolerance | 2 min |
+| clock tolerance | 2 min, `timing.ClockTolerance` (see [timing](../timing/README.md)) |
 | `report_by` | `accept_before` + 2 h + 4 x 15 min + 2 min |
 
 The redelivery period is the lease count times the lease life cap and depends on

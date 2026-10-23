@@ -1,6 +1,10 @@
 package trust
 
-import "time"
+import (
+	"time"
+
+	"github.com/aianyai/sidera/internal/timing"
+)
 
 // VoucherReason says why a voucher was accepted or rejected.
 type VoucherReason int
@@ -15,7 +19,7 @@ const (
 	// refresh trust that the issuer stopped vouching for.
 	VoucherCounterNotAdvancing
 	// VoucherFromFuture: the voucher is stamped later than the receiver's
-	// clock plus ClockTolerance. An issuer whose clock runs fast must not have
+	// clock plus timing.ClockTolerance. An issuer whose clock runs fast must not have
 	// its last voucher become valid later, once the receiver's clock reaches
 	// the stamp: that would bring an intermediate that went offline back to
 	// life for about one grace period.
@@ -40,7 +44,7 @@ type VoucherDecision struct {
 	Reason   VoucherReason
 }
 
-// Accept stores v if it is not stamped beyond now plus ClockTolerance and its
+// Accept stores v if it is not stamped beyond now plus timing.ClockTolerance and its
 // counter is greater than the stored one for its issuer and edge, replacing
 // it, so only the latest voucher is kept. The map must not be nil. now is the
 // moment of receipt. Whether an accepted voucher is still valid is not decided
@@ -53,7 +57,7 @@ type VoucherDecision struct {
 // The caller has verified the signature and that the issuer is an end of the
 // edge's credential.
 func (s Vouchers) Accept(v Voucher, now time.Time) VoucherDecision {
-	if v.IssuedAt.After(now.Add(ClockTolerance)) {
+	if v.IssuedAt.After(now.Add(timing.ClockTolerance)) {
 		return VoucherDecision{Accepted: false, Reason: VoucherFromFuture}
 	}
 	key := VoucherKey{Issuer: v.Issuer, Edge: v.Edge}
