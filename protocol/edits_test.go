@@ -84,6 +84,15 @@ func put(root any, p pos, v any) {
 	}
 }
 
+func contains(ps []pos, p pos) bool {
+	for _, q := range ps {
+		if q.String() == p.String() {
+			return true
+		}
+	}
+	return false
+}
+
 func parseTree(tb testing.TB, raw []byte) (any, bool) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
@@ -163,6 +172,56 @@ func TestDifferentialSingleEdits(t *testing.T) {
 					m["zz_unknown"] = json.Number("1")
 				}
 			})
+			// Graft: every member another document of the same target has at the same
+			// place and this one lacks, so that a member that belongs to one variant
+			// of a message is tried in the others.
+			for _, otherRaw := range seeds[tg.Name] {
+				other, ok := parseTree(t, otherRaw)
+				if !ok {
+					continue
+				}
+				var ops []pos
+				positions(other, nil, &ops)
+				ops = append(ops, nil)
+				for _, p := range ops {
+					var dst, src map[string]any
+					if len(p) == 0 {
+						dst, _ = tree.(map[string]any)
+						src, _ = other.(map[string]any)
+					} else if !contains(ps, p) {
+						continue
+					} else {
+						dst, _ = at(tree, p).(map[string]any)
+						src, _ = at(other, p).(map[string]any)
+					}
+					if dst == nil || src == nil {
+						continue
+					}
+					for k, v := range src {
+						if _, has := dst[k]; has {
+							continue
+						}
+						root := deepCopy(tree)
+						var target map[string]any
+						if len(p) == 0 {
+							target = root.(map[string]any)
+						} else {
+							target = at(root, p).(map[string]any)
+						}
+						target[k] = deepCopy(v)
+						mut, err := json.Marshal(root)
+						if err != nil || !inDomain(mut) {
+							continue
+						}
+						verdict, err := differ(t, tg, mut)
+						if err != nil {
+							t.Errorf("%s: grafting %q at %s: %v", tg.Name, k, p, err)
+							continue
+						}
+						c.record(verdict)
+					}
+				}
+			}
 			// The document itself, too: an unknown key at the top.
 			root := deepCopy(tree)
 			if m, ok := root.(map[string]any); ok {
@@ -323,6 +382,12 @@ func (x *schemaIndex) limits(nodes []node) constraints {
 func TestDifferentialBoundaries(t *testing.T) {
 	targets := buildTargets(t)
 	seeds := seedsFor(t, true)
+	positive := map[string]bool{}
+	for target, docs := range seedsFor(t, false) {
+		for _, d := range docs {
+			positive[target+"\x00"+string(d)] = true
+		}
+	}
 	idx := newSchemaIndex(t)
 	var c tally
 	for _, tg := range targets {
@@ -332,8 +397,8 @@ func TestDifferentialBoundaries(t *testing.T) {
 			root = []node{{file, idx.docs[file]}}
 		}
 		for _, raw := range seeds[tg.Name] {
-			if len(raw) > 3000 {
-				continue // the large documents are boundary cases themselves
+			if len(raw) > 3000 && !positive[tg.Name+"\x00"+string(raw)] {
+				continue // a large invalid document is a boundary case itself
 			}
 			tree, ok := parseTree(t, raw)
 			if !ok {
@@ -486,6 +551,7 @@ func discovered(tg target, tree any, p pos, old any) []any {
 		_, err = tg.Go(raw)
 		return err == nil
 	}
+	var out []any
 	var variant func(n int) any
 	var from, min, max int
 	switch x := old.(type) {
@@ -542,11 +608,13 @@ func discovered(tg target, tree any, p pos, old any) []any {
 	default:
 		return nil
 	}
+	if m, ok := old.(map[string]any); ok && len(m) > 0 {
+		out = append(out, discoveredKeys(goAccepts, m)...)
+	}
 	if !goAccepts(variant(from)) {
-		return nil
+		return out
 	}
 	lo, hi, hasLo, hasHi := edge(from, min, max, func(n int) bool { return goAccepts(variant(n)) })
-	var out []any
 	if hasHi {
 		out = append(out, variant(hi), variant(hi+1))
 	}
@@ -594,6 +662,46 @@ func discoveredNumbers(goAccepts func(any) bool, anchor int64) []any {
 			}
 		}
 		out = append(out, json.Number(fmt.Sprint(h)), json.Number(fmt.Sprint(h-1)))
+	}
+	return out
+}
+
+// discoveredKeys bisects how long the first key of an object may be, by padding it
+// with letters, for objects whose keys are names with a length limit.
+func discoveredKeys(goAccepts func(any) bool, m map[string]any) []any {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	key := keys[0]
+	rekey := func(n int) any {
+		name := key
+		if r := []rune(key); n <= len(r) {
+			name = string(r[:n])
+		} else {
+			name = key + strings.Repeat("a", n-len(r))
+		}
+		out := map[string]any{}
+		for _, k := range keys {
+			if k != key {
+				out[k] = deepCopy(m[k])
+			}
+		}
+		out[name] = deepCopy(m[key])
+		return out
+	}
+	from := len([]rune(key))
+	if !goAccepts(rekey(from)) {
+		return nil
+	}
+	lo, hi, hasLo, hasHi := edge(from, 1, 600, func(n int) bool { return n >= 1 && goAccepts(rekey(n)) })
+	var out []any
+	if hasHi {
+		out = append(out, rekey(hi), rekey(hi+1))
+	}
+	if hasLo {
+		out = append(out, rekey(lo), rekey(lo-1))
 	}
 	return out
 }
