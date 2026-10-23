@@ -130,10 +130,6 @@ Before acknowledging:
   waiting message and counts in none of `PromptInput.Pending`,
   `PromptInput.LastArrivalAt` and `BlockedInput.OldestPendingAt`: suspension
   means no lease, no prompt and no feedback.
-- A message whose `recv`-stage authorization is currently Suspend is not a
-  waiting message and counts in none of `PromptInput.Pending`,
-  `PromptInput.LastArrivalAt` and `BlockedInput.OldestPendingAt`: suspension
-  means no lease, no prompt and no feedback.
 - `NewSessionPromptText` is not a prompt `Attempt`: the caller does not record it
   in `PromptInput.Attempts`, and it does not count toward `MaxPerHour`. It
   announces no unread message, so recording it would be read as an unread prompt
