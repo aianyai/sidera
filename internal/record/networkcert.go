@@ -136,53 +136,88 @@ func (c NetworkKeyCertificate) ValidityAt(now time.Time) Validity {
 	return Valid
 }
 
+// SerialSeen is the highest network-key certificate serial seen for one node,
+// with the digest of the certificate seen at that serial. It is not the
+// accepted certificate: a certificate may be seen and never accepted (expired,
+// revoked, refused for a conflict), and the highest serial seen must still
+// stand, or an older certificate and its key could come back. The caller keeps
+// it per node and advances it whenever DecideSerial answers SerialAccept.
+// Revoking a certificate never lowers it.
+type SerialSeen struct {
+	Node   ident.NodeID
+	Serial uint64
+	// Digest is the record digest of the certificate seen at Serial. It
+	// identifies the certificate as a whole, window included.
+	Digest Digest
+}
+
+// SerialSeenOf returns the state that records v as the highest serial seen for
+// its node.
+func SerialSeenOf(v Verified[NetworkKeyCertificate]) SerialSeen {
+	return SerialSeen{Node: v.Payload.Node, Serial: v.Payload.Serial, Digest: v.Digest}
+}
+
 // SerialVerdict is the outcome of comparing a new certificate with the highest
-// one already accepted for the same node.
+// serial already seen for the same node.
 type SerialVerdict int
 
 const (
 	// SerialInvalid is the zero value: the comparison could not be made (the
-	// incoming certificate has no serial or no node).
+	// incoming certificate has no serial, no node or no digest).
 	SerialInvalid SerialVerdict = iota
 	// SerialAccept: the incoming serial is higher than any seen (or none has
-	// been seen). Store it.
+	// been seen). Record it as the highest seen with SerialSeenOf.
 	SerialAccept
-	// SerialStale: the incoming serial is lower than the highest seen, or equal
-	// with the same key. Nothing new; keep the stored certificate.
+	// SerialStale: the incoming serial is lower than the highest seen, or it is
+	// the very certificate seen at that serial. Nothing new.
 	SerialStale
-	// SerialConflict: the same serial carries a different network key. The
-	// identity key signed two different certificates under one serial, which is a
-	// sign of a copied or compromised identity key. Keep the stored certificate
-	// and tell the owner.
+	// SerialConflict: the same serial carries a different certificate (another
+	// network key, or the same key with another window). The identity key signed
+	// two certificates under one serial, which is a sign of a copied or
+	// compromised identity key. Keep what was seen and tell the owner.
 	SerialConflict
-	// SerialWrongNode: the two certificates are for different nodes; the caller
-	// looked up the wrong stored certificate. Nothing is accepted.
+	// SerialWrongNode: the incoming certificate is for another node than the
+	// state; the caller looked up the wrong state. Nothing is accepted.
 	SerialWrongNode
 )
 
-// DecideSerial applies the rule "accept only the highest serial seen". known is
-// the highest-serial certificate already accepted for the node, or nil if none.
-// Both certificates must already have passed Verify; validity in time is not
-// part of this decision, because an expired certificate with a higher serial
-// still advances the highest serial seen (it must not let an older key back).
-func DecideSerial(known *NetworkKeyCertificate, incoming NetworkKeyCertificate) SerialVerdict {
-	if incoming.Serial < 1 || incoming.Node.IsZero() {
+// DecideSerial applies the rule "accept only the highest serial seen". seen is
+// the state for the incoming certificate's node, or nil if none has been seen.
+// incoming must have passed Verify, which is what the type says. The decision
+// ignores validity in time and revocation: an expired certificate with a higher
+// serial still advances the serial seen, and a revoked one keeps it where it
+// was, so an older key cannot come back either way.
+func DecideSerial(seen *SerialSeen, incoming Verified[NetworkKeyCertificate]) SerialVerdict {
+	c := incoming.Payload
+	if c.Serial < 1 || c.Node.IsZero() || incoming.Digest.IsZero() {
 		return SerialInvalid
 	}
-	if known == nil {
+	if seen == nil {
 		return SerialAccept
 	}
 	switch {
-	case known.Node != incoming.Node:
+	case seen.Node != c.Node:
 		return SerialWrongNode
-	case incoming.Serial > known.Serial:
+	case c.Serial > seen.Serial:
 		return SerialAccept
-	case incoming.Serial < known.Serial:
+	case c.Serial < seen.Serial:
 		return SerialStale
-	case incoming.NetworkKey != known.NetworkKey:
+	case incoming.Digest != seen.Digest:
 		return SerialConflict
 	}
 	return SerialStale
+}
+
+// AcceptedNetworkKey is what a node currently accepts as another node's
+// network key: the accepted certificate and whether it has been revoked. The
+// accepted certificate is the highest-serial certificate that was verified and
+// taken in; it is kept apart from SerialSeen.
+type AcceptedNetworkKey struct {
+	// Cert is the accepted certificate; nil if none is known.
+	Cert *NetworkKeyCertificate
+	// Revoked reports that the certificate has been revoked. This package does
+	// not read revocations; the caller fills it from the revocation records.
+	Revoked bool
 }
 
 // Binding is the answer to "does this network key belong to this node".
@@ -191,8 +226,8 @@ type Binding int
 const (
 	// BindingInvalid is the zero value; it is never returned as an answer.
 	BindingInvalid Binding = iota
-	// BindingOK: the accepted certificate names this key for this node and is
-	// valid now.
+	// BindingOK: the accepted certificate names this key for this node, has not
+	// been revoked and is valid now.
 	BindingOK
 	// BindingNoCertificate: no accepted certificate for the node is known.
 	BindingNoCertificate
@@ -204,22 +239,50 @@ const (
 	BindingNotYetValid
 	// BindingExpired: the certificate's window has ended.
 	BindingExpired
+	// BindingRevoked: the certificate names this key for this node but has been
+	// revoked.
+	BindingRevoked
 )
 
-// NetworkKeyBelongs decides whether key is the network key of node, given the
-// certificate accepted for that node (nil if none). It is the only place that
-// answers this question: every record signed by a network key (declarations,
-// vouchers, reachability records, delivery reports) relies on it.
-func NetworkKeyBelongs(accepted *NetworkKeyCertificate, node ident.NodeID, key ident.PublicKey, now time.Time) Binding {
-	switch {
-	case accepted == nil:
-		return BindingNoCertificate
-	case node.IsZero() || accepted.Node != node:
-		return BindingNodeMismatch
-	case key.IsZero() || accepted.NetworkKey != key:
-		return BindingKeyMismatch
+func (b Binding) String() string {
+	switch b {
+	case BindingOK:
+		return "ok"
+	case BindingNoCertificate:
+		return "no-certificate"
+	case BindingNodeMismatch:
+		return "node-mismatch"
+	case BindingKeyMismatch:
+		return "key-mismatch"
+	case BindingNotYetValid:
+		return "not-yet-valid"
+	case BindingExpired:
+		return "expired"
+	case BindingRevoked:
+		return "revoked"
 	}
-	switch accepted.ValidityAt(now) {
+	return "invalid"
+}
+
+// NetworkKeyBelongs decides whether key is the network key of node, given what
+// is accepted for that node. It is the only place that answers this question:
+// every record signed by a network key (declarations, vouchers, reachability
+// records, delivery reports) relies on it. A key that is not the certificate's
+// is a mismatch whatever the certificate's state; a certificate that names the
+// key is judged next for revocation, then for its window.
+func NetworkKeyBelongs(accepted AcceptedNetworkKey, node ident.NodeID, key ident.PublicKey, now time.Time) Binding {
+	cert := accepted.Cert
+	switch {
+	case cert == nil:
+		return BindingNoCertificate
+	case node.IsZero() || cert.Node != node:
+		return BindingNodeMismatch
+	case key.IsZero() || cert.NetworkKey != key:
+		return BindingKeyMismatch
+	case accepted.Revoked:
+		return BindingRevoked
+	}
+	switch cert.ValidityAt(now) {
 	case NotYetValid:
 		return BindingNotYetValid
 	case Expired:

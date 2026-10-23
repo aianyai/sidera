@@ -144,17 +144,23 @@ key and not a peer identifier, so the contract packages do not depend on libp2p.
 
 - **Validity** is judged by `record`, with no tolerance: valid from `not_before`,
   expired at `not_after`. `not_after` must be after `not_before`.
-- **Serial**: peers accept only the highest serial seen (`DecideSerial`).
-  Higher is accepted; lower, or equal with the same key, is stale; equal with a
-  different network key is a conflict (the identity key signed two certificates
-  for one serial, the mark of a copied or compromised key); a certificate of
-  another node is refused. Expiry does not enter this decision: an expired
-  certificate with a higher serial still raises the serial seen, so an older key
-  cannot come back.
+- **Serial**: peers accept only the highest serial seen (`DecideSerial`). The
+  state is `SerialSeen`: the highest serial and the digest of the certificate
+  seen at it, kept apart from the certificate currently accepted. Higher is
+  accepted; lower, or the very same certificate, is stale; the same serial with
+  another digest is a conflict (the identity key signed two certificates for one
+  serial, the mark of a copied or compromised key; this covers the same key with
+  another window as well); a certificate of another node is refused. Neither
+  expiry nor revocation enters this decision: an expired certificate with a
+  higher serial still raises the serial seen, and revoking the accepted
+  certificate never lowers it, so an older key cannot come back.
 - **`NetworkKeyBelongs`** is the only function that decides whether a network
-  public key is a node's key, given the certificate accepted for the node.
-  Declarations, vouchers, reachability records and delivery reports that a
-  network key signs all rely on it.
+  public key is a node's key, given what is accepted for the node
+  (`AcceptedNetworkKey`: the certificate and a revoked flag the caller fills from
+  the revocation records). Declarations, vouchers, reachability records and
+  delivery reports that a network key signs all rely on it. A key the certificate
+  does not name is a mismatch whatever the certificate's state; a certificate
+  that names it is then judged for revocation, then for its window.
 
 Rotating the network key therefore leaves the node ID unchanged: a certificate
 with serial 2 names the new key for the same node ID, the old key stops
@@ -222,6 +228,12 @@ the same record with a short window.
   without a change here, tests can define their own, and no global state is
   needed; the descriptor passed to `Verify` also stops a record of one type
   from being accepted as another.
+- **The highest serial seen is separate from the accepted certificate.** A
+  certificate can be seen and never accepted (expired, revoked). If the only
+  record kept were the accepted certificate, discarding it would lower the bar
+  and let an older certificate, and its key, return. A conflict is judged by
+  digest and not by key, so a second certificate with the same key and another
+  window under one serial is caught too.
 - **Slots and partial verification.** Two-party credentials need to be signed
   one after the other. A signer rule as slots lets `VerifyPartial` check what the
   first party signed before the second signs, and lets `Verify` insist that the

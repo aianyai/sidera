@@ -23,8 +23,8 @@ for the format and the reasons behind it. Identifiers and keys come from
 | `TimeToWire`, `TimeFromWire`, `OptionalTime*`, `RequireCounter`, `LevelToWire`, `LevelFromWire` | The one place wire times, counters and levels are converted. |
 | `MarshalCanonical`, `UnmarshalStrict`             | The canonical codec for payload wire structs defined elsewhere.                                            |
 | `NetworkKeyCertificate` and `NetworkKeyCertificateDescriptor` | Node ID, network public key, serial, validity; signed by the identity key.                    |
-| `DecideSerial(known, incoming)`                   | Accept, stale, conflict, wrong node or invalid for a new certificate against the highest serial seen.     |
-| `NetworkKeyBelongs(accepted, node, key, now)`     | The one answer to "is this network key this node's key": every network-key record relies on it.          |
+| `SerialSeen`, `SerialSeenOf(v)`, `DecideSerial(seen, incoming)` | The highest serial seen for a node with the digest of the certificate seen at it; accept, stale, conflict, wrong node or invalid for a new verified certificate. |
+| `AcceptedNetworkKey`, `NetworkKeyBelongs(accepted, node, key, now)` | The accepted certificate and its revocation flag; the one answer to "is this network key this node's key": every network-key record relies on it. |
 | `DeviceCertificate`, `DeviceCertificateDescriptor`, `DeviceCertificate.AdminCert()` | Person ID, device key, level cap, validity; signed by the root key; conversion to `admin.DeviceCert`. |
 
 Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
@@ -73,9 +73,16 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 - **Network-key certificate.** Signed by the identity key whose derived node
   identifier is the certificate's node. The window is `NotBefore <= now <
   NotAfter` with no tolerance; this package judges it
-  (`NetworkKeyCertificate.ValidityAt`, `NetworkKeyBelongs`). A higher serial
-  replaces the stored certificate, a lower one or the same one is stale, the same
-  serial with another network key is a conflict.
+  (`NetworkKeyCertificate.ValidityAt`, `NetworkKeyBelongs`). A binding answer is
+  one of ok, no certificate, node mismatch, key mismatch, not yet valid, expired
+  or revoked.
+- **Highest serial seen.** `SerialSeen` is its own state, apart from the
+  accepted certificate: the serial and the digest of the certificate seen at it.
+  A higher serial is accepted, a lower one or the very same certificate is
+  stale, and the same serial with another digest is a conflict (another network
+  key or the same key with another window: the identity key signed two
+  certificates under one serial). An expired certificate with a higher serial
+  advances the serial; a revocation never lowers it.
 - **Device certificate.** Signed by the root key whose derived person identifier
   is the certificate's person. Its validity window is carried as written and is
   not judged here.
@@ -88,6 +95,12 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   the highest seen, and whether a device certificate is expired or revoked are
   separate decisions, made by the functions above, by `admin` and by the
   revocation records.
+- `AcceptedNetworkKey.Revoked` is filled by the caller from the revocation
+  records; this package never reads them. A caller without a revocation source
+  leaves it false and so reports every certificate as unrevoked. The caller keeps
+  `SerialSeen` per node and moves it forward with `SerialSeenOf` whenever
+  `DecideSerial` answers accept, whether or not the certificate is also taken as
+  the accepted one.
 - `AdminCert()` leaves `CertRevoked` and `RootKeyRevoked` false. They must be
   filled from the revocation sets before the value is handed to `admin`.
   `MaxLevel` is never `LevelNone`: a certificate without a level does not decode.
