@@ -6,9 +6,10 @@ Each topic is a directory `docs/references/<topic>/` whose `README.md` is its en
 
 ## Topics
 
-No topic exists yet. The commit that lands a subsystem's first code adds its directory and a row to this table.
+The commit that lands a subsystem's first code adds its directory and a row to this table.
 
 | Topic | Scope |
 | ----- | ----- |
+| [identity](identity/README.md) | Identifiers for nodes, people and endpoints; later identity keys, certificates and signed records |
 
 Language: everything in this directory is English.
