@@ -87,10 +87,19 @@ package that defines the type exports the descriptor and callers pass it to
 `Verify` explicitly. There is no registry, so a package can define record types
 without `record` knowing about them.
 
-The signer rule is a list of **slots**. A slot is a predicate on a public key
-("the key whose derived node identifier is X"). `Verify` accepts a record only if
-every slot is filled by exactly one signature and every signature fills a slot.
-`VerifyPartial` accepts empty slots and says the record is incomplete.
+The signer rule is a list of **slots**. A slot is a function of a public key
+that returns nil when the key may fill it and a reason when it may not ("the key
+whose derived node identifier is X"). `Verify` accepts a record only if every
+slot is filled by exactly one signature and every signature fills a slot.
+`VerifyPartial` accepts empty slots and says which are filled.
+
+A rule that depends on the caller is stated with the slot built for that
+context. `NetworkKeyOf(node, accepted, now)` accepts the keys `NetworkKeyBelongs`
+accepts, so a record signed by a network key is checked by the one binding
+function. The descriptor of such a record type is built per verification, by a
+function of the accepted certificate, its revocation and the time. A refused key
+returns an error that wraps `ErrSignerNotAllowed` and a `*BindingError`; its
+`Binding` field names the cause.
 
 ### Decoding
 
@@ -234,6 +243,14 @@ the same record with a short window.
   and let an older certificate, and its key, return. A conflict is judged by
   digest and not by key, so a second certificate with the same key and another
   window under one serial is caught too.
+- **Network-key slots are built per verification, with reasons.** Whether a
+  key is a node's network key depends on the certificate accepted now, on its
+  revocation and on the time. A descriptor created once could not hold that,
+  and a global holding it would make verification depend on hidden state. A
+  slot that returns a reason, and a typed error that carries it, lets the caller
+  act on the cause: an expired certificate asks for a refreshed one, a key
+  mismatch is hostile or stale, a revoked certificate is a security event. A bare
+  "signer not allowed" would collapse these.
 - **Slots and partial verification.** Two-party credentials need to be signed
   one after the other. A signer rule as slots lets `VerifyPartial` check what the
   first party signed before the second signs, and lets `Verify` insist that the

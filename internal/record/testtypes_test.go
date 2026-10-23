@@ -82,5 +82,37 @@ var noteDescriptor = NewDescriptor(noteType,
 		}
 		return noteRecord{w.Text, t}, nil
 	},
-	func(noteRecord) []SignerSlot { return []SignerSlot{func(ident.PublicKey) bool { return true }} },
+	func(noteRecord) []SignerSlot { return []SignerSlot{func(ident.PublicKey) error { return nil }} },
 )
+
+// declRecord is signed by the network key of the node it names. Whether a key
+// is that node's network key depends on the caller's accepted certificate and
+// on the time, so its descriptor is built per verification.
+type declRecord struct {
+	Node ident.NodeID
+	Text string
+}
+
+type declWire struct {
+	Node []byte `cbor:"1,keyasint"`
+	Text string `cbor:"2,keyasint"`
+}
+
+const declType = "sidera/test/decl/1"
+
+func declDescriptor(accepted AcceptedNetworkKey, now time.Time) Descriptor[declRecord] {
+	return NewDescriptor(declType,
+		func(d declRecord) (declWire, error) { return declWire{d.Node.Bytes(), d.Text}, nil },
+		func(w declWire) (declRecord, error) {
+			n, err := ident.NodeIDFromBytes(w.Node)
+			if err != nil {
+				return declRecord{}, err
+			}
+			if w.Text == "" {
+				return declRecord{}, fmt.Errorf("empty text")
+			}
+			return declRecord{n, w.Text}, nil
+		},
+		func(d declRecord) []SignerSlot { return []SignerSlot{NetworkKeyOf(d.Node, accepted, now)} },
+	)
+}

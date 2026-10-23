@@ -19,7 +19,7 @@ for the format and the reasons behind it. Identifiers and keys come from
 | `Descriptor[P]`, `NewDescriptor`                  | One record type: type string, payload codec, signer rule. Exported by the package that defines the type.  |
 | `Seal`, `Verify`, `VerifyPartial`                 | Encode and sign a typed payload; check a complete record; check a record that may still lack signers.     |
 | `SignedBytes`, `DigestOf`, `Record.Digest`        | The bytes that are signed and the signature-free digest.                                                  |
-| `NodeIdentityKey`, `PersonRootKey`                | Signer slots: "the key that derives this node / person identifier".                                       |
+| `SignerSlot`, `NodeIdentityKey`, `PersonRootKey`, `NetworkKeyOf`, `BindingError` | Signer slots: "the key that derives this node / person identifier", "the network key `NetworkKeyBelongs` accepts for this node". A refusal by `NetworkKeyOf` is a `*BindingError` with the specific reason. |
 | `TimeToWire`, `TimeFromWire`, `OptionalTime*`, `RequireCounter`, `LevelToWire`, `LevelFromWire` | The one place wire times, counters and levels are converted. |
 | `MarshalCanonical`, `UnmarshalStrict`             | The canonical codec for payload wire structs defined elsewhere.                                            |
 | `NetworkKeyCertificate` and `NetworkKeyCertificateDescriptor` | Node ID, network public key, serial, validity; signed by the identity key.                    |
@@ -58,10 +58,17 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   unsorted keys, a missing field, `null`) refuses the input. Decoding the
   envelope checks its shape only; signatures and payload are checked by
   `Verify`.
-- **Signer slots.** A descriptor's signer rule is a list of slots. `Verify`
-  needs every slot filled by exactly one signature and no signature outside a
-  slot. `VerifyPartial` accepts empty slots and reports `Complete`. Slots of one
-  rule must not overlap.
+- **Signer slots.** A descriptor's signer rule is a list of slots. A slot is a
+  function that returns nil for a key it accepts and a reason for one it does
+  not. `Verify` needs every slot filled by exactly one signature and no
+  signature outside a slot. `VerifyPartial` accepts empty slots and reports
+  which are filled. Slots of one rule must not overlap.
+- **Network-key slots and binding reasons.** `NetworkKeyOf(node, accepted, now)`
+  accepts exactly the keys `NetworkKeyBelongs` accepts, so the binding rules live
+  in one function. When it refuses, the verification error wraps
+  `ErrSignerNotAllowed` and a `*BindingError` whose `Binding` is the specific
+  reason (expired, not yet valid, key mismatch, node mismatch, revoked, no
+  certificate); read it with `errors.As`.
 - **Partial signatures.** The first party calls `Seal` (or `Sign`) with its
   signer and sends the encoded record. The second party decodes it, calls
   `VerifyPartial`, then `CoSign`. The signature of an injected `Signer` is
@@ -111,8 +118,13 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 - A payload wire struct passed to `NewDescriptor` has integer-keyed fields and
   tags optional fields `omitempty`; it must not use pointers to hold values that
   may be zero without also rejecting an explicit zero in its conversion.
-- Descriptors are created at package initialisation. `NewDescriptor` panics on a
-  malformed definition so that a test run finds it.
+- A descriptor with a fixed signer rule (the certificates) is created once, at
+  package initialisation. A descriptor whose rule depends on the caller's context
+  (a record signed by a network key needs the accepted certificate, its
+  revocation and the time) is built per verification by a function that takes
+  that context, for example `DeclarationDescriptor(accepted, now)`; the package
+  that defines such a record type exports that function, not a variable.
+  `NewDescriptor` panics on a malformed definition so that a test run finds it.
 
 ## Dependencies
 

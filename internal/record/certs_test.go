@@ -539,3 +539,110 @@ func TestDeviceCertificateToAdminFacts(t *testing.T) {
 		}
 	})
 }
+
+// A record signed by a network key states its signer rule with NetworkKeyOf,
+// which is built on NetworkKeyBelongs. The rule depends on the accepted
+// certificate and on the time, so the descriptor is built per verification, and
+// a refusal carries the specific binding reason.
+func TestNetworkKeySignedRecords(t *testing.T) {
+	identity, network, other := rfcSigner(t, 1), rfcSigner(t, 2), rfcSigner(t, 3)
+	cert := netCert(t, identity, network, 1)
+	node := cert.Node
+	mid := epoch.Add(time.Hour)
+	decl := declRecord{Node: node, Text: "hello"}
+	signedBy := func(s Signer) Record {
+		b, err := declDescriptor(AcceptedNetworkKey{Cert: &cert}, mid).encode(decl)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec, err := Sign(declType, b, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return rec
+	}
+	foreign := netCert(t, rfcSigner(t, 3), network, 1) // a certificate of another node
+
+	rows := []struct {
+		rule   string
+		signer Signer
+		acc    AcceptedNetworkKey
+		now    time.Time
+		want   Binding // BindingOK: the record verifies
+	}{
+		{"the node's certified network key, inside the window", network, AcceptedNetworkKey{Cert: &cert}, mid, BindingOK},
+		{"the certificate has expired", network, AcceptedNetworkKey{Cert: &cert}, endTime, BindingExpired},
+		{"the certificate is not yet valid", network, AcceptedNetworkKey{Cert: &cert}, epoch.Add(-time.Second), BindingNotYetValid},
+		{"the certificate has been revoked", network, AcceptedNetworkKey{Cert: &cert, Revoked: true}, mid, BindingRevoked},
+		{"another key than the certified one", other, AcceptedNetworkKey{Cert: &cert}, mid, BindingKeyMismatch},
+		{"the identity key in place of the network key", identity, AcceptedNetworkKey{Cert: &cert}, mid, BindingKeyMismatch},
+		{"the accepted certificate is another node's", network, AcceptedNetworkKey{Cert: &foreign}, mid, BindingNodeMismatch},
+		{"no certificate is accepted for the node", network, AcceptedNetworkKey{}, mid, BindingNoCertificate},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			rec := signedBy(r.signer)
+			d := declDescriptor(r.acc, r.now)
+			for name, verify := range map[string]func() error{
+				"Verify":        func() error { _, err := Verify(d, rec); return err },
+				"VerifyPartial": func() error { _, err := VerifyPartial(d, rec); return err },
+			} {
+				err := verify()
+				if r.want == BindingOK {
+					if err != nil {
+						t.Fatalf("%s: %v", name, err)
+					}
+					continue
+				}
+				if !errors.Is(err, ErrSignerNotAllowed) {
+					t.Fatalf("%s: error = %v, want ErrSignerNotAllowed", name, err)
+				}
+				var be *BindingError
+				if !errors.As(err, &be) {
+					t.Fatalf("%s: error %v carries no *BindingError", name, err)
+				}
+				if be.Binding != r.want || be.Node != node {
+					t.Fatalf("%s: binding error = %+v, want reason %v for the node", name, be, r.want)
+				}
+			}
+			// Sealing under the same context refuses the same signer for the
+			// same reason.
+			_, err := Seal(d, decl, r.signer)
+			if (err == nil) != (r.want == BindingOK) {
+				t.Fatalf("Seal error = %v", err)
+			}
+			var be *BindingError
+			if err != nil && (!errors.As(err, &be) || be.Binding != r.want) {
+				t.Fatalf("Seal error %v does not carry reason %v", err, r.want)
+			}
+		})
+	}
+
+	t.Run("a descriptor built for one moment does not follow the clock: it is built again to verify later", func(t *testing.T) {
+		rec := signedBy(network)
+		acc := AcceptedNetworkKey{Cert: &cert}
+		if _, err := Verify(declDescriptor(acc, mid), rec); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Verify(declDescriptor(acc, endTime), rec); !errors.Is(err, ErrSignerNotAllowed) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("a plain slot gives no binding reason", func(t *testing.T) {
+		_, err := Seal(pairDescriptor, pairOf(t), rfcSigner(t, 3))
+		var be *BindingError
+		if !errors.Is(err, ErrSignerNotAllowed) || errors.As(err, &be) {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("NetworkKeyOf agrees with NetworkKeyBelongs for every row", func(t *testing.T) {
+		for _, r := range rows {
+			slot := NetworkKeyOf(node, r.acc, r.now)
+			err := slot(r.signer.Public())
+			want := NetworkKeyBelongs(r.acc, node, r.signer.Public(), r.now)
+			if (err == nil) != (want == BindingOK) {
+				t.Fatalf("%s: slot error %v, binding %v", r.rule, err, want)
+			}
+		}
+	})
+}
