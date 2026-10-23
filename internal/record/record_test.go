@@ -402,12 +402,18 @@ func TestVerifyRejects(t *testing.T) {
 			t.Fatalf("Seal error = %v", err)
 		}
 	})
-	t.Run("a payload the type refuses is refused", func(t *testing.T) {
+	t.Run("a payload the type refuses is refused when it is sealed", func(t *testing.T) {
 		same := pairRecord{First: p.First, Second: p.First}
-		if _, err := Seal(pairDescriptor, same, s1); err != nil {
-			t.Fatalf("encoding does not apply the decoder's rule: %v", err)
+		if _, err := Seal(pairDescriptor, same, s1); !errors.Is(err, ErrPayload) {
+			t.Fatalf("Seal error = %v", err)
 		}
-		bad, _ := Seal(pairDescriptor, same, s1)
+	})
+	t.Run("a payload the type refuses is refused when it is received", func(t *testing.T) {
+		both := cborw.mapOf(cborw.uint(1), cborw.bstr(p.First.Bytes()), cborw.uint(2), cborw.bstr(p.First.Bytes()))
+		bad, err := Sign(pairType, both, s1)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, err := VerifyPartial(pairDescriptor, bad); !errors.Is(err, ErrPayload) {
 			t.Fatalf("error = %v", err)
 		}
@@ -605,6 +611,32 @@ func TestSignerFailuresAreCaughtAtTheSigner(t *testing.T) {
 	t.Run("an Ed25519 signer needs a full private key", func(t *testing.T) {
 		if _, err := NewEd25519Signer(ed25519.PrivateKey{1, 2}); !errors.Is(err, ErrKey) {
 			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+// A payload is validated in one place, the decoding conversion. Encoding runs
+// that path on its own output, so a conversion to wire form that is more lenient
+// than the decoding one cannot produce a payload a receiver would refuse.
+func TestSealRunsTheDecodingPath(t *testing.T) {
+	s := rfcSigner(t, 1)
+	t.Run("an empty text passes the lenient encoding conversion and is refused", func(t *testing.T) {
+		if _, err := noteDescriptor.encode(noteRecord{Text: ""}); !errors.Is(err, ErrPayload) {
+			t.Fatalf("encode error = %v", err)
+		}
+		if _, err := Seal(noteDescriptor, noteRecord{Text: ""}, s); !errors.Is(err, ErrPayload) {
+			t.Fatalf("Seal error = %v", err)
+		}
+	})
+	t.Run("a valid payload is sealed and read back unchanged", func(t *testing.T) {
+		in := noteRecord{Text: "hello", NotAfter: epoch}
+		rec, err := Seal(noteDescriptor, in, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v, err := Verify(noteDescriptor, rec)
+		if err != nil || v.Payload != in {
+			t.Fatalf("Verify = %+v, %v", v, err)
 		}
 	})
 }

@@ -49,9 +49,6 @@ var NetworkKeyCertificateDescriptor = NewDescriptor(NetworkKeyCertificateType,
 		if err != nil {
 			return networkKeyCertificateWire{}, fmt.Errorf("not_after: %w", err)
 		}
-		if err := checkNetworkKeyCertificate(c.Node, c.NetworkKey, c.Serial, nb, na); err != nil {
-			return networkKeyCertificateWire{}, err
-		}
 		return networkKeyCertificateWire{Node: c.Node.Bytes(), NetworkKey: KeyToWire(c.NetworkKey), Serial: c.Serial, NotBefore: nb, NotAfter: na}, nil
 	},
 	func(w networkKeyCertificateWire) (NetworkKeyCertificate, error) {
@@ -79,8 +76,9 @@ var NetworkKeyCertificateDescriptor = NewDescriptor(NetworkKeyCertificateType,
 	func(c NetworkKeyCertificate) []SignerSlot { return []SignerSlot{NodeIdentityKey(c.Node)} },
 )
 
-// checkNetworkKeyCertificate holds the rules shared by both directions: the
-// fields are set and the window is not empty.
+// checkNetworkKeyCertificate holds the rules of the certificate: the fields are
+// set and the window is not empty. Only the decoding side calls it; encoding
+// reaches it through the descriptor, which decodes what it wrote.
 func checkNetworkKeyCertificate(node ident.NodeID, key ident.PublicKey, serial uint64, notBefore, notAfter int64) error {
 	if node.IsZero() {
 		return fmt.Errorf("node: %w", ident.ErrZero)

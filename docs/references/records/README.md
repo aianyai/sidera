@@ -79,7 +79,10 @@ re-encoded.
 ### Record types
 
 A record type is a `Descriptor`: the type string, how to convert its payload
-to and from a wire struct (refusing invalid values), and the signer rule. The
+to and from a wire struct, and the signer rule. Validation of a payload lives
+only in the conversion from the wire struct; the conversion to it only converts.
+Encoding runs the decoding path on the bytes it produced and refuses on failure,
+so a payload the package writes is always one a receiver accepts. The
 package that defines the type exports the descriptor and callers pass it to
 `Verify` explicitly. There is no registry, so a package can define record types
 without `record` knowing about them.
@@ -211,6 +214,10 @@ the same record with a short window.
   process-wide type registry, and the signing key must be a libp2p key. The format
   here is a small custom envelope on the same layout as the envelope for domain
   separation.
+- **One home for payload validation.** If the encoding conversion repeated the
+  rules of the decoding one, the two copies would drift and a node could seal a
+  payload its peers refuse, a failure that shows only on the far side. Checking
+  by decoding what was encoded makes the receiver's rule the only rule.
 - **Descriptors, not a registry.** Another package can define a record type
   without a change here, tests can define their own, and no global state is
   needed; the descriptor passed to `Verify` also stops a record of one type

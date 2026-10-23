@@ -49,11 +49,17 @@ type Descriptor[P any] struct {
 //
 // typ is the type string including its version, for example "…/1". W is the
 // payload's wire struct: integer-keyed fields, optional ones tagged omitempty.
-// toWire converts a payload to its wire form and must refuse an invalid
-// payload; fromWire converts back and must refuse every wire value that is
-// well formed but not valid (zero required fields, unreduced values, an optional
-// field written as zero). signers returns the slots a payload requires. Strict
-// decoding and the canonical-bytes check are done here, once, for every type.
+//
+// Validation of a payload lives in exactly one place, fromWire. It converts a
+// wire value back and must refuse every wire value that is well formed but not
+// valid (zero required fields, unreduced values, an optional field written as
+// zero, a rule between fields). toWire only converts a payload to its wire form;
+// it may fail where a value has no wire representation at all (a time outside
+// the wire range, a level with no wire value) and must not repeat the rules of
+// fromWire. Encoding runs the decoding path on the bytes it produced
+// (UnmarshalStrict and fromWire) and refuses when that fails, so a payload this
+// package writes is one every receiver accepts, and the two directions cannot
+// drift apart. signers returns the slots a payload requires.
 //
 // NewDescriptor panics on an empty or over-long type or a nil function: that is
 // a programming error, found by the first test run, not a runtime condition.
@@ -66,27 +72,35 @@ func NewDescriptor[W, P any](
 	if checkTypeString(typ) != nil || toWire == nil || fromWire == nil || signers == nil {
 		panic("record: malformed descriptor for " + typ)
 	}
+	decode := func(payload []byte) (P, error) {
+		var w W
+		if err := UnmarshalStrict(payload, &w, len(payload)); err != nil {
+			var zero P
+			return zero, fmt.Errorf("payload of %s: %w", typ, err)
+		}
+		p, err := fromWire(w)
+		if err != nil {
+			var zero P
+			return zero, fmt.Errorf("payload of %s: %w: %w", typ, ErrPayload, err)
+		}
+		return p, nil
+	}
 	return Descriptor[P]{
-		typ: typ,
-		decode: func(payload []byte) (P, error) {
-			var w W
-			if err := UnmarshalStrict(payload, &w, len(payload)); err != nil {
-				var zero P
-				return zero, fmt.Errorf("payload of %s: %w", typ, err)
-			}
-			p, err := fromWire(w)
-			if err != nil {
-				var zero P
-				return zero, fmt.Errorf("payload of %s: %w: %w", typ, ErrPayload, err)
-			}
-			return p, nil
-		},
+		typ:    typ,
+		decode: decode,
 		encode: func(p P) ([]byte, error) {
 			w, err := toWire(p)
 			if err != nil {
 				return nil, fmt.Errorf("payload of %s: %w: %w", typ, ErrPayload, err)
 			}
-			return MarshalCanonical(w)
+			b, err := MarshalCanonical(w)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := decode(b); err != nil {
+				return nil, err
+			}
+			return b, nil
 		},
 		signers: signers,
 	}

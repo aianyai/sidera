@@ -54,9 +54,6 @@ var DeviceCertificateDescriptor = NewDescriptor(DeviceCertificateType,
 		if err != nil {
 			return deviceCertificateWire{}, fmt.Errorf("not_after: %w", err)
 		}
-		if err := checkDeviceCertificate(c.Person, c.DeviceKey, nb, na); err != nil {
-			return deviceCertificateWire{}, err
-		}
 		return deviceCertificateWire{Person: c.Person.Bytes(), DeviceKey: KeyToWire(c.DeviceKey), MaxLevel: level, NotBefore: nb, NotAfter: na}, nil
 	},
 	func(w deviceCertificateWire) (DeviceCertificate, error) {
@@ -88,6 +85,9 @@ var DeviceCertificateDescriptor = NewDescriptor(DeviceCertificateType,
 	func(c DeviceCertificate) []SignerSlot { return []SignerSlot{PersonRootKey(c.Person)} },
 )
 
+// checkDeviceCertificate holds the rules of the certificate. Only the decoding
+// side calls it; encoding reaches it through the descriptor, which decodes what
+// it wrote.
 func checkDeviceCertificate(person ident.PersonID, key ident.PublicKey, notBefore, notAfter int64) error {
 	if person.IsZero() {
 		return fmt.Errorf("person: %w", ident.ErrZero)

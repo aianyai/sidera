@@ -47,6 +47,11 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   and exported by the package that defines the type. A record verifies only
   against the descriptor whose type string it carries. The type string includes
   the version; an incompatible change is a new type string.
+- **One home for payload validation.** A descriptor's `fromWire` is the only
+  place that refuses an invalid payload; `toWire` only converts. Encoding (`Seal`)
+  runs the decoding path (`UnmarshalStrict`, then `fromWire`) on the bytes it
+  produced and refuses when that fails, so what this package writes is what every
+  receiver accepts.
 - **Strict decoding.** The size limit comes first. Then duplicate map keys,
   indefinite lengths, tags, unknown fields, NaN and Inf are refused, and the
   decoded value is encoded again: any difference (non-shortest integers,
