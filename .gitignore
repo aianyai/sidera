@@ -1,0 +1,97 @@
+# ============================================
+# Claude / AI tools
+# ============================================
+CLAUDE.local.md
+.claude/
+.worktree/
+.worktrees/
+
+# ============================================
+# Go
+# ============================================
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/dist/
+
+# Coverage and profiling
+coverage.out
+coverage.html
+*.coverprofile
+*.prof
+*.pprof
+
+# Local workspace (usually a personal setup for multi-module development)
+go.work
+go.work.sum
+
+# Dependencies (remove this line if you commit the output of `go mod vendor`)
+/vendor/
+
+# ============================================
+# TypeScript / Node.js
+# ============================================
+node_modules/
+.pnpm-store/
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+
+# Build output
+build/
+out/
+.next/
+.nuxt/
+.output/
+.svelte-kit/
+.turbo/
+.vite/
+*.tsbuildinfo
+
+# Testing and coverage
+coverage/
+.nyc_output/
+
+# Caches
+.cache/
+.parcel-cache/
+.eslintcache
+.stylelintcache
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ============================================
+# Environment variables / secrets
+# ============================================
+.env
+.env.*
+!.env.example
+
+# ============================================
+# Editors / OS
+# ============================================
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
