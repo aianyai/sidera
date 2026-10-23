@@ -213,11 +213,13 @@ func TestDeclarationPayloadRules(t *testing.T) {
 		{"queue time one second over the protocol limit", func(w *declarationWire) { w.MaxQueueSecs = sec(delivery.MaxQueueCap) + 1 }, ErrQueueTime},
 		{"queue time far over the protocol limit", func(w *declarationWire) { w.MaxQueueSecs = 1 << 62 }, ErrQueueTime},
 		{"queue time overflowing a duration", func(w *declarationWire) { w.MaxQueueSecs = ^uint64(0) }, ErrQueueTime},
+		{"queue time that wraps around to a small duration", func(w *declarationWire) { w.MaxQueueSecs = 18446744074 }, ErrQueueTime},
 		{"queue time zero", func(w *declarationWire) { w.MaxQueueSecs = 0 }, ErrQueueTime},
 		{"queue time of one second", func(w *declarationWire) { w.MaxQueueSecs = 1 }, nil},
 		{"lease renewal at the protocol limit", func(w *declarationWire) { w.LeaseRenewalSecs = sec(delivery.LeaseRenewalCap) }, nil},
 		{"lease renewal one second over the protocol limit", func(w *declarationWire) { w.LeaseRenewalSecs = sec(delivery.LeaseRenewalCap) + 1 }, ErrLeaseRenewal},
 		{"lease renewal overflowing a duration", func(w *declarationWire) { w.LeaseRenewalSecs = ^uint64(0) }, ErrLeaseRenewal},
+		{"lease renewal that wraps around to a small duration", func(w *declarationWire) { w.LeaseRenewalSecs = 18446744074 }, ErrLeaseRenewal},
 		{"lease renewal zero", func(w *declarationWire) { w.LeaseRenewalSecs = 0 }, ErrLeaseRenewal},
 		{"node unset", func(w *declarationWire) { w.Node = make([]byte, 32) }, ident.ErrZero},
 		{"counter zero", func(w *declarationWire) { w.Counter = 0 }, record.ErrCounter},
@@ -392,6 +394,34 @@ func TestDeclarationPayloadEncodingRules(t *testing.T) {
 			}
 			_, err = record.Verify(DeclarationDescriptor(acceptedA(t), declNow), r)
 			requireErr(t, err, tc.want)
+		})
+	}
+}
+
+// TestReceptionBits pins the wire value of every reception flag: the values are
+// part of what a declaration means, so they are written out here and not derived.
+func TestReceptionBits(t *testing.T) {
+	tests := []struct {
+		name string
+		r    Reception
+		bits uint64
+	}{
+		{"none", Reception{}, 0},
+		{"paused", Reception{Paused: true}, 1},
+		{"refuses several recipients", Reception{RefuseMultiRecipient: true}, 2},
+		{"restricts senders", Reception{RestrictSenders: true}, 4},
+		{"hidden from the directory", Reception{HiddenFromDirectory: true}, 8},
+		{"all", Reception{true, true, true, true}, 15},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.r.bits(); got != tc.bits {
+				t.Errorf("bits = %d, want %d", got, tc.bits)
+			}
+			back, err := receptionFromBits(tc.bits)
+			if err != nil || back != tc.r {
+				t.Errorf("round trip = %+v, %v", back, err)
+			}
 		})
 	}
 }

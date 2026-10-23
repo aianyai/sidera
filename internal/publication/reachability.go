@@ -70,11 +70,11 @@ func NewReachabilityRecord(counter uint64, expiresAt time.Time, addresses [][]by
 func (r ReachabilityRecord) Node() ident.NodeID { return r.Certificate.Payload.Node }
 
 // ExpiredAt reports whether the record can no longer be used at now. The
-// instant ExpiresAt is already expired, no tolerance is added (like the
-// network-key certificate's window), and a record without an expiry time counts
-// as expired.
+// instant ExpiresAt is already expired and no tolerance is added (like the
+// network-key certificate's window). A record without an expiry time, whose
+// zero ExpiresAt lies before any real time, counts as expired.
 func (r ReachabilityRecord) ExpiredAt(now time.Time) bool {
-	return r.ExpiresAt.IsZero() || !now.Before(r.ExpiresAt)
+	return !now.Before(r.ExpiresAt)
 }
 
 type reachabilityWire struct {
