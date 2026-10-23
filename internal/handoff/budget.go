@@ -67,7 +67,8 @@ func UTF16Len(s string) int {
 // ASCII text, however dense in digits or punctuation, and for every non-ASCII
 // rune: a Chinese or Japanese character counts 3, an emoji 4, always at least
 // the one token it needs. It is also never smaller than UTF16Len, which is
-// what lets DefaultBudget compare limits given in different units.
+// what lets SmallestVisibleLimit compare limits given
+// in different units.
 //
 // The price is that ordinary English text, which really costs about a quarter
 // of a token per byte, is counted four times too high, so long messages are

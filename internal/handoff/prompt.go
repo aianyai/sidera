@@ -57,10 +57,16 @@ func PromptText(count int) string {
 }
 
 // NewSessionPromptText is the prompt that starts a session created without an
-// initial message. It is the first input of the session, so it tells the agent
-// that nothing waits and how messages will reach it. Like PromptText it carries
-// no message body. The wording is provisional.
-const NewSessionPromptText = "This session is new and no message is waiting yet. " +
+// initial message. It tells the agent how messages will reach it and carries no
+// message body, like PromptText. The wording is provisional.
+//
+// It is not a prompt Attempt: the caller does not record it in
+// PromptInput.Attempts, and it does not count toward PromptParams.MaxPerHour.
+// It announces no unread message, so a recorded attempt would be read by
+// DecidePrompt as a delivered prompt the endpoint has not answered, and would
+// hold back the first real message for MinInterval. There is one per created
+// session, which authorization and the rate of session creation already bound.
+const NewSessionPromptText = "This is a new session. " +
 	"When you are told that new messages have arrived, read them with recv."
 
 // AttemptOutcome is what is known about one attempt to send a prompt into a

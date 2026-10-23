@@ -24,6 +24,11 @@ var (
 		},
 	}
 	noMarkers = AckMarkers{}
+	// Regular expressions that match the empty text at a position without
+	// matching the empty string: a wrapped result has more of those positions
+	// than the output has, though it has no more of the marker.
+	boundaryMarkers         = AckMarkers{Truncated: []Marker{{Regexp: `\b`}}}
+	optionalBoundaryMarkers = AckMarkers{Replaced: []Marker{{Regexp: `(?:x|\b)`}}}
 )
 
 func mustCompile(t *testing.T, m AckMarkers) MarkerSet {
@@ -58,6 +63,11 @@ func TestCheckBeforeAck(t *testing.T) {
 		{"equal content with no markers declared is accepted", noMarkers, out, out, AckAllowed, AckSeenInFull},
 		{"surrounding whitespace is ignored: a trimmed result is accepted", both, "  " + strings.TrimSpace(out), out, AckAllowed, AckSeenInFull},
 		{"a wrapper around the result is accepted", both, "Exit code: 0\nOutput:\n" + out + "(done)", out, AckAllowed, AckSeenInFull},
+
+		// Zero-width matches are not occurrences of a marker.
+		{"a word-boundary marker does not count the boundaries of a wrapper", boundaryMarkers, "Exit code: 0\nOutput:\n" + out + "(done)", out, AckAllowed, AckSeenInFull},
+		{"a marker with an empty alternative does not count the empty matches of a wrapper", optionalBoundaryMarkers, "Result:\n" + out + "(done)", out, AckAllowed, AckSeenInFull},
+		{"a marker with an empty alternative still counts its non-empty match", optionalBoundaryMarkers, "Result:\n" + out + "x", out, AckRefused, AckReplaced},
 
 		// Replaced result.
 		{"a replacement notice stands in for the result: refuse as replaced", replacingRuntime, savedNotice, out, AckRefused, AckReplaced},
@@ -125,6 +135,8 @@ func TestCompileMarkers(t *testing.T) {
 		{"a marker setting both fields is rejected", AckMarkers{Replaced: []Marker{{Literal: "x", Regexp: "x"}}}, false},
 		{"a regular expression matching the empty text is rejected", AckMarkers{Truncated: []Marker{{Regexp: `x*`}}}, false},
 		{"an anchor-only regular expression is rejected", AckMarkers{Replaced: []Marker{{Regexp: `^$`}}}, false},
+		{"a word boundary is valid: it does not match the empty string", boundaryMarkers, true},
+		{"an alternative that can be empty at a position is valid: it does not match the empty string", optionalBoundaryMarkers, true},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
@@ -186,34 +198,73 @@ func TestCheckBeforeAckProperties(t *testing.T) {
 		{"cut in the middle with a marker", func(e string, r []rune) string {
 			return string(r[:len(r)/3]) + "…99 tokens truncated…" + string(r[2*len(r)/3:])
 		}, outcome{AckRefused, AckTruncated}, mismatch},
+		// Replaced is reported before truncated, however the two are mixed.
+		{"both kinds of marker beside the whole output: replaced is reported", func(e string, _ []rune) string {
+			return "<persisted-output>" + e + "\n...42 bytes truncated..."
+		}, outcome{AckRefused, AckReplaced}, accepted},
 		{"cut in the middle without a marker", func(e string, r []rune) string {
 			return string(r[:len(r)/3]) + string(r[2*len(r)/3:])
 		}, mismatch, mismatch},
 		{"empty", func(string, []rune) string { return "" }, mismatch, mismatch},
 	}
 
-	taken := map[string]int{}
-	for i := 0; i < 300; i++ {
-		// randomText draws no rune that appears in a marker, so the markers
-		// in an observed text are exactly those a variant added; the body
-		// is long enough for the middle cut to remove something.
+	const iterations = 300
+	type pair = outcome
+	withMarkers := map[pair]int{}
+	withoutMarkers := map[pair]int{}
+	for i := 0; i < iterations; i++ {
+		// randomText practically never forms a whole marker. If it did, the
+		// marker would also be in expected and counting would cancel it. The
+		// body is long enough for the middle cut to remove something.
 		body := randomText(rng, 20+rng.Intn(200))
 		expected := "{\"messages\":[{\"body\":\"" + body + "\"}],\"more\":0}\n"
 		runes := []rune(strings.TrimSpace(expected))
 		for _, v := range variants {
 			observed := v.observed(expected, runes)
-			if verdict, reason := CheckBeforeAck(set, observed, expected); (outcome{verdict, reason}) != v.want {
+			verdict, reason := CheckBeforeAck(set, observed, expected)
+			if (outcome{verdict, reason}) != v.want {
 				t.Fatalf("%s: got verdict %d reason %d, want %+v\nobserved %q", v.name, verdict, reason, v.want, observed)
 			}
-			if verdict, reason := CheckBeforeAck(plain, observed, expected); (outcome{verdict, reason}) != v.plainWant {
+			withMarkers[outcome{verdict, reason}]++
+			verdict, reason = CheckBeforeAck(plain, observed, expected)
+			if (outcome{verdict, reason}) != v.plainWant {
 				t.Fatalf("%s without markers: got verdict %d reason %d, want %+v", v.name, verdict, reason, v.plainWant)
 			}
-			taken[v.name]++
+			withoutMarkers[outcome{verdict, reason}]++
 		}
 	}
-	for _, v := range variants {
-		if taken[v.name] != 300 {
-			t.Fatalf("variant %q ran %d times, want 300", v.name, taken[v.name])
+
+	// Lower bounds on how often each result was returned. They come from a run
+	// at this seed: every variant yields a fixed result for each iteration, so
+	// each count is iterations times the number of variants that give that
+	// result (the run printed exactly these numbers), and a bound is that
+	// count. A result no variant reaches, or a variant that stopped yielding
+	// its result, leaves a count below its bound.
+	for _, c := range []struct {
+		name   string
+		got    map[pair]int
+		bounds map[pair]int
+	}{
+		{"markers declared", withMarkers, map[pair]int{
+			accepted:                   2 * iterations,
+			{AckRefused, AckReplaced}:  3 * iterations,
+			{AckRefused, AckTruncated}: 2 * iterations,
+			mismatch:                   2 * iterations,
+		}},
+		{"no markers declared", withoutMarkers, map[pair]int{
+			accepted: 5 * iterations,
+			mismatch: 4 * iterations,
+		}},
+	} {
+		for result, bound := range c.bounds {
+			if c.got[result] < bound {
+				t.Errorf("%s: result %+v returned %d times, want at least %d", c.name, result, c.got[result], bound)
+			}
+		}
+		for result, n := range c.got {
+			if _, listed := c.bounds[result]; !listed {
+				t.Errorf("%s: unexpected result %+v returned %d times", c.name, result, n)
+			}
 		}
 	}
 }

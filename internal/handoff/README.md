@@ -112,7 +112,7 @@ Before acknowledging:
   `ErrInvalidMarker`. The zero `MarkerSet` declares nothing.
 - `CheckBeforeAck` refuses with `AckReplaced` or `AckTruncated` when the observed
   result has more occurrences of a marker of that list than the expected output
-  (replaced markers are judged first), and with `AckContentMismatch` when the
+  (replaced markers are judged first; zero-width matches are not counted), and with `AckContentMismatch` when the
   expected output is not in the observed result in full. Otherwise it allows
   (`AckSeenInFull`). Without declared markers only the content decides: the
   output seen in full is allowed, anything else is a mismatch. There is no
@@ -131,6 +131,12 @@ Before acknowledging:
   waiting message and counts in none of `PromptInput.Pending`,
   `PromptInput.LastArrivalAt` and `BlockedInput.OldestPendingAt`: suspension
   means no lease, no prompt and no feedback.
+- `NewSessionPromptText` is not a prompt `Attempt`: the caller does not record it
+  in `PromptInput.Attempts`, and it does not count toward `MaxPerHour`. It
+  announces no unread message, so recording it would be read as an unread prompt
+  and would hold back the first real message by `MinInterval`. There is one per
+  created session, already bounded by the authorization and the rate of session
+  creation.
 - `Busy` is true from the moment a prompt is dispatched until its turn ends.
 - The caller records every prompt attempt, with the `Kind` that `DecidePrompt`
   returned, and stores the `BlockedReport` of each `BlockedNew`.
@@ -143,6 +149,12 @@ Before acknowledging:
   never made.
 - `Message.From` is the sender the channel authenticated and `Body` is valid
   UTF-8.
+- `observed` is the text of the tool result as the model received it, never a
+  full output that the runtime saved elsewhere. An adapter that cannot obtain
+  the model-visible text does not acknowledge on the agent's behalf and leaves
+  acknowledgement to an explicit `ack`. Containment decides, so the fidelity of
+  `observed` is what prevents a silent wrong acknowledgement; markers cannot
+  catch a runtime that stores the full text while showing a preview.
 - Marker and budget declarations come from the adapter's manifest; the caller
   compiles the markers once when the adapter is admitted and rejects the
   adapter if that fails.

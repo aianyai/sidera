@@ -45,11 +45,22 @@ type matcher struct {
 	re      *regexp.Regexp
 }
 
+// count returns the occurrences of the marker in s. A regular expression such
+// as `\b` or `(?:x|\b)` can match the empty text at a position even though it
+// does not match the empty string as a whole; such a match is found in any
+// wrapped result and says nothing about a replaced or cut one, so only
+// non-empty matches are counted.
 func (m matcher) count(s string) int {
-	if m.re != nil {
-		return len(m.re.FindAllStringIndex(s, -1))
+	if m.re == nil {
+		return strings.Count(s, m.literal)
 	}
-	return strings.Count(s, m.literal)
+	n := 0
+	for _, loc := range m.re.FindAllStringIndex(s, -1) {
+		if loc[0] != loc[1] {
+			n++
+		}
+	}
+	return n
 }
 
 // Compile validates the markers and prepares them for CheckBeforeAck. A marker

@@ -11,10 +11,11 @@ checks that the model saw it before acknowledging for the agent.
 - A prompt is a short text without a body ("You have 3 new messages. Read them
   with recv."). Sender and body reach the model only through `recv`.
 - A session created without an initial message has nothing to count, so its
-  first prompt is a fixed text that says no message waits yet and that new ones
-  are read with `recv` once the agent is told they arrived
-  (`NewSessionPromptText`). With an initial message the first prompt is the
-  ordinary one for one message.
+  first prompt is a fixed text that says how messages will reach the agent: it
+  reads them with `recv` once it is told they have arrived
+  (`NewSessionPromptText`). It is not a prompt attempt: the caller does not
+  record it and it does not count toward the hourly cap. With an initial
+  message the first prompt is the ordinary one for one message.
 - A message whose `recv`-stage authorization is currently Suspend is not a
   waiting message: it counts toward no prompt, no blocked verdict and no
   arrival time, because suspension means no lease, no prompt and no feedback.
@@ -95,10 +96,19 @@ result that was replaced (a notice such as "saved to a file") and one that was
 cut (a warning line, or an inserted "N tokens truncated" text). Each is a list
 of markers, each marker a literal substring or an RE2 regular expression. The
 check refuses with the replaced reason, then the truncated reason, when the
-observed result has more occurrences of a marker than the expected output, and
-with the mismatch reason when the output is simply not there. Declarations are
+observed result has more occurrences of a marker than the expected output (a
+zero-width match is not an occurrence), and with the mismatch reason when the
+output is simply not there. Declarations are
 validated once: an empty marker, a marker with both forms, a regular expression
 that does not compile and one that matches the empty text are errors.
+
+The observed text must be what the model received as the tool result, never a
+full output that the runtime saved elsewhere. An adapter that cannot obtain the
+model-visible text does not acknowledge on the agent's behalf; the agent
+acknowledges explicitly with `ack`. Containment is the deciding criterion, so
+the fidelity of `observed` is what prevents a silent wrong acknowledgement: a
+runtime that stores the full text while showing a preview would pass the
+containment check against the stored text, and no marker could tell.
 
 The delivery side that these rules call into is described in
 [delivery](../delivery/README.md): `delivery.LeaseID` (the page identifier),
@@ -203,14 +213,22 @@ The delivery side that these rules call into is described in
   output beside a declared notice is still refused, as the notice says the
   model may not have seen it; an adapter that declares no markers loses that
   extra caution and relies on containment alone.
-- **Regular expressions that match the empty text are rejected.** Such a marker
-  is found at every position, so it would refuse every result. RE2 is used
+- **Regular expressions that match the empty text are rejected, and zero-width
+  matches are not counted.** Such a marker is found at every position, so it
+  would refuse every result. A pattern like `\b` does not match the empty
+  string as a whole but matches empty at word boundaries, and a wrapped result
+  has more of them than the output; counting only non-empty matches keeps a
+  normal wrapped result accepted. RE2 is used
   because its matching time is linear in the text, which matters as the markers
   come from an adapter package.
 - **A fixed first prompt for a session with no initial message.** The session
   needs a first input so that there is evidence it is ready, but there is no
-  message to count. The text says nothing waits and how messages will be
-  announced; it has no body, like every prompt.
+  message to count. The text says how messages will be announced and asserts no
+  state; it has no body, like every prompt. It is not recorded as an attempt: it
+  announces no unread message, so a recorded attempt would look like an unread
+  prompt and hold back the first real message by the minimum interval. One is
+  sent per created session, which authorization and the rate of session
+  creation already bound.
 - **Acknowledge only after comparing.** Acknowledging a message the model did
   not read loses it: the sender is told it was delivered and nobody reads it. A
   refused acknowledgement costs a redelivery marked as possibly duplicate.
@@ -221,7 +239,8 @@ The delivery side that these rules call into is described in
 ## Where
 
 - `internal/handoff/prompt.go`: prompt text, parameters, `DecidePrompt`.
-  Tests: `TestPromptText`, `TestNewSessionPromptText`, `TestDecidePrompt`,
+  Tests: `TestPromptText`, `TestNewSessionPromptText`, `TestNewSessionPromptIsNotAnAttempt`,
+  `TestDecidePrompt`,
   `TestPromptScenario*`, `TestPromptParamsValidate`.
 - `internal/handoff/blocked.go`: `AssessBlocked`. Tests: `TestAssessBlocked`,
   `TestAssessBlockedReportsOnceAndRecoversOnce`.

@@ -38,7 +38,7 @@ func TestPromptText(t *testing.T) {
 }
 
 func TestNewSessionPromptText(t *testing.T) {
-	const want = "This session is new and no message is waiting yet. When you are told that new messages have arrived, read them with recv."
+	const want = "This is a new session. When you are told that new messages have arrived, read them with recv."
 	if NewSessionPromptText != want {
 		t.Fatalf("NewSessionPromptText = %q, want %q", NewSessionPromptText, want)
 	}
@@ -51,6 +51,38 @@ func TestNewSessionPromptText(t *testing.T) {
 			t.Fatalf("the new-session prompt equals PromptText(%d)", n)
 		}
 	}
+}
+
+// The new-session prompt is not recorded as an attempt, so the first real
+// message after creation is prompted at once. Recording it would make that
+// message wait for the minimum interval behind an unread prompt.
+func TestNewSessionPromptIsNotAnAttempt(t *testing.T) {
+	arrived := PromptInput{Trigger: TriggerArrival, Pending: 1, LastArrivalAt: after(time.Minute)}
+	now := after(time.Minute)
+
+	t.Run("not recorded, as the contract says: the first message is prompted at once", func(t *testing.T) {
+		got, err := DecidePrompt(arrived, testPromptParams, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := PromptDecision{Action: PromptSend, Reason: PromptFirst, Kind: PromptKindFirst, Count: 1}
+		if got != want {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("recorded as a delivered attempt: the first message would wait", func(t *testing.T) {
+		in := arrived
+		in.Attempts = []Attempt{delivered(0, PromptKindFirst)}
+		got, err := DecidePrompt(in, testPromptParams, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := PromptDecision{Action: PromptHold, Reason: PromptUnreadWaiting, RetryAt: after(testPromptParams.MinInterval)}
+		if got != want {
+			t.Fatalf("got %+v, want %+v", got, want)
+		}
+	})
 }
 
 func TestPromptParamsValidate(t *testing.T) {
