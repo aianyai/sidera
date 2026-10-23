@@ -395,6 +395,66 @@ implementation), `credential_test.go`, `revocation_test.go`, `voucher_test.go`,
 records through `admin` and `trust`), `property_test.go` (payload bytes against
 an oracle), `fuzz_test.go`.
 
+### Publication records
+
+Package `internal/publication`. Three record types that a node publishes about
+itself. A declaration and a reachability record are signed by the node's network
+key, bound to the node through `NetworkKeyOf`; the proof is signed by the node's
+identity key.
+
+| Type | Payload | Signed by |
+| ---- | ------- | --------- |
+| `sidera/node-declaration/1` | `{1: node, 2: counter, 3: boot nonce (16 bytes), 4: accepts inheritance, 5: offers relay, 6: longest queue time (s), 7: lease renewal time (s), 8: endpoints}`; an endpoint is `{1: ID, 2: kind (1 session, 2 runtime), 3?: name, 4?: reception flags}` | the node's network key |
+| `sidera/reachability-record/1` | `{1: counter, 2: expires_at, 3: network-key certificate (a record), 4: addresses, 5: relays}` | the node's network key |
+| `sidera/reachability-proof/1` | `{1: person, 2: node, 3: not_after}` | the node's identity key |
+
+- **Declaration.** The two switches are always written. Reception flags are bits:
+  1 paused, 2 refuses several recipients, 4 restricts senders, 8 hidden from the
+  directory; an unknown bit is refused. The list of senders an endpoint accepts
+  is not published. Endpoints ascend by ID and are listed once, so one
+  declaration has one encoding; at most 256 endpoints and 64-byte names. The two
+  durations are whole seconds above zero and at most the protocol limits of
+  `delivery` (`MaxQueueCap`, `LeaseRenewalCap`): senders compute their pull
+  deadline from the limits, so a declared value above them would only mislead,
+  and it is refused when sealed and when received. The boot nonce is chosen anew
+  at every start, so a declaration after a restart differs even when nothing
+  else did. The inheritance switch yields the entry of
+  `trust.View.DeclaredAcceptsInheritance`.
+- **Reachability record.** Addresses (at most 16, 1 to 256 bytes each) are
+  opaque byte strings, in order of preference; relays (at most 8) are node IDs.
+  The record embeds the node's network-key certificate and its node is that
+  certificate's node, so a verifier that does not yet hold the certificate can
+  read it first (`EmbeddedNetworkKeyCertificate`), decide on it with the serial
+  rule, and verify the record against what it accepted. The expiry is the one
+  time window judged by this package: expired at `expires_at` and after, without
+  tolerance.
+- **Highest counter.** Both records carry a monotonic counter from 1 and a peer
+  keeps only the highest. The decision is accept for a higher counter, stale for
+  a lower one or the very record seen, conflict for the same counter with another
+  digest (two records signed under one counter: a copied key or a restored copy),
+  and wrong node for a state of another node. The state (counter and digest) is
+  kept apart from the record kept, so an expired or dropped record's counter
+  still stands. For the reachability record the counter decides first and expiry
+  second: a record the counter would accept but that has expired is refused as
+  expired and does not move the state.
+- **Proof.** It lets a person ask any cluster member for the node's reachability
+  record and grants no management right. Its `NotAfter` is passed on to
+  `admin.CheckReachabilityProof`.
+
+Why these shapes: the declaration carries its node and the reachability record
+embeds the certificate because the signer rule needs the node before the
+signature is checked; the senders' list stays local because publishing it would
+publish the node's contact graph for endpoints; the counter state outlives the
+record because the bar that stops an old record returning must not fall when the
+record is removed.
+
+Where: `internal/publication` (`declaration.go`, `reachability.go`, `proof.go`,
+`decide.go`). Tests: `golden_test.go` (vectors computed with an independent
+implementation), `declaration_test.go` (rules, protocol limits, signer binding),
+`reachability_test.go`, `proof_test.go` (through `admin`), `decide_test.go`
+(decisions against an oracle under random arrival orders; a declaration through
+`trust`), `fuzz_test.go` (every bit protected, every decoder).
+
 ## Why
 
 - **Deterministic CBOR with a re-encode comparison.** Revocations are kept by
