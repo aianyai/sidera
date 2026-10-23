@@ -3,6 +3,7 @@ package ident
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -36,29 +37,32 @@ func TestDecodeBech32mRejects(t *testing.T) {
 		rule string
 		in   string
 		want error
+		msg  string // part of the message, when the sentinel alone does not tell the rule
 	}{
-		{"prefix character below the range", "\x201xj0phk", ErrText},
-		{"prefix character above the range", "\x7f1g6xzxy", ErrText},
-		{"prefix character in the high range", "\x801vctc34", ErrText},
-		{"longer than 90 characters", "an84characterslonghumanreadablepartthatcontainsthetheexcludedcharactersbioandnumber11d6pts4", ErrLength},
-		{"no separator", "qyrz8wqd2c9m", ErrText},
-		{"empty prefix", "1qyrz8wqd2c9m", ErrText},
-		{"invalid data character b", "y1b0jsk6g", ErrText},
-		{"invalid data character i", "lt1igcx5c0", ErrText},
-		{"checksum too short", "in1muywd", ErrText},
-		{"invalid checksum character", "mm1crxm3i", ErrText},
-		{"invalid checksum character o", "au1s5cgom", ErrText},
-		{"uppercase with a wrong checksum", "M1VUXWEZ", ErrText},
-		{"empty prefix with checksum", "16plkw9", ErrText},
-		{"empty prefix, only a checksum", "1p2gdwpf", ErrText},
-		{"uppercase", "A1LQFN3A", ErrText},
-		{"mixed case", "a1LQFN3a", ErrText},
-		{"bech32 (not bech32m) checksum", "a12uel5l", ErrChecksum},
+		{"prefix character below the range", "\x201xj0phk", ErrText, ""},
+		{"prefix character above the range", "\x7f1g6xzxy", ErrText, ""},
+		{"prefix character in the high range", "\x801vctc34", ErrText, ""},
+		{"longer than 90 characters", "an84characterslonghumanreadablepartthatcontainsthetheexcludedcharactersbioandnumber11d6pts4", ErrLength, ""},
+		{"no separator", "qyrz8wqd2c9m", ErrText, ""},
+		{"empty prefix", "1qyrz8wqd2c9m", ErrText, ""},
+		{"invalid data character b", "y1b0jsk6g", ErrText, ""},
+		{"invalid data character i", "lt1igcx5c0", ErrText, ""},
+		{"checksum too short", "in1muywd", ErrText, ""},
+		{"invalid checksum character", "mm1crxm3i", ErrText, ""},
+		{"invalid checksum character o", "au1s5cgom", ErrText, ""},
+		{"uppercase with a wrong checksum", "M1VUXWEZ", ErrText, ""},
+		{"empty prefix with checksum", "16plkw9", ErrText, ""},
+		{"empty prefix, only a checksum", "1p2gdwpf", ErrText, ""},
+		{"uppercase", "A1LQFN3A", ErrText, "lowercase"},
+		{"mixed case", "a1LQFN3a", ErrText, "lowercase"},
+		{"uppercase prefix only", "A1lqfn3a", ErrText, "lowercase"},
+		{"bech32 (not bech32m) checksum", "a12uel5l", ErrChecksum, ""},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
-			if _, _, err := decodeBech32m(r.in); !errors.Is(err, r.want) {
-				t.Fatalf("error = %v, want %v", err, r.want)
+			_, _, err := decodeBech32m(r.in)
+			if !errors.Is(err, r.want) || (r.msg != "" && !strings.Contains(err.Error(), r.msg)) {
+				t.Fatalf("error = %v, want %v mentioning %q", err, r.want, r.msg)
 			}
 		})
 	}

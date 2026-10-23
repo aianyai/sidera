@@ -191,7 +191,7 @@ func fill(name string, dst, src []byte) error {
 // parse decodes the canonical bech32m text of s with the given prefix into
 // dst.
 func parse(name, hrp string, dst []byte, s string) error {
-	raw, err := decodeID(name, hrp, len(dst), s)
+	raw, err := decodeID(name, hrp, s)
 	if err != nil {
 		return err
 	}

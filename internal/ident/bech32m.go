@@ -135,10 +135,10 @@ func encodeID(hrp string, raw []byte) string {
 	return encodeBech32m(hrp, data5)
 }
 
-// decodeID parses a bech32m identifier text with the expected prefix and
-// payload length. The result is checked by re-encoding, so only the one
-// canonical text of a value is accepted.
-func decodeID(name, hrp string, size int, s string) ([]byte, error) {
+// decodeID parses a bech32m identifier text with the expected prefix; the
+// caller checks the length of the bytes it gets back. The result is checked by
+// re-encoding, so only the one canonical text of a value is accepted.
+func decodeID(name, hrp, s string) ([]byte, error) {
 	gotHRP, data5, err := decodeBech32m(s)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
@@ -146,11 +146,8 @@ func decodeID(name, hrp string, size int, s string) ([]byte, error) {
 	if gotHRP != hrp {
 		return nil, fmt.Errorf("%s: %w: got %q, want %q", name, ErrPrefix, gotHRP, hrp)
 	}
-	if want := (size*8 + 4) / 5; len(data5) != want {
-		return nil, fmt.Errorf("%s: %w: got %d data characters, want %d", name, ErrLength, len(data5), want)
-	}
 	raw, ok := convertBits(data5, 5, 8, false)
-	if !ok || len(raw) != size {
+	if !ok {
 		return nil, fmt.Errorf("%s: %w: padding bits are not zero", name, ErrText)
 	}
 	if encodeID(hrp, raw) != s {

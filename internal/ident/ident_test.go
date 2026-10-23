@@ -234,7 +234,15 @@ func TestParseKindRules(t *testing.T) {
 		{"a bech32 (not bech32m) checksum is rejected", func() error { _, err := ParseNodeID(vecNodeBech32); return err }, ErrChecksum},
 		{"a set padding bit is rejected even with a valid checksum", func() error { _, err := ParseNodeID(vecNodePadBits); return err }, ErrText},
 		{"a set padding bit in an endpoint is rejected", func() error { _, err := ParseEndpointID(vecEndpointPad); return err }, ErrText},
-		{"a node text of the wrong data length is rejected", func() error { _, err := ParseNodeID(vecEndpoint); return err }, ErrPrefix},
+		{"a node text with 16 data bytes is rejected", func() error { _, err := ParseNodeID("node1qypqxpq9qcrsszg2pvxq6rs0zqwfdk0r"); return err }, ErrLength},
+		{"a node text with 33 data bytes is rejected", func() error {
+			_, err := ParseNodeID("node1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5z5tpwxqergd3c8g7ruszzsg29a9")
+			return err
+		}, ErrLength},
+		{"an endpoint text with 32 data bytes is rejected", func() error {
+			_, err := ParseEndpointID("ep1qypqxpq9qcrsszg2pvxq6rs0zqg3yyc5z5tpwxqergd3c8g7rusq5h2dfx")
+			return err
+		}, ErrLength},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {

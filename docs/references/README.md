@@ -16,6 +16,7 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [administration](administration/README.md) | Who may administer a node: authorized-persons list, levels, operation catalogue, offline directives, management request semantics |
 | [delivery](delivery/README.md) | Delivery states and transitions, deadlines and retention, pull leases and acknowledgements, deduplication, sender feedback. |
 | [handoff](handoff/README.md) | Wake-up prompts, blocked-delivery detection, what one `recv` prints (output budget, paging, parts) and the check before acknowledging |
+| [records](records/README.md) | The signed-record envelope: encoding, signature domains and digest, strict decoding, descriptors, partial signatures, network-key and device certificates |
 | [timing](timing/README.md) | Time bounds every node applies identically: the clock tolerance shared by trust, delivery and administration |
 | [adapter-claude](adapter-claude/README.md) | The Claude adapter's session-creation state machine: crash-safe start, retry and readiness without a second process or session |
 
