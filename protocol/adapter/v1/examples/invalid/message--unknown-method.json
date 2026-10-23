@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "message",
+  "method": "",
+  "note": "a request for a method that does not exist",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "session.frobnicate",
+    "params": {}
+  }
+}

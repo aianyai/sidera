@@ -1,0 +1,13 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "an error response names the request, or null",
+  "document": {
+    "jsonrpc": "2.0",
+    "error": {
+      "code": -32603,
+      "message": "x"
+    }
+  }
+}

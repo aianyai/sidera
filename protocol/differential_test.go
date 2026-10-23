@@ -139,7 +139,7 @@ func differ(tb testing.TB, tg target, raw []byte) (verdict, error) {
 // seedsFor collects, for every target, the documents the golden messages hold for
 // it: the params or result of each example, and the parts of them that have a
 // target of their own.
-func seedsFor(tb testing.TB) map[string][][]byte {
+func seedsFor(tb testing.TB, includeInvalid bool) map[string][][]byte {
 	tb.Helper()
 	seeds := map[string][][]byte{}
 	methods := methodByName(tb)
@@ -154,6 +154,9 @@ func seedsFor(tb testing.TB) map[string][][]byte {
 			add("manifest", ex.Raw)
 			continue
 		case "invalid":
+			if !includeInvalid {
+				continue
+			}
 			var w struct {
 				Kind     string          `json:"kind"`
 				Method   string          `json:"method"`
@@ -239,7 +242,7 @@ func newMutator(seed int64, strs []string) *mutator {
 		json.Number("4294967295"), json.Number("4294967296"), json.Number("9007199254740991"), json.Number("9007199254740992"), json.Number("-9007199254740992"),
 		"", "x", "X", " ", "a b", strings.Repeat("a", 64), strings.Repeat("a", 65), strings.Repeat("a", 128), strings.Repeat("a", 129),
 		strings.Repeat("a", 256), strings.Repeat("a", 257), strings.Repeat("a", 1024), strings.Repeat("a", 1025), strings.Repeat("é", 129), "00000000000000000000000000000000",
-		"0.0.0", "1.0", "../x", "/x", "é",
+		"0.0.0", "1.0", "../x", "/x", "é", "zzz",
 		true, false, nil, []any{}, map[string]any{}, []any{"cli"}, []any{"cli", "cli"}, []any{json.Number("1")}, map[string]any{"kind": "none"},
 	}
 	for _, s := range strs {
@@ -437,7 +440,7 @@ func stringsIn(v any, out *[]string) {
 // never reaching the interesting cases.
 func TestDifferentialMutants(t *testing.T) {
 	targets := buildTargets(t)
-	seeds := seedsFor(t)
+	seeds := seedsFor(t, true)
 	var pool []string
 	for _, docs := range seeds {
 		for _, d := range docs {
@@ -511,7 +514,7 @@ func TestDifferentialMutants(t *testing.T) {
 // 1.0 or 1e2) are skipped.
 func FuzzDifferential(f *testing.F) {
 	targets := buildTargets(f)
-	seeds := seedsFor(f)
+	seeds := seedsFor(f, true)
 	for i, tg := range targets {
 		for _, raw := range seeds[tg.Name] {
 			f.Add(uint8(i), raw)

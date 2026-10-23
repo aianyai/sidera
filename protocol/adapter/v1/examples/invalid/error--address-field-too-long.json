@@ -1,0 +1,17 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the field is at most 128 characters",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": 1008,
+      "message": "x",
+      "data": {
+        "field": "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      }
+    }
+  }
+}

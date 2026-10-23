@@ -1,0 +1,11 @@
+{
+  "expect": "schema",
+  "kind": "message",
+  "method": "",
+  "note": "ping is a request: it needs an id",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "ping",
+    "params": {}
+  }
+}

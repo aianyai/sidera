@@ -1,0 +1,15 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a notification names its method",
+  "document": {
+    "jsonrpc": "2.0",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "turn": "t",
+      "final": "failed",
+      "at_ms": 1792713600000
+    }
+  }
+}

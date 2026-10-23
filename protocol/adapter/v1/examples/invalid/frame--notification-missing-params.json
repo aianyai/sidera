@@ -1,0 +1,10 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a notification carries params, even when empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "turn.ended"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "the error is an object",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": "boom"
+  }
+}

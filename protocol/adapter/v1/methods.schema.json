@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sidera.invalid/adapter/v1/methods.schema.json",
   "title": "Sidera adapter protocol v1: methods",
-  "description": "The params and result of every method. 'requests' and 'notifications' are each a oneOf discriminated by the const of 'method'; a request's x-result names the definition of its result, and x-direction says which peer may send the method. A required list or map may be empty but is never absent; an optional one is omitted instead of sent empty. Rules marked 'Go only' cannot be stated in JSON Schema.",
+  "description": "The params and result of every method. 'requests' and 'notifications' are each a oneOf discriminated by the const of 'method'; a request carries an id and a notification does not; a request's x-result names the definition of its result, and x-direction says which peer may send the method. A required list or map may be empty but is never absent; an optional one is omitted instead of sent empty. Rules marked 'Go only' cannot be stated in JSON Schema.",
   "oneOf": [
     { "$ref": "#/$defs/requests" },
     { "$ref": "#/$defs/notifications" }
@@ -10,35 +10,35 @@
   "$defs": {
     "requests": {
       "oneOf": [
-        { "x-direction": "daemon_to_adapter", "x-result": "initialize.result", "required": ["method", "params"], "properties": { "method": { "const": "initialize" }, "params": { "$ref": "#/$defs/initialize.params" } } },
-        { "x-direction": "both", "x-result": "empty", "required": ["method", "params"], "properties": { "method": { "const": "ping" }, "params": { "$ref": "#/$defs/empty" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "empty", "required": ["method", "params"], "properties": { "method": { "const": "shutdown" }, "params": { "$ref": "#/$defs/empty" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "adapter.start.result", "required": ["method", "params"], "properties": { "method": { "const": "adapter.start" }, "params": { "$ref": "#/$defs/adapter.start.params" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "adapter.probe.result", "required": ["method", "params"], "properties": { "method": { "const": "adapter.probe" }, "params": { "$ref": "#/$defs/adapter.probe.params" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "session.create.result", "required": ["method", "params"], "properties": { "method": { "const": "session.create" }, "params": { "$ref": "#/$defs/session.create.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "empty", "required": ["method", "params"], "properties": { "method": { "const": "checkpoint.put" }, "params": { "$ref": "#/$defs/checkpoint.put.params" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "prompt.deliver.result", "required": ["method", "params"], "properties": { "method": { "const": "prompt.deliver" }, "params": { "$ref": "#/$defs/prompt.deliver.params" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "session.interrupt.result", "required": ["method", "params"], "properties": { "method": { "const": "session.interrupt" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "session.close.result", "required": ["method", "params"], "properties": { "method": { "const": "session.close" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "prompt.reconcile.result", "required": ["method", "params"], "properties": { "method": { "const": "prompt.reconcile" }, "params": { "$ref": "#/$defs/prompt.reconcile.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "recv.observed.result", "required": ["method", "params"], "properties": { "method": { "const": "recv.observed" }, "params": { "$ref": "#/$defs/recv.observed.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.register.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.register" }, "params": { "$ref": "#/$defs/endpoint.register.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "empty", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.unregister" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.recv.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.recv" }, "params": { "$ref": "#/$defs/endpoint.recv.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.ack.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.ack" }, "params": { "$ref": "#/$defs/endpoint.ack.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.send.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.send" }, "params": { "$ref": "#/$defs/endpoint.send.params" } } },
-        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.message_status.result", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.message_status" }, "params": { "$ref": "#/$defs/endpoint.message_status.params" } } }
+        { "x-direction": "daemon_to_adapter", "x-result": "initialize.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "initialize" }, "params": { "$ref": "#/$defs/initialize.params" } } },
+        { "x-direction": "both", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "ping" }, "params": { "$ref": "#/$defs/empty" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "shutdown" }, "params": { "$ref": "#/$defs/empty" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "adapter.start.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "adapter.start" }, "params": { "$ref": "#/$defs/adapter.start.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "adapter.probe.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "adapter.probe" }, "params": { "$ref": "#/$defs/adapter.probe.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "session.create.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.create" }, "params": { "$ref": "#/$defs/session.create.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "checkpoint.put" }, "params": { "$ref": "#/$defs/checkpoint.put.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "prompt.deliver.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "prompt.deliver" }, "params": { "$ref": "#/$defs/prompt.deliver.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "session.interrupt.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.interrupt" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "session.close.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.close" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "prompt.reconcile.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "prompt.reconcile" }, "params": { "$ref": "#/$defs/prompt.reconcile.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "recv.observed.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "recv.observed" }, "params": { "$ref": "#/$defs/recv.observed.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.register.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.register" }, "params": { "$ref": "#/$defs/endpoint.register.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.unregister" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.recv.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.recv" }, "params": { "$ref": "#/$defs/endpoint.recv.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.ack.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.ack" }, "params": { "$ref": "#/$defs/endpoint.ack.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.send.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.send" }, "params": { "$ref": "#/$defs/endpoint.send.params" } } },
+        { "x-direction": "adapter_to_daemon", "x-result": "endpoint.message_status.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.message_status" }, "params": { "$ref": "#/$defs/endpoint.message_status.params" } } }
       ]
     },
     "notifications": {
       "oneOf": [
-        { "x-direction": "both", "required": ["method", "params"], "properties": { "method": { "const": "$/cancel_request" }, "params": { "$ref": "#/$defs/cancel_request.params" } } },
-        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "adapter.availability" }, "params": { "$ref": "#/$defs/adapter.availability.params" } } },
-        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "prompt.persisted" }, "params": { "$ref": "#/$defs/prompt.persisted.params" } } },
-        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "turn.started" }, "params": { "$ref": "#/$defs/turn.started.params" } } },
-        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "turn.ended" }, "params": { "$ref": "#/$defs/turn.ended.params" } } },
-        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "method": { "const": "native_request.handled" }, "params": { "$ref": "#/$defs/native_request.handled.params" } } },
-        { "x-direction": "daemon_to_adapter", "required": ["method", "params"], "properties": { "method": { "const": "endpoint.pending" }, "params": { "$ref": "#/$defs/endpoint.pending.params" } } }
+        { "x-direction": "both", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "$/cancel_request" }, "params": { "$ref": "#/$defs/cancel_request.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "adapter.availability" }, "params": { "$ref": "#/$defs/adapter.availability.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "prompt.persisted" }, "params": { "$ref": "#/$defs/prompt.persisted.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "turn.started" }, "params": { "$ref": "#/$defs/turn.started.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "turn.ended" }, "params": { "$ref": "#/$defs/turn.ended.params" } } },
+        { "x-direction": "adapter_to_daemon", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "native_request.handled" }, "params": { "$ref": "#/$defs/native_request.handled.params" } } },
+        { "x-direction": "daemon_to_adapter", "required": ["method", "params"], "properties": { "id": false, "method": { "const": "endpoint.pending" }, "params": { "$ref": "#/$defs/endpoint.pending.params" } } }
       ]
     },
 

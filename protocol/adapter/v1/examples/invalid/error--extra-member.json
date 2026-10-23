@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "no members beyond code, message and data",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": -32603,
+      "message": "x",
+      "detail": "y"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "an id string is not empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": "",
+    "method": "ping",
+    "params": {}
+  }
+}

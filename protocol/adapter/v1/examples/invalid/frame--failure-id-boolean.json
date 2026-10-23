@@ -1,0 +1,14 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "an id is an integer, a string or null",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": true,
+    "error": {
+      "code": -32603,
+      "message": "x"
+    }
+  }
+}

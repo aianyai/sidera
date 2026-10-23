@@ -1,0 +1,17 @@
+{
+  "expect": "schema",
+  "kind": "message",
+  "method": "",
+  "note": "turn.ended is a notification: it takes no id",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 4,
+    "method": "turn.ended",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "turn": "t",
+      "final": "failed",
+      "at_ms": 1792713600000
+    }
+  }
+}

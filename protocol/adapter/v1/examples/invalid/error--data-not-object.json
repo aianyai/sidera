@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "data is an object",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": -32022,
+      "message": "x",
+      "data": 5
+    }
+  }
+}

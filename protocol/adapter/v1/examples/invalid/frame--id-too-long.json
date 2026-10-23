@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "an id string is at most 128 characters",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": "iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii",
+    "method": "ping",
+    "params": {}
+  }
+}

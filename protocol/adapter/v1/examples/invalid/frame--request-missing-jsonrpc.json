@@ -1,0 +1,11 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a request names the JSON-RPC version",
+  "document": {
+    "id": 1,
+    "method": "ping",
+    "params": {}
+  }
+}

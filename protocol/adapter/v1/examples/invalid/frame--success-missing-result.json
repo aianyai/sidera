@@ -1,0 +1,10 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a response has a result or an error",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1
+  }
+}

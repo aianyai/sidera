@@ -25,15 +25,35 @@ func schemaVerdict(tb testing.TB, kind, method string, raw []byte) error {
 		return s.accepts(tb, "manifest.schema.json", doc)
 	case "frame", "error":
 		return s.accepts(tb, "message.schema.json", doc)
+	case "message":
+		// A request or a notification, whichever its shape says, against the
+		// message schema and the whole methods schema.
+		if err := s.accepts(tb, "message.schema.json", doc); err != nil {
+			return err
+		}
+		return s.accepts(tb, "methods.schema.json", doc)
 	}
 	if err := s.accepts(tb, "message.schema.json", doc); err != nil {
 		return err
 	}
 	switch kind {
-	case "request":
-		return s.accepts(tb, "methods.schema.json#/$defs/requests", doc)
-	case "notification":
-		return s.accepts(tb, "methods.schema.json#/$defs/notifications", doc)
+	case "request", "notification":
+		// The whole methods schema decides; the list the kind belongs to must accept
+		// the message and the other list must not.
+		mine, other := "requests", "notifications"
+		if kind == "notification" {
+			mine, other = other, mine
+		}
+		err := s.accepts(tb, "methods.schema.json", doc)
+		if err == nil {
+			if e := s.accepts(tb, "methods.schema.json#/$defs/"+mine, doc); e != nil {
+				return fmt.Errorf("accepted by the methods schema but not by its %s: %v", mine, e)
+			}
+			if s.accepts(tb, "methods.schema.json#/$defs/"+other, doc) == nil {
+				return fmt.Errorf("a %s that the %s list accepts as well", kind, other)
+			}
+		}
+		return err
 	case "result":
 		sm, ok := methodByName(tb)[method]
 		if !ok || sm.ResultDef == "" {
@@ -53,7 +73,7 @@ func goVerdict(kind, method string, raw []byte) (adapterproto.Message, error) {
 	case "manifest":
 		_, err := manifest.Parse(raw)
 		return nil, err
-	case "frame":
+	case "frame", "message":
 		return nil, errors.New("frames are the peer's business")
 	}
 	var f frame

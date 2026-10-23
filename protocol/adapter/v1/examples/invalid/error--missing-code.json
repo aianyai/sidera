@@ -1,0 +1,13 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the code is required",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "message": "x"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a method name is not empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "",
+    "params": {}
+  }
+}

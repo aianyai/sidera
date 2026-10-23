@@ -1,0 +1,12 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a method name is at most 128 characters",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "mmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmmm",
+    "params": {}
+  }
+}

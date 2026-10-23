@@ -89,9 +89,11 @@ Go types against.
    "note": "what is wrong", "document": { ... the message ... }}
   ```
 
-  `kind` is `request`, `notification`, `result`, `error`, `manifest` or `frame`
-  (a message checked against `message.schema.json` only); `method` names the
-  method for the first three. `expect` says where the case must be rejected:
+  `kind` is `request`, `notification`, `result`, `error`, `manifest`, `frame`
+  (checked against `message.schema.json` only) or `message` (a request or
+  notification checked against both the message and the methods schema, whichever
+  its shape says); `method` names the method for `request`, `notification` and
+  `result`. `expect` says where the case must be rejected:
   `schema` (the schema rejects it; used for frame-level mistakes the message types
   never see), `go` (the schema cannot state the rule: the schema accepts it and Go
   rejects it with a rule beyond the schema), or `both`.

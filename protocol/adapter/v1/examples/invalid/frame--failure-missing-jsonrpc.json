@@ -1,0 +1,13 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "an error response names the JSON-RPC version",
+  "document": {
+    "id": 1,
+    "error": {
+      "code": -32603,
+      "message": "x"
+    }
+  }
+}

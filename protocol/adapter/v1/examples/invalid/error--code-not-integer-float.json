@@ -1,0 +1,14 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the code is a whole number, not a float",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": -32603.5,
+      "message": "x"
+    }
+  }
+}

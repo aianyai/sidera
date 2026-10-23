@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the reason is required",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": 1009,
+      "message": "x",
+      "data": {}
+    }
+  }
+}

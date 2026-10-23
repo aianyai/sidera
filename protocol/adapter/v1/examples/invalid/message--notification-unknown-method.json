@@ -1,0 +1,11 @@
+{
+  "expect": "schema",
+  "kind": "message",
+  "method": "",
+  "note": "a notification for a method that does not exist",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "turn.paused",
+    "params": {}
+  }
+}

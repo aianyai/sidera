@@ -1,0 +1,11 @@
+{
+  "expect": "schema",
+  "kind": "frame",
+  "method": "",
+  "note": "a request names its method",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "params": {}
+  }
+}

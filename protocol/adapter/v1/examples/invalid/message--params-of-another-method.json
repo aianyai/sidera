@@ -1,0 +1,15 @@
+{
+  "expect": "schema",
+  "kind": "message",
+  "method": "",
+  "note": "params that belong to no variant of the method",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "session.close",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "attempt": "6f1c2a4e-8b3d-4c5a-9e7f-0a1b2c3d4e5f"
+    }
+  }
+}

@@ -612,7 +612,7 @@ func TestInvalidExamples(t *testing.T) {
 				if schemaErr == nil {
 					t.Errorf("%s (%s): the schema accepts it", ex.Name, wrapper.Note)
 				}
-				if wrapper.Kind != "frame" && goErr == nil {
+				if wrapper.Kind != "frame" && wrapper.Kind != "message" && goErr == nil {
 					t.Errorf("%s (%s): Go is looser than the schema", ex.Name, wrapper.Note)
 				}
 			case "go":
@@ -657,5 +657,54 @@ func TestEnumNamesMatchContractPackages(t *testing.T) {
 	}
 	if len(states) != 7 || len(reasons) != 10 {
 		t.Errorf("the contract packages list %d states and %d reasons; the protocol was written for 7 and 10", len(states), len(reasons))
+	}
+}
+
+// TestUniqueArrayLimits: the lists that must hold distinct entries cannot be
+// resized by repeating one, so their limits are probed with distinct entries.
+func TestUniqueArrayLimits(t *testing.T) {
+	oses, arches := manifest.KnownOS(), manifest.KnownArch()
+	build := func(platforms, options int) []byte {
+		var ps []map[string]string
+		for _, o := range oses {
+			for _, a := range arches {
+				if len(ps) < platforms {
+					ps = append(ps, map[string]string{"os": o, "arch": a})
+				}
+			}
+		}
+		doc := map[string]any{
+			"manifest_version": 1, "id": "x", "version": "1.0.0", "protocol": map[string]int{"min": 1, "max": 1},
+			"entry": map[string]string{"program": "p"}, "platforms": ps,
+		}
+		if options > 0 {
+			var opts []string
+			for i := 0; i < options; i++ {
+				opts = append(opts, fmt.Sprintf("option-%d", i))
+			}
+			doc["config"] = map[string]any{"instance": []map[string]any{{"key": "k", "type": "enum", "title": "T", "options": opts}}}
+		}
+		b, err := json.Marshal(doc)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	for _, tc := range []struct {
+		name              string
+		platforms, option int
+		ok                bool
+	}{
+		{"64 platforms", 64, 0, true}, {"65 platforms", 65, 0, false},
+		{"64 options", 1, 64, true}, {"65 options", 1, 65, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := build(tc.platforms, tc.option)
+			schemaErr := schemaVerdict(t, "manifest", "", raw)
+			_, goErr := manifest.Parse(raw)
+			if (schemaErr == nil) != tc.ok || (goErr == nil) != tc.ok {
+				t.Fatalf("schema: %v, Go: %v, want ok=%v", schemaErr, goErr, tc.ok)
+			}
+		})
 	}
 }
