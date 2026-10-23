@@ -1,17 +1,17 @@
 # Identity
 
-Identifiers for nodes, people and endpoints. The topic will also cover identity
-keys, certificates and signed records as they land. This document describes the
-identifiers only, as committed.
+Identifiers for nodes, people and endpoints, the public-key type they are
+derived from, and their text form. The signed records that carry keys and
+certificates are described in [records](../records/README.md).
 
 ## What
 
-| Identifier   | Length   | Meaning                                                  |
-| ------------ | -------- | -------------------------------------------------------- |
-| `NodeID`     | 32 bytes | A node. Becomes a digest of its long-term public key.    |
-| `PersonID`   | 32 bytes | A person. Becomes a digest of their root public key.     |
-| `EndpointID` | 16 bytes | An endpoint on a node. Random, issued by that node.      |
-| `Address`    | -        | `{Node, Endpoint}`: one endpoint on one node.            |
+| Identifier   | Length   | Meaning                                                              |
+| ------------ | -------- | -------------------------------------------------------------------- |
+| `NodeID`     | 32 bytes | A node. A digest of its long-term identity public key.               |
+| `PersonID`   | 32 bytes | A person. A digest of their root public key.                          |
+| `EndpointID` | 16 bytes | An endpoint on a node. Random, issued by that node.                  |
+| `Address`    | -        | `{Node, Endpoint}`: one endpoint on one node.                         |
 
 - Lengths are fixed. Constructors reject input of any other length.
 - The all-zero value means "unset" and is never a valid identifier. Constructors
@@ -19,14 +19,55 @@ identifiers only, as committed.
   An `Address` is zero if either part is.
 - An `EndpointID` is random and never changes once its node has issued it.
   `NewEndpointID` reads it from a caller-supplied `io.Reader`.
-- The text form is canonical lowercase hex of the exact length; uppercase,
-  prefixes and separators are rejected. An `Address` is written
-  `<node>/<endpoint>`.
-- The text form is provisional and will be fixed together with the record
-  encoding.
-- Until the record formats that carry the keys exist, a `NodeID` or `PersonID`
-  is an opaque 32-byte value; the digest derivations are not part of the code
-  yet.
+
+### Public keys
+
+A `PublicKey` is an algorithm tag and the key bytes. The tag is a small integer
+table: 1 is Ed25519, 2 is reserved for P-256 (hardware-backed keys) and is
+refused today, 0 is "none". `NewPublicKey` accepts a key only if
+
+1. the tag is 1 and the key is 32 bytes;
+2. the encoding is the canonical one: the y coordinate is below 2^255 - 19, the
+   point is on the curve, and an x of zero does not carry the sign bit;
+3. the point is not one of the eight points of order 1, 2, 4 or 8.
+
+`PublicKey.Verify` additionally depends on the standard library's Ed25519
+verification, which refuses a signature whose scalar is not reduced, so each
+signature has one encoding too.
+
+### Derivation
+
+```
+NodeID   = SHA-256("sidera/id/node/1"   || tag || key bytes)
+PersonID = SHA-256("sidera/id/person/1" || tag || key bytes)
+```
+
+`tag` is the one-byte algorithm tag. The key bytes are the canonical key
+bytes.
+
+### Text form
+
+bech32m (BIP 350). The human-readable part names the kind: `node`, `person`,
+`ep`. The data part is the identifier bytes regrouped into 5-bit values, then
+the six-character checksum.
+
+| Kind       | Text length    | Prefix   |
+| ---------- | -------------- | -------- |
+| `NodeID`   | 63 characters  | `node1…` |
+| `PersonID` | 65 characters  | `person1…` |
+| `EndpointID` | 35 characters | `ep1…`  |
+
+An `Address` is written `<node>/<endpoint>`; neither part contains `/`.
+
+The parser accepts exactly one text per identifier:
+
+- lowercase only (BIP 350 allows an all-uppercase form; it is refused, so one
+  value does not have two texts);
+- the expected prefix (a `person` text where a node is expected fails with a
+  prefix error before anything else is read);
+- the expected data length, zero padding bits, and the bech32m checksum constant
+  (a string with the older bech32 constant fails the checksum);
+- after decoding, the identifier is encoded again and compared with the input.
 
 ## Why
 
@@ -41,10 +82,62 @@ identifiers only, as committed.
   holds. If it were a valid identifier, an unset field could pass as a real
   node, person or endpoint without any error. Refusing it at every entry point
   makes "unset" distinguishable from every real identifier.
+- **bech32m text.** Node identifiers are copied and compared by people (a trust
+  setup that skips the verification code depends on both sides knowing the
+  other's node identifier in advance), so the text needs a kind marker and typo
+  detection. bech32 puts the prefix inside the checksum, so a person text cannot
+  be pasted into a node field, and its six-character checksum is guaranteed to
+  catch up to four character errors. The text is one lowercase word without
+  separators, so a double click selects it and it is safe in a file name or URL.
+  Rejected: plain hex (no kind, no typo detection), Syncthing-style grouped
+  base32 with check characters (needs a custom checksum, groups break
+  selection, no kind), base58 (case-sensitive, no checksum), multibase and CID
+  (a dependency and variable-length machinery we do not use), `nodekey:`-style
+  prefixed hex (no typo detection). bech32m rather than bech32: the original
+  checksum does not notice insertions or deletions of `q` before a final `p`;
+  bech32m changes one constant to remove that. The package carries its own
+  roughly 100-line implementation because the available libraries are not
+  importable or bring in large unrelated dependency trees.
+- **Padding bits and re-encoding.** 32 bytes are 256 bits but 52 five-bit
+  characters carry 260, so the last character has four spare bits; a decoder that
+  ignores them accepts 16 different texts for one identifier. A second text for
+  an identifier is a second spelling that logs, allow lists and comparisons can
+  disagree about. The padding bits must be zero and the result is re-encoded and
+  compared, which also covers anything the individual checks missed.
+- **The tag and a domain in the derivation.** Without a tag, a second algorithm
+  with keys of the same length could collide with Ed25519 keys; the tag is the
+  same small integer the record format carries. The domain differs between
+  nodes and people so that a single key used in both roles gives two unrelated
+  identifiers, and it is versioned so that changing the derivation means a new
+  domain and cannot silently re-label existing identifiers. The domain is not
+  length-prefixed: the two domains are fixed strings of different lengths and the
+  rest of the input has a fixed length per algorithm, so the input is unambiguous.
+- **Canonical keys only.** The standard library's point decoding accepts
+  non-canonical encodings of the same point, so hashing "whatever 32 bytes
+  arrived" would let an attacker create a second identifier for a key they do
+  not hold. Small-order points validate signatures for many messages; no
+  legitimate identity is one. Both are refused when the key is built, so every
+  `PublicKey` is safe to derive from. The check is done with `math/big` because
+  the standard library does not expose its decoder, the inputs are public and
+  speed does not matter.
+- **The key type lives in `ident`.** Derivation takes a key, and the record
+  package depends on `ident`. If the key type lived next to the record format,
+  `ident` would have to import `record`, or derivation would have to accept raw
+  bytes and repeat the canonical checks. The validation is part of what an
+  identifier means, so it belongs with the derivation.
 
 ## Where
 
-- `internal/ident/ident.go`: the types, constructors, parsers and
+- `internal/ident/ident.go`: the identifier types, constructors, parsers and
   `NewEndpointID`.
-- `internal/ident/ident_test.go`: table-driven tests of the rules above.
+- `internal/ident/bech32m.go`: the bech32m codec and the canonical-text check.
+- `internal/ident/key.go`: `PublicKey`, `Algorithm`, the canonical-point and
+  small-order checks.
+- `internal/ident/derive.go`: `NodeIDFromKey` and `PersonIDFromKey`.
+- Tests: `ident_test.go` (identifier rules, text vectors computed with an
+  independent implementation, `TestParseKindRules`), `bech32m_test.go`
+  (specification vectors), `key_test.go` (key rules, an oracle that decodes
+  points with a separate method, and a derivation of the torsion list from the
+  curve equation), `derive_test.go` (derived identifiers for the RFC 8032 test
+  keys), `fuzz_test.go` (every parser and the key constructor).
 - `internal/ident/README.md`: entry points and invariants of the package.

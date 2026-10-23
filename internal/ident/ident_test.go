@@ -2,6 +2,7 @@ package ident
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -97,7 +98,58 @@ func TestBytesReturnsCopy(t *testing.T) {
 	}
 }
 
+// Text vectors written by hand (computed with an independent bech32m
+// implementation, not with this package).
+const (
+	vecNode        = "node130llww2yztfmjn2fsslfx45qzye83306u3q7nzfs300qvxly7wpqgs2d9f"
+	vecNodeBytes   = "8bfff7394412d3b94d49843e935680113278c5fae441e989308bde061be4f382"
+	vecPerson      = "person1ka5ze2fvvznkgh5q4wvxpedus3dmet9ph9ypwmud2nrw255c25xssnvz2w"
+	vecEndpoint    = "ep1zqg3yyc5z5tpwxqergd3c8g7ruua880z"
+	vecEndpointHex = "101112131415161718191a1b1c1d1e1f"
+
+	vecNodeZero     = "node1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqknry08"
+	vecPersonZero   = "person1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqh4l2zv"
+	vecEndpointZero = "ep1qqqqqqqqqqqqqqqqqqqqqqqqqq2uzx7q"
+
+	// Same bytes as vecNode, with the older bech32 checksum constant.
+	vecNodeBech32 = "node130llww2yztfmjn2fsslfx45qzye83306u3q7nzfs300qvxly7wpqav6pqt"
+	// Same bytes as vecNode, last data character carries a set padding bit and
+	// the checksum is recomputed so that it verifies.
+	vecNodePadBits = "node130llww2yztfmjn2fsslfx45qzye83306u3q7nzfs300qvxly7wpp4x7ccm"
+	vecEndpointPad = "ep1zqg3yyc5z5tpwxqergd3c8g7raptnjjs"
+	// Other kinds with valid checksums over the same 32 bytes as vecNode.
+	vecPersonOverNodeBytes   = "person130llww2yztfmjn2fsslfx45qzye83306u3q7nzfs300qvxly7wpqfkkrgz"
+	vecEndpointOverNodeBytes = "ep130llww2yztfmjn2fsslfx45qzye83306u3q7nzfs300qvxly7wpq9zv05q"
+)
+
+var vecText = map[string]string{"NodeID": vecNode, "PersonID": vecPerson, "EndpointID": vecEndpoint}
+
+func TestTextGolden(t *testing.T) {
+	node, err := NodeIDFromBytes(mustHex(t, vecNodeBytes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := node.String(); got != vecNode {
+		t.Fatalf("NodeID text = %q, want %q", got, vecNode)
+	}
+	ep, err := EndpointIDFromBytes(mustHex(t, vecEndpointHex))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ep.String(); got != vecEndpoint {
+		t.Fatalf("EndpointID text = %q, want %q", got, vecEndpoint)
+	}
+	person, err := ParsePersonID(vecPerson)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := hex.EncodeToString(person.Bytes()); got != "b7682ca92c60a7645e80ab9860e5bc845bbcaca1b948176f8d54c6e55298550d" {
+		t.Fatalf("PersonID bytes = %s", got)
+	}
+}
+
 func TestTextRoundTrip(t *testing.T) {
+	wantLen := map[string]int{"NodeID": 63, "PersonID": 65, "EndpointID": 35}
 	for _, k := range kinds {
 		t.Run(k.name, func(t *testing.T) {
 			id, err := k.fromBytes(seq(k.length, 0xa0))
@@ -105,8 +157,8 @@ func TestTextRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			s := id.String()
-			if len(s) != 2*k.length {
-				t.Fatalf("text length = %d, want %d", len(s), 2*k.length)
+			if len(s) != wantLen[k.name] {
+				t.Fatalf("text length = %d, want %d", len(s), wantLen[k.name])
 			}
 			if s != strings.ToLower(s) {
 				t.Fatalf("text %q is not lowercase", s)
@@ -115,7 +167,7 @@ func TestTextRoundTrip(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if back != id {
+			if back.String() != s || !bytes.Equal(back.Bytes(), id.Bytes()) {
 				t.Fatalf("round trip = %v, want %v", back, id)
 			}
 		})
@@ -125,33 +177,81 @@ func TestTextRoundTrip(t *testing.T) {
 func TestParse(t *testing.T) {
 	for _, k := range kinds {
 		t.Run(k.name, func(t *testing.T) {
-			good := strings.Repeat("ab", k.length)
+			good := vecText[k.name]
+			zero := map[string]string{"NodeID": vecNodeZero, "PersonID": vecPersonZero, "EndpointID": vecEndpointZero}[k.name]
+			hrp := good[:strings.IndexByte(good, '1')]
 			rows := []struct {
 				rule string
 				in   string
 				want error
 			}{
-				{"canonical lowercase hex is accepted", good, nil},
-				{"empty text is rejected", "", ErrLength},
-				{"short text is rejected", good[:len(good)-2], ErrLength},
-				{"long text is rejected", good + "ab", ErrLength},
-				{"odd length is rejected", good[:len(good)-1], ErrLength},
+				{"canonical lowercase bech32m is accepted", good, nil},
+				{"empty text is rejected", "", ErrText},
+				{"short text is rejected", good[:len(good)-1], ErrChecksum},
+				{"long text is rejected", good + "q", ErrChecksum},
 				{"uppercase is rejected", strings.ToUpper(good), ErrText},
-				{"non-hex character is rejected", good[:len(good)-1] + "g", ErrText},
-				{"0x prefix is rejected", "0x" + good[2:], ErrText},
-				{"surrounding space is rejected", " " + good[1:], ErrText},
-				{"all-zero is rejected as unset", strings.Repeat("00", k.length), ErrZero},
+				{"mixed case is rejected", good[:len(good)-1] + strings.ToUpper(good[len(good)-1:]), ErrText},
+				{"character outside the alphabet is rejected", good[:len(good)-1] + "b", ErrText},
+				{"hex text of the old form is rejected", strings.Repeat("ab", k.length), ErrText},
+				{"surrounding space is rejected", " " + good, ErrText},
+				{"single changed character fails the checksum", changeChar(good, len(good)-8), ErrChecksum},
+				{"missing prefix is rejected", good[len(hrp):], ErrText},
+				{"all-zero value is rejected as unset", zero, ErrZero},
 			}
 			for _, r := range rows {
 				t.Run(r.rule, func(t *testing.T) {
-					_, err := k.parse(r.in)
+					got, err := k.parse(r.in)
 					if !errors.Is(err, r.want) {
 						t.Fatalf("error = %v, want %v", err, r.want)
+					}
+					if r.want != nil && got != nil && !got.IsZero() {
+						t.Fatalf("a failed parse returned %v", got)
 					}
 				})
 			}
 		})
 	}
+}
+
+func changeChar(s string, i int) string {
+	repl := byte('q')
+	if s[i] == 'q' {
+		repl = 'p'
+	}
+	return s[:i] + string(repl) + s[i+1:]
+}
+
+func TestParseKindRules(t *testing.T) {
+	rows := []struct {
+		rule  string
+		parse func() error
+		want  error
+	}{
+		{"a person text where a node is expected", func() error { _, err := ParseNodeID(vecPersonOverNodeBytes); return err }, ErrPrefix},
+		{"an endpoint text where a node is expected", func() error { _, err := ParseNodeID(vecEndpointOverNodeBytes); return err }, ErrPrefix},
+		{"a node text where a person is expected", func() error { _, err := ParsePersonID(vecNode); return err }, ErrPrefix},
+		{"a node text where an endpoint is expected", func() error { _, err := ParseEndpointID(vecNode); return err }, ErrPrefix},
+		{"a bech32 (not bech32m) checksum is rejected", func() error { _, err := ParseNodeID(vecNodeBech32); return err }, ErrChecksum},
+		{"a set padding bit is rejected even with a valid checksum", func() error { _, err := ParseNodeID(vecNodePadBits); return err }, ErrText},
+		{"a set padding bit in an endpoint is rejected", func() error { _, err := ParseEndpointID(vecEndpointPad); return err }, ErrText},
+		{"a node text of the wrong data length is rejected", func() error { _, err := ParseNodeID(vecEndpoint); return err }, ErrPrefix},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			if err := r.parse(); !errors.Is(err, r.want) {
+				t.Fatalf("error = %v, want %v", err, r.want)
+			}
+		})
+	}
+}
+
+func mustHex(t *testing.T, s string) []byte {
+	t.Helper()
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }
 
 func TestZeroValue(t *testing.T) {
@@ -254,14 +354,14 @@ func TestAddressText(t *testing.T) {
 	}{
 		{"empty is rejected", "", ErrText},
 		{"missing separator is rejected", node + endpoint, ErrText},
-		{"missing endpoint is rejected", node + "/", ErrLength},
-		{"missing node is rejected", "/" + endpoint, ErrLength},
-		{"extra segment is rejected", node + "/" + endpoint + "/" + endpoint, ErrLength},
-		{"swapped parts are rejected", endpoint + "/" + node, ErrLength},
+		{"missing endpoint is rejected", node + "/", ErrText},
+		{"missing node is rejected", "/" + endpoint, ErrText},
+		{"extra segment is rejected", node + "/" + endpoint + "/" + endpoint, ErrChecksum},
+		{"swapped parts are rejected", endpoint + "/" + node, ErrPrefix},
 		{"malformed node is rejected", strings.ToUpper(node) + "/" + endpoint, ErrText},
 		{"malformed endpoint is rejected", node + "/" + strings.ToUpper(endpoint), ErrText},
-		{"zero node is rejected", strings.Repeat("00", NodeIDLen) + "/" + endpoint, ErrZero},
-		{"zero endpoint is rejected", node + "/" + strings.Repeat("00", EndpointIDLen), ErrZero},
+		{"zero node is rejected", vecNodeZero + "/" + endpoint, ErrZero},
+		{"zero endpoint is rejected", node + "/" + vecEndpointZero, ErrZero},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {

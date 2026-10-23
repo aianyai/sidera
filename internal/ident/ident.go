@@ -1,12 +1,14 @@
-// Package ident defines the identifiers that name nodes, people and endpoints.
+// Package ident defines the identifiers that name nodes, people and endpoints,
+// the public-key type they are derived from, and their text form.
 //
 // All identifiers are fixed-length value types. They are comparable and usable
 // as map keys, and the zero value means "unset": it is never a valid
-// identifier. See README.md for the invariants.
+// identifier. Node and person identifiers are digests of a public key; the text
+// form is bech32m with a prefix that names the kind. See README.md for the
+// invariants.
 package ident
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -27,16 +29,29 @@ var (
 	ErrLength = errors.New("wrong length")
 	// ErrZero reports the all-zero value, which means "unset".
 	ErrZero = errors.New("all-zero value")
-	// ErrText reports text that is not the canonical lowercase hex form.
+	// ErrText reports text that is not the canonical bech32m form.
 	ErrText = errors.New("malformed text")
+	// ErrPrefix reports a well-formed bech32m string of another kind, for
+	// example a person identifier where a node identifier is expected.
+	ErrPrefix = errors.New("wrong human-readable prefix")
+	// ErrChecksum reports a string whose bech32m checksum does not verify,
+	// including one that carries the checksum of the older bech32 variant.
+	ErrChecksum = errors.New("bad checksum")
 )
 
-// NodeID identifies a node. It will be a digest of the node's long-term
-// identity public key.
+// Human-readable prefixes of the text forms.
+const (
+	nodePrefix     = "node"
+	personPrefix   = "person"
+	endpointPrefix = "ep"
+)
+
+// NodeID identifies a node. It is a digest of the node's long-term identity
+// public key (see NodeIDFromKey).
 type NodeID struct{ b [NodeIDLen]byte }
 
-// PersonID identifies a person. It will be a digest of the person's root
-// public key.
+// PersonID identifies a person. It is a digest of the person's root public key
+// (see PersonIDFromKey).
 type PersonID struct{ b [PersonIDLen]byte }
 
 // EndpointID identifies an endpoint on its node. It is generated randomly by
@@ -56,10 +71,10 @@ func NodeIDFromBytes(b []byte) (NodeID, error) {
 	return id, fill("node id", id.b[:], b)
 }
 
-// ParseNodeID parses the lowercase hex form produced by NodeID.String.
+// ParseNodeID parses the bech32m form produced by NodeID.String.
 func ParseNodeID(s string) (NodeID, error) {
 	var id NodeID
-	return id, parse("node id", id.b[:], s)
+	return id, parse("node id", nodePrefix, id.b[:], s)
 }
 
 // Bytes returns a copy of the identifier's bytes.
@@ -68,8 +83,8 @@ func (id NodeID) Bytes() []byte { return append([]byte(nil), id.b[:]...) }
 // IsZero reports whether id is the unset zero value.
 func (id NodeID) IsZero() bool { return isZero(id.b[:]) }
 
-// String returns the lowercase hex form.
-func (id NodeID) String() string { return hex.EncodeToString(id.b[:]) }
+// String returns the bech32m text form.
+func (id NodeID) String() string { return encodeID(nodePrefix, id.b[:]) }
 
 // PersonIDFromBytes returns the PersonID with the given bytes. It fails if b is
 // not exactly PersonIDLen bytes or is all zero.
@@ -78,10 +93,10 @@ func PersonIDFromBytes(b []byte) (PersonID, error) {
 	return id, fill("person id", id.b[:], b)
 }
 
-// ParsePersonID parses the lowercase hex form produced by PersonID.String.
+// ParsePersonID parses the bech32m form produced by PersonID.String.
 func ParsePersonID(s string) (PersonID, error) {
 	var id PersonID
-	return id, parse("person id", id.b[:], s)
+	return id, parse("person id", personPrefix, id.b[:], s)
 }
 
 // Bytes returns a copy of the identifier's bytes.
@@ -90,8 +105,8 @@ func (id PersonID) Bytes() []byte { return append([]byte(nil), id.b[:]...) }
 // IsZero reports whether id is the unset zero value.
 func (id PersonID) IsZero() bool { return isZero(id.b[:]) }
 
-// String returns the lowercase hex form.
-func (id PersonID) String() string { return hex.EncodeToString(id.b[:]) }
+// String returns the bech32m text form.
+func (id PersonID) String() string { return encodeID(personPrefix, id.b[:]) }
 
 // EndpointIDFromBytes returns the EndpointID with the given bytes. It fails if
 // b is not exactly EndpointIDLen bytes or is all zero.
@@ -100,10 +115,10 @@ func EndpointIDFromBytes(b []byte) (EndpointID, error) {
 	return id, fill("endpoint id", id.b[:], b)
 }
 
-// ParseEndpointID parses the lowercase hex form produced by EndpointID.String.
+// ParseEndpointID parses the bech32m form produced by EndpointID.String.
 func ParseEndpointID(s string) (EndpointID, error) {
 	var id EndpointID
-	return id, parse("endpoint id", id.b[:], s)
+	return id, parse("endpoint id", endpointPrefix, id.b[:], s)
 }
 
 // NewEndpointID reads a new random EndpointID from r. Callers pass
@@ -126,8 +141,8 @@ func (id EndpointID) Bytes() []byte { return append([]byte(nil), id.b[:]...) }
 // IsZero reports whether id is the unset zero value.
 func (id EndpointID) IsZero() bool { return isZero(id.b[:]) }
 
-// String returns the lowercase hex form.
-func (id EndpointID) String() string { return hex.EncodeToString(id.b[:]) }
+// String returns the bech32m text form.
+func (id EndpointID) String() string { return encodeID(endpointPrefix, id.b[:]) }
 
 // ParseAddress parses the form produced by Address.String: "<node>/<endpoint>".
 func ParseAddress(s string) (Address, error) {
@@ -173,14 +188,12 @@ func fill(name string, dst, src []byte) error {
 	return nil
 }
 
-// parse decodes the canonical lowercase hex form of s into dst.
-func parse(name string, dst []byte, s string) error {
-	if len(s) != 2*len(dst) {
-		return fmt.Errorf("%s: %w: got %d characters, want %d", name, ErrLength, len(s), 2*len(dst))
-	}
-	raw, err := hex.DecodeString(s)
-	if err != nil || hex.EncodeToString(raw) != s {
-		return fmt.Errorf("%s: %w: want lowercase hex", name, ErrText)
+// parse decodes the canonical bech32m text of s with the given prefix into
+// dst.
+func parse(name, hrp string, dst []byte, s string) error {
+	raw, err := decodeID(name, hrp, len(dst), s)
+	if err != nil {
+		return err
 	}
 	return fill(name, dst, raw)
 }
