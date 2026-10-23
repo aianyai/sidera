@@ -114,6 +114,18 @@
           "stable"
         ],
         "default": "stable"
+      },
+      {
+        "key": "timeout_s",
+        "type": "integer",
+        "title": "Start timeout in seconds",
+        "default": 30
+      },
+      {
+        "key": "port",
+        "type": "integer",
+        "title": "Local port",
+        "max": 65535
       }
     ],
     "preset": [
