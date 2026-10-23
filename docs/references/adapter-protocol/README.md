@@ -645,11 +645,16 @@ SDK module keeps no dependencies) checks:
    request and a result example; every enum value and error code appears in an
    example, counted per Go type by reflection, not by string;
 4. every invalid example is rejected at the layer it names;
-5. a differential test mutates every golden document (about 30,000 mutants per
-   run, from a fixed seed, with counts of each outcome asserted) and `FuzzDifferential`
-   does the same with the fuzzer's inputs: whatever Go accepts the schema accepts
-   and the reverse, except for the rules the schema cannot state, which Go must
-   report as such;
+5. differential tests give the same document to the schema and to Go and
+   require the same verdict, both ways, except for the rules the schema cannot
+   state, which Go must report as such. Four of them: a seeded random mutation of
+   every golden document (about 30,000 mutants a run, with counts of each outcome
+   asserted); every single edit at every position of every golden message (leave
+   out, null, retype, a key in another case, an unknown key, and every member
+   another message of the same method has); the lengths, counts and numbers around
+   every limit the schema states for each position, and around the edges of what
+   Go accepts there, found by bisection, so a limit missing from the schema is
+   found too; and `FuzzDifferential` with the fuzzer's inputs;
 6. the output of `handoff.Pack` and `handoff.Part`, for whole messages, resumed
    and last parts, duplicates and empty queues, is a valid `RecvPage` to both the
    schema and the Go type;
@@ -663,9 +668,11 @@ SDK module keeps no dependencies) checks:
   from a schema do not support `oneOf` with `const`, which the method list needs.
 - **A differential test, not only examples.** Examples prove the cases someone
   thought of. Two independent implementations (a schema validator and the Go
-  decoder) agreeing on hundreds of thousands of mutated documents find the cases
+  decoder) agreeing on tens of thousands of edited documents find the cases
   nobody thought of: it found a repeated key that Go and the validator read
-  differently.
+  differently, and mutating the schema itself (dropping a limit, widening an
+  enum) is caught almost everywhere; what is left is rules stated twice, once in
+  the message schema and again in the methods schema.
 - **Go may be stricter, never looser.** A message Go accepts must be valid for
   every other implementation. The few rules a schema cannot express are the only
   exceptions, and they are listed and marked so the test can tell them from a
@@ -675,5 +682,5 @@ SDK module keeps no dependencies) checks:
 
 ### Where
 
-- `protocol/conformance_test.go`, `differential_test.go`, `recvpage_test.go`,
-  `oracle_test.go`, `helpers_test.go`.
+- `protocol/conformance_test.go`, `differential_test.go`, `edits_test.go`,
+  `recvpage_test.go`, `oracle_test.go`, `helpers_test.go`.
