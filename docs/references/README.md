@@ -14,5 +14,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [trust](trust/README.md) | Direct and inherited trust, online vouchers and the grace period, local revocation, eviction, offline revoke directives |
 | [policy](policy/README.md) | The node-local access policy: rules, allow/suspend/reject outcomes, reply permission, endpoint declarations, and tighten/loosen classification of policy changes |
 | [administration](administration/README.md) | Who may administer a node: authorized-persons list, levels, operation catalogue, offline directives, management request semantics |
+| [delivery](delivery/README.md) | Delivery states and transitions, deadlines and retention, pull leases and acknowledgements, deduplication, sender feedback. |
 
 Language: everything in this directory is English.

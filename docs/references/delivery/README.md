@@ -1,0 +1,222 @@
+# Delivery
+
+How one message delivery behaves from the moment the sender's node records it
+to the moment it is delivered, refused, or given up on, and what the sender is
+told along the way. A delivery is one message to one recipient endpoint; a
+message with several recipients has several deliveries that share a message id.
+Control signals use the same states, the same deduplication and the same
+feedback. This document describes the committed code of `internal/delivery`.
+
+## What
+
+### States
+
+| State | Meaning | Final |
+| ----- | ------- | ----- |
+| `queued` | The sender's node has recorded the message. Sender view only. | no |
+| `accepted` | The target authorized, deduplicated and stored it. On the target this covers waiting in the queue and being leased. | no |
+| `delivered` | The whole body reached the agent and was acknowledged. | yes |
+| `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range). On the target only for a body that was never handed out. | yes |
+| `expired_unconfirmed` | The deadline passed and an active query found no receipt. The target may have the message. | no, correctable |
+| `delivery_unknown` | The body was handed out and whether the agent saw it cannot be told. The target produces it only for a delivery whose body was handed out at least once. | no, correctable |
+| `closed_unconfirmed` | `report_by` passed while the delivery was open. | yes, silent |
+
+`notified` is a target-internal sub-state of `accepted`: a prompt was handed to
+the session. It changes nothing outside the target and never produces feedback.
+
+Legal moves: from `queued` to any other state; from `expired_unconfirmed` to
+`accepted`, `delivered`, `rejected`, `delivery_unknown`, `closed_unconfirmed`;
+from `accepted` to `delivered`, `rejected`, `delivery_unknown`,
+`closed_unconfirmed`; from `delivery_unknown` to `delivered` and
+`closed_unconfirmed`. Nothing leaves a final state. On the target, `delivered`
+is reached only through the acknowledgement of every chunk and
+`delivery_unknown` only after a hand-out; a fact that asks for either otherwise
+is an error. A fact that describes an
+earlier stage than the record shows is ignored; a fact that contradicts a final
+state is an error.
+
+### Feedback
+
+| Kind | When | Notes |
+| ---- | ---- | ----- |
+| unreachable | Contact with the target failed for 2 minutes while the sender still retries. | Cause: network or trust chain suspended. Queued deliveries only. |
+| delivery blocked | The caller reports the message cannot reach the session. | Not a state; the message stays queued. Cause: adapter offline, runtime authentication, native service. |
+| blocked recovered | The cause ended, or the message was delivered while still marked blocked. | Only if the block was reported. |
+| expired_unconfirmed | Deadline plus tolerance passed and a later active query found no receipt. | Wording: the target may have received the message. |
+| expired corrected | An expired delivery turned out accepted or delivered. | |
+| rejected | The target refused. | Carries the reason. |
+| delivery unknown | Lease redelivery exhausted, leases unsettled at the settle deadline, or a delivery whose body was handed out closed by force (backlog deadline, denied second check, closed endpoint). | |
+| unknown corrected | A late acknowledgement completed an unknown delivery. | |
+
+Rules: normal progress and `closed_unconfirmed` give nothing; each kind is given
+at most once per delivery; moving from expired to rejected or unknown gives the
+new news instead of a correction. Merging: one notice per message for its
+anomalies, per (sender endpoint, target node) for unreachable hints and, as a
+notice of their own, for expired_unconfirmed notices, per (sender endpoint,
+target endpoint) for blocked reports with the recovery as its own notice. The merge window and the per-endpoint rate cap are undecided
+parameters without defaults; notices over the cap are held, not dropped.
+
+### Deadlines and retention
+
+| Name | Value |
+| ---- | ----- |
+| `accept_before` | default 10 min, at most 1 h ahead (plus clock tolerance) |
+| unreachable hint | 2 min of failed contact |
+| endpoint queue time | default 30 min, protocol cap 2 h |
+| lease | 5 min; total life at most 15 min; at most 3 redeliveries (4 leases) |
+| safety margin | 5 min |
+| clock tolerance | 2 min |
+| `report_by` | `accept_before` + 2 h + 4 x 15 min + 2 min |
+
+The redelivery period is the lease count times the lease life cap and depends on
+nothing else. Dedup records are kept until `report_by`; status reports for the
+longer of until `report_by` and a full `report_by` window from their creation;
+the sender's idempotency keys as long as the dedup records.
+
+Target guarantee: by `report_by - margin` every delivery is final or reported as
+`delivery_unknown`. A queued message becomes `rejected` (backlog expired) at the
+earlier of the endpoint's queue time from acceptance and `report_by - margin`,
+provided its body was never handed out; one that was handed out and requeued
+becomes `delivery_unknown` at that instant. A lease still open at
+`report_by - margin` becomes `delivery_unknown`. The same holds for any forced
+closure once a body was handed out: a denied second check or a closed endpoint
+gives `delivery_unknown`, never `rejected`. Sender
+side: expired is judged only after the deadline plus tolerance and a query made
+after that without a receipt; open deliveries close after `report_by`.
+
+Intake of a new request: a deadline already past is rejected as expired; one
+beyond now plus cap plus tolerance is rejected as out of range; denied
+authorization is rejected with the reason the denial carries (a denial without
+one is invalid input); suspended authorization is a non-final result and the
+sender keeps retrying until the deadline.
+
+### Leases, acknowledgements, chunks
+
+`recv` leases a message for 5 minutes. A lease is renewed only while the
+endpoint has an active turn and never lives beyond 15 minutes in total. An
+expired lease returns the message to the queue flagged as a possible duplicate;
+after the fourth lease expires unacknowledged the delivery is `delivery_unknown`.
+A repeated `recv` by the same endpoint first gets back the messages it holds a
+live lease on, flagged as possible duplicates, under the same lease. An
+acknowledgement needs the owning endpoint's token, stays valid after the lease
+expired, and corrects `delivery_unknown`. A message handed out as n chunks is
+`delivered` only when all n are acknowledged; only a chunk that was handed out
+can be acknowledged, and the first chunk not yet acknowledged is the next one
+to hand out. At `recv`, suspended authorization skips the message (no lease, no
+prompt, no feedback); denied authorization closes it: `rejected` if the body
+was never handed out, `delivery_unknown` if it was.
+
+### Status reports
+
+A target reports its state, the rejection reason, and whether the accepted
+message is blocked. The sender applies the report in one place: the state
+first, then, if the record is accepted, the block or its end. So a block
+reported before the receipt was pulled is still reported, and an expired
+delivery that turns out accepted and blocked gives both the correction and the
+blocked notice.
+
+### Deduplication
+
+A request is identified by (sender node, message id, recipient endpoint) and a
+body digest. The same key and digest returns the original record; the same key
+with another digest is a conflict. A control signal's reply is stored once in
+the dedup record and returned on every repeat.
+
+## Why
+
+- **Silence has to mean delivered.** The sender is told only about anomalies, so
+  every path that can end without the sender knowing must be bounded: the target
+  settles before `report_by - margin`, the sender keeps pulling until
+  `report_by`, and only then closes silently. Without the margin a result created
+  at the last instant could not be pulled in time.
+- **Expiry says "may have received".** A lost receipt is indistinguishable from
+  a lost message. Wording that implied non-delivery would make agents resend, and
+  a resend is a new message, so the recipient could get the content twice.
+- **The tolerance and the query before expiry.** A target whose clock runs
+  behind may still accept the message; judging expiry only after deadline plus
+  tolerance, and only after an active query, keeps a slow clock from producing a
+  false expiry.
+- **`report_by` depends only on caps.** The sender writes it before knowing the
+  target's settings, and every target must reach the same value. The redelivery
+  period therefore uses the lease life cap and the lease count, not what a
+  particular lease did. The lease cap is a total life from issue, so four leases
+  cannot exceed the period counted in `report_by`.
+- **Backlog expiry is clamped to the settle deadline.** An endpoint owner may set
+  a queue time the sender's `report_by` cannot cover; rejecting at the settle
+  deadline keeps the guarantee, and the sender still hears before it stops asking.
+- **Corrections are separate kinds.** A delivery can be wrong twice (expired,
+  then unknown); a single "correction" kind would silence the second.
+- **Replacement, not correction, when news changes.** Telling a sender "the
+  earlier notice was wrong" and then "rejected" is two notices for one fact.
+- **Notices over the rate cap are held, not dropped.** Dropping an anomaly would
+  make silence mean "possibly failed", defeating the rule above.
+- **Authorization suspended is not a refusal.** A node of the trust chain being
+  offline says nothing about the message; refusing would punish the sender for an
+  outage. The message waits in the queue where the queue time bounds the wait.
+- **Late acknowledgements count.** The agent saw the chunk; rejecting the
+  acknowledgement because the lease timed out would redeliver a message the agent
+  already acted on.
+- **Once a body was handed out, a forced closure is `delivery_unknown`.** The
+  agent may have seen the body, and `rejected` would tell the sender it was not
+  delivered, so it would resend and the recipient could get the content twice.
+  Whether the body was handed out, not whether a prompt was shown, decides: a
+  prompt carries no body. One rule closes a delivery by force, so the backlog
+  deadline, a denied second check and a closed endpoint cannot disagree.
+- **Delivered only through acknowledgement.** A target record that could be
+  marked delivered by an event would let a caller skip the chunk bookkeeping and
+  report a body the agent never fully received. For the same reason
+  `delivery_unknown` needs a hand-out and an acknowledgement needs a chunk that
+  was handed out.
+- **The rejection reason is chosen by the caller.** The policy knows why it
+  denied; collapsing every denial to one reason would hide from the sender
+  whether to retry, fix its request or give up.
+- **One rule for applying a report.** If every caller turned the report into
+  events itself, one of them would apply the receipt and forget the block, and a
+  block reported while the receipt was still unknown would never be told.
+- **Chunk acknowledgements persist across leases.** Redelivery then asks only
+  for what is missing.
+- **Tokens.** Only the endpoint a message is for may settle its lease, so another
+  session sharing a project directory cannot mark messages delivered.
+- **Dedup keys include the recipient.** One message to several endpoints on one
+  node is several deliveries, each with its own state.
+- **Retention equals `report_by`.** A retry after `report_by` cannot reach the
+  target within its deadline and would be refused as expired, so remembering the
+  request longer has no effect on the answer.
+- **One state machine for both sides.** Sender and target share the states and
+  the transition table so they cannot disagree about what a move means; the
+  record carries its side because only the sender produces feedback and only the
+  target hands out bodies.
+- **No scheduler.** A timer inside the package would need a clock; contract
+  packages read none, so callers run `Tick` when an instant may have passed.
+
+## Where
+
+- `internal/delivery/state.go`: states, sub-state, reject reasons, causes,
+  the transition table. Tests: `TestCanTransition`, `TestStateClasses`.
+- `internal/delivery/feedback.go`: kinds, wording, `TransitionFeedback`. Tests:
+  `TestTransitionFeedback`, `TestSummaries`.
+- `internal/delivery/record.go`: `Record`, `Apply`, `Tick`, `closeForcibly`,
+  `StatusReport`, `ApplyStatusReport`. Tests: `TestSourceTransitions`,
+  `TestRejectionReasonIsCarried`, `TestUnreachableHint`, `TestDeliveryBlocked`,
+  `TestTargetRecordProducesNoFeedback`, `TestTargetDeliveryUnknownNeedsHandout`,
+  `TestSideRules`, `TestNotifiedSubState`.
+- `internal/delivery/timing.go`: constants, `ReportBy`, retention, backlog
+  deadline. Tests: `TestReportByDerivation`, `TestDecidedValues`,
+  `TestRetention`, `TestValidateEndpointMaxQueue`, `TestBacklogDeadline`.
+- `internal/delivery/lease.go`: `Handout`, `Renew`, `Ack`, `NextPart`,
+  `SortForRecv`. Tests:
+  `TestHandout`, `TestHandoutLeaseTimes`, `TestHandoutInputs`, `TestRenew`,
+  `TestLeaseExpiry`, `TestAck`, `TestChunkedAck`, `TestSortForRecv`.
+- `internal/delivery/authorization.go`, `internal/delivery/intake.go`:
+  `Authorization`, `Intake`. Test: `TestIntake`.
+- `internal/delivery/dedup.go`: deduplication. Tests: `TestCheckDedup`,
+  `TestDedupReply`.
+- `internal/delivery/merge.go`: merge keys, `FeedbackQueue`. Tests:
+  `TestMergeKey`, `TestFeedbackParamsValidate`, `TestFeedbackQueue`.
+- Acceptance scenarios: `internal/delivery/scenario_test.go`
+  (`TestScenario*`, among them `TestScenarioForcedClosure` and
+  `TestScenarioStatusReportApplication`). The property test over random event
+  sequences is `TestPropertyEveryDeliveryClosesAndNoFeedbackRepeats` in
+  `property_test.go`: it checks, from the states the source went through, that
+  every anomaly was reported, and it fails when a path of the rules (a renewal
+  cap, a delivery_unknown, a correction) is reached fewer than 20 times.
