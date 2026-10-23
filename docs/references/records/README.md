@@ -28,6 +28,28 @@ public key     = { 1: algorithm tag, 2: key bytes }
   for Ed25519; 2 is reserved for P-256 and refused today. An Ed25519 key must be
   canonical and not of small order (see identity).
 
+### Framing
+
+Everything that is hashed or signed is built by one function, `frame.Frame`
+(package `internal/frame`):
+
+```
+Frame(domain, f1, f2, ...) = uvarint(len(domain)) || domain
+                             || uvarint(len(f1)) || f1 || uvarint(len(f2)) || f2 ...
+```
+
+A **domain** names the purpose of a hash or a signature. It starts with `sidera/`,
+is at most 63 bytes, ends in a version, and is declared with `frame.Domain`,
+which panics on a malformed one. All domains are different: a test parses the
+module for every `frame.Domain` call and fails on a repeat or on a domain that
+is not a string literal.
+
+Every part carries its own length, so two different inputs never give the same
+bytes and the framed bytes of one domain are never a prefix of another's. That
+is why one rule serves identifier derivation, record signatures, record digests
+and any later signed construction: a new domain cannot collide with an old one,
+and no construction has to argue separately that its own joining is unambiguous.
+
 ### Signed bytes and digest
 
 ```
@@ -193,6 +215,7 @@ the same record with a short window.
 
 ## Where
 
+- `internal/frame/frame.go`: `Frame`, `Domain`; `domains_test.go` is the check that every domain in the module is valid and distinct.
 - `internal/record/record.go`: envelope, signed bytes, digest, `Sign`, `CoSign`,
   `Decode`, `Encode`, `Signer`.
 - `internal/record/descriptor.go`: `Descriptor`, signer slots, `Seal`, `Verify`,
