@@ -359,6 +359,118 @@ call for reconciliation or an idempotent retry.
   `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
   `FuzzDecodeMessages`.
 
+## Capabilities and endpoint kinds
+
+### What
+
+An adapter declares what it supports in the result of `initialize`:
+
+```json
+{"runtime": {"interrupt": true, "ack_on_behalf": true, "server_requests": false, "frontends": ["cli", "mcp"]},
+ "direct": {"max_endpoints": 50}}
+```
+
+`runtime` and `direct` are each absent when the adapter provides no such
+endpoints. `frontends` lists the agent tool front ends a session can be set up
+with (at least one); `max_endpoints` is 1 to 1000. The three flags say that the
+adapter implements `session.interrupt`, calls `recv.observed`, and receives
+requests from its native runtime that it must answer and report.
+
+What an adapter declares is kept apart from what is currently usable. The
+declaration comes from `initialize` and the manifest and is recorded per
+connection; it fixes which endpoint kinds exist and which methods may be called.
+Usability comes from `adapter.probe` and the `adapter.availability` snapshots
+that follow; it explains why delivery is blocked, appears in the endpoint status
+and explains why a session could not be created. A runtime endpoint is written
+into the node's declaration only once the instance is enabled and its first
+probe has passed, and is not withdrawn when it later becomes unusable, so the
+declaration does not flap.
+
+| Kind | Read by | Created by |
+| ---- | ------- | ---------- |
+| `runtime` | nobody; it takes no ordinary messages | the daemon, one per adapter that declares a runtime |
+| `session` | the native agent itself, with `recv`; the adapter only wakes it and may acknowledge for it | `session.create` only |
+| `direct` | the adapter itself, as a chat bridge reads for a person | `endpoint.register`, up to `max_endpoints` |
+
+A session endpoint cannot exist without a runtime. "Direct" describes only who
+reads the messages: the channel does not distinguish a person from an agent on
+the other side.
+
+Control signals an endpoint accepts, which are written into the node's
+declaration of the endpoint: runtime: `session.create`, `endpoint.status`;
+session: `message.send` (delivered as a prompt), `session.close`,
+`endpoint.status`, and `session.interrupt` when the adapter declared interrupt;
+direct: `message.send`, `endpoint.status`. A signal that authorization allows but
+the endpoint does not accept is answered by the daemon as unsupported, without
+calling the adapter.
+
+Which methods apply to which kind (forbidden is refused with `1002`; a method
+that needs a capability the adapter did not declare is refused with `1003`):
+
+| Method | runtime and session endpoints | direct endpoints |
+| ------ | ----------------------------- | ---------------- |
+| `initialize`, `ping`, `$/cancel_request`, `shutdown`, `adapter.start`, `adapter.probe`, `adapter.availability` | required | required |
+| `session.create`, `prompt.deliver`, `prompt.reconcile`, `turn.started`, `turn.ended`, `session.close`, `prompt.persisted` | required | forbidden |
+| `checkpoint.put` | optional | optional |
+| `session.interrupt` | optional (`interrupt`) | forbidden |
+| `recv.observed` | optional (`ack_on_behalf`), session endpoints only | forbidden |
+| `native_request.handled` | required when `server_requests` is declared | forbidden |
+| `endpoint.register`, `endpoint.recv`, `endpoint.ack`, `endpoint.send`, `endpoint.pending` | forbidden | required |
+| `endpoint.unregister`, `endpoint.message_status` | forbidden | optional |
+
+Both kinds can be declared at once; the requirements add up.
+
+**Admission.** `adapterreg.Admit` takes the capabilities and the manifest and
+refuses an adapter that declares neither runtime nor direct endpoints, whose
+capabilities or manifest break a rule, whose manifest gives a budget for a front
+end it does not declare, or whose acknowledgement markers `handoff` cannot
+compile. Otherwise the admission records the kinds, the signals of each kind, the
+budget per front end (the manifest's, or the default) and the compiled markers.
+`CheckHandshake` additionally requires that the adapter reports the manifest's id
+and version and a protocol version in both the requested and the manifest range.
+
+**Mappings.** The daemon turns what an adapter reports into the values the
+contract packages take. `internal/adapterreg` holds the mapping for every row
+except the two that are plain calls (marked "call"):
+
+| Observation | Becomes |
+| ----------- | ------- |
+| `prompt.deliver` returns `accepted` or `persisted` | `handoff.AttemptDelivered` |
+| `prompt.deliver` returns `refused` | `AttemptFailed` |
+| an error response other than `-32603` and `-32800` | `AttemptFailed` (the request had no effect) |
+| no response, a timeout, `-32603`, `-32800`, a closed connection | `AttemptUnknown`, then `prompt.reconcile` |
+| reconcile `found`, `provably_absent`, `indeterminate` | `AttemptDelivered`, `AttemptFailed`, `AttemptUnknown` |
+| `turn.started` with an attempt | call: proof the attempt was delivered, as a `found` verdict |
+| availability `runtime_auth` | `Signals.AuthInvalid` |
+| availability `native_unavailable`, `dependency_missing` | `Signals.ServiceUnavailable` |
+| availability `version_untested` | no cause; shown in the status |
+| the daemon's own loss of the connection or two failed pings | `Signals.AdapterOffline`, with `Since` the moment it dropped |
+| `since_ms` | `Signals.Since`; zero (unknown) when absent or later than the moment the snapshot arrived, or when any condition of the cause lacks one |
+| `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`); keep reconciling, then unconfirmed |
+| `session.interrupt` stopped, requested, not_running, refused | reply stopped; stopped if `turn.ended` came in time else requested; not_running; failed |
+| `session.close` closed, close_unconfirmed | reply closed; close_unconfirmed with the same reason |
+| `recv.observed` verdict and reason | call: `handoff.CheckBeforeAck` over the observed text and the stored page output; allowed settles every part through `delivery.Record.Ack`. The reasons and the item acknowledgements are named by `AckReason` and `ItemAck` |
+| item acknowledgement | `recorded`, `completed`, `duplicate`, `refused_no_handout`, `refused_lease`, `too_late`: the names of the `delivery` verdicts (a refused token cannot occur: the connection owns its endpoints) |
+
+### Why
+
+- **Declared and usable are separate** so that a transient fault never rewrites
+  what the node says about itself, which other nodes act on.
+- **`endpoint.*` is forbidden on session endpoints** because the model must read
+  its own messages; an adapter reading them for it would swallow them.
+- **An undeclared capability is `1003`, a wrong kind `1002`**, so an adapter
+  author can tell a bug in their choice of endpoint from a missing declaration.
+- **The daemon, not the adapter, judges acknowledgements.** The adapter only
+  reports what it saw in the durable record, so one rule decides what counts as
+  seen.
+
+### Where
+
+- `internal/adapterreg` (`admit.go`, `methods.go`, `mappings.go`); tests
+  `TestAdmitDecisions`, `TestDeclaredKindsAndSignals`, `TestMethodMatrix`,
+  `TestCheck`, `TestSignals`, `TestCreateReply`, `TestInterruptReply`,
+  `TestCloseReply`, `TestCheckHandshake`.
+
 ## Control signals
 
 ### What

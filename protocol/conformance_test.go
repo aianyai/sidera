@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/aianyai/sidera/internal/authz"
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
@@ -633,3 +635,27 @@ func TestInvalidExamples(t *testing.T) {
 }
 
 var numberRE = regexp.MustCompile(`^-?[0-9]+$`)
+
+// TestEnumNamesMatchContractPackages: the protocol's delivery states, rejection
+// reasons and control signals are the names the daemon's contract packages give
+// the same things, so a state needs no translation on its way to the sender.
+func TestEnumNamesMatchContractPackages(t *testing.T) {
+	var states []string
+	for s := delivery.StateQueued; s <= delivery.StateClosedUnconfirmed; s++ {
+		states = append(states, s.String())
+	}
+	var reasons []string
+	for r := delivery.RejectUnauthorized; r <= delivery.RejectDeadlineOutOfRange; r++ {
+		reasons = append(reasons, r.String())
+	}
+	signals := []string{authz.ActionSessionCreate.String(), authz.ActionSessionClose.String(), authz.ActionSessionInterrupt.String(), authz.ActionEndpointStatus.String()}
+	tables := adapterproto.EnumTables()
+	for name, want := range map[string][]string{"DeliveryState": states, "RejectReason": reasons, "ControlSignal": signals} {
+		if !sameSet(tables[name], want) {
+			t.Errorf("%s: protocol %v, contract package %v", name, sorted(tables[name]), sorted(want))
+		}
+	}
+	if len(states) != 7 || len(reasons) != 10 {
+		t.Errorf("the contract packages list %d states and %d reasons; the protocol was written for 7 and 10", len(states), len(reasons))
+	}
+}
