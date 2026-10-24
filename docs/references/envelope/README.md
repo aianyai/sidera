@@ -192,11 +192,12 @@ specific cause.
 
 Reply permission reads facts that outlive the delivery. The source node keeps the
 outbound record, with its arrival facts and the digest of the accepted control
-reply, at least until `report_by` plus `timing.ClockTolerance` plus the reply
-window (24 hours). The target keeps the control reply payload and the delivery
-facts it reports on for the same period, which is longer than delivery keeps
-its dedup records and status reports. The target stores payloads
-only; the signature is made when a report or reply is sent.
+reply, until `reply.RetainFactsUntil(report_by)`: `report_by` plus
+`timing.ClockTolerance` plus the reply window (24 hours). The target keeps the
+control reply payload and the delivery facts it reports on for the same period,
+which is longer than delivery keeps its dedup records and status reports, so the
+stored control reply is not purged with the deduplication record. The target
+stores payloads only; the signature is made when a report or reply is sent.
 
 ### Reply permission
 
@@ -351,7 +352,7 @@ which may still admit it.
   records, their descriptors and the verified values.
 - `internal/envelope/outbound.go`: `Outbound`, `Tracked`, `Arrival`,
   `ApplyReport`; `handle.go`: `HandleControlReply`.
-- `internal/reply/reply.go`: `Admit`.
+- `internal/reply/reply.go`: `Admit`, `RetainFactsUntil`.
 - Tests: `internal/envelope/golden_vectors_test.go` (bytes written out with CBOR
   diagnostic notation; node identifiers, digests and signatures computed by an
   independent script) with `golden_test.go`; `envelope_test.go`
@@ -361,7 +362,11 @@ which may still admit it.
   `records_test.go` (`TestStatusReportRules`, `TestControlReplyRules`,
   `TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey`, which includes the
   sending-node check); `golden_test.go` (`TestGoldenRequestDigest`);
-  `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`); `fuzz_test.go`.
+  `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`,
+  `TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply`,
+  `TestAReportDatedAfterTheDeliverysReportByIsAContradiction`);
+  `envelope_test.go` (`TestATooLargeBodyIsToldApartFromAMalformedOne`, and the
+  disclosed-list rows of `TestRequestDigest`); `fuzz_test.go`.
   `internal/reply/reply_test.go` holds the named acceptance scenarios
   (`TestAfterInboundTighteningAReplyAndASessionCreateReplyStillGetBack`,
   `TestTheSourceBehindNATAcceptsAReplyCarryingEvidence`,
@@ -369,7 +374,9 @@ which may still admit it.
   `TestAForgedReplyToFromAThirdPartyIsRefused`), `TestWindow`,
   `TestEvidenceThatDoesNotVerifyIsDiscardedAndTheReplyIsJudgedWithoutIt`,
   `TestStaleEvidenceDoesNotTakePermissionFromAReplyWhoseFactsAreKnown`,
-  `TestTheOriginalRecipientOfAControlSignalNeverGetsReplyPermission`, and
+  `TestTheOriginalRecipientOfAControlSignalNeverGetsReplyPermission`,
+  `TestTheIntakeVerdictOfAReplyStillStandsAtTheSecondCheck`,
+  `TestRetainFactsUntilIsReportByPlusTheClockToleranceAndTheWindow`, and
   `property_test.go` compares random orders of replies, evidence and pulled
   reports with an oracle written separately; `fuzz_test.go` checks that
   permission earned through evidence implies the evidence verifies for the

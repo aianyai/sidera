@@ -69,10 +69,13 @@ func SettleBy(reportBy time.Time) time.Time {
 	return reportBy.Add(-ReportBySafetyMargin)
 }
 
-// DedupRetainUntil returns how long the target keeps a deduplication record,
-// and with it the stored reply of a control signal. It must cover every
-// retry the sender can still make: a retry after report_by cannot arrive
-// within its delivery deadline, so forgetting the record then is safe.
+// DedupRetainUntil returns how long the target keeps a deduplication record.
+// It must cover every retry the sender can still make: a retry after report_by
+// cannot arrive within its delivery deadline, so forgetting the record then is
+// safe. It does not bound the stored reply of a control signal: that reply
+// outlives the record and is kept until reply.RetainFactsUntil, because
+// reply permission still reads it, so storage must not purge it with the
+// deduplication record.
 func DedupRetainUntil(reportBy time.Time) time.Time {
 	return reportBy
 }

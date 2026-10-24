@@ -109,6 +109,20 @@ func TestTheIntakeVerdictOfAReplyStillStandsAtTheSecondCheck(t *testing.T) {
 	})
 }
 
+func TestRetainFactsUntilIsReportByPlusTheClockToleranceAndTheWindow(t *testing.T) {
+	for _, reportBy := range []time.Time{t0, t0.Add(3*time.Hour + 12*time.Minute), time.Unix(1893456000, 0).UTC()} {
+		// the independent computation: seconds, written out from the rule
+		// (2 minutes of clock tolerance, 24 hours of window)
+		want := time.Unix(reportBy.Unix()+2*60+24*60*60, 0).UTC()
+		if got := RetainFactsUntil(reportBy); !got.Equal(want) {
+			t.Errorf("RetainFactsUntil(%v) = %v, want %v", reportBy, got, want)
+		}
+		if !RetainFactsUntil(reportBy).After(delivery.DedupRetainUntil(reportBy)) {
+			t.Error("the facts must outlive the deduplication record")
+		}
+	}
+}
+
 func TestTheSourceBehindNATAcceptsAReplyCarryingEvidence(t *testing.T) {
 	now := t0.Add(time.Hour)
 	o := messageOutbound() // the delivery report was never pulled: the record is still queued

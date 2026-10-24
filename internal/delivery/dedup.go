@@ -26,7 +26,9 @@ type DedupKey struct {
 
 // DedupRecord is the target's memory of one accepted request. A control signal
 // stores its reply in the same record so a repeated request gets the stored
-// reply instead of running again.
+// reply instead of running again. The stored reply outlives the record's
+// RetainUntil: it must be kept until reply.RetainFactsUntil, so storage does not
+// purge it with the deduplication record.
 type DedupRecord struct {
 	Key         DedupKey
 	Digest      BodyDigest

@@ -18,6 +18,7 @@ every contract package follows, and
 | `Admission` | The `Decision`, the updated `Outbound`, the handling of a control reply, the effect of a report, and why the evidence was discarded (`EvidenceError`). |
 | `Decision.Granted()`, `Reason` | The verdict, which is the value of `authz.Request.Reply`, and a typed reason. |
 | `Window` | 24 hours. |
+| `RetainFactsUntil(reportBy)` | How long the facts the decision reads are kept: `reportBy` plus `timing.ClockTolerance` plus `Window`. The one place the retention is computed. |
 
 ## Rules
 
@@ -71,12 +72,13 @@ every contract package follows, and
 - A non-nil `Admission.EvidenceError` is logged and raised as an alert: it means
   a malfunctioning or hostile peer, or a network key that changed after the
   evidence was signed. It does not change the decision.
-- The facts the decision reads are kept: the node's `Outbound` with its arrival
-  facts at least until `report_by` plus `timing.ClockTolerance` plus `Window`, and
-  the target keeps the control reply payload and delivery facts for the same
-  period (see the [envelope](../envelope/README.md) caller guarantees). The
-  target signs a status report or control reply again each time it sends one as
-  evidence or in answer to a pull.
+- The facts the decision reads are kept until `RetainFactsUntil(report_by)`: the
+  node's `Outbound` with its arrival facts, and on the target the control reply
+  payload and delivery facts (see the [envelope](../envelope/README.md) caller
+  guarantees). That is longer than delivery keeps its deduplication records
+  (`delivery.DedupRetainUntil`), so storage does not purge the stored control
+  reply with them. The target signs a status report or control reply again each
+  time it sends one as evidence or in answer to a pull.
 - `Request.Outbound` is the node's record of exactly `ReplyTo`, found by the
   caller, or nil.
 - The `Admission.Outbound` and the outcomes of the evidence are committed in the

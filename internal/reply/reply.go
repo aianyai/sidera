@@ -9,11 +9,26 @@ import (
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // Window is how long reply permission lasts, counted from the start the sender
 // can prove (see Request).
 const Window = 24 * time.Hour
+
+// RetainFactsUntil returns how long the facts reply permission reads are kept
+// for a message whose report_by is reportBy: report_by plus the clock tolerance
+// (a report dated that late is still believed) plus Window (a reply admitted
+// at the end of the window is still decided from them). It is the one place
+// this retention is computed: the source keeps the message's envelope.Outbound
+// with its arrival facts and the digest of the accepted control reply, and the
+// target keeps the stored control reply and its delivery facts, until then.
+// That is longer than delivery keeps its deduplication records
+// (delivery.DedupRetainUntil), so the stored control reply must not be purged
+// with them.
+func RetainFactsUntil(reportBy time.Time) time.Time {
+	return reportBy.Add(timing.ClockTolerance + Window)
+}
 
 // ErrInvalidRequest reports an argument no correct caller produces: a missing
 // time or identity, or an outbound record that is not the one named by ReplyTo.

@@ -129,10 +129,11 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   status filled in.
 - The receiving node calls `Envelope.ValidateFor` with its own node on every
   decoded envelope before acting on it: `Decode` cannot know which node reads it.
-- Storage keeps, at least until `report_by` plus `timing.ClockTolerance` plus the
-  reply window (24 hours), the source's `Outbound` with its arrival facts and the
-  digest of the accepted control reply, and the target's control reply payload and
-  delivery facts, longer than delivery keeps its dedup records. The target
+- Storage keeps, at least until `reply.RetainFactsUntil(report_by)`, the
+  source's `Outbound` with its arrival facts and the digest of the accepted
+  control reply, and the target's control reply payload and delivery facts,
+  longer than delivery keeps its dedup records: the stored control reply is not
+  purged with the deduplication record. The target
   stores payloads only and signs a status report or control reply with its
   current network key each time it sends one as evidence or in answer to a pull;
   the digest excludes signatures, so signing again does not change it.
