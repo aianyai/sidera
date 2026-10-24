@@ -32,10 +32,13 @@ type SelfRevocation struct {
 	Node   ident.NodeID
 }
 
-// Load reads and checks every file of keys/ except the clock record and the init
-// marker, which it only checks to be readable, and returns the keys. It refuses,
-// naming the file, a directory or file that anyone but the owner can reach, a
-// file that is missing or damaged, and a file that contradicts the others: the
+// Load reads and checks every file of keys/ except the clock record, which it
+// only checks to be readable, and returns the keys. It refuses, naming the file,
+// a directory or file that anyone but the owner can reach, a file that is
+// missing or damaged, an init that did not finish (the marker is missing: the
+// writes of init are all optional, so only the marker says that the other
+// files, the config and the first clock record are all there), and a file that
+// contradicts the others: the
 // certificate must be for the node of the identity key and name the network key,
 // the serial file must be the node's and agree with the certificate, and the
 // self-revocation must be the statement of this node's identity key. It writes
@@ -72,8 +75,10 @@ func Load(w *txn.Writer) (*Keys, error) {
 	if _, err := ReadClock(r); err != nil {
 		return nil, err
 	}
-	if _, err := Initialized(r); err != nil {
+	if done, err := Initialized(r); err != nil {
 		return nil, err
+	} else if !done {
+		return nil, fileError(InitMarkerPath, ErrMissing, "init has not finished")
 	}
 
 	c := cert.verified.Payload()

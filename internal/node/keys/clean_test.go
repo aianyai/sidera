@@ -1,6 +1,7 @@
 package keys_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -100,5 +101,29 @@ func TestRecoveryWorkReadsOnlyAndReportsDamage(t *testing.T) {
 	put(t, clone, keys.SerialPath, b)
 	if _, err := keys.RecoveryWork(clone); err == nil {
 		t.Error("RecoveryWork of a damaged serial file reported no error")
+	}
+}
+
+// A keys directory without the init marker is an init that did not finish. The
+// start refuses it before any repair, so the predicate finds no work in it, even
+// where the files look like an interrupted renewal: resuming init is the
+// owner's, and a renewal must not be written over it.
+func TestRecoveryWorkOfAnUnfinishedInitIsEmpty(t *testing.T) {
+	r := newRig(t)
+	r.mustInit(1, t0)
+	if err := r.mustLoad().Renew(t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// an interrupted renewal: the serial is ahead of the certificate
+	node := r.mustLoadNode()
+	clone := r.mem.Clone()
+	put(t, clone, keys.SerialPath, oracleSerialFile(node, 9, strings.Repeat("ab", 32)))
+	work, err := keys.RecoveryWork(clone)
+	if err != nil || len(work) != 1 {
+		t.Fatalf("with the marker, RecoveryWork = %v, %v; want the interrupted renewal", work, err)
+	}
+	remove(t, clone, keys.InitMarkerPath)
+	if work, err := keys.RecoveryWork(clone); err != nil || len(work) != 0 {
+		t.Errorf("without the marker, RecoveryWork = %v, %v; want nothing", work, err)
 	}
 }

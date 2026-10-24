@@ -17,7 +17,7 @@ transaction of `txn`; nothing here calls an `fsx` write.
 
 | Name | Purpose |
 | ---- | ------- |
-| `Load(w)` | Reads and checks every file; returns `*Keys`. Writes nothing, repairs nothing. |
+| `Load(w)` | Reads and checks every file, the init marker included; returns `*Keys`. Refuses an init that did not finish. Writes nothing, repairs nothing. |
 | `Keys.Node`, `NetworkSigner`, `Certificate`, `CertificateWire`, `SerialSeen` | What the node knows of itself. The identity key never leaves the package: it signs certificates and the self-revocation only. |
 | `Keys.RenewalDue`, `RenewalDue`, `Keys.Renew` | The renewal rule (a pure function with a typed verdict and reason) and the renewal itself, which is also the repair of an interrupted one. |
 | `Keys.RenewalInterrupted`, `RenewalInterrupted`, `RecoveryWork` | The recovery predicate: the serial file is ahead of the certificate. Pure functions of the disk, for the load, the startup repair and the clean-scenario test. |
@@ -47,6 +47,12 @@ transaction of `txn`; nothing here calls an `fsx` write.
 - **Errors never quote a file.** The decoders say which check failed, not what
   they found, because a key file is secret. Keys and anything that holds one print
   as nothing under every `fmt` verb.
+- **Only the marker says init finished.** Every write of `init` is optional for
+  the transaction layer, which cannot require a file that was reused, so a disk on
+  which `init` stopped can hold every key, the certificate and the
+  self-revocation and still lack the clock record and the owner's configuration.
+  `Load` refuses it, naming `init.rec`, and `RecoveryWork` finds no work in it: the
+  start stops before any repair and the owner runs `init` again.
 - **Load checks that the files belong together.** The certificate is for the node
   of the identity key and names the network key; the serial file is this node's
   and agrees with the certificate (`record.DecideSerial`); the self-revocation is
@@ -103,6 +109,8 @@ transaction of `txn`; nothing here calls an `fsx` write.
 - Make the `init` transaction `Begin`, `PlanInit`'s plan `WriteKeys`, the other
   owners' writes, `WriteMarker`, `Commit`, in that order, and create the `keys`
   directory (`Dir`) first when it does not exist.
+- Call `Initialized` first at startup, to tell an `init` that never ran from one that
+  stopped before the marker, and to say so before the configuration is read.
 - After `Load`, call `CheckNotRetired` with the loaded revocations, and renew at
   startup when `RenewalDue` says so.
 - Zero means unset: the zero `ClockState` is the first start, a zero

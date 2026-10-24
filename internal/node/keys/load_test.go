@@ -84,6 +84,8 @@ func TestLoadRefusals(t *testing.T) {
 		{"certificate missing", del(keys.CertificatePath), keys.CertificatePath, keys.ErrMissing},
 		{"serial missing", del(keys.SerialPath), keys.SerialPath, keys.ErrMissing},
 		{"self-revocation missing", del(keys.SelfRevocationPath), keys.SelfRevocationPath, keys.ErrMissing},
+		{"init marker missing: init did not finish", del(keys.InitMarkerPath), keys.InitMarkerPath, keys.ErrMissing},
+		{"init marker damaged", flip(keys.InitMarkerPath), keys.InitMarkerPath, keys.ErrCorrupt},
 		{"identity key damaged", flip(keys.IdentityKeyPath), keys.IdentityKeyPath, keys.ErrCorrupt},
 		{"network key damaged", flip(keys.NetworkKeyPath), keys.NetworkKeyPath, keys.ErrCorrupt},
 		{"certificate damaged", flip(keys.CertificatePath), keys.CertificatePath, keys.ErrCorrupt},

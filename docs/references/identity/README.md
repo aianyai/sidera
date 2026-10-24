@@ -148,8 +148,9 @@ produces: fields in the order below, no spaces, times as UTC in whole seconds
 | `init` (`init.rec`) | `{"completed_at":"…Z"}` |
 
 **Loading.** The node refuses to start, naming the file, when the directory or a
-file can be reached by anyone but the owner, when a file is missing or damaged,
-or when the files contradict each other: the certificate must be for the node of
+file can be reached by anyone but the owner, when a file is missing or damaged
+(`init.rec` included: only the marker says that `init` finished), or when the
+files contradict each other: the certificate must be for the node of
 the identity key and name the network key; the serial file must be this node's
 and not behind the certificate, and at the certificate's serial it must name the
 certificate's digest; the self-revocation must verify under the identity key. It
@@ -330,6 +331,14 @@ serial file did not, the node refuses to start naming `network-serial`.
   without the serial. Rejected: one file holding both (a serial and a certificate
   are replaced together or not at all, and a lost write would take the serial with
   it), and a counter in `state/` (deleting `state/` would reset it).
+- **Only the marker says `init` finished.** The transaction layer cannot require
+  a write that may be a reused file, so every write of `init` is optional, and a
+  crash after the self-revocation leaves keys that all verify next to a missing
+  clock record and configuration: a `Load` that accepted it would start the node
+  as a first start with no owner decisions. The marker is the one required write
+  and the last, so `Load` refuses without it and the recovery predicate finds no
+  work in such a directory: the owner runs `init` again, which reuses what is
+  valid.
 - **An interrupted renewal is a start, not a refusal.** The state is a normal
   product of a crash and harmless to repair, so refusing would turn a crash into an
   outage that needs the owner. Repairing it in `Load` would make a read write; the

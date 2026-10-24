@@ -414,13 +414,17 @@ func TestInitReSignsACertificateThatDoesNotMatch(t *testing.T) {
 		}, 6, true},
 		{"serial missing, certificate valid", func(r *rig) { remove(t, r.mem, keys.SerialPath) }, 1, false},
 		{"serial behind a valid certificate of this node", func(r *rig) {
-			// two renewals: the certificate is at 3, then the serial file is put back to 1
+			// two renewals: the certificate is at 3, then the serial file is put back
+			// to 1. Load needs the marker, so it is there for the renewals and gone
+			// again for the init that is run after them.
+			putInitMarker(t, r.mem)
 			k := r.mustLoad()
 			for i := 1; i <= 2; i++ {
 				if err := k.Renew(t0.Add(time.Duration(i) * time.Hour)); err != nil {
 					t.Fatal(err)
 				}
 			}
+			remove(t, r.mem, keys.InitMarkerPath)
 			put(t, r.mem, keys.SerialPath, oldSerial)
 		}, 4, true},
 	}
@@ -470,7 +474,9 @@ func (r *rig) mustLoadNode() string {
 // is not the statement that retires the identity.
 func certRevocationWire(t *testing.T, r *rig) []byte {
 	t.Helper()
-	k := open(t, r.mem.Clone()).mustLoad()
+	withMarker := r.mem.Clone()
+	putInitMarker(t, withMarker)
+	k := open(t, withMarker).mustLoad()
 	signer, err := record.NewEd25519Signer(ed25519.NewKeyFromSeed(stream(1, 32)))
 	if err != nil {
 		t.Fatal(err)

@@ -411,6 +411,13 @@ func oracleRecordFile(kind string, body []byte) []byte {
 	return append([]byte(head), body...)
 }
 
+// putInitMarker puts the marker that says init finished, for a test that loads
+// the keys of a disk on which only the key side of init was run.
+func putInitMarker(tb testing.TB, mem *fsxtest.Mem) {
+	tb.Helper()
+	put(tb, mem, keys.InitMarkerPath, oracleRecordFile("init", []byte(`{"completed_at":"2026-10-24T06:00:00Z"}`)))
+}
+
 func oracleSerialFile(node string, serial uint64, digest string) []byte {
 	return oracleRecordFile("serial", []byte(fmt.Sprintf(`{"node":%q,"serial":%d,"digest":%q}`, node, serial, digest)))
 }

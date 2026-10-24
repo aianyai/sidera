@@ -151,13 +151,18 @@ type Work struct {
 // nothing else, and it is empty on every state that a run with no crash leaves,
 // whatever the step. The load evaluates the same rule, and a test of the clean
 // scenarios evaluates this function on a copy of the disk after each step. It
-// reads and writes nothing else. A data directory with no keys/ has no work; a
-// set of files that is damaged or inconsistent is an error, not an empty answer.
+// reads and writes nothing else. A data directory with no keys/, or with keys/
+// and no init marker, has no work: an unfinished init is refused by the start
+// before any repair, and is the owner's to resume. A set of files that is
+// damaged or inconsistent is an error, not an empty answer.
 func RecoveryWork(r fsx.Reader) ([]Work, error) {
 	if _, err := r.Stat(Dir); errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
 	} else if err != nil {
 		return nil, &FileError{Path: Dir, Err: err}
+	}
+	if done, err := Initialized(r); err != nil || !done {
+		return nil, err
 	}
 	cert, err := readCertificate(r)
 	if err != nil {
