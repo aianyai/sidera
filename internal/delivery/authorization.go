@@ -54,9 +54,11 @@ func (a Authorization) validate() error {
 // The reasons map as follows, so the sender hears why it was refused without
 // learning more than it may:
 //
-//   - trust denied, an explicit deny, no covering allow and a preset that is not
-//     granted are "unauthorized": the sender is not entitled to know which
-//     rule refused it;
+//   - trust denied, an explicit deny, no covering allow, a preset that is not
+//     granted and a preset closed to local sources are "unauthorized": the
+//     sender is not entitled to know which rule refused it (a preset closed to
+//     local sources is reported to a local sender as a control reply, so this
+//     row is reached only if a caller maps that verdict here);
 //   - a body over the size caps is "too large";
 //   - a paused endpoint, one that refuses several recipients and one that does
 //     not accept this sender are "endpoint declined": the endpoint's own
@@ -91,7 +93,8 @@ func rejectReasonFor(r authz.Reason) RejectReason {
 		return RejectEndpointDeclined
 	case authz.ReasonEndpointHidden:
 		return RejectEndpointMissing
-	case authz.ReasonTrustDenied, authz.ReasonExplicitDeny, authz.ReasonNotAuthorized, authz.ReasonPresetNotAllowed:
+	case authz.ReasonTrustDenied, authz.ReasonExplicitDeny, authz.ReasonNotAuthorized, authz.ReasonPresetNotAllowed,
+		authz.ReasonPresetClosedToLocalSources:
 		return RejectUnauthorized
 	}
 	return RejectUnauthorized

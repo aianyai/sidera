@@ -37,8 +37,10 @@ message another endpoint wrote by looking at the endpoint part alone.
 - Parsers and `EndpointIDFromBytes` accept it, because a node has to write it
   into records and pages.
 - Refusing it as a recipient on the wire is the envelope's rule (see
-  [envelope](../envelope/README.md)); this package only reserves the value and
-  does not judge senders.
+  [envelope](../envelope/README.md)). Refusing it as the sender of a request is
+  the policy's request shape check (see [policy](../policy/README.md)), shared by
+  the check of requests from other nodes and of requests from this node's own
+  endpoints. This package only reserves the value and does not judge anything.
 
 ### Public keys
 
@@ -137,7 +139,11 @@ The parser accepts exactly one text per identifier:
   changing it later would mean migrating the records and pages that already
   hold the value. All-ones was chosen because its text, `ep1` followed by a run
   of `l`, is recognisable at a glance and no random identifier looks like it; it
-  is also not the all-zero "unset" value, which stays refused everywhere.
+  is also not the all-zero "unset" value, which stays refused everywhere. The
+  value is refused in both directions: as a recipient by the envelope, and as a
+  sender by the policy shape check, because a request claiming to come from it is
+  forged or a bug: the node's own feedback is exempt traffic and is never judged
+  as a request.
   Rejected: a value chosen per node (reasons above); a random value stored in
   node configuration (it leaks through any reply and is reusable by the remote
   party); an explicit "feedback" flag on the page (a change to the page format,

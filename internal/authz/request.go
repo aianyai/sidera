@@ -136,8 +136,9 @@ const (
 
 	// ReasonTrustDenied: connection trust is denied.
 	ReasonTrustDenied
-	// ReasonMalformedRequest: the request itself is malformed, or its trust
-	// outcome is out of range.
+	// ReasonMalformedRequest: the request itself is malformed, its trust outcome
+	// is out of range, its sender is the system endpoint, or a preset statement
+	// is no statement (LocalCreate).
 	ReasonMalformedRequest
 	// ReasonExplicitDeny: a deny rule covers the request.
 	ReasonExplicitDeny
@@ -162,6 +163,9 @@ const (
 	// ReasonEndpointHidden: the target endpoint declared itself hidden from the
 	// directory.
 	ReasonEndpointHidden
+	// ReasonPresetClosedToLocalSources: the preset declares that local sources
+	// may not start a session with it.
+	ReasonPresetClosedToLocalSources
 )
 
 var reasonNames = [...]string{
@@ -178,6 +182,7 @@ var reasonNames = [...]string{
 	ReasonEndpointRefusesMultiRecipient: "endpoint_refuses_multi_recipient",
 	ReasonSenderNotAccepted:             "sender_not_accepted",
 	ReasonEndpointHidden:                "endpoint_hidden",
+	ReasonPresetClosedToLocalSources:    "preset_closed_to_local_sources",
 }
 
 // String returns a stable machine-readable name.
@@ -195,7 +200,7 @@ func (r Reason) Outcome() Outcome {
 		return OutcomeAllow
 	case r == ReasonTrustSuspended:
 		return OutcomeSuspend
-	case r >= ReasonTrustDenied && r <= ReasonEndpointHidden:
+	case r >= ReasonTrustDenied && r <= ReasonPresetClosedToLocalSources:
 		return OutcomeReject
 	}
 	return 0
@@ -224,7 +229,7 @@ type RateObligation struct {
 	Window time.Duration
 }
 
-// Verdict is the result of Evaluate.
+// Verdict is the result of Evaluate, EvaluateLocal and LocalCreate.
 type Verdict struct {
 	Outcome Outcome
 	Reason  Reason

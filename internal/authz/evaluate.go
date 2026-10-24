@@ -134,7 +134,7 @@ func Evaluate(p Policy, r Request) Verdict {
 	if !d.permits() && !reply {
 		return verdictFor(d.refusal())
 	}
-	if reason, declined := r.declinedBy(reply); declined {
+	if reason, declined := r.asked().declinedBy(reply); declined {
 		return verdictFor(reason)
 	}
 	if r.Trust == trust.Suspended {
@@ -170,17 +170,42 @@ func (r Request) query() query {
 	}
 }
 
+// asked is what the request-shape check and the target's own declarations read.
+// Request and LocalRequest both reduce to it, so the two entry points share one
+// shape check and one reading of the declarations.
+type asked struct {
+	stage          Stage
+	sender         Sender
+	action         Action
+	target         Target
+	multiRecipient bool
+	declaration    Declaration
+}
+
+func (r Request) asked() asked {
+	return asked{r.Stage, r.Sender, r.Action, r.Target, r.MultiRecipient, r.TargetDeclaration}
+}
+
+func (r LocalRequest) asked() asked {
+	return asked{r.Stage, r.Sender, r.Action, r.Target, r.MultiRecipient, r.TargetDeclaration}
+}
+
+// wellFormed is the request-shape check. The system endpoint is refused as a
+// sender: it only ever sends this node's own channel feedback, which is exempt
+// traffic and never reaches this package, and a remote node chooses its own
+// endpoint part and could otherwise forge that feedback.
+func (a asked) wellFormed() bool {
+	if a.sender.Node.IsZero() || a.sender.Endpoint.IsSystem() || !a.action.appliesTo(a.target.Kind) {
+		return false
+	}
+	if (a.target.Kind == TargetNode) != a.target.Endpoint.IsZero() {
+		return false
+	}
+	return a.stage == StageIntake || a.stage == StageRecv
+}
+
 func (r Request) wellFormed() bool {
-	if r.Sender.Node.IsZero() || !r.Action.appliesTo(r.Target.Kind) {
-		return false
-	}
-	if (r.Target.Kind == TargetNode) != r.Target.Endpoint.IsZero() {
-		return false
-	}
-	if r.Stage != StageIntake && r.Stage != StageRecv {
-		return false
-	}
-	if r.BodySize < 0 {
+	if !r.asked().wellFormed() || r.BodySize < 0 {
 		return false
 	}
 	return r.Action != ActionSessionCreate || r.Preset != ""
@@ -191,20 +216,20 @@ func (r Request) wellFormed() bool {
 // the sender restriction, because that restriction is the inbound policy the
 // reply permission exists to pass. At recv the endpoint is reading its own
 // queued messages, so its pause is not applied.
-func (r Request) declinedBy(reply bool) (Reason, bool) {
-	d := r.TargetDeclaration
-	switch r.Action {
+func (a asked) declinedBy(reply bool) (Reason, bool) {
+	d := a.declaration
+	switch a.action {
 	case ActionMessageSend:
 		switch {
-		case d.Paused && r.Stage == StageIntake:
+		case d.Paused && a.stage == StageIntake:
 			return ReasonEndpointPaused, true
-		case d.RefuseMultiRecipient && r.MultiRecipient:
+		case d.RefuseMultiRecipient && a.multiRecipient:
 			return ReasonEndpointRefusesMultiRecipient, true
-		case d.RestrictSenders && !reply && !d.accepts(r.Sender):
+		case d.RestrictSenders && !reply && !d.accepts(a.sender):
 			return ReasonSenderNotAccepted, true
 		}
 	case ActionSee:
-		if d.HiddenFromDirectory && r.Target.Kind != TargetNode {
+		if d.HiddenFromDirectory && a.target.Kind != TargetNode {
 			return ReasonEndpointHidden, true
 		}
 	}

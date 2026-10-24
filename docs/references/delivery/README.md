@@ -100,7 +100,7 @@ authorization:
 | -------------- | ------------- |
 | allow (granted, reply permission) | allow |
 | suspend (trust suspended) | suspend |
-| reject: trust denied, explicit deny, not authorized, preset not allowed | deny, `unauthorized` |
+| reject: trust denied, explicit deny, not authorized, preset not allowed, preset closed to local sources | deny, `unauthorized` |
 | reject: body too large | deny, `too_large` |
 | reject: endpoint paused, refuses several recipients, sender not accepted | deny, `endpoint_declined` |
 | reject: malformed request | deny, `malformed` |

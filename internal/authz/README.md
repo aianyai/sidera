@@ -10,6 +10,8 @@ for the reasons behind the rules.
 | Name                                 | Purpose                                                                                   |
 | ------------------------------------ | ----------------------------------------------------------------------------------------- |
 | `Evaluate(Policy, Request)`          | Decides one request: `Verdict{Outcome, Reason, Obligations}`.                             |
+| `EvaluateLocal(LocalRequest)`        | Decides one request from an endpoint on this node: request shape and the target's declarations only. |
+| `LocalCreate(PresetLocalAccess)`     | Decides a local `session.create` from the preset's own statement about local sources.     |
 | `NewPolicy([]Rule)`                  | Validates a rule list and returns a `Policy`; malformed rules come back as `*RuleError`s. |
 | `OnlyFrom(object, action, nodes...)` | Builds a restriction: the object accepts the action only from these nodes.                |
 | `Rule.Problems()`                    | Lists every way one rule is malformed, as typed `Problem` values.                         |
@@ -68,7 +70,11 @@ set of nodes).
    `Reject`; it is the zero value, so an unset field fails closed. A value
    outside the four outcomes is `Reject` (malformed). `AllowedDirect`,
    `AllowedInherited` and `Suspended` go on.
-2. Request shape, including the stage. A malformed request is `Reject`.
+2. Request shape, including the stage. A malformed request is `Reject`. A sender
+   whose endpoint is the system endpoint (`ident.EndpointID.IsSystem`) is
+   malformed: that endpoint only sends this node's own channel feedback, which
+   is exempt traffic and never reaches this package, and a remote node picks
+   its own endpoint part and could otherwise forge the feedback.
 3. Explicit deny rules give `Reject(ExplicitDeny)`.
 4. Restrictions and allow rules. If no allow rule grants the request, or a
    restriction excludes the sender, a verified reply may stand in for them
@@ -89,6 +95,38 @@ suspended, for the same reason, so a tightened policy or a lost grant ends a
 delivery even while a guarantee has lapsed instead of leaving it queued until trust
 returns. Only denied trust, an explicit deny, a missing grant, a restriction or a
 violated condition ends a delivery as rejected.
+
+## Local sources
+
+An endpoint on this node asks through `EvaluateLocal(LocalRequest)`. Node rules
+do not apply to it, so there is no policy, trust, body size or preset in the
+request: the verdict is the request shape (the same check as step 2 above, the
+system-endpoint sender included, plus one rule of its own: every local source is
+an endpoint, so a zero `Sender.Endpoint` is malformed, node-level requests
+included, whereas `Evaluate` accepts it from another node) and the target's
+declarations (the same code as step 5, both stages, a verified reply read as
+above), and nothing else. It is
+`Allow` with `ReasonGranted` or `Reject`; it is never `Suspend`, because nothing
+about a local source can lapse, and it never carries obligations, because only
+node rules create them. What does limit a local source beyond the declarations
+are the node's resource limits, which the caller applies.
+
+A preset makes one statement about local sources, `PresetLocalAllow` or
+`PresetLocalDeny`; the zero value is not a statement. `LocalCreate` turns the
+statement into a verdict for a local `session.create`: `Allow` with
+`ReasonGranted`, `Reject` with `ReasonPresetClosedToLocalSources`, and
+`ReasonMalformedRequest` for the zero value or a value that is neither
+statement, so a preset whose statement went missing is never read as open. It is
+a separate function, not part of `EvaluateLocal`, because the statement belongs
+to the preset and the preset is not part of the request; the caller reads it from
+the preset. The preset format refuses a preset without a statement and decodes
+the field to `PresetLocalAccess`, so both sides give zero the same meaning:
+no statement.
+
+A local `session.create` therefore passes two gates, one at each point where the
+information exists: `EvaluateLocal` at intake, and `LocalCreate` once the control
+record is accepted, so that the refusal can be answered as a control reply (see
+the caller guarantees below).
 
 ## Rate caps
 
@@ -198,6 +236,20 @@ control may loosen).
 - `Now` is the caller's clock reading in UTC; the same request at the same time
   gets the same verdict on every node.
 - `TargetDeclaration` is the target endpoint's current declaration.
+- `EvaluateLocal` is called only for a request that arrived over the loopback
+  transport; a remote connection that presents this node's ID is never a local
+  source and goes through `Evaluate`. `Sender.Node` is then this node. The stage
+  and the verified reply fact are set as above, the sender names its endpoint,
+  and the endpoint, runtime and declaration are current.
+- For `LocalCreate`: the preset exists and the statement is the preset's own, as
+  read from its definition. A local `session.create` proceeds only if both
+  `EvaluateLocal` (at intake) and `LocalCreate` (after the control record is
+  accepted, before the adapter is called) allow it. Any other verdict of
+  `LocalCreate` stops the creation and is answered with
+  `adapterreg.DaemonCreateFailure(DaemonCreatePresetClosedToLocalSources)`; it is
+  never passed to `delivery.IntakeAuthorization`. The zero statement cannot reach
+  `LocalCreate` because the preset format refuses it, so a malformed verdict is a
+  bug, answered the same way (fail closed) and logged.
 - Rate obligations are enforced by a limiter elsewhere, at the intake check only,
   and ignored at the `recv` check.
 - The endpoint, runtime and preset named in a request exist; this package judges

@@ -59,6 +59,36 @@ set of nodes.
   turns into a rejection at the second. The request says which check it is
   (`Stage`); an unset stage is malformed.
 
+**Local sources.** A request from an endpoint on this node goes through
+`EvaluateLocal`, not `Evaluate`. A request is local when it arrived over the
+loopback transport, never because it names this node: a remote connection that
+presents this node's ID goes through `Evaluate`. `EvaluateLocal` has no policy,
+trust, body size or preset: the verdict is the request shape and the target's
+declarations, through the same code as `Evaluate`, at both checks, and nothing
+else. The shape check has one rule of its own: a local source is always an
+endpoint, so a zero sender endpoint is malformed. It is never Suspend and never
+carries an obligation. Node rules are never read for a local source; what limits
+it besides the declarations are the node's resource limits, applied by the caller.
+
+**Preset statement about local sources.** Every preset must state whether local
+sources may start a session with it: `PresetLocalAllow` or `PresetLocalDeny`. The
+statement is mandatory and has no default, and the zero value is not a statement:
+a preset without one is invalid, and `LocalCreate` refuses the zero value as
+malformed, so a lost statement is never read as open. `LocalCreate` gives Allow
+for `PresetLocalAllow` and Reject (preset closed to local sources) for
+`PresetLocalDeny`. The default preset that `init` writes is `allow`; the owner
+declares as `deny` any preset that agents on the node must not use, for example
+one without a sandbox. `LocalCreate` is the second gate of a local
+`session.create`, which the caller checks after the control record is accepted,
+not part of `EvaluateLocal`: see the caller guarantees in
+`internal/authz/README.md`.
+
+**A system endpoint is never a sender.** The request shape check, shared by
+`Evaluate` and `EvaluateLocal`, refuses a request whose sender endpoint is the
+system endpoint (see [identity](../identity/README.md)) as malformed. Feedback
+from the system endpoint is exempt traffic and is not judged here, so nothing
+legitimate is refused.
+
 **Rate caps are obligations.** The package does not count. An allow returns a
 rate obligation (key, limit, window) for a stateful limiter, honoured at the
 intake check only: at the `recv` check the caller ignores it, because the message
@@ -107,6 +137,48 @@ Tighten, because it stops their replies.
 
 ## Why
 
+- **Local sources are judged by declarations and resource limits, never by node
+  rules.** Node rules say what other nodes, which this node does not control, may
+  ask of it. An endpoint on this node belongs to the same owner and runs on the
+  same machine, so no rule can usefully say that it may not message another
+  endpoint of that owner, and a rule that did would only break the node's own
+  agents. What stays is what the target itself says (an endpoint may pause itself
+  or accept only some senders, which is the agent's own choice of who writes to it)
+  and the resource limits that protect the node whoever asks. Running a local
+  request through the node policy with a made-up trust value was rejected: the rule
+  list would have to special-case a sender that is not a node, in every rule.
+  Sharing the shape check and the declaration step with `Evaluate`, instead of
+  copying them into a second entry, keeps one reading of both.
+- **The preset states whether local sources may use it, not a node rule.**
+  Without node rules, nothing would stop an agent in a sandbox from starting a
+  session with a preset that has no sandbox, and so leaving the sandbox. The limit
+  belongs to the preset because the preset is what carries the risk. The statement
+  is mandatory with no default and is an enumeration rather than a boolean, so
+  that "not written" can never be confused with "written as closed" or read as
+  open; the default preset of a new node is `allow` so that an agent can start a
+  session out of the box.
+- **A local source is told by a control reply, a remote one by a status report.**
+  A request refused at intake is refused before its control record is accepted, so
+  the sender could only learn of it as a rejected status report that says no more
+  than "unauthorized". The preset statement is therefore not judged at intake: the
+  caller checks it with `LocalCreate` after the control record is accepted and
+  before the adapter is called, next to "preset unknown" (see the authz caller
+  guarantees), so the local sender gets the reply `failed: preset_unavailable` (the
+  adapter protocol's reason for a preset that exists but cannot be used for this
+  creation; no new wire value was needed). A remote source is judged by node rules
+  at intake and refused as `rejected/unauthorized`. The two reports differ because
+  the checks happen at different points, not because they differ in kind.
+- **A local source is told apart by the transport, not by the node ID.** A node ID
+  in a request is only a claim; the loopback transport is the fact. A remote
+  connection that presents this node's ID would otherwise be taken for a local
+  source and escape node rules, so it is judged by `Evaluate` like any other
+  remote sender.
+- **The system endpoint is refused as a sender by the shape check.** Only this
+  node's own feedback comes from it, and that is exempt traffic, so a request
+  claiming it is either forged or a bug. The check sits in the shared shape check
+  so that both entry points refuse it by the one rule. Which reason it reports:
+  malformed request, because the request itself is invalid, not because of any
+  rule.
 - **A hand-written rule list with a closed condition syntax.** Whether a change
   tightens or loosens must be decidable, because only the owner or a person with
   full control may loosen. Cedar can decide it, but only through a solver that
@@ -198,7 +270,9 @@ Tighten, because it stops their replies.
 | Evaluation                                           | `internal/authz/evaluate.go`                                     |
 | Change classification                                | `internal/authz/classify.go`                                     |
 | Exempt traffic                                       | `internal/authz/traffic.go`                                      |
+| Local sources, the preset statement                  | `internal/authz/local.go`                                        |
 | Evaluation table, rate obligations and keys, the two checks | `evaluate_test.go`: `TestEvaluate`, `TestEvaluateRateObligations`, `TestEvaluateRateKeys`, `TestEvaluateTwoChecks` (including the stored reply verdict at `StageRecv`; `internal/reply`: `TestTheIntakeVerdictOfAReplyStillStandsAtTheSecondCheck`), `TestDefaultPolicyGrantsEveryActionOnEveryObject` |
 | Rule validation, rate containment and selection, exempt traffic | `policy_test.go`: `TestRuleProblems`, `TestNewPolicyRejectsMalformedRulesWithReasons`, `TestRateWithin`, `TestRateCmp`, `TestPolicyExemptTraffic` |
 | Classification table and exhaustive oracle           | `classify_test.go`: `TestClassify`, `TestClassifyAgainstExhaustiveOracle`, `TestClassifyArgumentSwap` |
 | Trust, declaration and reply properties              | `property_test.go`                                               |
+| Local rule table, node rules ignored, never Suspend, system endpoint as sender, `LocalCreate`, model and open-policy agreement | `local_test.go`: `TestEvaluateLocal`, `TestEvaluateLocalRefusesAnUnsetOrUnknownStage`, `TestEvaluateLocalIgnoresNodeRules`, `TestEvaluateLocalNeverSuspendsAndHasNoObligations`, `TestSystemEndpointAsSenderIsRefused`, `TestLocalCreate`, `TestEvaluateLocalAgreesWithModel`, `TestEvaluateLocalAgreesWithEvaluateUnderAnOpenPolicy` |
