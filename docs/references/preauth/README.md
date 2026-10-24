@@ -141,8 +141,9 @@ Three limits keep strangers from crowding out the cluster:
   exchange completed as a member or an authorized person, and the members whose
   valid network-key certificates the node holds (`HeldMembers` picks them with
   the same rules `Decide` uses: current serial, valid, unrevoked, and a member by
-  `trust`). A peer decided as a non-member stops being known. A person's new device, and a node with a new network key,
-  are strangers until their first exchange completes.
+  `trust`). A peer decided as a non-member stops being known. A person's new
+  device, and a node with a new network key, are strangers until their first
+  exchange completes.
 - **The non-member limits.** A connection whose exchange completed as a
   non-member counts toward `NonMemberConcurrency`; when none is free the
   connection is closed. A non-member lives at most `NonMemberLifetime`, counted
@@ -156,7 +157,7 @@ passed in. It has no timers: `Overdue` says which connections to close now, and
 `Sweep` forgets entries never seen connected. All numbers are `Params`; none is
 decided in this package.
 
-Honest limits, as measured with the library:
+Honest limits, from the measurements behind this design:
 
 - **The cap bounds occupancy, not cost.** The secure handshake runs before the
   cap is consulted, so a refused stranger has already cost a handshake of CPU
@@ -214,7 +215,6 @@ cache of who is known: the accounting keeps its own known set.
   node and is not a member, and members are not people; neither may use the
   other's protocol. What a management request may do is the administration
   rules' decision.
-
 - **A message, not a signed record.** The sender is authenticated by the secure
   handshake and the certificate carries its own signature; wrapping the exchange
   in a signed record would add a signature that proves nothing the handshake did
@@ -231,11 +231,10 @@ cache of who is known: the accounting keeps its own known set.
 - **The size bound is a protocol rule.** It is the same on every node and small,
   because an unauthenticated peer must not be able to make a node buffer or
   decode anything of consequence.
-- **Exchange on the specific connection.** Measured with the library: the host's
+- **Exchange on the specific connection.** Observed with the library: the host's
   stream function chooses a direct connection when there is one, so a relayed
   connection never receives an exchange and is closed at the deadline. Opening
   the stream on the connection avoids it.
-
 - **A suspended node is a member.** `trust` suspends a node when a path to it
   exists and lacks only a fresh voucher. Authorization already treats that
   outcome on its own: it neither hands out nor rejects what it holds, and the
@@ -260,7 +259,6 @@ cache of who is known: the accounting keeps its own known set.
   nothing, which suits callers that load it first. A pre-authentication decision
   made without having looked at revocations would let a revoked key in, so it
   asks for an explicit empty set instead.
-
 - **Exempt known members from the cap.** The cap exists so that strangers cannot
   hold the node's connections. The same cap shuts out members that reconnect
   during a flood, and the flood costs the attacker nothing. A key authenticated
@@ -268,8 +266,9 @@ cache of who is known: the accounting keeps its own known set.
   it also keeps its own deadline. The residual risk is a revoked member that
   keeps connecting: it holds no slot but it is closed at the deadline, and its
   next exchange removes it from the known.
-- **Key without direction.** The first version of the model keyed entries with
-  direction and leaked the entry of every hole-punched connection.
+- **Key without direction.** The direction the handshake reports and the one the
+  connection reports afterwards differ for a hole-punched connection. An entry
+  keyed with direction was never found again by the later events and leaked.
 - **Count inbound only.** The node chooses its outbound connections; inbound
   ones are what a stranger controls.
 - **Lifetime counted from the connection.** The online part of pairing starts
@@ -291,6 +290,6 @@ cache of who is known: the accounting keeps its own known set.
 | Protocol identifiers and classes | `internal/preauth/protocol.go` |
 | The access table | `internal/preauth/access.go`; tests `TestAllowedMatrix` (one row per rule, every cell written out), `TestBusinessProtocolBeforeTheExchangeIsRefused`, `TestStrangerAfterTheExchangeMayOnlyPair`, `TestRelayReservationBeforeTheExchangeIsRefused`, `TestAllowedRefusesAnInvalidState`, `TestProtocolIdentifiers` |
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
-| The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
+| The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestHeldMembers`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
 | Parameters | `internal/preauth/params.go`; test `TestParamsValidate` |
-| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestHeldMembers`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` compares every answer with a second implementation under 40,000 random events and asserts how often each path was taken |
+| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` compares every answer with a second implementation under 40,000 random events and asserts how often each path was taken |
