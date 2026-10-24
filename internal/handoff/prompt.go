@@ -26,6 +26,9 @@ type PromptParams struct {
 	// message must wait before it renews the endpoint's re-prompt allowance
 	// and wakes the endpoint again.
 	MinInterval time.Duration
+	// MaxConcurrentTurns caps the turns that prompts have started and that are
+	// still running on one node, across all endpoints.
+	MaxConcurrentTurns int
 }
 
 // ErrInvalidParams is wrapped by errors about parameters that are not positive.
@@ -172,6 +175,9 @@ const (
 	// PromptHourlyCap: the endpoint has been woken as often as the hourly cap
 	// allows.
 	PromptHourlyCap
+	// PromptNodeFull: the endpoint may be prompted, but the node already runs
+	// as many prompt-started turns as it allows.
+	PromptNodeFull
 )
 
 // PromptDecision is the verdict of DecidePrompt.

@@ -12,7 +12,7 @@ var t0 = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 // after returns the instant d after t0.
 func after(d time.Duration) time.Time { return t0.Add(d) }
 
-var testPromptParams = PromptParams{MaxPerHour: 6, MinInterval: 5 * time.Minute}
+var testPromptParams = PromptParams{MaxPerHour: 6, MinInterval: 5 * time.Minute, MaxConcurrentTurns: 3}
 
 func delivered(d time.Duration, k PromptKind) Attempt {
 	return Attempt{At: after(d), Outcome: AttemptDelivered, Kind: k}
@@ -91,10 +91,12 @@ func TestPromptParamsValidate(t *testing.T) {
 		p    PromptParams
 		ok   bool
 	}{
-		{"positive values are valid", PromptParams{MaxPerHour: 1, MinInterval: time.Second}, true},
-		{"zero cap is rejected", PromptParams{MaxPerHour: 0, MinInterval: time.Second}, false},
-		{"negative cap is rejected", PromptParams{MaxPerHour: -1, MinInterval: time.Second}, false},
-		{"zero interval is rejected", PromptParams{MaxPerHour: 1}, false},
+		{"positive values are valid", PromptParams{MaxPerHour: 1, MinInterval: time.Second, MaxConcurrentTurns: 1}, true},
+		{"zero cap is rejected", PromptParams{MaxPerHour: 0, MinInterval: time.Second, MaxConcurrentTurns: 1}, false},
+		{"negative cap is rejected", PromptParams{MaxPerHour: -1, MinInterval: time.Second, MaxConcurrentTurns: 1}, false},
+		{"zero interval is rejected", PromptParams{MaxPerHour: 1, MaxConcurrentTurns: 1}, false},
+		{"zero node cap is rejected: unset is not unlimited", PromptParams{MaxPerHour: 1, MinInterval: time.Second}, false},
+		{"negative node cap is rejected", PromptParams{MaxPerHour: 1, MinInterval: time.Second, MaxConcurrentTurns: -1}, false},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
@@ -288,7 +290,7 @@ type promptSim struct {
 func (s *promptSim) decide(trigger PromptTrigger) PromptDecision {
 	s.t.Helper()
 	d, err := DecidePrompt(PromptInput{Trigger: trigger, Pending: s.pending, LastArrivalAt: s.arrival,
-		LastRecvAt: s.recv, Busy: s.busy, Attempts: s.history}, PromptParams{MaxPerHour: 20, MinInterval: 5 * time.Minute}, s.now)
+		LastRecvAt: s.recv, Busy: s.busy, Attempts: s.history}, PromptParams{MaxPerHour: 20, MinInterval: 5 * time.Minute, MaxConcurrentTurns: 8}, s.now)
 	if err != nil {
 		s.t.Fatal(err)
 	}
@@ -424,7 +426,7 @@ func TestPromptScenarioDeliveryKilledMidWayChangesNothingExternal(t *testing.T) 
 func TestPromptEnumerationsAreNeverZero(t *testing.T) {
 	for _, v := range []int{int(AttemptFailed), int(AttemptUnknown), int(AttemptDelivered),
 		int(PromptKindFirst), int(PromptKindReprompt), int(TriggerArrival), int(TriggerTurnEnd),
-		int(PromptHold), int(PromptSend)} {
+		int(PromptHold), int(PromptSend), int(PromptNodeFull)} {
 		if v == 0 {
 			t.Fatal("an enumeration value equals the zero value, so an unset field would pass for it")
 		}
