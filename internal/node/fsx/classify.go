@@ -80,3 +80,9 @@ func fail(op operation, tag Tag, step Step, path string, err error) *Error {
 	}
 	return &Error{Point: p, Path: path, Class: classOf(op, step), Err: err}
 }
+
+// reject builds the error of a call that was refused before any step ran:
+// nothing was attempted, so nothing durable can have changed.
+func reject(tag Tag, step Step, path string, err error) *Error {
+	return &Error{Point: Point{Key: Key{Tag: tag, Step: step}}, Path: path, Class: Failed, Err: err}
+}

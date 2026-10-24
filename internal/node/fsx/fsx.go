@@ -151,17 +151,25 @@ func CheckPath(p string) error {
 	return nil
 }
 
+// checkNotRoot is CheckPath for operations that cannot act on the root itself.
+func checkNotRoot(p string) error {
+	if err := CheckPath(p); err != nil {
+		return err
+	}
+	if p == "." {
+		return &fs.PathError{Op: "path", Path: p, Err: fs.ErrInvalid}
+	}
+	return nil
+}
+
 // CheckRename returns an error wrapping fs.ErrInvalid unless from and to are
-// valid, distinct-or-equal paths with the same parent directory and neither is
-// the root. Renames across directories are not offered: their crash behaviour
-// differs between file systems.
+// valid paths with the same parent directory, neither of them the root.
+// Renames across directories are not offered: their crash behaviour differs
+// between file systems.
 func CheckRename(from, to string) error {
 	for _, p := range []string{from, to} {
-		if err := CheckPath(p); err != nil {
+		if err := checkNotRoot(p); err != nil {
 			return err
-		}
-		if p == "." {
-			return &fs.PathError{Op: "rename", Path: p, Err: fs.ErrInvalid}
 		}
 	}
 	if path.Dir(from) != path.Dir(to) {
