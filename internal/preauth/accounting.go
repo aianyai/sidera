@@ -25,6 +25,14 @@ const (
 // handshake reports and the direction the connection later reports can differ
 // (a hole-punched connection is inbound at the handshake and outbound after),
 // and a counter keyed with it would never release the entry.
+//
+// The key is not a connection identifier, and none is available: the connection
+// gater, where the cap is enforced, sees a connection before the library has
+// given it one, so (peer, address) is the finest key that the gater and the
+// later connection events can both obtain. The model therefore accounts for at
+// most one inbound connection per key at a time (see Secured), which is what
+// lets every later event, named by the key alone, find the one connection it is
+// about.
 type ConnKey struct {
 	// Peer is the network public key the secure handshake authenticated. The
 	// network layer takes it from the peer identifier, which embeds it.
@@ -56,11 +64,13 @@ const (
 	// tracked for its deadline but does not count against the cap, so a flood
 	// cannot keep members out.
 	AdmitKnownMember
-	// AdmitAlreadyTracked: the key is already tracked (the same connection told
-	// twice); nothing changes.
-	AdmitAlreadyTracked
 	// AdmitOutbound: an outbound connection is not accounted.
 	AdmitOutbound
+	// RefuseDuplicateKey: an inbound connection with this key is already on the
+	// books, whether its peer is known as a member or not. Nothing changes: the
+	// entry stays the first connection's, and the network layer closes the new
+	// one.
+	RefuseDuplicateKey
 	// RefuseCapReached: UnauthenticatedCap connections are already
 	// unauthenticated.
 	RefuseCapReached
@@ -74,10 +84,10 @@ func (r AdmissionReason) String() string {
 		return "admit-counted"
 	case AdmitKnownMember:
 		return "admit-known-member"
-	case AdmitAlreadyTracked:
-		return "admit-already-tracked"
 	case AdmitOutbound:
 		return "admit-outbound"
+	case RefuseDuplicateKey:
+		return "refuse-duplicate-key"
 	case RefuseCapReached:
 		return "refuse-cap-reached"
 	case RefuseInvalidInput:
@@ -113,7 +123,8 @@ const (
 	// peer.
 	PlaceUntracked
 	// RefuseNonMemberFull: NonMemberConcurrency non-members are already held. The
-	// entry is dropped and the network layer closes the connection.
+	// entry is dropped and the network layer closes the connection, without
+	// reporting it as disconnected.
 	RefuseNonMemberFull
 	// RefuseNotCompleted: the state is unauthenticated, which a completed
 	// exchange never is; nothing changes.
@@ -235,6 +246,28 @@ func (a *Accounting) Known(peer ident.PublicKey) bool {
 // that is not known as a member is refused when UnauthenticatedCap are already
 // unauthenticated; one of a known member is always let through and does not
 // count. An outbound connection is let through and not accounted.
+//
+// An inbound connection whose key is already on the books is refused, known
+// member or not (RefuseDuplicateKey). The gater is asked once per connection, so
+// a second call for a tracked key is a second connection with the same peer and
+// address, not the same one told twice. Admitting it would let it share the
+// first connection's entry, and once either connection ended, the other would
+// outlive the books: no cap place, no ExchangeDeadline, no NonMemberLifetime.
+// A legitimate peer does not hold two simultaneous inbound connections from one
+// address, and a refused retry succeeds as soon as the first connection has
+// completed its exchange or ended.
+//
+// A refused connection is closed by the caller and produces no later event for
+// its key: the entry belongs to the first connection, and reporting the refused
+// one as disconnected would release it.
+//
+// For a known member the refusal comes before the exemption, so the exempt path
+// only ever creates an entry for a key that has none, and Counts.Exempt cannot
+// count an entry twice or lose one. Every entry therefore has exactly one
+// connection behind it and leaves with it: by Disconnected, by Sweep while
+// the connection never came up, or by Completed once it is a member or an
+// authorized person. No counter other than the entry itself exists, so there is
+// nothing to leak.
 func (a *Accounting) Secured(key ConnKey, dir Direction, now time.Time) Admission {
 	if !key.valid() || now.IsZero() || (dir != DirectionInbound && dir != DirectionOutbound) {
 		return Admission{VerdictRefuse, RefuseInvalidInput}
@@ -243,7 +276,7 @@ func (a *Accounting) Secured(key ConnKey, dir Direction, now time.Time) Admissio
 		return Admission{VerdictAllow, AdmitOutbound}
 	}
 	if _, ok := a.entries[key]; ok {
-		return Admission{VerdictAllow, AdmitAlreadyTracked}
+		return Admission{VerdictRefuse, RefuseDuplicateKey}
 	}
 	if a.Known(key.Peer) {
 		a.entries[key] = &entry{phase: phaseUnauthenticated, exempt: true, securedAt: now}
@@ -260,9 +293,13 @@ func (a *Accounting) Secured(key ConnKey, dir Direction, now time.Time) Admissio
 
 // Connected is called when the connection is established, which starts the clock
 // of the exchange deadline and of the non-member lifetime. It reports whether
-// the key is tracked. An outbound connection is never tracked; an inbound one
-// that is not means its entry was swept too early, which is a configuration
-// error in SweepInterval.
+// the key is tracked, which for the one connection the books hold for the key
+// means that this connection is the accounted one: the caller reports every
+// established connection and remembers the answer, because Disconnected may be
+// reported for the accounted connection only. An outbound connection is never
+// tracked. An inbound one that is not means its entry was swept before it came
+// up, which is a configuration error in SweepInterval, and no deadline binds it:
+// the caller closes it.
 func (a *Accounting) Connected(key ConnKey, now time.Time) bool {
 	e, ok := a.entries[key]
 	if !ok || now.IsZero() {
@@ -318,8 +355,12 @@ func (a *Accounting) Completed(key ConnKey, s State, now time.Time) Placement {
 	return Placement{VerdictAllow, PlaceNonMember}
 }
 
-// Disconnected is called when the connection ends. It releases whatever the
-// connection held.
+// Disconnected is called when the accounted connection of the key ends. It
+// releases whatever the connection held. The key names the entry, not the
+// connection, so the caller reports only the connection for which Connected
+// answered true and which Completed has not released since: a released
+// connection that ends while a newer connection of the same key is on the books
+// must not take the newer connection's entry with it.
 func (a *Accounting) Disconnected(key ConnKey) {
 	if e, ok := a.entries[key]; ok {
 		a.remove(key, e)

@@ -135,7 +135,10 @@ only through a positive answer from `trust` or `admin`.
 
 ### Connection accounting
 
-Three limits keep strangers from crowding out the cluster:
+Three limits keep strangers from crowding out the cluster. They rest on one
+rule of the books: at most one inbound connection per key (the peer's network
+key and the remote address) is tracked at a time, and a second one is refused.
+
 
 - **The aggregate cap.** At most `UnauthenticatedCap` inbound connections may be
   unauthenticated at once. The check runs where the connection gater still can
@@ -283,6 +286,26 @@ cache of who is known: the accounting keeps its own known set.
   it also keeps its own deadline. The residual risk is a revoked member that
   keeps connecting: it holds no slot but it is closed at the deadline, and its
   next exchange removes it from the known.
+- **One inbound connection per key.** The connection gater is asked once per
+  connection, before the library has given it an identifier, so (peer, address)
+  is the finest key both the gater and the later connection events can obtain.
+  A second call for a tracked key is therefore a second connection, not the same
+  one told twice. Admitted, it would share the first connection's entry, and
+  once either ended the other would live outside the books: past the cap, past
+  the 5-second deadline, past the non-member lifetime. So the second connection
+  is refused with a reason of its own, whether its peer is a known member or not
+  (the exemption is from the cap, not from the books). A legitimate peer does
+  not hold two simultaneous inbound connections from one address, and a refused
+  retry succeeds as soon as the first connection completed its exchange or
+  ended. The same rule keeps every entry tied to exactly one connection: the
+  exempt path only creates entries for keys that have none, so nothing is counted
+  twice, and an entry leaves with its connection (disconnect, sweep, or release
+  as a member). A reference count of connections per key was rejected: a
+  connection rejected after the handshake produces no event, so a count would
+  never reach zero. Because events name a key and not a connection, the caller
+  reports a disconnect only for the accounted connection (the one `Connected`
+  answered true for and `Completed` has not released), so a released connection
+  that ends cannot remove the entry of a newer one.
 - **Key without direction.** The direction the handshake reports and the one the
   connection reports afterwards differ for a hole-punched connection. An entry
   keyed with direction was never found again by the later events and leaked.
@@ -309,4 +332,4 @@ cache of who is known: the accounting keeps its own known set.
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
 | The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestHeldMembers`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
 | Parameters | `internal/preauth/params.go`; test `TestParamsValidate` |
-| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestNonMemberPersonsAndNodesShareTheNonMemberLimits`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` compares every answer with a second implementation under 40,000 random events and asserts how often each path was taken |
+| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestASecondInboundConnectionOnATrackedKeyIsRefused`, `TestADuplicateKeyIsRefusedBeforeTheCapIsLookedAt`, `TestADuplicateKeyOfAKnownMemberIsRefusedWithoutLeakingAnEntry`, `TestADuplicateKeyOfANonMemberIsRefused`, `TestADuplicateKeyIsRefusedUntilTheSweepForgetsALostEntry`, `TestAKeyIsFreeAgainOnceItsConnectionBecameAMember`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestNonMemberPersonsAndNodesShareTheNonMemberLimits`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` follows every connection by an identifier of its own that the model never sees, compares every answer with a second implementation under 40,000 random events, asserts at every step that each live inbound connection is on the books and bound by a deadline or was released as a member, that every connected entry has an open connection behind it and that nothing remains once all connections ended, and asserts how often each path was taken |

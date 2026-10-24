@@ -87,7 +87,7 @@ func admit(t *testing.T, a *Accounting, k ConnKey, now time.Time, want Admission
 	t.Helper()
 	got := a.Secured(k, DirectionInbound, now)
 	wantVerdict := VerdictAllow
-	if want == RefuseCapReached || want == RefuseInvalidInput {
+	if want == RefuseCapReached || want == RefuseInvalidInput || want == RefuseDuplicateKey {
 		wantVerdict = VerdictRefuse
 	}
 	if got.Verdict != wantVerdict || got.Reason != want {
@@ -207,11 +207,103 @@ func TestTheKeyHasNoDirection(t *testing.T) {
 	wantCounts(t, a, 0, 0, 0)
 }
 
-func TestSecuredTwiceForOneKeyChangesNothing(t *testing.T) {
+func refuseDuplicate(t *testing.T, a *Accounting, k ConnKey, now time.Time) {
+	t.Helper()
+	admit(t, a, k, now, RefuseDuplicateKey)
+}
+
+// The gater is asked once per connection, so a second call for a tracked key is
+// a second connection with the same peer and address. Admitting it would let it
+// share the first one's entry and outlive the books once the first ended.
+func TestASecondInboundConnectionOnATrackedKeyIsRefused(t *testing.T) {
 	a := newAccounting(t)
 	k := key(t, 1, "a")
 	admit(t, a, k, at(0), AdmitCounted)
-	admit(t, a, k, at(1), AdmitAlreadyTracked)
+	refuseDuplicate(t, a, k, at(1))
+	wantCounts(t, a, 1, 0, 0) // the refusal changed nothing
+	// The entry is still the first connection's: its deadline runs, and it is
+	// released when that connection ends.
+	a.Connected(k, at(1))
+	if got := a.Overdue(at(6)); len(got) != 1 || got[0] != k {
+		t.Fatalf("the first connection lost its deadline: %v", got)
+	}
+	a.Disconnected(k)
+	wantCounts(t, a, 0, 0, 0)
+	// With the first connection gone the key is free again.
+	admit(t, a, k, at(7), AdmitCounted)
+}
+
+func TestADuplicateKeyIsRefusedBeforeTheCapIsLookedAt(t *testing.T) {
+	a := newAccounting(t)
+	for i := byte(1); i <= 3; i++ {
+		admit(t, a, key(t, i, "a"), at(0), AdmitCounted)
+	}
+	refuseDuplicate(t, a, key(t, 1, "a"), at(0))
+	admit(t, a, key(t, 4, "a"), at(0), RefuseCapReached)
+	wantCounts(t, a, 3, 0, 0)
+}
+
+// Known members keep their exemption from the cap, and their first connection
+// is tracked like any other. The exempt path only creates an entry for a key
+// that has none, so a duplicate can neither count an entry twice nor replace it
+// and lose the first connection's count.
+func TestADuplicateKeyOfAKnownMemberIsRefusedWithoutLeakingAnEntry(t *testing.T) {
+	a := newAccounting(t)
+	m := ConnKey{peerKey(t, 50), "a"}
+	a.SetHeld([]ident.PublicKey{m.Peer})
+	admit(t, a, m, at(0), AdmitKnownMember)
+	refuseDuplicate(t, a, m, at(1))
+	refuseDuplicate(t, a, m, at(2))
+	wantCounts(t, a, 0, 1, 0)
+	a.Disconnected(m)
+	wantCounts(t, a, 0, 0, 0)
+	admit(t, a, m, at(3), AdmitKnownMember) // the key is free once its connection ended
+	wantCounts(t, a, 0, 1, 0)
+}
+
+// A duplicate of a non-member's key cannot take over the non-member's place or
+// outlive its lifetime.
+func TestADuplicateKeyOfANonMemberIsRefused(t *testing.T) {
+	a := newAccounting(t)
+	k := key(t, 1, "a")
+	admit(t, a, k, at(0), AdmitCounted)
+	a.Connected(k, at(0))
+	a.Completed(k, StateNonMemberNode, at(1))
+	refuseDuplicate(t, a, k, at(2))
+	wantCounts(t, a, 0, 0, 1)
+	if got := a.Overdue(at(40)); len(got) != 1 || got[0] != k {
+		t.Errorf("the non-member lifetime does not run: %v", got)
+	}
+}
+
+// A connection rejected after the handshake produces no event, so its entry
+// stays until the sweep, and a retry of the same key is refused until then.
+func TestADuplicateKeyIsRefusedUntilTheSweepForgetsALostEntry(t *testing.T) {
+	a := newAccounting(t)
+	k := key(t, 1, "a")
+	admit(t, a, k, at(0), AdmitCounted)
+	refuseDuplicate(t, a, k, at(2.9))
+	a.Sweep(at(3))
+	admit(t, a, k, at(3), AdmitCounted)
+	wantCounts(t, a, 1, 0, 0)
+}
+
+func TestAKeyIsFreeAgainOnceItsConnectionBecameAMember(t *testing.T) {
+	a := newAccounting(t)
+	k := key(t, 1, "a")
+	admit(t, a, k, at(0), AdmitCounted)
+	a.Completed(k, StateMember, at(1))
+	admit(t, a, k, at(2), AdmitKnownMember)
+	wantCounts(t, a, 0, 1, 0)
+}
+
+func TestAnOutboundConnectionOnATrackedKeyIsNotADuplicate(t *testing.T) {
+	a := newAccounting(t)
+	k := key(t, 1, "a")
+	admit(t, a, k, at(0), AdmitCounted)
+	if got := a.Secured(k, DirectionOutbound, at(1)); got != (Admission{VerdictAllow, AdmitOutbound}) {
+		t.Errorf("outbound on a tracked key: %v/%v", got.Verdict, got.Reason)
+	}
 	wantCounts(t, a, 1, 0, 0)
 }
 

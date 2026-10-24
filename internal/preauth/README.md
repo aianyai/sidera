@@ -106,13 +106,20 @@ timers, and applies the answers.
 ### Accounting
 
 - **Accounting.** Only inbound connections are counted. A connection is named by
-  the peer's network key and the remote address, with no direction. Rules, in the
-  order a connection lives them:
+  the peer's network key and the remote address, with no direction, and at most
+  one inbound connection per key is on the books at a time. Rules, in the order
+  a connection lives them:
   - `Secured` (the handshake is done, the gater can still refuse): an inbound
     connection of a peer not known as a member is refused when
     `UnauthenticatedCap` connections are already unauthenticated; one of a known
     member is always let through and does not count. Outbound connections are
     let through and not accounted.
+  - A second inbound connection on a key that is on the books is refused
+    (`RefuseDuplicateKey`), known member or not, and checked before the cap. The
+    gater is asked once per connection, so it means a second connection with
+    the same peer and address; sharing the first one's entry would let it
+    outlive the books once the first ended. The caller closes the refused
+    connection and reports nothing more for its key.
   - Known members are the peers whose exchange completed as a member or an
     authorized person (`Completed` learns them), plus the members of the
     certificates the node holds: `HeldMembers` selects them (the certificate is
@@ -125,7 +132,14 @@ timers, and applies the answers.
     of `NonMemberConcurrency` places or, when none is free, is refused and dropped
     (the caller closes it). The decision may change later on the same connection
     (pairing made a non-member node a member): call `Completed` again.
-  - `Disconnected` releases whatever the connection held.
+  - `Connected` answers whether the key is tracked: for the one connection
+    the books hold for a key, whether it is the accounted one. The caller
+    reports every established connection and remembers the answer; an inbound
+    connection answered false has no deadline and is closed.
+  - `Disconnected` releases whatever the connection held. The caller reports it
+    for the accounted connection only (`Connected` answered true, and
+    `Completed` has not released it since), because it names a key and not a
+    connection.
   - `Sweep` forgets entries not seen connected within `SweepInterval`: a
     connection can be rejected after the handshake without any other callback.
   - `Overdue` lists, in a fixed order, the connections to close: unauthenticated
