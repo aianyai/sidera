@@ -17,7 +17,7 @@ import (
 type Arrival struct {
 	// DeliveredAt is the delivery time a delivered report gave; zero if none.
 	DeliveredAt time.Time
-	// ArrivedAt is the earliest issue time of a report that proves arrival
+	// ArrivedAt is the earliest reported_at of a report that proves arrival
 	// (StatusReport.ProvesArrival); zero if none. The earliest is kept so that a
 	// later report cannot move the start of the window forward.
 	ArrivedAt time.Time

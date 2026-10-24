@@ -96,7 +96,7 @@ func (o *oracle) learnReport(e ident.EndpointID, f fact) {
 }
 
 // start: the earliest delivery time of a delivered report; else the earliest
-// issue time of a report that shows arrival; else none.
+// reported_at of a report that shows arrival; else none.
 func (o *oracle) start(e ident.EndpointID) (int, string, bool) {
 	best, bestArr := -1, -1
 	for _, f := range o.facts[key(e)] {
