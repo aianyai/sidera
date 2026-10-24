@@ -84,6 +84,12 @@ const (
 	// OpModifyAuthorizedList changes the authorized-persons list. Only the
 	// local owner may.
 	OpModifyAuthorizedList
+
+	// opEnd is the end sentinel: it is one past the last operation in the
+	// catalogue and is itself in none. Tests iterate every kind below it and
+	// use it as an out-of-catalogue sample, so a kind added above it is covered
+	// without touching them. Add every new operation above it.
+	opEnd
 )
 
 // PresetChangeClass is the effect of a preset change, classified by the caller

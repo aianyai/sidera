@@ -66,7 +66,7 @@ func TestCatalogueCoversEveryOperation(t *testing.T) {
 	for _, tc := range catalogue {
 		covered[tc.op.Kind] = true
 	}
-	for k := OpUnknown + 1; k <= OpModifyAuthorizedList; k++ {
+	for k := OpUnknown + 1; k < opEnd; k++ {
 		if !covered[k] {
 			t.Errorf("operation kind %d has no catalogue row", k)
 		}
@@ -76,7 +76,7 @@ func TestCatalogueCoversEveryOperation(t *testing.T) {
 func TestUnknownOperationIsDeniedToEveryone(t *testing.T) {
 	a := person(t, 1)
 	list := mustList(t, Entry{Person: a, Level: LevelFullControl})
-	for _, kind := range []OpKind{OpUnknown, OpModifyAuthorizedList + 1, -1} {
+	for _, kind := range []OpKind{OpUnknown, opEnd, -1} {
 		for name, actor := range map[string]Actor{
 			"local owner":  LocalOwner(),
 			"full control": RemotePerson(a, validCert(LevelFullControl)),
