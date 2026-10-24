@@ -92,6 +92,43 @@ network layer:
   hole-punched connection reports is outbound on both sides. An exchange on a
   connection that is already authenticated is ignored.
 
+### From the exchange to a state
+
+`Decide(facts, peerKey, exchange)` turns the message into a state. `peerKey` is
+the public key the secure handshake authenticated; it is the only identity the
+peer proved, and the certificate must name it. The decision verifies the
+certificate itself, so no caller can skip that.
+
+For a node:
+
+1. The record must verify as a network-key certificate. Otherwise refused.
+2. The serial is compared with the highest seen for the node (`DecideSerial`).
+   A higher one advances the state, which is returned in the decision and kept
+   even if the exchange is refused for another reason. The very certificate seen
+   at the highest serial is the normal case of a peer that connects again and is
+   accepted; a lower serial is an old network key and is refused; the same serial
+   with another digest is a conflict and is refused.
+3. The certificate must belong to the peer (`NetworkKeyBelongs` with the
+   revocation lookup of the set): a different key, a revoked certificate, an
+   expired one or one that has not begun is refused. A node whose identity key
+   has a self-revocation is refused as retired.
+4. `trust.Evaluate` decides: allowed directly or by inheritance is a member,
+   **suspended is a member**, denied is a non-member (pairing only).
+
+For a person:
+
+1. The record must verify as a device certificate, and the peer must hold the
+   device key it names. Otherwise refused.
+2. `admin.EffectiveLevel` with the local list decides. A revoked device key or
+   root key, an expired certificate or one that has not begun is refused. A
+   person with no standing on the list is a non-member. A level makes an
+   authorized person, at the lower of the list level and the certificate's cap.
+
+A refused exchange leaves the state unauthenticated; the connection is closed.
+Failure closed throughout: an unset time or peer key, an unset kind, and a
+missing revocation set are refused, and a member or an authorized person exists
+only through a positive answer from `trust` or `admin`.
+
 ## Why
 
 - **Default closed.** The table lists the exceptions and every other protocol
@@ -137,6 +174,31 @@ network layer:
   connection never receives an exchange and is closed at the deadline. Opening
   the stream on the connection avoids it.
 
+- **A suspended node is a member.** `trust` suspends a node when a path to it
+  exists and lacks only a fresh voucher. Authorization already treats that
+  outcome on its own: it neither hands out nor rejects what it holds, and the
+  sender sees nothing until trust returns or is denied. Refusing the connection
+  would turn a pause into a denial, and the vouchers that end it travel on member
+  protocols. The connection state follows `trust`'s outcome, the policy layer
+  gets the outcome itself.
+- **The same certificate again is not stale.** `DecideSerial` answers stale for a
+  certificate it has seen, because for storage "nothing new" is the right answer;
+  for a connection the very certificate at the highest serial is exactly what a
+  returning peer presents. Only a lower serial is an old key.
+- **The serial moves forward even when the exchange is refused.** The node did
+  issue that serial. An expired or revoked certificate with a higher serial still
+  makes every lower serial an old key, which is the point of keeping the highest
+  seen apart from the accepted certificate.
+- **A person without a standing is a non-member, not refused.** The certificate
+  is valid; the person is merely not listed here. Refusing would force the
+  connection down for a fact that is not wrong with the peer, and the state
+  leaves room for protocols a valid certificate alone may use. Such a connection
+  is bounded by the non-member lifetime and concurrency limits like any other.
+- **A missing revocation set is a refusal.** In `revocation` a `nil` set revokes
+  nothing, which suits callers that load it first. A pre-authentication decision
+  made without having looked at revocations would let a revoked key in, so it
+  asks for an explicit empty set instead.
+
 ## Where
 
 | Part | Code |
@@ -145,3 +207,4 @@ network layer:
 | Protocol identifiers and classes | `internal/preauth/protocol.go` |
 | The access table | `internal/preauth/access.go`; tests `TestAllowedMatrix` (one row per rule, every cell written out), `TestBusinessProtocolBeforeTheExchangeIsRefused`, `TestStrangerAfterTheExchangeMayOnlyPair`, `TestRelayReservationBeforeTheExchangeIsRefused`, `TestAllowedRefusesAnInvalidState`, `TestProtocolIdentifiers` |
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
+| The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |

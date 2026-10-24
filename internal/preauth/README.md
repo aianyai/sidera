@@ -18,6 +18,7 @@ timers, and applies the answers.
 | `State`                                                 | `StateUnauthenticated`, `StateNonMember`, `StateMember`, `StateAuthorizedPerson`; the zero value is unset.     |
 | `Exchange`, `NewNodeExchange`, `NewPersonExchange`, `Encode`, `DecodeExchange` | The certificate exchange message: kind plus the certificate record, canonical CBOR, at most `MaxMessageSize` bytes. Not a signed record. |
 | `ExchangeDeadline`                                      | The 5 seconds a connection has to complete the exchange.                                                        |
+| `Decide(Facts, peerKey, Exchange)`                      | From a received exchange and the local facts to a `Decision{State, Reason, ...}`: unauthenticated (refused), non-member, member or authorized person. |
 | `Allowed(state, Use)`                                   | The one table: whether a peer in a state may open a stream of a protocol or make a relay request. `Access{Verdict, Reason}`. |
 
 ## Rules
@@ -59,6 +60,32 @@ timers, and applies the answers.
   verification does both. Any message that decodes encodes to the identical
   bytes.
 
+- **The decision.** `Decide` verifies the certificate record against the
+  descriptor of its kind itself, so a caller cannot skip verification, and then:
+  - A node exchange is refused (state stays unauthenticated, the connection is
+    closed) when the record does not verify, its serial is older than the highest
+    seen or conflicts with it, the node is retired, the certificate is revoked,
+    expired or not yet valid, or it names a network key other than the one the
+    secure handshake authenticated. Otherwise `trust.Evaluate` decides: allowed
+    directly or by inheritance and **suspended** are members, denied is a
+    non-member. A suspended node stays a member because its trust is waiting for
+    a voucher, not gone; the policy layer gets the suspended outcome in
+    `Decision.Trust` and holds what it must.
+  - A person exchange is refused when the device certificate does not verify,
+    names a device key other than the authenticated one, is revoked (the device
+    key, or the person's root key), expired or not yet valid. Otherwise
+    `admin.EffectiveLevel` decides: a level is an authorized person, anything
+    else (not listed, entry expired) a non-member.
+  - **Failure closed.** An unset time, an unset peer key, an unset kind and a
+    `nil` revocation set are refused. A `nil` set is not "nothing revoked" here,
+    as it is in `revocation`: use `revocation.NewSet()` for a node that has
+    revoked nothing. No code path makes a node a member or a person authorized
+    without the positive answer of `trust` or `admin`.
+  - **The serial seen** is advanced in `Decision.SerialSeen` whenever a verified
+    certificate carries a higher serial, also when the exchange is refused for
+    another reason. The same certificate again (the normal reconnect) is not
+    stale; only a lower serial is.
+
 ## What the caller must guarantee
 
 - **The exchange runs on the specific connection**, opened with the
@@ -73,6 +100,14 @@ timers, and applies the answers.
 - **The deadline is `ExchangeDeadline` from the moment the connection exists**;
   a connection still unauthenticated then is closed.
 
+- The peer key passed to `Decide` is the public key the secure handshake
+  authenticated on this connection, and nothing else. It is the only identity the
+  peer proved; the message is what it claims.
+- `Facts` is loaded fresh: the revocation set holds every revocation the node
+  keeps, `Trust.Retired` is `Revocations.Retired()`, and `SerialSeen` is the
+  stored state per node. The caller stores `Decision.SerialSeen` when it is not
+  the zero value and keeps `Decision.NodeCertificate` as the node's accepted
+  certificate when the exchange completed.
 - Applications register their stream handlers only through the gated host that
   asks `Allowed` first. A handler registered on the raw host bypasses the gate;
   the library's own protocols are the ones registered that way on purpose.
