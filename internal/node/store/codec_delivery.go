@@ -78,7 +78,7 @@ func toItem(it delivery.Item) (itemJSON, error) {
 	if it.Ref.Sender.IsZero() || it.Ref.Recipient.IsZero() {
 		return itemJSON{}, errors.New("a feedback item without addresses")
 	}
-	if err := checkMessage(it.Ref.Message); err != nil {
+	if err := envelope.ValidMessageID(it.Ref.Message); err != nil {
 		return itemJSON{}, err
 	}
 	at, err := wreq(it.At, "the time of a feedback item")
@@ -117,7 +117,7 @@ func fromItem(j itemJSON) (delivery.Item, error) {
 		return it, err
 	}
 	it.Ref.Message = delivery.MessageID(j.Message)
-	if err := checkMessage(it.Ref.Message); err != nil {
+	if err := envelope.ValidMessageID(it.Ref.Message); err != nil {
 		return it, err
 	}
 	it.At = time.Time(j.At)
@@ -291,7 +291,7 @@ func encodeOut(r OutRecord) ([]byte, error) {
 		j.To = append(j.To, a.String())
 	}
 	if e.ReplyTo != "" {
-		if err := checkMessage(e.ReplyTo); err != nil {
+		if err := envelope.ValidMessageID(e.ReplyTo); err != nil {
 			return nil, err
 		}
 	}
@@ -438,7 +438,7 @@ func decodeOut(key OutKey, body []byte) (OutRecord, error) {
 	}
 	r.Envelope.ReplyTo, r.Envelope.Thread = delivery.MessageID(j.ReplyTo), j.Thread
 	if j.ReplyTo != "" {
-		if err := checkMessage(r.Envelope.ReplyTo); err != nil {
+		if err := envelope.ValidMessageID(r.Envelope.ReplyTo); err != nil {
 			return r, err
 		}
 	}
@@ -545,7 +545,7 @@ func toHandout(h HandoutFields) (*handoutJSON, error) {
 		return nil, err
 	}
 	if h.ReplyTo != "" {
-		if err := checkMessage(h.ReplyTo); err != nil {
+		if err := envelope.ValidMessageID(h.ReplyTo); err != nil {
 			return nil, err
 		}
 	}
@@ -555,7 +555,7 @@ func toHandout(h HandoutFields) (*handoutJSON, error) {
 func fromHandout(j *handoutJSON) (HandoutFields, error) {
 	h := HandoutFields{ContentType: j.ContentType, ReplyTo: delivery.MessageID(j.ReplyTo), Thread: j.Thread, Seq: j.Seq, SentAt: time.Time(j.SentAt)}
 	if h.ReplyTo != "" {
-		if err := checkMessage(h.ReplyTo); err != nil {
+		if err := envelope.ValidMessageID(h.ReplyTo); err != nil {
 			return h, err
 		}
 	}

@@ -60,28 +60,12 @@ func (k OutKey) Kind() Kind {
 	return KindOut
 }
 
-// checkMessage accepts what a message id can be in a key: 1 to MaxIDLen bytes
-// of visible ASCII. The key joins its fields with a space and a person reads
-// it in a log, so a space or a control character cannot be part of one. The
-// envelope package judges the id itself; this is what the key text can carry.
-func checkMessage(m delivery.MessageID) error {
-	if len(m) < 1 || len(m) > envelope.MaxIDLen {
-		return fmt.Errorf("message id of %d bytes, want 1 to %d", len(m), envelope.MaxIDLen)
-	}
-	for i := 0; i < len(m); i++ {
-		if m[i] < 0x21 || m[i] > 0x7e {
-			return fmt.Errorf("message id has the byte 0x%02x", m[i])
-		}
-	}
-	return nil
-}
-
 // Bytes is the key text.
 func (k OutKey) Bytes() ([]byte, error) {
 	if k.Sender.IsZero() {
 		return nil, errors.New("out key without a sending endpoint")
 	}
-	if err := checkMessage(k.Message); err != nil {
+	if err := envelope.ValidMessageID(k.Message); err != nil {
 		return nil, err
 	}
 	if n := len(k.Recipients); n < 1 || n > envelope.MaxRecipients {
@@ -111,7 +95,7 @@ func (k TargetKey) Bytes() ([]byte, error) {
 	if k.SenderNode.IsZero() || k.Sender.IsZero() || k.Recipient.IsZero() {
 		return nil, errors.New("target key with an identifier that is not set")
 	}
-	if err := checkMessage(k.Message); err != nil {
+	if err := envelope.ValidMessageID(k.Message); err != nil {
 		return nil, err
 	}
 	return []byte(k.String()), nil
@@ -244,7 +228,7 @@ func ParseKey(kind Kind, key []byte) (any, error) {
 			return nil, err
 		}
 		k := OutKey{Sender: sender, Message: delivery.MessageID(fields[1]), Control: kind == KindOutCtl}
-		if err := checkMessage(k.Message); err != nil {
+		if err := envelope.ValidMessageID(k.Message); err != nil {
 			return nil, err
 		}
 		for _, f := range fields[2:] {
@@ -272,7 +256,7 @@ func ParseKey(kind Kind, key []byte) (any, error) {
 			return nil, err
 		}
 		k := TargetKey{SenderNode: node, Sender: sender, Message: delivery.MessageID(fields[2]), Recipient: recipient}
-		if err := checkMessage(k.Message); err != nil {
+		if err := envelope.ValidMessageID(k.Message); err != nil {
 			return nil, err
 		}
 		return k, nil
