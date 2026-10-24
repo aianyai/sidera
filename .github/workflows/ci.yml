@@ -10,10 +10,14 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same pull request supersedes the older run. Runs on main
-# and manual runs are never cancelled: each commit on main keeps its own verdict.
+# A newer push to a pull request supersedes that request's older run. Every
+# other run (push to main, manual dispatch) is its own group, named by its run
+# id, so runs on main never cancel, replace or wait for one another and each
+# commit keeps its own verdict. A group holds one running and one pending run,
+# and a newer pending run replaces the older one, so sharing a group per branch
+# would drop the verdict of a commit pushed while another is still running.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

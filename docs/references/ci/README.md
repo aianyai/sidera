@@ -95,8 +95,19 @@ to the workflow.
   (`gh api repos/<owner>/<repo>/git/ref/tags/<tag>`, or `/tags` for a lightweight
   tag) and replace both the SHA and the comment.
 - **Concurrency**: a new push to a pull request cancels that request's older
-  run; runs on `main` and manual runs are never cancelled, so every commit on
-  `main` has its verdict.
+  run. Every other run, whether a push to `main` or a manual dispatch, is its
+  own concurrency group, named by its run id, so no run on `main` cancels,
+  replaces or waits for another and every commit on `main` has its verdict.
+  A concurrency group allows one running and one pending run, and a newer
+  pending run cancels the older one (GitHub's `queue` setting, default
+  `single`). Grouping `main` by branch would therefore drop the run of any
+  commit pushed while an earlier run is in progress and another is already
+  waiting; so would a manual re-run started right after a push. The price is
+  that two pushes close together run side by side on separate runners. The
+  alternative `queue: max` keeps runs in order but cannot be combined with
+  `cancel-in-progress: true`, which pull requests need, and with
+  `cancel-in-progress` given as an expression the documentation leaves the
+  combination undefined.
 - **Go version**: `actions/setup-go` reads it from the `toolchain` line of the
   root `go.mod` (setup-go prefers it over the `go` line), so CI installs the same
   patch release a local build uses; with only a `go 1.26.0` line it would install
