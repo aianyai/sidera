@@ -2,6 +2,7 @@ package txn_test
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -79,45 +80,61 @@ func TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards(t *testing
 		t.Errorf("predicate after a power loss following Recover = %v, %v; want empty", work, err)
 	}
 
-	// Every point is a point of the cleanup transaction, a recovery one, and
-	// the files go before the directories and the directories are synced last.
+	// The cleanup transaction is a recovery one: the files go before the
+	// directories and the directories are synced last. The settle transaction
+	// follows it, of the normal kind, so that only the cleanup counts as a
+	// recovery.
 	names := rec.names()
 	wantPrefix := []string{
 		"txn-cleanup/tmp.remove#1", "txn-cleanup/tmp.remove#2", "txn-cleanup/tmp.remove#3",
 		"txn-cleanup/trash.remove-all#1", "txn-cleanup/trash.remove-all#2",
 	}
-	if len(names) < len(wantPrefix)+2 || !reflect.DeepEqual(names[:len(wantPrefix)], wantPrefix) {
-		t.Fatalf("points = %v, want them to start with %v", names, wantPrefix)
+	end := slices.Index(names, "txn-cleanup/commit#1")
+	if end < len(wantPrefix)+1 || !reflect.DeepEqual(names[:len(wantPrefix)], wantPrefix) {
+		t.Fatalf("points = %v, want them to start with %v and have the cleanup commit after the directory syncs", names, wantPrefix)
 	}
-	tail := names[len(wantPrefix):]
-	for _, n := range tail[:len(tail)-1] {
+	for _, n := range names[len(wantPrefix):end] {
 		if !strings.HasPrefix(n, "txn-cleanup/dir.sync-dir#") {
-			t.Errorf("point %s among the directory syncs", n)
+			t.Errorf("point %s among the directory syncs of the cleanup", n)
 		}
 	}
-	if tail[len(tail)-1] != "txn-cleanup/commit#1" {
-		t.Errorf("last point = %s, want txn-cleanup/commit#1", tail[len(tail)-1])
+	settle := names[end+1:]
+	if len(settle) < 2 || settle[len(settle)-1] != "txn-settle/commit#1" {
+		t.Fatalf("points after the cleanup = %v, want the settle transaction ending in txn-settle/commit#1", settle)
+	}
+	for _, n := range settle[:len(settle)-1] {
+		if !strings.HasPrefix(n, "txn-settle/dir.sync-dir#") {
+			t.Errorf("point %s among the directory syncs of the settle", n)
+		}
 	}
 	for i, k := range rec.kinds {
-		if k != txn.Recovery {
-			t.Errorf("point %s reported as kind %d, want Recovery", names[i], k)
+		want := txn.Recovery
+		if i > end {
+			want = txn.Normal
+		}
+		if k != want {
+			t.Errorf("point %s reported as kind %d, want %d", names[i], k, want)
 		}
 	}
 }
 
-// With nothing to remove, Recover touches nothing and reaches no point: a
-// start on a clean disk is not a recovery.
-func TestRecoverOnACleanDiskReachesNoPoint(t *testing.T) {
+// With nothing to remove, Recover removes nothing and reaches no point of the
+// recovery kind: a start on a clean disk is not a recovery. The only points it
+// reaches are the directory syncs of the settle transaction, which is of the
+// normal kind.
+func TestRecoverOnACleanDiskReachesNoRecoveryPoint(t *testing.T) {
 	r := newRig(t, nil)
 	put(t, r.mem, map[string]string{"a/x": "1"})
 	if err := r.w.Recover(); err != nil {
 		t.Fatal(err)
 	}
-	if n := r.rec.count(); n != 0 {
-		t.Errorf("Recover on a clean disk reached %d points: %v", n, r.rec.names())
+	for i, k := range r.rec.kinds {
+		if k == txn.Recovery {
+			t.Errorf("Recover on a clean disk reached the recovery point %s", r.rec.names()[i])
+		}
 	}
 	for _, c := range r.w.Coverage() {
-		if c.Hits != 0 {
+		if c.Key.Kind == txn.Recovery && c.Hits != 0 {
 			t.Errorf("%v has %d hits on a clean disk", c.Key.Key, c.Hits)
 		}
 	}

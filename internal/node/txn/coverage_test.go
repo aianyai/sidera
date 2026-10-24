@@ -70,8 +70,10 @@ func TestCoverageCountsHitsPerKeyAndSplitsThemByKind(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("hits:\n got %v\nwant %v", got, want)
 	}
-	if byKind[txn.Normal] != 20 {
-		t.Errorf("%d Normal keys, want 20", byKind[txn.Normal])
+	// multi has 20 keys, and the settle transaction has its directory sync and
+	// its commit.
+	if byKind[txn.Normal] != 20+2 {
+		t.Errorf("%d Normal keys, want %d", byKind[txn.Normal], 20+2)
 	}
 	// The recovery declarations are the cleanup transaction (4 steps' worth
 	// of keys: remove, remove-all, sync-dir and its commit) and replay (5 and

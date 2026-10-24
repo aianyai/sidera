@@ -1,6 +1,7 @@
 package txn_test
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -51,22 +52,18 @@ func TestTransactionTableIsValid(t *testing.T) {
 	}
 }
 
-func TestInternalDeclarationsAreRecoveryDeclarations(t *testing.T) {
+// The cleanup transaction repairs a crash and is of the recovery kind. The
+// settle transaction runs at every start, so it is of the normal kind: a clean
+// start must not count as a recovery.
+func TestInternalDeclarationsHaveTheirKinds(t *testing.T) {
 	internal := txn.Internal()
-	if len(internal) == 0 {
-		t.Fatal("no internal declaration")
-	}
-	var cleanup *txn.Decl
+	want := map[string]txn.Kind{"txn-cleanup": txn.Recovery, "txn-settle": txn.Normal}
+	got := map[string]txn.Kind{}
 	for _, d := range internal {
-		if d.Kind != txn.Recovery {
-			t.Errorf("internal declaration %q has kind %d, want Recovery", d.Name, d.Kind)
-		}
-		if d.Name == "txn-cleanup" {
-			cleanup = d
-		}
+		got[d.Name] = d.Kind
 	}
-	if cleanup == nil {
-		t.Fatal("no txn-cleanup declaration")
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("internal declarations and kinds = %v, want %v", got, want)
 	}
 	if _, err := txn.NewTable(internal...); err != nil {
 		t.Errorf("the internal declarations are not a valid table: %v", err)
