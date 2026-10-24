@@ -71,26 +71,38 @@ func peerGoroutines() []string {
 	return found
 }
 
+// settledPeerGoroutines waits up to wait for every goroutine of a Peer to end
+// and returns the stacks of those still alive. Peer.Close returns once the
+// reader and the writer have ended; its request workers and its notification
+// loop notice the end of the connection on their own schedule, so right after
+// a Close the goroutines of a finished peer are still on their way out.
+func settledPeerGoroutines() []string {
+	deadline := time.Now().Add(wait)
+	for {
+		left := peerGoroutines()
+		if len(left) == 0 || time.Now().After(deadline) {
+			return left
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // leakGuard fails the test if any goroutine of a Peer is still alive after
 // the test and its cleanups. Register it before anything that creates a peer.
 // Tests using it must not run in parallel.
+//
+// Peers that an earlier test closed without waiting for their goroutines (the
+// tests of package peer itself do not use the guard) may still be winding down
+// when the test starts, so the starting check waits for them like the final
+// check does; only goroutines that stay alive fail the test.
 func leakGuard(t *testing.T) {
 	t.Helper()
-	if n := len(peerGoroutines()); n != 0 {
-		t.Fatalf("%d peer goroutines alive before the test started", n)
+	if left := settledPeerGoroutines(); len(left) != 0 {
+		t.Fatalf("%d peer goroutines alive before the test started:\n%s", len(left), strings.Join(left, "\n\n"))
 	}
 	t.Cleanup(func() {
-		deadline := time.Now().Add(wait)
-		for {
-			left := peerGoroutines()
-			if len(left) == 0 {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Errorf("%d peer goroutines leaked:\n%s", len(left), strings.Join(left, "\n\n"))
-				return
-			}
-			time.Sleep(10 * time.Millisecond)
+		if left := settledPeerGoroutines(); len(left) != 0 {
+			t.Errorf("%d peer goroutines leaked:\n%s", len(left), strings.Join(left, "\n\n"))
 		}
 	})
 }
