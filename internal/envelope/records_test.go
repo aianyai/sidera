@@ -46,6 +46,7 @@ func TestStatusReportRules(t *testing.T) {
 		{"a reject reason comes only with rejected", func(w *statusReportWire) { w.Reject = 1 }},
 		{"rejected has a reason", func(w *statusReportWire) { w.State, w.DeliveredAt = 3, nil }},
 		{"the reject reason is known", func(w *statusReportWire) { w.State, w.Reject, w.DeliveredAt = 3, 11, nil }},
+		{"an unknown cause comes only with delivery_unknown", func(w *statusReportWire) { w.UnknownCause = 1 }},
 		{"a block cause comes only with accepted", func(w *statusReportWire) { w.BlockedCause = 1 }},
 		{"the block cause is known", func(w *statusReportWire) { w.State, w.BlockedCause, w.DeliveredAt = 1, 4, nil }},
 		{"delivered has a delivery time", func(w *statusReportWire) { w.DeliveredAt = nil }},
@@ -117,6 +118,145 @@ func TestStatusReportWireTablesAreIndependentOfGoOrder(t *testing.T) {
 	}
 }
 
+func TestUnknownCauseWireTableIsIndependentOfGoOrder(t *testing.T) {
+	if got, ok := toWireCode(unknownCauseWire, UnknownCauseLostAtTarget); !ok || got != 1 {
+		t.Errorf("lost_at_target: wire %d, want 1", got)
+	}
+	if _, ok := toWireCode(unknownCauseWire, UnknownCauseNone); ok {
+		t.Error("an absent cause has a wire value; it is never written")
+	}
+	if _, ok := toWireCode(unknownCauseWire, UnknownCause(200)); ok {
+		t.Error("an out-of-range cause has a wire value")
+	}
+}
+
+func unknownReport(t testing.TB, c UnknownCause) StatusReport {
+	return StatusReport{
+		Sender: localNode(t), Message: "m", Recipient: ep(1),
+		Status:       delivery.StatusReport{State: delivery.StateDeliveryUnknown},
+		UnknownCause: c, ReportedAt: t0,
+	}
+}
+
+func TestStatusReportUnknownCauseRoundTrips(t *testing.T) {
+	d := StatusReportDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(time.Hour))
+	for _, c := range []UnknownCause{UnknownCauseNone, UnknownCauseLostAtTarget} {
+		t.Run(c.String(), func(t *testing.T) {
+			rep := unknownReport(t, c)
+			signed, err := record.Seal(d, rep, signerOf(t, keyNetworkA))
+			requireNoErr(t, err)
+			enc, err := signed.Encode()
+			requireNoErr(t, err)
+			v, err := record.Verify(d, mustDecodeRecord(t, enc))
+			requireNoErr(t, err)
+			if v.Payload() != rep {
+				t.Errorf("payload = %+v, want %+v", v.Payload(), rep)
+			}
+		})
+	}
+}
+
+func TestStatusReportRefusesAnUnrepresentableUnknownCause(t *testing.T) {
+	d := StatusReportDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+	refused := func(t *testing.T, rep StatusReport) {
+		t.Helper()
+		_, err := record.Seal(d, rep, signerOf(t, keyNetworkA))
+		requireErr(t, err, record.ErrPayload)
+		_, err = statusReportToWire(rep)
+		requireErr(t, err, ErrReport)
+	}
+	for _, c := range []UnknownCause{2, 200} {
+		t.Run("a cause without a wire value is refused: "+c.String(), func(t *testing.T) {
+			refused(t, unknownReport(t, c))
+		})
+	}
+	for name, st := range map[string]delivery.StatusReport{
+		"accepted":         {State: delivery.StateAccepted},
+		"delivered":        {State: delivery.StateDelivered},
+		"rejected":         {State: delivery.StateRejected, Reject: delivery.RejectExpired},
+		"closed":           {State: delivery.StateClosedUnconfirmed},
+		"accepted blocked": {State: delivery.StateAccepted, Blocked: true, BlockedCause: delivery.CauseRuntimeAuth},
+	} {
+		t.Run("a cause on "+name+" is refused rather than dropped", func(t *testing.T) {
+			rep := unknownReport(t, UnknownCauseLostAtTarget)
+			rep.Status = st
+			if st.State == delivery.StateDelivered {
+				rep.DeliveredAt = t0
+			}
+			refused(t, rep)
+		})
+	}
+}
+
+// reportPayload is a status report payload written out by hand, in key order:
+// the given state, the pairs that follow it (key 4), reported_at, the pairs
+// that follow that (key 7), the sender, and the tail (key 9 and what follows).
+func reportPayload(pairs, state, afterState, afterReported, tail string) []byte {
+	return hexcat(pairs,
+		"01", "686d73672d30303034",
+		"02", "5001010101010101010101010101010101",
+		"03", state, afterState,
+		"06", "1a6553f484", afterReported,
+		"08", "582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7",
+		tail)
+}
+
+func TestStatusReportUnknownCauseDecodeRules(t *testing.T) {
+	verify := func(payload []byte) (StatusReport, error) {
+		rec, err := record.Sign(StatusReportType, payload, signerOf(t, keyNetworkA))
+		requireNoErr(t, err)
+		sr, err := VerifyStatusReport(rec, nodeOf(t, keyIdentityA), localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(time.Hour))
+		if err != nil {
+			return StatusReport{}, err
+		}
+		return sr.Report(), nil
+	}
+	t.Run("key 9 with delivery_unknown is accepted", func(t *testing.T) {
+		r, err := verify(reportPayload("a6", "04", "", "", "0901"))
+		requireNoErr(t, err)
+		if r.UnknownCause != UnknownCauseLostAtTarget || r.Status.State != delivery.StateDeliveryUnknown {
+			t.Errorf("got %+v", r)
+		}
+	})
+	t.Run("key 9 absent means no cause", func(t *testing.T) {
+		r, err := verify(reportPayload("a5", "04", "", "", ""))
+		requireNoErr(t, err)
+		if r.UnknownCause != UnknownCauseNone {
+			t.Errorf("cause = %v, want none", r.UnknownCause)
+		}
+	})
+	t.Run("an explicit zero is refused", func(t *testing.T) {
+		_, err := verify(reportPayload("a6", "04", "", "", "0900"))
+		requireErr(t, err, record.ErrPayload)
+	})
+	t.Run("a duplicate key is refused", func(t *testing.T) {
+		_, err := verify(reportPayload("a7", "04", "", "", "09010901"))
+		requireErr(t, err, record.ErrPayload)
+	})
+	for _, v := range []string{"02", "0a", "1818", "20"} {
+		t.Run("the value "+v+" is refused", func(t *testing.T) {
+			_, err := verify(reportPayload("a6", "04", "", "", "09"+v))
+			requireErr(t, err, record.ErrPayload)
+		})
+	}
+	for _, c := range []struct{ name, pairs, state, afterState, afterReported string }{
+		{"accepted", "a6", "01", "", ""},
+		{"delivered", "a7", "02", "", "071a6553f484"},
+		{"rejected", "a7", "03", "0401", ""},
+		{"closed_unconfirmed", "a6", "05", "", ""},
+	} {
+		t.Run("key 9 with "+c.name+" is refused", func(t *testing.T) {
+			// the same payload without key 9 is valid, so the refusal is the
+			// cause's alone
+			without := string([]byte{c.pairs[0], c.pairs[1] - 1})
+			_, err := verify(reportPayload(without, c.state, c.afterState, c.afterReported, ""))
+			requireNoErr(t, err)
+			_, err = verify(reportPayload(c.pairs, c.state, c.afterState, c.afterReported, "0901"))
+			requireErr(t, err, record.ErrPayload)
+		})
+	}
+}
+
 // targetRecords returns a target-side delivery record in each reportable state.
 func targetRecords(t testing.TB) map[string]delivery.Record {
 	t.Helper()
@@ -180,6 +320,19 @@ func TestStatusReportProvesArrival(t *testing.T) {
 			t.Errorf("state %s: ProvesArrival = %v, want %v", s, !w, w)
 		}
 	}
+	t.Run("a report of lost_at_target does not prove arrival", func(t *testing.T) {
+		r := StatusReport{Status: delivery.StatusReport{State: delivery.StateDeliveryUnknown}, UnknownCause: UnknownCauseLostAtTarget, ReportedAt: t0}
+		if r.ProvesArrival() {
+			t.Error("a target that lost its record proves nothing about when the message arrived")
+		}
+		if got := (Arrival{}).Learn(r); !got.ArrivedAt.IsZero() {
+			t.Errorf("a report of lost_at_target opened the reply window at %v", got.ArrivedAt)
+		}
+		r.UnknownCause = UnknownCauseNone
+		if !r.ProvesArrival() {
+			t.Error("delivery_unknown without a cause proves arrival")
+		}
+	})
 }
 
 func TestStatusReportRefusesAnUnreportableState(t *testing.T) {

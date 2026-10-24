@@ -72,6 +72,17 @@ func TestGoldenStatusReports(t *testing.T) {
 		Status:     delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectBacklogExpired},
 		ReportedAt: t0.Add(4000 * time.Second),
 	})
+	goldenRecord(t, "delivery unknown, lost at target", goldenReportLostAtTarget, goldenReportLostAtTargetDigest, goldenReportLostAtTargetSignedBytes, d, StatusReport{
+		Sender: b, Message: "msg-0004", Recipient: ep(1),
+		Status:       delivery.StatusReport{State: delivery.StateDeliveryUnknown},
+		UnknownCause: UnknownCauseLostAtTarget,
+		ReportedAt:   t0.Add(900 * time.Second),
+	})
+	goldenRecord(t, "delivery unknown, no cause given", goldenReportHandedOver, goldenReportHandedOverDigest, goldenReportHandedOverSignedBytes, d, StatusReport{
+		Sender: b, Message: "msg-0005", Recipient: ep(1),
+		Status:     delivery.StatusReport{State: delivery.StateDeliveryUnknown},
+		ReportedAt: t0.Add(950 * time.Second),
+	})
 }
 
 func TestGoldenControlReplies(t *testing.T) {

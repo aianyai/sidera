@@ -129,6 +129,76 @@ var goldenReportRejected = hexcat(
 const goldenReportRejectedDigest = "4a7a4000a5059f66cd4201bc4596d812a87a3d1e08e09f394a592b335905c095"
 const goldenReportRejectedSignedBytes = "117369646572612f7265636f72642d736967167369646572612f7374617475732d7265706f72742f314aa601686d73672d3030303302500101010101010101010101010101010103030407061a655400a008582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7"
 
+// A status report: msg-0004 is in an unknown state because the target lost what it had stored about it (key 9, unknown_cause, 1 = lost_at_target).
+var goldenReportLostAtTarget = hexcat(
+	"a3", // { 3 pairs: the record
+	"01", // 1: type
+	"767369646572612f7374617475732d7265706f72742f31", // "sidera/status-report/1"
+	"02",                                 // 2: payload
+	"584a",                               // bstr(74) payload
+	"a6",                                 // embedded { 6 pairs: status report payload
+	"01",                                 // embedded 1: message
+	"686d73672d30303034",                 // embedded "msg-0004"
+	"02",                                 // embedded 2: recipient
+	"5001010101010101010101010101010101", // embedded h'01010101010101010101010101010101'
+	"03",                                 // embedded 3: state
+	"04",                                 // embedded 4 (delivery_unknown)
+	"06",                                 // embedded 6: reported_at
+	"1a6553f484",                         // embedded 1700000900
+	"08",                                 // embedded 8: sender
+	"582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7", // embedded h'64e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7' (node B, the sending node)
+	"09", // embedded 9: unknown_cause
+	"01", // embedded 1 (lost_at_target)
+	"03", // 3: signatures
+	"81", // [ 1 signature, sorted by encoded public key
+	"a2", // { 2 pairs: signature item
+	"01", // 1: public key
+	"a2", // { 2 pairs: public key
+	"01", // 1: algorithm
+	"01", // 1 (Ed25519)
+	"02", // 2: key bytes
+	"5820d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737", // h'd04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737' (seed 0x11 x32)
+	"02", // 2: signature
+	"5840276a70a4f02475887a8069f30fa01a54793e1786085fd873897470bb57c806ab6bd8434ed27385c196b26ec56744b1d38ca5024c5d6359d674520486f2ab590e", // bstr(64) Ed25519 signature
+)
+
+const goldenReportLostAtTargetDigest = "a48e26a20e819113fb245bf0688c102843b495a00424ab904b76173d3bedbd39"
+const goldenReportLostAtTargetSignedBytes = "117369646572612f7265636f72642d736967167369646572612f7374617475732d7265706f72742f314aa601686d73672d303030340250010101010101010101010101010101010304061a6553f48408582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb70901"
+
+// A status report: msg-0005 is in an unknown state after the target handed it over; key 9 is absent.
+var goldenReportHandedOver = hexcat(
+	"a3", // { 3 pairs: the record
+	"01", // 1: type
+	"767369646572612f7374617475732d7265706f72742f31", // "sidera/status-report/1"
+	"02",                                 // 2: payload
+	"5848",                               // bstr(72) payload
+	"a5",                                 // embedded { 5 pairs: status report payload
+	"01",                                 // embedded 1: message
+	"686d73672d30303035",                 // embedded "msg-0005"
+	"02",                                 // embedded 2: recipient
+	"5001010101010101010101010101010101", // embedded h'01010101010101010101010101010101'
+	"03",                                 // embedded 3: state
+	"04",                                 // embedded 4 (delivery_unknown)
+	"06",                                 // embedded 6: reported_at
+	"1a6553f4b6",                         // embedded 1700000950
+	"08",                                 // embedded 8: sender
+	"582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7", // embedded h'64e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7' (node B, the sending node)
+	"03", // 3: signatures
+	"81", // [ 1 signature, sorted by encoded public key
+	"a2", // { 2 pairs: signature item
+	"01", // 1: public key
+	"a2", // { 2 pairs: public key
+	"01", // 1: algorithm
+	"01", // 1 (Ed25519)
+	"02", // 2: key bytes
+	"5820d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737", // h'd04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737' (seed 0x11 x32)
+	"02", // 2: signature
+	"584028bc8f70e1b1fca6edd3b9e1847625c9a46b5939131831a42c685e8318638cc7580b21e4c108e1e4f2f7a6195ab62c596c3fb3add454c778b2232bb37ba4290f", // bstr(64) Ed25519 signature
+)
+
+const goldenReportHandedOverDigest = "d0c5d80182e91d18e2defb4b9adc9acf2ba3baf0080825a4c395f8286826c650"
+const goldenReportHandedOverSignedBytes = "117369646572612f7265636f72642d736967167369646572612f7374617475732d7265706f72742f3148a501686d73672d303030350250010101010101010101010101010101010304061a6553f4b608582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7"
+
 // A control reply: ctl-0001 created session endpoint 0x03.
 var goldenReplyCreated = hexcat(
 	"a3", // { 3 pairs: the record

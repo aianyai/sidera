@@ -12,7 +12,7 @@ import (
 // identical bytes, and nothing panics, whatever the input.
 
 func FuzzDecodeEnvelope(f *testing.F) {
-	for _, g := range [][]byte{goldenEnvelopeMessage, goldenEnvelopeSessionCreate, goldenEnvelopeReply} {
+	for _, g := range [][]byte{goldenEnvelopeMessage, goldenEnvelopeSessionCreate, goldenEnvelopeReply, replyCarryingLostAtTargetReport(f)} {
 		f.Add(g)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -38,8 +38,21 @@ func FuzzDecodeEnvelope(f *testing.F) {
 	})
 }
 
+// replyCarryingLostAtTargetReport is the golden reply with its status report
+// replaced by the one that carries an unknown cause, so the evidence list seeds
+// the key.
+func replyCarryingLostAtTargetReport(tb testing.TB) []byte {
+	tb.Helper()
+	e, err := Decode(goldenEnvelopeReply, testLimits)
+	requireNoErr(tb, err)
+	e.Evidence[1] = mustDecodeRecord(tb, goldenReportLostAtTarget)
+	b, err := e.Encode(testLimits)
+	requireNoErr(tb, err)
+	return b
+}
+
 func FuzzVerifyStatusReport(f *testing.F) {
-	for _, g := range [][]byte{goldenReportDelivered, goldenReportBlocked, goldenReportRejected} {
+	for _, g := range [][]byte{goldenReportDelivered, goldenReportBlocked, goldenReportRejected, goldenReportLostAtTarget, goldenReportHandedOver} {
 		f.Add(g)
 	}
 	node := nodeOf(f, keyIdentityA)
