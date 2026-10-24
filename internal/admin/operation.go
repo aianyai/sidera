@@ -85,6 +85,40 @@ const (
 	// local owner may.
 	OpModifyAuthorizedList
 
+	// Operations for managing a single node. Each is held to the local owner
+	// until remote management exists: a level that cannot yet be exercised
+	// remotely cannot be validated, and loosening one later is a one-line,
+	// tested change of RequirementOf.
+
+	// OpEnableAdapter enables an installed adapter instance, which makes this
+	// machine run its code. Kept apart from OpDisableAdapter because enabling
+	// adds code and disabling only withdraws, so a remote level would differ.
+	OpEnableAdapter
+	// OpDisableAdapter disables an adapter instance.
+	OpDisableAdapter
+	// OpChangeEndpointSettings changes the settings of one endpoint, such as its
+	// backlog and longest queueing time. It is not OpManageEndpointSession,
+	// which only manages lifecycles among what is already approved.
+	OpChangeEndpointSettings
+	// OpChangeNodeSettings changes the node-wide settings.
+	OpChangeNodeSettings
+	// OpAcknowledgeAlert acknowledges an alert raised to the owner.
+	OpAcknowledgeAlert
+	// OpClearClockRollback clears the pause that a detected rollback of the
+	// wall clock put on signing.
+	OpClearClockRollback
+	// OpConfirmRevocationBackup records that the owner has stored the
+	// revocation statement safely.
+	OpConfirmRevocationBackup
+	// OpRetireIdentity retires this node's identity for good.
+	OpRetireIdentity
+	// OpExportRevocation returns the revocation statement, which can void this
+	// node's identity. It is a read that needs the local owner, not view: it
+	// is not SideEffecting, and its result must never be stored.
+	OpExportRevocation
+	// OpStopDaemon asks the running daemon to shut down normally.
+	OpStopDaemon
+
 	// opEnd is the end sentinel: it is one past the last operation in the
 	// catalogue and is itself in none. Tests iterate every kind below it and
 	// use it as an out-of-catalogue sample, so a kind added above it is covered
@@ -154,8 +188,8 @@ func (r Requirement) level() Level {
 // let more nodes in or back, let this machine run more code, or loosen internal
 // policy need full control; operations that only tighten or withdraw need
 // manage; reading needs view; the authorized-persons list is the local owner's
-// alone. The second result is false for an operation that is not in the
-// catalogue.
+// alone, as are the operations for managing a single node. The second result
+// is false for an operation that is not in the catalogue.
 func RequirementOf(op Operation) (Requirement, bool) {
 	switch op.Kind {
 	case OpRead, OpQueryOperationResult:
@@ -180,7 +214,11 @@ func RequirementOf(op Operation) (Requirement, bool) {
 	case OpConfirmTrust, OpEnableInheritance, OpExtendGracePeriod,
 		OpClearLocallyRevoked, OpInstallAdapter:
 		return RequireFullControl, true
-	case OpModifyAuthorizedList:
+	case OpModifyAuthorizedList,
+		OpEnableAdapter, OpDisableAdapter, OpChangeEndpointSettings,
+		OpChangeNodeSettings, OpAcknowledgeAlert, OpClearClockRollback,
+		OpConfirmRevocationBackup, OpRetireIdentity, OpExportRevocation,
+		OpStopDaemon:
 		return RequireLocalOwner, true
 	default:
 		return 0, false
@@ -188,9 +226,20 @@ func RequirementOf(op Operation) (Requirement, bool) {
 }
 
 // SideEffecting reports whether the operation changes state. Every
-// side-effecting management request carries an operation ID.
+// side-effecting management request carries an operation ID, and its result is
+// stored with the request's fingerprint.
+//
+// OpExportRevocation is the one exception among the operations that need more
+// than view: it is a read that needs a high level and changes nothing. Its
+// result is the revocation statement, so it must never be stored, and a
+// request that changes nothing has nothing for replay protection to guard.
 func (op Operation) SideEffecting() bool {
-	return op.Kind != OpRead && op.Kind != OpQueryOperationResult && op.Kind != OpUnknown
+	switch op.Kind {
+	case OpRead, OpQueryOperationResult, OpUnknown, OpExportRevocation:
+		return false
+	default:
+		return true
+	}
 }
 
 // IsConfigChange reports whether the operation changes a versioned setting.
@@ -203,7 +252,9 @@ func (op Operation) IsConfigChange() bool {
 	case OpEnableInheritance, OpDisableInheritance,
 		OpExtendGracePeriod, OpShortenGracePeriod,
 		OpChangePolicy, OpChangePreset,
-		OpEditDeclaration, OpChangeRelaySettings, OpSetLANDiscovery:
+		OpEditDeclaration, OpChangeRelaySettings, OpSetLANDiscovery,
+		OpEnableAdapter, OpDisableAdapter,
+		OpChangeEndpointSettings, OpChangeNodeSettings:
 		return true
 	default:
 		return false
