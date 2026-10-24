@@ -202,6 +202,22 @@ func TestFeedbackQueue(t *testing.T) {
 			t.Errorf("later flush %+v", got)
 		}
 	})
+	t.Run("a notice stops counting toward the cap exactly when its rate window ends", func(t *testing.T) {
+		var q FeedbackQueue
+		for i, m := range []string{"m1", "m2", "m3"} {
+			_ = q.Add(item("s1", "n11", m, KindRejected, time.Duration(i)*time.Second))
+		}
+		if got, _ := q.Flush(at(2*time.Minute), testParams); len(got) != 2 {
+			t.Fatalf("first flush sent %d notices, want the cap of 2", len(got))
+		}
+		release := at(2*time.Minute + testParams.RateWindow)
+		if got, _ := q.Flush(release.Add(-time.Nanosecond), testParams); len(got) != 0 {
+			t.Errorf("a nanosecond before the window ends, flush sent %+v", got)
+		}
+		if got, _ := q.Flush(release, testParams); len(got) != 1 || got[0].Items[0].Ref.Message != "m3" {
+			t.Errorf("when the window ends, flush sent %+v, want the held notice", got)
+		}
+	})
 	t.Run("the cap counts per sender endpoint", func(t *testing.T) {
 		var q FeedbackQueue
 		for _, m := range []string{"m1", "m2", "m3"} {

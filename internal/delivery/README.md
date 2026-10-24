@@ -16,6 +16,7 @@ reasons behind the rules.
 | `NewTargetControlRecord(acceptBefore, reportBy)` | Create the target's `Record` of a control signal: never queued for `recv`, no backlog deadline, delivered by `EventReplyCommitted`. |
 | `Record.Apply(now, Event)` | Applies one fact or occurrence. Returns the new record and an `Outcome` (applied or ignored with a reason, the transition, and the feedback to give). |
 | `Record.Tick(now)` | Everything due by time alone: lease expiry, backlog expiry, the settle deadline, closing after `report_by`. |
+| `Record.NextTick()` | The earliest instant at which `Tick` could change the record; the zero time for a final record. |
 | `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
 | `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A page's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
 | `Record.StatusReport`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery, and the one rule by which the sender applies it. |
@@ -23,7 +24,7 @@ reasons behind the rules.
 | `IntakeAuthorization(authz.Verdict)` | The one mapping from the policy's verdict to an `Authorization`: allow, suspend, or a denial with the `RejectReason` the sender hears. |
 | `CheckDedup`, `NewDedupRecord`, `DedupRecord.WithReply` | Deduplication, with the stored reply of a control signal. |
 | `TransitionFeedback`, `Kind` | Which feedback a change of state calls for; the fixed wording of each kind. |
-| `FeedbackQueue` (`Add`, `Flush`), `FeedbackParams`, `MergeKeyOf` | Merging and rate-capping pending feedback into notices. |
+| `FeedbackQueue` (`Add`, `Flush`, `NextFlush`), `FeedbackParams`, `MergeKeyOf` | Merging and rate-capping pending feedback into notices; `NextFlush` is the earliest instant at which `Flush` would send one. |
 | `ReportBy`, `SettleBy`, `BacklogDeadline`, `DedupRetainUntil`, `StatusReportRetainUntil`, `IdempotencyKeyRetainUntil`, `ValidateEndpointMaxQueue` | Deadline and retention arithmetic. |
 
 `Apply`, `Tick`, `Handout` and `Ack` change a record; every state change goes
@@ -168,7 +169,18 @@ correction and the blocked notice.
   never passes a control record to `Handout`, `Ack`, `EventNotified` or
   `EventBlocked`.
 - Run `Tick` before `Handout`, and whenever a lease, backlog, settle or
-  `report_by` instant may have passed.
+  `report_by` instant may have passed. A scheduler arms its timer for
+  `Record.NextTick()` (the zero time: no timer) and for
+  `FeedbackQueue.NextFlush(params)`, and asks again after every change to the
+  record or the queue, because the answers follow their state. The instant may
+  already be past; the package reads no clock and owns no timer. The scheduler
+  never works out `Tick`'s deadlines from the record's fields itself.
+- Every timed rule of `Tick` is a `Record` deadline method listed in
+  `tickDeadlines`, which `NextTick` reads. Adding a timed rule means adding its
+  deadline method and listing it there, and extending the property-test
+  generator and `requiredNextTickPaths` with it. A window boundary of the
+  feedback queue is likewise defined once: `mergeDueAt` for the merge window and
+  `rateReleaseAt` for the rate window.
 - Whether delivery is blocked is decided by the caller (the prompt logic); this
   package only turns the decision into feedback.
 - Digests passed to dedup are computed by the caller over everything that must

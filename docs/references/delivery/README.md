@@ -117,6 +117,36 @@ an endpoint that is absent, and all the rules that refuse without a declaration
 by the endpoint are reported alike as `unauthorized`, so the sender does not
 learn which rule refused it.
 
+### When the next Tick and the next Flush are due
+
+`Record.NextTick` returns the earliest instant at which `Tick` could change the
+record, or the zero time when none is pending, which is exactly the case for a
+final record. It is the earliest of the deadlines `Tick` consults that apply to
+the record in its present state:
+
+| Deadline | Instant | Applies to |
+| -------- | ------- | ---------- |
+| control settle | `report_by - margin` | an accepted control record |
+| lease settle | `report_by - margin` | an accepted target message under an open lease |
+| lease expiry | `Lease.ExpiresAt` | an accepted target message under an open lease |
+| backlog | `BacklogDeadline` | an accepted target message without a lease |
+| close | the nanosecond after `report_by` | every record that is not final |
+
+`Tick` closes strictly after `report_by`, so the close instant is the first
+nanosecond past it. The instant can be in the past of the caller's clock when a
+deadline was missed. It follows the record's state: ask again after `Tick`, after
+any event, and after a hand-out, a renewal or an acknowledgement.
+
+`FeedbackQueue.NextFlush(params)` returns the earliest instant at which `Flush`
+would send a notice, or the zero time when nothing is pending. For each sender
+endpoint with items waiting it is the later of the end of the merge window of the
+sender's oldest item and the instant at which fewer than `RateCap` of the
+sender's sent notices are still inside the rate window (when the `RateCap`-th most
+recent of them leaves it); the answer is the earliest over the senders. It
+refuses unset parameters as `Flush` does. Dropping sent notices that have left
+the rate window, which `Flush` does along the way, changes no later result and
+is not counted as a change.
+
 ### Leases, acknowledgements, chunks
 
 `recv` leases a message for 5 minutes. A lease is renewed only while the
@@ -308,6 +338,23 @@ permission still reads it.
   committed late still corrects it.
 - **No scheduler.** A timer inside the package would need a clock; contract
   packages read none, so callers run `Tick` when an instant may have passed.
+- **The package answers "when next".** A scheduler that guessed from the fields
+  ("which instant matters in which state") would restate `Tick`'s rules outside
+  the package, and miss a deadline the day `Tick` gains one. `NextTick` and
+  `NextFlush` read the same deadline definitions and parameter arithmetic that
+  `Tick` and `Flush` act on: the `deadline` methods of `Record`, all listed in
+  `tickDeadlines` (`schedule.go`), and `mergeDueAt` and `rateReleaseAt` in
+  `merge.go`, the one place each window boundary is defined (`countsTowardCap`
+  and `rateFreeAt` both read `rateReleaseAt`). A timed rule added to `Tick` is a
+  deadline method listed in `tickDeadlines`, and extends the property-test
+  generator and `requiredNextTickPaths`. The answer and the action cannot drift apart. Asking too
+  early would be harmless, since `Tick` only acts on instants that have come, but
+  waiting for a fixed poll interval would delay settlement and feedback by that
+  interval. The package still reads no clock: the caller owns the timer.
+- **The lease deadlines apply only under a lease, the backlog deadline only
+  without one.** That is how `Tick` consults them: a backlog deadline that passes
+  while a lease is open does nothing until the lease ends, so reporting it would
+  wake the scheduler for no change.
 
 ## Where
 
@@ -348,7 +395,17 @@ permission still reads it.
 - `internal/delivery/dedup.go`: deduplication. Tests: `TestCheckDedup`,
   `TestDedupReply`.
 - `internal/delivery/merge.go`: merge keys, `FeedbackQueue`. Tests:
-  `TestMergeKey`, `TestFeedbackParamsValidate`, `TestFeedbackQueue`.
+  `TestMergeKey`, `TestFeedbackParamsValidate`, `TestFeedbackQueue` (among
+  its cases, the exact instant at which a sent notice leaves the rate window).
+- `internal/delivery/schedule.go`: the deadlines `Tick` consults,
+  `Record.NextTick`, `FeedbackQueue.NextFlush`. Tests:
+  `TestNextTickNamesEachDeadline` and `TestNextFlushNamesEachDeadline` (instants
+  written out by hand), `TestNextFlushRefusesUnsetParameters`, and the property
+  tests `TestPropertyNextTickAgreesWithFineStepTick` and
+  `TestPropertyNextFlushAgreesWithFineStepFlush`, which run the real `Tick` and
+  `Flush` at every minute and a nanosecond either side of it around random
+  records and queues, and fail when a deadline kind is the answer fewer than 20
+  times.
 - Acceptance scenarios: `internal/delivery/scenario_test.go`
   (`TestScenario*`, among them `TestScenarioForcedClosure` and
   `TestScenarioStatusReportApplication`). The property test over random event

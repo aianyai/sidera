@@ -8,6 +8,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/ident"
 )
 
 // scheduleSeeds is how many random records and queues each property test
@@ -494,6 +496,7 @@ func TestNextFlushNamesEachDeadline(t *testing.T) {
 		{"a notice sent long ago does not hold a group", FeedbackQueue{Pending: []Item{item(1, 1, 60*time.Minute)}, Sent: []SentNotice{sent(1, 0)}}, p, at(65 * time.Minute)},
 		{"a rate window that ends before the merge window does not delay it", FeedbackQueue{Pending: []Item{item(1, 1, 20*time.Minute)}, Sent: []SentNotice{sent(1, -10*time.Minute)}}, p, at(25 * time.Minute)},
 		{"with a cap of two the older of two recent notices frees a slot", FeedbackQueue{Pending: []Item{item(1, 1, 0)}, Sent: []SentNotice{sent(1, 12*time.Minute), sent(1, 10*time.Minute)}}, cap2, at(40 * time.Minute)},
+		{"with more recent notices than the cap the cap-th most recent one decides", FeedbackQueue{Pending: []Item{item(1, 1, 0)}, Sent: []SentNotice{sent(1, 5*time.Minute), sent(1, 10*time.Minute), sent(1, 12*time.Minute)}}, cap2, at(40 * time.Minute)},
 		{"with a cap of two one recent notice holds nothing", FeedbackQueue{Pending: []Item{item(1, 1, 0)}, Sent: []SentNotice{sent(1, 10*time.Minute)}}, cap2, at(5 * time.Minute)},
 		{"another sender's notices do not count toward the cap", FeedbackQueue{Pending: []Item{item(1, 1, 0)}, Sent: []SentNotice{sent(2, 4*time.Minute)}}, p, at(5 * time.Minute)},
 		{"a held sender does not hold another sender's due group", FeedbackQueue{Pending: []Item{item(1, 1, 0), item(2, 2, 3*time.Minute)}, Sent: []SentNotice{sent(1, 4*time.Minute)}}, p, at(8 * time.Minute)},
@@ -536,7 +539,8 @@ func TestNextFlushRefusesUnsetParameters(t *testing.T) {
 }
 
 // scheduleQueue builds a queue by a random run of Add and Flush at whole-minute
-// instants, so that Pending and Sent are whatever those two leave.
+// instants, so that Pending and Sent are whatever those two leave, and
+// sometimes adds sent notices directly.
 func scheduleQueue(rng *rand.Rand) (*FeedbackQueue, FeedbackParams, time.Time) {
 	windows := []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 10 * time.Minute}
 	rateWindows := []time.Duration{5 * time.Minute, 10 * time.Minute, 30 * time.Minute, time.Hour}
@@ -562,11 +566,21 @@ func scheduleQueue(rng *rand.Rand) (*FeedbackQueue, FeedbackParams, time.Time) {
 			panic(err)
 		}
 	}
+	if rng.Intn(4) == 0 {
+		// A queue loaded from storage may hold more notices than the cap in
+		// one window, for example after the cap was lowered.
+		for n := 1 + rng.Intn(5); n > 0; n-- {
+			q.Sent = append(q.Sent, SentNotice{Sender: addr(1, byte(1+rng.Intn(3))), At: now.Add(-time.Duration(rng.Intn(61)) * time.Minute)})
+		}
+	}
 	return q, p, now
 }
 
 // describeNextFlush says which parameter decided the instant, judged from the
-// queue's fields alone, or "" when it is none of them.
+// queue's fields alone, or "" when it is none of them. The rate path counts
+// only when the instant is the end of the rate window of the RateCap-th newest
+// notice a sender sent: an older or newer notice that happens to end its window
+// at the same instant does not release the cap.
 func describeNextFlush(q *FeedbackQueue, p FeedbackParams, next time.Time) string {
 	if next.IsZero() {
 		return "none: nothing pending"
@@ -575,8 +589,16 @@ func describeNextFlush(q *FeedbackQueue, p FeedbackParams, next time.Time) strin
 	for _, it := range q.Pending {
 		window = window || next.Equal(it.At.Add(p.MergeWindow))
 	}
+	sentBy := map[ident.Address][]time.Time{}
 	for _, s := range q.Sent {
-		rate = rate || next.Equal(s.At.Add(p.RateWindow))
+		sentBy[s.Sender] = append(sentBy[s.Sender], s.At)
+	}
+	for _, sent := range sentBy {
+		if len(sent) < p.RateCap {
+			continue
+		}
+		sort.Slice(sent, func(i, j int) bool { return sent[i].After(sent[j]) })
+		rate = rate || next.Equal(sent[p.RateCap-1].Add(p.RateWindow))
 	}
 	switch {
 	case rate && p.RateCap > 1:

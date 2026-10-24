@@ -32,6 +32,25 @@ func (p FeedbackParams) Validate() error {
 	return nil
 }
 
+// mergeDueAt is the instant at which a group whose first item was decided at
+// opened has waited out the merge window.
+func mergeDueAt(opened time.Time, p FeedbackParams) time.Time {
+	return opened.Add(p.MergeWindow)
+}
+
+// rateReleaseAt is the instant at which a notice sent at sentAt stops counting
+// toward the rate cap: the end of its rate window. It is the one definition of
+// that boundary; Flush and NextFlush both read it.
+func rateReleaseAt(sentAt time.Time, p FeedbackParams) time.Time {
+	return sentAt.Add(p.RateWindow)
+}
+
+// countsTowardCap reports whether a notice sent at sentAt still counts toward
+// the rate cap at now.
+func countsTowardCap(sentAt, now time.Time, p FeedbackParams) bool {
+	return now.Before(rateReleaseAt(sentAt, p))
+}
+
 // DeliveryRef names one delivery for feedback purposes.
 type DeliveryRef struct {
 	// Sender is the sender endpoint that receives the feedback.
@@ -154,7 +173,7 @@ func (q *FeedbackQueue) Flush(now time.Time, p FeedbackParams) ([]Notice, error)
 	recent := q.Sent[:0]
 	perSender := map[ident.Address]int{}
 	for _, s := range q.Sent {
-		if now.Sub(s.At) < p.RateWindow {
+		if countsTowardCap(s.At, now, p) {
 			recent = append(recent, s)
 			perSender[s.Sender]++
 		}
@@ -178,7 +197,7 @@ func (q *FeedbackQueue) Flush(now time.Time, p FeedbackParams) ([]Notice, error)
 	}
 	keys := make([]MergeKey, 0, len(groups))
 	for k := range groups {
-		if now.Sub(opened[k]) >= p.MergeWindow {
+		if !now.Before(mergeDueAt(opened[k], p)) {
 			keys = append(keys, k)
 		}
 	}

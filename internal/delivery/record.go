@@ -349,7 +349,7 @@ func (r Record) closeIfDue(now time.Time) (Record, Outcome, error) {
 	if r.State.IsTerminal() {
 		return r, ignored(r.State, IgnoreAlreadyFinal), nil
 	}
-	if !now.After(r.ReportBy) {
+	if !r.closeDeadline().reachedBy(now) {
 		return r, ignored(r.State, IgnoreNotDueYet), nil
 	}
 	return r.moveTo(StateClosedUnconfirmed, RejectNone)
@@ -514,7 +514,8 @@ func (r Record) ApplyStatusReport(now time.Time, rep StatusReport) (Record, []Ou
 
 // Tick applies everything that is due by time alone and returns the outcomes
 // in the order they happened. Run it whenever the clock may have passed a
-// lease expiry, BacklogDeadline, SettleBy or ReportBy of a record.
+// lease expiry, BacklogDeadline, SettleBy or ReportBy of a record, or at
+// NextTick.
 //
 // A target record is settled in this order: a lease that is still open at
 // SettleBy becomes delivery_unknown; otherwise a lease past its expiry goes
@@ -525,6 +526,11 @@ func (r Record) ApplyStatusReport(now time.Time, rep StatusReport) (Record, []Ou
 // closes. A control record has no lease and no backlog: accepted at SettleBy it
 // becomes delivery_unknown, because the signal was handed to the adapter and
 // its reply was never committed, and then closes after ReportBy like any other.
+//
+// Every timed rule of Tick is a deadline method of Record, listed in
+// tickDeadlines, which NextTick reads. Adding a rule means adding its deadline
+// method and listing it there, and extending the property-test generator and
+// requiredNextTickPaths with it.
 func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 	var outs []Outcome
 	step := func(n Record, o Outcome, err error) error {
@@ -535,34 +541,32 @@ func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 		outs = append(outs, o)
 		return nil
 	}
-	if r.Side == SideTarget && r.Control && r.State == StateAccepted && !now.Before(SettleBy(r.ReportBy)) {
+	if r.controlSettleDeadline().reachedBy(now) {
 		if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
 			return r, outs, err
 		}
 	}
-	if r.hasQueue() && r.State == StateAccepted && r.Lease.Active {
-		switch {
-		case !now.Before(SettleBy(r.ReportBy)):
+	switch {
+	case r.leaseSettleDeadline().reachedBy(now):
+		if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
+			return r, outs, err
+		}
+	case r.leaseExpiryDeadline().reachedBy(now):
+		if r.Lease.Handouts >= MaxLeases {
 			if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
 				return r, outs, err
 			}
-		case !now.Before(r.Lease.ExpiresAt):
-			if r.Lease.Handouts >= MaxLeases {
-				if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
-					return r, outs, err
-				}
-			} else {
-				r.Lease.Active = false
-				outs = append(outs, Outcome{Result: ResultApplied, From: StateAccepted, To: StateAccepted, Requeued: true})
-			}
+		} else {
+			r.Lease.Active = false
+			outs = append(outs, Outcome{Result: ResultApplied, From: StateAccepted, To: StateAccepted, Requeued: true})
 		}
 	}
-	if r.hasQueue() && r.State == StateAccepted && !r.Lease.Active && !now.Before(r.BacklogDeadline) {
+	if r.backlogDeadline().reachedBy(now) {
 		if err := step(r.closeForcibly(RejectBacklogExpired)); err != nil {
 			return r, outs, err
 		}
 	}
-	if !r.State.IsTerminal() && now.After(r.ReportBy) {
+	if r.closeDeadline().reachedBy(now) {
 		if err := step(r.moveTo(StateClosedUnconfirmed, RejectNone)); err != nil {
 			return r, outs, err
 		}

@@ -193,11 +193,10 @@ func (r Record) NextPart() int {
 }
 
 // handoutDue reports whether a deadline that Tick settles has already passed.
+// Only an accepted message of the target's queue is handed out, so the lease
+// and backlog deadlines apply as they do in Tick.
 func (r Record) handoutDue(now time.Time) bool {
-	if r.Lease.Active {
-		return !now.Before(r.Lease.ExpiresAt) || !now.Before(SettleBy(r.ReportBy))
-	}
-	return !now.Before(r.BacklogDeadline)
+	return r.leaseSettleDeadline().reachedBy(now) || r.leaseExpiryDeadline().reachedBy(now) || r.backlogDeadline().reachedBy(now)
 }
 
 // SortForRecv orders records for one recv call: those on which the endpoint
