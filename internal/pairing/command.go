@@ -368,7 +368,7 @@ func (s State) Initiate(w World, c Conn, sid SessionID, req Request, in Initiati
 	if err := w.validate(); err != nil {
 		return s, Outcome{}, nil, err
 	}
-	if err := c.validate(); err != nil {
+	if err := w.validateConn(c); err != nil {
 		return s, Outcome{}, nil, err
 	}
 	if s.sessionIndex(sid) >= 0 {

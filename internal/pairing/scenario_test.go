@@ -2225,3 +2225,28 @@ func TestRetirementIsReadFromTheRevocationSetOnly(t *testing.T) {
 		}
 	})
 }
+
+// A trust view that is not for the local end of the connection is refused. With
+// no Local the "already directly trusted" guard could not see the credential the
+// node already holds, and a second credential would have been made.
+func TestTheTrustViewMustBeForTheLocalEndOfTheConnection(t *testing.T) {
+	for _, name := range []string{"a view with no local node", "a view of the other node"} {
+		t.Run(name, func(t *testing.T) {
+			s, a, b := standardPair(t)
+			a.view.Credentials = append(a.view.Credentials, trust.Credential{Digest: trust.CredentialDigest{9}, A: a.party.node, B: b.party.node})
+			if name == "a view with no local node" {
+				a.view.Local, b.view.Local = ident.NodeID{}, ident.NodeID{}
+			} else {
+				a.view.Local, b.view.Local = b.party.node, a.party.node
+			}
+			if _, _, _, err := a.state.Initiate(a.world(), a.conn(b), 1, a.owner(), Initiation{Target: b.party.node}, a.rng, s.now); !errors.Is(err, ErrWorld) {
+				t.Fatalf("Initiate: %v, want ErrWorld", err)
+			}
+			next, _, err := b.state.TargetOpen(b.world(), 1, s.now)
+			must(t, err)
+			if _, _, err := next.TargetReceive(b.world(), b.conn(a), 1, []byte{0}, b.rng, s.now); !errors.Is(err, ErrWorld) {
+				t.Fatalf("TargetReceive: %v, want ErrWorld", err)
+			}
+		})
+	}
+}

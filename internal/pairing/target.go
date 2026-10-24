@@ -67,7 +67,7 @@ func (s State) TargetReceive(w World, c Conn, sid SessionID, frame []byte, rand 
 	}
 	switch sess.phase {
 	case phaseFirst:
-		if err := c.validate(); err != nil {
+		if err := w.validateConn(c); err != nil {
 			return s, nil, err
 		}
 		sess.conn = c

@@ -48,7 +48,8 @@ type World struct {
 	// package that owns it defines.
 	Revocations *revocation.Set
 	// Trust is the trust view: whom the node trusts directly and whom its owner
-	// has revoked locally. Its Retired set is not read: retirement is judged
+	// has revoked locally. Its Local must be the node of the local end of every
+	// connection a call is given. Its Retired set is not read: retirement is judged
 	// from Revocations alone.
 	Trust trust.View
 	// List is the authorized-persons list.
@@ -72,6 +73,21 @@ func (w World) validate() error {
 	}
 	if w.Revocations == nil {
 		return fmt.Errorf("%w: no revocation set", ErrWorld)
+	}
+	return nil
+}
+
+// validateConn checks the connection facts against the world: the connection's
+// local end is this node, the node the trust view is for. A trust view of
+// another node, or one with no node (whose zero Local no peer can equal), would
+// judge partners against someone else's trust: a zero Local, for one, makes the
+// "already directly trusted" guard pass and lets a second credential through.
+func (w World) validateConn(c Conn) error {
+	if err := c.validate(); err != nil {
+		return err
+	}
+	if w.Trust.Local != c.Local.node {
+		return fmt.Errorf("%w: the trust view is not for the local end of the connection", ErrWorld)
 	}
 	return nil
 }

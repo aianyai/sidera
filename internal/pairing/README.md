@@ -106,6 +106,11 @@ them, and stores the records it hands out.
   "the certificate `Decide` accepted", not "a certificate `DecideSerial`
   accepts".) The negotiated
   protocol identifier comes from the stream.
+- Pass a `World` whose `Trust.Local` is the node of the local end of every `Conn`
+  (`Initiate` and `TargetReceive` refuse a mismatch with `ErrWorld`): a view of
+  no node or of another node would judge partners by someone else's trust, and a
+  zero `Local` would let the "already directly trusted" guard pass and a second
+  credential be made.
 - Give `crypto/rand` as the source of randomness. A target that repeats a nonce
   lets an attacker learn it in one session and use it in the next, so the
   randomness must not repeat after a virtual machine is snapshotted, cloned or
