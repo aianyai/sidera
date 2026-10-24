@@ -187,6 +187,18 @@ func checkToken(s string) error {
 	return nil
 }
 
+// ValidMessageID reports whether id is a message id this package accepts when
+// it decodes an envelope, a status report or a control reply: 1 to MaxIDLen
+// bytes of visible ASCII. An error wraps ErrID. Whoever stores or prints an id
+// outside an envelope (a record key, for one) asks here, so that what it
+// accepts is exactly what a peer can have sent.
+func ValidMessageID(id delivery.MessageID) error {
+	if err := checkToken(string(id)); err != nil {
+		return fmt.Errorf("%w: %v", ErrID, err)
+	}
+	return nil
+}
+
 // checkContentType accepts printable ASCII (0x20 to 0x7e), as a media type
 // with parameters is written.
 func checkContentType(s string) error {

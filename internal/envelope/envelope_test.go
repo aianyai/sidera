@@ -780,3 +780,43 @@ func TestSystemEndpointIsNoRecipient(t *testing.T) {
 		requireNoErr(t, err)
 	})
 }
+
+func TestValidMessageIDIsTheRuleTheDecoderAppliesToIds(t *testing.T) {
+	cases := []struct {
+		rule string
+		id   string
+		ok   bool
+	}{
+		{"one visible byte is an id", "a", true},
+		{"the lowest visible byte is accepted", "!", true},
+		{"the highest visible byte is accepted", "~", true},
+		{"an id of MaxIDLen bytes is accepted", strings.Repeat("x", MaxIDLen), true},
+		{"punctuation is part of an id", `ctl-0001/a.b:c"d'e`, true},
+		{"an id is not empty", "", false},
+		{"an id is at most MaxIDLen bytes", strings.Repeat("x", MaxIDLen+1), false},
+		{"an id has no space", "a b", false},
+		{"an id has no leading space", " a", false},
+		{"an id has no control byte", "a\x07b", false},
+		{"an id has no newline", "a\nb", false},
+		{"an id has no delete byte", "a\x7fb", false},
+		{"an id is ASCII", "mé", false},
+	}
+	for _, c := range cases {
+		t.Run(c.rule, func(t *testing.T) {
+			err := ValidMessageID(delivery.MessageID(c.id))
+			if c.ok != (err == nil) {
+				t.Fatalf("ValidMessageID(%q) = %v, want ok=%v", c.id, err, c.ok)
+			}
+			if err != nil && !errors.Is(err, ErrID) {
+				t.Fatalf("ValidMessageID(%q) = %v, want an error wrapping ErrID", c.id, err)
+			}
+			// The decoder is the authority: an id decodes in an envelope exactly when it is valid.
+			w := wireOf(t, baseMessage(t))
+			w.ID = c.id
+			_, derr := fromWire(w, testLimits)
+			if c.ok != (derr == nil) {
+				t.Fatalf("fromWire with id %q = %v, but ValidMessageID said ok=%v", c.id, derr, c.ok)
+			}
+		})
+	}
+}

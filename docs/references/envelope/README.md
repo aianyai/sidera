@@ -21,7 +21,7 @@ is a new type string.
 | Key | Field | Notes |
 | --- | ----- | ----- |
 | 1 | type | `sidera/envelope/1` |
-| 2 | `id` | 1 to 128 bytes of visible ASCII; the same for every retry, path and recipient |
+| 2 | `id` | 1 to 128 bytes of visible ASCII (`ValidMessageID`); the same for every retry, path and recipient |
 | 3 | `to` | list of `{1: node, 2: endpoint}`; the recipients on the target node, or all of them when `disclose_recipients` is set |
 | 4 | multi-recipient flag | the message as sent has more than one recipient, whatever `to` shows |
 | 5 | `disclose_recipients` | the sender lets each recipient see the whole list |
@@ -472,7 +472,8 @@ which may still admit it.
   `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`,
   `TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply`,
   `TestAReportDatedAfterTheDeliverysReportByIsIgnored`);
-  `envelope_test.go` (`TestATooLargeBodyIsToldApartFromAMalformedOne`, and the
+  `envelope_test.go` (`TestATooLargeBodyIsToldApartFromAMalformedOne`,
+  `TestValidMessageIDIsTheRuleTheDecoderAppliesToIds`, and the
   disclosed-list rows of `TestRequestDigest`); `fuzz_test.go`.
   `internal/reply/reply_test.go` holds the named acceptance scenarios
   (`TestAfterInboundTighteningAReplyAndASessionCreateReplyStillGetBack`,
