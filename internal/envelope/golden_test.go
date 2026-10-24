@@ -74,13 +74,12 @@ func TestGoldenStatusReports(t *testing.T) {
 	})
 	goldenRecord(t, "delivery unknown, lost at target", goldenReportLostAtTarget, goldenReportLostAtTargetDigest, goldenReportLostAtTargetSignedBytes, d, StatusReport{
 		Sender: b, Message: "msg-0004", Recipient: ep(1),
-		Status:       delivery.StatusReport{State: delivery.StateDeliveryUnknown},
-		UnknownCause: UnknownCauseLostAtTarget,
-		ReportedAt:   t0.Add(900 * time.Second),
+		Status:     delivery.StatusReport{State: delivery.StateDeliveryUnknown, Unknown: delivery.UnknownLostAtTarget},
+		ReportedAt: t0.Add(900 * time.Second),
 	})
-	goldenRecord(t, "delivery unknown, no cause given", goldenReportHandedOver, goldenReportHandedOverDigest, goldenReportHandedOverSignedBytes, d, StatusReport{
+	goldenRecord(t, "delivery unknown, handed over (no key 9)", goldenReportHandedOver, goldenReportHandedOverDigest, goldenReportHandedOverSignedBytes, d, StatusReport{
 		Sender: b, Message: "msg-0005", Recipient: ep(1),
-		Status:     delivery.StatusReport{State: delivery.StateDeliveryUnknown},
+		Status:     delivery.StatusReport{State: delivery.StateDeliveryUnknown, Unknown: delivery.UnknownHandedOver},
 		ReportedAt: t0.Add(950 * time.Second),
 	})
 	goldenRecord(t, "rejected, backlog full", goldenReportBacklogFull, goldenReportBacklogFullDigest, goldenReportBacklogFullSignedBytes, d, StatusReport{

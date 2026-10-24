@@ -155,6 +155,11 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 		if n.State != visits[len(visits)-1] {
 			visits = append(visits, n.State)
 		}
+		// The deliveries here are healthy: the only unknown result the source
+		// can hold is the one the target handed over, and only in that state.
+		if wantCause := causeOfState(n.State); n.Unknown != wantCause {
+			fail("source in %s with unknown cause %s, want %s", n.State, n.Unknown, wantCause)
+		}
 		src = n
 		observe(t, src)
 	}
@@ -225,6 +230,9 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 		}
 		if tgt.State == StateDeliveryUnknown && tgt.Lease.Handouts == 0 {
 			fail("delivery_unknown without a hand-out")
+		}
+		if wantCause := causeOfState(tgt.State); tgt.Unknown != wantCause {
+			fail("target in %s with unknown cause %s, want %s", tgt.State, tgt.Unknown, wantCause)
 		}
 		anyHandedOut := false
 		for i, out := range tgt.Lease.HandedOut {
@@ -490,6 +498,16 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 	if len(seen) != len(reportedCount) {
 		fail("decided %v, sent %v", reportedCount, seen)
 	}
+}
+
+// causeOfState is the unknown cause a healthy delivery shows in a state: the
+// cause is set exactly while the state is delivery_unknown, and a delivery that
+// was not lost to storage corruption is always handed over.
+func causeOfState(s State) UnknownCause {
+	if s == StateDeliveryUnknown {
+		return UnknownHandedOver
+	}
+	return UnknownCauseNone
 }
 
 // handedOutParts lists the chunks of the record that were handed out.

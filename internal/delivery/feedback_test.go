@@ -38,7 +38,7 @@ func TestTransitionFeedback(t *testing.T) {
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
-			got := TransitionFeedback(r.from, r.to, r.reported)
+			got := TransitionFeedback(r.from, r.to, UnknownHandedOver, r.reported)
 			if !sameKinds(got, r.want) {
 				t.Errorf("got %v, want %v", got, r.want)
 			}
@@ -48,7 +48,7 @@ func TestTransitionFeedback(t *testing.T) {
 
 func TestSummaries(t *testing.T) {
 	t.Run("every kind has a summary", func(t *testing.T) {
-		for k := KindUnreachable; k <= KindUnknownCorrected; k++ {
+		for k := KindUnreachable; k <= KindLostAtTarget; k++ {
 			if k.Summary() == "" || k.String() == "invalid" {
 				t.Errorf("kind %d has no summary or name", k)
 			}

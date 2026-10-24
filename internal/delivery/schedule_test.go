@@ -66,7 +66,7 @@ func mustReject(t *testing.T, r Record, now time.Time) Record {
 func TestNextTickNamesEachDeadline(t *testing.T) {
 	sourceQueued := NewSourceRecord(schedAcceptBefore)
 	sourceExpired, _ := mustApply(t, sourceQueued, at(13*time.Minute), Event{Type: EventExpiryQueried, QueriedAt: at(13 * time.Minute)})
-	sourceUnknown, _ := mustApply(t, sourceQueued, at(13*time.Minute), Event{Type: EventDeliveryUnknown})
+	sourceUnknown, _ := mustApply(t, sourceQueued, at(13*time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
 	sourceDelivered, _ := mustApply(t, sourceQueued, at(time.Minute), Event{Type: EventDelivered})
 	sourceClosed := mustTick(t, sourceQueued, afterReportBy)
 
@@ -210,7 +210,7 @@ func scheduleRecord(rng *rand.Rand) Record {
 			apply(event(Event{Type: EventReceipt})),
 			apply(event(Event{Type: EventDelivered})),
 			apply(event(Event{Type: EventRejected, Reject: RejectUnauthorized})),
-			apply(event(Event{Type: EventDeliveryUnknown})),
+			apply(event(Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})),
 		}
 	case 1:
 		maxQueues := []time.Duration{5 * time.Minute, 30 * time.Minute, time.Hour, MaxQueueCap}

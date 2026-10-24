@@ -501,7 +501,7 @@ func TestScenarioStatusReportApplication(t *testing.T) {
 	})
 	t.Run("a block reported for a state that is not accepted is not applied", func(t *testing.T) {
 		src := NewSourceRecord(ab)
-		src, outs, err := src.ApplyStatusReport(at(time.Minute), StatusReport{State: StateDeliveryUnknown, Blocked: true, BlockedCause: CauseRuntimeAuth})
+		src, outs, err := src.ApplyStatusReport(at(time.Minute), StatusReport{State: StateDeliveryUnknown, Unknown: UnknownHandedOver, Blocked: true, BlockedCause: CauseRuntimeAuth})
 		if err != nil || len(outs) != 1 || src.Blocked || src.Reported.Has(KindDeliveryBlocked) {
 			t.Errorf("outs %+v blocked %v reported %b err %v", outs, src.Blocked, src.Reported, err)
 		}

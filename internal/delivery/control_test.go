@@ -235,13 +235,13 @@ func TestControlRecordSettlement(t *testing.T) {
 		}
 	})
 	t.Run("delivery_unknown may be recorded for a control record that was never handed out", func(t *testing.T) {
-		rec, _ := mustApply(t, controlRecord(), at(time.Minute), Event{Type: EventDeliveryUnknown})
+		rec, _ := mustApply(t, controlRecord(), at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
 		if rec.State != StateDeliveryUnknown {
 			t.Errorf("state %s", rec.State)
 		}
 	})
 	t.Run("a message record without a hand-out is still refused delivery_unknown", func(t *testing.T) {
-		_, _, err := targetRecord(t, t0, time.Hour).Apply(at(time.Minute), Event{Type: EventDeliveryUnknown})
+		_, _, err := targetRecord(t, t0, time.Hour).Apply(at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
 		if !errors.Is(err, ErrIllegalTransition) {
 			t.Errorf("err = %v", err)
 		}
@@ -265,7 +265,7 @@ func TestControlStatusReport(t *testing.T) {
 				t.Fatal(err)
 			}
 			return rec
-		}, StatusReport{State: StateDeliveryUnknown}},
+		}, StatusReport{State: StateDeliveryUnknown, Unknown: UnknownHandedOver}},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
