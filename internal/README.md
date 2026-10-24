@@ -1,8 +1,16 @@
 # internal
 
-Contract packages. Each one holds a set of rules or formats that the daemon,
-the CLI, relays and adapters must all apply identically. Every package here
-follows the conventions below.
+Two kinds of package live here: **contract packages**, which are every
+directory in this tree except `node/`, and the **runtime packages** under
+[`node/`](node/README.md).
+
+A contract package holds a set of rules or formats that the daemon, the CLI,
+relays and adapters must all apply identically. Every contract package follows
+the conventions below. A runtime package does the I/O, runs the goroutines and
+reads the clock on top of them, and follows its own rules in `node/README.md`.
+A contract package never imports `internal/node/`; a test in `node/` enforces
+that on every supported platform and tag set. Code that belongs only to the
+command line goes in `cmd/sidera/internal/`.
 
 - **One home per rule.** A rule lives in exactly one package and callers never
   re-implement a check. Otherwise two components can disagree about the same

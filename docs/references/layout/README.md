@@ -1,0 +1,94 @@
+# Code layout
+
+Where code lives and which way it may depend on other code. The rules here
+keep the shared rules of the protocol pure and testable, and keep every source
+of nondeterminism in the daemon behind a seam that tests replace.
+
+## What
+
+The module has three kinds of Go code under the repository root.
+
+| Location | Kind | Does I/O, goroutines, clock reads |
+| -------- | ---- | --------------------------------- |
+| `internal/<package>` (every directory except `node/`) | Contract package: rules and formats that every component must apply identically | No. Time is a `now` parameter, randomness an injected `io.Reader`, there is no global mutable state and no storage |
+| `internal/node/<package>` | Runtime package: the daemon's file layer, clock, transactions, storage, transport, engine, interfaces and composition root | Yes, under the rules below |
+| `cmd/sidera/internal/<package>` | Code that belongs only to the command line | Yes |
+
+Import directions:
+
+- A contract package imports only the standard library, other contract
+  packages, approved third-party dependencies and the `sdk/go` module. It never
+  imports `internal/node/` or `cmd/`, directly or through another package, on
+  any supported operating system, with or without the build tags used for
+  crash and clock tests.
+- Runtime packages form a layered graph: file layer and clock at the bottom,
+  then transactions, then storage, keys and configuration, then transport,
+  adapter host and local IPC, then the engine, then the two local interfaces,
+  then the daemon that wires them. A package imports only lower layers. The
+  table and the exceptions are in
+  [`internal/node/README.md`](../../../internal/node/README.md).
+- `cmd/sidera/...` may import any runtime package.
+
+Three rules bind every runtime package:
+
+- Time comes only from the injected clock. Code that needs the real time calls
+  `clock.System()`.
+- Files are touched only through the `fsx` file layer.
+- Randomness arrives as an `io.Reader`; only the composition root and `cmd/`
+  read `crypto/rand`.
+
+## Why
+
+- **Contract packages stay pure** because two nodes evaluating the same inputs
+  must reach the same verdict, and property tests must be able to replay any
+  order of events. One import of a runtime package would bring the clock, the
+  disk or a goroutine into a rule that has to be a function of its arguments.
+- **The runtime lives under `internal/node/`, not in `cmd/sidera/internal/`**
+  because the mobile and web clients and the CLI's embedded management client
+  need to import it from outside the executable's directory. Go's internal rule
+  lets anything in this module import `internal/node/` and nothing outside the
+  module. A public top-level directory was rejected because it would publish a
+  Go API.
+- **The three runtime rules are enforced by scanning source** because a
+  violation fails no other test at once. A direct clock read makes fake-clock
+  tests fail now and then; a direct file write is a write the crash model never
+  sees, so the crash tests pass while the write path is untested. A scan of
+  about thirty lines per rule is cheaper than finding either in a late failure.
+- **The scans cover selectors, not only calls, and ignore build constraints**
+  so that `now := time.Now`, an import alias and a file that only builds on one
+  platform cannot slip past.
+- **The import scan runs per platform and tag set** because a platform file or a
+  tagged file can import a package the default build does not.
+- **Exception lists live in the test.** Some package must touch the real
+  thing: the clock packages read the time, the file layer, local IPC and the
+  test oracles touch files, the composition root reads `crypto/rand`, and the
+  crash model's seeded `math/rand` source is injected by the test. Writing the
+  lists in the test file means widening one is a visible change.
+- **Pure scans, not a linter dependency.** `go/parser` and `go list` are in the
+  standard toolchain; a linter would add a dependency for rules this small.
+
+## Where
+
+- `internal/README.md`: the contract-package conventions.
+- `internal/node/README.md`: the layer table, the runtime rules, the
+  exceptions and the list of tests.
+- `internal/node/layout_test.go`:
+  - `TestContractPackagesDoNotImportRuntime`: runs `go list -deps -test` for
+    every contract package for darwin, linux and windows, each with no tags and
+    with `crashtest,testclock`.
+  - `TestRuntimeReadsTimeOnlyThroughClock`,
+    `TestRuntimeTouchesFilesOnlyThroughFsx`,
+    `TestRuntimeTakesRandomnessAsReader`: scan every non-test Go file below
+    `internal/node/`. The exception lists are the variables at the top of the
+    file.
+  - `TestRuntimeImportersDetectViolations` and
+    `TestRuntimeScansDetectViolations`: check, on inline sources, that each
+    check reports what its rule forbids and passes what it allows, so a clean
+    tree means a clean tree and not a blind scan.
+- `internal/node/doc.go`: the package that gives these tests a home inside the
+  tree they scan.
+
+The runtime scans cover an empty set until the first runtime package is added;
+every package added afterwards is bound automatically. The exception entries
+for directories that do not exist yet (`internal/node/testkit/fixture` among
+them) are harmless until they do.
