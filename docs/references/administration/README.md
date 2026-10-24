@@ -27,7 +27,7 @@ included.
 | view         | Read state, policy, endpoints, logs, diagnostics, and the results of one's own earlier requests.          |
 | manage       | Withdraw or tighten (below) and manage endpoints and sessions, the declaration, relay settings, LAN discovery, issue offline directives. Choose only among adapters and presets already approved. |
 | full-control | Everything above plus whatever lets more nodes in or back, runs more code, or loosens policy.             |
-| local owner  | Everything, and alone: modify the list.                                                                   |
+| local owner  | Everything, and alone: modify the list and the operations for managing a single node (below).             |
 
 **Operation catalogue.**
 
@@ -36,7 +36,25 @@ included.
 | view          | Read; query the result of an operation (the requester's own).                                                                                                      |
 | manage        | Revoke trust; locally revoke a node; reject a trust request; disable inheritance; shorten the grace period; tighten policy; remove or narrow a preset; manage endpoints and sessions; edit declaration fields; relay settings; switch LAN discovery on or off; issue an offline directive. |
 | full-control  | Confirm trust establishment; enable inheritance; extend the grace period; clear a locally-revoked record; install or upgrade an adapter; add or loosen a preset; loosen policy. |
-| local owner   | Modify the authorized-persons list.                                                                                                                                |
+| local owner   | Modify the authorized-persons list; enable an adapter instance; disable an adapter instance; change an endpoint's settings; change the node's settings; acknowledge an alert; clear the clock-rollback pause; confirm the revocation backup; retire the identity; export the revocation statement; stop the daemon (the operations for managing a single node). |
+
+The operations for managing a single node are held to the local owner until
+remote management exists: a level that cannot yet be exercised
+remotely cannot be validated, setting it now would be a guess, and loosening it
+later is a one-line change of the catalogue guarded by tests, while tightening
+it after remote people depend on it would take their capability away.
+Enabling and disabling an adapter, and changing an endpoint's and the node's
+settings, are separate operations because their remote levels may differ once
+decided (enabling lets the machine run more code, disabling only withdraws), and
+splitting an operation later would change every call site.
+
+Exporting the revocation statement needs the local owner, never view: the
+statement voids this node's identity, so whoever can read it can end the node.
+It is the one operation above view that is not side-effecting. It changes
+nothing, so replay protection has nothing to guard, and the stored result of a
+side-effecting request would copy the statement into the stored results and
+widen where the secret lives, for as long as replay checks need to keep it. A
+request for it therefore needs no operation ID, and its result is never stored.
 
 A batch local revocation is not an operation of its own: the CLI sends the
 single local revocation to each node, and each node answers with its own verdict
@@ -114,13 +132,16 @@ management right: it opens reachability records and nothing else.
 
 **Management requests.** Each side-effecting request carries an operation ID.
 Configuration changes (inheritance, grace period, policy, presets, declaration,
-relay settings, LAN discovery) also carry the version of the setting the sender
+relay settings, LAN discovery, enabling and disabling an adapter, endpoint
+settings, node settings) also carry the version of the setting the sender
 last saw; a different current version is a conflict and the change is not
 applied. An operation ID has one result: a resend of the same request returns
 the stored result, the same ID with different content is refused. IDs are scoped
 to the sender, and the sender can query the result of its own operation (view).
 Rejecting a trust request is a one-off decision on one request and carries no
-version.
+version; neither do acknowledging an alert, clearing the clock-rollback pause,
+confirming the revocation backup, retiring the identity or stopping the daemon,
+which are state transitions and not edits of a setting.
 
 The declaration operation covers only declaration fields that have no operation
 of their own; the inheritance switch and the relay settings are excluded. A
@@ -247,7 +268,8 @@ neither file nor probe results.
 - `internal/admin/level.go`, `list.go`, `actor.go`: levels, list, actors,
   `EffectiveLevel`.
 - `internal/admin/operation.go`, `authorize.go`: catalogue, `RequirementOf`,
-  `Authorize`.
+  `Authorize`. Every kind is declared above the unexported end sentinel
+  `opEnd`, which the exhaustive test iterates up to.
 - `internal/admin/directive.go`: `AcceptDirective`.
 - `internal/admin/reachability.go`: `MayIssueReachabilityProof`,
   `CheckReachabilityProof`.
@@ -257,6 +279,7 @@ neither file nor probe results.
   - `list_test.go`: `TestNewList`, `TestListIsIsolatedFromCallerSlices`,
     `TestEntryExpiresAtTheInstant`.
   - `authorize_test.go`: `TestRequirementOf`, `TestCatalogueCoversEveryOperation`,
+    `TestSingleNodeManagementOperationsNeedTheLocalOwner`,
     `TestUnknownOperationIsDeniedToEveryone`, `TestZeroActorHasNoRights`,
     `TestAuthorizeEveryOperationAtEveryLevel`, `TestEffectiveLevelAndAuthorizeRules`,
     `TestAcceptanceScenarioManageLevel`,
@@ -274,6 +297,8 @@ neither file nor probe results.
     `TestCheckReachabilityProof`; with `publication`,
     `TestAProofOfARetiredNodeIsRefused`.
   - `request_test.go`: `TestValidateRequest`, `TestEveryConfigChangeIsSideEffecting`,
+    `TestSideEffectingOperations`,
+    `TestValidateRequestForSingleNodeManagementOperations`,
     `TestConfigChangesAreTheVersionedSettings`, `TestCheckVersion`,
     `TestCheckReplay`, `TestKeyForScopesOperationIDsToThePerson`,
     `TestNewOperationID`.
