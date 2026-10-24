@@ -64,6 +64,7 @@ bytes of the record domain.
 | `sidera/id/person/1`   | `ident`  | Derivation of a person identifier from its root key   | algorithm tag, key bytes      |
 | `sidera/record-sig`    | `record` | The bytes every signer of a record signs              | type, payload                 |
 | `sidera/record-digest` | `record` | The signature-free digest of a record                 | type, payload                 |
+| `sidera/request-digest/1` | `envelope` | The digest a target stores for deduplication of a request | kind, preset, content type, body, accept_before, report_by |
 
 ### Signed bytes and digest
 
@@ -492,6 +493,18 @@ implementation), `declaration_test.go` (rules, protocol limits, signer binding),
 `reachability_test.go`, `proof_test.go` (through `admin`), `decide_test.go`
 (decisions against an oracle under random arrival orders; a declaration through
 `trust`), `fuzz_test.go` (every bit protected, every decoder).
+
+### Delivery records
+
+Package `internal/envelope`. Two record types that a target node issues about a
+delivery, both signed by the node's network key bound through `NetworkKeyOf`. The
+node is not in the payload: the verifier names it from its own record of the
+message. The formats and the reasons are in [envelope](../envelope/README.md).
+
+| Type | Payload | Signed by |
+| ---- | ------- | --------- |
+| `sidera/status-report/1` | `{1: message, 2: recipient endpoint, 3: state, 4?: reject reason, 5?: block cause, 6: reported_at, 7?: delivered_at}` | the target node's network key |
+| `sidera/control-reply/1` | `{1: message, 2: recipient endpoint, 3: issued_at, 5?: create result, 6?: close result, 7?: interrupt result, 8?: status result}`, exactly one result | the target node's network key |
 
 ## Why
 
