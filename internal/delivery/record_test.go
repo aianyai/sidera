@@ -51,6 +51,7 @@ func TestSourceTransitions(t *testing.T) {
 		{"a rejection emits one rejected notice", []step{rejectedBy(time.Minute, RejectUnauthorized)}, StateRejected, []Kind{KindRejected}, IgnoreNone, nil},
 		{"a repeated rejection report is ignored as duplicate", []step{rejectedBy(time.Minute, RejectUnauthorized), rejectedBy(2*time.Minute, RejectUnauthorized)}, StateRejected, []Kind{KindRejected}, IgnoreDuplicate, nil},
 		{"a rejection without a reason is malformed", []step{rejectedBy(time.Minute, RejectNone)}, StateQueued, nil, IgnoreNone, ErrInvalidEvent},
+		{"a rejection with an unknown reason is malformed", []step{rejectedBy(time.Minute, RejectReason(200))}, StateQueued, nil, IgnoreNone, ErrInvalidEvent},
 		{"delivery_unknown emits one notice", []step{receipt(time.Second), unknown(time.Minute)}, StateDeliveryUnknown, []Kind{KindDeliveryUnknown}, IgnoreNone, nil},
 		{"delivery_unknown corrected by delivery emits one correction", []step{receipt(time.Second), unknown(time.Minute), delivered(2 * time.Minute)}, StateDelivered, []Kind{KindDeliveryUnknown, KindUnknownCorrected}, IgnoreNone, nil},
 		{"a repeated delivered report after correction is silent", []step{unknown(time.Minute), delivered(2 * time.Minute), delivered(3 * time.Minute)}, StateDelivered, []Kind{KindDeliveryUnknown, KindUnknownCorrected}, IgnoreDuplicate, nil},

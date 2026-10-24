@@ -233,8 +233,8 @@ func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 		}
 		return r.moveTo(StateDelivered, RejectNone)
 	case EventRejected:
-		if ev.Reject == RejectNone {
-			return r, Outcome{}, fmt.Errorf("%w: rejection without a reason", ErrInvalidEvent)
+		if ev.Reject == RejectNone || !ev.Reject.known() {
+			return r, Outcome{}, fmt.Errorf("%w: rejection without a known reason", ErrInvalidEvent)
 		}
 		if r.Side == SideTarget {
 			return r.closeForcibly(ev.Reject)

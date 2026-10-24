@@ -8,6 +8,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // violationOf returns the invariant Valid reports, ViolationNone for a valid
@@ -32,6 +34,18 @@ func cloneRecord(r Record) Record {
 	r.Lease.Acked = append([]bool(nil), r.Lease.Acked...)
 	return r
 }
+
+// lastKind is the highest Kind that exists, found by walking the kinds so no
+// test names it; kindSetBits is the width of a KindSet.
+var lastKind = func() Kind {
+	k := KindUnreachable
+	for (k + 1).valid() {
+		k++
+	}
+	return k
+}()
+
+const kindSetBits = 16
 
 func kindSetOf(kinds ...Kind) KindSet {
 	var s KindSet
@@ -201,7 +215,6 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		{"a lease is outstanding only while accepted", baseTgtUnknown, func(r *Record) { r.Lease.Active = true }, ViolationLeaseActive},
 		{"a lease has an issue time", baseTgtLeased, func(r *Record) { r.Lease.IssuedAt = time.Time{} }, ViolationLeaseTimes},
 		{"a lease has an expiry time", baseTgtLeased, func(r *Record) { r.Lease.ExpiresAt = time.Time{} }, ViolationLeaseTimes},
-		{"a lease lives at least LeaseDuration", baseTgtLeased, func(r *Record) { r.Lease.ExpiresAt = r.Lease.IssuedAt.Add(LeaseDuration - time.Nanosecond) }, ViolationLeaseTimes},
 		{"a lease lives at most LeaseRenewalCap", baseTgtLeased, func(r *Record) { r.Lease.ExpiresAt = r.Lease.IssuedAt.Add(LeaseRenewalCap + time.Nanosecond) }, ViolationLeaseTimes},
 		{"a lease is issued before the backlog deadline", baseTgtLeased, func(r *Record) {
 			r.Lease.IssuedAt = r.BacklogDeadline
@@ -254,6 +267,26 @@ func TestRecordValidAcceptsFreshRecords(t *testing.T) {
 	}
 	if got := violationOf(t, Record{}.Valid()); got != ViolationSide {
 		t.Errorf("the zero Record: violation %s, want %s", got, ViolationSide)
+	}
+}
+
+// TestRecordValidAcceptsALeaseRenewedAfterTheClockSteppedBack: the wall clock
+// may step back by up to timing.ClockTolerance in normal operation, so a lease
+// renewed at an instant before its issue time expires earlier than LeaseDuration
+// after the issue time, and the record is still one the transitions produced.
+func TestRecordValidAcceptsALeaseRenewedAfterTheClockSteppedBack(t *testing.T) {
+	issuedAt := at(time.Minute)
+	r := handOut(t, targetRecord(t, t0, 30*time.Minute), issuedAt, 2, 1)
+	renewedAt := issuedAt.Add(-timing.ClockTolerance / 2)
+	r, res := r.Renew(renewedAt, true)
+	if res != Renewed {
+		t.Fatalf("Renew at %v before the issue time: %v, want Renewed", issuedAt.Sub(renewedAt), res)
+	}
+	if !r.Lease.ExpiresAt.Before(r.Lease.IssuedAt.Add(LeaseDuration)) {
+		t.Fatalf("the lease expires at %v after its issue, want less than LeaseDuration: the scenario no longer steps the clock back", r.Lease.ExpiresAt.Sub(r.Lease.IssuedAt))
+	}
+	if err := r.Valid(); err != nil {
+		t.Errorf("a lease renewed after a clock step back is refused: %v", err)
 	}
 }
 
@@ -343,7 +376,7 @@ func TestRecordValidSourceFeedbackBookkeepingIsExact(t *testing.T) {
 	states := []State{StateQueued, StateAccepted, StateDelivered, StateRejected, StateExpiredUnconfirmed, StateDeliveryUnknown, StateClosedUnconfirmed}
 	causes := []Cause{CauseNone, CauseNetwork, CauseTrustSuspended, CauseAdapterOffline, CauseRuntimeAuth, CauseNativeUnavailable}
 	for _, s := range states {
-		for mask := 0; mask < 1<<(KindUnknownCorrected); mask++ {
+		for mask := 0; mask < 1<<lastKind; mask++ {
 			for _, blocked := range []bool{false, true} {
 				for _, cause := range causes {
 					k := reachedSource{State: s, Reported: KindSet(mask) << 1, Blocked: blocked, BlockedCause: cause}
@@ -419,6 +452,8 @@ func recordTags(r Record) []string {
 	add(r.Lease.Handouts > 0 && !r.Lease.Active && r.State == StateAccepted, "requeued")
 	add(r.Lease.Handouts >= 2, "redelivered")
 	add(r.Lease.Handouts == MaxLeases, "last lease")
+	add(r.Lease.Active && r.Lease.ExpiresAt.After(r.Lease.IssuedAt.Add(LeaseDuration)), "lease renewed")
+	add(r.Lease.Active && r.Lease.ExpiresAt.Equal(r.Lease.renewalLimit()), "lease at cap")
 	add(r.Lease.Chunks > 1, "several chunks")
 	add(r.Lease.Chunks > 0 && !r.Lease.Active && r.Lease.Handouts > 0 && r.State == StateDeliveryUnknown, "unknown after hand-out")
 	add(len(r.Lease.IDs) > 1, "several pages")
@@ -438,7 +473,7 @@ var requiredRecordTags = []string{
 	"source reported unknown_corrected", "source reported rejected",
 	"target accepted", "target delivered", "target rejected", "target delivery_unknown", "target closed_unconfirmed",
 	"target blocked", "target notified", "target lease active", "target requeued", "target redelivered",
-	"target last lease", "target several chunks", "target unknown after hand-out", "target several pages",
+	"target last lease", "target lease renewed", "target lease at cap", "target several chunks", "target unknown after hand-out", "target several pages",
 	"control accepted", "control delivered", "control delivery_unknown", "control closed_unconfirmed",
 }
 
@@ -533,8 +568,10 @@ func recordMutators() []recordMutator {
 		{"backlog deadline set past the settle deadline", false, func(rng *rand.Rand, r *Record) {
 			r.BacklogDeadline = SettleBy(r.ReportBy).Add(time.Duration(1+rng.Intn(3600)) * time.Second)
 		}, 0.5},
-		{"produced feedback: one kind flipped", false, func(rng *rand.Rand, r *Record) { r.Reported ^= 1 << (1 + rng.Intn(int(KindUnknownCorrected))) }, 0.8},
-		{"produced feedback: a bit outside the kinds", true, func(rng *rand.Rand, r *Record) { r.Reported |= 1 << (9 + rng.Intn(7)) }, 0},
+		{"produced feedback: one kind flipped", false, func(rng *rand.Rand, r *Record) { r.Reported ^= 1 << (1 + rng.Intn(int(lastKind))) }, 0.8},
+		{"produced feedback: a bit outside the kinds", true, func(rng *rand.Rand, r *Record) {
+			r.Reported |= 1 << (int(lastKind) + 1 + rng.Intn(kindSetBits-int(lastKind)-1))
+		}, 0},
 		{"blocked flipped", false, func(rng *rand.Rand, r *Record) { r.Blocked = !r.Blocked }, 0.9},
 		{"block cause to another", false, func(rng *rand.Rand, r *Record) { r.BlockedCause = Cause(otherInt(rng, int(r.BlockedCause), 0, 6)) }, 0.85},
 		{"lease: hand-out count to another", false, func(rng *rand.Rand, r *Record) { r.Lease.Handouts = otherInt(rng, r.Lease.Handouts, 0, MaxLeases+2) }, 0.9},
@@ -559,12 +596,12 @@ func recordMutators() []recordMutator {
 			if !r.Lease.IssuedAt.IsZero() {
 				r.Lease.IssuedAt = r.Lease.IssuedAt.Add(randomShift(rng))
 			}
-		}, 0.65},
+		}, 0.33},
 		{"lease: expiry time shifted", false, func(rng *rand.Rand, r *Record) {
 			if !r.Lease.ExpiresAt.IsZero() {
 				r.Lease.ExpiresAt = r.Lease.ExpiresAt.Add(randomShift(rng))
 			}
-		}, 0.65},
+		}, 0.24},
 		{"lease: a lease time unset", true, func(rng *rand.Rand, r *Record) {
 			if rng.Intn(2) == 0 {
 				r.Lease.IssuedAt = time.Time{}

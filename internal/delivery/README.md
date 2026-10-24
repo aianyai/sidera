@@ -153,10 +153,14 @@ reaches the sender through the control reply.
 ## A restored record is checked
 
 `Record.Valid` is the contract's own answer to "could the transitions have
-produced this record". It returns nil exactly for the records the constructors
-and the transitions reach, and otherwise an `*InvalidRecordError` (matching
-`ErrInvalidRecord` with `errors.Is`) whose `Violation` names the first invariant
-broken. It reads only the record, never a clock.
+produced this record". Every record the constructors and the transitions
+produce is valid, under the caller guarantees below, and every invariant listed
+here is refused: it returns nil for a record that has them all and otherwise an
+`*InvalidRecordError` (matching `ErrInvalidRecord` with `errors.Is`) whose
+`Violation` names the first invariant broken. The accepted set is not claimed to
+equal the reachable set; only for the feedback bookkeeping of a source record is
+it equal, which a test pins by enumerating the transitions. It reads only the
+record, never a clock.
 
 - Kind and state: a target is never `queued` or `expired_unconfirmed`, a control
   record is never `rejected` and exists only on the target; a rejection reason is
@@ -176,8 +180,11 @@ broken. It reads only the record, never a clock.
   chunk count agree, an acknowledged chunk was handed out, page identifiers are
   set and distinct, at most `MaxLeases` leases were issued and the last one is
   not over while the message is still accepted, a lease is outstanding only
-  while accepted, its times lie between `LeaseDuration` and `LeaseRenewalCap`
-  after the issue time, and it was issued before the backlog deadline.
+  while accepted, its times are set and the expiry is no later than
+  `LeaseRenewalCap` after the issue time, and it was issued before the backlog
+  deadline. There is no lower bound on the expiry: a renewal made after the
+  wall clock stepped back (within `timing.ClockTolerance`) ends earlier than
+  `LeaseDuration` after the issue time.
 - Outcome: a target message is `delivered` exactly when every chunk is
   acknowledged; a target is `delivery_unknown` only for a delivery that was
   handed over and `rejected` only for one that was not.
@@ -199,9 +206,12 @@ correction and the blocked notice.
 - `now` is UTC and comes from the caller; records are persisted atomically with
   the effects the outcome calls for.
 - A record read back from storage is passed to `Valid` after decoding, before
-  anything calls `Apply`, `Tick` or `Handout` on it; those trust the record, and
-  a record that is well formed but impossible would otherwise be acted on. An
-  invalid record is treated as corrupt, never repaired.
+  any other method of the record is called; they trust the record, and a lease
+  whose chunk flags disagree with its chunk count would make `Ack` and `Handout`
+  index out of range. An invalid record is treated as corrupt, never repaired.
+- Times in a stored record round-trip to the nanosecond (for example RFC 3339
+  with fractional seconds), because `Valid` compares them exactly: a format that
+  rounds `AcceptBefore` would make `ReportBy` differ from `ReportBy(AcceptBefore)`.
 - `report_by` in a target record equals `ReportBy(accept_before)` and the
   envelope is otherwise valid; this package does not validate the envelope.
 - The authorization verdict is the policy's (`authz.Evaluate`). `Intake` takes

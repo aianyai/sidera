@@ -38,6 +38,12 @@ const (
 	// ViolationBacklogDeadline: a queued message has no backlog deadline or one
 	// past the settle deadline, or a record that is not queued has one.
 	ViolationBacklogDeadline
+	// ViolationBlockedState: Blocked is set outside an accepted record that can
+	// be blocked (a control record never can).
+	ViolationBlockedState
+	// ViolationBlockedCause: the cause of the last block is unknown, is not a
+	// blocking cause, or is missing while Blocked is set.
+	ViolationBlockedCause
 	// ViolationReportedOnTarget: a target record lists produced feedback.
 	ViolationReportedOnTarget
 	// ViolationReportedUnknownKind: the produced feedback holds a kind that does
@@ -55,12 +61,6 @@ const (
 	// ViolationReportedBlocked: the blocked notice, its recovery and the cause
 	// of the last block do not fit the state and each other.
 	ViolationReportedBlocked
-	// ViolationBlockedState: Blocked is set outside an accepted record that can
-	// be blocked (a control record never can).
-	ViolationBlockedState
-	// ViolationBlockedCause: the cause of the last block is unknown, is not a
-	// blocking cause, or is missing while Blocked is set.
-	ViolationBlockedCause
 	// ViolationLeaseUnused: a record that is never queued for recv has lease
 	// bookkeeping.
 	ViolationLeaseUnused
@@ -79,8 +79,8 @@ const (
 	ViolationLeaseCount
 	// ViolationLeaseActive: a lease is outstanding outside the accepted state.
 	ViolationLeaseActive
-	// ViolationLeaseTimes: the lease instants are unset or outside what a lease
-	// issued and renewed under the rules can have.
+	// ViolationLeaseTimes: the lease instants are unset, or the expiry is later
+	// than LeaseRenewalCap after the issue time.
 	ViolationLeaseTimes
 	// ViolationLeaseAfterBacklog: a lease was issued at or after the backlog
 	// deadline, when the message could no longer be handed out.
@@ -106,14 +106,14 @@ var violationNames = [...]string{
 	ViolationDeadlinesUnset:           "deadlines_unset",
 	ViolationReportBy:                 "report_by",
 	ViolationBacklogDeadline:          "backlog_deadline",
+	ViolationBlockedState:             "blocked_state",
+	ViolationBlockedCause:             "blocked_cause",
 	ViolationReportedOnTarget:         "reported_on_target",
 	ViolationReportedUnknownKind:      "reported_unknown_kind",
 	ViolationReportedRejected:         "reported_rejected",
 	ViolationReportedDeliveryUnknown:  "reported_delivery_unknown",
 	ViolationReportedExpiry:           "reported_expiry",
 	ViolationReportedBlocked:          "reported_blocked",
-	ViolationBlockedState:             "blocked_state",
-	ViolationBlockedCause:             "blocked_cause",
 	ViolationLeaseUnused:              "lease_on_unqueued_record",
 	ViolationLeaseChunks:              "lease_chunks",
 	ViolationLeaseAckedUnseen:         "lease_acked_not_handed_out",
@@ -147,11 +147,17 @@ func (e *InvalidRecordError) Error() string {
 
 func (e *InvalidRecordError) Unwrap() error { return ErrInvalidRecord }
 
-// Valid reports nil exactly when the record is one the constructors and the
-// transitions can produce, and otherwise an *InvalidRecordError that names the
-// first invariant it fails. A caller that restores a record from storage calls
-// it after decoding, so a well-formed but impossible record is refused instead
-// of being trusted by Apply, Tick and Handout.
+// Valid reports nil for a record that has every invariant listed in
+// Violation, and otherwise an *InvalidRecordError that names the first one it
+// fails. Every record the constructors and the transitions produce is valid,
+// under the caller guarantees of the package README, and every listed
+// invariant is refused; the accepted set is not claimed to equal the reachable
+// set, except for the feedback bookkeeping of a source record. A caller that
+// restores a record from storage calls it after decoding and before any other
+// method of the record, so a well-formed but impossible record is refused
+// instead of being trusted by Apply, Tick, Handout and Ack: a lease whose chunk
+// flags disagree with its chunk count would make Ack and Handout index out of
+// range.
 //
 // The invariants are those of the transitions: what moveTo clears when the
 // state changes, what only the target or only the sender sets, and what a lease
@@ -383,7 +389,7 @@ func (r Record) checkLease() Violation {
 	if l.Active && r.State != StateAccepted {
 		return ViolationLeaseActive
 	}
-	if l.IssuedAt.IsZero() || l.ExpiresAt.IsZero() || l.ExpiresAt.Before(firstExpiry(l.IssuedAt)) || l.ExpiresAt.After(l.renewalLimit()) {
+	if l.IssuedAt.IsZero() || l.ExpiresAt.IsZero() || l.ExpiresAt.After(l.renewalLimit()) {
 		return ViolationLeaseTimes
 	}
 	if !l.IssuedAt.Before(r.BacklogDeadline) {

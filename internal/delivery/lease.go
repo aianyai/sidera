@@ -39,9 +39,6 @@ func (l Lease) isZero() bool {
 		l.Chunks == 0 && len(l.HandedOut) == 0 && len(l.Acked) == 0
 }
 
-// firstExpiry returns when a lease issued at issuedAt runs out unless renewed.
-func firstExpiry(issuedAt time.Time) time.Time { return issuedAt.Add(LeaseDuration) }
-
 // renewalLimit returns the instant past which the lease cannot be renewed, however
 // often: LeaseRenewalCap after it was issued.
 func (l Lease) renewalLimit() time.Time { return l.IssuedAt.Add(LeaseRenewalCap) }
@@ -175,7 +172,7 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int,
 	r.Lease.Handouts++
 	r.Lease.Active = true
 	r.Lease.IssuedAt = now
-	r.Lease.ExpiresAt = firstExpiry(now)
+	r.Lease.ExpiresAt = now.Add(LeaseDuration)
 	return r, HandoutResult{
 		Action:            HandoutGranted,
 		PossibleDuplicate: dup,

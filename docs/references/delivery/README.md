@@ -230,10 +230,15 @@ endpoint, so the sender keeps pulling until it has the reply (see
 
 ### Validity of a restored record
 
-`Record.Valid` returns nil exactly for the records that the constructors
-(`NewSourceRecord`, `NewTargetRecord`, `NewTargetControlRecord`) and the
-transitions (`Apply`, `Tick`, `Handout`, `Renew`, `Ack`) can produce, and an
-`*InvalidRecordError` otherwise; its `Violation` is a typed reason naming the
+Every record that the constructors (`NewSourceRecord`, `NewTargetRecord`,
+`NewTargetControlRecord`) and the transitions (`Apply`, `Tick`, `Handout`,
+`Renew`, `Ack`) produce is accepted by `Record.Valid`, under the caller
+guarantees of the package README, and every invariant listed there is refused;
+the accepted set is not claimed to equal the reachable set, and only for the
+feedback bookkeeping of a source record is it equal, which
+`TestRecordValidSourceFeedbackBookkeepingIsExact` pins by enumerating the
+transitions. An invalid record yields an `*InvalidRecordError`; its `Violation`
+is a typed reason naming the
 first invariant broken, in a fixed order of checks (kind and state, deadlines,
 block flags, produced feedback, lease, outcome against lease). The invariants
 are listed in the package README; each is a property the transitions keep:
@@ -245,6 +250,16 @@ are listed in the package README; each is a property the transitions keep:
   identifiers, times, lease count);
 - the end states of a target (delivered by the last acknowledgement, rejected
   only before a hand-out, delivery_unknown only after one).
+
+The lease expiry has an upper bound, `LeaseRenewalCap` after the issue time,
+and no lower one: `Renew` extends from the instant it is called, and the wall
+clock may step back by up to `timing.ClockTolerance` in normal operation, so a
+renewal can end earlier than `LeaseDuration` after the issue time.
+
+`Valid` binds stored records to the protocol constants it reads. Lowering
+`LeaseRenewalCap` or `MaxRedeliveries`, or changing `ReportByOffset`, would make
+records already stored invalid, so such a change is a storage format change that
+needs a migration of the stored records.
 
 ### Status reports
 
