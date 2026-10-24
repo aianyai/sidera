@@ -57,6 +57,11 @@ target-internal sub-state `notified` of `accepted`.
   `lost_at_target` on a target record is `ErrIllegalTransition`, because a target
   loses a record only by `NewLostRecord`; a `handed_over` target record needs a
   hand-out as before.
+- `checkUnknownCause` is the one statement of what a record's cause and the
+  storage-loss replacements promise (the cause is set exactly in
+  `delivery_unknown` and belongs to the record's side; a lost record carries no
+  history and no `AcceptBefore` or `BacklogDeadline`). A check of a whole record,
+  such as one restored from storage, calls it rather than restating it.
 - A repeated or older fact is ignored with a reason, not an error. A fact that
   contradicts the state (a rejection for a delivered message) is
   `ErrIllegalTransition`.

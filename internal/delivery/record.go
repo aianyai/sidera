@@ -406,6 +406,64 @@ func (r Record) hasQueue() bool {
 	return r.Side == SideTarget && !r.Control
 }
 
+// checkUnknownCause states, in one place, what a record's unknown cause and
+// the storage-loss replacements promise, for whatever checks a whole record
+// (for example one restored from disk) to call:
+//
+//   - Unknown is set exactly while State is StateDeliveryUnknown and is one of
+//     the causes of its side: a source holds handed_over, lost_at_sender or the
+//     lost_at_target a target reported; a target holds handed_over, which needs
+//     a hand-out or a control signal (see handedOver), or lost_at_target.
+//   - A record lost to storage corruption has the shape NewLostRecord gives it:
+//     no history (no lease, prompt, block or rejection), no AcceptBefore or
+//     BacklogDeadline, a ReportBy, a control flag only on the target, and, on
+//     the source, the one notice already marked as reported.
+func (r Record) checkUnknownCause() error {
+	if (r.State == StateDeliveryUnknown) != (r.Unknown != UnknownCauseNone) {
+		return fmt.Errorf("%w: state %s with unknown cause %s", ErrInvalidInput, r.State, r.Unknown)
+	}
+	switch r.Unknown {
+	case UnknownCauseNone:
+		return nil
+	case UnknownHandedOver:
+		if r.Side == SideTarget && !r.handedOver() {
+			return fmt.Errorf("%w: a target record handed over without a hand-out or a control signal", ErrInvalidInput)
+		}
+		return nil
+	case UnknownLostAtSender:
+		if r.Side != SideSource {
+			return fmt.Errorf("%w: lost_at_sender on side %d", ErrInvalidInput, r.Side)
+		}
+		return r.checkLostShape()
+	case UnknownLostAtTarget:
+		if r.Side == SideSource {
+			return nil // a loss the target reported: an ordinary source record
+		}
+		return r.checkLostShape()
+	}
+	return fmt.Errorf("%w: unknown cause %d", ErrInvalidInput, r.Unknown)
+}
+
+// checkLostShape checks a record that replaces one lost to storage corruption
+// against what NewLostRecord makes.
+func (r Record) checkLostShape() error {
+	switch {
+	case r.Control && r.Side == SideSource:
+		return fmt.Errorf("%w: a source record is never a control record", ErrInvalidInput)
+	case r.ReportBy.IsZero() || !r.AcceptBefore.IsZero() || !r.BacklogDeadline.IsZero():
+		return fmt.Errorf("%w: a lost record has a ReportBy and no AcceptBefore or BacklogDeadline", ErrInvalidInput)
+	case r.Sub != SubNone || r.Reject != RejectNone || r.Blocked || r.BlockedCause != CauseNone:
+		return fmt.Errorf("%w: a lost record has no prompt, rejection or block to carry", ErrInvalidInput)
+	case r.Lease.Handouts != 0 || r.Lease.Active || r.Lease.Chunks != 0 || len(r.Lease.IDs) != 0:
+		return fmt.Errorf("%w: a lost record has no lease to carry", ErrInvalidInput)
+	case r.Side == SideSource && r.Reported != KindSet(0).With(KindLostAtSender):
+		return fmt.Errorf("%w: a lost source record has reported exactly its own notice", ErrInvalidInput)
+	case r.Side == SideTarget && r.Reported != 0:
+		return fmt.Errorf("%w: a target record reports nothing", ErrInvalidInput)
+	}
+	return nil
+}
+
 // NeedsBody reports whether the delivery still needs the bytes of its body: a
 // sender that has no receipt yet may have to send it again, and a target
 // message waiting in the queue or under a lease has still to hand it out. A

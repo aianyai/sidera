@@ -308,6 +308,14 @@ The deduplication record of a lost target record is replaced by
 `DedupRetainUntil(LostReportBy(discoveredAt))`. Its digest is unknown
 (`DigestLost`), so `CheckDedup` answers every request under the key as a replay.
 
+What a record's cause and a replacement promise is stated once, in
+`checkUnknownCause`: the cause is set exactly in `delivery_unknown` and is one of
+the causes of the record's side, and a lost record has the shape `NewLostRecord`
+gives it (no lease, prompt, block or rejection, no `AcceptBefore` or
+`BacklogDeadline`, the one source notice already reported). Any check of a whole
+record calls that function. Test: `TestUnknownCauseInvariant`, one row per
+promise.
+
 `Record.NeedsBody()` says whether a record still needs the bytes of its body: a
 source record that is `queued`, and a target message record that is `accepted`
 (queued or under a lease). A caller that finds a stored body corrupt replaces

@@ -679,6 +679,63 @@ func TestStorageLossKindsMergeByMessage(t *testing.T) {
 	}
 }
 
+func TestUnknownCauseInvariant(t *testing.T) {
+	srcLost, _ := newLost(t, SideSource, false)
+	tgtLost, _ := newLost(t, SideTarget, false)
+	ctlLost, _ := newLost(t, SideTarget, true)
+	handed := handOut(t, targetRecord(t, t0, time.Hour), at(30*time.Second), 1, 1)
+	handed, _ = mustApply(t, handed, at(time.Minute), unknownWith(UnknownHandedOver))
+	ctlHanded, _ := mustApply(t, controlRecord(), at(time.Minute), unknownWith(UnknownHandedOver))
+	srcHanded, _ := mustApply(t, NewSourceRecord(at(10*time.Minute)), at(time.Minute), unknownWith(UnknownHandedOver))
+	srcTargetLoss, _ := mustApply(t, NewSourceRecord(at(10*time.Minute)), at(time.Minute), unknownWith(UnknownLostAtTarget))
+	mutate := func(r Record, f func(*Record)) Record { f(&r); return r }
+	rows := []struct {
+		rule  string
+		rec   Record
+		valid bool
+	}{
+		{"a record outside delivery_unknown has no cause", NewSourceRecord(at(10 * time.Minute)), true},
+		{"a source record that is handed over", srcHanded, true},
+		{"a source record that learned of a loss at the target", srcTargetLoss, true},
+		{"a target message handed over after a hand-out", handed, true},
+		{"a target control record handed over", ctlHanded, true},
+		{"a lost source record", srcLost, true},
+		{"a lost target message record", tgtLost, true},
+		{"a lost target control record", ctlLost, true},
+		{"a cause outside delivery_unknown", mutate(NewSourceRecord(at(10*time.Minute)), func(r *Record) { r.Unknown = UnknownHandedOver }), false},
+		{"delivery_unknown without a cause", mutate(srcHanded, func(r *Record) { r.Unknown = UnknownCauseNone }), false},
+		{"an unknown cause value", mutate(srcHanded, func(r *Record) { r.Unknown = 200 }), false},
+		{"a target message handed over without a hand-out", mutate(tgtLost, func(r *Record) { r.Unknown = UnknownHandedOver }), false},
+		{"lost_at_sender on the target", mutate(tgtLost, func(r *Record) { r.Unknown = UnknownLostAtSender }), false},
+		{"a lost source record that is a control record", mutate(srcLost, func(r *Record) { r.Control = true }), false},
+		{"a lost record without ReportBy", mutate(tgtLost, func(r *Record) { r.ReportBy = time.Time{} }), false},
+		{"a lost record with AcceptBefore", mutate(tgtLost, func(r *Record) { r.AcceptBefore = at(time.Minute) }), false},
+		{"a lost record with BacklogDeadline", mutate(tgtLost, func(r *Record) { r.BacklogDeadline = at(time.Minute) }), false},
+		{"a lost record with a prompt", mutate(tgtLost, func(r *Record) { r.Sub = SubNotified }), false},
+		{"a lost record with a rejection reason", mutate(tgtLost, func(r *Record) { r.Reject = RejectExpired }), false},
+		{"a lost record that is blocked", mutate(tgtLost, func(r *Record) { r.Blocked = true }), false},
+		{"a lost record with a block cause", mutate(tgtLost, func(r *Record) { r.BlockedCause = CauseAdapterOffline }), false},
+		{"a lost record with a hand-out", mutate(tgtLost, func(r *Record) { r.Lease.Handouts = 1 }), false},
+		{"a lost record with an open lease", mutate(tgtLost, func(r *Record) { r.Lease.Active = true }), false},
+		{"a lost record with chunks", mutate(tgtLost, func(r *Record) { r.Lease.Chunks = 1 }), false},
+		{"a lost record with page identifiers", mutate(tgtLost, func(r *Record) { r.Lease.IDs = []LeaseID{freshLease()} }), false},
+		{"a lost source record that has not reported its notice", mutate(srcLost, func(r *Record) { r.Reported = 0 }), false},
+		{"a lost source record that reported something else", mutate(srcLost, func(r *Record) { r.Reported = r.Reported.With(KindUnreachable) }), false},
+		{"a lost target record that reports feedback", mutate(tgtLost, func(r *Record) { r.Reported = KindSet(0).With(KindLostAtTarget) }), false},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			err := r.rec.checkUnknownCause()
+			if r.valid && err != nil {
+				t.Errorf("rejected a valid record: %v", err)
+			}
+			if !r.valid && !errors.Is(err, ErrInvalidInput) {
+				t.Errorf("err = %v, want ErrInvalidInput", err)
+			}
+		})
+	}
+}
+
 // lostModel is the oracle of the lost-record lifecycle: it knows only the
 // instants and the kinds of event, not how the record decides.
 type lostModel struct {
@@ -818,8 +875,8 @@ func TestPropertyLostRecordLifecycle(t *testing.T) {
 					t.Fatalf("run %d: state %s, a lost record stays unknown until it closes", i, rec.State)
 				}
 			}
-			if (rec.State == StateDeliveryUnknown) != (rec.Unknown != UnknownCauseNone) {
-				t.Fatalf("run %d: state %s with cause %s", i, rec.State, rec.Unknown)
+			if err := rec.checkUnknownCause(); err != nil {
+				t.Fatalf("run %d: %v", i, err)
 			}
 			if m.side == SideTarget && !m.control && (rec.State == StateDelivered || rec.State == StateAccepted || rec.Lease.Handouts != 0 || rec.Lease.Active) {
 				t.Fatalf("run %d: a lost target message is delivered again or leased: %+v", i, rec)
