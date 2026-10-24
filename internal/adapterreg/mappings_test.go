@@ -2,6 +2,7 @@ package adapterreg_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -513,4 +514,59 @@ func TestCreateReplyMapsEveryCreateFailure(t *testing.T) {
 			t.Errorf("%s: CreateReply = %+v, %v, %v, want reason %d", f, got, final, err, reason)
 		}
 	}
+}
+
+// A creation the daemon refuses itself, without calling the adapter, is a failed
+// creation with no session endpoint: the daemon allocated none, and nothing was
+// created. The wire values are written out by hand, from the protocol's reply
+// table (outcome 3 failed; reasons 1 preset_unknown, 2 preset_unavailable,
+// 3 adapter_offline), and a preset closed to local sources reuses
+// preset_unavailable, as an adapter's preset_invalid does: the preset exists and
+// cannot be used for this creation.
+func TestDaemonCreateFailure(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       adapterreg.DaemonCreateReason
+		outcome  uint8
+		reason   uint8
+		wireJSON string
+	}{
+		{"an unknown preset is preset_unknown", adapterreg.DaemonCreatePresetUnknown, 3, 1,
+			`{"outcome":"failed","reason":"preset_unknown"}`},
+		{"a preset closed to local sources is preset_unavailable", adapterreg.DaemonCreatePresetClosedToLocalSources, 3, 2,
+			`{"outcome":"failed","reason":"preset_unavailable"}`},
+		{"an adapter that is offline is adapter_offline", adapterreg.DaemonCreateAdapterOffline, 3, 3,
+			`{"outcome":"failed","reason":"adapter_offline"}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := adapterreg.DaemonCreateFailure(tc.in)
+			if want := (adapterproto.ControlCreateReply{Outcome: adapterproto.ControlCreateOutcome(tc.outcome), Reason: adapterproto.ControlCreateReason(tc.reason)}); got != want {
+				t.Fatalf("DaemonCreateFailure(%d) = %+v, want %+v", tc.in, got, want)
+			}
+			if err := got.Validate(); err != nil {
+				t.Errorf("not a valid reply: %v", err)
+			}
+			b, err := json.Marshal(got)
+			if err != nil || string(b) != tc.wireJSON {
+				t.Errorf("wire form %s (%v), want %s", b, err, tc.wireJSON)
+			}
+		})
+	}
+	t.Run("the reasons are distinct and none is the zero value", func(t *testing.T) {
+		seen := map[adapterreg.DaemonCreateReason]bool{}
+		for _, r := range []adapterreg.DaemonCreateReason{adapterreg.DaemonCreatePresetUnknown, adapterreg.DaemonCreatePresetClosedToLocalSources, adapterreg.DaemonCreateAdapterOffline} {
+			if r == 0 || seen[r] {
+				t.Errorf("reason %d is zero or repeated", r)
+			}
+			seen[r] = true
+		}
+	})
+	t.Run("a value that is no reason gives a reply that is not valid, so it cannot be sent", func(t *testing.T) {
+		for _, in := range []adapterreg.DaemonCreateReason{0, 4, 255} {
+			if got := adapterreg.DaemonCreateFailure(in); got != (adapterproto.ControlCreateReply{}) || got.Validate() == nil {
+				t.Errorf("DaemonCreateFailure(%d) = %+v, want the zero reply, which does not validate", in, got)
+			}
+		}
+	})
 }
