@@ -23,7 +23,7 @@ a system clock can replace it in one place.
 | `Error`, `Class` (`Failed`, `Fatal`), `IsFatal`, `PointOf` | What a failed operation returns and what the caller must do. |
 | `Leftovers`, `IsLeftover`, `TempPrefix`, `TrashPrefix` | Finding the debris of interrupted operations. |
 | `ErrLocked` | Returned by `FS.Lock` when the lock is held elsewhere. |
-| `CheckPath`, `CheckRename`, `ValidName` | The path and name rules, shared with `fsxtest`. |
+| `CheckPath`, `CheckRename`, `ValidName` | The path and name rules, shared with `fsxtest`. Reserved names are not valid names. |
 
 ## Rules
 
@@ -65,7 +65,9 @@ a system clock can replace it in one place.
 - Treat `Fatal` as the end of the process: exit and rescan on restart. `fsx`
   returns the class; the composition root exits.
 - Pass tags made by the transaction layer. `fsx` does not interpret them, and
-  uses the names `log` and `cleanup` itself for steps that are not crash points.
+  uses the names `log` and `cleanup` itself for steps that are not crash points:
+  they are reserved, so `ValidName` refuses them and they cannot be transaction
+  or role names.
 - Make appended formats self-delimiting with a checksum, and skip a damaged
   tail when reading: a crash or a short write leaves one.
 - Do not hold a read handle to a file `fsx` may replace; read it with `ReadFile`.

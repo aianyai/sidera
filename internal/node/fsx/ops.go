@@ -12,6 +12,10 @@ import (
 // directory to look in) is a failure of the operation, reported against the
 // step that would have run first.
 
+// cleanupTag is the tag of failure-path cleanup. It is a function so that no
+// package-level value can be reassigned to change what cleanup is attributed to.
+func cleanupTag() Tag { return Tag{Tx: TxCleanup} }
+
 // Replace atomically replaces the file at path with data: create a temporary
 // file next to it, write, sync, rename over the target, sync the directory.
 // A failure before the rename removes the temporary file and leaves the target
@@ -30,7 +34,7 @@ func Replace(fs FS, tag Tag, p string, data []byte, mode Mode) error {
 		f.Close()
 		// The leftover is removed at the next start in any case; a failure here
 		// changes nothing.
-		fs.Remove(CleanupTag, tmp)
+		fs.Remove(cleanupTag(), tmp)
 		return fail(opReplace, tag, step, p, err)
 	}
 	if err := writeAll(f, data); err != nil {
@@ -42,11 +46,11 @@ func Replace(fs FS, tag Tag, p string, data []byte, mode Mode) error {
 	// Close before the rename: Windows cannot rename an open file. A close error
 	// after a successful sync means the descriptor was not released cleanly.
 	if err := f.Close(); err != nil {
-		fs.Remove(CleanupTag, tmp)
+		fs.Remove(cleanupTag(), tmp)
 		return fail(opReplace, tag, StepSync, p, err)
 	}
 	if err := fs.Rename(tag, tmp, p); err != nil {
-		fs.Remove(CleanupTag, tmp)
+		fs.Remove(cleanupTag(), tmp)
 		return fail(opReplace, tag, StepRename, p, err)
 	}
 	if err := fs.SyncDir(tag, dir); err != nil {

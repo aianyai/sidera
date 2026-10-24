@@ -91,6 +91,8 @@ func TestParsePointRejectsWhatIsNotCanonical(t *testing.T) {
 		{"commit-with-role", "intake/out.commit#1"},
 		{"role-without-step-name", "intake/out.#1"},
 		{"commit-with-empty-role", "a/.commit#1"},
+		{"reserved-tx-log", "log/out.rename#1"},
+		{"reserved-tx-cleanup", "cleanup/commit#1"},
 		{"two-ordinals", "intake/out.rename#1#2"},
 		{"trailing-newline", "intake/commit#1\n"},
 	}
@@ -162,6 +164,7 @@ func TestPointValidateNamesTheProblem(t *testing.T) {
 	for name, mutate := range map[string]func(p *fsx.Point){
 		"bad-tx":          func(p *fsx.Point) { p.Tag.Tx = "T" },
 		"bad-role":        func(p *fsx.Point) { p.Tag.Role = "" },
+		"reserved-tx":     func(p *fsx.Point) { p.Tag.Tx = fsx.TxCleanup },
 		"unknown-step":    func(p *fsx.Point) { p.Step = 0 },
 		"step-too-large":  func(p *fsx.Point) { p.Step = fsx.StepCommit + 1 },
 		"zero-ordinal":    func(p *fsx.Point) { p.Hit = 0 },

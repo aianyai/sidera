@@ -38,9 +38,6 @@ const (
 	TxCleanup = "cleanup"
 )
 
-// CleanupTag is the tag of failure-path cleanup.
-var CleanupTag = Tag{Tx: TxCleanup}
-
 // Reserved reports whether the tag belongs to writes that are not crash
 // points.
 func (t Tag) Reserved() bool { return t.Tx == TxLog || t.Tx == TxCleanup }
@@ -140,8 +137,13 @@ const (
 
 var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 
-// ValidName reports whether s is acceptable as a transaction or role name.
-func ValidName(s string) bool { return nameRE.MatchString(s) }
+// ValidName reports whether s is acceptable as a transaction or role name. The
+// reserved names TxLog and TxCleanup are not: a transaction that took one would
+// have its steps silently skipped by observers, so they are refused wherever a
+// name is validated, key and point parsing and the transaction table included.
+func ValidName(s string) bool {
+	return nameRE.MatchString(s) && s != TxLog && s != TxCleanup
+}
 
 // CheckPath returns an error wrapping fs.ErrInvalid unless p is a valid
 // relative path in the sense of io/fs.ValidPath whose elements hold no

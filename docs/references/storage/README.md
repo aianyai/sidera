@@ -73,7 +73,11 @@ Two transaction names are reserved for writes that are not crash points:
 the temporary file of an operation that failed). `Observe` neither numbers nor
 reports them and a fault rule matches them only by naming them. A crash before
 or after a cleanup removal leaves a `.tmp-*` file that startup removes, the
-same state as a crash before the failed step, so it needs no crash point.
+same state as a crash before the failed step, so it needs no crash point. The
+two names are not valid transaction or role names (`ValidName` refuses them, so
+`ParseKey`, `ParsePoint`, `Key.Validate` and the transaction table do too): a
+transaction that took one would have its steps silently skipped by observers.
+`Faulty` follows `Observe`: it does not number steps of reserved transactions.
 
 ### Failure classes
 

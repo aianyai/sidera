@@ -289,3 +289,24 @@ func TestFaultyReservedTagsAreSelectedOnlyByName(t *testing.T) {
 		t.Errorf("the rule naming the cleanup transaction fired %d times, want 1", cleanup.Hits())
 	}
 }
+
+// Steps of a reserved transaction are not numbered, as fsx.Observe does not
+// number them: a rule that names an ordinal never selects one, and a rule
+// without an ordinal still does.
+func TestFaultyDoesNotNumberStepsOfReservedTransactions(t *testing.T) {
+	rec := &recorder{TB: t}
+	faulty := fsxtest.NewFaulty(rec, fsxtest.NewMem())
+	first := faulty.Fail(fsxtest.Match{Tx: fsx.TxCleanup, Step: fsx.StepRemove, Hit: 1}, syscall.EIO)
+	unordered := faulty.Fail(fsxtest.Match{Tx: fsx.TxCleanup, Step: fsx.StepRemove}, syscall.EIO)
+
+	if err := faulty.Remove(fsx.Tag{Tx: fsx.TxCleanup}, "x"); !errors.Is(err, syscall.EIO) {
+		t.Fatalf("Remove under the cleanup tag = %v, want the injected error", err)
+	}
+	if first.Hits() != 0 || unordered.Hits() != 1 {
+		t.Errorf("rule with an ordinal fired %d times, rule without one %d; want 0 and 1", first.Hits(), unordered.Hits())
+	}
+	rec.finish()
+	if len(rec.errors) != 1 || !strings.Contains(rec.errors[0], "hit=1") {
+		t.Errorf("end-of-test report = %q, want only the rule with the ordinal reported as never fired", rec.errors)
+	}
+}

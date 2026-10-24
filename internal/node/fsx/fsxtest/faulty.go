@@ -14,7 +14,8 @@ import (
 //
 // Steps are numbered by the Faulty's own counter, the same way fsx.Observe
 // numbers them, so Hit n is the n-th time a (transaction, role, step) key is
-// reached through this Faulty. Path is compared with the path the call works
+// reached through this Faulty. Steps of reserved transactions are not numbered,
+// as with fsx.Observe: a rule with a Hit never selects them. Path is compared with the path the call works
 // on: for a file, the name it was opened with; for a rename, either the source
 // or the target.
 //
@@ -128,7 +129,12 @@ func (f *Faulty) add(r *Rule) *Rule {
 
 // check numbers the step and returns the rule that fails it, if any.
 func (f *Faulty) check(tag fsx.Tag, step fsx.Step, paths ...string) *Rule {
-	p := f.counter.Next(fsx.Key{Tag: tag, Step: step})
+	// Like fsx.Observe, number no step of a reserved transaction: its point keeps
+	// ordinal zero, which no rule with an ordinal selects.
+	p := fsx.Point{Key: fsx.Key{Tag: tag, Step: step}}
+	if !tag.Reserved() {
+		p = f.counter.Next(p.Key)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, r := range f.rules {

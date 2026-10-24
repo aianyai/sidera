@@ -127,7 +127,7 @@ func TestObservedErrorsCarryTheirPoint(t *testing.T) {
 
 func TestObserveSkipsReservedTags(t *testing.T) {
 	r := newRecorded()
-	for _, tag := range []fsx.Tag{{Tx: fsx.TxLog}, fsx.CleanupTag} {
+	for _, tag := range []fsx.Tag{{Tx: fsx.TxLog}, fsx.Tag{Tx: fsx.TxCleanup}} {
 		f, err := r.fs.OpenAppend(tag, "x")
 		if err != nil {
 			t.Fatal(err)
@@ -138,7 +138,7 @@ func TestObserveSkipsReservedTags(t *testing.T) {
 		r.fs.Remove(tag, "x")
 	}
 	assertSteps(t, r.take(), nil)
-	if !(fsx.Tag{Tx: "log"}).Reserved() || !fsx.CleanupTag.Reserved() || (fsx.Tag{Tx: "intake", Role: "log"}).Reserved() {
+	if !(fsx.Tag{Tx: "log"}).Reserved() || !(fsx.Tag{Tx: fsx.TxCleanup}).Reserved() || (fsx.Tag{Tx: "intake", Role: "log"}).Reserved() {
 		t.Error("Reserved is wrong")
 	}
 }
