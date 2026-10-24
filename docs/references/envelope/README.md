@@ -43,7 +43,9 @@ signal has exactly one recipient, is not multi-recipient, and carries neither a
 its control reply); several recipients need the multi-recipient flag; a
 disclosed list of one entry is the whole message, so it is not flagged
 multi-recipient (an undisclosed list trimmed to one entry may be); endpoint
-identifiers are distinct across the list; evidence needs a `reply_to`. `from` is
+identifiers are distinct across the list; no recipient is the system endpoint
+(`ident.SystemEndpoint`), refused with `ErrSystemRecipient`, which wraps
+`ErrRecipients`; evidence needs a `reply_to`. `from` is
 not in the envelope. Encoding refuses what decoding refuses. The cap on
 `accept_before` is judged by the delivery intake, not by the envelope. The
 longest body and the most recipients are parameters (`Limits`) without defaults.
@@ -51,6 +53,14 @@ A body over the longest is `ErrBodyTooLarge`, which wraps `ErrBody` (the content
 type and body are inconsistent or not allowed), so a caller that reports the two
 differently to the sender can tell them apart; an input longer than the size the
 limits allow is refused before parsing, with the record package's oversize error.
+
+The system endpoint is the sender of a node's own channel feedback and is never
+addressed, so the one place that decodes recipients refuses it. A consequence for
+local senders: an Agent cannot send to the system endpoint, and cannot reply to a
+feedback message either, because a reply is addressed to the endpoint that sent
+the message; both are refused when the source takes the message in. Refusing the
+system endpoint as the *sender* of a request is not an envelope rule: the sender
+is not in the envelope.
 
 The receiving node adds what the bytes cannot say (`ValidateFor`, which the
 receiving node must call on every decoded envelope): it has a recipient in `to`;
@@ -246,6 +256,20 @@ which may still admit it.
   target that refuses multi-recipient messages whether the message had several.
   Disclosure needs the full list in the same field; trimming is a sender
   decision (`TrimmedFor`), and the receiver checks it (`ValidateFor`).
+- **The system endpoint is refused as a recipient, in the decoder.** Every node
+  must refuse it, whoever the sender is and whichever path the envelope took,
+  because the system endpoint only sends: no node gives it an inbox, so a
+  message addressed to it can never be read. Refusing it where every envelope is
+  decoded makes that mistake fail at the source with its own reason, on every
+  node and every path, instead of being taken in and ending as an undeliverable
+  message (see [identity](../identity/README.md) for why the value is reserved
+  in the shared identifier contract). The decoder is the one
+  place every envelope passes, and `Encode` runs its output through it, so a
+  sender cannot build one that its target would refuse. The reason has its own
+  error under `ErrRecipients`, so a caller can tell a refused address from a
+  malformed list. The cost is that a local Agent cannot answer a feedback
+  message; feedback is a notice, and the Agent acts by sending a new message
+  to the endpoint the feedback concerns.
 - **Control signal: one recipient, no body but for create.** A control signal is
   executed by one adapter and produces one reply; several recipients would bundle
   several results under one id. Body and content type on the other signals would
@@ -362,7 +386,9 @@ which may still admit it.
   independent script) with `golden_test.go`; `envelope_test.go`
   (`TestEnvelopeDecodeRules`, `TestEnvelopeStrictBytes`, `TestKindMappings`,
   `TestValidateFor`, `TestTrimmedForRandom`, `TestRequestDigest`,
-  `TestRetryAndDeduplication`, `TestEncodeRefusesWhatDecodeRefuses`);
+  `TestRetryAndDeduplication`, `TestEncodeRefusesWhatDecodeRefuses`, and for the
+  system endpoint the rows of `TestEnvelopeDecodeRules` and
+  `TestSystemEndpointIsNoRecipient`);
   `records_test.go` (`TestStatusReportRules`, `TestControlReplyRules`,
   `TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey`, which includes the
   sending-node check); `golden_test.go` (`TestGoldenRequestDigest`);

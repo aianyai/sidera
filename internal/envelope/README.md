@@ -48,12 +48,15 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   unless the sender discloses recipients, then all of them. `MultiRecipient` is
   independent of both, so a target that refuses multi-recipient messages can
   tell even when `To` was trimmed to one entry; a disclosed list of one entry is
-  the whole message and is not flagged. A control signal has exactly one
-  recipient, is not multi-recipient, and has neither `reply_to` nor evidence. Endpoint identifiers are distinct across
-  the whole list because sequence numbers are keyed by endpoint. `Seq` has one
-  entry per recipient on the target node; the structural check only requires
-  that every entry is a recipient, and `ValidateFor` checks that the entries are
-  exactly this node's recipients.
+  the whole message and is not flagged. No recipient is the system endpoint
+  (`ident.SystemEndpoint`): the decoder refuses it with `ErrSystemRecipient`,
+  which wraps `ErrRecipients`, so a local Agent can neither send to it nor reply
+  to a feedback message. A control signal has exactly one recipient, is not
+  multi-recipient, and has neither `reply_to` nor evidence. Endpoint identifiers
+  are distinct across the whole list because sequence numbers are keyed by
+  endpoint. `Seq` has one entry per recipient on the target node; the structural
+  check only requires that every entry is a recipient, and `ValidateFor` checks
+  that the entries are exactly this node's recipients.
 - **Deadlines.** `report_by` must equal `delivery.ReportBy(accept_before)`. The
   cap on `accept_before` is judged by `delivery.Intake`, not here.
 - **Body.** Content type and body are both present or both absent. A message has

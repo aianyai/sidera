@@ -304,6 +304,9 @@ func fromWireRecipients(e *Envelope, w envelopeWire, lim Limits) error {
 		if err != nil {
 			return fmt.Errorf("%w: recipient %d endpoint: %w", ErrRecipients, i, err)
 		}
+		if ep.IsSystem() {
+			return fmt.Errorf("%w: recipient %d", ErrSystemRecipient, i)
+		}
 		// Sequence numbers are keyed by endpoint alone, so no two recipients may
 		// share an endpoint identifier, even on different nodes. That also keeps
 		// every address in the list once.

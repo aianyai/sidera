@@ -18,6 +18,11 @@ var (
 	// or an endpoint, or does not fit the kind, the multi-recipient flag or the
 	// node it is read for.
 	ErrRecipients = errors.New("invalid recipients")
+	// ErrSystemRecipient: a recipient is the system endpoint, which only sends
+	// (a node's own channel feedback) and is never addressed. It wraps
+	// ErrRecipients, so a caller that must tell it from other recipient faults
+	// matches it first.
+	ErrSystemRecipient = fmt.Errorf("%w: the system endpoint is not a recipient", ErrRecipients)
 	// ErrKind: the kind is not one of the five defined.
 	ErrKind = errors.New("invalid kind")
 	// ErrSeq: the per-recipient sequence numbers are malformed or do not cover
