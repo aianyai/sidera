@@ -41,6 +41,9 @@ a system clock can replace it in one place.
   class; nothing else classifies.
 - **Appends are synced through the handle that appended them.** `SyncFile` takes
   the `File` from `OpenAppend`; reopening to sync can miss a write-back error.
+  The tag given to `Append` and `SyncFile` must be the tag the file was opened
+  with: the file's `Write` and `Sync` steps are attributed to that tag, and the
+  transaction layer guarantees they agree.
 - **Paths are relative, `/`-separated and valid under `io/fs.ValidPath`, and no
   element holds a backslash, a colon or NUL** on any platform, because on Windows
   they separate elements or name streams. `.` is the root and may only be synced
@@ -49,6 +52,9 @@ a system clock can replace it in one place.
 - **Files are 0600, or 0700 for adapter executables; directories are 0700.** On
   Windows the data directory root carries a protected DACL for the current user
   and everything created inside inherits it.
+- **`Discard` renames before it removes.** If the removal fails the error is
+  returned but the directory is already gone from its name; the `.trash-*`
+  leftover is removed at startup.
 - **`RenameDir` never replaces.** The target must not exist on any platform.
 - **Reads are not steps and hold nothing.** `ReadFile` reads and closes at once,
   so a reader never blocks a replacement on Windows.
@@ -68,8 +74,10 @@ a system clock can replace it in one place.
   uses the names `log` and `cleanup` itself for steps that are not crash points:
   they are reserved, so `ValidName` refuses them and they cannot be transaction
   or role names.
-- Make appended formats self-delimiting with a checksum, and skip a damaged
-  tail when reading: a crash or a short write leaves one.
+- Make appended formats self-delimiting with a checksum, and let a reader
+  resynchronise after a damaged record anywhere in the file, not only at the
+  tail: a failed append leaves a partial record that later appends follow, and a
+  crash leaves a damaged tail.
 - Do not hold a read handle to a file `fsx` may replace; read it with `ReadFile`.
 - Put the data directory on a local file system.
 

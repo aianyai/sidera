@@ -629,12 +629,26 @@ func TestEachCompositeOperationIsDurableWhenItReturns(t *testing.T) {
 	})
 }
 
-// A question for the transaction layer, recorded here because it is a property
-// of the File interface this package owns: the sync of an appended file is
-// attributed to the tag the file was opened with, while the directory sync of
-// SyncFile carries the tag SyncFile is called with.
-func TestSyncStepOfAppendedFileCarriesTheRoleOfTheSyncCall(t *testing.T) {
-	t.Skip("open question: a transaction that appends under one role and syncs under another gets the file sync " +
-		"attributed to the append role (File.Sync has no tag), so its crash point is not the one declared for the " +
-		"sync role; either the append role also declares the sync step, or File gains a way to re-tag a sync")
+// The file's Write and Sync steps are attributed to the tag the file was opened
+// with, and SyncFile's directory sync carries the tag it is given, which the
+// transaction layer makes the same tag. Both steps of SyncFile therefore appear
+// under the role that appended.
+func TestSyncFileStepsCarryTheTagTheFileWasOpenedWith(t *testing.T) {
+	r := newRecorded()
+	appendTag := fsx.Tag{Tx: "intake", Role: "events"}
+	f, err := fsx.OpenAppend(r.fs, appendTag, "log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := fsx.Append(f, appendTag, []byte("record\n")); err != nil {
+		t.Fatal(err)
+	}
+	r.take()
+
+	if err := fsx.SyncFile(r.fs, appendTag, f); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSteps(t, r.take(), []string{"intake/events.sync#1", "intake/events.sync-dir#1"})
 }

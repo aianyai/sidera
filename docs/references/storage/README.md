@@ -33,7 +33,7 @@ make a write durable are functions over any `FS`, not methods of it:
 | `MakeDir` | `mkdir`, `sync-dir` (the parent) | layout and staging directories |
 | `RenameDir` | `rename-dir`, `sync-dir` (the parent) | a staged directory appearing whole |
 | `RemoveAll` | `remove-all` | only a directory already renamed to a garbage name |
-| `Discard` | `rename-dir` to `.trash-<hex>`, `sync-dir`, `remove-all` | deleting a directory tree |
+| `Discard` | `rename-dir` to `.trash-<hex>`, `sync-dir`, `remove-all` | deleting a directory tree; if the removal fails the directory is already gone from its name and startup removes the leftover |
 
 Paths are relative to the data directory root, separated by `/`, and valid in
 the sense of `io/fs.ValidPath` (no `..`, no leading `/`, no empty segment); `.`
@@ -86,7 +86,7 @@ caller must do. The class is decided in one table (`classify.go`):
 
 | Step that failed | Class | Reason |
 | ---------------- | ----- | ------ |
-| `create`, `write`, `rename`, `remove`, `remove-all`, `mkdir`, `rename-dir`, `open` | Failed | the call did not complete, so nothing durable changed; the caller rejects the request or applies backpressure. A short write can leave half a record at the end of an appended file, which is why appended formats delimit and checksum their records and readers skip a damaged tail |
+| `create`, `write`, `rename`, `remove`, `remove-all`, `mkdir`, `rename-dir`, `open` | Failed | the call did not complete, so nothing durable changed; the caller rejects the request or applies backpressure. A failed append can leave a partial record that later appends follow, which is why appended formats delimit and checksum their records and a reader must resynchronise after a damaged record anywhere in the file, not only at the tail |
 | `sync` of the temporary file of a `Replace`, before its rename | Failed | the target is untouched and nothing was acknowledged; the temporary file is removed. Treating this as fatal would turn a persistent device error into a restart loop |
 | any `sync-dir` | Fatal | whether the rename or creation is durable is unknown, and memory may disagree with disk. After a failed write-back Linux marks the pages clean, so a later `fsync` can report success for data that is lost; the only safe answer is to exit and rescan |
 | `sync` of an appended file (`SyncFile`) | Fatal | the appended bytes are visible to this process but whether they are on disk is unknown. A later successful sync must not let the caller believe the whole batch is durable, for example by deleting what it just archived |
@@ -107,6 +107,12 @@ same operation. Linux reports a write-back error only to descriptors that were
 open when the error happened, so closing the file and reopening it to `fsync`
 can miss the error and succeed. Under the instance lock there is one writer, so
 `OpenAppend` positions at the end and appends there.
+
+The file's `Write` and `Sync` steps are attributed to the tag the file was opened
+with, and `File` has no way to change it. The tag given to `Append` and
+`SyncFile` must therefore be the tag the file was opened with; the transaction
+layer guarantees they agree, and its declaration of crash points lists the
+`sync` and `sync-dir` of an appended file under the appending role.
 
 ### Leftovers
 
@@ -318,13 +324,6 @@ so that the double cannot drift from what it stands for.
 
 ## Known gaps
 
-- **File sync under another role.** `File.Sync` has no tag: the sync of an
-  appended file is attributed to the tag the file was opened with. A transaction
-  that appends under one role and syncs under another therefore reaches the
-  file sync under the append role, which a declaration of the sync role would
-  not list. The question is recorded as a skipped test,
-  `TestSyncStepOfAppendedFileCarriesTheRoleOfTheSyncCall`, for the transaction
-  layer to settle.
 - **Reading an absent file on Windows** costs the retry budget, because
   `file not found` is in the retried set.
 - **Symbolic links.** The test that `Stat` does not follow a final symbolic link
@@ -339,7 +338,7 @@ so that the double cannot drift from what it stands for.
 | interface, paths, tags, reserved tags | `internal/node/fsx/fsx.go` | `ops_test.go` (`TestPathElementsNeverHoldABackslashColonOrNul`), `observe_test.go`, the path cases of `RunConformance` |
 | steps, keys, points, counter, `ParsePoint` | `internal/node/fsx/point.go` | `point_test.go` (golden points, rejection table, `FuzzParsePoint`, `FuzzPointRoundTrip`) |
 | classes and the classification table | `internal/node/fsx/error.go`, `classify.go` | `TestFsyncFailureBeforeRenameFailsOperation`, `TestDirSyncFailureAfterRenameIsFatal`, `TestFailureClassOfEveryStep` |
-| composite operations | `internal/node/fsx/ops.go` | `TestCompositeOperationsRunTheirFixedSteps`, `TestReplaceLeavesNoTemporaryAndKeepsTheTargetWhenAnyStepBeforeTheRenameFails`, `TestCleanupAfterAFailureIsNotAStep`, `TestAppendShortWriteIsAFailureThatLeavesAPartialTail`, `TestEachCompositeOperationIsDurableWhenItReturns`, `TestDiscardRenamesToAGarbageNameBeforeDeleting` and the `RenameDir`, path and root tests in `ops_test.go` |
+| composite operations | `internal/node/fsx/ops.go` | `TestCompositeOperationsRunTheirFixedSteps`, `TestReplaceLeavesNoTemporaryAndKeepsTheTargetWhenAnyStepBeforeTheRenameFails`, `TestCleanupAfterAFailureIsNotAStep`, `TestAppendShortWriteIsAFailureThatLeavesAPartialTail`, `TestSyncFileStepsCarryTheTagTheFileWasOpenedWith`, `TestEachCompositeOperationIsDurableWhenItReturns`, `TestDiscardRenamesToAGarbageNameBeforeDeleting` and the `RenameDir`, path and root tests in `ops_test.go` |
 | `Observe`, `PointOf` | `internal/node/fsx/observe.go`, `error.go` | `observe_test.go` |
 | leftovers | `internal/node/fsx/leftovers.go` | `leftovers_test.go` |
 | retry | `internal/node/fsx/retry.go` | `retry_internal_test.go` |

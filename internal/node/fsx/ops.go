@@ -74,9 +74,13 @@ func OpenAppend(fs FS, tag Tag, p string) (File, error) {
 	return f, nil
 }
 
-// Append writes data to a handle from OpenAppend without syncing it. A short
-// write can leave half a record at the end of the file, so appended formats
-// delimit and checksum their records and readers skip a damaged tail.
+// Append writes data to a handle from OpenAppend without syncing it. tag must be
+// the tag f was opened with: the file's Write and Sync steps are attributed to
+// that tag, and the transaction layer guarantees they agree.
+//
+// A failed append can leave a partial record that later appends follow, so an
+// appended format must let a reader resynchronise after a damaged record
+// anywhere in the file, not only at the tail.
 func Append(f File, tag Tag, data []byte) error {
 	if err := writeAll(f, data); err != nil {
 		return fail(opAppend, tag, StepWrite, f.Name(), err)
@@ -85,9 +89,11 @@ func Append(f File, tag Tag, data []byte) error {
 }
 
 // SyncFile makes everything appended through f durable: sync the handle, then
-// sync its directory so a newly created file's name is durable too. Both
-// failures are fatal: the data is visible to this process, but whether it is
-// on disk is unknown.
+// sync its directory so a newly created file's name is durable too. tag must be
+// the tag f was opened with: the file's Write and Sync steps are attributed to
+// that tag, and the transaction layer guarantees they agree. Both failures are
+// fatal: the data is visible to this process, but whether it is on disk is
+// unknown.
 func SyncFile(fs FS, tag Tag, f File) error {
 	if err := f.Sync(); err != nil {
 		return fail(opSyncFile, tag, StepSync, f.Name(), err)
@@ -181,6 +187,8 @@ func RemoveAll(fs FS, tag Tag, dir string) error {
 // Discard deletes a directory tree: rename it to a ".trash-" name in the same
 // parent, sync the parent, remove the tree. A crash while removing leaves a
 // half-deleted directory, but only under a garbage name that startup removes.
+// When the removal fails the error is returned, but the directory is already
+// gone from its name; the ".trash-" leftover is removed at startup.
 func Discard(fs FS, tag Tag, dir string) error {
 	if err := checkNotRoot(dir); err != nil {
 		return reject(tag, StepRenameDir, dir, err)
