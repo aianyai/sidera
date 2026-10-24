@@ -281,7 +281,9 @@ const (
 	// AckRefusedToken: the token is not the owning endpoint's.
 	AckRefusedToken
 	// AckRefusedNoHandout: that chunk was never handed out, so there is nothing
-	// to acknowledge.
+	// to acknowledge. A chunk number outside 1..Chunks is such a chunk too: the
+	// message has no such part, and the acknowledgement is about something the
+	// agent was never given.
 	AckRefusedNoHandout
 	// AckRefusedLease: the lease ID is unset or names no page this message was
 	// handed out on.
@@ -297,8 +299,9 @@ const (
 // the chunk was handed out on; any page the message was handed out on counts,
 // the latest one or an earlier one, because the chunk was seen on whichever
 // page carried it and a redelivery in between does not unsee it. Only a chunk
-// that was handed out can be acknowledged: an acknowledgement for anything else
-// would deliver a body the agent never received. The delivery becomes
+// that was handed out can be acknowledged: an acknowledgement for anything else,
+// a chunk number outside the message included, would deliver a body the agent
+// never received, and is refused as AckRefusedNoHandout. The delivery becomes
 // delivered when every chunk is acknowledged, not before.
 func (r Record) Ack(now time.Time, a Ack) (Record, AckVerdict, Outcome, error) {
 	if r.Side != SideTarget {
@@ -325,10 +328,7 @@ func (r Record) Ack(now time.Time, a Ack) (Record, AckVerdict, Outcome, error) {
 	if !r.Lease.issued(a.Lease) {
 		return r, AckRefusedLease, Outcome{}, nil
 	}
-	if a.Part < 1 || a.Part > r.Lease.Chunks {
-		return r, 0, Outcome{}, fmt.Errorf("%w: part %d of %d", ErrInvalidInput, a.Part, r.Lease.Chunks)
-	}
-	if !r.Lease.HandedOut[a.Part-1] {
+	if a.Part < 1 || a.Part > r.Lease.Chunks || !r.Lease.HandedOut[a.Part-1] {
 		return r, AckRefusedNoHandout, Outcome{}, nil
 	}
 	if r.Lease.Acked[a.Part-1] {

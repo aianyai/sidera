@@ -381,9 +381,13 @@ func (r AckReason) Valid() bool { return slices.Contains(ackReasons, r) }
 type ItemAck string
 
 const (
-	ItemRecorded         ItemAck = "recorded"
-	ItemCompleted        ItemAck = "completed"
-	ItemDuplicate        ItemAck = "duplicate"
+	ItemRecorded  ItemAck = "recorded"
+	ItemCompleted ItemAck = "completed"
+	ItemDuplicate ItemAck = "duplicate"
+	// ItemRefusedNoHandout: the part was never handed out to this endpoint.
+	// That covers a message the daemon holds nothing of for the endpoint and a
+	// part number beyond the message's last part: both are parts nobody was
+	// given, so there is nothing to acknowledge.
 	ItemRefusedNoHandout ItemAck = "refused_no_handout"
 	ItemRefusedLease     ItemAck = "refused_lease"
 	ItemTooLate          ItemAck = "too_late"

@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -400,13 +401,6 @@ func TestChunkedAck(t *testing.T) {
 			t.Errorf("state %s, next part %d", r.State, r.NextPart())
 		}
 	})
-	t.Run("a chunk outside 1..n is invalid", func(t *testing.T) {
-		for _, part := range []int{0, 4, -1} {
-			if _, _, _, err := ackUnder(start(t), at(time.Minute), good(part)); !errors.Is(err, ErrInvalidInput) {
-				t.Errorf("part %d: err %v", part, err)
-			}
-		}
-	})
 	t.Run("a refused token does not record the chunk", func(t *testing.T) {
 		r, v, _, _ := ackUnder(start(t), at(time.Minute), Ack{Part: 1})
 		if v != AckRefusedToken || r.Lease.Acked[0] {
@@ -707,4 +701,20 @@ func TestAckLease(t *testing.T) {
 			t.Errorf("verdict %v state %s", v, r.State)
 		}
 	})
+}
+
+// A chunk number outside the message is a chunk that was never handed out: the
+// verdict is the one a real but unseen chunk gets, not an input error, and the
+// record is left as it was.
+func TestAckOutOfRangePartWasNeverHandedOut(t *testing.T) {
+	for _, part := range []int{0, -1, 4, 1 << 20} {
+		before := handOutAll(t, targetRecord(t, t0, 2*time.Hour), t0, 3)
+		after, v, out, err := ackUnder(before, at(time.Minute), Ack{Part: part, TokenMatches: true})
+		if err != nil || v != AckRefusedNoHandout || !reflect.DeepEqual(out, Outcome{}) {
+			t.Errorf("part %d: verdict %v out %+v err %v", part, v, out, err)
+		}
+		if after.State != StateAccepted || !reflect.DeepEqual(after.Lease.Acked, before.Lease.Acked) {
+			t.Errorf("part %d: state %s acked %v, want the record unchanged", part, after.State, after.Lease.Acked)
+		}
+	}
 }

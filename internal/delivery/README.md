@@ -159,7 +159,9 @@ correction and the blocked notice.
   before it packs.
 - The caller splits bodies into chunks and passes the count and the chunk it is
   handing out (starting from `NextPart`) to `Handout`; the count is fixed at
-  the first hand-out. Only chunks handed out can be acknowledged.
+  the first hand-out. Only chunks handed out can be acknowledged: a chunk
+  number outside the message is a chunk never handed out (`AckRefusedNoHandout`),
+  not an input error.
 - A control signal's record is built with `NewTargetControlRecord`, never
   `NewTargetRecord`, and `EventReplyCommitted` is applied in the same
   transaction that commits the control reply and the execution result. A caller
