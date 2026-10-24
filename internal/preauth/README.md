@@ -93,6 +93,11 @@ timers, and applies the answers.
     key, or the person's root key), expired or not yet valid. Otherwise
     `admin.EffectiveLevel` decides: a level is an authorized person, anything
     else (not listed, entry expired) a non-member person.
+  - **Retirement has one source.** `Decide` and `HeldMembers` add
+    `Revocations.Retired()` to the view's `Retired` set before every
+    `trust.Evaluate`, so a retired intermediate carries no trust whether or not the
+    caller copied the set into the view. Nodes the view lists itself stay retired.
+    The caller's view is not changed.
   - **Failure closed.** An unset time, an unset peer key, an unset kind and a
     `nil` revocation set are refused. A `nil` set is not "nothing revoked" here,
     as it is in `revocation`: use `revocation.NewSet()` for a node that has
@@ -170,7 +175,7 @@ timers, and applies the answers.
   authenticated on this connection, and nothing else. It is the only identity the
   peer proved; the message is what it claims.
 - `Facts` is loaded fresh: the revocation set holds every revocation the node
-  keeps, `Trust.Retired` is `Revocations.Retired()`, and `SerialSeen` is the
+  keeps (the retired nodes are taken from it, see below), and `SerialSeen` is the
   stored state per node. The caller stores `Decision.SerialSeen` when it is not
   the zero value and keeps `Decision.NodeCertificate` as the node's accepted
   certificate when the exchange completed.

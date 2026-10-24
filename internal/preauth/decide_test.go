@@ -181,6 +181,18 @@ func TestDecideNode(t *testing.T) {
 			rec, _ := w.cert(1)
 			return w.facts(), w.peer.Public(), NewNodeExchange(rec)
 		}, want{StateNonMemberNode, ReasonNotTrusted, trust.Denied, trust.ReasonLocallyRevoked}},
+		{"a node trusted through an intermediate that only the revocation set retires is a non-member", func(w *world) (Facts, ident.PublicKey, Exchange) {
+			w.trustsThrough(false)
+			w.revoke(revocation.IssueNodeSelfRevocation(seedSigner(t, 0x02)))
+			rec, _ := w.cert(1)
+			return w.facts(), w.peer.Public(), NewNodeExchange(rec)
+		}, want{StateNonMemberNode, ReasonNotTrusted, trust.Denied, trust.ReasonRetired}},
+		{"a node trusted through an intermediate that only the view lists as retired is a non-member", func(w *world) (Facts, ident.PublicKey, Exchange) {
+			w.trustsThrough(false)
+			w.view.Retired[nodeOf(t, seedSigner(t, 0x02))] = struct{}{}
+			rec, _ := w.cert(1)
+			return w.facts(), w.peer.Public(), NewNodeExchange(rec)
+		}, want{StateNonMemberNode, ReasonNotTrusted, trust.Denied, trust.ReasonRetired}},
 		{"a trusted node presenting another network key is refused", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			w.trusts()
 			rec, _ := w.cert(1)
@@ -549,6 +561,12 @@ func TestHeldMembers(t *testing.T) {
 			w.revoke(revocation.IssueNetworkKeyCertificateRevocation(v, w.identity))
 			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
 		}, 0},
+		{"a node trusted through an intermediate that only the revocation set retires", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trustsThrough(false)
+			w.revoke(revocation.IssueNodeSelfRevocation(seedSigner(t, 0x02)))
+			_, v := w.cert(1)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
 		{"a certificate of a retired node", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
 			w.trusts()
 			_, v := w.cert(1)
@@ -606,5 +624,18 @@ func TestHeldMembers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The retired set is derived from the revocation set for the evaluation only:
+// the view the caller passed is left as it was.
+func TestDecideLeavesTheCallersTrustViewAlone(t *testing.T) {
+	w := newWorld(t).trustsThrough(false)
+	w.revoke(revocation.IssueNodeSelfRevocation(seedSigner(t, 0x02)))
+	rec, v := w.cert(1)
+	Decide(w.facts(), w.peer.Public(), NewNodeExchange(rec))
+	HeldMembers(w.facts(), []record.Verified[record.NetworkKeyCertificate]{v})
+	if len(w.view.Retired) != 0 {
+		t.Errorf("the caller's Retired set was changed: %v", w.view.Retired)
 	}
 }

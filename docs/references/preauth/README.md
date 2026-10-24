@@ -115,7 +115,9 @@ For a node:
    revocation lookup of the set): a different key, a revoked certificate, an
    expired one or one that has not begun is refused. A node whose identity key
    has a self-revocation is refused as retired.
-4. `trust.Evaluate` decides: allowed directly or by inheritance is a member,
+4. `trust.Evaluate` decides, on the trust view with the retired nodes of the
+   revocation set added to its own (a retired intermediate carries no trust):
+   allowed directly or by inheritance is a member,
    **suspended is a member**, denied is a non-member node (pairing only).
 
 For a person:
@@ -263,6 +265,13 @@ cache of who is known: the accounting keeps its own known set.
   would turn a pause into a denial, and the vouchers that end it travel on member
   protocols. The connection state follows `trust`'s outcome, the policy layer
   gets the outcome itself.
+- **Retirement is read from the revocation set, once.** Whether a node is
+  retired is a fact of the revocation set, and `trust` needs it for the
+  intermediates of a path as well as for the target. If the caller had to copy the
+  set into the trust view, forgetting to would silently trust through a retired
+  intermediate, and the decision and the held-member selection could disagree
+  about the same node. Both read it where the decision is made, as the union of
+  the view's own set and the revocation set, and leave the caller's view alone.
 - **The same certificate again is not stale.** `DecideSerial` answers stale for a
   certificate it has seen, because for storage "nothing new" is the right answer;
   for a connection the very certificate at the highest serial is exactly what a
@@ -291,9 +300,9 @@ cache of who is known: the accounting keeps its own known set.
   non-member decision forget the peer at once, and the caller forgets a peer when
   a member's trust ends or a person leaves the list. The residual risk is a
   peer whose standing ended without the caller saying so and that never
-  exchanges again: it holds no slot of the cap's and is closed at its deadline,
-  but its connections are not counted until the next exchange or the next
-  refresh of the held members.
+  exchanges again: its connections stay outside the cap, though each is closed
+  at its deadline, until its next exchange or the next refresh of the held
+  members.
 - **One inbound connection per key.** The connection gater is asked once per
   connection, before the library has given it an identifier, so (peer, address)
   is the finest key both the gater and the later connection events can obtain.
@@ -338,6 +347,6 @@ cache of who is known: the accounting keeps its own known set.
 | Protocol identifiers and classes | `internal/preauth/protocol.go` |
 | The access table | `internal/preauth/access.go`; tests `TestAllowedMatrix` (one row per rule, every cell written out), `TestBusinessProtocolBeforeTheExchangeIsRefused`, `TestNonMemberNodeMayOnlyPair`, `TestNonMemberPersonMayOnlyQueryReachability`, `TestRelayReservationBeforeTheExchangeIsRefused`, `TestAllowedRefusesAnInvalidState`, `TestProtocolIdentifiers` |
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
-| The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestHeldMembers`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
+| The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestHeldMembers`, `TestDecideLeavesTheCallersTrustViewAlone`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
 | Parameters | `internal/preauth/params.go`; test `TestParamsValidate` |
 | The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestASecondInboundConnectionOnATrackedKeyIsRefused`, `TestADuplicateKeyIsRefusedBeforeTheCapIsLookedAt`, `TestADuplicateKeyOfAKnownMemberIsRefusedWithoutLeakingAnEntry`, `TestADuplicateKeyOfANonMemberIsRefused`, `TestADuplicateKeyIsRefusedUntilTheSweepForgetsALostEntry`, `TestAKeyIsFreeAgainOnceItsConnectionBecameAMember`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestARefusedExchangeWithdrawsTheExemption`, `TestAnInvalidCompletedCallDoesNotWithdrawTheExemption`, `TestForgetEndsTheKnownStandingFromEitherSource`, `TestNonMemberPersonsAndNodesShareTheNonMemberLimits`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` follows every connection by an identifier of its own that the model never sees, compares every answer with a second implementation under 40,000 random events, asserts at every step that each live inbound connection is on the books and bound by a deadline or was released as a member, that every connected entry has an open connection behind it and that nothing remains once all connections ended, and asserts how often each path was taken |

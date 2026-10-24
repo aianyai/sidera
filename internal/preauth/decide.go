@@ -143,8 +143,10 @@ type Facts struct {
 	// revocation package, where a nil set means "nothing revoked". An empty set
 	// from revocation.NewSet says "looked, found nothing".
 	Revocations *revocation.Set
-	// Trust is the view trust.Evaluate decides on. Its Retired set should be
-	// Revocations.Retired(); a retired node is refused before trust is asked.
+	// Trust is the view trust.Evaluate decides on. Revocations.Retired() is added
+	// to its Retired set before every evaluation, so retirement has one source,
+	// the revocation set, and the caller fills nothing in; nodes the view itself
+	// lists as retired stay retired.
 	Trust trust.View
 	// SerialSeen is the highest network-key certificate serial seen, per node. A
 	// node missing from the map has had none seen.
@@ -281,7 +283,7 @@ func decideNode(f Facts, peer ident.PublicKey, rec record.Record) Decision {
 		return withSerial(refused(ReasonCertificateInvalid), advance)
 	}
 
-	verdict := trust.Evaluate(f.Trust, node, f.Now)
+	verdict := trust.Evaluate(f.trustView(), node, f.Now)
 	d := Decision{Node: node, Trust: verdict, NodeCertificate: cert, SerialSeen: advance}
 	d.State, d.Reason = nodeState(verdict.Outcome)
 	return d
@@ -340,6 +342,7 @@ func HeldMembers(f Facts, certs []record.Verified[record.NetworkKeyCertificate])
 		return nil
 	}
 	var out []ident.PublicKey
+	view := f.trustView()
 	seen := map[ident.PublicKey]bool{}
 	for _, cert := range certs {
 		c := cert.Payload()
@@ -349,13 +352,28 @@ func HeldMembers(f Facts, certs []record.Verified[record.NetworkKeyCertificate])
 		if record.NetworkKeyBelongs(f.Revocations.NetworkKey(cert), c.Node, c.NetworkKey, f.Now) != record.BindingOK {
 			continue
 		}
-		if state, _ := nodeState(trust.Evaluate(f.Trust, c.Node, f.Now).Outcome); state != StateMember || seen[c.NetworkKey] {
+		if state, _ := nodeState(trust.Evaluate(view, c.Node, f.Now).Outcome); state != StateMember || seen[c.NetworkKey] {
 			continue
 		}
 		seen[c.NetworkKey] = true
 		out = append(out, c.NetworkKey)
 	}
 	return out
+}
+
+// trustView is the view trust.Evaluate decides on: Facts.Trust with every node
+// the revocation set retires added to its Retired set. A retired intermediate
+// carries no trust, so the set must reach trust.Evaluate, not only the check of
+// the node itself; deriving it here from the one source keeps the caller from
+// having to remember it. Facts.Revocations must not be nil. Facts.Trust itself
+// is not changed: the view is a copy with its own Retired map.
+func (f Facts) trustView() trust.View {
+	view := f.Trust
+	view.Retired = f.Revocations.Retired()
+	for n := range f.Trust.Retired {
+		view.Retired[n] = struct{}{}
+	}
+	return view
 }
 
 func withSerial(d Decision, s record.SerialSeen) Decision {
