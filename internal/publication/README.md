@@ -85,7 +85,9 @@ package follows, and
   that lists a relay twice does not decode.
 - **Reachability proof.** Person, node and `NotAfter`, signed by the node's
   identity key. `NotAfter` is passed on to `admin.CheckReachabilityProof`, which
-  judges it.
+  judges it. `ReachabilityProof.Admin(retirement)` takes the caller's lookup of
+  the issuing node in the retirement records (`revocation.Set.NodeRetirement`),
+  because a retired node's proofs are void.
 
 ## What the caller must guarantee
 

@@ -108,7 +108,8 @@ lets them query the node's reachability records. The node may issue a proof to a
 person who is on its list with an unexpired entry, at any level, and only if the
 proof does not outlive the entry: its end may equal the entry's expiry but not
 exceed it. A proof is accepted for a requester when it names exactly this node
-and this requester and the present instant is before its end. A proof grants no
+and this requester, was not issued by a retired node, and the present instant is
+before its end. A proof grants no
 management right: it opens reachability records and nothing else.
 
 **Management requests.** Each side-effecting request carries an operation ID.
@@ -215,6 +216,13 @@ neither file nor probe results.
   reused by mistake; a fingerprint compare makes that a loud conflict. Version
   conflicts are reported instead of overwritten so two administrators never
   silently undo each other.
+- **A retired issuer voids its proofs.** A proof is signed by the issuing
+  node's identity key, and a self-revocation voids everything that key signed. A
+  checker that read only the proof's end would go on answering with a record for
+  a person on the list of a node that no longer exists. The retirement lookup is
+  an input like the revocation status of a device certificate, three-valued so a
+  caller that forgot it is refused (`retirement_unchecked`), and the rule lives
+  here, not in each query handler.
 - **Reachability proofs cannot outlive the entry.** A proof is bearer
   authority a person carries around; if it could outlast their list entry, the
   expiry on the entry would no longer bound what they can see. It grants no
@@ -255,7 +263,8 @@ neither file nor probe results.
     `TestAcceptDirectiveWithoutOfflineSinceRejects`,
     `TestAcceptDirectiveSigningTimeAgainstOfflineWindow`.
   - `reachability_test.go`: `TestMayIssueReachabilityProof`,
-    `TestCheckReachabilityProof`.
+    `TestCheckReachabilityProof`; with `publication`,
+    `TestAProofOfARetiredNodeIsRefused`.
   - `request_test.go`: `TestValidateRequest`, `TestEveryConfigChangeIsSideEffecting`,
     `TestConfigChangesAreTheVersionedSettings`, `TestCheckVersion`,
     `TestCheckReplay`, `TestKeyForScopesOperationIDsToThePerson`,

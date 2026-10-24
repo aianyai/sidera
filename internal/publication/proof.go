@@ -66,7 +66,10 @@ func proofFromWire(w reachabilityProofWire) (ReachabilityProof, error) {
 	return ReachabilityProof{Person: person, Node: node, NotAfter: notAfter}, nil
 }
 
-// Admin returns the facts package admin reads.
-func (p ReachabilityProof) Admin() admin.ReachabilityProof {
-	return admin.ReachabilityProof{Node: p.Node, Person: p.Person, NotAfter: p.NotAfter}
+// Admin returns the facts package admin reads. retirement is the result of the
+// caller's lookup of the issuing node (p.Node) in the retirement records
+// (revocation.Set.NodeRetirement): a proof of a retired node is void, and a
+// lookup nobody made is refused.
+func (p ReachabilityProof) Admin(retirement admin.RetirementStatus) admin.ReachabilityProof {
+	return admin.ReachabilityProof{Node: p.Node, Person: p.Person, NotAfter: p.NotAfter, IssuerRetirement: retirement}
 }

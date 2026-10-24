@@ -393,3 +393,19 @@ func TestTrustViewTakesRetirementFromTheSetOnly(t *testing.T) {
 		t.Fatal("an empty set retires nobody, whatever the view said")
 	}
 }
+
+// NodeRetirement is the checked status admin reads for a proof's issuer: never
+// the unchecked zero value.
+func TestNodeRetirementIsAlwaysChecked(t *testing.T) {
+	k1, k2 := rfcSigner(t, 1), rfcSigner(t, 2)
+	set := addAll(t, must(IssueNodeSelfRevocation(k1)))
+	if got := set.NodeRetirement(nodeOf(t, k1)); got != admin.RetirementRetired {
+		t.Fatalf("retired node: %v", got)
+	}
+	if got := set.NodeRetirement(nodeOf(t, k2)); got != admin.RetirementClear {
+		t.Fatalf("other node: %v", got)
+	}
+	if got := NewSet().NodeRetirement(nodeOf(t, k1)); got != admin.RetirementClear {
+		t.Fatalf("empty set: %v", got)
+	}
+}

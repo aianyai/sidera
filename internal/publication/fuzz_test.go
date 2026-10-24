@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/record"
 )
 
@@ -157,7 +158,7 @@ func FuzzDecodeProof(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if v.Payload().Admin().NotAfter.IsZero() {
+		if v.Payload().Admin(admin.RetirementClear).NotAfter.IsZero() {
 			t.Fatal("verified proof without an end")
 		}
 	})

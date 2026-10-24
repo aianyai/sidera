@@ -15,7 +15,7 @@ for the reasoning behind the rules.
 | `RequirementOf(op) (Requirement, bool)`                                 | The operation catalogue: which level, or the local owner alone, an operation needs.                       |
 | `AcceptDirective(local, list, d, offlineSince, now)`                    | Execute, reject, or only warn about an offline directive.                                                 |
 | `MayIssueReachabilityProof(list, person, notAfter, now) ProofVerdict`   | May this node issue a reachability proof to this person, valid until `notAfter`.                          |
-| `CheckReachabilityProof(p, node, requester, now) ProofVerdict`          | Does this proof let this requester query this node's reachability records now.                            |
+| `CheckReachabilityProof(p, node, requester, now) ProofVerdict`          | Does this proof let this requester query this node's reachability records now: it names this node and requester, its issuer is not retired (`RetirementStatus`), and it has not ended. |
 | `NewOperationID(r io.Reader) (OperationID, error)`                      | A random operation ID from an injected source; all-zero is refused.                                       |
 | `KeyFor(actor, id) RequestKey`                                          | The key under which an actor's results are filed; the operation ID is scoped to the person.               |
 | `ValidateRequest`, `CheckReplay`, `CheckVersion`                        | Shape of a management request, same-ID-same-result rule, version-conflict check.                          |
@@ -117,4 +117,9 @@ own `KeyFor`, so nobody sees another person's results.
 - `Fingerprint` is a collision-resistant digest of the whole request.
   Stored results are filed under `RequestKey` (person plus operation ID).
 - The signature format of a reachability proof is outside this package;
-  `ReachabilityProof` carries the verified facts only.
+  `ReachabilityProof` carries the verified facts only. One of them is the
+  caller's lookup of the issuing node in the retirement records
+  (`IssuerRetirement`): the proof is signed by the node's identity key, so a
+  retired node's proof is void. The zero value `RetirementUnchecked` is refused
+  with `ReasonRetirementUnchecked`; `revocation.Set.NodeRetirement` gives a
+  checked status.

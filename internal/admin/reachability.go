@@ -19,7 +19,28 @@ type ReachabilityProof struct {
 	Person ident.PersonID
 	// NotAfter is when the proof stops being valid, at that instant.
 	NotAfter time.Time
+	// IssuerRetirement is the result of looking the issuing node (Node, whose
+	// identity key signed the proof) up in the retirement records. The zero
+	// value RetirementUnchecked is refused: a caller that forgot the lookup gets
+	// a refusal, never a proof that merely looks issued by a live node.
+	IssuerRetirement RetirementStatus
 }
+
+// RetirementStatus is the outcome of looking a node up in the records of retired
+// nodes (identity keys with a verified self-revocation). Its zero value means
+// nobody looked.
+type RetirementStatus int
+
+const (
+	// RetirementUnchecked is the zero value: the retirement records were not
+	// consulted. It grants nothing.
+	RetirementUnchecked RetirementStatus = iota
+	// RetirementClear means the node was looked up and is not retired.
+	RetirementClear
+	// RetirementRetired means the node's identity key has a verified
+	// self-revocation.
+	RetirementRetired
+)
 
 // ProofVerdict is the result of the reachability-proof checks.
 type ProofVerdict struct {
@@ -49,14 +70,19 @@ func MayIssueReachabilityProof(list List, person ident.PersonID, notAfter, now t
 
 // CheckReachabilityProof decides whether p lets requester query the
 // reachability records of node at now. The proof must name exactly this node
-// and this requester, and is valid up to but excluding NotAfter. An unset node
-// or requester never matches.
+// and this requester, must not have been issued by a retired node (its identity
+// key is void, and so is everything it signed, a proof included), and is valid
+// up to but excluding NotAfter. An unset node or requester never matches.
 func CheckReachabilityProof(p ReachabilityProof, node ident.NodeID, requester ident.PersonID, now time.Time) ProofVerdict {
 	switch {
 	case node.IsZero() || p.Node != node:
 		return ProofVerdict{Reason: ReasonProofNodeMismatch}
 	case requester.IsZero() || p.Person != requester:
 		return ProofVerdict{Reason: ReasonProofPersonMismatch}
+	case p.IssuerRetirement == RetirementRetired:
+		return ProofVerdict{Reason: ReasonProofIssuerRetired}
+	case p.IssuerRetirement != RetirementClear:
+		return ProofVerdict{Reason: ReasonRetirementUnchecked}
 	case !now.Before(p.NotAfter):
 		return ProofVerdict{Reason: ReasonProofExpired}
 	default:

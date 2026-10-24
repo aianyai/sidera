@@ -270,7 +270,8 @@ keeps a revocation.
   `RevocationClear`; `Set.RemotePerson` builds the remote `admin.Actor` from one
   certificate, taking the person from it, and is the way to build one;
   `Set.Retired` returns the node IDs with a verified self-revocation as the
-  `trust.NodeSet`, and `Set.TrustView` returns a `trust.View` with its
+  `trust.NodeSet`, `Set.NodeRetirement` gives the checked status `admin` reads for
+  the issuer of a reachability proof, and `Set.TrustView` returns a `trust.View` with its
   `Retired` set replaced by it (the one source of retirement); `Set.NetworkKey(cert,
   highestSerial)` sets `AcceptedNetworkKey.Revocation` to `KeyRevocationRevoked`
   (the certificate's own revocation, or any self-revocation of its node) or

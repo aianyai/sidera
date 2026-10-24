@@ -47,7 +47,7 @@ func TestMayIssueReachabilityProof(t *testing.T) {
 func TestCheckReachabilityProof(t *testing.T) {
 	self, other := node(t, 1), node(t, 2)
 	me, someoneElse := person(t, 1), person(t, 2)
-	proof := ReachabilityProof{Node: self, Person: me, NotAfter: t0.Add(time.Hour)}
+	proof := ReachabilityProof{Node: self, Person: me, NotAfter: t0.Add(time.Hour), IssuerRetirement: RetirementClear}
 	with := func(mut func(*ReachabilityProof)) ReachabilityProof {
 		p := proof
 		mut(&p)
@@ -69,6 +69,16 @@ func TestCheckReachabilityProof(t *testing.T) {
 			ProofVerdict{false, ReasonProofExpired}},
 		{"a proof issued for another node is refused", proof, other, me, t0, ProofVerdict{false, ReasonProofNodeMismatch}},
 		{"a proof issued to another person is refused", proof, self, someoneElse, t0, ProofVerdict{false, ReasonProofPersonMismatch}},
+		{"a proof issued by a retired node is refused", with(func(p *ReachabilityProof) { p.IssuerRetirement = RetirementRetired }), self, me, t0,
+			ProofVerdict{false, ReasonProofIssuerRetired}},
+		{"a retired issuer is refused even when the proof has also expired", with(func(p *ReachabilityProof) { p.IssuerRetirement = RetirementRetired }), self, me, proof.NotAfter,
+			ProofVerdict{false, ReasonProofIssuerRetired}},
+		{"a proof whose issuer was never looked up is refused", with(func(p *ReachabilityProof) { p.IssuerRetirement = RetirementUnchecked }), self, me, t0,
+			ProofVerdict{false, ReasonRetirementUnchecked}},
+		{"an unknown retirement status counts as unchecked", with(func(p *ReachabilityProof) { p.IssuerRetirement = 99 }), self, me, t0,
+			ProofVerdict{false, ReasonRetirementUnchecked}},
+		{"a proof for another node is a mismatch before the retirement is read", with(func(p *ReachabilityProof) { p.IssuerRetirement = RetirementRetired }), other, me, t0,
+			ProofVerdict{false, ReasonProofNodeMismatch}},
 		{"an unset node never matches, even a proof with an unset node", with(func(p *ReachabilityProof) { p.Node = ident.NodeID{} }),
 			ident.NodeID{}, me, t0, ProofVerdict{false, ReasonProofNodeMismatch}},
 		{"an unset requester never matches, even a proof with an unset person", with(func(p *ReachabilityProof) { p.Person = ident.PersonID{} }),

@@ -8,6 +8,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/internal/revocation"
 )
 
 func sampleProof(t testing.TB) ReachabilityProof {
@@ -120,7 +121,7 @@ func TestProofThroughAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts := v.Payload().Admin()
+	facts := v.Payload().Admin(admin.RetirementClear)
 	node, person := nodeOf(t, keyA), personOf(t, keyRoot)
 	tests := []struct {
 		name      string
@@ -149,4 +150,40 @@ func TestProofThroughAdmin(t *testing.T) {
 	if got := admin.MayIssueReachabilityProof(list, person, v.Payload().NotAfter, t0); got.Reason != admin.ReasonProofOutlivesEntry {
 		t.Errorf("issue verdict = %+v", got)
 	}
+}
+
+// A proof is signed by the issuing node's identity key. Once that node is
+// retired its key is void, and so is the proof, although it has not expired.
+func TestAProofOfARetiredNodeIsRefused(t *testing.T) {
+	v, err := record.Verify(ReachabilityProofDescriptor, mustDecode(t, goldenProof))
+	if err != nil {
+		t.Fatal(err)
+	}
+	node, person := nodeOf(t, keyA), personOf(t, keyRoot)
+	set := revocation.NewSet()
+	check := func() admin.ProofVerdict {
+		return admin.CheckReachabilityProof(v.Payload().Admin(set.NodeRetirement(v.Payload().Node)), node, person, t0.Add(time.Hour))
+	}
+	if got := check(); !got.Allowed {
+		t.Fatalf("before the retirement: %+v", got)
+	}
+	rev, err := revocation.Verify(mustSelfRevocation(t, keyA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := set.Add(rev); err != nil {
+		t.Fatal(err)
+	}
+	if got := check(); got.Allowed || got.Reason != admin.ReasonProofIssuerRetired {
+		t.Fatalf("after the retirement: %+v", got)
+	}
+}
+
+func mustSelfRevocation(t *testing.T, seed int) record.Record {
+	t.Helper()
+	r, err := revocation.IssueNodeSelfRevocation(signerOf(t, seed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }

@@ -165,6 +165,16 @@ func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
 	return ok
 }
 
+// NodeRetirement returns the retirement status of node, for the facts of a
+// reachability proof its identity key signed. The status is always a checked
+// one, never admin.RetirementUnchecked.
+func (s *Set) NodeRetirement(node ident.NodeID) admin.RetirementStatus {
+	if s.NodeRetired(node) {
+		return admin.RetirementRetired
+	}
+	return admin.RetirementClear
+}
+
 // TrustView returns v with its Retired set replaced by the nodes this set
 // retires. It is the one way a trust.View gets its retired nodes, so that the
 // decision of a connection, the pairing of two nodes and every other reader of

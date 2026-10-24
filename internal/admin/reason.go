@@ -79,6 +79,13 @@ const (
 	ReasonProofNodeMismatch Reason = "proof_node_mismatch"
 	// ReasonProofPersonMismatch means the proof was issued to another person.
 	ReasonProofPersonMismatch Reason = "proof_person_mismatch"
+	// ReasonProofIssuerRetired means the node that issued the proof has a
+	// verified self-revocation: its identity key is void.
+	ReasonProofIssuerRetired Reason = "proof_issuer_retired"
+	// ReasonRetirementUnchecked means nobody looked the issuing node up in the
+	// retirement records. It is a caller bug and is refused, never treated as
+	// not retired.
+	ReasonRetirementUnchecked Reason = "retirement_unchecked"
 	// ReasonProofExpired means the proof is no longer valid at the instant it is
 	// presented.
 	ReasonProofExpired Reason = "proof_expired"
