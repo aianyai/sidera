@@ -377,7 +377,10 @@ signal) that share a key text.
 (`recfile`), the body follows. The checksum covers the body only; the kind and
 the key of the first line are verified by the file name, which is their hash, so
 a first line that passed can be trusted to name its key even when the body is
-gone, which is what a replacement of a damaged delivery record needs. A file is
+gone, which is what a replacement of a damaged delivery record needs. The detail of
+a damage names the rule and the field, never what the first line holds: a damaged
+newline can glue the body of a file, a private key for one under `keys/`, into it.
+A file is
 validated in seven steps, and each failure has a class:
 
 | Step | Check | Class |
@@ -454,11 +457,19 @@ quarantined: a damaged one stops the start and is named.
 pair is the highest of the floor of the pair and the numbers of the source records
 still there, plus one. A number is given again until the record that carries it is
 acknowledged, so a crash makes no gap. The sweep writes the floor of every pair it
-is about to remove a record of before it removes anything. Quarantining a source
+is about to remove a record of before it removes anything, and works the floors out
+itself from the source records it is given to remove (the highest number each used
+for each target): a chunk that removes a source record has no way to leave its
+floor out. Quarantining a source
 record whose numbers are lost raises the floor above everything known, by one for
 each lost record of the pair. A damaged floor file, or a source record whose first
 line is damaged, loses what it said, and a number of that pair may then be given
-twice; the owner has an alert. Deleting `state/` starts every pair at 1.
+twice; the owner has an alert. A floor file that is damaged when a write has to read
+it (a sweep, or the quarantine of a source record of the same sender) is not read
+as empty and overwritten, which would lose it without an alert: the write does
+nothing and returns the damaged file as the scan lists it, so that the caller
+quarantines it by the usual rule and tries again. The scan lists floor files first
+for that reason. Deleting `state/` starts every pair at 1.
 
 **Archive.** A line is `{"crc":"<8 hex>","rec":<compact JSON>}` and a newline; the
 checksum covers the record. A transaction that appends starts with a newline, so
@@ -482,7 +493,12 @@ and nothing in it says what it was; it stays until the retention a lost record
 would have if it were found at the time of the file's alert has passed (the
 longest delivery deadline, the clock tolerance, the report offset and the reply
 facts window, counted from the discovery), because until then a delivery related
-to it may still be live. The alert goes after it. Administrative
+to it may still be live. The alert goes after it. A closed session endpoint goes
+with its attempts, checkpoints and floor file, but not while any source record has
+it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
+a source record writes the floor of its sender, and a floor file written after the
+endpoint's was removed with it would stay forever. The sweep that removes its last
+source record leaves the endpoint, and the next one takes it. Administrative
 results are kept 7 days, acknowledged alerts 7 days after the acknowledgement, and
 archive files 30 days, uncompressed. An archived message costs about 2.4 KiB (two
 summaries and about eight events), so at 3,000 messages an hour, the upper scale
@@ -735,8 +751,13 @@ so that the double cannot drift from what it stands for.
 - **The sweep removes a control record before the delivery derived from it.** The
   other order can leave the delivery without the record that explains it, and a
   rule that rebuilds deliveries from control records would give it a second life.
-- **Floors are written before records are removed.** A number derived from the
-  records that happen to be there would be given again after a sweep.
+- **Floors are written before records are removed, and the store works them out.**
+  A number derived from the records that happen to be there would be given again
+  after a sweep; and a floor the caller had to pass in could be left out.
+- **An endpoint record goes after what hangs on it, once that is durably gone.** A
+  crash, or a power loss that kept the removal of the endpoint and lost that of its
+  floor, attempts or checkpoint file, would leave a file no sweep looks for, since
+  every rule finds them through the endpoint.
 - **The kind is hashed into the file name.** One flipped bit would otherwise turn a
   message record into a control record.
 - **Nothing is skipped on a resumption because it seems to be done.** What a
@@ -801,16 +822,16 @@ so that the double cannot drift from what it stands for.
 | settle at every start | `internal/node/txn/cleanup.go` | `settle_test.go` (`TestPowerLossCloneAfterRecoverKeepsWhatAProcessCrashLeftVisible`, `TestPowerLossCloneAfterACrashDuringTheSettle`, `TestRecoverSettlesEveryDirectoryInAStableOrder`); `internal/node/config/settle_test.go` (`TestPowerLossCloneAdapterGCAfterAnInstallCrashedBeforeTheDirectorySync`) |
 | coverage | `internal/node/txn/writer.go` | `coverage_test.go` |
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
-| record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `FuzzDecodeFrame` |
+| record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `TestHeaderDamageNeverEchoesTheFirstLine`, `FuzzDecodeFrame` |
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
 | recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `resume_scenarios_test.go` (the resumption of each kind of unfinished quarantine, walked from the state a crash leaves), `TestCleanScenariosLeaveNoRecoveryWork` |
-| sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` |
+| sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` (`TestArchiveSweepWritesTheFloorOfEverySenderAndTargetOfTheRecordsItRemoves`, `TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten`), `sweep_endpoint_test.go` |
 | archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |
-| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound`, `TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased` among them) |
+| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound`, `TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased` among them), `sweep_endpoint_test.go` (`TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone`, the crash walk of a closed session's sweep) |
 | deleting `state/`, the layout rule | `internal/node/store/recovery.go` | `state_deleted_test.go` |
 | cold start | `internal/node/store/bench_test.go` | `BenchmarkColdStartScan`, `TestColdStartFixtureScansBack` |
 

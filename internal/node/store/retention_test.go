@@ -155,10 +155,13 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 		p(store.SeqDir, store.SeqRecord{Sender: ep(5)}),
 		p(store.AdminDir, adminResult(1)),
 		p(store.AlertsDir, store.AlertRecord{ID: store.AlertID{1}}),
-		p(store.OutDir, srcOutFinished(10)),
 	}
 	sort.Strings(wantRecords)
-	if got := names(plan.Records); strings.Join(got, "\n") != strings.Join(wantRecords, "\n") {
+	// The record of a closed endpoint is its own group: it goes after the files that hang on it.
+	if got := names(plan.Endpoints); len(got) != 1 || got[0] != p(store.EndpointsDir, session(5, store.EndpointClosed, "")) {
+		t.Errorf("endpoints = %v, want only the closed one nothing points to", got)
+	}
+	if got := names(append(append([]store.FileRef(nil), plan.Records...), plan.Endpoints...)); strings.Join(got, "\n") != strings.Join(wantRecords, "\n") {
 		t.Errorf("records:\n got  %s\n want %s", strings.Join(got, "\n      "), strings.Join(wantRecords, "\n      "))
 	}
 	if got := names(plan.Ctl); len(got) != 1 || got[0] != p(store.CtlDir, c4) {
@@ -173,7 +176,11 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	held := []string{p(store.InDir, inRev(2, 1)), p(store.InDir, inFor(8, 3, 1)), p(store.EndpointsDir, session(3, store.EndpointClosed, "")),
 		p(store.EndpointsDir, directEndpoint(7, "chat")), p(store.AdminDir, adminResult(2)), p(store.AlertsDir, store.AlertRecord{ID: store.AlertID{2}}),
 		p(store.AlertsDir, store.AlertRecord{ID: store.AlertID{3}}), p(store.AlertsDir, store.AlertRecord{ID: store.AlertID{4}}), p(store.OutDir, srcOut(11, false))}
-	all := append(names(plan.Records), append(names(plan.Ctl), names(plan.Corrupt)...)...)
+	var outNames []string
+	for _, o := range plan.Outs {
+		outNames = append(outNames, p(store.OutDir, o))
+	}
+	all := append(append(append(names(plan.Records), outNames...), names(plan.Endpoints)...), append(names(plan.Ctl), names(plan.Corrupt)...)...)
 	for _, h := range held {
 		for _, a := range all {
 			if a == h {
@@ -217,9 +224,12 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	// Before retention nothing of the deliveries goes.
 	early := store.PlanSweep(build(t).scan(), base.Add(time.Hour))
 	for _, f := range early.Records {
-		if f.Dir == store.InDir || f.Dir == store.OutDir {
+		if f.Dir == store.InDir {
 			t.Errorf("%s swept before its retention ended", f.Name)
 		}
+	}
+	if len(early.Outs) != 0 {
+		t.Errorf("source records swept before their retention ended: %v", early.Outs)
 	}
 }
 
@@ -317,7 +327,7 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 	// alerts of the next pass follow.
 	r := build(t)
 	plan := store.PlanSweep(r.scan(), bound)
-	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: bound, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records, Bodies: plan.Bodies}))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk(bound)))
 	if left := r.scan().Corrupt; len(left) != 3 {
 		t.Errorf("%d quarantined files left after the sweep, want the three that must stay (no alert yet, a readable first line without a replacement, not a delivery directory): %v", len(left), left)
 	}
@@ -368,7 +378,7 @@ func TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAle
 				t.Fatalf("at the bound: swept %v, alert %v; want the file and not yet its alert", got, alert)
 			}
 			plan := store.PlanSweep(r.scan(), bound)
-			mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: bound, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records, Bodies: plan.Bodies}))
+			mustDo(t, r.st.ArchiveSweep(plan.Chunk(bound)))
 			if left := r.scan().Corrupt; len(left) != 0 {
 				t.Fatalf("quarantined files left after the sweep: %v", left)
 			}

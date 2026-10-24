@@ -889,50 +889,61 @@ func checkRef(f FileRef, corrupt bool) error {
 	return nil
 }
 
-// FloorWrite raises the sequence floors of one sending endpoint.
-type FloorWrite struct {
-	Sender ident.EndpointID
-	Floors map[ident.Address]uint64
-}
-
 // SweepChunk is one chunk of the archive sweep.
 type SweepChunk struct {
 	// Now is the time of the sweep; its UTC date names the archive file.
 	Now       time.Time
 	Summaries []ArchiveSummary
-	// Corrupt, Ctl and Records are removed in that order, each followed by the
-	// sync of its directories; Bodies last. A record that depends on a control
-	// record (the derived delivery of a session creation) goes in Records and
-	// its control record in Ctl.
-	Corrupt []FileRef
-	Ctl     []FileRef
-	Records []FileRef
-	Bodies  []BodyRef
-	// Floors are written before anything is removed and after the summaries are
-	// durable. KeepTarget, when set, prunes the floors of targets that can no
-	// longer receive messages.
-	Floors     []FloorWrite
+	// Corrupt, Ctl, Records and Outs are removed in that order, then Bodies, the
+	// directories of each of Corrupt and Ctl synced after the group and the others
+	// after the last of them; Endpoints go last, after that sync.
+	//
+	// A record that depends on a control record (the derived delivery of a
+	// session creation) goes in Records and its control record in Ctl. Records
+	// holds the files of every directory but out/ and endpoints/; the source
+	// records are Outs, as records and not as names, because the sweep writes the
+	// floor of every sequence number they used before it removes them, and a
+	// chunk that named them only by file could not. A closed session endpoint's
+	// record goes in Endpoints, after the attempts, checkpoints and floor files that
+	// hang on it are durably gone: a crash, or a power loss that kept one removal
+	// and lost the other, must not leave those without the record that says whom
+	// they belong to, since nothing would ever remove them.
+	Corrupt   []FileRef
+	Ctl       []FileRef
+	Records   []FileRef
+	Outs      []OutRecord
+	Endpoints []FileRef
+	Bodies    []BodyRef
+	// KeepTarget, when set, prunes from the floor files the sweep writes the
+	// floors of targets that can no longer receive messages.
 	KeepTarget func(ident.Address) bool
 }
 
-// floorFile is the floor file of a sender with the given raises merged into
-// what the disk holds: a floor is never lowered.
-func (s *Store) floorFile(sender ident.EndpointID, raises map[ident.Address]uint64, keep func(ident.Address) bool) (file, error) {
-	rec := SeqRecord{Sender: sender, Floors: map[ident.Address]uint64{}}
-	name := rec.Name()
+// readFloors is the floors of one sending endpoint as the disk holds them: none
+// when there is no floor file, a DamagedFileError when it is damaged. It is the
+// one place a floor file is read for writing.
+func (s *Store) readFloors(sender ident.EndpointID) (map[ident.Address]uint64, error) {
+	name := SeqRecord{Sender: sender}.Name()
 	data, err := s.r.ReadFile(path.Join(SeqDir, name))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
+		return map[ident.Address]uint64{}, nil
 	case err != nil:
-		return file{}, err
-	default:
-		// A floor file that is damaged is the quarantine's business: what it held
-		// is lost, and the floors start again from what is raised now.
-		if old, dmg := DecodeRecord(SeqDir, name, data); dmg == nil {
-			for a, n := range old.(SeqRecord).Floors {
-				rec.Floors[a] = n
-			}
-		}
+		return nil, err
+	}
+	rec, dmg := DecodeRecord(SeqDir, name, data)
+	if dmg != nil {
+		return nil, &DamagedFileError{File: damagedFile(SeqDir, name, dmg)}
+	}
+	return rec.(SeqRecord).Floors, nil
+}
+
+// floorRecordFile is the floor file of a sender: what the disk holds with the
+// raises merged in, a floor never lowered, and the targets keep refuses dropped.
+func floorRecordFile(sender ident.EndpointID, current, raises map[ident.Address]uint64, keep func(ident.Address) bool) (file, error) {
+	rec := SeqRecord{Sender: sender, Floors: map[ident.Address]uint64{}}
+	for a, n := range current {
+		rec.Floors[a] = n
 	}
 	for a, n := range raises {
 		if n == 0 || a.IsZero() {
@@ -952,10 +963,21 @@ func (s *Store) floorFile(sender ident.EndpointID, raises map[ident.Address]uint
 	return recordFile(SeqDir, rec)
 }
 
-// ArchiveSweep appends the summaries to the archive, makes them durable,
-// raises the sequence floors and removes the records. The order is the
-// guarantee: no record is removed before its summary and the floors of its
-// sequence numbers are durable.
+// floorFile is the floor file of a sender with the given raises merged into what
+// the disk holds.
+func (s *Store) floorFile(sender ident.EndpointID, raises map[ident.Address]uint64, keep func(ident.Address) bool) (file, error) {
+	current, err := s.readFloors(sender)
+	if err != nil {
+		return file{}, err
+	}
+	return floorRecordFile(sender, current, raises, keep)
+}
+
+// ArchiveSweep appends the summaries to the archive, makes them durable, writes
+// the sequence floors of the source records it removes and removes the records.
+// The order is the guarantee: no record is removed before its summary and the
+// floors of its sequence numbers are durable. The floors are the store's to
+// work out (floorsOf): a caller cannot remove a source record without them.
 func (s *Store) ArchiveSweep(c SweepChunk) error {
 	for _, f := range c.Corrupt {
 		if err := checkRef(f, true); err != nil {
@@ -971,8 +993,23 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		}
 	}
 	for _, f := range c.Records {
-		if f.Dir == BodiesDir {
-			return errors.New("store: bodies are removed as bodies")
+		if f.Dir == BodiesDir || f.Dir == OutDir || f.Dir == EndpointsDir {
+			return fmt.Errorf("store: %s is not removed as a record of a sweep: bodies, source records and endpoints have their own groups", f.Dir)
+		}
+		if err := checkRef(f, false); err != nil {
+			return err
+		}
+	}
+	outs := make([]FileRef, 0, len(c.Outs))
+	for _, o := range c.Outs {
+		if _, err := o.Key.Bytes(); err != nil {
+			return fmt.Errorf("store: a source record of a sweep: %w", err)
+		}
+		outs = append(outs, FileRef{Dir: OutDir, Name: o.Name()})
+	}
+	for _, f := range c.Endpoints {
+		if f.Dir != EndpointsDir {
+			return errors.New("store: the endpoints of a sweep are in endpoints/")
 		}
 		if err := checkRef(f, false); err != nil {
 			return err
@@ -987,14 +1024,14 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		lines = append(lines, l...)
 	}
 	var floors []file
-	for _, w := range c.Floors {
+	for _, w := range floorsOf(c.Outs) {
 		f, err := s.floorFile(w.Sender, w.Floors, c.KeepTarget)
 		if err != nil {
 			return err
 		}
 		floors = append(floors, f)
 	}
-	if len(lines)+len(floors)+len(c.Corrupt)+len(c.Ctl)+len(c.Records)+len(c.Bodies) == 0 {
+	if len(lines)+len(floors)+len(c.Corrupt)+len(c.Ctl)+len(c.Records)+len(outs)+len(c.Endpoints)+len(c.Bodies) == 0 {
 		return nil
 	}
 
@@ -1014,18 +1051,20 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 			return err
 		}
 	}
-	if err := s.removeAll(tx, "corrupt", "corrupt-dir", c.Corrupt, true); err != nil {
+	if err := s.removeAll(tx, "corrupt", "corrupt-dir", c.Corrupt); err != nil {
 		return err
 	}
-	if err := s.removeAll(tx, "ctl", "ctl-dir", c.Ctl, false); err != nil {
+	if err := s.removeAll(tx, "ctl", "ctl-dir", c.Ctl); err != nil {
 		return err
 	}
 	dirs := map[string]bool{}
-	for _, f := range c.Records {
-		if removed, err := s.removeRef(tx, "record", f); err != nil {
-			return err
-		} else if removed {
-			dirs[f.Dir] = true
+	for _, group := range [][]FileRef{c.Records, outs} {
+		for _, f := range group {
+			if removed, err := s.removeRef(tx, "record", f); err != nil {
+				return err
+			} else if removed {
+				dirs[f.Dir] = true
+			}
 		}
 	}
 	for _, r := range dedupe(c.Bodies) {
@@ -1039,6 +1078,12 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		if err := tx.SyncDir("dir", d); err != nil {
 			return err
 		}
+	}
+	// The endpoint records go once what hangs on them is durably gone: a power
+	// loss that kept the removal of the endpoint and lost that of its floor file
+	// would leave a file no sweep removes.
+	if err := s.removeAll(tx, "endpoint", "endpoint-dir", c.Endpoints); err != nil {
+		return err
 	}
 	return tx.Commit()
 }
@@ -1064,7 +1109,7 @@ func (s *Store) removeRef(tx *txn.Tx, role string, f FileRef) (bool, error) {
 
 // removeAll removes files under one role and syncs each directory they were in
 // under another.
-func (s *Store) removeAll(tx *txn.Tx, role, syncRole string, refs []FileRef, perDir bool) error {
+func (s *Store) removeAll(tx *txn.Tx, role, syncRole string, refs []FileRef) error {
 	dirs := map[string]bool{}
 	for _, f := range refs {
 		if removed, err := s.removeRef(tx, role, f); err != nil {

@@ -179,8 +179,16 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 		"an alert with the zero id": func(r *rig) error {
 			return r.st.AlertRaise(store.AlertRecord{Kind: "corrupt", At: base, Detail: "d"})
 		},
-		"a floor of zero": func(r *rig) error {
-			return r.st.ArchiveSweep(store.SweepChunk{Now: base, Floors: []store.FloorWrite{{Sender: ep(1), Floors: map[ident.Address]uint64{addr(2, 2): 0}}}})
+		"a source record of a sweep that has no sending endpoint": func(r *rig) error {
+			o := srcOutFinished(1)
+			o.Key.Sender = ident.EndpointID{}
+			return r.st.ArchiveSweep(store.SweepChunk{Now: base, Outs: []store.OutRecord{o}})
+		},
+		"a source record among the records of a sweep": func(r *rig) error {
+			return r.st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.OutDir, Name: srcOutFinished(1).Name()}}})
+		},
+		"an endpoint among the records of a sweep": func(r *rig) error {
+			return r.st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.EndpointsDir, Name: session(5, store.EndpointClosed, "").Name()}}})
 		},
 		"an archive event without a file": func(r *rig) error {
 			return r.st.ArchiveEvents(base, []store.ArchiveEvent{{At: base, Event: "x"}})

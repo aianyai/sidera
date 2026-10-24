@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -222,46 +223,92 @@ func (w *powerLossWorld) leased(i int) store.InRecord {
 	return in
 }
 
-// sweep removes whatever is finished, with the floors and summaries.
+// sweep removes whatever the model says is finished, long after every
+// retention. What goes, the summaries and the floor are derived here from the
+// stages of the messages and the fixtures, never from the store's own plan: the
+// plan is what the call below uses, and the plan is checked against this.
+//
+// A target record is finished once acknowledged (stage 4 and after) or when it
+// is the replacement of a lost one (stage 7, with its quarantined file); a
+// source record once its delivery was reported (stage 5). Administrative
+// results are past their seven days. Nothing else is finished in this world: the
+// alerts are not acknowledged, the endpoints are open, and the bodies a swept
+// record referred to were released by the update that finished it.
 func (w *powerLossWorld) sweep() *operation {
 	r := w.r
-	sc := r.scan()
 	now := base.Add(farAway)
-	plan := store.PlanSweep(sc, now)
-	if len(plan.Records) == 0 {
+	op := &operation{name: "archive-sweep", writes: map[string][]byte{}}
+	has := func(p string) bool { _, ok := w.led.files[p]; return ok }
+	swept := map[int]bool{}
+	for i := 1; i <= messages; i++ {
+		in, out := tgtIn(i), srcOut(i, true)
+		inFile, outFile := path.Join(store.InDir, in.Name()), path.Join(store.OutDir, out.Name())
+		switch stage := w.stage[i]; {
+		case has(inFile) && (stage == 4 || stage == 5 || stage == 7):
+			if stage == 7 {
+				op.removes = append(op.removes, path.Join(store.InDir, corruptName(in, alertFor(store.InDir, in.Name()))))
+			}
+			op.removes = append(op.removes, inFile)
+			op.summaries = append(op.summaries, tgtKey(i).String())
+		}
+		if has(outFile) && w.stage[i] == 5 {
+			kb, err := out.Key.Bytes()
+			if err != nil {
+				w.t.Fatal(err)
+			}
+			op.removes = append(op.removes, outFile)
+			op.summaries = append(op.summaries, string(kb))
+			swept[i] = true
+			op.floor = max(op.floor, uint64(i)) // srcOut numbers message i with i
+		}
+	}
+	for p := range w.led.files {
+		if strings.HasPrefix(p, store.AdminDir+"/") {
+			op.removes = append(op.removes, p)
+		}
+	}
+	if len(op.removes) == 0 {
 		return nil
 	}
-	op := &operation{name: "archive-sweep"}
-	for _, f := range append(append(append([]store.FileRef(nil), plan.Corrupt...), plan.Ctl...), plan.Records...) {
-		op.removes = append(op.removes, path.Join(f.Dir, f.Name))
-	}
-	for _, b := range plan.Bodies {
-		op.removes = append(op.removes, path.Join(store.BodiesDir, b.Name()))
-	}
-	for _, s := range plan.Summaries {
-		op.summaries = append(op.summaries, s.Key)
-	}
-	for _, o := range plan.Outs {
-		if n := o.Envelope.Seq[o.Key.Recipients[0].Endpoint]; n > op.floor {
-			op.floor = n
-		}
-	}
-	swept := map[int]bool{}
-	for _, o := range plan.Outs {
-		for i := 1; i <= messages; i++ {
-			if o.Key.Message == msgID(i) {
-				swept[i] = true
-			}
-		}
+	if op.floor > 0 {
+		seqFile := path.Join(store.SeqDir, store.SeqRecord{Sender: ep(1)}.Name())
+		op.writes[seqFile] = w.enc(store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pairFixture: max(op.floor, w.led.floor)}})
 	}
 	op.after = func() {
 		for i := range swept {
 			w.stage[i] = 6
 		}
 	}
-	book := store.NewSeqBook(sc)
 	op.call = func() error {
-		return r.st.ArchiveSweep(store.SweepChunk{Now: now, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records, Bodies: plan.Bodies, Floors: book.FloorWrites(plan.Outs)})
+		plan := store.PlanSweep(r.scan(), now)
+		var planned []string
+		for _, group := range [][]store.FileRef{plan.Corrupt, plan.Ctl, plan.Records, plan.Endpoints} {
+			for _, f := range group {
+				planned = append(planned, path.Join(f.Dir, f.Name))
+			}
+		}
+		for _, o := range plan.Outs {
+			planned = append(planned, path.Join(store.OutDir, o.Name()))
+		}
+		for _, b := range plan.Bodies {
+			planned = append(planned, path.Join(store.BodiesDir, b.Name()))
+		}
+		var keys []string
+		for _, sm := range plan.Summaries {
+			keys = append(keys, sm.Key)
+		}
+		for _, c := range []struct {
+			what      string
+			got, want []string
+		}{{"files", planned, op.removes}, {"summaries", keys, op.summaries}} {
+			got, want := append([]string(nil), c.got...), append([]string(nil), c.want...)
+			sort.Strings(got)
+			sort.Strings(want)
+			if strings.Join(got, "\n") != strings.Join(want, "\n") {
+				w.t.Errorf("the sweep plan does not match what the model says is finished (%s):\n plan  %v\n model %v", c.what, got, want)
+			}
+		}
+		return r.st.ArchiveSweep(plan.Chunk(now))
 	}
 	return op
 }
@@ -322,7 +369,7 @@ func (w *powerLossWorld) judge(where string, clone *fsxtest.Mem) {
 		if _, acked := w.led.files[p]; acked {
 			continue
 		}
-		if strings.HasPrefix(p, store.ArchiveDir+"/") || strings.HasPrefix(p, store.SeqDir+"/") {
+		if strings.HasPrefix(p, store.ArchiveDir+"/") {
 			continue
 		}
 		if cur != nil {

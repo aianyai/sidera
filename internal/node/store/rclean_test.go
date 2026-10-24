@@ -143,11 +143,10 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	check("checkpoint, alert, events")
 	sc := r.scan()
 	plan := store.PlanSweep(sc, base.Add(farAway))
-	if len(plan.Records) == 0 {
+	if len(plan.Records)+len(plan.Outs) == 0 {
 		t.Fatal("the sweep has nothing to do after a life of finished deliveries")
 	}
-	book := store.NewSeqBook(sc)
-	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: base.Add(farAway), Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records, Bodies: plan.Bodies, Floors: book.FloorWrites(plan.Outs)}))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
 	check("sweep")
 	mustDo(t, r.st.ArchiveExpire(store.ExpiredArchiveFiles([]string{"2026-01-01.jsonl"}, base, 30)))
 	acked := store.AlertRecord{ID: store.AlertID{1}, Kind: "version_untested", At: base, Detail: "d", Acked: &store.AlertAcked{At: base, Operation: adminResult(3).Key.ID}}

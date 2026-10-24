@@ -57,9 +57,9 @@ func TestRandomOperationsLeaveExactlyTheDiskAModelPredicts(t *testing.T) {
 	t.Logf("steps: %v", counts)
 }
 
-// compareExactly checks that every file of the disk, but the archive and the
-// floors, is a file of the ledger with its bytes, and every file of the ledger is on
-// the disk.
+// compareExactly checks that every file of the disk, but the archive, is a file
+// of the ledger with its bytes, floor files included, and every file of the ledger
+// is on the disk.
 func (w *powerLossWorld) compareExactly(where string) {
 	t := w.t
 	t.Helper()
@@ -72,7 +72,7 @@ func (w *powerLossWorld) compareExactly(where string) {
 		}
 	}
 	for p := range got {
-		if _, ok := w.led.files[p]; !ok && !strings.HasPrefix(p, store.ArchiveDir+"/") && !strings.HasPrefix(p, store.SeqDir+"/") {
+		if _, ok := w.led.files[p]; !ok && !strings.HasPrefix(p, store.ArchiveDir+"/") {
 			t.Errorf("%s: %s is on the disk and not in the model", where, p)
 		}
 	}

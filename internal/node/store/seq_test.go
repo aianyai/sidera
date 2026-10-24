@@ -1,6 +1,8 @@
 package store_test
 
 import (
+	"errors"
+	"path"
 	"syscall"
 	"testing"
 
@@ -123,11 +125,10 @@ func TestSweepKeepsNumbersFromBeingGivenAgain(t *testing.T) {
 	}
 	sc := r.scan()
 	plan := store.PlanSweep(sc, base.Add(farAway))
-	if len(plan.Records) != 3 {
-		t.Fatalf("the sweep takes %d records, want 3", len(plan.Records))
+	if len(plan.Outs) != 3 {
+		t.Fatalf("the sweep takes %d source records, want 3", len(plan.Outs))
 	}
-	book := store.NewSeqBook(sc)
-	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: base.Add(farAway), Summaries: plan.Summaries, Records: plan.Records, Bodies: plan.Bodies, Floors: book.FloorWrites(plan.Outs)}))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
 	after := openRig(t, r.mem.CrashCloneWorst())
 	sc = after.scan()
 	if len(sc.Out) != 0 {
@@ -138,13 +139,16 @@ func TestSweepKeepsNumbersFromBeingGivenAgain(t *testing.T) {
 	}
 }
 
-func TestFloorWritesPruneTargetsThatCannotReceiveAndNeverLowerAFloor(t *testing.T) {
+func TestSweepFloorsPruneTargetsThatCannotReceiveAndNeverLowerAFloor(t *testing.T) {
 	r := newRig(t)
 	gone, kept := addr(2, 7), addr(2, 8)
 	seed(t, r.mem, store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{gone: 5, kept: 9}})
+	toKept, toNew := srcOutFinished(1), srcOutFinished(2)
+	toKept.Key.Recipients, toKept.Envelope.Seq = []ident.Address{kept}, map[ident.EndpointID]uint64{kept.Endpoint: 4}
+	toNew.Key.Recipients, toNew.Envelope.Seq = []ident.Address{addr(2, 9)}, map[ident.EndpointID]uint64{ep(9): 2}
 	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{
 		Now:        base,
-		Floors:     []store.FloorWrite{{Sender: ep(1), Floors: map[ident.Address]uint64{kept: 4, addr(2, 9): 2}}},
+		Outs:       []store.OutRecord{toKept, toNew},
 		KeepTarget: func(a ident.Address) bool { return a != gone },
 	}))
 	sc := r.scan()
@@ -202,5 +206,112 @@ func TestDamagedFloorFileIsQuarantinedAndTheNextNumberFollowsTheRecords(t *testi
 	}
 	if got := store.NewSeqBook(sc).Next(ep(1), pair); got != 4 {
 		t.Errorf("Next = %d, want 4", got)
+	}
+}
+
+// A floor file that is damaged when a write needs to read it is not read as
+// empty and overwritten: that would lose what it held with no alert. The write
+// does nothing and returns the damaged file as the scan would have listed it, so
+// that the caller quarantines it by the usual rule and tries again; the scan lists
+// the floor files first, so a startup meets none after it began to quarantine
+// source records.
+func TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten(t *testing.T) {
+	pair := addr(2, 2)
+	floorName := store.SeqRecord{Sender: ep(1)}.Name()
+	build := func(t *testing.T) *rig {
+		r := newRig(t)
+		for i := 1; i <= 3; i++ {
+			seed(t, r.mem, srcOutFinished(i))
+		}
+		seed(t, r.mem, store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 40}})
+		damageBody(t, r.mem, path.Join(store.SeqDir, floorName))
+		return r
+	}
+	wantDamaged := func(t *testing.T, what string, err error) {
+		t.Helper()
+		var de *store.DamagedFileError
+		if !errors.As(err, &de) {
+			t.Fatalf("%s: error = %v, want a *DamagedFileError", what, err)
+		}
+		if de.File.Dir != store.SeqDir || de.File.Name != floorName || de.File.Damage.Class != store.BodyDamaged {
+			t.Errorf("%s: the damaged file is %+v, want the floor file of endpoint 1 with a damaged body", what, de.File)
+		}
+	}
+
+	t.Run("a sweep of source records", func(t *testing.T) {
+		r := build(t)
+		before := snapshot(t, r.mem, ".")
+		plan := store.PlanSweep(r.scan(), base.Add(farAway))
+		if len(plan.Outs) != 3 {
+			t.Fatalf("the plan takes %d source records, want 3", len(plan.Outs))
+		}
+		wantDamaged(t, "ArchiveSweep", r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
+		if diff := equalMaps(snapshot(t, r.mem, "."), before, nil); diff != "" {
+			t.Errorf("a sweep that could not read a floor file changed the disk: %s", diff)
+		}
+	})
+
+	t.Run("the quarantine of a source record of the same sender", func(t *testing.T) {
+		r := build(t)
+		damageBody(t, r.mem, path.Join(store.OutDir, srcOutFinished(2).Name()))
+		before := snapshot(t, r.mem, ".")
+		sc := r.scan()
+		if len(sc.Damaged) != 2 || sc.Damaged[0].Dir != store.SeqDir {
+			t.Fatalf("damaged files = %v, want the floor file first, then the source record", sc.Damaged)
+		}
+		out := sc.Damaged[1]
+		id := alertFor(out.Dir, out.Name)
+		err := r.st.Quarantine(store.Quarantine{File: out, Scan: sc, Alert: newSim(t, r.st).alert(id, "corrupt_record", out.Dir+"/"+out.Name)})
+		wantDamaged(t, "Quarantine", err)
+		if diff := equalMaps(snapshot(t, r.mem, "."), before, nil); diff != "" {
+			t.Errorf("a quarantine that could not read the floor file renamed or wrote something: %s", diff)
+		}
+	})
+
+	t.Run("the usual rule then lets both go on", func(t *testing.T) {
+		r := build(t)
+		damageBody(t, r.mem, path.Join(store.OutDir, srcOutFinished(2).Name()))
+		newSim(t, r.st).recoverAll()
+		sc := r.scan()
+		if len(sc.Damaged) != 0 || !hasCorrupt(sc, store.SeqDir, floorName, alertFor(store.SeqDir, floorName)) {
+			t.Fatalf("the floor file was not quarantined with an alert: damaged %v, quarantined %v", sc.Damaged, sc.Corrupt)
+		}
+		if out, _, _ := find(t, sc, srcOutFinished(2).Name()); out == nil || out.Lost == nil {
+			t.Errorf("the damaged source record was not replaced")
+		}
+		plan := store.PlanSweep(sc, base.Add(farAway))
+		mustDo(t, r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
+	})
+}
+
+// The sweep works out the floors from the records it is given to remove, for
+// every sender and every target: a chunk has no way to remove a source record
+// without them, and a lost record, whose numbers are lost, adds none.
+func TestArchiveSweepWritesTheFloorOfEverySenderAndTargetOfTheRecordsItRemoves(t *testing.T) {
+	r := newRig(t)
+	a, b := addr(2, 2), addr(2, 3)
+	multi := srcOutOf(1, 1)
+	multi.Key.Recipients = []ident.Address{a, b}
+	multi.Outbound.Recipients = append(multi.Outbound.Recipients, multi.Outbound.Recipients[0])
+	multi.Outbound.Recipients[1].Address = b
+	multi.Envelope.To = multi.Key.Recipients
+	multi.Envelope.Seq = map[ident.EndpointID]uint64{a.Endpoint: 7, b.Endpoint: 3}
+	other := finishedOutOf(6, 2)
+	other.Envelope.Seq = map[ident.EndpointID]uint64{a.Endpoint: 5}
+	lost := lostOutAt(finishedOutOf(1, 3).Key, base)
+	seed(t, r.mem, multi, other, lost)
+	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: base, Outs: []store.OutRecord{multi, other, lost}}))
+	sc := r.scan()
+	if len(sc.Out) != 0 {
+		t.Fatalf("%d source records left", len(sc.Out))
+	}
+	for _, c := range []struct {
+		sender int
+		to     ident.Address
+		want   uint64
+	}{{1, a, 7}, {1, b, 3}, {6, a, 5}} {
+		if got := floorOf(t, sc, c.sender, c.to); got != c.want {
+			t.Errorf("floor of endpoint %d for %v = %d, want %d", c.sender, c.to, got, c.want)
+		}
 	}
 }

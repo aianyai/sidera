@@ -390,6 +390,7 @@ func scenarios() []scenario {
 			},
 		},
 		sweepScenario(farFuture),
+		sweepClosedSessionScenario(farFuture),
 		{
 			name: "archive-expire",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
@@ -520,28 +521,18 @@ func sweepScenario(farFuture time.Time) scenario {
 			return strings.HasPrefix(p, store.ArchiveDir+"/")
 		},
 		run: func(t *testing.T, r *rig, s *sim) error {
-			sc := r.scan()
-			plan := store.PlanSweep(sc, farFuture)
+			plan := store.PlanSweep(r.scan(), farFuture)
 			if len(plan.Records) == 0 {
 				t.Fatalf("the plan sweeps nothing")
 			}
-			book := store.NewSeqBook(sc)
-			return r.st.ArchiveSweep(store.SweepChunk{
-				Now: farFuture, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records,
-				Bodies: plan.Bodies, Floors: book.FloorWrites(plan.Outs),
-			})
+			return r.st.ArchiveSweep(plan.Chunk(farFuture))
 		},
 		retry: func(t *testing.T, r *rig, s *sim) {
-			sc := r.scan()
-			plan := store.PlanSweep(sc, farFuture)
-			if len(plan.Records)+len(plan.Ctl)+len(plan.Corrupt)+len(plan.Bodies) == 0 {
+			plan := store.PlanSweep(r.scan(), farFuture)
+			if len(plan.Records)+len(plan.Ctl)+len(plan.Corrupt)+len(plan.Bodies)+len(plan.Outs)+len(plan.Endpoints) == 0 {
 				return
 			}
-			book := store.NewSeqBook(sc)
-			mustDo(t, r.st.ArchiveSweep(store.SweepChunk{
-				Now: farFuture, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records,
-				Bodies: plan.Bodies, Floors: book.FloorWrites(plan.Outs),
-			}))
+			mustDo(t, r.st.ArchiveSweep(plan.Chunk(farFuture)))
 		},
 		crashed: func(t *testing.T, where string, snap map[string]string) {
 			sweepInvariants(t, where, snap)

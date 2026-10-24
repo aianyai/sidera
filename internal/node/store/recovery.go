@@ -359,12 +359,8 @@ func (s *Store) raiseFloors(key OutKey, scanned *Scan, self string) (*file, erro
 	if err != nil {
 		return nil, err
 	}
-	current := map[ident.Address]uint64{}
-	if data, err := s.r.ReadFile(path.Join(SeqDir, SeqRecord{Sender: key.Sender}.Name())); err == nil {
-		if rec, dmg := DecodeRecord(SeqDir, SeqRecord{Sender: key.Sender}.Name(), data); dmg == nil {
-			current = rec.(SeqRecord).Floors
-		}
-	} else if !errors.Is(err, fs.ErrNotExist) {
+	current, err := s.readFloors(key.Sender)
+	if err != nil {
 		return nil, err
 	}
 	raises := map[ident.Address]uint64{}
@@ -372,10 +368,8 @@ func (s *Store) raiseFloors(key OutKey, scanned *Scan, self string) (*file, erro
 		m := current[to]
 		if scanned != nil {
 			for _, o := range scanned.Out {
-				if o.Key.Sender == key.Sender && o.Lost == nil && slices.Contains(o.Key.Recipients, to) {
-					if n := o.Envelope.Seq[to.Endpoint]; n > m {
-						m = n
-					}
+				if n, ok := o.number(to); ok && o.Key.Sender == key.Sender && n > m {
+					m = n
 				}
 			}
 		}
@@ -387,7 +381,7 @@ func (s *Store) raiseFloors(key OutKey, scanned *Scan, self string) (*file, erro
 		}
 		raises[to] = m + k
 	}
-	f, err := s.floorFile(key.Sender, raises, nil)
+	f, err := floorRecordFile(key.Sender, current, raises, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -438,58 +432,67 @@ func dirOfRecord(rec Record) string {
 	return ""
 }
 
-// quarantineTail writes what follows the rename in a quarantine and in its
-// resumption: the floors, the replacement, the closed session, the alert.
-// Nothing is skipped because it seems to be there already: what a process crash
-// left may not be durable, and the alert, which says the quarantine is finished,
-// must not become durable ahead of it.
-func (s *Store) quarantineTail(tx *txn.Tx, dir, name string, key any, scanned *Scan, replacement Record, session *EndpointRecord, alert AlertRecord) error {
-	self := name
-	var floors *file
-	if ok := dir == OutDir; ok {
-		if k, isOut := key.(OutKey); isOut {
-			f, err := s.raiseFloors(k, scanned, self)
-			if err != nil {
-				return err
-			}
-			floors = f
+// tail is what follows the rename in a quarantine and in its resumption, all of
+// it encoded: the floors, the replacement, the closed session, the alert.
+type tail struct {
+	floors, replacement, session *file
+	alert                        file
+}
+
+// prepareTail works out and encodes the tail before anything is written, so that
+// what cannot be written, or read (a damaged floor file, DamagedFileError), is
+// refused before the file is renamed.
+func (s *Store) prepareTail(dir, name string, key any, scanned *Scan, replacement Record, session *EndpointRecord, alert AlertRecord) (*tail, error) {
+	t := &tail{}
+	if k, isOut := key.(OutKey); isOut && dir == OutDir {
+		f, err := s.raiseFloors(k, scanned, name)
+		if err != nil {
+			return nil, err
 		}
+		t.floors = f
 	}
 	rf, err := replacementFile(dir, name, replacement)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	var sf *file
+	t.replacement = rf
 	if session != nil {
 		if session.Status != EndpointClosed {
-			return errors.New("store: the session endpoint of a quarantine is closed")
+			return nil, errors.New("store: the session endpoint of a quarantine is closed")
 		}
 		f, err := recordFile(EndpointsDir, *session)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		sf = &f
+		t.session = &f
 	}
-	af, err := recordFile(AlertsDir, alert)
-	if err != nil {
-		return err
+	if t.alert, err = recordFile(AlertsDir, alert); err != nil {
+		return nil, err
 	}
-	if floors != nil {
-		if err := s.replace(tx, "seq-floor", *floors); err != nil {
-			return err
-		}
-	}
-	if rf != nil {
-		if err := s.replace(tx, "replacement", *rf); err != nil {
-			return err
-		}
-	}
-	if sf != nil {
-		if err := s.replace(tx, "session", *sf); err != nil {
+	return t, nil
+}
+
+// write writes the tail, the alert last, and commits. Nothing is skipped because
+// it seems to be there already: what a process crash left may not be durable,
+// and the alert, which says the quarantine is finished, must not become durable
+// ahead of the rest.
+func (t *tail) write(s *Store, tx *txn.Tx) error {
+	if t.floors != nil {
+		if err := s.replace(tx, "seq-floor", *t.floors); err != nil {
 			return err
 		}
 	}
-	if err := s.replace(tx, "alert", af); err != nil {
+	if t.replacement != nil {
+		if err := s.replace(tx, "replacement", *t.replacement); err != nil {
+			return err
+		}
+	}
+	if t.session != nil {
+		if err := s.replace(tx, "session", *t.session); err != nil {
+			return err
+		}
+	}
+	if err := s.replace(tx, "alert", t.alert); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -514,7 +517,8 @@ func (s *Store) Quarantine(q Quarantine) error {
 		return err
 	}
 	// Everything is encoded before the file is renamed.
-	if _, err := replacementFile(d.Dir, d.Name, q.Replacement); err != nil {
+	t, err := s.prepareTail(d.Dir, d.Name, key, q.Scan, q.Replacement, q.Session, q.Alert)
+	if err != nil {
 		return err
 	}
 	tx := s.w.Begin(&declQuarantine)
@@ -522,7 +526,7 @@ func (s *Store) Quarantine(q Quarantine) error {
 	if err := tx.RenameFile("record", path.Join(d.Dir, d.Name), path.Join(d.Dir, corruptName(d.Name, q.Alert.ID))); err != nil {
 		return err
 	}
-	return s.quarantineTail(tx, d.Dir, d.Name, key, q.Scan, q.Replacement, q.Session, q.Alert)
+	return t.write(s, tx)
 }
 
 func (s *Store) presentOrErr(p string) (bool, error) {
@@ -539,12 +543,13 @@ func (s *Store) QuarantineResume(q QuarantineResume) error {
 	if c.Dir == BodiesDir || c.Alert != q.Alert.ID {
 		return errors.New("store: a quarantine is resumed with the alert its file names")
 	}
-	if _, err := replacementFile(c.Dir, c.Original, q.Replacement); err != nil {
+	t, err := s.prepareTail(c.Dir, c.Original, c.Key, q.Scan, q.Replacement, q.Session, q.Alert)
+	if err != nil {
 		return err
 	}
 	tx := s.w.Begin(&declQuarantineResume)
 	defer tx.Close()
-	return s.quarantineTail(tx, c.Dir, c.Original, c.Key, q.Scan, q.Replacement, q.Session, q.Alert)
+	return t.write(s, tx)
 }
 
 // BodyQuarantine is one chunk of the quarantine of a body whose content does

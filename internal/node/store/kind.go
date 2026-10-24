@@ -47,8 +47,11 @@ func StateDirs() []string {
 }
 
 // recordDirs are the directories that hold record files, in the order a scan
-// reads them.
-var recordDirs = []string{OutDir, InDir, CtlDir, EndpointsDir, AttemptsDir, CheckpointsDir, AdminDir, AlertsDir, SeqDir}
+// reads them, and so the order Scan.Damaged lists them in. The floor files come
+// first: quarantining a source record reads the floor file of its sender, and
+// refuses a damaged one, so a damaged floor file must be quarantined before the
+// records that need it.
+var recordDirs = []string{SeqDir, OutDir, InDir, CtlDir, EndpointsDir, AttemptsDir, CheckpointsDir, AdminDir, AlertsDir}
 
 // kindDir is the directory of each kind.
 var kindDir = map[Kind]string{

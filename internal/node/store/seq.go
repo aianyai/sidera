@@ -1,6 +1,7 @@
 package store
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/aianyai/sidera/internal/ident"
@@ -28,16 +29,55 @@ func NewSeqBook(sc *Scan) *SeqBook {
 		}
 	}
 	for _, o := range sc.Out {
-		if o.Lost != nil {
-			continue
-		}
 		for _, to := range o.Key.Recipients {
-			if n, ok := o.Envelope.Seq[to.Endpoint]; ok {
+			if n, ok := o.number(to); ok {
 				b.Note(o.Key.Sender, to, n)
 			}
 		}
 	}
 	return b
+}
+
+// number is the sequence number a regular source record used for the target to.
+// A lost record has none: its numbers are lost, and the floor of its pair was
+// raised above them when it was quarantined.
+func (o OutRecord) number(to ident.Address) (uint64, bool) {
+	if o.Lost != nil || !slices.Contains(o.Key.Recipients, to) {
+		return 0, false
+	}
+	n, ok := o.Envelope.Seq[to.Endpoint]
+	return n, ok
+}
+
+// senderFloors is the floor of every target of one sending endpoint.
+type senderFloors struct {
+	Sender ident.EndpointID
+	Floors map[ident.Address]uint64
+}
+
+// floorsOf is what a sweep must remember before it removes the source records
+// outs: for every sending endpoint and every target of their keys, the highest
+// number they used. It is read from the records themselves, so it cannot be
+// short of a number the removal is about to lose, however the caller kept its
+// view. Senders come in a fixed order.
+func floorsOf(outs []OutRecord) []senderFloors {
+	by := map[ident.EndpointID]map[ident.Address]uint64{}
+	for _, o := range outs {
+		for _, to := range o.Key.Recipients {
+			if n, ok := o.number(to); ok && n > 0 {
+				if by[o.Key.Sender] == nil {
+					by[o.Key.Sender] = map[ident.Address]uint64{}
+				}
+				by[o.Key.Sender][to] = max(by[o.Key.Sender][to], n)
+			}
+		}
+	}
+	out := make([]senderFloors, 0, len(by))
+	for sender, f := range by {
+		out = append(out, senderFloors{Sender: sender, Floors: f})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Sender.String() < out[j].Sender.String() })
+	return out
 }
 
 // Next is the number to give the next message from sender to target.
@@ -58,27 +98,4 @@ func (b *SeqBook) Note(sender ident.EndpointID, target ident.Address, seq uint64
 	if seq > b.high[p] {
 		b.high[p] = seq
 	}
-}
-
-// FloorWrites returns the floors to write before the given source records are
-// removed: for every sender and every target of their keys, the highest number
-// the book holds.
-func (b *SeqBook) FloorWrites(outs []OutRecord) []FloorWrite {
-	by := map[ident.EndpointID]map[ident.Address]uint64{}
-	for _, o := range outs {
-		for _, to := range o.Key.Recipients {
-			if n := b.High(o.Key.Sender, to); n > 0 {
-				if by[o.Key.Sender] == nil {
-					by[o.Key.Sender] = map[ident.Address]uint64{}
-				}
-				by[o.Key.Sender][to] = n
-			}
-		}
-	}
-	var out []FloorWrite
-	for s, f := range by {
-		out = append(out, FloorWrite{Sender: s, Floors: f})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Sender.String() < out[j].Sender.String() })
-	return out
 }

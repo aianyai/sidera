@@ -30,7 +30,7 @@ engine applies the delivery rules and calls the writes.
 | `OrphanBodies`, `OrphanEndpoints`, `UnfinishedQuarantines`, `EffectReplays`, `DrainCandidates`, `PromptReplays`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
 | `Store.Quarantine`, `QuarantineResume`, `QuarantineBody` | Quarantine; the alert is always the last write. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
-| `PlanSweep`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves. |
+| `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves. |
 | `Store.ReadBody`, `Store.Available`, `Store.Settle` | Body reads checked against their names, free space, and the durability barrier of a start. |
 | `MissingStateDirs`, `StateDirs` | The directories of `state/`, for the layout rule of the composition root. |
 
@@ -63,6 +63,21 @@ engine applies the delivery rules and calls the writes.
   quarantined file of a directory of records.
 - **A control record goes before the delivery derived from it** in a sweep, and a
   quarantined file before its replacement.
+- **Floors are written before records are removed, and `ArchiveSweep` works them
+  out.** A chunk carries the source records it removes (`SweepChunk.Outs`), not
+  their file names; the highest number each used for each target is written first,
+  merged into the floor file and never lowering it. A caller has no floors to pass
+  and none to leave out.
+- **A closed session endpoint waits for its source records.** `PlanSweep` keeps it
+  while any source record (whole, lost, or damaged with a trusted key) has it as
+  sender; the sweep after the one that removed the last takes the endpoint with its
+  attempts, checkpoints and floor file. Its record (`SweepChunk.Endpoints`) is
+  removed last, after the directories of the others are durable, so a crash cannot
+  leave a file that only the endpoint record would have led a sweep to.
+- **A write that meets a damaged floor file does nothing** and returns a
+  `*DamagedFileError`; the caller quarantines the file it names and tries again.
+  `Scan.Damaged` lists floor files first, so a startup meets none after it began to
+  quarantine source records.
 
 ## What the caller must guarantee
 
@@ -73,7 +88,11 @@ engine applies the delivery rules and calls the writes.
   exit and rescan.
 - Call `SeqBook.Note` only after the commit that wrote the number.
 - Run a drain, a prompt or block follower write, and a body quarantine in chunks of
-  the engine's choosing; the store accepts any size.
+  the engine's choosing; the store accepts any size. A sweep is cut from the groups
+  of `SweepPlan` (`SweepPlan.Chunk` is the whole plan as one chunk): a source record
+  is cut as a record, never as a file name, so its floor goes with it.
+- Quarantine the files of `Scan.Damaged` in the order listed, and on a
+  `*DamagedFileError` quarantine the file it names and try again.
 - Give `Quarantine` and `QuarantineResume` a replacement only for a delivery
   record whose first line was trusted (`DamagedFile.Key`, `CorruptFile.Key` set),
   built with the delivery package's constructor for a lost record.

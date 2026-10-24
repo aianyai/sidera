@@ -117,6 +117,7 @@ var (
 		rm("corrupt", many, optional), syncDir("corrupt-dir", many, optional),
 		rm("ctl", many, optional), syncDir("ctl-dir", optional),
 		rm("record", many, optional), rm("body", many, optional), syncDir("dir", many, optional),
+		rm("endpoint", many, optional), syncDir("endpoint-dir", optional),
 	}}
 	declArchiveExpire = txn.Decl{Name: "archive-expire", Kind: txn.Normal, Writes: []txn.Write{rm("file", many), syncDir("dir")}}
 	// alert-ack: the corrupt file goes before the alert is marked, so an

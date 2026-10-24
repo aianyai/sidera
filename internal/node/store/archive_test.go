@@ -308,7 +308,7 @@ func TestFailedSweepAppendRemovesNothing(t *testing.T) {
 	r2.faulty.Fail(fsxtest.Match{Tx: "archive-sweep", Role: "archive", Step: fsx.StepWrite, Hit: 1}, syscall.EIO)
 	err := r2.st.ArchiveSweep(store.SweepChunk{
 		Now: time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC), Summaries: []store.ArchiveSummary{summaryDelivered()},
-		Records: []store.FileRef{{Dir: store.OutDir, Name: rec.Name()}},
+		Outs: []store.OutRecord{rec},
 	})
 	if err == nil {
 		t.Fatal("the injected failure did not surface")

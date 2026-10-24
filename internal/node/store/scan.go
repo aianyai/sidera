@@ -36,6 +36,17 @@ type DamagedFile struct {
 	Key  any
 }
 
+// damagedFile is the report of a file that failed validation with dmg, in the
+// form the scan lists it and a write that met it returns it.
+func damagedFile(dir, name string, dmg *Damage) DamagedFile {
+	d := DamagedFile{Dir: dir, Name: name, Damage: *dmg}
+	if dmg.Class == BodyDamaged {
+		d.Kind = Kind(dmg.Kind)
+		d.Key, _ = ParseKey(d.Kind, dmg.Key)
+	}
+	return d
+}
+
 // Scan is everything state/ holds, decoded. The store keeps no index: the
 // engine builds its view from this.
 type Scan struct {
@@ -54,7 +65,8 @@ type Scan struct {
 	// Corrupt lists every quarantined file of every directory, bodies/
 	// included.
 	Corrupt []CorruptFile
-	// Damaged lists the files that failed validation, in directory order.
+	// Damaged lists the files that failed validation, in directory order with the
+	// floor files first (see recordDirs).
 	Damaged []DamagedFile
 	// Unknown lists paths that are neither a record, a body, a quarantined
 	// file nor debris of an interrupted write, sorted.
@@ -190,12 +202,7 @@ func (s *Store) scanRecord(sc *Scan, dir, name string) error {
 	}
 	rec, dmg := DecodeRecord(dir, name, data)
 	if dmg != nil {
-		d := DamagedFile{Dir: dir, Name: name, Damage: *dmg}
-		if dmg.Class == BodyDamaged {
-			d.Kind = Kind(dmg.Kind)
-			d.Key, _ = ParseKey(d.Kind, dmg.Key)
-		}
-		sc.Damaged = append(sc.Damaged, d)
+		sc.Damaged = append(sc.Damaged, damagedFile(dir, name, dmg))
 		return nil
 	}
 	switch r := rec.(type) {

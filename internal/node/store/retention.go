@@ -128,10 +128,25 @@ type SweepPlan struct {
 	Summaries []ArchiveSummary
 	Corrupt   []FileRef
 	Ctl       []FileRef
-	Records   []FileRef
-	Bodies    []BodyRef
-	// Outs are the source records among the removals, for the sequence floors.
+	// Records are the files of every directory but out/ and endpoints/.
+	Records []FileRef
+	// Outs are the source records to remove, whole: the sweep writes the sequence
+	// floors of their numbers before it removes them.
 	Outs []OutRecord
+	// Endpoints are the records of the closed endpoints to remove, which go after
+	// the files that hang on them.
+	Endpoints []FileRef
+	Bodies    []BodyRef
+}
+
+// Chunk is the whole plan as one chunk of the sweep at now. A caller that sweeps
+// in smaller chunks cuts the groups of the chunk it takes from here; a source
+// record is cut as a record, so its floor goes with it.
+func (p SweepPlan) Chunk(now time.Time) SweepChunk {
+	return SweepChunk{
+		Now: now, Summaries: p.Summaries, Corrupt: p.Corrupt, Ctl: p.Ctl, Records: p.Records,
+		Outs: p.Outs, Endpoints: p.Endpoints, Bodies: p.Bodies,
+	}
 }
 
 // PlanSweep selects what is ready to leave the live files at now: records that
@@ -139,6 +154,12 @@ type SweepPlan struct {
 // a session's derived delivery after its control record; admin results past
 // theirs; acknowledged alerts whose quarantined file is gone; closed endpoints
 // nothing live points to; and the bodies nothing refers to afterwards.
+//
+// A closed session endpoint is kept while any source record has it as sender,
+// swept or not: the sweep of a source record writes the floor of its sender, and
+// a floor file written for an endpoint whose record is gone is one nothing would
+// ever remove. The sweep that removes the last of its source records leaves it,
+// and the next one removes the endpoint with its floor file.
 func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	var plan SweepPlan
 	ready := func(rec Record) bool {
@@ -204,7 +225,7 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 		if !ready(o) {
 			continue
 		}
-		add(&plan.Records, OutDir, o.Name())
+		swept[path.Join(OutDir, o.Name())] = true
 		summary(o)
 		plan.Outs = append(plan.Outs, o)
 		if o.Body != nil {
@@ -278,11 +299,20 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 			live[c.Key.Recipient] = true
 		}
 	}
+	sends := map[ident.EndpointID]bool{} // senders of a source record, whole or damaged
+	for _, o := range sc.Out {
+		sends[o.Key.Sender] = true
+	}
+	for _, d := range sc.Damaged {
+		if k, ok := d.Key.(OutKey); ok && d.Dir == OutDir {
+			sends[k.Sender] = true
+		}
+	}
 	for _, e := range sc.Endpoints {
-		if e.Status != EndpointClosed || live[e.ID] {
+		if e.Status != EndpointClosed || live[e.ID] || (e.Kind == adapterreg.KindSession && sends[e.ID]) {
 			continue
 		}
-		add(&plan.Records, EndpointsDir, e.Name())
+		add(&plan.Endpoints, EndpointsDir, e.Name())
 		add2 := func(dir string, rec Record) { add(&plan.Records, dir, rec.Name()) }
 		for _, a := range sc.Attempts {
 			if a.Endpoint == e.ID {
@@ -331,6 +361,7 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	sortRefs(plan.Corrupt)
 	sortRefs(plan.Ctl)
 	sortRefs(plan.Records)
+	sortRefs(plan.Endpoints)
 	sort.Slice(plan.Bodies, func(i, j int) bool { return plan.Bodies[i].Name() < plan.Bodies[j].Name() })
 	return plan
 }
