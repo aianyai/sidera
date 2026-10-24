@@ -230,6 +230,9 @@ func TestDeferredReplacementsMustBeSyncedBeforeAnythingElse(t *testing.T) {
 			if err := tx.SyncDir("in-dir", "."); err != nil {
 				t.Fatal(err)
 			}
+			if err := tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
 		})
 	})
 }

@@ -268,6 +268,17 @@ For a single replacement this is exactly the rule of `fsx.Replace`. The class
 returned is the `txn.Error`'s `Class`; `txn.IsFatal` reads it, and also accepts
 an `fsx` error.
 
+A `Tx` closed after its commit point with no `Commit` and no recorded failure
+panics. The failures of the layer are all fatal from there on and are recorded,
+so reaching `Close` in that state means the owner stopped for a reason of its
+own: a read of its own that failed, or an early return. The disk then holds part
+of the transaction, memory shows none of it, and no error says so; an ordinary
+error returned to the caller would be read as "nothing happened". The panic ends
+the process and recovery runs, the outcome a fatal state calls for. A `Tx` that
+already panicked on a call of its own adds no second panic, so the first message
+is the one seen. The rule that keeps owners from meeting it is that every read an
+owner needs is done before `Begin`.
+
 **Deferred groups.** `ReplaceDefer` is `Replace` without the directory sync, so
 that k files of one directory cost k file syncs and one directory sync. The files
 of a group are in one directory and the next write is the `SyncDir` of it:

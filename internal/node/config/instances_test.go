@@ -362,7 +362,8 @@ func TestStableEndpointIDsAreMintedOnce(t *testing.T) {
 }
 
 // A change that is made while the Tx of another package runs is taken over only
-// after its commit: a Tx that is closed without a commit leaves memory alone.
+// after its commit: a Tx that is abandoned after its commit point is a defect
+// the transaction layer reports by panicking, and memory stays as it was.
 func TestEndpointIDsAreTakenOverOnlyAfterCommit(t *testing.T) {
 	rg, c := loaded(t)
 	rnd := bytes.NewReader(bytes.Repeat([]byte{0x51}, 16))
@@ -375,8 +376,15 @@ func TestEndpointIDsAreTakenOverOnlyAfterCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx.Close() // abandoned: the file was replaced but nobody committed
 	_ = done
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("a Tx abandoned after its commit point was closed without a panic")
+			}
+		}()
+		tx.Close() // abandoned: the file was replaced but nobody committed
+	}()
 	if !c.EndpointIDs("example").Direct["fresh"].IsZero() {
 		t.Error("memory took an id over without a commit")
 	}

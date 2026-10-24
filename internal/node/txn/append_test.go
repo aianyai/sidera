@@ -219,6 +219,15 @@ func TestSyncFileMakesWhatWasAppendedDurableUnderTheAppendingRole(t *testing.T) 
 		"sweep/digest.sync#1", "sweep/digest.sync-dir#1",
 	}
 	got := r.rec.names()
+	crashed := r.mem.CrashCloneWorst()
+	// The rest of the declaration: the sync is the commit point, so the Tx is
+	// ended the way every owner ends one.
+	put(t, r.mem, map[string]string{"a/old": "x"})
+	for _, err := range []error{tx.Remove("old", "a/old"), tx.SyncDir("old-dir", "a"), tx.Commit()} {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if len(got) != len(want) {
 		t.Fatalf("points = %v, want %v", got, want)
 	}
@@ -227,7 +236,7 @@ func TestSyncFileMakesWhatWasAppendedDurableUnderTheAppendingRole(t *testing.T) 
 			t.Errorf("point %d = %s, want %s", i, got[i], want[i])
 		}
 	}
-	if content := snapshot(t, r.mem.CrashCloneWorst())["a/digest"]; content != "d1\nd2\n" {
+	if content := snapshot(t, crashed)["a/digest"]; content != "d1\nd2\n" {
 		t.Errorf("after a power loss the digest is %q", content)
 	}
 }

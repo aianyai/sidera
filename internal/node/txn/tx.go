@@ -25,6 +25,7 @@ type Tx struct {
 	err       error
 	committed bool // the commit step of a write that is not preparatory has completed
 	ended     bool
+	panicked  bool // the Tx raised a panic of its own: Close adds none
 
 	// A group of ReplaceDefer is pending, in this directory, until the SyncDir
 	// of it.
@@ -43,6 +44,7 @@ type appendFile struct {
 }
 
 func (t *Tx) panicf(format string, args ...any) {
+	t.panicked = true
 	panic(fmt.Sprintf("txn: %s: ", t.d.name) + fmt.Sprintf(format, args...))
 }
 
@@ -353,11 +355,25 @@ func (t *Tx) checkEverySyncedRoleIsWhole() {
 
 // Close ends the transaction if it has not ended. It is meant for
 // `defer tx.Close()` and does nothing after Commit. A transaction closed
-// without a commit leaves what its writes did: the layer has no rollback, and
-// the declaration says which writes are preparatory leftovers.
+// without a commit before its commit point leaves what its writes did: the
+// layer has no rollback, and the declaration says which writes are preparatory
+// leftovers.
+//
+// A transaction closed after its commit point, with no Commit and no recorded
+// failure, panics. The disk holds part of the transaction and memory shows none
+// of it, and nothing tells the caller: a failure of the transaction is always
+// fatal from the commit point on, so an owner that returns some other error
+// from there (a read of its own, say) or returns early has left a fatal state
+// unreported. The panic ends the process and recovery runs, which is the right
+// outcome for that state. A Tx that already panicked on a call of its own adds
+// no second panic, so the first message is the one that is seen.
 func (t *Tx) Close() {
-	if !t.ended {
-		t.end()
+	if t.ended {
+		return
+	}
+	t.end()
+	if t.committed && t.err == nil && !t.panicked {
+		t.panicf("closed after its commit point without Commit and without a failure: the disk holds part of the transaction and memory does not; a caller that stops here must return the failure of the transaction, and any other error from this point on is a defect of the caller")
 	}
 }
 

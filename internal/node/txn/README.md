@@ -25,7 +25,7 @@ declaration of its own.
 | `Internal()` | The declarations of this package: the cleanup transaction (`Recovery`) and the settle transaction (`Normal`). The composition root puts them first in its table. |
 | `New(fs, table, observer)`, `Writer.Begin(decl)` | One `Writer` per process; `Begin` opens a `Tx` of a declaration of the table. |
 | `Tx.Replace`, `ReplaceDefer`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | One method per operation; the first argument is the declared role. |
-| `Tx.Commit`, `Tx.Close` | `Commit` ends the transaction and reaches its commit point; `Close` is for `defer` and does nothing after `Commit`. |
+| `Tx.Commit`, `Tx.Close` | `Commit` ends the transaction and reaches its commit point; `Close` is for `defer` and does nothing after `Commit`, and panics when the `Tx` is closed after its commit point with neither `Commit` nor a recorded failure. |
 | `Writer.Reader()` | The read side, as an `fsx.Reader` that offers nothing else. |
 | `Writer.Recover()`, `CleanupWork(reader)` | Remove every `.tmp-*` file and `.trash-*` directory, then make every directory durable; and the list of what the removal would remove, which a test evaluates on a copy of the disk. |
 | `Writer.Coverage()` | Every key of the table with its hit count, zeros included, each key carrying its transaction's kind. |
@@ -63,6 +63,14 @@ declaration of its own.
   or appended-file sync). From then on every failure, in the same operation or a
   later write, is `Fatal`. The rule is `commitStepOf`, `Tx.run` and `Tx.fail`, and
   nowhere else.
+- **Closing after the commit point without a result panics.** From the commit
+  point on every failure of the `Tx` is fatal and is recorded, so a `Tx` closed
+  there with no `Commit` and no recorded failure means the owner stopped for a
+  reason of its own (a read that failed, an early return): the disk holds part
+  of the transaction, memory shows none of it, and no error says so. `Close`
+  panics, the process exits and recovery runs. A `Tx` that already panicked on a
+  call of its own adds no second panic. An owner does every read it needs before
+  `Begin`.
 - **A deferred group.** `ReplaceDefer` replaces without syncing the directory.
   The files of a group are all in one directory and the very next write is the
   `SyncDir` of it. `NewTable` checks that every `ReplaceDefer` is declared
@@ -108,6 +116,8 @@ declaration of its own.
 
 - Acknowledge, and update memory, only after `Commit` returns nil, and do not
   read back a path written in the same `Tx`.
+  Return the error a write or `Commit` returned, and no other error, once a
+  write has passed its commit point; do every read before `Begin`.
 - An `Append` that no `SyncFile` followed is not durable, even after `Commit`
   returns nil. Declare and make the `SyncFile` of every append the caller
   acknowledges as durable.
