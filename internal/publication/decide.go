@@ -32,7 +32,8 @@ const (
 	VerdictWrongNode
 	// VerdictExpired: the record would be accepted by its counter but has
 	// expired. Only a reachability record can expire. Nothing is accepted and the
-	// state does not move: a record that was never usable does not raise the bar.
+	// state does not move, unlike record.DecideSerial, which advances on an
+	// expired higher certificate: see DecideReachability for the reason.
 	VerdictExpired
 )
 
@@ -131,6 +132,19 @@ func ReachabilitySeenOf(v record.Verified[ReachabilityRecord]) ReachabilitySeen 
 // first, so a stale or conflicting record is reported as such whether or not it
 // has expired; a record that the counter would accept but that has expired is
 // VerdictExpired and moves nothing.
+//
+// The state does not advance on an expired record, although record.DecideSerial
+// does advance on an expired higher certificate, because the two states guard
+// different things. A higher serial is the identity key's statement that every
+// lower certificate is void, whether or not the new one is still valid; it is a
+// fact that does not age. A reachability record says only "reach me here until
+// the expiry", and whether it has expired is judged by this peer's own clock: a
+// peer whose clock runs ahead would otherwise raise the bar on a record that is
+// still valid by real time, and then answer "stale" to that very record once its
+// clock is corrected. An expired record carries no information, so it is
+// dropped as if never received. What it costs: a lower-counter record that is
+// still unexpired can be accepted after a higher one expired; that is a statement
+// the node itself signed and it ends at its own expiry.
 func DecideReachability(seen *ReachabilitySeen, incoming record.Verified[ReachabilityRecord], now time.Time) Verdict {
 	var s *counterState
 	if seen != nil {

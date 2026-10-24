@@ -42,8 +42,8 @@ func TestGoldenReachability(t *testing.T) {
 	if len(p.Relays) != 1 || p.Relays[0] != nodeOf(t, keyRoot) {
 		t.Errorf("relays = %v", p.Relays)
 	}
-	if p.Certificate.Digest.String() != goldenNetworkKeyCertificateDigest {
-		t.Errorf("embedded certificate digest = %s", p.Certificate.Digest)
+	if p.Certificate().Digest.String() != goldenNetworkKeyCertificateDigest {
+		t.Errorf("embedded certificate digest = %s", p.Certificate().Digest)
 	}
 	if v.Digest.String() != goldenReachabilityDigest {
 		t.Errorf("digest = %s", v.Digest)
@@ -78,7 +78,7 @@ func TestVerifierWithoutTheCertificateStartsFromTheEmbeddedOne(t *testing.T) {
 	if got := record.DecideSerial(nil, cert); got != record.SerialAccept {
 		t.Fatalf("serial verdict = %v", got)
 	}
-	accepted := record.AcceptedNetworkKey{Cert: &cert.Payload}
+	accepted := record.AcceptedNetworkKey{Cert: &cert.Payload, Revocation: record.KeyRevocationClear}
 	if _, err := record.Verify(ReachabilityDescriptor(accepted, reachNow), r); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestVerifierWithoutTheCertificateStartsFromTheEmbeddedOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = record.Verify(ReachabilityDescriptor(record.AcceptedNetworkKey{Cert: &nv.Payload}, reachNow), r)
+	_, err = record.Verify(ReachabilityDescriptor(record.AcceptedNetworkKey{Cert: &nv.Payload, Revocation: record.KeyRevocationClear}, reachNow), r)
 	var be *record.BindingError
 	if !errors.As(err, &be) || be.Binding != record.BindingKeyMismatch {
 		t.Fatalf("err = %v, want a key mismatch", err)
@@ -100,24 +100,24 @@ func TestVerifierWithoutTheCertificateStartsFromTheEmbeddedOne(t *testing.T) {
 }
 
 func TestReachabilitySignerBinding(t *testing.T) {
-	good := acceptedA(t)
 	expired := acceptedA(t)
 	c := *expired.Cert
 	c.NotAfter = reachNow
 	expired.Cert = &c
 	revoked := acceptedA(t)
-	revoked.Revoked = true
+	revoked.Revocation = record.KeyRevocationRevoked
+	unchecked := acceptedA(t)
+	unchecked.Revocation = record.KeyRevocationUnchecked
 	tests := []struct {
 		name     string
 		accepted record.AcceptedNetworkKey
 		signer   int
 		want     record.Binding
 	}{
-		{"signed by the identity key", good, keyA, record.BindingKeyMismatch},
-		{"signed by another node's network key", good, keyNetOther, record.BindingKeyMismatch},
 		{"no certificate accepted", record.AcceptedNetworkKey{}, keyNetA, record.BindingNoCertificate},
 		{"certificate expired", expired, keyNetA, record.BindingExpired},
 		{"certificate revoked", revoked, keyNetA, record.BindingRevoked},
+		{"revocation never looked up", unchecked, keyNetA, record.BindingRevocationUnchecked},
 	}
 	payload := mustDecode(t, goldenReachability).Payload
 	for _, tc := range tests {
@@ -134,6 +134,63 @@ func TestReachabilitySignerBinding(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The key that signs a reachability record is the network key of the certificate
+// it embeds, whatever certificate the verifier holds. A verifier that already
+// holds a newer certificate would otherwise accept a record signed by the newer
+// key while a verifier that reads the embedded certificate refuses it.
+func TestReachabilityMustBeSignedByTheEmbeddedCertificateKey(t *testing.T) {
+	// The record embeds the serial-1 certificate (network key keyNetA) and is
+	// signed by the key of the serial-2 certificate (keyNetOther).
+	serial2 := networkCertRecord(t, keyA, keyNetOther, 2, t0, t0.Add(30*24*time.Hour))
+	v2, err := record.Verify(record.NetworkKeyCertificateDescriptor, serial2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signedBySerial2, err := record.Sign(ReachabilityType, mustDecode(t, goldenReachability).Payload, signerOf(t, keyNetOther))
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear := func(c *record.NetworkKeyCertificate) record.AcceptedNetworkKey {
+		return record.AcceptedNetworkKey{Cert: c, Revocation: record.KeyRevocationClear}
+	}
+	verifiers := []struct {
+		name     string
+		accepted record.AcceptedNetworkKey
+	}{
+		{"holds the embedded serial-1 certificate", acceptedA(t)},
+		{"holds the serial-2 certificate", clear(&v2.Payload)},
+		{"holds no certificate", record.AcceptedNetworkKey{}},
+	}
+	for _, tc := range verifiers {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := record.Verify(ReachabilityDescriptor(tc.accepted, reachNow), signedBySerial2)
+			requireErr(t, err, record.ErrSignerNotAllowed)
+			requireErr(t, err, errNotTheEmbeddedKey)
+		})
+	}
+	t.Run("signed by the identity key", func(t *testing.T) {
+		forged, err := record.Sign(ReachabilityType, mustDecode(t, goldenReachability).Payload, signerOf(t, keyA))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = record.Verify(ReachabilityDescriptor(acceptedA(t), reachNow), forged)
+		requireErr(t, err, record.ErrSignerNotAllowed, errNotTheEmbeddedKey)
+	})
+	t.Run("the embedded key still has to be the accepted key", func(t *testing.T) {
+		// A verifier that holds the serial-2 certificate refuses a record signed
+		// by the embedded serial-1 key, with the binding reason.
+		ok, err := record.Sign(ReachabilityType, mustDecode(t, goldenReachability).Payload, signerOf(t, keyNetA))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = record.Verify(ReachabilityDescriptor(clear(&v2.Payload), reachNow), ok)
+		var be *record.BindingError
+		if !errors.As(err, &be) || be.Binding != record.BindingKeyMismatch {
+			t.Fatalf("err = %v, want a key mismatch", err)
+		}
+	})
 }
 
 func goodReachabilityWire(t testing.TB) reachabilityWire {
@@ -206,6 +263,7 @@ func TestReachabilityPayloadRules(t *testing.T) {
 		{"address over the length limit", func(w *reachabilityWire) { w.Addresses = many(1, MaxAddressLen+1) }, ErrAddress},
 		{"relay list at the limit", func(w *reachabilityWire) { w.Relays = relays(MaxRelays) }, nil},
 		{"too many relays", func(w *reachabilityWire) { w.Relays = relays(MaxRelays + 1) }, ErrRelay},
+		{"same relay listed twice", func(w *reachabilityWire) { r := relays(2); w.Relays = [][]byte{r[0], r[1], r[0]} }, ErrRelay},
 		{"relay unset", func(w *reachabilityWire) { w.Relays = [][]byte{make([]byte, 32)} }, ErrRelay},
 		{"relay of the wrong length", func(w *reachabilityWire) { w.Relays = [][]byte{{1, 2, 3}} }, ErrRelay},
 	}
@@ -326,5 +384,43 @@ func TestReachabilityVerifyRejects(t *testing.T) {
 			_, err = record.Verify(desc, r)
 			requireErr(t, err, tc.want)
 		})
+	}
+}
+
+func TestSealRefusesDuplicateRelays(t *testing.T) {
+	relay := nodeOf(t, keyRoot)
+	rec, err := NewReachabilityRecord(1, t0.Add(time.Hour), [][]byte{{1}}, []ident.NodeID{relay, relay}, mustDecode(t, goldenNetworkKeyCertificate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = record.Seal(ReachabilityDescriptor(acceptedA(t), reachNow), rec, signerOf(t, keyNetA))
+	requireErr(t, err, record.ErrPayload, ErrRelay)
+}
+
+// The accessor and the embedded record cannot disagree: the certificate is only
+// ever derived from CertificateRecord.
+func TestCertificateAccessorIsDerivedFromTheEmbeddedRecord(t *testing.T) {
+	v, err := record.Verify(ReachabilityDescriptor(acceptedA(t), reachNow), mustDecode(t, goldenReachability))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := record.Verify(record.NetworkKeyCertificateDescriptor, v.Payload.CertificateRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := v.Payload.Certificate(); got.Digest != want.Digest || got.Payload != want.Payload {
+		t.Errorf("Certificate() = %+v, want %+v", got, want)
+	}
+	if (ReachabilityRecord{}).Certificate().Digest != (record.Digest{}) {
+		t.Error("a zero record has a certificate")
+	}
+}
+
+// Without a derived certificate a literal record names no signer, so it cannot be
+// sealed by accident.
+func TestSealRefusesRecordWithoutDerivedCertificate(t *testing.T) {
+	lit := ReachabilityRecord{Counter: 1, ExpiresAt: t0.Add(time.Hour), CertificateRecord: mustDecode(t, goldenNetworkKeyCertificate)}
+	if _, err := record.Seal(ReachabilityDescriptor(acceptedA(t), reachNow), lit, signerOf(t, keyNetA)); err == nil {
+		t.Fatal("sealed a record whose certificate was never derived")
 	}
 }

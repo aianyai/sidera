@@ -20,8 +20,13 @@ const DeclarationType = "sidera/node-declaration/1"
 const (
 	// BootNonceLen is the length of the boot nonce.
 	BootNonceLen = 16
-	// MaxEndpoints is the most endpoints one declaration lists.
-	MaxEndpoints = 256
+	// MaxEndpointsPerNode is the most endpoints a node has, and so the most one
+	// declaration lists. It is the product-level cap on a node's endpoints, and
+	// this constant is the one home of the number: endpoint registration on the
+	// node refuses the endpoint after the last one allowed, so that the node can
+	// always publish a declaration of everything it has. A declaration over the
+	// cap does not decode.
+	MaxEndpointsPerNode = 256
 	// MaxNameLen is the longest endpoint display name, in bytes of UTF-8.
 	MaxNameLen = 64
 )
@@ -251,8 +256,8 @@ func declarationFromWire(w declarationWire) (Declaration, error) {
 	if lease <= 0 || lease > delivery.LeaseRenewalCap {
 		return Declaration{}, fmt.Errorf("%w: %v, limit %v", ErrLeaseRenewal, lease, delivery.LeaseRenewalCap)
 	}
-	if len(w.Endpoints) > MaxEndpoints {
-		return Declaration{}, fmt.Errorf("%w: %d endpoints, at most %d", ErrEndpoint, len(w.Endpoints), MaxEndpoints)
+	if len(w.Endpoints) > MaxEndpointsPerNode {
+		return Declaration{}, fmt.Errorf("%w: %d endpoints, at most %d", ErrEndpoint, len(w.Endpoints), MaxEndpointsPerNode)
 	}
 	d := Declaration{
 		Node: node, Counter: w.Counter, BootNonce: nonce,
@@ -307,6 +312,20 @@ func DeclarationDescriptor(accepted record.AcceptedNetworkKey, now time.Time) re
 			return []record.SignerSlot{record.NetworkKeyOf(d.Node, accepted, now)}
 		},
 	)
+}
+
+// DeclarationNode returns the node a declaration claims to be about, read before
+// the signature is checked, only so that the verifier can look up the
+// network-key certificate it has accepted for that node and build the
+// DeclarationDescriptor. The result is untrusted: anyone can write any node into
+// a record. Nothing may be done with it until record.Verify accepts the record
+// under the descriptor built from it.
+func DeclarationNode(r record.Record) (ident.NodeID, error) {
+	u, err := record.Peek(DeclarationDescriptor(record.AcceptedNetworkKey{}, time.Time{}), r)
+	if err != nil {
+		return ident.NodeID{}, err
+	}
+	return u.Payload.Node, nil
 }
 
 // DeclaredInheritance returns the entry of trust.View.DeclaredAcceptsInheritance

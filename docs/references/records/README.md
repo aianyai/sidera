@@ -429,7 +429,7 @@ identity key.
   1 paused, 2 refuses several recipients, 4 restricts senders, 8 hidden from the
   directory; an unknown bit is refused. The list of senders an endpoint accepts
   is not published. Endpoints ascend by ID and are listed once, so one
-  declaration has one encoding; at most 256 endpoints and 64-byte names. The two
+  declaration has one encoding; at most 256 endpoints (`MaxEndpointsPerNode`, the product-level cap on a node's endpoints: endpoint registration on the node refuses the 257th so a declaration can always be published) and 64-byte names. `DeclarationNode` reads the claimed node through `Peek`, only to find the certificate to verify against. The two
   durations are whole seconds above zero and at most the protocol limits of
   `delivery` (`MaxQueueCap`, `LeaseRenewalCap`): senders compute their pull
   deadline from the limits, so a declared value above them would only mislead,
@@ -438,11 +438,15 @@ identity key.
   else did. The inheritance switch yields the entry of
   `trust.View.DeclaredAcceptsInheritance`.
 - **Reachability record.** Addresses (at most 16, 1 to 256 bytes each) are
-  opaque byte strings, in order of preference; relays (at most 8) are node IDs.
-  The record embeds the node's network-key certificate and its node is that
-  certificate's node, so a verifier that does not yet hold the certificate can
-  read it first (`EmbeddedNetworkKeyCertificate`), decide on it with the serial
-  rule, and verify the record against what it accepted. The expiry is the one
+  opaque byte strings, in order of preference; relays (at most 8) are node IDs,
+  each listed once. The record embeds the node's network-key certificate and its
+  node is that certificate's node. Every verifier reads the certificate first
+  (`EmbeddedNetworkKeyCertificate`, through `Peek`; untrusted), decides on it with
+  the serial rule and the revocation status, and verifies the record against what
+  it accepted. The signing key must also be the embedded certificate's network
+  key: a verifier that already holds a newer certificate would otherwise accept a
+  record signed by the newer key that a verifier reading the embedded certificate
+  refuses, and every verifier must reach the same verdict. The expiry is the one
   time window judged by this package: expired at `expires_at` and after, without
   tolerance.
 - **Highest counter.** Both records carry a monotonic counter from 1 and a peer
@@ -453,7 +457,13 @@ identity key.
   kept apart from the record kept, so an expired or dropped record's counter
   still stands. For the reachability record the counter decides first and expiry
   second: a record the counter would accept but that has expired is refused as
-  expired and does not move the state.
+  expired and does not move the state. The serial rule of the certificate
+  (`DecideSerial`) does advance on an expired higher certificate; the two differ
+  on purpose: a higher serial is the identity key's statement that lower
+  certificates are void, a fact that does not depend on the receiver's clock,
+  while an expired reachability record carries no information and is judged by the
+  receiver's clock, which, if fast, must not raise the bar on a record still valid
+  by real time.
 - **Proof.** It lets a person ask any cluster member for the node's reachability
   record and grants no management right. Its `NotAfter` is passed on to
   `admin.CheckReachabilityProof`.

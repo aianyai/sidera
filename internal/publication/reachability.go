@@ -1,6 +1,7 @@
 package publication
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -43,11 +44,19 @@ type ReachabilityRecord struct {
 	// is embedded in the payload. It is the one input: encoding reads only this
 	// field.
 	CertificateRecord record.Record
-	// Certificate is the verified content of CertificateRecord, derived: set by
-	// NewReachabilityRecord and by decoding. Its node is the node the record is
-	// about, and the network key it names is not necessarily the key that must
-	// sign: the signer is the key the verifier has accepted for the node.
-	Certificate record.Verified[record.NetworkKeyCertificate]
+	// certificate is the verified content of CertificateRecord, derived: set by
+	// NewReachabilityRecord and by decoding, and unexported so that it cannot
+	// disagree with CertificateRecord. Its node is the node the record is about
+	// and the network key it names is the key that must sign the record. Read it
+	// with Certificate.
+	certificate record.Verified[record.NetworkKeyCertificate]
+}
+
+// Certificate returns the verified content of the embedded network-key
+// certificate. It is the zero value on a ReachabilityRecord that was neither
+// built by NewReachabilityRecord nor produced by verification.
+func (r ReachabilityRecord) Certificate() record.Verified[record.NetworkKeyCertificate] {
+	return r.certificate
 }
 
 // NewReachabilityRecord builds the payload of a reachability record. certificate
@@ -61,13 +70,13 @@ func NewReachabilityRecord(counter uint64, expiresAt time.Time, addresses [][]by
 	}
 	return ReachabilityRecord{
 		Counter: counter, ExpiresAt: expiresAt, Addresses: addresses, Relays: relays,
-		CertificateRecord: certificate, Certificate: cert,
+		CertificateRecord: certificate, certificate: cert,
 	}, nil
 }
 
 // Node returns the node the record is about: the node of the embedded
 // certificate.
-func (r ReachabilityRecord) Node() ident.NodeID { return r.Certificate.Payload.Node }
+func (r ReachabilityRecord) Node() ident.NodeID { return r.certificate.Payload.Node }
 
 // ExpiredAt reports whether the record can no longer be used at now. The
 // instant ExpiresAt is already expired and no tolerance is added (like the
@@ -130,54 +139,69 @@ func reachabilityFromWire(w reachabilityWire) (ReachabilityRecord, error) {
 	}
 	r := ReachabilityRecord{
 		Counter: w.Counter, ExpiresAt: expires, Addresses: w.Addresses,
-		CertificateRecord: certRecord, Certificate: cert,
+		CertificateRecord: certRecord, certificate: cert,
 	}
+	seen := make(map[ident.NodeID]struct{}, len(w.Relays))
 	for i, b := range w.Relays {
 		n, err := ident.NodeIDFromBytes(b)
 		if err != nil {
 			return ReachabilityRecord{}, fmt.Errorf("%w: relay %d: %w", ErrRelay, i, err)
 		}
+		if _, dup := seen[n]; dup {
+			return ReachabilityRecord{}, fmt.Errorf("%w: relay %d is listed twice", ErrRelay, i)
+		}
+		seen[n] = struct{}{}
 		r.Relays = append(r.Relays, n)
 	}
 	return r, nil
 }
 
+// errNotTheEmbeddedKey is what the reachability record's signer slot answers
+// for any key but the network key of the certificate the record embeds.
+var errNotTheEmbeddedKey = errors.New("not the network key of the embedded certificate")
+
 // ReachabilityDescriptor describes the reachability record for a verification at
-// now. It is signed by one key: the network key that accepted names for the
-// record's node (record.NetworkKeyOf). The certificate embedded in the record
-// serves a verifier who does not hold the node's certificate yet:
-// EmbeddedNetworkKeyCertificate reads it before the signature is checked, the
-// verifier decides whether to accept it (record.DecideSerial, revocation), and
-// the result is the accepted certificate this descriptor is built from.
+// now. It is signed by one key, which must be both the network key of the
+// certificate the record embeds and the key that accepted names for the record's
+// node (record.NetworkKeyOf, with the binding reason on refusal).
 //
-// Expiry is not part of verification; DecideReachability judges it.
+// The first condition makes the verdict the same for every verifier whatever
+// certificate it holds: a verifier that already holds a newer certificate than
+// the embedded one would otherwise accept a record that a verifier reading the
+// embedded certificate refuses. Every verifier therefore reads the embedded
+// certificate first (EmbeddedNetworkKeyCertificate), runs it through
+// record.DecideSerial and the revocation lookup, and only then builds the
+// accepted key this descriptor is created from. Expiry of the record is not part
+// of verification; DecideReachability judges it.
 func ReachabilityDescriptor(accepted record.AcceptedNetworkKey, now time.Time) record.Descriptor[ReachabilityRecord] {
 	return record.NewDescriptor(ReachabilityType,
 		reachabilityToWire,
 		reachabilityFromWire,
 		func(r ReachabilityRecord) []record.SignerSlot {
-			return []record.SignerSlot{record.NetworkKeyOf(r.Node(), accepted, now)}
+			embedded := r.certificate.Payload.NetworkKey
+			belongs := record.NetworkKeyOf(r.Node(), accepted, now)
+			return []record.SignerSlot{func(k ident.PublicKey) error {
+				if k != embedded {
+					return errNotTheEmbeddedKey
+				}
+				return belongs(k)
+			}}
 		},
 	)
 }
 
 // EmbeddedNetworkKeyCertificate returns the network-key certificate embedded in
-// a reachability record, checked as a certificate (well formed, signed by the
-// identity key of the node it names) and nothing more. The record's own
-// signature has not been checked, so nothing else in the record may be used
-// until record.Verify has accepted it; this function exists to find the
-// certificate to build the accepted key from.
+// a reachability record, read through record.Peek and so checked as a
+// certificate (well formed, signed by the identity key of the node it names) and
+// nothing more. The record's own signature has not been checked, so the result
+// is untrusted: it is only the claim from which a verifier decides which
+// certificate to accept (record.DecideSerial, the revocation lookup) and builds
+// the accepted key for record.Verify. Nothing else in the record may be used
+// until record.Verify has accepted it.
 func EmbeddedNetworkKeyCertificate(r record.Record) (record.Verified[record.NetworkKeyCertificate], error) {
-	if r.Type != ReachabilityType {
-		return record.Verified[record.NetworkKeyCertificate]{}, fmt.Errorf("%w: got %q, want %q", record.ErrType, r.Type, ReachabilityType)
-	}
-	var w reachabilityWire
-	if err := record.UnmarshalStrict(r.Payload, &w, len(r.Payload)); err != nil {
+	u, err := record.Peek(ReachabilityDescriptor(record.AcceptedNetworkKey{}, time.Time{}), r)
+	if err != nil {
 		return record.Verified[record.NetworkKeyCertificate]{}, err
 	}
-	p, err := reachabilityFromWire(w)
-	if err != nil {
-		return record.Verified[record.NetworkKeyCertificate]{}, fmt.Errorf("%w: %w", record.ErrPayload, err)
-	}
-	return p.Certificate, nil
+	return u.Payload.certificate, nil
 }

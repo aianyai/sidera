@@ -27,7 +27,7 @@ func verifiedReachability(t testing.TB, node ident.NodeID, counter uint64, varia
 	// The node of a reachability record is the node of its embedded certificate.
 	cert := record.Verified[record.NetworkKeyCertificate]{Payload: record.NetworkKeyCertificate{Node: node}}
 	return record.Verified[ReachabilityRecord]{
-		Payload: ReachabilityRecord{Counter: counter, ExpiresAt: expires, Certificate: cert},
+		Payload: ReachabilityRecord{Counter: counter, ExpiresAt: expires, certificate: cert},
 		Digest:  fakeDigest(node, counter, variant),
 	}
 }

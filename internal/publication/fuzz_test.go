@@ -116,7 +116,7 @@ func FuzzDecodeDeclaration(f *testing.F) {
 			return
 		}
 		d := v.Payload
-		if d.MaxQueue <= 0 || d.LeaseRenewal <= 0 || d.Counter < 1 || len(d.Endpoints) > MaxEndpoints {
+		if d.MaxQueue <= 0 || d.LeaseRenewal <= 0 || d.Counter < 1 || len(d.Endpoints) > MaxEndpointsPerNode {
 			t.Fatalf("verified declaration outside the limits: %+v", d)
 		}
 	})

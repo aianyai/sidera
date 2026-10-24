@@ -101,10 +101,12 @@ func TestDeclarationSignerBinding(t *testing.T) {
 	n.NotBefore = declNow.Add(time.Second)
 	notYet.Cert = &n
 	revoked := acceptedA(t)
-	revoked.Revoked = true
+	revoked.Revocation = record.KeyRevocationRevoked
+	unchecked := acceptedA(t)
+	unchecked.Revocation = record.KeyRevocationUnchecked
 	otherNode := record.AcceptedNetworkKey{Cert: &record.NetworkKeyCertificate{
 		Node: nodeOf(t, keyOther), NetworkKey: signerOf(t, keyNetA).Public(), Serial: 1, NotBefore: t0, NotAfter: t0.Add(time.Hour * 24),
-	}}
+	}, Revocation: record.KeyRevocationClear}
 	tests := []struct {
 		name     string
 		accepted record.AcceptedNetworkKey
@@ -118,6 +120,7 @@ func TestDeclarationSignerBinding(t *testing.T) {
 		{"certificate expired at the instant", expired, keyNetA, record.BindingExpired},
 		{"certificate not valid yet", notYet, keyNetA, record.BindingNotYetValid},
 		{"certificate revoked", revoked, keyNetA, record.BindingRevoked},
+		{"revocation never looked up", unchecked, keyNetA, record.BindingRevocationUnchecked},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -239,7 +242,7 @@ func TestDeclarationPayloadRules(t *testing.T) {
 		{"every reception bit", func(w *declarationWire) { w.Endpoints[0].Reception = 15 }, nil},
 		{"too many endpoints", func(w *declarationWire) {
 			w.Endpoints = nil
-			for i := 0; i <= MaxEndpoints; i++ {
+			for i := 0; i <= MaxEndpointsPerNode; i++ {
 				id := make([]byte, 16)
 				id[0], id[1] = byte(i>>8), byte(i)
 				id[15] = 1
@@ -268,7 +271,7 @@ func TestDeclarationPayloadRules(t *testing.T) {
 	t.Run("exactly the endpoint limit", func(t *testing.T) {
 		w := goodDeclarationWire(t)
 		w.Endpoints = nil
-		for i := 0; i < MaxEndpoints; i++ {
+		for i := 0; i < MaxEndpointsPerNode; i++ {
 			id := make([]byte, 16)
 			id[0], id[1] = byte(i>>8), byte(i)
 			id[15] = 1
@@ -421,6 +424,51 @@ func TestReceptionBits(t *testing.T) {
 			back, err := receptionFromBits(tc.bits)
 			if err != nil || back != tc.r {
 				t.Errorf("round trip = %+v, %v", back, err)
+			}
+		})
+	}
+}
+
+// The claimed node is read before verification, only to choose the context. It
+// is whatever the sender wrote: a record with a forged signature still yields it.
+func TestDeclarationNodeReadsTheClaimedNode(t *testing.T) {
+	node, err := DeclarationNode(mustDecode(t, goldenDeclaration))
+	if err != nil || node != nodeOf(t, keyA) {
+		t.Fatalf("DeclarationNode = %v, %v", node, err)
+	}
+	forged, err := record.Sign(DeclarationType, mustDecode(t, goldenDeclaration).Payload, signerOf(t, keyOther))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := DeclarationNode(forged); err != nil || got != nodeOf(t, keyA) {
+		t.Errorf("a forged declaration claims %v, %v", got, err)
+	}
+	if _, err := record.Verify(DeclarationDescriptor(acceptedA(t), declNow), forged); err == nil {
+		t.Error("the forged declaration verifies")
+	}
+}
+
+func TestDeclarationNodeRefuses(t *testing.T) {
+	bad := mustDecode(t, goldenDeclaration)
+	bad.Payload = append([]byte{}, bad.Payload...)
+	bad.Payload[len(bad.Payload)-1] ^= 0xff
+	tests := []struct {
+		name string
+		r    record.Record
+		want error
+	}{
+		{"another record type", mustDecode(t, goldenReachability), record.ErrType},
+		{"a payload that does not decode", bad, nil},
+		{"a zero record", record.Record{}, record.ErrType},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DeclarationNode(tc.r)
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			if tc.want != nil {
+				requireErr(t, err, tc.want)
 			}
 		})
 	}
