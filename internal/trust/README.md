@@ -63,7 +63,8 @@ reasons behind the rules.
   must hear.
   The local node's own entry in the set is never read by any function here. A
   retired local identity is the caller's to handle: it refuses to run under it.
-  A nil or empty set retires nobody.
+  The zero value of `View.Retired` (a nil set) means no retired nodes, the same
+  as an empty set.
 - **Computed, never stored.** `Evaluate` is a pure function of the `View`; the
   order in which records reached the view does not matter.
 - **Local revocation** puts the node in the locally revoked set. The set beats
