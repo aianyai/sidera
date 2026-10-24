@@ -1,6 +1,7 @@
 package reply
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -170,7 +171,10 @@ func TestAForgedReplyToFromAThirdPartyIsRefused(t *testing.T) {
 		o := messageOutbound()
 		adm := mustAdmit(t, request(&o, onC(2), now, genuine))
 		if adm.Decision.Granted() || adm.Decision.Reason != ReasonNotRecipient || adm.Outbound.Recipients[0].Delivery.State != delivery.StateQueued {
-			t.Errorf("decision %+v; the evidence of a stranger must not be read", adm.Decision)
+			t.Errorf("decision %+v; the evidence of a stranger must not be applied", adm.Decision)
+		}
+		if adm.EvidenceError != nil {
+			t.Errorf("the evidence of a stranger was read and reported as a failure: %v", adm.EvidenceError)
 		}
 	})
 	t.Run("a node that is not a recipient's, with a report it signed itself", func(t *testing.T) {
@@ -187,9 +191,9 @@ func TestAForgedReplyToFromAThirdPartyIsRefused(t *testing.T) {
 		if adm.Decision.Granted() {
 			t.Errorf("decision %+v", adm.Decision)
 		}
-		// the report is about endpoint 2: it proves nothing for endpoint 8
-		if adm.Decision.Reason != ReasonEvidenceInvalid && adm.Decision.Reason != ReasonNotRecipient {
-			t.Errorf("reason %v", adm.Decision.Reason)
+		// the report is about endpoint 2: it is discarded, and endpoint 8 is no recipient
+		if adm.Decision.Reason != ReasonNotRecipient || adm.EvidenceError == nil {
+			t.Errorf("reason %v, evidence error %v", adm.Decision.Reason, adm.EvidenceError)
 		}
 	})
 	t.Run("another endpoint of the recipient's node with genuine evidence about itself", func(t *testing.T) {
@@ -267,11 +271,11 @@ func TestWindow(t *testing.T) {
 	}{
 		{"granted at once after delivery", o, deliveredAt, ReasonDeliveredWindow},
 		{"granted a second before 24 hours from the delivery time", o, deliveredAt.Add(Window - time.Second), ReasonDeliveredWindow},
-		{"refused at exactly 24 hours from the delivery time", o, deliveredAt.Add(Window), ReasonWindowClosed},
-		{"refused after 24 hours", o, deliveredAt.Add(Window + time.Hour), ReasonWindowClosed},
+		{"no permission at exactly 24 hours from the delivery time", o, deliveredAt.Add(Window), ReasonWindowClosed},
+		{"no permission after 24 hours", o, deliveredAt.Add(Window + time.Hour), ReasonWindowClosed},
 		{"the window does not run from the report time", o, t0.Add(3*time.Minute + Window - time.Second), ReasonWindowClosed},
 		{"granted a second before 24 hours from the arrival report", arrived, t0.Add(3*time.Minute + Window - time.Second), ReasonArrivalWindow},
-		{"refused at exactly 24 hours from the arrival report", arrived, t0.Add(3*time.Minute + Window), ReasonWindowClosed},
+		{"no permission at exactly 24 hours from the arrival report", arrived, t0.Add(3*time.Minute + Window), ReasonWindowClosed},
 		{"no permission without any proof", func() envelope.Outbound { return messageOutbound() }(), t0.Add(time.Minute), ReasonNoArrivalProof},
 	}
 	for _, c := range cases {
@@ -285,7 +289,7 @@ func TestWindow(t *testing.T) {
 				t.Error("Granted disagrees with the reason")
 			}
 			if !adm.Decision.Granted() && !adm.Decision.Until.IsZero() {
-				t.Error("a refusal has a window end")
+				t.Error("a decision without permission has a window end")
 			}
 		})
 	}
@@ -312,64 +316,133 @@ func TestWindow(t *testing.T) {
 	})
 }
 
-func TestEvidenceThatIsNotSignedByTheTargetNodeAboutThisMessageIsRefused(t *testing.T) {
+func TestEvidenceThatDoesNotVerifyIsDiscardedAndTheReplyIsJudgedWithoutIt(t *testing.T) {
 	now := t0.Add(time.Hour)
 	good := acceptedReport(t, runtimeR, t0.Add(time.Minute))
 	expiredKey := acceptedOn(onA(2))
 	expiredKey.Cert.NotAfter = t0.Add(30 * time.Minute)
 	revoked := acceptedOn(onA(2))
 	revoked.Revocation = record.KeyRevocationRevoked
+	deliveredRecord := func() envelope.Outbound {
+		return learn(t, messageOutbound(), deliveredReport(t, runtimeR, t0.Add(3*time.Minute), t0.Add(2*time.Minute)), now)
+	}
+	boundRecord := func() envelope.Outbound {
+		return learn(t, learnReply(t, createOutbound(true), createdReply(t, t0.Add(time.Minute)), now), acceptedReport(t, sessionD, t0.Add(2*time.Minute)), now)
+	}
 	cases := []struct {
 		rule     string
 		o        func() envelope.Outbound
+		replier  ident.Address
 		evidence []record.Record
 		mut      func(*Request)
+		// wantErr, if set, is the sentinel the evidence error must wrap.
+		wantErr error
 	}{
-		{"a report signed by another node's network key", messageOutbound2,
-			[]record.Record{sealReport(t, "m-1", runtimeR, delivery.StatusReport{State: delivery.StateAccepted}, t0.Add(time.Minute), time.Time{}, idC, netC)}, nil},
-		{"a report about another message", messageOutbound2,
-			[]record.Record{sealReport(t, "m-2", runtimeR, delivery.StatusReport{State: delivery.StateAccepted}, t0.Add(time.Minute), time.Time{}, idA, netA)}, nil},
-		{"a report about another endpoint than the replier", messageOutbound2,
-			[]record.Record{acceptedReport(t, ep(5), t0.Add(time.Minute))}, nil},
-		{"a report dated in the future", messageOutbound2,
-			[]record.Record{acceptedReport(t, runtimeR, now.Add(3*time.Minute))}, nil},
-		{"a report under an expired certificate", messageOutbound2, []record.Record{good}, func(r *Request) { r.Accepted = expiredKey }},
-		{"a report under a revoked certificate", messageOutbound2, []record.Record{good}, func(r *Request) { r.Accepted = revoked }},
-		{"a report with no certificate to check it", messageOutbound2, []record.Record{good}, func(r *Request) { r.Accepted = record.AcceptedNetworkKey{} }},
-		{"a report that contradicts the record", func() envelope.Outbound {
-			return learn(t, messageOutbound(), deliveredReport(t, runtimeR, t0.Add(3*time.Minute), t0.Add(2*time.Minute)), now)
-		}, []record.Record{sealReport(t, "m-1", runtimeR, delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectExpired}, t0.Add(time.Minute), time.Time{}, idA, netA)}, nil},
-		{"a control reply for a message that is not a control signal", messageOutbound2, []record.Record{createdReply(t, t0.Add(time.Minute))}, nil},
-		{"a control reply about another message", func() envelope.Outbound { return createOutbound(true) },
-			[]record.Record{sealCreateReply(t, "m-2", envelope.CreateResult{Outcome: 1, SessionEndpoint: sessionD}, t0.Add(time.Minute), idA, netA)}, nil},
-		{"a control reply signed by another node", func() envelope.Outbound { return createOutbound(true) },
-			[]record.Record{sealCreateReply(t, "m-1", envelope.CreateResult{Outcome: 1, SessionEndpoint: sessionD}, t0.Add(time.Minute), idC, netC)}, nil},
-		{"a control reply dated in the future", func() envelope.Outbound { return createOutbound(true) }, []record.Record{createdReply(t, now.Add(3*time.Minute))}, nil},
-		{"a control reply that names another session than the bound one", func() envelope.Outbound {
-			return learnReply(t, createOutbound(true), createdReply(t, t0.Add(time.Minute)), now)
-		}, []record.Record{sealCreateReply(t, "m-1", envelope.CreateResult{Outcome: 1, SessionEndpoint: ep(4)}, t0.Add(time.Minute), idA, netA)}, nil},
-		{"evidence in the wrong order", func() envelope.Outbound { return createOutbound(true) },
-			[]record.Record{acceptedReport(t, sessionD, t0.Add(time.Minute)), createdReply(t, t0.Add(time.Minute))}, nil},
-		{"two reports", messageOutbound2, []record.Record{good, good}, nil},
-		{"a record of another type", messageOutbound2, []record.Record{{Type: "sidera/node-declaration/1", Payload: []byte{0xa0}, Signatures: good.Signatures}}, nil},
+		{"a report signed by another node's network key", messageOutbound2, onA(2),
+			[]record.Record{sealReport(t, "m-1", runtimeR, delivery.StatusReport{State: delivery.StateAccepted}, t0.Add(time.Minute), time.Time{}, idC, netC)}, nil, nil},
+		{"a report about another message", messageOutbound2, onA(2),
+			[]record.Record{sealReport(t, "m-2", runtimeR, delivery.StatusReport{State: delivery.StateAccepted}, t0.Add(time.Minute), time.Time{}, idA, netA)}, nil, envelope.ErrMismatch},
+		{"a report about another endpoint than the replier", messageOutbound2, onA(2),
+			[]record.Record{acceptedReport(t, ep(5), t0.Add(time.Minute))}, nil, envelope.ErrMismatch},
+		{"a report naming another sending node", messageOutbound2, onA(2),
+			[]record.Record{sealReportFrom(t, nodeOf(idC), "m-1", runtimeR, delivery.StatusReport{State: delivery.StateAccepted}, t0.Add(time.Minute))}, nil, envelope.ErrMismatch},
+		{"a report dated in the future", messageOutbound2, onA(2),
+			[]record.Record{acceptedReport(t, runtimeR, now.Add(3*time.Minute))}, nil, envelope.ErrFromFuture},
+		{"a report under an expired certificate", messageOutbound2, onA(2), []record.Record{good}, func(r *Request) { r.Accepted = expiredKey }, nil},
+		{"a report under a revoked certificate", messageOutbound2, onA(2), []record.Record{good}, func(r *Request) { r.Accepted = revoked }, nil},
+		{"a report with no certificate to check it", messageOutbound2, onA(2), []record.Record{good}, func(r *Request) { r.Accepted = record.AcceptedNetworkKey{} }, nil},
+		{"a report that contradicts the record", deliveredRecord, onA(2),
+			[]record.Record{sealReport(t, "m-1", runtimeR, delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectExpired}, t0.Add(time.Minute), time.Time{}, idA, netA)}, nil, envelope.ErrPeerContradiction},
+		{"a control reply for a message that is not a control signal", messageOutbound2, onA(2), []record.Record{createdReply(t, t0.Add(time.Minute))}, nil, envelope.ErrMismatch},
+		{"a control reply about another message", func() envelope.Outbound { return createOutbound(true) }, onA(3),
+			[]record.Record{sealCreateReply(t, "m-2", envelope.CreateResult{Outcome: 1, SessionEndpoint: sessionD}, t0.Add(time.Minute), idA, netA)}, nil, envelope.ErrMismatch},
+		{"a control reply signed by another node", func() envelope.Outbound { return createOutbound(true) }, onA(3),
+			[]record.Record{sealCreateReply(t, "m-1", envelope.CreateResult{Outcome: 1, SessionEndpoint: sessionD}, t0.Add(time.Minute), idC, netC)}, nil, nil},
+		{"a control reply naming another sending node", func() envelope.Outbound { return createOutbound(true) }, onA(3),
+			[]record.Record{sealCreateReplyFrom(t, nodeOf(idC), envelope.CreateResult{Outcome: 1, SessionEndpoint: sessionD}, t0.Add(time.Minute))}, nil, envelope.ErrMismatch},
+		{"a control reply dated in the future", func() envelope.Outbound { return createOutbound(true) }, onA(3), []record.Record{createdReply(t, now.Add(3*time.Minute))}, nil, envelope.ErrFromFuture},
+		{"a control reply that names another session than the bound one", boundRecord, onA(3),
+			[]record.Record{sealCreateReply(t, "m-1", envelope.CreateResult{Outcome: 1, SessionEndpoint: ep(4)}, t0.Add(time.Minute), idA, netA)}, nil, envelope.ErrPeerContradiction},
+		{"a control reply after a failure was recorded", func() envelope.Outbound {
+			return learnReply(t, createOutbound(true), failedReply(t, t0.Add(30*time.Second)), now)
+		}, onA(3), []record.Record{createdReply(t, t0.Add(time.Minute))}, nil, envelope.ErrPeerContradiction},
+		{"evidence in the wrong order", func() envelope.Outbound { return createOutbound(true) }, onA(3),
+			[]record.Record{acceptedReport(t, sessionD, t0.Add(time.Minute)), createdReply(t, t0.Add(time.Minute))}, nil, envelope.ErrEvidence},
+		{"two reports", messageOutbound2, onA(2), []record.Record{good, good}, nil, envelope.ErrEvidence},
+		{"a record of another type", messageOutbound2, onA(2), []record.Record{{Type: "sidera/node-declaration/1", Payload: []byte{0xa0}, Signatures: good.Signatures}}, nil, envelope.ErrEvidence},
+		{"a report next to a control reply that fails is discarded with it", messageOutbound2, onA(2),
+			[]record.Record{createdReply(t, t0.Add(time.Minute)), good}, nil, envelope.ErrMismatch},
 	}
 	for _, c := range cases {
 		t.Run(c.rule, func(t *testing.T) {
 			o := c.o()
 			before := o
-			req := request(&o, onA(2), now, c.evidence...)
+			req := request(&o, c.replier, now, c.evidence...)
 			if c.mut != nil {
 				c.mut(&req)
 			}
 			adm := mustAdmit(t, req)
-			if adm.Decision.Granted() || adm.Decision.Reason != ReasonEvidenceInvalid || adm.EvidenceError == nil {
-				t.Fatalf("decision %+v error %v", adm.Decision, adm.EvidenceError)
+			if adm.EvidenceError == nil {
+				t.Fatalf("the evidence was not reported as failed; decision %+v", adm.Decision)
 			}
-			if !reflect.DeepEqual(*adm.Outbound, before) || adm.Handling != nil || adm.Report != envelope.ReportNone {
-				t.Error("refused evidence left a trace")
+			if c.wantErr != nil && !errors.Is(adm.EvidenceError, c.wantErr) {
+				t.Errorf("evidence error %v does not wrap %v", adm.EvidenceError, c.wantErr)
+			}
+			if !reflect.DeepEqual(*adm.Outbound, before) || adm.Handling != nil || adm.Report != envelope.ReportNone || adm.Reported != nil {
+				t.Error("discarded evidence left a trace")
+			}
+			// the verdict is the one the same reply gets without any evidence
+			bare := req
+			bare.Evidence = nil
+			want := mustAdmit(t, bare).Decision
+			if adm.Decision != want {
+				t.Errorf("decision %+v, want %+v (the reply without evidence)", adm.Decision, want)
 			}
 		})
 	}
+}
+
+func TestStaleEvidenceDoesNotTakePermissionFromAReplyWhoseFactsAreKnown(t *testing.T) {
+	// The target rotated its network key after it signed the evidence: the
+	// evidence no longer verifies, but the sender already learned that the
+	// message arrived and which session the control signal created.
+	now := t0.Add(time.Hour)
+	evidence := []record.Record{createdReply(t, t0.Add(time.Minute)), acceptedReport(t, sessionD, t0.Add(2*time.Minute))}
+	known := learn(t, learnReply(t, createOutbound(true), createdReply(t, t0.Add(time.Minute)), now), acceptedReport(t, sessionD, t0.Add(2*time.Minute)), now)
+	rotated := acceptedFor(idA, 0x99)
+
+	t.Run("a reply from the new session", func(t *testing.T) {
+		req := request(&known, onA(3), now, evidence...)
+		req.Accepted = rotated
+		adm := mustAdmit(t, req)
+		if adm.Decision.Reason != ReasonArrivalWindow || !adm.Decision.Until.Equal(t0.Add(2*time.Minute+Window)) {
+			t.Fatalf("decision %+v", adm.Decision)
+		}
+		if adm.EvidenceError == nil {
+			t.Error("the stale evidence was not reported")
+		}
+		if !reflect.DeepEqual(*adm.Outbound, known) {
+			t.Error("the stale evidence changed the record")
+		}
+	})
+	t.Run("a reply to a plain message", func(t *testing.T) {
+		o := learn(t, messageOutbound(), deliveredReport(t, runtimeR, t0.Add(3*time.Minute), t0.Add(2*time.Minute)), now)
+		req := request(&o, onA(2), now, deliveredReport(t, runtimeR, t0.Add(3*time.Minute), t0.Add(2*time.Minute)))
+		req.Accepted = rotated
+		adm := mustAdmit(t, req)
+		if adm.Decision.Reason != ReasonDeliveredWindow || adm.EvidenceError == nil {
+			t.Fatalf("decision %+v evidence error %v", adm.Decision, adm.EvidenceError)
+		}
+	})
+	t.Run("the same stale evidence gives nothing to a reply whose facts are not known", func(t *testing.T) {
+		o := createOutbound(true)
+		req := request(&o, onA(3), now, evidence...)
+		req.Accepted = rotated
+		adm := mustAdmit(t, req)
+		if adm.Decision.Granted() || adm.Decision.Reason != ReasonNotRecipient || adm.EvidenceError == nil {
+			t.Fatalf("decision %+v evidence error %v", adm.Decision, adm.EvidenceError)
+		}
+	})
 }
 
 func messageOutbound2() envelope.Outbound { return messageOutbound() }
@@ -396,11 +469,16 @@ func TestOnlyASessionCreateWithABodyGivesTheSessionAPermission(t *testing.T) {
 			t.Errorf("decision %+v derived %v", adm.Decision, adm.Outbound.Derived)
 		}
 	})
-	t.Run("the runtime endpoint itself is a recipient and may answer a session.create", func(t *testing.T) {
+	t.Run("the runtime endpoint itself never gets permission to answer a session.create", func(t *testing.T) {
+		// Its result returns as the control reply. The evidence is still a true
+		// fact and is applied.
 		o := createOutbound(true)
 		adm := mustAdmit(t, request(&o, onA(2), now, acceptedReport(t, runtimeR, t0.Add(time.Minute))))
-		if !adm.Decision.Granted() {
+		if adm.Decision.Granted() || adm.Decision.Reason != ReasonControlSignal || adm.EvidenceError != nil {
 			t.Errorf("decision %+v (%v)", adm.Decision, adm.EvidenceError)
+		}
+		if adm.Outbound.Recipients[0].Delivery.State != delivery.StateAccepted {
+			t.Error("the report was not applied")
 		}
 	})
 	t.Run("an endpoint identifier of one recipient's node is not a recipient on another node", func(t *testing.T) {
@@ -431,6 +509,55 @@ func TestOnlyASessionCreateWithABodyGivesTheSessionAPermission(t *testing.T) {
 	})
 }
 
+func TestTheOriginalRecipientOfAControlSignalNeverGetsReplyPermission(t *testing.T) {
+	now := t0.Add(time.Hour)
+	delivered := deliveredReport(t, runtimeR, t0.Add(3*time.Minute), t0.Add(2*time.Minute))
+	for _, kind := range []envelope.Kind{envelope.KindSessionCreate, envelope.KindSessionClose, envelope.KindSessionInterrupt, envelope.KindEndpointStatus} {
+		for _, body := range []bool{false, true} {
+			if body && kind != envelope.KindSessionCreate {
+				continue
+			}
+			t.Run(kind.String()+bodyName(body), func(t *testing.T) {
+				o := createOutbound(body)
+				o.Kind = kind
+				// every fact a plain message needs for permission is known
+				known := learn(t, o, delivered, now)
+				adm := mustAdmit(t, request(&known, onA(2), now))
+				if adm.Decision.Granted() || adm.Decision.Reason != ReasonControlSignal || !adm.Decision.Until.IsZero() {
+					t.Errorf("with the facts held: %+v", adm.Decision)
+				}
+				fresh := mustAdmit(t, request(&o, onA(2), now, delivered))
+				if fresh.Decision.Granted() || fresh.Decision.Reason != ReasonControlSignal {
+					t.Errorf("with the facts as evidence: %+v", fresh.Decision)
+				}
+			})
+		}
+	}
+	t.Run("a plain message to the same endpoint does get it", func(t *testing.T) {
+		o := learn(t, messageOutbound(), delivered, now)
+		if adm := mustAdmit(t, request(&o, onA(2), now)); !adm.Decision.Granted() {
+			t.Errorf("decision %+v", adm.Decision)
+		}
+	})
+	t.Run("the session the control signal created does, though the control signal itself is known to have arrived", func(t *testing.T) {
+		o := learn(t, learn(t, learnReply(t, createOutbound(true), createdReply(t, t0.Add(time.Minute)), now), delivered, now),
+			acceptedReport(t, sessionD, t0.Add(2*time.Minute)), now)
+		if adm := mustAdmit(t, request(&o, onA(3), now)); !adm.Decision.Granted() {
+			t.Errorf("decision %+v", adm.Decision)
+		}
+		if adm := mustAdmit(t, request(&o, onA(2), now)); adm.Decision.Reason != ReasonControlSignal {
+			t.Errorf("the runtime endpoint of the same record: %+v", adm.Decision)
+		}
+	})
+}
+
+func bodyName(body bool) string {
+	if body {
+		return " with a body"
+	}
+	return ""
+}
+
 func TestInvalidRequests(t *testing.T) {
 	o := messageOutbound()
 	now := t0.Add(time.Hour)
@@ -458,7 +585,7 @@ func TestReasonNames(t *testing.T) {
 	want := map[Reason]string{
 		ReasonDeliveredWindow: "delivered_window", ReasonArrivalWindow: "arrival_window", ReasonDisabled: "disabled",
 		ReasonNoOutbound: "no_outbound", ReasonNotSender: "not_sender", ReasonNotRecipient: "not_recipient",
-		ReasonEvidenceInvalid: "evidence_invalid", ReasonNoArrivalProof: "no_arrival_proof", ReasonWindowClosed: "window_closed",
+		ReasonControlSignal: "control_signal", ReasonNoArrivalProof: "no_arrival_proof", ReasonWindowClosed: "window_closed",
 		ReasonInvalid: "invalid", Reason(200): "invalid",
 	}
 	for r, w := range want {

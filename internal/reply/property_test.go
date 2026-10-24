@@ -288,8 +288,6 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 					want = ReasonNotSender
 				case replier.Node != nodeOf(idA):
 					want = ReasonNotRecipient
-				case mode == evForged:
-					want = ReasonEvidenceInvalid
 				default:
 					if haveReply {
 						model.bound = model.bound || binds
@@ -306,6 +304,10 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 					switch {
 					case !model.tracked(replier.Endpoint):
 						want = ReasonNotRecipient
+					case model.isControl && replier.Endpoint == runtimeR:
+						// the result of a control signal returns as its control
+						// reply: its original recipient never gets permission
+						want = ReasonControlSignal
 					default:
 						if s, why, ok = model.start(replier.Endpoint); !ok {
 							want = ReasonNoArrivalProof
@@ -316,6 +318,15 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 						} else {
 							want = ReasonArrivalWindow
 						}
+					}
+				}
+				if read := enabled && !wrongTarget && replier.Node == nodeOf(idA); read && len(evidence) > 0 {
+					// forged evidence is discarded and reported; genuine evidence never is
+					if (mode == evForged) != (adm.EvidenceError != nil) {
+						t.Fatalf("trial %d step %d: mode %d, evidence error %v", trial, step, mode, adm.EvidenceError)
+					}
+					if mode == evForged {
+						counts["evidence discarded"]++
 					}
 				}
 				if adm.Decision.Reason != want {
@@ -332,15 +343,15 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 						t.Fatalf("window end %v, oracle %v", adm.Decision.Until, secs(s+24*3600))
 					}
 				}
-				if want != ReasonEvidenceInvalid && want != ReasonDisabled && want != ReasonNotSender && replier.Node == nodeOf(idA) {
+				if want != ReasonDisabled && want != ReasonNotSender && replier.Node == nodeOf(idA) {
 					outbound = *adm.Outbound // commit
 				}
 			}
 		}
 	}
 	for name, min := range map[string]int{
-		"delivered_window": 150, "arrival_window": 150, "window_closed": 150, "no_arrival_proof": 150, "not_recipient": 300,
-		"evidence_invalid": 20, "disabled": 20, "not_sender": 5,
+		"delivered_window": 100, "arrival_window": 150, "window_closed": 80, "no_arrival_proof": 150, "not_recipient": 300,
+		"evidence discarded": 20, "control_signal": 60, "disabled": 20, "not_sender": 5,
 		"bound by evidence": 100, "bound by a pulled reply": 50, "granted to a derived session": 80, "pulled report": 300,
 	} {
 		if counts[name] < min {

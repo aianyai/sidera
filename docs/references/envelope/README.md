@@ -182,16 +182,23 @@ only; the signature is made when a report or reply is sent.
 ### Reply permission
 
 `reply.Admit` decides whether a message that says it answers one of this node's
-own is allowed back in, and its verdict is `authz.Request.Reply`.
+own is allowed back in, and its verdict is `authz.Request.Reply`. Without
+permission a message is not refused: it is judged by the node's ordinary policy,
+which may still admit it.
 
-- The replier is an original recipient of the message, or the session endpoint
-  bound by a verified control reply of a `session.create` with a non-empty body.
+- For a plain message the replier is an original recipient. For a control signal
+  the original recipient never has permission, because the signal's result
+  already returns as its control reply; only the session endpoint bound by a
+  verified control reply of a `session.create` with a non-empty body does.
 - The reply is addressed to the endpoint that sent the message, and `reply_to`
   matches the node's own record of it.
 - Evidence is read only if the replier's node is a recipient's node. It must be
-  signed by that node's network key, name the message, and a report must be about
-  the replier's own delivery. It is applied (control reply first) before the
-  replier is looked up. Evidence that fails refuses the reply.
+  signed by that node's network key, name this node as the sending node and the
+  message, and a report must be about the replier's own delivery. It is applied
+  (control reply first) before the replier is looked up. Evidence that fails any
+  of this is not applied, none of it, and is reported in `EvidenceError` for
+  logging and alerting; the reply is judged on the facts the record already holds,
+  as if it had carried none.
 - The window is 24 hours from the delivery time the target reported; otherwise
   from the earliest signed report that proves arrival; otherwise there is no
   permission. A control reply never starts the window. The window ends at the
@@ -256,10 +263,22 @@ own is allowed back in, and its verdict is `authz.Request.Reply`.
   endpoint of node Y must not change Y's delivery; checking that at every call
   site is a rule enforced many times. The verified value carries the node and the
   one rule checks it.
-- **Evidence is checked, not skipped.** A reply with evidence that does not
-  verify is refused even if the node already knows enough to admit it. The
-  sender of evidence is the node's own automation, so a failure means a
-  malfunctioning or hostile peer, and silence would hide it.
+- **Evidence that fails is reported, not punished.** The evidence is the target
+  node's own automation attaching what it holds, so a failure means a
+  malfunctioning or hostile peer, or a network key rotated since the evidence was
+  signed; the first two call for an alert and the last is routine. The evidence
+  is discarded and reported in `EvidenceError`, and the reply is judged on the
+  facts already held. Withholding permission from a reply whose arrival and
+  binding the sender already knows would turn a key rotation into lost replies,
+  and the evidence adds nothing the sender needs when it knows the facts. A
+  failed piece of evidence gives no permission it could not have had without it,
+  so nothing is gained by forging it.
+- **A control signal's original recipient never replies.** A control signal's
+  result already returns to the sender as the control reply, signed by the node
+  that executed it; permission for the recipient endpoint as well would admit a
+  second, unsigned channel back for a signal that has one. The session a
+  `session.create` created is a new endpoint with its own conversation, and only
+  that one can answer.
 - **Window start.** Many replies come within the turn in which the agent read
   the message, before the message is acknowledged, so the delivery time does not
   exist yet; the report that proves arrival is the next best fact and is signed.
@@ -267,9 +286,10 @@ own is allowed back in, and its verdict is `authz.Request.Reply`.
   window. With nothing, there is no permission: failing closed. A report of
   rejection or a closed delivery does not prove that the agent could have seen
   the message.
-- **Third parties.** A reply from a node that is not a recipient's is refused
-  before its evidence is read, and from another endpoint of a recipient's node it
-  is refused because it is neither a recipient nor a bound session. The evidence
+- **Third parties.** A reply from a node that is not a recipient's has no
+  permission and its evidence is not read, and from another endpoint of a
+  recipient's node it has none because that endpoint is neither a recipient nor a
+  bound session. The evidence
   of the real target replayed by a stranger is true and harmless to apply, and
   gives the stranger nothing.
 - **Parameters without defaults.** The longest body and the most recipients are
@@ -302,8 +322,12 @@ own is allowed back in, and its verdict is `authz.Request.Reply`.
   `TestTheSourceBehindNATAcceptsAReplyCarryingEvidence`,
   `TestAReplyFromTheNewSessionArrivingBeforeTheControlReplyIsAccepted`,
   `TestAForgedReplyToFromAThirdPartyIsRefused`), `TestWindow`,
-  `TestEvidenceThatIsNotSignedByTheTargetNodeAboutThisMessageIsRefused`, and
+  `TestEvidenceThatDoesNotVerifyIsDiscardedAndTheReplyIsJudgedWithoutIt`,
+  `TestStaleEvidenceDoesNotTakePermissionFromAReplyWhoseFactsAreKnown`,
+  `TestTheOriginalRecipientOfAControlSignalNeverGetsReplyPermission`, and
   `property_test.go` compares random orders of replies, evidence and pulled
-  reports with an oracle written separately.
+  reports with an oracle written separately; `fuzz_test.go` checks that
+  permission earned through evidence implies the evidence verifies for the
+  target node and this node as the sender.
 - `internal/envelope/README.md`, `internal/reply/README.md`: entry points and
   what callers must guarantee.
