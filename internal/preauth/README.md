@@ -16,6 +16,8 @@ timers, and applies the answers.
 | `BuiltinIdentify`, `BuiltinIdentifyPush`, `BuiltinPing`, `BuiltinCircuitStop`, `BuiltinCircuitHop`, `BuiltinDCUtR` | The libp2p protocols that stay open in every state, as names. |
 | `ClassOf(protocol)`                                     | The class of a protocol: built-in, relay, exchange, pairing, management, or application (members only).         |
 | `State`                                                 | `StateUnauthenticated`, `StateNonMember`, `StateMember`, `StateAuthorizedPerson`; the zero value is unset.     |
+| `Exchange`, `NewNodeExchange`, `NewPersonExchange`, `Encode`, `DecodeExchange` | The certificate exchange message: kind plus the certificate record, canonical CBOR, at most `MaxMessageSize` bytes. Not a signed record. |
+| `ExchangeDeadline`                                      | The 5 seconds a connection has to complete the exchange.                                                        |
 | `Allowed(state, Use)`                                   | The one table: whether a peer in a state may open a stream of a protocol or make a relay request. `Access{Verdict, Reason}`. |
 
 ## Rules
@@ -42,7 +44,34 @@ timers, and applies the answers.
 - **Exact match.** A protocol identifier with another version suffix is not the
   listed one and is a cluster protocol.
 
+- **One message type, two kinds.** The message is `{1: kind, 2: record}` with
+  kind 1 for a node's network-key certificate and 2 for a person's device
+  certificate; the record is the encoded signed record as a byte string. A
+  person sends nothing more than the device certificate: the root key that
+  signed it derives the person identifier the certificate names, and
+  verification checks that, so the receiver has what it needs to look the
+  person up. Revocations and the authorized-persons list are the receiver's own.
+- **Strict decoding, bounded first.** `DecodeExchange` applies the size bound
+  (`MaxMessageSize`, 1 KiB) before anything else, then the strict rules of
+  `record` (no duplicate keys, unknown fields, indefinite lengths, tags; the
+  bytes must be the canonical encoding), then decodes the certificate record the
+  same way. It checks no signature and not that the record's type fits the kind;
+  verification does both. Any message that decodes encodes to the identical
+  bytes.
+
 ## What the caller must guarantee
+
+- **The exchange runs on the specific connection**, opened with the
+  connection's own stream function and not the host's: the host picks the best
+  connection to a peer, so a relayed connection would never be asked and would
+  be closed at the deadline. The side whose connection direction is outbound
+  starts it: it opens the stream and writes its message; the other side writes
+  its own after reading the first. Each side writes exactly one message and then
+  closes its write side; the reader reads up to `MaxMessageSize` plus one byte
+  and refuses more. After a hole punch both ends may start one; the later
+  exchange on a connection that is already authenticated is ignored.
+- **The deadline is `ExchangeDeadline` from the moment the connection exists**;
+  a connection still unauthenticated then is closed.
 
 - Applications register their stream handlers only through the gated host that
   asks `Allowed` first. A handler registered on the raw host bypasses the gate;

@@ -50,6 +50,48 @@ stream arrived on and resets the stream when `Allowed` refuses. Everything the
 application registers must go through that wrapper; a handler registered on the
 raw host bypasses the gate.
 
+### The certificate exchange
+
+A peer proves who it is with a certificate, sent in one message on the exchange
+protocol. One protocol serves nodes and persons, and the message says which:
+
+```
+exchange = { 1: kind, 2: record }
+kind     = 1 (node: the network-key certificate)
+         | 2 (person: the device certificate)
+record   = the encoded signed record, as a byte string
+```
+
+The message is deterministic CBOR and is not a signed record: the sender is
+already authenticated by the secure handshake, and the certificate inside carries
+the signature that matters. It is at most 1024 bytes (a certificate message is
+about 230). A decoder applies the size bound first, then the strict rules of
+[records](../records/README.md) to the message and again to the record inside:
+duplicate keys, unknown fields, indefinite lengths, tags and any encoding but the
+canonical one are refused, so a message that decodes encodes to the same bytes.
+
+A person sends only the device certificate. The person identifier derives from
+the root key that signed it, and verification checks that the key derives the
+identifier the certificate names, so the receiver can look the person up on its
+list from the certificate alone. Whether the certificate is revoked or the person
+is on the list are the receiver's own facts.
+
+The exchange has a fixed deadline of 5 seconds from the moment the connection
+exists, after which an unauthenticated connection is closed. Requirements on the
+network layer:
+
+- The exchange runs on the specific connection, opened with the connection's own
+  stream function. The host's stream function picks the best connection to the
+  peer, so a relayed connection is never asked and sits unauthenticated until the
+  deadline.
+- The side whose connection direction is outbound starts it. It opens the stream
+  and writes its message; the other side reads it and writes its own. Each side
+  writes one message and closes its write side; a reader reads at most the size
+  bound plus one byte and refuses more.
+- After a hole punch both ends may start an exchange, because the direction a
+  hole-punched connection reports is outbound on both sides. An exchange on a
+  connection that is already authenticated is ignored.
+
 ## Why
 
 - **Default closed.** The table lists the exceptions and every other protocol
@@ -74,6 +116,27 @@ raw host bypasses the gate.
   other's protocol. What a management request may do is the administration
   rules' decision.
 
+- **A message, not a signed record.** The sender is authenticated by the secure
+  handshake and the certificate carries its own signature; wrapping the exchange
+  in a signed record would add a signature that proves nothing the handshake did
+  not, and a signing domain to maintain. The protocol messages of pairing are
+  typed canonical messages for the same reason.
+- **One protocol, a kind field.** A node connecting to a node and a person's tool
+  connecting to a node are told apart by what they present, so the receiver needs
+  one handler and one deadline, and a new kind of peer needs a new value, not a
+  new protocol.
+- **Nothing extra for a person.** The person identifier is derived from the root
+  public key and the certificate is signed by it, so the certificate already
+  proves the identifier. An extra field would be a second statement of the same
+  fact that could disagree with the first.
+- **The size bound is a protocol rule.** It is the same on every node and small,
+  because an unauthenticated peer must not be able to make a node buffer or
+  decode anything of consequence.
+- **Exchange on the specific connection.** Measured with the library: the host's
+  stream function chooses a direct connection when there is one, so a relayed
+  connection never receives an exchange and is closed at the deadline. Opening
+  the stream on the connection avoids it.
+
 ## Where
 
 | Part | Code |
@@ -81,3 +144,4 @@ raw host bypasses the gate.
 | States, verdicts | `internal/preauth/state.go` |
 | Protocol identifiers and classes | `internal/preauth/protocol.go` |
 | The access table | `internal/preauth/access.go`; tests `TestAllowedMatrix` (one row per rule, every cell written out), `TestBusinessProtocolBeforeTheExchangeIsRefused`, `TestStrangerAfterTheExchangeMayOnlyPair`, `TestRelayReservationBeforeTheExchangeIsRefused`, `TestAllowedRefusesAnInvalidState`, `TestProtocolIdentifiers` |
+| The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
