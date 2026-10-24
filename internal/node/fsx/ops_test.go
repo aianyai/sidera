@@ -68,6 +68,13 @@ func TestCompositeOperationsRunTheirFixedSteps(t *testing.T) {
 		}
 		assertSteps(t, r.take(), []string{"tx/f.create#1", "tx/f.write#1", "tx/f.sync#1", "tx/f.rename#1", "tx/f.sync-dir#1"})
 	})
+	t.Run("replace-deferred-has-no-directory-sync", func(t *testing.T) {
+		r := newRecorded()
+		if err := fsx.ReplaceDeferred(r.fs, tx, "rec", []byte("x"), fsx.ModePrivate); err != nil {
+			t.Fatal(err)
+		}
+		assertSteps(t, r.take(), []string{"tx/f.create#1", "tx/f.write#1", "tx/f.sync#1", "tx/f.rename#1"})
+	})
 	t.Run("append-then-sync-file", func(t *testing.T) {
 		r := newRecorded()
 		f, err := fsx.OpenAppend(r.fs, tx, "log")
@@ -159,6 +166,11 @@ func TestFailureClassOfEveryStep(t *testing.T) {
 			name:  "Replace",
 			steps: []fsx.Step{fsx.StepCreate, fsx.StepWrite, fsx.StepSync, fsx.StepRename, fsx.StepSyncDir},
 			run:   func(fs fsx.FS) error { return fsx.Replace(fs, tx, "rec", []byte("new"), fsx.ModePrivate) },
+		},
+		{
+			name:  "ReplaceDeferred",
+			steps: []fsx.Step{fsx.StepCreate, fsx.StepWrite, fsx.StepSync, fsx.StepRename},
+			run:   func(fs fsx.FS) error { return fsx.ReplaceDeferred(fs, tx, "rec", []byte("new"), fsx.ModePrivate) },
 		},
 		{
 			name:  "OpenAppend and Append",
@@ -559,6 +571,18 @@ func TestEachCompositeOperationIsDurableWhenItReturns(t *testing.T) {
 		mem := fsxtest.NewMem()
 		mustWrite(t, mem, "rec", "old")
 		if err := fsx.Replace(mem, tx, "rec", []byte("new"), fsx.ModePrivate); err != nil {
+			t.Fatal(err)
+		}
+		check(t, mem, map[string]string{"rec": "new"})
+	})
+	t.Run("ReplaceDeferred-then-SyncDir", func(t *testing.T) {
+		mem := fsxtest.NewMem()
+		mustWrite(t, mem, "rec", "old")
+		if err := fsx.ReplaceDeferred(mem, tx, "rec", []byte("new"), fsx.ModePrivate); err != nil {
+			t.Fatal(err)
+		}
+		check(t, mem, map[string]string{"rec": "old"}) // the rename alone is not durable
+		if err := fsx.SyncDir(mem, tx, "."); err != nil {
 			t.Fatal(err)
 		}
 		check(t, mem, map[string]string{"rec": "new"})

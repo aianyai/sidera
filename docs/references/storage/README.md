@@ -25,6 +25,7 @@ make a write durable are functions over any `FS`, not methods of it:
 | Operation | Steps, in order | Used for |
 | --------- | --------------- | -------- |
 | `Replace` | `create`, `write`, `sync`, `rename`, `sync-dir` | every single-file replacement: records, configuration, keys, manifests |
+| `ReplaceDeferred` | `create`, `write`, `sync`, `rename`; no `sync-dir` | several files of one directory, made durable together by one `SyncDir` after the last of them |
 | `OpenAppend`, `Append` | `open` once, then `write` per call; no sync | appended event and digest files |
 | `SyncFile` | `sync` (on the handle that appended), `sync-dir` | making a batch of appends durable |
 | `RenameFile` | `rename`, `sync-dir` | quarantining a damaged file |
@@ -308,7 +309,9 @@ so that the double cannot drift from what it stands for.
   because the reordering studied there is of different directory operations
   relative to each other, not a tear inside one rename. Every operation of `fsx`
   that binds a name syncs the directory before it returns, so a name is not bound
-  a second time before the first binding is durable.
+  a second time before the first binding is durable; `ReplaceDeferred` is the one
+  exception, and the transaction layer makes up for it by requiring the sync of
+  that directory to follow immediately.
 - **Fault injection through the interface, not build tags.** A tag changes the
   program under test; a wrapper does not, and a wrapper can also wrap the real
   file system.

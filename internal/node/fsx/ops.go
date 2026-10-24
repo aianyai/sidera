@@ -21,13 +21,35 @@ func cleanupTag() Tag { return Tag{Tx: TxCleanup} }
 // A failure before the rename removes the temporary file and leaves the target
 // as it was. After the rename the outcome is unknown and the error is Fatal.
 func Replace(fs FS, tag Tag, p string, data []byte, mode Mode) error {
+	if err := replaceUntilRename(fs, opReplace, tag, p, data, mode); err != nil {
+		return err
+	}
+	if err := fs.SyncDir(tag, path.Dir(p)); err != nil {
+		return fail(opReplace, tag, StepSyncDir, p, err)
+	}
+	return nil
+}
+
+// ReplaceDeferred is Replace without the final directory sync, so that several
+// files of one directory can be replaced and made durable together by one
+// SyncDir of that directory. Until that SyncDir returns, the new name is not
+// durable: a power loss may bring back the old file under it. The caller must
+// sync the directory before it acknowledges anything, and before it writes
+// anything that depends on these files being durable.
+func ReplaceDeferred(fs FS, tag Tag, p string, data []byte, mode Mode) error {
+	return replaceUntilRename(fs, opReplaceDeferred, tag, p, data, mode)
+}
+
+// replaceUntilRename is the part of Replace that both variants share: create a
+// temporary file, write, sync, close and rename it over the target. A failure
+// removes the temporary file and leaves the target as it was.
+func replaceUntilRename(fs FS, op operation, tag Tag, p string, data []byte, mode Mode) error {
 	if err := checkNotRoot(p); err != nil {
 		return reject(tag, StepCreate, p, err)
 	}
-	dir := path.Dir(p)
-	f, err := fs.CreateTemp(tag, dir, mode)
+	f, err := fs.CreateTemp(tag, path.Dir(p), mode)
 	if err != nil {
-		return fail(opReplace, tag, StepCreate, p, err)
+		return fail(op, tag, StepCreate, p, err)
 	}
 	tmp := f.Name()
 	abandon := func(step Step, err error) error {
@@ -35,7 +57,7 @@ func Replace(fs FS, tag Tag, p string, data []byte, mode Mode) error {
 		// The leftover is removed at the next start in any case; a failure here
 		// changes nothing.
 		fs.Remove(cleanupTag(), tmp)
-		return fail(opReplace, tag, step, p, err)
+		return fail(op, tag, step, p, err)
 	}
 	if err := writeAll(f, data); err != nil {
 		return abandon(StepWrite, err)
@@ -47,14 +69,11 @@ func Replace(fs FS, tag Tag, p string, data []byte, mode Mode) error {
 	// after a successful sync means the descriptor was not released cleanly.
 	if err := f.Close(); err != nil {
 		fs.Remove(cleanupTag(), tmp)
-		return fail(opReplace, tag, StepSync, p, err)
+		return fail(op, tag, StepSync, p, err)
 	}
 	if err := fs.Rename(tag, tmp, p); err != nil {
 		fs.Remove(cleanupTag(), tmp)
-		return fail(opReplace, tag, StepRename, p, err)
-	}
-	if err := fs.SyncDir(tag, dir); err != nil {
-		return fail(opReplace, tag, StepSyncDir, p, err)
+		return fail(op, tag, StepRename, p, err)
 	}
 	return nil
 }

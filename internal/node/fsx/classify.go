@@ -5,6 +5,7 @@ type operation uint8
 
 const (
 	opReplace operation = iota + 1
+	opReplaceDeferred
 	opAppend
 	opSyncFile
 	opRenameFile
@@ -36,6 +37,10 @@ var classification = []struct {
 	{opReplace, StepSync, Failed},
 	{opReplace, StepRename, Failed},
 	{opReplace, StepSyncDir, Fatal},
+	{opReplaceDeferred, StepCreate, Failed},
+	{opReplaceDeferred, StepWrite, Failed},
+	{opReplaceDeferred, StepSync, Failed},
+	{opReplaceDeferred, StepRename, Failed},
 
 	{opAppend, StepOpen, Failed},
 	{opAppend, StepWrite, Failed},

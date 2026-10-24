@@ -18,7 +18,7 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 | `FS`, `Reader`, `File` | The interface. Each write method is one step; a read is not a step. |
 | `OpenOS(root, rand)` | The real `FS` rooted at an existing directory; `rand` names temporary files. |
 | `MakeRoot(path)` | Creates the data directory owner-only, once, at `init`. |
-| `Replace`, `OpenAppend`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | The durable operations: fixed step sequences over any `FS`. |
+| `Replace`, `ReplaceDeferred`, `OpenAppend`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | The durable operations: fixed step sequences over any `FS`. |
 | `Observe(fs, counter, hook)` | Numbers every write step and calls the hook before it runs. |
 | `Tag`, `Step`, `Key`, `Point`, `Counter`, `ParseKey`, `ParsePoint` | Crash point identity: `intake/out.rename#2`. |
 | `Error`, `Class` (`Failed`, `Fatal`), `IsFatal`, `PointOf` | What a failed operation returns and what the caller must do. |
@@ -34,6 +34,9 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
   nothing platform specific: only the `FS` primitives differ per platform.
 - **`Replace` is create, write, sync, close, rename, sync the directory.** A
   failure before the rename removes the temporary file and leaves the target.
+  `ReplaceDeferred` is the same without the directory sync, for several files of
+  one directory that one `SyncDir` then makes durable together; until that sync
+  the new names are not durable, so the caller syncs before it acknowledges.
   The removal is not a step: it carries the reserved `cleanup` tag, which
   `Observe` does not number and which fault rules match only by name.
 - **The failure class is decided in one table, `classify.go`.** A failed
