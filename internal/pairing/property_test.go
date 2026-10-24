@@ -614,6 +614,9 @@ func TestPropertyRandomSchedules(t *testing.T) {
 	for _, k := range keys {
 		t.Logf("%-50s %d", k, cov[k])
 	}
+	if testing.Short() {
+		return // the shortened run is too small to reach every path; the full run asserts coverage
+	}
 	for _, k := range []string{
 		"credentials stored", "revocations stored", "crash", "frame dropped", "frame duplicated", "frame reordered", "fetch dropped",
 		"expectation entered", "locally revoked", "attacker/abort after reveal", "withdrawn after release", "reveals spent",
