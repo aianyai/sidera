@@ -19,6 +19,26 @@ certificates are described in [records](../records/README.md).
   An `Address` is zero if either part is.
 - An `EndpointID` is random and never changes once its node has issued it.
   `NewEndpointID` reads it from a caller-supplied `io.Reader`.
+- One `EndpointID` value is reserved and never issued: the system endpoint (next
+  section).
+
+### The system endpoint
+
+`SystemEndpoint()` returns the `EndpointID` of sixteen `0xff` bytes; its text is
+`ep1lllllllllllllllllllllllllusa628q`. `EndpointID.IsSystem()` reports it. It is
+the sender a node gives to its own channel feedback (a notice that a message was
+refused, expired or went unanswered), so a reader can tell feedback from a
+message another endpoint wrote by looking at the endpoint part alone.
+
+- `NewEndpointID` fails with `ErrReserved` if the randomness is exactly this
+  value, as it fails with `ErrZero` for all zeros. It does not draw again: a
+  source that produces such a block is broken, and a loop would hide that (and
+  never end for a constant source). The chance of an honest draw is 2^-128.
+- Parsers and `EndpointIDFromBytes` accept it, because a node has to write it
+  into records and pages.
+- Refusing it as a recipient on the wire is the envelope's rule (see
+  [envelope](../envelope/README.md)); this package only reserves the value and
+  does not judge senders.
 
 ### Public keys
 
@@ -103,6 +123,26 @@ The parser accepts exactly one text per identifier:
   holds. If it were a valid identifier, an unset field could pass as a real
   node, person or endpoint without any error. Refusing it at every entry point
   makes "unset" distinguishable from every real identifier.
+- **The system endpoint is reserved in the shared identifier contract.** An
+  endpoint identifier is chosen freely by the node that owns it, and the
+  receiving node cannot check it; a message arrives with the sending node
+  (known from the connection) and an endpoint part the remote node picked. If
+  each node chose its own system endpoint, a remote node could still send from
+  `<its node>/<any endpoint part>`, including the value this node uses, and an
+  Agent would have to compare whole addresses, two opaque texts of about 60
+  characters each, character by character, to tell feedback from impersonation;
+  a model does that unreliably. Reserving one value for every node lets every
+  node refuse it on the wire, so the endpoint part alone says "this node's
+  channel feedback", and the rule exists before any node issues an identifier:
+  changing it later would mean migrating the records and pages that already
+  hold the value. All-ones was chosen because its text, `ep1` followed by a run
+  of `l`, is recognisable at a glance and no random identifier looks like it; it
+  is also not the all-zero "unset" value, which stays refused everywhere.
+  Rejected: a value chosen per node (reasons above); a random value stored in
+  node configuration (it leaks through any reply and is reusable by the remote
+  party); an explicit "feedback" flag on the page (a change to the page format,
+  seen by direct endpoints too, and it would not stop a remote node from using
+  the same endpoint part).
 - **bech32m text.** Node identifiers are copied and compared by people (a trust
   setup that skips the verification code depends on both sides knowing the
   other's node identifier in advance), so the text needs a kind marker and typo
@@ -152,17 +192,20 @@ The parser accepts exactly one text per identifier:
 ## Where
 
 - `internal/ident/ident.go`: the identifier types, constructors, parsers and
-  `NewEndpointID`.
+  `NewEndpointID`, `SystemEndpoint` and `IsSystem`.
 - `internal/ident/bech32m.go`: the bech32m codec and the canonical-text check.
 - `internal/ident/key.go`: `PublicKey`, `Algorithm`, the canonical-point and
   small-order checks.
 - `internal/ident/derive.go`: `NodeIDFromKey` and `PersonIDFromKey`; the
   derivation domains are listed in the domain table of the records reference.
 - Tests: `ident_test.go` (identifier rules, text vectors computed with an
-  independent implementation, `TestParseKindRules`), `bech32m_test.go`
-  (specification vectors), `key_test.go` (key rules, an oracle that decodes
-  points with a separate method, and a derivation of the torsion list from the
-  curve equation, and `TestDecoderDenominatorIsNeverZero`, which backs the
-  decoder's omission of a zero check), `derive_test.go` (derived identifiers for the RFC 8032 test
-  keys), `fuzz_test.go` (every parser and the key constructor).
+  independent implementation, `TestParseKindRules`; the system endpoint:
+  `TestSystemEndpointValue`, `TestSystemEndpointTextGolden`,
+  `TestSystemEndpointRoundTrip`, `TestIsSystem`,
+  `TestNewEndpointIDNeverIssuesReserved`), `bech32m_test.go` (specification
+  vectors), `key_test.go` (key rules, an oracle that decodes points with a
+  separate method, and a derivation of the torsion list from the curve
+  equation, and `TestDecoderDenominatorIsNeverZero`, which backs the decoder's
+  omission of a zero check), `derive_test.go` (derived identifiers for the RFC
+  8032 test keys), `fuzz_test.go` (every parser and the key constructor).
 - `internal/ident/README.md`: entry points and invariants of the package.

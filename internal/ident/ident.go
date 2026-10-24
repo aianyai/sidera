@@ -29,6 +29,9 @@ var (
 	ErrLength = errors.New("wrong length")
 	// ErrZero reports the all-zero value, which means "unset".
 	ErrZero = errors.New("all-zero value")
+	// ErrReserved reports that randomness produced the value reserved for the
+	// system endpoint, which a node never issues.
+	ErrReserved = errors.New("reserved value")
 	// ErrText reports text that is not the canonical bech32m form.
 	ErrText = errors.New("malformed text")
 	// ErrPrefix reports a well-formed bech32m string of another kind, for
@@ -121,9 +124,26 @@ func ParseEndpointID(s string) (EndpointID, error) {
 	return id, parse("endpoint id", endpointPrefix, id.b[:], s)
 }
 
+// SystemEndpoint returns the EndpointID reserved for the system endpoint, the
+// sender of a node's channel feedback. The value is every bit set, sixteen 0xff
+// bytes: its text form, "ep1" followed by a run of "l" characters, is
+// recognisable at a glance and cannot be mistaken for a random identifier.
+// Every node refuses it as a recipient on the wire and never issues it (see
+// NewEndpointID), so no endpoint of any node can be mistaken for it. Parsers
+// and EndpointIDFromBytes accept it, because a node has to represent it in its
+// records and pages.
+func SystemEndpoint() EndpointID {
+	return EndpointID{b: [EndpointIDLen]byte{
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+	}}
+}
+
 // NewEndpointID reads a new random EndpointID from r. Callers pass
 // crypto/rand.Reader; the package itself performs no hidden I/O. It fails if r
-// fails or yields all zero bytes.
+// fails, yields all zero bytes (ErrZero) or yields the reserved system
+// endpoint (ErrReserved); it never draws again, so a failure of randomness
+// shows instead of being absorbed.
 func NewEndpointID(r io.Reader) (EndpointID, error) {
 	var id EndpointID
 	if _, err := io.ReadFull(r, id.b[:]); err != nil {
@@ -131,6 +151,9 @@ func NewEndpointID(r io.Reader) (EndpointID, error) {
 	}
 	if id.IsZero() {
 		return EndpointID{}, fmt.Errorf("endpoint id: %w", ErrZero)
+	}
+	if id.IsSystem() {
+		return EndpointID{}, fmt.Errorf("endpoint id: %w", ErrReserved)
 	}
 	return id, nil
 }
@@ -140,6 +163,9 @@ func (id EndpointID) Bytes() []byte { return append([]byte(nil), id.b[:]...) }
 
 // IsZero reports whether id is the unset zero value.
 func (id EndpointID) IsZero() bool { return isZero(id.b[:]) }
+
+// IsSystem reports whether id is the reserved system endpoint.
+func (id EndpointID) IsSystem() bool { return id == SystemEndpoint() }
 
 // String returns the bech32m text form.
 func (id EndpointID) String() string { return encodeID(endpointPrefix, id.b[:]) }
