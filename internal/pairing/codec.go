@@ -218,8 +218,24 @@ func transcriptFromWire(w transcriptWire) (Transcript, error) {
 	return t, nil
 }
 
+// The persisted kind of an author. These numbers are this package's own and
+// never change; they are not admin.ActorKind, whose values are free to be
+// renumbered without making every stored record read as another author.
+const (
+	authorKindLocalOwner   uint64 = 1
+	authorKindRemotePerson uint64 = 2
+)
+
+// authorToWire writes a validated author; an unset author has no wire form
+// (kind 0), which the reader refuses.
 func authorToWire(a Author) authorWire {
-	w := authorWire{Kind: uint64(a.kind)}
+	var w authorWire
+	switch a.kind {
+	case admin.ActorLocalOwner:
+		w.Kind = authorKindLocalOwner
+	case admin.ActorRemotePerson:
+		w.Kind = authorKindRemotePerson
+	}
 	if !a.person.IsZero() {
 		w.Person = a.person.Bytes()
 	}
@@ -228,13 +244,13 @@ func authorToWire(a Author) authorWire {
 
 func authorFromWire(w authorWire) (Author, error) {
 	var a Author
-	switch admin.ActorKind(w.Kind) {
-	case admin.ActorLocalOwner:
+	switch w.Kind {
+	case authorKindLocalOwner:
 		if len(w.Person) != 0 {
 			return Author{}, persisted(errors.New("local owner with a person"))
 		}
 		a = LocalAuthor()
-	case admin.ActorRemotePerson:
+	case authorKindRemotePerson:
 		p, err := ident.PersonIDFromBytes(w.Person)
 		if err != nil {
 			return Author{}, persisted(err)

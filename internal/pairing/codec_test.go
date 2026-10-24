@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
 )
 
@@ -41,6 +43,71 @@ func TestPersistedRecordGoldenVectors(t *testing.T) {
 		got, err := DecodeLimits(v(t, "persist.limits"))
 		if err != nil || len(got.Reveals()) != 1 || len(got.Failures()) != 2 {
 			t.Fatalf("DecodeLimits = %+v, %v", got, err)
+		}
+	})
+}
+
+// An author is stored under this package's own numbers, 1 for the local owner
+// and 2 for a remote person, whatever admin.ActorKind is numbered as.
+func TestPersistedAuthorKinds(t *testing.T) {
+	created := time.Unix(1798761600, 0).UTC()
+	nodeA, err := ident.NodeIDFromBytes(v(t, "A.node"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodeB, err := ident.NodeIDFromBytes(v(t, "B.node"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("golden bytes of a local owner and a remote person", func(t *testing.T) {
+		person := make([]byte, 32)
+		for i := range person {
+			person[i] = byte(0x41 + i)
+		}
+		pid, err := ident.PersonIDFromBytes(person)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pa, err := PersonAuthor(pid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		op1, op2 := admin.OperationID{}, admin.OperationID{}
+		for i := range op1 {
+			op1[i], op2[i] = byte(1+i), byte(17+i)
+		}
+		list := []Expectation{
+			{Node: nodeA, Author: LocalAuthor(), Operation: op1, CreatedAt: created},
+			{Node: nodeB, Author: pa, Operation: op2, CreatedAt: created.Add(time.Minute)},
+		}
+		got, err := EncodeExpectations(list)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := v(t, "persist.expectations"); !bytes.Equal(got, want) {
+			t.Fatalf("encoded = %x\nwant      %x", got, want)
+		}
+		back, err := DecodeExpectations(got)
+		if err != nil || len(back) != 2 || back[0].Author != list[0].Author || back[1].Author != list[1].Author {
+			t.Fatalf("decoded = %+v, %v", back, err)
+		}
+	})
+	t.Run("kinds outside the table are refused", func(t *testing.T) {
+		person := authorWire{Kind: authorKindRemotePerson, Person: bytes.Repeat([]byte{0x41}, 32)}
+		for name, a := range map[string]authorWire{
+			"unset":                         {},
+			"three":                         {Kind: 3, Person: person.Person},
+			"the local owner with a person": {Kind: authorKindLocalOwner, Person: person.Person},
+			"a remote person without one":   {Kind: authorKindRemotePerson},
+		} {
+			w := expectationsWire{List: []expectationWire{{Node: nodeA.Bytes(), Author: a, Operation: bytes.Repeat([]byte{1}, 16), CreatedAt: created.Unix()}}}
+			b, err := record.MarshalCanonical(wrap(TypeExpectations, w))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeExpectations(b); !errors.Is(err, ErrPersisted) {
+				t.Fatalf("%s: %v", name, err)
+			}
 		}
 	})
 }

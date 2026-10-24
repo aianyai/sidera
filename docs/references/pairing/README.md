@@ -155,6 +155,11 @@ the restart comes after the expiry: both decisions predate it, and the initiator
 that is waiting for the credential gets the one it signed for. A request that
 lacks either one ends as expired as usual.
 
+The author of a confirmation or an expectation is stored under numbers of this
+package, 1 for the local owner and 2 for a remote person, not under the numbering
+of `admin.ActorKind`: a renumbering there must not turn stored records into
+records of another author. Any other number is refused on loading.
+
 ## Why
 
 **Commit, reveal, open (ZRTP order).** The initiator must commit before it sees
@@ -226,7 +231,7 @@ revealed.
 | Messages | `message.go`; `message_test.go` (golden bytes, refusals, `TestDecodeOpening`, fuzz of every decoder) |
 | Limits, expectations | `limits.go`, `expectation.go`, `params.go`; `limits_test.go` (`TestLimitsAgainstAModel`, `TestLimitsSurviveTheClockSteppingBack`) |
 | Target and initiator | `target.go`, `initiator.go`, `lifecycle.go`, `command.go`, `state.go` |
-| Persisted records | `records.go`, `codec.go`; `codec_test.go` (golden bytes, wrong shapes) |
+| Persisted records | `records.go`, `codec.go`; `codec_test.go` (golden bytes, wrong shapes, `TestPersistedAuthorKinds`) |
 | Scenarios | `scenario_test.go` (`TestRestartAfterExpiryCompletesARequestDecidedBeforeIt`) |
 | Properties under faults | `property_test.go` (`TestPropertyRandomSchedules`, `TestCrashAtEveryPersistedStep`) |
 

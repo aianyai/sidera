@@ -1998,6 +1998,25 @@ func TestRecoverCompletesAConfirmedRequestThatHoldsTheSignature(t *testing.T) {
 	}
 }
 
+// A confirmation by the local owner is stored under the persisted author kind
+// of the local owner, in a target record as in an initiator record.
+func TestStoredRecordsCarryThePersistedAuthorKind(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, tb := startPairing(t, s, a, b)
+	b.confirm(tb.ID(), tb.Transcript.Code())
+	a.confirm(ia.ID(), ia.Transcript.Code())
+	var target envelope[targetWire]
+	must(t, record.UnmarshalStrict(b.disk["target/"+hexID(tb.ID())], &target, MaxPersisted))
+	var initiator envelope[initiatorWire]
+	must(t, record.UnmarshalStrict(a.disk["initiator/"+hexID(ia.ID())], &initiator, MaxPersisted))
+	if c := target.Payload.Confirmation; c == nil || c.By.Kind != authorKindLocalOwner || authorKindLocalOwner != 1 {
+		t.Fatalf("target confirmation %+v", c)
+	}
+	if c := initiator.Payload.Confirmation; c == nil || c.By.Kind != 1 {
+		t.Fatalf("initiator confirmation %+v", c)
+	}
+}
+
 func TestDecodingRefusesAnInconsistentRecord(t *testing.T) {
 	s, a, b := standardPair(t)
 	_, tb := startPairing(t, s, a, b)
