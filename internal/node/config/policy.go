@@ -181,7 +181,11 @@ func (w ruleWire) rule() (authz.Rule, error) {
 			r.Cond.NotAfter = t
 		}
 		if c.Rate != nil {
-			r.Cond.Rate = authz.RateCap{Count: c.Rate.Count, Window: secondsToDuration(c.Rate.WindowS)}
+			window := secondsToDuration(c.Rate.WindowS)
+			if c.Rate.WindowS > 0 && window/time.Second != time.Duration(c.Rate.WindowS) {
+				return r, invalidf("conditions.rate.window_s", "%d seconds are more than a duration holds", c.Rate.WindowS)
+			}
+			r.Cond.Rate = authz.RateCap{Count: c.Rate.Count, Window: window}
 		}
 		r.Cond.MaxBodyBytes = c.MaxBodyBytes
 		r.Cond.Presets = append([]string(nil), c.Presets...)

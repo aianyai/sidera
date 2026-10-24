@@ -57,6 +57,7 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"node queue time beyond the cap", config.NodePath, edit(goldenNode, `"max_queue_s": 1800`, `"max_queue_s": 99999`), config.KindNode, config.FileInvalid, "max_queue_s"},
 		{"node reserve below what the queue can grow", config.NodePath, edit(goldenNode, `"disk_reserve_bytes": 268435456`, `"disk_reserve_bytes": 1048576`), config.KindNode, config.FileInvalid, "disk_reserve_bytes"},
 		{"node retention zero", config.NodePath, edit(goldenNode, `"archive_retention_days": 30`, `"archive_retention_days": 0`), config.KindNode, config.FileInvalid, "archive_retention_days"},
+		{"node queue time no duration holds", config.NodePath, edit(goldenNode, `"max_queue_s": 1800`, `"max_queue_s": 9223372036854775807`), config.KindNode, config.FileInvalid, "max_queue_s"},
 		{"node operation id of the wrong length", config.NodePath, edit(goldenNode, opIDText, "0011"), config.KindNode, config.FileInvalid, "last_operation.id"},
 		{"node operation person unknown", config.NodePath, edit(goldenNode, `"person": "local"`, `"person": "someone"`), config.KindNode, config.FileInvalid, "last_operation.person"},
 		{"node operation result not an object", config.NodePath, edit(goldenNode, "\"result\": {\n      \"version\": 3\n    }", `"result": [1]`), config.KindNode, config.FileInvalid, "last_operation.result"},
@@ -73,6 +74,7 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"policy node that is not an id", config.PolicyPath, edit(goldenPolicy, `"node": "`+node2Text+`"`, `"node": "node1abc"`), config.KindPolicy, config.FileInvalid, "rules[1]"},
 		{"policy rule authz refuses", config.PolicyPath, edit(goldenPolicy, `"action": "see"`, `"action": "relay.reserve"`), config.KindPolicy, config.FileInvalid, "rules[0]"},
 		{"policy time that is not a time", config.PolicyPath, edit(goldenPolicy, `"2027-01-01T00:00:00Z"`, `"next year"`), config.KindPolicy, config.FileInvalid, "rules[1]"},
+		{"policy rate window no duration holds", config.PolicyPath, edit(goldenPolicy, `"window_s": 60`, `"window_s": 9223372036854775807`), config.KindPolicy, config.FileInvalid, "window_s"},
 		{"policy version zero", config.PolicyPath, edit(goldenPolicy, `"version": 2`, `"version": 0`), config.KindPolicy, config.FileInvalid, "version"},
 
 		// presets.json
@@ -100,6 +102,7 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"instance endpoint setting that sets nothing", config.InstancesPath, edit(goldenInstances, "{\n          \"backlog_limit\": 50\n        }", "{}"), config.KindInstances, config.FileInvalid, ep1Text},
 		{"instance endpoint explicit zero", config.InstancesPath, edit(goldenInstances, `"backlog_limit": 50`, `"backlog_limit": 0`), config.KindInstances, config.FileMalformed, "backlog_limit"},
 		{"instance endpoint queue time beyond the cap", config.InstancesPath, edit(goldenInstances, `"max_queue_s": 3600`, `"max_queue_s": 90000`), config.KindInstances, config.FileInvalid, "max_queue_s"},
+		{"instance endpoint queue time no duration holds", config.InstancesPath, edit(goldenInstances, `"max_queue_s": 3600`, `"max_queue_s": 9223372036854775807`), config.KindInstances, config.FileInvalid, "max_queue_s"},
 		{"instance endpoint negative backlog", config.InstancesPath, edit(goldenInstances, `"backlog_limit": 400`, `"backlog_limit": -1`), config.KindInstances, config.FileInvalid, "backlog_limit"},
 
 		// endpoint-ids
