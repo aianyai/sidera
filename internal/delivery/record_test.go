@@ -305,6 +305,20 @@ func TestSideRules(t *testing.T) {
 			}
 		})
 	}
+	t.Run("an accepted source record has no queue: time alone does not reject it before report_by minus the margin", func(t *testing.T) {
+		acceptBefore := at(10 * time.Minute)
+		rec, _ := mustApply(t, NewSourceRecord(acceptBefore), at(time.Second), Event{Type: EventReceipt})
+		// Far past where a target's backlog deadline (at most MaxQueueCap after
+		// acceptance) would fall, yet before the settle deadline.
+		now := at(10*time.Minute + MaxQueueCap + 30*time.Minute)
+		if !now.Before(SettleBy(rec.ReportBy)) {
+			t.Fatalf("test instant %v is not before the settle deadline %v", now, SettleBy(rec.ReportBy))
+		}
+		after, outs, err := rec.Tick(now)
+		if err != nil || after.State != StateAccepted || len(outs) != 0 {
+			t.Errorf("state %s outcomes %+v err %v", after.State, outs, err)
+		}
+	})
 }
 
 func TestNotifiedSubState(t *testing.T) {
