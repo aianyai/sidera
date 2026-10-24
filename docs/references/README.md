@@ -23,5 +23,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [envelope](envelope/README.md) | The message envelope, the signed status report and control reply, the single handling of a control reply on the sender, the digest used for deduplication, and reply permission |
 | [adapter-protocol](adapter-protocol/README.md) | How the daemon talks to adapters: the peer layer (line framing, queues, overload, cancellation, write timeout, the effect rule of error responses), the JSON-RPC methods, version negotiation, error codes, control signals, native process identity, the package manifest, the schema that other languages implement, and the mapping to the Agent Client Protocol |
 | [adapter-claude](adapter-claude/README.md) | The Claude adapter's session-creation state machine: crash-safe start, retry and readiness without a second process or session |
+| [ci](ci/README.md) | What the GitHub Actions workflow checks on which platform, what is deferred until the first release and why, and how to run the same checks locally |
 
 Language: everything in this directory is English.

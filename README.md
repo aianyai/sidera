@@ -25,6 +25,7 @@ nothing else is implemented yet.
   [README](protocol/README.md).
 - `sdk/go/`: the Go module adapters and the daemon share, with the JSON-RPC peer,
   the protocol messages and the adapter manifest, see its [README](sdk/go/README.md).
+- `.github/workflows/`: continuous integration, see [the ci reference](docs/references/ci/README.md).
 - `docs/references/`: engineering references by topic (what, why, where), see its
   [README](docs/references/README.md).
 
