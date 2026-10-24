@@ -149,7 +149,11 @@ schedules are not persisted. `Recover` completes a request that was confirmed an
 signed but not marked complete, and issues again the revocation of a signature
 that may have left; both are idempotent, and the completed credential has the
 same bytes every time (Ed25519 signatures are deterministic and the digest does
-not cover them).
+not cover them). A request holds a confirmation and the initiator's signature
+only if both arrived while it still waited, so `Recover` completes it even when
+the restart comes after the expiry: both decisions predate it, and the initiator
+that is waiting for the credential gets the one it signed for. A request that
+lacks either one ends as expired as usual.
 
 ## Why
 
@@ -223,7 +227,7 @@ revealed.
 | Limits, expectations | `limits.go`, `expectation.go`, `params.go`; `limits_test.go` (`TestLimitsAgainstAModel`, `TestLimitsSurviveTheClockSteppingBack`) |
 | Target and initiator | `target.go`, `initiator.go`, `lifecycle.go`, `command.go`, `state.go` |
 | Persisted records | `records.go`, `codec.go`; `codec_test.go` (golden bytes, wrong shapes) |
-| Scenarios | `scenario_test.go` |
+| Scenarios | `scenario_test.go` (`TestRestartAfterExpiryCompletesARequestDecidedBeforeIt`) |
 | Properties under faults | `property_test.go` (`TestPropertyRandomSchedules`, `TestCrashAtEveryPersistedStep`) |
 
 The expected values of the vectors were computed by an independent Python 3

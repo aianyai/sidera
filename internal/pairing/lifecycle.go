@@ -111,8 +111,11 @@ func (s State) tickInitiator(w World, rec InitiatorRecord, now time.Time) (State
 // point after a restart. A request that was confirmed and signed by the
 // initiator but not completed is completed (the credential is stored again,
 // which changes nothing if it already was), and the revocation of a signature
-// that may have left the node is stored again. Streams and schedules did not
-// survive: result exchanges start again at the next Tick.
+// that may have left the node is stored again. The restart may come after the
+// request would have expired: a request only holds a confirmation and a
+// signature if both arrived while it still waited, so both decisions predate
+// the expiry and completing repeats what was already decided. Streams and
+// schedules did not survive: result exchanges start again at the next Tick.
 func (s State) Recover(w World, now time.Time) (State, []Action, error) {
 	if err := w.validate(); err != nil {
 		return s, nil, err
@@ -120,7 +123,7 @@ func (s State) Recover(w World, now time.Time) (State, []Action, error) {
 	now = wholeNow(now)
 	next, actions := s, []Action(nil)
 	for _, rec := range s.targets {
-		if !rec.Waiting(now) || !rec.readyToComplete() {
+		if !rec.readyToComplete() {
 			continue
 		}
 		done, acts, err := next.completeTarget(w, rec, now)

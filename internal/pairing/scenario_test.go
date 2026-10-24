@@ -1035,6 +1035,92 @@ func TestRestartCompletesAConfirmedSignedRequest(t *testing.T) {
 	}
 }
 
+// Both decisions, the owner's confirmation and the initiator's signature, were
+// in before the request expired, so a restart that comes only after the expiry
+// still completes it: completing repeats what already happened, and the
+// initiator, who is waiting for the credential, gets the same one.
+func TestRestartAfterExpiryCompletesARequestDecidedBeforeIt(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, tb := startPairing(t, s, a, b)
+	b.confirm(tb.ID(), tb.Transcript.Code())
+	a.confirm(ia.ID(), ia.Transcript.Code())
+	s.tick()
+	f := s.fetches[0]
+	s.fetches = s.fetches[1:]
+	tsid := b.nextSID
+	b.nextSID++
+	next, _, _ := b.state.TargetOpen(b.world(), tsid, s.now)
+	b.state = next
+	_, actions, err := b.state.TargetReceive(b.world(), b.conn(a), tsid, f.frame, b.rng, s.now)
+	must(t, err)
+	// B crashes right after storing the credential, before it marks the request.
+	var upToTheStore []Action
+	for _, act := range actions {
+		upToTheStore = append(upToTheStore, act)
+		if _, ok := act.(StoreCredential); ok {
+			break
+		}
+	}
+	b.apply(upToTheStore, nil)
+	if len(b.credentials) != 1 {
+		t.Fatalf("credentials stored before the crash: %d", len(b.credentials))
+	}
+	if r, _ := DecodeTargetRecord(b.disk["target/"+hexID(tb.ID())]); r.Status != TargetPending || r.Confirmation == nil || r.InitiatorSignature == nil {
+		t.Fatalf("the record on disk is not pending, confirmed and signed: %+v", r)
+	}
+	// The node stays down until the request has expired.
+	s.advance(tb.ExpiresAt.Sub(s.now) + time.Second)
+	b.restart()
+	if got, _ := b.state.Target(tb.ID()); got.Status != TargetComplete {
+		t.Fatalf("after the restart the record is %v, want complete", got.Status)
+	}
+	if len(b.credentials) != 1 {
+		t.Fatalf("credentials after the restart: %d", len(b.credentials))
+	}
+	s.run(3*time.Minute, 10*time.Second)
+	assertCompleted(t, a, b, ia.ID())
+}
+
+// The window for deciding still closes at the expiry: a request that was
+// confirmed, or signed, but not both by then ends as expired, restart or not.
+func TestRestartAfterExpiryDoesNotCompleteAHalfDecidedRequest(t *testing.T) {
+	for name, decide := range map[string]func(rec *TargetRecord, ia InitiatorRecord, a *simNode){
+		"only the confirmation": func(rec *TargetRecord, _ InitiatorRecord, _ *simNode) {
+			conf := Confirmation{Method: ConfirmedByCode, By: LocalAuthor(), Operation: admin.OperationID{1}, At: rec.ReceivedAt}
+			rec.Confirmation = &conf
+		},
+		"only the signature": func(rec *TargetRecord, ia InitiatorRecord, a *simNode) {
+			sig := mustSeal(t, ia.Transcript.Credential(), a.signer)
+			rec.InitiatorSignature = &sig
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, a, b := standardPair(t)
+			ia, tb := startPairing(t, s, a, b)
+			rec := tb
+			decide(&rec, ia, a)
+			s.advance(tb.ExpiresAt.Sub(s.now) + time.Second)
+			st, err := Restore(Snapshot{Targets: []TargetRecord{rec}})
+			must(t, err)
+			next, actions, err := st.Recover(b.world(), s.now)
+			must(t, err)
+			for _, act := range actions {
+				if _, stored := act.(StoreCredential); stored {
+					t.Fatal("a credential was stored for a request that was not fully decided")
+				}
+			}
+			if got, _ := next.Target(tb.ID()); got.Status != TargetPending {
+				t.Fatalf("record %v", got.Status)
+			}
+			next, _, err = next.Tick(b.world(), b.rng, s.now)
+			must(t, err)
+			if got, _ := next.Target(tb.ID()); got.Status != TargetExpired {
+				t.Fatalf("after a tick the record is %v, want expired", got.Status)
+			}
+		})
+	}
+}
+
 func TestManagementAuthorization(t *testing.T) {
 	s, a, b := standardPair(t)
 	_, tb := startPairing(t, s, a, b)
