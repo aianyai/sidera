@@ -116,6 +116,16 @@ func TestEnvelopeDecodeRules(t *testing.T) {
 			w.Seq = append(w.Seq, seqWire{Endpoint: ep(9).Bytes(), Seq: 1})
 		}, ErrRecipients},
 		{"a control signal is not multi-recipient", create, func(w *envelopeWire) { w.MultiRecipient = true }, ErrRecipients},
+		{"a disclosed list of one is not multi-recipient", message, func(w *envelopeWire) { w.MultiRecipient, w.DiscloseRecipients = true, true }, ErrRecipients},
+		{"a control signal answers no message", create, func(w *envelopeWire) { w.ReplyTo = "msg-0001" }, ErrReplyTo},
+		{"session.close answers no message", closeSignal, func(w *envelopeWire) { w.ReplyTo = "msg-0001" }, ErrReplyTo},
+		{"a control signal carries no evidence", create, func(w *envelopeWire) {
+			w.Evidence = [][]byte{mustEncodeRecord(t, mustDecodeRecord(t, goldenReportDelivered))}
+		}, ErrEvidence},
+		{"a control signal carries no evidence even with a reply_to", create, func(w *envelopeWire) {
+			w.ReplyTo = "msg-0001"
+			w.Evidence = [][]byte{mustEncodeRecord(t, mustDecodeRecord(t, goldenReportDelivered))}
+		}, ErrReplyTo},
 		{"there is a sequence number", message, func(w *envelopeWire) { w.Seq = nil }, ErrSeq},
 		{"a sequence number belongs to a recipient", message, func(w *envelopeWire) { w.Seq[0].Endpoint = ep(9).Bytes() }, ErrSeq},
 		{"a sequence number is at least 1", message, func(w *envelopeWire) { w.Seq[0].Seq = 0 }, ErrSeq},
@@ -228,6 +238,13 @@ func TestEnvelopeValidVariants(t *testing.T) {
 		_, err := e.Encode(testLimits)
 		requireNoErr(t, err)
 	})
+	t.Run("a disclosed list of several recipients carries the flag", func(t *testing.T) {
+		e, err := Decode(goldenEnvelopeReply, testLimits)
+		requireNoErr(t, err)
+		if !e.MultiRecipient || !e.DiscloseRecipients || len(e.To) != 2 {
+			t.Fatalf("setup: %+v", e)
+		}
+	})
 	t.Run("a body of exactly MaxBody bytes", func(t *testing.T) {
 		e := baseMessage(t)
 		e.Body = bytes.Repeat([]byte{'a'}, testLimits.MaxBody)
@@ -334,13 +351,21 @@ func TestEnvelopeStrictBytes(t *testing.T) {
 
 func TestEncodeRefusesWhatDecodeRefuses(t *testing.T) {
 	cases := map[string]func(*Envelope){
-		"report_by not derived":   func(e *Envelope) { e.ReportBy = e.AcceptBefore },
-		"message without body":    func(e *Envelope) { e.Body, e.ContentType = nil, "" },
-		"zero sent time":          func(e *Envelope) { e.SentAt = time.Time{} },
-		"invalid kind":            func(e *Envelope) { e.Kind = KindInvalid },
-		"preset on a message":     func(e *Envelope) { e.Preset = "default" },
-		"no recipients":           func(e *Envelope) { e.To = nil },
-		"sequence for a stranger": func(e *Envelope) { e.Seq = map[ident.EndpointID]uint64{ep(9): 1} },
+		"report_by not derived":                      func(e *Envelope) { e.ReportBy = e.AcceptBefore },
+		"message without body":                       func(e *Envelope) { e.Body, e.ContentType = nil, "" },
+		"zero sent time":                             func(e *Envelope) { e.SentAt = time.Time{} },
+		"invalid kind":                               func(e *Envelope) { e.Kind = KindInvalid },
+		"preset on a message":                        func(e *Envelope) { e.Preset = "default" },
+		"no recipients":                              func(e *Envelope) { e.To = nil },
+		"sequence for a stranger":                    func(e *Envelope) { e.Seq = map[ident.EndpointID]uint64{ep(9): 1} },
+		"multi flag on a disclosed single recipient": func(e *Envelope) { e.MultiRecipient, e.DiscloseRecipients = true, true },
+		"reply_to on a control signal": func(e *Envelope) {
+			e.Kind, e.ContentType, e.Body, e.Preset, e.ReplyTo = KindEndpointStatus, "", nil, "", "other"
+		},
+		"evidence on a control signal": func(e *Envelope) {
+			e.Kind, e.ContentType, e.Body, e.Preset, e.ReplyTo = KindEndpointStatus, "", nil, "", ""
+			e.Evidence = []record.Record{mustDecodeRecord(t, goldenReportDelivered)}
+		},
 		"evidence of the wrong type": func(e *Envelope) {
 			e.ReplyTo = "x"
 			e.Evidence = []record.Record{{Type: "sidera/node-declaration/1", Payload: []byte{0xa0}, Signatures: mustDecodeRecord(t, goldenReportDelivered).Signatures}}
@@ -548,10 +573,7 @@ func TestRequestDigest(t *testing.T) {
 	same := map[string]func(*Envelope){
 		"another send time":      func(e *Envelope) { e.SentAt = e.SentAt.Add(time.Hour) },
 		"another sequence":       func(e *Envelope) { e.Seq = map[ident.EndpointID]uint64{ep(2): 99} },
-		"another thread":         func(e *Envelope) { e.Thread = "elsewhere" },
-		"another reply_to":       func(e *Envelope) { e.ReplyTo = "other" },
 		"evidence added":         func(e *Envelope) { e.Evidence = []record.Record{mustDecodeRecord(t, goldenReportDelivered)} },
-		"disclosure":             func(e *Envelope) { e.DiscloseRecipients = true },
 		"another trimmed list":   func(e *Envelope) { e.To = append(e.To, addr(nodeOf(t, keyIdentityB), 5)) },
 		"another message id":     func(e *Envelope) { e.ID = "ctl-9999" },
 		"another recipient node": func(e *Envelope) { e.To = []ident.Address{addr(nodeOf(t, keyIdentityB), 2)} },
@@ -566,15 +588,27 @@ func TestRequestDigest(t *testing.T) {
 		})
 	}
 	differs := map[string]func(*Envelope){
-		"kind":                 func(e *Envelope) { e.Kind = KindMessage },
-		"preset":               func(e *Envelope) { e.Preset = "fast" },
-		"content type":         func(e *Envelope) { e.ContentType = "text/markdown" },
-		"body":                 func(e *Envelope) { e.Body = []byte("start there") },
-		"empty body":           func(e *Envelope) { e.Body, e.ContentType = nil, "" },
-		"accept_before":        func(e *Envelope) { e.AcceptBefore = e.AcceptBefore.Add(time.Second) },
-		"report_by":            func(e *Envelope) { e.ReportBy = e.ReportBy.Add(time.Second) },
-		"body moved to preset": func(e *Envelope) { e.Preset, e.Body = "default"+string(e.Body), nil },
+		"kind":                     func(e *Envelope) { e.Kind = KindMessage },
+		"preset":                   func(e *Envelope) { e.Preset = "fast" },
+		"content type":             func(e *Envelope) { e.ContentType = "text/markdown" },
+		"body":                     func(e *Envelope) { e.Body = []byte("start there") },
+		"empty body":               func(e *Envelope) { e.Body, e.ContentType = nil, "" },
+		"accept_before":            func(e *Envelope) { e.AcceptBefore = e.AcceptBefore.Add(time.Second) },
+		"report_by":                func(e *Envelope) { e.ReportBy = e.ReportBy.Add(time.Second) },
+		"body moved to preset":     func(e *Envelope) { e.Preset, e.Body = "default"+string(e.Body), nil },
+		"reply_to":                 func(e *Envelope) { e.ReplyTo = "other" },
+		"thread":                   func(e *Envelope) { e.Thread = "elsewhere" },
+		"multi-recipient flag":     func(e *Envelope) { e.MultiRecipient = true },
+		"disclose_recipients":      func(e *Envelope) { e.DiscloseRecipients = true },
+		"thread moved to reply_to": func(e *Envelope) { e.Thread, e.ReplyTo = "", "same" },
 	}
+	t.Run("the digest keeps the two flags apart", func(t *testing.T) {
+		multi, disclose := base, base
+		multi.MultiRecipient, disclose.DiscloseRecipients = true, true
+		if multi.Digest() == disclose.Digest() {
+			t.Error("multi-recipient and disclose_recipients give the same digest")
+		}
+	})
 	for name, mut := range differs {
 		t.Run("the digest covers the "+name, func(t *testing.T) {
 			e := base

@@ -18,15 +18,20 @@ type SignedReport struct {
 }
 
 // VerifyStatusReport verifies r as a status report signed by node's network
-// key (see StatusReportDescriptor). node is the node the verifier sent the
-// message to, from its own records.
-func VerifyStatusReport(r record.Record, node ident.NodeID, accepted record.AcceptedNetworkKey, now time.Time) (SignedReport, error) {
-	if node.IsZero() {
+// key (see StatusReportDescriptor) about a message that local, the verifier's
+// own node, sent. node is the node the verifier sent the message to, from its
+// own records. A report naming another sending node is refused: it was issued
+// for someone else's message.
+func VerifyStatusReport(r record.Record, node, local ident.NodeID, accepted record.AcceptedNetworkKey, now time.Time) (SignedReport, error) {
+	if node.IsZero() || local.IsZero() {
 		return SignedReport{}, fmt.Errorf("%w: no node", ErrReport)
 	}
 	v, err := record.Verify(StatusReportDescriptor(node, accepted, now), r)
 	if err != nil {
 		return SignedReport{}, err
+	}
+	if got := v.Payload().Sender; got != local {
+		return SignedReport{}, fmt.Errorf("%w: the report names another sending node", ErrMismatch)
 	}
 	return SignedReport{node: node, v: v}, nil
 }
@@ -50,15 +55,19 @@ type SignedControlReply struct {
 }
 
 // VerifyControlReply verifies r as a control reply signed by node's network key
-// (see ControlReplyDescriptor). node is the node the control signal was sent
-// to, from the verifier's own records.
-func VerifyControlReply(r record.Record, node ident.NodeID, accepted record.AcceptedNetworkKey, now time.Time) (SignedControlReply, error) {
-	if node.IsZero() {
+// (see ControlReplyDescriptor) to a signal that local, the verifier's own node,
+// sent. node is the node the control signal was sent to, from the verifier's
+// own records. A reply naming another sending node is refused.
+func VerifyControlReply(r record.Record, node, local ident.NodeID, accepted record.AcceptedNetworkKey, now time.Time) (SignedControlReply, error) {
+	if node.IsZero() || local.IsZero() {
 		return SignedControlReply{}, fmt.Errorf("%w: no node", ErrControlReply)
 	}
 	v, err := record.Verify(ControlReplyDescriptor(node, accepted, now), r)
 	if err != nil {
 		return SignedControlReply{}, err
+	}
+	if got := v.Payload().Sender; got != local {
+		return SignedControlReply{}, fmt.Errorf("%w: the reply names another sending node", ErrMismatch)
 	}
 	return SignedControlReply{node: node, v: v}, nil
 }

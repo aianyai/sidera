@@ -63,14 +63,6 @@ func (l Limits) inputLimit() int {
 	return fixedBytes + l.MaxBody + l.MaxRecipients*perRecipientBytes + MaxEvidence*(record.DefaultMaxInput+16)
 }
 
-// Params holds the parameters of a control signal. Only control.session.create
-// has any.
-type Params struct {
-	// Preset names the run preset the new session starts from. It is
-	// authz.Request.Preset for the signal.
-	Preset string
-}
-
 // Envelope is one message as it travels from a sender's node to one target
 // node. The sender is not part of it: the receiving node knows it from the
 // connection. The envelope is not signed; the status reports and control
@@ -94,15 +86,16 @@ type Envelope struct {
 	// sender's choice and says nothing about how many recipients there are.
 	DiscloseRecipients bool
 	Kind               Kind
-	// ReplyTo is the message this one answers; empty if none. The channel reads
-	// it only to judge reply permission.
+	// ReplyTo is the message this one answers; empty if none, and always empty
+	// for a control signal. The channel reads it only to judge reply permission.
 	ReplyTo delivery.MessageID
 	// Thread is a grouping the sender chooses; the channel does not interpret
 	// it. Empty if none.
 	Thread string
 	// Evidence is what a reply carries to prove that the message it answers
 	// arrived: at most one control reply, then at most one status report, in
-	// that order, each signed by the node that was the target of ReplyTo.
+	// that order, each signed by the node that was the target of ReplyTo. A
+	// control signal carries none.
 	Evidence []record.Record
 	// Seq is the sender's sequence number for each recipient, from 1. For the
 	// recipients only; the channel does not order by it.
@@ -288,8 +281,11 @@ func fromWire(w envelopeWire, lim Limits) (Envelope, error) {
 	if err := CheckEvidence(e.Evidence); err != nil {
 		return Envelope{}, err
 	}
-	if len(e.Evidence) > 0 && e.ReplyTo == "" {
+	switch {
+	case len(e.Evidence) > 0 && e.ReplyTo == "":
 		return Envelope{}, fmt.Errorf("%w: evidence without reply_to", ErrEvidence)
+	case e.Kind.IsControl() && e.ReplyTo != "":
+		return Envelope{}, fmt.Errorf("%w: a control signal answers no message", ErrReplyTo)
 	}
 	return e, nil
 }
@@ -322,6 +318,9 @@ func fromWireRecipients(e *Envelope, w envelopeWire, lim Limits) error {
 		return fmt.Errorf("%w: several recipients without the multi-recipient flag", ErrRecipients)
 	case e.Kind.IsControl() && (len(e.To) != 1 || e.MultiRecipient):
 		return fmt.Errorf("%w: a control signal has exactly one recipient", ErrRecipients)
+	case len(e.To) == 1 && e.MultiRecipient && e.DiscloseRecipients:
+		// Disclosed, To is the whole list, so one entry is the whole message.
+		return fmt.Errorf("%w: the multi-recipient flag with a single disclosed recipient", ErrRecipients)
 	}
 	return nil
 }
@@ -518,18 +517,28 @@ func (e Envelope) TrimmedFor(node ident.NodeID) Envelope {
 // requestDomain is the digest domain of the request digest.
 var requestDomain = frame.Domain("sidera/request-digest/1")
 
-// Digest returns the digest the target stores for deduplication: it covers what
-// a retry of the same request must repeat exactly (the kind, the params, the
-// content type, the body and the two deadlines) and leaves out what may differ
-// between attempts (the recipient list as trimmed for a path, the sequence
-// numbers, the send time, the evidence, the thread). A request with the same id
-// and another digest is a conflict (delivery.CheckDedup).
+// Digest returns the digest the target stores for deduplication. It covers what
+// a retry of the same request must repeat exactly: the kind, the params, the
+// content type, the body, the two deadlines, and what the sender chose about
+// the message's place in a conversation and who sees whom (reply_to, thread,
+// the multi-recipient flag, disclose_recipients). A retry that changes any of
+// them is another request under the same id, and the target must not take it
+// for the one it already holds. It leaves out what may differ between attempts
+// of one request: the recipient list as trimmed for a path, the sequence
+// numbers, the send time and the evidence. A request with the same id and
+// another digest is a conflict (delivery.CheckDedup).
 func (e Envelope) Digest() delivery.BodyDigest {
 	kind, _ := e.Kind.toWire()
-	var kindB [1]byte
-	kindB[0] = byte(kind)
+	var flags byte
+	if e.MultiRecipient {
+		flags |= 1
+	}
+	if e.DiscloseRecipients {
+		flags |= 2
+	}
 	return delivery.BodyDigest(sha256.Sum256(frame.Frame(requestDomain,
-		kindB[:], []byte(e.Preset), []byte(e.ContentType), e.Body,
+		[]byte{byte(kind)}, []byte(e.Preset), []byte(e.ContentType), e.Body,
+		[]byte(e.ReplyTo), []byte(e.Thread), []byte{flags},
 		unixBE(e.AcceptBefore), unixBE(e.ReportBy))))
 }
 

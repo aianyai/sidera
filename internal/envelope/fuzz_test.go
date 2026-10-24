@@ -59,7 +59,7 @@ func FuzzVerifyStatusReport(f *testing.F) {
 				t.Fatalf("re-encoding the payload changed it:\n in %x\nout %x", r.Payload, again)
 			}
 		}
-		if sr, err := VerifyStatusReport(r, node, accepted, t0.Add(1000)); err == nil {
+		if sr, err := VerifyStatusReport(r, node, localNode(t), accepted, t0.Add(1000)); err == nil {
 			_ = sr.Report().ProvesArrival()
 			_ = Arrival{}.Learn(sr.Report())
 		}
@@ -88,6 +88,6 @@ func FuzzVerifyControlReply(f *testing.F) {
 			}
 			_, _ = u.Payload().Binds()
 		}
-		_, _ = VerifyControlReply(r, node, accepted, t0.Add(1000))
+		_, _ = VerifyControlReply(r, node, localNode(t), accepted, t0.Add(1000))
 	})
 }

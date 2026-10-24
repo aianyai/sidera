@@ -28,8 +28,12 @@ var (
 	// ErrParams: the params are missing, present where the kind has none, or
 	// invalid.
 	ErrParams = errors.New("invalid params")
-	// ErrEvidence: the evidence list is malformed, out of order, or without a
-	// reply_to to refer to.
+	// ErrReplyTo: a control signal carries a reply_to; only a message answers
+	// another message, and the result of a control signal returns as its
+	// control reply.
+	ErrReplyTo = errors.New("invalid reply_to")
+	// ErrEvidence: the evidence list is malformed, out of order, without a
+	// reply_to to refer to, or on a control signal.
 	ErrEvidence = errors.New("invalid evidence")
 
 	// ErrReport: the payload of a status report is invalid.
@@ -42,12 +46,15 @@ var (
 	ErrNotVerified = errors.New("record is not verified")
 	// ErrOutbound: the sender's record of a message is inconsistent.
 	ErrOutbound = errors.New("invalid outbound record")
-	// ErrMismatch: a report or reply does not refer to the message, recipient
-	// or signal the sender's record has.
+	// ErrMismatch: a report or reply does not refer to the message, recipient,
+	// signal or sending node the sender's record has.
 	ErrMismatch = errors.New("report or reply does not match the outbound record")
-	// ErrDerivedConflict: a control reply names a session endpoint that
-	// contradicts the one already bound for the message.
-	ErrDerivedConflict = errors.New("control reply contradicts the bound session endpoint")
+	// ErrPeerContradiction: a signed statement of the peer contradicts what the
+	// sender holds: a control reply that differs from the one already accepted
+	// for the signal, or a reply or report whose state cannot follow the
+	// delivery's. The peer broke the contract: the sender stops pulling from it
+	// for the message and logs it. The error wraps the specific cause.
+	ErrPeerContradiction = errors.New("peer contradicts its own earlier statement or the sender's record")
 	// ErrFromFuture: a report claims a time later than now plus the clock
 	// tolerance.
 	ErrFromFuture = errors.New("report is dated in the future")

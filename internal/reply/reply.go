@@ -96,6 +96,8 @@ type Request struct {
 	// Enabled is the node owner's switch for reply permission. The zero value
 	// is off: a caller that forgets it gets refusals, not permission.
 	Enabled bool
+	// Local is this node: the sending node the evidence has to name.
+	Local ident.NodeID
 	// Replier is who sent the reply, from the connection identity and the
 	// sending node's endpoint: never from the message body.
 	Replier ident.Address
@@ -168,8 +170,8 @@ type Admission struct {
 // arrived.
 func Admit(req Request) (Admission, error) {
 	switch {
-	case req.Now.IsZero() || req.Replier.IsZero() || req.Target.IsZero() || req.ReplyTo == "":
-		return Admission{}, fmt.Errorf("%w: time, replier, target and reply_to are required", ErrInvalidRequest)
+	case req.Now.IsZero() || req.Local.IsZero() || req.Replier.IsZero() || req.Target.IsZero() || req.ReplyTo == "":
+		return Admission{}, fmt.Errorf("%w: time, local node, replier, target and reply_to are required", ErrInvalidRequest)
 	case req.Outbound != nil && req.Outbound.Message != req.ReplyTo:
 		return Admission{}, fmt.Errorf("%w: the outbound record is of %q, not %q", ErrInvalidRequest, req.Outbound.Message, req.ReplyTo)
 	}
@@ -257,13 +259,13 @@ func applyEvidence(req Request, o envelope.Outbound, adm *Admission) (envelope.O
 	for _, r := range req.Evidence {
 		switch r.Type {
 		case envelope.ControlReplyType:
-			v, err := envelope.VerifyControlReply(r, node, req.Accepted, req.Now)
+			v, err := envelope.VerifyControlReply(r, node, req.Local, req.Accepted, req.Now)
 			if err != nil {
 				return o, fmt.Errorf("control reply: %w", err)
 			}
 			signedReply = &v
 		case envelope.StatusReportType:
-			v, err := envelope.VerifyStatusReport(r, node, req.Accepted, req.Now)
+			v, err := envelope.VerifyStatusReport(r, node, req.Local, req.Accepted, req.Now)
 			if err != nil {
 				return o, fmt.Errorf("status report: %w", err)
 			}

@@ -18,15 +18,18 @@ this package is [`reply`](../reply/README.md).
 | `Envelope`, `Limits`, `Encode(limits)`, `Decode(data, limits)` | The envelope and its deterministic CBOR form with strict decoding. `Limits` (longest body, most recipients) has no defaults; a zero value is refused. |
 | `Envelope.ValidateFor(node)`, `RecipientsOn(node)`, `TrimmedFor(node)` | What only the receiving node can check; the sender's trimming of recipients and sequence numbers for one target node. |
 | `Envelope.Digest()` | The request digest the target stores for deduplication. |
-| `Kind`, `Kind.Action()`, `Kind.Signal()`, `KindOfSignal` | The five kinds, the one mapping to `authz.Action`, and the mapping to the adapter protocol's control signals. |
+| `Kind`, `Kind.Action()`, `Kind.Signal()`, `KindOfSignal` | The five kinds, the mapping to `authz.Action` (a control signal's action comes from `adapterreg.ActionOf`), and the mapping to the adapter protocol's control signals. |
 | `CheckEvidence(records)` | The shape of an evidence list: at most one control reply, then at most one status report. |
-| `StatusReport`, `StatusReportDescriptor(node, accepted, now)`, `VerifyStatusReport` | The signed status report. `SignedReport` is the verified value and remembers the node it was verified for. |
-| `ControlReply`, `ControlResult`, `CreateResult`, `ControlReplyDescriptor(node, accepted, now)`, `VerifyControlReply` | The signed control reply for the four control signals, in the values of `adapterproto`. `SignedControlReply` is the verified value. |
-| `Outbound`, `Tracked`, `Arrival` | The sender's record of a message it sent: one delivery per recipient, the derived delivery of an initial message, and what signed reports proved about arrival. |
+| `StatusReport`, `StatusReportDescriptor(node, accepted, now)`, `VerifyStatusReport(record, target, local, accepted, now)` | The signed status report. `SignedReport` is the verified value and remembers the node it was verified for. The report names the sending node, which must be `local`. |
+| `ControlReply`, `ControlResult`, `CreateResult`, `ControlReplyDescriptor(node, accepted, now)`, `VerifyControlReply(record, target, local, accepted, now)` | The signed control reply for the four control signals, in the values of `adapterproto`. `SignedControlReply` is the verified value. The reply names the sending node, which must be `local`. |
+| `Outbound`, `Tracked`, `Arrival` | The sender's record of a message it sent: one delivery per recipient, the derived delivery of an initial message, the digest of the accepted control reply, and what signed reports proved about arrival. |
 | `Outbound.ApplyReport(now, report)` | The one rule by which a sender applies a verified status report, pulled or attached to a reply. |
 | `HandleControlReply(now, outbound, reply, report)` | The one rule by which a sender applies a verified control reply, pulled or attached to a reply. |
 
 Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
+`ErrPeerContradiction` means the peer broke the contract (a second distinct
+control reply, a reply to a rejected signal, a state that cannot follow): the
+caller stops pulling from that peer for the message and logs it.
 
 ## Rules
 
@@ -41,8 +44,9 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 - **Recipients.** `To` lists addresses: only the recipients on the target node
   unless the sender discloses recipients, then all of them. `MultiRecipient` is
   independent of both, so a target that refuses multi-recipient messages can
-  tell even when `To` was trimmed to one entry. A control signal has exactly one
-  recipient and is not multi-recipient. Endpoint identifiers are distinct across
+  tell even when `To` was trimmed to one entry; a disclosed list of one entry is
+  the whole message and is not flagged. A control signal has exactly one
+  recipient, is not multi-recipient, and has neither `reply_to` nor evidence. Endpoint identifiers are distinct across
   the whole list because sequence numbers are keyed by endpoint. `Seq` has one
   entry per recipient on the target node; the structural check only requires
   that every entry is a recipient, and `ValidateFor` checks that the entries are
@@ -58,20 +62,27 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 - **Evidence.** At most two records: a control reply, then a status report. An
   envelope with evidence has a `reply_to`. Signatures are not checked in the
   envelope; `reply` checks them against the sender's own records.
-- **One mapping from kind to action.** `Kind.Action()`; no caller maps kinds
-  itself.
+- **Request digest.** Covers the kind, preset, content type, body, both
+  deadlines, `reply_to`, `thread`, the multi-recipient flag and
+  `disclose_recipients`; not the trimmed recipient list, sequence numbers, send
+  time or evidence, which differ between attempts of one request.
+- **One mapping from kind to action.** `Kind.Action()`, which takes a control
+  signal's action from `adapterreg.ActionOf`; no caller maps kinds itself.
 - **Status report and control reply** are signed by the target node's network
   key, accepted by `record.NetworkKeyOf`. The node is not in the payload: the
   verifier names it from its own record of the message, and the verified value
   (`SignedReport`, `SignedControlReply`) keeps it, so a report cannot be applied
-  to a delivery on another node. Wire values of states, reasons and causes are
+  to a delivery on another node. Both name the sending node, and the verifiers
+  refuse one that names a node other than the local one. Wire values of states, reasons and causes are
   tables of their own, independent of the Go constants of `delivery`. The values
   of control replies are those of `adapterproto`, and their field rules are
   `adapterproto`'s own `Validate`.
 - **Arrival.** A report proves arrival when its state is accepted, delivered or
   delivery_unknown. `Arrival` keeps the earliest delivery time of a delivered
-  report and the earliest issue time of a report that proves arrival; a later
-  report never moves either forward.
+  report and the earliest `reported_at` of a report that proves arrival; a later
+  report never moves either forward. `reported_at` is the moment the target
+  recorded the state, and a report sent again for an unchanged state repeats it
+  under a fresh signature.
 - **Applying a report.** `Outbound.ApplyReport` checks that the report is about
   the message, is from the node the delivery's endpoint is on and is not dated
   after now plus `timing.ClockTolerance`; applies it with
@@ -83,29 +94,41 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   `session.create` with a body whose outcome is created or unconfirmed it
   creates the delivery of the initial message to the session endpoint (accepted,
   with the signal's own deadlines) and binds the endpoint; it then applies the
-  accompanying report. A reply that names a different endpoint than the bound
-  one, or none, is `ErrDerivedConflict`. Handling the same reply twice changes
-  nothing the second time, and the pull path and the evidence path reach the same
-  state in either order.
+  accompanying report. The record keeps the digest of the reply it accepted: the
+  same digest again changes nothing, any other is `ErrPeerContradiction` (so a
+  creation after a recorded failure builds no delivery). A reply after the
+  signal closed as `closed_unconfirmed` still binds the session, and the derived
+  delivery closes silently at its next tick. The pull path and the evidence path
+  reach the same state in either order.
 
 ## What the caller must guarantee
 
 - `now` is UTC and comes from the caller. Every returned value is committed in
   the transaction of the triggering input, with the effects the outcomes call
   for (feedback, events).
-- The node passed to `VerifyStatusReport` and `VerifyControlReply` is the node
-  the message or signal was sent to, taken from the sender's own record, never
-  from the record being verified. `accepted` is the network key accepted for that
-  node with its revocation status filled in.
+- The target node passed to `VerifyStatusReport` and `VerifyControlReply` is the
+  node the message or signal was sent to, taken from the sender's own record,
+  never from the record being verified; `local` is the verifier's own node.
+  `accepted` is the network key accepted for the target node with its revocation
+  status filled in.
+- The receiving node calls `Envelope.ValidateFor` with its own node on every
+  decoded envelope before acting on it: `Decode` cannot know which node reads it.
+- Storage keeps, at least until `report_by` plus `timing.ClockTolerance` plus the
+  reply window (24 hours), the source's `Outbound` with its arrival facts and the
+  digest of the accepted control reply, and the target's control reply payload and
+  delivery facts; the 30-day retention of terminal records covers it. The target
+  stores payloads only and signs a status report or control reply with its
+  current network key each time it sends one as evidence or in answer to a pull;
+  the digest excludes signatures, so signing again does not change it.
 - `Outbound` mirrors storage: one `Tracked` per recipient, source-side delivery
-  records, the derived delivery only after a control reply bound it.
-  `Outbound.Validate` checks the invariants.
+  records, the derived delivery only after a control reply bound it, and the
+  digest of that reply with it. `Outbound.Validate` checks the invariants.
 - `Limits` is chosen by the caller; there is no default body limit.
 - The request digest is stored by the target with the deduplication record of
   each delivery of the request, and compared with `delivery.CheckDedup`.
 
 ## Dependencies
 
-The standard library, `delivery`, `authz`, `ident`, `frame`, `record`, `timing`,
-`sdk/go/adapterproto` and `github.com/fxamacker/cbor/v2` (tests only for the
+The standard library, `delivery`, `authz`, `adapterreg`, `ident`, `frame`,
+`record`, `timing`, `sdk/go/adapterproto` and `github.com/fxamacker/cbor/v2` (tests only for the
 last). Nothing else; in particular no libp2p.

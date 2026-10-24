@@ -128,7 +128,34 @@ func createOutbound(body bool) envelope.Outbound {
 func sealReport(t testing.TB, msg delivery.MessageID, to ident.EndpointID, st delivery.StatusReport, reported, deliveredAt time.Time, idSeed, netSeed int) record.Record {
 	t.Helper()
 	d := envelope.StatusReportDescriptor(nodeOf(idSeed), acceptedFor(idSeed, netSeed), t0)
-	r, err := record.Seal(d, envelope.StatusReport{Message: msg, Recipient: to, Status: st, ReportedAt: reported, DeliveredAt: deliveredAt}, signerOf(netSeed))
+	r, err := record.Seal(d, envelope.StatusReport{Sender: nodeOf(idB), Message: msg, Recipient: to, Status: st, ReportedAt: reported, DeliveredAt: deliveredAt}, signerOf(netSeed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// sealReportFrom signs a report of the target node A that names another sending
+// node.
+func sealReportFrom(t testing.TB, sender ident.NodeID, msg delivery.MessageID, to ident.EndpointID, st delivery.StatusReport, reported time.Time) record.Record {
+	t.Helper()
+	d := envelope.StatusReportDescriptor(nodeOf(idA), acceptedFor(idA, netA), t0)
+	r, err := record.Seal(d, envelope.StatusReport{Sender: sender, Message: msg, Recipient: to, Status: st, ReportedAt: reported}, signerOf(netA))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// sealCreateReplyFrom signs a control reply of the target node A that names
+// another sending node.
+func sealCreateReplyFrom(t testing.TB, sender ident.NodeID, res envelope.CreateResult, issued time.Time) record.Record {
+	t.Helper()
+	d := envelope.ControlReplyDescriptor(nodeOf(idA), acceptedFor(idA, netA), t0)
+	r, err := record.Seal(d, envelope.ControlReply{
+		Sender: sender, Message: "m-1", Recipient: runtimeR, IssuedAt: issued,
+		Result: envelope.ControlResult{Signal: adapterproto.SignalSessionCreate, Create: &res},
+	}, signerOf(netA))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +174,7 @@ func sealCreateReply(t testing.TB, msg delivery.MessageID, res envelope.CreateRe
 	t.Helper()
 	d := envelope.ControlReplyDescriptor(nodeOf(idSeed), acceptedFor(idSeed, netSeed), t0)
 	r, err := record.Seal(d, envelope.ControlReply{
-		Message: msg, Recipient: runtimeR, IssuedAt: issued,
+		Sender: nodeOf(idB), Message: msg, Recipient: runtimeR, IssuedAt: issued,
 		Result: envelope.ControlResult{Signal: adapterproto.SignalSessionCreate, Create: &res},
 	}, signerOf(netSeed))
 	if err != nil {
@@ -167,7 +194,7 @@ func failedReply(t testing.TB, issued time.Time) record.Record {
 // request is a reply that arrived at now from replier to the sender's endpoint.
 func request(o *envelope.Outbound, replier ident.Address, now time.Time, evidence ...record.Record) Request {
 	return Request{
-		Now: now, Enabled: true, Replier: replier, Target: senderEndpoint(), ReplyTo: "m-1",
+		Now: now, Enabled: true, Local: nodeOf(idB), Replier: replier, Target: senderEndpoint(), ReplyTo: "m-1",
 		Outbound: o, Evidence: evidence, Accepted: acceptedOn(replier),
 	}
 }
@@ -184,7 +211,7 @@ func mustAdmit(t testing.TB, req Request) Admission {
 // learn applies a status report the sender pulled, as the pull path does.
 func learn(t testing.TB, o envelope.Outbound, rec record.Record, now time.Time) envelope.Outbound {
 	t.Helper()
-	sr, err := envelope.VerifyStatusReport(rec, nodeOf(idA), acceptedFor(idA, netA), now)
+	sr, err := envelope.VerifyStatusReport(rec, nodeOf(idA), nodeOf(idB), acceptedFor(idA, netA), now)
 	requireNoErr(t, err)
 	n, _, _, err := o.ApplyReport(now, sr)
 	requireNoErr(t, err)
@@ -194,7 +221,7 @@ func learn(t testing.TB, o envelope.Outbound, rec record.Record, now time.Time) 
 // learnReply applies a control reply the sender pulled, as the pull path does.
 func learnReply(t testing.TB, o envelope.Outbound, rec record.Record, now time.Time) envelope.Outbound {
 	t.Helper()
-	sc, err := envelope.VerifyControlReply(rec, nodeOf(idA), acceptedFor(idA, netA), now)
+	sc, err := envelope.VerifyControlReply(rec, nodeOf(idA), nodeOf(idB), acceptedFor(idA, netA), now)
 	requireNoErr(t, err)
 	h, err := envelope.HandleControlReply(now, o, sc, nil)
 	requireNoErr(t, err)

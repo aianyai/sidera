@@ -1,6 +1,7 @@
 package envelope
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -30,14 +31,14 @@ func createOutbound(t testing.TB) Outbound { return outboundTo(t, KindSessionCre
 
 func signedReport(t testing.TB, r StatusReport) SignedReport {
 	t.Helper()
-	sr, err := VerifyStatusReport(sealReport(t, r, keyNetworkA), nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(24*time.Hour))
+	sr, err := VerifyStatusReport(sealReport(t, r, keyNetworkA), nodeOf(t, keyIdentityA), localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(24*time.Hour))
 	requireNoErr(t, err)
 	return sr
 }
 
 func signedReply(t testing.TB, r ControlReply) SignedControlReply {
 	t.Helper()
-	sc, err := VerifyControlReply(sealReply(t, r, keyNetworkA), nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(24*time.Hour))
+	sc, err := VerifyControlReply(sealReply(t, r, keyNetworkA), nodeOf(t, keyIdentityA), localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(24*time.Hour))
 	requireNoErr(t, err)
 	return sc
 }
@@ -72,7 +73,11 @@ func TestOutboundValidate(t *testing.T) {
 	requireNoErr(t, good.Validate())
 	withDerived := good
 	withDerived.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(acceptBefore)}
+	withDerived.ControlReplyDigest = record.Digest{1}
 	requireNoErr(t, withDerived.Validate())
+	failedReplyAccepted := good
+	failedReplyAccepted.ControlReplyDigest = record.Digest{2}
+	requireNoErr(t, failedReplyAccepted.Validate())
 
 	cases := map[string]func(*Outbound){
 		"no message":         func(o *Outbound) { o.Message = "" },
@@ -85,11 +90,18 @@ func TestOutboundValidate(t *testing.T) {
 		},
 		"derived without a body": func(o *Outbound) { o.BodyNonEmpty = false; o.Derived = withDerived.Derived },
 		"derived on a message":   func(o *Outbound) { o.Kind = KindMessage; o.Derived = withDerived.Derived },
+		"derived without the digest of the reply that bound it": func(o *Outbound) {
+			o.Derived = withDerived.Derived
+			o.ControlReplyDigest = record.Digest{}
+		},
+		"a control reply digest on a message": func(o *Outbound) { o.Kind = KindMessage; o.ControlReplyDigest = record.Digest{1} },
 		"derived on another node": func(o *Outbound) {
 			o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityB), 3), Delivery: delivery.NewSourceRecord(acceptBefore)}
+			o.ControlReplyDigest = record.Digest{1}
 		},
 		"derived endpoint tracked twice": func(o *Outbound) {
 			o.Derived = &Tracked{Address: o.Recipients[0].Address, Delivery: delivery.NewSourceRecord(acceptBefore)}
+			o.ControlReplyDigest = record.Digest{1}
 		},
 		"a target-side record": func(o *Outbound) {
 			o.Recipients = []Tracked{{Address: o.Recipients[0].Address, Delivery: delivery.NewTargetControlRecord(acceptBefore, delivery.ReportBy(acceptBefore))}}
@@ -205,9 +217,9 @@ func TestApplyReport(t *testing.T) {
 	t.Run("a report signed by another node than the endpoint's is refused", func(t *testing.T) {
 		b := nodeOf(t, keyIdentityB)
 		d := StatusReportDescriptor(b, acceptedFor(t, keyIdentityB, keyNetworkB), t0)
-		rec, err := record.Seal(d, reportFor("ctl-0001", 2, delivered(), 760*time.Second, 700*time.Second), signerOf(t, keyNetworkB))
+		rec, err := record.Seal(d, withSender(t, reportFor("ctl-0001", 2, delivered(), 760*time.Second, 700*time.Second)), signerOf(t, keyNetworkB))
 		requireNoErr(t, err)
-		sr, err := VerifyStatusReport(rec, b, acceptedFor(t, keyIdentityB, keyNetworkB), t0.Add(time.Hour))
+		sr, err := VerifyStatusReport(rec, b, localNode(t), acceptedFor(t, keyIdentityB, keyNetworkB), t0.Add(time.Hour))
 		requireNoErr(t, err)
 		_, _, _, err = outboundTo(t, KindMessage, true).ApplyReport(now, sr)
 		requireErr(t, err, ErrMismatch)
@@ -232,7 +244,7 @@ func TestApplyReport(t *testing.T) {
 		o, _, _, err := o.ApplyReport(now, signedReport(t, reportFor("ctl-0001", 2, delivered(), 760*time.Second, 700*time.Second)))
 		requireNoErr(t, err)
 		n, eff, _, err := o.ApplyReport(now, signedReport(t, reportFor("ctl-0001", 2, delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectExpired}, 800*time.Second, 0)))
-		requireErr(t, err, delivery.ErrIllegalTransition)
+		requireErr(t, err, ErrPeerContradiction, delivery.ErrIllegalTransition)
 		if eff != ReportNone || !reflect.DeepEqual(n, o) {
 			t.Errorf("effect %v, outbound changed", eff)
 		}
@@ -248,6 +260,7 @@ func TestApplyReport(t *testing.T) {
 	t.Run("a report applies to the derived delivery", func(t *testing.T) {
 		o := createOutbound(t)
 		o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(acceptBefore)}
+		o.ControlReplyDigest = record.Digest{1}
 		n, eff, _, err := o.ApplyReport(now, signedReport(t, reportFor("ctl-0001", 3, delivered(), 760*time.Second, 700*time.Second)))
 		requireNoErr(t, err)
 		if eff != ReportApplied || n.Derived.Delivery.State != delivery.StateDelivered || n.Recipients[0].Delivery.State != delivery.StateQueued {
@@ -434,6 +447,19 @@ func TestHandleControlReply(t *testing.T) {
 		if h.Control.Result != delivery.ResultIgnored || h.Control.Ignored != delivery.IgnoreAlreadyFinal || h.Outbound.Derived == nil {
 			t.Errorf("control %+v derived %v", h.Control, h.Outbound.Derived)
 		}
+		// The derived delivery shares the deadlines that have passed, so it closes
+		// at its next tick without any notice: the sender is told nothing about a
+		// delivery whose report window ended before the reply arrived.
+		closed, outs, err := h.Outbound.Derived.Delivery.Tick(after)
+		requireNoErr(t, err)
+		if closed.State != delivery.StateClosedUnconfirmed {
+			t.Errorf("derived state after the tick: %v", closed.State)
+		}
+		for _, o := range outs {
+			if len(o.Feedback) != 0 {
+				t.Errorf("the late close gave feedback %+v", o.Feedback)
+			}
+		}
 	})
 	t.Run("a reply for a signal the target rejected is an error", func(t *testing.T) {
 		o := createOutbound(t)
@@ -441,15 +467,59 @@ func TestHandleControlReply(t *testing.T) {
 		requireNoErr(t, err)
 		o.Recipients[0].Delivery = rec
 		_, err = HandleControlReply(now, o, signedReply(t, createdReply("ctl-0001", 2, 3, 650*time.Second)), nil)
-		requireErr(t, err, delivery.ErrIllegalTransition)
+		requireErr(t, err, ErrPeerContradiction, delivery.ErrIllegalTransition)
 	})
-	t.Run("a reply that names another endpoint than the bound one is a conflict", func(t *testing.T) {
+	t.Run("the digest of the accepted reply is kept", func(t *testing.T) {
+		reply := signedReply(t, createdReply("ctl-0001", 2, 3, 650*time.Second))
+		h, err := HandleControlReply(now, createOutbound(t), reply, nil)
+		requireNoErr(t, err)
+		if h.Outbound.ControlReplyDigest != reply.Digest() || reply.Digest().IsZero() {
+			t.Errorf("digest %v, want %v", h.Outbound.ControlReplyDigest, reply.Digest())
+		}
+	})
+	t.Run("the same reply under a fresh signature is the same reply", func(t *testing.T) {
+		// The target keeps the payload and signs it again with its current network
+		// key each time it sends it: the digest excludes the signature.
 		first, err := HandleControlReply(now, createOutbound(t), signedReply(t, createdReply("ctl-0001", 2, 3, 650*time.Second)), nil)
 		requireNoErr(t, err)
-		_, err = HandleControlReply(now, first.Outbound, signedReply(t, createdReply("ctl-0001", 2, 4, 651*time.Second)), nil)
-		requireErr(t, err, ErrDerivedConflict)
-		_, err = HandleControlReply(now, first.Outbound, signedReply(t, failedReply("ctl-0001", 2, 651*time.Second)), nil)
-		requireErr(t, err, ErrDerivedConflict)
+		rotated := acceptedFor(t, keyIdentityA, keyThird)
+		payload := createdReply("ctl-0001", 2, 3, 650*time.Second)
+		payload.Sender = localNode(t)
+		rec, err := record.Seal(ControlReplyDescriptor(nodeOf(t, keyIdentityA), rotated, t0), payload, signerOf(t, keyThird))
+		requireNoErr(t, err)
+		again, err := VerifyControlReply(rec, nodeOf(t, keyIdentityA), localNode(t), rotated, t0.Add(time.Hour))
+		requireNoErr(t, err)
+		if again.Digest() != first.Outbound.ControlReplyDigest {
+			t.Fatalf("a new signature changed the digest")
+		}
+		second, err := HandleControlReply(now, first.Outbound, again, nil)
+		requireNoErr(t, err)
+		if !reflect.DeepEqual(first.Outbound, second.Outbound) || second.DerivedCreated {
+			t.Error("the same reply again changed the record")
+		}
+	})
+	t.Run("another reply after the first is a contradiction by the peer", func(t *testing.T) {
+		first, err := HandleControlReply(now, createOutbound(t), signedReply(t, createdReply("ctl-0001", 2, 3, 650*time.Second)), nil)
+		requireNoErr(t, err)
+		for name, other := range map[string]ControlReply{
+			"another session endpoint":      createdReply("ctl-0001", 2, 4, 650*time.Second),
+			"a failure after a creation":    failedReply("ctl-0001", 2, 650*time.Second),
+			"the same result, issued later": createdReply("ctl-0001", 2, 3, 651*time.Second),
+		} {
+			_, err = HandleControlReply(now, first.Outbound, signedReply(t, other), nil)
+			if !errors.Is(err, ErrPeerContradiction) {
+				t.Errorf("%s: error %v, want ErrPeerContradiction", name, err)
+			}
+		}
+	})
+	t.Run("a creation after a recorded failure builds no delivery of the initial message", func(t *testing.T) {
+		failed, err := HandleControlReply(now, createOutbound(t), signedReply(t, failedReply("ctl-0001", 2, 30*time.Second)), nil)
+		requireNoErr(t, err)
+		h, err := HandleControlReply(now, failed.Outbound, signedReply(t, createdReply("ctl-0001", 2, 3, 650*time.Second)), nil)
+		requireErr(t, err, ErrPeerContradiction)
+		if !reflect.DeepEqual(h, Handling{}) || failed.Outbound.Derived != nil {
+			t.Error("a contradicting reply returned or changed something")
+		}
 	})
 	t.Run("a reply whose endpoint collides with a recipient is refused", func(t *testing.T) {
 		_, err := HandleControlReply(now, createOutbound(t), signedReply(t, createdReply("ctl-0001", 2, 2, 650*time.Second)), nil)
@@ -476,9 +546,11 @@ func TestHandleControlReply(t *testing.T) {
 	}
 	t.Run("a reply signed by another node is refused", func(t *testing.T) {
 		b := nodeOf(t, keyIdentityB)
-		rec, err := record.Seal(ControlReplyDescriptor(b, acceptedFor(t, keyIdentityB, keyNetworkB), t0), createdReply("ctl-0001", 2, 3, 650*time.Second), signerOf(t, keyNetworkB))
+		reply := createdReply("ctl-0001", 2, 3, 650*time.Second)
+		reply.Sender = localNode(t)
+		rec, err := record.Seal(ControlReplyDescriptor(b, acceptedFor(t, keyIdentityB, keyNetworkB), t0), reply, signerOf(t, keyNetworkB))
 		requireNoErr(t, err)
-		sc, err := VerifyControlReply(rec, b, acceptedFor(t, keyIdentityB, keyNetworkB), t0.Add(time.Hour))
+		sc, err := VerifyControlReply(rec, b, localNode(t), acceptedFor(t, keyIdentityB, keyNetworkB), t0.Add(time.Hour))
 		requireNoErr(t, err)
 		_, err = HandleControlReply(now, createOutbound(t), sc, nil)
 		requireErr(t, err, ErrMismatch)
@@ -489,9 +561,9 @@ func TestHandleControlReply(t *testing.T) {
 		_, err := HandleControlReply(now, createOutbound(t), reply, &other)
 		requireErr(t, err, ErrMismatch)
 		b := nodeOf(t, keyIdentityB)
-		rec, err := record.Seal(StatusReportDescriptor(b, acceptedFor(t, keyIdentityB, keyNetworkB), t0), reportFor("ctl-0001", 3, accepted(), 700*time.Second, 0), signerOf(t, keyNetworkB))
+		rec, err := record.Seal(StatusReportDescriptor(b, acceptedFor(t, keyIdentityB, keyNetworkB), t0), withSender(t, reportFor("ctl-0001", 3, accepted(), 700*time.Second, 0)), signerOf(t, keyNetworkB))
 		requireNoErr(t, err)
-		fromB, err := VerifyStatusReport(rec, b, acceptedFor(t, keyIdentityB, keyNetworkB), t0.Add(time.Hour))
+		fromB, err := VerifyStatusReport(rec, b, localNode(t), acceptedFor(t, keyIdentityB, keyNetworkB), t0.Add(time.Hour))
 		requireNoErr(t, err)
 		_, err = HandleControlReply(now, createOutbound(t), reply, &fromB)
 		requireErr(t, err, ErrMismatch)
@@ -524,6 +596,11 @@ func TestHandleControlReply(t *testing.T) {
 			t.Errorf("state %v", n.Recipients[0].Delivery.State)
 		}
 	})
+}
+
+func withSender(t testing.TB, r StatusReport) StatusReport {
+	r.Sender = localNode(t)
+	return r
 }
 
 func createOutbound2(t testing.TB) func() Outbound {

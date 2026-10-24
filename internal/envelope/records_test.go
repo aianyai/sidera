@@ -38,6 +38,9 @@ func TestStatusReportRules(t *testing.T) {
 		{"the message is not empty", func(w *statusReportWire) { w.Message = "" }},
 		{"the recipient is an endpoint", func(w *statusReportWire) { w.Recipient = []byte{1, 2} }},
 		{"the recipient is not zero", func(w *statusReportWire) { w.Recipient = make([]byte, 16) }},
+		{"the sender is a node", func(w *statusReportWire) { w.Sender = []byte{1, 2} }},
+		{"the sender is not zero", func(w *statusReportWire) { w.Sender = make([]byte, 32) }},
+		{"the sender is given", func(w *statusReportWire) { w.Sender = nil }},
 		{"state zero is not a state", func(w *statusReportWire) { w.State = 0 }},
 		{"state six is not a state", func(w *statusReportWire) { w.State = 6 }},
 		{"a reject reason comes only with rejected", func(w *statusReportWire) { w.Reject = 1 }},
@@ -144,7 +147,7 @@ func TestStatusReportCarriesTheDeliveryReport(t *testing.T) {
 	for name, rec := range targetRecords(t) {
 		t.Run(name, func(t *testing.T) {
 			rep := StatusReport{
-				Message: "m", Recipient: ep(1), Status: rec.StatusReport(),
+				Sender: localNode(t), Message: "m", Recipient: ep(1), Status: rec.StatusReport(),
 				ReportedAt: t0.Add(30 * time.Minute),
 			}
 			if rec.State == delivery.StateDelivered {
@@ -182,12 +185,12 @@ func TestStatusReportProvesArrival(t *testing.T) {
 func TestStatusReportRefusesAnUnreportableState(t *testing.T) {
 	d := StatusReportDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 	for _, s := range []delivery.State{delivery.StateInvalid, delivery.StateQueued, delivery.StateExpiredUnconfirmed} {
-		_, err := record.Seal(d, StatusReport{Message: "m", Recipient: ep(1), Status: delivery.StatusReport{State: s}, ReportedAt: t0}, signerOf(t, keyNetworkA))
+		_, err := record.Seal(d, StatusReport{Sender: localNode(t), Message: "m", Recipient: ep(1), Status: delivery.StatusReport{State: s}, ReportedAt: t0}, signerOf(t, keyNetworkA))
 		requireErr(t, err, record.ErrPayload)
 	}
-	_, err := record.Seal(d, StatusReport{Message: "m", Recipient: ep(1), Status: delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectReason(77)}, ReportedAt: t0}, signerOf(t, keyNetworkA))
+	_, err := record.Seal(d, StatusReport{Sender: localNode(t), Message: "m", Recipient: ep(1), Status: delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectReason(77)}, ReportedAt: t0}, signerOf(t, keyNetworkA))
 	requireErr(t, err, record.ErrPayload)
-	_, err = record.Seal(d, StatusReport{Message: "m", Recipient: ep(1), Status: delivery.StatusReport{State: delivery.StateAccepted, Blocked: true, BlockedCause: delivery.CauseNetwork}, ReportedAt: t0}, signerOf(t, keyNetworkA))
+	_, err = record.Seal(d, StatusReport{Sender: localNode(t), Message: "m", Recipient: ep(1), Status: delivery.StatusReport{State: delivery.StateAccepted, Blocked: true, BlockedCause: delivery.CauseNetwork}, ReportedAt: t0}, signerOf(t, keyNetworkA))
 	requireErr(t, err, record.ErrPayload)
 }
 
@@ -228,8 +231,8 @@ func signerCases(t *testing.T) []struct {
 }
 
 func TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey(t *testing.T) {
-	rep := StatusReport{Message: "m", Recipient: ep(1), Status: delivery.StatusReport{State: delivery.StateAccepted}, ReportedAt: t0}
-	reply := ControlReply{Message: "m", Recipient: ep(1), IssuedAt: t0, Result: ControlResult{
+	rep := StatusReport{Sender: localNode(t), Message: "m", Recipient: ep(1), Status: delivery.StatusReport{State: delivery.StateAccepted}, ReportedAt: t0}
+	reply := ControlReply{Sender: localNode(t), Message: "m", Recipient: ep(1), IssuedAt: t0, Result: ControlResult{
 		Signal: adapterproto.SignalSessionClose, Close: &adapterproto.ControlCloseReply{Outcome: adapterproto.CloseReplyClosed}}}
 	for _, c := range signerCases(t) {
 		t.Run(c.rule, func(t *testing.T) {
@@ -238,7 +241,7 @@ func TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey(t *testing.T) {
 			wire, err := statusReportToWire(rep)
 			requireNoErr(t, err)
 			recR := signRaw(t, StatusReportType, wire, c.signer)
-			_, err = VerifyStatusReport(recR, c.node, c.accepted, c.now)
+			_, err = VerifyStatusReport(recR, c.node, localNode(t), c.accepted, c.now)
 			requireErr(t, err, record.ErrSignerNotAllowed)
 			var be *record.BindingError
 			if !errors.As(err, &be) || be.Binding != c.binding {
@@ -247,7 +250,7 @@ func TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey(t *testing.T) {
 			cw, err := controlReplyToWire(reply)
 			requireNoErr(t, err)
 			recC := signRaw(t, ControlReplyType, cw, c.signer)
-			_, err = VerifyControlReply(recC, c.node, c.accepted, c.now)
+			_, err = VerifyControlReply(recC, c.node, localNode(t), c.accepted, c.now)
 			requireErr(t, err, record.ErrSignerNotAllowed)
 			if !errors.As(err, &be) || be.Binding != c.binding {
 				t.Errorf("reply: binding = %v, want %v (%v)", be, c.binding, err)
@@ -256,28 +259,47 @@ func TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey(t *testing.T) {
 	}
 	t.Run("the right key verifies and the signed value remembers its node", func(t *testing.T) {
 		a := nodeOf(t, keyIdentityA)
-		sr, err := VerifyStatusReport(sealReport(t, rep, keyNetworkA), a, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		sr, err := VerifyStatusReport(sealReport(t, rep, keyNetworkA), a, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 		requireNoErr(t, err)
 		if sr.Node() != a || sr.Report().Message != "m" || sr.Digest().IsZero() {
 			t.Errorf("signed report %+v", sr)
 		}
-		sc, err := VerifyControlReply(sealReply(t, reply, keyNetworkA), a, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		sc, err := VerifyControlReply(sealReply(t, reply, keyNetworkA), a, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 		requireNoErr(t, err)
 		if sc.Node() != a || sc.Reply().Message != "m" || sc.Digest().IsZero() {
 			t.Errorf("signed reply %+v", sc)
 		}
 	})
 	t.Run("no node, no verification", func(t *testing.T) {
-		_, err := VerifyStatusReport(sealReport(t, rep, keyNetworkA), ident.NodeID{}, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		_, err := VerifyStatusReport(sealReport(t, rep, keyNetworkA), ident.NodeID{}, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 		requireErr(t, err, ErrReport)
-		_, err = VerifyControlReply(sealReply(t, reply, keyNetworkA), ident.NodeID{}, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		_, err = VerifyControlReply(sealReply(t, reply, keyNetworkA), ident.NodeID{}, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 		requireErr(t, err, ErrControlReply)
+	})
+	t.Run("no local node, no verification", func(t *testing.T) {
+		a := nodeOf(t, keyIdentityA)
+		_, err := VerifyStatusReport(sealReport(t, rep, keyNetworkA), a, ident.NodeID{}, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		requireErr(t, err, ErrReport)
+		_, err = VerifyControlReply(sealReply(t, reply, keyNetworkA), a, ident.NodeID{}, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		requireErr(t, err, ErrControlReply)
+	})
+	t.Run("a report or reply naming another sending node is refused", func(t *testing.T) {
+		a := nodeOf(t, keyIdentityA)
+		elsewhere := nodeOf(t, keyThird) // not the local node: the signal was sent by someone else
+		other := rep
+		other.Sender = elsewhere
+		_, err := VerifyStatusReport(sealReport(t, other, keyNetworkA), a, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		requireErr(t, err, ErrMismatch)
+		otherReply := reply
+		otherReply.Sender = elsewhere
+		_, err = VerifyControlReply(sealReply(t, otherReply, keyNetworkA), a, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		requireErr(t, err, ErrMismatch)
 	})
 	t.Run("a report is not a reply", func(t *testing.T) {
 		a := nodeOf(t, keyIdentityA)
-		_, err := VerifyControlReply(sealReport(t, rep, keyNetworkA), a, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		_, err := VerifyControlReply(sealReport(t, rep, keyNetworkA), a, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 		requireErr(t, err, record.ErrType)
-		_, err = VerifyStatusReport(sealReply(t, reply, keyNetworkA), a, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		_, err = VerifyStatusReport(sealReply(t, reply, keyNetworkA), a, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 		requireErr(t, err, record.ErrType)
 	})
 	t.Run("a second signature is refused", func(t *testing.T) {
@@ -285,7 +307,7 @@ func TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey(t *testing.T) {
 		r := sealReport(t, rep, keyNetworkA)
 		r2, err := record.Sign(StatusReportType, r.Payload, signerOf(t, keyNetworkA), signerOf(t, keyThird))
 		requireNoErr(t, err)
-		_, err = VerifyStatusReport(r2, a, acceptedFor(t, keyIdentityA, keyNetworkA), t0)
+		_, err = VerifyStatusReport(r2, a, localNode(t), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 		requireErr(t, err, record.ErrSignerNotAllowed)
 	})
 }
@@ -318,6 +340,9 @@ func TestControlReplyRules(t *testing.T) {
 	}{
 		{"the message is an id", created, func(w *controlReplyWire) { w.Message = "a b" }},
 		{"the recipient is an endpoint", created, func(w *controlReplyWire) { w.Recipient = []byte{1} }},
+		{"the sender is a node", created, func(w *controlReplyWire) { w.Sender = []byte{1, 2} }},
+		{"the sender is not zero", created, func(w *controlReplyWire) { w.Sender = make([]byte, 32) }},
+		{"the sender is given", created, func(w *controlReplyWire) { w.Sender = nil }},
 		{"the issue time is required", created, func(w *controlReplyWire) { w.IssuedAt = 0 }},
 		{"exactly one result: none", created, func(w *controlReplyWire) { w.Create = nil }},
 		{"exactly one result: two", created, func(w *controlReplyWire) { w.Close = &outcomeReasonWire{Outcome: 1} }},
@@ -371,7 +396,7 @@ func TestControlReplyRules(t *testing.T) {
 
 func TestControlReplySealRefusesWhatReceiversRefuse(t *testing.T) {
 	d := ControlReplyDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
-	good := ControlReply{Message: "m", Recipient: ep(2), IssuedAt: t0, Result: ControlResult{
+	good := ControlReply{Sender: localNode(t), Message: "m", Recipient: ep(2), IssuedAt: t0, Result: ControlResult{
 		Signal: adapterproto.SignalSessionCreate, Create: &CreateResult{Outcome: adapterproto.CreateReplyCreated, SessionEndpoint: ep(3)}}}
 	cases := map[string]func(*ControlReply){
 		"no result": func(r *ControlReply) { r.Result = ControlResult{} },

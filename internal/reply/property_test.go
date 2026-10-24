@@ -202,7 +202,7 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				if !ok {
 					continue
 				}
-				sr, err := envelope.VerifyStatusReport(rec, nodeOf(idA), acceptedFor(idA, netA), secs(now))
+				sr, err := envelope.VerifyStatusReport(rec, nodeOf(idA), nodeOf(idB), acceptedFor(idA, netA), secs(now))
 				requireNoErr(t, err)
 				n, eff, _, err := outbound.ApplyReport(secs(now), sr)
 				requireNoErr(t, err)
@@ -217,7 +217,7 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 					t.Fatalf("an untracked report was applied")
 				}
 			case kind < 4 && model.isControl: // the sender pulls the control reply
-				sc, err := envelope.VerifyControlReply(reply(), nodeOf(idA), acceptedFor(idA, netA), secs(now))
+				sc, err := envelope.VerifyControlReply(reply(), nodeOf(idA), nodeOf(idB), acceptedFor(idA, netA), secs(now))
 				requireNoErr(t, err)
 				if secs(controlIssued).After(secs(now).Add(2 * time.Minute)) {
 					continue // the reply is dated after now: not issued yet

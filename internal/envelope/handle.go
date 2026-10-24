@@ -1,6 +1,7 @@
 package envelope
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -38,19 +39,24 @@ type Handling struct {
 //
 // In order, and all or nothing:
 //
-//  1. The delivery of the control signal ends as delivered: the target
+//  1. A reply other than the one already accepted for the signal (a different
+//     digest) is ErrPeerContradiction: the target keeps one reply per signal and
+//     sends that same payload every time, so a second distinct one means it broke
+//     that. The same reply again changes nothing.
+//  2. The delivery of the control signal ends as delivered: the target
 //     committed the reply, whatever its outcome says, so the signal was
-//     delivered and executed or refused by the adapter. (A signal the target
-//     rejected or one already closed is not changed by a reply; a rejection is
-//     an error, a closed delivery is left alone.)
-//  2. For a session.create with a body whose outcome is created or unconfirmed,
+//     delivered and executed or refused by the adapter. A signal judged
+//     expired_unconfirmed is corrected; one already closed_unconfirmed is left
+//     as it is and the reply still takes effect below (the derived delivery,
+//     which shares the signal's deadlines, then closes silently at its next
+//     tick). A signal the target is known to have rejected cannot have a reply:
+//     that is ErrPeerContradiction.
+//  3. For a session.create with a body whose outcome is created or unconfirmed,
 //     the initial message goes to the session endpoint the reply names: the
 //     delivery of the message to that endpoint is created in state accepted,
 //     sharing the signal's deadline (the body and the signal were accepted
 //     together), and the endpoint is bound as the one derived from the signal.
-//     A reply that names another endpoint than the one already bound, or none,
-//     is ErrDerivedConflict.
-//  3. The accompanying status report, if any, is applied to the delivery it
+//  4. The accompanying status report, if any, is applied to the delivery it
 //     reports on (Outbound.ApplyReport), which can be the derived one just
 //     created.
 //
@@ -80,28 +86,31 @@ func HandleControlReply(now time.Time, o Outbound, reply SignedControlReply, rep
 	if err := checkNotFuture(now, r.IssuedAt); err != nil {
 		return Handling{}, err
 	}
+	if !o.ControlReplyDigest.IsZero() && o.ControlReplyDigest != reply.Digest() {
+		return Handling{}, fmt.Errorf("%w: another control reply was already accepted for the signal", ErrPeerContradiction)
+	}
 
 	n := o.clone()
+	n.ControlReplyDigest = reply.Digest()
 	var h Handling
 
 	d, out, err := target.Delivery.Apply(now, delivery.Event{Type: delivery.EventDelivered})
+	if errors.Is(err, delivery.ErrIllegalTransition) {
+		return Handling{}, fmt.Errorf("%w: ending the control signal: %w", ErrPeerContradiction, err)
+	}
 	if err != nil {
 		return Handling{}, fmt.Errorf("ending the control signal: %w", err)
 	}
 	n.Recipients[0].Delivery = d
 	h.Control = out
 
-	endpoint, binds := r.Binds()
-	switch {
-	case binds && o.BodyNonEmpty && n.Derived == nil:
+	if endpoint, binds := r.Binds(); binds && o.BodyNonEmpty && n.Derived == nil {
 		rec, _, err := delivery.NewSourceRecord(o.AcceptBefore).Apply(now, delivery.Event{Type: delivery.EventReceipt})
 		if err != nil {
 			return Handling{}, fmt.Errorf("creating the delivery of the initial message: %w", err)
 		}
 		n.Derived = &Tracked{Address: ident.Address{Node: target.Address.Node, Endpoint: endpoint}, Delivery: rec}
 		h.DerivedCreated = true
-	case n.Derived != nil && (!binds || n.Derived.Address.Endpoint != endpoint):
-		return Handling{}, fmt.Errorf("%w: bound to %s", ErrDerivedConflict, n.Derived.Address.Endpoint)
 	}
 	if err := n.Validate(); err != nil {
 		return Handling{}, err

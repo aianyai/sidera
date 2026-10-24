@@ -241,7 +241,7 @@ func TestTheOwnerCanTurnReplyPermissionOff(t *testing.T) {
 		t.Errorf("decision %+v", adm.Decision)
 	}
 	// the zero Request is off too
-	if got := mustAdmit(t, Request{Now: now, Replier: onA(2), Target: senderEndpoint(), ReplyTo: "m-1", Outbound: &o}); got.Decision.Reason != ReasonDisabled {
+	if got := mustAdmit(t, Request{Now: now, Local: nodeOf(idB), Replier: onA(2), Target: senderEndpoint(), ReplyTo: "m-1", Outbound: &o}); got.Decision.Reason != ReasonDisabled {
 		t.Errorf("a request that never said it is on: %+v", got.Decision)
 	}
 	t.Run("off, the evidence is not applied", func(t *testing.T) {
@@ -437,6 +437,7 @@ func TestInvalidRequests(t *testing.T) {
 	base := request(&o, onA(2), now)
 	cases := map[string]func(*Request){
 		"no time":                        func(r *Request) { r.Now = time.Time{} },
+		"no local node":                  func(r *Request) { r.Local = ident.NodeID{} },
 		"no replier":                     func(r *Request) { r.Replier.Node = ident.NodeID{} },
 		"no target":                      func(r *Request) { r.Target = ident.EndpointID{} },
 		"no reply_to":                    func(r *Request) { r.ReplyTo = "" },

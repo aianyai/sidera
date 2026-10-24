@@ -20,6 +20,11 @@ const StatusReportType = "sidera/status-report/1"
 // node is not part of the payload, the verifier knows it from its own record of
 // the message (StatusReportDescriptor).
 type StatusReport struct {
+	// Sender is the node that sent the message, as the target saw it from the
+	// connection. A message is identified by its sender, id and recipient, so a
+	// report names all three; a node that receives a report for another sender
+	// refuses it.
+	Sender ident.NodeID
 	// Message is the id of the message reported on.
 	Message delivery.MessageID
 	// Recipient is the endpoint the message was delivered to. For the initial
@@ -30,7 +35,11 @@ type StatusReport struct {
 	// block, as delivery reports it. The wire form writes the cause only while
 	// the delivery is blocked.
 	Status delivery.StatusReport
-	// ReportedAt is when the target issued the report.
+	// ReportedAt is the moment the target recorded the state the report states,
+	// not the moment it signed the report. A target that sends the report again
+	// for an unchanged state repeats the same ReportedAt under a fresh
+	// signature, so the earliest report that proves arrival (the start of the
+	// reply window) cannot be moved by resending.
 	ReportedAt time.Time
 	// DeliveredAt is when the target saw the delivery acknowledged. Present
 	// exactly when the state is delivered.
@@ -103,6 +112,7 @@ type statusReportWire struct {
 	BlockedCause uint64 `cbor:"5,keyasint,omitempty"`
 	ReportedAt   int64  `cbor:"6,keyasint"`
 	DeliveredAt  *int64 `cbor:"7,keyasint,omitempty"`
+	Sender       []byte `cbor:"8,keyasint"`
 }
 
 func statusReportToWire(r StatusReport) (statusReportWire, error) {
@@ -110,7 +120,7 @@ func statusReportToWire(r StatusReport) (statusReportWire, error) {
 	if !ok {
 		return statusReportWire{}, fmt.Errorf("%w: a target does not report state %s", ErrReport, r.Status.State)
 	}
-	w := statusReportWire{Message: string(r.Message), Recipient: r.Recipient.Bytes(), State: state}
+	w := statusReportWire{Message: string(r.Message), Recipient: r.Recipient.Bytes(), State: state, Sender: r.Sender.Bytes()}
 	if r.Status.Reject != delivery.RejectNone {
 		// An unknown reason has no wire value; a known one on a state other than
 		// rejected is refused by the decoding path that encoding runs.
@@ -143,11 +153,15 @@ func statusReportFromWire(w statusReportWire) (StatusReport, error) {
 	if err != nil {
 		return StatusReport{}, fmt.Errorf("%w: recipient: %w", ErrReport, err)
 	}
+	sender, err := ident.NodeIDFromBytes(w.Sender)
+	if err != nil {
+		return StatusReport{}, fmt.Errorf("%w: sender: %w", ErrReport, err)
+	}
 	state, ok := fromWireCode(stateWire, w.State)
 	if !ok {
 		return StatusReport{}, fmt.Errorf("%w: state %d", ErrReport, w.State)
 	}
-	r := StatusReport{Message: delivery.MessageID(w.Message), Recipient: recipient, Status: delivery.StatusReport{State: state}}
+	r := StatusReport{Sender: sender, Message: delivery.MessageID(w.Message), Recipient: recipient, Status: delivery.StatusReport{State: state}}
 	if (w.Reject != 0) != (state == delivery.StateRejected) {
 		return StatusReport{}, fmt.Errorf("%w: a reject reason is given exactly with the state rejected", ErrReport)
 	}

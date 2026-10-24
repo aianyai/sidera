@@ -50,11 +50,16 @@ type ControlResult struct {
 // reply. Like a status report it is signed by the target node's network key and
 // the node is not in the payload.
 type ControlReply struct {
+	// Sender is the node that sent the signal, as the target saw it from the
+	// connection: a signal is identified by its sender, id and recipient.
+	Sender ident.NodeID
 	// Message is the id of the control signal.
 	Message delivery.MessageID
 	// Recipient is the endpoint the signal was addressed to.
 	Recipient ident.EndpointID
-	// IssuedAt is when the target committed the reply.
+	// IssuedAt is when the target committed the reply. The target stores the
+	// payload with the signal's deduplication record and signs it again each
+	// time it sends it, so every copy has these same fields.
 	IssuedAt time.Time
 	Result   ControlResult
 }
@@ -90,6 +95,7 @@ type controlReplyWire struct {
 	Message   string             `cbor:"1,keyasint"`
 	Recipient []byte             `cbor:"2,keyasint"`
 	IssuedAt  int64              `cbor:"3,keyasint"`
+	Sender    []byte             `cbor:"4,keyasint"`
 	Create    *createWire        `cbor:"5,keyasint,omitempty"`
 	Close     *outcomeReasonWire `cbor:"6,keyasint,omitempty"`
 	Interrupt *outcomeReasonWire `cbor:"7,keyasint,omitempty"`
@@ -101,7 +107,7 @@ func controlReplyToWire(r ControlReply) (controlReplyWire, error) {
 	if err != nil {
 		return controlReplyWire{}, fmt.Errorf("issued_at: %w", err)
 	}
-	w := controlReplyWire{Message: string(r.Message), Recipient: r.Recipient.Bytes(), IssuedAt: issued}
+	w := controlReplyWire{Message: string(r.Message), Recipient: r.Recipient.Bytes(), IssuedAt: issued, Sender: r.Sender.Bytes()}
 	set := 0
 	if c := r.Result.Create; c != nil {
 		set++
@@ -158,7 +164,11 @@ func controlReplyFromWire(w controlReplyWire) (ControlReply, error) {
 	if err != nil {
 		return ControlReply{}, fmt.Errorf("%w: issued_at: %w", ErrControlReply, err)
 	}
-	r := ControlReply{Message: delivery.MessageID(w.Message), Recipient: recipient, IssuedAt: issued}
+	sender, err := ident.NodeIDFromBytes(w.Sender)
+	if err != nil {
+		return ControlReply{}, fmt.Errorf("%w: sender: %w", ErrControlReply, err)
+	}
+	r := ControlReply{Sender: sender, Message: delivery.MessageID(w.Message), Recipient: recipient, IssuedAt: issued}
 	n := 0
 	for _, present := range []bool{w.Create != nil, w.Close != nil, w.Interrupt != nil, w.Status != nil} {
 		if present {

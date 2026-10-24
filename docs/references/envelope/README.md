@@ -26,9 +26,9 @@ is a new type string.
 | 4 | multi-recipient flag | the message as sent has more than one recipient, whatever `to` shows |
 | 5 | `disclose_recipients` | the sender lets each recipient see the whole list |
 | 6 | `kind` | 1 message, 2 `control.session.create`, 3 `control.session.close`, 4 `control.session.interrupt`, 5 `control.endpoint.status` |
-| 7 | `reply_to` | optional id |
+| 7 | `reply_to` | optional id; never on a control signal |
 | 8 | `thread` | optional id-shaped token; the channel does not interpret it |
-| 9 | `evidence` | optional list of at most two embedded signed records: a control reply, then a status report |
+| 9 | `evidence` | optional list of at most two embedded signed records: a control reply, then a status report; never on a control signal |
 | 10 | `seq` | list of `{1: endpoint, 2: seq}` ascending by endpoint, one per recipient on the target node; `seq` from 1 |
 | 11 | `sent_at` | Unix seconds |
 | 12 | `accept_before` | Unix seconds |
@@ -38,24 +38,29 @@ is a new type string.
 
 Rules: a message has a body; a `session.create` may have one (the initial
 message); the other control signals have neither body nor params; a control
-signal has exactly one recipient and is not multi-recipient; several recipients
-need the multi-recipient flag; endpoint identifiers are distinct across the
-list; evidence needs a `reply_to`. `from` is not in the envelope. The cap on
+signal has exactly one recipient, is not multi-recipient, and carries neither a
+`reply_to` nor evidence (it answers no message, and its own result returns as
+its control reply); several recipients need the multi-recipient flag; a
+disclosed list of one entry is the whole message, so it is not flagged
+multi-recipient (an undisclosed list trimmed to one entry may be); endpoint
+identifiers are distinct across the list; evidence needs a `reply_to`. `from` is
+not in the envelope. Encoding refuses what decoding refuses. The cap on
 `accept_before` is judged by the delivery intake, not by the envelope. The
 longest body and the most recipients are parameters (`Limits`) without defaults.
 
-The receiving node adds what the bytes cannot say (`ValidateFor`): it has a
-recipient in `to`; without disclosure all of `to` is on the node; the `seq`
-entries are exactly its recipients'. The sender produces the per-node form with
-`TrimmedFor`.
+The receiving node adds what the bytes cannot say (`ValidateFor`, which the
+receiving node must call on every decoded envelope): it has a recipient in `to`;
+without disclosure all of `to` is on the node; the `seq` entries are exactly its
+recipients'. The sender produces the per-node form with `TrimmedFor`.
 
 The **request digest** (`Envelope.Digest`) is what the target stores with the
 deduplication record of each delivery of the request. It covers the kind, the
-preset, the content type, the body and the two deadlines, and nothing a retry may
-change (the recipient list as trimmed for a path, sequence numbers, the send
-time, the evidence, the thread). A retry with the same id and another digest is a
-conflict; this also means a `message.send` under the id of a control signal's
-initial message conflicts with the initial message's delivery.
+preset, the content type, the body, the two deadlines, `reply_to`, `thread`, the
+multi-recipient flag and `disclose_recipients`, and nothing a retry may change
+(the recipient list as trimmed for a path, sequence numbers, the send time, the
+evidence). A retry with the same id and another digest is a conflict; this also
+means a `message.send` under the id of a control signal's initial message
+conflicts with the initial message's delivery.
 
 ### Status report
 
@@ -69,18 +74,25 @@ key.
 | 3 | state | 1 accepted, 2 delivered, 3 rejected, 4 delivery_unknown, 5 closed_unconfirmed |
 | 4 | reject reason | exactly when rejected: 1 unauthorized, 2 endpoint_missing, 3 endpoint_closed, 4 endpoint_declined, 5 too_large, 6 expired, 7 backlog_expired, 8 second_check_failed, 9 malformed, 10 deadline_out_of_range |
 | 5 | block cause | present exactly when the delivery is blocked (only with accepted): 1 adapter_offline, 2 runtime_auth, 3 native_unavailable |
-| 6 | reported_at | when the target issued it |
+| 6 | reported_at | when the target recorded the state the report states |
 | 7 | delivered_at | exactly when delivered; not after `reported_at` |
+| 8 | sender | the node that sent the message, as the target saw it on the connection |
 
 The blocked flag of `delivery.StatusReport` is the presence of key 5. A report
 proves arrival when its state is accepted, delivered or delivery_unknown.
 
+`reported_at` is the moment the target recorded the state, not the moment it
+signed. A target that sends the report again for an unchanged state (as evidence
+on a reply, or in answer to another pull) repeats the same `reported_at` under a
+fresh signature, so the earliest report that proves arrival, which starts the
+reply window, cannot be moved by resending.
+
 ### Control reply
 
 A record of type `sidera/control-reply/1`, signed by the target node's network
-key: message id (1), the control's recipient endpoint (2), issue time (3), and
-exactly one result under key 5 create, 6 close, 7 interrupt or 8 status, so the
-key says which signal the reply is for.
+key: message id (1), the control's recipient endpoint (2), issue time (3), the
+sending node (4), and exactly one result under key 5 create, 6 close, 7 interrupt
+or 8 status, so the key says which signal the reply is for.
 
 | Result | Fields |
 | ------ | ------ |
@@ -91,44 +103,81 @@ key says which signal the reply is for.
 
 The integer codes and the rules between a result's fields are those of the
 adapter protocol (`adapterproto`); there is no second set of codes. Both records
-carry the network key signature only: the node is not in the payload, because the
-verifier already knows from its own record which node the message went to, and
-verifies against that node's accepted network key. A verified report or reply
-(`SignedReport`, `SignedControlReply`) keeps that node.
+carry the network key signature only: the signer is not in the payload, because
+the verifier already knows from its own record which node the message went to,
+and verifies against that node's accepted network key. A verified report or
+reply (`SignedReport`, `SignedControlReply`) keeps that node.
+
+The one node a payload does name is the **sending node**. A message is
+identified at the target by (sender node, message id, recipient endpoint), the
+key of its deduplication record, and two senders may use the same id. A report
+or reply that did not name its sender could be applied by the wrong node to its
+own message of the same id; the verifiers (`VerifyStatusReport`,
+`VerifyControlReply`) take the local node and refuse a record that names
+another.
+
+The target stores the payload of a control reply with the signal's deduplication
+record and signs it again, with its current network key, each time it sends it as
+evidence or in answer to a pull. The digest excludes signatures, so a reply
+signed again (after a key rotation, say) has the digest it had.
 
 ### The sender's record and applying a report
 
 `Outbound` is the sender node's record of one message: the local sending
 endpoint, the kind, whether the body was non-empty, the delivery deadline, one
-`Tracked` per recipient (address, source-side delivery record, arrival facts)
-and, for a `session.create` with a body whose control reply named a session, one
-more for the initial message. `Outbound.ApplyReport` is the one rule for taking
+`Tracked` per recipient (address, source-side delivery record, arrival facts),
+the digest of the control reply it accepted and, for a `session.create` with a
+body whose control reply named a session, one more `Tracked` for the initial
+message. `Outbound.ApplyReport` is the one rule for taking
 in a verified report, whether pulled or attached to a reply: it checks message,
 signer node and date, applies it with `delivery.Record.ApplyStatusReport`, and
 learns the arrival facts (earliest delivery time of a delivered report, earliest
-issue time of a report that proves arrival).
+`reported_at` of a report that proves arrival). A report whose state cannot
+follow the delivery's is `ErrPeerContradiction`.
 
 ### Control reply handling
 
 `HandleControlReply` is the one entry that takes a verified control reply in. In
 one step, all or nothing:
 
-1. the control signal's own delivery ends as delivered (`EventDelivered`),
+1. a reply with another digest than the one already accepted for the signal is
+   `ErrPeerContradiction`; the same digest again is the same reply and changes
+   nothing;
+2. the control signal's own delivery ends as delivered (`EventDelivered`),
    whatever the outcome: the target committed a reply;
-2. for a `session.create` with a body and an outcome of created or unconfirmed,
+3. for a `session.create` with a body and an outcome of created or unconfirmed,
    the delivery of the initial message to the session endpoint is created
    (accepted, with the signal's own `accept_before` and `report_by`, because
    the body and the signal were accepted together), and the endpoint is bound;
-3. the accompanying status report, if any, is applied to the delivery it reports
+4. the accompanying status report, if any, is applied to the delivery it reports
    on.
 
 A failed creation, a creation without an initial message, and every other
 control signal bind nothing. A report for an endpoint the sender holds no
-delivery for is not applied. A reply that names another endpoint than the bound
-one is refused. The pull path and the evidence path call it, so they reach the
-same state in either order. If the control signal had been judged
+delivery for is not applied. The pull path and the evidence path call it, so
+they reach the same state in either order. If the control signal had been judged
 `expired_unconfirmed`, the reply corrects it (one correction notice) and the
-session is still bound.
+session is still bound. If it had closed as `closed_unconfirmed`, it stays so,
+the session is still bound, and the derived delivery, which shares the signal's
+deadlines, closes silently at its next tick: a reply after the report window
+makes the session known to the sender, so a reply from it can bind, and tells
+the sender nothing it can act on.
+
+`ErrPeerContradiction` is returned for a second distinct control reply, for a
+reply to a signal the target is known to have rejected, and for a report that
+cannot follow the delivery's state. It means the peer broke the contract: the
+sender stops pulling from it for this message and logs it. The error wraps the
+specific cause.
+
+### What each side keeps
+
+Reply permission reads facts that outlive the delivery. The source node keeps the
+outbound record, with its arrival facts and the digest of the accepted control
+reply, at least until `report_by` plus `timing.ClockTolerance` plus the reply
+window (24 hours). The target keeps the control reply payload and the delivery
+facts it reports on for the same period. Both are terminal records, which the
+node keeps for 30 days, so the period is covered. The target stores payloads
+only; the signature is made when a report or reply is sent.
 
 ### Reply permission
 
@@ -166,7 +215,29 @@ own is allowed back in, and its verdict is `authz.Request.Reply`.
   have no reader, and an envelope field nobody reads is a place to hide data.
 - **Request digest instead of a digest of the whole envelope.** A retry travels
   by other paths with other trimming and a new send time; the fields that make
-  it the same request are the ones that decide what the target does.
+  it the same request are the ones that decide what the target does. That
+  includes `reply_to` (it decides reply permission), `thread`, the
+  multi-recipient flag (a target may refuse multi-recipient messages) and
+  `disclose_recipients` (what the recipients see): a retry that changed any of
+  them under the same id would otherwise be taken for the request the target
+  already holds. The evidence, the sequence numbers, the send time and the
+  trimmed recipient list differ between attempts of one request and stay out.
+- **The sending node in reports and replies.** The deduplication key is (sender
+  node, message id, recipient endpoint), so a report that named only the id and
+  the endpoint would fit every sender that used that id. Naming the sender makes
+  a record usable only by the node it was issued for, and a node that receives
+  one meant for another refuses it.
+- **A control signal carries no `reply_to` and no evidence.** Only a message
+  answers a message, and a control signal's result returns as its control reply.
+  A field nobody reads is a place to hide data, and a control signal with
+  evidence would need rules for which node signs it.
+- **One control reply per signal, kept by digest.** The target commits one reply
+  with the execution result and returns that payload on every repeat; the sender
+  keeps the digest of the one it accepted. A different digest later means the
+  peer changed its answer (a failure after it said created, say), and building
+  the delivery of the initial message from the second answer would invent a
+  delivery the first answer ruled out. The digest excludes signatures so a
+  reply signed again with a newer network key is still the same reply.
 - **Initial message as a second delivery under the same id.** The body is
   delivered by `recv` to the new session's endpoint, so it is a delivery to that
   endpoint with its own states and report; the sender cannot know the endpoint
@@ -209,7 +280,8 @@ own is allowed back in, and its verdict is `authz.Request.Reply`.
 
 - `internal/envelope/envelope.go`: `Envelope`, `Limits`, `Encode`, `Decode`,
   `ValidateFor`, `TrimmedFor`, `Digest`, `CheckEvidence`; `kind.go`: `Kind` and
-  its mappings.
+  its mappings (a control signal's action is `adapterreg.ActionOf` of its
+  signal, so that mapping has one home).
 - `internal/envelope/statusreport.go`, `controlreply.go`, `verified.go`: the two
   records, their descriptors and the verified values.
 - `internal/envelope/outbound.go`: `Outbound`, `Tracked`, `Arrival`,
@@ -220,8 +292,10 @@ own is allowed back in, and its verdict is `authz.Request.Reply`.
   independent script) with `golden_test.go`; `envelope_test.go`
   (`TestEnvelopeDecodeRules`, `TestEnvelopeStrictBytes`, `TestKindMappings`,
   `TestValidateFor`, `TestTrimmedForRandom`, `TestRequestDigest`,
-  `TestRetryAndDeduplication`); `records_test.go` (`TestStatusReportRules`,
-  `TestControlReplyRules`, `TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey`);
+  `TestRetryAndDeduplication`, `TestEncodeRefusesWhatDecodeRefuses`);
+  `records_test.go` (`TestStatusReportRules`, `TestControlReplyRules`,
+  `TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey`, which includes the
+  sending-node check); `golden_test.go` (`TestGoldenRequestDigest`);
   `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`); `fuzz_test.go`.
   `internal/reply/reply_test.go` holds the named acceptance scenarios
   (`TestAfterInboundTighteningAReplyAndASessionCreateReplyStillGetBack`,

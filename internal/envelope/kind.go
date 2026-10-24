@@ -3,6 +3,7 @@ package envelope
 import (
 	"fmt"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -93,23 +94,19 @@ func kindFromWire(v uint64) (Kind, error) {
 }
 
 // Action returns the action the policy judges an envelope of this kind as, and
-// whether k has one. It is the one mapping between what an envelope asks for
-// and what authz is asked to decide; callers never map kinds to actions
-// themselves.
+// whether k has one. A message is message.send; a control signal is the action
+// adapterreg.ActionOf gives its signal, so the mapping from control signals to
+// actions has one home and callers never map kinds themselves.
 func (k Kind) Action() (authz.Action, bool) {
-	switch k {
-	case KindMessage:
+	if k == KindMessage {
 		return authz.ActionMessageSend, true
-	case KindSessionCreate:
-		return authz.ActionSessionCreate, true
-	case KindSessionClose:
-		return authz.ActionSessionClose, true
-	case KindSessionInterrupt:
-		return authz.ActionSessionInterrupt, true
-	case KindEndpointStatus:
-		return authz.ActionEndpointStatus, true
 	}
-	return 0, false
+	signal, ok := k.Signal()
+	if !ok {
+		return 0, false
+	}
+	action, err := adapterreg.ActionOf(signal)
+	return action, err == nil
 }
 
 // Signal returns the control signal of the adapter protocol that k stands for,

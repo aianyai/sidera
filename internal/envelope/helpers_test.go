@@ -98,6 +98,15 @@ func mustDecodeRecord(t testing.TB, b []byte) record.Record {
 	return r
 }
 
+func mustEncodeRecord(t testing.TB, r record.Record) []byte {
+	t.Helper()
+	b, err := r.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
 func requireErr(t testing.TB, err error, want ...error) {
 	t.Helper()
 	if err == nil {
@@ -117,9 +126,16 @@ func requireNoErr(t testing.TB, err error) {
 	}
 }
 
-// sealReport signs a status report with the network key of netSeed.
+// localNode is the node the tests' messages are sent from: node B.
+func localNode(t testing.TB) ident.NodeID { return nodeOf(t, keyIdentityB) }
+
+// sealReport signs a status report with the network key of netSeed. A report
+// without a sender names the local node.
 func sealReport(t testing.TB, r StatusReport, netSeed int) record.Record {
 	t.Helper()
+	if r.Sender.IsZero() {
+		r.Sender = localNode(t)
+	}
 	d := StatusReportDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 	rec, err := record.Seal(d, r, signerOf(t, netSeed))
 	if err != nil {
@@ -128,9 +144,13 @@ func sealReport(t testing.TB, r StatusReport, netSeed int) record.Record {
 	return rec
 }
 
-// sealReply signs a control reply with the network key of netSeed.
+// sealReply signs a control reply with the network key of netSeed. A reply
+// without a sender names the local node.
 func sealReply(t testing.TB, r ControlReply, netSeed int) record.Record {
 	t.Helper()
+	if r.Sender.IsZero() {
+		r.Sender = localNode(t)
+	}
 	d := ControlReplyDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0)
 	rec, err := record.Seal(d, r, signerOf(t, netSeed))
 	if err != nil {

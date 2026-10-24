@@ -57,17 +57,18 @@ func goldenRecord[P any](t *testing.T, name string, golden []byte, digest, signe
 
 func TestGoldenStatusReports(t *testing.T) {
 	d := StatusReportDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(time.Hour))
+	b := nodeOf(t, keyIdentityB)
 	goldenRecord(t, "delivered", goldenReportDelivered, goldenReportDeliveredDigest, goldenReportDeliveredSignedBytes, d, StatusReport{
-		Message: "ctl-0001", Recipient: ep(3), Status: delivery.StatusReport{State: delivery.StateDelivered},
+		Sender: b, Message: "ctl-0001", Recipient: ep(3), Status: delivery.StatusReport{State: delivery.StateDelivered},
 		ReportedAt: t0.Add(760 * time.Second), DeliveredAt: t0.Add(700 * time.Second),
 	})
 	goldenRecord(t, "accepted and blocked", goldenReportBlocked, goldenReportBlockedDigest, goldenReportBlockedSignedBytes, d, StatusReport{
-		Message: "msg-0001", Recipient: ep(1),
+		Sender: b, Message: "msg-0001", Recipient: ep(1),
 		Status:     delivery.StatusReport{State: delivery.StateAccepted, Blocked: true, BlockedCause: delivery.CauseAdapterOffline},
 		ReportedAt: t0.Add(120 * time.Second),
 	})
 	goldenRecord(t, "rejected", goldenReportRejected, goldenReportRejectedDigest, goldenReportRejectedSignedBytes, d, StatusReport{
-		Message: "msg-0003", Recipient: ep(1),
+		Sender: b, Message: "msg-0003", Recipient: ep(1),
 		Status:     delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectBacklogExpired},
 		ReportedAt: t0.Add(4000 * time.Second),
 	})
@@ -75,28 +76,29 @@ func TestGoldenStatusReports(t *testing.T) {
 
 func TestGoldenControlReplies(t *testing.T) {
 	d := ControlReplyDescriptor(nodeOf(t, keyIdentityA), acceptedFor(t, keyIdentityA, keyNetworkA), t0.Add(time.Hour))
+	b := nodeOf(t, keyIdentityB)
 	goldenRecord(t, "create created", goldenReplyCreated, goldenReplyCreatedDigest, goldenReplyCreatedSignedBytes, d, ControlReply{
-		Message: "ctl-0001", Recipient: ep(2), IssuedAt: t0.Add(650 * time.Second),
+		Sender: b, Message: "ctl-0001", Recipient: ep(2), IssuedAt: t0.Add(650 * time.Second),
 		Result: ControlResult{Signal: adapterproto.SignalSessionCreate, Create: &CreateResult{
 			Outcome: adapterproto.CreateReplyCreated, SessionEndpoint: ep(3)}},
 	})
 	goldenRecord(t, "create failed", goldenReplyFailed, goldenReplyFailedDigest, goldenReplyFailedSignedBytes, d, ControlReply{
-		Message: "ctl-0002", Recipient: ep(2), IssuedAt: t0.Add(30 * time.Second),
+		Sender: b, Message: "ctl-0002", Recipient: ep(2), IssuedAt: t0.Add(30 * time.Second),
 		Result: ControlResult{Signal: adapterproto.SignalSessionCreate, Create: &CreateResult{
 			Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonPresetUnavailable}},
 	})
 	goldenRecord(t, "close unconfirmed", goldenReplyClose, goldenReplyCloseDigest, goldenReplyCloseSignedBytes, d, ControlReply{
-		Message: "ctl-0003", Recipient: ep(3), IssuedAt: t0.Add(40 * time.Second),
+		Sender: b, Message: "ctl-0003", Recipient: ep(3), IssuedAt: t0.Add(40 * time.Second),
 		Result: ControlResult{Signal: adapterproto.SignalSessionClose, Close: &adapterproto.ControlCloseReply{
 			Outcome: adapterproto.CloseReplyUnconfirmed, Reason: adapterproto.CloseReasonAdapterOffline}},
 	})
 	goldenRecord(t, "interrupt failed", goldenReplyInterrupt, goldenReplyInterruptDigest, goldenReplyInterruptSignedBytes, d, ControlReply{
-		Message: "ctl-0005", Recipient: ep(3), IssuedAt: t0.Add(50 * time.Second),
+		Sender: b, Message: "ctl-0005", Recipient: ep(3), IssuedAt: t0.Add(50 * time.Second),
 		Result: ControlResult{Signal: adapterproto.SignalSessionInterrupt, Interrupt: &adapterproto.ControlInterruptReply{
 			Outcome: adapterproto.InterruptReplyFailed, Reason: adapterproto.InterruptReasonNativeError}},
 	})
 	goldenRecord(t, "endpoint status", goldenReplyStatus, goldenReplyStatusDigest, goldenReplyStatusSignedBytes, d, ControlReply{
-		Message: "ctl-0004", Recipient: ep(1), IssuedAt: t0.Add(90 * time.Second),
+		Sender: b, Message: "ctl-0004", Recipient: ep(1), IssuedAt: t0.Add(90 * time.Second),
 		Result: ControlResult{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{
 			Activity: adapterproto.ActivityBusy, Queued: 3,
 			Conditions: []adapterproto.ControlCondition{adapterproto.ControlConditionAdapterOffline, adapterproto.ControlConditionServerRequestRejected},
@@ -153,10 +155,20 @@ func TestGoldenEnvelopes(t *testing.T) {
 }
 
 func TestGoldenRequestDigest(t *testing.T) {
-	e, err := Decode(goldenEnvelopeSessionCreate, testLimits)
-	requireNoErr(t, err)
-	d := e.Digest()
-	if got := hex.EncodeToString(d[:]); got != goldenSessionCreateRequestDigest {
-		t.Errorf("request digest = %s, want %s", got, goldenSessionCreateRequestDigest)
+	for name, c := range map[string]struct {
+		envelope []byte
+		want     string
+	}{
+		"a session.create with an initial message":      {goldenEnvelopeSessionCreate, goldenSessionCreateRequestDigest},
+		"a reply with a thread to disclosed recipients": {goldenEnvelopeReply, goldenReplyRequestDigest},
+	} {
+		t.Run(name, func(t *testing.T) {
+			e, err := Decode(c.envelope, testLimits)
+			requireNoErr(t, err)
+			d := e.Digest()
+			if got := hex.EncodeToString(d[:]); got != c.want {
+				t.Errorf("request digest = %s, want %s", got, c.want)
+			}
+		})
 	}
 }

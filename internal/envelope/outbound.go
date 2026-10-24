@@ -1,12 +1,14 @@
 package envelope
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // Arrival is what a sender has learned from signed status reports about when a
@@ -58,6 +60,12 @@ type Outbound struct {
 	// shares it and the report_by that follows from it.
 	AcceptBefore time.Time
 	Recipients   []Tracked
+	// ControlReplyDigest is the digest of the control reply this record
+	// accepted; zero until one was. A reply with the same digest is the same
+	// reply again and changes nothing, any other is a contradiction by the peer
+	// (HandleControlReply). The target keeps one reply per signal, so a second
+	// distinct one means it broke that.
+	ControlReplyDigest record.Digest
 	// Derived is the delivery of the initial message to the session the control
 	// signal created. Nil until a control reply binds it, and only possible for
 	// a session.create with a body.
@@ -77,6 +85,10 @@ func (o Outbound) Validate() error {
 		return fmt.Errorf("%w: only a session.create with a body has a derived delivery", ErrOutbound)
 	case o.Derived != nil && o.Derived.Address.Node != o.Recipients[0].Address.Node:
 		return fmt.Errorf("%w: the derived endpoint is on another node than the control's recipient", ErrOutbound)
+	case o.Derived != nil && o.ControlReplyDigest.IsZero():
+		return fmt.Errorf("%w: a derived delivery is bound by a control reply, whose digest is kept", ErrOutbound)
+	case !o.ControlReplyDigest.IsZero() && !o.Kind.IsControl():
+		return fmt.Errorf("%w: only a control signal has a control reply", ErrOutbound)
 	}
 	seen := map[ident.EndpointID]struct{}{}
 	for _, t := range append(slices.Clone(o.Recipients), derivedList(o.Derived)...) {
@@ -158,7 +170,8 @@ const (
 // The report must be about this message, signed by the node the delivery's
 // endpoint is on, and not dated later than now plus the clock tolerance. A
 // report for an endpoint with no delivery here changes nothing (ReportNotTracked).
-// On an error nothing changes.
+// A report whose state cannot follow the delivery's (a rejection of a delivery
+// already delivered, say) is ErrPeerContradiction. On an error nothing changes.
 func (o Outbound) ApplyReport(now time.Time, rep SignedReport) (Outbound, ReportEffect, []delivery.Outcome, error) {
 	if err := o.Validate(); err != nil {
 		return o, ReportNone, nil, err
@@ -186,6 +199,9 @@ func (o Outbound) ApplyReport(now time.Time, rep SignedReport) (Outbound, Report
 		}
 	}
 	d, outs, err := t.Delivery.ApplyStatusReport(now, r.Status)
+	if errors.Is(err, delivery.ErrIllegalTransition) {
+		return o, ReportNone, nil, fmt.Errorf("%w: %w", ErrPeerContradiction, err)
+	}
 	if err != nil {
 		return o, ReportNone, nil, err
 	}
