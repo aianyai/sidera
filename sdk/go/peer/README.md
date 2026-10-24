@@ -24,6 +24,7 @@ method the peer handles itself is the `$/cancel_request` notification.
 | `NoEffect(err)`, `ResultUnknown(err)` | The effect rule: after an error from `Call`, did the request definitely do nothing, or is the outcome unknown? |
 | `Done()`, `Err()`, `Close()` | Learn that and why the connection ended; end it. |
 | `Error`, `NewError`, `Code*` | The error object a handler returns and `Call` reports; the code table. |
+| `RequestID`, `CancelRequestParams` | The one statement of the request id rule, and the params of `$/cancel_request`, for the layers above to reuse instead of restating. |
 
 ## Rules
 
@@ -35,9 +36,10 @@ method the peer handles itself is the `$/cancel_request` notification.
   `encoding/json` silently replaces bad bytes) and valid JSON (`-32700`, the
   connection continues). It must be an object with `"jsonrpc":"2.0"`; batches
   and non-objects are `-32600` and the connection continues. Member names are
-  matched exactly. An `id` is a string or an integer that fits in 64 bits;
-  `null`, fractions and exponents are invalid, so two spellings of one number
-  cannot be two different in-flight requests.
+  matched exactly. An `id` is an integer of at most 2^53-1 in absolute value or a
+  string of 1 to 128 characters (`RequestID`); `null`, fractions and exponents
+  are invalid, so two spellings of one number cannot be two different in-flight
+  requests.
 - **Overload is decided first.** The read loop classifies a request, finds its
   handler and checks its id; if the request queue (`MaxPendingRequests`) is
   full it answers `-32001` immediately. Parameters are not examined and no

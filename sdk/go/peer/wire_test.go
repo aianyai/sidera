@@ -336,6 +336,43 @@ func TestCancellation(t *testing.T) {
 	})
 }
 
+func TestCancelWithoutAUsableRequestIDCancelsNothing(t *testing.T) {
+	leakGuard(t)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
+		p.Handle("wait", func(ctx context.Context, _ json.RawMessage) (any, error) {
+			started <- struct{}{}
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-release:
+				return struct{}{}, nil
+			}
+		})
+	})
+	// The zero value of a missing id is 0, so request 0 shows that none of these
+	// is read as a cancel of it.
+	r.send(`{"jsonrpc":"2.0","id":0,"method":"wait"}`)
+	<-started
+	for _, params := range []string{
+		`{}`, `{"request_id":null}`, `{"request_id":""}`, `{"request_id":1.0}`,
+		`{"request_id":9223372036854775807}`, `{"request_id":[0]}`,
+	} {
+		r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":` + params + `}`)
+	}
+	r.send(`{"jsonrpc":"2.0","method":"$/cancel_request"}`)
+	// The read loop answers this on its own, so once the reply is here the cancels were processed.
+	r.send(`{"jsonrpc":"2.0","id":1,"method":"no.such.method"}`)
+	if f := r.recv(); string(f.ID) != "1" || f.errCode() != peer.CodeMethodNotFound {
+		t.Fatalf("got %+v", f)
+	}
+	close(release)
+	if f := r.recv(); string(f.ID) != "0" || f.Error != nil {
+		t.Fatalf("request 0 was disturbed: %+v", f)
+	}
+}
+
 func TestWriteTimeoutClosesTransportOnStalledReader(t *testing.T) {
 	leakGuard(t)
 	in, _ := io.Pipe() // never delivers anything
@@ -579,7 +616,13 @@ func TestInvalidRequestIDs(t *testing.T) {
 		{"fraction", `1.5`},
 		{"integral fraction", `1.0`},
 		{"exponent", `1e2`},
+		{"first number beyond the exact range", `9007199254740992`},
+		{"last negative number beyond the exact range", `-9007199254740992`},
+		{"largest int64", `9223372036854775807`},
 		{"beyond int64", `9223372036854775808`},
+		{"empty string", `""`},
+		{"string of 129 characters", `"` + strings.Repeat("a", 129) + `"`},
+		{"string of 129 two-byte characters", `"` + strings.Repeat("é", 129) + `"`},
 		{"object", `{}`},
 		{"array", `[1]`},
 		{"boolean", `true`},
@@ -592,15 +635,21 @@ func TestInvalidRequestIDs(t *testing.T) {
 			}
 		})
 	}
-	for _, id := range []string{`0`, `-5`, `9223372036854775807`, `"abc"`, `""`, `"abc"`} {
+	valid := []string{
+		`0`, `-0`, `-5`, `9007199254740991`, `-9007199254740991`,
+		`"abc"`, `"a"`, `"` + strings.Repeat("a", 128) + `"`,
+		// The limit counts characters, not bytes: 128 of them take 256 bytes.
+		`"` + strings.Repeat("é", 128) + `"`,
+	}
+	for _, id := range valid {
 		r.send(`{"jsonrpc":"2.0","id":` + id + `,"method":"echo"}`)
 		f := r.recv()
 		if f.Error != nil || string(f.ID) != id {
-			t.Fatalf("id %s: got %+v, want a result echoing the id as received", id, f)
+			t.Fatalf("id %.40s: got %+v, want a result echoing the id as received", id, f)
 		}
 	}
-	if ran.Load() != 6 {
-		t.Fatalf("handler ran %d times, want 6", ran.Load())
+	if int(ran.Load()) != len(valid) {
+		t.Fatalf("handler ran %d times, want %d", ran.Load(), len(valid))
 	}
 }
 

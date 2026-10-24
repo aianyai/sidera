@@ -63,7 +63,9 @@ Behaviour, each point pinned by the tests named in "Where":
   return `ErrOverloaded` and write nothing. Replies the read loop owes wait for
   room instead, which stops reading from a flooding counterpart for at most
   `WriteTimeout`.
-- **Ids.** Strings or integers that fit in 64 bits. A late response, one whose
+- **Ids.** An integer of at most 2^53-1 in absolute value, or a string of 1 to
+  128 characters: `peer.RequestID`, the only statement of the rule, which the
+  schema repeats and a conformance test holds equal. A late response, one whose
   call has timed out or been cancelled, is dropped and logged.
 - **Close** is idempotent, ends every pending call with `ErrClosed`, cancels
   handler contexts and leaves no goroutine behind once handlers return.
@@ -133,10 +135,15 @@ anything not listed, including unknown codes, counts as unknown.
   is the right backpressure on a flooding counterpart, and the write timeout
   bounds it. The cost is that two peers that both flood each other can stall
   each other until the timeout fires, after which the connection is closed.
-- **`id` is a string or a 64-bit integer.** Fractions, exponents and `null`
-  have several spellings of one value (`1`, `1.0`, `1e0`), which would defeat
-  the in-flight check and cancellation; rejecting them removes the ambiguity.
-  Null ids stay reserved for errors that cannot name a request.
+- **`id` is a string or an integer every JSON implementation represents
+  exactly.** Fractions, exponents and `null` have several spellings of one value
+  (`1`, `1.0`, `1e0`), which would defeat the in-flight check and cancellation;
+  rejecting them removes the ambiguity. A 64-bit integer would be rounded by a
+  peer written in JavaScript or any language that reads numbers as doubles, and
+  the echoed id would then name another request, so the range stops at 2^53-1,
+  the bound the schema can state. The string length is counted in characters
+  because that is what the schema counts. Null ids stay reserved for errors that
+  cannot name a request.
 - **A response with a valid id but an invalid body fails its call.** Dropping
   it would leave the caller waiting for its timeout on a counterpart that
   already answered.
@@ -159,6 +166,7 @@ anything not listed, including unknown codes, counts as unknown.
 | ------- | ---- |
 | Line reader with the length limit | `sdk/go/peer/frame.go` (`frameReader`) |
 | Classification of one line, id keys, outbound encoding | `sdk/go/peer/message.go` (`classify`, `idKey`) |
+| The request id rule, `$/cancel_request` params | `sdk/go/peer/requestid.go` (`RequestID`, `CancelRequestParams`) |
 | Error codes, `Error`, effect rule | `sdk/go/peer/errors.go` (`NoEffect`, `ResultUnknown`) |
 | Peer lifecycle, parameters, termination | `sdk/go/peer/peer.go` |
 | Writer, write timeout, read loop | `sdk/go/peer/io.go` |
@@ -182,7 +190,8 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | Owed error replies wait for room and are never dropped (flood backpressure) | `TestReadLoopWaitsWhenErrorRepliesCannotBeQueued` |
 | Notification order and overflow | `TestNotificationsAreHandledInArrivalOrder`, `TestNotificationOverflowClosesConnection` |
 | Outbound full | `TestOutboundQueueFullReturnsErrOverloadedAndWritesNothing`, `TestRefusedCallLeavesNoPendingEntry` |
-| Duplicate and invalid ids | `TestDuplicateInFlightIDIsInvalidRequest`, `TestInvalidRequestIDs` |
+| Duplicate and invalid ids, the id rule | `TestDuplicateInFlightIDIsInvalidRequest`, `TestInvalidRequestIDs`, `TestRequestIDJSON`, `TestRequestIDValidate`, `TestClassify` |
+| A cancel without a usable id cancels nothing | `TestCancelWithoutAUsableRequestIDCancelsNothing` |
 | Late response, malformed response | `TestLateResponseIsDroppedAndLogged`, `TestMalformedResponseFailsTheCall` |
 | Unknown method and notification | `TestUnknownMethodIsMethodNotFound`, `TestUnknownNotificationIsLoggedAndDropped` |
 | Close, pending calls, goroutines | `TestCloseEndsPendingCallsWithErrClosed`, `TestCloseWithoutStartAndCloseFromHandler`, `TestCloseWaitsForReaderAndWriter`, `TestNoGoroutineLeakAfterManyPeers` |

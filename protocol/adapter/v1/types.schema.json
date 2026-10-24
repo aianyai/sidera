@@ -59,7 +59,7 @@
       }
     },
     "RequestID": {
-      "description": "A request identifier: an integer or a string.",
+      "description": "A request identifier: an integer or a string. An integer is written in plain digits, without a fraction or an exponent, which JSON Schema cannot require: 1.0 and 1e2 are integers to it, but not request identifiers.",
       "oneOf": [
         { "type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991 },
         { "type": "string", "minLength": 1, "maxLength": 128 }

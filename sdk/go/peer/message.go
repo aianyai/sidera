@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"unicode/utf8"
 )
 
@@ -168,28 +167,15 @@ func parseErrorObject(raw json.RawMessage) *Error {
 }
 
 // idKey returns the canonical key of a request or response id and whether it
-// is valid: a string, or an integer that fits int64. Null, fractions,
-// exponents, objects and arrays are not valid ids, so "1" and "1.0" cannot be
-// two spellings of different in-flight requests.
+// is valid under the rule of RequestID. Null, fractions, exponents, objects and
+// arrays are not valid ids, so "1" and "1.0" cannot be two spellings of
+// different in-flight requests.
 func idKey(raw json.RawMessage) (string, bool) {
-	if len(raw) == 0 {
+	var id RequestID
+	if len(raw) == 0 || json.Unmarshal(raw, &id) != nil {
 		return "", false
 	}
-	switch c := raw[0]; {
-	case c == '"':
-		var s string
-		if json.Unmarshal(raw, &s) != nil {
-			return "", false
-		}
-		return "s" + s, true
-	case c == '-' || (c >= '0' && c <= '9'):
-		n, err := strconv.ParseInt(string(raw), 10, 64)
-		if err != nil {
-			return "", false
-		}
-		return "n" + strconv.FormatInt(n, 10), true
-	}
-	return "", false
+	return id.key(), true
 }
 
 // structured reports whether params may be handed to a handler: absent, an
@@ -257,8 +243,12 @@ func marshalParams(params any) (json.RawMessage, error) {
 	return raw, nil
 }
 
-func requestLine(id int64, method string, params json.RawMessage) ([]byte, error) {
-	return encodeLine(wire{ID: json.RawMessage(strconv.FormatInt(id, 10)), Method: method, Params: params})
+func requestLine(id RequestID, method string, params json.RawMessage) ([]byte, error) {
+	rawID, err := id.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	return encodeLine(wire{ID: rawID, Method: method, Params: params})
 }
 
 func notificationLine(method string, params json.RawMessage) ([]byte, error) {

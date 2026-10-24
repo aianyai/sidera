@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -37,10 +38,11 @@ func oracleClassify(line []byte) verdict {
 	validID := func(id any) bool {
 		switch x := id.(type) {
 		case string:
-			return true
+			n := utf8.RuneCountInString(x)
+			return n >= 1 && n <= 128
 		case json.Number:
-			_, err := strconv.ParseInt(string(x), 10, 64)
-			return err == nil
+			n, err := strconv.ParseInt(string(x), 10, 64)
+			return err == nil && n >= -(1<<53-1) && n <= 1<<53-1
 		}
 		return false
 	}
@@ -96,6 +98,16 @@ var classifyCorpus = []struct {
 	{"request with fractional id", `{"jsonrpc":"2.0","id":1.5,"method":"m"}`},
 	{"request with exponent id", `{"jsonrpc":"2.0","id":1e0,"method":"m"}`},
 	{"request with huge id", `{"jsonrpc":"2.0","id":99999999999999999999,"method":"m"}`},
+	{"request with the largest exact id", `{"jsonrpc":"2.0","id":9007199254740991,"method":"m"}`},
+	{"request with the smallest exact id", `{"jsonrpc":"2.0","id":-9007199254740991,"method":"m"}`},
+	{"request with id beyond the exact range", `{"jsonrpc":"2.0","id":9007199254740992,"method":"m"}`},
+	{"request with negative id beyond the exact range", `{"jsonrpc":"2.0","id":-9007199254740992,"method":"m"}`},
+	{"request with the largest int64 id", `{"jsonrpc":"2.0","id":9223372036854775807,"method":"m"}`},
+	{"request with empty string id", `{"jsonrpc":"2.0","id":"","method":"m"}`},
+	{"request with 128-character string id", `{"jsonrpc":"2.0","id":"` + strings.Repeat("é", 128) + `","method":"m"}`},
+	{"request with 129-character string id", `{"jsonrpc":"2.0","id":"` + strings.Repeat("é", 129) + `","method":"m"}`},
+	{"response with id beyond the exact range", `{"jsonrpc":"2.0","id":9007199254740992,"result":{}}`},
+	{"response with empty string id", `{"jsonrpc":"2.0","id":"","result":{}}`},
 	{"request with object id", `{"jsonrpc":"2.0","id":{},"method":"m"}`},
 	{"request with bool id", `{"jsonrpc":"2.0","id":true,"method":"m"}`},
 	{"empty method", `{"jsonrpc":"2.0","method":""}`},

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
 )
 
 // Call sends a request and waits for the answer, decoding the result into
@@ -66,7 +65,7 @@ func (p *Peer) encodeCall(ctx context.Context, method string, params any) (line 
 		return nil, 0, fmt.Errorf("%w: %w", ErrNotSent, err)
 	}
 	id = p.nextID.Add(1)
-	line, err = requestLine(id, method, raw)
+	line, err = requestLine(NumberID(id), method, raw)
 	if err != nil {
 		return nil, 0, fmt.Errorf("%w: %w", ErrNotSent, err)
 	}
@@ -92,7 +91,10 @@ func decodeResult(res callResult, into any) error {
 // sendCancel asks the other side to stop working on request id. It is
 // advisory, so it is dropped rather than waiting when the queue is full.
 func (p *Peer) sendCancel(id int64) {
-	params := json.RawMessage(`{"request_id":` + strconv.FormatInt(id, 10) + `}`)
+	params, err := marshalValue(CancelRequestParams{RequestID: NumberID(id)})
+	if err != nil {
+		return
+	}
 	line, err := notificationLine(MethodCancelRequest, params)
 	if err != nil {
 		return

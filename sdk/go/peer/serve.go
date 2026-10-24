@@ -90,18 +90,16 @@ func (p *Peer) acceptNotification(msg message) {
 // cancelRequest cancels the context of an in-flight inbound request. The
 // request is still answered, exactly once, by its worker.
 func (p *Peer) cancelRequest(params json.RawMessage) {
-	var body struct {
-		RequestID json.RawMessage `json:"request_id"`
-	}
+	var body CancelRequestParams
 	if err := json.Unmarshal(params, &body); err != nil {
 		p.log.Warn("cancel request with unusable params")
 		return
 	}
-	key, ok := idKey(body.RequestID)
-	if !ok {
+	if body.Validate() != nil {
 		p.log.Warn("cancel request with unusable request_id")
 		return
 	}
+	key := body.RequestID.key()
 	p.mu.Lock()
 	req := p.inbound[key]
 	p.mu.Unlock()
