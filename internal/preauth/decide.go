@@ -54,7 +54,7 @@ const (
 	// network layer closes the connection.
 
 	// ReasonInvalidInput: the facts or the message cannot be judged: no time, no
-	// peer key, an unset kind, a serial state filed under the wrong node.
+	// peer key, an unset kind, a serial state that was not loaded (a nil map).
 	ReasonInvalidInput
 	// ReasonRevocationsUnavailable: no revocation set was given (a nil set).
 	// Without one nothing can be known to be unrevoked, and the revocation
@@ -155,7 +155,10 @@ type Facts struct {
 	// lists as retired stay retired.
 	Trust trust.View
 	// SerialSeen is the highest network-key certificate serial seen, per node. A
-	// node missing from the map has had none seen.
+	// node missing from the map has had none seen. The map must be loaded: a nil
+	// map is a state nobody loaded and is refused (ReasonInvalidInput), because
+	// reading it as "nothing seen" would let an old network key back in. A node
+	// that has seen nothing at all passes an empty map.
 	SerialSeen map[ident.NodeID]record.SerialSeen
 	// Authorized is the local authorized-persons list. The zero List is empty.
 	Authorized admin.List
@@ -265,6 +268,8 @@ func Decide(f Facts, peer ident.PublicKey, ex Exchange) Decision {
 		return refused(ReasonInvalidInput)
 	case f.Revocations == nil:
 		return refused(ReasonRevocationsUnavailable)
+	case f.SerialSeen == nil:
+		return refused(ReasonInvalidInput)
 	}
 	switch ex.Kind {
 	case KindNode:
@@ -376,10 +381,10 @@ func highestSeen(seen map[ident.NodeID]record.SerialSeen, advance record.SerialS
 // current one for its node, valid now and not revoked, and the node is a member
 // as Decide would decide (trusted directly, by inheritance, or suspended). The
 // accounting exempts these peers from the aggregate cap before they have
-// completed an exchange on this run. Facts without a time or a revocation set
-// give none.
+// completed an exchange on this run. Facts without a time, a revocation set or a
+// loaded serial state give none.
 func HeldMembers(f Facts, certs []record.Verified[record.NetworkKeyCertificate]) []ident.PublicKey {
-	if f.Now.IsZero() || f.Revocations == nil {
+	if f.Now.IsZero() || f.Revocations == nil || f.SerialSeen == nil {
 		return nil
 	}
 	var out []ident.PublicKey
@@ -401,6 +406,33 @@ func HeldMembers(f Facts, certs []record.Verified[record.NetworkKeyCertificate])
 		out = append(out, c.NetworkKey)
 	}
 	return out
+}
+
+// NextHeldExpiry returns the earliest instant after f.Now at which the answer of
+// HeldMembers changes with the clock alone: the earliest end of a held
+// certificate or of a credential in the trust view that has not ended yet. The
+// zero time means nothing held or credited ends. HeldMembers is a function of
+// the facts and the time, so a caller that refreshes SetHeld only when the facts
+// change would keep a member exempt after its certificate or credential ran out;
+// it also refreshes when this instant passes. Facts without a time give the
+// zero time.
+func NextHeldExpiry(f Facts, certs []record.Verified[record.NetworkKeyCertificate]) time.Time {
+	var next time.Time
+	consider := func(t time.Time) {
+		if !t.IsZero() && t.After(f.Now) && (next.IsZero() || t.Before(next)) {
+			next = t
+		}
+	}
+	if f.Now.IsZero() {
+		return time.Time{}
+	}
+	for _, c := range certs {
+		consider(c.Payload().NotAfter)
+	}
+	for _, c := range f.Trust.Credentials {
+		consider(c.NotAfter)
+	}
+	return next
 }
 
 // trustView is the view trust.Evaluate decides on: Facts.Trust with every node

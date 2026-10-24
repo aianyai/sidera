@@ -22,6 +22,7 @@ timers, and applies the answers.
 | `Params`, `Params.Validate`, `ParamsError`                | The numbers of the accounting model, none decided here; the check that `NonMemberLifetime >= ExchangeDeadline + PairingOnlineTimeout`. |
 | `Accounting`, `NewAccounting`                           | The connection-accounting model as pure state transitions: `Secured`, `Connected`, `Completed`, `Disconnected`, `Sweep`, `Overdue`, `SetHeld`, `Forget`, `Known`, `Counts`. |
 | `HeldMembers(Facts, certificates)`                      | The network keys of held certificates that belong to members; what `SetHeld` is given. |
+| `NextHeldExpiry(Facts, certificates)`                   | The earliest end of a held certificate or credential after now: when `SetHeld` is refreshed for time alone. |
 | `Allowed(state, Use)`                                   | The one table: whether a peer in a state may open a stream of a protocol or make a relay request. `Access{Verdict, Reason}`. |
 
 ## Rules
@@ -102,8 +103,10 @@ timers, and applies the answers.
     `trust.Evaluate`, so a retired intermediate carries no trust whether or not the
     caller copied the set into the view. Nodes the view lists itself stay retired.
     The caller's view is not changed.
-  - **Failure closed.** An unset time, an unset peer key, an unset kind and a
-    `nil` revocation set are refused. `revocation` panics on a `nil` set so that a
+  - **Failure closed.** An unset time, an unset peer key, an unset kind, a
+    `nil` revocation set and a `nil` serial state are refused (the last with
+    `ReasonInvalidInput`; an empty map is how a node that has seen nothing says
+    so). `revocation` panics on a `nil` set so that a
     set nobody loaded cannot read as "nothing revoked"; `Decide` refuses it first
     with `ReasonRevocationsUnavailable`, so a missing set is a decision and not a
     crash. Use `revocation.NewSet()` for a node that has revoked nothing. No code path makes a node a member or a person authorized
@@ -210,8 +213,9 @@ timers, and applies the answers.
   outcome. `Sweep` is called at least every `SweepInterval`, and `Overdue` often
   enough that a connection is closed soon after its deadline; a timer is only a
   wake-up and `Overdue` is the truth. `SetHeld` is refreshed from `HeldMembers`
-  at start and whenever a held certificate, a revocation or the trust view
-  changes. The caller calls `Forget` for a peer when the standing that made it
+  at start, whenever a held certificate, a revocation or the trust view changes,
+  and when the instant `NextHeldExpiry` returns passes (the earliest end of a
+  held certificate or credential: `HeldMembers` also depends on the time). The caller calls `Forget` for a peer when the standing that made it
   known ends: a member node's trust ends, or a person is removed from the
   authorized-persons list or revoked; without it the exemption would last until
   the peer's next exchange, which it need not make. `SweepInterval` is longer than the longest time between the
@@ -240,9 +244,10 @@ timers, and applies the answers.
   `revocation` panics on a `nil` set; here the refusal comes first, so an unloaded
   set can neither let a revoked key in nor crash the decision. The caller passes
   `revocation.NewSet()` to say "looked, found nothing".
-- `Facts.SerialSeen`: a node missing from the map has had no serial seen; an
-  entry for the wrong node is an invalid input. `Decision.SerialSeen` zero means
-  "keep what is stored".
+- `Facts.SerialSeen`: a node missing from the map has had no serial seen. A
+  `nil` map is a state nobody loaded and is refused with `ReasonInvalidInput`
+  (`HeldMembers` gives none); a node that has seen nothing passes an explicit
+  empty map. `Decision.SerialSeen` zero means "keep what is stored".
 - `Facts.Authorized` zero is the empty list: nobody is authorized.
 - `Facts.Trust` zero is an empty view, in which no node is trusted.
 - `admin.DeviceCert.MaxLevel` is never `LevelNone` for a certificate that

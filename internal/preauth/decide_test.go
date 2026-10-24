@@ -743,3 +743,74 @@ func TestADemotedMemberConnectionIsClosed(t *testing.T) {
 		}
 	})
 }
+
+// A serial state nobody loaded is not "nothing seen": it would let an old
+// network key back in. An explicit empty map is the way to say nothing was seen.
+func TestANilSerialStateIsRefused(t *testing.T) {
+	w := newWorld(t).trusts()
+	rec, v := w.cert(1)
+	peer, ex := w.peer.Public(), NewNodeExchange(rec)
+
+	t.Run("a nil map is refused as invalid input", func(t *testing.T) {
+		f := w.facts()
+		f.SerialSeen = nil
+		if d := Decide(f, peer, ex); d.State != StateUnauthenticated || d.Reason != ReasonInvalidInput {
+			t.Fatalf("Decide = %v/%v", d.State, d.Reason)
+		}
+	})
+	t.Run("an empty map says nothing was seen and decides", func(t *testing.T) {
+		f := w.facts()
+		f.SerialSeen = map[ident.NodeID]record.SerialSeen{}
+		if d := Decide(f, peer, ex); d.State != StateMember {
+			t.Fatalf("Decide = %v/%v", d.State, d.Reason)
+		}
+	})
+	t.Run("HeldMembers gives none for a nil map and the member for an empty one", func(t *testing.T) {
+		f := w.facts()
+		f.SerialSeen = nil
+		if got := HeldMembers(f, []record.Verified[record.NetworkKeyCertificate]{v}); len(got) != 0 {
+			t.Fatalf("held members of a nil map: %v", got)
+		}
+		f.SerialSeen = map[ident.NodeID]record.SerialSeen{}
+		if got := HeldMembers(f, []record.Verified[record.NetworkKeyCertificate]{v}); len(got) != 1 {
+			t.Fatalf("held members of an empty map: %v", got)
+		}
+	})
+}
+
+// HeldMembers depends on the clock: a held member is not a member once its
+// certificate or its credential has ended, with no change of facts. The caller
+// refreshes SetHeld when NextHeldExpiry passes.
+func TestHeldMembersEndWithTheClockAndNextHeldExpiryNamesWhen(t *testing.T) {
+	w := newWorld(t)
+	certEnd := epoch.Add(3 * time.Hour)
+	credEnd := epoch.Add(2 * time.Hour)
+	_, v := w.certWindow(1, epoch, certEnd)
+	certs := []record.Verified[record.NetworkKeyCertificate]{v}
+	w.view.Credentials = append(w.view.Credentials,
+		trust.Credential{Digest: trust.CredentialDigest{1}, A: w.local, B: w.remoteNode(), NotAfter: credEnd})
+	f := w.facts()
+	f.SerialSeen[w.remoteNode()] = record.SerialSeenOf(v)
+
+	if got := NextHeldExpiry(f, certs); !got.Equal(credEnd) {
+		t.Fatalf("next expiry = %v, want the credential's end %v", got, credEnd)
+	}
+	if got := HeldMembers(f, certs); len(got) != 1 {
+		t.Fatalf("before the credential ends: %v", got)
+	}
+	f.Now = credEnd
+	if got := HeldMembers(f, certs); len(got) != 0 {
+		t.Fatalf("at the credential's end the node is still a held member: %v", got)
+	}
+	if got := NextHeldExpiry(f, certs); !got.Equal(certEnd) {
+		t.Fatalf("next expiry after the credential ended = %v, want the certificate's end %v", got, certEnd)
+	}
+	f.Now = certEnd
+	if got := NextHeldExpiry(f, certs); !got.IsZero() {
+		t.Fatalf("nothing held ends after %v, got %v", certEnd, got)
+	}
+	f.Now = time.Time{}
+	if got := NextHeldExpiry(f, certs); !got.IsZero() {
+		t.Fatalf("no time gives %v", got)
+	}
+}

@@ -164,10 +164,14 @@ type Placement struct {
 
 // Counts are the sizes of the tracked sets.
 type Counts struct {
-	// Unauthenticated counts inbound connections in the unauthenticated state
-	// whose peer is not known as a member: the number UnauthenticatedCap bounds.
+	// Unauthenticated counts inbound connections that were not known as members
+	// when they were secured and have not completed an exchange: the number
+	// UnauthenticatedCap bounds. The class is fixed at Secured, so a peer learned
+	// or forgotten afterwards does not move a connection between this count and
+	// Exempt.
 	Unauthenticated int
-	// Exempt counts inbound unauthenticated connections of known members.
+	// Exempt counts inbound connections that were known members when they were
+	// secured and have not completed an exchange.
 	Exempt int
 	// NonMembers counts inbound connections in the non-member state: the number
 	// NonMemberConcurrency bounds.
