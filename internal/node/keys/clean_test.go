@@ -82,7 +82,7 @@ func TestRecoveryPredicatesAreEmptyOnCleanScenarios(t *testing.T) {
 }
 
 // The predicate is read-only and sees a damaged state as an error, not as
-// nothing to do: a state R-CLEAN cannot call clean.
+// nothing to do: a state the clean-scenario test cannot call clean.
 func TestRecoveryWorkReadsOnlyAndReportsDamage(t *testing.T) {
 	r := newRig(t)
 	r.mustInit(1, t0)
