@@ -428,6 +428,56 @@ func TestSchemaPatternsMatchGo(t *testing.T) {
 	}
 }
 
+// TestPatternsRefuseATrailingNewline: every pattern ends with $, which some
+// regular-expression engines let match before a trailing newline. Neither the
+// schema validator nor Go may accept a value that differs from a valid one by a
+// newline at its end; the README tells other implementations to anchor fully.
+func TestPatternsRefuseATrailingNewline(t *testing.T) {
+	valid := map[string]string{
+		"AttemptID":  "6f1c2a4e-8b3d-4c5a-9e7f-0a1b2c3d4e5f",
+		"LeaseRef":   "0123456789abcdef0123456789abcdef",
+		"Token":      "k3JpQ9vL2mXwR7tYbN5cZ8dHfG1sAeUo0iWxM4yTqBA",
+		"AdapterID":  "example",
+		"PresetName": "review.readonly",
+		"ConfigKey":  "project_dir",
+		"EnvName":    "SIDERA_ENDPOINT_TOKEN",
+		"ReasonWord": "too_many_recipients",
+		"SemVer":     "2.1.307-rc.1+build.5",
+	}
+	s := schemas(t)
+	for name, pattern := range adapterproto.Patterns() {
+		sample, ok := valid[name]
+		if !ok {
+			t.Errorf("no valid sample for pattern %s", name)
+			continue
+		}
+		re := regexp.MustCompile(pattern)
+		ref := "types.schema.json#/$defs/" + name
+		if !re.MatchString(sample) || s.accepts(t, ref, sample) != nil {
+			t.Errorf("%s: the sample %q is not valid", name, sample)
+			continue
+		}
+		for _, bad := range []string{sample + "\n", sample + "\r\n", "\n" + sample} {
+			if re.MatchString(bad) {
+				t.Errorf("%s: the Go pattern matches %q", name, bad)
+			}
+			if s.accepts(t, ref, bad) == nil {
+				t.Errorf("%s: the schema accepts %q", name, bad)
+			}
+		}
+	}
+	for name, err := range map[string]error{
+		"ValidatePresetName": adapterproto.ValidatePresetName("default\n"),
+		"ValidateAdapterID":  adapterproto.ValidateAdapterID("example\n"),
+		"ValidateConfigKey":  adapterproto.ValidateConfigKey("project_dir\n"),
+		"ValidateSemVer":     adapterproto.ValidateSemVer("1.2.3\n"),
+	} {
+		if err == nil {
+			t.Errorf("%s accepts a value with a trailing newline", name)
+		}
+	}
+}
+
 // TestManifestVocabulariesMatchSchema: the manifest's enums and the platform
 // vocabularies.
 func TestManifestVocabulariesMatchSchema(t *testing.T) {

@@ -516,8 +516,8 @@ except the two that are plain calls (marked "call"):
 | ----------- | ------- |
 | `prompt.deliver` returns `accepted` or `persisted` | `handoff.AttemptDelivered` |
 | `prompt.deliver` returns `refused` | `AttemptFailed` |
-| an error response other than `-32603` and `-32800` | `AttemptFailed` (the request had no effect) |
-| no response, a timeout, `-32603`, `-32800`, a closed connection | `AttemptUnknown`, then `prompt.reconcile` |
+| an error response with a code of the effect rule's no-effect list (`-32700`, `-32600`, `-32601`, `-32602`, `-32001` to `-32004`, `-32022`, and any code in the application range 1001 to 1099) | `AttemptFailed` (the request had no effect) |
+| no response, a timeout, `-32603`, `-32800`, a closed connection, and an error response with any other code, a code of no package's table included | `AttemptUnknown`, then `prompt.reconcile` |
 | reconcile `found`, `provably_absent`, `indeterminate` | `AttemptDelivered`, `AttemptFailed`, `AttemptUnknown` |
 | `turn.started` with an attempt | call: proof the attempt was delivered, as a `found` verdict |
 | availability `runtime_auth` | `Signals.AuthInvalid` |
@@ -590,7 +590,7 @@ daemon alone from what it has observed:
 | `queued` | messages waiting, not counting those paused by authorization |
 | `conditions` | ascending, no repeats, omitted when empty: 1 adapter_offline, 2 runtime_auth, 3 native_unavailable, 4 server_request_rejected, 5 control_unknown, 6 version_untested |
 | `presets` | `name`, `available`, sorted by name; runtime endpoints only |
-| `as_of` | Unix seconds |
+| `as_of` | Unix seconds, 1 to 253402300799 (9999-12-31T23:59:59Z, the latest time any record carries; the millisecond bound would admit times billions of years away) |
 
 In JSON (the `control_reply` of `endpoint.message_status`) a reply is one object
 with `signal` beside its fields, and enums are their names.

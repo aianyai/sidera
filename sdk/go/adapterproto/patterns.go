@@ -12,8 +12,10 @@ const (
 	// AdapterIDPattern is the identifier of an adapter, such as "example".
 	AdapterIDPattern = `^[a-z0-9][a-z0-9-]{0,31}$`
 	// PresetNamePattern is the name of a runtime preset; its length is at most
-	// MaxPresetNameLen. It is the syntax the authorization of session creation
-	// checks.
+	// MaxPresetNameLen. This package is the one home of the syntax:
+	// ValidatePresetName applies it wherever a message names a preset. The
+	// authorization rules only require a preset name to be non-empty and do not
+	// check the syntax.
 	PresetNamePattern = `^[a-z0-9][a-z0-9._-]*$`
 	// ConfigKeyPattern is the key of a configuration field.
 	ConfigKeyPattern = `^[a-z][a-z0-9_]{0,63}$`

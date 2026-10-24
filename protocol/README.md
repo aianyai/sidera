@@ -50,6 +50,16 @@ fetched, they only let the files refer to each other
   characters with no pattern: they are opaque to adapters, and the daemon is the
   only place that parses their syntax. The examples write them as hexadecimal
   strings for readability; no sender or reader may rely on that spelling.
+- **Patterns are anchored at both ends, and an implementation must anchor them
+  fully.** Every pattern ends with `$`. In some regular-expression engines `$`
+  also matches before a trailing newline (Python's `re.search`, Perl, PCRE
+  without the dollar-end-only option), so `"abc\n"` would match `^[a-z]+$`. A
+  validator or a hand-written check must match the whole string and nothing more
+  (Python: `re.fullmatch`, or `\Z` in place of the final `$`; PCRE: the `D`
+  modifier). The Go side uses RE2, where `$`
+  without the multi-line flag matches only at the end of the text, and a
+  conformance test checks it. A value with a trailing newline is not valid for
+  any pattern of the protocol.
 - **Numbers** are integers written as plain integer literals. The schema accepts
   `1.0` as an integer, as the specification says; the Go types do not, and
   neither should a sender.
