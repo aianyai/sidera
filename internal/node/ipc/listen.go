@@ -7,10 +7,12 @@ import (
 
 // Listen starts serving the interface at addr and returns the listener.
 //
-// lock must show that the caller holds the data directory's instance lock:
-// on Unix a leftover socket is deleted before listening, and that is only safe
-// for the one process that knows no other daemon serves the directory. A nil
-// or released lock fails with ErrLockNotHeld on every platform.
+// lock is the caller's assertion that it holds the data directory's instance
+// lock: on Unix a leftover socket is deleted before listening, and that is only
+// safe for the one process that knows no other daemon serves the directory. A
+// nil or released lock fails with ErrLockNotHeld on every platform. The
+// assertion catches ordering mistakes in the caller; it is not a security
+// boundary.
 //
 // On Unix the socket directory must already exist, be owned by the user and
 // have mode 0700, or Listen fails with a *PeerCheckError; the socket is made

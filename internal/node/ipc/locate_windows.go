@@ -13,13 +13,9 @@ func Locate(home string, kind Kind) (Address, error) {
 	if err != nil {
 		return Address{}, err
 	}
-	canonical, err := canonicalPipeHome(abs)
-	if err != nil {
-		return Address{}, err
-	}
 	sid, err := currentUserSID()
 	if err != nil {
 		return Address{}, fmt.Errorf("ipc: derive the pipe name: %w", err)
 	}
-	return Address{kind: kind, home: abs, name: pipeName(pipeHash(sid.String(), canonical), kind)}, nil
+	return Address{kind: kind, home: abs, name: pipeName(pipeHash(sid.String(), pipeHomeKey(abs)), kind)}, nil
 }

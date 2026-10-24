@@ -1,4 +1,4 @@
-//go:build unix
+//go:build darwin || linux
 
 package ipc
 
@@ -442,5 +442,21 @@ func TestClosingTheListenerRemovesTheSocket(t *testing.T) {
 	l.Close()
 	if _, err := os.Lstat(addr.Name()); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("socket after Close: %v, want it removed", err)
+	}
+}
+
+// The listener returned by Listen offers only the checked Accept. The methods
+// of net.UnixListener that would hand out a connection or the descriptor
+// without the peer check must not be reachable through it.
+func TestListenerDoesNotExposeAnUncheckedAccept(t *testing.T) {
+	_, l := listenIn(t, shortHome(t), KindAgent, Options{})
+	if _, ok := l.(interface{ AcceptUnix() (*net.UnixConn, error) }); ok {
+		t.Error("the listener exposes AcceptUnix, which accepts without the peer check")
+	}
+	if _, ok := l.(interface{ File() (*os.File, error) }); ok {
+		t.Error("the listener exposes File, which hands out the descriptor")
+	}
+	if _, ok := l.(interface{ SetUnlinkOnClose(bool) }); ok {
+		t.Error("the listener exposes SetUnlinkOnClose")
 	}
 }

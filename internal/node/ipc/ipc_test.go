@@ -85,15 +85,25 @@ func TestPipeNames(t *testing.T) {
 func TestPipeSDDLGrantsOnlyTheUser(t *testing.T) {
 	const sid = "S-1-5-21-1-2-3-1001"
 	want := "O:S-1-5-21-1-2-3-1001D:P(A;;GA;;;S-1-5-21-1-2-3-1001)"
-	if got := pipeSDDL(sid); got != want {
+	got := pipeSDDL(sid)
+	if got != want {
 		t.Fatalf("pipeSDDL = %s, want %s", got, want)
 	}
-	if strings.Contains(want, "OW") {
+	if strings.Contains(got, "OW") {
 		t.Fatal("the descriptor must not use the owner-rights shorthand")
 	}
 }
 
 func TestCanonicalPipeHomeIsAbsoluteCleanAndLowerCase(t *testing.T) {
+	// The rule is the absolute path made clean and lower case, which is what
+	// Locate puts into the hash.
+	canonicalPipeHome := func(home string) (string, error) {
+		abs, err := absoluteHome(home)
+		if err != nil {
+			return "", err
+		}
+		return pipeHomeKey(abs), nil
+	}
 	for _, tc := range []struct{ name, in, want string }{
 		{"upper case", "/Users/Alice/.Sidera", "/users/alice/.sidera"},
 		{"dot segments and trailing slash", "/a/./B/../C/", "/a/c"},

@@ -26,14 +26,23 @@ allow a second daemon while it is gone.
   socket is chmod 0600; between the two calls the 0700 directory already keeps
   everyone else out.
 - The daemon deletes a leftover socket only while it holds `daemon.lock`, and
-  only if it is a socket owned by the user. The caller proves it holds the lock.
+  only if it is a socket owned by the user. The caller asserts that it holds the
+  lock; the assertion is a precondition that catches ordering mistakes in the
+  composition root, not a security boundary.
 - The listener reads the peer's uid for every accepted connection (macOS
-  `LOCAL_PEERCRED`, Linux `SO_PEERCRED`) and closes a connection whose uid is
-  not its own, or whose credentials cannot be read.
+  `LOCAL_PEERCRED`, Linux `SO_PEERCRED`; the Linux call is pending verification
+  by CI on main) and closes a connection whose uid is not its own, or whose
+  credentials cannot be read. The listener it returns has only `Accept`, `Close`
+  and `Addr`; the underlying listener's `AcceptUnix`, `File` and
+  `SetUnlinkOnClose` are not reachable, because they would accept or hand out the
+  descriptor without that check.
 - The client, before connecting: the directory is a real directory (not a
   link), owned by the user, mode exactly 0700; the socket is a real socket (not
   a link), owned by the user. After connecting it reads the server's
   credentials and requires the user's uid. Nothing is sent when a check fails.
+  `EACCES` on connect is a failed check (`access_denied`), not "not running": the
+  user's own socket lets the user connect, so a refusal means someone else holds
+  the name.
 - Linux abstract-namespace sockets are not used: they are not protected by file
   permissions.
 
@@ -42,7 +51,8 @@ allow a second daemon while it is gone.
 The absolute path in bytes must not exceed 103 on macOS and 107 on Linux. The
 numbers: macOS `sun_path` is 104 bytes and a 104-byte path was measured to fail
 with "invalid argument", so 103 is the longest that works; Linux `sun_path` is
-108 bytes including the NUL. Some other Unix implementations are as short as 92
+108 bytes including the NUL (the Linux limit is pending verification by CI on
+main). Some other Unix implementations are as short as 92
 bytes; they are not supported. `Locate` is the one check, shared by `init`,
 daemon start and client connect, and its error names the path, its length and
 the limit. Leave room for a long user name and for a `SIDERA_HOME` override.
@@ -71,11 +81,15 @@ socket writable by the connecting process (unix(7)); both hold for the owner.
   The listener does not check who connects: the kernel enforces the descriptor
   when a client opens the pipe, which is the same level as a 0700 directory with
   a 0600 socket on Unix.
-- Client: after opening the pipe it reads the server process id from its own
-  handle, opens the process and its token, and requires the token's `TokenUser`
-  to equal its own. Any failing step refuses the connection. This stops another
-  local user who created the pipe while the daemon was down from collecting the
-  token a client sends.
+- Client: after opening the pipe it makes two checks, in this order, and any
+  failing step refuses the connection (fail closed). First it reads the owner of
+  the pipe from its own handle (`GetSecurityInfo`, owner only) and requires it
+  to be its own SID. Second it reads the server process id from the handle,
+  opens the process and its token, and requires the token's `TokenUser` to equal
+  its own. Together they stop another local user who created the pipe while the
+  daemon was down from collecting the token a client sends. A refusal of access
+  when opening the pipe is a failed check too (`access_denied`): the daemon's
+  pipe always grants the user, so a refusal means someone else created the name.
 - A pipe is a kernel object that disappears with its last handle, so there is no
   leftover to delete.
 
@@ -85,6 +99,10 @@ socket writable by the connecting process (unix(7)); both hold for the owner.
   mode is not enough for a client: another user who can write in a parent
   directory could replace the socket, and the client would send its token to
   it. A directory that only the user can write, owned by the user, closes that.
+  The time between these checks and the connect, and a writable directory above
+  the data directory, are covered by the credential check after the connect: it
+  reads the process that actually accepted, whatever the paths looked like a
+  moment before.
 - **Credentials as well as permissions.** unix(7) says portable programs should
   not rely on socket permissions for security; unix(4) on macOS says the
   credentials mechanism is reliable and works in both directions. Both sides
@@ -103,8 +121,20 @@ socket writable by the connecting process (unix(7)); both hold for the owner.
   at open time. The Unix listener checks credentials only because Linux
   documents socket permissions as unreliable; the pipe descriptor has no such
   reservation.
-- **Client check on the server's token.** Nothing prevents another user from
-  creating the pipe first while the daemon is down; only the client can notice.
+- **Client check of the pipe owner, then of the server's token.** Nothing
+  prevents another user from creating the pipe first while the daemon is down;
+  only the client can notice. The owner is the check that holds. The server
+  process id that `GetNamedPipeServerProcessId` reports can be stale: a process
+  can hand the pipe handle to another process and exit, and its id can be reused
+  by a process the attacker controls, a window the attacker chooses (the id
+  reflects the process that opened the pipe, as shown in Project Zero's 2019
+  "Windows Exploitation Tricks: Spoofing Named Pipe Client PID"). An
+  unprivileged process cannot make another user's SID the owner of an object it
+  creates (Microsoft, "Owner of a new object"), and .NET's
+  `PipeOptions.CurrentUserOnly` validates the pipe's owner the same way. The
+  listener's descriptor sets `O:<user SID>` explicitly, so the owner is the user
+  whether or not the daemon is elevated. The token user of the reported server
+  process stays as the second line.
 - **AF_UNIX on Windows rejected.** It would be one mechanism on every platform,
   but it supports only stream sockets, no ancillary data and no socketpair,
   needs the old file deleted before binding, its path limit is unconfirmed, and
@@ -114,15 +144,24 @@ socket writable by the connecting process (unix(7)); both hold for the owner.
   per-instance accept and security descriptors, which is too much to write
   safely by hand. go-winio v0.6.4 (MIT license, which allows bundling and
   redistribution with its notice; actively maintained by Microsoft; widely used
-  by container tooling; small, its dependencies are `x/sys`) is the latest
-  release. `golang.org/x/sys` supplies the peer credential calls and the Windows
-  security calls.
-- **A subset interface for the directory checks.** The checks need only `Lstat`
-  of paths below the data directory; they read through a small interface so
-  tests can present a directory owned by another user, which a test cannot
-  create. The real implementation uses `os.Lstat`; `ipc` is the one runtime
-  package besides `fsx` allowed to touch files, because it owns the socket
-  files.
+  by container tooling) is the latest release. The packages we import
+  (`go-winio`, `internal/fs`, `internal/socket`, `internal/stringbuffer`,
+  `pkg/guid`) depend only on `golang.org/x/sys`; go-winio's module graph also
+  lists logrus (used only by its ETW logging subpackage) and the modules
+  `x/mod`, `x/sync` and `x/tools` (build tooling), none of which is linked into
+  our binaries (checked with `GOOS=windows go list -deps ./...`).
+  `golang.org/x/sys` supplies the peer credential calls and the Windows
+  security calls. go-winio and x/sys require `go 1.26.0`, which is why the root
+  module's Go line and toolchain line are as they are.
+- **`os.Lstat` for the directory checks, behind a small test seam.** The checks
+  need to know whether a path is a symbolic link, whether it is a socket, its
+  exact permission bits and its owner, for a single user. `fsx.Info`
+  deliberately does not express those, so `ipc` reads the socket directory and
+  the socket with `os.Lstat` itself; it is the one runtime package besides
+  `fsx` allowed to touch files, because it owns the socket files. The checks
+  read through a one-method interface (`lstater`, `Lstat` of a path below the
+  data directory) only so that tests can present a directory owned by another
+  user, which a test cannot create; nothing in production sets it.
 
 ## Errors
 
@@ -131,7 +170,21 @@ socket writable by the connecting process (unix(7)); both hold for the owner.
 | `ErrDaemonNotRunning`   | Socket or directory absent, `ECONNREFUSED`, pipe not found            | `unavailable`/`daemon_not_running`    |
 | `*PeerCheckError`       | A check failed; carries the `Failure`, the path and the system error  | `unavailable`/`peer_check_failed`     |
 | `*PathTooLongError`     | The socket path exceeds the platform limit                            | `init`, start and connect each report it |
-| `ErrLockNotHeld`        | `Listen` without proof of the instance lock                           | programming error                     |
+| `ErrLockNotHeld`        | `Listen` without the caller's assertion that it holds the instance lock | programming error                   |
+
+The `Failure` values of a `*PeerCheckError` are stable strings:
+
+| Failure                                                                             | Check that failed                                                                  |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `directory_missing`, `directory_not_directory`, `directory_symlink`, `directory_owner`, `directory_mode` | The socket directory (Unix): exists, is a real directory, owner, mode 0700. |
+| `socket_missing`, `socket_not_socket`, `socket_owner`                               | The socket file (Unix): exists, is a socket, owner.                                |
+| `stat_failed`                                                                       | A file could not be inspected for another reason.                                  |
+| `server_credentials`, `server_uid`                                                  | The process serving the socket (Unix): credentials unreadable, or not the user.    |
+| `access_denied`                                                                     | The system refused the user access to the socket (`EACCES`) or pipe (`ERROR_ACCESS_DENIED`): someone else holds the name. |
+| `own_sid`                                                                           | The client could not determine its own SID (Windows).                              |
+| `pipe_owner`                                                                        | The pipe's owner is unreadable or is not the user (Windows).                       |
+| `server_process_id`, `server_process_open`, `server_token_open`, `server_token_user`, `server_sid` | The server process of the pipe (Windows): one value per step, and `server_sid` when its user is not ours. |
+| `server_query`                                                                      | Reading the pipe's owner and server failed in a way no step above names (Windows). |
 
 A failed check is never reported as "not running": it may mean the place was
 taken by someone else, and sending the user to start a daemon would hide that.
@@ -150,14 +203,24 @@ taken by someone else, and sending the user to start a daemon would hide that.
   `TestListenRemovesAStaleSocketOnlyWhileHoldingTheLock`,
   `TestListenDoesNotDeleteWhatIsNotASocket`,
   `TestListenCreatesAnOwnerOnlySocket`, `TestLocateRefusesPathLongerThanThePlatformAllows`,
-  `TestDialReportsDaemonNotRunning`.
+  `TestDialReportsDaemonNotRunning`,
+  `TestClientReportsASocketTheSystemRefusesAsAFailedCheck`,
+  `TestListenerDoesNotExposeAnUncheckedAccept`.
 - Tests (every platform, pure rules): `TestSocketPathLengthLimit`,
   `TestPipeHashKnownAnswers`, `TestPipeSDDLGrantsOnlyTheUser`,
   `TestCanonicalPipeHomeIsAbsoluteCleanAndLowerCase`.
 - Tests (Windows, pending verification by CI on main):
   `TestSecondListenerOnSamePipeNameFails`, `TestTwoConsecutiveConnectionsSucceed`,
   `TestConnectionsMayOverlap`, `TestClientCanReadTheServerProcessAndItsTokenUser`,
-  `TestPipeIsOwnedByAndGrantedToTheUserOnly`, `TestPipeNameFollowsUserSIDAndDataDirectory`.
+  `TestPipeIsOwnedByAndGrantedToTheUserOnly`, `TestPipeNameFollowsUserSIDAndDataDirectory`,
+  `TestDialReportsDaemonNotRunning`, `TestCheckAcceptsThePipeOfTheCurrentUser`,
+  `TestClientRefusesAPipeOwnedByAnotherUser`,
+  `TestClientRefusesAServerRunningAsAnotherUser`,
+  `TestClientFailsClosedWhenThePipeServerCannotBeRead`,
+  `TestClientReportsAPipeThatDeniesTheUserAsAFailedCheck`,
+  `TestOpenErrorClassification`. The owner and server-user checks run on a real
+  pipe of the user and, for the refusals, with the owner and server user
+  presented through an unexported seam of `Options`.
 
 ## Known untested items
 
@@ -168,12 +231,13 @@ taken by someone else, and sending the user to start a daemon would hide that.
 - Whether go-winio accepts further instances under this descriptor (`GA`
   includes the right to create pipe instances) is covered only by the Windows
   test of consecutive connections.
-- Whether `GetNamedPipeServerProcessId` accepts a client handle, and whether the
-  default owner under elevation is the user: asserted by Windows tests whose
-  first result comes from CI. If the server-token step is refused in common
-  elevated and unelevated combinations, the fallback is to read the owner of
-  the pipe (`GetSecurityInfo` owner, which the descriptor already sets) as the
-  second check; that is a fix to make then, not built twice now.
+- Whether `GetNamedPipeServerProcessId` accepts a client handle, whether
+  `GetSecurityInfo` reads the owner from a client handle, and whether the owner
+  under elevation is the user: asserted by Windows tests whose first result
+  comes from CI. The owner is the first line of the client check and the server
+  token the second; if the token step is refused in common elevated and
+  unelevated combinations, that is a fix to make then, because the owner check
+  already holds on its own.
 - **Cross-user takeover is not tested on any platform:** a single-user CI can
   prove that the owner can connect and that a same-name listener fails, not
   that another user is refused. `TestClientRefusesAPipeServedByAnotherUser`
@@ -182,6 +246,13 @@ taken by someone else, and sending the user to start a daemon would hide that.
 - An elevated daemon with an unelevated client on Windows (`TOKEN_QUERY` of the
   elevated process's token).
 - Process id reuse between reading the server's id and opening the process: the
-  window is tiny and undocumented; no special handling.
-- Linux `SO_PEERCRED` and the 107-byte limit: pending verification by CI on
-  main. macOS behavior is verified locally.
+  server id can be stale (a process can hand the pipe handle to another and
+  exit, and its id can be reused), so the token of that process is not the
+  decisive check; the pipe's owner is, and it does not depend on a process id.
+- Linux `SO_PEERCRED`, the 107-byte limit and `EACCES` on connect to a socket
+  without write permission: pending verification by CI on main. macOS behavior
+  is verified locally.
+- The cross-user claims of the owner check (an unprivileged process cannot make
+  another user the owner of a pipe it creates) rest on Microsoft's documentation
+  and on how .NET validates the same property; no test creates a pipe as another
+  user.

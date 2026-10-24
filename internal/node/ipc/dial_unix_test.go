@@ -1,4 +1,4 @@
-//go:build unix
+//go:build darwin || linux
 
 package ipc
 
@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 )
 
@@ -69,21 +70,24 @@ func TestClientRefusesSocketDirectoryNotOwnedByUser(t *testing.T) {
 	}
 }
 
-// assertPeerCheck requires a failed check, and not "daemon not running", which
-// would send the user to start a daemon that someone else may have displaced.
-func assertPeerCheck(t *testing.T, err error, want Failure) {
-	t.Helper()
-	if errors.Is(err, ErrDaemonNotRunning) {
-		t.Fatalf("got %q, a failed check must not read as daemon-not-running", err)
+// A socket the system refuses the user access to is not a daemon that is not
+// running: the user's own socket always grants the user, so another process
+// holds the name.
+func TestClientReportsASocketTheSystemRefusesAsAFailedCheck(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root is not refused by socket permissions")
 	}
-	if !errors.Is(err, ErrPeerCheckFailed) {
-		t.Fatalf("error %q does not match ErrPeerCheckFailed", err)
+	home := shortHome(t)
+	mkdirExact(t, filepath.Join(home, "run"), 0o700)
+	path := filepath.Join(home, "run", "agent.sock")
+	serveCounting(t, path)
+	if err := os.Chmod(path, 0o000); err != nil {
+		t.Fatal(err)
 	}
-	var pe *PeerCheckError
-	if !errors.As(err, &pe) {
-		t.Fatalf("error %q is not a *PeerCheckError", err)
-	}
-	if pe.Failure != want {
-		t.Fatalf("failure = %q, want %q (%v)", pe.Failure, want, err)
+
+	err := dialErrorWith(t, locate(t, home, KindAgent), Options{})
+	assertPeerCheck(t, err, FailAccessDenied)
+	if !errors.Is(err, syscall.EACCES) {
+		t.Fatalf("%v: the system error should be kept as the cause", err)
 	}
 }

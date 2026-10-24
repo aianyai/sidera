@@ -1,4 +1,4 @@
-//go:build unix
+//go:build darwin || linux
 
 package ipc
 
@@ -25,8 +25,11 @@ func dial(ctx context.Context, addr Address, opts Options) (net.Conn, error) {
 
 	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", addr.name)
 	if err != nil {
-		if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, fs.ErrNotExist) {
+		switch {
+		case errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, fs.ErrNotExist):
 			return nil, notRunning(addr, err)
+		case errors.Is(err, syscall.EACCES):
+			return nil, accessDenied(addr, err)
 		}
 		return nil, fmt.Errorf("ipc: dial %s: %w", addr.name, err)
 	}

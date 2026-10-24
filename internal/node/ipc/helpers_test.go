@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -41,4 +42,23 @@ func serveEcho(t *testing.T, l net.Listener) {
 		}
 	}()
 	t.Cleanup(func() { l.Close(); wg.Wait() })
+}
+
+// assertPeerCheck requires a failed check, and not "daemon not running", which
+// would send the user to start a daemon that someone else may have displaced.
+func assertPeerCheck(t *testing.T, err error, want Failure) {
+	t.Helper()
+	if errors.Is(err, ErrDaemonNotRunning) {
+		t.Fatalf("got %q, a failed check must not read as daemon-not-running", err)
+	}
+	if !errors.Is(err, ErrPeerCheckFailed) {
+		t.Fatalf("error %q does not match ErrPeerCheckFailed", err)
+	}
+	var pe *PeerCheckError
+	if !errors.As(err, &pe) {
+		t.Fatalf("error %q is not a *PeerCheckError", err)
+	}
+	if pe.Failure != want {
+		t.Fatalf("failure = %q, want %q (%v)", pe.Failure, want, err)
+	}
 }

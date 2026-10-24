@@ -1,4 +1,4 @@
-//go:build unix
+//go:build darwin || linux
 
 package ipc
 
@@ -45,11 +45,11 @@ func listen(addr Address, opts Options) (net.Listener, error) {
 		return nil, fmt.Errorf("ipc: make socket %s owner-only: %w", addr.name, err)
 	}
 	return &guardedListener{
-		UnixListener: l,
-		addr:         addr,
-		euid:         euid,
-		peerUID:      opts.peerUIDFunc(),
-		log:          opts.logger(),
+		inner:   l,
+		addr:    addr,
+		euid:    euid,
+		peerUID: opts.peerUIDFunc(),
+		log:     opts.logger(),
 	}, nil
 }
 
@@ -76,8 +76,12 @@ func removeStaleSocket(files lstater, addr Address, euid uint32) error {
 // of the directory and socket modes already keep other users out; this one
 // does not depend on them, because Linux documents socket permissions as
 // unreliable for security.
+//
+// The underlying listener is a named field and not embedded: embedding would
+// promote AcceptUnix, File and SetUnlinkOnClose, and a caller that reached
+// them would accept connections without the check.
 type guardedListener struct {
-	*net.UnixListener
+	inner   *net.UnixListener
 	addr    Address
 	euid    uint32
 	peerUID func(*net.UnixConn) (uint32, error)
@@ -89,7 +93,7 @@ type guardedListener struct {
 // and logged, and Accept waits for the next one.
 func (l *guardedListener) Accept() (net.Conn, error) {
 	for {
-		c, err := l.UnixListener.AcceptUnix()
+		c, err := l.inner.AcceptUnix()
 		if err != nil {
 			return nil, err
 		}
@@ -107,3 +111,10 @@ func (l *guardedListener) Accept() (net.Conn, error) {
 		c.Close()
 	}
 }
+
+// Close stops the listener and, as net.UnixListener does by default, removes
+// the socket file.
+func (l *guardedListener) Close() error { return l.inner.Close() }
+
+// Addr is the socket address.
+func (l *guardedListener) Addr() net.Addr { return l.inner.Addr() }

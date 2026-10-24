@@ -15,8 +15,8 @@ var (
 	// ErrPeerCheckFailed matches every *PeerCheckError.
 	ErrPeerCheckFailed = errors.New("ipc: peer check failed")
 
-	// ErrLockNotHeld is returned by Listen when the caller cannot show that it
-	// holds the data directory's instance lock.
+	// ErrLockNotHeld is returned by Listen when the caller does not assert that
+	// it holds the data directory's instance lock.
 	ErrLockNotHeld = errors.New("ipc: the instance lock is not held")
 )
 
@@ -39,15 +39,24 @@ const (
 	FailServerUID         Failure = "server_uid"
 )
 
-// Windows: the client's check of the process serving the pipe, one value per
-// step so that a log line says which step the system refused.
+// Both platforms: the system refused the user access to the socket or pipe.
+// The user's own socket and pipe always grant that access, so a refusal means
+// the name is held by someone else.
+const FailAccessDenied Failure = "access_denied"
+
+// Windows: the client's check of the pipe and of the process serving it, one
+// value per step so that a log line says which step the system refused.
 const (
 	FailOwnSID            Failure = "own_sid"
+	FailPipeOwner         Failure = "pipe_owner"
 	FailServerProcessID   Failure = "server_process_id"
 	FailServerProcessOpen Failure = "server_process_open"
 	FailServerTokenOpen   Failure = "server_token_open"
 	FailServerTokenUser   Failure = "server_token_user"
 	FailServerSID         Failure = "server_sid"
+	// FailServerQuery is a failure to read the pipe's owner and server that
+	// no step above names.
+	FailServerQuery Failure = "server_query"
 )
 
 // PeerCheckError reports that the path to an interface or the process at its

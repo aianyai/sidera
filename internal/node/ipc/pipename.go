@@ -24,17 +24,13 @@ func pipeHash(userSID, canonicalHome string) string {
 	return hex.EncodeToString(sum[:])[:16]
 }
 
-// canonicalPipeHome is the form of the data directory that goes into the hash:
-// absolute, clean and lower case, because NTFS paths are case-insensitive and
-// every spelling a user can type must reach the same pipe. Two spellings that
-// reach one directory by other means (a junction) yield two pipe names; the
-// client then cannot connect, which is visible and easy to fix.
-func canonicalPipeHome(home string) (string, error) {
-	abs, err := absoluteHome(home)
-	if err != nil {
-		return "", err
-	}
-	return strings.ToLower(filepath.Clean(abs)), nil
+// pipeHomeKey is the form of the absolute data directory that goes into the
+// hash: clean and lower case, because NTFS paths are case-insensitive and every
+// spelling a user can type must reach the same pipe. Two spellings that reach
+// one directory by other means (a junction) yield two pipe names; the client
+// then cannot connect, which is visible and easy to fix.
+func pipeHomeKey(abs string) string {
+	return strings.ToLower(filepath.Clean(abs))
 }
 
 func pipeName(hash string, kind Kind) string {
