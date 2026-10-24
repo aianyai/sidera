@@ -64,10 +64,15 @@ to the workflow.
 - **Concurrency**: a new push to a pull request cancels that request's older
   run; runs on `main` and manual runs are never cancelled, so every commit on
   `main` has its verdict.
-- **Go version**: `actions/setup-go` reads it from `go.mod`; `go.work` and
-  `sdk/go/go.mod` carry the same line. Module and build caches are keyed on every
-  `go.sum` in the tree. The cross-compile matrix does not use the cache, because
-  its five jobs would try to save the same entry.
+- **Go version**: `actions/setup-go` reads it from the `toolchain` line of the
+  root `go.mod` (setup-go prefers it over the `go` line), so CI installs the same
+  patch release a local build uses; with only a `go 1.26.0` line it would install
+  exactly 1.26.0 and miss later patch fixes. `go.work` carries the same two lines.
+  `sdk/go/go.mod` keeps its own, lower minimum: it is a published module and does
+  not depend on go-winio, which is what raises the root module's minimum. Module
+  and build caches are keyed on every `go.sum` in the tree. The cross-compile
+  matrix does not use the cache, because its five jobs would try to save the same
+  entry.
 
 ## Where
 
