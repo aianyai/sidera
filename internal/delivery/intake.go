@@ -13,7 +13,7 @@ import (
 // queue before further ones are refused. It is the node's queue limit divided by
 // the node's endpoint scale, so one endpoint that is flooded can take at most
 // its share of the node, and it is well above what ordinary traffic queues in
-// the endpoint's longest queue time. An endpoint's owner may set another limit.
+// the default queue time of 30 minutes. An endpoint's owner may set another limit.
 const DefaultEndpointBacklogLimit = 200
 
 // ErrBacklogLimit reports an endpoint backlog limit below one.
@@ -42,17 +42,24 @@ type Backlog struct {
 // kind. It governs ordinary messages only: they are what a sender can pile up in
 // an endpoint's queue. A control signal is executed, never queued, and refusing
 // it would keep the owner from closing or interrupting an endpoint that is
-// flooded. Status reports, control replies and system feedback are exempt
-// traffic: refusing a notice because the endpoint is behind would silence the
-// anomaly it reports.
+// flooded. System feedback is exempt too: refusing a notice because the endpoint
+// is behind would silence the anomaly it reports.
 func backlogGoverned(traffic authz.TrafficKind) bool {
 	return traffic == authz.TrafficMessage
 }
 
-// validIntakeTraffic reports whether traffic of this kind is delivered to an
-// endpoint, which is what Intake judges. Trust maintenance is not.
+// validIntakeTraffic reports whether Intake judges traffic of this kind: a
+// message, a control signal or system feedback. A status report is taken by
+// ApplyReport and a control reply by HandleControlReply, never by Intake, so the
+// backlog limit never refuses them; trust maintenance is not delivered to an
+// endpoint at all.
 func validIntakeTraffic(traffic authz.TrafficKind) bool {
-	return traffic >= authz.TrafficMessage && traffic <= authz.TrafficSystemFeedback
+	switch traffic {
+	case authz.TrafficMessage, authz.TrafficControlSignal, authz.TrafficSystemFeedback:
+		return true
+	default:
+		return false
+	}
 }
 
 // OccupiesBacklogSlot reports whether a record counts toward its endpoint's
@@ -110,7 +117,7 @@ func Intake(now, acceptBefore time.Time, traffic authz.TrafficKind, auth Authori
 		return IntakeVerdict{}, err
 	}
 	if !validIntakeTraffic(traffic) {
-		return IntakeVerdict{}, fmt.Errorf("%w: traffic kind %d is not delivered to an endpoint", ErrInvalidInput, traffic)
+		return IntakeVerdict{}, fmt.Errorf("%w: traffic kind %d is not judged by Intake", ErrInvalidInput, traffic)
 	}
 	if backlogGoverned(traffic) {
 		if err := ValidateEndpointBacklogLimit(backlog.Limit); err != nil {

@@ -96,7 +96,8 @@ depends on), and the tolerance. The target settles every delivery by
 
 An endpoint holds at most `DefaultEndpointBacklogLimit` (200, or the limit its
 owner set) queued messages. A message that arrives when the count is at the
-limit is `rejected` with `backlog_full`, a final state, and nothing is stored.
+limit is `rejected` with `backlog_full`, a final state; the rejected record takes no slot and no
+body is kept.
 
 - Judged last in `Intake`: after the deadline checks, and only if authorization
   allows. A denied sender hears its denial and learns nothing of the queue; a
@@ -213,8 +214,11 @@ correction and the blocked notice.
   for which `Record.OccupiesBacklogSlot(traffic)` is true (each with the traffic
   it was made for) and the endpoint's limit, which is validated with
   `ValidateEndpointBacklogLimit`; an unset limit (zero) is invalid input, not
-  "no limit". `traffic` is what the request is; trust maintenance is not
-  delivered to an endpoint and is invalid input. The count and the intake
+  "no limit". `traffic` is what the request is; `Intake` judges only a
+  message, a control signal and system feedback, and every other kind (a status
+  report and a control reply are taken by `ApplyReport` and
+  `HandleControlReply`, trust maintenance is not delivered to an endpoint) is
+  invalid input. The count and the intake
   decision are made in one atomic step with storing the record, or two requests
   can both see room for the last slot.
 - Digests passed to dedup are computed by the caller over everything that must

@@ -129,8 +129,8 @@ messages as the limit is `rejected` with `backlog_full`, in `Intake`.
 | ordinary message, authorization suspended | suspended, whatever the count |
 | deadline already past, out of range or missing | rejected as `expired`, `deadline_out_of_range`, `malformed`, whatever the count |
 | control signal | accepted: never queued, so no slot is taken and none is needed |
-| status report, control reply, system feedback | accepted: exempt traffic, the count is not read |
-| limit unset (zero) or negative, negative count, traffic that is not delivered to an endpoint | invalid input |
+| system feedback | accepted: exempt traffic, the count is not read |
+| limit unset (zero) or negative, negative count, a traffic kind `Intake` does not judge (status report, control reply, trust maintenance, unset or unknown) | invalid input |
 
 Which records are counted is `Record.OccupiesBacklogSlot`: a target record that
 is `accepted` (queued, leased or prompted for) and not a control record. A
@@ -294,8 +294,9 @@ permission still reads it.
   feedback cannot by itself exhaust the sender's prompts. One sender endpoint
   rarely meets more than 10 different kinds of trouble in 10 minutes. A burst of
   30 notices delays only the last by 20 minutes, and within one endpoint queue
-  time of 30 minutes at most 30 notices wait in the sender's queue, far below
-  the backlog limit of an endpoint. A cap of 5 would hold notices back for
+  time of 30 minutes at most 30 notices wait in the sender's queue. Notices are
+  not counted against the backlog limit, and this is why that is safe: 30 is
+  far below the limit (200), so notices cannot crowd out messages. A cap of 5 would hold notices back for
   longer in ordinary use, and a cap of 20 would let feedback alone wake the
   session as often as a message every 30 seconds.
 - **Authorization suspended is not a refusal.** A node of the trust chain being
@@ -331,10 +332,13 @@ permission still reads it.
   would blur "the endpoint refuses this sender" with "the endpoint is behind".
   The same rejection keeps the node's queue bounded per endpoint without any
   shared state between endpoints.
-- **Why 200.** A node holds at most 10,000 unsettled deliveries and about 50
-  endpoints, and 10,000 / 50 = 200: one flooded endpoint can take at most its
-  share. Ordinary traffic stays far below it, a few messages a minute over the
-  30 minute default queue time is at most about 100.
+- **Why 200.** 200 is the node queue limit of 10,000 unsettled deliveries
+  divided by the 50 endpoints a node is sized for, so one flooded endpoint takes
+  at most a fiftieth of the node; a node may publish up to
+  `publication.MaxEndpointsPerNode` endpoints, so it is the node queue limit, not
+  the sum of endpoint limits, that bounds the node. Ordinary traffic stays far
+  below it, a few messages a minute over the 30 minute default queue time is at
+  most about 100.
 - **The limit is judged last.** A sender that may not write to the endpoint
   must not learn how full its queue is, and a suspension stores nothing, so the
   limit has nothing to bound until the retry that is accepted.
@@ -345,7 +349,8 @@ permission still reads it.
   (no notice about a notice) would make that silent. Notices are not counted
   either, so ordinary messages are never refused because notices took the room.
   What bounds the notices is the feedback rate cap, at most 30 per endpoint in a
-  queue time, so the count of an endpoint can exceed the limit only by that.
+  queue time (far below the limit), so the queue of an endpoint can exceed the
+  limit only by that.
   Counting them would instead let the node's own traffic refuse other senders'
   messages.
 - **One rule for applying a report.** If every caller turned the report into
@@ -429,7 +434,8 @@ permission still reads it.
 ## Where
 
 - `internal/delivery/state.go`: states, sub-state, reject reasons, causes,
-  the transition table. Tests: `TestCanTransition`, `TestStateClasses`.
+  the transition table. Tests: `TestCanTransition`, `TestStateClasses`,
+  `TestRejectReasonNames`.
 - `internal/delivery/feedback.go`: kinds, wording, `TransitionFeedback`. Tests:
   `TestTransitionFeedback`, `TestSummaries`.
 - `internal/delivery/record.go`: `Record`, `NewTargetControlRecord`, `Apply`,
@@ -472,7 +478,8 @@ permission still reads it.
   `FeedbackParams` and its decided values (`DefaultFeedbackParams`). Tests:
   `TestDefaultFeedbackParamsValidate`, `TestDefaultFeedbackParamsValues` (each
   value, named after its reason), `TestDefaultFeedbackParamsReasons` (the figures
-  above recomputed from the defaults), `TestDefaultFeedbackParamsAgainstHandoff`
+  above recomputed from the defaults, including that the notices of one queue
+  time stay below `DefaultEndpointBacklogLimit`), `TestDefaultFeedbackParamsAgainstHandoff`
   (the hourly cap stays within the prompt cap of an endpoint), `TestMergeKey`,
   `TestFeedbackParamsValidate`, `TestFeedbackQueue` (among its cases, the exact
   instant at which a sent notice leaves the rate window).

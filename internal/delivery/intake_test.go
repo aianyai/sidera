@@ -57,7 +57,7 @@ func TestIntake(t *testing.T) {
 	denials := []RejectReason{
 		RejectUnauthorized, RejectEndpointMissing, RejectEndpointClosed, RejectEndpointDeclined,
 		RejectTooLarge, RejectExpired, RejectBacklogExpired, RejectSecondCheckFailed,
-		RejectMalformed, RejectDeadlineOutOfRange, RejectBacklogFull,
+		RejectMalformed, RejectDeadlineOutOfRange,
 	}
 	for _, why := range denials {
 		t.Run("a denial is rejected with the reason it carries: "+why.String(), func(t *testing.T) {
@@ -100,8 +100,6 @@ func TestIntakeBacklogLimit(t *testing.T) {
 		{"an owner's lower limit applies: at it rejects", authz.TrafficMessage, ab, allow, Backlog{Queued: 1, Limit: 1}, IntakeReject, RejectBacklogFull},
 		{"an owner's higher limit applies", authz.TrafficMessage, ab, allow, Backlog{Queued: 200, Limit: 400}, IntakeAccept, RejectNone},
 		{"a control signal is accepted at a full backlog", authz.TrafficControlSignal, ab, allow, full, IntakeAccept, RejectNone},
-		{"a status report is accepted at a full backlog", authz.TrafficStatusReport, ab, allow, full, IntakeAccept, RejectNone},
-		{"a control reply is accepted at a full backlog", authz.TrafficControlReply, ab, allow, full, IntakeAccept, RejectNone},
 		{"system feedback is accepted at a full backlog", authz.TrafficSystemFeedback, ab, allow, full, IntakeAccept, RejectNone},
 		{"system feedback is accepted far above the limit", authz.TrafficSystemFeedback, ab, allow, Backlog{Queued: 230, Limit: 200}, IntakeAccept, RejectNone},
 		{"exempt traffic needs no backlog input", authz.TrafficSystemFeedback, ab, allow, Backlog{}, IntakeAccept, RejectNone},
@@ -143,6 +141,8 @@ func TestIntakeBacklogInputs(t *testing.T) {
 		{"the unset traffic kind is invalid input", authz.TrafficKind(0), allow, ab, roomy},
 		{"an unknown traffic kind is invalid input", authz.TrafficKind(99), allow, ab, roomy},
 		{"trust maintenance is not a delivery to an endpoint", authz.TrafficTrustMaintenance, allow, ab, roomy},
+		{"a status report is taken by ApplyReport, not judged by Intake", authz.TrafficStatusReport, allow, ab, roomy},
+		{"a control reply is taken by HandleControlReply, not judged by Intake", authz.TrafficControlReply, allow, ab, roomy},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {

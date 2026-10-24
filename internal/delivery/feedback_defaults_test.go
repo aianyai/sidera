@@ -46,6 +46,8 @@ func TestDefaultFeedbackParamsReasons(t *testing.T) {
 			UnreachableHintAfter+p.MergeWindow < DefaultAcceptBefore},
 		{"within one queue time at most 30 notices wait in the sender's queue",
 			inQueueTime == 30},
+		{"the notices a sender can receive within one queue time stay below the endpoint backlog limit",
+			inQueueTime < DefaultEndpointBacklogLimit},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
