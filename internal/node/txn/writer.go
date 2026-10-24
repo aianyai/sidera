@@ -20,6 +20,8 @@ type Writer struct {
 	mu   sync.Mutex
 	hits []int          // per key of the table
 	open map[*Decl]bool // declarations with an open Tx
+
+	recovered bool // Recover has returned nil
 }
 
 // New returns a Writer over fs for the declarations of table. obs may be nil.
@@ -72,10 +74,11 @@ func (r reader) Stat(p string) (fsx.Info, error)         { return r.r.Stat(p) }
 func (r reader) Available(dir string) (uint64, error)    { return r.r.Available(dir) }
 
 // Begin opens a transaction of a declaration of the table. It panics when the
-// declaration is not the very one the table was built from, or when a Tx of it
-// is still open: crash points are numbered per key, and two Tx of one
-// declaration advancing the same keys would make the numbering depend on
-// scheduling. Declarations that differ may run at once.
+// declaration is not the very one the table was built from; when it is an
+// owner's declaration (not one of Internal) and Recover has not returned nil;
+// or when a Tx of it is still open: crash points are numbered per key, and two
+// Tx of one declaration advancing the same keys would make the numbering depend
+// on scheduling. Declarations that differ may run at once.
 func (w *Writer) Begin(d *Decl) *Tx {
 	c, ok := w.table.byDecl[d]
 	if !ok {
@@ -85,7 +88,16 @@ func (w *Writer) Begin(d *Decl) *Tx {
 		}
 		panic(fmt.Sprintf("txn: the declaration %q is not in the table; every transaction must be declared, and listed in the program's table", name))
 	}
+	if !isInternal(c.name) && !w.isRecovered() {
+		panic(fmt.Sprintf("txn: Begin of %q before Recover has returned nil: Recover must run first, because an owner's recovery reads existence and acts on it durably, and only after the settle of Recover is what it reads a state a power loss cannot take back", c.name))
+	}
 	return w.begin(c)
+}
+
+func (w *Writer) isRecovered() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.recovered
 }
 
 func (w *Writer) begin(c *compiled) *Tx {

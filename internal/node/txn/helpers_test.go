@@ -45,6 +45,13 @@ func (r *recorder) names() []string {
 	return out
 }
 
+// forget drops the points kept so far.
+func (r *recorder) forget() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.points, r.kinds = nil, nil
+}
+
 func (r *recorder) count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()

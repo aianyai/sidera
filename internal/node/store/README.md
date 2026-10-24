@@ -90,8 +90,9 @@ engine applies the delivery rules and calls the writes.
 - Build the table once with `txn.Internal()` and `Transactions()`; call
   `Writer.Recover`, then the layout rule, then `Scan`, and run the recovery rules
   in the order of the startup. The rules run only after `Recover` has returned
-  nil: it ends by making every directory durable, so what a rule reads is what a
+  nil: it starts by making every directory durable, so what a rule reads is what a
   power loss cannot take back, and the store has no such barrier of its own.
+  `txn.Writer.Begin` panics for the store's transactions until it has.
 - Acknowledge and update memory only after a method returns nil; on `txn.IsFatal`
   exit and rescan.
 - Call `SeqBook.Note` only after the commit that wrote the number.

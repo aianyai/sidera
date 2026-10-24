@@ -548,7 +548,9 @@ func TestEveryConfigTransactionSurvivesACrashAtEveryPoint(t *testing.T) {
 					t.Errorf("%s: adapter gc work left after a start: %v, %v", where, work, err)
 				}
 				// Starting again changes nothing.
-				c3, err := config.Load(txn.New(clone, newTable(t), nil))
+				w3 := txn.New(clone, newTable(t), nil)
+				recoverWriter(t, w3)
+				c3, err := config.Load(w3)
 				if err != nil || tc.state(t, where, c3) != got {
 					t.Errorf("%s: a second start reads another state: %v", where, err)
 				}

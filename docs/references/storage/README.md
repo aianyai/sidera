@@ -367,8 +367,14 @@ removal of the files of that directory is durable on its own, so a power loss
 during it could keep the removal of some files and lose the rename, which brings
 the directory back under its original name with only some of its files. Settling
 first makes the state that every recovery predicate and the cleanup read one a
-power loss cannot take back. The caller guarantees that the predicates of every
-owner run after `Recover` returned. The transaction sits in this package because
+power loss cannot take back. The predicates of every owner must run after
+`Recover` returned nil, and the `Writer` enforces it for the writes: `Begin` of
+any declaration that is not one of `Internal()` panics, naming the declaration,
+until `Recover` has returned nil. The ordering was once only a promise of the
+caller, and a composition root that broke it failed silently and only after a
+crash and a power loss; now it fails at its first start. A `Recover` that
+returned an error leaves the `Writer` not recovered. A predicate's reads before
+its first `Begin` remain the caller's to order. The transaction sits in this package because
 `Recover` already runs first at startup and walks the whole data directory, so
 there is one home for the rule and no owner repeats it. No order of the syncs is
 needed for durability (a directory sync covers that directory's entries only and
@@ -599,10 +605,11 @@ record that, after a process crash, may be visible and not durable; a power loss
 that followed would leave the followers without their head. The store does not
 guard against this itself: it relies on the settle transaction that starts
 `txn.Writer.Recover` (the Settle paragraph of the transaction section), which
-makes every directory durable before any rule runs. On Windows `SyncDir` flushes nothing, so that
+makes every directory durable before any rule runs, and `Begin` refuses the
+store's transactions until it has returned nil. On Windows `SyncDir` flushes nothing, so that
 barrier persists nothing there (the platform section says what durability rests
-on); pending verification by CI on main. The caller guarantees that the rules run after
-`Recover` returned. The store's crash walk runs its restarts through the real
+on); pending verification by CI on main. The rules run after
+`Recover` returned nil. The store's crash walk runs its restarts through the real
 `Recover`, so it exercises that barrier: without it the walk fails on orphan
 collection after a process crash.
 
@@ -893,7 +900,7 @@ so that the double cannot drift from what it stands for.
 | fault injection | `internal/node/fsx/fsxtest/faulty.go` | `faulty_test.go` |
 | conformance | `internal/node/fsx/fsxtest/conformance.go` | `TestMemConformsToTheFSContract`, `TestOSFSConformsToTheFSContract` |
 | declarations, table, keys | `internal/node/txn/txn.go`, `table.go`, `ops.go` | `TestTransactionTableIsValid`, `TestTableKeysAreTheStepsOfEveryDeclaredWrite`, `TestTableKeysOfEveryOperation`, `TestNewTableRejects`, `TestNewTableAccepts`, `TestTableKeepsTheDeclarationItWasBuiltFrom` |
-| run time checks | `internal/node/txn/tx.go`, `writer.go` | `runtime_test.go` (`TestBeginPanicsOnADeclarationThatIsNotInTheTable`, `TestBeginPanicsWhileATxOfTheSameDeclarationIsOpen`, `TestTxPanicsOnACallTheDeclarationDoesNotAllow`, `TestDeferredReplacementsMustBeSyncedBeforeAnythingElse`, `TestSyncFileMustMatchTheAppendInThisTx`, `TestCommitOfATransactionThatMadeNoWriteReachesNoPoint`) |
+| run time checks | `internal/node/txn/tx.go`, `writer.go` | `recoverfirst_test.go` (`TestBeginOfAnOwnerDeclarationBeforeRecoverPanics`, `TestBeginOfAnOwnerDeclarationAfterASuccessfulRecoverWorks`, `TestBeginOfAnOwnerDeclarationAfterAFailedRecoverStillPanics`, `TestBeginOfAnInternalDeclarationIsNotRefusedBeforeRecover`); `runtime_test.go` (`TestBeginPanicsOnADeclarationThatIsNotInTheTable`, `TestBeginPanicsWhileATxOfTheSameDeclarationIsOpen`, `TestTxPanicsOnACallTheDeclarationDoesNotAllow`, `TestDeferredReplacementsMustBeSyncedBeforeAnythingElse`, `TestSyncFileMustMatchTheAppendInThisTx`, `TestCommitOfATransactionThatMadeNoWriteReachesNoPoint`) |
 | commit point and classes | `internal/node/txn/ops.go`, `tx.go` | `classify_test.go` (`TestFailureClassBeforeAndAfterTheCommitPoint`, `TestFirstErrorIsStickyAndNoStepRunsAfterIt`, `TestEachOperationHasItsCommitStep`, `TestFailureAfterTheCommitStepInsideOneOperationIsFatal`) |
 | crash states and durability | `internal/node/txn/tx.go` | `crash_test.go` (`TestEveryDeclaredKeyIsReachedInOrder`, `TestCrashStatesAtEveryPointOfAMultiWriteTransaction`, `TestAcknowledgedWritesSurvivePowerLoss`), `TestRandomTransactionsHonourTheCommitPointOrderingAndDurability` |
 | a `Tx` closed after its commit point, and removals synced before the commit | `internal/node/txn/tx.go` | `close_test.go` (`TestCloseAfterTheCommitPointWithoutCommitOrFailurePanics`, `TestCloseThatIsNotALapseDoesNotPanic`, `TestCloseDoesNotReplaceThePanicOfTheTxItself`), `unsynced_test.go` (`TestCommitPanicsWhenARemovalWasNotSynced`) |

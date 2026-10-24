@@ -17,7 +17,7 @@ var replayLike = &txn.Decl{Name: "replay", Kind: txn.Recovery,
 // Coverage lists every key of the table, the ones never reached with a zero,
 // each with the kind of its transaction.
 func TestCoverageListsEveryKeyOfTheTableWithZerosIncluded(t *testing.T) {
-	r := newRig(t, nil, multi, replayLike)
+	r := newRigUnrecovered(t, nil, multi, replayLike)
 	keys := r.tab.Keys()
 	cov := r.w.Coverage()
 
@@ -44,8 +44,10 @@ func TestCoverageCountsHitsPerKeyAndSplitsThemByKind(t *testing.T) {
 	}
 
 	// Per key, written out by hand: the deferred group has two files, the log
-	// two appends, and the run was twice.
+	// two appends, and the run was twice. The rig's Recover settled the three
+	// directories of the disk (the root, a and b) once.
 	want := map[string]int{
+		"txn-settle/dir.sync-dir": 3, "txn-settle/commit": 1,
 		"multi/body.create": 2, "multi/body.write": 2, "multi/body.sync": 2, "multi/body.rename": 2, "multi/body.sync-dir": 2,
 		"multi/in.create": 4, "multi/in.write": 4, "multi/in.sync": 4, "multi/in.rename": 4,
 		"multi/in-dir.sync-dir": 2,
@@ -87,7 +89,7 @@ func TestCoverageCountsHitsPerKeyAndSplitsThemByKind(t *testing.T) {
 // zero, so parallel tests do not disturb each other.
 func TestCoverageBelongsToTheWriter(t *testing.T) {
 	r1 := newRig(t, nil, multi)
-	r2 := newRig(t, nil, multi)
+	r2 := newRigUnrecovered(t, nil, multi)
 	if _, err := firstError(r1.runMulti()); err != nil {
 		t.Fatal(err)
 	}

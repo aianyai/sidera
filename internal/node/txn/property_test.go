@@ -648,6 +648,15 @@ func runScenario(t *testing.T, rng *rand.Rand, s scenario, tl *tally) {
 	tab := table(t, s.decl)
 	rec := &recorder{}
 	crashRNG := rand.New(rand.NewPCG(uint64(len(events)), 99))
+	// The Writer recovers before the scenario begins, as a program's does. The
+	// observer is not set yet, so the points of that Recover are neither counted
+	// nor made crash states of: the scenario is the declaration under test.
+	w := txn.New(base, tab, rec)
+	if err := w.Recover(); err != nil {
+		t.Fatalf("setup Recover: %v", err)
+	}
+	recoverPoints := rec.names()
+	rec.forget()
 	rec.on = func(p fsx.Point, _ txn.Kind) {
 		i := rec.count() - 1
 		isCommit := p.Step == fsx.StepCommit
@@ -684,7 +693,6 @@ func runScenario(t *testing.T, rng *rand.Rand, s scenario, tl *tally) {
 			}
 		}
 	}
-	w := txn.New(base, tab, rec)
 
 	tx := w.Begin(s.decl)
 	errs := make([]error, 0, len(s.calls)+1)
@@ -729,9 +737,9 @@ func runScenario(t *testing.T, rng *rand.Rand, s scenario, tl *tally) {
 		t.Fatalf("points reached:\n got %v\nwant %v", got, want)
 	}
 
-	// Coverage counts what was reached.
+	// Coverage counts what was reached, the points of the setup Recover included.
 	counted := map[string]int{}
-	for _, name := range want {
+	for _, name := range append(recoverPoints, want...) {
 		p, err := fsx.ParsePoint(name)
 		if err != nil {
 			t.Fatal(err)

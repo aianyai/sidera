@@ -136,6 +136,7 @@ func TestFailedWriteDoesNotChangeMemory(t *testing.T) {
 			putTree(t, mem, validTree(t))
 			faulty := fsxtest.NewFaulty(t, mem)
 			w := txn.New(faulty, newTable(t), nil)
+			recoverWriter(t, w)
 			c, err := config.Load(w)
 			if err != nil {
 				t.Fatal(err)
@@ -175,6 +176,7 @@ func TestFailedStageIsAnOrdinaryFailure(t *testing.T) {
 			putTree(t, mem, validTree(t))
 			faulty := fsxtest.NewFaulty(t, mem)
 			w := txn.New(faulty, newTable(t), nil)
+			recoverWriter(t, w)
 			c, err := config.Load(w)
 			if err != nil {
 				t.Fatal(err)

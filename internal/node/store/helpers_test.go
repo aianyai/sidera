@@ -508,13 +508,17 @@ type faultyRig struct {
 	faulty *fsxtest.Faulty
 }
 
-// newFaultyRig starts a process over mem through a fault injector.
+// newFaultyRig starts a process over mem through a fault injector. The process
+// recovers before the test names a fault, and the points of that start are
+// forgotten.
 func newFaultyRig(t *testing.T, mem *fsxtest.Mem) *faultyRig {
 	t.Helper()
 	f := fsxtest.NewFaulty(t, mem)
 	r := &rig{t: t, mem: mem, tab: program(t), rec: &recorder{}}
 	r.w = txn.New(f, r.tab, r.rec)
 	r.st = store.New(r.w)
+	r.restart()
+	r.rec.forget()
 	return &faultyRig{rig: r, faulty: f}
 }
 

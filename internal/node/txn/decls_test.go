@@ -89,9 +89,18 @@ type rig struct {
 
 // newRig builds the table, a Mem holding the directories a and b, and a Writer
 // over base(mem), which is the Mem itself when base is nil.
+// newRig is a rig whose Writer has recovered, as every Writer of a program does
+// before an owner begins a transaction. The points of that Recover are dropped
+// from the recorder, so a test counts and orders what it does itself; they
+// remain in Coverage, which counts a Writer's whole life.
 func newRig(t testing.TB, base func(*fsxtest.Mem) fsx.FS, decls ...*txn.Decl) *rig {
 	t.Helper()
-	return newRigUnrecovered(t, base, decls...)
+	r := newRigUnrecovered(t, base, decls...)
+	if err := r.w.Recover(); err != nil {
+		t.Fatalf("setup Recover: %v", err)
+	}
+	r.rec.forget()
+	return r
 }
 
 // newRigUnrecovered is a rig whose Writer has not run Recover.

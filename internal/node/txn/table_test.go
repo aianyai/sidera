@@ -262,7 +262,7 @@ func TestNewTableAccepts(t *testing.T) {
 // afterwards: the declaration a Writer enforces is the one that was validated.
 func TestTableKeepsTheDeclarationItWasBuiltFrom(t *testing.T) {
 	d := &txn.Decl{Name: "x", Kind: txn.Normal, Writes: []txn.Write{{Role: "r", Op: txn.OpReplace}}}
-	tab, err := txn.NewTable(d)
+	tab, err := txn.NewTable(append(txn.Internal(), d)...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,6 +276,9 @@ func TestTableKeepsTheDeclarationItWasBuiltFrom(t *testing.T) {
 	mem := fsxtest.NewMem()
 	mkdirs(t, mem, "a")
 	w := txn.New(mem, tab, nil)
+	if err := w.Recover(); err != nil {
+		t.Fatal(err)
+	}
 	tx := w.Begin(d)
 	defer tx.Close()
 	mustNotPanic(t, func() {

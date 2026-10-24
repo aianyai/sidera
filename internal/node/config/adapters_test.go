@@ -655,6 +655,7 @@ func TestStagedFilesKeepTheirModes(t *testing.T) {
 	fsys := &modeFS{Mem: mem, temp: map[string]fsx.Mode{}, final: map[string]fsx.Mode{}}
 	rg := &rig{t: t, mem: mem, tab: newTable(t)}
 	rg.w = txn.New(fsys, rg.tab, nil)
+	recoverWriter(t, rg.w)
 	putTree(t, mem, validTree(t))
 	c := rg.load()
 

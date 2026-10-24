@@ -17,6 +17,10 @@ const cleanupName = "txn-cleanup"
 // every start. Its one role, dir, syncs a directory.
 const settleName = "txn-settle"
 
+// isInternal reports whether name is a declaration of Internal: the ones that
+// Recover runs itself, and so the only ones that may begin before it returns.
+func isInternal(name string) bool { return name == cleanupName || name == settleName }
+
 // Internal returns the declarations that belong to this package. The
 // composition root puts them in front of the declarations of every owner when
 // it builds the table, so Writer.Recover has its transactions. The cleanup
@@ -76,6 +80,12 @@ func CleanupWork(r fsx.Reader) ([]fsx.Leftover, error) {
 // finished transaction left behind is for the package that owns those files to
 // repair.
 //
+// Until Recover has returned nil, Begin refuses every declaration that is not
+// one of Internal: an owner's recovery runs only on a settled disk, and a
+// composition root that forgets Recover fails at its first start instead of
+// after a crash and a power loss. A Recover that returned an error leaves the
+// Writer as it was.
+//
 // The table must hold both declarations even on a clean disk: a composition
 // root that left out Internal() fails at its first start, not at the first
 // crash.
@@ -85,7 +95,13 @@ func (w *Writer) Recover() error {
 	if err := w.settle(settle); err != nil {
 		return err
 	}
-	return w.cleanup(cleanup)
+	if err := w.cleanup(cleanup); err != nil {
+		return err
+	}
+	w.mu.Lock()
+	w.recovered = true
+	w.mu.Unlock()
+	return nil
 }
 
 func (w *Writer) internal(name string) *compiled {

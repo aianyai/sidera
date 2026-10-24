@@ -117,7 +117,8 @@ transaction of `txn`; nothing here calls an `fsx` write.
 
 ## What the caller must guarantee
 
-- Pass `*txn.Writer` after `Recover`, and build the table from `Transactions()`
+- Pass `*txn.Writer` after `Recover` (its `Begin` panics for an owner's
+  transaction until `Recover` has returned nil), and build the table from `Transactions()`
   together with the `init` and `clock-clear` declarations whose writes are
   `InitWrites()`, `InitMarkerWrite()` and the `RoleClock` write.
 - Serialise the transactions of one declaration (the single writer loop does).

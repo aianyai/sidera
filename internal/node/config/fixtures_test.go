@@ -9,6 +9,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/admin"
@@ -440,15 +441,43 @@ func newRig(t testing.TB) *rig {
 	t.Helper()
 	r := &rig{t: t, mem: fsxtest.NewMem(), tab: newTable(t)}
 	r.w = txn.New(r.mem, r.tab, nil)
+	recoverWriter(t, r.w)
 	return r
+}
+
+// recoverWriter runs the Recover that every process does before an owner begins
+// a transaction.
+func recoverWriter(t testing.TB, w *txn.Writer) {
+	t.Helper()
+	if err := w.Recover(); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
 }
 
 // onClone is a rig over an existing disk, as a restart gives.
 func onDisk(t testing.TB, mem *fsxtest.Mem, obs txn.Observer) *rig {
 	t.Helper()
 	r := &rig{t: t, mem: mem, tab: newTable(t), obs: obs}
-	r.w = txn.New(mem, r.tab, obs)
+	g := &afterRecover{obs: obs}
+	r.w = txn.New(mem, r.tab, g)
+	recoverWriter(t, r.w)
+	g.live.Store(true)
 	return r
+}
+
+// afterRecover passes the points to obs from the moment the process has
+// recovered: the points of that Recover are the start's, not those of the
+// transaction a test walks, and the settle of Recover has its own crash tests
+// in package txn.
+type afterRecover struct {
+	obs  txn.Observer
+	live atomic.Bool
+}
+
+func (a *afterRecover) Reached(p fsx.Point, k txn.Kind) {
+	if a.live.Load() && a.obs != nil {
+		a.obs.Reached(p, k)
+	}
 }
 
 // loaded is a rig holding a valid tree, and the Config loaded from it.

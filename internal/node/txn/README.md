@@ -23,7 +23,7 @@ declaration of its own.
 | `Decl`, `Write`, `Kind`, `Op` | The static declaration of one transaction: name, kind (`Normal` or `Recovery`), and writes in order. Each `Write` has a role, an operation, and the flags `Many`, `Optional`, `Prepare`. |
 | `NewTable(decls...)`, `Table.Keys()` | Validates the declarations of the whole program and expands every crash point: every step of every write under its role, and one commit per transaction. |
 | `Internal()` | The declarations of this package: the cleanup transaction (`Recovery`) and the settle transaction (`Normal`). The composition root puts them first in its table. |
-| `New(fs, table, observer)`, `Writer.Begin(decl)` | One `Writer` per process; `Begin` opens a `Tx` of a declaration of the table. |
+| `New(fs, table, observer)`, `Writer.Begin(decl)` | One `Writer` per process; `Begin` opens a `Tx` of a declaration of the table, and refuses an owner's declaration until `Recover` has returned nil. |
 | `Tx.Replace`, `ReplaceDefer`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | One method per operation; the first argument is the declared role. |
 | `Tx.Commit`, `Tx.Close` | `Commit` ends the transaction and reaches its commit point; `Close` is for `defer` and does nothing after `Commit`, and panics when the `Tx` is closed after its commit point with neither `Commit` nor a recorded failure. |
 | `Writer.Reader()` | The read side, as an `fsx.Reader` that offers nothing else. |
@@ -48,6 +48,17 @@ declaration of its own.
   error, not an I/O error. `NewTable` also refuses a `Prepare` write declared
   after a write that is not `Prepare`: past the commit point the flag changes
   nothing, and it would mislead a reader.
+- **An owner's transaction cannot begin before `Recover` has returned nil.**
+  `Recover` makes everything visible durable (the settle) and only then removes
+  leftovers, and every owner's recovery predicate reads existence and acts on it
+  durably: run earlier, it can act on a change a power loss takes back. The
+  ordering used to be only a promise of the caller, and a composition root that
+  forgot it failed silently, after a crash and a power loss. `Begin` now panics
+  for every declaration that is not one of `Internal()`, naming it and saying
+  `Recover` must run first, so the omission fails at the first start. The
+  `Writer` records the success of `Recover`; a `Recover` that returned an error
+  leaves it not recovered, because the disk was not settled or not cleaned.
+  `Recover` itself runs the declarations of `Internal()`, which are exempt.
 - **One open `Tx` per declaration.** Crash points are numbered per key; two
   transactions of one declaration advancing the same keys would make the
   numbering depend on scheduling. A second `Begin` panics. Different
@@ -142,9 +153,11 @@ declaration of its own.
 - Build the table once, at the composition root, from `Internal()` and every
   owner's declarations, and check it with `NewTable` before anything runs.
 - Call `Recover` at startup after taking the instance lock and before loading
-  anything. Run every owner's recovery predicate only after `Recover` has
-  returned nil: a predicate reads existence, and only after the settle is what
-  it reads durable.
+  anything, and treat an error from it as the end of the start. An owner's
+  transaction, which is where its recovery predicate acts, panics until
+  `Recover` has returned nil; the predicate's reads before its first `Begin`
+  are the caller's to order after `Recover`, because only after the settle is
+  what a predicate reads durable.
 - Serialise the transactions of one declaration (the single writer loop does).
   Use a `Writer` from several goroutines only for different declarations.
 - A transaction that writes the files of two owners belongs to the composing
@@ -166,6 +179,7 @@ is checked the same way once the owners declare theirs. The crash-state tests
 (`TestCrashStatesAtEveryPointOfAMultiWriteTransaction`,
 `TestAcknowledgedWritesSurvivePowerLoss`), the class tests
 (`TestFailureClassBeforeAndAfterTheCommitPoint`, `TestEachOperationHasItsCommitStep`),
-the run time checks, and `TestRandomTransactionsHonourTheCommitPointOrderingAndDurability`
+the run time checks (among them `TestBeginOfAnOwnerDeclarationBeforeRecoverPanics`,
+`TestBeginOfAnOwnerDeclarationAfterAFailedRecoverStillPanics`), and `TestRandomTransactionsHonourTheCommitPointOrderingAndDurability`
 (a fixed-seed property test against a model of the disk written in the test)
 make up the fast crash suite of this package.

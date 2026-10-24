@@ -324,7 +324,7 @@ func TestCommitOfATransactionThatMadeNoWriteReachesNoPoint(t *testing.T) {
 		t.Errorf("Commit of an empty transaction reached %d points: %v", n, r.rec.names())
 	}
 	for _, c := range r.w.Coverage() {
-		if c.Hits != 0 {
+		if c.Hits != 0 && c.Key.Tag.Tx != "txn-settle" { // the rig's Recover settled once
 			t.Errorf("%v has %d hits after an empty transaction", c.Key.Key, c.Hits)
 		}
 	}

@@ -267,6 +267,9 @@ func TestFailedAppendLeavesAHalfLineAndLaterTransactionsStayReadable(t *testing.
 		t.Fatal(err)
 	}
 	w := txn.New(faulty, tab, nil)
+	if err := w.Recover(); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
 	st := store.New(w)
 
 	faulty.FailShortWrite(fsxtest.Match{Tx: "archive-events", Role: "archive", Step: fsx.StepWrite, Hit: 1}, 20, syscall.EIO)
