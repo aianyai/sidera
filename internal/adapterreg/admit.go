@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/handoff"
@@ -30,11 +31,15 @@ const (
 	// ReasonMarkersInvalid: an acknowledgement marker is empty, does not compile
 	// or matches the empty text.
 	ReasonMarkersInvalid
+	// ReasonRecvWaitFrontendUndeclared: the manifest gives a receive wait limit for
+	// an agent front end that no declared runtime lists, as for a budget.
+	ReasonRecvWaitFrontendUndeclared
 )
 
 var admitReasonNames = [...]string{
 	ReasonCapabilitiesInvalid: "capabilities_invalid", ReasonManifestInvalid: "manifest_invalid", ReasonNoEndpointKinds: "no_endpoint_kinds",
 	ReasonBudgetFrontendUndeclared: "budget_frontend_undeclared", ReasonMarkersInvalid: "markers_invalid",
+	ReasonRecvWaitFrontendUndeclared: "recv_wait_frontend_undeclared",
 }
 
 // String returns the name of the reason.
@@ -62,13 +67,25 @@ func (e *AdmitError) Unwrap() error { return e.Err }
 
 // Admission is what the daemon records for an admitted adapter on one connection:
 // the endpoint kinds it may own, the control signals each kind accepts, the
-// output budgets and the compiled acknowledgement markers. The zero value
-// declares nothing and carries the default budget.
+// output budgets, the receive wait limits and the compiled acknowledgement
+// markers. The zero value declares nothing and carries the default budget and
+// the default receive wait.
 type Admission struct {
-	caps    adapterproto.Capabilities
-	budgets map[manifest.Frontend]handoff.Budget
-	markers handoff.MarkerSet
+	caps      adapterproto.Capabilities
+	budgets   map[manifest.Frontend]handoff.Budget
+	recvWaits map[adapterproto.Frontend]time.Duration
+	markers   handoff.MarkerSet
 }
+
+// DefaultRecvWait is the longest a recv waits through an agent front end whose
+// manifest gives no limit. The shortest known client timeout is 10 seconds:
+// Codex returns its default unified-exec call after 10 seconds with the command
+// still running, and its one-shot mode kills the command then. Eight seconds
+// leaves 2 under that for the connection and the output. A page returned after
+// the client gave up is not seen by the agent, but nothing is lost: the message
+// stays leased and comes back, marked as a possible duplicate, when the lease
+// expires. A wait that is too short only makes the agent ask again.
+const DefaultRecvWait = 8 * time.Second
 
 // Admit decides whether an adapter that declared caps in initialize and ships
 // manifest m may be admitted, and records what it may do.
@@ -76,8 +93,9 @@ type Admission struct {
 // The capabilities and the manifest are validated again here, so a value built in
 // code is judged like one read from the wire. An adapter must declare at least
 // one of runtime and direct endpoints; every front end the manifest gives a budget
-// for must be declared; and the acknowledgement markers are compiled here, once,
-// by handoff, which is the only place that judges them.
+// for must be declared, and so must every agent front end it gives a receive wait
+// limit for (a runtime that lists it); and the acknowledgement markers are
+// compiled here, once, by handoff, which is the only place that judges them.
 func Admit(caps adapterproto.Capabilities, m manifest.Manifest) (Admission, error) {
 	if err := caps.Validate(); err != nil {
 		return Admission{}, &AdmitError{ReasonCapabilitiesInvalid, err}
@@ -88,7 +106,7 @@ func Admit(caps adapterproto.Capabilities, m manifest.Manifest) (Admission, erro
 	if caps.Runtime == nil && caps.Direct == nil {
 		return Admission{}, &AdmitError{ReasonNoEndpointKinds, errors.New("neither runtime nor direct endpoints are declared")}
 	}
-	a := Admission{caps: cloneCaps(caps), budgets: map[manifest.Frontend]handoff.Budget{}}
+	a := Admission{caps: cloneCaps(caps), budgets: map[manifest.Frontend]handoff.Budget{}, recvWaits: map[adapterproto.Frontend]time.Duration{}}
 	for _, b := range m.Budgets {
 		if !declaresFrontend(caps, b.Frontend) {
 			return Admission{}, &AdmitError{ReasonBudgetFrontendUndeclared, fmt.Errorf("budget for %q, which the adapter does not declare", string(b.Frontend))}
@@ -98,6 +116,12 @@ func Admit(caps adapterproto.Capabilities, m manifest.Manifest) (Admission, erro
 			unit = handoff.UnitTokens
 		}
 		a.budgets[b.Frontend] = handoff.Budget{Unit: unit, Limit: b.Limit}
+	}
+	for _, l := range m.RecvWaitLimits {
+		if caps.Runtime == nil || !slices.Contains(caps.Runtime.Frontends, l.Frontend) {
+			return Admission{}, &AdmitError{ReasonRecvWaitFrontendUndeclared, fmt.Errorf("receive wait limit for %q, which the adapter does not declare", string(l.Frontend))}
+		}
+		a.recvWaits[l.Frontend] = time.Duration(l.MaxS) * time.Second
 	}
 	if m.AckMarkers != nil {
 		set, err := handoffMarkers(*m.AckMarkers).Compile()
@@ -235,6 +259,17 @@ func (a Admission) Budget(f manifest.Frontend) handoff.Budget {
 		return b
 	}
 	return handoff.DefaultBudget()
+}
+
+// RecvWait is the longest a recv through the agent front end may wait: the limit
+// the manifest declares, or DefaultRecvWait when it declares none for the front
+// end. It does not apply to direct endpoints: the adapter chooses the wait of
+// its own endpoint.recv in wait_s, capped by adapterproto.MaxWaitSeconds.
+func (a Admission) RecvWait(f adapterproto.Frontend) time.Duration {
+	if d, ok := a.recvWaits[f]; ok {
+		return d
+	}
+	return DefaultRecvWait
 }
 
 // Markers returns the compiled acknowledgement markers; the zero set declares

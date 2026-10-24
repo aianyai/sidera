@@ -23,10 +23,6 @@
     {
       "frontend": "mcp",
       "max_s": 120
-    },
-    {
-      "frontend": "direct",
-      "max_s": 30
     }
   ]
 }

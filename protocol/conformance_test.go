@@ -512,24 +512,30 @@ func TestManifestVocabulariesMatchSchema(t *testing.T) {
 	}
 }
 
-// TestManifestRecvWaitLimitsMatchSchema: the front ends a receive wait limit can
-// name and the bounds of its seconds are the schema's.
+// TestManifestRecvWaitLimitsMatchSchema: a receive wait limit names an agent
+// front end (cli or mcp, not direct), one entry at most for each, and the bounds
+// of its seconds are the schema's.
 func TestManifestRecvWaitLimitsMatchSchema(t *testing.T) {
 	raw := rawSchema(t, "manifest")
 	limits := sub(t, raw, "properties", "recv_wait_limits")
 	if got := limits["minItems"]; got != float64(1) {
 		t.Errorf("recv_wait_limits minItems: schema %v, want 1", got)
 	}
-	if got := limits["maxItems"]; got != float64(len(manifest.BudgetFrontends())) {
-		t.Errorf("recv_wait_limits maxItems: schema %v, want one per front end (%d)", got, len(manifest.BudgetFrontends()))
+	agentFrontends := adapterproto.EnumTables()["Frontend"]
+	if got := limits["maxItems"]; got != float64(len(agentFrontends)) {
+		t.Errorf("recv_wait_limits maxItems: schema %v, want one per agent front end (%d)", got, len(agentFrontends))
 	}
 	item := sub(t, raw, "properties", "recv_wait_limits", "items")
 	if got := item["required"]; !sameSet(anyStrings(t, got), []string{"frontend", "max_s"}) {
 		t.Errorf("recv_wait_limits required members: schema %v", got)
 	}
 	props := sub(t, raw, "properties", "recv_wait_limits", "items", "properties")
-	if got := anyStrings(t, props["frontend"].(map[string]any)["enum"]); !sameSet(got, toStrings(manifest.BudgetFrontends())) {
-		t.Errorf("recv_wait_limits front ends: schema %v", got)
+	if got := props["frontend"].(map[string]any)["$ref"]; got != "types.schema.json#/$defs/Frontend" {
+		t.Errorf("recv_wait_limits front end: schema %v, want the agent front end definition of the types schema", got)
+	}
+	typesFrontend := sub(t, rawSchema(t, "types"), "$defs", "Frontend")
+	if got := anyStrings(t, typesFrontend["enum"]); !sameSet(got, agentFrontends) {
+		t.Errorf("agent front ends: types schema %v, Go %v", got, agentFrontends)
 	}
 	maxS := props["max_s"].(map[string]any)
 	if maxS["type"] != "integer" || maxS["minimum"] != float64(1) || maxS["maximum"] != float64(manifest.MaxRecvWaitSeconds) {

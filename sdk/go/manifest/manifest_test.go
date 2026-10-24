@@ -26,7 +26,7 @@ func base() manifest.Manifest {
 			Preset:   []manifest.Field{{Key: "model", Type: manifest.FieldString, Title: "Model", Default: json.RawMessage(`"standard"`)}},
 		},
 		Budgets:        []manifest.Budget{{Frontend: manifest.FrontendCLI, Unit: manifest.UnitChars, Limit: 27000}},
-		RecvWaitLimits: []manifest.RecvWaitLimit{{Frontend: manifest.FrontendCLI, MaxS: 8}, {Frontend: manifest.FrontendMCP, MaxS: 100}},
+		RecvWaitLimits: []manifest.RecvWaitLimit{{Frontend: adapterproto.FrontendCLI, MaxS: 8}, {Frontend: adapterproto.FrontendMCP, MaxS: 100}},
 		AckMarkers:     &manifest.AckMarkers{Replaced: []manifest.Marker{{Literal: ptr("[saved]")}}, Truncated: []manifest.Marker{{Regexp: ptr(`\.\.\. \d+ more`)}}},
 	}
 }
@@ -366,24 +366,27 @@ func markers(n int) []manifest.Marker {
 }
 
 func TestRecvWaitLimitRules(t *testing.T) {
-	w := func(f manifest.Frontend, s int) manifest.RecvWaitLimit {
+	w := func(f adapterproto.Frontend, s int) manifest.RecvWaitLimit {
 		return manifest.RecvWaitLimit{Frontend: f, MaxS: s}
 	}
 	set := func(ls ...manifest.RecvWaitLimit) func(*manifest.Manifest) {
 		return func(m *manifest.Manifest) { m.RecvWaitLimits = ls }
 	}
 	if manifest.MaxRecvWaitSeconds != 120 {
-		t.Fatalf("MaxRecvWaitSeconds = %d, the protocol cap is 120", manifest.MaxRecvWaitSeconds)
+		t.Fatalf("MaxRecvWaitSeconds = %d, the longest an agent recv may wait is 120", manifest.MaxRecvWaitSeconds)
 	}
 	runManifestRows(t, []mrow{
 		{"no limits", func(m *manifest.Manifest) { m.RecvWaitLimits = nil }, "", false},
 		{"one limit", set(w("cli", 8)), "", false},
-		{"a limit for every front end", set(w("cli", 8), w("mcp", 100), w("direct", 30)), "", false},
+		{"a limit for every agent front end", set(w("cli", 8), w("mcp", 100)), "", false},
+		{"direct is not an agent front end", set(w("direct", 30)), "recv_wait_limits[0].frontend", false},
+		{"direct is not an agent front end, beside a valid entry", set(w("cli", 8), w("direct", 30)), "recv_wait_limits[1].frontend", false},
+		{"more entries than agent front ends", set(w("cli", 8), w("mcp", 8), w("cli", 8)), "recv_wait_limits", false},
 		{"max_s 1 is the shortest wait", set(w("cli", 1)), "", false},
-		{"max_s 120 is the protocol cap", set(w("mcp", 120)), "", false},
+		{"max_s 120 is the longest an agent recv may wait", set(w("mcp", 120)), "", false},
 		{"max_s 0", set(w("cli", 0)), "recv_wait_limits[0].max_s", false},
 		{"max_s negative", set(w("cli", -1)), "recv_wait_limits[0].max_s", false},
-		{"max_s 121 is above the protocol cap", set(w("cli", 121)), "recv_wait_limits[0].max_s", false},
+		{"max_s 121 is above the longest an agent recv may wait", set(w("cli", 121)), "recv_wait_limits[0].max_s", false},
 		{"max_s of the second entry is judged too", set(w("cli", 8), w("mcp", 121)), "recv_wait_limits[1].max_s", false},
 		{"front end unknown", set(w("web", 8)), "recv_wait_limits[0].frontend", false},
 		{"front end missing", set(w("", 8)), "recv_wait_limits[0].frontend", false},
@@ -402,27 +405,28 @@ func TestParseRecvWaitLimits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Parse = %v", err)
 	}
-	want := []manifest.RecvWaitLimit{{Frontend: manifest.FrontendCLI, MaxS: 8}, {Frontend: manifest.FrontendMCP, MaxS: 120}}
+	want := []manifest.RecvWaitLimit{{Frontend: adapterproto.FrontendCLI, MaxS: 8}, {Frontend: adapterproto.FrontendMCP, MaxS: 120}}
 	if len(m.RecvWaitLimits) != 2 || m.RecvWaitLimits[0] != want[0] || m.RecvWaitLimits[1] != want[1] {
 		t.Fatalf("RecvWaitLimits = %+v, want %+v", m.RecvWaitLimits, want)
 	}
 	for name, limits := range map[string]string{
-		"max_s with a fraction":           `[{"frontend":"cli","max_s":8.5}]`,
-		"max_s written as a float":        `[{"frontend":"cli","max_s":8.0}]`,
-		"max_s as a string":               `[{"frontend":"cli","max_s":"8"}]`,
-		"max_s null":                      `[{"frontend":"cli","max_s":null}]`,
-		"max_s missing":                   `[{"frontend":"cli"}]`,
-		"front end missing":               `[{"max_s":8}]`,
-		"front end of another case":       `[{"frontend":"CLI","max_s":8}]`,
-		"an unknown member of an entry":   `[{"frontend":"cli","max_s":8,"min_s":1}]`,
-		"max_s above the cap":             `[{"frontend":"cli","max_s":121}]`,
-		"max_s zero":                      `[{"frontend":"cli","max_s":0}]`,
-		"max_s negative":                  `[{"frontend":"cli","max_s":-3}]`,
-		"max_s too large for any integer": `[{"frontend":"cli","max_s":99999999999999999999}]`,
-		"a repeated front end":            `[{"frontend":"cli","max_s":8},{"frontend":"cli","max_s":9}]`,
-		"an explicit empty list":          `[]`,
-		"null instead of the list":        `null`,
-		"an object instead of the list":   `{"frontend":"cli","max_s":8}`,
+		"max_s with a fraction":            `[{"frontend":"cli","max_s":8.5}]`,
+		"max_s written as a float":         `[{"frontend":"cli","max_s":8.0}]`,
+		"max_s as a string":                `[{"frontend":"cli","max_s":"8"}]`,
+		"max_s null":                       `[{"frontend":"cli","max_s":null}]`,
+		"max_s missing":                    `[{"frontend":"cli"}]`,
+		"front end missing":                `[{"max_s":8}]`,
+		"front end of another case":        `[{"frontend":"CLI","max_s":8}]`,
+		"an unknown member of an entry":    `[{"frontend":"cli","max_s":8,"min_s":1}]`,
+		"max_s above the cap":              `[{"frontend":"cli","max_s":121}]`,
+		"max_s zero":                       `[{"frontend":"cli","max_s":0}]`,
+		"max_s negative":                   `[{"frontend":"cli","max_s":-3}]`,
+		"max_s too large for any integer":  `[{"frontend":"cli","max_s":99999999999999999999}]`,
+		"direct is not an agent front end": `[{"frontend":"direct","max_s":8}]`,
+		"a repeated front end":             `[{"frontend":"cli","max_s":8},{"frontend":"cli","max_s":9}]`,
+		"an explicit empty list":           `[]`,
+		"null instead of the list":         `null`,
+		"an object instead of the list":    `{"frontend":"cli","max_s":8}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if got, err := manifest.Parse(doc(limits)); err == nil {

@@ -87,7 +87,7 @@ that matches `adapterproto.ErrBeyondSchema` (`manifest.ErrBeyondSchema`).
 - In a manifest: a tested range has `min` not above `max` in SemVer order; a field
   `default` lies within the field's options, or within `min` and `max`; `min` is
   not above `max`; the keys of one group of fields are distinct; no front end has
-  two budgets.
+  two budgets and none has two receive wait limits.
 
 ## Examples
 

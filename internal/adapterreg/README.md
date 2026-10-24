@@ -21,6 +21,7 @@ not frame, send or store anything.
 | `Admit(capabilities, manifest)` | Whether an adapter is admitted, and the `Admission` that records what it may do. Refusals are an `*AdmitError` with a typed `AdmitReason`. |
 | `Admission.Declares`, `DeclaredKinds`, `Signals(kind)`, `AcceptsSignal` | The endpoint kinds the adapter may own and the control signals each accepts. |
 | `Admission.Budget(frontend)`, `Markers()` | The output budget of `recv` per front end (the default when the manifest gives none) and the compiled acknowledgement markers. |
+| `Admission.RecvWait(frontend)`, `DefaultRecvWait` | The longest an agent's `recv` may wait through an agent front end (`cli` or `mcp`): the manifest's limit, or `DefaultRecvWait` (8 seconds) when it gives none. It does not apply to direct endpoints. |
 | `MethodAllowed(kind, method)`, `RequirementOf` | The method requirement matrix: forbidden, optional or required per kind. |
 | `Admission.Check(kind, method)` | The error code to answer a call the adapter made with (`0` when it is acceptable): method not found (unknown, or a method only the daemon may call), wrong endpoint kind, or a capability not declared. |
 | `CheckHandshake(sent, result, manifest)` | That the adapter reports the manifest's id and version, and a protocol version in both ranges. |
@@ -50,6 +51,24 @@ not frame, send or store anything.
 - **Budgets.** A manifest budget for `cli` or `mcp` needs a runtime that declares
   that front end, and one for `direct` needs direct endpoints; otherwise the
   adapter is refused. A front end without a budget uses `handoff.DefaultBudget()`.
+- **Receive wait.** A limit applies to the agent front ends, `cli` and `mcp`;
+  the manifest refuses one for `direct`. A limit for an agent front end that no
+  declared runtime lists refuses the adapter, as a budget does
+  (`ReasonRecvWaitFrontendUndeclared`). `Admission.RecvWait` returns the declared
+  limit, and `DefaultRecvWait` for a front end without one, an unknown or direct
+  front end and the zero `Admission`. A direct endpoint's wait is chosen by the
+  adapter in the `wait_s` of `endpoint.recv`, capped by
+  `adapterproto.MaxWaitSeconds`; `RecvWait` does not apply to it. The default
+  is 8 seconds because the shortest known client timeout is 10: Codex returns its
+  default unified-exec call after 10 seconds with the command still running, and
+  its one-shot mode kills the command then, so 8 seconds leaves 2 for the
+  connection and the output. A page returned after the client gave up is not seen
+  by the agent, but nothing is lost: the message stays leased and comes back,
+  marked as a possible duplicate, when the lease expires. A wait that is too
+  short only makes the agent ask again. `manifest.MaxRecvWaitSeconds`, 120
+  seconds, is the longest an agent's `recv` may wait whatever a manifest
+  declares; the manifest rejects a limit above it, so `RecvWait` never exceeds
+  it.
 - **Markers** are compiled by `handoff` here and nowhere else; a marker that is
   empty, does not compile or matches the empty text refuses the adapter.
 - **Methods.** The matrix is one column for runtime and session endpoints and one

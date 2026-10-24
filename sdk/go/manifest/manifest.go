@@ -32,11 +32,16 @@ const Version = 1
 const (
 	// MaxBudgetLimit is the largest output budget a manifest may declare.
 	MaxBudgetLimit = 131072
-	maxFields      = 64
-	maxMarkers     = 32
-	maxMarkerText  = 1024
-	maxString      = 4096
-	maxIntValue    = 1<<53 - 1
+	// MaxRecvWaitSeconds is the longest an agent's recv (CLI or MCP) may wait for
+	// a message, whatever a manifest declares: a manifest may declare less for a
+	// front end, never more. A direct endpoint's endpoint.recv has its own cap,
+	// adapterproto.MaxWaitSeconds, which this does not govern.
+	MaxRecvWaitSeconds = 120
+	maxFields          = 64
+	maxMarkers         = 32
+	maxMarkerText      = 1024
+	maxString          = 4096
+	maxIntValue        = 1<<53 - 1
 )
 
 // ErrBeyondSchema is matched by errors.Is for a failed rule that JSON Schema
@@ -129,6 +134,10 @@ type Manifest struct {
 	Config *Config `json:"config,omitempty"`
 	// Budgets gives the output budget of recv per front end.
 	Budgets []Budget `json:"budgets,omitempty"`
+	// RecvWaitLimits gives, per agent front end (CLI or MCP), the longest a recv
+	// through that front end may wait for a message. A front end without a limit
+	// gets the daemon's default.
+	RecvWaitLimits []RecvWaitLimit `json:"recv_wait_limits,omitempty"`
 	// AckMarkers declares how the runtime shows a replaced or cut tool result.
 	AckMarkers *AckMarkers `json:"ack_markers,omitempty"`
 }
@@ -271,6 +280,16 @@ type Budget struct {
 	Limit    int      `json:"limit"`
 }
 
+// RecvWaitLimit is the longest, in whole seconds, that a recv through one agent
+// front end (CLI or MCP) may wait for a message. The client of a front end ends a
+// wait that runs past its own timeout, so only the adapter knows how long its
+// front end can wait. Direct endpoints have no entry: the adapter chooses the
+// wait of its own endpoint.recv.
+type RecvWaitLimit struct {
+	Frontend adapterproto.Frontend `json:"frontend"`
+	MaxS     int                   `json:"max_s"`
+}
+
 // AckMarkers declares how the runtime shows a tool result it replaced by a notice
 // or cut short, so that a refused acknowledgement can say which.
 type AckMarkers struct {
@@ -367,6 +386,9 @@ func (m Manifest) Validate() error {
 	}
 	if err := validateBudgets(m.Budgets); err != nil {
 		return under("budgets", err)
+	}
+	if err := validateRecvWaitLimits(m.RecvWaitLimits); err != nil {
+		return under("recv_wait_limits", err)
 	}
 	if m.AckMarkers != nil {
 		if err := m.AckMarkers.validate(); err != nil {
@@ -624,6 +646,31 @@ func validateBudgets(bs []Budget) error {
 			return failBeyond(idx(i)+".frontend", "front end %q has two budgets", string(b.Frontend))
 		}
 		seen[b.Frontend] = true
+	}
+	return nil
+}
+
+func validateRecvWaitLimits(ls []RecvWaitLimit) error {
+	if ls == nil {
+		return nil
+	}
+	// One entry at most per agent front end, so the bound follows the vocabulary.
+	most := len(adapterproto.EnumTables()["Frontend"])
+	if len(ls) < 1 || len(ls) > most {
+		return fail("", "%d entries, need 1..%d", len(ls), most)
+	}
+	seen := map[adapterproto.Frontend]bool{}
+	for i, l := range ls {
+		if !l.Frontend.Valid() {
+			return fail(idx(i)+".frontend", "unknown front end %q", string(l.Frontend))
+		}
+		if l.MaxS < 1 || l.MaxS > MaxRecvWaitSeconds {
+			return fail(idx(i)+".max_s", "%d outside 1..%d", l.MaxS, MaxRecvWaitSeconds)
+		}
+		if seen[l.Frontend] {
+			return failBeyond(idx(i)+".frontend", "front end %q has two receive wait limits", string(l.Frontend))
+		}
+		seen[l.Frontend] = true
 	}
 	return nil
 }

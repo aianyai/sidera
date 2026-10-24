@@ -593,9 +593,12 @@ Both kinds can be declared at once; the requirements add up.
 **Admission.** `adapterreg.Admit` takes the capabilities and the manifest and
 refuses an adapter that declares neither runtime nor direct endpoints, whose
 capabilities or manifest break a rule, whose manifest gives a budget for a front
-end it does not declare, or whose acknowledgement markers `handoff` cannot
-compile. Otherwise the admission records the kinds, the signals of each kind, the
-budget per front end (the manifest's, or the default) and the compiled markers.
+end it does not declare or a receive wait limit for an agent front end no declared
+runtime lists, or whose acknowledgement markers `handoff` cannot compile.
+Otherwise the admission records the kinds, the signals of each kind, the budget
+per front end (the manifest's, or the default), the receive wait per agent front
+end (`Admission.RecvWait`: the manifest's limit, or `adapterreg.DefaultRecvWait`,
+8 seconds; it does not apply to direct endpoints) and the compiled markers.
 `CheckHandshake` additionally requires that the adapter reports the manifest's id
 and version and a protocol version in both the requested and the manifest range.
 
@@ -773,6 +776,8 @@ to install an adapter and to admit one. `sdk/go/manifest` parses and validates i
   "tested": [{"runtime": "example-runtime", "min": "2.1.306", "max": "2.1.308"}],
   "budgets": [{"frontend": "cli", "unit": "chars", "limit": 27000},
               {"frontend": "mcp", "unit": "tokens", "limit": 22500}],
+  "recv_wait_limits": [{"frontend": "cli", "max_s": 8},
+                       {"frontend": "mcp", "max_s": 100}],
   "ack_markers": {"replaced": [{"literal": "[result saved to file]"}],
                   "truncated": [{"regexp": "\\.\\.\\. \\d+ more lines"}]}
 }
@@ -786,7 +791,14 @@ In short: `id` and `version` are checked as the adapter reports them in
 `initialize`, and must equal them; the protocol range and the adapter's
 announcement are checked against each other; `tested` ranges are closed SemVer
 ranges; configuration uses a small field vocabulary; budgets map to the output
-budget of `recv` for that front end, and a front end without one gets the default.
+budget of `recv` for that front end, and a front end without one gets the default;
+`recv_wait_limits` give, per agent front end (`cli` or `mcp`, never `direct`), the
+longest an agent's `recv` may wait for a message, in whole seconds from 1 to 120
+(`manifest.MaxRecvWaitSeconds`, the longest such a wait may be whatever a
+manifest declares), one entry per front end, and a front end without an entry
+waits at most `adapterreg.DefaultRecvWait`, 8 seconds. A direct endpoint's
+`endpoint.recv` has its own cap, `adapterproto.MaxWaitSeconds` (30 seconds),
+which this field does not govern: the adapter chooses that wait in `wait_s`.
 
 A native version outside the tested ranges still runs. The daemon compares the
 name and version that `adapter.probe` reported with the ranges and produces the
@@ -808,6 +820,26 @@ automatic update of the runtime, while a wrong reconciliation can only end as
   stands in for a tool result belongs to the adapter, so it is declared in the
   manifest; the check that a marker is usable lives in `handoff` where it is
   applied, and the manifest package only parses its shape.
+- **The receive wait is declared per agent front end, by the adapter,** because
+  the client that runs the front end ends a call at its own timeout and only the
+  adapter knows it: a shell command of the Codex CLI returns after 10 seconds with
+  the command still running (the default of its unified execution mode) or is
+  killed at 10 seconds (its one-shot mode), while MCP tool calls are allowed far
+  longer. A page returned after the client gave up is not seen by the agent, but
+  nothing is lost: the message stays leased and comes back, marked as a possible
+  duplicate, when the lease expires. A wait that is too short only makes the agent
+  ask again. So the default for a front end that declares nothing is 8 seconds,
+  which leaves 2 under the shortest known timeout of 10 for the connection and the
+  output, and a declared limit is capped at 120 seconds so that one wait cannot
+  hold a daemon connection for long. The limit is a field of its own, not part of
+  a budget entry: a budget entry requires a unit and a limit, so a front end that
+  only wants to declare its wait would have to invent a budget. `direct` is not
+  allowed: a direct endpoint has no client with a timeout of its own, the adapter
+  reads it itself and chooses each wait in the `wait_s` of `endpoint.recv`, capped
+  by `adapterproto.MaxWaitSeconds` (30 seconds). Whole seconds are enough for the
+  agent front ends; a wait needs no finer limit. The cap of 120 lives in
+  `manifest.MaxRecvWaitSeconds` and the default in `adapterreg.DefaultRecvWait`,
+  nowhere else.
 - **The budget is declared per front end** because the runtime shows different
   amounts through different tool paths; the author subtracts the safety margin so
   the daemon uses the limit as given.
@@ -816,8 +848,11 @@ automatic update of the runtime, while a wrong reconciliation can only end as
 
 - `sdk/go/manifest/manifest.go`; tests `TestIdentityRules`, `TestEntryRules`,
   `TestPlatformAndRequirementRules`, `TestTestedRangeRules`,
-  `TestConfigFieldRules`, `TestBudgetRules`, `TestAckMarkerShape`, `TestParse`,
-  `FuzzParse`.
+  `TestConfigFieldRules`, `TestBudgetRules`, `TestRecvWaitLimitRules`,
+  `TestParseRecvWaitLimits`, `TestAckMarkerShape`, `TestParse`, `FuzzParse`;
+  `protocol/conformance_test.go` `TestManifestRecvWaitLimitsMatchSchema`;
+  `internal/adapterreg` `TestAdmitDecisions` (a limit for an undeclared front
+  end, a limit for `direct`) and `TestRecvWait`.
 
 ## Schema and conformance
 

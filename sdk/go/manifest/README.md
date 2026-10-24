@@ -3,7 +3,8 @@
 The adapter package manifest, `sidera-adapter.json`: the file at the root of an
 adapter package that says what the adapter is, how to start it, where it runs,
 what it needs, which runtime versions it was tested against, what configuration
-it takes and how much output one `recv` may print for it. `Parse` reads it
+it takes, how much output one `recv` may print for it and how long one `recv` may
+wait for a message. `Parse` reads it
 strictly and `Validate` states the structural rules once. The daemon reads the
 manifest when it installs an adapter and again, with the capabilities the adapter
 declares, when it admits one (`internal/adapterreg`).
@@ -49,6 +50,16 @@ the same rules in JSON Schema.
 - `budgets` give the output budget per front end (`cli`, `mcp`, `direct`), at most
   one each, with a unit (`chars` or `tokens`) and a limit of 1 to 131072. The
   author subtracts any safety margin.
+- `recv_wait_limits` give the longest an agent's `recv` may wait per front end
+  (`cli`, `mcp`: the agent front ends of the adapter protocol, not `direct`), at
+  most one each, `max_s` a whole number of seconds from 1 to
+  `MaxRecvWaitSeconds` (120, the longest an agent's `recv` may wait whatever a
+  manifest declares, and the only place it is written). The client that runs a
+  front end ends a call at its own timeout, and only the adapter knows what that
+  is. A front end without a limit gets the daemon's default
+  (`adapterreg.DefaultRecvWait`). A direct endpoint's `endpoint.recv` has its own
+  cap, `adapterproto.MaxWaitSeconds`, which the adapter uses in `wait_s`; this
+  field does not govern it.
 - `ack_markers` has two lists, `replaced` and `truncated`, of markers. A marker
   is `{literal}` or `{regexp}`, exactly one. **Only that shape is checked here.**
   Whether the text is usable is decided in one place, when the daemon compiles the
@@ -57,5 +68,5 @@ the same rules in JSON Schema.
 ## What the caller must guarantee
 
 - A `Manifest` that did not come from `Parse` is validated before use.
-- The front ends a budget names and the ones the adapter declares as capabilities
-  must agree; that check needs both and lives in `internal/adapterreg`.
+- The front ends a budget or a receive wait limit names and the ones the adapter
+  declares as capabilities must agree; that check needs both and lives in `internal/adapterreg`.
