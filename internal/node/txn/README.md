@@ -22,12 +22,12 @@ declaration of its own.
 | ---- | ------- |
 | `Decl`, `Write`, `Kind`, `Op` | The static declaration of one transaction: name, kind (`Normal` or `Recovery`), and writes in order. Each `Write` has a role, an operation, and the flags `Many`, `Optional`, `Prepare`. |
 | `NewTable(decls...)`, `Table.Keys()` | Validates the declarations of the whole program and expands every crash point: every step of every write under its role, and one commit per transaction. |
-| `Internal()` | The declarations of this package (the cleanup transaction). The composition root puts them first in its table. |
+| `Internal()` | The declarations of this package: the cleanup transaction (`Recovery`) and the settle transaction (`Normal`). The composition root puts them first in its table. |
 | `New(fs, table, observer)`, `Writer.Begin(decl)` | One `Writer` per process; `Begin` opens a `Tx` of a declaration of the table. |
 | `Tx.Replace`, `ReplaceDefer`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | One method per operation; the first argument is the declared role. |
 | `Tx.Commit`, `Tx.Close` | `Commit` ends the transaction and reaches its commit point; `Close` is for `defer` and does nothing after `Commit`. |
 | `Writer.Reader()` | The read side, as an `fsx.Reader` that offers nothing else. |
-| `Writer.Recover()`, `CleanupWork(reader)` | Remove every `.tmp-*` file and `.trash-*` directory; and the list of what that would remove, which a test evaluates on a copy of the disk. |
+| `Writer.Recover()`, `CleanupWork(reader)` | Remove every `.tmp-*` file and `.trash-*` directory, then make every directory durable; and the list of what the removal would remove, which a test evaluates on a copy of the disk. |
 | `Writer.Coverage()` | Every key of the table with its hit count, zeros included, each key carrying its transaction's kind. |
 | `Observer` | Told of every point before its step runs; the hook of a crash test. |
 | `Error`, `IsFatal` | What a failed write returns, and the one question a caller asks of it. |
@@ -87,9 +87,22 @@ declaration of its own.
   incomplete transaction, not an empty one.
 - **Cleanup is one `Recovery` transaction.** `Recover` removes the leftover
   files, then the leftover directories, then syncs each directory that held one.
-  With nothing to remove it does nothing and reaches no point. It panics when
-  the table has no cleanup declaration, on a clean disk as well, so a
-  composition root that left out `Internal()` fails at its first start.
+  With nothing to remove the cleanup does nothing and reaches no point. `Recover`
+  panics when the table has no cleanup or settle declaration, on a clean disk as
+  well, so a composition root that left out `Internal()` fails at its first
+  start.
+- **Settle is one `Normal` transaction, run at every start.** After a process
+  crash a rename or a removal can be visible in a directory and not yet durable.
+  The recovery of an owner reads existence and acts on it durably (it deletes
+  what a pointer or a reference no longer names), so a power loss afterwards
+  could bring the pointer or reference back to something that is gone. `Recover`
+  therefore ends by syncing every directory under the data directory, the root
+  included, once each, after the cleanup so a directory the cleanup removed is
+  not synced. No order is needed for durability, since a directory sync covers
+  that directory's entries only and a rename stays inside one directory; the
+  order is parents before children, names sorted, so crash point numbers are
+  stable. The cost is one directory sync per directory at every start. The
+  transaction is `Normal`, so a clean start is not counted as a recovery.
 
 ## What the caller must guarantee
 
@@ -103,7 +116,9 @@ declaration of its own.
 - Build the table once, at the composition root, from `Internal()` and every
   owner's declarations, and check it with `NewTable` before anything runs.
 - Call `Recover` at startup after taking the instance lock and before loading
-  anything.
+  anything. Run every owner's recovery predicate only after `Recover` has
+  returned nil: a predicate reads existence, and only after the settle is what
+  it reads durable.
 - Serialise the transactions of one declaration (the single writer loop does).
   Use a `Writer` from several goroutines only for different declarations.
 - A transaction that writes the files of two owners belongs to the composing

@@ -299,12 +299,34 @@ every quiescent point, because a temporary name exists only while a replacement
 is under way and a garbage name only while a directory is being discarded. With
 nothing to remove `Recover` reaches no point, so a start on a clean disk is not a
 recovery, and a clean run that reaches a recovery point is a failure. `Recover`
-checks that the table holds `txn-cleanup` before it looks at the disk and
-panics otherwise, so a composition root that left out `Internal()` fails at its
-first start rather than at the first crash. Every other
+checks that the table holds `txn-cleanup` and `txn-settle` before it looks at
+the disk and panics otherwise, so a composition root that left out `Internal()`
+fails at its first start rather than at the first crash. Every other
 `Recovery` transaction has the same shape: its trigger is a named pure function
 of the disk, used by the repair and by the scenario tests, and holds only for
 states a crash or damage can produce.
+
+**Settle.** `Recover` ends with `txn-settle`, a `Normal` transaction that syncs
+every directory under the data directory, the root included, once each, parents
+before children and names sorted. After a process crash a rename or a removal
+can be visible in a directory and not durable: the page cache outlives the
+process, the directory entry may not have reached the disk. The recovery of an
+owner reads existence and acts on it durably (an orphan collector deletes a body
+no reference names, an adapter repair discards a version directory the current
+pointer no longer names), and a power loss afterwards can restore the change it
+acted on: a durable consequence of a change that no longer exists, such as a
+current pointer back at a version that is gone. Settling first makes the state
+every recovery predicate reads one a power loss cannot take back. The caller
+guarantees that the predicates of every owner run after `Recover` returned. The
+transaction sits in this package because `Recover` already runs first at startup
+and walks the whole data directory, so there is one home for the rule and no
+owner repeats it. No order of the syncs is needed for durability (a directory
+sync covers that directory's entries only and renames stay inside one
+directory); the order only keeps crash point numbers stable. It is `Normal`,
+not `Recovery`, because it runs at every start and a clean start is not a
+recovery. The cost is one directory sync per directory at every start. A crash inside it leaves a state that the next `Recover` settles again.
+It walks the tree after the cleanup, not with it, so a directory the cleanup
+removed is never synced.
 
 **Coverage.** `Writer.Coverage()` returns every key of the table with its hit
 count, zeros included, each key with the kind of its transaction, so a caller
@@ -501,10 +523,11 @@ so that the double cannot drift from what it stands for.
   `commitStepOf` and `Tx.fail`. A caller only reads the resulting class.
 - **A declaration is copied into the table.** The `Tx` enforces the declaration
   that was validated, not whatever the literal was edited to afterwards.
-- **`Recover` does nothing on a clean disk.** An empty transaction would still
-  reach a commit point of a recovery transaction at every start, which would make
-  "a clean run reaches no recovery point" false and blur the coverage of the
-  recovery path.
+- **The cleanup of `Recover` does nothing on a clean disk.** An empty
+  transaction would still reach a commit point of a recovery transaction at every
+  start, which would make "a clean run reaches no recovery point" false and blur
+  the coverage of the recovery path. The settle that follows is of the normal
+  kind for the same reason.
 
 ## Known gaps
 
@@ -548,7 +571,8 @@ so that the double cannot drift from what it stands for.
 | commit point and classes | `internal/node/txn/ops.go`, `tx.go` | `classify_test.go` (`TestFailureClassBeforeAndAfterTheCommitPoint`, `TestFirstErrorIsStickyAndNoStepRunsAfterIt`, `TestEachOperationHasItsCommitStep`, `TestFailureAfterTheCommitStepInsideOneOperationIsFatal`) |
 | crash states and durability | `internal/node/txn/tx.go` | `crash_test.go` (`TestEveryDeclaredKeyIsReachedInOrder`, `TestCrashStatesAtEveryPointOfAMultiWriteTransaction`, `TestAcknowledgedWritesSurvivePowerLoss`), `TestRandomTransactionsHonourTheCommitPointOrderingAndDurability` |
 | appended files | `internal/node/txn/tx.go` | `append_test.go` (`TestFailedAppendDropsTheHandle`, `TestHandlesAreClosedWhenTheTransactionEnds`) |
-| cleanup and its predicate | `internal/node/txn/cleanup.go` | `recover_test.go` (`TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards`, `TestCleanupPredicateIsEmptyOnEveryCleanState`, `TestRecoverOnACleanDiskReachesNoPoint`, `TestRecoverPanicsWithoutTheCleanupDeclarationEvenOnACleanDisk`) |
+| cleanup and its predicate | `internal/node/txn/cleanup.go` | `recover_test.go` (`TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards`, `TestCleanupPredicateIsEmptyOnEveryCleanState`, `TestRecoverOnACleanDiskReachesNoRecoveryPoint`, `TestRecoverPanicsWithoutTheCleanupDeclarationEvenOnACleanDisk`) |
+| settle at every start | `internal/node/txn/cleanup.go` | `settle_test.go` (`TestPowerLossCloneAfterRecoverKeepsWhatAProcessCrashLeftVisible`, `TestPowerLossCloneAfterACrashDuringTheSettle`, `TestRecoverSettlesEveryDirectoryInAStableOrder`); `internal/node/config/settle_test.go` (`TestPowerLossCloneAdapterGCAfterAnInstallCrashedBeforeTheDirectorySync`) |
 | coverage | `internal/node/txn/writer.go` | `coverage_test.go` |
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
 
