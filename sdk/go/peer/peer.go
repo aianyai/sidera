@@ -85,6 +85,9 @@ type Config struct {
 	// Logger receives protocol violations, dropped messages and the end of the
 	// connection. It never receives message bodies. Nil discards everything.
 	Logger *slog.Logger
+	// Dialect is the protocol convention the peer applies itself. The zero value
+	// is the adapter protocol's.
+	Dialect Dialect
 }
 
 // RequestHandler answers one inbound request. params is the raw "params"
