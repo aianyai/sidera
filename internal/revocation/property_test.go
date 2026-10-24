@@ -18,6 +18,7 @@ type oracleInput struct {
 	local      int // -1: no local node
 	graph      []int
 	declared   []int
+	pairing    []int
 	held, capN int
 }
 
@@ -46,6 +47,7 @@ func oracle(in oracleInput) (class, reason string) {
 		{in.node == in.local, "local-node"},
 		{has(in.graph, in.node), "trust-graph-node"},
 		{has(in.declared, in.node), "declaration-signer"},
+		{has(in.pairing, in.node), "pairing-node"},
 	} {
 		if step.hit {
 			return "long-term", step.reason
@@ -79,7 +81,7 @@ func TestClassifyAgainstOracle(t *testing.T) {
 		if rng.Intn(3) > 0 {
 			in.local = rng.Intn(nodes)
 		}
-		ctx := Context{TrustGraph: trust.NodeSet{}, DeclarationSigners: trust.NodeSet{}}
+		ctx := Context{TrustGraph: trust.NodeSet{}, DeclarationSigners: trust.NodeSet{}, PairingNodes: trust.NodeSet{}}
 		if in.local >= 0 {
 			ctx.Local = ids[in.local]
 		}
@@ -91,6 +93,10 @@ func TestClassifyAgainstOracle(t *testing.T) {
 			if rng.Intn(6) == 0 {
 				in.declared = append(in.declared, n)
 				ctx.DeclarationSigners[ids[n]] = struct{}{}
+			}
+			if rng.Intn(6) == 0 {
+				in.pairing = append(in.pairing, n)
+				ctx.PairingNodes[ids[n]] = struct{}{}
 			}
 		}
 		in.node = rng.Intn(nodes)
@@ -123,6 +129,7 @@ func TestClassifyAgainstOracle(t *testing.T) {
 	for _, key := range [][2]string{
 		{"long-term", "person-level"}, {"long-term", "device-level"}, {"long-term", "local-node"},
 		{"long-term", "trust-graph-node"}, {"long-term", "declaration-signer"},
+		{"long-term", "pairing-node"},
 		{"forward-once", "unrelated-node"}, {"dropped", "cap-reached"}, {"dropped", "invalid-input"},
 	} {
 		if counts[key] < 150 {

@@ -34,12 +34,14 @@ func nodeIDOf(t testing.TB, n int) ident.NodeID { return nodeOf(t, indexedSigner
 // Rule table of the retention decision, each row named after the rule.
 func TestClassify(t *testing.T) {
 	local, graph, declared, unrelated := nodeIDOf(t, 1), nodeIDOf(t, 2), nodeIDOf(t, 3), nodeIDOf(t, 4)
+	pairing := nodeIDOf(t, 7)
 	person := personOf(t, indexedSigner(t, 5))
 	device := indexedSigner(t, 6).Public()
 	ctx := Context{
 		Local:              local,
 		TrustGraph:         trust.NodeSet{graph: {}},
 		DeclarationSigners: trust.NodeSet{declared: {}},
+		PairingNodes:       trust.NodeSet{pairing: {}},
 	}
 	p := Params{MaxForwardOnce: 3}
 	long := func(r Reason) Retention { return Retention{LongTerm, r} }
@@ -67,6 +69,16 @@ func TestClassify(t *testing.T) {
 		{"a declaration signer: its self-revocation is long-term", nodeSelfOf(declared, 1), ctx, 0, p, long(ReasonDeclarationSigner)},
 		{"a declaration signer: its certificate revocation is long-term", certRevocationOf(declared, 1), ctx, 0, p, long(ReasonDeclarationSigner)},
 		{"the trust graph is named before the declaration signers", nodeSelfOf(graph, 1), Context{TrustGraph: trust.NodeSet{graph: {}}, DeclarationSigners: trust.NodeSet{graph: {}}}, 0, p, long(ReasonTrustGraphNode)},
+		{"a node with a pairing expectation or request: its self-revocation is long-term", nodeSelfOf(pairing, 1), ctx, 0, p, long(ReasonPairingNode)},
+		{"a node with a pairing expectation or request: its certificate revocation is long-term", certRevocationOf(pairing, 1), ctx, 0, p, long(ReasonPairingNode)},
+		{"a pairing node stays long-term with the cap full", nodeSelfOf(pairing, 1), ctx, 1000, p, long(ReasonPairingNode)},
+		{"a pairing node stays long-term with the cap unset", nodeSelfOf(pairing, 1), ctx, 0, Params{}, long(ReasonPairingNode)},
+		{"a pairing node stays long-term with a negative count held", nodeSelfOf(pairing, 1), ctx, -1, p, long(ReasonPairingNode)},
+		{"the declaration signers are named before the pairing nodes", nodeSelfOf(declared, 1), Context{DeclarationSigners: trust.NodeSet{declared: {}}, PairingNodes: trust.NodeSet{declared: {}}}, 0, p, long(ReasonDeclarationSigner)},
+		{"the trust graph is named before the pairing nodes", nodeSelfOf(graph, 1), Context{TrustGraph: trust.NodeSet{graph: {}}, PairingNodes: trust.NodeSet{graph: {}}}, 0, p, long(ReasonTrustGraphNode)},
+		{"the local node is named before the pairing nodes", nodeSelfOf(local, 1), Context{Local: local, PairingNodes: trust.NodeSet{local: {}}}, 0, p, long(ReasonLocalNode)},
+		{"a node only in the pairing set is not related through the other sets", nodeSelfOf(pairing, 1), Context{Local: local, TrustGraph: trust.NodeSet{graph: {}}, DeclarationSigners: trust.NodeSet{declared: {}}}, 0, p, Retention{ForwardOnce, ReasonUnrelatedNode}},
+		{"a person self-revocation ignores the pairing nodes", personSelfOf(personOf(t, indexedSigner(t, 5))), ctx, 0, p, long(ReasonPersonLevel)},
 		{"an unrelated self-revocation is forwarded once", nodeSelfOf(unrelated, 1), ctx, 0, p, Retention{ForwardOnce, ReasonUnrelatedNode}},
 		{"an unrelated certificate revocation is forwarded once", certRevocationOf(unrelated, 1), ctx, 0, p, Retention{ForwardOnce, ReasonUnrelatedNode}},
 		{"one below the cap is still forwarded", nodeSelfOf(unrelated, 1), ctx, 2, p, Retention{ForwardOnce, ReasonUnrelatedNode}},

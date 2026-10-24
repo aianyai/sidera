@@ -157,8 +157,8 @@ func FuzzStatementRoundTrip(f *testing.F) {
 				t.Fatal(err)
 			}
 			cert := deviceCertificateFor(t, root, k)
-			if !s.DeviceCertificate(cert).CertRevoked {
-				t.Fatal("the revoked device key is not revoked")
+			if got := s.DeviceCertificate(cert).Revocation; got != admin.RevocationCertRevoked {
+				t.Fatalf("the revoked device key: status %v, want cert-revoked", got)
 			}
 		}
 	})

@@ -27,6 +27,13 @@ type Context struct {
 	// DeclarationSigners holds the nodes whose declarations the local node has
 	// cached.
 	DeclarationSigners trust.NodeSet
+	// PairingNodes holds the nodes for which the local node has a pairing
+	// expectation (a node ID the owner entered ahead of time) or a pending
+	// pairing request. A node whose identity was retired can later be paired by
+	// an attacker who holds the stolen key, and an expectation the owner entered
+	// confirms such a pairing by itself; if the retirement was passed on once and
+	// then dropped, the check at confirmation could not see it.
+	PairingNodes trust.NodeSet
 }
 
 // Class is how long a node keeps a revocation.
@@ -74,6 +81,9 @@ const (
 	// ReasonDeclarationSigner: it concerns a node whose declaration the local
 	// node has cached.
 	ReasonDeclarationSigner
+	// ReasonPairingNode: it concerns a node the local node has a pairing
+	// expectation or a pending pairing request for.
+	ReasonPairingNode
 	// ReasonUnrelatedNode: a node-level revocation of a node the local node has
 	// no relation to; it is passed on once, within the cap.
 	ReasonUnrelatedNode
@@ -98,6 +108,8 @@ func (r Reason) String() string {
 		return "trust-graph-node"
 	case ReasonDeclarationSigner:
 		return "declaration-signer"
+	case ReasonPairingNode:
+		return "pairing-node"
 	case ReasonUnrelatedNode:
 		return "unrelated-node"
 	case ReasonCapReached:
@@ -119,9 +131,10 @@ type Retention struct {
 //   - Person self-revocations and device key revocations are LongTerm. They are
 //     few, and a node cannot tell which concern its peers, so none is filtered.
 //   - A node-level revocation (self-revocation, certificate revocation) is
-//     LongTerm when its node is the local node, a node in the trust graph or the
-//     signer of a declaration the local node has cached, and in that order of
-//     precedence for the reason.
+//     LongTerm when its node is the local node, a node in the trust graph, the
+//     signer of a declaration the local node has cached, or a node the local
+//     node has a pairing expectation or pending pairing request for, and in that
+//     order of precedence for the reason.
 //   - Any other node-level revocation is ForwardOnce while forwardOnceHeld, the
 //     number of forward-once revocations the node holds now, is below
 //     p.MaxForwardOnce, and Dropped after that. The cap bounds what unrelated
@@ -148,6 +161,8 @@ func Classify(r Revocation, ctx Context, forwardOnceHeld int, p Params) Retentio
 		return Retention{LongTerm, ReasonTrustGraphNode}
 	case inSet(ctx.DeclarationSigners, r.node):
 		return Retention{LongTerm, ReasonDeclarationSigner}
+	case inSet(ctx.PairingNodes, r.node):
+		return Retention{LongTerm, ReasonPairingNode}
 	}
 	if forwardOnceHeld < 0 || p.MaxForwardOnce < 1 {
 		return Retention{Dropped, ReasonInvalidInput}

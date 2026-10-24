@@ -14,9 +14,12 @@ import (
 // permanent: nothing is ever removed, and adding the same fact twice changes
 // nothing, so the answers do not depend on the order revocations arrived in.
 //
-// Every query is on *Set; a nil *Set is the empty set, which revokes nothing
-// (a node with no revocation source reports everything as unrevoked, as record
-// documents for its own flags). Add on a nil Set fails.
+// Every query is on *Set; a nil *Set is the empty set, which revokes nothing: the
+// two certificate queries answer "looked up, clear" for it, never "unchecked".
+// Add on a nil Set fails.
+//
+// A Set is not safe for concurrent use: Add writes and the queries read the same
+// maps, so a caller that shares one between goroutines serializes the calls.
 type Set struct {
 	nodes   map[ident.NodeID]struct{}
 	persons map[ident.PersonID]struct{}
@@ -107,15 +110,20 @@ func (s *Set) Retired() trust.NodeSet {
 
 // DeviceCertificate returns the facts administration reads about cert: the
 // signature-derived part (cap and window, as record.DeviceCertificate.AdminCert
-// gives them) with both revocation flags filled in.
+// gives them) with the revocation status filled in. The status is always a
+// checked one, never admin.RevocationUnchecked, so administration never refuses
+// the certificate for a lookup nobody made:
 //
-//   - RootKeyRevoked: the person the certificate names has a verified
-//     self-revocation.
-//   - CertRevoked: the person has a verified revocation of this device key. The
-//     revocation is of the key, so it covers every certificate of that person for
-//     it, whichever window the certificate has. A revocation by another person
-//     never matches: the lookup is by the certificate's person, and a statement
-//     can only name the person its signing root key derives.
+//   - admin.RevocationRootKeyRevoked: the person the certificate names has a
+//     verified self-revocation. It is the wider fact and wins over a revoked
+//     device key.
+//   - admin.RevocationCertRevoked: the person has a verified revocation of this
+//     device key. The revocation is of the key, so it covers every certificate
+//     of that person for it, whichever window the certificate has. A revocation
+//     by another person never matches: the lookup is by the certificate's
+//     person, and a statement can only name the person its signing root key
+//     derives.
+//   - admin.RevocationClear: neither.
 //
 // Revocations apply whatever the time: no clock is read. cert must have been
 // verified against record.DeviceCertificateDescriptor; a zero Verified yields a
@@ -123,9 +131,26 @@ func (s *Set) Retired() trust.NodeSet {
 func (s *Set) DeviceCertificate(cert record.Verified[record.DeviceCertificate]) admin.DeviceCert {
 	c := cert.Payload
 	out := c.AdminCert()
-	out.RootKeyRevoked = s.PersonRevoked(c.Person)
-	out.CertRevoked = s.deviceRevoked(c.Person, c.DeviceKey)
+	switch {
+	case s.PersonRevoked(c.Person):
+		out.Revocation = admin.RevocationRootKeyRevoked
+	case s.deviceRevoked(c.Person, c.DeviceKey):
+		out.Revocation = admin.RevocationCertRevoked
+	default:
+		out.Revocation = admin.RevocationClear
+	}
 	return out
+}
+
+// RemotePerson returns the actor for a remote person who presented cert. The
+// person is the one the certificate names and the certificate facts are
+// DeviceCertificate's for that same certificate, so a caller cannot pair a person
+// with another person's certificate facts or with a revocation status nobody
+// looked up. It is the way to build a remote admin.Actor from a verified
+// certificate; cert must have been verified against
+// record.DeviceCertificateDescriptor.
+func (s *Set) RemotePerson(cert record.Verified[record.DeviceCertificate]) admin.Actor {
+	return admin.RemotePerson(cert.Payload.Person, s.DeviceCertificate(cert))
 }
 
 func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
@@ -136,9 +161,10 @@ func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
 	return ok
 }
 
-// NetworkKey returns the accepted network key for cert with its Revoked flag
-// filled in, ready for record.NetworkKeyBelongs. The certificate is revoked
-// when
+// NetworkKey returns the accepted network key for cert with its revocation
+// status filled in, ready for record.NetworkKeyBelongs. The status is always a
+// checked one, never record.KeyRevocationUnchecked: it is
+// record.KeyRevocationRevoked when
 //
 //   - its node has a verified revocation of this very certificate (node, serial
 //     and digest all match), or
@@ -147,12 +173,18 @@ func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
 //     holding a leaked identity key would still have certificates the node's
 //     peers accept.
 //
+// and record.KeyRevocationClear otherwise.
+//
 // It does not touch the highest serial seen; a revocation never lowers it (see
 // record.SerialSeen). cert must have been verified against
 // record.NetworkKeyCertificateDescriptor.
 func (s *Set) NetworkKey(cert record.Verified[record.NetworkKeyCertificate]) record.AcceptedNetworkKey {
 	c := cert.Payload
-	return record.AcceptedNetworkKey{Cert: &c, Revoked: s.certificateRevoked(c.Node, c.Serial, cert.Digest)}
+	status := record.KeyRevocationClear
+	if s.certificateRevoked(c.Node, c.Serial, cert.Digest) {
+		status = record.KeyRevocationRevoked
+	}
+	return record.AcceptedNetworkKey{Cert: &c, Revocation: status}
 }
 
 func (s *Set) certificateRevoked(node ident.NodeID, serial uint64, digest record.Digest) bool {

@@ -20,9 +20,10 @@ of it.
 | `DeviceKeyRevocation`, `...Descriptor`, `IssueDeviceKeyRevocation(root, deviceKey)` | Retires a device key of the person whose root key signs. Applies to that person only.      |
 | `Verify(record)`, `Of(verified)`, `Revocation`, `Kind`                | Verify a record of any of the four types and reduce it to a `Revocation`, the one value the rest takes.   |
 | `Set`, `NewSet`, `Set.Add`                                            | The revocations a node chose to keep. Permanent, order independent, idempotent.                           |
-| `Set.DeviceCertificate(cert)`                                         | `admin.DeviceCert` with `CertRevoked` and `RootKeyRevoked` filled.                                         |
+| `Set.DeviceCertificate(cert)`                                         | `admin.DeviceCert` with `Revocation` set to a checked status: clear, cert revoked or root key revoked.    |
+| `Set.RemotePerson(cert)`                                              | The `admin.Actor` for a remote person: the person and the facts both come from the one certificate. The way to build a remote actor. |
 | `Set.Retired()`, `Set.NodeRetired(n)`, `Set.PersonRevoked(p)`         | The nodes with a verified self-revocation, as `trust.NodeSet` for `trust.View.Retired`; single lookups.   |
-| `Set.NetworkKey(cert)`                                                | `record.AcceptedNetworkKey` with `Revoked` filled, for `record.NetworkKeyBelongs`.                         |
+| `Set.NetworkKey(cert)`                                                | `record.AcceptedNetworkKey` with `Revocation` set to a checked status (clear or revoked), for `record.NetworkKeyBelongs`. |
 | `Classify(rev, ctx, held, params)`, `Context`, `Params`, `Retention`  | Long-term, forward-once or dropped, with a reason.                                                        |
 
 ## Rules
@@ -57,15 +58,25 @@ of it.
 - **No optional field.** Every field is required; an unknown field, including
   one written as 0, is refused by the strict decoding of `record`. Serial starts
   at 1 and the digest and identifiers are never zero.
-- **Queries read the set and no clock.** `DeviceCertificate` sets
-  `RootKeyRevoked` from the person's self-revocation and `CertRevoked` from a
-  revocation of the certificate's device key by the certificate's person; the cap
+- **Queries read the set and no clock, and always report a checked status.**
+  `DeviceCertificate` sets `admin.RevocationRootKeyRevoked` from the person's
+  self-revocation (the wider fact, reported even when the device key is revoked
+  too), else `admin.RevocationCertRevoked` from a revocation of the certificate's
+  device key by the certificate's person, else `admin.RevocationClear`; the cap
   and window stay as `AdminCert()` gives them, so a revoked certificate is
-  refused by `admin` at every instant. `NetworkKey` sets `Revoked` when the
-  certificate's node, serial and digest are revoked, **or** when the node has a
-  self-revocation: the identity key that signed the certificate is declared void,
+  refused by `admin` at every instant. `NetworkKey` sets
+  `record.KeyRevocationRevoked` when the certificate's node, serial and digest are
+  revoked, **or** when the node has a self-revocation, and
+  `record.KeyRevocationClear` otherwise: the identity key that signed the certificate is declared void,
   and so is everything it signed, including the certificates an attacker with the
   leaked key signs afterwards. `Retired` is the nodes with a self-revocation.
+  The unchecked status is never returned: this package is the one place that
+  turns the revocation set into these statuses, and a lookup that found nothing
+  says so with "clear", which is how `admin` and `record.NetworkKeyBelongs` tell
+  it from a lookup nobody made.
+- **A remote actor is built with `Set.RemotePerson`.** It takes the person ID
+  from the certificate itself, so a caller cannot pair a person with another
+  person's certificate facts, nor with a status nobody looked up.
 - **Revocation never lowers the highest serial seen.** Nothing here takes or
   changes `record.SerialSeen`: an older certificate stays stale after the newer
   one is revoked.
@@ -73,7 +84,13 @@ of it.
   self-revocation and device key revocation (few, and a node cannot tell which
   concern its peers); and every node-level revocation (self-revocation or
   certificate revocation) of the local node, of a node in the local trust graph,
-  or of the signer of a declaration the local node has cached. Any other
+  of the signer of a declaration the local node has cached, or of a node for
+  which the local node holds a pairing expectation or a pending pairing request
+  (`Context.PairingNodes`). The last rule exists because a node whose identity
+  was retired can later be paired by an attacker holding the stolen key, and an
+  expectation the owner entered confirms that pairing by itself; a retirement
+  that was passed on once and dropped could not be seen by the check at
+  confirmation. Any other
   node-level revocation is passed on once (`ForwardOnce`) while the node holds
   fewer than `Params.MaxForwardOnce` of them and is `Dropped` after that; a
   related revocation is never refused for the cap. The reason says which rule
@@ -90,22 +107,29 @@ of it.
   keeps no unrelated node-level revocation long term). The caller counts the
   forward-once revocations it holds, passes the count to `Classify` and lowers
   it when one has been passed on.
-- A `nil` `*Set` and an empty one revoke nothing: a node with no revocation
-  source reports everything as unrevoked, so every caller loads the set before
-  it judges. All other cross-package zero values: `Retired()` is a non-nil empty
-  `trust.NodeSet` for no retired node, which `trust` reads as "nobody retired";
+- A `Set` is not safe for concurrent use: `Add` writes the maps the queries
+  read, so a caller that shares one between goroutines serializes the calls.
+- A `nil` `*Set` and an empty one revoke nothing: both report everything as
+  clear (a checked status, not "unchecked"), so every caller loads the set
+  before it judges. Other cross-package zero values: `Retired()` is a non-nil
+  empty `trust.NodeSet` for no retired node, which `trust` reads as "nobody retired";
   `DeviceCertificate` of a zero `Verified` gives `LevelNone` and a zero
   `NotAfter`, which `admin` reads as "grants nothing" and "expired";
-  `NetworkKey` always returns a non-nil certificate and `Revoked` false when
-  nothing is revoked.
+  `NetworkKey` always returns a non-nil certificate and
+  `record.KeyRevocationClear` when nothing is revoked.
+- `Context.PairingNodes` lists every node the local node holds a pairing
+  expectation or a pending pairing request for, kept current by the caller; a
+  node missing from it has its retirement treated as any unrelated one.
 - Statements for the keys of this node are made when the keys are: the issue
   functions only build and sign, and storing the self-revocation offline is the
   caller's. Verification of an incoming statement does not depend on what the
   node holds, so a node verifies a self-revocation of a node it has never heard
   of.
-- Not decided here: the set digest two peers compare when they connect. It fixes
-  wire bytes and the scope of node-level revocations per peer; the
-  synchronisation protocol decides it (see `design_test.go`).
+- The synchronisation protocol decides the set digest two peers compare;
+  `Revocation.Digest` is its input. The protocol must also bound the volume of
+  person-level revocations, which this package retains long term without a count
+  limit: anyone can mint root keys and self-revocations cheaply, so the bound
+  (for example per connection) belongs to the protocol.
 
 ## Dependencies
 

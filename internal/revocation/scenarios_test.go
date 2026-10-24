@@ -223,10 +223,12 @@ func TestFlood(t *testing.T) {
 	const cap = 8
 	p := Params{MaxForwardOnce: cap}
 	related := seedSigner(t, 50)
+	pairing := seedSigner(t, 52)
 	ctx := Context{
 		Local:              nodeOf(t, seedSigner(t, 51)),
 		TrustGraph:         trust.NodeSet{nodeOf(t, related): {}},
 		DeclarationSigners: trust.NodeSet{},
+		PairingNodes:       trust.NodeSet{nodeOf(t, pairing): {}},
 	}
 	held := 0
 	counts := map[Retention]int{}
@@ -263,6 +265,7 @@ func TestFlood(t *testing.T) {
 	}{
 		{"a related node's self-revocation", mustRevocation(t, must(IssueNodeSelfRevocation(related)), nil), Retention{LongTerm, ReasonTrustGraphNode}},
 		{"a related node's certificate revocation", mustRevocation(t, must(IssueNetworkKeyCertificateRevocation(relatedCert, related)), nil), Retention{LongTerm, ReasonTrustGraphNode}},
+		{"a pairing node's self-revocation", mustRevocation(t, must(IssueNodeSelfRevocation(pairing)), nil), Retention{LongTerm, ReasonPairingNode}},
 		{"a person self-revocation", mustRevocation(t, must(IssuePersonSelfRevocation(seedSigner(t, 60))), nil), Retention{LongTerm, ReasonPersonLevel}},
 		{"a device key revocation", mustRevocation(t, must(IssueDeviceKeyRevocation(seedSigner(t, 60), seedSigner(t, 61).Public())), nil), Retention{LongTerm, ReasonDeviceLevel}},
 	} {

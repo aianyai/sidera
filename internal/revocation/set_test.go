@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/trust"
 )
@@ -36,9 +37,10 @@ func must[T any](v T, err error) T {
 }
 
 // Rule: a device certificate is revoked by its person's revocation of its
-// device key, and its person's root key by the person's self-revocation; nothing
-// else changes the flags, and everything else of the certificate is as
-// AdminCert gives it.
+// device key, and its person's root key by the person's self-revocation, the
+// root key being the wider fact; nothing else changes the status, the status is
+// always a checked one, and everything else of the certificate is as AdminCert
+// gives it.
 func TestDeviceCertificateStanding(t *testing.T) {
 	p, q := rfcSigner(t, 3), seedSigner(t, 7)
 	d, d2 := rfcSigner(t, 2), seedSigner(t, 8)
@@ -54,30 +56,29 @@ func TestDeviceCertificateStanding(t *testing.T) {
 	nodeSelf := must(IssueNodeSelfRevocation(node))
 
 	rows := []struct {
-		rule        string
-		set         *Set
-		cert        record.Verified[record.DeviceCertificate]
-		certRevoked bool
-		rootRevoked bool
+		rule string
+		set  *Set
+		cert record.Verified[record.DeviceCertificate]
+		want admin.RevocationStatus
 	}{
-		{"a nil set revokes nothing", nil, certP, false, false},
-		{"an empty set revokes nothing", NewSet(), certP, false, false},
-		{"the person's revocation of the device key revokes the certificate", addAll(t, pRevokesD), certP, true, false},
-		{"the person's self-revocation revokes the root key", addAll(t, pSelf), certP, false, true},
-		{"both revocations set both flags", addAll(t, pRevokesD, pSelf), certP, true, true},
-		{"another device key of the person leaves the certificate alone", addAll(t, pRevokesD2), certP, false, false},
-		{"another person's revocation of the same device key leaves the certificate alone", addAll(t, qRevokesD), certP, false, false},
-		{"another person's self-revocation leaves the certificate alone", addAll(t, qSelf), certP, false, false},
-		{"a node-level revocation leaves the certificate alone", addAll(t, nodeSelf), certP, false, false},
-		{"the revocation of the device key by P does not revoke Q's certificate for the same key", addAll(t, pRevokesD), certQ, false, false},
-		{"Q's own revocation of the key revokes Q's certificate", addAll(t, pRevokesD, qRevokesD), certQ, true, false},
-		{"P's self-revocation does not void Q's root key", addAll(t, pSelf), certQ, false, false},
+		{"a nil set revokes nothing and has looked", nil, certP, admin.RevocationClear},
+		{"an empty set revokes nothing and has looked", NewSet(), certP, admin.RevocationClear},
+		{"the person's revocation of the device key revokes the certificate", addAll(t, pRevokesD), certP, admin.RevocationCertRevoked},
+		{"the person's self-revocation revokes the root key", addAll(t, pSelf), certP, admin.RevocationRootKeyRevoked},
+		{"both revocations: the root key is the wider fact and is the one reported", addAll(t, pRevokesD, pSelf), certP, admin.RevocationRootKeyRevoked},
+		{"another device key of the person leaves the certificate alone", addAll(t, pRevokesD2), certP, admin.RevocationClear},
+		{"another person's revocation of the same device key leaves the certificate alone", addAll(t, qRevokesD), certP, admin.RevocationClear},
+		{"another person's self-revocation leaves the certificate alone", addAll(t, qSelf), certP, admin.RevocationClear},
+		{"a node-level revocation leaves the certificate alone", addAll(t, nodeSelf), certP, admin.RevocationClear},
+		{"the revocation of the device key by P does not revoke Q's certificate for the same key", addAll(t, pRevokesD), certQ, admin.RevocationClear},
+		{"Q's own revocation of the key revokes Q's certificate", addAll(t, pRevokesD, qRevokesD), certQ, admin.RevocationCertRevoked},
+		{"P's self-revocation does not void Q's root key", addAll(t, pSelf), certQ, admin.RevocationClear},
 	}
 	for _, row := range rows {
 		t.Run(row.rule, func(t *testing.T) {
 			got := row.set.DeviceCertificate(row.cert)
 			want := row.cert.Payload.AdminCert()
-			want.CertRevoked, want.RootKeyRevoked = row.certRevoked, row.rootRevoked
+			want.Revocation = row.want
 			if got != want {
 				t.Fatalf("got %+v, want %+v", got, want)
 			}
@@ -85,7 +86,7 @@ func TestDeviceCertificateStanding(t *testing.T) {
 	}
 	t.Run("a zero certificate grants nothing and revokes nothing", func(t *testing.T) {
 		got := addAll(t, pRevokesD).DeviceCertificate(record.Verified[record.DeviceCertificate]{})
-		if got.MaxLevel != admin.LevelNone || !got.NotAfter.IsZero() || got.CertRevoked || got.RootKeyRevoked {
+		if got.MaxLevel != admin.LevelNone || !got.NotAfter.IsZero() || got.Revocation != admin.RevocationClear {
 			t.Fatalf("got %+v", got)
 		}
 	})
@@ -137,8 +138,8 @@ func TestRevokedDeviceCertificateIsRefusedAtAnyTime(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !set.DeviceCertificate(v).CertRevoked {
-			t.Fatal("the renewed certificate is not revoked")
+		if got := set.DeviceCertificate(v).Revocation; got != admin.RevocationCertRevoked {
+			t.Fatalf("the renewed certificate: status %v, want cert-revoked", got)
 		}
 	})
 }
@@ -222,23 +223,24 @@ func TestNetworkKeyRevoked(t *testing.T) {
 		rule string
 		set  *Set
 		cert record.Verified[record.NetworkKeyCertificate]
-		want bool
+		want record.KeyRevocationStatus
 	}{
-		{"a nil set revokes nothing", nil, cert1, false},
-		{"the revocation names this certificate", addAll(t, rev1), cert1, true},
-		{"the revocation of serial 1 does not revoke serial 2", addAll(t, rev1), cert2, false},
-		{"the same serial with another digest is another certificate", addAll(t, rev1), cert1b, false},
-		{"another node's identical-looking certificate is not revoked", addAll(t, rev1), otherCert, false},
-		{"a revocation of the other certificate under the same serial leaves this one", addAll(t, must(IssueNetworkKeyCertificateRevocation(cert1b, identity))), cert1, false},
-		{"a self-revocation voids every certificate the identity key signed", addAll(t, must(IssueNodeSelfRevocation(identity))), cert2, true},
-		{"a self-revocation of another node does not", addAll(t, must(IssueNodeSelfRevocation(other))), cert2, false},
-		{"a device or person revocation does not", addAll(t, must(IssuePersonSelfRevocation(rfcSigner(t, 1))), must(IssueDeviceKeyRevocation(rfcSigner(t, 1), netA.Public()))), cert1, false},
+		{"a nil set revokes nothing and has looked", nil, cert1, record.KeyRevocationClear},
+		{"an empty set revokes nothing and has looked", NewSet(), cert1, record.KeyRevocationClear},
+		{"the revocation names this certificate", addAll(t, rev1), cert1, record.KeyRevocationRevoked},
+		{"the revocation of serial 1 does not revoke serial 2", addAll(t, rev1), cert2, record.KeyRevocationClear},
+		{"the same serial with another digest is another certificate", addAll(t, rev1), cert1b, record.KeyRevocationClear},
+		{"another node's identical-looking certificate is not revoked", addAll(t, rev1), otherCert, record.KeyRevocationClear},
+		{"a revocation of the other certificate under the same serial leaves this one", addAll(t, must(IssueNetworkKeyCertificateRevocation(cert1b, identity))), cert1, record.KeyRevocationClear},
+		{"a self-revocation voids every certificate the identity key signed", addAll(t, must(IssueNodeSelfRevocation(identity))), cert2, record.KeyRevocationRevoked},
+		{"a self-revocation of another node does not", addAll(t, must(IssueNodeSelfRevocation(other))), cert2, record.KeyRevocationClear},
+		{"a device or person revocation does not", addAll(t, must(IssuePersonSelfRevocation(rfcSigner(t, 1))), must(IssueDeviceKeyRevocation(rfcSigner(t, 1), netA.Public()))), cert1, record.KeyRevocationClear},
 	}
 	for _, row := range rows {
 		t.Run(row.rule, func(t *testing.T) {
 			got := row.set.NetworkKey(row.cert)
-			if got.Revoked != row.want {
-				t.Fatalf("Revoked = %v, want %v", got.Revoked, row.want)
+			if got.Revocation != row.want {
+				t.Fatalf("Revocation = %v, want %v", got.Revocation, row.want)
 			}
 			if got.Cert == nil || *got.Cert != row.cert.Payload {
 				t.Fatalf("Cert = %+v, want the verified payload", got.Cert)
@@ -287,9 +289,56 @@ func TestAnswersDoNotDependOnOrder(t *testing.T) {
 		rng.Shuffle(len(recs), func(a, b int) { recs[a], recs[b] = recs[b], recs[a] })
 		got := addAll(t, recs...)
 		if got.DeviceCertificate(dcert) != want.DeviceCertificate(dcert) ||
-			got.NetworkKey(cert).Revoked != want.NetworkKey(cert).Revoked ||
+			got.NetworkKey(cert).Revocation != want.NetworkKey(cert).Revocation ||
 			len(got.Retired()) != len(want.Retired()) {
 			t.Fatalf("order %d changed an answer", i)
 		}
+	}
+}
+
+// Rule: Set.RemotePerson builds the remote actor from the certificate alone: the
+// person is the certificate's, the facts are DeviceCertificate's for the same
+// certificate, and administration judges the result as it judges any actor.
+func TestRemotePerson(t *testing.T) {
+	p, q := rfcSigner(t, 3), seedSigner(t, 7)
+	d := rfcSigner(t, 2)
+	certP := deviceCertificate(t, p, d, admin.LevelFullControl)
+	certQ := deviceCertificate(t, q, d, admin.LevelFullControl)
+	list, problems := admin.NewList([]admin.Entry{
+		{Person: personOf(t, p), Level: admin.LevelFullControl},
+		{Person: personOf(t, q), Level: admin.LevelFullControl},
+	})
+	if len(problems) != 0 {
+		t.Fatal(problems)
+	}
+	now := epoch.Add(time.Hour)
+
+	rows := []struct {
+		rule       string
+		set        *Set
+		cert       record.Verified[record.DeviceCertificate]
+		wantPerson ident.PersonID
+		wantStatus admin.RevocationStatus
+		wantLevel  admin.Level
+	}{
+		{"a nil set gives a checked, clear actor", nil, certP, personOf(t, p), admin.RevocationClear, admin.LevelFullControl},
+		{"the person is the certificate's person", NewSet(), certQ, personOf(t, q), admin.RevocationClear, admin.LevelFullControl},
+		{"the device revocation of the certificate's person reaches the actor", addAll(t, must(IssueDeviceKeyRevocation(p, d.Public()))), certP, personOf(t, p), admin.RevocationCertRevoked, admin.LevelNone},
+		{"the root revocation of the certificate's person reaches the actor", addAll(t, must(IssuePersonSelfRevocation(p))), certP, personOf(t, p), admin.RevocationRootKeyRevoked, admin.LevelNone},
+		{"another person's revocations do not reach the actor", addAll(t, must(IssueDeviceKeyRevocation(q, d.Public())), must(IssuePersonSelfRevocation(q))), certP, personOf(t, p), admin.RevocationClear, admin.LevelFullControl},
+	}
+	for _, row := range rows {
+		t.Run(row.rule, func(t *testing.T) {
+			actor := row.set.RemotePerson(row.cert)
+			if actor.Kind != admin.ActorRemotePerson || actor.Person != row.wantPerson {
+				t.Fatalf("got kind %v person %v", actor.Kind, actor.Person)
+			}
+			if actor.Cert != row.set.DeviceCertificate(row.cert) || actor.Cert.Revocation != row.wantStatus {
+				t.Fatalf("cert facts %+v, want status %v and DeviceCertificate's facts", actor.Cert, row.wantStatus)
+			}
+			if got := admin.EffectiveLevel(list, actor.Person, actor.Cert, now).Level; got != row.wantLevel {
+				t.Fatalf("effective level %v, want %v", got, row.wantLevel)
+			}
+		})
 	}
 }

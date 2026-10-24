@@ -221,6 +221,117 @@ the same record with a short window.
   left unchecked, which administration refuses; the revocation lookup sets it
   before the value is used.
 
+### Identity revocations
+
+Package `internal/revocation`. Four record types built with `NewDescriptor` on
+the envelope above, the queries that turn verified revocations into the facts
+`admin`, `trust` and `record` read, and the rule that decides how long a node
+keeps a revocation.
+
+| Type | Payload | Signed by |
+| ---- | ------- | --------- |
+| `sidera/node-self-revocation/1` | `{1: node ID}` | the identity key that derives the node ID |
+| `sidera/person-self-revocation/1` | `{1: person ID}` | the root key that derives the person ID |
+| `sidera/network-key-cert-revocation/1` | `{1: node ID, 2: serial, 3: certificate digest}` | the identity key that derives the node ID |
+| `sidera/device-key-revocation/1` | `{1: person ID, 2: device public key}` | the root key that derives the person ID |
+
+- **Self-revocations** are made when the key is made and kept offline; they are
+  published when the key leaks. Only the key itself can sign one, so a forwarder
+  cannot forge it.
+- **A certificate revocation** names the node, the serial and the record digest
+  of the certificate. All three must match the certificate. The network key that
+  the certificate names cannot sign it.
+- **A device key revocation** applies only to certificates of the person it
+  names, and that person is the one the signing root key derives, so a person's
+  revocation can reach nobody else's device. It revokes the key under every
+  certificate of that person, past and future. It cannot name the person's own
+  root key (nothing would be revoked).
+- **No statement carries a time.** Revocations apply whenever they are learned.
+- **Queries.** `Set.DeviceCertificate` sets `admin.DeviceCert.Revocation` to
+  `RevocationRootKeyRevoked` (the person's self-revocation, the wider fact),
+  `RevocationCertRevoked` (the person's revocation of this device key) or
+  `RevocationClear`; `Set.RemotePerson` builds the remote `admin.Actor` from one
+  certificate, taking the person from it, and is the way to build one;
+  `Set.Retired` returns the node IDs with a verified self-revocation as the
+  `trust.NodeSet` that `trust.View.Retired` takes; `Set.NetworkKey` sets
+  `AcceptedNetworkKey.Revocation` to `KeyRevocationRevoked` (the certificate's
+  own revocation, or any self-revocation of its node) or `KeyRevocationClear`.
+  The two certificate queries never return the unchecked status, which `admin`
+  and `record.NetworkKeyBelongs` refuse; this package is the one place that turns
+  the revocation set into those statuses. None of them reads a clock or touches
+  `SerialSeen`, so a revocation never lowers the highest serial seen. A `Set` is
+  not safe for concurrent use.
+- **Retention.** `Classify` returns long-term for person self-revocations and
+  device key revocations, and for node-level revocations (self-revocations and
+  certificate revocations) of the local node, of a node in the local trust graph,
+  of the signer of a cached declaration and of a node the local node holds a
+  pairing expectation or a pending pairing request for. Other node-level
+  revocations are forward-once, within a total cap (`Params.MaxForwardOnce`, no
+  value decided, zero is unset), and dropped over it.
+- **Synchronisation.** The synchronisation protocol decides the set digest two
+  peers compare; `Revocation.Digest` is its input. Person-level revocations are
+  retained long term without a count limit, and anyone can mint root keys and
+  self-revocations cheaply, so the protocol must bound their volume (for example
+  per connection).
+
+Why these shapes:
+
+- A statement is signed by the key it concerns, with the identifier inside the
+  payload, so the signer rule is "the key that derives it", the same check the
+  certificates use; without it anybody could cut anybody's edges or devices. The
+  person in a device revocation is not a separate claim: a statement signed by P
+  naming Q fails the signer rule, and the lookup by (person, key) makes P's
+  statement about a key Q also uses concern P's own certificates only.
+- Certificate revocations are signed by the identity key, not the network key:
+  the network key is the one that leaks in day-to-day use, and if it could revoke
+  certificates the holder of a leaked old key could retire the certificate that
+  limits it, or cut the node's current certificate off. The digest is in the
+  statement because the identity key could sign two certificates under one serial
+  (the highest-serial rule reports a conflict); a serial alone would revoke both
+  or the wrong one.
+- A self-revocation voids the certificates of its node: an attacker with a leaked
+  identity key signs valid certificates for his own network key, and the owner
+  cannot name certificates not yet made. `trust` separately refuses the node.
+- No time field and no optional field. A time no rule may read is a trap, and the
+  same statement signed at two moments would have two digests that a digest-based
+  synchronisation cannot tell from two different facts; every field decides what
+  is revoked, so an absent one would be a second way to write a weaker statement.
+- A status of three values with a zero "unchecked" keeps a caller that forgot the
+  lookup from presenting a revoked key as clear; the set answers "clear" for
+  itself, empty or nil, because it did look. `RemotePerson` exists so the person
+  and the certificate facts cannot come from different certificates.
+- Retention is asymmetric. Person and device revocations are few and a node
+  cannot tell which concern its peers (the authorized list is local), so all are
+  kept. Node-level revocations are many and mostly irrelevant to a given node:
+  storing every one would let an attacker with many throwaway identities fill
+  every node's store, so only those of the local node, its trust graph, the
+  signers of declarations it holds and the nodes it is pairing with are kept for
+  good; the rest pass through once under a total cap that bounds memory whoever
+  floods and never refuses a related revocation. The pairing nodes are kept
+  because a node whose identity was retired can later be paired by an attacker
+  holding the stolen key, and an expectation the owner entered confirms that
+  pairing by itself; a retirement passed on once and dropped could not be seen at
+  confirmation. Classification is separate from the set: the set only answers
+  questions, and what to put in it is `Classify`'s decision, so the rule has one
+  home.
+
+Where: `internal/revocation` (`statements.go`: payloads, descriptors and `Issue*`
+functions; `revocation.go`: `Revocation`, `Kind`, `Of`, `Verify`; `set.go`: `Set`
+and its queries; `retention.go`: `Classify`, `Params`, `Context`). Tests:
+`golden_test.go` (vectors computed with Python's `hashlib` and `cryptography`,
+from the RFC 8032 keys), `statements_test.go` (`TestGoldenStatements`, `TestSignerRules`,
+`TestDeviceRevocationAppliesOnlyToTheSignersPerson`, `TestPayloadRules`,
+`TestTypeStrings`, `TestEveryBitIsProtected`), `set_test.go`
+(`TestDeviceCertificateStanding`, `TestRemotePerson`,
+`TestRevokedDeviceCertificateIsRefusedAtAnyTime`, `TestRetired`,
+`TestNetworkKeyRevoked`), `scenarios_test.go`
+(`TestOldCertificateRevocationRefusesTheOldKey`, `TestIdentityKeyCompromise`,
+`TestFlood`), `retention_test.go` (`TestClassify`), `property_test.go`
+(`TestClassifyAgainstOracle`, `TestFloodNeverExceedsTheCap`), and the fuzz targets
+in `fuzz_test.go` (`FuzzDecodeStatement`, `FuzzPayloads`, `FuzzStatementRoundTrip`,
+`FuzzClassifyCounts`). The package `README.md` lists entry points and what callers
+must guarantee.
+
 ## Why
 
 - **Deterministic CBOR with a re-encode comparison.** Revocations are kept by
@@ -356,109 +467,3 @@ the same record with a short window.
   `TestDeviceCertificateRules`, `TestDeviceCertificateToAdminFacts`),
   `fuzz_test.go` (decoders, payloads, the strict codec, time conversion).
 - `internal/record/README.md`: entry points and what callers must guarantee.
-
-## Identity revocations
-
-Package `internal/revocation`. Four record types built with `NewDescriptor`
-on the envelope above, the queries that turn verified revocations into the facts
-`admin`, `trust` and `record` read, and the rule that decides how long a node
-keeps a revocation.
-
-### What
-
-| Type string                             | Payload                                     | Signed by                                  |
-| --------------------------------------- | ------------------------------------------- | ------------------------------------------ |
-| `sidera/node-self-revocation/1`         | `{1: node ID}`                              | the identity key that derives the node ID  |
-| `sidera/person-self-revocation/1`       | `{1: person ID}`                            | the root key that derives the person ID    |
-| `sidera/network-key-cert-revocation/1`  | `{1: node ID, 2: serial, 3: certificate digest}` | the identity key that derives the node ID |
-| `sidera/device-key-revocation/1`        | `{1: person ID, 2: device public key}`      | the root key that derives the person ID    |
-
-- **Self-revocations** are made when the key is made and kept offline; they
-  are published when the key leaks. Only the key itself can sign one, so a
-  forwarder cannot forge it.
-- **A certificate revocation** names the node, the serial and the record digest
-  of the certificate. All three must match the certificate. The network key that
-  the certificate names cannot sign it.
-- **A device key revocation** applies only to certificates of the person it
-  names, and that person is the one the signing root key derives, so a person's
-  revocation can reach nobody else's device. It revokes the key under every
-  certificate of that person, past and future. It cannot name the person's own
-  root key (nothing would be revoked).
-- **No statement carries a time.** Revocations apply whenever they are learned.
-- **Queries.** `Set.DeviceCertificate` fills `admin.DeviceCert.CertRevoked` and
-  `RootKeyRevoked`; `Set.Retired` returns the node IDs with a verified
-  self-revocation as the `trust.NodeSet` that `trust.View.Retired` takes;
-  `Set.NetworkKey` fills `AcceptedNetworkKey.Revoked`: the certificate's own
-  revocation, or any self-revocation of its node. None of them reads a clock or
-  touches `SerialSeen`, so a revocation never lowers the highest serial seen.
-- **Retention.** `Classify` returns long-term for person self-revocations and
-  device key revocations, and for node-level revocations (self-revocations and
-  certificate revocations) of the local node, of a node in the local trust graph
-  and of the signer of a cached declaration. Other node-level revocations are
-  forward-once, within a total cap (`Params.MaxForwardOnce`, no value decided,
-  zero is unset), and dropped over it.
-
-### Why
-
-- **Signed by the key concerned, with the identifier inside the payload.** A
-  statement names an identifier and the signer rule is "the key that derives
-  it". Without that, anybody could cut anybody's edges or devices; with it, the
-  check is the same one the certificates already use. The person in a device
-  revocation is not a separate claim: a statement signed by P naming Q fails the
-  signer rule, and the lookup by (person, key) makes sure P's statement about
-  a key that Q also uses is only about P's own certificates.
-- **Identity key, not network key, for certificate revocations.** The network
-  key is the one that leaks in day-to-day use; if it could revoke certificates,
-  the holder of a leaked old key could retire the certificate that limits it, or
-  cut the node's current certificate off.
-- **Digest in the certificate revocation.** The identity key could sign two
-  certificates under one serial (the highest-serial rule reports that as a
-  conflict). A serial alone would revoke both, or the wrong one; the digest names
-  exactly one.
-- **A self-revocation voids the certificates of its node.** An attacker with a
-  leaked identity key signs valid certificates for his own network key. Those
-  are revoked by the node's self-revocation, not by naming each, which the owner
-  cannot do for certificates not yet made. `trust` separately refuses the node.
-- **No time field.** Revocations are judged without regard to time. A time that
-  no rule may read is a trap, and the same statement signed at two moments would
-  have two digests that the digest-based synchronisation of revocations cannot
-  tell apart from two different facts.
-- **No optional fields.** Every field decides what is revoked; absence would be
-  a second way to write a weaker statement. Unknown fields are refused with the
-  rest of the strict decoding.
-- **Retention asymmetry.** Person and device revocations are few and a node
-  cannot tell which concern its peers (the authorized list is local), so all are
-  kept. Node-level revocations are many and mostly irrelevant to a given node:
-  storing every one would let an attacker with many throwaway identities fill
-  every node's store, so only those of the local node, its trust graph and the
-  signers of declarations it holds are kept for good; the rest pass through
-  once under a total cap. The cap bounds memory whoever floods, and a related
-  revocation is never refused for it.
-- **Classification is separate from the set.** The set only answers questions;
-  what to put in it is `Classify`'s decision, so the retention rule has one home
-  and the queries do not depend on it.
-- **Open: the set digest for synchronisation.** Two peers compare a digest of
-  their revocations when they connect. What it covers (node-level revocations
-  only in the part that concerns the peer) and how it is built fix wire bytes,
-  so it is left to the synchronisation protocol, and
-  `TestSetDigestForSynchronisation` records the question.
-
-### Where
-
-- `internal/revocation/statements.go`: the four payloads, descriptors and
-  `Issue*` functions.
-- `internal/revocation/revocation.go`: `Revocation`, `Kind`, `Of`, `Verify`.
-- `internal/revocation/set.go`: `Set`, `DeviceCertificate`, `Retired`,
-  `NetworkKey`.
-- `internal/revocation/retention.go`: `Classify`, `Params`, `Context`.
-- Tests: `golden_test.go` and `TestGoldenStatements` (vectors computed with
-  Python's `hashlib` and `cryptography`, from the RFC 8032 keys),
-  `TestSignerRules`, `TestDeviceRevocationAppliesOnlyToTheSignersPerson`,
-  `TestPayloadRules`, `TestTypeStrings`, `TestEveryBitIsProtected`,
-  `TestDeviceCertificateStanding`, `TestRevokedDeviceCertificateIsRefusedAtAnyTime`,
-  `TestRetired`, `TestNetworkKeyRevoked`, `TestOldCertificateRevocationRefusesTheOldKey`,
-  `TestIdentityKeyCompromise`, `TestClassify`, `TestFlood`,
-  `TestClassifyAgainstOracle` (random graphs against an independent oracle),
-  `TestFloodNeverExceedsTheCap`, and the fuzz targets `FuzzDecodeStatement`,
-  `FuzzPayloads`, `FuzzStatementRoundTrip`, `FuzzClassifyCounts`.
-- `internal/revocation/README.md`: entry points and what callers must guarantee.
