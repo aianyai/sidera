@@ -138,6 +138,15 @@ func TestSaveClockNeverGoesBack(t *testing.T) {
 		{"move the start of the pause", keys.ClockState{HighWater: hw, RollbackPausedSince: since}, keys.ClockState{HighWater: hw, RollbackPausedSince: since.Add(time.Minute)}, true},
 		{"lower the mark of a paused clock", keys.ClockState{HighWater: hw, RollbackPausedSince: since}, keys.ClockState{HighWater: hw.Add(-time.Minute), RollbackPausedSince: since}, true},
 		{"first write with no record", keys.ClockState{}, keys.ClockState{HighWater: hw}, false},
+		// a time the decoder refuses is never written: the next start would read
+		// the file as damaged, and the way out would be to delete the mark
+		{"pause that started before 1970", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC)}, true},
+		{"pause that started at the epoch itself", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Unix(0, 0)}, true},
+		{"pause that started within the first second", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Unix(0, 999_000_000)}, true},
+		{"pause that starts after year 9999", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}, true},
+		{"mark that is before 1970", keys.ClockState{}, keys.ClockState{HighWater: time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC)}, true},
+		{"mark after year 9999", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}, true},
+		{"pause from the first second of the epoch on", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Unix(1, 0)}, false},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
@@ -212,5 +221,31 @@ func TestClearingTheRollbackResetsTheMarkAndTheFlagInOneReplacement(t *testing.T
 	}
 	if clockSteps != 5 {
 		t.Errorf("the clear took %d steps of the clock role, want the 5 of one replacement: %v", clockSteps, r.obs.names())
+	}
+}
+
+// The owner's clear refuses a time the decoder would refuse, writing nothing
+// into the transaction.
+func TestClearingTheRollbackRefusesATimeTheDecoderRefuses(t *testing.T) {
+	for name, now := range map[string]time.Time{
+		"zero time":       {},
+		"before 1970":     time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC),
+		"after year 9999": time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t)
+			r.mustInit(1, t0)
+			r.obs.points = nil
+			tx := r.w.Begin(clearDecl)
+			defer tx.Close()
+			err := keys.PutClockCleared(tx, now)
+			if !errors.Is(err, keys.ErrClockRegression) {
+				t.Fatalf("PutClockCleared = %v, want ErrClockRegression", err)
+			}
+			asFileError(t, err, keys.ClockPath)
+			if r.obs.count() != 0 {
+				t.Errorf("a refused clear wrote: %v", r.obs.names())
+			}
+		})
 	}
 }

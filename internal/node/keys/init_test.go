@@ -491,3 +491,28 @@ func certRevocationWire(t *testing.T, r *rig) []byte {
 	}
 	return wire
 }
+
+// init writes the time it is given into the marker and, when there is no clock
+// record, into it. A time the decoders refuse would make a file that no start
+// reads, and the owner's only way out would be to delete files by hand, so the
+// plan is refused first, writing nothing and drawing nothing from the reader.
+func TestPlanInitRefusesATimeTheDecodersRefuse(t *testing.T) {
+	for name, now := range map[string]time.Time{
+		"zero time":       {},
+		"before 1970":     time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC),
+		"first second":    time.Unix(0, 500_000_000),
+		"after year 9999": time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t)
+			rd := newSeeded(1)
+			before := snapshot(t, r.mem)
+			if _, err := keys.PlanInit(r.w.Reader(), rd, now); err == nil {
+				t.Fatal("PlanInit accepted the time")
+			}
+			if rd.n != 0 || !reflect.DeepEqual(snapshot(t, r.mem), before) {
+				t.Errorf("a refused plan drew %d bytes or changed the disk", rd.n)
+			}
+		})
+	}
+}

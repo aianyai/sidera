@@ -57,8 +57,13 @@ func ReadClock(r fsx.Reader) (ClockState, error) {
 func (k *Keys) SaveClock(next ClockState) error {
 	next.HighWater = next.HighWater.UTC().Truncate(time.Second)
 	next.RollbackPausedSince = next.RollbackPausedSince.UTC().Truncate(time.Second)
-	if next.HighWater.Unix() < 1 {
-		return fileError(ClockPath, ErrClockRegression, "the record needs a high water mark")
+	if err := checkRecordTime(next.HighWater); err != nil {
+		return fileError(ClockPath, ErrClockRegression, "the record needs a high water mark from 1970-01-01T00:00:01Z on, to the end of year 9999")
+	}
+	if !next.RollbackPausedSince.IsZero() {
+		if err := checkRecordTime(next.RollbackPausedSince); err != nil {
+			return fileError(ClockPath, ErrClockRegression, "the rollback pause needs a start from 1970-01-01T00:00:01Z on, to the end of year 9999")
+		}
 	}
 	cur, err := ReadClock(k.s.w.Reader())
 	if err != nil {
@@ -86,8 +91,8 @@ func (k *Keys) SaveClock(next ClockState) error {
 // commits the transaction and decides whether there was a pause to clear.
 func PutClockCleared(tx *txn.Tx, now time.Time) error {
 	now = now.UTC().Truncate(time.Second)
-	if now.Unix() < 1 {
-		return fileError(ClockPath, ErrClockRegression, "the record needs a high water mark")
+	if err := checkRecordTime(now); err != nil {
+		return fileError(ClockPath, ErrClockRegression, "the record needs a high water mark from 1970-01-01T00:00:01Z on, to the end of year 9999")
 	}
 	return tx.Replace(RoleClock, ClockPath, encodeClock(ClockState{HighWater: now}), fsx.ModePrivate)
 }

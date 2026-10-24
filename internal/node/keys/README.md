@@ -75,6 +75,13 @@ transaction of `txn`; nothing here calls an `fsx` write.
 - **The clock record never goes back.** `SaveClock` refuses a lower mark, a lifted
   or moved pause flag, and a state without a mark. Only `PutClockCleared` resets
   the mark and lifts the pause, in one replacement.
+- **No file is written that its own decoder refuses.** A time in `keys/` is UTC in
+  whole seconds from 1970-01-01T00:00:01Z to the end of year 9999, and every write
+  (`SaveClock` for both of its times, `PutClockCleared`, `PlanInit` for `now`)
+  applies the rule the decoders apply before it writes anything. A clock that was
+  reset to zero by a dead battery is the case it is for: a pause that started at
+  that time would otherwise be written and then read as damage, and the owner's
+  only way out would be to delete the file and lose the pause and the mark.
 - **`init` looks before it writes and never overwrites.** A key file that exists
   and parses is reused; one that does not parse is refused, naming it. The
   self-revocation is reused only if it verifies under the identity key that is

@@ -30,13 +30,30 @@ const timeLayout = "2006-01-02T15:04:05Z"
 
 func formatTime(t time.Time) string { return t.UTC().Truncate(time.Second).Format(timeLayout) }
 
-// parseTime reads a UTC time in whole seconds from the epoch on. A spelling that
+// checkRecordTime refuses a time that these files cannot hold, as it would be
+// written (whole seconds, UTC): before 1970-01-01T00:00:01Z, which includes the
+// zero time, or after year 9999. It is the one rule of what a time of these files
+// may be: parseTime applies it to what is read and every write applies it to
+// what is about to be written, so that no file is written that its own decoder
+// refuses.
+func checkRecordTime(t time.Time) error {
+	t = t.UTC().Truncate(time.Second)
+	if t.Unix() < 1 || t.Year() > 9999 {
+		return errors.New("not a UTC time in whole seconds from 1970-01-01T00:00:01Z to the end of year 9999")
+	}
+	return nil
+}
+
+// parseTime reads a time in the one spelling formatTime writes. A spelling that
 // parses but is not what formatTime writes (a one-digit hour) is refused by the
 // canonical check of the body.
 func parseTime(s string) (time.Time, error) {
 	t, err := time.Parse(timeLayout, s)
-	if err != nil || t.Unix() < 1 {
-		return time.Time{}, errors.New("not a UTC time in whole seconds from 1970 on")
+	if err != nil {
+		return time.Time{}, errors.New("not a UTC time in whole seconds")
+	}
+	if err := checkRecordTime(t); err != nil {
+		return time.Time{}, err
 	}
 	return t, nil
 }

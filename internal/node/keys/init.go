@@ -99,9 +99,14 @@ func (p *InitPlan) WriteMarker(tx *txn.Tx) error {
 //     node), and the serial file is written first. A missing serial file next to
 //     a valid certificate is written from the certificate.
 //
-// Init that finished is refused with ErrAlreadyInitialized. A file that anyone
+// A time that the files cannot hold (the zero time, one before
+// 1970-01-01T00:00:01Z or after year 9999) is a plain error of the caller, before
+// anything is read or drawn. Init that finished is refused with ErrAlreadyInitialized. A file that anyone
 // but the owner can reach is refused, naming it, before anything is read from it.
 func PlanInit(r fsx.Reader, rd io.Reader, now time.Time) (*InitPlan, error) {
+	if err := checkRecordTime(now); err != nil {
+		return nil, fmt.Errorf("keys: init needs the current time: %w", err)
+	}
 	if done, err := Initialized(r); err != nil {
 		return nil, err
 	} else if done {
