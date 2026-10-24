@@ -39,6 +39,10 @@ type Handling struct {
 //
 // In order, and all or nothing:
 //
+//  0. A reply that names the control signal's own recipient as the session
+//     endpoint it created is ErrPeerContradiction: a session is a new endpoint,
+//     and tracking one endpoint twice would corrupt the record. It is judged
+//     before anything else is built.
 //  1. A reply other than the one already accepted for the signal (a different
 //     digest) is ErrPeerContradiction: the target keeps one reply per signal and
 //     sends that same payload every time, so a second distinct one means it broke
@@ -85,6 +89,9 @@ func HandleControlReply(now time.Time, o Outbound, reply SignedControlReply, rep
 	}
 	if err := checkNotFuture(now, r.IssuedAt); err != nil {
 		return Handling{}, err
+	}
+	if endpoint, binds := r.Binds(); binds && endpoint == target.Address.Endpoint {
+		return Handling{}, fmt.Errorf("%w: the reply names the signal's own recipient as the session endpoint", ErrPeerContradiction)
 	}
 	if !o.ControlReplyDigest.IsZero() && o.ControlReplyDigest != reply.Digest() {
 		return Handling{}, fmt.Errorf("%w: another control reply was already accepted for the signal", ErrPeerContradiction)

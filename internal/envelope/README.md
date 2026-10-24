@@ -28,8 +28,9 @@ this package is [`reply`](../reply/README.md).
 
 Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 `ErrPeerContradiction` means the peer broke the contract (a second distinct
-control reply, a reply to a rejected signal, a state that cannot follow): the
-caller stops pulling from that peer for the message and logs it. `ErrBodyTooLarge` wraps `ErrBody`, so a
+control reply, a reply to a rejected signal, a reply that names the signal's own
+recipient as the session, a state that cannot follow): the caller stops pulling from
+that peer for the message and logs it. `ErrBodyTooLarge` wraps `ErrBody`, so a
 caller tells a body over `Limits.MaxBody` from a malformed one; an input over the
 size derived from the limits is refused before parsing, with `record.ErrOversize`.
 
@@ -95,7 +96,9 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   an endpoint the sender has no delivery to changes nothing
   (`ReportNotTracked`). On an error nothing changes.
 - **Handling a control reply.** `HandleControlReply` is all or nothing. It ends
-  the control signal's delivery with `delivery.EventDelivered`; for a
+  the control signal's delivery with `delivery.EventDelivered`; a reply that
+  names the signal's own recipient as the session endpoint is
+  `ErrPeerContradiction`, judged before anything is built; for a
   `session.create` with a body whose outcome is created or unconfirmed it
   creates the delivery of the initial message to the session endpoint (accepted,
   with the signal's own deadlines) and binds the endpoint; it then applies the

@@ -150,7 +150,9 @@ one step, all or nothing:
    `ErrPeerContradiction`; the same digest again is the same reply and changes
    nothing;
 2. the control signal's own delivery ends as delivered (`EventDelivered`),
-   whatever the outcome: the target committed a reply;
+   whatever the outcome: the target committed a reply (a reply that names the
+   signal's own recipient as the session endpoint is `ErrPeerContradiction`,
+   judged before anything is built);
 3. for a `session.create` with a body and an outcome of created or unconfirmed,
    the delivery of the initial message to the session endpoint is created
    (accepted, with the signal's own `accept_before` and `report_by`, because
@@ -170,8 +172,9 @@ makes the session known to the sender, so a reply from it can bind, and tells
 the sender nothing it can act on.
 
 `ErrPeerContradiction` is returned for a second distinct control reply, for a
-reply to a signal the target is known to have rejected, and for a report that
-cannot follow the delivery's state. It means the peer broke the contract: the
+reply to a signal the target is known to have rejected, for a reply that names the
+signal's own recipient as the session it created, and for a report that cannot
+follow the delivery's state. It means the peer broke the contract: the
 sender stops pulling from it for this message and logs it. The error wraps the
 specific cause.
 

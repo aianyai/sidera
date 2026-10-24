@@ -521,9 +521,21 @@ func TestHandleControlReply(t *testing.T) {
 			t.Error("a contradicting reply returned or changed something")
 		}
 	})
-	t.Run("a reply whose endpoint collides with a recipient is refused", func(t *testing.T) {
-		_, err := HandleControlReply(now, createOutbound(t), signedReply(t, createdReply("ctl-0001", 2, 2, 650*time.Second)), nil)
-		requireErr(t, err, ErrOutbound)
+	t.Run("a reply that names the signal's own recipient as the session is a contradiction by the peer, judged before the record is built", func(t *testing.T) {
+		for name, o := range map[string]Outbound{
+			"with an initial message":    createOutbound(t),
+			"without an initial message": outboundTo(t, KindSessionCreate, false),
+		} {
+			o := o
+			h, err := HandleControlReply(now, o, signedReply(t, createdReply("ctl-0001", 2, 2, 650*time.Second)), nil)
+			requireErr(t, err, ErrPeerContradiction)
+			if errors.Is(err, ErrOutbound) {
+				t.Errorf("%s: the collision reached Validate: %v", name, err)
+			}
+			if !reflect.DeepEqual(h, Handling{}) || o.Recipients[0].Delivery.State != delivery.StateQueued {
+				t.Errorf("%s: a refused reply returned or changed something", name)
+			}
+		}
 	})
 	mismatches := []struct {
 		rule  string
