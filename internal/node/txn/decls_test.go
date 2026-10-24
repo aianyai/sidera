@@ -25,8 +25,8 @@ var multi = &txn.Decl{
 		{Role: "in", Op: txn.OpReplaceDefer, Many: true},
 		{Role: "in-dir", Op: txn.OpSyncDir},
 		{Role: "out", Op: txn.OpReplace},
-		{Role: "log", Op: txn.OpAppend, Many: true},
-		{Role: "log", Op: txn.OpSyncFile},
+		{Role: "journal", Op: txn.OpAppend, Many: true},
+		{Role: "journal", Op: txn.OpSyncFile},
 	},
 }
 
@@ -49,7 +49,7 @@ var multiPoints = []string{
 	"multi/in.create#2", "multi/in.write#2", "multi/in.sync#2", "multi/in.rename#2",
 	"multi/in-dir.sync-dir#1",
 	"multi/out.create#1", "multi/out.write#1", "multi/out.sync#1", "multi/out.rename#1", "multi/out.sync-dir#1",
-	"multi/log.open#1", "multi/log.write#1", "multi/log.write#2", "multi/log.sync#1", "multi/log.sync-dir#1",
+	"multi/journal.open#1", "multi/journal.write#1", "multi/journal.write#2", "multi/journal.sync#1", "multi/journal.sync-dir#1",
 	"multi/commit#1",
 }
 
@@ -62,9 +62,9 @@ func runMulti(tx *txn.Tx) []error {
 		tx.ReplaceDefer("in", "a/in-2", []byte(multiFiles["a/in-2"]), fsx.ModePrivate),
 		tx.SyncDir("in-dir", "a"),
 		tx.Replace("out", "b/out", []byte(multiFiles["b/out"]), fsx.ModePrivate),
-		tx.Append("log", "a/log", []byte("line 1\n")),
-		tx.Append("log", "a/log", []byte("line 2\n")),
-		tx.SyncFile("log", "a/log"),
+		tx.Append("journal", "a/log", []byte("line 1\n")),
+		tx.Append("journal", "a/log", []byte("line 2\n")),
+		tx.SyncFile("journal", "a/log"),
 		tx.Commit(),
 	}
 }

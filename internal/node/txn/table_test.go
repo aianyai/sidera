@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -85,7 +86,7 @@ func TestTableKeysAreTheStepsOfEveryDeclaredWrite(t *testing.T) {
 		"multi/body.create", "multi/body.write", "multi/body.sync", "multi/body.rename", "multi/body.sync-dir",
 		"multi/in.create", "multi/in.write", "multi/in.sync", "multi/in.rename",
 		"multi/in-dir.sync-dir",
-		"multi/log.open", "multi/log.write", "multi/log.sync", "multi/log.sync-dir",
+		"multi/journal.open", "multi/journal.write", "multi/journal.sync", "multi/journal.sync-dir",
 		"multi/out.create", "multi/out.write", "multi/out.sync", "multi/out.rename", "multi/out.sync-dir",
 		"multi/commit",
 	}
@@ -202,14 +203,14 @@ func TestNewTableRejects(t *testing.T) {
 		{"sync-file-of-a-replace-role", []*txn.Decl{withWrites(
 			txn.Write{Role: "r", Op: txn.OpReplace}, txn.Write{Role: "r", Op: txn.OpSyncFile})}, "SyncFile"},
 		{"sync-file-with-another-role-than-its-append", []*txn.Decl{withWrites(
-			txn.Write{Role: "log", Op: txn.OpAppend}, txn.Write{Role: "sync", Op: txn.OpSyncFile})}, "SyncFile"},
+			txn.Write{Role: "journal", Op: txn.OpAppend}, txn.Write{Role: "sync", Op: txn.OpSyncFile})}, "SyncFile"},
 		{"sync-file-before-its-append", []*txn.Decl{withWrites(
-			txn.Write{Role: "log", Op: txn.OpSyncFile}, txn.Write{Role: "log", Op: txn.OpAppend})}, "SyncFile"},
+			txn.Write{Role: "journal", Op: txn.OpSyncFile}, txn.Write{Role: "journal", Op: txn.OpAppend})}, "SyncFile"},
 		{"two-sync-files-of-one-append-role", []*txn.Decl{withWrites(
-			txn.Write{Role: "log", Op: txn.OpAppend}, txn.Write{Role: "log", Op: txn.OpSyncFile},
-			txn.Write{Role: "log", Op: txn.OpSyncFile})}, "SyncFile"},
+			txn.Write{Role: "journal", Op: txn.OpAppend}, txn.Write{Role: "journal", Op: txn.OpSyncFile},
+			txn.Write{Role: "journal", Op: txn.OpSyncFile})}, "SyncFile"},
 		{"two-appends-with-one-role", []*txn.Decl{withWrites(
-			txn.Write{Role: "log", Op: txn.OpAppend}, txn.Write{Role: "log", Op: txn.OpAppend})}, "role"},
+			txn.Write{Role: "journal", Op: txn.OpAppend}, txn.Write{Role: "journal", Op: txn.OpAppend})}, "role"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -232,7 +233,7 @@ func TestNewTableAccepts(t *testing.T) {
 	}{
 		{"a-name-of-32-characters", []txn.Write{{Role: strings.Repeat("a", 32), Op: txn.OpReplace}}},
 		{"append-then-sync-file-with-the-same-role", []txn.Write{
-			{Role: "log", Op: txn.OpAppend, Many: true, Optional: true}, {Role: "log", Op: txn.OpSyncFile, Optional: true}}},
+			{Role: "journal", Op: txn.OpAppend, Many: true, Optional: true}, {Role: "journal", Op: txn.OpSyncFile, Optional: true}}},
 		{"replace-defer-then-sync-dir", []txn.Write{
 			{Role: "r", Op: txn.OpReplaceDefer, Many: true, Optional: true}, {Role: "d", Op: txn.OpSyncDir, Optional: true}}},
 		{"two-deferred-groups", []txn.Write{
@@ -266,6 +267,18 @@ func TestTableKeepsTheDeclarationItWasBuiltFrom(t *testing.T) {
 	if after := len(tab.Keys()); after != before {
 		t.Errorf("keys changed from %d to %d after the declaration was edited", before, after)
 	}
+
+	mem := fsxtest.NewMem()
+	mkdirs(t, mem, "a")
+	w := txn.New(mem, tab, nil)
+	tx := w.Begin(d)
+	defer tx.Close()
+	mustNotPanic(t, func() {
+		if err := tx.Replace("r", "a/f", []byte("x"), mode); err != nil {
+			t.Fatal(err)
+		}
+	})
+	mustPanic(t, "not declared", func() { tx.Remove("s", "a/f") })
 }
 
 // Other declarations used by the tests of this package.

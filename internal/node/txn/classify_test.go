@@ -50,10 +50,10 @@ func TestFailureClassBeforeAndAfterTheCommitPoint(t *testing.T) {
 		{"replace-after-commit-sync", "out", fsx.StepSync, 1, fsx.Fatal, afterCommit},
 		{"replace-after-commit-rename", "out", fsx.StepRename, 1, fsx.Fatal, afterCommit},
 		{"replace-after-commit-sync-dir", "out", fsx.StepSyncDir, 1, fsx.Fatal, fsFatal},
-		{"append-after-commit-open", "log", fsx.StepOpen, 1, fsx.Fatal, afterCommit},
-		{"append-after-commit-write", "log", fsx.StepWrite, 2, fsx.Fatal, afterCommit},
-		{"sync-file-sync", "log", fsx.StepSync, 1, fsx.Fatal, fsFatal},
-		{"sync-file-sync-dir", "log", fsx.StepSyncDir, 1, fsx.Fatal, fsFatal},
+		{"append-after-commit-open", "journal", fsx.StepOpen, 1, fsx.Fatal, afterCommit},
+		{"append-after-commit-write", "journal", fsx.StepWrite, 2, fsx.Fatal, afterCommit},
+		{"sync-file-sync", "journal", fsx.StepSync, 1, fsx.Fatal, fsFatal},
+		{"sync-file-sync-dir", "journal", fsx.StepSyncDir, 1, fsx.Fatal, fsFatal},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -98,7 +98,7 @@ func TestFirstErrorIsStickyAndNoStepRunsAfterIt(t *testing.T) {
 	}{
 		{"before-the-commit-point", "in", fsx.StepSync, 1},
 		{"after-the-commit-point", "out", fsx.StepWrite, 1},
-		{"in-the-last-write", "log", fsx.StepSync, 1},
+		{"in-the-last-write", "journal", fsx.StepSync, 1},
 	} {
 		t.Run(failAt.name, func(t *testing.T) {
 			var faulty *fsxtest.Faulty

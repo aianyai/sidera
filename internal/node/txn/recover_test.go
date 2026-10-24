@@ -84,7 +84,7 @@ func TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards(t *testing
 	names := rec.names()
 	wantPrefix := []string{
 		"txn-cleanup/tmp.remove#1", "txn-cleanup/tmp.remove#2", "txn-cleanup/tmp.remove#3",
-		"txn-cleanup/trash.remove-all#1", "txn-cleanup/trash.remove-all#2", "txn-cleanup/trash.remove-all#3",
+		"txn-cleanup/trash.remove-all#1", "txn-cleanup/trash.remove-all#2",
 	}
 	if len(names) < len(wantPrefix)+2 || !reflect.DeepEqual(names[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("points = %v, want them to start with %v", names, wantPrefix)

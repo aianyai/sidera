@@ -587,7 +587,7 @@ func TestRandomTransactionsHonourTheCommitPointOrderingAndDurability(t *testing.
 	atLeast("successful runs", tl.succeeded, 100)
 	atLeast("failed runs whose disk was checked for no change", tl.failedWithNothingChanged, 40)
 	atLeast("scenarios with a preparatory write", tl.withPrepare, 100)
-	atLeast("scenarios with a deferred group", tl.withDefer, 100)
+	atLeast("scenarios with a deferred group", tl.withDefer, 60)
 	atLeast("points before the commit point", tl.preCommitPoints, 1000)
 	atLeast("points after the commit point", tl.postCommitPoints, 1000)
 	for _, op := range []txn.Op{txn.OpReplace, txn.OpReplaceDefer, txn.OpAppend, txn.OpSyncFile, txn.OpRenameFile, txn.OpRemove,

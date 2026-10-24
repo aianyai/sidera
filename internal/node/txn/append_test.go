@@ -154,9 +154,12 @@ func TestFailedOpenAndFailedSyncFileLeaveNoOpenHandle(t *testing.T) {
 			if err := c.run(tx); err == nil {
 				t.Fatal("injected failure did not surface")
 			}
+			if opened, closed := log.counts(); opened != closed {
+				t.Errorf("right after the failure: %d handles opened, %d closed", opened, closed)
+			}
 			tx.Close()
 			if opened, closed := log.counts(); opened != closed {
-				t.Errorf("%d handles opened, %d closed", opened, closed)
+				t.Errorf("after Close: %d handles opened, %d closed", opened, closed)
 			}
 		})
 	}

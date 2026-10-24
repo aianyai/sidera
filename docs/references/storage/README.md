@@ -6,7 +6,9 @@ believed to do. The code is under
 [`internal/node/fsx`](../../../internal/node/fsx/README.md) (the file system
 interface and the durable write sequences) and
 [`internal/node/fsx/fsxtest`](../../../internal/node/fsx/fsxtest/README.md)
-(the crashable in-memory file system and the fault injector).
+(the crashable in-memory file system and the fault injector) and
+[`internal/node/txn`](../../../internal/node/txn/README.md) (the transaction
+layer every persistent write goes through).
 
 Platform paragraphs that say "pending verification by CI on main" describe
 behaviour no one has observed on that platform yet: the code and its tests are
@@ -97,9 +99,9 @@ look in) is Failed. `fsx.IsFatal` finds a Fatal error through any wrapping. The
 process exit itself is not in `fsx`: it returns the class and the composition
 root exits.
 
-A multi-file transaction fails Fatal for any failure after its first
-non-preparatory write is durable; that rule belongs to the transaction layer,
-not to `fsx`.
+A multi-file transaction fails Fatal for any failure after the commit step of
+its first non-preparatory write has completed; that rule belongs to the
+transaction layer, not to `fsx` (see The transaction layer).
 
 ### Appending and syncing
 
@@ -200,6 +202,108 @@ Windows paragraphs are pending verification by CI on main. Specifically:
 
 Linux paragraphs (the `fsync` and directory `fsync` semantics, `flock`, `statfs`)
 are pending verification by CI on main: the development machine is macOS.
+
+### The transaction layer
+
+`fsx` makes one write durable. A transaction is several writes that belong
+together, and `txn` is the one entry point through which every persistent write
+of `keys/`, `config/` and `state/` goes: it is the only holder of a writable
+`FS`, and the packages above it get a `Writer`, a `Tx` per transaction, and a
+`Reader` that has no write method. Logs, the instance lock and the creation of
+the data directory root are not transactions and not crash points.
+
+**Declarations and the table.** A transaction is declared as a literal: a name,
+a kind (`Normal`, or `Recovery` for what only repairs a crash) and its writes in
+order, each with a role, an operation, and the flags `Many` (may repeat),
+`Optional` (may be skipped) and `Prepare` (what it leaves behind is garbage that
+recovery removes). The composition root builds one table of every declaration
+of the program, `NewTable`, and `Table.Keys()` is every crash point the program
+can reach: every step of every write under its role (`intake/out.rename`), and
+one `commit` per transaction. Nothing registers at run time, so the expected
+set of points is known before anything runs. `NewTable` refuses duplicate or
+invalid names (the reserved `log` and `cleanup` included), unknown operations and
+kinds, a transaction without writes, a role used twice (except the role of an
+`Append`, which one later `SyncFile` repeats), a `SyncFile` whose role is not an
+earlier `Append`'s, and a `ReplaceDefer` that is not declared immediately before
+a `SyncDir`.
+
+**Run time checks.** `Begin` panics for a declaration that is not in the table.
+Each call of a `Tx` is checked against its declaration: the role, the operation
+and the order (a `Many` write repeats, an `Optional` one is skipped, nothing is
+made again after a later write, and `Commit` needs every required write). A
+second open `Tx` of one declaration panics, because crash points are numbered per
+key and two transactions advancing the same key would make the numbering depend
+on scheduling. These are programming errors, so they panic, and they are found
+the first time the code runs. The first failed write is sticky: every later call,
+`Commit` included, returns it before any check and runs no step.
+
+**The commit point.** Writes that are `Prepare` leave only garbage until the
+first write that is not. The commit point is the completion of that write's
+commit step, its first step that readers can see:
+
+| Operation | Commit step |
+| --------- | ----------- |
+| `Replace`, `ReplaceDefer`, `RenameFile` | `rename` |
+| `Remove` | `remove` |
+| `MakeDir` | `mkdir` |
+| `RenameDir`, `Discard` | `rename-dir` |
+| `RemoveAll` | `remove-all` |
+| `SyncFile` | `sync` |
+| `SyncDir` (a write of its own) | `sync-dir` |
+| `Append` | none |
+
+Before it, a failure has the class `fsx` gave it. From it on, every failure, in
+the same operation or in a later write, is `Fatal`: the disk is in one of the
+intermediate states that replay is designed for, while memory still shows the
+state before the transaction, so continuing would write on a view that is wrong.
+For a single replacement this is exactly the rule of `fsx.Replace`. The class
+returned is the `txn.Error`'s `Class`; `txn.IsFatal` reads it, and also accepts
+an `fsx` error.
+
+**Deferred groups.** `ReplaceDefer` is `Replace` without the directory sync, so
+that k files of one directory cost k file syncs and one directory sync. The files
+of a group are in one directory and the next write is the `SyncDir` of it:
+`NewTable` checks the declaration, and the `Tx` tracks the directory at run time
+and panics for a second directory, any other write, or `Commit` before the sync.
+
+**Appended files.** The `Tx` opens an appended file at its first append and
+syncs through that same handle (`SyncFile` is declared under the role of its
+`Append`, because a file's steps carry the role it was opened under). A failed
+append or sync closes the handle at once and the `Tx` writes nothing more, so a
+handle is never reused after a failure and never outlives its `Tx`; the next `Tx`
+opens the file again. The partial record a failed append can leave is the
+reader's to skip. The framing of what is appended, including a separator at the
+start of a `Tx`'s first append to a file that may end in a partial record, belongs
+to the format's owner: this layer writes the bytes it is given.
+
+**Cleanup and the clean-state requirement.** `Writer.Recover` is one `Recovery`
+transaction, `txn-cleanup`: it removes every `.tmp-*` file and `.trash-*`
+directory anywhere under the data directory, files first, then directories, then
+one directory sync per directory that held one. The list it works from is the
+exported pure function `CleanupWork`, which only reads, so a test evaluates it on
+`Mem.Clone()` and the repair uses the same function. The requirement is that on
+every clean run (no crash, no damage, no injected fault) the list is empty at
+every quiescent point, because a temporary name exists only while a replacement
+is under way and a garbage name only while a directory is being discarded. With
+nothing to remove `Recover` reaches no point, so a start on a clean disk is not a
+recovery, and a clean run that reaches a recovery point is a failure. Every other
+`Recovery` transaction has the same shape: its trigger is a named pure function
+of the disk, used by the repair and by the scenario tests, and holds only for
+states a crash or damage can produce.
+
+**Coverage.** `Writer.Coverage()` returns every key of the table with its hit
+count, zeros included, each key with the kind of its transaction, so a caller
+counts the normal and the recovery paths separately. Counts and ordinals belong
+to the `Writer`: one per process, one per test.
+
+**Observing.** An `Observer` is told of every point before its step runs, and of
+the commit point after the last step completed and before `Commit` returns, when
+nothing has been acknowledged. A test takes `Mem.Clone()` (process crash) or
+`CrashClone` (power loss) in it and restarts on the clone.
+
+**Contract with callers.** Acknowledge, and update memory, only after `Commit`
+returns nil; do not read back a path written in the same `Tx`; exit and rescan
+on `IsFatal`; serialise the transactions of one declaration.
 
 ## The crash model and what it can prove
 
@@ -335,6 +439,56 @@ so that the double cannot drift from what it stands for.
   need it removed), yet it is not a crash point, so it is tagged `cleanup` and
   skipped by observers and by fault rules that do not name it.
 
+- **No generic commit manifest.** Every transaction that spans files has one of
+  three shapes: prepare then commit (a body file, then the one record that
+  refers to it), authority then followers (the first file decides, the others
+  follow from it and from the records already there), or an independent batch
+  (every file is a valid single-record change, so any subset is a valid state).
+  None needs several files that cannot be derived from each other to appear
+  all-or-nothing, which is the only thing a manifest buys. A manifest would cost
+  more syncs (a four-sync intake becomes seven), more crash points, a second
+  opaque copy of the state that the owner's files no longer fully describe,
+  secrets copied into it for the transactions that write keys, special cases when
+  `state/` is deleted (a replay would write half a transaction into an empty
+  tree), and no way to tell a manifest damaged in the middle of a write from one
+  damaged after its commit. The price of doing without is that each owner writes
+  the replay rules of its own transactions; they stay honest because a rule's
+  trigger is a named pure function that must be empty on every clean state, and
+  because the layer's ordering checks make the declaration the same thing as the
+  code. SQLite's super-journal, LevelDB's `CURRENT` and git's table list serve
+  files that must switch together and cannot be derived from one another; git's
+  own multi-reference update, which renames one file at a time and orders them so
+  the intermediate states are the less bad ones, is the model taken here.
+- **The commit point is the first namespace step, not the first durable sync.**
+  Once a rename, a removal or a `mkdir` has completed, this process's own later
+  reads see it. If the next failure were an ordinary failure, memory would
+  still claim "nothing happened" while the disk shows a batch deleted down to the
+  third file. Taking the namespace step as the point makes that failure fatal. For
+  a single replacement it changes nothing: a failed directory sync was already
+  fatal. An `Append` has no commit step because its bytes are not durable until a
+  sync and its readers skip a damaged record, so a failed append needs no more
+  than an ordinary failure.
+- **Deferred groups are one directory with the sync next.** If a write to another
+  directory could come between the replacements and the sync, a power loss could
+  keep that later write and lose the group, so the file the later write was meant
+  to follow would be there without its predecessor. One directory and the very
+  next write fixes the order that matters; the ordinary `Replace` of the same
+  directory would cost a directory sync per file.
+- **Panics for misuse, errors for I/O.** An undeclared role, an operation or an
+  order the declaration does not allow, a second open `Tx` of one declaration, a
+  deferred group left unsynced: each is a defect in the code that makes the call,
+  found the first time it runs, and returning an error would let a caller treat it
+  as an I/O failure and carry on.
+- **The class is decided in two places, each once.** What a failed step means
+  without context is in the `fsx` table; what it means after a commit step is
+  `commitStepOf` and `Tx.fail`. A caller only reads the resulting class.
+- **A declaration is copied into the table.** The `Tx` enforces the declaration
+  that was validated, not whatever the literal was edited to afterwards.
+- **`Recover` does nothing on a clean disk.** An empty transaction would still
+  reach a commit point of a recovery transaction at every start, which would make
+  "a clean run reaches no recovery point" false and blur the coverage of the
+  recovery path.
+
 ## Known gaps
 
 - **Symbolic links.** The test that `Stat` does not follow a final symbolic link
@@ -345,6 +499,17 @@ so that the double cannot drift from what it stands for.
   cover is a short comparison against the trusted set.
 - **Cross-user permission checks** (a different user opening the data directory)
   are not tested: CI has one user.
+
+- **The ordering of renames on Windows.** The transaction layer relies on one
+  rename becoming durable before the next, which `MoveFileEx` with write-through
+  does not document. It is the same weakness the file system layer has; pending
+  verification by CI on main.
+- **Handles are closed without checking.** A close error of an appended file is
+  ignored: a file that was synced is durable, and one that was not is not
+  promised to be.
+- **The tests of this layer run on the in-memory file system.** They prove the
+  step sequences, the classes and the ordering against the crash model, not
+  against a real kernel.
 
 ## Where
 
@@ -361,6 +526,14 @@ so that the double cannot drift from what it stands for.
 | crash model | `internal/node/fsx/fsxtest/mem.go`, `crash.go` | `mem_test.go` (each rule above, and the append and directory-rename result table `TestAppendAndRenameDirResultTable`), `counterexample_test.go` |
 | fault injection | `internal/node/fsx/fsxtest/faulty.go` | `faulty_test.go` |
 | conformance | `internal/node/fsx/fsxtest/conformance.go` | `TestMemConformsToTheFSContract`, `TestOSFSConformsToTheFSContract` |
+| declarations, table, keys | `internal/node/txn/txn.go`, `table.go`, `ops.go` | `TestTransactionTableIsValid`, `TestTableKeysAreTheStepsOfEveryDeclaredWrite`, `TestTableKeysOfEveryOperation`, `TestNewTableRejects`, `TestNewTableAccepts`, `TestTableKeepsTheDeclarationItWasBuiltFrom` |
+| run time checks | `internal/node/txn/tx.go`, `writer.go` | `runtime_test.go` (`TestBeginPanicsOnADeclarationThatIsNotInTheTable`, `TestBeginPanicsWhileATxOfTheSameDeclarationIsOpen`, `TestTxPanicsOnACallTheDeclarationDoesNotAllow`, `TestDeferredReplacementsMustBeSyncedBeforeAnythingElse`, `TestSyncFileMustMatchTheAppendInThisTx`) |
+| commit point and classes | `internal/node/txn/ops.go`, `tx.go` | `classify_test.go` (`TestFailureClassBeforeAndAfterTheCommitPoint`, `TestFirstErrorIsStickyAndNoStepRunsAfterIt`, `TestEachOperationHasItsCommitStep`, `TestFailureAfterTheCommitStepInsideOneOperationIsFatal`) |
+| crash states and durability | `internal/node/txn/tx.go` | `crash_test.go` (`TestEveryDeclaredKeyIsReachedInOrder`, `TestCrashStatesAtEveryPointOfAMultiWriteTransaction`, `TestAcknowledgedWritesSurvivePowerLoss`), `TestRandomTransactionsHonourTheCommitPointOrderingAndDurability` |
+| appended files | `internal/node/txn/tx.go` | `append_test.go` (`TestFailedAppendDropsTheHandle`, `TestHandlesAreClosedWhenTheTransactionEnds`) |
+| cleanup and its predicate | `internal/node/txn/cleanup.go` | `recover_test.go` (`TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards`, `TestCleanupPredicateIsEmptyOnEveryCleanState`, `TestRecoverOnACleanDiskReachesNoPoint`) |
+| coverage | `internal/node/txn/writer.go` | `coverage_test.go` |
+| read side | `internal/node/txn/writer.go` | `reader_test.go` |
 
 ### Windows tests
 

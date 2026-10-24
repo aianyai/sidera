@@ -50,7 +50,7 @@ func TestCoverageCountsHitsPerKeyAndSplitsThemByKind(t *testing.T) {
 		"multi/in.create": 4, "multi/in.write": 4, "multi/in.sync": 4, "multi/in.rename": 4,
 		"multi/in-dir.sync-dir": 2,
 		"multi/out.create":      2, "multi/out.write": 2, "multi/out.sync": 2, "multi/out.rename": 2, "multi/out.sync-dir": 2,
-		"multi/log.open": 2, "multi/log.write": 4, "multi/log.sync": 2, "multi/log.sync-dir": 2,
+		"multi/journal.open": 2, "multi/journal.write": 4, "multi/journal.sync": 2, "multi/journal.sync-dir": 2,
 		"multi/commit": 2,
 	}
 	got := map[string]int{}
