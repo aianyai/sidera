@@ -19,6 +19,7 @@ func TestLeftoversFindsTemporaryFilesAndDiscardedDirectories(t *testing.T) {
 	mustWrite(t, mem, "state/.tmp-0002", "x")
 	mustWrite(t, mem, "state/in/.tmp-0003", "x")
 	mustWrite(t, mem, ".trash-1/inner", "x")   // inside a leftover: removed with it
+	mustWrite(t, mem, ".trash-1/.tmp-in", "x") // a leftover inside a leftover: not listed on its own
 	mustWrite(t, mem, "state/.tmpnot", "x")    // not a leftover: no dash
 	mustWrite(t, mem, "state/in/trash-2", "x") // not a leftover: no dot
 	mustWrite(t, mem, "state/in/.tmp", "x")    // not a leftover: no dash

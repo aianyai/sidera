@@ -428,6 +428,28 @@ func TestDirectoryRenameMovesOrDoesNotButNeverDuplicates(t *testing.T) {
 	})
 }
 
+// Once a directory is synced, its earlier renames no longer tie names together:
+// the names are decided one by one again.
+func TestSyncDirEndsTheGroupingOfEarlierDirectoryRenames(t *testing.T) {
+	mem := fsxtest.NewMem()
+	durableDir(t, mem, "a")
+	must(t, mem.RenameDir(tag, "a", "b"))
+	must(t, mem.SyncDir(tag, ".")) // the rename is durable and its names are free again
+	must(t, mem.RemoveAll(tag, "b"))
+	must(t, mem.Mkdir(tag, "a")) // an unrelated, unsynced change to both names
+
+	outcomes := map[string]int{}
+	for _, c := range crashes(mem) {
+		outcomes[fmt.Sprintf("a=%v,b=%v", exists(c, "a"), exists(c, "b"))]++
+	}
+	t.Logf("outcomes %v", outcomes)
+	for _, mixed := range []string{"a=true,b=true", "a=false,b=false", "a=true,b=false", "a=false,b=true"} {
+		if outcomes[mixed] == 0 {
+			t.Errorf("outcome %s never occurred in %d seeds: the names are still decided together", mixed, manySeeds)
+		}
+	}
+}
+
 // The new name can be durable while the renamed file's content is not: the
 // target then holds a cut or damaged file.
 func TestDurableNameOfAnUnsyncedFileHoldsDamagedContent(t *testing.T) {
