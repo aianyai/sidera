@@ -48,7 +48,9 @@ identifiers are distinct across the list; no recipient is the system endpoint
 `ErrRecipients`; evidence needs a `reply_to`. `from` is
 not in the envelope. Encoding refuses what decoding refuses. The cap on
 `accept_before` is judged by the delivery intake, not by the envelope. The
-longest body and the most recipients are parameters (`Limits`) without defaults.
+longest body and the most recipients are parameters (`Limits`), so a caller may
+tighten them; `DefaultLimits()` returns the protocol values, 64 KiB and 50, and
+a zero value is refused, never read as no limit.
 A body over the longest is `ErrBodyTooLarge`, which wraps `ErrBody` (the content
 type and body are inconsistent or not allowed), so a caller that reports the two
 differently to the sender can tell them apart; an input longer than the size the
@@ -401,21 +403,42 @@ which may still admit it.
   bound session. The evidence
   of the real target replayed by a stranger is true and harmless to apply, and
   gives the stranger nothing.
-- **Parameters without defaults.** The longest body and the most recipients are
-  not decided. The reply switch's zero value is off, as every security-relevant
-  zero is.
+- **The reply switch is off by default.** Its zero value is off, as every
+  security-relevant zero is.
+
+- **A body limit of 64 KiB and 50 recipients, as protocol values.** The two
+  ends of a channel must agree on them: a body or a recipient list that one node
+  may send and another refuses would fail only after the sender was told the
+  message was accepted. They are therefore constants of the protocol, not node
+  settings, and `Limits` is where a caller tightens them for itself. 64 KiB holds
+  a long code excerpt or log in one message and is about eight parts at the
+  default `recv` output budget; 256 KiB would be about 29 parts, and 16 KiB would
+  not hold common excerpts, so larger content goes by another route the agent
+  chooses. The recipient limit is the one the adapter protocol applies to a
+  message (`adapterproto.MaxRecipients`); `MaxRecipients` reads it instead of
+  repeating the number, so a message an adapter may send always fits an envelope.
+  50 lets one message reach every endpoint of a node at the scale the channel is
+  sized for, about 50 endpoints; a node may publish up to
+  `publication.MaxEndpointsPerNode` (256), so this is a sizing choice, not a
+  promise that one message can address every endpoint. Each recipient takes about
+  96 bytes on the wire, under 5 KiB for 50, and the body is stored once however
+  many recipients there are.
 
 ## Where
 
-- `internal/envelope/envelope.go`: `Envelope`, `Limits`, `Encode`, `Decode`,
-  `ValidateFor`, `TrimmedFor`, `Digest`, `CheckEvidence`; `kind.go`: `Kind` and
-  its mappings (a control signal's action is `adapterreg.ActionOf` of its
-  signal, so that mapping has one home).
+- `internal/envelope/envelope.go`: `Envelope`, `Limits`, `DefaultLimits` and the
+  protocol values it returns (`MaxBody`, `MaxRecipients`), `Encode`,
+  `Decode`, `ValidateFor`, `TrimmedFor`, `Digest`, `CheckEvidence`; `kind.go`:
+  `Kind` and its mappings (a control signal's action is `adapterreg.ActionOf`
+  of its signal, so that mapping has one home).
 - `internal/envelope/statusreport.go`, `controlreply.go`, `verified.go`: the two
   records, their descriptors and the verified values.
 - `internal/envelope/outbound.go`: `Outbound`, `Tracked`, `Arrival`,
   `ApplyReport`; `handle.go`: `HandleControlReply`.
 - `internal/reply/reply.go`: `Admit`, `RetainFactsUntil`.
+- Tests of the protocol values: `limits_defaults_test.go`
+  (`TestDefaultLimitsValidate`, `TestDefaultLimitsValues`,
+  `TestDefaultLimitsBehaviour`).
 - Tests: `internal/envelope/golden_vectors_test.go` (bytes written out with CBOR
   diagnostic notation; node identifiers, digests and signatures computed by an
   independent script) with `golden_test.go`; `envelope_test.go`

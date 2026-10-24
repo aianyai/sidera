@@ -31,15 +31,42 @@ const (
 	MaxEvidence = 2
 )
 
-// Limits are the parameters of decoding and encoding. Neither has a default:
-// the longest body and the most recipients are product settings that are not
-// decided, and a zero value is refused rather than read as "no limit".
+// MaxBody is the longest body in bytes. Sender and receiver must agree on it,
+// which is why it is a protocol constant and not a node setting: a body the
+// sender may send must be one every receiver accepts. 64 KiB holds a long code
+// excerpt or log in one message and is about eight parts at the default recv
+// output budget; larger content is passed on by the agent some other way.
+// 256 KiB would be about 29 parts, and 16 KiB is too small for common
+// excerpts.
+const MaxBody = 64 * 1024
+
+// MaxRecipients is the most recipients one envelope lists. It is the bound the
+// adapter protocol already applies to one message, and the envelope reads it
+// from there so that the two can never differ: a message an adapter may send
+// must fit in the envelope. 50 lets one message reach every endpoint of a node
+// at the scale the channel is sized for, about 50 endpoints; a node may publish
+// up to publication.MaxEndpointsPerNode (256), so this is a sizing choice, not
+// a promise that one message can address every endpoint. Each recipient costs
+// about 96 bytes on the wire, so the most an envelope can list adds under 5
+// KiB, and the body is stored once however many recipients there are.
+const MaxRecipients = adapterproto.MaxRecipients
+
+// Limits are the parameters of decoding and encoding. A zero value is refused
+// rather than read as "no limit". They are parameters so that a caller can
+// tighten them; DefaultLimits returns the protocol values.
 type Limits struct {
 	// MaxBody is the longest body in bytes. It is the envelope-wide limit; the
 	// per-endpoint size caps of the policy are separate and judged by authz.
 	MaxBody int
 	// MaxRecipients is the most recipients one envelope lists.
 	MaxRecipients int
+}
+
+// DefaultLimits returns the protocol values. A caller may tighten either limit;
+// a receiver that sets a limit above the protocol value would accept messages
+// that other nodes refuse.
+func DefaultLimits() Limits {
+	return Limits{MaxBody: MaxBody, MaxRecipients: MaxRecipients}
 }
 
 func (l Limits) check() error {

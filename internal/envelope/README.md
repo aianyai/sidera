@@ -15,7 +15,8 @@ this package is [`reply`](../reply/README.md).
 
 | Name | Purpose |
 | ---- | ------- |
-| `Envelope`, `Limits`, `Encode(limits)`, `Decode(data, limits)` | The envelope and its deterministic CBOR form with strict decoding. `Limits` (longest body, most recipients) has no defaults; a zero value is refused. |
+| `Envelope`, `Limits`, `Encode(limits)`, `Decode(data, limits)` | The envelope and its deterministic CBOR form with strict decoding. `Limits` (longest body, most recipients) is a parameter a caller may tighten; a zero value is refused. |
+| `DefaultLimits()` | The protocol values: a body of at most 64 KiB (`MaxBody`) and at most 50 recipients (`MaxRecipients`, read from `adapterproto.MaxRecipients`). |
 | `Envelope.ValidateFor(node)`, `RecipientsOn(node)`, `TrimmedFor(node)` | What only the receiving node can check; the sender's trimming of recipients and sequence numbers for one target node. |
 | `Envelope.Digest()` | The request digest the target stores for deduplication. |
 | `Kind`, `Kind.Action()`, `Kind.Signal()`, `KindOfSignal` | The five kinds, the mapping to `authz.Action` (a control signal's action comes from `adapterreg.ActionOf`), and the mapping to the adapter protocol's control signals. |
@@ -153,7 +154,9 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
 - `Outbound` mirrors storage: one `Tracked` per recipient, source-side delivery
   records, the derived delivery only after a control reply bound it, and the
   digest of that reply with it. `Outbound.Validate` checks the invariants.
-- `Limits` is chosen by the caller; there is no default body limit.
+- `Limits` is passed by the caller. `DefaultLimits()` is the protocol values,
+  which sender and receiver must share; a caller may tighten them, and a limit
+  above them makes a node accept what others refuse. A zero field is refused.
 - The request digest is stored by the target with the deduplication record of
   each delivery of the request, and compared with `delivery.CheckDedup`.
 
