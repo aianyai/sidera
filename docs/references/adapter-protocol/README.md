@@ -15,7 +15,8 @@ messages, enums, application error codes and manifest are defined in the package
 `adapterproto` and `manifest` and, for other languages, by the JSON Schema under
 `protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`.
 This document has one part per layer: the peer layer, then the messages and
-methods, the control signals and the native process identity.
+methods, the control signals and the native process identity. How each method relates to the Agent Client Protocol is in
+[acp-mapping.md](acp-mapping.md).
 
 ## Peer layer
 
