@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"os"
 	"runtime/pprof"
 	"strings"
 	"sync"
@@ -17,6 +18,45 @@ import (
 )
 
 const wait = 5 * time.Second
+
+// wireLogEnv names a file that collects every line a peer under test writes, for
+// a test in the repository's root module that checks each line against the
+// protocol's message schema (the validator is a dependency of that module only).
+const wireLogEnv = "SIDERA_PEER_WIRE_LOG"
+
+var wireLog struct {
+	sync.Mutex
+	f *os.File
+}
+
+// captured wraps the writer of a peer under test so that the lines it writes are
+// copied to the file named by wireLogEnv, when there is one.
+func captured(w io.WriteCloser) io.WriteCloser {
+	if os.Getenv(wireLogEnv) == "" {
+		return w
+	}
+	return &capturingWriter{WriteCloser: w}
+}
+
+type capturingWriter struct{ io.WriteCloser }
+
+func (c *capturingWriter) Write(p []byte) (int, error) {
+	wireLog.Lock()
+	if wireLog.f == nil {
+		f, err := os.OpenFile(os.Getenv(wireLogEnv), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+		if err != nil {
+			panic(err)
+		}
+		wireLog.f = f
+	}
+	// One Write is one line, and O_APPEND keeps lines whole.
+	_, err := wireLog.f.Write(p)
+	wireLog.Unlock()
+	if err != nil {
+		panic(err)
+	}
+	return c.WriteCloser.Write(p)
+}
 
 // peerGoroutines returns the stacks of live goroutines that belong to a Peer.
 func peerGoroutines() []string {
@@ -127,7 +167,7 @@ func newRawDrain(t *testing.T, params peer.Params, setup func(*peer.Peer), drain
 	toPeerR, toPeerW := io.Pipe()
 	fromPeerR, fromPeerW := io.Pipe()
 	logs := &logBuf{}
-	p, err := peer.New(toPeerR, fromPeerW, peer.Config{Params: params, Logger: logs.logger()})
+	p, err := peer.New(toPeerR, captured(fromPeerW), peer.Config{Params: params, Logger: logs.logger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,11 +291,11 @@ func newPair(t *testing.T, pa, pb peer.Params, tap func(from string, line []byte
 	t.Helper()
 	aToBR, aToBW := io.Pipe()
 	bToAR, bToAW := io.Pipe()
-	var wa io.WriteCloser = aToBW
-	var wb io.WriteCloser = bToAW
+	var wa io.WriteCloser = captured(aToBW)
+	var wb io.WriteCloser = captured(bToAW)
 	if tap != nil {
-		wa = &tapWriter{WriteCloser: aToBW, from: "a", tap: tap}
-		wb = &tapWriter{WriteCloser: bToAW, from: "b", tap: tap}
+		wa = &tapWriter{WriteCloser: wa, from: "a", tap: tap}
+		wb = &tapWriter{WriteCloser: wb, from: "b", tap: tap}
 	}
 	var err error
 	if a, err = peer.New(bToAR, wa, peer.Config{Params: pa}); err != nil {

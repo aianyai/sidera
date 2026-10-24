@@ -72,6 +72,15 @@ Behaviour, each point pinned by the tests named in "Where":
   128 characters: `peer.RequestID`, the only statement of the rule, which the
   schema repeats and a conformance test holds equal. A late response, one whose
   call has timed out or been cancelled, is dropped and logged.
+- **Frames the peer sends.** Only lines that `message.schema.json` accepts:
+  `params` is always an object (`nil` is sent as `{}`, a list or a scalar is
+  refused with `ErrNotSent`), a result is always an object (anything else a
+  handler returns is answered `-32603`), a method name has 1 to 128 characters
+  (a longer one is refused locally), an error carries a message of 1 to 1024
+  characters (an empty message becomes the name of its code, or `error`; a longer
+  one is cut), `data` only as an object and on any code, and nothing over
+  `MaxLineBytes` (an error reply that long is answered `-32603` too). A nil
+  `*Error`, including a typed nil inside a wrapped error, is answered `-32603`.
 - **Close** is idempotent, ends every pending call with `ErrClosed`, cancels
   handler contexts and leaves no goroutine behind once handlers return.
   `Peer.Err()` says why the connection ended.
@@ -160,6 +169,14 @@ anything not listed, including unknown codes, counts as unknown.
   answer to a call and which the other side's peer logs and drops. The reply
   is kept rather than replaced by a log line only so that a counterpart that
   speaks a broken dialect gets a visible signal.
+- **The peer writes only what the schema accepts.** Third parties implement the
+  schema, not the Go code: a frame the Go peer wrote that the schema rejects
+  would be the Go side's bug that every other implementation has to work around.
+  The peer is the one writer of frames, so the guarantee is kept in one place
+  instead of in every handler, and a root-module test validates every line the
+  peer's own tests make it write. What the peer cannot know is the protocol's
+  application codes, so the handlers of the protocol layer return only those the
+  protocol defines.
 - **A repeated member of the frame is refused where the frame is read.** Two
   readers of `{"id":1,"id":2,...}` can disagree about which request is meant,
   and a cancel or an in-flight check would then act on another request than the
@@ -204,6 +221,8 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | Behaviour | Tests |
 | --------- | ----- |
 | Overlong line closes; exactly-max accepted; nothing after is read | `TestOverlongLineClosesConnection` |
+| Every line the peer writes in its own tests is a frame of the schema | `TestPeerOutputMatchesSchema` (root module `protocol`, running the peer tests with the writers recorded) |
+| The rules of what the peer sends | `TestNilParamsAreSentAsAnEmptyObject`, `TestParamsThatAreNotAnObjectAreRefused`, `TestMethodNameLength`, `TestHandlerResultMustBeAnObject`, `TestTypedNilErrorIsAnInternalError`, `TestErrorRepliesFitTheSchema`, `TestWithDataKeepsOnlyObjects`, `TestErrorReplyTooLargeIsAnInternalError` |
 | Invalid JSON, invalid UTF-8 | `TestInvalidJSONKeepsConnection`, `TestInvalidUTF8IsParseError` |
 | Missing or wrong `jsonrpc`, bad shapes | `TestMissingOrWrongVersionIsInvalidRequest` |
 | A repeated frame member is refused; a repeat inside params is not the frame's business | `TestRepeatedFrameMemberIsInvalidRequest`, `TestNoDuplicateTopLevelKeys`, `TestClassify` |

@@ -79,9 +79,6 @@ func TestHandlerErrorsAndEffectRule(t *testing.T) {
 			return nil, errors.New("database password is hunter2")
 		})
 		b.Handle("panic", func(context.Context, json.RawMessage) (any, error) { panic("oops") })
-		b.Handle("code", func(context.Context, json.RawMessage) (any, error) {
-			return nil, fmt.Errorf("wrapped: %w", peer.NewError(-32099, "custom server error"))
-		})
 		b.Handle("badresult", func(context.Context, json.RawMessage) (any, error) { return make(chan int), nil })
 		b.Handle("ping", pingHandler)
 	})
@@ -109,11 +106,6 @@ func TestHandlerErrorsAndEffectRule(t *testing.T) {
 		if peer.NoEffect(err) || !peer.ResultUnknown(err) {
 			t.Fatalf("%s: -32603 leaves the result unknown", method)
 		}
-	}
-
-	err = a.Call(ctx, "code", nil, nil)
-	if !errors.As(err, &re) || re.Code != -32099 || !peer.ResultUnknown(err) {
-		t.Fatalf("an unlisted server-range code must leave the result unknown: %v", err)
 	}
 
 	err = a.Call(ctx, "missing", nil, nil)
@@ -351,11 +343,29 @@ func TestOutboundMessageValidation(t *testing.T) {
 func TestResultTooLargeIsAnInternalError(t *testing.T) {
 	leakGuard(t)
 	_, r, _ := newRaw(t, peer.Params{MaxLineBytes: 200}, func(p *peer.Peer) {
-		p.Handle("big", func(context.Context, json.RawMessage) (any, error) { return strings.Repeat("x", 500), nil })
+		p.Handle("big", func(context.Context, json.RawMessage) (any, error) {
+			return map[string]string{"s": strings.Repeat("x", 500)}, nil
+		})
 	})
 	r.send(`{"jsonrpc":"2.0","id":1,"method":"big"}`)
 	if f := r.recv(); f.errCode() != peer.CodeInternalError {
 		t.Fatalf("got %+v", f)
+	}
+}
+
+// A code the protocol does not list leaves the result unknown. The error comes
+// from the raw side: the peer itself sends only the codes of the schema.
+func TestUnlistedServerCodeLeavesTheResultUnknown(t *testing.T) {
+	leakGuard(t)
+	p, r, _ := newRaw(t, peer.Params{}, nil)
+	errc := make(chan error, 1)
+	go func() { errc <- p.Call(context.Background(), "m", nil, nil) }()
+	req := r.recv()
+	r.send(`{"jsonrpc":"2.0","id":` + string(req.ID) + `,"error":{"code":-32099,"message":"custom server error"}}`)
+	err := <-errc
+	var re *peer.Error
+	if !errors.As(err, &re) || re.Code != -32099 || !peer.ResultUnknown(err) {
+		t.Fatalf("an unlisted server-range code must leave the result unknown: %v", err)
 	}
 }
 
@@ -387,7 +397,7 @@ func TestMalformedResponseFailsTheCall(t *testing.T) {
 func TestResultDecodeFailureIsReportedWithUnknownEffect(t *testing.T) {
 	leakGuard(t)
 	a, _ := startPair(t, nil, func(b *peer.Peer) {
-		b.Handle("text", func(context.Context, json.RawMessage) (any, error) { return "just text", nil })
+		b.Handle("text", func(context.Context, json.RawMessage) (any, error) { return map[string]string{"x": "just text"}, nil })
 	})
 	var into struct{ X int }
 	err := a.Call(context.Background(), "text", nil, &into)

@@ -8,7 +8,8 @@ import (
 
 // Call sends a request and waits for the answer, decoding the result into
 // result (which may be nil to discard it, or a *json.RawMessage to keep it
-// raw). params must marshal to a JSON object or array, or be nil.
+// raw). params must marshal to a JSON object, or be nil, which is sent as {}.
+// A method name of more than 128 characters is refused like an empty one.
 //
 // The error says what is known about the request's effect; see NoEffect and
 // ResultUnknown. A *Error is the other side's error response. When ctx is done
@@ -57,8 +58,8 @@ func (p *Peer) encodeCall(ctx context.Context, method string, params any) (line 
 	if err := ctx.Err(); err != nil {
 		return nil, 0, fmt.Errorf("%w: %w", ErrNotSent, err)
 	}
-	if method == "" {
-		return nil, 0, fmt.Errorf("%w: empty method", ErrNotSent)
+	if err := checkMethod(method); err != nil {
+		return nil, 0, err
 	}
 	raw, err := marshalParams(params)
 	if err != nil {
@@ -113,8 +114,8 @@ func (p *Peer) Notify(ctx context.Context, method string, params any) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("%w: %w", ErrNotSent, err)
 	}
-	if method == "" {
-		return fmt.Errorf("%w: empty method", ErrNotSent)
+	if err := checkMethod(method); err != nil {
+		return err
 	}
 	raw, err := marshalParams(params)
 	if err != nil {

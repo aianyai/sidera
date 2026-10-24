@@ -241,21 +241,44 @@ func encodeLine(w wire) ([]byte, error) {
 	return line, nil
 }
 
-// marshalParams encodes call parameters: nil and null are omitted, anything
-// else must be an object or an array.
+// The peer sends only frames that the message schema of the protocol accepts,
+// so that every reader, in any language, takes what it sends.
+const (
+	// maxMethodLen bounds a method name sent, in characters as the schema counts.
+	maxMethodLen = 128
+	// maxErrorMessageLen bounds the text of an error sent, in characters.
+	maxErrorMessageLen = 1024
+)
+
+var emptyObject = json.RawMessage("{}")
+
+// isObject reports whether raw, one valid JSON value, is an object.
+func isObject(raw []byte) bool { return len(raw) > 0 && raw[0] == '{' }
+
+// checkMethod refuses a method name the schema would not accept.
+func checkMethod(method string) error {
+	if n := utf8.RuneCountInString(method); n < 1 || n > maxMethodLen {
+		return fmt.Errorf("%w: method of %d characters, want 1 to %d", ErrNotSent, n, maxMethodLen)
+	}
+	return nil
+}
+
+// marshalParams encodes call parameters. The schema wants params to be an
+// object, so nil and null are sent as {} and anything that is not an object is
+// refused.
 func marshalParams(params any) (json.RawMessage, error) {
 	if params == nil {
-		return nil, nil
+		return emptyObject, nil
 	}
 	raw, err := marshalValue(params)
 	if err != nil {
 		return nil, err
 	}
 	if bytes.Equal(raw, []byte("null")) {
-		return nil, nil
+		return emptyObject, nil
 	}
-	if !structured(raw) {
-		return nil, fmt.Errorf("params must be an object or an array")
+	if !isObject(raw) {
+		return nil, fmt.Errorf("params must be a JSON object")
 	}
 	return raw, nil
 }
@@ -272,25 +295,56 @@ func notificationLine(method string, params json.RawMessage) ([]byte, error) {
 	return encodeLine(wire{Method: method, Params: params})
 }
 
+// resultLine encodes a success response. The schema wants the result to be an
+// object; anything else is an error, which the caller answers with -32603.
 func resultLine(id json.RawMessage, result any) ([]byte, error) {
 	raw, err := marshalValue(result)
 	if err != nil {
 		return nil, err
+	}
+	if !isObject(raw) {
+		return nil, errors.New("result is not a JSON object")
 	}
 	return encodeLine(wire{ID: id, Result: raw})
 }
 
 var nullID = json.RawMessage("null")
 
-// errorLine encodes an error response. A nil id is sent as null.
+// errorLine encodes an error response. A nil id is sent as null. The error is
+// first made to fit the schema (see conform).
 func errorLine(id json.RawMessage, e *Error) []byte {
 	if len(id) == 0 {
 		id = nullID
 	}
+	e = conform(e)
 	line, err := encodeLine(wire{ID: id, Error: e})
 	if err != nil {
 		// Only unmarshalable data can fail; the code and message always fit.
 		line, _ = encodeLine(wire{ID: id, Error: NewError(e.Code, e.Message)})
 	}
 	return line
+}
+
+// conform returns an error object that the message schema accepts, whatever a
+// handler built: a nil error becomes an internal error, an empty message gets
+// the name of the code as its text, a long message is cut to the schema's limit
+// and data that is not a JSON object is left out.
+func conform(e *Error) *Error {
+	if e == nil {
+		return NewError(CodeInternalError, "internal error")
+	}
+	c := Error{Code: e.Code, Message: e.Message}
+	if c.Message == "" {
+		c.Message = CodeName(c.Code)
+		if c.Message == "" {
+			c.Message = "error"
+		}
+	}
+	if utf8.RuneCountInString(c.Message) > maxErrorMessageLen {
+		c.Message = string([]rune(c.Message)[:maxErrorMessageLen])
+	}
+	if isObject(e.Data) && json.Valid(e.Data) {
+		c.Data = e.Data
+	}
+	return &c
 }

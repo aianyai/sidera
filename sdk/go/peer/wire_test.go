@@ -385,7 +385,7 @@ func TestWriteTimeoutClosesTransportOnStalledReader(t *testing.T) {
 	in, _ := io.Pipe() // never delivers anything
 	outR, outW := io.Pipe()
 	// Nobody reads outR: the first write stalls.
-	p, err := peer.New(in, outW, peer.Config{Params: peer.Params{WriteTimeout: 100 * time.Millisecond}})
+	p, err := peer.New(in, captured(outW), peer.Config{Params: peer.Params{WriteTimeout: 100 * time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestSlowButProgressingReaderDoesNotTimeOut(t *testing.T) {
 	leakGuard(t)
 	in, _ := io.Pipe()
 	outR, outW := io.Pipe()
-	p, err := peer.New(in, outW, peer.Config{Params: peer.Params{WriteTimeout: 500 * time.Millisecond}})
+	p, err := peer.New(in, captured(outW), peer.Config{Params: peer.Params{WriteTimeout: 500 * time.Millisecond}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestOutboundQueueFullReturnsErrOverloadedAndWritesNothing(t *testing.T) {
 	leakGuard(t)
 	in, _ := io.Pipe()
 	outR, outW := io.Pipe()
-	p, err := peer.New(in, outW, peer.Config{Params: peer.Params{MaxOutbound: 4, WriteTimeout: time.Minute}})
+	p, err := peer.New(in, captured(outW), peer.Config{Params: peer.Params{MaxOutbound: 4, WriteTimeout: time.Minute}})
 	if err != nil {
 		t.Fatal(err)
 	}

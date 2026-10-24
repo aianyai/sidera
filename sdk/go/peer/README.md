@@ -22,7 +22,7 @@ method the peer handles itself is the `$/cancel_request` notification.
 | `New(r io.Reader, w io.WriteCloser, Config)`, `Start()` | Create a peer over the streams, register handlers, then start it. Nothing is read or written before `Start`. |
 | `Params`, `DefaultParams()` | The limits. A zero field means "use the default"; a negative field is an error from `New`. |
 | `Handle(method, RequestHandler)`, `HandleNotification(method, NotificationHandler)` | Register what the other side may call. Requests for unregistered methods get `-32601`; unregistered notifications are logged and dropped. |
-| `Call(ctx, method, params, result)`, `Notify(ctx, method, params)` | Send a request and wait, or send a notification. `params` must marshal to an object or an array, or be nil. |
+| `Call(ctx, method, params, result)`, `Notify(ctx, method, params)` | Send a request and wait, or send a notification. `params` must marshal to an object, or be nil (sent as `{}`). The method name is 1 to 128 characters. |
 | `NoEffect(err)`, `ResultUnknown(err)` | The effect rule: after an error from `Call`, did the request definitely do nothing, or is the outcome unknown? |
 | `Done()`, `Err()`, `Close()` | Learn that and why the connection ended; end it. |
 | `Error`, `NewError`, `Code*`, `Codes()`, `CodeName` | The error object a handler returns and `Call` reports; the code table, which is the one definition of the JSON-RPC and server-range codes. |
@@ -55,7 +55,18 @@ method the peer handles itself is the `$/cancel_request` notification.
   handler runs, so a caller that gets `-32001` may retry safely.
 - **Handlers.** `MaxConcurrentHandlers` request handlers run at once. Each
   request is answered exactly once, with a result, an `*Error`, or `-32603`
-  (any other error or a panic; the error text is logged, never sent).
+  (any other error, a typed-nil `*Error`, a panic, a result that is not a JSON
+  object or does not marshal, or a reply over the line limit; the error text is
+  logged, never sent).
+- **The peer sends only frames that `message.schema.json` accepts.** `params` is
+  always an object (`nil` is sent as `{}`; a list or scalar is refused with
+  `ErrNotSent`), a result is always an object, a method name has 1 to 128
+  characters, and an error has a message of 1 to 1024 characters (an empty one
+  becomes the name of the code, or `error`; a longer one is cut), `data` only
+  when it is a JSON object (for any code; `WithData` leaves out anything else),
+  and a line within `MaxLineBytes`. What the peer cannot know is which
+  application codes the protocol defines: a handler returns only those
+  (`adapterproto.ApplicationCodes`).
 - **Notifications** are handled one at a time in arrival order. When
   `MaxPendingNotifications` is exceeded the connection is closed: dropping one
   could leave the owner with a wrong picture of the other side, and the owner
@@ -81,7 +92,8 @@ method the peer handles itself is the `$/cancel_request` notification.
   `WriteTimeout`.
 - **Message size on the way out.** A request or notification longer than
   `MaxLineBytes` is refused with `ErrMessageTooLarge` (the other side is assumed
-  to enforce the same limit); a handler result that long is answered `-32603`.
+  to enforce the same limit); a handler result or error that long is answered
+  `-32603`.
 - **Responses.** A response that matches no pending call (it timed out, or the
   id was never sent) is dropped and logged. A response with the right id but an
   invalid body fails the call with `ErrInvalidResponse`.

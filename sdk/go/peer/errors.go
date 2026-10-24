@@ -92,12 +92,13 @@ func NewError(code int, message string) *Error {
 	return &Error{Code: code, Message: message}
 }
 
-// WithData returns a copy of e carrying data marshaled to JSON. Data that
-// cannot be marshaled is left out rather than failing the reply.
+// WithData returns a copy of e carrying data marshaled to JSON, for any code.
+// Data travels as a JSON object; data that cannot be marshaled, or marshals to
+// anything else, is left out rather than failing the reply.
 func (e *Error) WithData(data any) *Error {
 	c := *e
 	c.Data = nil
-	if raw, err := marshalValue(data); err == nil {
+	if raw, err := marshalValue(data); err == nil && isObject(raw) {
 		c.Data = raw
 	}
 	return &c

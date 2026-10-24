@@ -190,23 +190,29 @@ func (p *Peer) serve(req *inboundRequest) {
 	p.send(line)
 }
 
+// invoke runs the handler and builds the reply line. Whatever the handler
+// returned, the line is one that the schema accepts and the other side's limit
+// allows: a result that is not an object, one that does not marshal and a reply
+// that is too long are all answered with -32603.
 func (p *Peer) invoke(req *inboundRequest) []byte {
+	var line []byte
 	result, err := p.callHandler(req)
 	if err != nil {
-		return errorLine(req.id, p.errorFor(req, err))
-	}
-	line, err := resultLine(req.id, result)
-	if err != nil {
-		p.log.Error("result does not marshal", "method", clip(req.method, 64), "err", err)
-		return errorLine(req.id, NewError(CodeInternalError, "internal error"))
+		line = errorLine(req.id, p.errorFor(req, err))
+	} else if line, err = resultLine(req.id, result); err != nil {
+		p.log.Error("result is not sendable", "method", clip(req.method, 64), "err", err)
+		line = errorLine(req.id, NewError(CodeInternalError, "internal error"))
 	}
 	if len(line)-1 > p.params.MaxLineBytes {
-		p.log.Error("result exceeds the line limit", "method", clip(req.method, 64))
-		return errorLine(req.id, NewError(CodeInternalError, "result too large"))
+		p.log.Error("reply exceeds the line limit", "method", clip(req.method, 64))
+		line = errorLine(req.id, NewError(CodeInternalError, "reply too large"))
 	}
 	return line
 }
 
+// errorFor chooses the error a failed handler is answered with. A nil *Error
+// inside a non-nil error is returned as nil, which errorLine answers as an
+// internal error.
 func (p *Peer) errorFor(req *inboundRequest, err error) *Error {
 	var re *Error
 	switch {
