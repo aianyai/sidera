@@ -87,7 +87,7 @@ var (
 		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventDelivered})
 	}}
 	baseSrcUnknownDelivered = validBase{"source delivered after delivery_unknown", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventDeliveryUnknown}, Event{Type: EventDelivered})
+		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver}, Event{Type: EventDelivered})
 	}}
 	baseSrcExpired = validBase{"source expired_unconfirmed", func(t *testing.T) Record {
 		return applyAll(t, NewSourceRecord(validAcceptBefore), farFuture, Event{Type: EventExpiryQueried, QueriedAt: farFuture})
@@ -117,7 +117,15 @@ var (
 		return applyAll(t, targetRecord(t, t0, 30*time.Minute), at(time.Minute), Event{Type: EventRejected, Reject: RejectEndpointClosed})
 	}}
 	baseControlRecord = validBase{"control accepted", func(t *testing.T) Record { return controlRecord() }}
+	baseLostSource    = validBase{"lost source record", func(t *testing.T) Record { return newLostRecord(t, SideSource, false) }}
+	baseLostTarget    = validBase{"lost target record", func(t *testing.T) Record { return newLostRecord(t, SideTarget, false) }}
 )
+
+func newLostRecord(t *testing.T, side Side, control bool) Record {
+	t.Helper()
+	r, _ := newLost(t, side, control)
+	return r
+}
 
 // TestRecordValidRefusesImpossibleRecords is the table of invalid records: one
 // row per invariant, each named after it. Every row starts from a record the
@@ -150,6 +158,15 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		{"notified only while accepted", baseTgtDelivered, func(r *Record) { r.Sub = SubNotified }, ViolationSubState},
 		{"a control record is never notified", baseControlRecord, func(r *Record) { r.Sub = SubNotified }, ViolationSubState},
 		{"the sub-state is a known one", baseTgt, func(r *Record) { r.Sub = 7 }, ViolationSubState},
+		// unknown cause and the replacement of a lost record
+		{"a cause is set only with delivery_unknown", baseQueued, func(r *Record) { r.Unknown = UnknownHandedOver }, ViolationUnknownCause},
+		{"delivery_unknown has a cause", baseSrcUnknownDelivered, func(r *Record) { r.State, r.Unknown = StateDeliveryUnknown, UnknownCauseNone }, ViolationUnknownCause},
+		{"a lost record keeps its replacement marker's cause", baseLostTarget, func(r *Record) { r.Unknown = UnknownHandedOver }, ViolationUnknownCause},
+		{"lost_at_target on a target is the replacement's", baseTgtUnknown, func(r *Record) { r.Unknown = UnknownLostAtTarget }, ViolationUnknownCause},
+		{"the marker goes only on a replacement's states", baseQueued, func(r *Record) { r.Lost = true }, ViolationLostShape},
+		{"a replacement has a report_by and no envelope deadlines", baseLostTarget, func(r *Record) { r.AcceptBefore = validAcceptBefore }, ViolationLostShape},
+		{"a replacement has no lease", baseLostTarget, func(r *Record) { r.Lease.Handouts = 1 }, ViolationLostShape},
+		{"a source replacement has reported exactly its own notice", baseLostSource, func(r *Record) { r.Reported = 0 }, ViolationLostShape},
 		// deadlines
 		{"accept_before is set", baseQueued, func(r *Record) { r.AcceptBefore = time.Time{} }, ViolationDeadlinesUnset},
 		{"report_by is set", baseQueued, func(r *Record) { r.ReportBy = time.Time{} }, ViolationDeadlinesUnset},
@@ -165,7 +182,7 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		{"the produced feedback holds only existing kinds (the zero kind)", baseQueued, func(r *Record) { r.Reported = KindSet(1) }, ViolationReportedUnknownKind},
 		{"the rejection notice exists only for a rejected record", baseQueued, func(r *Record) { r.Reported = kindSetOf(KindRejected) }, ViolationReportedRejected},
 		{"a rejected source record reported its rejection", baseSrcRejected, func(r *Record) { r.Reported = 0 }, ViolationReportedRejected},
-		{"a delivery_unknown source record reported it", baseSrcUnknownDelivered, func(r *Record) { r.State, r.Reported = StateDeliveryUnknown, 0 }, ViolationReportedDeliveryUnknown},
+		{"a delivery_unknown source record reported it", baseSrcUnknownDelivered, func(r *Record) { r.State, r.Unknown, r.Reported = StateDeliveryUnknown, UnknownHandedOver, 0 }, ViolationReportedDeliveryUnknown},
 		{"the delivery_unknown notice is not produced while queued", baseQueued, func(r *Record) { r.Reported = kindSetOf(KindDeliveryUnknown) }, ViolationReportedDeliveryUnknown},
 		{"the delivery_unknown notice is not produced while accepted", baseSrcAccepted, func(r *Record) { r.Reported = kindSetOf(KindDeliveryUnknown) }, ViolationReportedDeliveryUnknown},
 		{"the correction of delivery_unknown needs delivered", baseSrcAccepted, func(r *Record) { r.Reported = kindSetOf(KindDeliveryUnknown, KindUnknownCorrected) }, ViolationReportedDeliveryUnknown},
@@ -227,7 +244,7 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 			r.Lease.HandedOut[1] = true
 			r.Lease.Acked[0], r.Lease.Acked[1] = true, true
 		}, ViolationDelivered},
-		{"a target delivery_unknown was handed over", baseTgt, func(r *Record) { r.State = StateDeliveryUnknown }, ViolationDeliveryUnknownUnhandled},
+		{"a target delivery_unknown was handed over", baseTgt, func(r *Record) { r.State, r.Unknown = StateDeliveryUnknown, UnknownHandedOver }, ViolationDeliveryUnknownUnhandled},
 		{"a handed-over delivery is not rejected", baseTgtLeased, func(r *Record) {
 			r.State, r.Reject, r.Lease.Active = StateRejected, RejectEndpointClosed, false
 		}, ViolationRejectedHandedOver},
@@ -308,13 +325,14 @@ func TestRecordValidReportsTheFirstViolation(t *testing.T) {
 type reachedSource struct {
 	State        State
 	Reject       RejectReason
+	Unknown      UnknownCause
 	Reported     KindSet
 	Blocked      bool
 	BlockedCause Cause
 }
 
 func keyOfSource(r Record) reachedSource {
-	return reachedSource{r.State, r.Reject, r.Reported, r.Blocked, r.BlockedCause}
+	return reachedSource{r.State, r.Reject, r.Unknown, r.Reported, r.Blocked, r.BlockedCause}
 }
 
 // TestRecordValidSourceFeedbackBookkeepingIsExact enumerates every source
@@ -326,8 +344,11 @@ func keyOfSource(r Record) reachedSource {
 func TestRecordValidSourceFeedbackBookkeepingIsExact(t *testing.T) {
 	start := NewSourceRecord(validAcceptBefore)
 	var events []Event
-	for _, ty := range []EventType{EventReceipt, EventDelivered, EventDeliveryUnknown, EventReportByPassed, EventUnblocked} {
+	for _, ty := range []EventType{EventReceipt, EventDelivered, EventReportByPassed, EventUnblocked} {
 		events = append(events, Event{Type: ty})
+	}
+	for _, cause := range []UnknownCause{UnknownHandedOver, UnknownLostAtTarget} {
+		events = append(events, Event{Type: EventDeliveryUnknown, Unknown: cause})
 	}
 	events = append(events,
 		Event{Type: EventRejected, Reject: RejectTooLarge},
@@ -366,7 +387,7 @@ func TestRecordValidSourceFeedbackBookkeepingIsExact(t *testing.T) {
 	}
 	for k := range reached {
 		r := start
-		r.State, r.Reject, r.Reported, r.Blocked, r.BlockedCause = k.State, k.Reject, k.Reported, k.Blocked, k.BlockedCause
+		r.State, r.Reject, r.Unknown, r.Reported, r.Blocked, r.BlockedCause = k.State, k.Reject, k.Unknown, k.Reported, k.Blocked, k.BlockedCause
 		if err := r.Valid(); err != nil {
 			t.Errorf("reached record refused: %+v: %v", k, err)
 		}
@@ -375,23 +396,28 @@ func TestRecordValidSourceFeedbackBookkeepingIsExact(t *testing.T) {
 	candidates, accepted := 0, 0
 	states := []State{StateQueued, StateAccepted, StateDelivered, StateRejected, StateExpiredUnconfirmed, StateDeliveryUnknown, StateClosedUnconfirmed}
 	causes := []Cause{CauseNone, CauseNetwork, CauseTrustSuspended, CauseAdapterOffline, CauseRuntimeAuth, CauseNativeUnavailable}
+	// lost_at_sender is the cause of a replacement alone, which the Lost marker
+	// recognises; this walk starts from an ordinary source record.
+	unknowns := []UnknownCause{UnknownCauseNone, UnknownHandedOver, UnknownLostAtTarget}
 	for _, s := range states {
 		for mask := 0; mask < 1<<lastKind; mask++ {
 			for _, blocked := range []bool{false, true} {
 				for _, cause := range causes {
-					k := reachedSource{State: s, Reported: KindSet(mask) << 1, Blocked: blocked, BlockedCause: cause}
-					if s == StateRejected {
-						k.Reject = RejectTooLarge
-					}
-					r := start
-					r.State, r.Reject, r.Reported, r.Blocked, r.BlockedCause = k.State, k.Reject, k.Reported, k.Blocked, k.BlockedCause
-					err := r.Valid()
-					candidates++
-					if err == nil {
-						accepted++
-					}
-					if (err == nil) != reached[k] {
-						t.Errorf("%+v: Valid = %v, reachable = %v", k, err, reached[k])
+					for _, unknown := range unknowns {
+						k := reachedSource{State: s, Unknown: unknown, Reported: KindSet(mask) << 1, Blocked: blocked, BlockedCause: cause}
+						if s == StateRejected {
+							k.Reject = RejectTooLarge
+						}
+						r := start
+						r.State, r.Reject, r.Unknown, r.Reported, r.Blocked, r.BlockedCause = k.State, k.Reject, k.Unknown, k.Reported, k.Blocked, k.BlockedCause
+						err := r.Valid()
+						candidates++
+						if err == nil {
+							accepted++
+						}
+						if (err == nil) != reached[k] {
+							t.Errorf("%+v: Valid = %v, reachable = %v", k, err, reached[k])
+						}
 					}
 				}
 			}
@@ -458,6 +484,7 @@ func recordTags(r Record) []string {
 	add(r.Lease.Chunks > 0 && !r.Lease.Active && r.Lease.Handouts > 0 && r.State == StateDeliveryUnknown, "unknown after hand-out")
 	add(len(r.Lease.IDs) > 1, "several pages")
 	add(r.Reject != RejectNone, "reject "+r.Reject.String())
+	add(r.Lost, "lost "+r.State.String())
 	for k := KindUnreachable; k.valid(); k++ {
 		add(r.Reported.Has(k), "reported "+k.String())
 	}
@@ -475,6 +502,9 @@ var requiredRecordTags = []string{
 	"target blocked", "target notified", "target lease active", "target requeued", "target redelivered",
 	"target last lease", "target lease renewed", "target lease at cap", "target several chunks", "target unknown after hand-out", "target several pages",
 	"control accepted", "control delivered", "control delivery_unknown", "control closed_unconfirmed",
+	"source lost delivery_unknown", "source lost closed_unconfirmed", "source reported lost_at_sender", "source reported lost_at_target",
+	"target lost delivery_unknown", "target lost closed_unconfirmed",
+	"control lost delivery_unknown", "control lost delivered", "control lost closed_unconfirmed",
 }
 
 func (o *recordObserver) requireCoverage(t *testing.T) {
@@ -494,10 +524,43 @@ func (o *recordObserver) requireCoverage(t *testing.T) {
 	}
 }
 
+// runSourceLearnsLoss drives source records that hear from the target that it
+// lost its record: the loss is reported at a random stage and then corrected by
+// a delivery, or left until the record closes. observe sees every record.
+func runSourceLearnsLoss(t *testing.T, runs int, observe func(*testing.T, Record)) {
+	t.Helper()
+	rng := rand.New(rand.NewSource(5))
+	lost := StatusReport{State: StateDeliveryUnknown, Unknown: UnknownLostAtTarget}
+	for i := 0; i < runs; i++ {
+		r := NewSourceRecord(validAcceptBefore)
+		observe(t, r)
+		switch rng.Intn(3) {
+		case 1:
+			r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventReceipt})
+		case 2:
+			r, _ = mustApply(t, r, farFuture, Event{Type: EventExpiryQueried, QueriedAt: farFuture})
+		}
+		observe(t, r)
+		r, _, err := r.ApplyStatusReport(at(2*time.Minute), lost)
+		if err != nil {
+			t.Fatal(err)
+		}
+		observe(t, r)
+		switch rng.Intn(3) {
+		case 0:
+			r, _ = mustApply(t, r, at(3*time.Minute), Event{Type: EventDelivered})
+		case 1:
+			r, _ = mustApply(t, r, r.ReportBy.Add(time.Nanosecond), Event{Type: EventReportByPassed})
+		}
+		observe(t, r)
+	}
+}
+
 // TestPropertyEveryProducedRecordIsValid runs the random deliveries and random
-// control signals of the other property tests, with the same fixed seeds, and
-// requires every record they produce, on both sides, after every step, to be
-// Valid.
+// control signals of the other property tests, with the same fixed seeds, the
+// records that replace a loss from their creation to their closure, and the
+// source records that learn of a loss, and requires every record they produce,
+// on both sides, after every step, to be Valid.
 func TestPropertyEveryProducedRecordIsValid(t *testing.T) {
 	obs := newRecordObserver(0, false)
 	paths := map[string]int{}
@@ -505,6 +568,8 @@ func TestPropertyEveryProducedRecordIsValid(t *testing.T) {
 		t.Run(fmt.Sprintf("delivery seed %d", seed), func(t *testing.T) { runRandomDelivery(t, seed, paths, obs.observe) })
 		t.Run(fmt.Sprintf("control seed %d", seed), func(t *testing.T) { runRandomControl(t, seed, paths, obs.observe) })
 	}
+	t.Run("lost records", func(t *testing.T) { runLostLifecycles(t, lostLifecycleRuns, obs.observe) })
+	t.Run("source learns a loss", func(t *testing.T) { runSourceLearnsLoss(t, 300, obs.observe) })
 	if t.Failed() {
 		return
 	}
@@ -542,7 +607,17 @@ func recordMutators() []recordMutator {
 	return []recordMutator{
 		{"side to an unknown value", true, func(rng *rand.Rand, r *Record) { r.Side = []Side{0, 3, 255}[rng.Intn(3)] }, 0},
 		{"side swapped", true, func(rng *rand.Rand, r *Record) { r.Side = SideSource + SideTarget - r.Side }, 0},
-		{"control flipped", true, func(rng *rand.Rand, r *Record) { r.Control = !r.Control }, 0},
+		{"control flipped", true, func(rng *rand.Rand, r *Record) {
+			// What the lost file's first line says is all a replacement keeps, so a
+			// lost message record and a lost control record look alike until the
+			// state tells them apart: only a delivered one is a control record.
+			if r.Lost && r.Side == SideTarget && r.State != StateDelivered {
+				return
+			}
+			r.Control = !r.Control
+		}, 0},
+		{"lost marker flipped", true, func(rng *rand.Rand, r *Record) { r.Lost = !r.Lost }, 0},
+		{"unknown cause to another", true, func(rng *rand.Rand, r *Record) { r.Unknown = UnknownCause(otherInt(rng, int(r.Unknown), 0, 3)) }, 0},
 		{"state to another", false, func(rng *rand.Rand, r *Record) { r.State = State(otherInt(rng, int(r.State), 0, 8)) }, 0.6},
 		{"state to another with the matching reason", false, func(rng *rand.Rand, r *Record) {
 			r.State = State(otherInt(rng, int(r.State), 1, 7))
@@ -551,11 +626,21 @@ func recordMutators() []recordMutator {
 				r.Reject = RejectTooLarge
 			}
 		}, 0.5},
+		{"state to delivery_unknown with its cause", false, func(rng *rand.Rand, r *Record) {
+			r.State, r.Unknown, r.Reject = StateDeliveryUnknown, UnknownHandedOver, RejectNone
+		}, 0.7},
 		{"reject reason to an unknown value", true, func(rng *rand.Rand, r *Record) { r.Reject = RejectReason(100 + rng.Intn(100)) }, 0},
 		{"reject reason to another known one", false, func(rng *rand.Rand, r *Record) { r.Reject = RejectReason(otherInt(rng, int(r.Reject), 0, 11)) }, 0.85},
 		{"sub-state flipped", false, func(rng *rand.Rand, r *Record) { r.Sub = SubNotified - r.Sub }, 0.9},
 		{"accept_before shifted", true, func(rng *rand.Rand, r *Record) { r.AcceptBefore = r.AcceptBefore.Add(randomShift(rng)) }, 0},
-		{"report_by shifted", true, func(rng *rand.Rand, r *Record) { r.ReportBy = r.ReportBy.Add(randomShift(rng)) }, 0},
+		{"report_by shifted", true, func(rng *rand.Rand, r *Record) {
+			// A replacement's ReportBy is any instant: LostReportBy of a discovery
+			// time the record does not keep.
+			if r.Lost {
+				return
+			}
+			r.ReportBy = r.ReportBy.Add(randomShift(rng))
+		}, 0},
 		{"a deadline unset", true, func(rng *rand.Rand, r *Record) {
 			if rng.Intn(2) == 0 {
 				r.AcceptBefore = time.Time{}
@@ -644,6 +729,8 @@ func TestPropertyMutatedRecordsAreCaught(t *testing.T) {
 		t.Run(fmt.Sprintf("delivery seed %d", seed), func(t *testing.T) { runRandomDelivery(t, seed, paths, obs.observe) })
 		t.Run(fmt.Sprintf("control seed %d", seed), func(t *testing.T) { runRandomControl(t, seed, paths, obs.observe) })
 	}
+	t.Run("lost records", func(t *testing.T) { runLostLifecycles(t, lostLifecycleRuns/3, obs.observe) })
+	t.Run("source learns a loss", func(t *testing.T) { runSourceLearnsLoss(t, 300, obs.observe) })
 	if t.Failed() {
 		return
 	}

@@ -157,8 +157,8 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 		}
 		// The deliveries here are healthy: the only unknown result the source
 		// can hold is the one the target handed over, and only in that state.
-		if err := n.checkUnknownCause(); err != nil {
-			fail("source record: %v", err)
+		if v := n.checkUnknownCause(); v != ViolationNone {
+			fail("source record: %s", v)
 		}
 		if wantCause := causeOfState(n.State); n.Unknown != wantCause {
 			fail("source in %s with unknown cause %s, want %s", n.State, n.Unknown, wantCause)
@@ -234,8 +234,8 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 		if tgt.State == StateDeliveryUnknown && tgt.Lease.Handouts == 0 {
 			fail("delivery_unknown without a hand-out")
 		}
-		if err := tgt.checkUnknownCause(); err != nil {
-			fail("target record: %v", err)
+		if v := tgt.checkUnknownCause(); v != ViolationNone {
+			fail("target record: %s", v)
 		}
 		if wantCause := causeOfState(tgt.State); tgt.Unknown != wantCause {
 			fail("target in %s with unknown cause %s, want %s", tgt.State, tgt.Unknown, wantCause)

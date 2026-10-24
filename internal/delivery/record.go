@@ -50,9 +50,16 @@ type Record struct {
 	Reject  RejectReason // set while State is StateRejected
 	Unknown UnknownCause // set while State is StateDeliveryUnknown
 
+	// Lost marks a record that replaces one lost to storage corruption. Only
+	// NewLostRecord sets it and no transition clears it, so it still says what the
+	// record is after the record has closed, when Unknown no longer does: a record
+	// restored from storage is recognised as a replacement by it, and not judged
+	// by the shape of a delivery that was accepted normally.
+	Lost bool
+
 	// Control marks the target's record of a control signal; only
-	// NewTargetControlRecord sets it, so it is never set on the source side. A
-	// control signal is executed by the adapter when it is accepted and answered
+	// NewTargetControlRecord and, for a lost control record, NewLostRecord on the
+	// target set it, so it is never set on the source side. A control signal is executed by the adapter when it is accepted and answered
 	// with a reply; it is never queued for recv, so it has no lease, no chunks
 	// and no backlog deadline, and it is delivered by EventReplyCommitted, not
 	// by Ack. False for every other record.
@@ -129,8 +136,8 @@ func NewTargetControlRecord(acceptBefore, reportBy time.Time) Record {
 // get (KindLostAtSender), already marked as reported; a target record produces
 // none and reports lost_at_target when the sender pulls.
 //
-// ReportBy is LostReportBy(discoveredAt), an upper bound of the lost record's
-// own report_by. AcceptBefore and BacklogDeadline stay zero because they are
+// The record carries the Lost marker for the rest of its life. ReportBy is
+// LostReportBy(discoveredAt), an upper bound of the lost record's own report_by. AcceptBefore and BacklogDeadline stay zero because they are
 // unknown, so Tick closes the record at ReportBy and at no other time.
 //
 // This is the only way into a storage loss: it is a way to start a record, like
@@ -153,7 +160,7 @@ func NewLostRecord(side Side, control bool, discoveredAt time.Time) (Record, Out
 	default:
 		return Record{}, Outcome{}, fmt.Errorf("%w: side %d", ErrInvalidInput, side)
 	}
-	r := Record{Side: side, State: StateDeliveryUnknown, Unknown: cause, Control: control, ReportBy: LostReportBy(discoveredAt)}
+	r := Record{Side: side, State: StateDeliveryUnknown, Unknown: cause, Lost: true, Control: control, ReportBy: LostReportBy(discoveredAt)}
 	n, feedback := r.withFeedback(StateInvalid, StateDeliveryUnknown, RejectNone)
 	return n, Outcome{Result: ResultApplied, From: StateInvalid, To: StateDeliveryUnknown, Feedback: feedback}, nil
 }
@@ -335,11 +342,15 @@ func (r Record) moveToUnknown(cause UnknownCause) (Record, Outcome, error) {
 }
 
 // change is the only place that changes State. The reason and the cause are set
-// with the states they belong to (the callers pass a cause exactly when to is
-// delivery_unknown) and cleared when the state moves on.
+// with the states they belong to and cleared when the state moves on. The
+// callers pass a cause exactly when to is delivery_unknown, and one of the three
+// causes then; anything else is a programming error, refused before it can leave
+// a record whose cause and state disagree.
 func (r Record) change(to State, reason RejectReason, unknown UnknownCause) (Record, Outcome, error) {
 	from := r.State
 	switch {
+	case !causeFitsState(to, unknown):
+		return r, Outcome{}, fmt.Errorf("%w: entering %s with unknown cause %s", ErrInvalidInput, to, unknown)
 	case r.Unknown == UnknownLostAtSender && to != StateClosedUnconfirmed:
 		return r, ignored(from, IgnoreRecordLost), nil
 	case from == to:
@@ -406,62 +417,98 @@ func (r Record) hasQueue() bool {
 	return r.Side == SideTarget && !r.Control
 }
 
-// checkUnknownCause states, in one place, what a record's unknown cause and
-// the storage-loss replacements promise, for whatever checks a whole record
-// (for example one restored from disk) to call:
-//
-//   - Unknown is set exactly while State is StateDeliveryUnknown and is one of
-//     the causes of its side: a source holds handed_over, lost_at_sender or the
-//     lost_at_target a target reported; a target holds handed_over, which needs
-//     a hand-out or a control signal (see handedOver), or lost_at_target.
-//   - A record lost to storage corruption has the shape NewLostRecord gives it:
-//     no history (no lease, prompt, block or rejection), no AcceptBefore or
-//     BacklogDeadline, a ReportBy, a control flag only on the target, and, on
-//     the source, the one notice already marked as reported.
-func (r Record) checkUnknownCause() error {
-	if (r.State == StateDeliveryUnknown) != (r.Unknown != UnknownCauseNone) {
-		return fmt.Errorf("%w: state %s with unknown cause %s", ErrInvalidInput, r.State, r.Unknown)
-	}
-	switch r.Unknown {
-	case UnknownCauseNone:
-		return nil
-	case UnknownHandedOver:
-		if r.Side == SideTarget && !r.handedOver() {
-			return fmt.Errorf("%w: a target record handed over without a hand-out or a control signal", ErrInvalidInput)
-		}
-		return nil
-	case UnknownLostAtSender:
-		if r.Side != SideSource {
-			return fmt.Errorf("%w: lost_at_sender on side %d", ErrInvalidInput, r.Side)
-		}
-		return r.checkLostShape()
-	case UnknownLostAtTarget:
-		if r.Side == SideSource {
-			return nil // a loss the target reported: an ordinary source record
-		}
-		return r.checkLostShape()
-	}
-	return fmt.Errorf("%w: unknown cause %d", ErrInvalidInput, r.Unknown)
+// causeFitsState reports whether an unknown cause goes with a state: the cause
+// is set exactly while the state is delivery_unknown. It is the one statement of
+// that pairing, for the transitions, the status report and Valid.
+func causeFitsState(state State, cause UnknownCause) bool {
+	return (state == StateDeliveryUnknown) == (cause != UnknownCauseNone)
 }
 
-// checkLostShape checks a record that replaces one lost to storage corruption
-// against what NewLostRecord makes.
-func (r Record) checkLostShape() error {
-	switch {
-	case r.Control && r.Side == SideSource:
-		return fmt.Errorf("%w: a source record is never a control record", ErrInvalidInput)
-	case r.ReportBy.IsZero() || !r.AcceptBefore.IsZero() || !r.BacklogDeadline.IsZero():
-		return fmt.Errorf("%w: a lost record has a ReportBy and no AcceptBefore or BacklogDeadline", ErrInvalidInput)
-	case r.Sub != SubNone || r.Reject != RejectNone || r.Blocked || r.BlockedCause != CauseNone:
-		return fmt.Errorf("%w: a lost record has no prompt, rejection or block to carry", ErrInvalidInput)
-	case r.Lease.Handouts != 0 || r.Lease.Active || r.Lease.Chunks != 0 || len(r.Lease.IDs) != 0:
-		return fmt.Errorf("%w: a lost record has no lease to carry", ErrInvalidInput)
-	case r.Side == SideSource && r.Reported != KindSet(0).With(KindLostAtSender):
-		return fmt.Errorf("%w: a lost source record has reported exactly its own notice", ErrInvalidInput)
-	case r.Side == SideTarget && r.Reported != 0:
-		return fmt.Errorf("%w: a target record reports nothing", ErrInvalidInput)
+// checkUnknownCause states, in one place, which unknown cause a record can hold,
+// for Valid to call:
+//
+//   - The cause is set exactly while the state is delivery_unknown (see
+//     causeFitsState) and is one of the causes of the record's side. A source
+//     holds handed_over, or the lost_at_target a target reported, or, for the
+//     record that replaces its own loss, lost_at_sender. A target holds
+//     handed_over, or, for the record that replaces its loss, lost_at_target.
+//   - The Lost marker and the loss causes go together: a replacement is in
+//     delivery_unknown only for its side's loss cause, and no other record holds
+//     one.
+//
+// That a target's handed_over needs a hand-out or a control signal is
+// checkOutcome's rule, which every target delivery_unknown meets.
+func (r Record) checkUnknownCause() Violation {
+	if !causeFitsState(r.State, r.Unknown) {
+		return ViolationUnknownCause
 	}
-	return nil
+	var ok bool
+	switch r.Unknown {
+	case UnknownCauseNone:
+		ok = true
+	case UnknownHandedOver:
+		ok = !r.Lost
+	case UnknownLostAtSender:
+		ok = r.Side == SideSource && r.Lost
+	case UnknownLostAtTarget:
+		// A source holds the loss a target reported; only a target's own
+		// replacement holds it on the target. An unknown side holds nothing.
+		switch r.Side {
+		case SideSource:
+			ok = !r.Lost
+		case SideTarget:
+			ok = r.Lost
+		}
+	}
+	if !ok {
+		return ViolationUnknownCause
+	}
+	return ViolationNone
+}
+
+// checkLostShape checks a record that carries the Lost marker against what
+// NewLostRecord makes and the transitions can leave of it. It is the one place
+// that says what a replacement looks like, for Valid to call; the other checks
+// admit that shape (a lost target in delivery_unknown was never handed out, the
+// notice of its own loss is a legal notice) and a marker on any other shape is
+// refused here:
+//
+//   - The state is delivery_unknown, or closed_unconfirmed after ReportBy. A lost
+//     control signal on the target can also be delivered, by a committed reply.
+//     Nothing else reaches a replacement.
+//   - There is a ReportBy, from LostReportBy, and neither an AcceptBefore nor a
+//     BacklogDeadline, which are lost with the record, so only Tick at ReportBy
+//     closes it.
+//   - There is no history: no lease or block cause. A replacement is never
+//     handed out, whatever the loss destroyed.
+//   - A source replacement has reported exactly its own notice; the sender
+//     learns of it from the outcome of NewLostRecord and from nowhere else.
+func (r Record) checkLostShape() Violation {
+	if !r.Lost {
+		return ViolationNone
+	}
+	switch {
+	case !r.lostStateAllowed():
+		return ViolationLostShape
+	case r.ReportBy.IsZero() || !r.AcceptBefore.IsZero() || !r.BacklogDeadline.IsZero():
+		return ViolationLostShape
+	case r.BlockedCause != CauseNone || !r.Lease.isZero():
+		return ViolationLostShape
+	case r.Side == SideSource && r.Reported != KindSet(0).With(KindLostAtSender):
+		return ViolationLostShape
+	}
+	return ViolationNone
+}
+
+// lostStateAllowed reports whether a replacement record can be in its state.
+func (r Record) lostStateAllowed() bool {
+	switch r.State {
+	case StateDeliveryUnknown, StateClosedUnconfirmed:
+		return true
+	case StateDelivered:
+		return r.Side == SideTarget && r.Control
+	}
+	return false
 }
 
 // NeedsBody reports whether the delivery still needs the bytes of its body: a
@@ -640,7 +687,7 @@ type StatusReport struct {
 // Validate checks that the cause of an unknown result is set exactly with the
 // state delivery_unknown. A report that breaks it was not made by a record.
 func (s StatusReport) Validate() error {
-	if (s.State == StateDeliveryUnknown) != (s.Unknown != UnknownCauseNone) {
+	if !causeFitsState(s.State, s.Unknown) {
 		return fmt.Errorf("%w: a report of state %s with unknown cause %s", ErrInvalidInput, s.State, s.Unknown)
 	}
 	return nil

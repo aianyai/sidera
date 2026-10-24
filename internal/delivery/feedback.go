@@ -130,7 +130,9 @@ type Feedback struct {
 // TransitionFeedback returns the feedback a change of state calls for, given
 // what has already been reported for the delivery. It never returns a kind that
 // is in reported, so repeating a transition cannot repeat a notice. unknown is
-// the cause of the delivery_unknown being entered and is read only then.
+// the cause of the delivery_unknown being entered and is read only then; it must
+// be one of the three causes when to is delivery_unknown, and a cause that is not
+// one gives no notice.
 //
 //   - Entering rejected, expired_unconfirmed or delivery_unknown reports that
 //     anomaly; the kind of a delivery_unknown follows its cause. Entering

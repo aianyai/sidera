@@ -50,6 +50,9 @@ func NewDedupRecord(key DedupKey, digest BodyDigest, reportBy time.Time) DedupRe
 // NewLostDedupRecord returns the deduplication record that replaces one lost to
 // storage corruption, discovered at discoveredAt. It is kept as long as the
 // record it replaces could have been: until DedupRetainUntil(LostReportBy).
+// discoveredAt is the instant the delivery record's replacement was made from,
+// so the two records of one loss end together: the caller passes the very value
+// it first gave NewLostRecord, which has to be one that call accepted.
 func NewLostDedupRecord(key DedupKey, discoveredAt time.Time) DedupRecord {
 	return DedupRecord{Key: key, RetainUntil: DedupRetainUntil(LostReportBy(discoveredAt)), DigestLost: true}
 }

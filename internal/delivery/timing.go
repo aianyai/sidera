@@ -65,9 +65,12 @@ func ReportBy(acceptBefore time.Time) time.Time {
 
 // LostReportBy returns the report_by a record that replaces one lost to storage
 // corruption is kept and reported until: an upper bound of the report_by of any
-// delivery accepted no later than discoveredAt. Intake refuses a deadline later
-// than its own time plus MaxAcceptBefore plus the clock tolerance, and the
-// lost record was accepted no later than discoveredAt.
+// delivery accepted no later than discoveredAt. The bound is that no accepted
+// deadline lies later than the acceptance time plus MaxAcceptBefore plus the
+// clock tolerance, and the lost record was accepted no later than discoveredAt.
+// On the target Intake enforces it, by refusing a later deadline. On the source
+// nothing in this package does: the caller must not accept from its own caller
+// a deadline the target's Intake would refuse (see the README).
 func LostReportBy(discoveredAt time.Time) time.Time {
 	return ReportBy(discoveredAt.Add(MaxAcceptBefore + timing.ClockTolerance))
 }

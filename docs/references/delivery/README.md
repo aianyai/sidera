@@ -247,17 +247,23 @@ feedback bookkeeping of a source record is it equal, which
 `TestRecordValidSourceFeedbackBookkeepingIsExact` pins by enumerating the
 transitions. An invalid record yields an `*InvalidRecordError`; its `Violation`
 is a typed reason naming the
-first invariant broken, in a fixed order of checks (kind and state, deadlines,
-block flags, produced feedback, lease, outcome against lease). The invariants
+first invariant broken, in a fixed order of checks (kind and state, unknown cause,
+replacement shape, deadlines, block flags, produced feedback, lease, outcome
+against lease). The invariants
 are listed in the package README; each is a property the transitions keep:
 
-- what `moveTo` clears on leaving `accepted` (block flag, outstanding lease, sub-state);
+- what `change` clears on leaving `accepted` (block flag, outstanding lease, sub-state);
 - what only one side or one kind of record has (feedback and expiry on the
   sender, leases, backlog deadline and sub-state on a queued target message);
 - the shapes `Handout` creates and `Renew` and `Tick` leave (chunk flags,
   identifiers, times, lease count);
 - the end states of a target (delivered by the last acknowledgement, rejected
-  only before a hand-out, delivery_unknown only after one).
+  only before a hand-out, delivery_unknown only after one, unless it replaces a
+  lost record);
+- the unknown cause and the replacement of a lost record (see the next section):
+  the cause is set exactly in `delivery_unknown`, and a record that carries the
+  `Lost` marker has the shape `NewLostRecord` gives it, in every state it can
+  reach.
 
 The lease expiry has an upper bound, `LeaseRenewalCap` after the issue time,
 and no lower one: `Renew` extends from the instant it is called, and the wall
@@ -293,10 +299,22 @@ line: the side, whether it was a control signal, and the delivery's identity.
 | target control | as target message, `Control` kept | none | as target message; a committed reply still corrects it |
 | source control | not a record: `ErrInvalidInput` | | a control signal has no record on the sender's side |
 
+The replacement carries `Lost`, set only by `NewLostRecord` and cleared by no
+transition. It is how a restored record is recognised as a replacement in every
+state it can reach: `delivery_unknown`, `closed_unconfirmed` after `ReportBy`
+and, for a control signal on the target, `delivered` by a committed reply. The
+cause cannot be that mark, because it is set only in `delivery_unknown` and a
+closed replacement has none; judging a closed replacement by the shape of a
+normally accepted delivery would find it corrupt on every restart, and it would
+be replaced and reported once more, without end.
+
 `ReportBy` is `LostReportBy(discoveredAt)`, `ReportBy(discoveredAt +
 MaxAcceptBefore + clock tolerance)`: an upper bound of the lost record's own
 `report_by`, because every accepted deadline lies at most that far after its
-acceptance and the acceptance was not after the discovery. `AcceptBefore` and
+acceptance and the acceptance was not after the discovery. On the target `Intake`
+keeps that bound by refusing a later deadline; on the source it holds because the
+sending node does not accept a deadline the target's `Intake` would refuse, a
+guarantee of the caller. `AcceptBefore` and
 `BacklogDeadline` are unknown and zero. The record is closed by `Tick` after
 `ReportBy` like any other; nothing else is timed for it, so `tickDeadlines` has
 no new entry. A replacement of the target is reported as
@@ -309,12 +327,22 @@ The deduplication record of a lost target record is replaced by
 (`DigestLost`), so `CheckDedup` answers every request under the key as a replay.
 
 What a record's cause and a replacement promise is stated once, in
-`checkUnknownCause`: the cause is set exactly in `delivery_unknown` and is one of
-the causes of the record's side, and a lost record has the shape `NewLostRecord`
-gives it (no lease, prompt, block or rejection, no `AcceptBefore` or
-`BacklogDeadline`, the one source notice already reported). Any check of a whole
-record calls that function. Test: `TestUnknownCauseInvariant`, one row per
-promise.
+`checkUnknownCause` (`ViolationUnknownCause`) and `checkLostShape`
+(`ViolationLostShape`), which `Valid` calls: the cause is set exactly in
+`delivery_unknown` (`causeFitsState`, shared with `change` and
+`StatusReport.Validate`) and is one of the causes of the record's side, and a
+replacement has the shape `NewLostRecord` gives it (no lease or block cause, no
+`AcceptBefore` or `BacklogDeadline`, a `ReportBy`, the one source notice already
+reported) and sits only in the states above. `Valid` cannot check the value of
+`ReportBy`, which is `LostReportBy` of a discovery time the record does not keep.
+The checks of produced feedback and deadlines admit the replacement shapes: a
+lost target is `delivery_unknown` without a hand-out, `lost_at_sender` and
+`lost_at_target` are legal notices, and a source that learned a loss from a report
+is an ordinary record whose notice is `lost_at_target`. A transition that would
+enter `delivery_unknown` without a cause, or another state with one, is refused by
+`change` with `ErrInvalidInput`. Tests: `TestUnknownCauseAndLostShapeInvariants`
+(one row per promise, judged by `Valid`), `TestChangeRefusesACauseThatDoesNotFitTheState`,
+`TestLostMarkerIsSetByNewLostRecordAndNeverCleared`.
 
 `Record.NeedsBody()` says whether a record still needs the bytes of its body: a
 source record that is `queued`, and a target message record that is `accepted`
@@ -369,6 +397,11 @@ permission still reads it.
   the sender read the loss as delivery. A new state would need a new wire code,
   a new place in the transition table and the ordering, and would say the same
   thing.
+- **A marker, not a missing field, says that a record is a replacement.** The
+  replacement's shape (no `AcceptBefore`, no lease) is the shape of nothing else,
+  but inferring it from zero fields would take a corrupt normal record for a
+  replacement, and the cause is gone once it closes. An explicit `Lost`, set in
+  one place and kept, is the cheapest thing that stays true.
 - **The replacement is a way to start a record, not an event.** It has no earlier
   state to apply an event to, and if an event could produce it, any caller
   holding a healthy record could turn it into a lost one, which is the shortcut
@@ -608,8 +641,11 @@ permission still reads it.
   `TestTargetLostRecordStaysUnknownUnderForcedClosure`,
   `TestStatusReportCarriesUnknownCause`,
   `TestLostDedupRecordAnswersEveryRetryAsReplay`, `TestNeedsBodyByStateAndSide`,
+  `TestUnknownCauseAndLostShapeInvariants`, `TestCheckUnknownCauseJudgesTheSideOfALossCause`,
+  `TestChangeRefusesACauseThatDoesNotFitTheState`, `TestLostMarkerIsSetByNewLostRecordAndNeverCleared`,
   and `TestPropertyLostRecordLifecycle` (fixed seed, a model written in the test:
-  a replacement never delivers again, reports at most once, and closes).
+  a replacement never delivers again, reports at most once, and closes; `Valid`
+  holds after every step).
 - `internal/delivery/record.go`: `Record`, `NewTargetControlRecord`, `Apply`,
   `Tick`, `closeForcibly`, `StatusReport`, `ApplyStatusReport`. Tests:
   `TestSourceTransitions`, `TestRejectionReasonIsCarried`,
@@ -660,10 +696,12 @@ permission still reads it.
   `TestRecordValidRefusesImpossibleRecords` (one row per invariant, each starting
   from a record the package produces, and a check that every `Violation` has a
   row), `TestRecordValidAcceptsFreshRecords`, `TestRecordValidReportsTheFirstViolation`,
-  `TestRecordValidSourceFeedbackBookkeepingIsExact`,
+  `TestRecordValidSourceFeedbackBookkeepingIsExact` (the unknown cause is part of
+  the enumerated record),
   `TestPropertyEveryProducedRecordIsValid` (the random deliveries and control
-  signals of the other property tests, through the observer they take, with
-  coverage assertions per kind of record) and `TestPropertyMutatedRecordsAreCaught`.
+  signals of the other property tests, the replacement records from creation to
+  closure and the source records that learn of a loss, through the observer they
+  take, with coverage assertions per kind of record) and `TestPropertyMutatedRecordsAreCaught`.
 - `internal/delivery/schedule.go`: the deadlines `Tick` consults,
   `Record.NextTick`, `FeedbackQueue.NextFlush`. Tests:
   `TestNextTickNamesEachDeadline` and `TestNextFlushNamesEachDeadline` (instants

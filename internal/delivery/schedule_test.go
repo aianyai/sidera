@@ -196,7 +196,9 @@ func scheduleRecord(rng *rand.Rand) Record {
 	}
 	event := func(ev Event) func(time.Time) Event { return func(time.Time) Event { return ev } }
 
-	switch rng.Intn(4) {
+	switch rng.Intn(5) {
+	case 4:
+		return lostScheduleRecord(rng)
 	case 3:
 		return lateTargetRecord(rng, ab)
 	case 0:
@@ -319,6 +321,37 @@ func lateTargetRecord(rng *rand.Rand, ab time.Time) Record {
 	return r
 }
 
+// lostScheduleRecord is a record that replaces one lost to storage corruption,
+// of a random kind, discovered at a whole minute: it has a ReportBy and none of
+// the other deadlines, and half of them have gone on to close, or, for a control
+// signal, to be delivered.
+func lostScheduleRecord(rng *rand.Rand) Record {
+	discovered := t0.Add(time.Duration(rng.Intn(120)) * time.Minute)
+	side, control := SideTarget, false
+	switch rng.Intn(3) {
+	case 0:
+		side = SideSource
+	case 1:
+		control = true
+	}
+	r, _, err := NewLostRecord(side, control, discovered)
+	if err != nil {
+		panic(err)
+	}
+	switch rng.Intn(4) {
+	case 0:
+		r, _, err = r.Tick(r.ReportBy.Add(time.Nanosecond))
+	case 1:
+		if control {
+			r, _, err = r.Apply(discovered, Event{Type: EventReplyCommitted})
+		}
+	}
+	if err != nil {
+		panic(err)
+	}
+	return r
+}
+
 // describeNextTick says which deadline of the record the instant is, judged
 // from the record's fields alone, or "" when it is none of them. It is the test
 // side's account of why the instant is what it is.
@@ -328,6 +361,9 @@ func describeNextTick(r Record, next time.Time) string {
 	side := map[Side]string{SideSource: "source", SideTarget: "target"}[r.Side]
 	if r.Control {
 		side = "control"
+	}
+	if r.Lost {
+		side = "lost " + side
 	}
 	switch {
 	case next.IsZero():
@@ -366,6 +402,8 @@ var requiredNextTickPaths = []string{
 	"backlog deadline", "backlog deadline clamped to settle",
 	"close after report_by: source queued", "close after report_by: source expired_unconfirmed",
 	"close after report_by: target delivery_unknown", "close after report_by: control delivery_unknown",
+	"close after report_by: lost source delivery_unknown", "close after report_by: lost target delivery_unknown",
+	"close after report_by: lost control delivery_unknown",
 }
 
 // TestPropertyNextTickAgreesWithFineStepTick checks NextTick against Tick run

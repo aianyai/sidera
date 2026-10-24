@@ -57,11 +57,16 @@ target-internal sub-state `notified` of `accepted`.
   `lost_at_target` on a target record is `ErrIllegalTransition`, because a target
   loses a record only by `NewLostRecord`; a `handed_over` target record needs a
   hand-out as before.
-- `checkUnknownCause` is the one statement of what a record's cause and the
-  storage-loss replacements promise (the cause is set exactly in
-  `delivery_unknown` and belongs to the record's side; a lost record carries no
-  history and no `AcceptBefore` or `BacklogDeadline`). A check of a whole record,
-  such as one restored from storage, calls it rather than restating it.
+- `change` refuses, with `ErrInvalidInput`, a transition that enters
+  `delivery_unknown` without a cause or any other state with one: the cause and
+  the state are set together (`causeFitsState`, which `StatusReport.Validate` and
+  `Valid` use as well). That is a programming error, never a fact.
+- `Record.Lost` marks a replacement for a record lost to storage corruption. Only
+  `NewLostRecord` sets it and no transition clears it, so a replacement stays
+  recognisable after it closes, when `Unknown` is gone. `Unknown` stays set
+  exactly in `delivery_unknown`. `checkUnknownCause` and `checkLostShape` are the
+  one statement of what a cause and a replacement promise (see "A restored record
+  is checked"); `Valid` calls them rather than restating them.
 - A repeated or older fact is ignored with a reason, not an error. A fact that
   contradicts the state (a rejection for a delivered message) is
   `ErrIllegalTransition`.
@@ -83,8 +88,10 @@ expired_unconfirmed and delivery_unknown. Normal progress and `closed_unconfirme
   whether it was delivered, or for a control signal executed, is unknown, and that
   the sender must not assume it was not delivered. They never say the target
   handed anything over: a node that lost its record cannot know. They are kinds of
-  their own, merge by message, and are corrected like `delivery_unknown` by a
-  later `delivered`.
+  their own and merge by message. A `lost_at_target` the sender learned from a
+  report is corrected like `delivery_unknown` by a later `delivered`, while a
+  sender's own loss (`lost_at_sender`) never is: its replacement ignores every
+  later fact.
 - The delivery_unknown notice says the target handed the delivery over (to the
   agent, or to the adapter that executes a control signal), that whether it was
   seen or executed is unknown, and that the sender must not assume it was not
@@ -161,6 +168,9 @@ survives: the side, whether it was a control signal, and the identity of the
 delivery. `NewLostRecord(side, control, discoveredAt)` makes the replacement. It
 starts `delivery_unknown`, because the delivery may or may not have been handed
 over and neither `rejected` nor silence would be true, with the cause of its side.
+It carries `Lost`, which it keeps through every state it can reach: `delivery_unknown`,
+then `closed_unconfirmed` after `ReportBy`, or, for a control replacement, `delivered`
+by a committed reply.
 
 - A source replacement is `lost_at_sender` and returns the one feedback the
   sender must get (`KindLostAtSender`), already marked as reported. Every later
@@ -179,8 +189,9 @@ over and neither `rejected` nor silence would be true, with the cause of its sid
 - `ReportBy` is `LostReportBy(discoveredAt)`, an upper bound of the lost record's
   own `report_by`: an accepted deadline lies at most `MaxAcceptBefore` plus the
   clock tolerance after its acceptance, and the acceptance was not after
-  `discoveredAt`. `AcceptBefore` and `BacklogDeadline` stay zero because they are
-  unknown. `Tick` closes the record after `ReportBy`, silently, like any other;
+  `discoveredAt`. On the target `Intake` keeps that bound, by refusing a later
+  deadline; on the source it holds by a guarantee of the caller (see below).
+  `AcceptBefore` and `BacklogDeadline` stay zero because they are unknown. `Tick` closes the record after `ReportBy`, silently, like any other;
   no other deadline applies, so it adds no timed rule.
 - `NewLostDedupRecord(key, discoveredAt)` replaces the deduplication record of a
   lost target record. It is marked `DigestLost`, and `CheckDedup` answers every
@@ -231,11 +242,28 @@ record, never a clock.
   recorded exactly while the state is `rejected`; `notified` only on an accepted
   message record of the target.
 - Deadlines: `ReportBy` is `ReportBy(AcceptBefore)`; a queued message has a
-  backlog deadline no later than `SettleBy`, every other record has none.
+  backlog deadline no later than `SettleBy`, every other record has none. A
+  replacement is judged by its marker instead (below).
+- Unknown cause (`ViolationUnknownCause`): the cause is set exactly while the
+  state is `delivery_unknown` and is one its side and kind can hold: a source holds
+  `handed_over`, the `lost_at_target` a target reported, or, as a replacement,
+  `lost_at_sender`; a target holds `handed_over`, which needs a hand-out or a
+  control signal, or, as a replacement, `lost_at_target`. A replacement is never
+  `handed_over`, and no other record holds a loss cause of its own side.
+- Replacement (`ViolationLostShape`): the marker is on `delivery_unknown` or
+  `closed_unconfirmed` records, and on a delivered one only for a control signal
+  on the target. A replacement has a `ReportBy` and no `AcceptBefore` or
+  `BacklogDeadline`, no lease and no cause of a block, was never handed out, and,
+  on the source, has reported exactly its own notice. `Valid` cannot check the
+  value of `ReportBy`, which is `LostReportBy` of a discovery time the record does
+  not keep. The marker is refused on every other shape.
 - Produced feedback (`Reported`) is the sender's alone, and the kinds that go
   together with a state follow `TransitionFeedback`: the rejection notice exactly
   for `rejected`, `delivery_unknown` and its correction only on the way to
-  `delivered` or `closed_unconfirmed`, an expiry notice corrected on the way to
+  `delivered` or `closed_unconfirmed` and exactly the notice of the record's
+  cause (`delivery_unknown` for `handed_over`, `lost_at_target` for the loss a
+  target reported; the sender's own loss belongs to a replacement alone), an
+  expiry notice corrected on the way to
   `accepted` or `delivered` unless a rejection or `delivery_unknown` replaced it,
   a recovery after every block that ended in `delivered` or in `accepted`.
 - Blocked: only an accepted record that is not a control record, with a blocking
@@ -251,7 +279,7 @@ record, never a clock.
   `LeaseDuration` after the issue time.
 - Outcome: a target message is `delivered` exactly when every chunk is
   acknowledged; a target is `delivery_unknown` only for a delivery that was
-  handed over and `rejected` only for one that was not.
+  handed over, or a replacement, and `rejected` only for one that was not.
 
 Where a check reads a rule the transitions also use (`hasQueue`, `handedOver`,
 `SettleBy`, `ReportBy`, the lease bounds), it calls the same function.
@@ -270,11 +298,16 @@ correction and the blocked notice.
 - `discoveredAt` of `NewLostRecord` and `NewLostDedupRecord` is not earlier than
   the lost record's acceptance: the later of the clock reading and the
   persisted wall-clock high-water mark. The bound of `LostReportBy` holds only
-  then.
-- A source replacement's feedback is queued in the same step that stores the
-  record, because it is the only notice the sender gets; the replacement carries
-  `Reported`, so a rebuild after the notice was queued does not repeat it.
-
+  then. The same `discoveredAt` goes to `NewLostDedupRecord` that first went to
+  `NewLostRecord`, so that the two records of one loss end together.
+- A source record's `AcceptBefore` is no later than its acceptance time plus
+  `MaxAcceptBefore` plus the clock tolerance: the sending node does not accept a
+  deadline the target's `Intake` would refuse. On the target `Intake` keeps the
+  bound of `LostReportBy`; on the source only this guarantee does.
+- The replacement and its feedback item are stored in one atomic step.
+  `NewLostRecord` returns the notice on every call, so it is called once per
+  loss; a step that did not commit queued nothing and may run again. A
+  replacement that is itself later lost is a new loss and gives a new notice.
 - `now` is UTC and comes from the caller; records are persisted atomically with
   the effects the outcome calls for.
 - A record read back from storage is passed to `Valid` after decoding, before

@@ -31,6 +31,14 @@ const (
 	// ViolationSubState: the sub-state is unknown, or notified outside an
 	// accepted message record of the target.
 	ViolationSubState
+	// ViolationUnknownCause: the cause of an unknown result is set outside
+	// delivery_unknown, is missing or unknown there, or is not one the record's
+	// side and kind can hold.
+	ViolationUnknownCause
+	// ViolationLostShape: a record that replaces one lost to storage corruption
+	// does not have the shape of one, or the marker is on a record that cannot be
+	// one.
+	ViolationLostShape
 	// ViolationDeadlinesUnset: AcceptBefore or ReportBy is not set.
 	ViolationDeadlinesUnset
 	// ViolationReportBy: ReportBy is not the one that follows from AcceptBefore.
@@ -89,7 +97,8 @@ const (
 	// is acknowledged.
 	ViolationDelivered
 	// ViolationDeliveryUnknownUnhandled: a target is delivery_unknown for a
-	// delivery that was never handed over.
+	// delivery that was never handed over, unless it replaces one lost to storage
+	// corruption, which is never handed out.
 	ViolationDeliveryUnknownUnhandled
 	// ViolationRejectedHandedOver: a target rejected a delivery that was handed
 	// over, which must have become delivery_unknown.
@@ -103,6 +112,8 @@ var violationNames = [...]string{
 	ViolationState:                    "state_for_record",
 	ViolationRejectReason:             "reject_reason",
 	ViolationSubState:                 "sub_state",
+	ViolationUnknownCause:             "unknown_cause",
+	ViolationLostShape:                "lost_shape",
 	ViolationDeadlinesUnset:           "deadlines_unset",
 	ViolationReportBy:                 "report_by",
 	ViolationBacklogDeadline:          "backlog_deadline",
@@ -159,14 +170,18 @@ func (e *InvalidRecordError) Unwrap() error { return ErrInvalidRecord }
 // flags disagree with its chunk count would make Ack and Handout index out of
 // range.
 //
-// The invariants are those of the transitions: what moveTo clears when the
+// The invariants are those of the transitions: what change clears when the
 // state changes, what only the target or only the sender sets, and what a lease
-// can look like after Handout, Renew and Tick. The checks run in the order of
+// can look like after Handout, Renew and Tick. A record that replaces one lost
+// to storage corruption is recognised by its Lost marker, which it keeps in every
+// state it can reach, and is held to the shape NewLostRecord gives it instead of
+// that of a delivery accepted normally; without the marker such a record would
+// be judged corrupt again after it closed, and replaced and reported once more. The checks run in the order of
 // the Violation constants, so the answer for a record with several faults does
 // not depend on how many there are.
 func (r Record) Valid() error {
 	for _, check := range []func() Violation{
-		r.checkKind, r.checkDeadlines, r.checkBlocked, r.checkReported, r.checkLease, r.checkOutcome,
+		r.checkKind, r.checkUnknownCause, r.checkLostShape, r.checkDeadlines, r.checkBlocked, r.checkReported, r.checkLease, r.checkOutcome,
 	} {
 		if v := check(); v != ViolationNone {
 			return &InvalidRecordError{Violation: v}
@@ -223,8 +238,12 @@ func (r Record) checkKind() Violation {
 
 // checkDeadlines covers AcceptBefore, ReportBy and BacklogDeadline. Only a
 // message in the target's queue has a backlog deadline, and it never lies past
-// SettleBy (see BacklogDeadline).
+// SettleBy (see BacklogDeadline). A record that replaces a loss has none of the
+// envelope's deadlines to compare, and checkLostShape holds it to its own.
 func (r Record) checkDeadlines() Violation {
+	if r.Lost {
+		return ViolationNone
+	}
 	if r.AcceptBefore.IsZero() || r.ReportBy.IsZero() {
 		return ViolationDeadlinesUnset
 	}
@@ -275,19 +294,31 @@ func (r Record) checkReported() Violation {
 	if r.Side != SideSource {
 		return ViolationNone
 	}
+	// The one notice of a source replacement is checkLostShape's.
+	if r.Lost {
+		return ViolationNone
+	}
 	has, s := r.Reported.Has, r.State
 	if has(KindRejected) != (s == StateRejected) {
 		return ViolationReportedRejected
 	}
-	// delivery_unknown is reported on entering it; the states after it are
-	// delivered (which reports the correction) and closed_unconfirmed.
-	if s == StateDeliveryUnknown && !has(KindDeliveryUnknown) {
+	// delivery_unknown is reported on entering it, as the notice of its cause: the
+	// handed-over notice, or the loss at the target that a status report told. The
+	// notice of the sender's own loss belongs to a replacement alone, which
+	// returned above. One delivery gets at most one of these notices, because
+	// delivery_unknown is entered once. The states after it are delivered (which
+	// reports the correction) and closed_unconfirmed.
+	if has(KindLostAtSender) || (has(KindDeliveryUnknown) && has(KindLostAtTarget)) {
 		return ViolationReportedDeliveryUnknown
 	}
-	if has(KindDeliveryUnknown) && s != StateDeliveryUnknown && s != StateDelivered && s != StateClosedUnconfirmed {
+	unknownReported := has(KindDeliveryUnknown) || has(KindLostAtTarget)
+	if s == StateDeliveryUnknown && (has(KindDeliveryUnknown) != (r.Unknown == UnknownHandedOver) || has(KindLostAtTarget) != (r.Unknown == UnknownLostAtTarget)) {
 		return ViolationReportedDeliveryUnknown
 	}
-	if has(KindUnknownCorrected) != (s == StateDelivered && has(KindDeliveryUnknown)) {
+	if unknownReported && s != StateDeliveryUnknown && s != StateDelivered && s != StateClosedUnconfirmed {
+		return ViolationReportedDeliveryUnknown
+	}
+	if has(KindUnknownCorrected) != (s == StateDelivered && unknownReported) {
 		return ViolationReportedDeliveryUnknown
 	}
 	// expired_unconfirmed is reported on entering it from queued and corrected
@@ -308,7 +339,7 @@ func (r Record) checkReported() Violation {
 	if s == StateAccepted && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) {
 		return ViolationReportedExpiry
 	}
-	if s == StateDelivered && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) && !has(KindDeliveryUnknown) {
+	if s == StateDelivered && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) && !unknownReported {
 		return ViolationReportedExpiry
 	}
 	// A block is noticed only in accepted, so the notice comes after queued and
@@ -415,7 +446,7 @@ func (r Record) checkOutcome() Violation {
 			return ViolationDelivered
 		}
 	}
-	if r.State == StateDeliveryUnknown && !r.handedOver() {
+	if r.State == StateDeliveryUnknown && !r.Lost && !r.handedOver() {
 		return ViolationDeliveryUnknownUnhandled
 	}
 	if r.State == StateRejected && r.handedOver() {
