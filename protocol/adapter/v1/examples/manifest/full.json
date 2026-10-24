@@ -161,6 +161,16 @@
       "limit": 22500
     }
   ],
+  "recv_wait_limits": [
+    {
+      "frontend": "cli",
+      "max_s": 8
+    },
+    {
+      "frontend": "mcp",
+      "max_s": 100
+    }
+  ],
   "ack_markers": {
     "replaced": [
       {

@@ -35,6 +35,11 @@ func withBudgets(m manifest.Manifest, bs ...manifest.Budget) manifest.Manifest {
 	return m
 }
 
+func withRecvWaits(m manifest.Manifest, ls ...manifest.RecvWaitLimit) manifest.Manifest {
+	m.RecvWaitLimits = ls
+	return m
+}
+
 func withMarkers(m manifest.Manifest, replaced, truncated []manifest.Marker) manifest.Manifest {
 	m.AckMarkers = &manifest.AckMarkers{Replaced: replaced, Truncated: truncated}
 	return m
@@ -66,6 +71,16 @@ func TestAdmitDecisions(t *testing.T) {
 		{"budget for direct with only a runtime", runtimeCaps(false, false, false, "cli"), withBudgets(man(), manifest.Budget{Frontend: "direct", Unit: "chars", Limit: 100}), adapterreg.ReasonBudgetFrontendUndeclared},
 		{"budgets for every declared front end", both, withBudgets(man(),
 			manifest.Budget{Frontend: "cli", Unit: "chars", Limit: 1}, manifest.Budget{Frontend: "mcp", Unit: "tokens", Limit: 2}, manifest.Budget{Frontend: "direct", Unit: "chars", Limit: 3}), 0},
+		{"recv wait limit for a declared cli", runtimeCaps(false, false, false, "cli"), withRecvWaits(man(), manifest.RecvWaitLimit{Frontend: "cli", MaxS: 8}), 0},
+		{"recv wait limit for an undeclared mcp", runtimeCaps(false, false, false, "cli"), withRecvWaits(man(), manifest.RecvWaitLimit{Frontend: "mcp", MaxS: 8}), adapterreg.ReasonRecvWaitFrontendUndeclared},
+		{"recv wait limit for cli with no runtime", adapterproto.Capabilities{Direct: directCaps(5)}, withRecvWaits(man(), manifest.RecvWaitLimit{Frontend: "cli", MaxS: 8}), adapterreg.ReasonRecvWaitFrontendUndeclared},
+		{"recv wait limit for direct with direct endpoints", adapterproto.Capabilities{Direct: directCaps(5)}, withRecvWaits(man(), manifest.RecvWaitLimit{Frontend: "direct", MaxS: 8}), 0},
+		{"recv wait limit for direct with only a runtime", runtimeCaps(false, false, false, "cli"), withRecvWaits(man(), manifest.RecvWaitLimit{Frontend: "direct", MaxS: 8}), adapterreg.ReasonRecvWaitFrontendUndeclared},
+		{"recv wait limit for a declared front end after one for an undeclared", runtimeCaps(false, false, false, "cli"),
+			withRecvWaits(man(), manifest.RecvWaitLimit{Frontend: "cli", MaxS: 8}, manifest.RecvWaitLimit{Frontend: "mcp", MaxS: 100}), adapterreg.ReasonRecvWaitFrontendUndeclared},
+		{"recv wait limits for every declared front end", both, withRecvWaits(man(),
+			manifest.RecvWaitLimit{Frontend: "cli", MaxS: 1}, manifest.RecvWaitLimit{Frontend: "mcp", MaxS: 120}, manifest.RecvWaitLimit{Frontend: "direct", MaxS: 30}), 0},
+		{"a recv wait limit above the protocol cap", runtimeCaps(false, false, false, "cli"), withRecvWaits(man(), manifest.RecvWaitLimit{Frontend: "cli", MaxS: 121}), adapterreg.ReasonManifestInvalid},
 		{"a literal marker", runtimeCaps(false, false, false, "cli"), withMarkers(man(), []manifest.Marker{{Literal: str("[saved]")}}, nil), 0},
 		{"a regexp marker", runtimeCaps(false, false, false, "cli"), withMarkers(man(), nil, []manifest.Marker{{Regexp: str(`\d+ more`)}}), 0},
 		{"an empty literal marker", runtimeCaps(false, false, false, "cli"), withMarkers(man(), []manifest.Marker{{Literal: str("")}}, nil), adapterreg.ReasonMarkersInvalid},
@@ -98,7 +113,7 @@ func TestAdmitReasonNames(t *testing.T) {
 	for r, want := range map[adapterreg.AdmitReason]string{
 		adapterreg.ReasonCapabilitiesInvalid: "capabilities_invalid", adapterreg.ReasonManifestInvalid: "manifest_invalid",
 		adapterreg.ReasonNoEndpointKinds: "no_endpoint_kinds", adapterreg.ReasonBudgetFrontendUndeclared: "budget_frontend_undeclared",
-		adapterreg.ReasonMarkersInvalid: "markers_invalid", 0: "invalid(0)", 99: "invalid(99)",
+		adapterreg.ReasonMarkersInvalid: "markers_invalid", adapterreg.ReasonRecvWaitFrontendUndeclared: "recv_wait_frontend_undeclared", 0: "invalid(0)", 99: "invalid(99)",
 	} {
 		if r.String() != want {
 			t.Errorf("%d: %q, want %q", r, r.String(), want)
@@ -273,6 +288,63 @@ func TestBudgetsAndMarkers(t *testing.T) {
 	if got := a.Budget("nonsense"); got != handoff.DefaultBudget() {
 		t.Errorf("an unknown front end's budget = %+v", got)
 	}
+}
+
+// TestRecvWait: the wait limit of a front end is the one the manifest declares,
+// and the default for a front end it does not name.
+func TestRecvWait(t *testing.T) {
+	if adapterreg.DefaultRecvWait != 8*time.Second {
+		t.Fatalf("DefaultRecvWait = %v, want 8s: below the shortest client timeout of 10s", adapterreg.DefaultRecvWait)
+	}
+	if adapterreg.DefaultRecvWait >= 10*time.Second {
+		t.Fatalf("DefaultRecvWait = %v must stay below the 10s at which a shell client returns or kills", adapterreg.DefaultRecvWait)
+	}
+	caps := adapterproto.Capabilities{Runtime: runtimeCaps(true, true, true, "cli", "mcp").Runtime, Direct: directCaps(5)}
+	m := withRecvWaits(man(),
+		manifest.RecvWaitLimit{Frontend: "cli", MaxS: 3},
+		manifest.RecvWaitLimit{Frontend: "mcp", MaxS: manifest.MaxRecvWaitSeconds})
+	a, err := adapterreg.Admit(caps, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		f    manifest.Frontend
+		want time.Duration
+	}{
+		{"a declared short limit", "cli", 3 * time.Second},
+		{"a declared limit at the protocol cap", "mcp", 120 * time.Second},
+		{"a front end the manifest does not name gets the default", "direct", adapterreg.DefaultRecvWait},
+		{"an unknown front end gets the default", "nonsense", adapterreg.DefaultRecvWait},
+		{"an empty front end gets the default", "", adapterreg.DefaultRecvWait},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := a.RecvWait(tc.f); got != tc.want {
+				t.Errorf("RecvWait(%q) = %v, want %v", tc.f, got, tc.want)
+			}
+		})
+	}
+	t.Run("a manifest without limits gives the default everywhere", func(t *testing.T) {
+		none, err := adapterreg.Admit(caps, man())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range manifest.BudgetFrontends() {
+			if got := none.RecvWait(f); got != adapterreg.DefaultRecvWait {
+				t.Errorf("RecvWait(%q) = %v, want the default", f, got)
+			}
+		}
+	})
+	t.Run("the zero admission gives the default", func(t *testing.T) {
+		if got := (adapterreg.Admission{}).RecvWait("cli"); got != adapterreg.DefaultRecvWait {
+			t.Errorf("RecvWait = %v, want the default", got)
+		}
+	})
+	t.Run("a declared limit may be longer than the default", func(t *testing.T) {
+		if got := a.RecvWait("mcp"); got <= adapterreg.DefaultRecvWait {
+			t.Errorf("RecvWait(mcp) = %v: a front end with a long timeout must be able to wait longer than the default", got)
+		}
+	})
 }
 
 // TestMarkersDriveTheAckCheck: markers declared in a manifest reach

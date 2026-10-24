@@ -1,0 +1,32 @@
+{
+  "manifest_version": 1,
+  "id": "waits",
+  "version": "1.0.0",
+  "protocol": {
+    "min": 1,
+    "max": 1
+  },
+  "entry": {
+    "program": "sidera-adapter-minimal"
+  },
+  "platforms": [
+    {
+      "os": "linux",
+      "arch": "amd64"
+    }
+  ],
+  "recv_wait_limits": [
+    {
+      "frontend": "cli",
+      "max_s": 1
+    },
+    {
+      "frontend": "mcp",
+      "max_s": 120
+    },
+    {
+      "frontend": "direct",
+      "max_s": 30
+    }
+  ]
+}
