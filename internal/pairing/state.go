@@ -214,8 +214,14 @@ type (
 		Record     record.Record
 	}
 	// StoreRevocation stores a revocation of a credential this node signed and
-	// publishes it with the other revocations. It is idempotent.
-	StoreRevocation struct{ Record record.Record }
+	// publishes it with the other revocations. Revocation is the record verified
+	// against credential.RevocationDescriptor, whose digest belongs in
+	// trust.View.RevokedCredentials; the record is not a revocation.Set entry
+	// (that package verifies identity-level statements only). It is idempotent.
+	StoreRevocation struct {
+		Revocation record.Verified[credential.Revocation]
+		Record     record.Record
+	}
 	// Notify tells a human something.
 	Notify struct{ Notice Notice }
 )

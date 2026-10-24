@@ -33,7 +33,7 @@ them, and stores the records it hands out.
 | `State.Confirm`, `Reject`, `Expect`, `Forget` | The management requests, in the order `admin` defines. |
 | `State.Withdrawn(digest)` | Whether a synchronised credential is one this node signed and revoked. |
 | `TargetRecord`, `InitiatorRecord`, `Display`, `Encode`/`Decode...` | The persisted records. The identifier, the code and the credential are recomputed whenever a record is decoded. |
-| `Action` and its types | What the caller does: `Send`, `Close`, `FetchRequest`, `Persist...`, `Delete...`, `StoreCredential`, `StoreRevocation`, `Notify`. |
+| `Action` and its types | What the caller does: `Send`, `Close`, `FetchRequest`, `Persist...`, `Delete...`, `StoreCredential`, `StoreRevocation` (both with the verified value and the record), `Notify`. |
 
 ## Rules
 
@@ -108,8 +108,12 @@ them, and stores the records it hands out.
   restored.
 - Keep the connection lifetime of nodes that are not members at least as long as
   the certificate exchange plus `Params.OnlineTimeout`.
-- Store a credential from `StoreCredential` as a credential of the trust view,
-  and a revocation from `StoreRevocation` with the other revocations.
+- Store a credential from `StoreCredential` as a credential of the trust view.
+  A revocation from `StoreRevocation` is a credential revocation: the record is
+  verified with `credential.RevocationDescriptor` (the action carries the
+  `record.Verified` as `StoreCredential` does) and its digest goes into
+  `trust.View.RevokedCredentials`. It is not an entry of `revocation.Set`, whose
+  `Verify` answers `record.ErrType` for it.
 
 ## Dependencies
 

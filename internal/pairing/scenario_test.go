@@ -516,6 +516,11 @@ func TestSignedRequestThatExpiresIsRevokedByTheInitiator(t *testing.T) {
 	if _, ok := a.revocations[digest]; !ok {
 		t.Fatal("the revocation is not for the credential A signed")
 	}
+	// The action carries the verified revocation, whose digest goes into the
+	// trust view's revoked credentials.
+	if _, ok := a.view.RevokedCredentials[trust.CredentialDigest(digest)]; !ok {
+		t.Fatal("the verified revocation's digest is not in the trust view")
+	}
 	if !a.state.Withdrawn(digest) {
 		t.Fatal("A does not refuse the credential it revoked")
 	}

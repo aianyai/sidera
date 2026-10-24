@@ -273,7 +273,10 @@ func (n *simNode) apply(actions []Action, stream *simStream) {
 		case StoreRevocation:
 			ver, err := record.Verify(credential.RevocationDescriptor, a.Record)
 			must(t, err)
-			rev := ver.Payload()
+			if ver.Digest() != a.Revocation.Digest() {
+				t.Fatal("the action's verified revocation is not its record")
+			}
+			rev := a.Revocation.Payload()
 			n.revocations[record.Digest(rev.Digest())] = a.Record
 			n.view.RevokedCredentials[rev.Digest()] = struct{}{}
 			n.sim.log(simEvent{Node: n.name, Kind: "revocation", Aux: record.Digest(rev.Digest()).String()})

@@ -141,7 +141,7 @@ func (s State) Recover(w World, now time.Time) (State, []Action, error) {
 		if err != nil {
 			return s, nil, err
 		}
-		actions = append(actions, StoreRevocation{rev})
+		actions = append(actions, StoreRevocation{Revocation: rev.verified, Record: rev.record})
 	}
 	return next, actions, nil
 }

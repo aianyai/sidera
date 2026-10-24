@@ -324,7 +324,7 @@ func (s State) endInitiator(w World, rec InitiatorRecord, status InitiatorStatus
 		if err != nil {
 			return s, nil, err
 		}
-		actions = append(actions, StoreRevocation{rev})
+		actions = append(actions, StoreRevocation{Revocation: rev.verified, Record: rev.record})
 	}
 	actions = append(actions, PersistInitiator{rec})
 	remote := rec.Transcript.terms.Target.node
@@ -338,13 +338,24 @@ func (s State) endInitiator(w World, rec InitiatorRecord, status InitiatorStatus
 // revocationOf is the revocation of the credential the record's transcript
 // computes, signed by this node's identity key. The credential is known
 // locally, so the revocation does not wait for the target or depend on it.
-func revocationOf(w World, rec InitiatorRecord) (record.Record, error) {
+func revocationOf(w World, rec InitiatorRecord) (issuedRevocation, error) {
 	if err := w.signsFor(rec.Transcript.terms.Initiator); err != nil {
-		return record.Record{}, err
+		return issuedRevocation{}, err
 	}
 	r, err := credential.IssueRevocation(rec.Transcript.credential, w.Identity)
 	if err != nil {
-		return record.Record{}, fmt.Errorf("pairing: revoking the credential: %w", err)
+		return issuedRevocation{}, fmt.Errorf("pairing: revoking the credential: %w", err)
 	}
-	return r, nil
+	ver, err := record.Verify(credential.RevocationDescriptor, r)
+	if err != nil {
+		return issuedRevocation{}, fmt.Errorf("pairing: verifying the revocation: %w", err)
+	}
+	return issuedRevocation{verified: ver, record: r}, nil
+}
+
+// issuedRevocation is a revocation this node signed, as the record and as the
+// verified value the caller stores with it.
+type issuedRevocation struct {
+	verified record.Verified[credential.Revocation]
+	record   record.Record
 }

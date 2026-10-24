@@ -296,7 +296,7 @@ func (s State) Reject(w World, req Request, id ID, reason WithdrawReason, now ti
 			if err != nil {
 				return s, Outcome{}, nil, err
 			}
-			actions = append(actions, StoreRevocation{rev})
+			actions = append(actions, StoreRevocation{Revocation: rev.verified, Record: rev.record})
 		}
 		actions = append(actions, PersistInitiator{rec})
 		if rec.needsRevocation() {
