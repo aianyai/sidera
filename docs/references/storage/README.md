@@ -440,9 +440,15 @@ bytes, or loses the reference.
 alert id is chosen before and never repeats, so a replacement that is damaged in
 its turn gets a file of its own. The last write of every quarantine is the alert,
 and an alert is deleted only after the file it names. So "a quarantined file with
-no alert" is exactly an unfinished quarantine, and the rule that finishes it never
-builds a replacement twice. Configuration and key files are never quarantined: a
-damaged one stops the start and is named.
+no alert" is exactly an unfinished quarantine. The rule that finishes it writes
+what the first pass wrote, in the same order: the replacement (the same name, built
+by the same rule, so there is one such record and the feedback it owes is not
+formed a second time), the closed session endpoint, and the alert last. The first
+line of a quarantined file is trusted by the same rule as that of a live one,
+against the name the file had (steps 1 to 4): a first line that parses but does not
+hash to that name is handled like an unreadable one, with no replacement and no
+sequence floor raised for the key it claims. Configuration and key files are never
+quarantined: a damaged one stops the start and is named.
 
 **Sequence numbers.** The next number of a (sending endpoint, target address)
 pair is the highest of the floor of the pair and the numbers of the source records
@@ -470,7 +476,8 @@ whole `report_by` window after its creation, and the facts reply permission read
 until `report_by` plus the clock tolerance plus the reply window. That is about 27
 hours after the delivery deadline. Then a summary goes to the archive and the file
 is removed, a quarantined file with its replacement (the file first). A quarantined
-file of a delivery directory whose first line was unreadable has no replacement,
+file of a delivery directory whose first line was unreadable (or does not belong to
+the name the file had) has no replacement,
 and nothing in it says what it was; it stays until the retention a lost record
 would have if it were found at the time of the file's alert has passed (the
 longest delivery deadline, the clock tolerance, the report offset and the reply
@@ -797,13 +804,13 @@ so that the double cannot drift from what it stands for.
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `FuzzDecodeFrame` |
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
-| scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go`, `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
+| scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
-| recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `TestCleanScenariosLeaveNoRecoveryWork` |
+| recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `resume_scenarios_test.go` (the resumption of each kind of unfinished quarantine, walked from the state a crash leaves), `TestCleanScenariosLeaveNoRecoveryWork` |
 | sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` |
 | archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |
-| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound` among them) |
+| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound`, `TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased` among them) |
 | deleting `state/`, the layout rule | `internal/node/store/recovery.go` | `state_deleted_test.go` |
 | cold start | `internal/node/store/bench_test.go` | `BenchmarkColdStartScan`, `TestColdStartFixtureScansBack` |
 

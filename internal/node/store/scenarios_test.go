@@ -616,7 +616,7 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 // crash point the store declares.
 func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	sink := newSink()
-	all := append(scenarios(), recoveryScenarios()...)
+	all := append(append(scenarios(), recoveryScenarios()...), resumedQuarantines()...)
 	total := scenarioStats{}
 	var mu sync.Mutex
 	// The walks are independent: they run side by side, and the coverage is

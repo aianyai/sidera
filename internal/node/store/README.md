@@ -43,11 +43,17 @@ engine applies the delivery rules and calls the writes.
 - **A head record lists its followers as it read them.** `PromptEnd` and `Blocked`
   refuse a follower that is not listed with the revision and acceptance time it was
   read with.
-- **The alert is the last write of a quarantine.** Nothing a resumed quarantine
-  writes is skipped because it seems done.
+- **The alert is the last write of a quarantine.** A resumed quarantine writes what
+  the first pass wrote, in the same order (floors, the replacement under the same
+  name, the closed session, the alert last); nothing is skipped because it seems
+  done.
 - **Bodies first, and removed last.** The caller works out which bodies lost their
   last reference (the reference count is in the engine's view) and says so; a body
   already gone is not an error.
+- **A quarantined file's first line is trusted by the rule of a live file, once.**
+  The scan and `DecodeRecord` share one function for it (kind held by the
+  directory, name equal to the hash of kind and key, key parses); a first line
+  that parses but does not match the name the file had leaves `CorruptFile.Key` nil.
 - **A header-unreadable quarantined file of a delivery directory is swept after a
   lost record's retention.** With no replacement, nothing but the time of its
   alert says when it may go: the retention of a lost record found then (from
@@ -68,8 +74,9 @@ engine applies the delivery rules and calls the writes.
 - Call `SeqBook.Note` only after the commit that wrote the number.
 - Run a drain, a prompt or block follower write, and a body quarantine in chunks of
   the engine's choosing; the store accepts any size.
-- Give `Quarantine` a replacement only for a delivery record whose first line was
-  readable, built with the delivery package's constructor for a lost record.
+- Give `Quarantine` and `QuarantineResume` a replacement only for a delivery
+  record whose first line was trusted (`DamagedFile.Key`, `CorruptFile.Key` set),
+  built with the delivery package's constructor for a lost record.
 - On a body that does not hash to its name, replace a record with a lost record
   only when `delivery.Record.NeedsBody()` says it still needs the bytes (the
   replacement comes from `delivery.NewLostRecord`, and on the target side

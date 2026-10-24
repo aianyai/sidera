@@ -259,8 +259,13 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 		}
 		// No alert yet: the quarantine is unfinished, and its rule runs before any sweep.
 		seedRaw(t, r.mem, store.InDir, corrupt(store.InDir, 9, store.AlertID{9}), []byte("not a first line"))
-		// A quarantined file whose first line is readable has a replacement of its
-		// own, which is what takes it along; with none, the bound is not its rule.
+		// A quarantined file whose first line is trusted (it belongs to the name the
+		// file had) always had a replacement written before its alert, and the file
+		// goes with that replacement. With none, the file is a state no quarantine
+		// leaves, and nothing may judge it by a bound that is for files whose
+		// record is unknown: it stays for the owner to see. A first line that
+		// parses but does not belong to the name is not this case (see the test
+		// for it below).
 		damaged := inRev(5, 1)
 		damagedData, err := store.EncodeRecord(damaged)
 		if err != nil {
@@ -315,5 +320,61 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: bound, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records, Bodies: plan.Bodies}))
 	if left := r.scan().Corrupt; len(left) != 3 {
 		t.Errorf("%d quarantined files left after the sweep, want the three that must stay (no alert yet, a readable first line without a replacement, not a delivery directory): %v", len(left), left)
+	}
+}
+
+// A quarantined file whose first line parses but does not belong to the name the
+// file had is a file whose record is unknown, like one with an unreadable first
+// line: it goes after the lost record's bound counted from its alert, and the
+// acknowledged alert is released only then.
+func TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased(t *testing.T) {
+	bound := base.Add(time.Hour + 2*time.Minute).Add(3*time.Hour + 2*time.Minute).Add(24*time.Hour + 2*time.Minute)
+	id := store.AlertID{1}
+	build := func(t *testing.T, dir string) (*rig, string) {
+		r := newRig(t)
+		var claimed, under store.Record
+		switch dir {
+		case store.OutDir:
+			claimed, under = srcOut(1, false), srcOut(2, false)
+		case store.InDir:
+			claimed, under = inRev(1, 1), inRev(2, 1)
+		default:
+			claimed, under = sessionCtl(1, 5), sessionCtl(2, 6)
+		}
+		name, data := misnamed(t, claimed, under, id)
+		seedRaw(t, r.mem, dir, name, data)
+		seed(t, r.mem, store.AlertRecord{ID: id, Kind: "corrupt_record", At: base, Detail: "d", Subject: dir,
+			Acked: &store.AlertAcked{At: base, Operation: adminResult(1).Key.ID}})
+		return r, path.Join(dir, name)
+	}
+	for _, dir := range []string{store.OutDir, store.InDir, store.CtlDir} {
+		t.Run(path.Base(dir), func(t *testing.T) {
+			r, file := build(t, dir)
+			swept := func(now time.Time) (corrupt []string, alert bool) {
+				plan := store.PlanSweep(r.scan(), now)
+				for _, f := range plan.Corrupt {
+					corrupt = append(corrupt, path.Join(f.Dir, f.Name))
+				}
+				for _, f := range plan.Records {
+					alert = alert || f.Dir == store.AlertsDir
+				}
+				return corrupt, alert
+			}
+			if got, alert := swept(bound.Add(-time.Nanosecond)); len(got) != 0 || alert {
+				t.Fatalf("before the bound: swept %v, alert %v; want nothing", got, alert)
+			}
+			got, alert := swept(bound)
+			if len(got) != 1 || got[0] != file || alert {
+				t.Fatalf("at the bound: swept %v, alert %v; want the file and not yet its alert", got, alert)
+			}
+			plan := store.PlanSweep(r.scan(), bound)
+			mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: bound, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records, Bodies: plan.Bodies}))
+			if left := r.scan().Corrupt; len(left) != 0 {
+				t.Fatalf("quarantined files left after the sweep: %v", left)
+			}
+			if got, alert := swept(base.Add(store.AlertAckRetention + time.Hour)); len(got) != 0 || !alert {
+				t.Errorf("after the file went and the acknowledgement was kept for its time: swept %v, alert %v; want the alert released", got, alert)
+			}
+		})
 	}
 }

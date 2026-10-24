@@ -301,9 +301,14 @@ type Quarantine struct {
 	Scan *Scan
 }
 
-// QuarantineResume finishes a quarantine whose alert is missing: what was
-// there is not written again, the floors are raised once more, and the alert
-// is written.
+// QuarantineResume finishes a quarantine whose alert is missing. It writes what
+// the first pass wrote, in the same order and under the same names: the floors
+// raised once more, the replacement, the closed session endpoint, and the alert
+// last. Nothing is skipped because it seems to be there: it may not be durable.
+// The replacement has the name the damaged file had, so a resumption rewrites
+// that record and makes no second one; the caller builds it by the same rule as
+// the first pass, and builds none for a file whose first line is not trusted
+// (CorruptFile.Key is nil).
 type QuarantineResume struct {
 	File        CorruptFile
 	Alert       AlertRecord

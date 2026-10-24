@@ -156,6 +156,43 @@ func TestScanReadsTheKeyOfQuarantinedFiles(t *testing.T) {
 	}
 }
 
+// The first line of a quarantined file is trusted by the rule of a live file,
+// against the name the file had: a first line that parses but belongs to another
+// name, or to a kind the directory does not hold, says nothing about the file.
+func TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName(t *testing.T) {
+	id := store.AlertID{1}
+	named, ownData := misnamed(t, srcOut(1, false), srcOut(1, false), id)
+	other, otherData := misnamed(t, srcOut(1, false), srcOut(2, false), id)
+	endpointFile := mustEncode(t, directEndpoint(7, "chat"))
+	for _, c := range []struct {
+		rule    string
+		name    string
+		data    []byte
+		trusted bool
+	}{
+		{"a first line that belongs to the name", named, ownData, true},
+		{"a first line that parses but hashes to another name", other, otherData, false},
+		{"a record of a kind the directory does not hold", corruptName(srcOut(3, false), id), endpointFile, false},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			r := newRig(t)
+			seedRaw(t, r.mem, store.OutDir, c.name, c.data)
+			sc := r.scan()
+			if len(sc.Corrupt) != 1 {
+				t.Fatalf("quarantined files: %v", sc.Corrupt)
+			}
+			got := sc.Corrupt[0]
+			if c.trusted {
+				if k, ok := got.Key.(store.OutKey); !ok || k.Message != msgID(1) || got.Kind != store.KindOut {
+					t.Errorf("a first line of the file's own name is not trusted: %+v", got)
+				}
+			} else if got.Key != nil || got.Kind != "" {
+				t.Errorf("a first line that does not belong to the name is trusted: %+v", got)
+			}
+		})
+	}
+}
+
 // A missing directory is not an error: a node whose state/ was deleted has
 // nothing, and the layout rule makes the directories again.
 func TestScanOfMissingDirectoriesIsEmpty(t *testing.T) {

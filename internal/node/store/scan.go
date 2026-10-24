@@ -2,10 +2,8 @@ package store
 
 import (
 	"errors"
-	"github.com/aianyai/sidera/internal/node/recfile"
 	"io/fs"
 	"path"
-	"slices"
 	"sort"
 	"strings"
 
@@ -18,8 +16,11 @@ type CorruptFile struct {
 	Name     string // the full name
 	Original string // the name the file had
 	Alert    AlertID
-	// Kind and Key are those of the first line, when it was readable; Key is
-	// the parsed key.
+	// Kind and Key are those of the first line, set only when it can be trusted:
+	// it is readable, its kind is one the directory holds, and its kind and key
+	// hash to Original (the rule of DecodeRecord). Key is the parsed key. A file
+	// whose first line does not pass has neither, and is handled like one whose
+	// first line is unreadable.
 	Kind Kind
 	Key  any
 }
@@ -221,19 +222,17 @@ func (s *Store) scanRecord(sc *Scan, dir, name string) error {
 }
 
 // scanCorrupt reads the first line of a quarantined file of a directory of
-// records: when it parses, the kind and the key of the file are known, which
-// the sequence floor of a source record needs.
+// records. It is trusted by the rule of a record file (readHeader), against the
+// name the file had: only then are the kind and the key of the file known,
+// which the sequence floor of a source record needs. A first line that
+// parses but does not belong to that name says nothing about the file.
 func (s *Store) scanCorrupt(dir, name, original string, id AlertID) (CorruptFile, error) {
 	c := CorruptFile{Dir: dir, Name: name, Original: original, Alert: id}
 	data, err := s.r.ReadFile(path.Join(dir, name))
 	if err != nil {
 		return c, err
 	}
-	h, _, dmg := recfile.ParseHeader(data)
-	if dmg != nil || !slices.Contains(kindsOf(dir), Kind(h.Kind)) {
-		return c, nil
-	}
-	if key, err := ParseKey(Kind(h.Kind), h.Key); err == nil {
+	if h, _, key, dmg := readHeader(dir, original, data); dmg == nil {
 		c.Kind, c.Key = Kind(h.Kind), key
 	}
 	return c, nil

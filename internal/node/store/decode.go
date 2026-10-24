@@ -88,19 +88,9 @@ func EncodeRecord(rec Record) ([]byte, error) {
 //  7. the body decodes strictly, is the canonical encoding of what it decodes
 //     to, and passes the checks of its kind (BodyDamaged).
 func DecodeRecord(dir, name string, data []byte) (Record, *Damage) {
-	h, body, dmg := recfile.ParseHeader(data)
+	h, body, key, dmg := readHeader(dir, name, data)
 	if dmg != nil {
 		return nil, dmg
-	}
-	if !slices.Contains(kindsOf(dir), Kind(h.Kind)) {
-		return nil, headerDamage(ReasonKindNotAllowed, "%s does not hold %q", dir, h.Kind)
-	}
-	if want := recfile.FileName(h.Kind, h.Key); name != want {
-		return nil, headerDamage(ReasonNameMismatch, "the name is %q, kind and key hash to %q", name, want)
-	}
-	key, err := ParseKey(Kind(h.Kind), h.Key)
-	if err != nil {
-		return nil, headerDamage(ReasonKeyInvalid, "%v", err)
 	}
 	if dmg := recfile.CheckBody(h, body); dmg != nil {
 		return nil, dmg
@@ -110,6 +100,30 @@ func DecodeRecord(dir, name string, data []byte) (Record, *Damage) {
 		return nil, &Damage{Class: BodyDamaged, Reason: ReasonBodyInvalid, Detail: err.Error(), Kind: h.Kind, Key: h.Key}
 	}
 	return rec, nil
+}
+
+// readHeader is steps 1 to 4 of DecodeRecord: what the first line of a file of
+// dir that is, or was, named name may be trusted to say. The kind is one the
+// directory holds, the file name is the hash of kind and key, and the key
+// parses as a key of the kind; only then are the kind and the key those of the
+// file, and the key is returned parsed. It is the one place the rule lives:
+// the scan of a quarantined file asks it too, with the name the file had.
+func readHeader(dir, name string, data []byte) (h recfile.Header, body []byte, key any, dmg *Damage) {
+	h, body, dmg = recfile.ParseHeader(data)
+	if dmg != nil {
+		return h, nil, nil, dmg
+	}
+	if !slices.Contains(kindsOf(dir), Kind(h.Kind)) {
+		return h, nil, nil, headerDamage(ReasonKindNotAllowed, "%s does not hold %q", dir, h.Kind)
+	}
+	if want := recfile.FileName(h.Kind, h.Key); name != want {
+		return h, nil, nil, headerDamage(ReasonNameMismatch, "the name is %q, kind and key hash to %q", name, want)
+	}
+	key, err := ParseKey(Kind(h.Kind), h.Key)
+	if err != nil {
+		return h, nil, nil, headerDamage(ReasonKeyInvalid, "%v", err)
+	}
+	return h, body, key, nil
 }
 
 func decodeBody(kind Kind, key any, body []byte) (Record, error) {
