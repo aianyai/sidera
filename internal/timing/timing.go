@@ -1,8 +1,8 @@
 // Package timing holds the time bounds that every node must apply identically.
 //
 // A bound lives here when two nodes compare a timestamp against it and a
-// disagreement about the result would be a protocol fork. Contract packages
-// import it instead of declaring their own copy.
+// disagreement about the result would be a protocol fork. Packages import it
+// instead of declaring their own copy.
 package timing
 
 import "time"

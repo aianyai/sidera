@@ -1,6 +1,7 @@
 # Timing
 
-Time bounds shared by every contract package. At present one value:
+Time bounds that every node applies identically, imported by the contract
+packages and by the daemon's runtime clock package. At present one value:
 `ClockTolerance`.
 
 ## What
@@ -27,6 +28,13 @@ up on, is a protocol fork that no retry resolves.
 - **A constant, not a parameter.** A per-call or per-node tolerance would let two
   nodes judge the same timestamp differently. The offline-directive check had a
   tolerance parameter that no caller ever varied; it was removed for that reason.
+- **The same bound for a set-back wall clock.** Peers already accept timestamps
+  up to `ClockTolerance` from their own clock, so a set-back within it (including
+  NTP stepping a drifted clock) yields signed times and deadline judgments
+  indistinguishable from skew peers already tolerate, and pausing for it would
+  only cost availability. A larger set-back would let the node sign or judge
+  times earlier than what it already issued, beyond any peer's tolerance. Using
+  the same constant makes the threshold exactly the peers' tolerance.
 - **2 minutes.** Long enough to absorb ordinary clock error on machines that
   synchronize with network time, short enough that it adds little to the
   windows it widens (the voucher grace floor, the delivery report-by time).
@@ -39,5 +47,6 @@ up on, is a protocol fork that no retry resolves.
 | A delivery deadline may exceed the cap by this much; the expiry judgement and `report_by` add it | `internal/delivery` (`Intake`, `ReportByOffset`, `ExpiryJudgeableAfter`) |
 | An offline directive's signing time may be this far ahead of now and this far before the node lost contact | `internal/admin` (`AcceptDirective`) |
 | A certificate is issued valid from this long before its issue time, because validity is compared without tolerance and a higher serial replaces the old certificate at once | `internal/record` (`IssueNetworkKeyCertificate`, `IssueDeviceCertificate`) |
+| A reading of the wall clock may be this far behind the persisted high water mark before the node treats the clock as set back; the boundary is inclusive | `internal/node/clock` (`CheckWall`, `HighWater.Observe`; table `TestCheckWallJudgmentTable`) |
 
 The value itself: `internal/timing/timing.go`. Test: `TestClockTolerance`.
