@@ -184,7 +184,7 @@ func planCertificate(r fsx.Reader, p *initPlan, identity, network *privateKey, n
 	}
 
 	switch {
-	case haveSeen && fits && record.DecideSerial(&seen, current.verified) == record.SerialStale && current.verified.Payload().Serial == seen.Serial:
+	case haveSeen && fits && seen == record.SerialSeenOf(current.verified):
 		return nil // the certificate and the serial file agree
 	case !haveSeen && fits:
 		p.add(RoleSerial, SerialPath, encodeSerial(record.SerialSeenOf(current.verified)))

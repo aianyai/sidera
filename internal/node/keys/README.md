@@ -38,15 +38,18 @@ transaction of `txn`; nothing here calls an `fsx` write.
   and `self-revocation.rec` are the record wire bytes. A file is read only if it is
   exactly what the writer writes: a body that decodes but is not in the canonical
   form is damaged. Any damage, of the first line or of the body, is `ErrCorrupt`
-  naming the file; nothing here replaces a damaged file.
+  naming the file; nothing here replaces a damaged file. A file larger than the
+  largest record file is damaged too, and is refused by its size before it is
+  read.
 - **Permissions are refused, never fixed.** A directory or file of `keys/` that
   anyone but the owner can reach makes `Load`, `PlanInit` and the standalone
   readers fail with `ErrPermissionsTooBroad` naming it. On Unix any group or
   other bit counts; on Windows the DACL check is `fsx.Info.OwnerOnly`. Nothing
   here narrows a permission: only the owner knows who has read the file.
 - **Errors never quote a file.** The decoders say which check failed, not what
-  they found, because a key file is secret. Keys and anything that holds one print
-  as nothing under every `fmt` verb.
+  they found, because a key file is secret. Keys print as a fixed text that names only
+  their node, by pointer or as a copy, and anything that holds one prints as an
+  address.
 - **Only the marker says init finished.** Every write of `init` is optional for
   the transaction layer, which cannot require a file that was reused, so a disk on
   which `init` stopped can hold every key, the certificate and the

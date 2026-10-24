@@ -5,8 +5,11 @@ import (
 	"fmt"
 )
 
-// Failures. Every failure about a file is a *FileError that names the file, and
-// wraps one of the first four; match them with errors.Is.
+// Failures. Every failure about a file is a *FileError that names the file; match
+// the reason with errors.Is. A file that is too broad, missing, damaged or
+// inconsistent wraps one of the first four, a refused write of the clock record
+// or a second init wraps ErrClockRegression or ErrAlreadyInitialized, and a file
+// that cannot be examined or read at all wraps the error of the file system.
 var (
 	// ErrPermissionsTooBroad: someone other than the owner can reach the file.
 	// The node never narrows the permissions itself: only the owner knows who

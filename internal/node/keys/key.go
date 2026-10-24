@@ -10,17 +10,19 @@ import (
 )
 
 // privateKey is an Ed25519 private key with the identifiers derived from it. It
-// is held by pointer and it prints as nothing: no fmt verb shows the key, so a
-// log line or an error that carries one by mistake leaks nothing.
+// is held by pointer and it prints as a fixed text naming only its node: no fmt
+// verb shows the key, so a log line or an error that carries one by mistake leaks
+// nothing. The printing methods have value receivers, so that a copy of the key,
+// which fmt would otherwise print field by field, prints as no secret either.
 type privateKey struct {
 	priv ed25519.PrivateKey
 	pub  ident.PublicKey
 	node ident.NodeID // the node the key would be the identity key of
 }
 
-func (k *privateKey) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, k.String()) }
-func (k *privateKey) String() string             { return "keys.privateKey(" + k.node.String() + ")" }
-func (k *privateKey) GoString() string           { return k.String() }
+func (k privateKey) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, k.String()) }
+func (k privateKey) String() string             { return "keys.privateKey(" + k.node.String() + ")" }
+func (k privateKey) GoString() string           { return k.String() }
 
 // keyFromSeed builds the key of a 32-byte seed.
 func keyFromSeed(seed [32]byte) (*privateKey, error) {
@@ -56,7 +58,7 @@ func (k *privateKey) seed() [32]byte {
 	return s
 }
 
-// signer returns the key as a record.Signer that prints as nothing.
+// signer returns the key as a record.Signer that prints as no secret.
 func (k *privateKey) signer() record.Signer { return &keySigner{key: k} }
 
 type keySigner struct{ key *privateKey }
@@ -65,6 +67,6 @@ func (s *keySigner) Public() ident.PublicKey { return s.key.pub }
 func (s *keySigner) Sign(msg []byte) ([]byte, error) {
 	return ed25519.Sign(s.key.priv, msg), nil
 }
-func (s *keySigner) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, s.String()) }
-func (s *keySigner) String() string             { return "keys.Signer(" + s.key.node.String() + ")" }
-func (s *keySigner) GoString() string           { return s.String() }
+func (s keySigner) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, s.String()) }
+func (s keySigner) String() string             { return "keys.Signer(" + s.key.node.String() + ")" }
+func (s keySigner) GoString() string           { return s.String() }

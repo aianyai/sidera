@@ -24,7 +24,7 @@ func TestWindowsDACLWiderThanTheOwnerIsRefusedNamingTheFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{keys.IdentityKeyPath, keys.NetworkKeyPath, keys.CertificatePath, keys.SerialPath, keys.SelfRevocationPath, keys.ClockPath, keys.InitMarkerPath} {
+	for _, p := range []string{keys.Dir, keys.IdentityKeyPath, keys.NetworkKeyPath, keys.CertificatePath, keys.SerialPath, keys.SelfRevocationPath, keys.ClockPath, keys.InitMarkerPath} {
 		abs := filepath.Join(r.root, filepath.FromSlash(p))
 		sd, err := windows.GetNamedSecurityInfo(abs, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 		if err != nil {

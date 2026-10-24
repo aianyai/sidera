@@ -149,7 +149,8 @@ produces: fields in the order below, no spaces, times as UTC in whole seconds
 
 **Loading.** The node refuses to start, naming the file, when the directory or a
 file can be reached by anyone but the owner, when a file is missing or damaged
-(`init.rec` included: only the marker says that `init` finished), or when the
+(`init.rec` included: only the marker says that `init` finished; a file larger than
+the largest record file is damaged, and is not read), or when the
 files contradict each other: the certificate must be for the node of
 the identity key and name the network key; the serial file must be this node's
 and not behind the certificate, and at the certificate's serial it must name the
@@ -325,9 +326,10 @@ certificate below.
   of which spelling a file may have, and makes the decoders fuzzable for
   round-tripping.
 - **Errors never quote a file.** Terminals and logs are not places for a seed,
-  damaged or not; the decoders report which check failed. Keys and holders of keys
-  print as nothing, because `fmt` shows the unexported fields of a struct whatever
-  methods its members have.
+  damaged or not; the decoders report which check failed. Keys print as a fixed text that names only
+  their node, as a pointer or as a copy, and holders of keys are held behind a
+  pointer so that they print as an address, because `fmt` shows the unexported
+  fields of a struct whatever methods its members have.
 - **The serial is written before the certificate and is the commit point.** If the
   certificate came first, a crash between the writes would leave a published
   certificate whose serial the serial file did not know, and the next renewal could

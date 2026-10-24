@@ -7,7 +7,12 @@ import (
 	"path"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/recfile"
 )
+
+// maxFileSize is the size of the largest file of keys/: a record file at its
+// limits. The signed records (the certificate, the self-revocation) are smaller.
+const maxFileSize = recfile.MaxHeaderLen + recfile.MaxBodyLen
 
 // statOwnerOnly reports the file as missing, a directory, or too broad; nil when
 // it is a file that only its owner can reach.
@@ -26,7 +31,8 @@ func statOwnerOnly(r fsx.Reader, p string) (fsx.Info, error) {
 }
 
 // readOwnerOnly reads a file of keys/, after checking that only its owner can
-// reach it: a key that others could read is not read at all.
+// reach it (a key that others could read is not read at all) and that it is not
+// larger than any file of keys/ can be.
 func readOwnerOnly(r fsx.Reader, p string) ([]byte, error) {
 	info, err := statOwnerOnly(r, p)
 	if err != nil {
@@ -34,6 +40,9 @@ func readOwnerOnly(r fsx.Reader, p string) ([]byte, error) {
 	}
 	if info.IsDir {
 		return nil, fileError(p, ErrCorrupt, "it is a directory")
+	}
+	if info.Size > maxFileSize {
+		return nil, fileError(p, ErrCorrupt, "it is %d bytes, over the %d of the largest file", info.Size, maxFileSize)
 	}
 	data, err := r.ReadFile(p)
 	if errors.Is(err, fs.ErrNotExist) {

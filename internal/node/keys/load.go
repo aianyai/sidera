@@ -141,7 +141,7 @@ func checkSerial(seen record.SerialSeen, cert record.Verified[record.NetworkKeyC
 // Node is the identifier of this node, derived from its identity key.
 func (k *Keys) Node() ident.NodeID { return k.s.identity.node }
 
-// NetworkSigner signs with the network key. It prints as nothing. The identity
+// NetworkSigner signs with the network key. It prints as no secret. The identity
 // key signs inside this package only: the certificates and the self-revocation.
 func (k *Keys) NetworkSigner() record.Signer { return k.s.network.signer() }
 

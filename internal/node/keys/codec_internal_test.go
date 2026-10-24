@@ -167,8 +167,8 @@ func TestDecodersAcceptTheGoldenFiles(t *testing.T) {
 	}
 }
 
-// A private key prints as nothing under every verb, held by pointer as it always
-// is. The seed is shown in no spelling.
+// A private key prints as no secret under every verb, held by pointer as it always
+// is and as a copy. The seed is shown in no spelling.
 func TestPrivateKeyPrintsAsNothing(t *testing.T) {
 	var seed [32]byte
 	for i := range seed {
@@ -178,7 +178,9 @@ func TestPrivateKeyPrintsAsNothing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []any{k, k.signer()} {
+	// by pointer, as the package holds them, and as values, should a copy of one
+	// ever be printed
+	for _, v := range []any{k, *k, k.signer(), *k.signer().(*keySigner)} {
 		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%x", "%d", "%q"} {
 			out := fmt.Sprintf(verb, v)
 			for _, spelling := range []string{hex.EncodeToString(seed[:]), fmt.Sprint(seed[:]), string(seed[:]), base64.RawURLEncoding.EncodeToString(seed[:])} {
