@@ -2,6 +2,9 @@ package keys
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -153,5 +156,49 @@ func TestDecodersAcceptTheGoldenFiles(t *testing.T) {
 	}
 	if at, err := decodeInit([]byte(initFileGolden)); err != nil || at.Hour() != 6 {
 		t.Errorf("init: %v, %v", at, err)
+	}
+}
+
+// A private key prints as nothing under every verb, held by pointer as it always
+// is. The seed is shown in no spelling.
+func TestPrivateKeyPrintsAsNothing(t *testing.T) {
+	var seed [32]byte
+	for i := range seed {
+		seed[i] = byte(i + 1)
+	}
+	k, err := keyFromSeed(seed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []any{k, k.signer()} {
+		for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%x", "%d", "%q"} {
+			out := fmt.Sprintf(verb, v)
+			for _, spelling := range []string{hex.EncodeToString(seed[:]), fmt.Sprint(seed[:]), string(seed[:]), base64.RawURLEncoding.EncodeToString(seed[:])} {
+				if strings.Contains(out, spelling) {
+					t.Errorf("%s of %T shows the seed: %s", verb, v, out)
+				}
+			}
+		}
+	}
+}
+
+// A key file is read only in the form the writer writes: another spelling of the
+// same key (spaces, the fields in the other order) is damage, not a second form.
+func TestDecodeKeyFileRefusesAnotherSpellingOfTheSameKey(t *testing.T) {
+	const seedText = "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A"
+	for name, body := range map[string]string{
+		"spaces":            `{"algorithm": "ed25519", "seed": "` + seedText + `"}`,
+		"other order":       `{"seed":"` + seedText + `","algorithm":"ed25519"}`,
+		"padded seed":       `{"algorithm":"ed25519","seed":"` + seedText + `="}`,
+		"standard alphabet": `{"algorithm":"ed25519","seed":"` + strings.NewReplacer("_", "/", "-", "+").Replace(seedText) + `"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := decodeKeyFile(kindIdentityKey, encodeEnvelope(kindIdentityKey, []byte(body))); err == nil {
+				t.Error("accepted")
+			}
+		})
+	}
+	if _, err := decodeKeyFile(kindIdentityKey, encodeEnvelope(kindIdentityKey, []byte(`{"algorithm":"ed25519","seed":"`+seedText+`"}`))); err != nil {
+		t.Errorf("the written form is refused: %v", err)
 	}
 }

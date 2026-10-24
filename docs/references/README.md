@@ -10,7 +10,7 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 
 | Topic | Scope |
 | ----- | ----- |
-| [identity](identity/README.md) | Identifiers for nodes, people and endpoints, public keys, identifier derivation and the bech32m text form |
+| [identity](identity/README.md) | Identifiers for nodes, people and endpoints, public keys, identifier derivation and the bech32m text form; the node's keys on disk: files and formats, permissions, certificate serial and renewal, clock record, `init` rules, the self-revocation export |
 | [trust](trust/README.md) | Direct and inherited trust, online vouchers and the grace period, local revocation, eviction, offline revoke directives |
 | [policy](policy/README.md) | The node-local access policy: rules, allow/suspend/reject outcomes, reply permission, endpoint declarations, and tighten/loosen classification of policy changes |
 | [administration](administration/README.md) | Who may administer a node: authorized-persons list, levels, operation catalogue, offline directives, management request semantics |

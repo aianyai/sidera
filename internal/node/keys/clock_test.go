@@ -62,6 +62,7 @@ func TestReadClockRefusesEverythingThatIsNotTheWrittenForm(t *testing.T) {
 		{"fields out of order", oracleHeader("clock", `{"rollback_paused_since":"2026-10-24T05:50:00Z","high_water":"2026-10-24T05:56:00Z"}`)},
 		{"time with an offset", oracleHeader("clock", `{"high_water":"2026-10-24T07:56:00+02:00"}`)},
 		{"time with fractions", oracleHeader("clock", `{"high_water":"2026-10-24T05:56:00.5Z"}`)},
+		{"hour with one digit", oracleHeader("clock", `{"high_water":"2026-10-24T5:56:00Z"}`)},
 		{"time that is not a time", oracleHeader("clock", `{"high_water":"yesterday"}`)},
 		{"time before the epoch", oracleHeader("clock", `{"high_water":"1969-12-31T23:59:59Z"}`)},
 		{"zero time", oracleHeader("clock", `{"high_water":"0001-01-01T00:00:00Z"}`)},
@@ -88,7 +89,7 @@ func oracleHeader(kind, body string) string { return string(oracleRecordFile(kin
 // whole seconds.
 func TestSaveClockWritesTheGoldenForm(t *testing.T) {
 	r := newRig(t)
-	r.mustInit(1, t0)
+	r.mustInit(1, t0.Add(-time.Hour)) // before the golden mark, which is at 05:56
 	k := r.mustLoad()
 
 	hw := time.Date(2026, 10, 24, 5, 56, 0, 999_000_000, time.UTC)
@@ -127,6 +128,7 @@ func TestSaveClockNeverGoesBack(t *testing.T) {
 		{"raise the mark", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw.Add(time.Minute)}, false},
 		{"same mark", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw}, false},
 		{"same mark within the second", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw.Add(500 * time.Millisecond)}, false},
+		{"zero state with no record", keys.ClockState{}, keys.ClockState{}, true},
 		{"lower the mark", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw.Add(-time.Second)}, true},
 		{"zero state", keys.ClockState{HighWater: hw}, keys.ClockState{}, true},
 		{"start the pause", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: since}, false},

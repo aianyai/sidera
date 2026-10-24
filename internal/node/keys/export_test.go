@@ -119,6 +119,11 @@ func TestReadSelfRevocationRefusals(t *testing.T) {
 			put(t, m, keys.SelfRevocationPath, base.read(keys.CertificatePath))
 			return m
 		}, keys.ErrCorrupt},
+		{"a revocation of a certificate", func() *fsxtest.Mem {
+			m := base.mem.Clone()
+			put(t, m, keys.SelfRevocationPath, certRevocationWire(t, base))
+			return m
+		}, keys.ErrCorrupt},
 		{"empty", func() *fsxtest.Mem { m := base.mem.Clone(); put(t, m, keys.SelfRevocationPath, nil); return m }, keys.ErrCorrupt},
 	}
 	for _, row := range rows {

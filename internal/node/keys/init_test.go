@@ -3,10 +3,10 @@ package keys_test
 import (
 	"bytes"
 	"crypto/ed25519"
-	"encoding/hex"
 	"errors"
 	"math/rand/v2"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,6 +274,10 @@ func TestInitReusesAValidSelfRevocation(t *testing.T) {
 	if !bytes.Equal(r2.read(keys.SelfRevocationPath), was) {
 		t.Error("the self-revocation was rewritten")
 	}
+	// the certificate and the serial that agree are reused as they are as well
+	if !bytes.Equal(r2.read(keys.CertificatePath), r.read(keys.CertificatePath)) || !bytes.Equal(r2.read(keys.SerialPath), r.read(keys.SerialPath)) {
+		t.Error("a certificate that matches its serial was signed again")
+	}
 }
 
 // A self-revocation that does not verify under the current identity key is
@@ -297,6 +301,7 @@ func TestInitRefusesASelfRevocationThatDoesNotVerifyUnderTheCurrentKey(t *testin
 	}{
 		{"another identity's statement", other.read(keys.SelfRevocationPath), keys.ErrInconsistent},
 		{"a certificate", base.read(keys.CertificatePath), keys.ErrCorrupt},
+		{"a revocation of a certificate, which verifies but is not a node's self-revocation", certRevocationWire(t, base), keys.ErrCorrupt},
 		{"a flipped signature bit", flipped, keys.ErrCorrupt},
 		{"truncated", mine[:len(mine)-10], keys.ErrCorrupt},
 		{"empty", nil, keys.ErrCorrupt},
@@ -405,9 +410,19 @@ func TestInitReSignsACertificateThatDoesNotMatch(t *testing.T) {
 		{"certificate damaged", func(r *rig) { put(t, r.mem, keys.CertificatePath, []byte("junk")) }, 2, true},
 		{"certificate missing", func(r *rig) { remove(t, r.mem, keys.CertificatePath) }, 2, true},
 		{"serial ahead of the certificate: an interrupted renewal", func(r *rig) {
-			put(t, r.mem, keys.SerialPath, oracleSerialFile(r.mustLoadNode(), 5, hex.EncodeToString(make([]byte, 32))))
+			put(t, r.mem, keys.SerialPath, oracleSerialFile(r.mustLoadNode(), 5, strings.Repeat("ab", 32)))
 		}, 6, true},
 		{"serial missing, certificate valid", func(r *rig) { remove(t, r.mem, keys.SerialPath) }, 1, false},
+		{"serial behind a valid certificate of this node", func(r *rig) {
+			// two renewals: the certificate is at 3, then the serial file is put back to 1
+			k := r.mustLoad()
+			for i := 1; i <= 2; i++ {
+				if err := k.Renew(t0.Add(time.Duration(i) * time.Hour)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			put(t, r.mem, keys.SerialPath, oldSerial)
+		}, 4, true},
 	}
 	for _, row := range rows {
 		t.Run(row.name, func(t *testing.T) {
@@ -448,4 +463,25 @@ func (r *rig) mustLoadNode() string {
 		r.t.Fatal(err)
 	}
 	return rv.Node().String()
+}
+
+// certRevocationWire is a statement that verifies as a revocation, signed by the
+// identity key of the rig's node, of the kind that retires one certificate. It
+// is not the statement that retires the identity.
+func certRevocationWire(t *testing.T, r *rig) []byte {
+	t.Helper()
+	k := open(t, r.mem.Clone()).mustLoad()
+	signer, err := record.NewEd25519Signer(ed25519.NewKeyFromSeed(stream(1, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := revocation.IssueNetworkKeyCertificateRevocation(k.Certificate(), signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := rec.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wire
 }
