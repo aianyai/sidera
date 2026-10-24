@@ -439,6 +439,15 @@ them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch quarantines the body and
 every record that refers to it either becomes a lost record, if it still needs the
 bytes, or loses the reference.
 
+**Existence is read before the transaction opens.** A call that removes files
+(a release of bodies, a sweep, an orphan collection) asks the disk which of them
+are there before it begins, and the removals only consult that answer. A read
+that failed inside the transaction after its commit point would be an ordinary
+error on a disk that already changed, and the caller would go on with a view of
+memory that is no longer the disk; a failed read before it ends the call with
+nothing written. A file that is gone is skipped, so a release interrupted by a
+crash can be repeated.
+
 **Quarantine.** A damaged file is renamed `<name>.<alert id>.corrupt`, where the
 alert id is chosen before and never repeats, so a replacement that is damaged in
 its turn gets a file of its own. The last write of every quarantine is the alert,

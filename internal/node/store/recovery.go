@@ -635,10 +635,18 @@ func (s *Store) OrphanGC(bodies []string) error {
 			return fmt.Errorf("store: %q is not the name of a body", b)
 		}
 	}
+	files := make([]FileRef, len(bodies))
+	for i, b := range bodies {
+		files[i] = FileRef{Dir: BodiesDir, Name: b}
+	}
+	ex, err := s.exist(files)
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(&declOrphanGC)
 	defer tx.Close()
-	for _, b := range bodies {
-		if _, err := s.removeRef(tx, "body", FileRef{Dir: BodiesDir, Name: b}); err != nil {
+	for _, f := range files {
+		if _, err := s.removeRef(tx, "body", f, ex); err != nil {
 			return err
 		}
 	}
@@ -653,10 +661,18 @@ func (s *Store) OrphanGCEndpoint(eps []EndpointRecord) error {
 	if len(eps) == 0 {
 		return nil
 	}
+	files := make([]FileRef, len(eps))
+	for i, e := range eps {
+		files[i] = FileRef{Dir: EndpointsDir, Name: e.Name()}
+	}
+	ex, err := s.exist(files)
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(&declOrphanGCEndpoint)
 	defer tx.Close()
-	for _, e := range eps {
-		if _, err := s.removeRef(tx, "endpoint", FileRef{Dir: EndpointsDir, Name: e.Name()}); err != nil {
+	for _, f := range files {
+		if _, err := s.removeRef(tx, "endpoint", f, ex); err != nil {
 			return err
 		}
 	}

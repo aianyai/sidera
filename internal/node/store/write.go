@@ -118,23 +118,57 @@ func (s *Store) replace(tx *txn.Tx, role string, f file) error {
 	return tx.Replace(role, f.path, f.data, fsx.ModePrivate)
 }
 
+// existence says which of the files a call is about to remove are there. The
+// call asks the disk before it opens its transaction. A transaction that has passed its
+// commit point turns every failure into a fatal one, and a read that fails
+// there would be an ordinary error on a disk that already changed; so no call
+// reads the disk once it writes.
+type existence map[FileRef]bool
+
+// exist asks the disk about every file of the groups.
+func (s *Store) exist(groups ...[]FileRef) (existence, error) {
+	ex := existence{}
+	for _, group := range groups {
+		for _, f := range group {
+			there, err := fsx.Exists(s.r, path.Join(f.Dir, f.Name))
+			if err != nil {
+				return nil, err
+			}
+			ex[f] = there
+		}
+	}
+	return ex, nil
+}
+
+// take reports whether the file is there and forgets it, so that a name listed
+// twice is removed once.
+func (e existence) take(f FileRef) bool {
+	there := e[f]
+	delete(e, f)
+	return there
+}
+
+// bodyFiles are the files of the bodies, each once.
+func bodyFiles(refs []BodyRef) []FileRef {
+	var out []FileRef
+	for _, r := range dedupe(refs) {
+		out = append(out, FileRef{Dir: BodiesDir, Name: r.Name()})
+	}
+	return out
+}
+
 // release removes the body files named, those that are there, and syncs
 // bodies/. A body that is already gone was removed by an earlier, interrupted
 // release.
-func (s *Store) release(tx *txn.Tx, refs []BodyRef) error {
+func (s *Store) release(tx *txn.Tx, refs []BodyRef, ex existence) error {
 	if len(refs) == 0 {
 		return nil
 	}
-	for _, r := range dedupe(refs) {
-		p := path.Join(BodiesDir, r.Name())
-		there, err := fsx.Exists(s.r, p)
-		if err != nil {
-			return err
-		}
-		if !there {
+	for _, f := range bodyFiles(refs) {
+		if !ex.take(f) {
 			continue
 		}
-		if err := tx.Remove("body", p); err != nil {
+		if err := tx.Remove("body", path.Join(f.Dir, f.Name)); err != nil {
 			return err
 		}
 	}
@@ -260,12 +294,16 @@ func (s *Store) SourceUpdate(out OutRecord, release []BodyRef) error {
 	if err != nil {
 		return err
 	}
+	ex, err := s.exist(bodyFiles(release))
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(&declSourceUpdate)
 	defer tx.Close()
 	if err := s.replace(tx, "out", of); err != nil {
 		return err
 	}
-	if err := s.release(tx, release); err != nil {
+	if err := s.release(tx, release, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -329,6 +367,10 @@ func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord, release [
 		}
 		ef = &f
 	}
+	ex, err := s.exist(bodyFiles(release))
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(&declControlResult)
 	defer tx.Close()
 	if err := s.replace(tx, "ctl", cf); err != nil {
@@ -339,7 +381,7 @@ func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord, release [
 			return err
 		}
 	}
-	if err := s.release(tx, release); err != nil {
+	if err := s.release(tx, release, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -453,12 +495,16 @@ func (s *Store) Ack(ins []InRecord, release []BodyRef) error {
 	if err != nil {
 		return err
 	}
+	ex, err := s.exist(bodyFiles(release))
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(&declAck)
 	defer tx.Close()
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
 		return err
 	}
-	if err := s.release(tx, release); err != nil {
+	if err := s.release(tx, release, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -489,6 +535,10 @@ func (s *Store) Tick(b TickBatch) error {
 	if len(of)+len(inf)+len(cf) == 0 {
 		return errors.New("store: Tick needs a record")
 	}
+	ex, err := s.exist(bodyFiles(b.Release))
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(&declTick)
 	defer tx.Close()
 	if err := writeGroup(tx, "out", "out-dir", OutDir, of); err != nil {
@@ -500,7 +550,7 @@ func (s *Store) Tick(b TickBatch) error {
 	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
 		return err
 	}
-	if err := s.release(tx, b.Release); err != nil {
+	if err := s.release(tx, b.Release, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -586,6 +636,10 @@ func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, wit
 	if !withHead && len(inf)+len(cf) == 0 {
 		return errors.New("store: a drain closes a record")
 	}
+	ex, err := s.exist(bodyFiles(b.Release))
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(decl)
 	defer tx.Close()
 	if withHead {
@@ -599,7 +653,7 @@ func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, wit
 	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
 		return err
 	}
-	if err := s.release(tx, b.Release); err != nil {
+	if err := s.release(tx, b.Release, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -737,13 +791,15 @@ func (s *Store) AlertAck(a AlertAckInput) error {
 		}
 		q = path.Join(a.Quarantined.Dir, a.Quarantined.Name)
 	}
+	var there bool
+	if q != "" {
+		if there, err = fsx.Exists(s.r, q); err != nil {
+			return err
+		}
+	}
 	tx := s.w.Begin(&declAlertAck)
 	defer tx.Close()
 	if q != "" {
-		there, err := fsx.Exists(s.r, q)
-		if err != nil {
-			return err
-		}
 		if there {
 			if err := tx.Remove("quarantined", q); err != nil {
 				return err
@@ -1026,6 +1082,10 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		return nil
 	}
 
+	ex, err := s.exist(c.Corrupt, c.Ctl, c.Records, outs, bodyFiles(c.Bodies), c.Endpoints)
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(&declArchiveSweep)
 	defer tx.Close()
 	if len(lines) > 0 {
@@ -1042,24 +1102,24 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 			return err
 		}
 	}
-	if err := s.removeAll(tx, "corrupt", "corrupt-dir", c.Corrupt); err != nil {
+	if err := s.removeAll(tx, "corrupt", "corrupt-dir", c.Corrupt, ex); err != nil {
 		return err
 	}
-	if err := s.removeAll(tx, "ctl", "ctl-dir", c.Ctl); err != nil {
+	if err := s.removeAll(tx, "ctl", "ctl-dir", c.Ctl, ex); err != nil {
 		return err
 	}
 	dirs := map[string]bool{}
 	for _, group := range [][]FileRef{c.Records, outs} {
 		for _, f := range group {
-			if removed, err := s.removeRef(tx, "record", f); err != nil {
+			if removed, err := s.removeRef(tx, "record", f, ex); err != nil {
 				return err
 			} else if removed {
 				dirs[f.Dir] = true
 			}
 		}
 	}
-	for _, r := range dedupe(c.Bodies) {
-		if removed, err := s.removeRef(tx, "body", FileRef{Dir: BodiesDir, Name: r.Name()}); err != nil {
+	for _, f := range bodyFiles(c.Bodies) {
+		if removed, err := s.removeRef(tx, "body", f, ex); err != nil {
 			return err
 		} else if removed {
 			dirs[BodiesDir] = true
@@ -1073,7 +1133,7 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 	// The endpoint records go once what hangs on them is durably gone: a power
 	// loss that kept the removal of the endpoint and lost that of its floor file
 	// would leave a file no sweep removes.
-	if err := s.removeAll(tx, "endpoint", "endpoint-dir", c.Endpoints); err != nil {
+	if err := s.removeAll(tx, "endpoint", "endpoint-dir", c.Endpoints, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1088,22 +1148,20 @@ func sortedDirs(m map[string]bool) []string {
 	return out
 }
 
-// removeRef removes a file if it is there, reporting whether it did.
-func (s *Store) removeRef(tx *txn.Tx, role string, f FileRef) (bool, error) {
-	p := path.Join(f.Dir, f.Name)
-	there, err := fsx.Exists(s.r, p)
-	if err != nil || !there {
-		return false, err
+// removeRef removes a file if ex says it is there, reporting whether it did.
+func (s *Store) removeRef(tx *txn.Tx, role string, f FileRef, ex existence) (bool, error) {
+	if !ex.take(f) {
+		return false, nil
 	}
-	return true, tx.Remove(role, p)
+	return true, tx.Remove(role, path.Join(f.Dir, f.Name))
 }
 
 // removeAll removes files under one role and syncs each directory they were in
 // under another.
-func (s *Store) removeAll(tx *txn.Tx, role, syncRole string, refs []FileRef) error {
+func (s *Store) removeAll(tx *txn.Tx, role, syncRole string, refs []FileRef, ex existence) error {
 	dirs := map[string]bool{}
 	for _, f := range refs {
-		if removed, err := s.removeRef(tx, role, f); err != nil {
+		if removed, err := s.removeRef(tx, role, f, ex); err != nil {
 			return err
 		} else if removed {
 			dirs[f.Dir] = true

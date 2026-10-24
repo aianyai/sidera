@@ -59,6 +59,10 @@ engine applies the delivery rules and calls the writes.
   alert says when it may go: the retention of a lost record found then (from
   `delivery.LostReportBy`) is the bound. A file with a record under its name goes
   with that record.
+- **Existence is read before the transaction opens.** A call that removes files
+  asks the disk which are there first and only consults the answer while it
+  writes: a read that failed after the commit point would be an ordinary error on
+  a disk that already changed.
 - **A removal is checked.** The sweep refuses a name that is not a record file or a
   quarantined file of a directory of records.
 - **A control record goes before the delivery derived from it** in a sweep, and a
