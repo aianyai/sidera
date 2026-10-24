@@ -40,6 +40,11 @@ jobs:
 
   # The same three checks on every platform a node runs on. The race detector
   # needs cgo and a C compiler; all three hosted images ship one.
+  #
+  # go test stops a package after 10 minutes unless told otherwise; the explicit
+  # limit leaves the job's own timeout room for setup and a readable failure.
+  # The power-loss tests replay a crash on an in-memory file system, so only
+  # Linux runs them; the other platforms skip them by name.
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -51,6 +56,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      SKIP_TESTS: ${{ matrix.os != 'ubuntu-latest' && '^TestPowerLossClone' || '' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -62,9 +69,41 @@ jobs:
       - name: go vet
         run: go vet ./... ./sdk/go/...
       - name: go test
-        run: go test -count=1 ./... ./sdk/go/...
+        run: go test -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
       - name: go test -race
-        run: go test -race -count=1 ./... ./sdk/go/...
+        run: go test -race -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
+
+  # The same checks again with the build tags that select binary-level crash
+  # points and the test clock, which the untagged job never compiles. vet also
+  # sees the acceptance tag, so the files it selects are type-checked on every
+  # platform; the tests behind that tag run in their own jobs, not here.
+  test-tags:
+    name: test with tags (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    env:
+      SKIP_TESTS: ${{ matrix.os != 'ubuntu-latest' && '^TestPowerLossClone' || '' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: "**/go.sum"
+      - name: go vet with tags
+        run: go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
+      - name: go test with tags
+        run: go test -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" ./... ./sdk/go/...
+      - name: go test -race with tags
+        run: go test -race -count=1 -timeout 30m -tags crashtest,testclock -skip "$SKIP_TESTS" ./... ./sdk/go/...
 
   # sdk/go is published as its own module, so it must build, test and be tidy
   # without go.work.

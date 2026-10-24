@@ -8,18 +8,35 @@ The workflow is [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml).
 
 The workflow runs on every push to `main`, on every pull request and on manual
 dispatch. Every step fails its job on any failure; there is no
-`continue-on-error` and no test is skipped, so the suite runs without `-short`.
+`continue-on-error`; the only tests skipped are the power-loss tests on macOS
+and Windows (see below), and the suite runs without `-short`.
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
 | `format` | Linux | `gofmt -l .` must print nothing |
-| `test` | Linux, macOS, Windows | `go vet ./... ./sdk/go/...`, `go test -count=1 ./... ./sdk/go/...`, `go test -race -count=1 ./... ./sdk/go/...` |
+| `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...` |
+| `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
 | `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64 |
 
 `./...` at the root covers every package of the root module, `cmd/` binaries
 included; `./sdk/go/...` adds the SDK module that `go.work` joins to it. The
 five platforms are the ones Sidera ships binaries for.
+
+### Build tags
+
+Three tags exist; none selects code yet, so until tagged files land the
+`test-tags` job compiles and runs exactly what `test` does.
+
+| Tag | Selects | Compiled by |
+| --- | ------- | ----------- |
+| `crashtest` | binary-level crash points, which stop a real process at a named step | `test-tags` |
+| `testclock` | the test clock a binary reads from its environment | `test-tags` |
+| `acceptance` | the test files that drive built binaries | `go vet` in `test-tags`; their tests run only in the acceptance jobs |
+
+`go test` in `test-tags` leaves `acceptance` off on purpose: those tests start
+binaries and have their own jobs, limits and timeouts. `go vet` in `test-tags`
+adds it so the files are at least type-checked on every platform.
 
 ### Not run yet
 
@@ -46,6 +63,22 @@ to the workflow.
   compiler, which all three hosted runner images carry.
 - **Race and plain runs are separate steps**: the race detector changes timing
   and memory use; a failure in one mode must be visible without the other.
+- **Why a second tagged job**: tagged files are not compiled without their tag,
+  so `test` alone would never vet or run them. A separate job, not an extra
+  step, keeps each failure attributable to the build it came from and lets
+  both builds run in parallel.
+- **Explicit `-timeout`**: `go test` aborts a package after 10 minutes by
+  default, which a slow runner under `-race` can exceed. Every `go test` step
+  names `30m`, inside the job's 40 minute limit, so a hang ends with the test
+  binary's goroutine dump and not with the job being killed.
+- **Power-loss tests run on Linux only**: tests that replay a crash against an
+  in-memory file system model the same thing on every platform, so repeating
+  them elsewhere only costs time. Their names all start with
+  `TestPowerLossClone`; `test` and `test-tags` skip that prefix with
+  `-skip '^TestPowerLossClone'` on macOS and Windows and skip nothing on Linux.
+  The fast fault-injection tests of the same file system are not named this
+  way and run everywhere. Any new power-loss test must keep the prefix, or it
+  will run on all three platforms.
 - **Full suite on shared runners**: some tests are skipped under `-short`
   (`internal/pairing` property tests, `internal/authz` classification sweeps,
   `protocol` peer wire test, which re-runs the SDK peer tests). CI runs them
@@ -86,8 +119,13 @@ From the repository root (zsh and bash alike; on Windows use Git Bash):
 ```sh
 gofmt -l .   # must print nothing
 go vet ./... ./sdk/go/...
-go test -count=1 ./... ./sdk/go/...
-go test -race -count=1 ./... ./sdk/go/...
+go test -count=1 -timeout 30m ./... ./sdk/go/...
+go test -race -count=1 -timeout 30m ./... ./sdk/go/...
+
+# the tagged job; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
+go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
+go test -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
+go test -race -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 
 (cd sdk/go && GOWORK=off go build ./... && GOWORK=off go test ./... && GOWORK=off go mod tidy -diff)
 
