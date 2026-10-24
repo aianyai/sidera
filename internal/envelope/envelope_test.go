@@ -154,7 +154,7 @@ func TestEnvelopeDecodeRules(t *testing.T) {
 		{"a body comes with a content type, on a session.create too", create, func(w *envelopeWire) { w.ContentType = "" }, ErrBody},
 		{"a body comes with a content type", message, func(w *envelopeWire) { w.ContentType = "" }, ErrBody},
 		{"a message has a body", message, func(w *envelopeWire) { w.Body, w.ContentType = nil, "" }, ErrBody},
-		{"a body is at most MaxBody", message, func(w *envelopeWire) { w.Body = bytes.Repeat([]byte{'a'}, testLimits.MaxBody+1) }, ErrBody},
+		{"a body is at most MaxBody", message, func(w *envelopeWire) { w.Body = bytes.Repeat([]byte{'a'}, testLimits.MaxBody+1) }, ErrBodyTooLarge},
 		{"a content type is printable ASCII", message, func(w *envelopeWire) { w.ContentType = "text/\x01" }, ErrBody},
 		{"a content type is at most 128 bytes", message, func(w *envelopeWire) { w.ContentType = strings.Repeat("a", MaxContentTypeLen+1) }, ErrBody},
 		{"a message has no params", message, func(w *envelopeWire) { w.Params = &paramsWire{Preset: "default"} }, ErrParams},
@@ -644,6 +644,42 @@ func TestRequestDigest(t *testing.T) {
 				t.Error("digest unchanged")
 			}
 		})
+	}
+}
+
+// A caller reports a body over the limit to the sender as too large and one
+// that is inconsistent as malformed, so the two are told apart by the error.
+func TestATooLargeBodyIsToldApartFromAMalformedOne(t *testing.T) {
+	small := Limits{MaxBody: 4, MaxRecipients: 64}
+	_, err := Decode(goldenEnvelopeMessage, small)
+	requireErr(t, err, ErrBodyTooLarge, ErrBody)
+
+	exact := Limits{MaxBody: len("hello"), MaxRecipients: 64}
+	if _, err := Decode(goldenEnvelopeMessage, exact); err != nil {
+		t.Errorf("a body of exactly MaxBody bytes: %v", err)
+	}
+
+	cases := []struct {
+		rule  string
+		build func() envelopeWire
+		mut   func(*envelopeWire)
+	}{
+		{"a content type without a body", func() envelopeWire { return wireOf(t, baseMessage(t)) }, func(w *envelopeWire) { w.Body = nil }},
+		{"a body without a content type", func() envelopeWire { return wireOf(t, baseMessage(t)) }, func(w *envelopeWire) { w.ContentType = "" }},
+		{"a content type that is not printable", func() envelopeWire { return wireOf(t, baseMessage(t)) }, func(w *envelopeWire) { w.ContentType = "text/\x01" }},
+		{"a message without a body", func() envelopeWire { return wireOf(t, baseMessage(t)) }, func(w *envelopeWire) { w.Body, w.ContentType = nil, "" }},
+		{"a body on a session.close", func() envelopeWire { return wireOf(t, baseCreate(t)) }, func(w *envelopeWire) {
+			w.Kind, w.Params = wireKindSessionClose, nil
+		}},
+	}
+	for _, c := range cases {
+		w := c.build()
+		c.mut(&w)
+		err := decodeWire(t, w, testLimits)
+		requireErr(t, err, ErrBody)
+		if errors.Is(err, ErrBodyTooLarge) {
+			t.Errorf("%s: reported as too large: %v", c.rule, err)
+		}
 	}
 }
 

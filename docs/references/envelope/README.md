@@ -47,6 +47,10 @@ identifiers are distinct across the list; evidence needs a `reply_to`. `from` is
 not in the envelope. Encoding refuses what decoding refuses. The cap on
 `accept_before` is judged by the delivery intake, not by the envelope. The
 longest body and the most recipients are parameters (`Limits`) without defaults.
+A body over the longest is `ErrBodyTooLarge`, which wraps `ErrBody` (the content
+type and body are inconsistent or not allowed), so a caller that reports the two
+differently to the sender can tell them apart; an input longer than the size the
+limits allow is refused before parsing, with the record package's oversize error.
 
 The receiving node adds what the bytes cannot say (`ValidateFor`, which the
 receiving node must call on every decoded envelope): it has a recipient in `to`;

@@ -29,7 +29,9 @@ this package is [`reply`](../reply/README.md).
 Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 `ErrPeerContradiction` means the peer broke the contract (a second distinct
 control reply, a reply to a rejected signal, a state that cannot follow): the
-caller stops pulling from that peer for the message and logs it.
+caller stops pulling from that peer for the message and logs it. `ErrBodyTooLarge` wraps `ErrBody`, so a
+caller tells a body over `Limits.MaxBody` from a malformed one; an input over the
+size derived from the limits is refused before parsing, with `record.ErrOversize`.
 
 ## Rules
 

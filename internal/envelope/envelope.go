@@ -365,7 +365,7 @@ func fromWireContent(e *Envelope, w envelopeWire, lim Limits) error {
 			return fmt.Errorf("%w: content type: %v", ErrBody, err)
 		}
 		if len(w.Body) > lim.MaxBody {
-			return fmt.Errorf("%w: %d bytes, limit %d", ErrBody, len(w.Body), lim.MaxBody)
+			return fmt.Errorf("%w: %d bytes, limit %d", ErrBodyTooLarge, len(w.Body), lim.MaxBody)
 		}
 	}
 	switch {

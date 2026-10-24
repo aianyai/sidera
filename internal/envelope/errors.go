@@ -1,6 +1,9 @@
 package envelope
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // Errors returned by this package. They are wrapped with context; match them
 // with errors.Is.
@@ -25,6 +28,10 @@ var (
 	// ErrBody: the content type and body are inconsistent, too large, or not
 	// allowed for the kind.
 	ErrBody = errors.New("invalid content type or body")
+	// ErrBodyTooLarge: the body is longer than Limits.MaxBody. It wraps ErrBody,
+	// so a caller that must tell too large from malformed (one is reported to the
+	// sender as too_large, the other as malformed) matches it first.
+	ErrBodyTooLarge = fmt.Errorf("%w: body is larger than the limit", ErrBody)
 	// ErrParams: the params are missing, present where the kind has none, or
 	// invalid.
 	ErrParams = errors.New("invalid params")
