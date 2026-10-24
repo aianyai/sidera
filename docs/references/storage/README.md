@@ -289,6 +289,16 @@ already panicked on a call of its own adds no second panic, so the first message
 is the one seen. The rule that keeps owners from meeting it is that every read an
 owner needs is done before `Begin`.
 
+**Removals are synced before the commit.** `Remove` and `RemoveAll` unbind a
+name and make nothing durable; the directory sync that follows a batch does. A
+power loss after `Commit` could bring a removed name back after the caller
+acknowledged the removal, and with it whatever the owner deleted because the name
+was gone. So the `Tx` remembers every directory in which it removed a name and
+forgets it at a successful `SyncDir` of that directory, and `Commit` panics,
+naming the directories, when any is left: a programming error found the first
+time it runs, like a deferred group left unsynced. A removal that failed unbinds
+nothing and is not remembered; the error is what `Commit` returns.
+
 **Deferred groups.** `ReplaceDefer` is `Replace` without the directory sync, so
 that k files of one directory cost k file syncs and one directory sync. The files
 of a group are in one directory and the next write is the `SyncDir` of it:
@@ -313,9 +323,9 @@ start of a `Tx`'s first append to a file that may end in a partial record, belon
 to the format's owner: this layer writes the bytes it is given.
 
 **Cleanup and the clean-state requirement.** `Writer.Recover` runs the settle
-below first and then one `Recovery` transaction, `txn-cleanup`: it removes every `.tmp-*` file and `.trash-*`
-directory anywhere under the data directory, files first, then directories, then
-one directory sync per directory that held one. The list it works from is the
+below first and then one `Recovery` transaction, `txn-cleanup`: it removes every
+`.tmp-*` file and `.trash-*` directory anywhere under the data directory, files
+first, then directories, then one directory sync per directory that held one. The list it works from is the
 exported pure function `CleanupWork`, which only reads, so a test evaluates it on
 `Mem.Clone()` and the repair uses the same function. The requirement is that on
 every clean run (no crash, no damage, no injected fault) the list is empty at
@@ -576,8 +586,8 @@ of such a run.
 record that, after a process crash, may be visible and not durable; a power loss
 that followed would leave the followers without their head. The store does not
 guard against this itself: it relies on the settle transaction that starts
-`txn.Writer.Recover` (the Settle paragraph of the transaction section), which makes every directory
-durable before any rule runs. On Windows `SyncDir` flushes nothing, so that
+`txn.Writer.Recover` (the Settle paragraph of the transaction section), which
+makes every directory durable before any rule runs. On Windows `SyncDir` flushes nothing, so that
 barrier persists nothing there (the platform section says what durability rests
 on); pending verification by CI on main. The caller guarantees that the rules run after
 `Recover` returned. The store's crash walk runs its restarts through the real

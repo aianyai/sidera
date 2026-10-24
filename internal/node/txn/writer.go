@@ -95,7 +95,7 @@ func (w *Writer) begin(c *compiled) *Tx {
 		panic(fmt.Sprintf("txn: a transaction of %q is already open; end it with Commit or Close first", c.name))
 	}
 	w.open[c.decl] = true
-	return &Tx{w: w, d: c, cur: -1, files: map[string]*appendFile{}}
+	return &Tx{w: w, d: c, cur: -1, files: map[string]*appendFile{}, unsynced: map[string]bool{}}
 }
 
 func (w *Writer) release(c *compiled) {

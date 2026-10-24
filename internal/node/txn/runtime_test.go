@@ -312,6 +312,7 @@ func TestSyncFileMustMatchTheAppendInThisTx(t *testing.T) {
 func TestCommitOfATransactionThatMadeNoWriteReachesNoPoint(t *testing.T) {
 	d := &txn.Decl{Name: "idle", Kind: txn.Recovery, Writes: []txn.Write{
 		{Role: "only", Op: txn.OpRemove, Many: true, Optional: true},
+		{Role: "only-dir", Op: txn.OpSyncDir, Optional: true},
 	}}
 	r := newRig(t, nil, d)
 	tx := r.w.Begin(d)
@@ -336,11 +337,14 @@ func TestCommitOfATransactionThatMadeNoWriteReachesNoPoint(t *testing.T) {
 	if err := again.Remove("only", "a/x"); err != nil {
 		t.Fatal(err)
 	}
+	if err := again.SyncDir("only-dir", "a"); err != nil {
+		t.Fatal(err)
+	}
 	if err := again.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if names := r.rec.names(); len(names) != 2 || names[1] != "idle/commit#1" {
-		t.Errorf("points = %v, want the remove and the commit point", names)
+	if names := r.rec.names(); len(names) != 3 || names[2] != "idle/commit#1" {
+		t.Errorf("points = %v, want the remove, the sync and the commit point", names)
 	}
 }
 

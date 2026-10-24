@@ -33,6 +33,11 @@ type Tx struct {
 	hasPending bool
 
 	files map[string]*appendFile // paths appended in this Tx, open
+
+	// unsynced holds the directories in which this Tx removed a name and has not
+	// synced the directory since. A removal unbinds a name without making that
+	// durable; Commit refuses a Tx that leaves any.
+	unsynced map[string]bool
 }
 
 // appendFile is a file appended in this Tx: the handle every append and the
@@ -149,6 +154,12 @@ func (t *Tx) run(role string, op Op, p string, do func(tag fsx.Tag) error) error
 	}
 	if !prepare && commitStepOf(op) != 0 {
 		t.committed = true
+	}
+	switch op {
+	case OpRemove, OpRemoveAll:
+		t.unsynced[path.Dir(p)] = true
+	case OpSyncDir:
+		delete(t.unsynced, p)
 	}
 	return nil
 }
@@ -319,11 +330,30 @@ func (t *Tx) Commit() error {
 		t.panicf("Commit while the deferred group of directory %q is not synced: the next write after a deferred group must be the SyncDir of its directory", t.pending)
 	}
 	t.checkEverySyncedRoleIsWhole()
+	t.checkEveryRemovalIsSynced()
 	if t.cur < 0 {
 		return nil
 	}
 	t.w.commitPoint(t.d.name)
 	return nil
+}
+
+// checkEveryRemovalIsSynced panics when a directory in which the Tx removed a
+// name was not synced after the removal. A removal unbinds a name and does not
+// make that durable, so a power loss after Commit could bring the name back
+// after the caller acknowledged its removal, and with it whatever the owner
+// then deleted because the name was gone. The sync is the owner's to declare
+// and make, like the sync of a deferred group.
+func (t *Tx) checkEveryRemovalIsSynced() {
+	if len(t.unsynced) == 0 {
+		return
+	}
+	dirs := make([]string, 0, len(t.unsynced))
+	for d := range t.unsynced {
+		dirs = append(dirs, d)
+	}
+	sort.Strings(dirs)
+	t.panicf("Commit: names were removed in the directories %q and no SyncDir of them followed: a removal is not durable until its directory is synced", dirs)
 }
 
 // checkEverySyncedRoleIsWhole panics when a role that made its SyncFile also

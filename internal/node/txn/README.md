@@ -76,6 +76,11 @@ declaration of its own.
   `SyncDir` of it. `NewTable` checks that every `ReplaceDefer` is declared
   immediately before a `SyncDir`; the `Tx` checks at run time that the group is
   one directory and that nothing, `Commit` included, comes before the sync.
+- **Removals are synced before the commit.** `Remove` and `RemoveAll` unbind a
+  name without making that durable. The `Tx` remembers every directory in which
+  it removed a name and forgets it when that directory is synced afterwards;
+  `Commit` panics, naming the directories, when any is left, so a removal the
+  caller acknowledges cannot be undone by a power loss.
 - **Appends go through one handle and one role.** The `Tx` opens an appended
   file at its first append, keeps the handle, and syncs through it. The steps of
   the file are attributed to the role it was opened under, so `SyncFile` is
