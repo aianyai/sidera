@@ -15,7 +15,7 @@ to the delivery side, which calls into this package.
 | Function | Decides |
 | -------- | ------- |
 | `PromptText(count)`, `NewSessionPromptText` | The wake-up text for waiting messages, and the first prompt of a session created without an initial message. No message body, ever. Provisional wording. |
-| `DecidePrompt(PromptInput, PromptParams, now)` | Whether to send a prompt now: send or hold, with a typed reason, the prompt kind to record and the count for the text. A hold may carry `RetryAt`, when to evaluate again. |
+| `DecidePrompt(PromptInput, PromptParams, now)` | The per-endpoint rule that `DecideNodePrompts` applies: send or hold, with a typed reason, the prompt kind to record and the count for the text. A hold may carry `RetryAt`, when to evaluate again. A `PromptSend` from it alone never authorizes a prompt. |
 | `DecideNodePrompts([]WaitingPrompt, running, PromptParams, now)` | Which waiting endpoints of the node are prompted now, so that prompt-started turns never exceed `MaxConcurrentTurns`: one `PromptDecision` per endpoint, ordered earliest waiter first, held ones with `PromptNodeFull`. It calls `DecidePrompt` for each endpoint and adds only the node-wide limit. |
 | `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. |
 | `Pack(queue, delivery.LeaseID, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the first part not yet acknowledged). |
@@ -68,13 +68,21 @@ Node-wide concurrency of prompt-started turns:
   not count toward `MaxPerHour`, it is not a failure and so never makes delivery
   blocked. Messages stay queued and readable with `recv`.
 - A freed slot is not an event of any waiting endpoint, and `RetryAt` covers only
-  the hourly cap and the minimum interval. So whenever any turn that a prompt
-  started ends, however it ended, the caller evaluates all waiting endpoints
-  again with `DecideNodePrompts`, each with the `Trigger` it had when it was held.
+  the hourly cap and the minimum interval. The principle: whenever free slots
+  may have grown (`running` falls or `MaxConcurrentTurns` rises), the caller
+  calls `DecideNodePrompts` again for all waiting endpoints. That happens when
+  a turn that a prompt started ends in any way, when a dispatched prompt is
+  confirmed not to have started a turn, when an adapter whose turns were counted
+  goes offline, and when the cap is raised.
+- Each endpoint is passed with the `Trigger` it has pending. A later arrival for
+  a held endpoint does not replace `TriggerTurnEnd`; it is kept until a prompt is
+  sent to the endpoint.
 - A turn whose adapter is offline is not counted in `running`: its state is
   unknown, and a turn nobody can observe must not stop the whole node. When the
   adapter returns and reports the turn still running it is counted again, so
   `running` can exceed the cap; nothing is released until it falls below it.
+- An endpoint whose adapter is offline is not in `waiting`: it would take a slot
+  for an attempt that is bound to fail, and the failure would feed `AssessBlocked`.
 
 Delivery blocked:
 
@@ -167,25 +175,37 @@ Before acknowledging:
 - `Busy` is true from the moment a prompt is dispatched until its turn ends.
 - The caller records every prompt attempt, with the `Kind` that `DecidePrompt`
   returned, and stores the `BlockedReport` of each `BlockedNew`.
-- The caller evaluates `DecidePrompt` again at `RetryAt`, when one is returned,
-  with the `Trigger` it passed the first time.
-- `running` is the number of turns started by prompts that are still running on
-  the node and whose adapter is online. The caller derives it; this package
-  cannot tell an offline adapter's turn from a running one.
-- Every waiting endpoint is passed to `DecideNodePrompts` each time, once per
-  endpoint, with a nonzero `WaitingSince` (when it began to wait, for example the
-  arrival of its oldest waiting message). Duplicates, unset endpoints, a zero
-  `WaitingSince` and a negative `running` are errors wrapping
+- At `RetryAt`, and on any event of an endpoint (arrival, turn end, adapter back
+  online), the caller evaluates all waiting endpoints with `DecideNodePrompts`,
+  each with the `Trigger` it has pending; a `PromptSend` from `DecidePrompt` alone
+  never authorizes a prompt.
+- `running` is the number of turns that prompts started on the node, counted
+  from dispatch (the moment `Busy` becomes true, above) until the turn ends or
+  the prompt is confirmed not to have started one. Only prompt-started turns of
+  online adapters count. The caller derives it; this package cannot tell an
+  offline adapter's turn from a running one.
+- `waiting` holds every endpoint with a pending message and an online adapter,
+  once per endpoint. An endpoint whose adapter is offline is not put in it.
+  `WaitingSince` is nonzero and is the same value as `BlockedInput.OldestPendingAt`:
+  the arrival of the oldest pending message, suspended messages excluded. That is
+  why earliest-waiter-first tracks the expiry clock. Duplicates, unset endpoints,
+  a zero `WaitingSince` and a negative `running` are errors wrapping
   `ErrInvalidNodeInput`.
-- The caller sends a prompt only to the endpoints with action `PromptSend`, and
-  counts the turn each one starts in `running` from then on.
-- A decision `PromptNodeFull` records no attempt, and the caller evaluates again
-  when any prompt-started turn on the node ends.
+- The caller sends a prompt only to the endpoints with action `PromptSend` from
+  `DecideNodePrompts`, and counts the turn each one starts in `running` from then
+  on.
+- A decision `PromptNodeFull` records no attempt. The caller evaluates again on
+  the events listed under node-wide concurrency: whenever free slots may have
+  grown.
 - `Signals.Since`, when the active cause started being continuously true, is
   optional precision. Zero means unknown and the cause is then measured from the
   arrival of the oldest waiting message, which can only overstate its duration.
   Blocked is decided without the caller having to record an attempt that was
   never made.
+- Because the node cap can make an endpoint wait long, the caller supplies
+  `Signals.Since` when an adapter goes offline (the engine always observes that
+  instant). Otherwise the time the endpoint was held back would be counted as
+  failure time.
 - `Message.From` is the sender the channel authenticated and `Body` is valid
   UTF-8.
 - `observed` is the text of the tool result as the model received it, never a

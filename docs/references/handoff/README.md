@@ -37,9 +37,10 @@ checks that the model saw it before acknowledging for the agent.
   message stays queued and readable with `recv`.
 - The number of turns that prompts have started and that are still running on
   a node is capped. `DecidePrompt` judges one endpoint and knows nothing of the
-  others; `DecideNodePrompts` takes all waiting endpoints and the count of
-  running prompt-started turns and returns one decision for each, ordered by the
-  time the endpoint began to wait and then by endpoint ID. An endpoint that
+  others; a prompt is sent only through `DecideNodePrompts`, which takes all
+  waiting endpoints and the count of running prompt-started turns and returns one
+  decision for each, ordered by the time the endpoint began to wait and then by
+  endpoint ID. An endpoint that
   `DecidePrompt` would prompt is released while there are free slots (the cap
   less the running turns); the rest are held with `PromptNodeFull`. An endpoint
   that `DecidePrompt` would not prompt keeps that decision and takes no slot.
@@ -47,12 +48,25 @@ checks that the model saw it before acknowledging for the agent.
   counts toward the hourly cap, and no failure exists that could make delivery
   blocked. The message stays queued and readable with `recv`.
 - No event of a waiting endpoint marks a slot being freed, and `RetryAt` names
-  only the instants of the hourly cap and the minimum interval. So whenever any
-  prompt-started turn on the node ends, whatever the way, every waiting endpoint
-  is evaluated again, each with the trigger it had when it was held.
-- A turn whose adapter is offline is not counted: its state is unknown. When the
-  adapter returns and reports the turn running, it is counted again and the
-  total may exceed the cap until it falls back.
+  only the instants of the hourly cap and the minimum interval. So whenever free
+  slots may have grown (the running count falls or the cap rises), every waiting
+  endpoint is evaluated again through `DecideNodePrompts`: when a prompt-started
+  turn ends in any way, when a dispatched prompt is confirmed not to have started
+  a turn, when an adapter whose turns were counted goes offline, and when the cap
+  is raised. A later arrival for a held endpoint does not replace its turn-end
+  trigger; it is kept until a prompt is sent to the endpoint.
+- A prompt counts as running from its dispatch until its turn ends or it is
+  confirmed not to have started one. A turn whose adapter is offline is not
+  counted: its state is unknown. When the adapter returns and reports the turn
+  running, it is counted again and the total may exceed the cap until it falls
+  back. An endpoint whose adapter is offline is not among the waiting endpoints,
+  or it would take a slot for an attempt bound to fail, and that failure would
+  feed the blocked verdict.
+- The time an endpoint waited is the arrival of its oldest pending message,
+  suspended messages excluded, the same value the blocked rule reads. Because
+  the node cap can make an endpoint wait long, the caller gives the instant an
+  adapter went offline as the start of that cause; otherwise the time held back
+  would be counted as failure time.
 - Parameters this package gives no default: the hourly cap, the minimum interval
   and the node cap. The prompt wording is provisional.
 
@@ -159,9 +173,10 @@ The delivery side that these rules call into is described in
   closest to losing its messages; releasing it first gives the held-back time
   the least chance of expiring them. A tie is broken by endpoint ID in byte
   order and not by the order of the input, so the outcome does not depend on how
-  the caller happened to collect the endpoints. Rejected: a round robin or a
-  random choice, which needs state or randomness in a function that is pure and
-  replayed in property tests, and gives no bound on how long one endpoint waits.
+  the caller happened to collect the endpoints. Rejected: a round robin
+  and a random choice both ignore how close each endpoint's messages are to
+  expiring, while earliest-waiter-first follows the expiry clock; a random choice
+  also has no bound on how long one endpoint waits.
 - **Only endpoints that would be prompted take a slot.** Giving a slot to an
   endpoint that is busy, or at its hourly cap, would leave it unused while a
   ready endpoint waits.
@@ -310,8 +325,8 @@ The delivery side that these rules call into is described in
   `TestDecideNodePromptsDoesNotModifyItsInput`,
   `TestNodePromptScenarioFreedSlotReleasesWaitersOldestFirst`,
   `TestNodeCapHoldIsNeitherAnAttemptNorBlocked`,
-  `TestDecideNodePromptsProperties` (fixed seed, an oracle written in the test,
-  coverage assertions), and the cap rows of `TestPromptParamsValidate`.
+  `TestDecideNodePromptsProperties` (fixed seed, declarative assertions written
+  in the test, coverage assertions), and the cap rows of `TestPromptParamsValidate`.
 - `internal/handoff/blocked.go`: `AssessBlocked`. Tests: `TestAssessBlocked`,
   `TestAssessBlockedReportsOnceAndRecoversOnce`.
 - `internal/handoff/budget.go`: units, the token estimate, `DefaultBudget` and

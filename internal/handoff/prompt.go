@@ -181,9 +181,8 @@ const (
 	PromptHourlyCap
 	// PromptNodeFull: the endpoint may be prompted, but the node already runs
 	// as many prompt-started turns as it allows. Only DecideNodePrompts returns
-	// it. It is not an attempt and no failure: the caller records nothing, and
-	// evaluates the endpoint again when any prompt-started turn on the node
-	// ends.
+	// it. It is not an attempt and no failure: the caller records nothing. When
+	// the endpoint is evaluated again is described at DecideNodePrompts.
 	PromptNodeFull
 )
 
