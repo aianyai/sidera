@@ -778,7 +778,12 @@ SDK module keeps no dependencies) checks:
    and last parts, duplicates and empty queues, is a valid `RecvPage` to both the
    schema and the Go type;
 7. the platform vocabulary of the manifest covers every platform the Go
-   toolchain lists.
+   toolchain lists;
+8. every line the Go peer writes while its own tests run is a frame the message
+   schema accepts (`peerwire_test.go`, which runs those tests with the peers'
+   writers recorded);
+9. no pattern of the schema or of Go accepts a value with a trailing newline,
+   which engines that let `$` match before one would (`TestPatternsRefuseATrailingNewline`).
 
 ### Why
 
@@ -802,4 +807,4 @@ SDK module keeps no dependencies) checks:
 ### Where
 
 - `protocol/conformance_test.go`, `differential_test.go`, `edits_test.go`,
-  `recvpage_test.go`, `oracle_test.go`, `helpers_test.go`.
+  `recvpage_test.go`, `peerwire_test.go`, `oracle_test.go`, `helpers_test.go`.
