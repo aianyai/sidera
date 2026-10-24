@@ -686,6 +686,13 @@ so that the double cannot drift from what it stands for.
 - **Renames only within one directory.** The crash behaviour of a cross-directory
   rename differs between file systems; offering no such rename means there is no
   such case to model. Every rename the node needs is in one directory.
+- **`Remove` unbinds without syncing.** A removal is one unlink and a directory
+  sync is one more step with its own failure class, so a batch of removals costs
+  one sync and not one per file, and a failed sync is the single point at which
+  the batch is known not to be durable. `Remove` therefore relies on the
+  `SyncDir` that follows it, and the transaction layer enforces that: `Commit`
+  panics when a directory in which the `Tx` removed a name (or a tree) was not
+  synced after the removal, as it does for a group of deferred replacements.
 - **No overwrite in place.** Every write is either a new temporary file renamed
   into place or an append, so a file's content after a power loss is a synced
   prefix followed by an unsynced part. With overwrite the model would need
