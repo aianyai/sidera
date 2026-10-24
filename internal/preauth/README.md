@@ -26,6 +26,8 @@ timers, and applies the answers.
 
 ## Rules
 
+### Access
+
 - **Default closed.** Every protocol that is not listed is a cluster protocol
   and only members may use it. A new cluster protocol needs no entry here to be
   safe; a protocol that must be open to anyone else needs one, together with its
@@ -48,6 +50,8 @@ timers, and applies the answers.
 - **Exact match.** A protocol identifier with another version suffix is not the
   listed one and is a cluster protocol.
 
+### The exchange message
+
 - **One message type, two kinds.** The message is `{1: kind, 2: record}` with
   kind 1 for a node's network-key certificate and 2 for a person's device
   certificate; the record is the encoded signed record as a byte string. A
@@ -62,6 +66,8 @@ timers, and applies the answers.
   same way. It checks no signature and not that the record's type fits the kind;
   verification does both. Any message that decodes encodes to the identical
   bytes.
+
+### The decision
 
 - **The decision.** `Decide` verifies the certificate record against the
   descriptor of its kind itself, so a caller cannot skip verification, and then:
@@ -88,6 +94,8 @@ timers, and applies the answers.
     certificate carries a higher serial, also when the exchange is refused for
     another reason. The same certificate again (the normal reconnect) is not
     stale; only a lower serial is.
+
+### Accounting
 
 - **Accounting.** Only inbound connections are counted. A connection is named by
   the peer's network key and the remote address, with no direction. Rules, in the
@@ -134,7 +142,6 @@ timers, and applies the answers.
   exchange on a connection that is already authenticated is ignored.
 - **The deadline is `ExchangeDeadline` from the moment the connection exists**;
   a connection still unauthenticated then is closed.
-
 - The peer key passed to `Decide` is the public key the secure handshake
   authenticated on this connection, and nothing else. It is the only identity the
   peer proved; the message is what it claims.
@@ -149,9 +156,9 @@ timers, and applies the answers.
   enough that a connection is closed soon after its deadline; a timer is only a
   wake-up and `Overdue` is the truth. `SetHeld` is refreshed from `HeldMembers`
   at start and whenever a held certificate, a revocation or the trust view
-  changes.
-  `SweepInterval` is longer than the longest time between the handshake and the
-  connection being established. An `Accounting` is not safe for concurrent use.
+  changes. `SweepInterval` is longer than the longest time between the
+  handshake and the connection being established. An `Accounting` is not safe
+  for concurrent use.
 - Per-peer resource limits (a stage of the network layer, not modelled here): the
   resource manager asks its limiter once when it creates a peer's scope and then
   keeps the object and re-reads it on every check, so the limiter must return the
@@ -166,3 +173,19 @@ timers, and applies the answers.
   of the peer: a peer can hold several connections in different states.
 - A refusal is carried out by resetting the stream after negotiation. The peer
   sees "negotiation succeeded, then stream reset"; nothing earlier is possible.
+
+## Zero values
+
+- `State`, `Verdict`, `Kind`, `Direction`, every reason enum and `Params` fields:
+  zero is unset and is refused or reported as invalid, never a valid input.
+- `Facts.Revocations == nil` is refused. In `revocation`, a `nil` set reads as
+  "nothing revoked"; here an unloaded set must not let a revoked key in, so the
+  caller passes `revocation.NewSet()` to say "looked, found nothing".
+- `Facts.SerialSeen`: a node missing from the map has had no serial seen; an
+  entry for the wrong node is an invalid input. `Decision.SerialSeen` zero means
+  "keep what is stored".
+- `Facts.Authorized` zero is the empty list: nobody is authorized.
+- `Facts.Trust` zero is an empty view, in which no node is trusted.
+- `admin.DeviceCert.MaxLevel` is never `LevelNone` for a certificate that
+  decodes; the revocation status given to `admin` always comes from
+  `revocation.Set.DeviceCertificate`, which sets a checked status.
