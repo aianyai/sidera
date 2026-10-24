@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -485,17 +487,102 @@ func TestNoGoroutineLeakAfterManyPeers(t *testing.T) {
 	}
 }
 
-// Close waits for the peer's reader and writer: once it returns, neither is
-// left running. (Request workers end as soon as their handler returns.)
+// heldReader blocks inside Read until released, and its Close does not
+// interrupt that Read, so the peer's reader goroutine stays in the loop until
+// the test lets it go.
+type heldReader struct {
+	entered  chan struct{}
+	release  chan struct{}
+	returned atomic.Bool
+	once     sync.Once
+}
+
+func (r *heldReader) Read([]byte) (int, error) {
+	r.once.Do(func() { close(r.entered) })
+	<-r.release
+	r.returned.Store(true)
+	return 0, io.EOF
+}
+
+func (r *heldReader) Close() error { return nil }
+
+// heldWriter is heldReader for Write.
+type heldWriter struct {
+	entered  chan struct{}
+	release  chan struct{}
+	returned atomic.Bool
+	once     sync.Once
+}
+
+func (w *heldWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	<-w.release
+	w.returned.Store(true)
+	return len(p), nil
+}
+
+func (w *heldWriter) Close() error { return nil }
+
+// Close waits for the peer's reader and writer: while either is still inside
+// its loop, Close does not return. Each goroutine is held in a call into the
+// transport; Close must stay blocked until the test lets that call return, and
+// the call must have returned by the time Close does. (A stack sample taken
+// after Close cannot tell a goroutine that is still working from one that has
+// released the peer's wait group and is only returning, so the test observes
+// the order of events instead. Request workers end as soon as their handler
+// returns and are not part of this property.)
 func TestCloseWaitsForReaderAndWriter(t *testing.T) {
 	leakGuard(t)
-	for range 50 {
-		p, _, _ := newRaw(t, peer.Params{}, nil) // the only peer alive
-		p.Close()
-		for _, stack := range peerGoroutines() {
-			if strings.Contains(stack, "readLoop") || strings.Contains(stack, "writeLoop") {
-				t.Fatalf("Close returned while a reader or writer goroutine was alive:\n%s", stack)
+	for _, side := range []string{"reader", "writer"} {
+		t.Run(side, func(t *testing.T) {
+			idle, _ := io.Pipe() // a reader that stays open until the peer closes it
+			var (
+				r        io.Reader      = idle
+				w        io.WriteCloser = nopWriteCloser{}
+				entered  chan struct{}
+				release  chan struct{}
+				returned *atomic.Bool
+			)
+			switch side {
+			case "reader":
+				h := &heldReader{entered: make(chan struct{}), release: make(chan struct{})}
+				r, entered, release, returned = h, h.entered, h.release, &h.returned
+			case "writer":
+				h := &heldWriter{entered: make(chan struct{}), release: make(chan struct{})}
+				w, entered, release, returned = h, h.entered, h.release, &h.returned
 			}
-		}
+			p, err := peer.New(r, w, peer.Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			p.Start()
+			if side == "writer" {
+				if err := p.Notify(context.Background(), "n", nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			select {
+			case <-entered:
+			case <-time.After(wait):
+				t.Fatalf("the %s never started", side)
+			}
+
+			closed := make(chan struct{})
+			go func() { p.Close(); close(closed) }()
+			select {
+			case <-closed:
+				t.Fatalf("Close returned while the %s goroutine was still inside the transport", side)
+			case <-time.After(50 * time.Millisecond):
+			}
+			close(release)
+			select {
+			case <-closed:
+			case <-time.After(wait):
+				t.Fatalf("Close did not return after the %s was released", side)
+			}
+			if !returned.Load() {
+				t.Fatalf("Close returned before the %s's call into the transport did", side)
+			}
+		})
 	}
 }
