@@ -82,3 +82,5 @@ func nonceOf(first byte) Nonce {
 	}
 	return n
 }
+
+func hexDecode(s string) ([]byte, error) { return hex.DecodeString(s) }
