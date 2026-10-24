@@ -261,6 +261,12 @@ func TestSyncFileMustMatchTheAppendInThisTx(t *testing.T) {
 			tx.Append("first", "a/one", []byte("x"))
 			tx.Append("second", "a/one", []byte("y"))
 		}},
+		{"two-paths-under-one-role-only-one-synced", "a/two", func(tx *txn.Tx) {
+			tx.Append("first", "a/one", []byte("x"))
+			tx.Append("first", "a/two", []byte("y"))
+			tx.SyncFile("first", "a/one")
+			tx.Commit()
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -293,6 +299,46 @@ func TestSyncFileMustMatchTheAppendInThisTx(t *testing.T) {
 			t.Errorf("synced appends after power loss: %v", got)
 		}
 	})
+}
+
+// A transaction that made no write has nothing to commit: Commit returns nil
+// and reaches no point, so an owner that opened one with nothing to do does not
+// leave a commit point of its own on a start that had no work. A declaration
+// with a required write still panics: that Commit is an incomplete transaction,
+// not an empty one.
+func TestCommitOfATransactionThatMadeNoWriteReachesNoPoint(t *testing.T) {
+	d := &txn.Decl{Name: "idle", Kind: txn.Recovery, Writes: []txn.Write{
+		{Role: "only", Op: txn.OpRemove, Many: true, Optional: true},
+	}}
+	r := newRig(t, nil, d)
+	tx := r.w.Begin(d)
+	defer tx.Close()
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit of an empty transaction: %v", err)
+	}
+	if n := r.rec.count(); n != 0 {
+		t.Errorf("Commit of an empty transaction reached %d points: %v", n, r.rec.names())
+	}
+	for _, c := range r.w.Coverage() {
+		if c.Hits != 0 {
+			t.Errorf("%v has %d hits after an empty transaction", c.Key.Key, c.Hits)
+		}
+	}
+	mustNotPanic(t, func() { r.w.Begin(d).Close() }) // the declaration is free again
+
+	// One write is enough for the commit point.
+	put(t, r.mem, map[string]string{"a/x": "1"})
+	again := r.w.Begin(d)
+	defer again.Close()
+	if err := again.Remove("only", "a/x"); err != nil {
+		t.Fatal(err)
+	}
+	if err := again.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if names := r.rec.names(); len(names) != 2 || names[1] != "idle/commit#1" {
+		t.Errorf("points = %v, want the remove and the commit point", names)
+	}
 }
 
 func TestTxPanicsWhenUsedAfterItEnded(t *testing.T) {

@@ -48,18 +48,20 @@ func CleanupWork(r fsx.Reader) ([]fsx.Leftover, error) {
 //
 // The removal is one Recovery transaction, all removals first and the
 // directory syncs after them. When there is nothing to remove it does nothing
-// and reaches no point, so a start on a clean disk is not a recovery.
+// and reaches no point, so a start on a clean disk is not a recovery. The table
+// must hold the cleanup declaration even then: a composition root that left out
+// Internal() fails at its first start, not at the first crash.
 func (w *Writer) Recover() error {
+	c, ok := w.table.byName[cleanupName]
+	if !ok {
+		panic("txn: the table has no " + cleanupName + " transaction; build it from txn.Internal() and the declarations of the owners")
+	}
 	work, err := CleanupWork(w.base)
 	if err != nil {
 		return fmt.Errorf("txn: cleanup: %w", err)
 	}
 	if len(work) == 0 {
 		return nil
-	}
-	c, ok := w.table.byName[cleanupName]
-	if !ok {
-		panic("txn: the table has no " + cleanupName + " transaction; build it from txn.Internal() and the declarations of the owners")
 	}
 	tx := w.begin(c)
 	defer tx.Close()

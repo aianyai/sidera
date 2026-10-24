@@ -85,6 +85,8 @@ func oracleSteps(op txn.Op, firstAppendOfPath bool) []fsx.Step {
 		return []fsx.Step{fsx.StepRenameDir, fsx.StepSyncDir}
 	case txn.OpDiscard:
 		return []fsx.Step{fsx.StepRenameDir, fsx.StepSyncDir, fsx.StepRemoveAll}
+	case txn.OpRemoveAll:
+		return []fsx.Step{fsx.StepRemoveAll}
 	}
 	panic("oracle: unknown operation")
 }
@@ -233,6 +235,21 @@ func (g *generator) removals() {
 	g.add(call{write: sidx, op: sync.Op, role: sync.Role, path: dir})
 }
 
+func (g *generator) removeAlls() {
+	w := txn.Write{Role: g.role(), Op: txn.OpRemoveAll, Many: g.coin(), Optional: g.optional()}
+	idx, run := g.declare(w)
+	sync := txn.Write{Role: g.role(), Op: txn.OpSyncDir, Optional: w.Optional}
+	sidx, _ := g.declare(sync)
+	if !run {
+		return
+	}
+	dir := g.dir()
+	for i := 0; i < g.count(w.Many); i++ {
+		g.add(call{write: idx, op: w.Op, role: w.Role, path: g.existingDir(dir)})
+	}
+	g.add(call{write: sidx, op: sync.Op, role: sync.Role, path: dir})
+}
+
 func (g *generator) renameFile() {
 	w := txn.Write{Role: g.role(), Op: txn.OpRenameFile, Many: g.coin(), Optional: g.optional()}
 	idx, run := g.declare(w)
@@ -329,10 +346,10 @@ func scenarioFor(t testing.TB, rng *rand.Rand, name string) scenario {
 		}
 	}
 	for i := 1 + g.rng.IntN(4); i > 0; i-- {
-		switch g.rng.IntN(10) {
+		switch g.rng.IntN(12) {
 		case 0:
 			g.replace(false)
-		case 1:
+		case 1, 9: // a deferred group is the rule with the most to prove, so it has two slots
 			g.deferred()
 		case 2:
 			g.removals()
@@ -348,6 +365,8 @@ func scenarioFor(t testing.TB, rng *rand.Rand, name string) scenario {
 			g.appends(true)
 		case 8:
 			g.appends(false)
+		case 10:
+			g.removeAlls()
 		default:
 			g.syncDir()
 		}
@@ -407,6 +426,8 @@ func (c call) do(tx *txn.Tx) error {
 		return tx.RenameDir(c.role, c.path, c.to)
 	case txn.OpDiscard:
 		return tx.Discard(c.role, c.path)
+	case txn.OpRemoveAll:
+		return tx.RemoveAll(c.role, c.path)
 	}
 	panic("unknown operation")
 }
@@ -442,7 +463,7 @@ func apply(m map[string]string, c call) {
 			m[c.to+strings.TrimPrefix(k, c.path)] = m[k]
 			delete(m, k)
 		}
-	case txn.OpDiscard:
+	case txn.OpDiscard, txn.OpRemoveAll:
 		for _, k := range keysUnder(m, c.path) {
 			delete(m, k)
 		}
@@ -469,7 +490,7 @@ func touched(c call, initial, final map[string]string) []string {
 		return []string{c.path + "/"}
 	case txn.OpRenameDir:
 		return append(keysUnder(initial, c.path), keysUnder(final, c.to)...)
-	case txn.OpDiscard:
+	case txn.OpDiscard, txn.OpRemoveAll:
 		return keysUnder(initial, c.path)
 	}
 	return nil
@@ -552,7 +573,7 @@ func has(m map[string]string, k string) bool { _, ok := m[k]; return ok }
 // tally is how much of each case the run of the property reached.
 type tally struct {
 	scenarios, injected, failedClass, fatalAfterCommit, fatalInFS, succeeded int
-	withPrepare, withDefer, calls                                            int
+	withPrepare, withDefer, withoutWrites, calls                             int
 	opCalls                                                                  map[txn.Op]int
 	preCommitPoints, postCommitPoints, commitPoints                          int
 	failedWithNothingChanged                                                 int
@@ -573,6 +594,8 @@ func TestRandomTransactionsHonourTheCommitPointOrderingAndDurability(t *testing.
 		tl.scenarios, tl.injected, tl.failedClass, tl.fatalAfterCommit, tl.fatalInFS, tl.succeeded)
 	t.Logf("points checked: %d before the commit point, %d after, %d commit points; %d calls", tl.preCommitPoints, tl.postCommitPoints, tl.commitPoints, tl.calls)
 
+	t.Logf("scenarios with a preparatory write %d, with a deferred group %d, with no write %d; calls per operation %v", tl.withPrepare, tl.withDefer, tl.withoutWrites, tl.opCalls)
+
 	atLeast := func(what string, got, min int) {
 		t.Helper()
 		if got < min {
@@ -587,11 +610,12 @@ func TestRandomTransactionsHonourTheCommitPointOrderingAndDurability(t *testing.
 	atLeast("successful runs", tl.succeeded, 100)
 	atLeast("failed runs whose disk was checked for no change", tl.failedWithNothingChanged, 40)
 	atLeast("scenarios with a preparatory write", tl.withPrepare, 100)
-	atLeast("scenarios with a deferred group", tl.withDefer, 60)
+	atLeast("scenarios with a deferred group", tl.withDefer, 100)
+	atLeast("scenarios that made no write", tl.withoutWrites, 2)
 	atLeast("points before the commit point", tl.preCommitPoints, 1000)
 	atLeast("points after the commit point", tl.postCommitPoints, 1000)
 	for _, op := range []txn.Op{txn.OpReplace, txn.OpReplaceDefer, txn.OpAppend, txn.OpSyncFile, txn.OpRenameFile, txn.OpRemove,
-		txn.OpSyncDir, txn.OpMakeDir, txn.OpRenameDir, txn.OpDiscard} {
+		txn.OpSyncDir, txn.OpMakeDir, txn.OpRenameDir, txn.OpDiscard, txn.OpRemoveAll} {
 		atLeast(fmt.Sprintf("operation %d", op), tl.opCalls[op], 60)
 	}
 }
@@ -681,12 +705,15 @@ func runScenario(t *testing.T, rng *rand.Rand, s scenario, tl *tally) {
 	if hasDefer {
 		tl.withDefer++
 	}
+	if len(s.calls) == 0 {
+		tl.withoutWrites++
+	}
 	if hasPrepare {
 		tl.withPrepare++
 	}
 
 	// The points reached.
-	var want []string
+	want := []string{}
 	last := len(events) - 1
 	if failAt >= 0 {
 		last = failAt
@@ -694,7 +721,8 @@ func runScenario(t *testing.T, rng *rand.Rand, s scenario, tl *tally) {
 	for _, e := range events[:last+1] {
 		want = append(want, e.point.String())
 	}
-	if failAt < 0 {
+	// A transaction that made no write has nothing to commit.
+	if failAt < 0 && len(s.calls) > 0 {
 		want = append(want, commitPointStep(s.decl.Name).String())
 	}
 	if got := rec.names(); !reflect.DeepEqual(got, want) {

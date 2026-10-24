@@ -32,7 +32,9 @@ type Table struct {
 // of an Append, which one later SyncFile repeats. Every operation is known.
 // Every ReplaceDefer is followed immediately by a SyncDir: the files of a
 // deferred group are not durable until the directory is synced, and nothing may
-// be made durable ahead of them.
+// be made durable ahead of them. A Prepare write comes before every write that
+// is not Prepare: once the commit point is passed the flag changes nothing, and
+// a declaration that sets it there would mislead its reader.
 func NewTable(decls ...*Decl) (*Table, error) {
 	t := &Table{
 		byDecl: make(map[*Decl]*compiled, len(decls)),
@@ -77,6 +79,7 @@ func compile(d *Decl) (*compiled, error) {
 	roles := map[string]bool{}
 	appended := map[string]bool{} // roles of an Append, so far
 	synced := map[string]bool{}   // roles of an Append that a SyncFile took
+	committing := false           // a write that is not Prepare was declared
 	for i, w := range c.writes {
 		if !fsx.ValidName(w.Role) {
 			return nil, fmt.Errorf("txn: transaction %q: invalid role name %q", d.Name, w.Role)
@@ -104,6 +107,10 @@ func compile(d *Decl) (*compiled, error) {
 				appended[w.Role] = true
 			}
 		}
+		if w.Prepare && committing {
+			return nil, fmt.Errorf("txn: transaction %q: Prepare write %q follows a write that is not Prepare: after the commit point a Prepare flag has no effect", d.Name, w.Role)
+		}
+		committing = committing || !w.Prepare
 		if w.Op == OpReplaceDefer && (i+1 == len(c.writes) || c.writes[i+1].Op != OpSyncDir) {
 			return nil, fmt.Errorf("txn: transaction %q: ReplaceDefer %q must be followed immediately by a SyncDir", d.Name, w.Role)
 		}

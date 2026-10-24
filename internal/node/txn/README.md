@@ -45,7 +45,9 @@ declaration of its own.
   declaration: a `Many` write may repeat, an `Optional` one may be skipped,
   nothing may be made again after a later write, and `Commit` needs every
   required write made. A violation panics, naming the rule: it is a programming
-  error, not an I/O error.
+  error, not an I/O error. `NewTable` also refuses a `Prepare` write declared
+  after a write that is not `Prepare`: past the commit point the flag changes
+  nothing, and it would mislead a reader.
 - **One open `Tx` per declaration.** Crash points are numbered per key; two
   transactions of one declaration advancing the same keys would make the
   numbering depend on scheduling. A second `Begin` panics. Different
@@ -71,18 +73,31 @@ declaration of its own.
   the file are attributed to the role it was opened under, so `SyncFile` is
   declared under the role of its `Append` (a declaration repeats the role for
   that pair and for no other), and the `Tx` panics if a path is appended under
-  two roles or synced under another role. A failed append or sync closes the
-  handle at once; handles never outlive their `Tx`.
+  two roles or synced under another role. A role has one `SyncFile`, which
+  makes one path durable, so `Commit` panics, naming the role and the paths, when
+  a role that made its `SyncFile` also appended to a path that sync did not
+  cover: the other paths would be lost without a sign. A failed append or sync
+  closes the handle at once; handles never outlive their `Tx`.
 - **Reserved names.** `log` and `cleanup` are not valid transaction or role
   names (`fsx.ValidName`): `fsx` uses them for steps that are not crash points.
+- **A `Tx` that made no write commits nothing.** `Commit` returns nil and
+  reaches no point, so an owner that opened a transaction with nothing to do
+  does not leave a commit point of a recovery transaction on a clean start. A
+  declaration with a required write that was not made still panics: that is an
+  incomplete transaction, not an empty one.
 - **Cleanup is one `Recovery` transaction.** `Recover` removes the leftover
   files, then the leftover directories, then syncs each directory that held one.
-  With nothing to remove it does nothing and reaches no point.
+  With nothing to remove it does nothing and reaches no point. It panics when
+  the table has no cleanup declaration, on a clean disk as well, so a
+  composition root that left out `Internal()` fails at its first start.
 
 ## What the caller must guarantee
 
 - Acknowledge, and update memory, only after `Commit` returns nil, and do not
   read back a path written in the same `Tx`.
+- An `Append` that no `SyncFile` followed is not durable, even after `Commit`
+  returns nil. Declare and make the `SyncFile` of every append the caller
+  acknowledges as durable.
 - On `IsFatal`, exit and rescan on restart. The package returns the class; the
   composition root exits.
 - Build the table once, at the composition root, from `Internal()` and every

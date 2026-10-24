@@ -224,13 +224,18 @@ set of points is known before anything runs. `NewTable` refuses duplicate or
 invalid names (the reserved `log` and `cleanup` included), unknown operations and
 kinds, a transaction without writes, a role used twice (except the role of an
 `Append`, which one later `SyncFile` repeats), a `SyncFile` whose role is not an
-earlier `Append`'s, and a `ReplaceDefer` that is not declared immediately before
-a `SyncDir`.
+earlier `Append`'s, a `ReplaceDefer` that is not declared immediately before a
+`SyncDir`, and a `Prepare` write declared after a write that is not `Prepare`
+(after the commit point the flag has no effect, so it would only mislead a
+reader).
 
 **Run time checks.** `Begin` panics for a declaration that is not in the table.
 Each call of a `Tx` is checked against its declaration: the role, the operation
 and the order (a `Many` write repeats, an `Optional` one is skipped, nothing is
-made again after a later write, and `Commit` needs every required write). A
+made again after a later write, and `Commit` needs every required write; a `Tx` that made no write commits nothing:
+`Commit` returns nil and reaches no point, so an owner that opened a transaction
+with nothing to do does not leave a commit point of a recovery transaction on a
+clean start). A
 second open `Tx` of one declaration panics, because crash points are numbered per
 key and two transactions advancing the same key would make the numbering depend
 on scheduling. These are programming errors, so they panic, and they are found
@@ -271,7 +276,14 @@ syncs through that same handle (`SyncFile` is declared under the role of its
 `Append`, because a file's steps carry the role it was opened under). A failed
 append or sync closes the handle at once and the `Tx` writes nothing more, so a
 handle is never reused after a failure and never outlives its `Tx`; the next `Tx`
-opens the file again. The partial record a failed append can leave is the
+opens the file again. A role has one `SyncFile`, which takes one path, so a role
+that appended to several paths cannot make them all durable: `Commit` panics,
+naming the role and the unsynced paths, when a role that made its `SyncFile`
+also appended to a path that sync did not cover, since the declaration reads as
+"this role is durable" and the other paths would be lost without a sign. A role
+that never syncs is the declaration of an unsynced batch and may append to any
+number of paths. An append that no `SyncFile` followed is not durable even after
+`Commit` returns nil. The partial record a failed append can leave is the
 reader's to skip. The framing of what is appended, including a separator at the
 start of a `Tx`'s first append to a file that may end in a partial record, belongs
 to the format's owner: this layer writes the bytes it is given.
@@ -286,7 +298,10 @@ every clean run (no crash, no damage, no injected fault) the list is empty at
 every quiescent point, because a temporary name exists only while a replacement
 is under way and a garbage name only while a directory is being discarded. With
 nothing to remove `Recover` reaches no point, so a start on a clean disk is not a
-recovery, and a clean run that reaches a recovery point is a failure. Every other
+recovery, and a clean run that reaches a recovery point is a failure. `Recover`
+checks that the table holds `txn-cleanup` before it looks at the disk and
+panics otherwise, so a composition root that left out `Internal()` fails at its
+first start rather than at the first crash. Every other
 `Recovery` transaction has the same shape: its trigger is a named pure function
 of the disk, used by the repair and by the scenario tests, and holds only for
 states a crash or damage can produce.
@@ -302,8 +317,9 @@ nothing has been acknowledged. A test takes `Mem.Clone()` (process crash) or
 `CrashClone` (power loss) in it and restarts on the clone.
 
 **Contract with callers.** Acknowledge, and update memory, only after `Commit`
-returns nil; do not read back a path written in the same `Tx`; exit and rescan
-on `IsFatal`; serialise the transactions of one declaration.
+returns nil; do not read back a path written in the same `Tx`; an append that no
+`SyncFile` followed is not durable even after `Commit` returns nil; exit and
+rescan on `IsFatal`; serialise the transactions of one declaration.
 
 ## The crash model and what it can prove
 
@@ -413,9 +429,10 @@ so that the double cannot drift from what it stands for.
   because the reordering studied there is of different directory operations
   relative to each other, not a tear inside one rename. Every operation of `fsx`
   that binds a name syncs the directory before it returns, so a name is not bound
-  a second time before the first binding is durable; `ReplaceDeferred` is the one
-  exception, and the transaction layer makes up for it by requiring the sync of
-  that directory to follow immediately.
+  a second time before the first binding is durable, with two exceptions:
+  `ReplaceDeferred` and `OpenAppend` do not sync the directory before returning.
+  The first is completed by the `SyncDir` that must follow it, the second by
+  `SyncFile`.
 - **Fault injection through the interface, not build tags.** A tag changes the
   program under test; a wrapper does not, and a wrapper can also wrap the real
   file system.
@@ -527,11 +544,11 @@ so that the double cannot drift from what it stands for.
 | fault injection | `internal/node/fsx/fsxtest/faulty.go` | `faulty_test.go` |
 | conformance | `internal/node/fsx/fsxtest/conformance.go` | `TestMemConformsToTheFSContract`, `TestOSFSConformsToTheFSContract` |
 | declarations, table, keys | `internal/node/txn/txn.go`, `table.go`, `ops.go` | `TestTransactionTableIsValid`, `TestTableKeysAreTheStepsOfEveryDeclaredWrite`, `TestTableKeysOfEveryOperation`, `TestNewTableRejects`, `TestNewTableAccepts`, `TestTableKeepsTheDeclarationItWasBuiltFrom` |
-| run time checks | `internal/node/txn/tx.go`, `writer.go` | `runtime_test.go` (`TestBeginPanicsOnADeclarationThatIsNotInTheTable`, `TestBeginPanicsWhileATxOfTheSameDeclarationIsOpen`, `TestTxPanicsOnACallTheDeclarationDoesNotAllow`, `TestDeferredReplacementsMustBeSyncedBeforeAnythingElse`, `TestSyncFileMustMatchTheAppendInThisTx`) |
+| run time checks | `internal/node/txn/tx.go`, `writer.go` | `runtime_test.go` (`TestBeginPanicsOnADeclarationThatIsNotInTheTable`, `TestBeginPanicsWhileATxOfTheSameDeclarationIsOpen`, `TestTxPanicsOnACallTheDeclarationDoesNotAllow`, `TestDeferredReplacementsMustBeSyncedBeforeAnythingElse`, `TestSyncFileMustMatchTheAppendInThisTx`, `TestCommitOfATransactionThatMadeNoWriteReachesNoPoint`) |
 | commit point and classes | `internal/node/txn/ops.go`, `tx.go` | `classify_test.go` (`TestFailureClassBeforeAndAfterTheCommitPoint`, `TestFirstErrorIsStickyAndNoStepRunsAfterIt`, `TestEachOperationHasItsCommitStep`, `TestFailureAfterTheCommitStepInsideOneOperationIsFatal`) |
 | crash states and durability | `internal/node/txn/tx.go` | `crash_test.go` (`TestEveryDeclaredKeyIsReachedInOrder`, `TestCrashStatesAtEveryPointOfAMultiWriteTransaction`, `TestAcknowledgedWritesSurvivePowerLoss`), `TestRandomTransactionsHonourTheCommitPointOrderingAndDurability` |
 | appended files | `internal/node/txn/tx.go` | `append_test.go` (`TestFailedAppendDropsTheHandle`, `TestHandlesAreClosedWhenTheTransactionEnds`) |
-| cleanup and its predicate | `internal/node/txn/cleanup.go` | `recover_test.go` (`TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards`, `TestCleanupPredicateIsEmptyOnEveryCleanState`, `TestRecoverOnACleanDiskReachesNoPoint`) |
+| cleanup and its predicate | `internal/node/txn/cleanup.go` | `recover_test.go` (`TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards`, `TestCleanupPredicateIsEmptyOnEveryCleanState`, `TestRecoverOnACleanDiskReachesNoPoint`, `TestRecoverPanicsWithoutTheCleanupDeclarationEvenOnACleanDisk`) |
 | coverage | `internal/node/txn/writer.go` | `coverage_test.go` |
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
 

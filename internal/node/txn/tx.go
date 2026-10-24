@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path"
+	"sort"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
 )
@@ -36,8 +37,9 @@ type Tx struct {
 // appendFile is a file appended in this Tx: the handle every append and the
 // sync go through, and the role its steps are attributed to.
 type appendFile struct {
-	f    fsx.File
-	role string
+	f      fsx.File
+	role   string
+	synced bool // SyncFile completed on this handle
 }
 
 func (t *Tx) panicf(format string, args ...any) {
@@ -212,7 +214,8 @@ func (t *Tx) Append(role, p string, data []byte) error {
 }
 
 // SyncFile makes what was appended to path in this Tx durable, through the
-// handle that appended it. The role is the role of the Append.
+// handle that appended it. The role is the role of the Append. A role makes one
+// sync, so a role that appended to several paths must not sync: see Commit.
 func (t *Tx) SyncFile(role, p string) error {
 	return t.run(role, OpSyncFile, p, func(tag fsx.Tag) error {
 		af, ok := t.files[p]
@@ -226,6 +229,7 @@ func (t *Tx) SyncFile(role, p string) error {
 			t.drop(p)
 			return err
 		}
+		af.synced = true
 		return nil
 	})
 }
@@ -295,6 +299,9 @@ func (t *Tx) Discard(role, dir string) error {
 // Commit ends the transaction. If a write failed it returns that error;
 // otherwise it checks that the declaration is complete, reaches the commit
 // point, and returns nil: only now may the caller acknowledge or update memory.
+// A transaction that made no write has nothing to commit: it returns nil and
+// reaches no point. An append that no SyncFile followed is not durable when
+// Commit returns.
 func (t *Tx) Commit() error {
 	t.mustBeOpen()
 	defer t.end()
@@ -309,8 +316,39 @@ func (t *Tx) Commit() error {
 	if t.hasPending {
 		t.panicf("Commit while the deferred group of directory %q is not synced: the next write after a deferred group must be the SyncDir of its directory", t.pending)
 	}
+	t.checkEverySyncedRoleIsWhole()
+	if t.cur < 0 {
+		return nil
+	}
 	t.w.commitPoint(t.d.name)
 	return nil
+}
+
+// checkEverySyncedRoleIsWhole panics when a role that made its SyncFile also
+// appended to a path that sync did not cover. A role has one SyncFile, which
+// takes one path, so the declaration reads as "this role's appends are durable"
+// while the other paths would not be: a silent loss of what the caller
+// acknowledges after Commit.
+func (t *Tx) checkEverySyncedRoleIsWhole() {
+	synced := map[string]bool{}
+	for _, af := range t.files {
+		synced[af.role] = synced[af.role] || af.synced
+	}
+	unsynced := map[string][]string{}
+	for p, af := range t.files {
+		if synced[af.role] && !af.synced {
+			unsynced[af.role] = append(unsynced[af.role], p)
+		}
+	}
+	roles := make([]string, 0, len(unsynced))
+	for role := range unsynced {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	for _, role := range roles {
+		sort.Strings(unsynced[role])
+		t.panicf("Commit: role %q made its SyncFile, but the paths %q appended under it were not synced: a role has one SyncFile, which makes durable one path", role, unsynced[role])
+	}
 }
 
 // Close ends the transaction if it has not ended. It is meant for

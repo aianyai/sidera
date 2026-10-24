@@ -211,6 +211,11 @@ func TestNewTableRejects(t *testing.T) {
 			txn.Write{Role: "journal", Op: txn.OpSyncFile})}, "SyncFile"},
 		{"two-appends-with-one-role", []*txn.Decl{withWrites(
 			txn.Write{Role: "journal", Op: txn.OpAppend}, txn.Write{Role: "journal", Op: txn.OpAppend})}, "role"},
+
+		{"prepare-write-after-a-write-that-is-not-prepare", []*txn.Decl{withWrites(
+			txn.Write{Role: "r", Op: txn.OpReplace}, txn.Write{Role: "s", Op: txn.OpReplace, Prepare: true})}, "Prepare"},
+		{"prepare-write-after-an-optional-write-that-is-not-prepare", []*txn.Decl{withWrites(
+			txn.Write{Role: "r", Op: txn.OpReplace, Optional: true}, txn.Write{Role: "s", Op: txn.OpMakeDir, Prepare: true})}, "Prepare"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -240,6 +245,9 @@ func TestNewTableAccepts(t *testing.T) {
 			{Role: "a", Op: txn.OpReplaceDefer, Many: true}, {Role: "a-dir", Op: txn.OpSyncDir},
 			{Role: "b", Op: txn.OpReplaceDefer, Many: true}, {Role: "b-dir", Op: txn.OpSyncDir}}},
 		{"every-flag", []txn.Write{{Role: "r", Op: txn.OpReplace, Many: true, Optional: true, Prepare: true}}},
+		{"prepare-writes-before-the-others", []txn.Write{
+			{Role: "a", Op: txn.OpReplace, Prepare: true}, {Role: "b", Op: txn.OpMakeDir, Prepare: true},
+			{Role: "c", Op: txn.OpReplace}, {Role: "d", Op: txn.OpRemove}}},
 		{"two-appends-each-synced", []txn.Write{
 			{Role: "a", Op: txn.OpAppend}, {Role: "a", Op: txn.OpSyncFile},
 			{Role: "b", Op: txn.OpAppend}, {Role: "b", Op: txn.OpSyncFile}}},

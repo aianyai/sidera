@@ -123,6 +123,21 @@ func TestRecoverOnACleanDiskReachesNoPoint(t *testing.T) {
 	}
 }
 
+// The table of a composition root that forgot Internal() has no cleanup
+// transaction. That is found at the first start, on a disk with nothing to
+// clean, not at the first crash.
+func TestRecoverPanicsWithoutTheCleanupDeclarationEvenOnACleanDisk(t *testing.T) {
+	tab, err := txn.NewTable(singleReplace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem := fsxtest.NewMem()
+	mkdirs(t, mem, "a")
+	put(t, mem, map[string]string{"a/x": "1"})
+	w := txn.New(mem, tab, nil)
+	mustPanic(t, "txn-cleanup", func() { w.Recover() })
+}
+
 // A failure of the cleanup is classified like any other transaction's: the
 // first removal changes nothing if it fails, a later failure is fatal.
 func TestRecoverFailureClasses(t *testing.T) {
