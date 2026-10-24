@@ -56,7 +56,7 @@ func TestGoldenPairRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Payload != p || len(v.Signers) != 2 || v.Digest.String() != goldenPairCompleteDigest {
+	if v.Payload() != p || len(v.Signers()) != 2 || v.Digest().String() != goldenPairCompleteDigest {
 		t.Fatalf("verified = %+v", v)
 	}
 }
@@ -88,7 +88,7 @@ func TestPartialSignatures(t *testing.T) {
 		if err != nil || v.Complete() {
 			t.Fatalf("VerifyPartial = %+v, %v", v, err)
 		}
-		if v.Digest.String() != goldenPairFirstOnlyDigest || v.Digest != first.Digest() {
+		if v.Digest().String() != goldenPairFirstOnlyDigest || v.Digest() != first.Digest() {
 			t.Fatal("digest of the partial record is not the digest of the record")
 		}
 	})
@@ -98,8 +98,8 @@ func TestPartialSignatures(t *testing.T) {
 			t.Fatal(err)
 		}
 		want := []SlotState{{Signed: true, Signer: s1.Public()}, {}}
-		if len(v.Slots) != 2 || v.Slots[0] != want[0] || v.Slots[1] != want[1] || v.Payload != p {
-			t.Fatalf("Slots = %+v", v.Slots)
+		if len(v.Slots()) != 2 || v.Slots()[0] != want[0] || v.Slots()[1] != want[1] || v.Payload() != p {
+			t.Fatalf("Slots = %+v", v.Slots())
 		}
 		recv, _ := Decode(goldenPairComplete, DefaultMaxInput)
 		v, err = VerifyPartial(pairDescriptor, recv)
@@ -107,8 +107,8 @@ func TestPartialSignatures(t *testing.T) {
 			t.Fatalf("complete record: %+v, %v", v, err)
 		}
 		// The record lists key 2 first, but slot 0 is the first node's slot.
-		if v.Slots[0].Signer != s1.Public() || v.Slots[1].Signer != s2.Public() {
-			t.Fatalf("slots are not in the rule's order: %+v", v.Slots)
+		if v.Slots()[0].Signer != s1.Public() || v.Slots()[1].Signer != s2.Public() {
+			t.Fatalf("slots are not in the rule's order: %+v", v.Slots())
 		}
 	})
 	t.Run("a partial result cannot stand in for a verified one", func(t *testing.T) {
@@ -763,7 +763,7 @@ func TestSealRunsTheDecodingPath(t *testing.T) {
 			t.Fatal(err)
 		}
 		v, err := Verify(noteDescriptor, rec)
-		if err != nil || v.Payload != in {
+		if err != nil || v.Payload() != in {
 			t.Fatalf("Verify = %+v, %v", v, err)
 		}
 	})

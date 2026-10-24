@@ -46,10 +46,10 @@ func TestGoldenNetworkKeyCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Payload != cert {
-		t.Fatalf("payload = %+v, want %+v", v.Payload, cert)
+	if v.Payload() != cert {
+		t.Fatalf("payload = %+v, want %+v", v.Payload(), cert)
 	}
-	if got := v.Payload.Node.String(); got != "node1ufd2fh9u0xuwcjwzt4fu97hafsmw754hz0exug8e7as824s67qwsw4tkv5" {
+	if got := v.Payload().Node.String(); got != "node1ufd2fh9u0xuwcjwzt4fu97hafsmw754hz0exug8e7as824s67qwsw4tkv5" {
 		t.Fatalf("node text = %s", got)
 	}
 }
@@ -250,7 +250,6 @@ func TestDecideSerial(t *testing.T) {
 		{"same serial, same key, different window: conflict", &seen, cert(a, 5, func(c *NetworkKeyCertificate) { c.NotAfter = c.NotAfter.Add(time.Hour) }), SerialConflict},
 		{"another node's certificate: wrong node", &seen, otherNode, SerialWrongNode},
 		{"an unverified zero value: invalid", &seen, Verified[NetworkKeyCertificate]{}, SerialInvalid},
-		{"a certificate without its digest: invalid", &seen, Verified[NetworkKeyCertificate]{Payload: known.Payload}, SerialInvalid},
 		{"an expired certificate with a higher serial still advances the serial", &seen, expired, SerialAccept},
 	}
 	for _, r := range rows {
@@ -274,8 +273,9 @@ func TestDecideSerial(t *testing.T) {
 		}
 	})
 	t.Run("a revocation is not an input: the serial seen stays", func(t *testing.T) {
-		accepted := AcceptedNetworkKey{Cert: &known.Payload, Revocation: KeyRevocationRevoked}
-		if got := NetworkKeyBelongs(accepted, known.Payload.Node, a.Public(), epoch.Add(time.Hour)); got != BindingRevoked {
+		knownCert := known.Payload()
+		accepted := AcceptedNetworkKey{Cert: &knownCert, Revocation: KeyRevocationRevoked}
+		if got := NetworkKeyBelongs(accepted, known.Payload().Node, a.Public(), epoch.Add(time.Hour)); got != BindingRevoked {
 			t.Fatalf("binding = %v", got)
 		}
 		if got := DecideSerial(&seen, cert(b, 4)); got != SerialStale {
@@ -286,7 +286,7 @@ func TestDecideSerial(t *testing.T) {
 		}
 	})
 	t.Run("SerialSeenOf takes node, serial and digest of the certificate", func(t *testing.T) {
-		if seen.Node != known.Payload.Node || seen.Serial != 5 || seen.Digest != known.Digest || seen.Digest.IsZero() {
+		if seen.Node != known.Payload().Node || seen.Serial != 5 || seen.Digest != known.Digest() || seen.Digest.IsZero() {
 			t.Fatalf("SerialSeenOf = %+v", seen)
 		}
 	})
@@ -360,7 +360,7 @@ func TestRotatingTheNetworkKeyKeepsTheNodeID(t *testing.T) {
 		t.Fatalf("first certificate: %v", verdict)
 	}
 	seen := SerialSeenOf(v1)
-	c1 := v1.Payload
+	c1 := v1.Payload()
 	if got := NetworkKeyBelongs(AcceptedNetworkKey{Cert: &c1, Revocation: KeyRevocationClear}, node, oldKey.Public(), now); got != BindingOK {
 		t.Fatalf("old key before rotation: %v", got)
 	}
@@ -370,7 +370,7 @@ func TestRotatingTheNetworkKeyKeepsTheNodeID(t *testing.T) {
 		t.Fatalf("rotation certificate: %v", verdict)
 	}
 	seen = SerialSeenOf(v2)
-	c2 := v2.Payload
+	c2 := v2.Payload()
 	if c2.Node != c1.Node || c2.Node != node {
 		t.Fatal("the node identifier changed with the network key")
 	}
@@ -422,8 +422,8 @@ func TestGoldenDeviceCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Payload != cert {
-		t.Fatalf("payload = %+v, want %+v", v.Payload, cert)
+	if v.Payload() != cert {
+		t.Fatalf("payload = %+v, want %+v", v.Payload(), cert)
 	}
 }
 
@@ -739,8 +739,8 @@ func TestIssuedCertificatesAreBackdatedByTheClockTolerance(t *testing.T) {
 			t.Fatalf("certificate = %+v", c)
 		}
 		v := verifiedNetCert(t, identity, c) // sealed, decoded and verified: the issued value is valid
-		if v.Payload != c {
-			t.Fatalf("read back %+v, want %+v", v.Payload, c)
+		if v.Payload() != c {
+			t.Fatalf("read back %+v, want %+v", v.Payload(), c)
 		}
 		acc := AcceptedNetworkKey{Cert: &c, Revocation: KeyRevocationClear}
 		node, key := c.Node, network.Public()
@@ -772,7 +772,7 @@ func TestIssuedCertificatesAreBackdatedByTheClockTolerance(t *testing.T) {
 			t.Fatal(err)
 		}
 		v, err := Verify(DeviceCertificateDescriptor, rec)
-		if err != nil || v.Payload != c {
+		if err != nil || v.Payload() != c {
 			t.Fatalf("Verify = %+v, %v", v, err)
 		}
 		list, _ := admin.NewList([]admin.Entry{{Person: c.Person, Level: admin.LevelFullControl}})

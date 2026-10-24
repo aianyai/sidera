@@ -115,7 +115,7 @@ func acceptedA(t testing.TB) record.AcceptedNetworkKey {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return record.AcceptedNetworkKey{Cert: &v.Payload, Revocation: record.KeyRevocationClear}
+	return record.AcceptedNetworkKey{Cert: ptrTo(v.Payload()), Revocation: record.KeyRevocationClear}
 }
 
 // networkCertRecord issues a certificate record for node (identity key seed
@@ -176,3 +176,6 @@ func bootNonce(first byte) BootNonce {
 	}
 	return n
 }
+
+// ptrTo returns a pointer to a copy of v.
+func ptrTo[T any](v T) *T { return &v }

@@ -174,7 +174,7 @@ func decodePayload(b []byte) (Credential, error) {
 	if err != nil {
 		return Credential{}, err
 	}
-	return u.Payload, nil
+	return u.Payload(), nil
 }
 
 // Facts returns what package trust reads of a verified credential: the digest,
@@ -182,9 +182,9 @@ func decodePayload(b []byte) (Credential, error) {
 // expires", which is how package trust reads a zero NotAfter too.
 func Facts(v record.Verified[Credential]) trust.Credential {
 	return trust.Credential{
-		Digest:   trust.CredentialDigest(v.Digest),
-		A:        v.Payload.A,
-		B:        v.Payload.B,
-		NotAfter: v.Payload.NotAfter,
+		Digest:   trust.CredentialDigest(v.Digest()),
+		A:        v.Payload().A,
+		B:        v.Payload().B,
+		NotAfter: v.Payload().NotAfter,
 	}
 }

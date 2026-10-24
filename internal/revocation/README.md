@@ -101,8 +101,9 @@ of it.
 ## What the caller must guarantee
 
 - Pass `Of` only values that `record.Verify` returned for the matching
-  descriptor, or use `Verify`, which does that. A zero or hand-built
-  `record.Verified` produces a `Revocation` that `Set.Add` and `Classify` refuse.
+  descriptor, or use `Verify`, which does that. A zero
+  `record.Verified` (the only one code outside package `record` can write)
+  produces a `Revocation` that `Set.Add` and `Classify` refuse.
 - Add a revocation to the `Set` only when `Classify` says `LongTerm` (a node
   keeps no unrelated node-level revocation long term). The caller counts the
   forward-once revocations it holds, passes the count to `Classify` and lowers

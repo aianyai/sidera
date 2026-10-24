@@ -30,13 +30,13 @@ func TestGoldenVoucher(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if v.Payload != sampleVoucher(t) {
-		t.Errorf("payload = %+v", v.Payload)
+	if v.Payload() != sampleVoucher(t) {
+		t.Errorf("payload = %+v", v.Payload())
 	}
-	if v.Digest.String() != goldenVoucherDigest {
-		t.Errorf("digest = %s", v.Digest)
+	if v.Digest().String() != goldenVoucherDigest {
+		t.Errorf("digest = %s", v.Digest())
 	}
-	if v.Signers[0] != signerOf(t, keyNetA).Public() {
+	if v.Signers()[0] != signerOf(t, keyNetA).Public() {
 		t.Error("not signed by the network key")
 	}
 	sealed, err := record.Seal(VoucherDescriptor(accepted, voucherNow), sampleVoucher(t), signerOf(t, keyNetA))
@@ -225,7 +225,7 @@ func TestCheckVoucher(t *testing.T) {
 				t.Errorf("a refused voucher returned %+v", got)
 			}
 			if reason == VoucherOK {
-				p := tc.v.Payload
+				p := tc.v.Payload()
 				if want := (trust.Voucher{Issuer: p.Issuer, Edge: p.Edge, IssuedAt: p.IssuedAt, Counter: p.Counter}); got != want {
 					t.Errorf("voucher = %+v, want %+v", got, want)
 				}

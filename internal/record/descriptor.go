@@ -3,6 +3,7 @@ package record
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
@@ -165,15 +166,29 @@ func (d Descriptor[P]) valid() bool {
 
 // Verified is the result of checking a complete record against its descriptor:
 // every slot of the signer rule is filled by an allowed signer whose signature
-// verifies. Only Verify returns it. A record that may still lack signers is
-// checked with VerifyPartial, which returns a Partial, a different type that
-// cannot be used where a Verified is expected.
+// verifies. Only Verify returns it, and its fields are unexported so that no
+// other code can build one: a Verified in hand is proof that a record was
+// verified, whatever package holds it. The zero Verified is the one value that
+// can be written by hand; it carries no digest and every consumer refuses it.
+//
+// A record that may still lack signers is checked with VerifyPartial, which
+// returns a Partial, a different type that cannot be used where a Verified is
+// expected.
 type Verified[P any] struct {
-	Payload P
-	Digest  Digest
-	// Signers are the keys that signed, in the record's order.
-	Signers []ident.PublicKey
+	payload P
+	digest  Digest
+	signers []ident.PublicKey
 }
+
+// Payload returns the verified payload.
+func (v Verified[P]) Payload() P { return v.payload }
+
+// Digest returns the digest of the verified record.
+func (v Verified[P]) Digest() Digest { return v.digest }
+
+// Signers returns the keys that signed, in the record's order. The caller may
+// modify the returned slice.
+func (v Verified[P]) Signers() []ident.PublicKey { return slices.Clone(v.signers) }
 
 // SlotState says whether one slot of a signer rule is filled and by whom.
 type SlotState struct {
@@ -187,18 +202,27 @@ type SlotState struct {
 // signers: every signature present verifies and every signer present is
 // allowed, but slots may be empty. It is not a Verified: nothing of it may be
 // acted on as a statement of the record's signers until Verify accepts the
-// complete record.
+// complete record. Only VerifyPartial returns it.
 type Partial[P any] struct {
-	Payload P
-	Digest  Digest
-	// Slots holds one entry per slot of the signer rule, in the rule's order.
-	Slots []SlotState
+	payload P
+	digest  Digest
+	slots   []SlotState
 }
+
+// Payload returns the payload, whose signatures present were verified.
+func (p Partial[P]) Payload() P { return p.payload }
+
+// Digest returns the digest of the record.
+func (p Partial[P]) Digest() Digest { return p.digest }
+
+// Slots returns one entry per slot of the signer rule, in the rule's order. The
+// caller may modify the returned slice.
+func (p Partial[P]) Slots() []SlotState { return slices.Clone(p.slots) }
 
 // Complete reports that every slot is filled. A complete Partial is still not a
 // Verified; pass the record to Verify for that.
 func (p Partial[P]) Complete() bool {
-	for _, s := range p.Slots {
+	for _, s := range p.slots {
 		if !s.Signed {
 			return false
 		}
@@ -243,7 +267,7 @@ func Verify[P any](d Descriptor[P], r Record) (Verified[P], error) {
 	for i, s := range r.Signatures {
 		signers[i] = s.Key
 	}
-	return Verified[P]{Payload: p.Payload, Digest: p.Digest, Signers: signers}, nil
+	return Verified[P]{payload: p.payload, digest: p.digest, signers: signers}, nil
 }
 
 // VerifyPartial is Verify for a record that may still be waiting for other
@@ -279,7 +303,7 @@ func VerifyPartial[P any](d Descriptor[P], r Record) (Partial[P], error) {
 			return Partial[P]{}, fmt.Errorf("%w: signature %d", ErrSignature, i)
 		}
 	}
-	return Partial[P]{Payload: p, Digest: r.Digest(), Slots: state}, nil
+	return Partial[P]{payload: p, digest: r.Digest(), slots: state}, nil
 }
 
 // Unverified is a payload read from a record whose signatures were not checked.
@@ -290,8 +314,11 @@ func VerifyPartial[P any](d Descriptor[P], r Record) (Partial[P], error) {
 // Nothing in it is trustworthy: the payload is exactly what the sender wrote,
 // and any claim in it (a node, a key, a time) is a claim.
 type Unverified[P any] struct {
-	Payload P
+	payload P
 }
+
+// Payload returns the payload exactly as the sender wrote it.
+func (u Unverified[P]) Payload() P { return u.payload }
 
 // Peek reads the payload of r as the record type d describes, without checking
 // any signature or the signer rule. It checks only what decoding needs: that r
@@ -317,7 +344,7 @@ func Peek[P any](d Descriptor[P], r Record) (Unverified[P], error) {
 	if err != nil {
 		return Unverified[P]{}, err
 	}
-	return Unverified[P]{Payload: p}, nil
+	return Unverified[P]{payload: p}, nil
 }
 
 // CoSign adds s's signature to r, a record of the type d describes that is
@@ -344,7 +371,7 @@ func CoSign[P any](d Descriptor[P], r Record, s Signer) (Record, error) {
 			return Record{}, ErrDuplicateSigner
 		}
 	}
-	if err := assign(d.signers(partial.Payload), partial.Slots, pub); err != nil {
+	if err := assign(d.signers(partial.payload), partial.slots, pub); err != nil {
 		return Record{}, fmt.Errorf("%s: %w", d.typ, err)
 	}
 	return r.withSignature(s)

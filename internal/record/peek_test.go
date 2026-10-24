@@ -3,8 +3,11 @@ package record
 import (
 	"errors"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/ident"
 )
 
 func TestPeek(t *testing.T) {
@@ -17,7 +20,7 @@ func TestPeek(t *testing.T) {
 
 	t.Run("a well-formed record of the type yields its payload", func(t *testing.T) {
 		u, err := Peek(pairDescriptor, good)
-		if err != nil || u.Payload != p {
+		if err != nil || u.Payload() != p {
 			t.Fatalf("Peek = %+v, %v", u, err)
 		}
 	})
@@ -26,7 +29,7 @@ func TestPeek(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if u, err := Peek(pairDescriptor, first); err != nil || u.Payload != p {
+		if u, err := Peek(pairDescriptor, first); err != nil || u.Payload() != p {
 			t.Fatalf("Peek = %+v, %v", u, err)
 		}
 	})
@@ -36,8 +39,8 @@ func TestPeek(t *testing.T) {
 			t.Fatal(err)
 		}
 		v, err := Verify(pairDescriptor, good)
-		if err != nil || v.Payload != u.Payload {
-			t.Fatalf("Verify payload %+v, Peek payload %+v, error %v", v.Payload, u.Payload, err)
+		if err != nil || v.Payload() != u.Payload() {
+			t.Fatalf("Verify payload %+v, Peek payload %+v, error %v", v.Payload(), u.Payload(), err)
 		}
 	})
 	t.Run("a record of another type is refused", func(t *testing.T) {
@@ -84,7 +87,7 @@ func TestPeek(t *testing.T) {
 		if _, err := Verify(pairDescriptor, forged); !errors.Is(err, ErrSignature) {
 			t.Fatalf("Verify error = %v, want ErrSignature", err)
 		}
-		if u, err := Peek(pairDescriptor, forged); err != nil || u.Payload != p {
+		if u, err := Peek(pairDescriptor, forged); err != nil || u.Payload() != p {
 			t.Fatalf("Peek = %+v, %v", u, err)
 		}
 	})
@@ -97,7 +100,7 @@ func TestPeek(t *testing.T) {
 		if _, err := Verify(pairDescriptor, rec); !errors.Is(err, ErrSignerNotAllowed) {
 			t.Fatalf("Verify error = %v, want ErrSignerNotAllowed", err)
 		}
-		if u, err := Peek(pairDescriptor, rec); err != nil || u.Payload != p {
+		if u, err := Peek(pairDescriptor, rec); err != nil || u.Payload() != p {
 			t.Fatalf("Peek = %+v, %v", u, err)
 		}
 	})
@@ -127,12 +130,12 @@ func TestPeekChoosesTheVerificationContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, ok := accepted[u.Payload.Node.String()]
+	ctx, ok := accepted[u.Payload().Node.String()]
 	if !ok {
 		t.Fatal("the claimed node has no accepted certificate")
 	}
 	v, err := Verify(declDescriptor(ctx, mid), rec)
-	if err != nil || v.Payload.Text != "hello" {
+	if err != nil || v.Payload().Text != "hello" {
 		t.Fatalf("Verify = %+v, %v", v, err)
 	}
 	// With no context for the claimed node, verification refuses the record.
@@ -141,17 +144,59 @@ func TestPeekChoosesTheVerificationContext(t *testing.T) {
 	}
 }
 
-func TestUnverifiedIsADistinctType(t *testing.T) {
-	u := reflect.TypeOf(Unverified[pairRecord]{})
-	for _, other := range []reflect.Type{
+func TestResultTypesAreMutuallyDistinct(t *testing.T) {
+	types := []reflect.Type{
+		reflect.TypeOf(Unverified[pairRecord]{}),
+		reflect.TypeOf(Verified[pairRecord]{}),
+		reflect.TypeOf(Partial[pairRecord]{}),
+	}
+	for i, a := range types {
+		for j, b := range types {
+			if i != j && (a.AssignableTo(b) || a.ConvertibleTo(b)) {
+				t.Errorf("%v is assignable or convertible to %v", a, b)
+			}
+		}
+	}
+}
+
+// Code outside the package can build a result only by writing its fields, so
+// every field staying unexported is what keeps a Verified from being forged.
+func TestResultTypesHaveNoExportedField(t *testing.T) {
+	for _, typ := range []reflect.Type{
+		reflect.TypeOf(Unverified[pairRecord]{}),
 		reflect.TypeOf(Verified[pairRecord]{}),
 		reflect.TypeOf(Partial[pairRecord]{}),
 	} {
-		if u.AssignableTo(other) || u.ConvertibleTo(other) {
-			t.Errorf("Unverified is assignable or convertible to %v", other)
+		for i := 0; i < typ.NumField(); i++ {
+			if f := typ.Field(i); f.IsExported() {
+				t.Errorf("%v has the exported field %s", typ, f.Name)
+			}
 		}
-		if other.AssignableTo(u) || other.ConvertibleTo(u) {
-			t.Errorf("%v is assignable or convertible to Unverified", other)
-		}
+	}
+}
+
+func TestResultAccessorsReturnCopies(t *testing.T) {
+	s1, s2 := rfcSigner(t, 1), rfcSigner(t, 2)
+	p := pairOf(t)
+	rec, err := Seal(pairDescriptor, p, s1, s2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := Verify(pairDescriptor, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := slices.Clone(v.Signers())
+	v.Signers()[0] = ident.PublicKey{}
+	if got := v.Signers(); !slices.Equal(got, want) {
+		t.Fatalf("Signers after a caller modified its copy: %+v", got)
+	}
+	part, err := VerifyPartial(pairDescriptor, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part.Slots()[0] = SlotState{}
+	if got := part.Slots(); !got[0].Signed || !part.Complete() {
+		t.Fatalf("Slots after a caller modified its copy: %+v", got)
 	}
 }

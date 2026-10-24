@@ -17,7 +17,7 @@ func TestGoldenCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	c := v.Payload
+	c := v.Payload()
 	if got := hex.EncodeToString(c.A.Bytes()); got != hexNodeB {
 		t.Errorf("end a = %s, want the smaller node ID %s", got, hexNodeB)
 	}
@@ -27,7 +27,7 @@ func TestGoldenCredential(t *testing.T) {
 	if !c.CreatedAt.Equal(t0) || !c.NotAfter.Equal(t0.Add(24*time.Hour)) || c.Nonce != sampleNonce() {
 		t.Errorf("payload = %+v", c)
 	}
-	if got := v.Digest.String(); got != goldenCredentialDigest {
+	if got := v.Digest().String(); got != goldenCredentialDigest {
 		t.Errorf("digest = %s, want %s", got, goldenCredentialDigest)
 	}
 	if goldenCredentialDigest != hexCredentialDigest {
@@ -36,10 +36,10 @@ func TestGoldenCredential(t *testing.T) {
 	if got := hex.EncodeToString(record.SignedBytes(r.Type, r.Payload)); got != goldenCredentialSignedBytes {
 		t.Errorf("signed bytes differ from the vector")
 	}
-	if len(v.Signers) != 2 {
-		t.Fatalf("signers = %d", len(v.Signers))
+	if len(v.Signers()) != 2 {
+		t.Fatalf("signers = %d", len(v.Signers()))
 	}
-	if !signedBy(v.Signers, signerOf(t, keyA)) || !signedBy(v.Signers, signerOf(t, keyB)) {
+	if !signedBy(v.Signers(), signerOf(t, keyA)) || !signedBy(v.Signers(), signerOf(t, keyB)) {
 		t.Errorf("signers are not exactly the identity keys of both ends")
 	}
 }
@@ -91,14 +91,14 @@ func TestGoldenCredentialWithoutEndNeverExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !v.Payload.NotAfter.IsZero() {
-		t.Errorf("NotAfter = %v, want the zero time", v.Payload.NotAfter)
+	if !v.Payload().NotAfter.IsZero() {
+		t.Errorf("NotAfter = %v, want the zero time", v.Payload().NotAfter)
 	}
 	f := Facts(v)
 	if !f.NotAfter.IsZero() {
 		t.Errorf("trust.Credential.NotAfter = %v, want zero (never expires)", f.NotAfter)
 	}
-	if got := v.Digest.String(); got != goldenCredentialNoEndDigest {
+	if got := v.Digest().String(); got != goldenCredentialNoEndDigest {
 		t.Errorf("digest = %s", got)
 	}
 }
@@ -112,7 +112,7 @@ func TestGoldenPartialCredential(t *testing.T) {
 	if p.Complete() {
 		t.Error("a credential with one signature is complete")
 	}
-	if p.Digest.String() != goldenCredentialPartialDigest || goldenCredentialPartialDigest != goldenCredentialDigest {
+	if p.Digest().String() != goldenCredentialPartialDigest || goldenCredentialPartialDigest != goldenCredentialDigest {
 		t.Errorf("the partial and the complete credential must share one digest")
 	}
 	if _, err := record.Verify(Descriptor, r); err == nil {
@@ -160,8 +160,8 @@ func TestCredentialAsPairingBuildsIt(t *testing.T) {
 		t.Error("partial record reported complete")
 	}
 	// Slots are in the rule's order: end a (B) first, then end b (A). Only A signed.
-	if checked.Slots[0].Signed || !checked.Slots[1].Signed || checked.Slots[1].Signer != signerOf(t, keyA).Public() {
-		t.Errorf("slots = %+v, want only the slot of node A (end b) filled by key A", checked.Slots)
+	if checked.Slots()[0].Signed || !checked.Slots()[1].Signed || checked.Slots()[1].Signer != signerOf(t, keyA).Public() {
+		t.Errorf("slots = %+v, want only the slot of node A (end b) filled by key A", checked.Slots())
 	}
 	// The target must not co-sign a payload that is not its own; that comparison
 	// is the caller's, and the bytes decide it.
@@ -185,11 +185,11 @@ func TestCredentialAsPairingBuildsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Digest != want || checked.Digest != want || partial.Digest() != want {
-		t.Errorf("digest changed between stages: %s %s %s, want %s", partial.Digest(), checked.Digest, v.Digest, want)
+	if v.Digest() != want || checked.Digest() != want || partial.Digest() != want {
+		t.Errorf("digest changed between stages: %s %s %s, want %s", partial.Digest(), checked.Digest(), v.Digest(), want)
 	}
-	if v.Payload != initiator {
-		t.Errorf("payload = %+v", v.Payload)
+	if v.Payload() != initiator {
+		t.Errorf("payload = %+v", v.Payload())
 	}
 }
 

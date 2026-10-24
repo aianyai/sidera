@@ -32,7 +32,7 @@ func TestGoldenReachability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	p := v.Payload
+	p := v.Payload()
 	if p.Counter != 3 || !p.ExpiresAt.Equal(t0.Add(time.Hour)) || p.Node() != nodeOf(t, keyA) {
 		t.Errorf("payload = %+v", p)
 	}
@@ -42,13 +42,13 @@ func TestGoldenReachability(t *testing.T) {
 	if len(p.Relays) != 1 || p.Relays[0] != nodeOf(t, keyRoot) {
 		t.Errorf("relays = %v", p.Relays)
 	}
-	if p.Certificate().Digest.String() != goldenNetworkKeyCertificateDigest {
-		t.Errorf("embedded certificate digest = %s", p.Certificate().Digest)
+	if p.Certificate().Digest().String() != goldenNetworkKeyCertificateDigest {
+		t.Errorf("embedded certificate digest = %s", p.Certificate().Digest())
 	}
-	if v.Digest.String() != goldenReachabilityDigest {
-		t.Errorf("digest = %s", v.Digest)
+	if v.Digest().String() != goldenReachabilityDigest {
+		t.Errorf("digest = %s", v.Digest())
 	}
-	if v.Signers[0] != signerOf(t, keyNetA).Public() {
+	if v.Signers()[0] != signerOf(t, keyNetA).Public() {
 		t.Error("not signed by the network key")
 	}
 }
@@ -78,7 +78,7 @@ func TestVerifierWithoutTheCertificateStartsFromTheEmbeddedOne(t *testing.T) {
 	if got := record.DecideSerial(nil, cert); got != record.SerialAccept {
 		t.Fatalf("serial verdict = %v", got)
 	}
-	accepted := record.AcceptedNetworkKey{Cert: &cert.Payload, Revocation: record.KeyRevocationClear}
+	accepted := record.AcceptedNetworkKey{Cert: ptrTo(cert.Payload()), Revocation: record.KeyRevocationClear}
 	if _, err := record.Verify(ReachabilityDescriptor(accepted, reachNow), r); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestVerifierWithoutTheCertificateStartsFromTheEmbeddedOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = record.Verify(ReachabilityDescriptor(record.AcceptedNetworkKey{Cert: &nv.Payload, Revocation: record.KeyRevocationClear}, reachNow), r)
+	_, err = record.Verify(ReachabilityDescriptor(record.AcceptedNetworkKey{Cert: ptrTo(nv.Payload()), Revocation: record.KeyRevocationClear}, reachNow), r)
 	var be *record.BindingError
 	if !errors.As(err, &be) || be.Binding != record.BindingKeyMismatch {
 		t.Fatalf("err = %v, want a key mismatch", err)
@@ -160,7 +160,7 @@ func TestReachabilityMustBeSignedByTheEmbeddedCertificateKey(t *testing.T) {
 		accepted record.AcceptedNetworkKey
 	}{
 		{"holds the embedded serial-1 certificate", acceptedA(t)},
-		{"holds the serial-2 certificate", clear(&v2.Payload)},
+		{"holds the serial-2 certificate", clear(ptrTo(v2.Payload()))},
 		{"holds no certificate", record.AcceptedNetworkKey{}},
 	}
 	for _, tc := range verifiers {
@@ -185,7 +185,7 @@ func TestReachabilityMustBeSignedByTheEmbeddedCertificateKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = record.Verify(ReachabilityDescriptor(clear(&v2.Payload), reachNow), ok)
+		_, err = record.Verify(ReachabilityDescriptor(clear(ptrTo(v2.Payload())), reachNow), ok)
 		var be *record.BindingError
 		if !errors.As(err, &be) || be.Binding != record.BindingKeyMismatch {
 			t.Fatalf("err = %v, want a key mismatch", err)
@@ -352,7 +352,7 @@ func TestVerificationDoesNotJudgeExpiry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if !v.Payload.ExpiredAt(late) {
+	if !v.Payload().ExpiredAt(late) {
 		t.Error("the record should be expired")
 	}
 	if got := DecideReachability(nil, v, late); got != VerdictExpired {
@@ -404,14 +404,14 @@ func TestCertificateAccessorIsDerivedFromTheEmbeddedRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := record.Verify(record.NetworkKeyCertificateDescriptor, v.Payload.CertificateRecord)
+	want, err := record.Verify(record.NetworkKeyCertificateDescriptor, v.Payload().CertificateRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := v.Payload.Certificate(); got.Digest != want.Digest || got.Payload != want.Payload {
+	if got := v.Payload().Certificate(); got.Digest() != want.Digest() || got.Payload() != want.Payload() {
 		t.Errorf("Certificate() = %+v, want %+v", got, want)
 	}
-	if (ReachabilityRecord{}).Certificate().Digest != (record.Digest{}) {
+	if (ReachabilityRecord{}).Certificate().Digest() != (record.Digest{}) {
 		t.Error("a zero record has a certificate")
 	}
 }

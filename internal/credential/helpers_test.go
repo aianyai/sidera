@@ -207,7 +207,7 @@ func acceptedNetworkKey(t testing.TB, node, netSeed int) record.AcceptedNetworkK
 type certFacts struct{ status admin.RevocationStatus }
 
 func (f certFacts) DeviceCertificate(v record.Verified[record.DeviceCertificate]) admin.DeviceCert {
-	c := v.Payload.AdminCert()
+	c := v.Payload().AdminCert()
 	c.Revocation = f.status
 	return c
 }
@@ -229,5 +229,5 @@ func requireErr(t *testing.T, err error, want ...error) {
 
 // facts of trust, for readability of the end-to-end tests.
 func digestOf(v record.Verified[Credential]) trust.CredentialDigest {
-	return trust.CredentialDigest(v.Digest)
+	return trust.CredentialDigest(v.Digest())
 }

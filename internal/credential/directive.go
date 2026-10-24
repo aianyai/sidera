@@ -98,7 +98,7 @@ var DirectiveDescriptor = record.NewDescriptor(DirectiveType,
 	directiveToWire,
 	directiveFromWire,
 	func(d OfflineDirective) []record.SignerSlot {
-		key := d.certificate.Payload.DeviceKey
+		key := d.certificate.Payload().DeviceKey
 		return []record.SignerSlot{func(k ident.PublicKey) error {
 			if k != key {
 				return errNotTheDeviceKey
@@ -187,7 +187,7 @@ func (d OfflineDirective) AdminDirective(facts DeviceCertificateFacts) admin.Dir
 		Kind:     admin.DirectiveRevokeTrustEdge,
 		Node:     d.Node,
 		SignedAt: d.SignedAt,
-		Signer:   d.certificate.Payload.Person,
+		Signer:   d.certificate.Payload().Person,
 		Cert:     facts.DeviceCertificate(d.certificate),
 	}
 }

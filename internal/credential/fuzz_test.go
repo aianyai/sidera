@@ -103,10 +103,10 @@ func FuzzDecodeRevocation(f *testing.F) {
 			return
 		}
 		// The digest is the one of the credential the payload embeds.
-		if want := independentDigest(Type, mustEmbedded(t, r.Payload)); [32]byte(v.Payload.Digest()) != want {
-			t.Fatalf("digest %s is not the digest of the embedded payload", v.Payload.Digest())
+		if want := independentDigest(Type, mustEmbedded(t, r.Payload)); [32]byte(v.Payload().Digest()) != want {
+			t.Fatalf("digest %s is not the digest of the embedded payload", v.Payload().Digest())
 		}
-		if _, err := NewRevocation(v.Payload.Credential); err != nil {
+		if _, err := NewRevocation(v.Payload().Credential); err != nil {
 			t.Fatalf("a verified revocation does not rebuild: %v", err)
 		}
 	})
@@ -134,8 +134,8 @@ func FuzzDecodeVoucher(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if v.Payload.Counter < 1 || v.Payload.IssuedAt.IsZero() || v.Payload.Issuer.IsZero() {
-			t.Fatalf("verified voucher with unset fields: %+v", v.Payload)
+		if v.Payload().Counter < 1 || v.Payload().IssuedAt.IsZero() || v.Payload().Issuer.IsZero() {
+			t.Fatalf("verified voucher with unset fields: %+v", v.Payload())
 		}
 	})
 }
@@ -151,7 +151,7 @@ func FuzzDecodeDirective(f *testing.F) {
 		if err != nil {
 			return
 		}
-		d := v.Payload
+		d := v.Payload()
 		if d.AdminDirective(clearFacts).SignedAt.IsZero() || d.TrustDirective().A == d.TrustDirective().B {
 			t.Fatalf("unusable facts from a verified directive: %+v", d)
 		}

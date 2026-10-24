@@ -225,9 +225,9 @@ func IssuePersonSelfRevocation(root record.Signer) (record.Record, error) {
 // refuses any other signer, the network key included.
 func IssueNetworkKeyCertificateRevocation(cert record.Verified[record.NetworkKeyCertificate], identity record.Signer) (record.Record, error) {
 	return record.Seal(NetworkKeyCertificateRevocationDescriptor, NetworkKeyCertificateRevocation{
-		Node:        cert.Payload.Node,
-		Serial:      cert.Payload.Serial,
-		Certificate: cert.Digest,
+		Node:        cert.Payload().Node,
+		Serial:      cert.Payload().Serial,
+		Certificate: cert.Digest(),
 	}, identity)
 }
 

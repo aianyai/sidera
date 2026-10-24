@@ -564,6 +564,18 @@ implementation), `declaration_test.go` (rules, protocol limits, signer binding),
   reason `Partial` is distinct from `Verified`: a payload no signature backs
   must not be passable where a checked one is expected. It carries no digest
   and no signer list, so there is nothing to mistake for the result of a check.
+- **The results are sealed.** With exported fields, `record.Verified[P]{Payload: x}`
+  compiles in any package, and together with `Peek` it turns a payload nobody
+  checked into an apparently verified one in a single line. Every decision
+  function downstream trusts a `Verified` without looking at a signature, so the
+  type is the proof only if no other code can write one. The fields are
+  unexported and read through accessors; `Partial` and `Unverified` are sealed
+  the same way, because each is a statement about what was checked. The zero
+  value remains writable, and carries no digest, which every consumer refuses.
+  Tests that need a verified value seal and verify a real record. The cost is
+  that a test cannot fabricate a payload no descriptor would accept (a zero
+  counter, a missing node); those states cannot reach a decision function any
+  more, so they are no longer tested there.
 - **Network-key slots are built per verification, with reasons.** Whether a
   key is a node's network key depends on the certificate accepted now, on its
   revocation and on the time. A descriptor created once could not hold that,
@@ -607,7 +619,8 @@ implementation), `declaration_test.go` (rules, protocol limits, signer binding),
   `TestEveryBitOfARecordIsProtected`, `TestEnvelopeRules`,
   `TestSealRunsTheDecodingPath`, `TestSignerFailuresAreCaughtAtTheSigner`),
   `peek_test.go` (`TestPeek`, `TestPeekChoosesTheVerificationContext`,
-  `TestUnverifiedIsADistinctType`),
+  `TestResultTypesAreMutuallyDistinct`,
+  `TestResultTypesHaveNoExportedField`, `TestResultAccessorsReturnCopies`),
   `codec_test.go` (`TestStrictUnmarshal`, `TestNestingLimit`,
   `TestTimeConversion`, `TestLevelTable`, `TestOptionalFieldsInAnExternalRecordType`),
   `certs_test.go` (`TestNetworkKeyCertificateRules`, `TestDecideSerial`,

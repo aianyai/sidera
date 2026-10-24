@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/ident"
-	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/trust"
 )
 
@@ -71,8 +70,25 @@ func TestClassifyAgainstOracle(t *testing.T) {
 	for i := range ids {
 		ids[i] = nodeIDOf(t, 1000+i)
 	}
-	persons := []ident.PersonID{personOf(t, indexedSigner(t, 2000)), personOf(t, indexedSigner(t, 2001))}
 	device := indexedSigner(t, 2002).Public()
+	// The statements the rounds draw from, sealed and verified once.
+	const maxSerial = 5
+	nodeSelf := make([]Revocation, nodes)
+	nodeCert := make([][maxSerial]Revocation, nodes)
+	for i := range ids {
+		identity := indexedSigner(t, 1000+i)
+		nodeSelf[i] = mustRevocation(t, must(IssueNodeSelfRevocation(identity)), nil)
+		for serial := 1; serial <= maxSerial; serial++ {
+			_, cert := networkCertificate(t, identity, seedSigner(t, 0x21), uint64(serial), epoch, endTime)
+			nodeCert[i][serial-1] = mustRevocation(t, must(IssueNetworkKeyCertificateRevocation(cert, identity)), nil)
+		}
+	}
+	var personSelf, deviceKey [2]Revocation
+	for i := range personSelf {
+		root := indexedSigner(t, 2000+i)
+		personSelf[i] = mustRevocation(t, must(IssuePersonSelfRevocation(root)), nil)
+		deviceKey[i] = mustRevocation(t, must(IssueDeviceKeyRevocation(root, device)), nil)
+	}
 	rng := rand.New(rand.NewSource(20261023))
 	counts := map[[2]string]int{}
 
@@ -104,17 +120,15 @@ func TestClassifyAgainstOracle(t *testing.T) {
 			in.node = in.local
 		}
 		var rev Revocation
-		digest := record.Digest{byte(round), byte(round >> 8), 1}
 		switch k := rng.Intn(10); {
 		case k < 3:
-			in.kind, rev = "node-self", Of(record.Verified[NodeSelfRevocation]{Payload: NodeSelfRevocation{Node: ids[in.node]}, Digest: digest})
+			in.kind, rev = "node-self", nodeSelf[in.node]
 		case k < 6:
-			in.kind, rev = "node-cert", Of(record.Verified[NetworkKeyCertificateRevocation]{
-				Payload: NetworkKeyCertificateRevocation{Node: ids[in.node], Serial: uint64(rng.Intn(5) + 1), Certificate: record.Digest{9, byte(round)}}, Digest: digest})
+			in.kind, rev = "node-cert", nodeCert[in.node][rng.Intn(maxSerial)]
 		case k < 7:
-			in.kind, rev = "person", Of(record.Verified[PersonSelfRevocation]{Payload: PersonSelfRevocation{Person: persons[rng.Intn(2)]}, Digest: digest})
+			in.kind, rev = "person", personSelf[rng.Intn(2)]
 		case k < 8:
-			in.kind, rev = "device", Of(record.Verified[DeviceKeyRevocation]{Payload: DeviceKeyRevocation{Person: persons[rng.Intn(2)], DeviceKey: device}, Digest: digest})
+			in.kind, rev = "device", deviceKey[rng.Intn(2)]
 		default:
 			in.kind, rev = "none", Revocation{}
 		}
@@ -148,14 +162,18 @@ func TestFloodNeverExceedsTheCap(t *testing.T) {
 	for i := range ids {
 		ids[i] = nodeIDOf(t, 3000+i)
 	}
+	selfRevocations, certRevocations := make([]Revocation, nodes), make([]Revocation, nodes)
+	for i := range ids {
+		selfRevocations[i], certRevocations[i] = nodeSelfOf(t, 3000+i), certRevocationOf(t, 3000+i)
+	}
 	ctx := Context{Local: ids[0], TrustGraph: trust.NodeSet{ids[1]: {}, ids[2]: {}}, DeclarationSigners: trust.NodeSet{ids[3]: {}}}
 	for _, capN := range []int{1, 2, 5, 17} {
 		held, forwarded, dropped, kept := 0, 0, 0, 0
 		for i := 0; i < 3000; i++ {
-			n := ids[rng.Intn(nodes)]
-			rev := nodeSelfOf(n, byte(i))
+			n := rng.Intn(nodes)
+			rev := selfRevocations[n]
 			if rng.Intn(2) == 0 {
-				rev = certRevocationOf(n, byte(i))
+				rev = certRevocations[n]
 			}
 			got := Classify(rev, ctx, held, Params{MaxForwardOnce: capN})
 			switch got.Class {

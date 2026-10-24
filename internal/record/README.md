@@ -76,6 +76,13 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   types do not convert into each other, so a record that still lacks a signer can
   never be handed on as verified by mistake; a complete `Partial` is still
   checked again by `Verify`.
+- **Results are sealed.** `Verified[P]`, `Partial[P]` and `Unverified[P]` have
+  no exported field: they are read through `Payload()`, `Digest()`, `Signers()`
+  and `Slots()`, and only `Verify`, `VerifyPartial` and `Peek` can produce a
+  non-zero one. A `Verified` in hand therefore proves that some `Verify` accepted
+  a record, whichever package holds it. The one value code outside this package
+  can write is the zero value, which has no digest, and every consumer refuses
+  it. `Signers()` and `Slots()` return copies.
 - **Peek is not verification.** `Peek(descriptor, record)` checks the type string
   and decodes the payload through the descriptor's own decoding path (strict
   decoding, then the type's validation), and checks no signature and no signer

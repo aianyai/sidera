@@ -62,7 +62,7 @@ func VoucherIssuer(r record.Record) (ident.NodeID, error) {
 	if err != nil {
 		return ident.NodeID{}, err
 	}
-	return u.Payload.Issuer, nil
+	return u.Payload().Issuer, nil
 }
 
 func voucherToWire(v Voucher) (voucherWire, error) {
@@ -136,7 +136,7 @@ func (r VoucherReason) String() string {
 
 // CheckVoucher applies the one rule package trust leaves to its caller: the
 // issuer must be an end of the credential the voucher names. The caller
-// provides that credential (found by v.Payload.Edge) as trust.Credential, the
+// provides that credential (found by v.Payload().Edge) as trust.Credential, the
 // form package trust holds it in. On VoucherOK the result is the voucher to
 // give to trust.Vouchers.Accept; otherwise it is the zero Voucher.
 //
@@ -145,7 +145,7 @@ func (r VoucherReason) String() string {
 // answer (VoucherInvalid): an unset issuer or digest equals an unset end and
 // would otherwise match.
 func CheckVoucher(v record.Verified[Voucher], cred trust.Credential) (trust.Voucher, VoucherReason) {
-	p := v.Payload
+	p := v.Payload()
 	switch {
 	case p.Issuer.IsZero() || p.Edge == (trust.CredentialDigest{}) || cred.Digest == (trust.CredentialDigest{}):
 		return trust.Voucher{}, VoucherInvalid

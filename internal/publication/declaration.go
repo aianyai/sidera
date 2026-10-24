@@ -325,7 +325,7 @@ func DeclarationNode(r record.Record) (ident.NodeID, error) {
 	if err != nil {
 		return ident.NodeID{}, err
 	}
-	return u.Payload.Node, nil
+	return u.Payload().Node, nil
 }
 
 // DeclaredInheritance returns the entry of trust.View.DeclaredAcceptsInheritance

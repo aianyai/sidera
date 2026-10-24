@@ -177,7 +177,7 @@ type SerialSeen struct {
 // SerialSeenOf returns the state that records v as the highest serial seen for
 // its node.
 func SerialSeenOf(v Verified[NetworkKeyCertificate]) SerialSeen {
-	return SerialSeen{Node: v.Payload.Node, Serial: v.Payload.Serial, Digest: v.Digest}
+	return SerialSeen{Node: v.payload.Node, Serial: v.payload.Serial, Digest: v.digest}
 }
 
 // SerialVerdict is the outcome of comparing a new certificate with the highest
@@ -211,8 +211,8 @@ const (
 // serial still advances the serial seen, and a revoked one keeps it where it
 // was, so an older key cannot come back either way.
 func DecideSerial(seen *SerialSeen, incoming Verified[NetworkKeyCertificate]) SerialVerdict {
-	c := incoming.Payload
-	if c.Serial < 1 || c.Node.IsZero() || incoming.Digest.IsZero() {
+	c := incoming.payload
+	if c.Serial < 1 || c.Node.IsZero() || incoming.digest.IsZero() {
 		return SerialInvalid
 	}
 	if seen == nil {
@@ -225,7 +225,7 @@ func DecideSerial(seen *SerialSeen, incoming Verified[NetworkKeyCertificate]) Se
 		return SerialAccept
 	case c.Serial < seen.Serial:
 		return SerialStale
-	case incoming.Digest != seen.Digest:
+	case incoming.digest != seen.Digest:
 		return SerialConflict
 	}
 	return SerialStale

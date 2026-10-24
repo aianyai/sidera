@@ -20,13 +20,13 @@ func TestGoldenProof(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if v.Payload != sampleProof(t) {
-		t.Errorf("payload = %+v", v.Payload)
+	if v.Payload() != sampleProof(t) {
+		t.Errorf("payload = %+v", v.Payload())
 	}
-	if v.Digest.String() != goldenProofDigest {
-		t.Errorf("digest = %s", v.Digest)
+	if v.Digest().String() != goldenProofDigest {
+		t.Errorf("digest = %s", v.Digest())
 	}
-	if v.Signers[0] != signerOf(t, keyA).Public() {
+	if v.Signers()[0] != signerOf(t, keyA).Public() {
 		t.Error("not signed by the node's identity key")
 	}
 	r, err := record.Seal(ReachabilityProofDescriptor, sampleProof(t), signerOf(t, keyA))
@@ -120,7 +120,7 @@ func TestProofThroughAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	facts := v.Payload.Admin()
+	facts := v.Payload().Admin()
 	node, person := nodeOf(t, keyA), personOf(t, keyRoot)
 	tests := []struct {
 		name      string
@@ -146,7 +146,7 @@ func TestProofThroughAdmin(t *testing.T) {
 	// A proof that outlives the list entry is the issuer's to avoid, and admin
 	// says so: the facts carried here are what it compares.
 	list, _ := admin.NewList([]admin.Entry{{Person: person, Level: admin.LevelView, ExpiresAt: t0.Add(time.Hour)}})
-	if got := admin.MayIssueReachabilityProof(list, person, v.Payload.NotAfter, t0); got.Reason != admin.ReasonProofOutlivesEntry {
+	if got := admin.MayIssueReachabilityProof(list, person, v.Payload().NotAfter, t0); got.Reason != admin.ReasonProofOutlivesEntry {
 		t.Errorf("issue verdict = %+v", got)
 	}
 }

@@ -95,7 +95,7 @@ type DeclarationSeen struct {
 // DeclarationSeenOf returns the state that records v as the highest declaration
 // seen for its node.
 func DeclarationSeenOf(v record.Verified[Declaration]) DeclarationSeen {
-	return DeclarationSeen{Node: v.Payload.Node, Counter: v.Payload.Counter, Digest: v.Digest}
+	return DeclarationSeen{Node: v.Payload().Node, Counter: v.Payload().Counter, Digest: v.Digest()}
 }
 
 // DecideDeclaration applies the rule "keep only the declaration with the highest
@@ -106,8 +106,8 @@ func DecideDeclaration(seen *DeclarationSeen, incoming record.Verified[Declarati
 	if seen != nil {
 		s = &counterState{seen.Node, seen.Counter, seen.Digest}
 	}
-	p := incoming.Payload
-	return decideCounter(s, counterState{p.Node, p.Counter, incoming.Digest})
+	p := incoming.Payload()
+	return decideCounter(s, counterState{p.Node, p.Counter, incoming.Digest()})
 }
 
 // ReachabilitySeen is the highest reachability counter seen for one node, with
@@ -124,7 +124,7 @@ type ReachabilitySeen struct {
 // ReachabilitySeenOf returns the state that records v as the highest
 // reachability record seen for its node.
 func ReachabilitySeenOf(v record.Verified[ReachabilityRecord]) ReachabilitySeen {
-	return ReachabilitySeen{Node: v.Payload.Node(), Counter: v.Payload.Counter, Digest: v.Digest}
+	return ReachabilitySeen{Node: v.Payload().Node(), Counter: v.Payload().Counter, Digest: v.Digest()}
 }
 
 // DecideReachability applies the rule "keep only the reachability record with the
@@ -150,8 +150,8 @@ func DecideReachability(seen *ReachabilitySeen, incoming record.Verified[Reachab
 	if seen != nil {
 		s = &counterState{seen.Node, seen.Counter, seen.Digest}
 	}
-	p := incoming.Payload
-	v := decideCounter(s, counterState{p.Node(), p.Counter, incoming.Digest})
+	p := incoming.Payload()
+	v := decideCounter(s, counterState{p.Node(), p.Counter, incoming.Digest()})
 	if v == VerdictAccept && p.ExpiredAt(now) {
 		return VerdictExpired
 	}

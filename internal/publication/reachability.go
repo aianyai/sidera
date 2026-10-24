@@ -76,7 +76,7 @@ func NewReachabilityRecord(counter uint64, expiresAt time.Time, addresses [][]by
 
 // Node returns the node the record is about: the node of the embedded
 // certificate.
-func (r ReachabilityRecord) Node() ident.NodeID { return r.certificate.Payload.Node }
+func (r ReachabilityRecord) Node() ident.NodeID { return r.certificate.Payload().Node }
 
 // ExpiredAt reports whether the record can no longer be used at now. The
 // instant ExpiresAt is already expired and no tolerance is added (like the
@@ -178,7 +178,7 @@ func ReachabilityDescriptor(accepted record.AcceptedNetworkKey, now time.Time) r
 		reachabilityToWire,
 		reachabilityFromWire,
 		func(r ReachabilityRecord) []record.SignerSlot {
-			embedded := r.certificate.Payload.NetworkKey
+			embedded := r.certificate.Payload().NetworkKey
 			belongs := record.NetworkKeyOf(r.Node(), accepted, now)
 			return []record.SignerSlot{func(k ident.PublicKey) error {
 				if k != embedded {
@@ -203,5 +203,5 @@ func EmbeddedNetworkKeyCertificate(r record.Record) (record.Verified[record.Netw
 	if err != nil {
 		return record.Verified[record.NetworkKeyCertificate]{}, err
 	}
-	return u.Payload.certificate, nil
+	return u.Payload().certificate, nil
 }

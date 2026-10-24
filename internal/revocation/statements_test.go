@@ -93,8 +93,8 @@ func TestGoldenStatements(t *testing.T) {
 func TestGoldenCertificateDigest(t *testing.T) {
 	_, cert := goldenCertificate(t)
 	want := "e6bdc451ac725c2be0632bcce2f18e30c5a0c3fe43265832adab4adb64ad9531"
-	if cert.Digest.String() != want {
-		t.Fatalf("digest %s, want %s", cert.Digest, want)
+	if cert.Digest().String() != want {
+		t.Fatalf("digest %s, want %s", cert.Digest(), want)
 	}
 }
 
@@ -130,7 +130,8 @@ func TestSignerRules(t *testing.T) {
 	k1, k2, k3 := rfcSigner(t, 1), rfcSigner(t, 2), rfcSigner(t, 3)
 	node1, person3 := nodeOf(t, k1), personOf(t, k3)
 	_, cert := goldenCertificate(t)
-	certPayload := cborw.mapOf(cborw.uint(1), cborw.bstr(node1.Bytes()), cborw.uint(2), cborw.uint(1), cborw.uint(3), cborw.bstr(cert.Digest[:]))
+	certDigest := cert.Digest()
+	certPayload := cborw.mapOf(cborw.uint(1), cborw.bstr(node1.Bytes()), cborw.uint(2), cborw.uint(1), cborw.uint(3), cborw.bstr(certDigest[:]))
 	nodePayload := cborw.mapOf(cborw.uint(1), cborw.bstr(node1.Bytes()))
 	personPayload := cborw.mapOf(cborw.uint(1), cborw.bstr(person3.Bytes()))
 	devicePayload := cborw.mapOf(cborw.uint(1), cborw.bstr(person3.Bytes()), cborw.uint(2), cborw.key(1, k2.Public().Bytes()))
@@ -208,6 +209,7 @@ func TestPayloadRules(t *testing.T) {
 	node1, person3 := nodeOf(t, k1), personOf(t, k3)
 	zeroID := bytes.Repeat([]byte{0}, ident.NodeIDLen)
 	_, cert := goldenCertificate(t)
+	certDigest := cert.Digest()
 	dev := cborw.key(1, k2.Public().Bytes())
 	node := func(extra ...[]byte) []byte {
 		return cborw.mapOf(append([][]byte{cborw.uint(1), cborw.bstr(node1.Bytes())}, extra...)...)
@@ -239,16 +241,16 @@ func TestPayloadRules(t *testing.T) {
 		{"an explicit zero in a field the statement does not have is refused: no optional field exists", NodeSelfRevocationType, node(cborw.uint(2), cborw.uint(0)), k1, record.ErrMalformed},
 		{"a person self-revocation with the zero person is refused", PersonSelfRevocationType, cborw.mapOf(cborw.uint(1), cborw.bstr(zeroID)), k3, record.ErrPayload},
 		{"a person self-revocation with an unknown field is refused", PersonSelfRevocationType, person(cborw.uint(2), cborw.uint(0)), k3, record.ErrMalformed},
-		{"a certificate revocation with serial 0 is refused", NetworkKeyCertificateRevocationType, certRev(node1.Bytes(), 0, cert.Digest[:]), k1, record.ErrPayload},
+		{"a certificate revocation with serial 0 is refused", NetworkKeyCertificateRevocationType, certRev(node1.Bytes(), 0, certDigest[:]), k1, record.ErrPayload},
 		{"a certificate revocation with the zero digest is refused", NetworkKeyCertificateRevocationType, certRev(node1.Bytes(), 1, make([]byte, 32)), k1, record.ErrPayload},
-		{"a certificate revocation with a short digest is refused", NetworkKeyCertificateRevocationType, certRev(node1.Bytes(), 1, cert.Digest[:31]), k1, record.ErrPayload},
-		{"a certificate revocation with a long digest is refused", NetworkKeyCertificateRevocationType, certRev(node1.Bytes(), 1, append(cert.Digest[:], 0)), k1, record.ErrPayload},
-		{"a certificate revocation with the zero node is refused", NetworkKeyCertificateRevocationType, certRev(zeroID, 1, cert.Digest[:]), k1, record.ErrPayload},
+		{"a certificate revocation with a short digest is refused", NetworkKeyCertificateRevocationType, certRev(node1.Bytes(), 1, certDigest[:31]), k1, record.ErrPayload},
+		{"a certificate revocation with a long digest is refused", NetworkKeyCertificateRevocationType, certRev(node1.Bytes(), 1, append(certDigest[:], 0)), k1, record.ErrPayload},
+		{"a certificate revocation with the zero node is refused", NetworkKeyCertificateRevocationType, certRev(zeroID, 1, certDigest[:]), k1, record.ErrPayload},
 		{"a certificate revocation without the digest is refused", NetworkKeyCertificateRevocationType, cborw.mapOf(cborw.uint(1), cborw.bstr(node1.Bytes()), cborw.uint(2), cborw.uint(1)), k1, record.ErrNotCanonical},
 		{"a certificate revocation with a non-shortest serial is refused", NetworkKeyCertificateRevocationType,
-			append(append([]byte{0xa3, 0x01}, cborw.bstr(node1.Bytes())...), append([]byte{0x02, 0x18, 0x01, 0x03}, cborw.bstr(cert.Digest[:])...)...), k1, record.ErrNotCanonical},
+			append(append([]byte{0xa3, 0x01}, cborw.bstr(node1.Bytes())...), append([]byte{0x02, 0x18, 0x01, 0x03}, cborw.bstr(certDigest[:])...)...), k1, record.ErrNotCanonical},
 		{"a certificate revocation with its keys out of order is refused", NetworkKeyCertificateRevocationType,
-			append(append([]byte{0xa3, 0x02, 0x01, 0x01}, cborw.bstr(node1.Bytes())...), append([]byte{0x03}, cborw.bstr(cert.Digest[:])...)...), k1, record.ErrNotCanonical},
+			append(append([]byte{0xa3, 0x02, 0x01, 0x01}, cborw.bstr(node1.Bytes())...), append([]byte{0x03}, cborw.bstr(certDigest[:])...)...), k1, record.ErrNotCanonical},
 		{"a device revocation with the zero person is refused", DeviceKeyRevocationType, devRev(zeroID, dev), k3, record.ErrPayload},
 		{"a device revocation without the device key is refused", DeviceKeyRevocationType, cborw.mapOf(cborw.uint(1), cborw.bstr(person3.Bytes())), k3, record.ErrNotCanonical},
 		{"a device revocation with a small-order device key is refused", DeviceKeyRevocationType, devRev(person3.Bytes(), smallOrder), k3, record.ErrPayload},
@@ -269,7 +271,7 @@ func TestPayloadRules(t *testing.T) {
 		if _, err := record.Seal(NodeSelfRevocationDescriptor, NodeSelfRevocation{}, k1); err == nil {
 			t.Fatal("zero node self-revocation sealed")
 		}
-		if _, err := record.Seal(NetworkKeyCertificateRevocationDescriptor, NetworkKeyCertificateRevocation{Node: node1, Serial: 0, Certificate: cert.Digest}, k1); err == nil {
+		if _, err := record.Seal(NetworkKeyCertificateRevocationDescriptor, NetworkKeyCertificateRevocation{Node: node1, Serial: 0, Certificate: cert.Digest()}, k1); err == nil {
 			t.Fatal("serial 0 sealed")
 		}
 		if _, err := record.Seal(NetworkKeyCertificateRevocationDescriptor, NetworkKeyCertificateRevocation{Node: node1, Serial: 1}, k1); err == nil {
@@ -317,7 +319,7 @@ func TestTypeStrings(t *testing.T) {
 	})
 	t.Run("a certificate is not a revocation", func(t *testing.T) {
 		_, cert := goldenCertificate(t)
-		certRec, err := record.Seal(record.NetworkKeyCertificateDescriptor, cert.Payload, k1)
+		certRec, err := record.Seal(record.NetworkKeyCertificateDescriptor, cert.Payload(), k1)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -405,6 +407,8 @@ func TestSignatureShapes(t *testing.T) {
 	})
 }
 
+// Of builds a Revocation from a verified statement only; the one Verified that
+// code outside package record can write is the zero value, and it is refused.
 func TestRevocationOfZeroVerifiedIsInvalid(t *testing.T) {
 	set := NewSet()
 	rows := []struct {
@@ -427,28 +431,4 @@ func TestRevocationOfZeroVerifiedIsInvalid(t *testing.T) {
 			}
 		})
 	}
-	n, p := nodeOf(t, rfcSigner(t, 1)), personOf(t, rfcSigner(t, 3))
-	d, key := record.Digest{1}, rfcSigner(t, 2).Public()
-	for _, row := range []struct {
-		rule string
-		rev  Revocation
-	}{
-		{"a certificate revocation without a node is invalid", Of(record.Verified[NetworkKeyCertificateRevocation]{Payload: NetworkKeyCertificateRevocation{Serial: 1, Certificate: d}, Digest: d})},
-		{"a certificate revocation without a serial is invalid", Of(record.Verified[NetworkKeyCertificateRevocation]{Payload: NetworkKeyCertificateRevocation{Node: n, Certificate: d}, Digest: d})},
-		{"a certificate revocation without the certificate digest is invalid", Of(record.Verified[NetworkKeyCertificateRevocation]{Payload: NetworkKeyCertificateRevocation{Node: n, Serial: 1}, Digest: d})},
-		{"a device revocation without a person is invalid", Of(record.Verified[DeviceKeyRevocation]{Payload: DeviceKeyRevocation{DeviceKey: key}, Digest: d})},
-		{"a device revocation without a device key is invalid", Of(record.Verified[DeviceKeyRevocation]{Payload: DeviceKeyRevocation{Person: p}, Digest: d})},
-	} {
-		t.Run(row.rule, func(t *testing.T) {
-			if err := set.Add(row.rev); !errors.Is(err, ErrInvalidRevocation) {
-				t.Fatalf("got %v", err)
-			}
-		})
-	}
-	t.Run("a verified payload without a digest is invalid", func(t *testing.T) {
-		v := record.Verified[NodeSelfRevocation]{Payload: NodeSelfRevocation{Node: nodeOf(t, rfcSigner(t, 1))}}
-		if err := set.Add(Of(v)); !errors.Is(err, ErrInvalidRevocation) {
-			t.Fatalf("got %v", err)
-		}
-	})
 }

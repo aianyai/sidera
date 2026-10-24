@@ -77,7 +77,7 @@ func TestDeviceCertificateStanding(t *testing.T) {
 	for _, row := range rows {
 		t.Run(row.rule, func(t *testing.T) {
 			got := row.set.DeviceCertificate(row.cert)
-			want := row.cert.Payload.AdminCert()
+			want := row.cert.Payload().AdminCert()
 			want.Revocation = row.want
 			if got != want {
 				t.Fatalf("got %+v, want %+v", got, want)
@@ -102,7 +102,7 @@ func TestRevokedDeviceCertificateIsRefusedAtAnyTime(t *testing.T) {
 		t.Fatal(problems)
 	}
 	cert := deviceCertificate(t, p, d, admin.LevelFullControl)
-	person := cert.Payload.Person
+	person := cert.Payload().Person
 	instants := []time.Time{epoch.Add(-24 * time.Hour), epoch, epoch.Add(time.Hour), endTime.Add(-time.Second), endTime, endTime.Add(24 * time.Hour)}
 	for _, tc := range []struct {
 		rule string
@@ -242,7 +242,7 @@ func TestNetworkKeyRevoked(t *testing.T) {
 			if got.Revocation != row.want {
 				t.Fatalf("Revocation = %v, want %v", got.Revocation, row.want)
 			}
-			if got.Cert == nil || *got.Cert != row.cert.Payload {
+			if got.Cert == nil || *got.Cert != row.cert.Payload() {
 				t.Fatalf("Cert = %+v, want the verified payload", got.Cert)
 			}
 		})

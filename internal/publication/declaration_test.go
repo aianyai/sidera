@@ -33,7 +33,7 @@ func TestGoldenDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	d := v.Payload
+	d := v.Payload()
 	if d.Node != nodeOf(t, keyA) {
 		t.Errorf("node = %s", d.Node)
 	}
@@ -48,10 +48,10 @@ func TestGoldenDeclaration(t *testing.T) {
 		d.Endpoints[1].Reception != (Reception{}) || d.Endpoints[1].Name != "" {
 		t.Errorf("endpoints = %+v", d.Endpoints)
 	}
-	if v.Digest.String() != goldenDeclarationDigest {
-		t.Errorf("digest = %s", v.Digest)
+	if v.Digest().String() != goldenDeclarationDigest {
+		t.Errorf("digest = %s", v.Digest())
 	}
-	if v.Signers[0] != signerOf(t, keyNetA).Public() {
+	if v.Signers()[0] != signerOf(t, keyNetA).Public() {
 		t.Error("not signed by the network key")
 	}
 	node, accepts := d.DeclaredInheritance()

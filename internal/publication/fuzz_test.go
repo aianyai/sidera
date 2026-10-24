@@ -115,7 +115,7 @@ func FuzzDecodeDeclaration(f *testing.F) {
 		if err != nil {
 			return
 		}
-		d := v.Payload
+		d := v.Payload()
 		if d.MaxQueue <= 0 || d.LeaseRenewal <= 0 || d.Counter < 1 || len(d.Endpoints) > MaxEndpointsPerNode {
 			t.Fatalf("verified declaration outside the limits: %+v", d)
 		}
@@ -138,8 +138,8 @@ func FuzzDecodeReachability(f *testing.F) {
 		if certErr != nil {
 			t.Fatalf("a verified record has no readable embedded certificate: %v", certErr)
 		}
-		p := v.Payload
-		if cert.Payload.Node != p.Node() || len(p.Addresses) > MaxAddresses || len(p.Relays) > MaxRelays {
+		p := v.Payload()
+		if cert.Payload().Node != p.Node() || len(p.Addresses) > MaxAddresses || len(p.Relays) > MaxRelays {
 			t.Fatalf("verified record outside the limits: %+v", p)
 		}
 		_ = DecideReachability(nil, v, reachNow.Add(100*time.Hour))
@@ -157,7 +157,7 @@ func FuzzDecodeProof(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if v.Payload.Admin().NotAfter.IsZero() {
+		if v.Payload().Admin().NotAfter.IsZero() {
 			t.Fatal("verified proof without an end")
 		}
 	})

@@ -129,7 +129,7 @@ func (s *Set) Retired() trust.NodeSet {
 // verified against record.DeviceCertificateDescriptor; a zero Verified yields a
 // certificate that grants nothing.
 func (s *Set) DeviceCertificate(cert record.Verified[record.DeviceCertificate]) admin.DeviceCert {
-	c := cert.Payload
+	c := cert.Payload()
 	out := c.AdminCert()
 	switch {
 	case s.PersonRevoked(c.Person):
@@ -150,7 +150,7 @@ func (s *Set) DeviceCertificate(cert record.Verified[record.DeviceCertificate]) 
 // certificate; cert must have been verified against
 // record.DeviceCertificateDescriptor.
 func (s *Set) RemotePerson(cert record.Verified[record.DeviceCertificate]) admin.Actor {
-	return admin.RemotePerson(cert.Payload.Person, s.DeviceCertificate(cert))
+	return admin.RemotePerson(cert.Payload().Person, s.DeviceCertificate(cert))
 }
 
 func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
@@ -179,9 +179,9 @@ func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
 // record.SerialSeen). cert must have been verified against
 // record.NetworkKeyCertificateDescriptor.
 func (s *Set) NetworkKey(cert record.Verified[record.NetworkKeyCertificate]) record.AcceptedNetworkKey {
-	c := cert.Payload
+	c := cert.Payload()
 	status := record.KeyRevocationClear
-	if s.certificateRevoked(c.Node, c.Serial, cert.Digest) {
+	if s.certificateRevoked(c.Node, c.Serial, cert.Digest()) {
 		status = record.KeyRevocationRevoked
 	}
 	return record.AcceptedNetworkKey{Cert: &c, Revocation: status}

@@ -54,7 +54,7 @@ func TestGoldenDirective(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	d := v.Payload
+	d := v.Payload()
 	want := sampleDirective(t)
 	if d.Node != want.Node || d.Credential != want.Credential || d.A != want.A || d.B != want.B || !d.SignedAt.Equal(directiveSignedAt) {
 		t.Errorf("payload = %+v", d)
@@ -62,16 +62,16 @@ func TestGoldenDirective(t *testing.T) {
 	if d.A != nodeOf(t, keyB) || d.B != nodeOf(t, keyA) {
 		t.Error("claimed ends are not in ascending order")
 	}
-	if v.Digest.String() != goldenDirectiveDigest {
-		t.Errorf("digest = %s", v.Digest)
+	if v.Digest().String() != goldenDirectiveDigest {
+		t.Errorf("digest = %s", v.Digest())
 	}
 	if !bytes.Equal(mustEncode(t, d.CertificateRecord), goldenDeviceCertificate) {
 		t.Error("embedded certificate differs from the vector")
 	}
-	if d.Certificate().Digest.String() != goldenDeviceCertificateDigest {
-		t.Errorf("certificate digest = %s", d.Certificate().Digest)
+	if d.Certificate().Digest().String() != goldenDeviceCertificateDigest {
+		t.Errorf("certificate digest = %s", d.Certificate().Digest())
 	}
-	if v.Signers[0] != signerOf(t, keyDevice).Public() {
+	if v.Signers()[0] != signerOf(t, keyDevice).Public() {
 		t.Error("signed by an unexpected key")
 	}
 }
@@ -94,7 +94,7 @@ func TestDirectiveFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := v.Payload
+	d := v.Payload()
 	got := d.AdminDirective(clearFacts)
 	want := admin.Directive{
 		Kind:     admin.DirectiveRevokeTrustEdge,
@@ -138,7 +138,7 @@ func TestDirectiveCarriesTheCertificateCap(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := v.Payload.AdminDirective(clearFacts).Cert.MaxLevel; got != level {
+		if got := v.Payload().AdminDirective(clearFacts).Cert.MaxLevel; got != level {
 			t.Errorf("cap = %v, want %v", got, level)
 		}
 	}
@@ -350,7 +350,7 @@ func TestAdminDirectiveAsksTheSourceAboutTheAttachedCertificate(t *testing.T) {
 	d := sampleDirective(t)
 	src := &recordingFacts{status: admin.RevocationCertRevoked}
 	got := d.AdminDirective(src)
-	if src.asked.Digest != d.Certificate().Digest || src.asked.Payload != d.Certificate().Payload || src.asked.Digest.IsZero() {
+	if src.asked.Digest() != d.Certificate().Digest() || src.asked.Payload() != d.Certificate().Payload() || src.asked.Digest().IsZero() {
 		t.Errorf("asked about %+v, want the attached certificate %+v", src.asked, d.Certificate())
 	}
 	if got.Cert.Revocation != admin.RevocationCertRevoked {
@@ -386,7 +386,7 @@ func TestDirectiveCertificateIsDerivedFromTheEmbeddedRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := d.Certificate(); got.Digest != want.Digest || got.Payload != want.Payload {
+	if got := d.Certificate(); got.Digest() != want.Digest() || got.Payload() != want.Payload() {
 		t.Errorf("Certificate() = %+v, want %+v", got, want)
 	}
 }

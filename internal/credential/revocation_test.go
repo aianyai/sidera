@@ -15,15 +15,15 @@ func TestGoldenRevocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if v.Payload.Credential != sampleCredential(t) {
-		t.Errorf("embedded credential = %+v", v.Payload.Credential)
+	if v.Payload().Credential != sampleCredential(t) {
+		t.Errorf("embedded credential = %+v", v.Payload().Credential)
 	}
 	// The digest is recomputed from the embedded payload and equals the
 	// credential record's digest, which the independent reference computed.
-	if got := trust.CredentialDigest(mustHex(t, goldenCredentialDigest)[0:32:32]); v.Payload.Digest() != got {
-		t.Errorf("revoked digest = %s, want %s", v.Payload.Digest(), got)
+	if got := trust.CredentialDigest(mustHex(t, goldenCredentialDigest)[0:32:32]); v.Payload().Digest() != got {
+		t.Errorf("revoked digest = %s, want %s", v.Payload().Digest(), got)
 	}
-	if v.Signers[0] != signerOf(t, keyB).Public() {
+	if v.Signers()[0] != signerOf(t, keyB).Public() {
 		t.Error("signed by an unexpected key")
 	}
 	if got, want := r.Signatures[0].Key, signerOf(t, keyB).Public(); got != want {
@@ -61,7 +61,7 @@ func TestEitherEndMayRevoke(t *testing.T) {
 		if err != nil {
 			t.Fatalf("verify by %d: %v", signer, err)
 		}
-		digests = append(digests, v.Payload.Digest())
+		digests = append(digests, v.Payload().Digest())
 	}
 	if digests[0] != digests[1] {
 		t.Error("the revoked digest depends on who signed")
@@ -166,8 +166,8 @@ func TestRevokedDigestIsRecomputedFromThePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if [32]byte(v.Payload.Digest()) != want {
-		t.Errorf("decoded digest = %s, independent = %x", v.Payload.Digest(), want)
+	if [32]byte(v.Payload().Digest()) != want {
+		t.Errorf("decoded digest = %s, independent = %x", v.Payload().Digest(), want)
 	}
 
 	c2 := c

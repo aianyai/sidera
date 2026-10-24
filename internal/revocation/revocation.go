@@ -10,7 +10,7 @@ import (
 
 // ErrInvalidRevocation reports a Revocation that is the zero value or lacks a
 // field its kind needs. Only Of and Verify build a Revocation, so this means the
-// value came from a zero or hand-built record.Verified.
+// value came from a zero record.Verified.
 var ErrInvalidRevocation = errors.New("invalid revocation")
 
 // Kind says which of the four statements a Revocation comes from.
@@ -85,15 +85,15 @@ type payload interface {
 // The statement must have been verified against its own descriptor
 // (NodeSelfRevocationDescriptor and so on); Of does not check signatures.
 func Of[P payload](v record.Verified[P]) Revocation {
-	switch p := any(v.Payload).(type) {
+	switch p := any(v.Payload()).(type) {
 	case NodeSelfRevocation:
-		return Revocation{kind: KindNodeSelf, digest: v.Digest, node: p.Node}
+		return Revocation{kind: KindNodeSelf, digest: v.Digest(), node: p.Node}
 	case PersonSelfRevocation:
-		return Revocation{kind: KindPersonSelf, digest: v.Digest, person: p.Person}
+		return Revocation{kind: KindPersonSelf, digest: v.Digest(), person: p.Person}
 	case NetworkKeyCertificateRevocation:
-		return Revocation{kind: KindNetworkKeyCertificate, digest: v.Digest, node: p.Node, serial: p.Serial, cert: p.Certificate}
+		return Revocation{kind: KindNetworkKeyCertificate, digest: v.Digest(), node: p.Node, serial: p.Serial, cert: p.Certificate}
 	case DeviceKeyRevocation:
-		return Revocation{kind: KindDeviceKey, digest: v.Digest, person: p.Person, device: p.DeviceKey}
+		return Revocation{kind: KindDeviceKey, digest: v.Digest(), person: p.Person, device: p.DeviceKey}
 	}
 	return Revocation{}
 }

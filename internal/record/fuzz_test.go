@@ -35,7 +35,7 @@ func FuzzDecodeRecord(f *testing.F) {
 		_, _ = VerifyPartial(noteDescriptor, rec)
 		// Peeking never panics, and a record that verifies peeks to the same payload.
 		if v, err := VerifyPartial(pairDescriptor, rec); err == nil {
-			if u, err := Peek(pairDescriptor, rec); err != nil || u.Payload != v.Payload {
+			if u, err := Peek(pairDescriptor, rec); err != nil || u.Payload() != v.Payload() {
 				t.Fatalf("a record that verifies does not peek to its payload: %v", err)
 			}
 		}

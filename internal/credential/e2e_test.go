@@ -46,7 +46,7 @@ func listWith(t testing.TB, level admin.Level) admin.List {
 func TestDirectiveThroughAdminAndTrust(t *testing.T) {
 	a, b, c := nodeOf(t, keyA), nodeOf(t, keyB), nodeOf(t, keyOther)
 	cred := verifiedCredential(t, sampleCredential(t))
-	digest := trust.CredentialDigest(cred.Digest)
+	digest := trust.CredentialDigest(cred.Digest())
 	view := func() trust.View {
 		return trust.View{Local: a, Settings: trust.DefaultSettings(), Credentials: []trust.Credential{Facts(cred)}}
 	}
@@ -125,14 +125,14 @@ func TestDirectiveThroughAdminAndTrust(t *testing.T) {
 				status = admin.RevocationClear
 			}
 			v := makeDirective(t, node, digest, ends[0], ends[1], at, tc.cert)
-			got := admin.AcceptDirective(a, tc.list, v.Payload.AdminDirective(certFacts{status}), offlineSince, n)
+			got := admin.AcceptDirective(a, tc.list, v.Payload().AdminDirective(certFacts{status}), offlineSince, n)
 			if got.Disposition != tc.wantAdmin || got.Reason != tc.wantReason {
 				t.Fatalf("admin: %v %v, want %v %v", got.Disposition, got.Reason, tc.wantAdmin, tc.wantReason)
 			}
 			if tc.wantAdmin != admin.DispositionExecute {
 				return
 			}
-			tv := trust.ApplyDirective(view(), v.Payload.TrustDirective())
+			tv := trust.ApplyDirective(view(), v.Payload().TrustDirective())
 			if tv.Disposition != tc.wantTrust {
 				t.Fatalf("trust: %v, want %v", tv.Disposition, tc.wantTrust)
 			}
@@ -162,17 +162,17 @@ func TestDirectiveForAnEdgeOfOthers(t *testing.T) {
 	bc := verifiedCredential2(t, New(b, c, t0, time.Time{}, Nonce{5}), keyB, keyOther)
 	// Node A holds the credential B-C in its two-hop view, and a directive for it
 	// reaches A (the administrator may address any node on whose list it is).
-	v := makeDirective(t, a, trust.CredentialDigest(bc.Digest), b, c, t0.Add(time.Second), goldenCert(t))
+	v := makeDirective(t, a, trust.CredentialDigest(bc.Digest()), b, c, t0.Add(time.Second), goldenCert(t))
 	view := trust.View{Local: a, Settings: trust.DefaultSettings(), Credentials: []trust.Credential{Facts(bc)}}
-	if got := trust.ApplyDirective(view, v.Payload.TrustDirective()); got.Disposition != trust.DirectiveNotForThisNode {
+	if got := trust.ApplyDirective(view, v.Payload().TrustDirective()); got.Disposition != trust.DirectiveNotForThisNode {
 		t.Errorf("disposition = %v, want not-for-this-node", got.Disposition)
 	}
 	// Once revoked, a repeated directive is already effective.
 	own := verifiedCredential(t, sampleCredential(t))
 	view2 := trust.View{Local: a, Settings: trust.DefaultSettings(), Credentials: []trust.Credential{Facts(own)},
-		RevokedCredentials: trust.DigestSet{trust.CredentialDigest(own.Digest): {}}}
-	v2 := makeDirective(t, a, trust.CredentialDigest(own.Digest), a, b, t0.Add(time.Second), goldenCert(t))
-	if got := trust.ApplyDirective(view2, v2.Payload.TrustDirective()); got.Disposition != trust.DirectiveAlreadyEffective {
+		RevokedCredentials: trust.DigestSet{trust.CredentialDigest(own.Digest()): {}}}
+	v2 := makeDirective(t, a, trust.CredentialDigest(own.Digest()), a, b, t0.Add(time.Second), goldenCert(t))
+	if got := trust.ApplyDirective(view2, v2.Payload().TrustDirective()); got.Disposition != trust.DirectiveAlreadyEffective {
 		t.Errorf("disposition = %v, want already-effective", got.Disposition)
 	}
 }
@@ -189,7 +189,7 @@ func TestVoucherThroughTrust(t *testing.T) {
 	lm := verifiedCredential2(t, New(local, m, t0, time.Time{}, Nonce{1}), kLocal, kM)
 	mt := verifiedCredential2(t, New(m, target, t0, time.Time{}, Nonce{2}), kM, kTarget)
 	creds := map[trust.CredentialDigest]trust.Credential{
-		trust.CredentialDigest(lm.Digest): Facts(lm), trust.CredentialDigest(mt.Digest): Facts(mt),
+		trust.CredentialDigest(lm.Digest()): Facts(lm), trust.CredentialDigest(mt.Digest()): Facts(mt),
 	}
 	now := t0.Add(time.Hour)
 	voucherOf := func(issuer int, issuerNode ident.NodeID, edge record.Digest, issuedAt time.Time, counter uint64) record.Verified[Voucher] {
@@ -217,7 +217,7 @@ func TestVoucherThroughTrust(t *testing.T) {
 		}
 	}
 	receive := func(vs trust.Vouchers, v record.Verified[Voucher]) (VoucherReason, trust.VoucherDecision) {
-		got, reason := CheckVoucher(v, creds[v.Payload.Edge])
+		got, reason := CheckVoucher(v, creds[v.Payload().Edge])
 		if reason != VoucherOK {
 			return reason, trust.VoucherDecision{}
 		}
@@ -227,7 +227,7 @@ func TestVoucherThroughTrust(t *testing.T) {
 	t.Run("fresh vouchers from the intermediate make the inherited trust", func(t *testing.T) {
 		vs := trust.Vouchers{}
 		for _, e := range []record.Verified[Credential]{lm, mt} {
-			reason, dec := receive(vs, voucherOf(kM, m, e.Digest, now.Add(-time.Minute), 1))
+			reason, dec := receive(vs, voucherOf(kM, m, e.Digest(), now.Add(-time.Minute), 1))
 			if reason != VoucherOK || !dec.Accepted {
 				t.Fatalf("voucher refused: %v %+v", reason, dec)
 			}
@@ -240,7 +240,7 @@ func TestVoucherThroughTrust(t *testing.T) {
 	t.Run("a voucher from a node that is not an end never reaches trust", func(t *testing.T) {
 		vs := trust.Vouchers{}
 		// The target is an end of m-target but not of local-m.
-		forged := voucherOf(kTarget, target, lm.Digest, now.Add(-time.Minute), 1)
+		forged := voucherOf(kTarget, target, lm.Digest(), now.Add(-time.Minute), 1)
 		reason, _ := receive(vs, forged)
 		if reason != VoucherIssuerNotAnEnd {
 			t.Fatalf("reason = %v, want issuer-not-an-end", reason)
@@ -249,7 +249,7 @@ func TestVoucherThroughTrust(t *testing.T) {
 			t.Fatal("a refused voucher was stored")
 		}
 		// The only voucher present is for the other edge, so the path is suspended.
-		if _, dec := receive(vs, voucherOf(kM, m, mt.Digest, now.Add(-time.Minute), 1)); !dec.Accepted {
+		if _, dec := receive(vs, voucherOf(kM, m, mt.Digest(), now.Add(-time.Minute), 1)); !dec.Accepted {
 			t.Fatal("honest voucher refused")
 		}
 		got := trust.Evaluate(newView(vs), target, now)
@@ -260,7 +260,7 @@ func TestVoucherThroughTrust(t *testing.T) {
 
 	t.Run("a voucher stamped in the future is a fact trust judges", func(t *testing.T) {
 		vs := trust.Vouchers{}
-		v := voucherOf(kM, m, lm.Digest, now.Add(time.Hour), 1)
+		v := voucherOf(kM, m, lm.Digest(), now.Add(time.Hour), 1)
 		reason, dec := receive(vs, v)
 		if reason != VoucherOK {
 			t.Fatalf("this package refused a future voucher: %v", reason)
@@ -272,15 +272,15 @@ func TestVoucherThroughTrust(t *testing.T) {
 
 	t.Run("a counter that does not advance is refused by trust", func(t *testing.T) {
 		vs := trust.Vouchers{}
-		if _, dec := receive(vs, voucherOf(kM, m, lm.Digest, now.Add(-time.Minute), 5)); !dec.Accepted {
+		if _, dec := receive(vs, voucherOf(kM, m, lm.Digest(), now.Add(-time.Minute), 5)); !dec.Accepted {
 			t.Fatal("first voucher refused")
 		}
 		for _, counter := range []uint64{5, 4, 1} {
-			if _, dec := receive(vs, voucherOf(kM, m, lm.Digest, now.Add(-time.Second), counter)); dec.Accepted || dec.Reason != trust.VoucherCounterNotAdvancing {
+			if _, dec := receive(vs, voucherOf(kM, m, lm.Digest(), now.Add(-time.Second), counter)); dec.Accepted || dec.Reason != trust.VoucherCounterNotAdvancing {
 				t.Errorf("counter %d: %+v", counter, dec)
 			}
 		}
-		if _, dec := receive(vs, voucherOf(kM, m, lm.Digest, now.Add(-time.Second), 6)); !dec.Accepted {
+		if _, dec := receive(vs, voucherOf(kM, m, lm.Digest(), now.Add(-time.Second), 6)); !dec.Accepted {
 			t.Error("counter 6 refused")
 		}
 	})
@@ -289,7 +289,7 @@ func TestVoucherThroughTrust(t *testing.T) {
 		vs := trust.Vouchers{}
 		old := now.Add(-trust.DefaultGracePeriod - time.Minute)
 		for _, e := range []record.Verified[Credential]{lm, mt} {
-			if _, dec := receive(vs, voucherOf(kM, m, e.Digest, old, 1)); !dec.Accepted {
+			if _, dec := receive(vs, voucherOf(kM, m, e.Digest(), old, 1)); !dec.Accepted {
 				t.Fatal("refused")
 			}
 		}
@@ -355,7 +355,7 @@ func TestRevocationThroughTrust(t *testing.T) {
 	if got := trust.Evaluate(view, x, t0); got.Outcome != trust.AllowedDirect {
 		t.Fatalf("before: %v %v", got.Outcome, got.Reason)
 	}
-	rev, err := NewRevocation(cred.Payload)
+	rev, err := NewRevocation(cred.Payload())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,10 +367,10 @@ func TestRevocationThroughTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Payload.Digest() != trust.CredentialDigest(cred.Digest) || v.Payload.Digest() == trust.CredentialDigest(again.Digest) {
-		t.Fatalf("revoked digest %s is not the credential's %s alone", v.Payload.Digest(), trust.CredentialDigest(cred.Digest))
+	if v.Payload().Digest() != trust.CredentialDigest(cred.Digest()) || v.Payload().Digest() == trust.CredentialDigest(again.Digest()) {
+		t.Fatalf("revoked digest %s is not the credential's %s alone", v.Payload().Digest(), trust.CredentialDigest(cred.Digest()))
 	}
-	view.RevokedCredentials = trust.DigestSet{v.Payload.Digest(): {}}
+	view.RevokedCredentials = trust.DigestSet{v.Payload().Digest(): {}}
 	if got := trust.Evaluate(view, x, t0); got.Outcome != trust.Denied || got.Reason != trust.ReasonCredentialRevoked {
 		t.Fatalf("after: %v %v", got.Outcome, got.Reason)
 	}
@@ -401,7 +401,7 @@ func TestCredentialClusterRows(t *testing.T) {
 	}
 	voucher := func(issuer string, e record.Verified[Credential], counter uint64) trust.Voucher {
 		d := VoucherDescriptor(acceptedNetworkKey(t, seeds[issuer], nets[issuer]), now)
-		r, err := record.Seal(d, Voucher{Issuer: id(issuer), Edge: trust.CredentialDigest(e.Digest), IssuedAt: now.Add(-time.Minute), Counter: counter}, signerOf(t, nets[issuer]))
+		r, err := record.Seal(d, Voucher{Issuer: id(issuer), Edge: trust.CredentialDigest(e.Digest()), IssuedAt: now.Add(-time.Minute), Counter: counter}, signerOf(t, nets[issuer]))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -435,7 +435,7 @@ func TestCredentialClusterRows(t *testing.T) {
 			v.Credentials = append(v.Credentials, Facts(edge(e[0], e[1])))
 		}
 		for _, c := range o.revoked {
-			v.RevokedCredentials[trust.CredentialDigest(c.Digest)] = struct{}{}
+			v.RevokedCredentials[trust.CredentialDigest(c.Digest())] = struct{}{}
 		}
 		for i, vo := range o.vouchers {
 			e := creds[vo[1]]

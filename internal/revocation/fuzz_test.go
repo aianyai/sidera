@@ -132,8 +132,8 @@ func FuzzStatementRoundTrip(f *testing.F) {
 				return
 			}
 			v, err := record.Verify(NetworkKeyCertificateRevocationDescriptor, rec)
-			if err != nil || v.Payload != payload {
-				t.Fatalf("round trip: %+v %v", v.Payload, err)
+			if err != nil || v.Payload() != payload {
+				t.Fatalf("round trip: %+v %v", v.Payload(), err)
 			}
 		case 3:
 			k, kerr := ident.NewPublicKey(ident.AlgorithmEd25519, key)
@@ -186,8 +186,8 @@ func FuzzClassifyCounts(f *testing.F) {
 	f.Add(3, 3)
 	f.Add(-1, 5)
 	f.Add(1<<62, -1<<62)
+	rev := nodeSelfOf(f, 77)
 	f.Fuzz(func(t *testing.T, held, capN int) {
-		rev := nodeSelfOf(nodeIDOf(t, 77), 1)
 		got := Classify(rev, Context{TrustGraph: trust.NodeSet{}}, held, Params{MaxForwardOnce: capN})
 		switch {
 		case held < 0 || capN < 1:

@@ -1,8 +1,6 @@
 package publication
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
 	"math/rand"
 	"testing"
 	"time"
@@ -12,47 +10,104 @@ import (
 	"github.com/aianyai/sidera/internal/trust"
 )
 
-func fakeDigest(node ident.NodeID, counter uint64, variant byte) record.Digest {
-	b := append(node.Bytes(), variant)
-	b = binary.BigEndian.AppendUint64(b, counter)
-	return sha256.Sum256(b)
+// sealedKey identifies one sealed record the decision tests ask for.
+type sealedKey struct {
+	reachability bool
+	idSeed       int
+	counter      uint64
+	variant      byte
+	expiresAt    time.Time
 }
 
-func verifiedDeclaration(node ident.NodeID, counter uint64, variant byte) record.Verified[Declaration] {
-	return record.Verified[Declaration]{Payload: Declaration{Node: node, Counter: counter}, Digest: fakeDigest(node, counter, variant)}
-}
+// sealedRecords caches the verified records of the decision tests: the
+// randomized test asks for the same record many times, and sealing each time
+// would only repeat the signatures.
+var sealedRecords = map[sealedKey]any{}
 
-func verifiedReachability(t testing.TB, node ident.NodeID, counter uint64, variant byte, expires time.Time) record.Verified[ReachabilityRecord] {
+// networkSeedOf is the seed of the network key of the node whose identity key
+// has seed idSeed, for the nodes the decision tests make up.
+func networkSeedOf(idSeed int) int { return idSeed + 0x80 }
+
+// acceptedFor is the certificate a verifier holds for the node whose identity
+// key has seed idSeed: the node certifies network key networkSeedOf(idSeed) for
+// 30 days from t0.
+func acceptedFor(t testing.TB, idSeed int) record.AcceptedNetworkKey {
 	t.Helper()
-	// The node of a reachability record is the node of its embedded certificate.
-	cert := record.Verified[record.NetworkKeyCertificate]{Payload: record.NetworkKeyCertificate{Node: node}}
-	return record.Verified[ReachabilityRecord]{
-		Payload: ReachabilityRecord{Counter: counter, ExpiresAt: expires, certificate: cert},
-		Digest:  fakeDigest(node, counter, variant),
+	cert, err := record.Verify(record.NetworkKeyCertificateDescriptor, networkCertRecord(t, idSeed, networkSeedOf(idSeed), 1, t0, t0.Add(30*24*time.Hour)))
+	if err != nil {
+		t.Fatal(err)
 	}
+	c := cert.Payload()
+	return record.AcceptedNetworkKey{Cert: &c, Revocation: record.KeyRevocationClear}
+}
+
+// verifiedDeclaration seals a declaration of the node with identity key idSeed
+// and verifies it. Two declarations with the same counter and variant are the
+// same record; another variant is another content (a different boot nonce).
+func verifiedDeclaration(t testing.TB, idSeed int, counter uint64, variant byte) record.Verified[Declaration] {
+	t.Helper()
+	k := sealedKey{idSeed: idSeed, counter: counter, variant: variant}
+	if v, ok := sealedRecords[k]; ok {
+		return v.(record.Verified[Declaration])
+	}
+	d := sampleDeclaration(t)
+	d.Node, d.Counter, d.BootNonce = nodeOf(t, idSeed), counter, bootNonce(variant)
+	desc := DeclarationDescriptor(acceptedFor(t, idSeed), declNow)
+	r, err := record.Seal(desc, d, signerOf(t, networkSeedOf(idSeed)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := record.Verify(desc, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedRecords[k] = v
+	return v
+}
+
+// verifiedReachability seals a reachability record of the node with identity
+// key idSeed and verifies it. The variant stands for the content (one address).
+func verifiedReachability(t testing.TB, idSeed int, counter uint64, variant byte, expires time.Time) record.Verified[ReachabilityRecord] {
+	t.Helper()
+	k := sealedKey{reachability: true, idSeed: idSeed, counter: counter, variant: variant, expiresAt: expires}
+	if v, ok := sealedRecords[k]; ok {
+		return v.(record.Verified[ReachabilityRecord])
+	}
+	cert := networkCertRecord(t, idSeed, networkSeedOf(idSeed), 1, t0, t0.Add(30*24*time.Hour))
+	p, err := NewReachabilityRecord(counter, expires, [][]byte{{variant}}, nil, cert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desc := ReachabilityDescriptor(acceptedFor(t, idSeed), declNow)
+	r, err := record.Seal(desc, p, signerOf(t, networkSeedOf(idSeed)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := record.Verify(desc, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealedRecords[k] = v
+	return v
 }
 
 func TestDecideDeclaration(t *testing.T) {
-	a, b := nodeOf(t, keyA), nodeOf(t, keyOther)
-	seen5 := DeclarationSeenOf(verifiedDeclaration(a, 5, 1))
+	a, b := keyA, keyOther
+	seen5 := DeclarationSeenOf(verifiedDeclaration(t, a, 5, 1))
 	tests := []struct {
 		name     string
 		seen     *DeclarationSeen
 		incoming record.Verified[Declaration]
 		want     Verdict
 	}{
-		{"nothing seen yet", nil, verifiedDeclaration(a, 1, 1), VerdictAccept},
-		{"higher counter", &seen5, verifiedDeclaration(a, 6, 1), VerdictAccept},
-		{"counter far higher", &seen5, verifiedDeclaration(a, 1<<40, 1), VerdictAccept},
-		{"lower counter", &seen5, verifiedDeclaration(a, 4, 1), VerdictStale},
-		{"lowest counter", &seen5, verifiedDeclaration(a, 1, 2), VerdictStale},
-		{"the very declaration seen", &seen5, verifiedDeclaration(a, 5, 1), VerdictStale},
-		{"same counter, different content", &seen5, verifiedDeclaration(a, 5, 2), VerdictConflict},
-		{"a declaration of another node", &seen5, verifiedDeclaration(b, 9, 1), VerdictWrongNode},
-		{"counter unset", &seen5, verifiedDeclaration(a, 0, 1), VerdictInvalid},
-		{"counter unset, nothing seen", nil, verifiedDeclaration(a, 0, 1), VerdictInvalid},
-		{"node unset", nil, verifiedDeclaration(ident.NodeID{}, 3, 1), VerdictInvalid},
-		{"digest unset", nil, record.Verified[Declaration]{Payload: Declaration{Node: a, Counter: 3}}, VerdictInvalid},
+		{"nothing seen yet", nil, verifiedDeclaration(t, a, 1, 1), VerdictAccept},
+		{"higher counter", &seen5, verifiedDeclaration(t, a, 6, 1), VerdictAccept},
+		{"counter far higher", &seen5, verifiedDeclaration(t, a, 1<<40, 1), VerdictAccept},
+		{"lower counter", &seen5, verifiedDeclaration(t, a, 4, 1), VerdictStale},
+		{"lowest counter", &seen5, verifiedDeclaration(t, a, 1, 2), VerdictStale},
+		{"the very declaration seen", &seen5, verifiedDeclaration(t, a, 5, 1), VerdictStale},
+		{"same counter, different content", &seen5, verifiedDeclaration(t, a, 5, 2), VerdictConflict},
+		{"a declaration of another node", &seen5, verifiedDeclaration(t, b, 9, 1), VerdictWrongNode},
 		{"zero value", nil, record.Verified[Declaration]{}, VerdictInvalid},
 	}
 	for _, tc := range tests {
@@ -65,7 +120,7 @@ func TestDecideDeclaration(t *testing.T) {
 }
 
 func TestDecideReachability(t *testing.T) {
-	a, b := nodeOf(t, keyA), nodeOf(t, keyOther)
+	a, b := keyA, keyOther
 	now := t0.Add(10 * time.Minute)
 	live := now.Add(time.Hour)
 	seen5 := ReachabilitySeenOf(verifiedReachability(t, a, 5, 1, live))
@@ -81,7 +136,7 @@ func TestDecideReachability(t *testing.T) {
 		{"the very record seen", &seen5, verifiedReachability(t, a, 5, 1, live), VerdictStale},
 		{"same counter, different content", &seen5, verifiedReachability(t, a, 5, 2, live), VerdictConflict},
 		{"another node", &seen5, verifiedReachability(t, b, 9, 1, live), VerdictWrongNode},
-		{"counter unset", nil, verifiedReachability(t, a, 0, 1, live), VerdictInvalid},
+		{"zero value", nil, record.Verified[ReachabilityRecord]{}, VerdictInvalid},
 		{"higher counter but expired", &seen5, verifiedReachability(t, a, 6, 1, now.Add(-time.Second)), VerdictExpired},
 		{"higher counter expiring at this instant", &seen5, verifiedReachability(t, a, 6, 1, now), VerdictExpired},
 		{"first record already expired", nil, verifiedReachability(t, a, 1, 1, now.Add(-time.Hour)), VerdictExpired},
@@ -89,7 +144,6 @@ func TestDecideReachability(t *testing.T) {
 		{"stale beats expired", &seen5, verifiedReachability(t, a, 4, 1, now.Add(-time.Hour)), VerdictStale},
 		{"conflict beats expired", &seen5, verifiedReachability(t, a, 5, 2, now.Add(-time.Hour)), VerdictConflict},
 		{"wrong node beats expired", &seen5, verifiedReachability(t, b, 9, 1, now.Add(-time.Hour)), VerdictWrongNode},
-		{"no expiry time counts as expired", nil, verifiedReachability(t, a, 1, 1, time.Time{}), VerdictExpired},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -146,7 +200,7 @@ func (o *oracle) judge(a arrival, expiryApplies bool) Verdict {
 // order was.
 func TestHighestCounterUnderRandomArrivalOrders(t *testing.T) {
 	rng := rand.New(rand.NewSource(20231023))
-	nodes := []ident.NodeID{nodeOf(t, keyA), nodeOf(t, keyOther), nodeOf(t, keyRoot)}
+	nodes := []int{keyA, keyOther, keyRoot}
 	now := t0.Add(time.Hour)
 	counts := map[Verdict]int{}
 
@@ -181,7 +235,7 @@ func TestHighestCounterUnderRandomArrivalOrders(t *testing.T) {
 				// An expiry time is part of the content, so it is fixed by the
 				// variant of a record, not drawn again for each arrival.
 				if kind == "declaration" {
-					v := verifiedDeclaration(node, a.counter, a.variant)
+					v := verifiedDeclaration(t, node, a.counter, a.variant)
 					got = DecideDeclaration(declSeen[a.node], v)
 					accepted = func() { s := DeclarationSeenOf(v); declSeen[a.node] = &s }
 				} else {
@@ -291,7 +345,7 @@ func TestDeclarationInheritanceThroughTrust(t *testing.T) {
 		if verdict == VerdictAccept {
 			s := DeclarationSeenOf(v)
 			seen = &s
-			n, on := v.Payload.DeclaredInheritance()
+			n, on := v.Payload().DeclaredInheritance()
 			facts[n] = on
 		}
 		return verdict
