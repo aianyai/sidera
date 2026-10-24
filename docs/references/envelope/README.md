@@ -102,7 +102,7 @@ or 8 status, so the key says which signal the reply is for.
 
 | Result | Fields |
 | ------ | ------ |
-| create (5) | `{1: outcome, 2: session endpoint, 3: reason}`: outcomes 1 created, 2 unconfirmed, 3 failed; the endpoint (16 bytes) for created and unconfirmed; reasons 1 to 6 for failed, 7 and 8 for unconfirmed |
+| create (5) | `{1: outcome, 2: session endpoint, 3: reason}`: outcomes 1 created, 2 unconfirmed, 3 failed; the endpoint (16 bytes) for created and unconfirmed; reasons 1 to 6 and 9 for failed, 7 and 8 for unconfirmed |
 | close (6) | `{1: outcome, 2: reason}` |
 | interrupt (7) | `{1: outcome, 2: reason}` |
 | status (8) | `{1: activity, 2: queued, 3: conditions, 4: presets, 5: as_of}` |
@@ -368,7 +368,7 @@ which may still admit it.
   sending-node check); `golden_test.go` (`TestGoldenRequestDigest`);
   `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`,
   `TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply`,
-  `TestAReportDatedAfterTheDeliverysReportByIsAContradiction`);
+  `TestAReportDatedAfterTheDeliverysReportByIsIgnored`);
   `envelope_test.go` (`TestATooLargeBodyIsToldApartFromAMalformedOne`, and the
   disclosed-list rows of `TestRequestDigest`); `fuzz_test.go`.
   `internal/reply/reply_test.go` holds the named acceptance scenarios

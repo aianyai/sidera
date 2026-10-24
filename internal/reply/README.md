@@ -68,7 +68,9 @@ every contract package follows, and
 
 - `Replier` comes from the connection identity and the sending node's
   endpoint, never from the message body. `Local` is the node itself. `Accepted`
-  is the network key accepted for `Replier.Node`, with revocation filled in.
+  is the network key accepted for `Replier.Node`, with its revocation status and
+  the highest certificate serial seen for that node filled in; a certificate
+  below that serial binds nothing.
 - A non-nil `Admission.EvidenceError` is logged and raised as an alert: it means
   a malfunctioning or hostile peer, or a network key that changed after the
   evidence was signed. It does not change the decision.

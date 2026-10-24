@@ -52,7 +52,9 @@ const (
 	// CreateReplyUnconfirmed: the session may have been created but no evidence
 	// of readiness came in time.
 	CreateReplyUnconfirmed
-	// CreateReplyFailed: certainly no session was created.
+	// CreateReplyFailed: no session will be attached to the channel. Certainly
+	// none was created, except for the reason CreateReasonControlUnknown, where a
+	// native session or process may remain and the adapter leaves it alone.
 	CreateReplyFailed
 )
 

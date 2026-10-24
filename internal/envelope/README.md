@@ -127,7 +127,8 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   node the message or signal was sent to, taken from the sender's own record,
   never from the record being verified; `local` is the verifier's own node.
   `accepted` is the network key accepted for the target node with its revocation
-  status filled in.
+  status and the highest certificate serial seen for that node filled in; a
+  certificate below that serial binds nothing.
 - The receiving node calls `Envelope.ValidateFor` with its own node on every
   decoded envelope before acting on it: `Decode` cannot know which node reads it.
 - Storage keeps, at least until `reply.RetainFactsUntil(report_by)`, the

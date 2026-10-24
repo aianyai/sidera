@@ -118,8 +118,9 @@ For a node:
    very certificate may have just raised): a different key, a revoked
    certificate, an expired one or one that has not begun is refused. A node whose identity key
    has a self-revocation is refused as retired.
-4. `trust.Evaluate` decides, on the trust view with the retired nodes of the
-   revocation set added to its own (a retired intermediate carries no trust):
+4. `trust.Evaluate` decides, on the trust view whose retired set is the one
+   `revocation.Set.TrustView` fills from the revocation set only (a retired
+   intermediate carries no trust):
    allowed directly or by inheritance is a member,
    **suspended is a member**, denied is a non-member node (pairing only).
 
@@ -321,7 +322,8 @@ cache of who is known: the accounting keeps its own known set.
   panic there would be a crash that peer can cause by timing alone, so this
   package refuses a `nil` set first, with a reason of its own: a missing set is a
   decision, not a crash. A node that has revoked nothing passes an explicit empty
-  set.
+  set. A `nil` `Facts.SerialSeen` is refused the same way
+  (`ReasonInvalidInput`), and an empty map means no serial seen yet.
 - **Exempt known members from the cap.** The cap exists so that strangers cannot
   hold the node's connections. The same cap shuts out members that reconnect
   during a flood, and the flood costs the attacker nothing. A key authenticated

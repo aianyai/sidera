@@ -134,7 +134,8 @@ type Request struct {
 	// envelope.
 	Evidence []record.Record
 	// Accepted is the network key this node accepts for Replier.Node, with its
-	// revocation status. The evidence has to be signed by it.
+	// revocation status and the highest certificate serial seen for that node (a
+	// certificate below it binds nothing). The evidence has to be signed by it.
 	Accepted record.AcceptedNetworkKey
 }
 

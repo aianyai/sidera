@@ -25,8 +25,8 @@ var (
 	ErrSeq = errors.New("invalid sequence numbers")
 	// ErrReportBy: report_by is not delivery.ReportBy(accept_before).
 	ErrReportBy = errors.New("report_by does not follow from accept_before")
-	// ErrBody: the content type and body are inconsistent, too large, or not
-	// allowed for the kind.
+	// ErrBody: the content type and body are inconsistent or not allowed for the
+	// kind. A body that is too large is the wrapped case ErrBodyTooLarge.
 	ErrBody = errors.New("invalid content type or body")
 	// ErrBodyTooLarge: the body is longer than Limits.MaxBody. It wraps ErrBody,
 	// so a caller that must tell too large from malformed (one is reported to the
