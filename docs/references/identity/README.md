@@ -117,7 +117,11 @@ The parser accepts exactly one text per identifier:
 
 The node's own keys live in `keys/` of the data directory (package
 `internal/node/keys`). Every file is owner-only (0600 on Unix, an owner-only DACL
-on Windows), in a directory that is owner-only too.
+on Windows), in a directory that is owner-only too. A file of `keys/` that is a
+symbolic link is refused as too broad whatever it points to, because the check
+sees the link and the read follows it
+(`TestAKeyFileThatIsASymlinkIsRefused`,
+`TestAKeyFileThatIsASymlinkWithOwnerOnlyBitsIsRefused`).
 
 | File | Holds | Written by |
 | ---- | ----- | ---------- |

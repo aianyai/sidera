@@ -393,3 +393,21 @@ func TestWindowsOwnerOnlyIsFalseWithACallbackAllowEntry(t *testing.T) {
 		t.Errorf("Stat(key) = %+v, %v; want OwnerOnly false with a callback allow entry", info, err)
 	}
 }
+
+// Stat does not follow a link and ReadFile does, so a link is never owner-only,
+// whatever its own descriptor says. Creating a symbolic link needs a privilege
+// (or developer mode) that an account may lack.
+func TestWindowsOwnerOnlyIsFalseForASymbolicLink(t *testing.T) {
+	fsys, root := openTemp(t)
+	if err := fsx.Replace(fsys, tx, "target", []byte("secret"), fsx.ModePrivate); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "target"), filepath.Join(root, "link")); err != nil {
+		t.Skipf("the account cannot create symbolic links (needs SeCreateSymbolicLinkPrivilege or developer mode): %v", err)
+	}
+	info, err := fsys.Stat("link")
+	t.Logf("Stat(link) = %+v, %v", info, err)
+	if err != nil || info.OwnerOnly {
+		t.Errorf("Stat(link) = %+v, %v; want OwnerOnly false for a symbolic link", info, err)
+	}
+}

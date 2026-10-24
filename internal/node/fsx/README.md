@@ -57,6 +57,11 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 - **Files are 0600, or 0700 for adapter executables; directories are 0700.** On
   Windows the data directory root carries a protected DACL for the current user
   and everything created inside inherits it.
+- **`Info.OwnerOnly` is true only for a regular file or a directory.** A symbolic
+  link, a socket, a device or a Windows junction is never owner-only: `Stat` does
+  not follow a link and `ReadFile` does, so the permission bits of a link (macOS
+  lets the owner set them with `chmod -h`) say nothing about who can read what it
+  points to. The Windows effect is pending verification by CI on main.
 - **`Discard` renames before it removes.** If the removal fails the error is
   returned but the directory is already gone from its name; the `.trash-*`
   leftover is removed at startup.

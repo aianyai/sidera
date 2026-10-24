@@ -137,3 +137,22 @@ func TestMakeRootCreatesAnOwnerOnlyDirectoryAndRefusesAnExistingOne(t *testing.T
 		t.Errorf("MakeRoot without a parent = %v, want os.ErrNotExist", err)
 	}
 }
+
+// Stat does not follow a link and ReadFile does, so the bits of a link say
+// nothing about who can read what it points to: a link is never owner-only, even
+// when it points at a private file.
+func TestOSUnixOwnerOnlyIsFalseForASymbolicLink(t *testing.T) {
+	fsys, root := openTemp(t)
+	if err := fsx.Replace(fsys, tx, "target", []byte("secret"), fsx.ModePrivate); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "target"), filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := fsys.Stat("target"); err != nil || !info.OwnerOnly {
+		t.Fatalf("Stat(target) = %+v, %v; want OwnerOnly for the private target", info, err)
+	}
+	if info, err := fsys.Stat("link"); err != nil || info.OwnerOnly {
+		t.Errorf("Stat(link) = %+v, %v; want OwnerOnly false for a symbolic link", info, err)
+	}
+}

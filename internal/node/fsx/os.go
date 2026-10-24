@@ -103,7 +103,7 @@ func (o *osFS) Stat(p string) (Info, error) {
 		Name:      path.Base(p),
 		Size:      fi.Size(),
 		IsDir:     fi.IsDir(),
-		OwnerOnly: ownerOnly(a, fi),
+		OwnerOnly: fi.Mode().Type()&^fs.ModeDir == 0 && ownerOnly(a, fi),
 	}, nil
 }
 

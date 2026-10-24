@@ -94,7 +94,11 @@ type Info struct {
 	// fails closed: the owner is the user running the process, Administrators or
 	// SYSTEM, and the DACL has only deny entries and allow entries for the user
 	// running the process, SYSTEM and Administrators; an entry of any other type
-	// or a descriptor that cannot be read makes it false.
+	// or a descriptor that cannot be read makes it false. It is false for
+	// anything that is neither a regular file nor a directory (a symbolic link,
+	// a socket, a device, a Windows junction): Stat does not follow a link and
+	// ReadFile does, so the permission bits of a link say nothing about who can
+	// read what it points to.
 	OwnerOnly bool
 }
 

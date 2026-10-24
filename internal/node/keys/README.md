@@ -44,8 +44,10 @@ transaction of `txn`; nothing here calls an `fsx` write.
 - **Permissions are refused, never fixed.** A directory or file of `keys/` that
   anyone but the owner can reach makes `Load`, `PlanInit` and the standalone
   readers fail with `ErrPermissionsTooBroad` naming it. On Unix any group or
-  other bit counts; on Windows the DACL check is `fsx.Info.OwnerOnly`. Nothing
-  here narrows a permission: only the owner knows who has read the file.
+  other bit counts; on Windows the DACL check is `fsx.Info.OwnerOnly`. A file that
+  is a symbolic link is refused too, whatever it points to: the check sees the
+  link and the read follows it. Nothing here narrows a permission: only the owner
+  knows who has read the file.
 - **Errors never quote a file.** The decoders say which check failed, not what
   they found, because a key file is secret. Keys print as a fixed text that names only
   their node, by pointer or as a copy, and anything that holds one prints as an

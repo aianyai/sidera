@@ -54,6 +54,18 @@ be written outside the root. Renames stay inside one
 directory. Files have one of two permissions, 0600 or 0700 for adapter
 executables; directories are 0700.
 
+`Info.OwnerOnly`, which callers use to refuse a secret that others could reach,
+is true only for a regular file or a directory whose permissions are the owner's.
+`Stat` does not follow a final symbolic link and `ReadFile` does, so the bits of a
+link (which macOS lets the owner set with `chmod -h`) say nothing about who can
+read what it points to: a link, like a socket, a device or a Windows junction, is
+never owner-only. Without this a link made 0600 pointing at a world-readable copy
+of a private key would pass the check and be read. The tests are
+`TestOSUnixOwnerOnlyIsFalseForASymbolicLink`,
+`TestDarwinOwnerOnlyIsFalseForASymbolicLinkWithOwnerOnlyBits` and
+`TestWindowsOwnerOnlyIsFalseForASymbolicLink`; the Windows effect (what
+`Lstat` reports for a link there) is pending verification by CI on main.
+
 There is no overwrite in place, no truncate, no rename across directories, no
 replacing a directory, no chmod, and no long-held read handle. Each is left out
 for a reason in the Why section.
@@ -833,7 +845,8 @@ so that the double cannot drift from what it stands for.
 ## Known gaps
 
 - **Symbolic links.** The test that `Stat` does not follow a final symbolic link
-  skips where the platform refuses to create one without privilege.
+  and the tests that a link is not owner-only skip where the platform refuses to
+  create one without privilege.
 - **Assigning another owner on Windows.** The tests that a file owned by
   Everyone or by another user is not owner-only skip where the account lacks
   the privilege to assign that owner, which is the usual case; the decision they
@@ -910,4 +923,4 @@ handle is held (succeeds once the handle is released within the retry budget,
 and fails as an ordinary failure with the target intact when it is not), the
 retried error set, the directory flush attempt (logs the measured result), `Sync`
 on an append handle, `RenameDir` refusing an existing target, a second `Lock`
-getting `ErrLocked`, the owner-only descriptor of a created data directory (and that Everyone, an untrusted owner or a callback allow entry make it false), and that reading a missing file returns `fs.ErrNotExist` at once.
+getting `ErrLocked`, the owner-only descriptor of a created data directory (and that Everyone, an untrusted owner, a callback allow entry or a symbolic link make it false), and that reading a missing file returns `fs.ErrNotExist` at once.
