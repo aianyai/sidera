@@ -15,7 +15,8 @@ Two interfaces, each on its own local endpoint:
 
 `<home>` is the data directory, made absolute and clean. The management socket
 has its own directory because sandboxes are granted access by directory and
-`run/` is granted to agents. The instance lock is `<home>/daemon.lock`, at the
+`run/` is granted to agents, to connect only (see Sandboxes and the
+socket directory below). The instance lock is `<home>/daemon.lock`, at the
 root, because `state/` can be deleted as a whole and a lock inside it would
 allow a second daemon while it is gone.
 
@@ -57,12 +58,24 @@ bytes; they are not supported. `Locate` is the one check, shared by `init`,
 daemon start and client connect, and its error names the path, its length and
 the limit. Leave room for a long user name and for a `SIDERA_HOME` override.
 
-Sandboxes that allow writes to the socket directory match the resolved path:
+Sandboxes that allow connecting to the socket match the resolved path:
 Codex normalizes the allowed path (`/tmp` becomes `/private/tmp`), Claude Code
 matches by sub-path. Allow the canonical path.
 
 On Linux the directory must be searchable and writable by the user and the
 socket writable by the connecting process (unix(7)); both hold for the owner.
+
+#### Sandboxes and the socket directory
+
+A sandbox may allow connecting to `agent.sock`; it must not allow writing to or
+deleting in `run/`. An agent in the sandbox runs as the daemon's own user, so
+every check this document describes (the directory's owner and mode, the
+socket's owner, the peer's uid) holds for it as well. With `run/` writable it
+could remove `agent.sock`, listen on the name in its place, and collect the
+tokens that other sessions send to what they take for the daemon. The client's
+checks cannot tell the two apart, because both have the user's uid. The
+directory permission of the sandbox is therefore the only thing that keeps the
+name, and it has to be read-only for the agent (connect only).
 
 ### Windows
 
@@ -92,6 +105,10 @@ socket writable by the connecting process (unix(7)); both hold for the owner.
   pipe always grants the user, so a refusal means someone else created the name.
 - A pipe is a kernel object that disappears with its last handle, so there is no
   leftover to delete.
+- The same holds as on Unix: a process of the same user, including an agent in a
+  sandbox, passes the owner and token checks. While the daemon is not running it
+  can create the pipe under the daemon's name and collect the tokens that
+  clients send; the sandbox must not let an agent create pipes under that name.
 
 ## Why
 
