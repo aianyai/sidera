@@ -255,6 +255,8 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"the invalid state", "in", `"state":"accepted"`, `"state":"invalid"`},
 		{"an authorization kind that is not one", "in", `"kind":"allow"`, `"kind":"maybe"`},
 		{"a reply reason that is not one", "in", `"reason":"disabled"`, `"reason":"because"`},
+		{"an in record of another sender than the system without the verdict of the authorization check", "in", `"auth":{"kind":"allow"},`, ``},
+		{"an in record of another sender than the system without the reply permission", "in", `"reply":{"reason":"disabled"},`, ``},
 		{"a digest of the wrong length", "in", `"digest":"0102`, `"digest":"010`},
 		{"a body reference of the wrong digest length", "in", `"sha256":"ea8c`, `"sha256":"ea8`},
 		{"a body reference of a negative length", "in", `"len":17`, `"len":-1`},
@@ -608,5 +610,60 @@ func TestFirstLineFlipsNeverGiveATrustedWrongKey(t *testing.T) {
 				t.Fatalf("flip of byte %d bit %d: a body damage with the wrong kind or key %q %q", i, bit, dmg.Kind, dmg.Key)
 			}
 		}
+	}
+}
+
+// Omitting the verdict of the authorization check and the reply permission is
+// for the notices of the system endpoint, exempt traffic that cannot be replied
+// to. Any other sender's record carries both, in the encoder and in the decoder:
+// a record that lost them in storage must not pass for one that never had them.
+func TestOnlyTheSystemEndpointMayOmitTheVerdictAndTheReplyPermission(t *testing.T) {
+	system := func(mutate func(*store.InRecord)) store.InRecord {
+		in := tgtIn(5)
+		in.Rev = 1
+		in.Key = store.TargetKey{SenderNode: node(local), Sender: ident.SystemEndpoint(), Message: msgID(5), Recipient: ep(1)}
+		in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(5), in.Record.ReportBy)
+		mutate(&in)
+		return in
+	}
+	other := func(mutate func(*store.InRecord)) store.InRecord {
+		in := tgtIn(5)
+		in.Rev = 1
+		mutate(&in)
+		return in
+	}
+	noAuth := func(in *store.InRecord) { in.Auth = delivery.Authorization{} }
+	noReply := func(in *store.InRecord) { in.ReplyDecision = reply.Decision{} }
+	neither := func(in *store.InRecord) { noAuth(in); noReply(in) }
+	for _, c := range []struct {
+		rule   string
+		rec    store.InRecord
+		wantOK bool
+	}{
+		{"the system endpoint omits both", system(neither), true},
+		{"the system endpoint omits the verdict", system(noAuth), true},
+		{"the system endpoint omits the reply permission", system(noReply), true},
+		{"the system endpoint may carry both", system(func(*store.InRecord) {}), true},
+		{"another sender carries both", other(func(*store.InRecord) {}), true},
+		{"another sender omits the verdict", other(noAuth), false},
+		{"another sender omits the reply permission", other(noReply), false},
+		{"another sender omits both", other(neither), false},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			data, err := store.EncodeRecord(c.rec)
+			if (err == nil) != c.wantOK {
+				t.Fatalf("EncodeRecord error = %v, want ok = %v", err, c.wantOK)
+			}
+			if err != nil {
+				return
+			}
+			got, dmg := store.DecodeRecord(store.InDir, c.rec.Name(), data)
+			if dmg != nil {
+				t.Fatalf("what the encoder wrote does not decode: %+v", dmg)
+			}
+			if !equalRecords(got, c.rec) {
+				t.Errorf("round trip changed the record:\n got  %#v\n want %#v", got, c.rec)
+			}
+		})
 	}
 }

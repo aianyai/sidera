@@ -78,6 +78,8 @@ engine applies the delivery rules and calls the writes.
   `*DamagedFileError`; the caller quarantines the file it names and tries again.
   `Scan.Damaged` lists floor files first, so a startup meets none after it began to
   quarantine source records.
+- **Only the system endpoint's notices omit the verdict of the authorization check
+  and the reply permission,** in the encoder and in the decoder.
 
 ## What the caller must guarantee
 

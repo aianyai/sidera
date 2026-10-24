@@ -573,6 +573,8 @@ func outFileHash(name string) (string, error) {
 	return h, nil
 }
 
+var errNoVerdictFromAnotherSender = errors.New("only a notice of the system endpoint omits the verdict of the authorization check or the reply permission")
+
 func encodeIn(r InRecord) ([]byte, error) {
 	if _, err := r.Key.Bytes(); err != nil {
 		return nil, err
@@ -613,6 +615,11 @@ func encodeIn(r InRecord) ([]byte, error) {
 	j.Rev = &rev
 	// A system notice has neither a verdict of the authorization check nor a
 	// reply permission: exempt traffic, and a system endpoint cannot be replied to.
+	// Of any other sender both are stored, so that a record that lost them in
+	// storage cannot pass for one that never had them.
+	if (r.Auth == (delivery.Authorization{}) || r.ReplyDecision == (reply.Decision{})) && !r.Key.Sender.IsSystem() {
+		return nil, errNoVerdictFromAnotherSender
+	}
 	if r.Auth != (delivery.Authorization{}) {
 		if j.Auth, err = toAuth(r.Auth); err != nil {
 			return nil, err
@@ -698,6 +705,9 @@ func decodeIn(key TargetKey, body []byte) (InRecord, error) {
 	r.Rev = *j.Rev
 	if j.Handout == nil || j.AcceptedAt == nil {
 		return r, errors.New("a regular in record needs its handout fields and acceptance time")
+	}
+	if (j.Auth == nil || j.Reply == nil) && !key.Sender.IsSystem() {
+		return r, errNoVerdictFromAnotherSender
 	}
 	if j.Auth != nil {
 		if r.Auth, err = fromAuth(j.Auth); err != nil {

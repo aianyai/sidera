@@ -758,6 +758,9 @@ so that the double cannot drift from what it stands for.
   crash, or a power loss that kept the removal of the endpoint and lost that of its
   floor, attempts or checkpoint file, would leave a file no sweep looks for, since
   every rule finds them through the endpoint.
+- **Only the system endpoint's notices omit the verdict of the authorization check
+  and the reply permission.** Any other sender's in record stores both, so that one
+  that lost them in storage is damaged and not a record that never had them.
 - **The kind is hashed into the file name.** One flipped bit would otherwise turn a
   message record into a control record.
 - **Nothing is skipped on a resumption because it seems to be done.** What a
@@ -824,7 +827,7 @@ so that the double cannot drift from what it stands for.
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `TestHeaderDamageNeverEchoesTheFirstLine`, `FuzzDecodeFrame` |
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
-| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
+| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestOnlyTheSystemEndpointMayOmitTheVerdictAndTheReplyPermission`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
