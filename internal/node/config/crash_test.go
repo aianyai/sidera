@@ -6,7 +6,9 @@ import (
 	"math/rand/v2"
 	"path"
 	"reflect"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/admin"
@@ -31,6 +33,31 @@ func newWalker(mem *fsxtest.Mem, seed uint64, check func(where string, clone *fs
 	return &walker{mem: mem, rng: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)), check: check}
 }
 
+// The kinds of crash a walker takes at each point.
+const (
+	modelProcessCrash = "process crash"
+	modelWorstPower   = "worst power loss"
+	modelPowerLoss    = "power loss"
+)
+
+var crashModels = []string{modelProcessCrash, modelWorstPower, modelPowerLoss}
+
+// crashed counts, for each crash point and each kind of crash, the crash states
+// the walkers took there and judged: reaching a point is not crashing at it.
+var crashed = struct {
+	sync.Mutex
+	taken map[fsx.Key]map[string]int
+}{taken: map[fsx.Key]map[string]int{}}
+
+func recordCrash(p fsx.Point, model string) {
+	crashed.Lock()
+	defer crashed.Unlock()
+	if crashed.taken[p.Key] == nil {
+		crashed.taken[p.Key] = map[string]int{}
+	}
+	crashed.taken[p.Key][model]++
+}
+
 func (w *walker) Reached(p fsx.Point, _ txn.Kind) {
 	if w.paused {
 		return
@@ -38,9 +65,12 @@ func (w *walker) Reached(p fsx.Point, _ txn.Kind) {
 	w.points = append(w.points, p.String())
 	where := "before " + p.String()
 	w.check(where+" (process crash)", w.mem.Clone(), true)
+	recordCrash(p, modelProcessCrash)
 	w.check(where+" (worst power loss)", w.mem.CrashCloneWorst(), false)
+	recordCrash(p, modelWorstPower)
 	for i := 0; i < 3; i++ {
 		w.check(fmt.Sprintf("%s (power loss %d)", where, i), w.mem.CrashClone(w.rng), false)
+		recordCrash(p, modelPowerLoss)
 	}
 }
 
@@ -255,6 +285,42 @@ func crashCases(t *testing.T) []crashCase {
 			done: func(t *testing.T, rg *rig, c *config.Config) {
 				if exists(rg.mem, config.AdapterDir("fresh")) {
 					t.Error("the adapter directory survived Unstage")
+				}
+			},
+		},
+		{
+			// An upgrade whose version directory was renamed in and never made
+			// current: the unstage discards it as well as the staging directory.
+			name:      "adapter-unstage/version renamed in but not current",
+			invisible: true,
+			disk:      disabledTree,
+			prepare: func(t *testing.T, rg *rig, c *config.Config) {
+				staged = stagedFresh(t, c, "example", "2.0.0")
+				plan, err := c.PlanInstall(staged)
+				if err != nil {
+					t.Fatal(err)
+				}
+				tx := rg.w.Begin(testAdapterInstall)
+				if err := plan.Promote(tx); err != nil {
+					t.Fatal(err)
+				}
+				tx.Close() // the rename is a preparatory write: the installation never committed
+			},
+			run: func(t *testing.T, rg *rig, c *config.Config) error {
+				return c.Unstage(staged)
+			},
+			state: func(t *testing.T, where string, c *config.Config) string {
+				if ads := c.Adapters(); len(ads) != 1 || ads[0].Version != "1.0.0" {
+					t.Errorf("%s: adapters = %+v", where, ads)
+				}
+				return "before"
+			},
+			done: func(t *testing.T, rg *rig, c *config.Config) {
+				if exists(rg.mem, config.AdapterVersionDir("example", "2.0.0")) {
+					t.Error("the version directory that never became current survived Unstage")
+				}
+				if !exists(rg.mem, config.AdapterVersionDir("example", "1.0.0")) {
+					t.Error("Unstage removed the installed version")
 				}
 			},
 		},
@@ -657,5 +723,51 @@ func TestInitCrashNeverReplacesAnOwnersFile(t *testing.T) {
 	}
 	if checks == 0 {
 		t.Fatal("init reached no step")
+	}
+}
+
+// Reaching a point is not crashing at it: every crash point config declares has
+// had a crash state taken at it and judged, of every kind of crash, by one of
+// the walks above (a point that only a recovery after another transaction's
+// crash reaches needs a case of its own that starts from that state). The
+// points of the transaction layer itself, the cleanup and the settle of every
+// start, are walked by the tests of txn and store, and the transactions the
+// tests compose from config's write functions are declared by the tests.
+//
+// It runs after the walks, in source order, and says nothing on a run that
+// selected none of them.
+func TestEveryDeclaredCrashPointIsCrashedAtUnderEveryKindOfCrash(t *testing.T) {
+	crashed.Lock()
+	defer crashed.Unlock()
+	if len(crashed.taken) == 0 {
+		t.Skip("no walk ran in this run: nothing to assert about")
+	}
+	tab, err := txn.NewTable(append(txn.Internal(), config.Transactions()...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := map[string]bool{}
+	for _, d := range config.Transactions() {
+		declared[d.Name] = true
+	}
+	var gaps []string
+	checked := 0
+	for _, k := range tab.Keys() {
+		if !declared[k.Tag.Tx] {
+			continue
+		}
+		checked++
+		for _, m := range crashModels {
+			if crashed.taken[k.Key][m] == 0 {
+				gaps = append(gaps, fmt.Sprintf("%s under %s", k.Key, m))
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no key of config was checked")
+	}
+	sort.Strings(gaps)
+	if len(gaps) > 0 {
+		t.Errorf("%d crash points of config have no crash state taken at them, for the kind of crash named:\n%s", len(gaps), strings.Join(gaps, "\n"))
 	}
 }
