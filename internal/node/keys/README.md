@@ -58,7 +58,8 @@ transaction of `txn`; nothing here calls an `fsx` write.
   and agrees with the certificate (`record.DecideSerial`); the self-revocation is
   the statement of this identity key. A serial file behind the certificate, or at
   its serial with another digest, is refused: it would let a serial be issued
-  twice.
+  twice. One function (`checkSerial`) states this rule for `Load` and for
+  `RecoveryWork`, and its error names the reason.
 - **The serial never goes back.** A renewal reserves the next serial in
   `network-serial` first, and that write is the commit point of the transaction:
   from then on the serial is never issued again, whatever happens to the
@@ -139,7 +140,10 @@ transaction of `txn`; nothing here calls an `fsx` write.
   export relies on `fsx.ReadFile`, which reads and closes at once. The order of
   two renames at a power loss is not documented for Windows: if the certificate
   survived and the serial file did not, `Load` refuses naming `network-serial`,
-  which is the fail-closed answer.
+  which is the fail-closed answer; the error says how to mend it (delete
+  `keys/init.rec` and run `init` again, which signs a new certificate above both
+  serials). The file system layer does not flush a directory on Windows, so the two
+  renames can reach the disk in either order.
 
 ## Where the tests are
 

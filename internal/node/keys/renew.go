@@ -172,12 +172,8 @@ func RecoveryWork(r fsx.Reader) ([]Work, error) {
 	if err != nil {
 		return nil, err
 	}
-	switch record.DecideSerial(&seen, cert.verified) {
-	case record.SerialStale:
-	case record.SerialAccept:
-		return nil, fileError(SerialPath, ErrInconsistent, "the serial %d is behind the certificate's %d", seen.Serial, cert.verified.Payload().Serial)
-	default:
-		return nil, fileError(SerialPath, ErrInconsistent, "it does not agree with the certificate")
+	if err := checkSerial(seen, cert.verified); err != nil {
+		return nil, err
 	}
 	if RenewalInterrupted(seen, cert.verified) {
 		return []Work{{Reason: WorkRenewalInterrupted, Path: CertificatePath}}, nil

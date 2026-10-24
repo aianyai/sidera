@@ -215,8 +215,11 @@ the loaded revocations, because a retired identity cannot become valid again.
 DACL rule of the file system layer: the owner is the user, Administrators or
 SYSTEM, and only those are granted. The test that widens the DACL of each file
 runs only in Windows CI. The order in which two renames reach the disk after a
-power loss is not documented for Windows; if the certificate survived and the
-serial file did not, the node refuses to start naming `network-serial`.
+power loss is not documented for Windows, and the file system layer does not
+flush a directory there, so the certificate's rename can survive while the serial
+file's is lost. The node then refuses to start naming `network-serial`, and the
+owner mends it as described under the refusal of a serial file behind the
+certificate below.
 
 ## Why
 
@@ -330,9 +333,11 @@ serial file did not, the node refuses to start naming `network-serial`.
   certificate whose serial the serial file did not know, and the next renewal could
   issue the same serial for another certificate: peers that saw the first would
   call the second a conflict, a sign of a copied identity key. With the serial
-  first, the worst case is a gap, which costs nothing. The serial's replacement is
-  durable before the certificate is written, so no power loss shows the certificate
-  without the serial. Rejected: one file holding both (a serial and a certificate
+  first, the worst case is a gap, which costs nothing. Where a directory
+  flush reaches the disk (Unix), the serial's replacement is durable before the
+  certificate is written, so no power loss shows the certificate without the
+  serial; on Windows the order of the two renames at a power loss is not known (see
+  the Windows paragraph above), and the refusal below is the safety net. Rejected: one file holding both (a serial and a certificate
   are replaced together or not at all, and a lost write would take the serial with
   it), and a counter in `state/` (deleting `state/` would reset it).
 - **Only the marker says `init` finished.** The transaction layer cannot require
@@ -350,7 +355,12 @@ serial file did not, the node refuses to start naming `network-serial`.
 - **A serial file behind the certificate is refused.** No step of a renewal makes
   it, so it means a file was edited, restored from a backup or lost in a power loss
   that reordered renames. Continuing could issue a serial twice; the refusal is
-  loud, cheap to notice, and fixed by the owner.
+  loud, cheap to notice, and fixed by the owner: the error says to delete
+  `keys/init.rec` and run `init` again, which signs a new certificate above both
+  serials and writes the serial file first (`TestInitReSignsACertificateThatDoesNotMatch`,
+  its row for a serial behind a valid certificate). The one rule is applied by
+  `Load` and by the recovery predicate alike, so the owner reads the same reason
+  from either.
 - **No signing while the clock is in doubt.** A certificate signed with a clock
   that was set back starts before certificates the node already issued. The check
   is repeated in the renewal, next to the signature it protects, because the

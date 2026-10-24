@@ -100,14 +100,8 @@ func Load(w *txn.Writer) (*Keys, error) {
 	case c.NetworkKey != network.pub:
 		return nil, fileError(NetworkKeyPath, ErrInconsistent, "it is not the network key that the certificate names")
 	}
-	switch record.DecideSerial(&seen, cert.verified) {
-	case record.SerialStale: // the certificate is the one seen, or older: a renewal was interrupted
-	case record.SerialAccept:
-		return nil, fileError(SerialPath, ErrInconsistent, "the serial %d is behind the certificate's %d", seen.Serial, c.Serial)
-	case record.SerialConflict:
-		return nil, fileError(SerialPath, ErrInconsistent, "it names another certificate at the serial of the certificate")
-	default:
-		return nil, fileError(SerialPath, ErrInconsistent, "it is not the serial of this node")
+	if err := checkSerial(seen, cert.verified); err != nil {
+		return nil, err
 	}
 	if rev.node != identity.node {
 		return nil, fileError(SelfRevocationPath, ErrInconsistent, "it is not the statement of the identity key")
@@ -120,6 +114,29 @@ func Load(w *txn.Writer) (*Keys, error) {
 // and exports: a caller that read the file again would have to compare its node
 // with Node, and a retirement cannot be undone.
 func (k *Keys) SelfRevocation() SelfRevocation { return k.s.selfRev }
+
+// checkSerial is the one rule that the serial file and the certificate agree: the
+// serial file is this node's and not behind the certificate, and at the
+// certificate's serial it names the certificate. A serial file ahead of the
+// certificate is not a refusal: it is an interrupted renewal. Load and the
+// recovery predicate both apply it, and the reason names what is wrong and, where
+// the owner can mend it, how.
+func checkSerial(seen record.SerialSeen, cert record.Verified[record.NetworkKeyCertificate]) error {
+	switch record.DecideSerial(&seen, cert) {
+	case record.SerialStale:
+		return nil
+	case record.SerialAccept:
+		return fileError(SerialPath, ErrInconsistent,
+			"the serial %d is behind the certificate's %d; delete %s and run init again, which signs a new certificate above both and writes the serial first",
+			seen.Serial, cert.Payload().Serial, InitMarkerPath)
+	case record.SerialConflict:
+		return fileError(SerialPath, ErrInconsistent, "it names another certificate at the serial of the certificate")
+	case record.SerialWrongNode:
+		return fileError(SerialPath, ErrInconsistent, "it is not the serial of this node")
+	default: // SerialInvalid: the certificate or the serial file has no usable serial, node or digest
+		return fileError(SerialPath, ErrInconsistent, "it cannot be compared with the certificate")
+	}
+}
 
 // Node is the identifier of this node, derived from its identity key.
 func (k *Keys) Node() ident.NodeID { return k.s.identity.node }

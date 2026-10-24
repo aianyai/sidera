@@ -276,3 +276,50 @@ func TestLoadedKeysHandOutTheVerifiedSelfRevocationOfThisNode(t *testing.T) {
 		t.Error("changing the returned bytes changed the statement of the keys")
 	}
 }
+
+// The rule that the serial file and the certificate agree is one rule: Load and
+// the recovery predicate refuse the same disk with the same words, each naming
+// the reason, so that what the owner is told does not depend on which of the two
+// looked first.
+func TestLoadAndRecoveryWorkRefuseADisagreeingSerialFileWithTheSameWords(t *testing.T) {
+	base := newRig(t)
+	base.mustInit(1, t0)
+	behind := base.read(keys.SerialPath) // serial 1
+	if err := base.mustLoad().Renew(t0.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	other := newRig(t)
+	other.mustInit(9, t0)
+	node := base.mustLoad().Node().String()
+
+	rows := []struct {
+		name string
+		data []byte
+		want string // a phrase the reason holds
+	}{
+		{"behind the certificate", behind, "delete keys/init.rec and run init again"},
+		{"another digest at the serial of the certificate", oracleSerialFile(node, 2, strings.Repeat("ab", 32)), "another certificate"},
+		{"another node", other.read(keys.SerialPath), "not the serial of this node"},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			mem := base.mem.Clone()
+			put(t, mem, keys.SerialPath, row.data)
+			r := open(t, mem)
+			_, loadErr := keys.Load(r.w)
+			_, workErr := keys.RecoveryWork(r.mem)
+			for what, err := range map[string]error{"Load": loadErr, "RecoveryWork": workErr} {
+				if !errors.Is(err, keys.ErrInconsistent) {
+					t.Fatalf("%s = %v, want ErrInconsistent", what, err)
+				}
+				asFileError(t, err, keys.SerialPath)
+				if !strings.Contains(err.Error(), row.want) {
+					t.Errorf("%s says %q, want it to say %q", what, err, row.want)
+				}
+			}
+			if loadErr.Error() != workErr.Error() {
+				t.Errorf("Load says %q, RecoveryWork says %q: one rule, one wording", loadErr, workErr)
+			}
+		})
+	}
+}
