@@ -619,6 +619,7 @@ except the two that are plain calls (marked "call"):
 | probed runtime name and version outside every tested range of the manifest (`RuntimeVersionUntested`) | no cause; status condition 6 `version_untested`, written by the daemon |
 | the daemon's own loss of the connection or two failed pings | `Signals.AdapterOffline`, with `Since` the moment it dropped |
 | `since_ms` | `Signals.Since`; zero (unknown) when absent or later than the moment the snapshot arrived, or when any condition of the cause lacks one |
+| a `session.create` the daemon refuses itself, before calling the adapter (`DaemonCreateFailure`): preset unknown, preset closed to local sources, adapter offline | control reply failed with `preset_unknown`, `preset_unavailable`, `adapter_offline`, and no session endpoint |
 | `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`, `control_unknown` stays `control_unknown`, the others keep their names); keep reconciling, then unconfirmed |
 | `session.interrupt` stopped, requested, not_running, refused | reply stopped; stopped if `turn.ended` came in time else requested; not_running; failed |
 | `session.close` closed, close_unconfirmed | reply closed; close_unconfirmed with the same reason |
@@ -638,6 +639,16 @@ except the two that are plain calls (marked "call"):
 - **`1005 attempt_conflict` leaves a prompt attempt unknown** although the
   conflicting request itself did nothing: the identifier is already known, so an
   earlier request of the attempt reached the adapter and may have delivered.
+- **A creation the daemon refuses itself has one mapping, beside the adapter's.**
+  Which of its own checks becomes which wire reason is a rule about the
+  protocol, so it lives with `CreateReply` instead of being spelled out wherever
+  the daemon makes the check. The set of reasons is closed, so a new refusal needs
+  a decision about what the sender is told. A preset closed to local sources is
+  `preset_unavailable` and not a new value: for the sender it is the same
+  situation as an adapter reporting that a preset cannot be used for this
+  creation (the preset exists, nothing was created), and the protocol's reasons
+  are persisted in signed records, so a new one is not added for a case an existing
+  one already states truthfully.
 - **The daemon, not the adapter, judges acknowledgements.** The adapter only
   reports what it saw in the durable record, so one rule decides what counts as
   seen.
@@ -646,7 +657,7 @@ except the two that are plain calls (marked "call"):
 
 - `internal/adapterreg` (`admit.go`, `methods.go`, `mappings.go`); tests
   `TestAdmitDecisions`, `TestDeclaredKindsAndSignals`, `TestMethodMatrix`,
-  `TestCreateReplyMapsEveryCreateFailure`, `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestInterruptReply`,
+  `TestCreateReplyMapsEveryCreateFailure`, `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestDaemonCreateFailure`, `TestInterruptReply`,
   `TestCloseReply`, `TestCheckHandshake`.
 
 ## Control signals

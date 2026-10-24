@@ -232,6 +232,45 @@ func CreateReply(r adapterproto.SessionCreateResult, session adapterproto.Endpoi
 	return adapterproto.ControlCreateReply{}, false, unmapped("creation outcome", string(r.Outcome))
 }
 
+// DaemonCreateReason is why the daemon itself refuses a session.create before
+// the adapter is called. The set is closed: a refusal that is not listed here has
+// no reply, so it cannot be added without deciding what the sender is told.
+type DaemonCreateReason uint8
+
+// The reasons the daemon refuses a creation by itself. The zero value is no
+// reason.
+const (
+	// DaemonCreatePresetUnknown: no preset has that name.
+	DaemonCreatePresetUnknown DaemonCreateReason = iota + 1
+	// DaemonCreatePresetClosedToLocalSources: the preset exists, but declares
+	// that endpoints on this node may not start a session with it.
+	DaemonCreatePresetClosedToLocalSources
+	// DaemonCreateAdapterOffline: the adapter that owns the runtime is not
+	// connected.
+	DaemonCreateAdapterOffline
+)
+
+// DaemonCreateFailure is the reply to a session.create the daemon refuses
+// without calling the adapter. It is a failed creation with no session endpoint:
+// none was allocated and nothing was created. A preset closed to local sources
+// is preset_unavailable, as an adapter's preset_invalid is: the preset exists and
+// cannot be used for this creation. A value that is no reason gives the zero
+// reply, which does not validate, so it cannot be sent by mistake.
+func DaemonCreateFailure(r DaemonCreateReason) adapterproto.ControlCreateReply {
+	var reason adapterproto.ControlCreateReason
+	switch r {
+	case DaemonCreatePresetUnknown:
+		reason = adapterproto.CreateReasonPresetUnknown
+	case DaemonCreatePresetClosedToLocalSources:
+		reason = adapterproto.CreateReasonPresetUnavailable
+	case DaemonCreateAdapterOffline:
+		reason = adapterproto.CreateReasonAdapterOffline
+	default:
+		return adapterproto.ControlCreateReply{}
+	}
+	return adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: reason}
+}
+
 // CreateUnconfirmed is the reply written when the reply deadline passes, or the
 // adapter is lost, before readiness was shown. The session endpoint is the one
 // the daemon allocated, so a retry gets the same one.
