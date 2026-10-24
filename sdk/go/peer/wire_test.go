@@ -136,7 +136,11 @@ func TestMissingOrWrongVersionIsInvalidRequest(t *testing.T) {
 		{"jsonrpc 1.0", `{"jsonrpc":"1.0","id":2,"method":"echo"}`, "2"},
 		{"jsonrpc is a number", `{"jsonrpc":2.0,"id":3,"method":"echo"}`, "3"},
 		{"wrong key case", `{"JSONRPC":"2.0","id":4,"method":"echo"}`, "4"},
-		{"method key in wrong case", `{"jsonrpc":"2.0","id":5,"Method":"echo"}`, "5"},
+		// No "method" member: not recognisable as a request, so no id is echoed.
+		{"method key in wrong case", `{"jsonrpc":"2.0","id":5,"Method":"echo"}`, "null"},
+		{"response without jsonrpc", `{"id":9,"result":{}}`, "null"},
+		{"error response with jsonrpc 1.0", `{"jsonrpc":"1.0","id":10,"error":{"code":1001,"message":"x"}}`, "null"},
+		{"neither method, result nor error", `{"jsonrpc":"2.0","id":11}`, "null"},
 		{"not an object", `"hello"`, "null"},
 		{"a number", `42`, "null"},
 		{"null", `null`, "null"},
@@ -854,5 +858,75 @@ func TestOverlongLineWithStalledReaderStillCloses(t *testing.T) {
 	waitDone(t, p)
 	if err := p.Err(); err != peer.ErrLineTooLong {
 		t.Fatalf("Err = %v, want ErrLineTooLong", err)
+	}
+}
+
+// Both sides have a call 5 in flight: the other side's request 5 is being
+// handled here, and this side's own call 5 waits for its answer. A malformed
+// message that looks like a response to 5 must not be answered with id 5: that
+// error would be taken for the answer to the other side's request, whose
+// handler is still running and may yet have an effect.
+func TestMalformedResponseIsNeverAnsweredWithItsID(t *testing.T) {
+	leakGuard(t)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	p, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
+		p.Handle("slow", func(context.Context, json.RawMessage) (any, error) {
+			started <- struct{}{}
+			<-release
+			return map[string]string{"done": "yes"}, nil
+		})
+	})
+	ctx := context.Background()
+
+	// This side's calls 1 to 4 complete; call 5 stays in flight.
+	for i := 1; i <= 4; i++ {
+		done := make(chan error, 1)
+		go func() { done <- p.Call(ctx, "other", nil, nil) }()
+		if f := r.recv(); string(f.ID) != fmt.Sprint(i) {
+			t.Fatalf("call %d went out with id %s", i, f.ID)
+		}
+		r.send(fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"result":{}}`, i))
+		if err := <-done; err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+	}
+	call5 := make(chan error, 1)
+	var result struct{ Echo string }
+	go func() { call5 <- p.Call(ctx, "other", nil, &result) }()
+	if f := r.recv(); string(f.ID) != "5" {
+		t.Fatalf("the fifth call went out with id %s", f.ID)
+	}
+
+	// The other side's request 5 is in flight here too.
+	r.send(`{"jsonrpc":"2.0","id":5,"method":"slow"}`)
+	<-started
+
+	for _, malformed := range []string{
+		`{"id":5,"result":{}}`,
+		`{"jsonrpc":"1.0","id":5,"result":{}}`,
+		`{"jsonrpc":"2.0","id":5}`,
+		`{"id":5,"error":{"code":-32603,"message":"x"}}`,
+	} {
+		r.send(malformed)
+		f := r.recv()
+		if f.errCode() != peer.CodeInvalidRequest || string(f.ID) != "null" {
+			t.Fatalf("%s was answered with %+v, want -32600 with a null id", malformed, f)
+		}
+	}
+
+	// Neither request 5 nor call 5 was disturbed.
+	select {
+	case err := <-call5:
+		t.Fatalf("call 5 ended on a malformed message: %v", err)
+	default:
+	}
+	close(release)
+	if f := r.recv(); string(f.ID) != "5" || f.Error != nil || !strings.Contains(string(f.Result), `"done"`) {
+		t.Fatalf("request 5 was answered with %+v, want its result", f)
+	}
+	r.send(`{"jsonrpc":"2.0","id":5,"result":{"echo":"ok"}}`)
+	if err := <-call5; err != nil || result.Echo != "ok" {
+		t.Fatalf("call 5 = %v, %+v", err, result)
 	}
 }

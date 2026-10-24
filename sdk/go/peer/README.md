@@ -40,6 +40,10 @@ method the peer handles itself is the `$/cancel_request` notification.
   string of 1 to 128 characters (`RequestID`); `null`, fractions and exponents
   are invalid, so two spellings of one number cannot be two different in-flight
   requests.
+  The error reply to an invalid line carries the line's id only when the line
+  has a `method` and a valid id; any other malformed line, which may have been
+  meant as a response, is answered with a null id, so the error can never be
+  taken for the answer to a call of the other side.
 - **Overload is decided first.** The read loop classifies a request, finds its
   handler and checks its id; if the request queue (`MaxPendingRequests`) is
   full it answers `-32001` immediately. Parameters are not examined and no

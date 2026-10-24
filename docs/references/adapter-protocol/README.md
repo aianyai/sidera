@@ -47,7 +47,10 @@ Behaviour, each point pinned by the tests named in "Where":
   `-32700` with a null id; a missing or wrong `"jsonrpc"`, a non-object, a
   batch, a null or malformed request id, or an id already in flight are
   `-32600`. After any of these except the overlong line the connection
-  continues.
+  continues. The reply carries the id of the line only when the line has a
+  `method` and a valid id, that is, when it is recognisably a request; every
+  other malformed line, which may have been meant as a response, is answered
+  with a null id.
 - **Overload.** A request that finds the request queue full is answered
   `-32001` before its params are examined and before any handler is started, so
   a `-32001` always means the handler did not run.
@@ -146,6 +149,15 @@ anything not listed, including unknown codes, counts as unknown.
   the bound the schema can state. The string length is counted in characters
   because that is what the schema counts. Null ids stay reserved for errors that
   cannot name a request.
+- **An error reply carries an id only for a request.** A malformed line without
+  `method` may be a response to a call of the other side. Answering it with its
+  id would land in that side's own call-id space: the error would fail one of
+  their calls that this side received and may have executed, and a code that
+  says "no effect" can make them send it again. JSON-RPC sends no reply to a
+  response, so the line earns an error with a null id, which is never the
+  answer to a call and which the other side's peer logs and drops. The reply
+  is kept rather than replaced by a log line only so that a counterpart that
+  speaks a broken dialect gets a visible signal.
 - **A response with a valid id but an invalid body fails its call.** Dropping
   it would leave the caller waiting for its timeout on a counterpart that
   already answered.
@@ -185,6 +197,7 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | Overlong line closes; exactly-max accepted; nothing after is read | `TestOverlongLineClosesConnection` |
 | Invalid JSON, invalid UTF-8 | `TestInvalidJSONKeepsConnection`, `TestInvalidUTF8IsParseError` |
 | Missing or wrong `jsonrpc`, bad shapes | `TestMissingOrWrongVersionIsInvalidRequest` |
+| A malformed response-like line is never answered with its id, even when both sides have that id in flight | `TestMalformedResponseIsNeverAnsweredWithItsID`, `TestClassifyDetails` |
 | Batch rejected, connection kept | `TestBatchIsRejectedAndConnectionContinues` |
 | Overload before params and handler | `TestOverloadedIsDecidedBeforeParamsAndHandler` |
 | Cancellation, one reply | `TestCancellation`, `TestCallContextCancellation` |

@@ -142,16 +142,24 @@ func TestClassify(t *testing.T) {
 // TestClassifyDetails pins what the oracle does not compare: the id echoed in
 // an error reply, the canonical id key and the handling of params.
 func TestClassifyDetails(t *testing.T) {
-	t.Run("error reply echoes a valid id and nothing else", func(t *testing.T) {
+	t.Run("error reply echoes the id of a request and of nothing else", func(t *testing.T) {
 		for line, want := range map[string]string{
+			// A message with "method" is a request: its id is echoed.
 			`{"id":7,"method":"m"}`:                             "7",
 			`{"id":"a","jsonrpc":"1.0","method":"m"}`:           `"a"`,
 			`{"id":1.5,"jsonrpc":"1.0","method":"m"}`:           "",
 			`{"jsonrpc":"2.0","id":null,"method":"m"}`:          "",
 			`{"jsonrpc":"2.0","id":3,"method":"m","result":{}}`: "3",
-			`{"jsonrpc":"2.0","id":3}`:                          "3",
-			`not json`:                                          "",
-			`[{"jsonrpc":"2.0","id":3,"method":"m"}]`:           "",
+			`{"jsonrpc":"2.0","id":3,"method":""}`:              "3",
+			// Without "method" it may be a response to a call of the other side:
+			// answering with its id would land in their call-id space.
+			`{"jsonrpc":"2.0","id":3}`:                     "",
+			`{"id":3,"result":{}}`:                         "",
+			`{"jsonrpc":"1.0","id":3,"result":{}}`:         "",
+			`{"jsonrpc":"2.0","id":3,"Method":"m"}`:        "",
+			`{"id":3,"error":{"code":1001,"message":"x"}}`: "",
+			`not json`: "",
+			`[{"jsonrpc":"2.0","id":3,"method":"m"}]`: "",
 		} {
 			_, cerr := classify([]byte(line))
 			if cerr == nil {

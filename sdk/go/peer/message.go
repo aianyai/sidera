@@ -45,8 +45,8 @@ type message struct {
 }
 
 // classifyError is a line that is not a valid message, together with the
-// error response it earns. id is the request's id when it had a valid one,
-// otherwise nil (answered with a null id).
+// error response it earns. id is the id of a message that has "method" and a
+// valid id, otherwise nil (answered with a null id).
 type classifyError struct {
 	id  json.RawMessage
 	err *Error
@@ -84,8 +84,20 @@ func classify(line []byte) (message, *classifyError) {
 
 	idRaw, hasID := top["id"]
 	key, idOK := idKey(idRaw)
+	methodRaw, hasMethod := top["method"]
+	resultRaw, hasResult := top["result"]
+	errRaw, hasErr := top["error"]
+
+	// Only a message with "method" is recognisably a request, and only a request
+	// is answered with its own id. Anything else that is malformed may be meant
+	// as a response to a call of the other side, and an error carrying its id
+	// would land in that side's own call-id space: it would fail a call of
+	// theirs that this side received and may have executed, with a code that
+	// says "no effect", and so invite them to send it again. JSON-RPC sends no
+	// reply to a response; the error for such a message carries a null id,
+	// which is never the answer to a call.
 	var replyID json.RawMessage
-	if idOK {
+	if hasMethod && idOK {
 		replyID = idRaw
 	}
 
@@ -93,10 +105,6 @@ func classify(line []byte) (message, *classifyError) {
 	if raw, ok := top["jsonrpc"]; !ok || json.Unmarshal(raw, &version) != nil || version != jsonrpcVersion {
 		return message{}, invalidRequest(replyID, `"jsonrpc" must be the string "2.0"`)
 	}
-
-	methodRaw, hasMethod := top["method"]
-	resultRaw, hasResult := top["result"]
-	errRaw, hasErr := top["error"]
 
 	if hasMethod {
 		if hasResult || hasErr {
@@ -121,7 +129,7 @@ func classify(line []byte) (message, *classifyError) {
 
 	// A response: no "method", but a "result" or an "error".
 	if !hasResult && !hasErr {
-		return message{}, invalidRequest(replyID, `a message needs "method", "result" or "error"`)
+		return message{}, invalidRequest(nil, `a message needs "method", "result" or "error"`)
 	}
 	if !hasID {
 		return message{}, invalidRequest(nil, `a response must carry "id"`)
