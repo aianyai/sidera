@@ -31,9 +31,37 @@
 // What the caller must guarantee: every exported field of a struct that a
 // document is decoded into carries a json tag (the tag "-" leaves it out) and is
 // not embedded. Decode panics on a struct that breaks this, because the mistake
-// is in the program and not in the input. A target that is not a non-nil pointer is also a programming error,
-// reported as a plain error. Every problem with the input is an *Error, which
-// names the JSON path of the offending value.
+// is in the program and not in the input. A target that is not a non-nil
+// pointer is also a programming error, reported as a plain error.
+//
+// A type that decodes itself through Decode or DecodeOpen has two more duties.
+// When decoding fails, each such type in the document is offered its value once
+// more, on a fresh instance and with the value re-encoded (members sorted,
+// escapes normalised), to find which one refused; so its decoder must have no
+// side effects and must decide only on the content of the value, never on its
+// byte form, the order of its members or state of its own, or the path may name
+// the wrong position or be missing. And the failure path costs 2^k decodes for k
+// such types nested inside one another, so these types must not nest without
+// bound on untrusted input.
+//
+// Every problem with the input is an *Error. Its Path names the offending value
+// in nearly every case: a value of the wrong JSON type or one that does not fit
+// its Go type, a refusal by a type that decodes itself, and every rule above.
+// The messages strictjson produces say what was expected and never repeat the
+// value found. Some messages are not its own and may contain the value: the
+// refusal of a type that decodes itself carries that type's message, and a field
+// tagged with the "string" option, or a json.Number given a string that does
+// not spell a number, is checked by encoding/json alone and carries its message. A caller that must keep values
+// secret does not show these.
+//
+// Path is empty when the document as a whole is at fault (input that is not
+// valid UTF-8 or JSON, data after the value, a root of the wrong JSON type) and
+// where strictjson cannot place a failure: a member whose key is the empty
+// string, whose path element the syntax cannot show; a field with the "string"
+// option; a json.Number given a string that does not spell a number; a refusal by a type that decodes itself
+// that offering its value again does not reproduce, because the type decides on
+// byte form, member order or state; and the refusal of a map key by a key type
+// that decodes itself.
 package strictjson
 
 import (
@@ -43,7 +71,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -51,7 +82,7 @@ import (
 // Error is a strict-decoding failure at a JSON path.
 type Error struct {
 	// Path locates the offending value, for example "sessions[2].process.pid".
-	// It is empty for the document itself.
+	// It is empty when the document as a whole is at fault.
 	Path string
 	Msg  string
 }
@@ -80,15 +111,22 @@ func Decode(data []byte, v any) error {
 	if err != nil {
 		return err
 	}
-	if err := check(tree, rt.Elem(), ""); err != nil {
+	if err := check(tree, rt.Elem(), "", false); err != nil {
 		return err
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(v); err != nil {
-		return &Error{Msg: err.Error()}
+	err = dec.Decode(v)
+	if err == nil {
+		return nil
 	}
-	return nil
+	// What check lets through can still fail where a type decodes itself. The
+	// standard library does not say where, so the positions of such types are
+	// tried one by one to find the one that refuses its value.
+	if located := check(tree, rt.Elem(), "", true); located != nil {
+		return located
+	}
+	return &Error{Msg: err.Error()}
 }
 
 // DecodeOpen is Decode for an object that ignores the members it has no field
@@ -234,6 +272,7 @@ var (
 	jsonUnmarshaler = reflect.TypeFor[json.Unmarshaler]()
 	textUnmarshaler = reflect.TypeFor[encoding.TextUnmarshaler]()
 	rawMessageType  = reflect.TypeFor[json.RawMessage]()
+	numberType      = reflect.TypeFor[json.Number]()
 )
 
 // opaque reports whether t keeps raw JSON or decodes itself.
@@ -245,14 +284,31 @@ func opaque(t reflect.Type) bool {
 	return pt.Implements(jsonUnmarshaler) || pt.Implements(textUnmarshaler)
 }
 
-// check walks the parsed document alongside the Go type that will receive it.
-func check(tree any, t reflect.Type, path string) error {
+// check walks the parsed document alongside the Go type that will receive it
+// and reports the first, in traversal order, value that cannot be stored in its
+// position (object members are walked in sorted key order, so the same input
+// always reports the same position): null, a
+// value of another JSON type, or a number the Go type cannot hold. Doing this
+// here, and not leaving it to encoding/json, is what gives these errors a path:
+// the standard library locates a mismatch only by byte offset and names fields
+// without the keys of maps and the indexes of lists. The messages say what was
+// expected and never repeat the value found.
+//
+// With probe set, a value in a position that a type decodes itself is also
+// offered to that type, which reports its refusal at the path of the value.
+// Decode sets it only after decoding has failed, to find where; the offer is made
+// on a copy of the value, so it can only name a position, never change what is
+// accepted.
+func check(tree any, t reflect.Type, path string, probe bool) error {
 	for t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	if opaque(t) {
 		if tree == nil && t != rawMessageType && t.Kind() != reflect.Interface {
 			return &Error{Path: path, Msg: "null is not a value"}
+		}
+		if probe && t != rawMessageType && t.Kind() != reflect.Interface {
+			return probeOpaque(tree, t, path)
 		}
 		return nil
 	}
@@ -265,14 +321,14 @@ func check(tree any, t reflect.Type, path string) error {
 		if !ok {
 			return &Error{Path: path, Msg: "expected an object"}
 		}
-		return checkStruct(obj, t, path)
+		return checkStruct(obj, t, path, probe)
 	case reflect.Slice, reflect.Array:
 		arr, ok := tree.([]any)
 		if !ok {
 			return &Error{Path: path, Msg: "expected an array"}
 		}
 		for i, e := range arr {
-			if err := check(e, t.Elem(), fmt.Sprintf("%s[%d]", path, i)); err != nil {
+			if err := check(e, t.Elem(), fmt.Sprintf("%s[%d]", path, i), probe); err != nil {
 				return err
 			}
 		}
@@ -281,13 +337,122 @@ func check(tree any, t reflect.Type, path string) error {
 		if !ok {
 			return &Error{Path: path, Msg: "expected an object"}
 		}
-		for k, e := range obj {
-			if err := check(e, t.Elem(), join(path, k)); err != nil {
+		for _, k := range sortedKeys(obj) {
+			e := obj[k]
+			if msg := keyProblem(k, t.Key()); msg != "" {
+				return &Error{Path: join(path, k), Msg: msg}
+			}
+			if err := check(e, t.Elem(), join(path, k), probe); err != nil {
 				return err
 			}
 		}
+	default:
+		if msg := scalarProblem(tree, t); msg != "" {
+			return &Error{Path: path, Msg: msg}
+		}
 	}
 	return nil
+}
+
+// probeOpaque offers the JSON value tree to a fresh value of type t, which
+// decodes itself, and reports a refusal at path. A refusal that is itself an
+// *Error, because the type decodes with this package, has a path of its own
+// below the value.
+func probeOpaque(tree any, t reflect.Type, path string) error {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(tree); err != nil {
+		return nil
+	}
+	err := json.Unmarshal(b.Bytes(), reflect.New(t).Interface())
+	if err == nil {
+		return nil
+	}
+	var se *Error
+	if errors.As(err, &se) {
+		return &Error{Path: below(path, se.Path), Msg: se.Msg}
+	}
+	return &Error{Path: path, Msg: err.Error()}
+}
+
+// scalarProblem says why the JSON scalar tree cannot be stored in a Go value of
+// type t, or returns "" when it can or when t is not a scalar kind.
+func scalarProblem(tree any, t reflect.Type) string {
+	switch t.Kind() {
+	case reflect.String:
+		if t == numberType {
+			// json.Number takes a number, and a string that spells one: the
+			// standard library alone says which strings do, and its message
+			// may contain the string.
+			switch tree.(type) {
+			case json.Number, string:
+				return ""
+			}
+			return "expected a number"
+		}
+		if _, ok := tree.(string); !ok {
+			return "expected a string"
+		}
+	case reflect.Bool:
+		if _, ok := tree.(bool); !ok {
+			return "expected a boolean"
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+		reflect.Float32, reflect.Float64:
+		n, ok := tree.(json.Number)
+		if !ok {
+			return "expected a number"
+		}
+		return numberProblem(n.String(), t)
+	}
+	return ""
+}
+
+// numberProblem says why the number written as s does not fit the numeric type
+// t, which must be an integer or float kind, or returns "" when it does. It
+// applies the standard library's own rules: an integer type takes no fraction
+// or exponent, and a value must be in range.
+func numberProblem(s string, t reflect.Type) string {
+	var err error
+	var expected string
+	switch k := t.Kind(); {
+	case k >= reflect.Int && k <= reflect.Int64:
+		_, err = strconv.ParseInt(s, 10, t.Bits())
+		expected = "expected an integer"
+	case k >= reflect.Uint && k <= reflect.Uintptr:
+		_, err = strconv.ParseUint(s, 10, t.Bits())
+		expected = "expected a non-negative integer"
+	default:
+		_, err = strconv.ParseFloat(s, t.Bits())
+	}
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, strconv.ErrRange):
+		return "number out of range"
+	default:
+		return expected
+	}
+}
+
+// keyProblem says why the object key k cannot be the key of a Go map whose key
+// type is t, or returns "" when it can. Only integer keys are judged here: a
+// string key always fits, a key type that decodes itself answers for its own
+// keys, and any other key type is one encoding/json refuses to decode into, so
+// it is left to refuse.
+func keyProblem(k string, t reflect.Type) string {
+	if opaque(t) {
+		return ""
+	}
+	switch kind := t.Kind(); {
+	case kind >= reflect.Int && kind <= reflect.Int64, kind >= reflect.Uint && kind <= reflect.Uintptr:
+		if msg := numberProblem(k, t); msg != "" {
+			return "map key: " + msg
+		}
+	}
+	return ""
 }
 
 type field struct {
@@ -295,6 +460,7 @@ type field struct {
 	name     string
 	optional bool
 	pointer  bool
+	quoted   bool // the "string" option: a scalar is written inside a JSON string
 }
 
 func fields(t reflect.Type) []field {
@@ -311,8 +477,11 @@ func fields(t reflect.Type) []field {
 		name, opts, _ := strings.Cut(tag, ",")
 		f := field{index: i, name: name, pointer: sf.Type.Kind() == reflect.Pointer}
 		for _, o := range strings.Split(opts, ",") {
-			if o == "omitempty" {
+			switch o {
+			case "omitempty":
 				f.optional = true
+			case "string":
+				f.quoted = true
 			}
 		}
 		out = append(out, f)
@@ -320,13 +489,13 @@ func fields(t reflect.Type) []field {
 	return out
 }
 
-func checkStruct(obj map[string]any, t reflect.Type, path string) error {
+func checkStruct(obj map[string]any, t reflect.Type, path string, probe bool) error {
 	fs := fields(t)
 	known := make(map[string]bool, len(fs))
 	for _, f := range fs {
 		known[f.name] = true
 	}
-	for k := range obj {
+	for _, k := range sortedKeys(obj) {
 		if !known[k] {
 			return &Error{Path: join(path, k), Msg: "unknown field"}
 		}
@@ -344,11 +513,32 @@ func checkStruct(obj map[string]any, t reflect.Type, path string) error {
 		if f.optional && !f.pointer && explicitZero(val, ft) {
 			return &Error{Path: p, Msg: "explicit empty value; omit the field instead"}
 		}
-		if err := check(val, ft, p); err != nil {
+		if f.quoted && scalarKind(ft) {
+			// encoding/json reads the scalar out of a string, so the JSON
+			// type is not the kind of the field. Null is still no value.
+			if val == nil {
+				return &Error{Path: p, Msg: "null is not a value"}
+			}
+			continue
+		}
+		if err := check(val, ft, p, probe); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// scalarKind reports whether t, or what it points to, is a string, bool or
+// number: the kinds to which the "string" option of a field applies.
+func scalarKind(t reflect.Type) bool {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.Struct, reflect.Slice, reflect.Array, reflect.Map, reflect.Interface, reflect.Pointer:
+		return false
+	}
+	return true
 }
 
 // explicitZero reports whether val is the JSON spelling of the zero value of an
@@ -372,9 +562,28 @@ func explicitZero(val any, t reflect.Type) bool {
 	return false
 }
 
+// sortedKeys is the keys of obj in ascending order, so that a walk of an object
+// meets its members, and reports the first problem among them, in the same order
+// every time.
+func sortedKeys(obj map[string]any) []string {
+	return slices.Sorted(maps.Keys(obj))
+}
+
 func join(path, name string) string {
 	if path == "" {
 		return name
 	}
 	return path + "." + name
+}
+
+// below is the path rel, which starts at the value at path, as a path from the
+// document.
+func below(path, rel string) string {
+	switch {
+	case rel == "":
+		return path
+	case path == "", strings.HasPrefix(rel, "["):
+		return path + rel
+	}
+	return path + "." + rel
 }

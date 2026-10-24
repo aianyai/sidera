@@ -545,7 +545,15 @@ is authoritative.
   `recv.go`, `endpoints.go` (the messages), `decode.go` (`Decode`, `Encode`),
   `validate.go`.
 - `sdk/go/strictjson`: the strict decoder. It is a public package so that readers
-  outside the SDK apply the same rules instead of a second copy.
+  outside the SDK apply the same rules instead of a second copy. Nearly every
+  input error names the path of the offending value, a wrong JSON type included, so a
+  message can say which member is wrong without repeating its value (the
+  messages strictjson produces; a type that decodes itself, a `string`-tagged
+  field and a `json.Number` given a non-number string carry other messages); the
+  few failures that cannot be placed have no path, and the rules, those cases and
+  what a type that decodes itself must guarantee are in its README. Tests:
+  `TestDecodeTypeErrorPaths`, `TestDecodeRefusalOfATypeThatDecodesItselfHasPath`,
+  `FuzzDecodeTypeErrorsHavePaths`.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
   `TestRejectReasonTable`, `TestEnumNamesMatchContractPackages` (the reasons are
   the delivery package's own names), `TestErrorObjectKnowsEveryCode`,

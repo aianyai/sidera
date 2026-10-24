@@ -37,11 +37,41 @@ for how the protocol layers use it.
   Unknown fields are errors, except in the object given to `DecodeOpen`.
 - **No repeated key**, at any depth (ignored members of an open object included),
   because parsers disagree about which duplicate wins.
+- **The right type.** A value must have the JSON type of its Go field: a string,
+  a boolean, a number, an array or an object. A number must fit the field: no
+  fraction or exponent for an integer type, non-negative for an unsigned one, within the range of
+  the type. The same holds for the keys of a map with integer keys.
+- **A path for nearly every input error.** An `*Error` names the offending value
+  by its path (`sessions[2].process.pid`; a map key is a path element), for a
+  wrong JSON type or a number that does not fit just as for an unknown field, a
+  repeat or a `null`. The messages `strictjson` produces say what was expected
+  and never repeat the value. Some messages are not its own and may contain the
+  value: a type that decodes itself refuses with its own message, and a field with
+  the `string` option, or a `json.Number` given a string that does not spell a
+  number, is checked by `encoding/json` alone and carries its message. A caller
+  that must keep values secret does not show these.
+  `Path` is empty when the whole document is at fault (input that is not valid
+  UTF-8 or JSON, data after the value, a root of the wrong type) and where the
+  failure cannot be placed: a member whose key is the empty string, whose path
+  element the syntax cannot show; a field with the `string` option; a
+  `json.Number` given a string that does not spell a number; a refusal by a type
+  that decodes itself that offering its value again does not reproduce, because
+  the type decides on byte form, member order or state; and the refusal of a map
+  key by a key type that decodes itself. Where a document has several problems,
+  the same input always reports the same one: object members are walked in sorted
+  key order.
 - **Any depth.** The rules about keys, required fields and `null` apply inside
-  nested structs, slices, Go arrays and map values alike.
+  nested structs, slices, Go arrays included, and map values alike.
 - **Opaque positions.** `json.RawMessage`, `any` and a type with its own
   `UnmarshalJSON` or `UnmarshalText` keep or decode their value themselves and
-  answer for its strictness; such a type may call `Decode`.
+  answer for its strictness; such a type may call `Decode`. When one refuses its
+  value, the error carries the path of that value, and the path of the error the
+  type itself raised through `Decode` or `DecodeOpen` continues from there, for
+  example `inner.open.m`. The refusal is located only after decoding has failed,
+  by offering each such value to a fresh copy of its type, so the position never
+  changes what is accepted. A map with a key type that `encoding/json` cannot
+  decode into (a bool or float key, say) is left to `encoding/json`, which refuses
+  it.
 
 ## What the caller must guarantee
 
@@ -54,3 +84,12 @@ for how the protocol layers use it.
   defined type with the same fields and no such method, or the call recurses.
 - Every problem in the input is an `*Error`; its message begins with
   `strictjson: `, which a caller that wraps it in its own error type may trim.
+- A type that decodes itself through `Decode` or `DecodeOpen` is offered its
+  value once more after a failure, on a fresh instance and with the value
+  re-encoded (members sorted, escapes normalised), to find which one refused. Its
+  decoder must therefore have no side effects and decide only on the content of
+  the value, not on its byte form, the order of its members or state of its own;
+  otherwise the path may name the wrong position or be missing.
+- Such types must not nest without bound on untrusted input. On the failure path
+  each one is decoded twice, so `k` of them nested inside one another cost `2^k`
+  decodes (pinned by `TestDecodeFailureCostOfNestedSelfDecodingTypes`).
