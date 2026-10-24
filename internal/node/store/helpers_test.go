@@ -108,21 +108,28 @@ func (r *recorder) Reached(p fsx.Point, k txn.Kind) {
 	}
 }
 
+// forget drops the points kept so far.
+func (r *recorder) forget() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.points, r.kinds = nil, nil
+}
+
 func (r *recorder) count() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return len(r.points)
 }
 
-// working counts the points of everything but the barrier that makes the
-// directories durable: the writes a process that has nothing to do still makes
-// are the barrier's alone.
+// working counts the points of everything but the barrier that txn.Recover ends
+// with to make the directories durable: the writes a process that has nothing
+// to do still makes are the barrier's alone.
 func (r *recorder) working() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	n := 0
 	for _, p := range r.points {
-		if p.Tag.Tx != "settle" {
+		if p.Tag.Tx != "txn-settle" {
 			n++
 		}
 	}
@@ -214,11 +221,14 @@ func newRig(t testing.TB) *rig {
 }
 
 // openRig starts a process over a disk: a new Writer and Store, the way a
-// restart does, after the leftovers were removed.
+// restart does, after the leftovers were removed and the directories made
+// durable. The points of that start are forgotten, so that a test counts only
+// what the call it makes reaches.
 func openRig(t testing.TB, mem *fsxtest.Mem) *rig {
 	t.Helper()
 	r := openRigRaw(t, mem, nil)
 	r.restart()
+	r.rec.forget()
 	return r
 }
 

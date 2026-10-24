@@ -77,11 +77,6 @@ var designTable = []struct {
 	{"archive-expire", txn.Normal, "file:Remove[M] dir:SyncDir"},
 	{"alert-ack", txn.Normal, "quarantined:Remove[O] quarantined-dir:SyncDir[O] alert:Replace result:Replace"},
 	{"daemon-stop", txn.Normal, "result:Replace"},
-	// Not in the design. A recovery rule that finds a head record after a process
-	// crash may find it visible and not durable, and writes its followers
-	// durably; after a power loss the followers would be there without the head.
-	// The process makes the directories durable first.
-	{"settle", txn.Normal, "dir:SyncDir[M]"},
 	{"quarantine", txn.Recovery, "record:RenameFile seq-floor:Replace[O] replacement:Replace[O] session:Replace[O] alert:Replace"},
 	{"quarantine-resume", txn.Recovery, "seq-floor:Replace[O] replacement:Replace[O] session:Replace[O] alert:Replace"},
 	// The design lists the body rename and the alert without flags; a body with

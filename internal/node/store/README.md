@@ -31,7 +31,7 @@ engine applies the delivery rules and calls the writes.
 | `Store.Quarantine`, `QuarantineResume`, `QuarantineBody` | Quarantine; the alert is always the last write. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
 | `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves. |
-| `Store.ReadBody`, `Store.Available`, `Store.Settle` | Body reads checked against their names, free space, and the durability barrier of a start. |
+| `Store.ReadBody`, `Store.Available` | Body reads checked against their names, and free space. |
 | `MissingStateDirs`, `StateDirs` | The directories of `state/`, for the layout rule of the composition root. |
 
 ## Rules
@@ -84,8 +84,10 @@ engine applies the delivery rules and calls the writes.
 ## What the caller must guarantee
 
 - Build the table once with `txn.Internal()` and `Transactions()`; call
-  `Writer.Recover`, then the layout rule, then `Settle`, then `Scan`, and run the
-  recovery rules in the order of the startup.
+  `Writer.Recover`, then the layout rule, then `Scan`, and run the recovery rules
+  in the order of the startup. The rules run only after `Recover` has returned
+  nil: it ends by making every directory durable, so what a rule reads is what a
+  power loss cannot take back, and the store has no such barrier of its own.
 - Acknowledge and update memory only after a method returns nil; on `txn.IsFatal`
   exit and rescan.
 - Call `SeqBook.Note` only after the commit that wrote the number.

@@ -536,11 +536,15 @@ crash and no damage finds none of them at any quiet point, and a finished recove
 leaves none; tests evaluate the predicates on a copy of the disk after every step
 of such a run.
 
-**Settle.** A start makes the directories of `state/` durable before it runs any
-rule. After a process crash a head record may be visible and not durable; a rule
-writes its followers durably, and a power loss that followed would leave the
-followers without their head. The crash tests found this; the barrier is one
-directory sync per directory.
+**Settle.** The rules above write their followers durably after reading a head
+record that, after a process crash, may be visible and not durable; a power loss
+that followed would leave the followers without their head. The store does not
+guard against this itself: it relies on the settle transaction that ends
+`txn.Writer.Recover` (the Settle paragraph of the transaction section), which makes every directory
+durable before any rule runs. The caller guarantees that the rules run after
+`Recover` returned. The store's crash walk runs its restarts through the real
+`Recover`, so it exercises that barrier: without it the walk fails on orphan
+collection after a process crash.
 
 ## The crash model and what it can prove
 

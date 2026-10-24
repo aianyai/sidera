@@ -1125,33 +1125,3 @@ func (s *Store) removeAll(tx *txn.Tx, role, syncRole string, refs []FileRef) err
 	}
 	return nil
 }
-
-// Settle makes every directory of state/ durable. A process calls it first when
-// it starts, after the leftovers of the interrupted writes are removed and the
-// missing directories made, and before it reads anything to act on: what a
-// crashed process left may be visible without being durable, and the recovery
-// rules write their followers durably, so the head they follow must be durable
-// before they do.
-func (s *Store) Settle() error {
-	var dirs []string
-	for _, d := range StateDirs() {
-		there, err := s.present(d)
-		if err != nil {
-			return err
-		}
-		if there {
-			dirs = append(dirs, d)
-		}
-	}
-	if len(dirs) == 0 {
-		return nil
-	}
-	tx := s.w.Begin(&declSettle)
-	defer tx.Close()
-	for _, d := range dirs {
-		if err := tx.SyncDir("dir", d); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}

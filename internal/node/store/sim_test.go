@@ -121,7 +121,6 @@ func (s *sim) sessionToClose(sc *store.Scan, ctlFile string) (closed *store.Endp
 // scan entry does, and returns how many passes it took.
 func (s *sim) recoverAll() int {
 	s.t.Helper()
-	s.must(s.st.Settle(), "Settle")
 	for pass := 1; pass <= 12; pass++ {
 		if !s.pass() {
 			return pass

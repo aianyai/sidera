@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -664,6 +665,35 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	}
 	if len(uncrashed) > 0 {
 		t.Errorf("%d declared crash points have no crash state taken at them by a walk, for the kind of crash named:\n%s", len(uncrashed), strings.Join(uncrashed, "\n"))
+	}
+	// The cleanup and the settle that txn.Recover runs at every start belong to
+	// no workflow: the walks crash at them while they recover, every kind of
+	// crash. A short run does not crash recoveries. The store never discards a
+	// directory, so no disk of its workflows holds a ".trash-" directory and the
+	// removal of one cannot be reached here.
+	if !testing.Short() {
+		prog, err := programTable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		internal := map[string]bool{}
+		for _, d := range txn.Internal() {
+			internal[d.Name] = true
+		}
+		var gaps []string
+		for _, k := range prog.Keys() {
+			if !internal[k.Tag.Tx] || k.Tag.Role == "trash" {
+				continue
+			}
+			for _, m := range models {
+				if sink.taken[k.Key][m] == 0 {
+					gaps = append(gaps, fmt.Sprintf("%s (%v) under %s", k.Key, kindName(k.Kind), m))
+				}
+			}
+		}
+		if len(gaps) > 0 {
+			t.Errorf("%d crash points of the transaction layer have no crash state taken at them, for the kind of crash named:\n%s", len(gaps), strings.Join(gaps, "\n"))
+		}
 	}
 	if total.nested == 0 && !testing.Short() {
 		t.Error("no recovery was crashed in the middle")

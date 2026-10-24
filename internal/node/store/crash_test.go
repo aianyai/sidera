@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math/rand/v2"
 	"path"
 	"sort"
@@ -189,10 +190,10 @@ func (sc *scenario) newSimFor(t *testing.T, r *rig) *sim {
 // crashKinds are the disks a crash at one instant can leave.
 func crashKinds(m *fsxtest.Mem, rng *rand.Rand) []crashState {
 	return []crashState{
-		{"process-crash", m.Clone(), false},
-		{"worst-power-loss", m.CrashCloneWorst(), true},
-		{"power-loss-a", m.CrashClone(rng), true},
-		{"power-loss-b", m.CrashClone(rng), true},
+		{name: "process-crash", mem: m.Clone()},
+		{name: "worst-power-loss", mem: m.CrashCloneWorst(), power: true},
+		{name: "power-loss-a", mem: m.CrashClone(rng), power: true},
+		{name: "power-loss-b", mem: m.CrashClone(rng), power: true},
 	}
 }
 
@@ -201,6 +202,11 @@ type crashState struct {
 	mem  *fsxtest.Mem
 	// power: the state is what a power loss left, everything in it is durable.
 	power bool
+	// at and model tell, for a state taken at a point of the transaction layer
+	// during a recovery, where it was taken and of which kind of crash it is, so
+	// that the walk can show that those points were crashed at as well.
+	at    fsx.Point
+	model string
 }
 
 // stats of a run of a scenario.
@@ -241,7 +247,7 @@ func runScenario(t *testing.T, sc *scenario, sink *coverageSink, seed uint64) sc
 	durableSeen, durable := false, false
 	stepAfter := false
 	r.rec.on = func(p fsx.Point, k txn.Kind) {
-		if p.Tag.Tx == "settle" && p.Hit > 1 {
+		if p.Tag.Tx == "txn-settle" && p.Hit > 1 {
 			return // one directory sync of the barrier stands for all
 		}
 		if stepAfter {
@@ -272,6 +278,13 @@ func runScenario(t *testing.T, sc *scenario, sink *coverageSink, seed uint64) sc
 	return st
 }
 
+// fnvSeed is a seed that depends on nothing but the text.
+func fnvSeed(s string) uint64 {
+	h := fnv.New64a()
+	h.Write([]byte(s))
+	return h.Sum64()
+}
+
 // exercise recovers from one crash state and checks everything.
 func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, after map[string]string, durable bool, sink *coverageSink, st *scenarioStats, nested bool) {
 	t.Helper()
@@ -284,14 +297,26 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 	}
 
 	// Recovery, watched: every point of it gives crash states of its own.
+	seeded := newRand(fnvSeed(where))
 	var inner []crashState
 	var rr *rig
 	hook := func(p fsx.Point, k txn.Kind) {
-		if !nested || testing.Short() || cs.name == "power-loss-a" || cs.name == "power-loss-b" || (p.Tag.Tx == "settle" && p.Hit > 1) {
+		if !nested || testing.Short() || cs.name == "power-loss-a" || cs.name == "power-loss-b" || (p.Tag.Tx == "txn-settle" && p.Hit > 1) {
 			return
 		}
-		inner = append(inner, crashState{fmt.Sprintf("%s, then a crash %s before %v", where, "process", p), rr.mem.Clone(), false})
-		inner = append(inner, crashState{fmt.Sprintf("%s, then a power loss before %v", where, p), rr.mem.CrashCloneWorst(), true})
+		inner = append(inner, crashState{name: fmt.Sprintf("%s, then a crash %s before %v", where, "process", p), mem: rr.mem.Clone()})
+		inner = append(inner, crashState{name: fmt.Sprintf("%s, then a power loss before %v", where, p), mem: rr.mem.CrashCloneWorst(), power: true})
+		if !strings.HasPrefix(p.Tag.Tx, "txn-") {
+			return
+		}
+		// The cleanup and the settle of txn.Recover belong to no workflow, so
+		// the walk of a workflow reaches them only here, and every kind of crash
+		// is taken at them.
+		inner[len(inner)-2].at, inner[len(inner)-2].model = p, "process-crash"
+		inner[len(inner)-1].at, inner[len(inner)-1].model = p, "worst-power-loss"
+		for _, m := range []string{"power-loss-a", "power-loss-b"} {
+			inner = append(inner, crashState{name: fmt.Sprintf("%s, then a power loss (%s) before %v", where, m, p), mem: rr.mem.CrashClone(seeded), power: true, at: p, model: m})
+		}
 	}
 	// The rig does not exist until the hook may run; recoverMem creates it, so
 	// give the hook a way to reach it.
@@ -337,6 +362,9 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 	// A crash during recovery converges to the same state.
 	for _, in := range inner {
 		st.nested++
+		if in.model != "" {
+			sink.took(in.at, in.model)
+		}
 		r4 := sc.recoverMem(t, in.mem, sink, nil)
 		got := snapshot(t, r4.mem, ".")
 		// A power loss on top of a process crash takes what the process had not
