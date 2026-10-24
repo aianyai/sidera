@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"math/rand"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -602,6 +603,32 @@ func TestRequestDigest(t *testing.T) {
 		"disclose_recipients":      func(e *Envelope) { e.DiscloseRecipients = true },
 		"thread moved to reply_to": func(e *Envelope) { e.Thread, e.ReplyTo = "", "same" },
 	}
+	t.Run("when recipients are disclosed the digest covers the whole recipient list, in order", func(t *testing.T) {
+		nodeA, nodeB := nodeOf(t, keyIdentityA), nodeOf(t, keyIdentityB)
+		disclosed := base
+		disclosed.DiscloseRecipients, disclosed.MultiRecipient = true, true
+		disclosed.To = []ident.Address{addr(nodeA, 2), addr(nodeB, 5)}
+		d := disclosed.Digest()
+		for name, to := range map[string][]ident.Address{
+			"a recipient added":            {addr(nodeA, 2), addr(nodeB, 5), addr(nodeB, 6)},
+			"a recipient removed":          {addr(nodeA, 2)},
+			"the order changed":            {addr(nodeB, 5), addr(nodeA, 2)},
+			"another endpoint":             {addr(nodeA, 2), addr(nodeB, 6)},
+			"another node for an endpoint": {addr(nodeA, 2), addr(nodeA, 5)},
+		} {
+			e := disclosed
+			e.To = to
+			if e.Digest() == d {
+				t.Errorf("%s: the digest did not change", name)
+			}
+		}
+		again := disclosed
+		again.To = slices.Clone(disclosed.To)
+		again.SentAt = disclosed.SentAt.Add(time.Hour)
+		if again.Digest() != d {
+			t.Error("the same disclosed list under another send time changed the digest")
+		}
+	})
 	t.Run("the digest keeps the two flags apart", func(t *testing.T) {
 		multi, disclose := base, base
 		multi.MultiRecipient, disclose.DiscloseRecipients = true, true

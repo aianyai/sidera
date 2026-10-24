@@ -521,10 +521,12 @@ var requestDomain = frame.Domain("sidera/request-digest/1")
 // a retry of the same request must repeat exactly: the kind, the params, the
 // content type, the body, the two deadlines, and what the sender chose about
 // the message's place in a conversation and who sees whom (reply_to, thread,
-// the multi-recipient flag, disclose_recipients). A retry that changes any of
-// them is another request under the same id, and the target must not take it
-// for the one it already holds. It leaves out what may differ between attempts
-// of one request: the recipient list as trimmed for a path, the sequence
+// the multi-recipient flag, disclose_recipients and, when recipients are
+// disclosed, the whole recipient list in the order the sender gave it). A retry
+// that changes any of them is another request under the same id, and the target
+// must not take it for the one it already holds. It leaves out what may differ
+// between attempts of one request: the recipient list when it is not disclosed,
+// because each path carries the list trimmed for its node, the sequence
 // numbers, the send time and the evidence. A request with the same id and
 // another digest is a conflict (delivery.CheckDedup).
 func (e Envelope) Digest() delivery.BodyDigest {
@@ -538,8 +540,24 @@ func (e Envelope) Digest() delivery.BodyDigest {
 	}
 	return delivery.BodyDigest(sha256.Sum256(frame.Frame(requestDomain,
 		[]byte{byte(kind)}, []byte(e.Preset), []byte(e.ContentType), e.Body,
-		[]byte(e.ReplyTo), []byte(e.Thread), []byte{flags},
+		[]byte(e.ReplyTo), []byte(e.Thread), []byte{flags}, e.disclosedRecipients(),
 		unixBE(e.AcceptBefore), unixBE(e.ReportBy))))
+}
+
+// disclosedRecipients returns the recipient list as the request digest covers it:
+// each address as node bytes then endpoint bytes, in the order of To, when the
+// sender discloses the recipients, and nothing otherwise. Without disclosure To
+// is the list trimmed for one path and differs between attempts of one request.
+func (e Envelope) disclosedRecipients() []byte {
+	if !e.DiscloseRecipients {
+		return nil
+	}
+	var b []byte
+	for _, a := range e.To {
+		b = append(b, a.Node.Bytes()...)
+		b = append(b, a.Endpoint.Bytes()...)
+	}
+	return b
 }
 
 func unixBE(t time.Time) []byte {

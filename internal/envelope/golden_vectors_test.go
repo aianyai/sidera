@@ -13,9 +13,10 @@ package envelope
 // Signed bytes: 0x11 "sidera/record-sig" uvarint(len(type)) type uvarint(len(payload)) payload.
 // Digest: SHA-256 of the same layout with the domain "sidera/record-digest".
 // Request digest: SHA-256 of the fields kind (1 byte), preset, content type, body, reply_to,
-// thread, flags (1 byte: bit 0 multi-recipient, bit 1 disclose_recipients), accept_before and
-// report_by (8 bytes big-endian each), each framed with a uvarint length, under the domain
-// "sidera/request-digest/1".
+// thread, flags (1 byte: bit 0 multi-recipient, bit 1 disclose_recipients), the disclosed
+// recipients (each address as 32 node bytes then 16 endpoint bytes, in the order of "to"; empty when
+// the recipients are not disclosed), accept_before and report_by (8 bytes big-endian each), each
+// framed with a uvarint length, under the domain "sidera/request-digest/1".
 
 const goldenNodeA = "e25aa4dcbc79b8ec49c25d53c2fafd4c36ef52b713f26e20f9f76075561af01d"
 const goldenNodeB = "64e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7"
@@ -535,5 +536,5 @@ var goldenEnvelopeReply = hexcat(
 	"44646f6e65",                         // "done"
 )
 
-const goldenSessionCreateRequestDigest = "12168a8aa94a7a8f8d68542d84d99abe6dfe9229804f6a18ffc32637f563c40d"
-const goldenReplyRequestDigest = "a91171bb345c89fc2b6ba7b4354009cd52cfdfd30eb071f3ec3b68b63ce29141"
+const goldenSessionCreateRequestDigest = "969d368e36698f0ef78f05632599890299c704a0c66cb26b8f9670c006280d51"
+const goldenReplyRequestDigest = "36b57c2c0c2c23954a786ecb3d22b1c2574f7ca99ba1d413fd147fca60452abe"

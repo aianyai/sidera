@@ -64,8 +64,11 @@ caller stops pulling from that peer for the message and logs it.
   envelope; `reply` checks them against the sender's own records.
 - **Request digest.** Covers the kind, preset, content type, body, both
   deadlines, `reply_to`, `thread`, the multi-recipient flag and
-  `disclose_recipients`; not the trimmed recipient list, sequence numbers, send
-  time or evidence, which differ between attempts of one request.
+  `disclose_recipients`, and, when recipients are disclosed, the whole `To` list
+  in the sender's order (it is what the recipients see, and every path carries it
+  untrimmed); not the recipient list when it is not disclosed (each path carries
+  a list trimmed for its node), sequence numbers, send time or evidence, which
+  differ between attempts of one request.
 - **One mapping from kind to action.** `Kind.Action()`, which takes a control
   signal's action from `adapterreg.ActionOf`; no caller maps kinds itself.
 - **Status report and control reply** are signed by the target node's network

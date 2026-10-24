@@ -56,8 +56,10 @@ recipients'. The sender produces the per-node form with `TrimmedFor`.
 The **request digest** (`Envelope.Digest`) is what the target stores with the
 deduplication record of each delivery of the request. It covers the kind, the
 preset, the content type, the body, the two deadlines, `reply_to`, `thread`, the
-multi-recipient flag and `disclose_recipients`, and nothing a retry may change
-(the recipient list as trimmed for a path, sequence numbers, the send time, the
+multi-recipient flag and `disclose_recipients`, and, when `disclose_recipients`
+is set, the whole `to` list (each address as node then endpoint bytes, in the
+sender's order). It covers nothing a retry may change (the recipient list as
+trimmed for a path when it is not disclosed, sequence numbers, the send time, the
 evidence). A retry with the same id and another digest is a conflict; this also
 means a `message.send` under the id of a control signal's initial message
 conflicts with the initial message's delivery.
@@ -227,8 +229,13 @@ which may still admit it.
   multi-recipient flag (a target may refuse multi-recipient messages) and
   `disclose_recipients` (what the recipients see): a retry that changed any of
   them under the same id would otherwise be taken for the request the target
-  already holds. The evidence, the sequence numbers, the send time and the
-  trimmed recipient list differ between attempts of one request and stay out.
+  already holds. The evidence, the sequence numbers and the send time differ
+  between attempts of one request and stay out, and so does the recipient list
+  when it is not disclosed, because each path carries a list trimmed for its node.
+  When recipients are disclosed every path carries the whole list untrimmed, and
+  it is what the recipients are shown, so a retry under the same id that listed
+  other recipients, or the same in another order, is another request and must
+  conflict rather than be taken for the one already held.
 - **The sending node in reports and replies.** The deduplication key is (sender
   node, message id, recipient endpoint), so a report that named only the id and
   the endpoint would fit every sender that used that id. Naming the sender makes
