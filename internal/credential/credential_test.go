@@ -3,6 +3,7 @@ package credential
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"testing"
 	"time"
 
@@ -509,5 +510,24 @@ func TestNewNonce(t *testing.T) {
 	}
 	if _, err := NewNonce(bytes.NewReader(make([]byte, 3))); err == nil {
 		t.Error("a short source gave a nonce")
+	}
+}
+
+func TestCheckWindow(t *testing.T) {
+	for _, row := range []struct {
+		rule                string
+		createdAt, notAfter time.Time
+		want                error
+	}{
+		{"no expiry", t0, time.Time{}, nil},
+		{"ends after it starts", t0, t0.Add(time.Second), nil},
+		{"ends when it starts", t0, t0, ErrWindow},
+		{"ends before it starts", t0, t0.Add(-time.Second), ErrWindow},
+	} {
+		t.Run(row.rule, func(t *testing.T) {
+			if err := CheckWindow(row.createdAt, row.notAfter); !errors.Is(err, row.want) || (row.want == nil && err != nil) {
+				t.Fatalf("CheckWindow = %v, want %v", err, row.want)
+			}
+		})
 	}
 }

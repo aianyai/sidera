@@ -89,8 +89,8 @@ func displayOf(t Transcript, initiating bool, expiresAt time.Time) Display {
 }
 
 // checkComplete is the rule for a complete credential record of a transcript:
-// the payload is the one computed locally, both identity keys signed and nobody
-// else did.
+// the payload is the one computed locally. That both identity keys signed and
+// nobody else did is the credential descriptor's own rule, which Verify applies.
 func checkComplete(t Transcript, r record.Record) (record.Verified[credential.Credential], error) {
 	local, err := t.credential.Payload()
 	if err != nil {
@@ -102,11 +102,6 @@ func checkComplete(t Transcript, r record.Record) (record.Verified[credential.Cr
 	ver, err := record.Verify(credential.Descriptor, r)
 	if err != nil {
 		return record.Verified[credential.Credential]{}, fmt.Errorf("%w: %w", ErrRecord, err)
-	}
-	signers := ver.Signers()
-	a, b := t.terms.Initiator.identity, t.terms.Target.identity
-	if len(signers) != 2 || !(signers[0] == a && signers[1] == b || signers[0] == b && signers[1] == a) {
-		return record.Verified[credential.Credential]{}, fmt.Errorf("%w: credential signers are not the two identity keys", ErrRecord)
 	}
 	return ver, nil
 }

@@ -58,6 +58,18 @@ type Credential struct {
 	Nonce    Nonce
 }
 
+// CheckWindow is the one statement of the credential's window rule: a credential
+// that expires ends after it starts. A zero notAfter means it does not expire.
+// Whoever negotiates a credential's times before the credential exists (the
+// pairing terms) asks here, so the rule has no second statement. It returns
+// ErrWindow.
+func CheckWindow(createdAt, notAfter time.Time) error {
+	if !notAfter.IsZero() && !notAfter.After(createdAt) {
+		return ErrWindow
+	}
+	return nil
+}
+
 // New builds the credential between x and y, in either order. Times keep the
 // precision of the wire only after a round trip: seconds.
 func New(x, y ident.NodeID, createdAt, notAfter time.Time, nonce Nonce) Credential {
@@ -116,8 +128,8 @@ func credentialFromWire(w credentialWire) (Credential, error) {
 	if err != nil {
 		return Credential{}, fmt.Errorf("not_after: %w", err)
 	}
-	if !notAfter.IsZero() && !notAfter.After(created) {
-		return Credential{}, ErrWindow
+	if err := CheckWindow(created, notAfter); err != nil {
+		return Credential{}, err
 	}
 	return Credential{A: a, B: b, CreatedAt: created, NotAfter: notAfter, Nonce: nonce}, nil
 }

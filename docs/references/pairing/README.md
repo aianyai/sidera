@@ -32,7 +32,7 @@ shape.
 
 | Message | From | Fields |
 | ------- | ---- | ------ |
-| M1 commitment | initiator | `1` commitment, `2` created_at, `3` not_after (optional) |
+| M1 commitment | initiator | `1` commitment, `2` created_at, `3` not_after (optional; after created_at, which `credential.CheckWindow` judges) |
 | M2 reveal | target | `1` nB |
 | M3 open | initiator | `1` nA |
 | M4 accepted | target | `1` pairing id, `2` expires_at |

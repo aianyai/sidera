@@ -42,6 +42,12 @@ them, and stores the records it hands out.
   checked the request; the initiator opens its nonce last; the target checks the
   commitment against its own view of the connection. The code, the pairing
   identifier and the credential nonce all come from the opened transcript.
+- **The credential's own rules stay in `credential`.** That `not_after` is after
+  `created_at` is `credential.CheckWindow`, which the terms and the first message
+  ask; that exactly the two nodes' identity keys sign is the credential
+  descriptor's signer slots, which `record.Verify` applies. Pairing checks only
+  what is its own: that the payload is the one the transcript computes, and who
+  signed a partial record.
 - **Every concatenation is `frame.Frame`** with its own domain, so no input of
   one hash can be read as an input of another. The domains are listed in the
   records reference.

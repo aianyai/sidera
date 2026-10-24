@@ -7,6 +7,7 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 
+	"github.com/aianyai/sidera/internal/credential"
 	"github.com/aianyai/sidera/internal/record"
 )
 
@@ -397,8 +398,8 @@ func DecodeCommit(b []byte) (CommitMsg, error) {
 		if notAfter, err = requiredTime(*w.NotAfter, "not_after"); err != nil {
 			return CommitMsg{}, err
 		}
-		if !notAfter.After(created) {
-			return CommitMsg{}, fmt.Errorf("%w: not_after must be after created_at", ErrMessage)
+		if err := credential.CheckWindow(created, notAfter); err != nil {
+			return CommitMsg{}, fmt.Errorf("%w: %w", ErrMessage, err)
 		}
 	}
 	return CommitMsg{Commitment: Commitment(c), CreatedAt: created, NotAfter: notAfter}, nil

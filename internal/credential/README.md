@@ -15,6 +15,7 @@ first for the conventions every contract package follows, and
 | Name                                                          | Purpose                                                                                                         |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `Credential`, `New`, `Descriptor`, `Type`                     | The credential payload and its record type. `New(x, y, createdAt, notAfter, nonce)` puts the two nodes in the fixed order. Signed by both ends' identity keys. |
+| `CheckWindow(createdAt, notAfter)`                            | The one statement of the window rule (`not_after` after `created_at`, or absent); the decoder and the pairing terms both ask it. |
 | `Nonce`, `NewNonce(r)`, `NonceLen`                            | The 16-byte nonce, supplied by the caller or read from an injected `io.Reader`.                                  |
 | `Credential.Payload()`, `Credential.Digest()`                 | The exact payload bytes (`record.EncodePayload` under the credential descriptor) and the record digest, known to both sides before anyone signs.                   |
 | `Facts(v) trust.Credential`                                   | What `trust` reads of a verified credential.                                                                     |
@@ -41,7 +42,7 @@ first for the conventions every contract package follows, and
   refused. The digest is the same at every stage.
 - **No time is judged here** except the shape of a payload: `created_at` is
   required, `not_after` is optional (left out, never written as 0) and must be
-  after `created_at`. An expired credential is a valid record and reaches `trust`
+  after `created_at` (`CheckWindow`, the only place that says so). An expired credential is a valid record and reaches `trust`
   with its `NotAfter`. A voucher's `issued_at` and a directive's `signed_at` are
   passed on as facts; the device certificate's window is not judged either.
 - **A revocation embeds the credential payload.** The verifier decodes the

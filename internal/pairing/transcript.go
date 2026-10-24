@@ -99,8 +99,8 @@ func (t Terms) validate() error {
 		if err != nil || !t.NotAfter.Equal(time.Unix(notAfter, 0)) {
 			return fmt.Errorf("%w: not_after must be whole seconds in range", ErrTerms)
 		}
-		if notAfter <= created {
-			return fmt.Errorf("%w: not_after must be after created_at", ErrTerms)
+		if err := credential.CheckWindow(t.CreatedAt, t.NotAfter); err != nil {
+			return fmt.Errorf("%w: %w", ErrTerms, err)
 		}
 	}
 	return nil

@@ -591,3 +591,22 @@ func TestNewNonce(t *testing.T) {
 		t.Fatalf("NewNonce = %v, %v", n, err)
 	}
 }
+
+// The rule that a credential ends after it starts is the credential package's;
+// the terms and the commitment message ask it and carry its error.
+func TestTheWindowRuleIsTheCredentialPackagesOwn(t *testing.T) {
+	terms := vectorTerms(t, vectorNotAfter)
+	terms.NotAfter = terms.CreatedAt
+	if err := terms.validate(); !errors.Is(err, ErrTerms) || !errors.Is(err, credential.ErrWindow) {
+		t.Fatalf("terms: %v, want ErrTerms wrapping credential.ErrWindow", err)
+	}
+	c := Commitment{1}
+	w := commitWire{Commit: c[:], CreatedAt: 100, NotAfter: ptr(int64(100))}
+	b, err := record.MarshalCanonical(wrap(TypeCommit, w))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecodeCommit(b); !errors.Is(err, ErrMessage) || !errors.Is(err, credential.ErrWindow) {
+		t.Fatalf("M1: %v, want ErrMessage wrapping credential.ErrWindow", err)
+	}
+}
