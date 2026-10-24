@@ -279,7 +279,7 @@ func TestMessageStatusRules(t *testing.T) {
 		}, "", false},
 		{"every rejection reason", func(r *adapterproto.MessageStatusResult) {
 			r.Recipients = nil
-			for _, why := range []adapterproto.RejectReason{"unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired", "backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range"} {
+			for _, why := range []adapterproto.RejectReason{"unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired", "backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range", "backlog_full"} {
 				r.Recipients = append(r.Recipients, adapterproto.RecipientStatus{To: addr1, State: "rejected", Reason: why})
 			}
 		}, "", false},

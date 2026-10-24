@@ -875,6 +875,9 @@ func TestMembersAreClosedExceptInCapabilities(t *testing.T) {
 	}
 }
 
+// invalidName is what the contract packages print for a value past their last.
+const invalidName = "invalid"
+
 var numberRE = regexp.MustCompile(`^-?[0-9]+$`)
 
 // TestEnumNamesMatchContractPackages: the protocol's delivery states, rejection
@@ -886,7 +889,9 @@ func TestEnumNamesMatchContractPackages(t *testing.T) {
 		states = append(states, s.String())
 	}
 	var reasons []string
-	for r := delivery.RejectUnauthorized; r <= delivery.RejectDeadlineOutOfRange; r++ {
+	// A reason the contract package names counts, however many it has: the
+	// loop ends where its names end, not at a constant written here.
+	for r := delivery.RejectUnauthorized; r.String() != invalidName; r++ {
 		reasons = append(reasons, r.String())
 	}
 	signals := []string{authz.ActionSessionCreate.String(), authz.ActionSessionClose.String(), authz.ActionSessionInterrupt.String(), authz.ActionEndpointStatus.String()}
@@ -896,8 +901,8 @@ func TestEnumNamesMatchContractPackages(t *testing.T) {
 			t.Errorf("%s: protocol %v, contract package %v", name, sorted(tables[name]), sorted(want))
 		}
 	}
-	if len(states) != 7 || len(reasons) != 10 {
-		t.Errorf("the contract packages list %d states and %d reasons; the protocol was written for 7 and 10", len(states), len(reasons))
+	if len(states) != 7 || len(reasons) == 0 {
+		t.Errorf("the contract packages list %d states and %d reasons; the protocol was written for 7 states and at least one reason", len(states), len(reasons))
 	}
 }
 

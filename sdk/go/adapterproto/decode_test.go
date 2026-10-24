@@ -389,3 +389,28 @@ func TestCapabilitiesAreOpen(t *testing.T) {
 		}
 	})
 }
+
+// TestRejectReasonTable: the rejection reasons a sender can read, written out
+// in order. A reason is appended, never renumbered or renamed, and a rejected
+// recipient with each one survives a decode and an encode unchanged.
+func TestRejectReasonTable(t *testing.T) {
+	want := []string{
+		"unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired",
+		"backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range", "backlog_full",
+	}
+	got := adapterproto.EnumTables()["RejectReason"]
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("RejectReason table = %v, want %v", got, want)
+	}
+	if adapterproto.RejectBacklogFull != "backlog_full" || !adapterproto.RejectBacklogFull.Valid() {
+		t.Errorf("RejectBacklogFull = %q, Valid %v", adapterproto.RejectBacklogFull, adapterproto.RejectBacklogFull.Valid())
+	}
+	m := mustLookup(t, adapterproto.MethodEndpointMessageStatus)
+	for _, why := range want {
+		in := `{"recipients":[{"to":"` + addr1 + `","state":"rejected","reason":"` + why + `"}]}`
+		out, err := canonical(m, true, []byte(in))
+		if err != nil || string(out) != in {
+			t.Errorf("reason %s: canonical = %s, %v; want %s", why, out, err, in)
+		}
+	}
+}
