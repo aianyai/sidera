@@ -9,9 +9,32 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 )
 
-// FeedbackParams are the feedback settings the design leaves open. They have
-// no defaults: a node must choose them, and Validate refuses zero values so an
-// unset parameter cannot silently disable merging or the rate cap.
+// Decided feedback values. Each has its reason with it, and
+// DefaultFeedbackParams returns them together.
+const (
+	// DefaultFeedbackMergeWindow is how long a group of notices waits for more
+	// of its kind. A burst of notices, such as 20 messages sent at once to an
+	// unreachable target, arrives within seconds, so a minute merges it into
+	// one. An unreachable notice is due UnreachableHintAfter after the first
+	// failure, so it reaches the sender within 3 minutes, long before the
+	// default delivery deadline of 10 minutes, while the sender can still send
+	// elsewhere or give up.
+	DefaultFeedbackMergeWindow = time.Minute
+	// DefaultFeedbackRateCap is the most notices a sender endpoint receives per
+	// rate window. A sender rarely meets more than 10 kinds of trouble in
+	// 10 minutes, and even a burst of 30 only delays its last notice by 20
+	// minutes. Each notice is a message that wakes the sender's session, so
+	// cap and window together stay at the prompt cap of an endpoint per hour.
+	DefaultFeedbackRateCap = 10
+	// DefaultFeedbackRateWindow is the span over which the rate cap is counted.
+	// It is 10 minutes: 10 notices per window is 60 an hour, and within one
+	// queue time at most 30 notices wait in the sender's queue.
+	DefaultFeedbackRateWindow = 10 * time.Minute
+)
+
+// FeedbackParams are the settings of feedback merging and rate limiting.
+// Validate refuses zero values so an unset parameter cannot silently disable
+// merging or the rate cap. DefaultFeedbackParams returns the decided values.
 type FeedbackParams struct {
 	// MergeWindow is how long a group of notices that share a merge key waits
 	// for more of its kind before it is sent as one notice.
@@ -22,6 +45,15 @@ type FeedbackParams struct {
 	// lie.
 	RateCap    int
 	RateWindow time.Duration
+}
+
+// DefaultFeedbackParams returns the decided values.
+func DefaultFeedbackParams() FeedbackParams {
+	return FeedbackParams{
+		MergeWindow: DefaultFeedbackMergeWindow,
+		RateCap:     DefaultFeedbackRateCap,
+		RateWindow:  DefaultFeedbackRateWindow,
+	}
 }
 
 // Validate checks that every parameter is set.

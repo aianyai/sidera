@@ -24,7 +24,7 @@ reasons behind the rules.
 | `IntakeAuthorization(authz.Verdict)` | The one mapping from the policy's verdict to an `Authorization`: allow, suspend, or a denial with the `RejectReason` the sender hears. |
 | `CheckDedup`, `NewDedupRecord`, `DedupRecord.WithReply` | Deduplication, with the stored reply of a control signal. |
 | `TransitionFeedback`, `Kind` | Which feedback a change of state calls for; the fixed wording of each kind. |
-| `FeedbackQueue` (`Add`, `Flush`, `NextFlush`), `FeedbackParams`, `MergeKeyOf` | Merging and rate-capping pending feedback into notices; `NextFlush` is the earliest instant at which `Flush` would send one. |
+| `FeedbackQueue` (`Add`, `Flush`, `NextFlush`), `FeedbackParams`, `DefaultFeedbackParams()`, `MergeKeyOf` | Merging and rate-capping pending feedback into notices; `NextFlush` is the earliest instant at which `Flush` would send one. `DefaultFeedbackParams` is the decided window and cap. |
 | `ReportBy`, `SettleBy`, `BacklogDeadline`, `DedupRetainUntil`, `StatusReportRetainUntil`, `IdempotencyKeyRetainUntil`, `ValidateEndpointMaxQueue` | Deadline and retention arithmetic. |
 
 `Apply`, `Tick`, `Handout` and `Ack` change a record; every state change goes
@@ -71,8 +71,11 @@ delivery_unknown. Normal progress and `closed_unconfirmed` never do.
   a notice of their own, expired_unconfirmed notices per (sender endpoint,
   target node); blocked reports per (sender endpoint, target endpoint), with the
   recovery as a separate notice. The merge window and the
-  per-endpoint rate cap are undecided and live in `FeedbackParams`, which has
-  no defaults. Notices over the cap are held back, never dropped.
+  per-endpoint rate cap live in `FeedbackParams`; `DefaultFeedbackParams()` is
+  the decided values, a 1-minute window and 10 notices per 10 minutes for each
+  sender endpoint (60 an hour, the prompts an endpoint may receive per hour).
+  Notices over the cap are held back, never dropped. Any value that is not
+  positive is refused, so an unset parameter never disables merging or the cap.
 
 ## Time
 

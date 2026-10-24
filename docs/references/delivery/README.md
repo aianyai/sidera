@@ -55,8 +55,10 @@ at most once per delivery; moving from expired to rejected or unknown gives the
 new news instead of a correction. Merging: one notice per message for its
 anomalies, per (sender endpoint, target node) for unreachable hints and, as a
 notice of their own, for expired_unconfirmed notices, per (sender endpoint,
-target endpoint) for blocked reports with the recovery as its own notice. The merge window and the per-endpoint rate cap are undecided
-parameters without defaults; notices over the cap are held, not dropped.
+target endpoint) for blocked reports with the recovery as its own notice. The
+merge window (1 minute) and the per-endpoint rate cap (10 notices per 10
+minutes) are the values of `DefaultFeedbackParams`; notices over the cap are
+held, not dropped.
 
 ### Deadlines and retention
 
@@ -254,6 +256,25 @@ permission still reads it.
   earlier notice was wrong" and then "rejected" is two notices for one fact.
 - **Notices over the rate cap are held, not dropped.** Dropping an anomaly would
   make silence mean "possibly failed", defeating the rule above.
+- **A merge window of one minute, ten notices per ten minutes.**
+  (`DefaultFeedbackParams`.) Every notice is a message to the sender's endpoint
+  and wakes its session under the prompt rules, so the notices must be merged
+  and bounded. A typical burst, such as 20 messages sent at once to an
+  unreachable target, arrives within seconds, so one minute merges it into one
+  notice. The window adds to the time before the first news: an unreachable
+  notice is due 2 minutes after the first failure and leaves up to 1 minute
+  later, so it arrives within 3 minutes, long before the default delivery
+  deadline of 10 minutes, while the sender can still send elsewhere or give up.
+  A window of 2 minutes would delay that news for little more merging, and one
+  of 30 seconds would split bursts that are slower than seconds. Ten notices per
+  ten minutes is 60 an hour, the most prompts an endpoint receives per hour, so
+  feedback cannot by itself exhaust the sender's prompts. One sender endpoint
+  rarely meets more than 10 different kinds of trouble in 10 minutes. A burst of
+  30 notices delays only the last by 20 minutes, and within one endpoint queue
+  time of 30 minutes at most 30 notices wait in the sender's queue, far below
+  the backlog limit of an endpoint. A cap of 5 would hold notices back for
+  longer in ordinary use, and a cap of 20 would let feedback alone wake the
+  session as often as a message every 30 seconds.
 - **Authorization suspended is not a refusal.** A node of the trust chain being
   offline says nothing about the message; refusing would punish the sender for an
   outage. The message waits in the queue where the queue time bounds the wait.
@@ -394,9 +415,14 @@ permission still reads it.
   explicit mapping).
 - `internal/delivery/dedup.go`: deduplication. Tests: `TestCheckDedup`,
   `TestDedupReply`.
-- `internal/delivery/merge.go`: merge keys, `FeedbackQueue`. Tests:
-  `TestMergeKey`, `TestFeedbackParamsValidate`, `TestFeedbackQueue` (among
-  its cases, the exact instant at which a sent notice leaves the rate window).
+- `internal/delivery/merge.go`: merge keys, `FeedbackQueue`,
+  `FeedbackParams` and its decided values (`DefaultFeedbackParams`). Tests:
+  `TestDefaultFeedbackParamsValidate`, `TestDefaultFeedbackParamsValues` (each
+  value, named after its reason), `TestDefaultFeedbackParamsReasons` (the figures
+  above recomputed from the defaults), `TestDefaultFeedbackParamsAgainstHandoff`
+  (the hourly cap stays within the prompt cap of an endpoint), `TestMergeKey`,
+  `TestFeedbackParamsValidate`, `TestFeedbackQueue` (among its cases, the exact
+  instant at which a sent notice leaves the rate window).
 - `internal/delivery/schedule.go`: the deadlines `Tick` consults,
   `Record.NextTick`, `FeedbackQueue.NextFlush`. Tests:
   `TestNextTickNamesEachDeadline` and `TestNextFlushNamesEachDeadline` (instants

@@ -61,7 +61,7 @@ func TestFeedbackParamsValidate(t *testing.T) {
 		ok   bool
 	}{
 		{"complete parameters are valid", testParams, true},
-		{"the zero value is refused: the parameters are undecided", FeedbackParams{}, false},
+		{"the zero value is refused: an unset parameter never disables merging or the cap", FeedbackParams{}, false},
 		{"a missing merge window is refused", FeedbackParams{RateCap: 1, RateWindow: time.Minute}, false},
 		{"a missing rate cap is refused", FeedbackParams{MergeWindow: time.Minute, RateWindow: time.Minute}, false},
 		{"a missing rate window is refused", FeedbackParams{MergeWindow: time.Minute, RateCap: 1}, false},
