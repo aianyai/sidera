@@ -8,8 +8,8 @@ marker that says `init` finished. Read
 for the formats, the export format and the reasons.
 
 This is a runtime package (layer 3 of [`internal/node/README.md`](../README.md)):
-it imports `txn`, the contract packages, and from `fsx` and `clock` only types and
-the pure `clock.CheckWall`. It reads no clock and no random source of its own:
+it imports `txn`, `recfile` (the framing of the record files), the contract
+packages, and from `fsx` and `clock` only types and the pure `clock.CheckWall`. It reads no clock and no random source of its own:
 the time and the reader of randomness are parameters. Every write goes through a
 transaction of `txn`; nothing here calls an `fsx` write.
 
@@ -33,11 +33,12 @@ transaction of `txn`; nothing here calls an `fsx` write.
 ## Rules
 
 - **Files.** `identity.key`, `network.key`, `network-serial`, `clock.rec` and
-  `init.rec` are in the record envelope (`sidera-record 1 <kind> <crc32c> <length>
-  <key>`, key = the kind name, body = canonical JSON); `network.cert` and
-  `self-revocation.rec` are the record wire bytes. A file is read only if it is
+  `init.rec` are singleton records of `recfile`: one fixed file name each, the key
+  of the first line is the kind. Their bodies are canonical JSON, and `network.cert`
+  and `self-revocation.rec` are the record wire bytes. A file is read only if it is
   exactly what the writer writes: a body that decodes but is not in the canonical
-  form is damaged.
+  form is damaged. Any damage, of the first line or of the body, is `ErrCorrupt`
+  naming the file; nothing here replaces a damaged file.
 - **Permissions are refused, never fixed.** A directory or file of `keys/` that
   anyone but the owner can reach makes `Load`, `PlanInit` and the standalone
   readers fail with `ErrPermissionsTooBroad` naming it. On Unix any group or

@@ -133,18 +133,12 @@ The serial and the clock live here, and not under `state/`, because deleting
 `state/` must not make a serial reusable or erase the mark and the pause.
 
 **Formats.** The three records that are not wire bytes of a signed record, and
-the two key files, share the record envelope of the data directory:
-
-```
-sidera-record 1 <kind> <crc32c> <length> <key>\n<body>
-```
-
-`<crc32c>` is the CRC32C (Castagnoli) of the body in eight lowercase hex digits,
-`<length>` the body length in decimal without leading zeros, `<key>` the
-base64url text of the kind name without padding (these files are singletons with
-fixed names, so the key is the kind). The body is JSON in the one canonical form
-the writer produces: fields in the order below, no spaces, times as UTC in whole
-seconds (`2026-10-24T05:56:00Z`). A file is read only in that form.
+the two key files, are singleton records in the record framing of the data
+directory (`recfile`; see [storage](../storage/README.md#the-records-of-state)
+for the first line, its checks and the reasons). Each has one fixed file name and
+its key is its kind. The body is JSON in the one canonical form the writer
+produces: fields in the order below, no spaces, times as UTC in whole seconds
+(`2026-10-24T05:56:00Z`). A file is read only in that form.
 
 | Kind (file) | Body |
 | ----------- | ---- |
@@ -310,9 +304,11 @@ serial file did not, the node refuses to start naming `network-serial`.
   WireGuard and Syncthing keep a key in an owner-only file and sshd refuses a
   wider one. The node does the same and never narrows the permissions itself:
   only the owner knows who has read the file already.
-- **The record envelope for the key files too.** One checksummed, length-checked
-  first line and one canonical body mean one decoder for every small file of the
-  directory and one test of "what decodes encodes to the same bytes". PEM or
+- **The record framing for the key files too.** One checksummed, length-checked
+  first line, shared with `state/`, and one canonical body mean one decoder for
+  every small file of the directory and one test of "what decodes encodes to the
+  same bytes". The framing's damages name the rule that failed and never the
+  first line, which a damaged newline can fill with the body of a key file. PEM or
   OpenSSH key formats would add a second parser for a file only this program
   reads. The key is the 32-byte seed, not the 64-byte Go form, so that nothing
   stored can disagree with the key derived from it.
@@ -398,7 +394,7 @@ serial file did not, the node refuses to start naming `network-serial`.
   8032 test keys), `fuzz_test.go` (every parser and the key constructor).
 - `internal/ident/README.md`: entry points and invariants of the package.
 - `internal/node/keys/`: the package; its `README.md` lists the entry points.
-  `envelope.go` and `codec.go` are the formats, `key.go` key generation and
+  `codec.go` holds the kinds and bodies (the framing is `internal/node/recfile`), `key.go` key generation and
   printing, `read.go` and `load.go` the checks, `renew.go` the renewal and the
   recovery predicate, `clock.go` the clock record, `init.go` the key side of
   `init`, `export.go` the armor, `paths.go` the paths, roles, parameters and

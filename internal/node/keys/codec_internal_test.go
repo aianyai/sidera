@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"hash/crc32"
 	"strings"
 	"testing"
 	"time"
@@ -47,6 +48,13 @@ func TestEncodersWriteTheGoldenFiles(t *testing.T) {
 	if got := string(encodeInit(time.Date(2026, 10, 24, 6, 0, 0, 0, time.UTC))); got != initFileGolden {
 		t.Errorf("init file %q", got)
 	}
+}
+
+// recordFileOf is a file of a singleton record for kind and body, written from
+// the description of the format and not through recfile.
+func recordFileOf(kind string, body []byte) []byte {
+	head := fmt.Sprintf("sidera-record 1 %s %08x %d %s\n", kind, crc32.Checksum(body, crc32.MakeTable(crc32.Castagnoli)), len(body), base64.RawURLEncoding.EncodeToString([]byte(kind)))
+	return append([]byte(head), body...)
 }
 
 func mustHexByte(s string) byte {
@@ -193,12 +201,12 @@ func TestDecodeKeyFileRefusesAnotherSpellingOfTheSameKey(t *testing.T) {
 		"standard alphabet": `{"algorithm":"ed25519","seed":"` + strings.NewReplacer("_", "/", "-", "+").Replace(seedText) + `"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := decodeKeyFile(kindIdentityKey, encodeEnvelope(kindIdentityKey, []byte(body))); err == nil {
+			if _, err := decodeKeyFile(kindIdentityKey, recordFileOf(kindIdentityKey, []byte(body))); err == nil {
 				t.Error("accepted")
 			}
 		})
 	}
-	if _, err := decodeKeyFile(kindIdentityKey, encodeEnvelope(kindIdentityKey, []byte(`{"algorithm":"ed25519","seed":"`+seedText+`"}`))); err != nil {
+	if _, err := decodeKeyFile(kindIdentityKey, recordFileOf(kindIdentityKey, []byte(`{"algorithm":"ed25519","seed":"`+seedText+`"}`))); err != nil {
 		t.Errorf("the written form is refused: %v", err)
 	}
 }

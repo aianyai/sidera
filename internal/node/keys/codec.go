@@ -10,11 +10,13 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/recfile"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
-// The kinds of the files in the record envelope.
+// The kinds of the files that are records of the data directory (recfile). Each
+// is a singleton: one file with a fixed name, its key the kind itself.
 const (
 	kindIdentityKey = "identity-key"
 	kindNetworkKey  = "network-key"
@@ -39,6 +41,28 @@ func parseTime(s string) (time.Time, error) {
 	return t, nil
 }
 
+// frame returns the file of a record of the given kind. The kinds are the
+// constants above and a body is a few hundred bytes, so recfile cannot refuse
+// it.
+func frame(kind string, body []byte) []byte {
+	data, err := recfile.EncodeSingleton(kind, body)
+	if err != nil {
+		panic("keys: framing a record cannot fail: " + err.Error())
+	}
+	return data
+}
+
+// unframe returns the body of a file that is a singleton record of the given
+// kind. The error says which rule of the first line, the length or the checksum
+// failed and never repeats the file: recfile's damages name the rule only.
+func unframe(kind string, data []byte) ([]byte, error) {
+	body, damage := recfile.DecodeSingleton(kind, data)
+	if damage != nil {
+		return nil, damage
+	}
+	return body, nil
+}
+
 // marshal encodes a body that holds only strings and counters, which cannot
 // fail.
 func marshal(v any) []byte {
@@ -51,9 +75,9 @@ func marshal(v any) []byte {
 
 // decodeBody decodes the body of the file into v with the strict rules and then
 // checks that encoding what was decoded gives the same body: a body is read only
-// in the one form it is written. The first line is the envelope's to check.
+// in the one form it is written. The first line is recfile's to check.
 func decodeBody(kind string, data []byte, v any, build func() ([]byte, error)) error {
-	body, err := decodeEnvelope(kind, data)
+	body, err := unframe(kind, data)
 	if err != nil {
 		return err
 	}
@@ -83,12 +107,12 @@ func keyBodyOf(seed [32]byte) []byte {
 	return marshal(keyBody{Algorithm: algorithmEd25519, Seed: base64.RawURLEncoding.EncodeToString(seed[:])})
 }
 
-func encodeKeyFile(kind string, seed [32]byte) []byte { return encodeEnvelope(kind, keyBodyOf(seed)) }
+func encodeKeyFile(kind string, seed [32]byte) []byte { return frame(kind, keyBodyOf(seed)) }
 
 // decodeKeyFile returns the seed of a key file. Every error is a fixed text: a
 // key file is secret, and what is wrong with it is never quoted.
 func decodeKeyFile(kind string, data []byte) (seed [32]byte, err error) {
-	body, err := decodeEnvelope(kind, data)
+	body, err := unframe(kind, data)
 	if err != nil {
 		return seed, err
 	}
@@ -119,7 +143,7 @@ func serialBodyOf(s record.SerialSeen) []byte {
 	return marshal(serialBody{Node: s.Node.String(), Serial: s.Serial, Digest: s.Digest.String()})
 }
 
-func encodeSerial(s record.SerialSeen) []byte { return encodeEnvelope(kindSerial, serialBodyOf(s)) }
+func encodeSerial(s record.SerialSeen) []byte { return frame(kindSerial, serialBodyOf(s)) }
 
 func decodeSerial(data []byte) (record.SerialSeen, error) {
 	var b serialBody
@@ -164,7 +188,7 @@ func clockBodyOf(c ClockState) []byte {
 	return marshal(b)
 }
 
-func encodeClock(c ClockState) []byte { return encodeEnvelope(kindClock, clockBodyOf(c)) }
+func encodeClock(c ClockState) []byte { return frame(kindClock, clockBodyOf(c)) }
 
 func decodeClock(data []byte) (ClockState, error) {
 	var b clockBody
@@ -195,7 +219,7 @@ type initBody struct {
 
 func initBodyOf(t time.Time) []byte { return marshal(initBody{CompletedAt: formatTime(t)}) }
 
-func encodeInit(t time.Time) []byte { return encodeEnvelope(kindInit, initBodyOf(t)) }
+func encodeInit(t time.Time) []byte { return frame(kindInit, initBodyOf(t)) }
 
 func decodeInit(data []byte) (time.Time, error) {
 	var b initBody
