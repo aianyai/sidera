@@ -13,6 +13,31 @@ import (
 // StatusReportType is the type string of a signed status report.
 const StatusReportType = "sidera/status-report/1"
 
+// UnknownCause says why a delivery is in an unknown state, for the one cause a
+// target can report that the state alone does not say. The zero value is no
+// cause given: the delivery was handed over and its result is unknown.
+type UnknownCause uint8
+
+const (
+	// UnknownCauseNone: no cause on the wire (key 9 absent).
+	UnknownCauseNone UnknownCause = iota
+	// UnknownCauseLostAtTarget: the target lost what it had stored about the
+	// message to storage corruption. It cannot say the message was handed over,
+	// and the sender must not take the silence for delivery. The report does not
+	// prove that the message ever arrived.
+	UnknownCauseLostAtTarget
+)
+
+func (c UnknownCause) String() string {
+	switch c {
+	case UnknownCauseNone:
+		return "none"
+	case UnknownCauseLostAtTarget:
+		return "lost_at_target"
+	}
+	return fmt.Sprintf("unknown_cause(%d)", uint8(c))
+}
+
 // StatusReport is a target node's signed statement about one delivery: where a
 // message stands at one of its endpoints. It is the evidence that lets a reply
 // come back (the message arrived, and when) and what the sender pulls to learn
@@ -35,6 +60,11 @@ type StatusReport struct {
 	// block, as delivery reports it. The wire form writes the cause only while
 	// the delivery is blocked.
 	Status delivery.StatusReport
+	// UnknownCause is given only with the state delivery_unknown; the zero value
+	// is no cause. Encoding refuses a cause the wire format cannot carry rather
+	// than writing the report without it, which a reader would take for a
+	// delivery handed over.
+	UnknownCause UnknownCause
 	// ReportedAt is the moment the target recorded the state the report states,
 	// not the moment it signed the report. A target that sends the report again
 	// for an unchanged state repeats the same ReportedAt under a fresh
@@ -48,8 +78,13 @@ type StatusReport struct {
 
 // ProvesArrival reports whether the report shows that the message reached the
 // target node and was kept: accepted (queued or leased), delivered, or handed
-// out with an unknown result. A rejection and a closed delivery do not.
+// out with an unknown result. A rejection and a closed delivery do not, and
+// neither does a report of lost_at_target: its reported_at is when the target
+// found the loss, not when the message arrived.
 func (r StatusReport) ProvesArrival() bool {
+	if r.UnknownCause == UnknownCauseLostAtTarget {
+		return false
+	}
 	switch r.Status.State {
 	case delivery.StateAccepted, delivery.StateDelivered, delivery.StateDeliveryUnknown:
 		return true
@@ -85,6 +120,9 @@ var (
 		2: delivery.CauseRuntimeAuth,
 		3: delivery.CauseNativeUnavailable,
 	}
+	unknownCauseWire = []UnknownCause{
+		1: UnknownCauseLostAtTarget,
+	}
 )
 
 func toWireCode[T comparable](table []T, v T) (uint64, bool) {
@@ -113,6 +151,7 @@ type statusReportWire struct {
 	ReportedAt   int64  `cbor:"6,keyasint"`
 	DeliveredAt  *int64 `cbor:"7,keyasint,omitempty"`
 	Sender       []byte `cbor:"8,keyasint"`
+	UnknownCause uint64 `cbor:"9,keyasint,omitempty"`
 }
 
 func statusReportToWire(r StatusReport) (statusReportWire, error) {
@@ -133,6 +172,13 @@ func statusReportToWire(r StatusReport) (statusReportWire, error) {
 		w.BlockedCause, ok = toWireCode(causeWire, r.Status.BlockedCause)
 		if !ok {
 			return statusReportWire{}, fmt.Errorf("%w: block cause %s", ErrReport, r.Status.BlockedCause)
+		}
+	}
+	if r.UnknownCause != UnknownCauseNone {
+		// A cause on a state other than delivery_unknown is refused by the
+		// decoding path that encoding runs.
+		if w.UnknownCause, ok = toWireCode(unknownCauseWire, r.UnknownCause); !ok {
+			return statusReportWire{}, fmt.Errorf("%w: unknown cause %s", ErrReport, r.UnknownCause)
 		}
 	}
 	var err error
@@ -177,6 +223,14 @@ func statusReportFromWire(w statusReportWire) (StatusReport, error) {
 		r.Status.Blocked = true
 		if r.Status.BlockedCause, ok = fromWireCode(causeWire, w.BlockedCause); !ok {
 			return StatusReport{}, fmt.Errorf("%w: block cause %d", ErrReport, w.BlockedCause)
+		}
+	}
+	if w.UnknownCause != 0 {
+		if state != delivery.StateDeliveryUnknown {
+			return StatusReport{}, fmt.Errorf("%w: an unknown cause is given only with the state delivery_unknown", ErrReport)
+		}
+		if r.UnknownCause, ok = fromWireCode(unknownCauseWire, w.UnknownCause); !ok {
+			return StatusReport{}, fmt.Errorf("%w: unknown cause %d", ErrReport, w.UnknownCause)
 		}
 	}
 	if r.ReportedAt, err = record.TimeFromWire(w.ReportedAt); err != nil {

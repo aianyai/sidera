@@ -93,9 +93,44 @@ key.
 | 6 | reported_at | when the target recorded the state the report states |
 | 7 | delivered_at | exactly when delivered; not after `reported_at` |
 | 8 | sender | the node that sent the message, as the target saw it on the connection |
+| 9 | unknown_cause | optional; only with delivery_unknown; 1 lost_at_target. Absent means the delivery was handed over and its result is unknown |
 
 The blocked flag of `delivery.StatusReport` is the presence of key 5. A report
-proves arrival when its state is accepted, delivered or delivery_unknown.
+proves arrival when its state is accepted, delivered or delivery_unknown, except
+a report that carries `lost_at_target`.
+
+**Unknown cause.** A target whose record of a delivery was lost to storage
+corruption cannot claim it handed the message over, which is what a plain
+delivery_unknown says, and the sender must not take its silence for delivery.
+Key 9 lets it say so: `lost_at_target` means the target lost what it had stored
+about the message, so whether it was delivered (or, for a control signal,
+executed) is unknown. It is not "not delivered". The rules, enforced by the
+decoding path, which encoding also runs on what it writes:
+
+- key 9 appears only with state 4; with any other state the report is refused;
+- the only value is 1; absence is how no cause is written, so an explicit 0 is
+  refused as non-canonical, and any other value is refused;
+- a cause the format cannot carry (any `UnknownCause` without a wire value) is
+  an encoding error, never a report written without the key: a reader would
+  take that for a delivery handed over;
+- a report of `lost_at_target` does not prove arrival, and so never opens or
+  moves the reply window: its `reported_at` is when the target found the loss,
+  not when the message arrived, and a message that may never have been read
+  needs no reply permission.
+
+The key is optional and absent by default, so every report written before it
+keeps its bytes and still decodes. A reader built without key 9 refuses a
+report that carries it, since unknown fields are refused, and with it a reply
+that carries such a report as evidence. The type string stays
+`sidera/status-report/1` only because the key was added before any node outside
+this repository's own builds exchanged status reports; once nodes are deployed,
+a new field is a new type string. `StatusReport.UnknownCause` holds the cause;
+its zero value is no cause. `Outbound.ApplyReport` applies the state of a report
+to the delivery and does not yet carry the cause into it, so until the delivery
+layer carries the cause a sender that applies a `lost_at_target` report is told
+the ordinary delivery_unknown wording (the target handed it over); no code
+produces `lost_at_target` reports yet. A sender's loss of its own record (`lost_at_sender`) is never
+reported by a target and has no wire value.
 
 `reported_at` is the moment the target recorded the state, not the moment it
 signed. A target that sends the report again for an unchanged state (as evidence
@@ -389,7 +424,11 @@ which may still admit it.
   `TestRetryAndDeduplication`, `TestEncodeRefusesWhatDecodeRefuses`, and for the
   system endpoint the rows of `TestEnvelopeDecodeRules` and
   `TestSystemEndpointIsNoRecipient`);
-  `records_test.go` (`TestStatusReportRules`, `TestControlReplyRules`,
+  `records_test.go` (`TestStatusReportRules`, `TestStatusReportUnknownCauseDecodeRules`,
+  `TestStatusReportUnknownCauseRoundTrips`,
+  `TestStatusReportRefusesAnUnrepresentableUnknownCause`,
+  `TestUnknownCauseWireTableIsIndependentOfGoOrder`,
+  `TestStatusReportProvesArrival`, `TestControlReplyRules`,
   `TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey`, which includes the
   sending-node check); `golden_test.go` (`TestGoldenRequestDigest`);
   `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`,

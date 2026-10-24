@@ -162,12 +162,14 @@ func TestStatusReportRefusesAnUnrepresentableUnknownCause(t *testing.T) {
 		t.Helper()
 		_, err := record.Seal(d, rep, signerOf(t, keyNetworkA))
 		requireErr(t, err, record.ErrPayload)
-		_, err = statusReportToWire(rep)
 		requireErr(t, err, ErrReport)
 	}
 	for _, c := range []UnknownCause{2, 200} {
 		t.Run("a cause without a wire value is refused: "+c.String(), func(t *testing.T) {
-			refused(t, unknownReport(t, c))
+			rep := unknownReport(t, c)
+			refused(t, rep)
+			_, err := statusReportToWire(rep)
+			requireErr(t, err, ErrReport)
 		})
 	}
 	for name, st := range map[string]delivery.StatusReport{
@@ -227,18 +229,22 @@ func TestStatusReportUnknownCauseDecodeRules(t *testing.T) {
 	})
 	t.Run("an explicit zero is refused", func(t *testing.T) {
 		_, err := verify(reportPayload("a6", "04", "", "", "0900"))
-		requireErr(t, err, record.ErrPayload)
+		requireErr(t, err, record.ErrNotCanonical)
 	})
 	t.Run("a duplicate key is refused", func(t *testing.T) {
 		_, err := verify(reportPayload("a7", "04", "", "", "09010901"))
-		requireErr(t, err, record.ErrPayload)
+		requireErr(t, err, record.ErrMalformed)
 	})
-	for _, v := range []string{"02", "0a", "1818", "20"} {
-		t.Run("the value "+v+" is refused", func(t *testing.T) {
-			_, err := verify(reportPayload("a6", "04", "", "", "09"+v))
+	for _, v := range []struct{ hex, name string }{{"02", "2"}, {"0a", "10"}, {"1818", "24"}} {
+		t.Run("the value "+v.name+" is refused", func(t *testing.T) {
+			_, err := verify(reportPayload("a6", "04", "", "", "09"+v.hex))
 			requireErr(t, err, record.ErrPayload)
 		})
 	}
+	t.Run("a negative value is refused", func(t *testing.T) {
+		_, err := verify(reportPayload("a6", "04", "", "", "0920"))
+		requireErr(t, err, record.ErrMalformed)
+	})
 	for _, c := range []struct{ name, pairs, state, afterState, afterReported string }{
 		{"accepted", "a6", "01", "", ""},
 		{"delivered", "a7", "02", "", "071a6553f484"},

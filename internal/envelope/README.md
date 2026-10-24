@@ -20,7 +20,7 @@ this package is [`reply`](../reply/README.md).
 | `Envelope.Digest()` | The request digest the target stores for deduplication. |
 | `Kind`, `Kind.Action()`, `Kind.Signal()`, `KindOfSignal` | The five kinds, the mapping to `authz.Action` (a control signal's action comes from `adapterreg.ActionOf`), and the mapping to the adapter protocol's control signals. |
 | `CheckEvidence(records)` | The shape of an evidence list: at most one control reply, then at most one status report. |
-| `StatusReport`, `StatusReportDescriptor(node, accepted, now)`, `VerifyStatusReport(record, target, local, accepted, now)` | The signed status report. `SignedReport` is the verified value and remembers the node it was verified for. The report names the sending node, which must be `local`. |
+| `StatusReport` (with `UnknownCause`: `UnknownCauseNone`, `UnknownCauseLostAtTarget`), `StatusReportDescriptor(node, accepted, now)`, `VerifyStatusReport(record, target, local, accepted, now)` | The signed status report. `SignedReport` is the verified value and remembers the node it was verified for. The report names the sending node, which must be `local`. |
 | `ControlReply`, `ControlResult`, `CreateResult`, `ControlReplyDescriptor(node, accepted, now)`, `VerifyControlReply(record, target, local, accepted, now)` | The signed control reply for the four control signals, in the values of `adapterproto`. `SignedControlReply` is the verified value. The reply names the sending node, which must be `local`. |
 | `Outbound`, `Tracked`, `Arrival` | The sender's record of a message it sent: one delivery per recipient, the derived delivery of an initial message, the digest of the accepted control reply, and what signed reports proved about arrival. |
 | `Outbound.ApplyReport(now, report)` | The one rule by which a sender applies a verified status report, pulled or attached to a reply. Returns a `ReportEffect`: applied, not tracked, too late, or awaiting the control reply. |
@@ -65,6 +65,12 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   endpoint-level size caps of the policy are separate.
 - **Params.** Only `session.create` has params, `{1: preset}`, and it requires
   them; the preset follows `adapterproto.ValidatePresetName`.
+- **Status report unknown cause.** `StatusReport.UnknownCause` is optional (zero
+  is absent), allowed only with the state delivery_unknown, and has one value,
+  `UnknownCauseLostAtTarget`. A report that carries it does not prove arrival.
+  Encoding returns `ErrReport` for a cause the wire format cannot carry; a cause
+  on another state is refused by the decoding path that sealing runs. Neither
+  writes the report without it.
 - **Evidence.** At most two records: a control reply, then a status report. An
   envelope with evidence has a `reply_to`. Signatures are not checked in the
   envelope; `reply` checks them against the sender's own records.
