@@ -50,8 +50,12 @@ fetched, they only let the files refer to each other
 - **Numbers** are integers written as plain integer literals. The schema accepts
   `1.0` as an integer, as the specification says; the Go types do not, and
   neither should a sender.
-- **Repeated keys** in one object are not allowed. The schema cannot state it; the
-  Go decoder rejects them.
+- **Repeated keys** in one object are not allowed, at any depth: parsers disagree
+  about which of two equal keys wins, so a message must not contain any. The
+  schema cannot state it. The Go decoder rejects them in params and results, and
+  the Go peer rejects a repeated member of the frame itself (`jsonrpc`, `id`,
+  `method`, `params`, `result`, `error`) with `-32600` and a null id, before it
+  reads the message. An implementation in another language must do both.
 
 ## What the schema cannot state
 

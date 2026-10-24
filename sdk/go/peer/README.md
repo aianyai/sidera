@@ -7,7 +7,9 @@ against a counterpart that is buggy or hostile. Read
 [the adapter-protocol reference](../../../docs/references/adapter-protocol/README.md)
 for the reasons behind the rules.
 
-The package depends on the standard library only. Method names, parameter
+The package depends on the standard library and on the strict JSON scanner
+of its own module (`sdk/go/internal/strictjson`), which nothing outside the SDK
+can import. Method names, parameter
 schemas and the meaning of results belong to the layer above (`adapterproto`);
 `initialize`, `ping`, `shutdown` and the rest of that layer's methods are
 registered by the owner with `Handle`, never special-cased here. The one
@@ -39,7 +41,10 @@ method the peer handles itself is the `$/cancel_request` notification.
   matched exactly. An `id` is an integer of at most 2^53-1 in absolute value or a
   string of 1 to 128 characters (`RequestID`); `null`, fractions and exponents
   are invalid, so two spellings of one number cannot be two different in-flight
-  requests.
+  requests. A member name that occurs twice in the frame itself is `-32600`
+  with a null id (parsers disagree about which one wins, and the id of such a
+  line cannot be trusted); repeats inside `params` and `result` are the business
+  of the layer that decodes them.
   The error reply to an invalid line carries the line's id only when the line
   has a `method` and a valid id; any other malformed line, which may have been
   meant as a response, is answered with a null id, so the error can never be
@@ -56,7 +61,8 @@ method the peer handles itself is the `$/cancel_request` notification.
   could leave the owner with a wrong picture of the other side, and the owner
   resynchronizes after reconnecting.
 - **Cancellation.** `$/cancel_request {"request_id": …}` is handled directly by
-  the read loop. It cancels the handler's context; the request is still
+  the read loop; its params are decoded as strictly as any other (an unknown or
+  repeated member, a member in another case or a null cancels nothing). It cancels the handler's context; the request is still
   answered exactly once, with the handler's result or with `-32800`. A request
   cancelled while still queued is answered `-32800` without running its handler.
   When a `Call` context ends, the peer sends the cancel notification, returns

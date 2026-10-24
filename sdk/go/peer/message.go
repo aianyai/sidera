@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"unicode/utf8"
+
+	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
 )
 
 const jsonrpcVersion = "2.0"
@@ -74,6 +76,13 @@ func classify(line []byte) (message, *classifyError) {
 		return message{}, invalidRequest(nil, "batch requests are not supported")
 	default:
 		return message{}, invalidRequest(nil, "a message must be a JSON object")
+	}
+	// A repeated member would be read as the first by one implementation and as
+	// the last by another, so a frame with one is refused. Only the frame's own
+	// members are looked at; the layer that interprets params and results
+	// refuses repeats inside them.
+	if strictjson.NoDuplicateTopLevelKeys(line) != nil {
+		return message{}, invalidRequest(nil, "a member name occurs twice")
 	}
 	// Exact key names: encoding/json struct decoding would also accept
 	// "Method" or "JSONRPC".

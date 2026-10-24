@@ -362,6 +362,9 @@ func TestCancelWithoutAUsableRequestIDCancelsNothing(t *testing.T) {
 	for _, params := range []string{
 		`{}`, `{"request_id":null}`, `{"request_id":""}`, `{"request_id":1.0}`,
 		`{"request_id":9223372036854775807}`, `{"request_id":[0]}`,
+		// Decoded as strictly as every other params: a repeated member, an unknown
+		// member and a member in another case are not a cancel of request 0.
+		`{"request_id":0,"request_id":0}`, `{"request_id":0,"extra":true}`, `{"Request_ID":0}`,
 	} {
 		r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":` + params + `}`)
 	}
@@ -928,5 +931,34 @@ func TestMalformedResponseIsNeverAnsweredWithItsID(t *testing.T) {
 	r.send(`{"jsonrpc":"2.0","id":5,"result":{"echo":"ok"}}`)
 	if err := <-call5; err != nil || result.Echo != "ok" {
 		t.Fatalf("call 5 = %v, %+v", err, result)
+	}
+}
+
+func TestRepeatedFrameMemberIsInvalidRequest(t *testing.T) {
+	leakGuard(t)
+	var ran atomic.Int32
+	_, r, _ := newRaw(t, peer.Params{}, echoCounter(&ran))
+	for _, tc := range []struct{ name, line string }{
+		{"jsonrpc", `{"jsonrpc":"2.0","jsonrpc":"2.0","id":1,"method":"echo"}`},
+		{"id", `{"jsonrpc":"2.0","id":1,"id":2,"method":"echo"}`},
+		{"method", `{"jsonrpc":"2.0","id":1,"method":"echo","method":"ping"}`},
+		{"params", `{"jsonrpc":"2.0","id":1,"method":"echo","params":{},"params":{}}`},
+		{"a notification", `{"jsonrpc":"2.0","method":"echo","method":"echo"}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r.send(tc.line)
+			// The id cannot be trusted when members repeat, so the reply has none.
+			if f := r.recv(); f.errCode() != peer.CodeInvalidRequest || string(f.ID) != "null" {
+				t.Fatalf("got %+v, want -32600 with a null id", f)
+			}
+		})
+	}
+	// A repeat inside params is not the frame's business: the handler is run.
+	r.send(`{"jsonrpc":"2.0","id":9,"method":"echo","params":{"a":1,"a":2}}`)
+	if f := r.recv(); string(f.ID) != "9" || f.Error != nil {
+		t.Fatalf("a repeat inside params was refused by the frame layer: %+v", f)
+	}
+	if ran.Load() != 1 {
+		t.Fatalf("handler ran %d times, want 1", ran.Load())
 	}
 }

@@ -148,3 +148,35 @@ func FuzzDecode(f *testing.F) {
 		}
 	})
 }
+
+func TestNoDuplicateTopLevelKeys(t *testing.T) {
+	tests := []struct {
+		name, in string
+		wantErr  string
+	}{
+		{"accepts an empty object", `{}`, ""},
+		{"accepts distinct keys", `{"a":1,"b":2}`, ""},
+		{"rejects a repeated key", `{"a":1,"b":2,"a":3}`, "a: duplicate key"},
+		{"rejects a repeated key whose values are objects", `{"a":{},"a":{}}`, "a: duplicate key"},
+		{"rejects a repeated key after a nested object", `{"a":{"x":[1,{"y":2}]},"b":1,"b":2}`, "b: duplicate key"},
+		{"does not look inside an object value", `{"a":{"x":1,"x":2}}`, ""},
+		{"does not look inside a list value", `{"a":[{"x":1,"x":2}],"b":[[{"y":1,"y":1}]]}`, ""},
+		{"accepts the same key at two depths", `{"a":{"a":{"a":1}},"b":1}`, ""},
+		{"a repeated key is a repeated key whatever follows it", `{"a":1,"a":[{"x":1,"x":2}]}`, "a: duplicate key"},
+		{"reports truncated input", `{"a":{"b":`, "strictjson"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := strictjson.NoDuplicateTopLevelKeys([]byte(tc.in))
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("got %v, want success", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("got %v, want an error containing %q", err, tc.wantErr)
+			}
+		})
+	}
+}

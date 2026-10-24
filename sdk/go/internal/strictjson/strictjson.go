@@ -78,50 +78,87 @@ func Decode(data []byte, v any) error {
 	return nil
 }
 
-// noDuplicateKeys reports the first object that has a key twice.
-func noDuplicateKeys(data []byte) error {
+// noDuplicateKeys reports the first object that has a key twice, at any depth.
+func noDuplicateKeys(data []byte) error { return scanKeys(data, true) }
+
+// NoDuplicateTopLevelKeys reports an error when the object that data holds has a
+// key twice. Objects nested inside it are not looked at, for a caller that
+// interprets only the outer object and leaves the rest to a layer that decodes
+// it with Decode. data must be one valid JSON object.
+func NoDuplicateTopLevelKeys(data []byte) error { return scanKeys(data, false) }
+
+// scanKeys walks data and reports the first object with a repeated key; with
+// deep unset it looks at the keys of the outermost object only.
+func scanKeys(data []byte, deep bool) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
-	var scan func(path string) error
-	scan = func(path string) error {
+	token := func() (json.Token, error) {
 		tok, err := dec.Token()
 		if err != nil {
-			return &Error{Msg: err.Error()}
+			return nil, &Error{Msg: err.Error()}
+		}
+		return tok, nil
+	}
+	// skip consumes the value whose first token, tok, has been read.
+	skip := func(tok json.Token) error {
+		if _, ok := tok.(json.Delim); !ok {
+			return nil
+		}
+		for depth := 1; depth > 0; {
+			tok, err := token()
+			if err != nil {
+				return err
+			}
+			if d, ok := tok.(json.Delim); ok {
+				if d == '{' || d == '[' {
+					depth++
+				} else {
+					depth--
+				}
+			}
+		}
+		return nil
+	}
+	var scan func(path string, outermost bool) error
+	scan = func(path string, outermost bool) error {
+		tok, err := token()
+		if err != nil {
+			return err
 		}
 		d, ok := tok.(json.Delim)
 		if !ok {
 			return nil
 		}
+		if !deep && !outermost {
+			return skip(tok)
+		}
 		switch d {
 		case '{':
 			seen := map[string]bool{}
 			for dec.More() {
-				kt, err := dec.Token()
+				kt, err := token()
 				if err != nil {
-					return &Error{Msg: err.Error()}
+					return err
 				}
 				k := kt.(string)
 				if seen[k] {
 					return &Error{Path: join(path, k), Msg: "duplicate key"}
 				}
 				seen[k] = true
-				if err := scan(join(path, k)); err != nil {
+				if err := scan(join(path, k), false); err != nil {
 					return err
 				}
 			}
 		case '[':
 			for i := 0; dec.More(); i++ {
-				if err := scan(fmt.Sprintf("%s[%d]", path, i)); err != nil {
+				if err := scan(fmt.Sprintf("%s[%d]", path, i), false); err != nil {
 					return err
 				}
 			}
 		}
-		_, err = dec.Token() // the closing delimiter
-		if err != nil {
-			return &Error{Msg: err.Error()}
-		}
-		return nil
+		_, err = token() // the closing delimiter
+		return err
 	}
-	return scan("")
+	return scan("", true)
 }
 
 func parseTree(data []byte) (any, error) {

@@ -45,8 +45,8 @@ Behaviour, each point pinned by the tests named in "Where":
   `MaxLineBytes` is answered `-32004` with a null id and the connection is
   closed. Invalid UTF-8 (checked with `utf8.Valid`) and invalid JSON are
   `-32700` with a null id; a missing or wrong `"jsonrpc"`, a non-object, a
-  batch, a null or malformed request id, or an id already in flight are
-  `-32600`. After any of these except the overlong line the connection
+  batch, a member name that occurs twice in the frame, a null or malformed
+  request id, or an id already in flight are `-32600`. After any of these except the overlong line the connection
   continues. The reply carries the id of the line only when the line has a
   `method` and a valid id, that is, when it is recognisably a request; every
   other malformed line, which may have been meant as a response, is answered
@@ -58,7 +58,9 @@ Behaviour, each point pinned by the tests named in "Where":
   overflows the connection is closed. Unknown notifications are logged and
   dropped.
 - **Cancellation.** `$/cancel_request {request_id}` is processed by the read
-  loop and cancels the handler's context. The request is still answered exactly
+  loop and cancels the handler's context. Its params are decoded strictly, like
+  the params of every method, so a cancel with an unknown or repeated member
+  cancels nothing. The request is still answered exactly
   once: with its result, or with `-32800`.
 - **Write timeout.** A timer per write closes the transport when a line is not
   written within `WriteTimeout`.
@@ -158,6 +160,13 @@ anything not listed, including unknown codes, counts as unknown.
   answer to a call and which the other side's peer logs and drops. The reply
   is kept rather than replaced by a log line only so that a counterpart that
   speaks a broken dialect gets a visible signal.
+- **A repeated member of the frame is refused where the frame is read.** Two
+  readers of `{"id":1,"id":2,...}` can disagree about which request is meant,
+  and a cancel or an in-flight check would then act on another request than the
+  one that is handled. The line is answered with a null id because its id
+  cannot be trusted. Repeats inside params and results are left to the layer
+  that decodes them (`strictjson`), so the peer does not scan what it does not
+  interpret.
 - **A response with a valid id but an invalid body fails its call.** Dropping
   it would leave the caller waiting for its timeout on a counterpart that
   already answered.
@@ -197,6 +206,7 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | Overlong line closes; exactly-max accepted; nothing after is read | `TestOverlongLineClosesConnection` |
 | Invalid JSON, invalid UTF-8 | `TestInvalidJSONKeepsConnection`, `TestInvalidUTF8IsParseError` |
 | Missing or wrong `jsonrpc`, bad shapes | `TestMissingOrWrongVersionIsInvalidRequest` |
+| A repeated frame member is refused; a repeat inside params is not the frame's business | `TestRepeatedFrameMemberIsInvalidRequest`, `TestNoDuplicateTopLevelKeys`, `TestClassify` |
 | A malformed response-like line is never answered with its id, even when both sides have that id in flight | `TestMalformedResponseIsNeverAnsweredWithItsID`, `TestClassifyDetails` |
 | Batch rejected, connection kept | `TestBatchIsRejectedAndConnectionContinues` |
 | Overload before params and handler | `TestOverloadedIsDecidedBeforeParamsAndHandler` |
@@ -206,7 +216,7 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | Notification order and overflow | `TestNotificationsAreHandledInArrivalOrder`, `TestNotificationOverflowClosesConnection` |
 | Outbound full | `TestOutboundQueueFullReturnsErrOverloadedAndWritesNothing`, `TestRefusedCallLeavesNoPendingEntry` |
 | Duplicate and invalid ids, the id rule | `TestDuplicateInFlightIDIsInvalidRequest`, `TestInvalidRequestIDs`, `TestRequestIDJSON`, `TestRequestIDValidate`, `TestClassify` |
-| A cancel without a usable id cancels nothing | `TestCancelWithoutAUsableRequestIDCancelsNothing` |
+| A cancel without a usable id, or with an unknown or repeated member, cancels nothing | `TestCancelWithoutAUsableRequestIDCancelsNothing` |
 | Late response, malformed response | `TestLateResponseIsDroppedAndLogged`, `TestMalformedResponseFailsTheCall` |
 | Unknown method and notification | `TestUnknownMethodIsMethodNotFound`, `TestUnknownNotificationIsLoggedAndDropped` |
 | Close, pending calls, goroutines | `TestCloseEndsPendingCallsWithErrClosed`, `TestCloseWithoutStartAndCloseFromHandler`, `TestCloseWaitsForReaderAndWriter`, `TestNoGoroutineLeakAfterManyPeers` |
@@ -330,7 +340,7 @@ with the rest. `1001` to `1011` are the protocol's own (`adapterproto.Code*`):
 | Code | Name | Meaning |
 | ---- | ---- | ------- |
 | -32700 | parse_error | invalid JSON or UTF-8; the connection continues |
-| -32600 | invalid_request | not an object, a batch, no `jsonrpc`, bad or reused id |
+| -32600 | invalid_request | not an object, a batch, no `jsonrpc`, a repeated member, bad or reused id |
 | -32601 | method_not_found | unknown method, or not valid in this direction |
 | -32602 | invalid_params | breaks the schema or has an unknown field |
 | -32603 | internal_error | the handler failed; the outcome is unknown |

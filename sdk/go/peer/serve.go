@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
+
+	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
 )
 
 // handleLine classifies one inbound line and acts on it. It runs on the read
@@ -91,7 +93,7 @@ func (p *Peer) acceptNotification(msg message) {
 // request is still answered, exactly once, by its worker.
 func (p *Peer) cancelRequest(params json.RawMessage) {
 	var body CancelRequestParams
-	if err := json.Unmarshal(params, &body); err != nil {
+	if err := strictjson.Decode(params, &body); err != nil {
 		p.log.Warn("cancel request with unusable params")
 		return
 	}

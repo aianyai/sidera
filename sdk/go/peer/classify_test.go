@@ -29,7 +29,7 @@ func oracleClassify(line []byte) verdict {
 		return verdict{code: CodeParseError}
 	}
 	m, ok := v.(map[string]any)
-	if !ok {
+	if !ok || repeatsTopLevelMember(line) {
 		return verdict{code: CodeInvalidRequest}
 	}
 	if m["jsonrpc"] != "2.0" {
@@ -66,6 +66,50 @@ func oracleClassify(line []byte) verdict {
 		return verdict{code: CodeInvalidRequest}
 	}
 	return verdict{kind: kindResponse}
+}
+
+// repeatsTopLevelMember reports whether the object in line names one of its own
+// members twice. It walks the tokens and counts depth by hand, without sharing
+// anything with the code under test.
+func repeatsTopLevelMember(line []byte) bool {
+	dec := json.NewDecoder(bytes.NewReader(line))
+	depth := 0
+	seen := map[string]bool{}
+	expectKey := false
+	for {
+		tok, err := dec.Token()
+		if err != nil {
+			return false
+		}
+		switch x := tok.(type) {
+		case json.Delim:
+			switch x {
+			case '{', '[':
+				depth++
+				expectKey = depth == 1 && x == '{'
+			default:
+				depth--
+				expectKey = depth == 1 // a nested value ended: the next token is a key
+			}
+			if depth == 0 {
+				return false
+			}
+			continue
+		case string:
+			if depth == 1 && expectKey {
+				if seen[x] {
+					return true
+				}
+				seen[x] = true
+				expectKey = false
+				continue
+			}
+		}
+		// A value at depth 1 ends the pair; the next token is a key again.
+		if depth == 1 {
+			expectKey = true
+		}
+	}
 }
 
 var classifyCorpus = []struct {
@@ -119,7 +163,14 @@ var classifyCorpus = []struct {
 	{"response with bool id", `{"jsonrpc":"2.0","id":false,"result":{}}`},
 	{"result and error", `{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":1,"message":"x"}}`},
 	{"error without code", `{"jsonrpc":"2.0","id":1,"error":{"message":"x"}}`},
-	{"duplicate keys, last wins", `{"jsonrpc":"2.0","jsonrpc":"1.0","method":"m"}`},
+	{"repeated jsonrpc", `{"jsonrpc":"2.0","jsonrpc":"2.0","method":"m"}`},
+	{"repeated jsonrpc with a wrong first value", `{"jsonrpc":"1.0","jsonrpc":"2.0","method":"m"}`},
+	{"repeated id", `{"jsonrpc":"2.0","id":1,"id":2,"method":"m"}`},
+	{"repeated method", `{"jsonrpc":"2.0","method":"a","method":"b"}`},
+	{"repeated params", `{"jsonrpc":"2.0","method":"m","params":{},"params":[]}`},
+	{"repeated result", `{"jsonrpc":"2.0","id":1,"result":{},"result":{}}`},
+	{"repeated member inside params is the next layer's business", `{"jsonrpc":"2.0","method":"m","params":{"a":1,"a":2}}`},
+	{"same member name at two depths", `{"jsonrpc":"2.0","method":"m","params":{"method":"x","jsonrpc":"y"}}`},
 	{"deeply nested params", `{"jsonrpc":"2.0","method":"m","params":` + string(bytes.Repeat([]byte("["), 20000)) + string(bytes.Repeat([]byte("]"), 20000)) + `}`},
 }
 
