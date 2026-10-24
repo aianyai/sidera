@@ -35,8 +35,26 @@ checks that the model saw it before acknowledging for the agent.
   counted by the cap. An unknown outcome counts toward the cap and is otherwise
   treated like a failure. Neither changes anything outside the endpoint: the
   message stays queued and readable with `recv`.
-- Undecided, therefore parameters: the hourly cap and the minimum interval. The
-  prompt wording is provisional.
+- The number of turns that prompts have started and that are still running on
+  a node is capped. `DecidePrompt` judges one endpoint and knows nothing of the
+  others; `DecideNodePrompts` takes all waiting endpoints and the count of
+  running prompt-started turns and returns one decision for each, ordered by the
+  time the endpoint began to wait and then by endpoint ID. An endpoint that
+  `DecidePrompt` would prompt is released while there are free slots (the cap
+  less the running turns); the rest are held with `PromptNodeFull`. An endpoint
+  that `DecidePrompt` would not prompt keeps that decision and takes no slot.
+- Being held by the node cap is not an attempt: nothing is recorded, nothing
+  counts toward the hourly cap, and no failure exists that could make delivery
+  blocked. The message stays queued and readable with `recv`.
+- No event of a waiting endpoint marks a slot being freed, and `RetryAt` names
+  only the instants of the hourly cap and the minimum interval. So whenever any
+  prompt-started turn on the node ends, whatever the way, every waiting endpoint
+  is evaluated again, each with the trigger it had when it was held.
+- A turn whose adapter is offline is not counted: its state is unknown. When the
+  adapter returns and reports the turn running, it is counted again and the
+  total may exceed the cap until it falls back.
+- Parameters this package gives no default: the hourly cap, the minimum interval
+  and the node cap. The prompt wording is provisional.
 
 ### Delivery blocked
 
@@ -130,6 +148,42 @@ The delivery side that these rules call into is described in
   repeats loop on an agent that chose to ignore the prompt. One repeat answers
   the first case; the renewal by a new message, after an interval, answers the
   danger of an endpoint that is never woken again after ignoring one prompt.
+- **The node cap is a separate function over all waiting endpoints.** Which
+  endpoint is released first depends on the others, and a per-endpoint function
+  sees only its own input, so putting the order inside `DecidePrompt` would have
+  needed the whole node as its input and made every single-endpoint decision
+  depend on unrelated endpoints. `DecideNodePrompts` leaves the per-endpoint rules
+  where they are and adds only the limit and the order.
+- **Earliest waiter first, ties by endpoint ID.** A waiting message expires a
+  fixed time after it arrived, so the endpoint that has waited longest is the
+  closest to losing its messages; releasing it first gives the held-back time
+  the least chance of expiring them. A tie is broken by endpoint ID in byte
+  order and not by the order of the input, so the outcome does not depend on how
+  the caller happened to collect the endpoints. Rejected: a round robin or a
+  random choice, which needs state or randomness in a function that is pure and
+  replayed in property tests, and gives no bound on how long one endpoint waits.
+- **Only endpoints that would be prompted take a slot.** Giving a slot to an
+  endpoint that is busy, or at its hourly cap, would leave it unused while a
+  ready endpoint waits.
+- **A held-back endpoint is re-evaluated on every turn end, not at an instant.**
+  A hold for the hourly cap or the interval ends at a time that the function
+  can name. A hold by the node cap ends when some other endpoint's turn ends,
+  which is no instant and no event of this endpoint. Naming `RetryAt` would be a
+  guess; the caller instead has the one rule of evaluating all waiting
+  endpoints at each prompt-started turn end.
+- **Being held back is not an attempt.** An attempt records a prompt that was
+  sent. A hold sends nothing and wakes nobody, so counting it toward the hourly
+  cap would penalise an endpoint for the node's load, and counting it as a
+  failure would report delivery blocked while the adapter is fine.
+- **Turns of offline adapters are not counted.** Their state is unknown and may
+  never be learned if the adapter does not return; counting them would let a few
+  dead adapters stop prompts on the whole node. The cost is that the node can
+  briefly run more turns than the cap when they come back, which is why the free
+  slots never go below zero and nothing is released until the count falls under
+  the cap.
+- **An unset cap is an error.** Zero meaning no limit would silently remove the
+  protection on a configuration that forgot it. `DecidePrompt` does not read the
+  cap, but it rejects the same params, so that one value is validated in one place.
 - **Failed attempts are not counted by the cap.** The cap protects the agent
   from being woken too often. A prompt that never reached the session woke
   nobody, and counting it would keep a recovered adapter from waking the agent
@@ -250,6 +304,14 @@ The delivery side that these rules call into is described in
   Tests: `TestPromptText`, `TestNewSessionPromptText`, `TestNewSessionPromptIsNotAnAttempt`,
   `TestDecidePrompt`,
   `TestPromptScenario*`, `TestPromptParamsValidate`.
+- `internal/handoff/nodeprompt.go`: `DecideNodePrompts`, `WaitingPrompt`,
+  `NodePromptDecision`. Tests: `TestDecideNodePrompts` (one row per rule),
+  `TestDecideNodePromptsRejectsInvalidInput`,
+  `TestDecideNodePromptsDoesNotModifyItsInput`,
+  `TestNodePromptScenarioFreedSlotReleasesWaitersOldestFirst`,
+  `TestNodeCapHoldIsNeitherAnAttemptNorBlocked`,
+  `TestDecideNodePromptsProperties` (fixed seed, an oracle written in the test,
+  coverage assertions), and the cap rows of `TestPromptParamsValidate`.
 - `internal/handoff/blocked.go`: `AssessBlocked`. Tests: `TestAssessBlocked`,
   `TestAssessBlockedReportsOnceAndRecoversOnce`.
 - `internal/handoff/budget.go`: units, the token estimate, `DefaultBudget` and

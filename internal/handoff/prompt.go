@@ -15,9 +15,9 @@ const MaxReprompts = 1
 // hourlyWindow is the span over which PromptParams.MaxPerHour is counted.
 const hourlyWindow = time.Hour
 
-// PromptParams holds the prompt values that are not decided yet. There is no
-// default for either: the caller must supply both, and DecidePrompt rejects a
-// value that is not positive.
+// PromptParams holds the prompt values that this package gives no default. The
+// caller must supply all of them, and DecidePrompt and DecideNodePrompts reject
+// a value that is not positive: an unset cap is never read as no cap.
 type PromptParams struct {
 	// MaxPerHour caps the prompts that may have woken an endpoint within any
 	// one hour: delivered attempts and attempts with an unknown outcome.
@@ -27,7 +27,8 @@ type PromptParams struct {
 	// and wakes the endpoint again.
 	MinInterval time.Duration
 	// MaxConcurrentTurns caps the turns that prompts have started and that are
-	// still running on one node, across all endpoints.
+	// still running on one node, across all endpoints. Only DecideNodePrompts
+	// reads it; DecidePrompt, which judges one endpoint, does not.
 	MaxConcurrentTurns int
 }
 
@@ -41,6 +42,9 @@ func (p PromptParams) Validate() error {
 	}
 	if p.MinInterval <= 0 {
 		return fmt.Errorf("%w: MinInterval must be positive, got %v", ErrInvalidParams, p.MinInterval)
+	}
+	if p.MaxConcurrentTurns <= 0 {
+		return fmt.Errorf("%w: MaxConcurrentTurns must be positive, got %d", ErrInvalidParams, p.MaxConcurrentTurns)
 	}
 	return nil
 }
@@ -176,7 +180,10 @@ const (
 	// allows.
 	PromptHourlyCap
 	// PromptNodeFull: the endpoint may be prompted, but the node already runs
-	// as many prompt-started turns as it allows.
+	// as many prompt-started turns as it allows. Only DecideNodePrompts returns
+	// it. It is not an attempt and no failure: the caller records nothing, and
+	// evaluates the endpoint again when any prompt-started turn on the node
+	// ends.
 	PromptNodeFull
 )
 

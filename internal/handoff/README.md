@@ -16,6 +16,7 @@ to the delivery side, which calls into this package.
 | -------- | ------- |
 | `PromptText(count)`, `NewSessionPromptText` | The wake-up text for waiting messages, and the first prompt of a session created without an initial message. No message body, ever. Provisional wording. |
 | `DecidePrompt(PromptInput, PromptParams, now)` | Whether to send a prompt now: send or hold, with a typed reason, the prompt kind to record and the count for the text. A hold may carry `RetryAt`, when to evaluate again. |
+| `DecideNodePrompts([]WaitingPrompt, running, PromptParams, now)` | Which waiting endpoints of the node are prompted now, so that prompt-started turns never exceed `MaxConcurrentTurns`: one `PromptDecision` per endpoint, ordered earliest waiter first, held ones with `PromptNodeFull`. It calls `DecidePrompt` for each endpoint and adds only the node-wide limit. |
 | `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. |
 | `Pack(queue, delivery.LeaseID, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the first part not yet acknowledged). |
 | `Part(msg, k, delivery.LeaseID, Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
@@ -47,6 +48,33 @@ Prompts:
 - A failed attempt changes nothing: it is not an unread prompt, spends no
   allowance and does not count toward the cap. An unknown outcome counts toward
   the cap only.
+
+Node-wide concurrency of prompt-started turns:
+
+- The turns that prompts started and that are still running on one node are
+  capped (`PromptParams.MaxConcurrentTurns`). The cap protects the machine's
+  CPU, memory and subscription use. It does not count turns a person or another
+  tool started. `DecidePrompt` judges one endpoint and does not read it;
+  `DecideNodePrompts` is the node-wide entry.
+- Only an endpoint that `DecidePrompt` would prompt takes a slot. An endpoint
+  that is busy, has nothing pending, is at its hourly cap or has a prompt unread
+  keeps its own hold and leaves the slot to the next waiter.
+- Of the endpoints that would be prompted, the one that has waited longest goes
+  first, until the free slots (the cap less `running`) are used. Ties in
+  `WaitingSince` go to the lower endpoint ID in byte order, so the outcome does
+  not depend on the order of the input. The others are held with
+  `PromptNodeFull`.
+- Being held back is not an attempt. The caller records nothing for it, it does
+  not count toward `MaxPerHour`, it is not a failure and so never makes delivery
+  blocked. Messages stay queued and readable with `recv`.
+- A freed slot is not an event of any waiting endpoint, and `RetryAt` covers only
+  the hourly cap and the minimum interval. So whenever any turn that a prompt
+  started ends, however it ended, the caller evaluates all waiting endpoints
+  again with `DecideNodePrompts`, each with the `Trigger` it had when it was held.
+- A turn whose adapter is offline is not counted in `running`: its state is
+  unknown, and a turn nobody can observe must not stop the whole node. When the
+  adapter returns and reports the turn still running it is counted again, so
+  `running` can exceed the cap; nothing is released until it falls below it.
 
 Delivery blocked:
 
@@ -141,6 +169,18 @@ Before acknowledging:
   returned, and stores the `BlockedReport` of each `BlockedNew`.
 - The caller evaluates `DecidePrompt` again at `RetryAt`, when one is returned,
   with the `Trigger` it passed the first time.
+- `running` is the number of turns started by prompts that are still running on
+  the node and whose adapter is online. The caller derives it; this package
+  cannot tell an offline adapter's turn from a running one.
+- Every waiting endpoint is passed to `DecideNodePrompts` each time, once per
+  endpoint, with a nonzero `WaitingSince` (when it began to wait, for example the
+  arrival of its oldest waiting message). Duplicates, unset endpoints, a zero
+  `WaitingSince` and a negative `running` are errors wrapping
+  `ErrInvalidNodeInput`.
+- The caller sends a prompt only to the endpoints with action `PromptSend`, and
+  counts the turn each one starts in `running` from then on.
+- A decision `PromptNodeFull` records no attempt, and the caller evaluates again
+  when any prompt-started turn on the node ends.
 - `Signals.Since`, when the active cause started being continuously true, is
   optional precision. Zero means unknown and the cause is then measured from the
   arrival of the oldest waiting message, which can only overstate its duration.
@@ -179,5 +219,6 @@ Before acknowledging:
 - A page prints the lease as its text form, `MaxLeaseLen`
   (`delivery.LeaseIDTextLen`, 32) lowercase hex characters, which JSON does not
   escape.
-- `PromptParams` has no default: `MaxPerHour` and `MinInterval` are undecided and
-  must be configured.
+- `PromptParams` has no default: `MaxPerHour`, `MinInterval` and
+  `MaxConcurrentTurns` must be configured, and all three must be positive. An
+  unset node cap is an error, never no cap.
