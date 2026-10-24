@@ -161,6 +161,11 @@ const (
 	// reported endpoint, so there is nothing to apply the report to. A sender
 	// applies reports only to deliveries it has records for.
 	ReportNotTracked
+	// ReportTooLate: the report is dated after the delivery's report_by plus the
+	// clock tolerance. Nothing was applied and nothing learned from it: a report
+	// that late cannot move the arrival facts, and the reply window with them.
+	// It is not a fault of the peer (see ApplyReport).
+	ReportTooLate
 	// ReportAwaitsControlReply: the report says a control signal was delivered,
 	// and the control signal's delivery ends only through its control reply
 	// (HandleControlReply), which this record has not accepted yet. Nothing was
@@ -177,6 +182,12 @@ const (
 // endpoint is on, and not dated later than now plus the clock tolerance. A
 // report for an endpoint with no delivery here changes nothing (ReportNotTracked).
 //
+// A report dated after the delivery's report_by plus the clock tolerance also
+// changes nothing (ReportTooLate) and is not an error. A target that slept past
+// report_by settles the delivery when it wakes, at that later moment, and its
+// honest report carries that moment; what the sender must not do is let such a
+// report move the arrival facts, and the reply window with them.
+//
 // A control signal's own delivery ends as delivered only through its control
 // reply, because only the reply carries the result and the session endpoint the
 // sender needs: until HandleControlReply has accepted one (ControlReplyDigest is
@@ -185,9 +196,7 @@ const (
 // has the reply. Every other state of the report is applied as usual.
 //
 // A report whose state cannot follow the delivery's (a rejection of a delivery
-// already delivered, say) is ErrPeerContradiction, and so is a report dated
-// later than the delivery's report_by plus the clock tolerance: the target
-// stops reporting at report_by. On an error nothing changes.
+// already delivered, say) is ErrPeerContradiction. On an error nothing changes.
 func (o Outbound) ApplyReport(now time.Time, rep SignedReport) (Outbound, ReportEffect, []delivery.Outcome, error) {
 	if err := o.Validate(); err != nil {
 		return o, ReportNone, nil, err
@@ -215,7 +224,7 @@ func (o Outbound) ApplyReport(now time.Time, rep SignedReport) (Outbound, Report
 		}
 	}
 	if r.ReportedAt.After(t.Delivery.ReportBy.Add(timing.ClockTolerance)) {
-		return o, ReportNone, nil, fmt.Errorf("%w: the report is dated after the delivery's report_by plus the clock tolerance", ErrPeerContradiction)
+		return o, ReportTooLate, nil, nil
 	}
 	// Without a control reply the only delivery tracked is the signal's own (a
 	// derived one exists only once a reply bound it, Validate).

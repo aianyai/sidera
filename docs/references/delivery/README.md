@@ -186,8 +186,10 @@ blocked notice.
 
 A request is identified by (sender node, message id, recipient endpoint) and a
 body digest. The same key and digest returns the original record; the same key
-with another digest is a conflict. A control signal's reply is stored once in
-the dedup record and returned on every repeat.
+with another digest is a conflict. A control signal's reply is stored once
+in the dedup record and returned on every repeat. The stored reply outlives the
+record's own retention and is kept until `reply.RetainFactsUntil`, because reply
+permission still reads it.
 
 ## Why
 

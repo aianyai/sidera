@@ -139,9 +139,12 @@ in a verified report, whether pulled or attached to a reply: it checks message,
 signer node and date, applies it with `delivery.Record.ApplyStatusReport`, and
 learns the arrival facts (earliest delivery time of a delivered report, earliest
 `reported_at` of a report that proves arrival). A report whose state cannot
-follow the delivery's is `ErrPeerContradiction`, and so is one dated after the
-delivery's `report_by` plus the clock tolerance, because the target stops
-reporting at `report_by`.
+follow the delivery's is `ErrPeerContradiction`. One dated after the delivery's
+`report_by` plus the clock tolerance is not applied and teaches the sender
+nothing: `ApplyReport` returns `ReportTooLate` and no error, because a target
+that slept past `report_by` settles late and its honest report carries that late
+`reported_at`. In the reply evidence such a report contributes nothing and is not
+an evidence error.
 
 A control signal's own delivery ends only through its control reply. While the
 sender has accepted none (`ControlReplyDigest` is zero), a `delivered` report for
@@ -183,8 +186,7 @@ the sender nothing it can act on.
 `ErrPeerContradiction` is returned for a second distinct control reply, for a
 reply to a signal the target is known to have rejected, for a reply that names the
 signal's own recipient as the session it created, and for a report that cannot
-follow the delivery's state or is dated after the delivery's `report_by` plus the
-clock tolerance. It means the peer broke the contract: the
+follow the delivery's state. It means the peer broke the contract: the
 sender stops pulling from it for this message and logs it. The error wraps the
 specific cause.
 
@@ -314,11 +316,13 @@ which may still admit it.
   endpoint) and the result of `endpoint.status`. The report is therefore not
   applied before the reply was accepted, and the caller keeps pulling. The report
   is not wrong, only not the last word, so it is not a contradiction.
-- **Reports end at `report_by`.** The target stops reporting at the delivery's
-  `report_by`, so a report dated later than that plus the clock tolerance was not
-  issued by a target that keeps the delivery rules; treating it as a fact would
-  let a faulty peer move arrival times, and the reply window with them, outside
-  any delivery.
+- **A report cannot extend the window past `report_by`.** A target that slept
+  past a delivery's `report_by` settles the delivery when it wakes, at that
+  later moment, so its honest report is dated after `report_by`. The report is
+  not wrong, but taking its date as an arrival fact would let any peer, honest
+  or not, move arrival times and the reply window with them outside the
+  delivery. It is therefore ignored (`ReportTooLate`), not refused: the peer
+  broke no contract.
 - **A control signal's original recipient never replies.** A control signal's
   result already returns to the sender as the control reply, signed by the node
   that executed it; permission for the recipient endpoint as well would admit a

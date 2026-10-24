@@ -694,9 +694,11 @@ func TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply(t *testing.T) {
 	})
 }
 
-// The target stops reporting at report_by, so a report dated later than that
-// plus the clock tolerance is not one a genuine target issued.
-func TestAReportDatedAfterTheDeliverysReportByIsAContradiction(t *testing.T) {
+// A target that slept past report_by settles the delivery when it wakes, so
+// its honest report is dated after report_by. Such a report is not a fault of
+// the peer, but it must not move the arrival facts or the reply window: it is
+// ignored.
+func TestAReportDatedAfterTheDeliverysReportByIsIgnored(t *testing.T) {
 	now := t0.Add(5 * time.Hour)
 	// accept_before is 10 minutes after t0; report_by follows 2 h (queue cap),
 	// four 15 min leases and the 2 min clock tolerance later; the sender then
@@ -723,14 +725,31 @@ func TestAReportDatedAfterTheDeliverysReportByIsAContradiction(t *testing.T) {
 				t.Errorf("effect %v", eff)
 			}
 		})
-		t.Run(name+": one second later is a contradiction and changes nothing", func(t *testing.T) {
+		t.Run(name+": one second later is ignored and changes nothing", func(t *testing.T) {
 			n, eff, outs, err := o.ApplyReport(now, signedReport(t, reportFor("ctl-0001", to, accepted(), lastBelieved+time.Second, 0)))
-			requireErr(t, err, ErrPeerContradiction)
-			if eff != ReportNone || outs != nil || !reflect.DeepEqual(n, o) {
+			requireNoErr(t, err)
+			if eff != ReportTooLate || outs != nil || !reflect.DeepEqual(n, o) {
 				t.Errorf("effect %v: the record changed", eff)
 			}
 		})
 	}
+	t.Run("a late delivered report of a control signal is too late, not awaiting the reply", func(t *testing.T) {
+		o := outboundTo(t, KindSessionClose, false)
+		n, eff, _, err := o.ApplyReport(now, signedReport(t, reportFor("ctl-0001", 2, delivered(), lastBelieved+time.Second, lastBelieved)))
+		requireNoErr(t, err)
+		if eff != ReportTooLate || !reflect.DeepEqual(n, o) {
+			t.Errorf("effect %v", eff)
+		}
+	})
+	t.Run("a late report attached to a control reply leaves the reply handled and the report ignored", func(t *testing.T) {
+		o := createOutbound(t)
+		late := signedReport(t, reportFor("ctl-0001", 2, delivered(), lastBelieved+time.Second, lastBelieved))
+		h, err := HandleControlReply(now, o, signedReply(t, createdReply("ctl-0001", 2, 3, 650*time.Second)), &late)
+		requireNoErr(t, err)
+		if h.Report != ReportTooLate || h.Reported != nil || h.Outbound.Derived == nil || h.Outbound.ControlReplyDigest.IsZero() {
+			t.Errorf("report effect %v, outbound %+v", h.Report, h.Outbound)
+		}
+	})
 	t.Run("a report for an endpoint the sender holds nothing for is still only not tracked", func(t *testing.T) {
 		_, eff, _, err := outboundTo(t, KindMessage, true).ApplyReport(now, signedReport(t, reportFor("ctl-0001", 9, accepted(), lastBelieved+time.Hour, 0)))
 		requireNoErr(t, err)

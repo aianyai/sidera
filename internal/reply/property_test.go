@@ -1,8 +1,8 @@
 package reply
 
 import (
-	"errors"
 	"math/rand"
+	"reflect"
 	"sort"
 	"testing"
 	"time"
@@ -201,7 +201,7 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 			}
 			// a report the target could have issued at tau for endpoint e
 			// A late report is dated after the delivery's report_by plus the clock
-			// tolerance, which no genuine target issues.
+			// tolerance, as an honest target's that slept past report_by.
 			reportFor := func(e ident.EndpointID, s story, late bool) (record.Record, fact, bool) {
 				st, recordedAt, delAt, ok := s.at(tau)
 				if !ok {
@@ -241,10 +241,12 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 						t.Fatalf("an untracked report was applied")
 					}
 				case late:
-					if !errors.Is(err, envelope.ErrPeerContradiction) {
-						t.Fatalf("a report dated after report_by plus the tolerance: %v (effect %v)", err, eff)
+					// no effect, no error, nothing learned
+					requireNoErr(t, err)
+					if eff != envelope.ReportTooLate || !reflect.DeepEqual(n, outbound) {
+						t.Fatalf("a report dated after report_by plus the tolerance: effect %v, or the record changed", eff)
 					}
-					counts["late report refused"]++
+					counts["late report ignored"]++
 				default:
 					requireNoErr(t, err)
 					want := envelope.ReportApplied
@@ -318,13 +320,11 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 					evidence = nil
 				}
 
-				// A report dated after report_by plus the tolerance makes the evidence
-				// fail as a whole, and then the reply is judged without it. A late
-				// report for an endpoint the sender does not track is never looked at.
-				bindsHere := haveReply && binds && replier.Endpoint == sessionD
-				discarded := haveReport && lateEvidence && (model.tracked(replier.Endpoint) || bindsHere)
-				if discarded {
-					haveReply, haveReport = false, false
+				// A report dated after report_by plus the tolerance contributes
+				// nothing, and is no evidence error; a control reply beside it is
+				// still handled.
+				if lateEvidence {
+					haveReport = false
 				}
 
 				req := request(&outbound, replier, secs(now), evidence...)
@@ -354,6 +354,12 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 					if haveReport {
 						model.learnReport(replier.Endpoint, repFact)
 					}
+					if lateEvidence && model.tracked(replier.Endpoint) {
+						if adm.Report != envelope.ReportTooLate {
+							t.Fatalf("trial %d step %d: a late report in the evidence: effect %v", trial, step, adm.Report)
+						}
+						counts["late report in the evidence ignored"]++
+					}
 					var s int
 					var why string
 					var ok bool
@@ -377,15 +383,13 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 					}
 				}
 				if read := enabled && !wrongTarget && replier.Node == nodeOf(idA); read && len(evidence) > 0 {
-					// forged evidence is discarded and reported; genuine evidence never is
-					if (mode == evForged || discarded) != (adm.EvidenceError != nil) {
+					// forged evidence is discarded and reported; genuine evidence never
+					// is, however late its report
+					if (mode == evForged) != (adm.EvidenceError != nil) {
 						t.Fatalf("trial %d step %d: mode %d, evidence error %v", trial, step, mode, adm.EvidenceError)
 					}
-					if mode == evForged || discarded {
+					if mode == evForged {
 						counts["evidence discarded"]++
-					}
-					if discarded {
-						counts["late report discards the evidence"]++
 					}
 				}
 				if adm.Decision.Reason != want {
@@ -411,7 +415,7 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 	for name, min := range map[string]int{
 		"delivered_window": 100, "arrival_window": 100, "window_closed": 80, "no_arrival_proof": 150, "not_recipient": 300,
 		"evidence discarded": 20, "control_signal": 60, "disabled": 20, "not_sender": 5,
-		"late report refused": 15, "late report discards the evidence": 15, "delivered report awaits the control reply": 20,
+		"late report ignored": 100, "late report in the evidence ignored": 50, "delivered report awaits the control reply": 20,
 		"bound by evidence": 100, "bound by a pulled reply": 50, "granted to a derived session": 80, "pulled report": 300,
 	} {
 		if counts[name] < min {
