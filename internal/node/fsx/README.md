@@ -41,9 +41,11 @@ a system clock can replace it in one place.
   class; nothing else classifies.
 - **Appends are synced through the handle that appended them.** `SyncFile` takes
   the `File` from `OpenAppend`; reopening to sync can miss a write-back error.
-- **Paths are relative, `/`-separated and valid under `io/fs.ValidPath`.** `.` is
-  the root and may only be synced or listed. Renames stay inside one directory.
-  Nothing can be written outside the root.
+- **Paths are relative, `/`-separated and valid under `io/fs.ValidPath`, and no
+  element holds a backslash, a colon or NUL** on any platform, because on Windows
+  they separate elements or name streams. `.` is the root and may only be synced
+  or listed. Renames stay inside one directory. Nothing can be written outside
+  the root; the real file system also maps paths through `filepath.Localize`.
 - **Files are 0600, or 0700 for adapter executables; directories are 0700.** On
   Windows the data directory root carries a protected DACL for the current user
   and everything created inside inherits it.

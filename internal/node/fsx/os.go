@@ -51,12 +51,19 @@ func OpenOS(root string, rand io.Reader) (FS, error) {
 // transaction can exist.
 func MakeRoot(p string) error { return makeRoot(p) }
 
-// abs maps a relative slash path to a path under the root.
+// abs maps a relative slash path to a path under the root. filepath.Localize
+// is the platform's own judgement of what is a local path (on Windows it also
+// refuses reserved device names such as NUL and COM1), a second line of defence
+// behind CheckPath against a path that escapes the root.
 func (o *osFS) abs(p string) (string, error) {
 	if err := CheckPath(p); err != nil {
 		return "", err
 	}
-	return filepath.Join(o.root, filepath.FromSlash(p)), nil
+	local, err := filepath.Localize(p)
+	if err != nil {
+		return "", &fs.PathError{Op: "path", Path: p, Err: fs.ErrInvalid}
+	}
+	return filepath.Join(o.root, local), nil
 }
 
 func (o *osFS) ReadFile(p string) ([]byte, error) {

@@ -303,28 +303,13 @@ func RunConformance(t *testing.T, newFS func(t *testing.T) fsx.FS) {
 			}
 		}},
 		{"invalid-paths-are-refused-by-every-method", func(t *testing.T, fsys fsx.FS) {
-			for _, p := range []string{"", "/abs", "../up", "a/../b", "a//b", "a/./b", "a/"} {
-				calls := map[string]error{
-					"ReadFile":   second(fsys.ReadFile(p)),
-					"ReadDir":    second(fsys.ReadDir(p)),
-					"Stat":       second(fsys.Stat(p)),
-					"Available":  second(fsys.Available(p)),
-					"CreateTemp": second(fsys.CreateTemp(tag, p, fsx.ModePrivate)),
-					"OpenAppend": second(fsys.OpenAppend(tag, p)),
-					"Rename":     fsys.Rename(tag, p, "x"),
-					"SyncDir":    fsys.SyncDir(tag, p),
-					"Remove":     fsys.Remove(tag, p),
-					"RemoveAll":  fsys.RemoveAll(tag, p),
-					"Mkdir":      fsys.Mkdir(tag, p),
-					"RenameDir":  fsys.RenameDir(tag, "x", p),
-					"Lock":       second(fsys.Lock(p)),
-				}
-				for name, err := range calls {
-					if !errors.Is(err, fs.ErrInvalid) {
-						t.Errorf("%s(%q) = %v, want fs.ErrInvalid", name, p, err)
-					}
-				}
-			}
+			assertRefusedByEveryMethod(t, fsys, tag, "", "/abs", "../up", "a/../b", "a//b", "a/./b", "a/")
+		}},
+		{"names-with-a-backslash-colon-or-nul-are-refused-by-every-method", func(t *testing.T, fsys fsx.FS) {
+			// On Windows a backslash is a separator and a colon names a stream or a
+			// drive, so these would reach outside the root or a different file.
+			// Every FS refuses them, so the node behaves alike everywhere.
+			assertRefusedByEveryMethod(t, fsys, tag, `a\b`, `..\x`, `a:b`, "a/b:c", "a\x00b")
 		}},
 		{"the-root-cannot-be-removed-renamed-or-created", func(t *testing.T, fsys fsx.FS) {
 			if err := fsys.Remove(tag, "."); err == nil {
@@ -405,5 +390,33 @@ func assertNames(t *testing.T, fsys fsx.Reader, dir string, want ...string) {
 	}
 	if !reflect.DeepEqual(got, want) && !(len(got) == 0 && len(want) == 0) {
 		t.Errorf("%s holds %v, want %v", dir, got, want)
+	}
+}
+
+// assertRefusedByEveryMethod checks that every method of fsys refuses each path
+// with fs.ErrInvalid.
+func assertRefusedByEveryMethod(t *testing.T, fsys fsx.FS, tag fsx.Tag, paths ...string) {
+	t.Helper()
+	for _, p := range paths {
+		calls := map[string]error{
+			"ReadFile":   second(fsys.ReadFile(p)),
+			"ReadDir":    second(fsys.ReadDir(p)),
+			"Stat":       second(fsys.Stat(p)),
+			"Available":  second(fsys.Available(p)),
+			"CreateTemp": second(fsys.CreateTemp(tag, p, fsx.ModePrivate)),
+			"OpenAppend": second(fsys.OpenAppend(tag, p)),
+			"Rename":     fsys.Rename(tag, p, "x"),
+			"SyncDir":    fsys.SyncDir(tag, p),
+			"Remove":     fsys.Remove(tag, p),
+			"RemoveAll":  fsys.RemoveAll(tag, p),
+			"Mkdir":      fsys.Mkdir(tag, p),
+			"RenameDir":  fsys.RenameDir(tag, "x", p),
+			"Lock":       second(fsys.Lock(p)),
+		}
+		for name, err := range calls {
+			if !errors.Is(err, fs.ErrInvalid) {
+				t.Errorf("%s(%q) = %v, want fs.ErrInvalid", name, p, err)
+			}
+		}
 	}
 }

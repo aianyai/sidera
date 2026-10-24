@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"strings"
 )
 
 // Tag names the write a step belongs to: the transaction and the role of the
@@ -143,9 +144,13 @@ var nameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,31}$`)
 func ValidName(s string) bool { return nameRE.MatchString(s) }
 
 // CheckPath returns an error wrapping fs.ErrInvalid unless p is a valid
-// relative path in the sense of io/fs.ValidPath.
+// relative path in the sense of io/fs.ValidPath whose elements hold no
+// backslash, colon or NUL. On Windows a backslash separates elements and a colon
+// names a drive or an alternate data stream, so a path holding one would reach a
+// different file there than it means elsewhere; every platform refuses them, so
+// that a node behaves the same everywhere.
 func CheckPath(p string) error {
-	if !fs.ValidPath(p) {
+	if !fs.ValidPath(p) || strings.ContainsAny(p, "\\:\x00") {
 		return &fs.PathError{Op: "path", Path: p, Err: fs.ErrInvalid}
 	}
 	return nil

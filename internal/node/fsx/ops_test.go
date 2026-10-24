@@ -387,6 +387,31 @@ func TestInvalidPathsFailTheOperationBeforeAnyStep(t *testing.T) {
 	assertSteps(t, r.take(), nil)
 }
 
+// A backslash separates path elements on Windows, a colon names an alternate
+// data stream or a drive, and NUL ends a name: a path holding one would reach a
+// different file on Windows than the same path means everywhere else. The rule
+// is the same on every platform, so a node's behaviour does not depend on it.
+func TestPathElementsNeverHoldABackslashColonOrNul(t *testing.T) {
+	for _, p := range []string{`a\b`, `..\x`, `a:b`, "a/b:c", "a\x00b", `C:\x`, `\\host\share`, "file:stream"} {
+		if err := fsx.CheckPath(p); !errors.Is(err, fs.ErrInvalid) {
+			t.Errorf("CheckPath(%q) = %v, want fs.ErrInvalid", p, err)
+		}
+		if err := fsx.CheckRename(p, "x"); !errors.Is(err, fs.ErrInvalid) {
+			t.Errorf("CheckRename(%q, x) = %v, want fs.ErrInvalid", p, err)
+		}
+		r := newRecorded()
+		if err := fsx.Replace(r.fs, tx, p, nil, fsx.ModePrivate); !errors.Is(err, fs.ErrInvalid) {
+			t.Errorf("Replace(%q) = %v, want fs.ErrInvalid", p, err)
+		}
+		assertSteps(t, r.take(), nil)
+	}
+	for _, p := range []string{"a", "a.b", "a-b_c/d", ".hidden", "a b"} {
+		if err := fsx.CheckPath(p); err != nil {
+			t.Errorf("CheckPath(%q) = %v, want it accepted", p, err)
+		}
+	}
+}
+
 func TestTheRootIsNotTheSubjectOfAWriteOperation(t *testing.T) {
 	r := newRecorded()
 	for name, call := range map[string]func() error{

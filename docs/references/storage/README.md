@@ -37,7 +37,14 @@ make a write durable are functions over any `FS`, not methods of it:
 
 Paths are relative to the data directory root, separated by `/`, and valid in
 the sense of `io/fs.ValidPath` (no `..`, no leading `/`, no empty segment); `.`
-is the root. Nothing can be written outside the root. Renames stay inside one
+is the root. No element may hold a backslash, a colon or NUL, on any platform:
+on Windows a backslash separates elements and a colon names a drive or an
+alternate data stream, so `a\b`, `..\x` or `a:b` would escape the root or name
+another file there while being a single innocent element elsewhere. Refusing
+them everywhere keeps the node's behaviour the same on every platform; the real
+file system additionally maps each path through `filepath.Localize`, the
+platform's own check of what is local, and refuses what it refuses. Nothing can
+be written outside the root. Renames stay inside one
 directory. Files have one of two permissions, 0600 or 0700 for adapter
 executables; directories are 0700.
 
@@ -325,7 +332,7 @@ so that the double cannot drift from what it stands for.
 
 | Subject | Code | Tests |
 | ------- | ---- | ----- |
-| interface, paths, tags, reserved tags | `internal/node/fsx/fsx.go` | `ops_test.go`, `observe_test.go` |
+| interface, paths, tags, reserved tags | `internal/node/fsx/fsx.go` | `ops_test.go` (`TestPathElementsNeverHoldABackslashColonOrNul`), `observe_test.go`, the path cases of `RunConformance` |
 | steps, keys, points, counter, `ParsePoint` | `internal/node/fsx/point.go` | `point_test.go` (golden points, rejection table, `FuzzParsePoint`, `FuzzPointRoundTrip`) |
 | classes and the classification table | `internal/node/fsx/error.go`, `classify.go` | `TestFsyncFailureBeforeRenameFailsOperation`, `TestDirSyncFailureAfterRenameIsFatal`, `TestFailureClassOfEveryStep` |
 | composite operations | `internal/node/fsx/ops.go` | `TestCompositeOperationsRunTheirFixedSteps`, `TestReplaceLeavesNoTemporaryAndKeepsTheTargetWhenAnyStepBeforeTheRenameFails`, `TestCleanupAfterAFailureIsNotAStep`, `TestAppendShortWriteIsAFailureThatLeavesAPartialTail`, `TestEachCompositeOperationIsDurableWhenItReturns`, `TestDiscardRenamesToAGarbageNameBeforeDeleting` and the `RenameDir`, path and root tests in `ops_test.go` |
