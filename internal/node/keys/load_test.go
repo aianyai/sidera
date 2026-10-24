@@ -186,7 +186,7 @@ func TestCheckNotRetired(t *testing.T) {
 		t.Fatal(err)
 	}
 	add := func(s *revocation.Set, sr keys.SelfRevocation) {
-		rec, err := record.Decode(sr.Wire, record.DefaultMaxInput)
+		rec, err := record.Decode(sr.Wire(), record.DefaultMaxInput)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -245,5 +245,34 @@ func TestKeyFileErrorsNeverRepeatTheKey(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+// While the node runs, the statement that retires it comes from the keys that
+// were loaded: the one Load verified as this node's, not a file read again that
+// the caller would have to compare with the node itself.
+func TestLoadedKeysHandOutTheVerifiedSelfRevocationOfThisNode(t *testing.T) {
+	r := newRig(t)
+	r.mustInit(1, t0)
+	k := r.mustLoad()
+
+	sr := k.SelfRevocation()
+	if !bytes.Equal(sr.Wire(), r.read(keys.SelfRevocationPath)) {
+		t.Error("the statement is not the bytes of the file")
+	}
+	if sr.Node() != k.Node() {
+		t.Errorf("the statement is for %s, the node is %s", sr.Node(), k.Node())
+	}
+	onDisk, err := keys.ReadSelfRevocation(r.mem)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sr.Digest() != onDisk.Digest() {
+		t.Errorf("digest %s, the file's is %s", sr.Digest(), onDisk.Digest())
+	}
+	// what the caller gets is a copy: changing it changes nothing in the keys
+	sr.Wire()[0] ^= 0xff
+	if !bytes.Equal(k.SelfRevocation().Wire(), r.read(keys.SelfRevocationPath)) {
+		t.Error("changing the returned bytes changed the statement of the keys")
 	}
 }

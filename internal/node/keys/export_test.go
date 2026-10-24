@@ -38,16 +38,16 @@ func TestExportFormatGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadSelfRevocation: %v", err)
 	}
-	if !bytes.Equal(sr.Wire, mustHex(goldenSelfRevocationHex)) {
+	if !bytes.Equal(sr.Wire(), mustHex(goldenSelfRevocationHex)) {
 		t.Error("the record bytes read are not the file's")
 	}
-	if sr.Node.String() != goldenNode {
-		t.Errorf("Node = %s, want %s", sr.Node, goldenNode)
+	if sr.Node().String() != goldenNode {
+		t.Errorf("Node = %s, want %s", sr.Node(), goldenNode)
 	}
-	if sr.Digest.String() != goldenSelfRevocationDigest {
-		t.Errorf("Digest = %s, want %s", sr.Digest, goldenSelfRevocationDigest)
+	if sr.Digest().String() != goldenSelfRevocationDigest {
+		t.Errorf("Digest = %s, want %s", sr.Digest(), goldenSelfRevocationDigest)
 	}
-	rec, err := record.Decode(sr.Wire, record.DefaultMaxInput)
+	rec, err := record.Decode(sr.Wire(), record.DefaultMaxInput)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestExportOfAFreshNodeDecodesToTheFile(t *testing.T) {
 	if err != nil || !bytes.Equal(raw, r.read(keys.SelfRevocationPath)) {
 		t.Errorf("the body does not decode to the file's bytes: %v", err)
 	}
-	if digest != sr.Digest || len(digest) != 32 {
+	if digest != sr.Digest() || len(digest) != 32 {
 		t.Error("the digest returned is not the digest of the statement")
 	}
 	if _, err := hex.DecodeString(digest.String()); err != nil {

@@ -21,10 +21,10 @@ const (
 
 // FormatRevocationExport returns the exported form of the self-revocation, the
 // text with its trailing newline, and the record digest. It is the one formatter
-// behind both ways of exporting: through the daemon, and directly from the file
-// when the daemon is not running. The file for `--out` is the plain Wire bytes.
+// behind both ways of exporting, for a statement from Keys.SelfRevocation or from
+// ReadSelfRevocation. The file an export writes is the plain Wire bytes.
 func FormatRevocationExport(sr SelfRevocation) (text []byte, digest record.Digest) {
-	body := base64.StdEncoding.EncodeToString(sr.Wire)
+	body := base64.StdEncoding.EncodeToString(sr.wire)
 	var b strings.Builder
 	b.WriteString(exportBegin)
 	b.WriteByte('\n')
@@ -36,5 +36,5 @@ func FormatRevocationExport(sr SelfRevocation) (text []byte, digest record.Diges
 	}
 	b.WriteString(exportEnd)
 	b.WriteByte('\n')
-	return []byte(b.String()), sr.Digest
+	return []byte(b.String()), sr.digest
 }

@@ -70,10 +70,10 @@ func verifyCertificate(data []byte) (certificate, error) {
 
 // ReadSelfRevocation reads keys/self-revocation.rec and verifies that it is a
 // node's self-revocation, signed by the identity key of the node it names. It is
-// the one reader behind both ways of exporting the statement, with the daemon
-// running and without it, and it writes nothing. It does not know the identity
-// key of this node, so it cannot say that the statement is this node's: Load and
-// init check that.
+// the reader for a caller with no loaded keys, an export while the node is
+// stopped, and it writes nothing. It does not know the identity key of this
+// node, so it cannot say that the statement is this node's: Load and init check
+// that, and a running node takes the statement from Keys.SelfRevocation.
 func ReadSelfRevocation(r fsx.Reader) (SelfRevocation, error) {
 	data, err := readOwnerOnly(r, SelfRevocationPath)
 	if err != nil {
@@ -94,5 +94,5 @@ func verifySelfRevocation(data []byte) (SelfRevocation, error) {
 	if rv.Kind() != revocation.KindNodeSelf {
 		return SelfRevocation{}, corrupt(SelfRevocationPath, errors.New("the statement is not a node's self-revocation"))
 	}
-	return SelfRevocation{Wire: data, Digest: rv.Digest(), Node: rv.Node()}, nil
+	return SelfRevocation{wire: data, digest: rv.Digest(), node: rv.Node()}, nil
 }

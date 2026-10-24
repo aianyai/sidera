@@ -52,7 +52,7 @@ func TestInitWritesEveryFileOfKeys(t *testing.T) {
 	if rv.Kind() != revocation.KindNodeSelf || rv.Node() != plan.Node() {
 		t.Errorf("self-revocation is %v for %s, want a node self-revocation for %s", rv.Kind(), rv.Node(), plan.Node())
 	}
-	if plan.SelfRevocation().Digest != rv.Digest() || !bytes.Equal(plan.SelfRevocation().Wire, r.read(keys.SelfRevocationPath)) {
+	if plan.SelfRevocation().Digest() != rv.Digest() || !bytes.Equal(plan.SelfRevocation().Wire(), r.read(keys.SelfRevocationPath)) {
 		t.Error("the plan does not describe the statement that was written")
 	}
 	// the node is the one that the identity public key derives (checked through the certificate's signer)
@@ -265,7 +265,7 @@ func TestInitReusesAValidSelfRevocation(t *testing.T) {
 	if rd.n != 0 {
 		t.Errorf("init drew %d random bytes although every key exists", rd.n)
 	}
-	if !bytes.Equal(plan.SelfRevocation().Wire, was) {
+	if !bytes.Equal(plan.SelfRevocation().Wire(), was) {
 		t.Error("the plan carries another statement than the one on disk")
 	}
 	if _, err := r2.runInit(newSeeded(3), t0.Add(time.Hour)); err != nil {

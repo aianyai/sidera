@@ -22,15 +22,27 @@ type state struct {
 	cert     record.Verified[record.NetworkKeyCertificate]
 	certWire []byte
 	seen     record.SerialSeen
+	selfRev  SelfRevocation
 }
 
 // SelfRevocation is the node's statement that its identity key is void, as it
-// is stored: the record wire bytes, the record digest and the node it names.
+// is stored: the record wire bytes, the record digest and the node it names. Only
+// this package makes one, from a statement it verified, so the three always
+// belong together.
 type SelfRevocation struct {
-	Wire   []byte
-	Digest record.Digest
-	Node   ident.NodeID
+	wire   []byte
+	digest record.Digest
+	node   ident.NodeID
 }
+
+// Wire is a copy of the record wire bytes.
+func (s SelfRevocation) Wire() []byte { return append([]byte(nil), s.wire...) }
+
+// Digest is the record digest, the name of the statement.
+func (s SelfRevocation) Digest() record.Digest { return s.digest }
+
+// Node is the node whose identity key the statement voids.
+func (s SelfRevocation) Node() ident.NodeID { return s.node }
 
 // Load reads and checks every file of keys/ except the clock record, which it
 // only checks to be readable, and returns the keys. It refuses, naming the file,
@@ -97,11 +109,17 @@ func Load(w *txn.Writer) (*Keys, error) {
 	default:
 		return nil, fileError(SerialPath, ErrInconsistent, "it is not the serial of this node")
 	}
-	if rev.Node != identity.node {
+	if rev.node != identity.node {
 		return nil, fileError(SelfRevocationPath, ErrInconsistent, "it is not the statement of the identity key")
 	}
-	return &Keys{s: &state{w: w, identity: identity, network: network, cert: cert.verified, certWire: cert.wire, seen: seen}}, nil
+	return &Keys{s: &state{w: w, identity: identity, network: network, cert: cert.verified, certWire: cert.wire, seen: seen, selfRev: rev}}, nil
 }
+
+// SelfRevocation is the statement that voids this node's identity key, the one
+// Load verified as this node's. It is what a running node retires itself with
+// and exports: a caller that read the file again would have to compare its node
+// with Node, and a retirement cannot be undone.
+func (k *Keys) SelfRevocation() SelfRevocation { return k.s.selfRev }
 
 // Node is the identifier of this node, derived from its identity key.
 func (k *Keys) Node() ident.NodeID { return k.s.identity.node }

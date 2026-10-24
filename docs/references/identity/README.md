@@ -185,12 +185,17 @@ again: when it does not match the keys and the serial file, a new one is signed
 at a serial above every serial known, and the serial file is written first; a
 serial file missing next to a valid certificate is written from the certificate.
 `init` that finished is refused. Deleting `keys/` and running `init` again makes
-a new identity, certificate and self-revocation; the owner's `config/` is kept,
-and the old backup confirmation no longer matches the new statement.
+a new identity, certificate and self-revocation.
 
-**The export of the self-revocation.** Both ways of exporting it (through the
-running daemon and straight from the file) read it with `ReadSelfRevocation` and
-format it with `FormatRevocationExport`:
+**The self-revocation.** `Keys.SelfRevocation` returns the statement `Load`
+verified as the statement of this node's identity key: the record wire bytes, the
+record digest (see [records](../records/README.md)) and the node. A running node
+retires itself and exports with it, so that no caller has to compare the node of a
+statement with its own. `ReadSelfRevocation` reads and verifies the file for a
+caller that has not loaded the keys, such as an export while the node is stopped;
+it cannot say that the statement is this node's, only that it verifies under the
+key of the node it names. `FormatRevocationExport` is the one formatter of the
+export:
 
 ```
 -----BEGIN SIDERA SELF-REVOCATION-----
@@ -198,14 +203,11 @@ format it with `FormatRevocationExport`:
 -----END SIDERA SELF-REVOCATION-----
 ```
 
-with a trailing newline. The digest that identifies the statement, and with which
-the owner confirms the backup, is the record digest (see
-[records](../records/README.md)), printed apart from the armor. With `--out` the
-file receives the raw wire bytes, owner-only, created exclusively.
-
-**Retiring the identity.** The verified statement is what the engine writes into
-`config/revocations/`; nothing in `keys/` changes. The node then refuses to start
-(`CheckNotRetired`), because a retired identity cannot become valid again.
+with a trailing newline, and the digest returned apart from the armor, because the
+record digest is what identifies the statement. Where an export is written and
+with which permissions are the caller's. The package writes nothing into `keys/`
+for a retirement; `CheckNotRetired` refuses to run a node whose identity is among
+the loaded revocations, because a retired identity cannot become valid again.
 
 **Windows (pending verification by CI on main).** The owner-only check is the
 DACL rule of the file system layer: the owner is the user, Administrators or
@@ -376,6 +378,14 @@ serial file did not, the node refuses to start naming `network-serial`.
 - **30 days, renewed at 10.** A leaked network key stops being accepted within a
   month even if nobody revokes it; a node that has been off for a week still
   holds a valid certificate when it returns.
+- **The loaded keys hand out the self-revocation.** A reader of the file cannot
+  know whose node it runs for, so a caller that read it would compare the node of
+  the statement with its own at the call site, and a retirement cannot be undone:
+  writing another node's statement would leave this node running while the owner
+  believes it retired. `Load` has the identity key and has already verified the
+  statement as this node's, so it keeps that statement and hands it out. The fields
+  are unexported so that no one can build a statement whose digest is not the
+  digest of its bytes.
 - **The armor is base64 between two marker lines.** The statement is copied by
   hand, printed or kept in a password manager; the text survives all three, and
   the markers say what it is. Standard base64 with padding is what every tool

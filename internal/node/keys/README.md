@@ -22,7 +22,7 @@ transaction of `txn`; nothing here calls an `fsx` write.
 | `Keys.RenewalDue`, `RenewalDue`, `Keys.Renew` | The renewal rule (a pure function with a typed verdict and reason) and the renewal itself, which is also the repair of an interrupted one. |
 | `Keys.RenewalInterrupted`, `RenewalInterrupted`, `RecoveryWork` | The recovery predicate: the serial file is ahead of the certificate. Pure functions of the disk, for the load, the startup repair and the clean-scenario test. |
 | `ReadClock`, `Keys.SaveClock`, `PutClockCleared` | The clock record. `SaveClock` is the periodic write and never goes back; `PutClockCleared` is the write of the owner's clear, for the engine's transaction. |
-| `ReadSelfRevocation`, `FormatRevocationExport` | The one reader and the one formatter behind both ways of exporting the statement. |
+| `Keys.SelfRevocation`, `ReadSelfRevocation`, `FormatRevocationExport` | The statement `Load` verified as this node's, for a running node; the reader of the file for a caller with no loaded keys; the one formatter of the export. |
 | `Keys.CheckNotRetired` | The refusal to run a node whose identity is among the loaded revocations. |
 | `PlanInit`, `InitPlan.WriteKeys`, `WriteMarker`, `Initialized` | The key side of `init`, and the marker. |
 | `CheckPermissions` | The permission sweep of `keys/`, for a caller that checks before it loads. |
@@ -89,11 +89,15 @@ transaction of `txn`; nothing here calls an `fsx` write.
   source when given nil, and since Go 1.26 the second ignores the reader. A
   reader that fails or runs dry fails `init` with `ErrRandom`; there is no
   fallback.
-- **Local retire.** Retiring the identity writes the verified self-revocation into
-  `config/revocations/`, a transaction of the engine with a write function of
-  `config`. This package contributes the verified statement
-  (`ReadSelfRevocation`: bytes, digest, node) and writes nothing in `keys/`; after
-  the retirement the daemon refuses to start, which is `CheckNotRetired`.
+- **The self-revocation is handed out verified, and never written here.**
+  `Keys.SelfRevocation` returns the statement `Load` verified as the statement of
+  this node's identity key, as bytes, digest and node: a running node retires
+  itself and exports with it, so no caller compares a node of its own. `ReadSelfRevocation`
+  reads and verifies the file for a caller that has not loaded the keys (an export
+  while the node is stopped). Its fields are not exported, so a statement whose
+  bytes and digest disagree cannot be built outside the package. Nothing here
+  writes into `keys/` for a retirement; `CheckNotRetired` refuses to run a node whose
+  identity is among the loaded revocations.
 
 ## What the caller must guarantee
 
@@ -111,6 +115,8 @@ transaction of `txn`; nothing here calls an `fsx` write.
   directory (`Dir`) first when it does not exist.
 - Call `Initialized` first at startup, to tell an `init` that never ran from one that
   stopped before the marker, and to say so before the configuration is read.
+- Retire and export a running node with `Keys.SelfRevocation`, never with a
+  statement read again.
 - After `Load`, call `CheckNotRetired` with the loaded revocations, and renew at
   startup when `RenewalDue` says so.
 - Zero means unset: the zero `ClockState` is the first start, a zero

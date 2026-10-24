@@ -216,7 +216,7 @@ func planSelfRevocation(r fsx.Reader, p *initPlan, identity *privateKey) error {
 	sr, err := ReadSelfRevocation(r)
 	switch {
 	case err == nil:
-		if sr.Node != identity.node {
+		if sr.node != identity.node {
 			return fileError(SelfRevocationPath, ErrInconsistent, "it is not the statement of the identity key")
 		}
 		p.selfRev = sr
