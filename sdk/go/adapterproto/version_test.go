@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 func TestNegotiate(t *testing.T) {
@@ -140,23 +141,26 @@ func TestRangeContains(t *testing.T) {
 	}
 }
 
-func TestErrorCodeTable(t *testing.T) {
+func TestApplicationCodeTable(t *testing.T) {
 	// The numbers are part of the protocol; written out here independently of the
 	// constants.
 	want := map[int]string{
-		-32700: "parse_error", -32600: "invalid_request", -32601: "method_not_found", -32602: "invalid_params",
-		-32603: "internal_error", -32001: "overloaded", -32002: "shutting_down", -32003: "not_initialized",
-		-32004: "line_too_long", -32022: "unsupported_protocol_version", -32800: "request_cancelled",
 		1001: "unknown_endpoint", 1002: "wrong_endpoint_kind", 1003: "capability_not_declared", 1004: "unknown_attempt",
 		1005: "attempt_conflict", 1006: "checkpoint_too_large", 1007: "endpoint_limit", 1008: "invalid_address",
 		1009: "send_refused", 1010: "lease_unknown", 1011: "instance_locked",
 	}
 	got := map[int]string{}
-	for _, c := range adapterproto.ErrorCodes() {
+	for _, c := range adapterproto.ApplicationCodes() {
 		if _, dup := got[c.Code]; dup {
 			t.Errorf("code %d listed twice", c.Code)
 		}
 		got[c.Code] = c.Name
+		if !peer.IsApplicationCode(c.Code) {
+			t.Errorf("code %d %s is outside the range the peer reserves for the application", c.Code, c.Name)
+		}
+		if peer.CodeName(c.Code) != "" {
+			t.Errorf("code %d %s is also a code of the peer", c.Code, c.Name)
+		}
 	}
 	if len(got) != len(want) {
 		t.Fatalf("%d codes, want %d", len(got), len(want))
@@ -165,21 +169,18 @@ func TestErrorCodeTable(t *testing.T) {
 		if got[code] != name {
 			t.Errorf("code %d: %q, want %q", code, got[code], name)
 		}
-		if !adapterproto.KnownCode(code) {
-			t.Errorf("KnownCode(%d) = false", code)
+		if !adapterproto.KnownApplicationCode(code) {
+			t.Errorf("KnownApplicationCode(%d) = false", code)
 		}
 	}
-	for _, code := range []int{0, 1, -32000, -32099, 999, 1012, 2001, -32005, -32701} {
-		if adapterproto.KnownCode(code) {
-			t.Errorf("KnownCode(%d) = true", code)
+	// The codes of the peer are not application codes, and nothing else is.
+	for _, code := range append([]int{0, 1, -32000, -32099, 999, 1012, 2001, -32005, -32701}, peer.Codes()...) {
+		if adapterproto.KnownApplicationCode(code) {
+			t.Errorf("KnownApplicationCode(%d) = true", code)
 		}
 	}
 	// Constants match the table.
 	consts := map[int]int{
-		adapterproto.CodeParseError: -32700, adapterproto.CodeInvalidRequest: -32600, adapterproto.CodeMethodNotFound: -32601,
-		adapterproto.CodeInvalidParams: -32602, adapterproto.CodeInternalError: -32603, adapterproto.CodeOverloaded: -32001,
-		adapterproto.CodeShuttingDown: -32002, adapterproto.CodeNotInitialized: -32003, adapterproto.CodeLineTooLong: -32004,
-		adapterproto.CodeUnsupportedProtocolVersion: -32022, adapterproto.CodeRequestCancelled: -32800,
 		adapterproto.CodeUnknownEndpoint: 1001, adapterproto.CodeWrongEndpointKind: 1002, adapterproto.CodeCapabilityNotDeclared: 1003,
 		adapterproto.CodeUnknownAttempt: 1004, adapterproto.CodeAttemptConflict: 1005, adapterproto.CodeCheckpointTooLarge: 1006,
 		adapterproto.CodeEndpointLimit: 1007, adapterproto.CodeInvalidAddress: 1008, adapterproto.CodeSendRefused: 1009,
@@ -192,15 +193,6 @@ func TestErrorCodeTable(t *testing.T) {
 	}
 }
 
-func TestEffectUnknown(t *testing.T) {
-	for _, c := range adapterproto.ErrorCodes() {
-		want := c.Code == -32603 || c.Code == -32800
-		if adapterproto.EffectUnknown(c.Code) != want {
-			t.Errorf("EffectUnknown(%d %s) = %v, want %v", c.Code, c.Name, !want, want)
-		}
-	}
-}
-
 func TestErrorObjectValidate(t *testing.T) {
 	raw := func(s string) json.RawMessage { return json.RawMessage(s) }
 	tests := []struct {
@@ -208,7 +200,7 @@ func TestErrorObjectValidate(t *testing.T) {
 		e    adapterproto.ErrorObject
 		ok   bool
 	}{
-		{"a plain error", adapterproto.ErrorObject{Code: -32601, Message: "no such method"}, true},
+		{"a plain error", adapterproto.ErrorObject{Code: peer.CodeMethodNotFound, Message: "no such method"}, true},
 		{"unknown code", adapterproto.ErrorObject{Code: 4242, Message: "x"}, false},
 		{"code zero", adapterproto.ErrorObject{Message: "x"}, false},
 		{"empty message", adapterproto.ErrorObject{Code: -32603}, false},
@@ -243,4 +235,38 @@ func repeat(s string, n int) string {
 		out = append(out, s...)
 	}
 	return string(out)
+}
+
+// TestErrorObjectKnowsEveryCode: the codes of the peer and the application codes
+// are all the codes an error object may carry.
+func TestErrorObjectKnowsEveryCode(t *testing.T) {
+	versionData := json.RawMessage(`{"requested":{"min":2,"max":3},"supported":{"min":1,"max":1}}`)
+	addressData := json.RawMessage(`{"field":"to"}`)
+	sendData := json.RawMessage(`{"reason":"too_many_recipients"}`)
+	dataOf := func(code int) json.RawMessage {
+		switch code {
+		case peer.CodeUnsupportedProtocolVersion:
+			return versionData
+		case adapterproto.CodeInvalidAddress:
+			return addressData
+		case adapterproto.CodeSendRefused:
+			return sendData
+		}
+		return nil
+	}
+	codes := peer.Codes()
+	for _, c := range adapterproto.ApplicationCodes() {
+		codes = append(codes, c.Code)
+	}
+	for _, code := range codes {
+		e := adapterproto.ErrorObject{Code: code, Message: "m", Data: dataOf(code)}
+		if err := e.Validate(); err != nil {
+			t.Errorf("code %d: %v", code, err)
+		}
+	}
+	// The object is the peer's, so one converts to the other without copying.
+	e := adapterproto.NewUnsupportedVersionError(&adapterproto.NoCommonVersionError{})
+	if pe := (*peer.Error)(&e); pe.Code != peer.CodeUnsupportedProtocolVersion {
+		t.Errorf("converted code %d", pe.Code)
+	}
 }

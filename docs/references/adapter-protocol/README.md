@@ -71,13 +71,15 @@ Behaviour, each point pinned by the tests named in "Where":
   handler contexts and leaves no goroutine behind once handlers return.
   `Peer.Err()` says why the connection ended.
 
-The error codes of the peer layer are constants in `sdk/go/peer/errors.go`:
-`-32700` parse error, `-32600` invalid request, `-32601` method not found,
-`-32602` invalid params, `-32603` internal error, `-32001` overloaded, `-32002`
-shutting down, `-32003` not initialized, `-32004` line too long, `-32022`
-unsupported protocol version, `-32800` request cancelled; codes 1001 to 1099
-are the application range, whose individual meanings belong to the protocol
-above the peer.
+The error codes of the peer layer are constants in `sdk/go/peer/errors.go`
+(`peer.Codes()` lists them): `-32700` parse error, `-32600` invalid request,
+`-32601` method not found, `-32602` invalid params, `-32603` internal error,
+`-32001` overloaded, `-32002` shutting down, `-32003` not initialized,
+`-32004` line too long, `-32022` unsupported protocol version, `-32800` request
+cancelled; codes 1001 to 1099 are the application range, whose individual
+meanings belong to the protocol above the peer (`adapterproto` defines 1001 to
+1011). The codes below 1000 and the effect rule are defined here and nowhere
+else: the message layer and the daemon refer to `peer`.
 
 **The effect rule.** An error response says whether the request did anything.
 `-32700`, `-32600`, `-32601`, `-32602`, `-32001`, `-32002`, `-32003`, `-32004`,
@@ -167,7 +169,7 @@ anything not listed, including unknown codes, counts as unknown.
 | Line reader with the length limit | `sdk/go/peer/frame.go` (`frameReader`) |
 | Classification of one line, id keys, outbound encoding | `sdk/go/peer/message.go` (`classify`, `idKey`) |
 | The request id rule, `$/cancel_request` params | `sdk/go/peer/requestid.go` (`RequestID`, `CancelRequestParams`) |
-| Error codes, `Error`, effect rule | `sdk/go/peer/errors.go` (`NoEffect`, `ResultUnknown`) |
+| Error codes, `Error`, effect rule | `sdk/go/peer/errors.go` (`Codes`, `NoEffect`, `ResultUnknown`) |
 | Peer lifecycle, parameters, termination | `sdk/go/peer/peer.go` |
 | Writer, write timeout, read loop | `sdk/go/peer/io.go` |
 | Request and notification dispatch, cancellation | `sdk/go/peer/serve.go` |
@@ -308,8 +310,9 @@ same key always gets the same endpoint. It reads with `endpoint.recv`, which
 returns the `RecvPage` that `handoff` prints, and settles with `endpoint.ack`.
 
 **Errors.** Codes `-32700` to `-32600` and `-32603` are JSON-RPC's; `-32001`
-to `-32004`, `-32022` and `-32800` are the implementation-defined range; `1001`
-to `1011` are the protocol's own:
+to `-32004`, `-32022` and `-32800` are the implementation-defined range; both
+groups are defined by the peer layer (`peer.Code*`) and listed here to be read
+with the rest. `1001` to `1011` are the protocol's own (`adapterproto.Code*`):
 
 | Code | Name | Meaning |
 | ---- | ---- | ------- |
@@ -336,11 +339,11 @@ to `1011` are the protocol's own:
 | 1010 | lease_unknown | the lease does not belong to the endpoint |
 | 1011 | instance_locked | another process holds the instance lock |
 
-An error response means the request had no effect, except `-32603`, `-32800`,
-and the absence of a response (timeout, closed connection), which leave the
-outcome unknown. Only for the methods with side effects (`session.create`,
-`prompt.deliver`, `session.interrupt`, `session.close`) does an unknown outcome
-call for reconciliation or an idempotent retry.
+Whether a failed request had an effect is the peer layer's effect rule, applied
+to the error a call returned (`peer.NoEffect`, `peer.ResultUnknown`; the daemon
+does not sort codes itself). Only for the methods with side effects
+(`session.create`, `prompt.deliver`, `session.interrupt`, `session.close`) does
+an unknown outcome call for reconciliation or an idempotent retry.
 
 ### Why
 
@@ -363,12 +366,13 @@ call for reconciliation or an idempotent retry.
 ### Where
 
 - `sdk/go/adapterproto`: `methods.go` (the table), `version.go` (negotiation),
-  `codes.go` (error codes), `enums.go`, `lifecycle.go`, `session.go`, `prompt.go`,
+  `codes.go` (the application codes and the rules of the error object),
+  `enums.go`, `lifecycle.go`, `session.go`, `prompt.go`,
   `recv.go`, `endpoints.go` (the messages), `decode.go` (`Decode`, `Encode`),
   `validate.go`.
 - `sdk/go/internal/strictjson`: the strict decoder.
-- Tests: `TestNegotiate`, `TestMethodTable`, `TestErrorCodeTable`,
-  `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
+- Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
+  `TestErrorObjectKnowsEveryCode`, `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
   `FuzzDecodeMessages`.
 
 ## Capabilities and endpoint kinds

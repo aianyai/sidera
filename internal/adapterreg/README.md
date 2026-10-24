@@ -10,7 +10,8 @@ for the reasons behind the rules.
 
 The messages, the manifest and the version negotiation are defined in the SDK
 module `sdk/go` (packages `adapterproto` and `manifest`), which the daemon shares
-with adapters. This package takes values the protocol layer has decoded; it does
+with adapters; the rules of a JSON-RPC frame, the error codes below 1000 and
+the effect rule of an error are those of its `peer` package. This package takes values the protocol layer has decoded; it does
 not frame, send or store anything.
 
 ## Entry points
@@ -23,7 +24,7 @@ not frame, send or store anything.
 | `MethodAllowed(kind, method)`, `RequirementOf` | The method requirement matrix: forbidden, optional or required per kind. |
 | `Admission.Check(kind, method)` | The error code to answer a call with (`0` when it is acceptable): wrong endpoint kind, or a capability not declared. |
 | `CheckHandshake(sent, result, manifest)` | That the adapter reports the manifest's id and version, and a protocol version in both ranges. |
-| `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, an error response and a reconciliation verdict as `handoff.AttemptOutcome`. |
+| `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, the error a `prompt.deliver` call returned and a reconciliation verdict as `handoff.AttemptOutcome`. |
 | `Signals(conditions, endpoint, received, offline, offlineSince)` | An availability snapshot as `handoff.Signals`, with `Since`. |
 | `StatusConditions(...)` | The `conditions` of a status reply. |
 | `CreateReply`, `CreateUnconfirmed`, `InterruptReply`, `CloseReply` | Adapter results as the reply to a control signal. |
@@ -53,10 +54,11 @@ not frame, send or store anything.
   must be read by the model itself, and an adapter reading them for it would
   swallow them. `session.interrupt`, `recv.observed` and `native_request.handled`
   also need the capability that enables them.
-- **Error responses and attempts.** An error response means the request had no
-  effect (the attempt failed) except `-32603` and `-32800` (the attempt is
-  unknown, to be reconciled). A missing response, a timeout and a closed
-  connection are unknown as well; the caller records that itself.
+- **Errors and attempts.** The error of a `prompt.deliver` call is judged by the
+  effect rule of `sdk/go/peer`, which this package does not restate: when it
+  proves the request had no effect the attempt failed, otherwise (`-32603`,
+  `-32800`, a missing response, a timeout, a closed connection, anything the
+  rule does not know) the attempt is unknown, to be reconciled.
 - **`Since` of a cause** is unknown (zero) unless every condition of the winning
   cause reports a start that is not later than the moment the daemon received the
   snapshot; the adapter's clock is for reference only.

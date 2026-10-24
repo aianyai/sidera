@@ -5,12 +5,13 @@
 // The two sides exchange newline-delimited JSON-RPC 2.0 over the adapter's
 // standard input and output, and either may send requests and notifications.
 // This package knows nothing about framing or transport; the JSON-RPC rules of
-// a frame, such as the request id, belong to package peer. It holds what is specific to the protocol:
+// a frame belong to package peer: the request id, the JSON-RPC and server-range
+// error codes and the rule for which errors leave a request's outcome unknown. It holds what is specific to the protocol:
 //
 //   - the version range and its negotiation (Range, Negotiate);
 //   - the name, direction and kind of every method (Methods, Lookup) and the
 //     type of its parameters and result;
-//   - the enums, written as strings (EnumTables), the error codes (ErrorCodes)
+//   - the enums, written as strings (EnumTables), the application error codes (ApplicationCodes)
 //     and the identifier types;
 //   - the capabilities an adapter declares, the native process identity and the
 //     tool access a session is given;

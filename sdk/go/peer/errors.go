@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // Error codes. The first group is the JSON-RPC 2.0 reserved range; the second
@@ -53,6 +54,17 @@ var codeNames = map[int]string{
 // CodeName returns the name of a code defined by this package, or "" for any
 // other code.
 func CodeName(code int) string { return codeNames[code] }
+
+// Codes lists the codes this package defines, ascending: the JSON-RPC and
+// server-range codes, not the application range.
+func Codes() []int {
+	codes := make([]int, 0, len(codeNames))
+	for c := range codeNames {
+		codes = append(codes, c)
+	}
+	slices.Sort(codes)
+	return codes
+}
 
 // noEffectCode reports whether an error response with this code proves that
 // the request produced no effect on the other side. Every other code

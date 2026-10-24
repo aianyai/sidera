@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -170,6 +171,37 @@ func TestEffectClassification(t *testing.T) {
 	}
 	if errors.Is(peer.NewError(peer.CodeInternalError, "x"), peer.ErrOverloaded) {
 		t.Error("only -32001 matches ErrOverloaded")
+	}
+}
+
+// TestCodes: the list of codes the package defines, with their names and the
+// effect each carries.
+func TestCodes(t *testing.T) {
+	want := map[int]string{
+		-32700: "parse_error", -32600: "invalid_request", -32601: "method_not_found", -32602: "invalid_params",
+		-32603: "internal_error", -32001: "overloaded", -32002: "shutting_down", -32003: "not_initialized",
+		-32004: "line_too_long", -32022: "unsupported_protocol_version", -32800: "request_cancelled",
+	}
+	codes := peer.Codes()
+	if !slices.IsSorted(codes) || len(codes) != len(want) {
+		t.Fatalf("Codes() = %v, want the %d codes of the table in ascending order", codes, len(want))
+	}
+	for _, code := range codes {
+		if peer.CodeName(code) != want[code] || want[code] == "" {
+			t.Errorf("code %d is named %q, want %q", code, peer.CodeName(code), want[code])
+		}
+		if peer.IsApplicationCode(code) {
+			t.Errorf("code %d is in the application range", code)
+		}
+		unknown := code == -32603 || code == -32800
+		if got := peer.ResultUnknown(peer.NewError(code, "x")); got != unknown {
+			t.Errorf("code %d: ResultUnknown = %v, want %v", code, got, unknown)
+		}
+	}
+	for _, code := range []int{1001, 1099, 0, -32000} {
+		if peer.CodeName(code) != "" {
+			t.Errorf("code %d has the name %q", code, peer.CodeName(code))
+		}
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // matrix is the requirement of each method for a runtime, a session and a direct
@@ -139,7 +140,7 @@ func TestCheck(t *testing.T) {
 		}
 	}
 	a, _ := adapterreg.Admit(runtimeCaps(true, true, true, "cli"), man())
-	if got := a.Check(adapterreg.KindSession, "no.such.method"); got != adapterproto.CodeMethodNotFound {
+	if got := a.Check(adapterreg.KindSession, "no.such.method"); got != peer.CodeMethodNotFound {
 		t.Errorf("Check of an unknown method = %d", got)
 	}
 	if got := (adapterreg.Admission{}).Check(adapterreg.KindSession, "prompt.deliver"); got != adapterproto.CodeCapabilityNotDeclared {

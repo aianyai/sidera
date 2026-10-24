@@ -2,6 +2,7 @@ package adapterreg
 
 import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // Requirement says what a kind of endpoint expects of a method.
@@ -120,7 +121,7 @@ func MethodAllowed(k EndpointKind, method string) bool {
 // acceptable from this adapter. It returns 0 when it is, and otherwise the error
 // code the daemon answers with:
 //
-//   - adapterproto.CodeMethodNotFound: no such method;
+//   - peer.CodeMethodNotFound: no such method;
 //   - adapterproto.CodeWrongEndpointKind: the method is forbidden for the kind;
 //   - adapterproto.CodeCapabilityNotDeclared: the adapter did not declare the kind,
 //     or the capability the method needs (interrupt, ack on behalf, server
@@ -128,7 +129,7 @@ func MethodAllowed(k EndpointKind, method string) bool {
 func (a Admission) Check(k EndpointKind, method string) int {
 	r, ok := requirements[method]
 	if !ok {
-		return adapterproto.CodeMethodNotFound
+		return peer.CodeMethodNotFound
 	}
 	if r.of(k) == Forbidden {
 		return adapterproto.CodeWrongEndpointKind

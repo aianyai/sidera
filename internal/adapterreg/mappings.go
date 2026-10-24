@@ -11,6 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // ErrUnmapped is wrapped by the mapping functions when a value is not one the
@@ -32,17 +33,20 @@ func PromptOutcome(r adapterproto.PromptDeliverResult) (handoff.AttemptOutcome, 
 	return 0, unmapped("prompt stage", string(r.Stage))
 }
 
-// PromptOutcomeOnError maps the code of an error response to prompt.deliver onto
-// the attempt outcome. Most codes mean the request had no effect, so the prompt
-// certainly did not reach the session; the two that leave the outcome open
-// (internal error, cancelled) leave the attempt unknown, to be reconciled. So
-// does the absence of a response, a timeout or a closed connection, for which the
-// caller records handoff.AttemptUnknown without calling this function.
-func PromptOutcomeOnError(code int) handoff.AttemptOutcome {
-	if adapterproto.EffectUnknown(code) {
-		return handoff.AttemptUnknown
+// PromptOutcomeOnError maps the error a peer.Call of prompt.deliver returned onto
+// the attempt outcome, by the effect rule of package peer. An error that proves
+// the request had no effect (most error responses, and a request refused before
+// it was written) means the prompt certainly did not reach the session. Every
+// other failure leaves the attempt unknown, to be reconciled: an internal error,
+// a cancellation, no response at all, a timeout, a closed connection, and any
+// error the rule does not know. A nil error is no failure; it maps to unknown
+// as well, so that a caller that mistakenly passes one never records a delivery
+// as failed.
+func PromptOutcomeOnError(err error) handoff.AttemptOutcome {
+	if peer.NoEffect(err) {
+		return handoff.AttemptFailed
 	}
-	return handoff.AttemptFailed
+	return handoff.AttemptUnknown
 }
 
 // ReconcileOutcome maps a reconciliation verdict onto the corrected attempt

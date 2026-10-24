@@ -19,6 +19,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // positive reports whether the example is a message or manifest that must be
@@ -362,8 +363,16 @@ func TestSchemaErrorCodesMatchGo(t *testing.T) {
 		m := e.(map[string]any)
 		got[int(m["const"].(float64))] = m["title"].(string)
 	}
+	// The codes of a frame are the peer's and the application codes are the
+	// message types': together they are the schema's list, each in one place.
 	want := map[int]string{}
-	for _, c := range adapterproto.ErrorCodes() {
+	for _, code := range peer.Codes() {
+		want[code] = peer.CodeName(code)
+	}
+	for _, c := range adapterproto.ApplicationCodes() {
+		if _, dup := want[c.Code]; dup {
+			t.Errorf("code %d is defined by both the peer and adapterproto", c.Code)
+		}
 		want[c.Code] = c.Name
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -380,10 +389,17 @@ func TestSchemaErrorCodesMatchGo(t *testing.T) {
 	if !reflect.DeepEqual(want, independent) {
 		t.Errorf("Go error codes differ from the expected table:\n Go       %v\n expected %v", want, independent)
 	}
-	for code, name := range map[int]int{adapterproto.CodeParseError: 0, adapterproto.CodeOverloaded: 0, adapterproto.CodeInstanceLocked: 0} {
-		_ = name
-		if !adapterproto.KnownCode(code) {
-			t.Errorf("constant %d is not a known code", code)
+	for constant, value := range map[int]int{
+		peer.CodeParseError: -32700, peer.CodeInvalidRequest: -32600, peer.CodeMethodNotFound: -32601, peer.CodeInvalidParams: -32602,
+		peer.CodeInternalError: -32603, peer.CodeOverloaded: -32001, peer.CodeShuttingDown: -32002, peer.CodeNotInitialized: -32003,
+		peer.CodeLineTooLong: -32004, peer.CodeUnsupportedProtocolVersion: -32022, peer.CodeRequestCancelled: -32800,
+		adapterproto.CodeUnknownEndpoint: 1001, adapterproto.CodeWrongEndpointKind: 1002, adapterproto.CodeCapabilityNotDeclared: 1003,
+		adapterproto.CodeUnknownAttempt: 1004, adapterproto.CodeAttemptConflict: 1005, adapterproto.CodeCheckpointTooLarge: 1006,
+		adapterproto.CodeEndpointLimit: 1007, adapterproto.CodeInvalidAddress: 1008, adapterproto.CodeSendRefused: 1009,
+		adapterproto.CodeLeaseUnknown: 1010, adapterproto.CodeInstanceLocked: 1011,
+	} {
+		if constant != value {
+			t.Errorf("a code constant is %d, want %d", constant, value)
 		}
 	}
 }
@@ -562,7 +578,12 @@ func TestEveryErrorCodeAppearsInAnExample(t *testing.T) {
 			seen[e.Code] = true
 		}
 	}
-	for _, c := range adapterproto.ErrorCodes() {
+	for _, code := range peer.Codes() {
+		if !seen[code] {
+			t.Errorf("no golden error holds code %d (%s)", code, peer.CodeName(code))
+		}
+	}
+	for _, c := range adapterproto.ApplicationCodes() {
 		if !seen[c.Code] {
 			t.Errorf("no golden error holds code %d (%s)", c.Code, c.Name)
 		}

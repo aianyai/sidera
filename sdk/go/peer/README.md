@@ -23,7 +23,7 @@ method the peer handles itself is the `$/cancel_request` notification.
 | `Call(ctx, method, params, result)`, `Notify(ctx, method, params)` | Send a request and wait, or send a notification. `params` must marshal to an object or an array, or be nil. |
 | `NoEffect(err)`, `ResultUnknown(err)` | The effect rule: after an error from `Call`, did the request definitely do nothing, or is the outcome unknown? |
 | `Done()`, `Err()`, `Close()` | Learn that and why the connection ended; end it. |
-| `Error`, `NewError`, `Code*` | The error object a handler returns and `Call` reports; the code table. |
+| `Error`, `NewError`, `Code*`, `Codes()`, `CodeName` | The error object a handler returns and `Call` reports; the code table, which is the one definition of the JSON-RPC and server-range codes. |
 | `RequestID`, `CancelRequestParams` | The one statement of the request id rule, and the params of `$/cancel_request`, for the layers above to reuse instead of restating. |
 
 ## Rules

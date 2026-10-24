@@ -2,7 +2,7 @@
 
 The messages of the adapter protocol: the version range and its negotiation,
 every method with its direction, the parameter and result types, the enums, the
-error codes, the capabilities and the control-signal values. It has no framing
+application error codes, the capabilities and the control-signal values. It has no framing
 and no transport; the daemon and every adapter use it to read and write what
 travels over the line.
 
@@ -20,7 +20,8 @@ for what each message means and why the protocol is shaped this way.
 | `Decode(data, &msg)`, `Encode(msg)` | Strict decoding of any message type and validation before encoding |
 | `msg.Validate()` | The rules of one message, on every type |
 | `CancelRequestParams`, `MethodCancelRequest` | The params and name of `$/cancel_request`, which belong to the `peer` package together with the request id rule; listed here so the method table is complete |
-| `EnumTables()`, `Patterns()`, `ErrorCodes()` | The vocabularies the schema is compared with |
+| `EnumTables()`, `Patterns()`, `ApplicationCodes()` | The vocabularies the schema is compared with |
+| `ErrorObject` | The `error` member of a response: `peer.Error` with the protocol's rules for its code, message and data |
 | `ControlReply` and the `Control*` enums | The replies to the control signals, with their numeric codes |
 
 ## Rules
@@ -49,5 +50,6 @@ for what each message means and why the protocol is shaped this way.
   for the part it is given.
 - A request is answered with a result or an error; what the daemon acts on is
   in the result, and the error only means the request was not understood or not
-  allowed. `EffectUnknown` says which error codes leave the outcome open.
+  allowed. Which failures leave the outcome open is the effect rule of package
+  `peer` (`peer.NoEffect`, `peer.ResultUnknown`), not restated here.
 - A message built by hand is validated (`Encode` does it) before it is sent.

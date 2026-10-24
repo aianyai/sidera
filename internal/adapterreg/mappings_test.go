@@ -1,7 +1,9 @@
 package adapterreg_test
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 func TestPromptOutcome(t *testing.T) {
@@ -42,14 +45,36 @@ func TestPromptOutcome(t *testing.T) {
 }
 
 func TestPromptOutcomeOnError(t *testing.T) {
-	for _, c := range adapterproto.ErrorCodes() {
+	codes := peer.Codes()
+	for _, c := range adapterproto.ApplicationCodes() {
+		codes = append(codes, c.Code)
+	}
+	for _, code := range codes {
 		// Written out: only these two codes leave the outcome open.
 		want := handoff.AttemptFailed
-		if c.Code == -32603 || c.Code == -32800 {
+		if code == -32603 || code == -32800 {
 			want = handoff.AttemptUnknown
 		}
-		if got := adapterreg.PromptOutcomeOnError(c.Code); got != want {
-			t.Errorf("PromptOutcomeOnError(%d %s) = %v, want %v", c.Code, c.Name, got, want)
+		if got := adapterreg.PromptOutcomeOnError(&peer.Error{Code: code}); got != want {
+			t.Errorf("PromptOutcomeOnError(code %d) = %v, want %v", code, got, want)
+		}
+	}
+	for name, tc := range map[string]struct {
+		err  error
+		want handoff.AttemptOutcome
+	}{
+		"refused before it was written": {peer.ErrOverloaded, handoff.AttemptFailed},
+		"not sent":                      {peer.ErrMessageTooLarge, handoff.AttemptFailed},
+		"wrapped error response":        {fmt.Errorf("call: %w", &peer.Error{Code: adapterproto.CodeUnknownAttempt}), handoff.AttemptFailed},
+		"closed connection":             {peer.ErrClosed, handoff.AttemptUnknown},
+		"timeout":                       {context.DeadlineExceeded, handoff.AttemptUnknown},
+		"malformed response":            {peer.ErrInvalidResponse, handoff.AttemptUnknown},
+		"a code nobody defines":         {&peer.Error{Code: 4242}, handoff.AttemptUnknown},
+		"an error of no known kind":     {errors.New("boom"), handoff.AttemptUnknown},
+		"no error":                      {nil, handoff.AttemptUnknown},
+	} {
+		if got := adapterreg.PromptOutcomeOnError(tc.err); got != tc.want {
+			t.Errorf("%s: PromptOutcomeOnError = %v, want %v", name, got, tc.want)
 		}
 	}
 }

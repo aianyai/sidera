@@ -5,30 +5,14 @@ import (
 	"strings"
 
 	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
-// Error codes. The codes from -32700 to -32600 are the JSON-RPC 2.0 ones; those
-// from -32099 to -32000 are the server-defined range; the 1000s are the
-// protocol's own.
-//
-// An error response means the request had no effect, except -32603 (the handler
-// failed in an unknown state), -32800 (cancelled) and the absence of a response
-// at all (timeout, closed connection), which leave the outcome unknown. Only for
-// the methods with side effects does an unknown outcome call for reconciliation
-// or an idempotent retry.
+// Application error codes: the protocol's own, in the range package peer sets
+// aside for them (peer.CodeApplicationMin to peer.CodeApplicationMax). The
+// JSON-RPC codes, the server-range codes the framing uses and the rule for which
+// of them leave the outcome of a request unknown are package peer's.
 const (
-	CodeParseError                 = -32700 // invalid JSON or invalid UTF-8; the connection continues
-	CodeInvalidRequest             = -32600 // not an object, a batch, no "jsonrpc", bad or reused id
-	CodeMethodNotFound             = -32601 // unknown method, or one not valid in this direction
-	CodeInvalidParams              = -32602 // breaks the schema, or has an unknown field
-	CodeInternalError              = -32603 // the handler failed; the outcome is unknown
-	CodeOverloaded                 = -32001 // refused before queueing; the handler did not run
-	CodeShuttingDown               = -32002 // shutdown has begun
-	CodeNotInitialized             = -32003 // before initialize
-	CodeLineTooLong                = -32004 // sent just before the connection is closed
-	CodeUnsupportedProtocolVersion = -32022 // data: UnsupportedVersionData
-	CodeRequestCancelled           = -32800 // cancelled; the outcome is unknown unless the method says otherwise
-
 	CodeUnknownEndpoint       = 1001 // the endpoint does not exist or is not this connection's
 	CodeWrongEndpointKind     = 1002 // the endpoint's kind cannot be used with this method
 	CodeCapabilityNotDeclared = 1003 // the method needs a capability that was not declared
@@ -48,20 +32,9 @@ type ErrorCode struct {
 	Name string
 }
 
-// ErrorCodes lists every code of the protocol.
-func ErrorCodes() []ErrorCode {
+// ApplicationCodes lists every application code of the protocol.
+func ApplicationCodes() []ErrorCode {
 	return []ErrorCode{
-		{CodeParseError, "parse_error"},
-		{CodeInvalidRequest, "invalid_request"},
-		{CodeMethodNotFound, "method_not_found"},
-		{CodeInvalidParams, "invalid_params"},
-		{CodeInternalError, "internal_error"},
-		{CodeOverloaded, "overloaded"},
-		{CodeShuttingDown, "shutting_down"},
-		{CodeNotInitialized, "not_initialized"},
-		{CodeLineTooLong, "line_too_long"},
-		{CodeUnsupportedProtocolVersion, "unsupported_protocol_version"},
-		{CodeRequestCancelled, "request_cancelled"},
 		{CodeUnknownEndpoint, "unknown_endpoint"},
 		{CodeWrongEndpointKind, "wrong_endpoint_kind"},
 		{CodeCapabilityNotDeclared, "capability_not_declared"},
@@ -76,9 +49,9 @@ func ErrorCodes() []ErrorCode {
 	}
 }
 
-// KnownCode reports whether code is one of ErrorCodes.
-func KnownCode(code int) bool {
-	for _, c := range ErrorCodes() {
+// KnownApplicationCode reports whether code is one of ApplicationCodes.
+func KnownApplicationCode(code int) bool {
+	for _, c := range ApplicationCodes() {
 		if c.Code == code {
 			return true
 		}
@@ -86,11 +59,9 @@ func KnownCode(code int) bool {
 	return false
 }
 
-// EffectUnknown reports whether an error response with this code leaves it open
-// whether the request had an effect. Every other code means it had none.
-func EffectUnknown(code int) bool {
-	return code == CodeInternalError || code == CodeRequestCancelled
-}
+// knownCode reports whether code is one the protocol defines, whichever package
+// owns its definition.
+func knownCode(code int) bool { return peer.CodeName(code) != "" || KnownApplicationCode(code) }
 
 // MaxMessageLen bounds the text of an error message.
 const MaxMessageLen = 1024
@@ -118,26 +89,24 @@ func (d SendRefusedData) Validate() error {
 	return matches(reasonWordRE, d.Reason)
 }
 
-// ErrorObject is the "error" member of an error response.
-type ErrorObject struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-	// Data is present exactly for the codes that define a data shape:
-	// CodeUnsupportedProtocolVersion, CodeInvalidAddress and CodeSendRefused.
-	Data json.RawMessage `json:"data,omitempty"`
-}
+// ErrorObject is the "error" member of an error response: the JSON-RPC error
+// object of package peer, which owns its shape, with the protocol's rules for
+// it. Data is present exactly for the codes that define a data shape:
+// peer.CodeUnsupportedProtocolVersion, CodeInvalidAddress and CodeSendRefused.
+// Convert with (*peer.Error)(&e) to hand one to a peer.
+type ErrorObject peer.Error
 
 // Validate checks the code, the message and the shape of the data.
 func (e ErrorObject) Validate() error {
 	var c checker
-	c.ok(KnownCode(e.Code), "unknown error code %d", e.Code)
+	c.ok(knownCode(e.Code), "unknown error code %d", e.Code)
 	c.field("message", strLen(e.Message, 1, MaxMessageLen))
 	if c.err != nil {
 		return c.err
 	}
 	var data interface{ Validate() error }
 	switch e.Code {
-	case CodeUnsupportedProtocolVersion:
+	case peer.CodeUnsupportedProtocolVersion:
 		data = new(UnsupportedVersionData)
 	case CodeInvalidAddress:
 		data = new(InvalidAddressData)
@@ -169,5 +138,5 @@ func NewUnsupportedVersionError(e *NoCommonVersionError) ErrorObject {
 	if err != nil {
 		panic(err) // two ranges of integers always encode
 	}
-	return ErrorObject{Code: CodeUnsupportedProtocolVersion, Message: "no common protocol version", Data: data}
+	return ErrorObject{Code: peer.CodeUnsupportedProtocolVersion, Message: "no common protocol version", Data: data}
 }
