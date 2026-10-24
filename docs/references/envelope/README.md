@@ -139,7 +139,16 @@ in a verified report, whether pulled or attached to a reply: it checks message,
 signer node and date, applies it with `delivery.Record.ApplyStatusReport`, and
 learns the arrival facts (earliest delivery time of a delivered report, earliest
 `reported_at` of a report that proves arrival). A report whose state cannot
-follow the delivery's is `ErrPeerContradiction`.
+follow the delivery's is `ErrPeerContradiction`, and so is one dated after the
+delivery's `report_by` plus the clock tolerance, because the target stops
+reporting at `report_by`.
+
+A control signal's own delivery ends only through its control reply. While the
+sender has accepted none (`ControlReplyDigest` is zero), a `delivered` report for
+the signal's recipient is not applied and `ApplyReport` returns
+`ReportAwaitsControlReply`, so the caller keeps pulling the signal. Every other
+state of that report is applied as usual, and once a reply was accepted a
+`delivered` report is an ordinary one.
 
 ### Control reply handling
 
@@ -174,7 +183,8 @@ the sender nothing it can act on.
 `ErrPeerContradiction` is returned for a second distinct control reply, for a
 reply to a signal the target is known to have rejected, for a reply that names the
 signal's own recipient as the session it created, and for a report that cannot
-follow the delivery's state. It means the peer broke the contract: the
+follow the delivery's state or is dated after the delivery's `report_by` plus the
+clock tolerance. It means the peer broke the contract: the
 sender stops pulling from it for this message and logs it. The error wraps the
 specific cause.
 
@@ -287,6 +297,19 @@ which may still admit it.
   and the evidence adds nothing the sender needs when it knows the facts. A
   failed piece of evidence gives no permission it could not have had without it,
   so nothing is gained by forging it.
+- **A control signal's delivery ends through its reply, not its report.** The
+  control reply carries the result, and for a `session.create` the session
+  endpoint from which the initial message's delivery is built. A `delivered`
+  report of the signal ends the sender's record at once, the sender then stops
+  pulling and never gets the reply: it loses the pair (initial message, session
+  endpoint) and the result of `endpoint.status`. The report is therefore not
+  applied before the reply was accepted, and the caller keeps pulling. The report
+  is not wrong, only not the last word, so it is not a contradiction.
+- **Reports end at `report_by`.** The target stops reporting at the delivery's
+  `report_by`, so a report dated later than that plus the clock tolerance was not
+  issued by a target that keeps the delivery rules; treating it as a fact would
+  let a faulty peer move arrival times, and the reply window with them, outside
+  any delivery.
 - **A control signal's original recipient never replies.** A control signal's
   result already returns to the sender as the control reply, signed by the node
   that executed it; permission for the recipient endpoint as well would admit a

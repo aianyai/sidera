@@ -167,9 +167,11 @@ differs from a message record in four ways:
   `delivered` once the reply is committed, or `delivery_unknown` after
   settlement.
 
-The sender applies the signed reply with the existing `EventDelivered` (or
-`ApplyStatusReport` of a `delivered` report); nothing on the source side
-changes.
+The sender applies the signed reply with the existing `EventDelivered`; nothing
+on the source side changes. A `delivered` status report of the control signal
+does not end the sender's record: the reply carries the result and the session
+endpoint, so the sender keeps pulling until it has the reply (see
+[envelope](../envelope/README.md)).
 
 ### Status reports
 

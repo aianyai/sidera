@@ -9,6 +9,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // Arrival is what a sender has learned from signed status reports about when a
@@ -160,6 +161,11 @@ const (
 	// reported endpoint, so there is nothing to apply the report to. A sender
 	// applies reports only to deliveries it has records for.
 	ReportNotTracked
+	// ReportAwaitsControlReply: the report says a control signal was delivered,
+	// and the control signal's delivery ends only through its control reply
+	// (HandleControlReply), which this record has not accepted yet. Nothing was
+	// applied; the caller keeps pulling the signal until the reply arrives.
+	ReportAwaitsControlReply
 )
 
 // ApplyReport applies a verified status report to the delivery it reports on:
@@ -170,8 +176,18 @@ const (
 // The report must be about this message, signed by the node the delivery's
 // endpoint is on, and not dated later than now plus the clock tolerance. A
 // report for an endpoint with no delivery here changes nothing (ReportNotTracked).
+//
+// A control signal's own delivery ends as delivered only through its control
+// reply, because only the reply carries the result and the session endpoint the
+// sender needs: until HandleControlReply has accepted one (ControlReplyDigest is
+// zero), a delivered report for the signal's recipient changes nothing
+// (ReportAwaitsControlReply), so that the sender does not stop pulling before it
+// has the reply. Every other state of the report is applied as usual.
+//
 // A report whose state cannot follow the delivery's (a rejection of a delivery
-// already delivered, say) is ErrPeerContradiction. On an error nothing changes.
+// already delivered, say) is ErrPeerContradiction, and so is a report dated
+// later than the delivery's report_by plus the clock tolerance: the target
+// stops reporting at report_by. On an error nothing changes.
 func (o Outbound) ApplyReport(now time.Time, rep SignedReport) (Outbound, ReportEffect, []delivery.Outcome, error) {
 	if err := o.Validate(); err != nil {
 		return o, ReportNone, nil, err
@@ -197,6 +213,14 @@ func (o Outbound) ApplyReport(now time.Time, rep SignedReport) (Outbound, Report
 		if err := checkNotFuture(now, at); err != nil {
 			return o, ReportNone, nil, err
 		}
+	}
+	if r.ReportedAt.After(t.Delivery.ReportBy.Add(timing.ClockTolerance)) {
+		return o, ReportNone, nil, fmt.Errorf("%w: the report is dated after the delivery's report_by plus the clock tolerance", ErrPeerContradiction)
+	}
+	// Without a control reply the only delivery tracked is the signal's own (a
+	// derived one exists only once a reply bound it, Validate).
+	if o.Kind.IsControl() && o.ControlReplyDigest.IsZero() && r.Status.State == delivery.StateDelivered {
+		return o, ReportAwaitsControlReply, nil, nil
 	}
 	d, outs, err := t.Delivery.ApplyStatusReport(now, r.Status)
 	if errors.Is(err, delivery.ErrIllegalTransition) {

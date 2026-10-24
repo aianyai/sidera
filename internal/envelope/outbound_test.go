@@ -597,15 +597,145 @@ func TestHandleControlReply(t *testing.T) {
 			t.Error("a failed handling returned or changed something")
 		}
 	})
-	t.Run("the target's own view: committing the reply delivers the control record, the sender applies it as delivered", func(t *testing.T) {
+	t.Run("the target's own view: the delivered report of the committed reply does not end the signal, the reply does", func(t *testing.T) {
 		target := delivery.NewTargetControlRecord(acceptBefore, delivery.ReportBy(acceptBefore))
 		target, _, err := target.Apply(now, delivery.Event{Type: delivery.EventReplyCommitted})
 		requireNoErr(t, err)
 		rep := reportFor("ctl-0001", 2, target.StatusReport(), 700*time.Second, 690*time.Second)
-		n, _, _, err := createOutbound(t).ApplyReport(now, signedReport(t, rep))
+		o := createOutbound(t)
+		n, eff, _, err := o.ApplyReport(now, signedReport(t, rep))
 		requireNoErr(t, err)
-		if n.Recipients[0].Delivery.State != delivery.StateDelivered {
-			t.Errorf("state %v", n.Recipients[0].Delivery.State)
+		if eff != ReportAwaitsControlReply || !reflect.DeepEqual(n, o) {
+			t.Errorf("effect %v, or the record changed: the control signal's delivery is %v", eff, n.Recipients[0].Delivery.State)
+		}
+	})
+}
+
+// A control signal's own delivery ends only through its control reply: the
+// reply carries the result and the session endpoint, and a sender that stopped
+// pulling at the delivered report would never get either.
+func TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply(t *testing.T) {
+	now := t0.Add(20 * time.Minute)
+	deliveredFromControl := func() SignedReport {
+		return signedReport(t, reportFor("ctl-0001", 2, delivered(), 700*time.Second, 690*time.Second))
+	}
+	reply := func() SignedControlReply { return signedReply(t, createdReply("ctl-0001", 2, 3, 650*time.Second)) }
+
+	t.Run("a delivered report alone leaves the signal pending, and the reply then ends it and builds the initial message's delivery", func(t *testing.T) {
+		o := createOutbound(t)
+		n, eff, outs, err := o.ApplyReport(now, deliveredFromControl())
+		requireNoErr(t, err)
+		if eff != ReportAwaitsControlReply || outs != nil || !reflect.DeepEqual(n, o) {
+			t.Fatalf("effect %v outcomes %v: the report must change nothing", eff, outs)
+		}
+		if n.Recipients[0].Delivery.State.IsTerminal() {
+			t.Fatalf("the signal's delivery is final (%v): the sender would stop pulling and never get the control reply", n.Recipients[0].Delivery.State)
+		}
+		h, err := HandleControlReply(now, n, reply(), nil)
+		requireNoErr(t, err)
+		d := h.Outbound.Derived
+		if h.Outbound.Recipients[0].Delivery.State != delivery.StateDelivered || d == nil || !h.DerivedCreated || d.Address.Endpoint != ep(3) {
+			t.Errorf("after the reply: signal %v, derived %+v", h.Outbound.Recipients[0].Delivery.State, d)
+		}
+	})
+	t.Run("the other states of the signal's own report are applied as before", func(t *testing.T) {
+		for name, st := range map[string]delivery.StatusReport{
+			"accepted":          accepted(),
+			"accepted, blocked": {State: delivery.StateAccepted, Blocked: true, BlockedCause: delivery.CauseAdapterOffline},
+			"delivery_unknown":  {State: delivery.StateDeliveryUnknown},
+			"rejected":          {State: delivery.StateRejected, Reject: delivery.RejectUnauthorized},
+		} {
+			n, eff, _, err := createOutbound(t).ApplyReport(now, signedReport(t, reportFor("ctl-0001", 2, st, 100*time.Second, 0)))
+			requireNoErr(t, err)
+			if eff != ReportApplied || n.Recipients[0].Delivery.State != st.State {
+				t.Errorf("%s: effect %v state %v", name, eff, n.Recipients[0].Delivery.State)
+			}
+		}
+	})
+	t.Run("every control signal waits for its reply", func(t *testing.T) {
+		for _, kind := range []Kind{KindSessionCreate, KindSessionClose, KindSessionInterrupt, KindEndpointStatus} {
+			o := outboundTo(t, kind, false)
+			n, eff, _, err := o.ApplyReport(now, deliveredFromControl())
+			requireNoErr(t, err)
+			if eff != ReportAwaitsControlReply || !reflect.DeepEqual(n, o) {
+				t.Errorf("%v: effect %v", kind, eff)
+			}
+		}
+	})
+	t.Run("once a reply was accepted, a delivered report is an ordinary one, whatever the reply's outcome", func(t *testing.T) {
+		for name, r := range map[string]ControlReply{
+			"created": createdReply("ctl-0001", 2, 3, 650*time.Second),
+			"failed":  failedReply("ctl-0001", 2, 30*time.Second),
+		} {
+			h, err := HandleControlReply(now, createOutbound(t), signedReply(t, r), nil)
+			requireNoErr(t, err)
+			_, eff, _, err := h.Outbound.ApplyReport(now, deliveredFromControl())
+			requireNoErr(t, err)
+			if eff != ReportApplied {
+				t.Errorf("%s: effect %v", name, eff)
+			}
+		}
+	})
+	t.Run("a message's delivered report ends the delivery as before", func(t *testing.T) {
+		n, eff, _, err := outboundTo(t, KindMessage, true).ApplyReport(now, deliveredFromControl())
+		requireNoErr(t, err)
+		if eff != ReportApplied || n.Recipients[0].Delivery.State != delivery.StateDelivered {
+			t.Errorf("effect %v state %v", eff, n.Recipients[0].Delivery.State)
+		}
+	})
+	t.Run("the initial message's delivered report is applied once the reply bound the session", func(t *testing.T) {
+		h, err := HandleControlReply(now, createOutbound(t), reply(), nil)
+		requireNoErr(t, err)
+		n, eff, _, err := h.Outbound.ApplyReport(now, signedReport(t, reportFor("ctl-0001", 3, delivered(), 760*time.Second, 700*time.Second)))
+		requireNoErr(t, err)
+		if eff != ReportApplied || n.Derived.Delivery.State != delivery.StateDelivered {
+			t.Errorf("effect %v derived %v", eff, n.Derived.Delivery.State)
+		}
+	})
+}
+
+// The target stops reporting at report_by, so a report dated later than that
+// plus the clock tolerance is not one a genuine target issued.
+func TestAReportDatedAfterTheDeliverysReportByIsAContradiction(t *testing.T) {
+	now := t0.Add(5 * time.Hour)
+	// accept_before is 10 minutes after t0; report_by follows 2 h (queue cap),
+	// four 15 min leases and the 2 min clock tolerance later; the sender then
+	// allows the clock tolerance again.
+	lastBelieved := 10*time.Minute + 2*time.Hour + 4*15*time.Minute + 2*time.Minute + 2*time.Minute
+	for name, o := range map[string]Outbound{
+		"a message": outboundTo(t, KindMessage, true),
+		"a control": outboundTo(t, KindSessionClose, false),
+		"a derived": func() Outbound {
+			o := createOutbound(t)
+			o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(acceptBefore)}
+			o.ControlReplyDigest = record.Digest{1}
+			return o
+		}(),
+	} {
+		to := byte(2)
+		if o.Derived != nil {
+			to = 3
+		}
+		t.Run(name+": the last second believed is applied", func(t *testing.T) {
+			_, eff, _, err := o.ApplyReport(now, signedReport(t, reportFor("ctl-0001", to, accepted(), lastBelieved, 0)))
+			requireNoErr(t, err)
+			if eff != ReportApplied {
+				t.Errorf("effect %v", eff)
+			}
+		})
+		t.Run(name+": one second later is a contradiction and changes nothing", func(t *testing.T) {
+			n, eff, outs, err := o.ApplyReport(now, signedReport(t, reportFor("ctl-0001", to, accepted(), lastBelieved+time.Second, 0)))
+			requireErr(t, err, ErrPeerContradiction)
+			if eff != ReportNone || outs != nil || !reflect.DeepEqual(n, o) {
+				t.Errorf("effect %v: the record changed", eff)
+			}
+		})
+	}
+	t.Run("a report for an endpoint the sender holds nothing for is still only not tracked", func(t *testing.T) {
+		_, eff, _, err := outboundTo(t, KindMessage, true).ApplyReport(now, signedReport(t, reportFor("ctl-0001", 9, accepted(), lastBelieved+time.Hour, 0)))
+		requireNoErr(t, err)
+		if eff != ReportNotTracked {
+			t.Errorf("effect %v", eff)
 		}
 	})
 }

@@ -1,6 +1,7 @@
 package reply
 
 import (
+	"errors"
 	"math/rand"
 	"sort"
 	"testing"
@@ -31,14 +32,14 @@ type storyEvent struct {
 
 type story []storyEvent
 
-// at returns the state reached by tau, and the time of the delivery if
-// delivered by then.
-func (s story) at(tau int) (state delivery.State, deliveredAt int, ok bool) {
+// at returns the state reached by tau, when the target recorded that state, and
+// the time of the delivery if delivered by then.
+func (s story) at(tau int) (state delivery.State, recordedAt, deliveredAt int, ok bool) {
 	for _, e := range s {
 		if e.at > tau {
 			break
 		}
-		state, ok = e.state, true
+		state, recordedAt, ok = e.state, e.at, true
 		if e.state == delivery.StateDelivered {
 			deliveredAt = e.at
 		}
@@ -46,23 +47,34 @@ func (s story) at(tau int) (state delivery.State, deliveredAt int, ok bool) {
 	return
 }
 
+// reportByOffset and lateLimit are the delivery's report_by and the latest
+// reported_at the sender believes, as seconds after t0, written out from the
+// numbers of the delivery rules (accept_before is 10 minutes after t0, then the
+// 2 h queue cap, four 15 min leases and the 2 min clock tolerance, and then the
+// clock tolerance again). A target stops reporting at report_by, so every story
+// ends before it.
+const (
+	reportBySecs = 10*60 + 2*3600 + 4*15*60 + 2*60
+	lateLimit    = reportBySecs + 2*60
+)
+
 func randomStory(rng *rand.Rand, forControlRecipient bool) story {
 	minutes := func(lo, hi int) int { return (lo + rng.Intn(hi-lo+1)) * 60 }
-	a := minutes(0, 20*60)
+	a := minutes(0, 60)
 	choices := 5
 	if forControlRecipient {
 		choices = 3
 	}
 	switch rng.Intn(choices) {
 	case 0:
-		return story{{a, delivery.StateAccepted}, {a + minutes(1, 240), delivery.StateDelivered}}
+		return story{{a, delivery.StateAccepted}, {a + minutes(1, 90), delivery.StateDelivered}}
 	case 1:
 		return story{{a, delivery.StateAccepted}}
 	case 2:
 		return nil
 	case 3:
-		u := a + minutes(1, 120)
-		return story{{a, delivery.StateAccepted}, {u, delivery.StateDeliveryUnknown}, {u + minutes(1, 120), delivery.StateDelivered}}
+		u := a + minutes(1, 40)
+		return story{{a, delivery.StateAccepted}, {u, delivery.StateDeliveryUnknown}, {u + minutes(1, 40), delivery.StateDelivered}}
 	default:
 		return story{{a, delivery.StateRejected}}
 	}
@@ -80,7 +92,10 @@ type oracle struct {
 	bodyOK    bool // the control signal had an initial message
 	isControl bool
 	bound     bool // a verified control reply bound the session
-	facts     map[string][]fact
+	// replied: the sender has accepted the control reply, the only thing that
+	// ends the control signal's own delivery.
+	replied bool
+	facts   map[string][]fact
 }
 
 func key(e ident.EndpointID) string { return string(e.Bytes()) }
@@ -89,10 +104,18 @@ func (o *oracle) tracked(e ident.EndpointID) bool {
 	return e == runtimeR || (o.bound && e == sessionD)
 }
 
-func (o *oracle) learnReport(e ident.EndpointID, f fact) {
-	if o.tracked(e) {
-		o.facts[key(e)] = append(o.facts[key(e)], f)
+// learnReport adds a report the sender applied and says whether it did: a
+// delivered report for a control signal's own recipient is not applied before
+// the control reply was accepted.
+func (o *oracle) learnReport(e ident.EndpointID, f fact) bool {
+	if !o.tracked(e) {
+		return false
 	}
+	if o.isControl && e == runtimeR && !o.replied && f.state == delivery.StateDelivered {
+		return false
+	}
+	o.facts[key(e)] = append(o.facts[key(e)], f)
+	return true
 }
 
 // start: the earliest delivery time of a delivered report; else the earliest
@@ -171,16 +194,21 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 		binds := model.isControl && model.bodyOK && outcome != adapterproto.CreateReplyFailed
 		now := 0
 		for step := 0; step < 14; step++ {
-			now += (1 + rng.Intn(360)) * 60 // up to 6 hours: the window is 24
+			now += (1 + rng.Intn(300)) * 60 // up to 5 hours: the window is 24
 			tau := now - rng.Intn(20)*60
 			if tau < 0 {
 				tau = 0
 			}
 			// a report the target could have issued at tau for endpoint e
-			reportFor := func(e ident.EndpointID, s story) (record.Record, fact, bool) {
-				st, delAt, ok := s.at(tau)
+			// A late report is dated after the delivery's report_by plus the clock
+			// tolerance, which no genuine target issues.
+			reportFor := func(e ident.EndpointID, s story, late bool) (record.Record, fact, bool) {
+				st, recordedAt, delAt, ok := s.at(tau)
 				if !ok {
 					return record.Record{}, fact{}, false
+				}
+				if late {
+					recordedAt = lateLimit + 1 + rng.Intn(3600)
 				}
 				rep := delivery.StatusReport{State: st}
 				var del time.Time
@@ -190,7 +218,7 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				if st == delivery.StateDelivered {
 					del = secs(delAt)
 				}
-				return sealReport(t, "m-1", e, rep, secs(tau), del, idA, netA), fact{state: st, reportedAt: tau, deliveredAt: delAt}, true
+				return sealReport(t, "m-1", e, rep, secs(recordedAt), del, idA, netA), fact{state: st, reportedAt: recordedAt, deliveredAt: delAt}, true
 			}
 			switch kind := rng.Intn(10); {
 			case kind < 3: // the sender pulls a status report
@@ -198,23 +226,38 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				if rng.Intn(2) == 0 {
 					e, s = sessionD, storyD
 				}
-				rec, f, ok := reportFor(e, s)
+				late := now > lateLimit+3700 && rng.Intn(6) == 0
+				rec, f, ok := reportFor(e, s, late)
 				if !ok {
 					continue
 				}
 				sr, err := envelope.VerifyStatusReport(rec, nodeOf(idA), nodeOf(idB), acceptedFor(idA, netA), secs(now))
 				requireNoErr(t, err)
 				n, eff, _, err := outbound.ApplyReport(secs(now), sr)
-				requireNoErr(t, err)
-				outbound = n
-				if model.tracked(e) {
-					model.learnReport(e, f)
-					if eff != envelope.ReportApplied {
-						t.Fatalf("a tracked report was not applied")
+				switch {
+				case !model.tracked(e):
+					requireNoErr(t, err)
+					if eff != envelope.ReportNotTracked {
+						t.Fatalf("an untracked report was applied")
 					}
-					counts["pulled report"]++
-				} else if eff != envelope.ReportNotTracked {
-					t.Fatalf("an untracked report was applied")
+				case late:
+					if !errors.Is(err, envelope.ErrPeerContradiction) {
+						t.Fatalf("a report dated after report_by plus the tolerance: %v (effect %v)", err, eff)
+					}
+					counts["late report refused"]++
+				default:
+					requireNoErr(t, err)
+					want := envelope.ReportApplied
+					if !model.learnReport(e, f) {
+						want = envelope.ReportAwaitsControlReply
+						counts["delivered report awaits the control reply"]++
+					} else {
+						counts["pulled report"]++
+					}
+					if eff != want {
+						t.Fatalf("a tracked report: effect %v, oracle %v", eff, want)
+					}
+					outbound = n
 				}
 			case kind < 4 && model.isControl: // the sender pulls the control reply
 				sc, err := envelope.VerifyControlReply(reply(), nodeOf(idA), nodeOf(idB), acceptedFor(idA, netA), secs(now))
@@ -225,6 +268,7 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				h, err := envelope.HandleControlReply(secs(now), outbound, sc, nil)
 				requireNoErr(t, err)
 				outbound = h.Outbound
+				model.replied = true
 				if binds && !model.bound {
 					counts["bound by a pulled reply"]++
 				}
@@ -242,6 +286,7 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				haveReport := false
 				var replyRec record.Record
 				haveReply := false
+				lateEvidence := false
 				if (mode == evReply || mode == evBoth) && model.isControl && secs(controlIssued).Before(secs(now).Add(2*time.Minute)) {
 					replyRec, haveReply = reply(), true
 				}
@@ -253,8 +298,9 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 					case sessionD:
 						s = storyD
 					}
-					if rec, f, ok := reportFor(replier.Endpoint, s); ok {
-						evidence, repFact, haveReport = append(evidence, rec), f, true
+					late := now > lateLimit+3700 && rng.Intn(6) == 0
+					if rec, f, ok := reportFor(replier.Endpoint, s, late); ok {
+						evidence, repFact, haveReport, lateEvidence = append(evidence, rec), f, true, late
 					} else if replier.Endpoint != runtimeR && replier.Endpoint != sessionD {
 						// an endpoint with no story: a genuine report that it was accepted
 						rec := acceptedReport(t, replier.Endpoint, secs(tau))
@@ -270,6 +316,15 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				}
 				if !haveReport && !haveReply && mode != evForged {
 					evidence = nil
+				}
+
+				// A report dated after report_by plus the tolerance makes the evidence
+				// fail as a whole, and then the reply is judged without it. A late
+				// report for an endpoint the sender does not track is never looked at.
+				bindsHere := haveReply && binds && replier.Endpoint == sessionD
+				discarded := haveReport && lateEvidence && (model.tracked(replier.Endpoint) || bindsHere)
+				if discarded {
+					haveReply, haveReport = false, false
 				}
 
 				req := request(&outbound, replier, secs(now), evidence...)
@@ -291,6 +346,7 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				default:
 					if haveReply {
 						model.bound = model.bound || binds
+						model.replied = true
 						if binds {
 							counts["bound by evidence"]++
 						}
@@ -322,11 +378,14 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				}
 				if read := enabled && !wrongTarget && replier.Node == nodeOf(idA); read && len(evidence) > 0 {
 					// forged evidence is discarded and reported; genuine evidence never is
-					if (mode == evForged) != (adm.EvidenceError != nil) {
+					if (mode == evForged || discarded) != (adm.EvidenceError != nil) {
 						t.Fatalf("trial %d step %d: mode %d, evidence error %v", trial, step, mode, adm.EvidenceError)
 					}
-					if mode == evForged {
+					if mode == evForged || discarded {
 						counts["evidence discarded"]++
+					}
+					if discarded {
+						counts["late report discards the evidence"]++
 					}
 				}
 				if adm.Decision.Reason != want {
@@ -350,8 +409,9 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 		}
 	}
 	for name, min := range map[string]int{
-		"delivered_window": 100, "arrival_window": 150, "window_closed": 80, "no_arrival_proof": 150, "not_recipient": 300,
+		"delivered_window": 100, "arrival_window": 100, "window_closed": 80, "no_arrival_proof": 150, "not_recipient": 300,
 		"evidence discarded": 20, "control_signal": 60, "disabled": 20, "not_sender": 5,
+		"late report refused": 15, "late report discards the evidence": 15, "delivered report awaits the control reply": 20,
 		"bound by evidence": 100, "bound by a pulled reply": 50, "granted to a derived session": 80, "pulled report": 300,
 	} {
 		if counts[name] < min {

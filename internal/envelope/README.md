@@ -23,13 +23,14 @@ this package is [`reply`](../reply/README.md).
 | `StatusReport`, `StatusReportDescriptor(node, accepted, now)`, `VerifyStatusReport(record, target, local, accepted, now)` | The signed status report. `SignedReport` is the verified value and remembers the node it was verified for. The report names the sending node, which must be `local`. |
 | `ControlReply`, `ControlResult`, `CreateResult`, `ControlReplyDescriptor(node, accepted, now)`, `VerifyControlReply(record, target, local, accepted, now)` | The signed control reply for the four control signals, in the values of `adapterproto`. `SignedControlReply` is the verified value. The reply names the sending node, which must be `local`. |
 | `Outbound`, `Tracked`, `Arrival` | The sender's record of a message it sent: one delivery per recipient, the derived delivery of an initial message, the digest of the accepted control reply, and what signed reports proved about arrival. |
-| `Outbound.ApplyReport(now, report)` | The one rule by which a sender applies a verified status report, pulled or attached to a reply. |
+| `Outbound.ApplyReport(now, report)` | The one rule by which a sender applies a verified status report, pulled or attached to a reply. Returns a `ReportEffect`: applied, not tracked, or awaiting the control reply. |
 | `HandleControlReply(now, outbound, reply, report)` | The one rule by which a sender applies a verified control reply, pulled or attached to a reply. |
 
 Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
 `ErrPeerContradiction` means the peer broke the contract (a second distinct
 control reply, a reply to a rejected signal, a reply that names the signal's own
-recipient as the session, a state that cannot follow): the caller stops pulling from
+recipient as the session, a state that cannot follow, a report dated after the
+delivery's `report_by` plus the clock tolerance): the caller stops pulling from
 that peer for the message and logs it. `ErrBodyTooLarge` wraps `ErrBody`, so a
 caller tells a body over `Limits.MaxBody` from a malformed one; an input over the
 size derived from the limits is refused before parsing, with `record.ErrOversize`.
@@ -94,7 +95,14 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   after now plus `timing.ClockTolerance`; applies it with
   `delivery.Record.ApplyStatusReport`; and adds its arrival facts. A report for
   an endpoint the sender has no delivery to changes nothing
-  (`ReportNotTracked`). On an error nothing changes.
+  (`ReportNotTracked`). A report dated after the delivery's `report_by` plus
+  `timing.ClockTolerance` is `ErrPeerContradiction`: the target stops reporting
+  at `report_by`. A control signal's own delivery ends only through its control
+  reply: while `ControlReplyDigest` is zero, a `delivered` report for the
+  signal's recipient changes nothing and the effect is `ReportAwaitsControlReply`,
+  so the caller keeps pulling the signal and gets the reply, which carries the
+  result and the session endpoint (every other state of that report is applied
+  as usual). On an error nothing changes.
 - **Handling a control reply.** `HandleControlReply` is all or nothing. It ends
   the control signal's delivery with `delivery.EventDelivered`; a reply that
   names the signal's own recipient as the session endpoint is
@@ -128,6 +136,8 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   stores payloads only and signs a status report or control reply with its
   current network key each time it sends one as evidence or in answer to a pull;
   the digest excludes signatures, so signing again does not change it.
+- A caller that gets `ReportAwaitsControlReply` keeps pulling the control signal
+  (its reply) as it does for any delivery that is not final.
 - `Outbound` mirrors storage: one `Tracked` per recipient, source-side delivery
   records, the derived delivery only after a control reply bound it, and the
   digest of that reply with it. `Outbound.Validate` checks the invariants.

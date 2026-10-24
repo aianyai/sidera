@@ -294,7 +294,7 @@ func TestWindow(t *testing.T) {
 		})
 	}
 	t.Run("a window of 24 hours is not extended by a later report", func(t *testing.T) {
-		later := learn(t, arrived, acceptedReport(t, runtimeR, t0.Add(10*time.Hour)), t0.Add(11*time.Hour))
+		later := learn(t, arrived, acceptedReport(t, runtimeR, t0.Add(2*time.Hour)), t0.Add(11*time.Hour))
 		adm := mustAdmit(t, request(&later, onA(2), t0.Add(3*time.Minute+Window)))
 		if adm.Decision.Reason != ReasonWindowClosed {
 			t.Errorf("decision %+v", adm.Decision)
