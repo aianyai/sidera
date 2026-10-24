@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -98,6 +99,41 @@ func TestDefaultsComeFromTheirOwners(t *testing.T) {
 	}
 }
 
+// The one conversion of the retention to a duration, and the largest number of
+// days it can hold: a duration holds 9,223,372,036 whole seconds, which is
+// 106751 days and 85,636 seconds, so one more day would pass it.
+func TestArchiveRetention(t *testing.T) {
+	rows := []struct {
+		name  string
+		days  int
+		want  time.Duration
+		valid bool
+	}{
+		{"the default", 30, 30 * 24 * time.Hour, true},
+		{"one day", 1, 24 * time.Hour, true},
+		{"the largest number a duration holds", 106751, 9223286400 * time.Second, true},
+		{"one day more", 106752, 0, false},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			s := config.DefaultNodeSettings()
+			s.ArchiveRetentionDays = r.days
+			err := s.Validate()
+			if r.valid != (err == nil) {
+				t.Fatalf("Validate = %v, valid want %v", err, r.valid)
+			}
+			if r.valid {
+				if got := s.ArchiveRetention(); got != r.want {
+					t.Errorf("ArchiveRetention = %v, want %v", got, r.want)
+				}
+			}
+			if !r.valid && !errors.Is(err, config.ErrOutOfRange) {
+				t.Errorf("Validate = %v, want ErrOutOfRange", err)
+			}
+		})
+	}
+}
+
 // The settings that no other package limits have ranges of their own.
 func TestNodeSettingRanges(t *testing.T) {
 	good := config.DefaultNodeSettings()
@@ -111,6 +147,8 @@ func TestNodeSettingRanges(t *testing.T) {
 		{"disk reserve negative", func(s *config.NodeSettings) { s.DiskReserveBytes = -1 }},
 		{"retention zero", func(s *config.NodeSettings) { s.ArchiveRetentionDays = 0 }},
 		{"retention negative", func(s *config.NodeSettings) { s.ArchiveRetentionDays = -30 }},
+		{"retention one day beyond what a duration holds", func(s *config.NodeSettings) { s.ArchiveRetentionDays = 106752 }},
+		{"retention that wraps around a duration", func(s *config.NodeSettings) { s.ArchiveRetentionDays = math.MaxInt }},
 		{"log total zero", func(s *config.NodeSettings) { s.LogTotalBytes = 0 }},
 		{"log total negative", func(s *config.NodeSettings) { s.LogTotalBytes = -1 }},
 	}

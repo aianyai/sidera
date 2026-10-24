@@ -143,6 +143,9 @@ func (w ruleWire) rule() (authz.Rule, error) {
 			r.Subject.Node = n
 		}
 		if w.Subject.Address != "" {
+			if w.Subject.Node != "" {
+				return r, invalidf("subject.address", "an address names its node: give node or address, not both")
+			}
 			a, err := ident.ParseAddress(w.Subject.Address)
 			if err != nil {
 				return r, invalid("subject.address", err)

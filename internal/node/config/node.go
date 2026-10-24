@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
@@ -24,6 +25,11 @@ const (
 	// feedback it may give rise to. The disk reserve must cover this for as many
 	// deliveries as the queue holds, plus the logs.
 	OpenDeliveryDiskGrowth = 4 << 10
+	// MaxArchiveRetentionDays is the most days of retention a time.Duration can
+	// hold. A larger number would wrap around to a negative or short retention
+	// in ArchiveRetention, and the archive would then discard its summaries at
+	// once. The limit is almost three centuries, which no owner needs.
+	MaxArchiveRetentionDays = math.MaxInt64 / int64(24*time.Hour)
 )
 
 // DefaultNodeSettings are the settings `init` writes. The limits another
@@ -74,6 +80,13 @@ func (o EndpointOverride) Validate() error {
 	return nil
 }
 
+// ArchiveRetention is how long the archive keeps its summaries, the one
+// conversion of archive_retention_days to a duration. Validate refuses a number
+// of days that the conversion would wrap around.
+func (s NodeSettings) ArchiveRetention() time.Duration {
+	return time.Duration(s.ArchiveRetentionDays) * 24 * time.Hour
+}
+
 func outOfRange(field string, v any) error {
 	return invalid(field, fmt.Errorf("%w: %v (at least 1)", ErrOutOfRange, v))
 }
@@ -95,6 +108,10 @@ func (s NodeSettings) Validate() error {
 	}
 	if s.ArchiveRetentionDays < 1 {
 		return outOfRange("archive_retention_days", s.ArchiveRetentionDays)
+	}
+	if int64(s.ArchiveRetentionDays) > MaxArchiveRetentionDays {
+		return invalid("archive_retention_days", fmt.Errorf("%w: %d (at most %d, the days a duration can hold)",
+			ErrOutOfRange, s.ArchiveRetentionDays, MaxArchiveRetentionDays))
 	}
 	if s.LogTotalBytes < 1 {
 		return outOfRange("log_total_bytes", s.LogTotalBytes)

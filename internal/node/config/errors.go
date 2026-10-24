@@ -186,7 +186,14 @@ func (r ChangeReason) String() string {
 // ChangeError is a refused change.
 type ChangeError struct {
 	Reason ChangeReason
-	// Field is the JSON path of the offending value, for ChangeInvalid.
+	// Field names what the refusal is about. For ChangeInvalid it is the JSON
+	// path of the offending value, or for a package being installed the path of
+	// the offending file in it. For the reasons about a name it is that name: the
+	// preset (ChangePresetExists, ChangePresetUnknown), the instance
+	// (ChangeInstanceUnknown, ChangeInstanceExists, ChangeInstanceAdapterMismatch),
+	// the adapter (ChangeAdapterNotInstalled), "instances.<name>" for
+	// ChangeAdapterInUse and the endpoint id for ChangeEndpointUnknown. It is
+	// empty for ChangeVersionConflict and ChangeNothingToChange.
 	Field string
 	// Current is the current version of the collection, for
 	// ChangeVersionConflict.

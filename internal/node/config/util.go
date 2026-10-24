@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 func sortedKeys[V any](m map[string]V) []string {
@@ -44,4 +45,21 @@ func cloneOperation(o *Operation) *Operation {
 	c := *o
 	c.Result = append(json.RawMessage(nil), o.Result...)
 	return &c
+}
+
+// cloneManifest returns a manifest that shares no memory with m, by writing it
+// out and parsing it again: a manifest has slices, pointers and raw JSON at
+// several depths, and going through its own parser keeps the copy complete
+// whatever fields the manifest package adds. m came from manifest.Parse, so a
+// failure here is a defect and not an input.
+func cloneManifest(m manifest.Manifest) manifest.Manifest {
+	data, err := json.Marshal(m)
+	if err != nil {
+		panic("config: a parsed manifest cannot be written out: " + err.Error())
+	}
+	c, err := manifest.Parse(data)
+	if err != nil {
+		panic("config: a parsed manifest is refused when parsed again: " + err.Error())
+	}
+	return c
 }

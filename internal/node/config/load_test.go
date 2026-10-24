@@ -58,6 +58,8 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"node queue time beyond the cap", config.NodePath, edit(goldenNode, `"max_queue_s": 1800`, `"max_queue_s": 99999`), config.KindNode, config.FileInvalid, "max_queue_s"},
 		{"node reserve below what the queue can grow", config.NodePath, edit(goldenNode, `"disk_reserve_bytes": 268435456`, `"disk_reserve_bytes": 1048576`), config.KindNode, config.FileInvalid, "disk_reserve_bytes"},
 		{"node retention zero", config.NodePath, edit(goldenNode, `"archive_retention_days": 30`, `"archive_retention_days": 0`), config.KindNode, config.FileInvalid, "archive_retention_days"},
+		{"node retention beyond what a duration holds", config.NodePath, edit(goldenNode, `"archive_retention_days": 30`, `"archive_retention_days": 106752`), config.KindNode, config.FileInvalid, "archive_retention_days"},
+		{"node retention that wraps around a duration", config.NodePath, edit(goldenNode, `"archive_retention_days": 30`, `"archive_retention_days": 9223372036854775807`), config.KindNode, config.FileInvalid, "archive_retention_days"},
 		{"node queue time no duration holds", config.NodePath, edit(goldenNode, `"max_queue_s": 1800`, `"max_queue_s": 9223372036854775807`), config.KindNode, config.FileInvalid, "max_queue_s"},
 		{"node queue time that wraps around a duration", config.NodePath, edit(goldenNode, `"max_queue_s": 1800`, `"max_queue_s": 18446744074`), config.KindNode, config.FileInvalid, "max_queue_s"},
 		{"node operation id zero", config.NodePath, edit(goldenNode, opIDText, "00000000000000000000000000000000"), config.KindNode, config.FileInvalid, "last_operation.id"},
@@ -77,6 +79,7 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"policy node that is not an id", config.PolicyPath, edit(goldenPolicy, `"node": "`+node2Text+`"`, `"node": "node1abc"`), config.KindPolicy, config.FileInvalid, "rules[1]"},
 		{"policy rule authz refuses", config.PolicyPath, edit(goldenPolicy, `"action": "see"`, `"action": "relay.reserve"`), config.KindPolicy, config.FileInvalid, "rules[0]"},
 		{"policy time that is not a time", config.PolicyPath, edit(goldenPolicy, `"2027-01-01T00:00:00Z"`, `"next year"`), config.KindPolicy, config.FileInvalid, "rules[1]"},
+		{"policy endpoint subject with both a node and an address", config.PolicyPath, edit(goldenPolicy, `"address": "`+node2Text+`/`+ep2Text+`"`, `"node": "`+node1Text+`", "address": "`+node2Text+`/`+ep2Text+`"`), config.KindPolicy, config.FileInvalid, "subject.address"},
 		{"policy rate window no duration holds", config.PolicyPath, edit(goldenPolicy, `"window_s": 60`, `"window_s": 9223372036854775807`), config.KindPolicy, config.FileInvalid, "window_s"},
 		{"policy version zero", config.PolicyPath, edit(goldenPolicy, `"version": 2`, `"version": 0`), config.KindPolicy, config.FileInvalid, "version"},
 
@@ -119,6 +122,7 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"endpoint ids runtime that is the system endpoint", config.EndpointIDsPath("example"), edit(goldenEndpointIDs, `"runtime": "`+ep1Text+`"`, `"runtime": "`+ident.SystemEndpoint().String()+`"`), config.KindEndpointIDs, config.FileInvalid, "runtime"},
 		{"endpoint ids unknown field", config.EndpointIDsPath("example"), edit(goldenEndpointIDs, `"format": 1,`, `"format": 1, "extra": 1,`), config.KindEndpointIDs, config.FileMalformed, "extra"},
 		{"endpoint ids file of an instance with no valid name", config.EndpointIDsPath("Bad Name"), goldenEndpointIDs, config.KindEndpointIDs, config.FileMisnamed, ""},
+		{"endpoint ids backup copy beside a file", config.EndpointIDsDir + "/example.json.bak", goldenEndpointIDs, config.KindEndpointIDs, config.FileMisnamed, ""},
 		{"endpoint ids id of another instance", config.EndpointIDsPath("other"), `{"format": 1, "direct": {"y": "` + ep1Text + `"}}`, config.KindEndpointIDs, config.FileInvalid, ""},
 
 		// revocation-backup.json
@@ -129,6 +133,7 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 
 		// revocation records
 		{"revocation file with another name", config.RevocationPath(otherDigest), string(revData), config.KindRevocation, config.FileMisnamed, ""},
+		{"revocation file that is no record", config.RevocationsDir + "/notes.txt", "x", config.KindRevocation, config.FileMalformed, ""},
 		{"revocation not a record", config.RevocationPath(digest), "not a record", config.KindRevocation, config.FileMalformed, ""},
 
 		// adapters
@@ -181,6 +186,35 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 				t.Errorf("refusing the tree wrote something: before %v after %v", keysOf(before), keysOf(after))
 			}
 		})
+	}
+}
+
+// A name that begins with a dot is never a document of config: the operating
+// system and editors put such files (.DS_Store) into any directory, and refusing
+// startup for one would only annoy the owner. The directories that fail closed
+// on every other unknown name, endpoint-ids/ and revocations/ among them, ignore
+// these; and ignoring them writes nothing.
+func TestNamesBeginningWithADotAreIgnored(t *testing.T) {
+	for _, dir := range []string{config.EndpointIDsDir, config.RevocationsDir, config.AdaptersDir} {
+		for _, name := range []string{".DS_Store", ".localized", ".example.json.swp"} {
+			t.Run(dir+"/"+name, func(t *testing.T) {
+				rg := newRig(t)
+				tree := validTree(t)
+				tree[dir+"/"+name] = "not a document of config"
+				putTree(t, rg.mem, tree)
+				before := snapshot(t, rg.mem)
+				c, err := config.Load(rg.w)
+				if err != nil {
+					t.Fatalf("Load refused a %s in %s: %v", name, dir, err)
+				}
+				if len(c.Revocations()) != 1 || c.EndpointIDs("example").Runtime.IsZero() || len(c.Adapters()) != 1 {
+					t.Errorf("the configuration beside %s is not what was written", name)
+				}
+				if after := snapshot(t, rg.mem); !reflect.DeepEqual(before, after) {
+					t.Errorf("loading wrote something: before %v after %v", keysOf(before), keysOf(after))
+				}
+			})
+		}
 	}
 }
 

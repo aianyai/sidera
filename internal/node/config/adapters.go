@@ -203,9 +203,6 @@ func readPackage(src fsx.Reader) (pkg, error) {
 // for what is in it leaves nothing. rnd names the staging directory. The
 // platform the manifest lists is the caller's to check on Staged.Manifest.
 func (c *Config) StageAdapter(src fsx.Reader, rnd io.Reader) (Staged, error) {
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
-
 	p, err := readPackage(src)
 	if err != nil {
 		return Staged{}, err
@@ -285,8 +282,6 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) error {
 // never touches the version the current pointer names. What is not there is not
 // an error, and with nothing to drop it writes nothing.
 func (c *Config) Unstage(s Staged) error {
-	c.wmu.Lock()
-	defer c.wmu.Unlock()
 	return c.unstage(s)
 }
 
@@ -409,7 +404,7 @@ func (i Install) Point(tx *txn.Tx) (AfterCommit, error) {
 	if err := tx.Replace(RoleCurrent, AdapterCurrentPath(i.staged.ID), data, fsx.ModePrivate); err != nil {
 		return nil, err
 	}
-	adapter := Adapter{ID: i.staged.ID, Version: i.staged.Version, Manifest: i.staged.Manifest}
+	adapter := Adapter{ID: i.staged.ID, Version: i.staged.Version, Manifest: cloneManifest(i.staged.Manifest)}
 	return func() {
 		i.c.mu.Lock()
 		defer i.c.mu.Unlock()

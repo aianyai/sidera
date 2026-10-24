@@ -97,7 +97,7 @@ patch is merged into the current settings and the result is validated whole.
 | `node_queue_limit` | unfinished deliveries the node holds before new sends are refused | 10,000 (`config`) | at least 1, and the reserve rule below |
 | `disk_reserve_bytes` | free space below which new work is refused | 256 MiB (`config`) | at least 1, and the reserve rule below |
 | `node_prompt_turns` | turns started by prompts that may run at once on the node | `handoff.DefaultMaxConcurrentTurns` | `handoff.PromptParams.Validate` accepts it (positive) |
-| `archive_retention_days` | days the archive keeps its summaries | 30 (`config`) | at least 1 |
+| `archive_retention_days` | days the archive keeps its summaries | 30 (`config`) | from 1 to 106,751, the days a `time.Duration` holds |
 | `log_total_bytes` | space all logs together may take | 150 MiB (`config`) | at least 1, and the reserve rule below |
 | `endpoint_defaults.max_queue_s` | longest an endpoint keeps a message queued, in seconds | `delivery.DefaultEndpointMaxQueue` | `delivery.ValidateEndpointMaxQueue` accepts it |
 | `endpoint_defaults.backlog_limit` | messages an endpoint holds queued | `delivery.DefaultEndpointBacklogLimit` | `delivery.ValidateEndpointBacklogLimit` accepts it |
@@ -112,6 +112,19 @@ queue limit can go up to 27,136. The arithmetic does not overflow: a limit too
 large for it is refused as too large. The archive itself is not counted: it
 grows with the number of deliveries kept for the retention period, and its size
 is documented with the archive.
+
+The retention reaches its consumers only as `NodeSettings.ArchiveRetention()`,
+the one conversion of days to a duration. The upper bound exists because above
+it that conversion wraps around to a negative or short duration and the archive
+would discard its summaries at once, silently; it is almost three centuries, so
+no owner's retention is refused for it.
+
+The reserve rule is an estimate, not a proof. The 4 KiB is rounded from about
+4.15 KiB per unfinished delivery, and the blocks a file system allocates for
+small files are not counted. No margin term is added, because the quantities
+that would need one are already counted at their maximum: logs at their cap,
+the archive by the bytes appended to it, and one feedback notice merges many
+deliveries instead of adding one each. With the defaults the reserve leaves about 66 MiB over the sum.
 
 A setting that another package limits is validated by that package, and the
 error the owner gets is that package's error: the rule has one home.
@@ -152,7 +165,9 @@ refused is found when it is written. `init` writes the default policy of
 `rules` is required and may be empty, which allows nothing. Every rule goes
 through `authz.NewPolicy`, so a combination `authz` refuses (a rate cap on a
 deny, an action that cannot be aimed at the object) refuses the file, with the
-index of the rule.
+index of the rule. A subject that gives both `node` and `address` is refused,
+since an address already names its node and one of the two would be dropped
+silently.
 
 ### `presets.json`
 
@@ -281,25 +296,32 @@ it is installed.
 
 **Installing** (`adapter install` of a package directory):
 
-1. Staging, outside the single writer loop: the package is read through a reader
+1. Staging, outside the single writer loop and holding none of its locks: the
+   package is read through a reader
    rooted at its directory (its manifest must parse, its entry program must be in
    it, and no name in it may begin with `.tmp-`, `.trash-` or `.stage-`, which
    the cleanup would remove silently), then copied to
    `versions/.stage-<hex>` beside the versions, because a rename needs one
    parent. The copy's manifest is parsed again and must name the same adapter
    and version as the source did, so the package cannot change between the check
-   and the install. Everything staging writes is preparation.
-2. In the loop, one transaction: discard a leftover directory of the version if
+   and the install. Everything staging writes is preparation. A copy can take as
+   long as the package is big and touches only a directory that no change reads,
+   so the versioned changes of the loop never wait for it.
+2. In the loop, `PlanInstall` and the transaction it plans in the same command,
+   so that nothing changes between the plan and its writes. The transaction:
+   discard a leftover directory of the version if
    there is one; rename the staging directory to `versions/<version>`; replace
    `current` (the commit point); the caller's own result write; discard the
    previous version. An adapter that has an enabled instance is not upgraded
    (`adapter_in_use`): it runs the version that is current, and the owner
    disables it first. The same version that is already current is "already
    installed" and writes nothing.
-3. A refused or failed installation is unstaged: the staging directory, a version
-   directory that was renamed in and did not become current, and, for an adapter
-   never installed, its whole directory, so that no `adapters/<id>/` without a
-   `current` is left.
+3. An installation that did not install is unstaged by the install worker: when
+   the result is "already installed", when it is refused, and when it failed
+   with an error that is not fatal. The staging directory, a version directory
+   that was renamed in and did not become current, and, for an adapter never
+   installed, its whole directory are dropped, so that no `adapters/<id>/`
+   without a `current` is left. After a fatal error the next start removes them.
 
 **The repair.** An adapter directory without `current`, a staging directory, and
 a version directory the pointer does not name are garbage. `AdapterGCWork(r)`
@@ -341,10 +363,21 @@ be read, is not a valid document of its kind, breaks a rule or has a name that
 does not match what it holds ends the load with an error that names the file
 and, when the fault is in a value, the path of the value; the node does not
 start and nothing is written. Only if everything is valid does the repair of the
-adapter directory run. An entry of `endpoint-ids/`, `revocations/` or `adapters/` that is not one of
-the kinds above (a stray file in `adapters/`, an editor's backup beside a file in
-`endpoint-ids/`) is named and refused too, since an entry that is none of them is
-a sign that something other than the node wrote there.
+adapter directory run. Three directories are strict about what they hold: in `endpoint-ids/` an entry
+must be `<instance>.json`, in `revocations/` a record named by its digest, in
+`adapters/` the directory of an adapter named by its id. Any other entry (a
+stray file in `adapters/`, an editor's backup `example.json.bak` beside a file
+in `endpoint-ids/`) is named and refused, since an entry that is none of them is
+a sign that something other than the node wrote there. Revocations and stable
+ids fail closed for a reason: a revocation record that was not read would let a
+retired identity be used again, and an endpoint-id file that was not read would
+make the node mint a new id, and so a new address, for an endpoint that has one.
+A name that begins with a dot is ignored in all three: it is either a leftover
+that the cleanup at start removes (`.tmp-`, `.trash-`) or a file an operating
+system or editor puts into a directory by itself (`.DS_Store`), and none of
+those is ever configuration. The root of `config/` and the package directories
+under `adapters/` are not checked for extra files: nothing there is read as
+configuration, so a stray file cannot be taken for it.
 
 ### `init`
 
@@ -477,10 +510,12 @@ the owner's decisions and orphan the installed adapters. A file that is there
 and valid is the owner's; one that is there and invalid is theirs to fix.
 
 **Strict about stray files and missing directories.** A directory the owner
-deleted, or a file nobody expected, is named and refused. This is stricter than
-needed for safety and is deliberate: configuration that is being quietly
-misread is worse than a node that tells the owner what to look at. An editor's
-backup file beside a configuration file is a stray file and is named.
+deleted is named and refused. So is an unexpected file in the three directories
+described under Start, where an unread file changes what the node does:
+configuration that is being quietly misread is worse than a node that tells the
+owner what to look at. An editor's backup file beside a configuration file there
+is a stray file and is named; a name that begins with a dot is not. Elsewhere
+(the root of `config/`, the package directories) extra files are not checked.
 
 **A result function, not a result.** The shape of a management result belongs to
 the management layer, and it contains the new version, which exists only once
@@ -494,9 +529,6 @@ endpoints and not to others for a reason nobody remembers.
 
 ## Known gaps
 
-- The mode of a staged file (the entry program is written executable, the rest
-  private) is chosen by `config` and not observed by the tests: the in-memory
-  file system does not model modes.
 - Changing a setting for a closed session endpoint is refused only when the
   caller says which endpoints are open; a caller that cannot say gets no check.
 - Windows: the order of two renames after a power loss is not documented by the
@@ -522,6 +554,9 @@ endpoints and not to others for a reason nobody remembers.
 | Expected versions, recording the operation | `TestExpectedVersionConflictPerCollection`, `TestVersionedChangeRecordsTheOperation`, `TestStaleVersionIsReportedBeforeAnInvalidValue` |
 | Settings and their owners | `TestSettingsValidationDelegatesToOwningContract`, `TestEndpointSettingsValidationDelegatesToOwningContract`, `TestDefaultsComeFromTheirOwners`, `TestNodeSettingRanges`, `TestDiskReserveCoversTheQueueAndTheLogs`, `TestNodeSettingsPatch` |
 | Crash states and replay | `TestEveryConfigTransactionSurvivesACrashAtEveryPoint`, `TestCrashDuringAdapterGCReplay`, `TestInitSurvivesACrashAtEveryPoint`, `TestInitCrashNeverReplacesAnOwnersFile`, `TestEveryDeclaredCrashPointIsReached` |
+| Staging does not hold up the loop; modes of staged files; manifests are copies | `TestStagingDoesNotHoldUpTheWriterLoop`, `TestStagedFilesKeepTheirModes`, `TestAdaptersReturnsCopiesOfTheManifests` |
+| Names that begin with a dot | `TestNamesBeginningWithADotAreIgnored` (and the stray-file rows of `TestInvalidFileRefusesStartupAndNamesTheFile`) |
+| The retention and its bound | `TestArchiveRetention`, `TestNodeSettingRanges` |
 | A clean run leaves no recovery work | `TestCleanScenariosLeaveNoConfigRecoveryWork` |
 | `init` | `TestInitWritesTheDefaults`, `TestInitNeverOverwritesExistingConfig`, `TestInitRefusesAnInvalidExistingFileNamingIt` |
 | Golden files | `TestGoldenNode`, `TestGoldenPolicy`, `TestGoldenPresets`, `TestGoldenInstances`, `TestGoldenEndpointIDs`, `TestGoldenBackup`, `TestGoldenAdapterCurrent` |

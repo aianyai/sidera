@@ -17,7 +17,8 @@ declared here or in the package that composes it. It reads no clock.
 | Name | Purpose |
 | ---- | ------- |
 | `Load(w)` | Reads and checks all of `config/`, then repairs the adapter directory. Returns a `*Config`, or a `*FileError` that names the file that is wrong. |
-| `Config` accessors: `Node`, `Policy`, `Presets`, `Instances`, `EndpointIDs`, `EndpointSettings`, `Backup`, `Revocations`, `RevocationSet`, `Adapters`, `LastOperations` | Copies of the loaded state. |
+| `Config` accessors: `Node`, `Policy`, `Presets`, `Instances`, `EndpointIDs`, `EndpointSettings`, `Backup`, `Revocations`, `RevocationSet`, `Adapters`, `LastOperations` | Copies of the loaded state, manifests of `Adapters` included: nothing a caller changes reaches the configuration or another caller. |
+| `NodeSettings.ArchiveRetention()` | The retention of the archive as a duration: the one conversion of `archive_retention_days`. |
 | `SetNodeSettings`, `AddPreset`, `RemovePreset`, `EnableAdapter`, `DisableAdapter`, `SetEndpointSettings` | The versioned changes. Each checks the version the request names, validates, records the operation and its result in the file it changes, in the same replacement, and returns the new state. Refusals are `*ChangeError` with a typed `ChangeReason`. |
 | `RuntimeID`, `DirectID`, `PutEndpointIDs`, `PutBackup`, `PutRevocation` | Write functions for transactions of other packages: they take a `*txn.Tx`, write under an exported role, and return an `AfterCommit` that the caller calls once `Commit` returned nil. |
 | `StageAdapter`, `Unstage`, `PlanInstall`, `Install` | The installation of an adapter package: copy it next to the versions, drop it, plan the writes that make it current. |
@@ -44,7 +45,10 @@ declared here or in the package that composes it. It reads no clock.
   is compared with the current one by `admin.CheckVersion`, inside the change,
   before the content is looked at: a stale and invalid request is a conflict.
   The management layer does not check it separately, because the check and the
-  write have to be one step.
+  write have to be one step. Whether the request was already answered is not
+  decided here: the management layer runs `admin.CheckReplay` first, against the
+  operations `LastOperations()` returns, and calls a change only when it says to
+  execute.
 - **The operation is recorded in the file it changed.** `last_operation` holds
   the operation id, the person, the fingerprint and the result, written in the
   same replacement as the new version. The management layer builds the result
@@ -61,6 +65,16 @@ declared here or in the package that composes it. It reads no clock.
   decides is a number here (below).
 - **A patch is merged, then validated whole, and applies whole.** A setting is
   judged against the others it depends on, and one bad value changes nothing.
+- **A name that begins with a dot is never configuration.** Reading
+  `endpoint-ids/`, `revocations/` and `adapters/` ignores every such name:
+  the leftovers of interrupted operations (`.tmp-`, `.trash-`, which the cleanup
+  at start removes) and the files an operating system or an editor puts into a
+  directory (`.DS_Store`). Any other name in these three directories that is
+  not what belongs there refuses startup and is named. Revocations and stable
+  ids fail closed: a record that was not read would revive a retired identity,
+  and an id file that was not read would give an endpoint a new address. The
+  root of `config/` and the package directories under `adapters/` are not
+  checked for extra files.
 - **The disk reserve covers the queue and the logs.** `disk_reserve_bytes` must
   be at least `log_total_bytes` plus `OpenDeliveryDiskGrowth` (4 KiB) times
   `node_queue_limit`, computed without overflow: below that, new work would be
@@ -105,7 +119,7 @@ declared here or in the package that composes it. It reads no clock.
 | `node_queue_limit` | 10,000 unfinished deliveries | Above what ordinary traffic queues in the default queue time, small enough that the disk reserve below covers it. |
 | `disk_reserve_bytes` | 256 MiB | Covers the log total and 4 KiB for each of 10,000 deliveries (about 190 MiB) with room. |
 | `log_total_bytes` | 150 MiB | Shared by the daemon and every adapter instance; the size at which each log rotates follows from it and from the number of instances. |
-| `archive_retention_days` | 30 | How long summaries stay; the archive is not counted in the reserve. |
+| `archive_retention_days` | 30, at most 106,751 | How long summaries stay; the archive is not counted in the reserve. The upper bound is the number of days a `time.Duration` holds: above it the conversion would wrap around to a negative or short retention and the archive would discard its summaries at once. Consumers read the retention only through `ArchiveRetention()`. |
 | `OpenDeliveryDiskGrowth` | 4 KiB | An unfinished delivery adds its archive summary and events and the feedback notification it may cause before it is archived. |
 
 The prompt turns and the endpoint defaults are not here: they are
@@ -117,7 +131,11 @@ The prompt turns and the endpoint defaults are not here: they are
 - Build the transaction table once, from `txn.Internal()`, `Transactions()` and
   the composed declarations, and call `Writer.Recover` before `Load`.
 - Serialise the writes of one declaration (the single writer loop does).
-  `Config` also serialises its own writers, but a second writer would only wait.
+  `Config` also serialises its versioned changes and `PlanInstall`, but a second
+  writer would only wait.
+- Call a versioned change only after `admin.CheckReplay`, run against the
+  operations `LastOperations()` returns, has said to execute: the version check
+  is inside `config`, the replay check is not.
 - A transaction that spans owners is declared by the composing package, with the
   roles exported here, and writes config's files only through the functions here:
   `direct-register` and `runtime-admit` (`RoleEndpointIDs`), `backup-confirm`
@@ -129,7 +147,16 @@ The prompt turns and the endpoint defaults are not here: they are
 - Pass `OpenEndpoints` to every write of `instances.json`, with the set of
   endpoints that are open now.
 - For `StageAdapter`, pass a `fsx.Reader` rooted at the package directory and
-  check the platform in `Staged.Manifest`.
+  check the platform in `Staged.Manifest`. `StageAdapter` and `Unstage` are
+  called only by the single install worker, one at a time, and may run
+  concurrently with the writer loop: they take no lock of `Config` and touch
+  only staging and version directories that no change reads.
+- Run `PlanInstall` and the transaction it plans in the same loop command, so
+  that nothing changes between the plan and its writes. Call `Unstage` when the
+  result is `AlreadyCurrent`, when the installation is refused and when it
+  failed with an error that is not fatal; after a fatal error the next start
+  removes what is left.
+- Read the archive retention only through `ArchiveRetention()`.
 - A `Fatal` error from a write means exit and rescan: memory was not changed,
   and the next start reads what is on disk.
 - Do not edit `endpoint-ids/` by hand; edit the other files only while the node

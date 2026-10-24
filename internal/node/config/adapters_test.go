@@ -9,10 +9,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
 // srcPackage is a package directory as the owner hands it over: a file system
@@ -527,5 +530,219 @@ func TestLoadRepairsTheAdapterDirectory(t *testing.T) {
 	}
 	if _, err := rg.mem.Stat(config.AdapterDir("half")); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("Stat = %v", err)
+	}
+}
+
+// blockingSource serves a package and holds the read of one file until released:
+// a copy that is stuck halfway, as a slow disk or a network share makes it.
+type blockingSource struct {
+	fsx.Reader
+	file    string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockingSource) ReadFile(p string) ([]byte, error) {
+	if p == b.file {
+		b.once.Do(func() { close(b.entered) })
+		<-b.release
+	}
+	return b.Reader.ReadFile(p)
+}
+
+// Copying a package can take as long as the package is big, and it touches only
+// a staging directory no change reads, so the writer loop must not wait for it:
+// while one package is stuck halfway through its copy, a versioned change and
+// the dropping of another staged package both complete.
+func TestStagingDoesNotHoldUpTheWriterLoop(t *testing.T) {
+	rg, c := loaded(t)
+	other, err := c.StageAdapter(srcPackage(t, "fresh", "0.1.0", nil), suffixReader())
+	if err != nil {
+		t.Fatalf("StageAdapter: %v", err)
+	}
+
+	src := &blockingSource{Reader: srcPackage(t, "example", "2.0.0", nil), file: "README",
+		entered: make(chan struct{}), release: make(chan struct{})}
+	staging := make(chan error, 1)
+	go func() {
+		_, err := c.StageAdapter(src, bytes.NewReader([]byte{9, 9, 9, 9, 9, 9, 9, 9}))
+		staging <- err
+	}()
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			close(src.release)
+		}
+	}
+	defer release()
+	select {
+	case <-src.entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the copy never reached the file it was to block on")
+	}
+
+	changed := make(chan error, 1)
+	go func() {
+		_, err := c.SetNodeSettings(request(1, c.Node().Version), []byte(`{"reply_permission": false}`), result(new([]config.Node), `{}`))
+		changed <- err
+	}()
+	unstaged := make(chan error, 1)
+	go func() { unstaged <- c.Unstage(other) }()
+	for _, step := range []struct {
+		name string
+		done <-chan error
+	}{{"a versioned change", changed}, {"the dropping of another staged package", unstaged}} {
+		select {
+		case err := <-step.done:
+			if err != nil {
+				t.Errorf("%s: %v", step.name, err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Errorf("%s waited for a copy that is stuck halfway", step.name)
+		}
+	}
+	if c.Node().Settings.ReplyPermission {
+		t.Error("the versioned change did not take effect")
+	}
+
+	release()
+	if err := <-staging; err != nil {
+		t.Errorf("the copy that was held up failed once released: %v", err)
+	}
+	if !exists(rg.mem, config.AdapterStageDir("example", "0909090909090909")) {
+		t.Error("the copy that was held up did not leave its staging directory")
+	}
+}
+
+// modeFS records the mode of every file a transaction creates, under the path
+// the file ends up at: the in-memory file system does not model modes.
+type modeFS struct {
+	*fsxtest.Mem
+	mu    sync.Mutex
+	temp  map[string]fsx.Mode
+	final map[string]fsx.Mode
+}
+
+func (m *modeFS) CreateTemp(tag fsx.Tag, dir string, mode fsx.Mode) (fsx.File, error) {
+	f, err := m.Mem.CreateTemp(tag, dir, mode)
+	if err == nil {
+		m.mu.Lock()
+		m.temp[f.Name()] = mode
+		m.mu.Unlock()
+	}
+	return f, err
+}
+
+func (m *modeFS) Rename(tag fsx.Tag, from, to string) error {
+	err := m.Mem.Rename(tag, from, to)
+	if err == nil {
+		m.mu.Lock()
+		if mode, ok := m.temp[from]; ok {
+			delete(m.temp, from)
+			m.final[to] = mode
+		}
+		m.mu.Unlock()
+	}
+	return err
+}
+
+// The entry program of a staged package is the one file that is executable;
+// every other file is private to the owner.
+func TestStagedFilesKeepTheirModes(t *testing.T) {
+	mem := fsxtest.NewMem()
+	fsys := &modeFS{Mem: mem, temp: map[string]fsx.Mode{}, final: map[string]fsx.Mode{}}
+	rg := &rig{t: t, mem: mem, tab: newTable(t)}
+	rg.w = txn.New(fsys, rg.tab, nil)
+	putTree(t, mem, validTree(t))
+	c := rg.load()
+
+	staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
+	if err != nil {
+		t.Fatalf("StageAdapter: %v", err)
+	}
+	want := map[string]fsx.Mode{
+		path.Join(staged.Dir, "bin/sidera-adapter-example"): fsx.ModePrivateExec,
+		path.Join(staged.Dir, "sidera-adapter.json"):        fsx.ModePrivate,
+		path.Join(staged.Dir, "lib/a/b.txt"):                fsx.ModePrivate,
+		path.Join(staged.Dir, "README"):                     fsx.ModePrivate,
+	}
+	fsys.mu.Lock()
+	defer fsys.mu.Unlock()
+	for p, mode := range want {
+		got, ok := fsys.final[p]
+		if !ok || got != mode {
+			t.Errorf("mode of %s = %v (recorded %v), want %v", p, got, ok, mode)
+		}
+	}
+	for p, mode := range fsys.final {
+		if _, expected := want[p]; !expected && strings.HasPrefix(p, staged.Dir) {
+			t.Errorf("a file %s (mode %v) was written that the package does not hold", p, mode)
+		}
+	}
+}
+
+const richManifest = `{"manifest_version":1,"id":"rich","version":"0.1.0","protocol":{"min":1,"max":1},` +
+	`"entry":{"program":"bin/sidera-adapter-example","args":["--serve"]},` +
+	`"platforms":[{"os":"linux","arch":"amd64"},{"os":"darwin","arch":"arm64"}],` +
+	`"requires":[{"program":"git","os":["linux","darwin"]}],` +
+	`"tested":[{"runtime":"claude","min":"1.0.0","max":"2.0.0"}],` +
+	`"config":{"instance":[{"key":"limit","type":"integer","title":"Limit","default":3,"min":1,"max":9}],` +
+	`"preset":[{"key":"mode","type":"enum","title":"Mode","options":["a","b"],"default":"a"}]},` +
+	`"budgets":[{"frontend":"cli","unit":"chars","limit":1000}],` +
+	`"recv_wait_limits":[{"frontend":"cli","max_s":30}],` +
+	`"ack_markers":{"replaced":[{"literal":"replaced"}],"truncated":[{"regexp":"cut.*"}]}}`
+
+// What Adapters returns is the caller's: changing any slice, pointer or raw
+// value in it changes nothing that a later call, or the configuration, holds.
+func TestAdaptersReturnsCopiesOfTheManifests(t *testing.T) {
+	rg, c := loaded(t)
+	want, err := manifest.Parse([]byte(richManifest))
+	if err != nil {
+		t.Fatalf("the manifest of the test is not valid: %v", err)
+	}
+	staged, err := c.StageAdapter(srcPackage(t, "rich", "0.1.0", map[string]string{"sidera-adapter.json": richManifest}), suffixReader())
+	if err != nil {
+		t.Fatalf("StageAdapter: %v", err)
+	}
+	if err := install(t, rg, c, staged); err != nil {
+		t.Fatalf("install: %v", err)
+	}
+	find := func() manifest.Manifest {
+		for _, a := range c.Adapters() {
+			if a.ID == "rich" {
+				return a.Manifest
+			}
+		}
+		t.Fatal("the installed adapter is not listed")
+		return manifest.Manifest{}
+	}
+	if got := find(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("manifest = %+v, want %+v", got, want)
+	}
+
+	m := find()
+	m.Entry.Args[0] = "x"
+	m.Platforms[0].OS = "x"
+	m.Requires[0].OS[0] = "x"
+	m.Tested[0].Min = "x"
+	m.Config.Instance[0].Title = "x"
+	m.Config.Instance[0].Default[0] = '7'
+	*m.Config.Instance[0].Max = 99
+	m.Config.Preset[0].Options[0] = "x"
+	m.Budgets[0].Limit = 1
+	m.RecvWaitLimits[0].MaxS = 1
+	*m.AckMarkers.Replaced[0].Literal = "x"
+	*m.AckMarkers.Truncated[0].Regexp = "x"
+	if got := find(); !reflect.DeepEqual(got, want) {
+		t.Errorf("a change to a returned manifest reached the next call:\n got %+v\nwant %+v", got, want)
+	}
+
+	// The manifest the caller staged is not shared with the configuration either.
+	staged.Manifest.Platforms[0].OS = "x"
+	staged.Manifest.Budgets[0].Limit = 1
+	if got := find(); !reflect.DeepEqual(got, want) {
+		t.Errorf("a change to the staged manifest reached the installed one:\n got %+v\nwant %+v", got, want)
 	}
 }

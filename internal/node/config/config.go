@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"io/fs"
+	"strings"
 	"sync"
 
 	"github.com/aianyai/sidera/internal/ident"
@@ -38,9 +39,11 @@ type state struct {
 type Config struct {
 	w *txn.Writer
 
-	// wmu serialises the writes: the single writer loop does that already, and
-	// this makes a second writer wait instead of reading a version that is about
-	// to change.
+	// wmu serialises the versioned changes and the planning of an installation:
+	// the single writer loop does that already, and this makes a second caller
+	// wait instead of reading a version that is about to change. Staging and
+	// unstaging take no part in it. They copy a package, which can take long,
+	// into a directory no change reads, and the loop must not wait for them.
 	wmu sync.Mutex
 	// mu guards st, which a read takes a copy of.
 	mu sync.RWMutex
@@ -85,8 +88,11 @@ func readFile(r fsx.Reader, p string, kind FileKind) ([]byte, error) {
 	}
 }
 
-// listDir lists the entries of a directory of config/ without the leftovers of
-// interrupted operations, which the cleanup at start removes.
+// listDir lists the entries of a directory of config/ without the names that
+// begin with a dot: the leftovers of interrupted operations, which the cleanup
+// at start removes, and the files an operating system or an editor puts into a
+// directory on its own (.DS_Store, .localized), which are never the owner's
+// configuration. A name that begins with a dot is never a document of config.
 func listDir(r fsx.Reader, dir string) ([]fsx.Entry, error) {
 	entries, err := r.ReadDir(dir)
 	if err != nil {
@@ -98,7 +104,7 @@ func listDir(r fsx.Reader, dir string) ([]fsx.Entry, error) {
 	}
 	out := entries[:0:0]
 	for _, e := range entries {
-		if !fsx.IsLeftover(e.Name) {
+		if !strings.HasPrefix(e.Name, ".") {
 			out = append(out, e)
 		}
 	}
@@ -309,12 +315,15 @@ func (c *Config) RevocationSet() *revocation.Set {
 	return set
 }
 
-// Adapters returns the installed adapters, by id.
+// Adapters returns the installed adapters, in the order of their ids. The
+// manifests are copies: changing one changes nothing a later call returns.
 func (c *Config) Adapters() []Adapter {
 	st := c.read()
 	out := make([]Adapter, 0, len(st.adapters))
 	for _, id := range sortedKeys(st.adapters) {
-		out = append(out, st.adapters[id])
+		a := st.adapters[id]
+		a.Manifest = cloneManifest(a.Manifest)
+		out = append(out, a)
 	}
 	return out
 }

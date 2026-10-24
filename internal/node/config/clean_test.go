@@ -16,7 +16,8 @@ import (
 // temporary names. The steps cover every lifecycle event of config: loading,
 // each management change, an installation that succeeds, one that is refused
 // because the adapter is in use, a first installation that is refused, a
-// package that cannot be staged, and minting stable ids.
+// package that cannot be staged, a reinstallation of the version that is
+// current (planned as already current, then unstaged), and minting stable ids.
 func TestCleanScenariosLeaveNoConfigRecoveryWork(t *testing.T) {
 	rg, c := loaded(t)
 	rnd := bytes.NewReader(bytes.Repeat([]byte{0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78}, 8))
@@ -126,14 +127,19 @@ func TestCleanScenariosLeaveNoConfigRecoveryWork(t *testing.T) {
 			}
 			return install(t, rg, c, staged)
 		}},
-		{"installing the version that is current", func() error {
+		{"reinstalling the version that is current", func() error {
 			staged, err := c.StageAdapter(srcPackage(t, "fresh", "0.1.0", nil), suffixReader())
 			if err != nil {
 				return err
 			}
-			if err := install(t, rg, c, staged); err != nil {
+			plan, err := c.PlanInstall(staged)
+			if err != nil {
 				return err
 			}
+			if !plan.AlreadyCurrent {
+				t.Error("the version that is current was planned for installation again")
+			}
+			// Nothing is installed, so the caller drops the staging directory.
 			return c.Unstage(staged)
 		}},
 		{"confirming the backup again", func() error {
