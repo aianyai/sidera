@@ -65,6 +65,11 @@ bytes of the record domain.
 | `sidera/record-sig`    | `record` | The bytes every signer of a record signs              | type, payload                 |
 | `sidera/record-digest` | `record` | The signature-free digest of a record                 | type, payload                 |
 | `sidera/request-digest/1` | `envelope` | The digest a target stores for deduplication of a request | kind, preset, content type, body, accept_before, report_by |
+| `sidera/pairing/commit/1`            | `pairing` | The initiator's commitment to its nonce and the terms | terms, nA                |
+| `sidera/pairing/transcript/1`        | `pairing` | The pairing identifier                              | terms, C, nB, nA             |
+| `sidera/pairing/sas/1`               | `pairing` | The input of the verification-code derivation         | terms, C, nB, nA             |
+| `sidera/pairing/credential-nonce/1`  | `pairing` | The input of the credential-nonce derivation          | terms, C, nB, nA             |
+| `sidera/pairing/request/1`           | `pairing` | The fingerprint of a management request about a pairing | request kind, arguments   |
 
 ### Signed bytes and digest
 
