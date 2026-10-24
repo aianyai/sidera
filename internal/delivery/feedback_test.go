@@ -60,6 +60,14 @@ func TestSummaries(t *testing.T) {
 			t.Errorf("summary %q does not warn that the message may have arrived", s)
 		}
 	})
+	t.Run("delivery_unknown wording holds for a message and a control signal and forbids assuming non-delivery", func(t *testing.T) {
+		s := KindDeliveryUnknown.Summary()
+		for _, want := range []string{"handed it over", "agent", "control signal", "adapter", "seen or executed is unknown", "do not assume it was not delivered"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("summary %q lacks %q", s, want)
+			}
+		}
+	})
 	t.Run("rejection wording says it was not delivered", func(t *testing.T) {
 		if !strings.Contains(KindRejected.Summary(), "not delivered") {
 			t.Errorf("summary %q", KindRejected.Summary())

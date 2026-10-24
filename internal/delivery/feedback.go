@@ -29,7 +29,10 @@ const (
 	KindExpiredCorrected
 	// KindRejected: the target refused the message, for the reason given.
 	KindRejected
-	// KindDeliveryUnknown: the body was handed out and the result is unknown.
+	// KindDeliveryUnknown: the target handed the delivery over and the result is
+	// unknown. A message was handed to the agent; a control signal was handed to
+	// the adapter that executes it. The feedback cannot tell the two apart, so
+	// its wording holds for both.
 	KindDeliveryUnknown
 	// KindUnknownCorrected: a message reported as KindDeliveryUnknown was
 	// delivered after all.
@@ -72,7 +75,7 @@ func (k Kind) Summary() string {
 	case KindRejected:
 		return "the target rejected the message; it was not delivered"
 	case KindDeliveryUnknown:
-		return "the message was handed to the agent but whether the agent saw it is unknown"
+		return "the target handed it over, to the agent or, for a control signal, to the adapter that executes it, but whether it was seen or executed is unknown; do not assume it was not delivered"
 	case KindUnknownCorrected:
 		return "correction: the message whose result was unknown was delivered"
 	}

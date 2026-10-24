@@ -5,7 +5,8 @@ to the moment it is delivered, refused, or given up on, and what the sender is
 told along the way. A delivery is one message to one recipient endpoint; a
 message with several recipients has several deliveries that share a message id.
 Control signals use the same states, the same deduplication and the same
-feedback; on the target they differ only in how a delivery ends (see Control
+feedback, including the wording of each notice (the delivery_unknown wording
+covers both a message and a control signal); on the target they differ only in how a delivery ends (see Control
 signals on the target). This document describes the committed code of `internal/delivery`.
 
 ## What
@@ -46,7 +47,7 @@ state is an error.
 | expired_unconfirmed | Deadline plus tolerance passed and a later active query found no receipt. | Wording: the target may have received the message. |
 | expired corrected | An expired delivery turned out accepted or delivered. | |
 | rejected | The target refused. | Carries the reason. |
-| delivery unknown | Lease redelivery exhausted, leases unsettled at the settle deadline, or a delivery whose body was handed out closed by force (backlog deadline, denied second check, closed endpoint). | |
+| delivery unknown | Lease redelivery exhausted, leases unsettled at the settle deadline, or a delivery whose body was handed out closed by force (backlog deadline, denied second check, closed endpoint); for a control signal, no committed reply by the settle deadline or a forced closure. | Wording: the target handed it over (to the agent, or to the adapter that executes a control signal), whether it was seen or executed is unknown, and the sender must not assume it was not delivered. |
 | unknown corrected | A late acknowledgement completed an unknown delivery. | |
 
 Rules: normal progress and `closed_unconfirmed` give nothing; each kind is given
@@ -202,6 +203,11 @@ the dedup record and returned on every repeat.
 - **Backlog expiry is clamped to the settle deadline.** An endpoint owner may set
   a queue time the sender's `report_by` cannot cover; rejecting at the settle
   deadline keeps the guarantee, and the sender still hears before it stops asking.
+- **One delivery_unknown wording for messages and control signals.** The
+  sender's record cannot tell them apart, and the rule that the sender must not
+  assume non-delivery has to stay in one place. The wording names both
+  hand-overs, to the agent and to the adapter, instead of the agent alone, which
+  would be wrong for a control signal.
 - **Corrections are separate kinds.** A delivery can be wrong twice (expired,
   then unknown); a single "correction" kind would silence the second.
 - **Replacement, not correction, when news changes.** Telling a sender "the

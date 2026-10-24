@@ -59,6 +59,11 @@ delivery_unknown. Normal progress and `closed_unconfirmed` never do.
 - At most once per delivery per kind. Corrections are kinds of their own, so a
   delivery corrected twice is told twice.
 - The expiry notice says the target may have received the message.
+- The delivery_unknown notice says the target handed the delivery over (to the
+  agent, or to the adapter that executes a control signal), that whether it was
+  seen or executed is unknown, and that the sender must not assume it was not
+  delivered. One wording serves messages and control signals, because the
+  sender's record cannot tell them apart.
 - A rejection or delivery_unknown that follows expired_unconfirmed replaces it
   instead of correcting it.
 - Merging: anomalies of one message are one notice; unreachable hints and, as
