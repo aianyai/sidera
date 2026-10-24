@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"unicode/utf8"
 
@@ -255,6 +256,14 @@ func FuzzDecodeTypeErrorsHavePaths(f *testing.F) {
 		if !utf8.Valid(data) {
 			return
 		}
+		// A member of the root object whose key is the empty string has an empty
+		// path element, which the path syntax cannot show.
+		var root map[string]json.RawMessage
+		if json.Unmarshal(data, &root) == nil {
+			if _, ok := root[""]; ok {
+				return
+			}
+		}
 		var std typed
 		var ute *json.UnmarshalTypeError
 		if e := json.Unmarshal(data, &std); !errors.As(e, &ute) || ute.Field == "" {
@@ -295,5 +304,139 @@ func TestDecodeRefusalOfATypeThatDecodesItselfHasPath(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			assertPath(t, tc.in, strictjson.Decode([]byte(tc.in), tc.target()), tc.path)
 		})
+	}
+}
+
+// A key type that encoding/json cannot decode into is not for strictjson to
+// judge: the document is refused, as encoding/json refuses it, and nothing
+// panics.
+func TestDecodeRefusesAMapKeyTypeThatCannotBeDecodedWithoutPanicking(t *testing.T) {
+	var byBool map[bool]string
+	if err := strictjson.Decode([]byte(`{"true":"x"}`), &byBool); err == nil {
+		t.Error("a map with bool keys decoded")
+	}
+	var byFloat map[float64]string
+	if err := strictjson.Decode([]byte(`{"1.5":"x"}`), &byFloat); err == nil {
+		t.Error("a map with float keys decoded")
+	}
+	var wrapped struct {
+		M map[bool]string `json:"m"`
+	}
+	if err := strictjson.Decode([]byte(`{"m":{"true":"x"}}`), &wrapped); err == nil {
+		t.Error("a struct field that is a map with bool keys decoded")
+	}
+}
+
+type amount struct {
+	Value json.Number `json:"value"`
+}
+
+func TestDecodeJSONNumber(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		path string // the path of the refusal; "-" means accepted
+	}{
+		{"accepts a number", `{"value":12.5}`, "-"},
+		{"accepts a string that spells a number", `{"value":"12"}`, "-"},
+		{"reports a bool at its path", `{"value":true}`, "value"},
+		{"reports an object at its path", `{"value":{"k":1}}`, "value"},
+		{"reports a list at its path", `{"value":[1]}`, "value"},
+		{"reports null at its path", `{"value":null}`, "value"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var a amount
+			err := strictjson.Decode([]byte(tc.in), &a)
+			if tc.path == "-" {
+				if err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
+			assertPath(t, tc.in, err, tc.path)
+		})
+	}
+	t.Run("a string that does not spell a number is refused by encoding/json", func(t *testing.T) {
+		// The standard library alone decides which strings spell a number, and
+		// its message, which may contain the string, has no path.
+		var a amount
+		if err := strictjson.Decode([]byte(`{"value":"abc"}`), &a); err == nil {
+			t.Fatal("a string that is not a number decoded into a json.Number")
+		}
+	})
+}
+
+type sorted struct {
+	Labels map[string]int `json:"labels"`
+	Items  []sortedItem   `json:"items"`
+}
+
+type sortedItem struct {
+	A int `json:"a"`
+}
+
+// Where a document has several problems, the same input reports the same one
+// every time, whatever order a map happens to be walked in.
+func TestDecodeReportsTheSamePositionForTheSameInput(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		path string
+	}{
+		{"keys of a map", `{"labels":{"d":"x","b":"x","c":"x","a":"x","e":"x"},"items":[]}`, "labels.a"},
+		{"unknown fields of an object", `{"labels":{},"items":[],"z":1,"y":1,"x":1,"w":1}`, "w"},
+		{"unknown fields of an element", `{"labels":{},"items":[{"a":1,"q":1,"p":1,"r":1}]}`, "items[0].p"},
+		{"elements of a list", `{"labels":{"k":1},"items":[{"a":"x"},{"a":"y"}]}`, "items[0].a"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			for range 40 {
+				var s sorted
+				assertPath(t, tc.in, strictjson.Decode([]byte(tc.in), &s), tc.path)
+			}
+		})
+	}
+}
+
+var chainCalls atomic.Int64
+
+// chain decodes itself with Decode, so that every value of it that fails costs
+// further UnmarshalJSON calls on the way back out.
+type chain struct {
+	N     int    `json:"n"`
+	Child *chain `json:"child,omitempty"`
+}
+
+func (c *chain) UnmarshalJSON(b []byte) error {
+	chainCalls.Add(1)
+	type plain chain
+	return strictjson.Decode(b, (*plain)(c))
+}
+
+type chainRoot struct {
+	C chain `json:"c"`
+}
+
+// A refusal below k nested types that decode themselves is located by offering
+// the value to each of them again, which costs 2^k calls in all: this pins that
+// bound, which a caller must keep in mind when it decodes untrusted input into
+// such types.
+func TestDecodeFailureCostOfNestedSelfDecodingTypes(t *testing.T) {
+	for k := 1; k <= 4; k++ {
+		in := `{"n":"x"}`
+		path := "c"
+		for i := 1; i < k; i++ {
+			in = `{"n":1,"child":` + in + `}`
+			path += ".child"
+		}
+		path += ".n"
+		in = `{"c":` + in + `}`
+		chainCalls.Store(0)
+		var r chainRoot
+		assertPath(t, in, strictjson.Decode([]byte(in), &r), path)
+		if got, want := chainCalls.Load(), int64(2*(1<<k-1)); got != want {
+			t.Errorf("depth %d: %d UnmarshalJSON calls, want %d", k, got, want)
+		}
 	}
 }
