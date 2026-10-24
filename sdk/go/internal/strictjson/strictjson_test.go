@@ -164,6 +164,8 @@ func TestNoDuplicateTopLevelKeys(t *testing.T) {
 		{"accepts the same key at two depths", `{"a":{"a":{"a":1}},"b":1}`, ""},
 		{"a repeated key is a repeated key whatever follows it", `{"a":1,"a":[{"x":1,"x":2}]}`, "a: duplicate key"},
 		{"reports truncated input", `{"a":{"b":`, "strictjson"},
+		{"reads a number too large for a float64", `{"a":1e700,"b":{"c":-1e700}}`, ""},
+		{"finds a repeat next to a number too large for a float64", `{"a":1e700,"a":2}`, "a: duplicate key"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

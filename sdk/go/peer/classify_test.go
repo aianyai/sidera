@@ -163,6 +163,7 @@ var classifyCorpus = []struct {
 	{"response with bool id", `{"jsonrpc":"2.0","id":false,"result":{}}`},
 	{"result and error", `{"jsonrpc":"2.0","id":1,"result":{},"error":{"code":1,"message":"x"}}`},
 	{"error without code", `{"jsonrpc":"2.0","id":1,"error":{"message":"x"}}`},
+	{"a number too large for a float64 is still valid JSON", `{"jsonrpc":"2.0","id":null,"error":{"":1e700}}`},
 	{"repeated jsonrpc", `{"jsonrpc":"2.0","jsonrpc":"2.0","method":"m"}`},
 	{"repeated jsonrpc with a wrong first value", `{"jsonrpc":"1.0","jsonrpc":"2.0","method":"m"}`},
 	{"repeated id", `{"jsonrpc":"2.0","id":1,"id":2,"method":"m"}`},

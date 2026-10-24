@@ -131,6 +131,9 @@ func NoDuplicateTopLevelKeys(data []byte) error { return scanKeys(data, false) }
 // deep unset it looks at the keys of the outermost object only.
 func scanKeys(data []byte, deep bool) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
+	// Numbers stay text: only the keys matter here, and a number that does not
+	// fit a float64 is valid JSON that the scan must not trip over.
+	dec.UseNumber()
 	token := func() (json.Token, error) {
 		tok, err := dec.Token()
 		if err != nil {
