@@ -296,3 +296,46 @@ func TestOptionalFilesMayBeAbsent(t *testing.T) {
 		t.Error("revocations or adapters appeared from nowhere")
 	}
 }
+
+// A value of the wrong type is named by its full path, through objects, maps and
+// arrays, so that an owner who edited the file finds it.
+func TestWrongTypeIsNamedByItsPath(t *testing.T) {
+	rows := []struct {
+		name   string
+		decode func() error
+		field  string
+	}{
+		{"a boolean statement in a preset", func() error {
+			_, err := config.DecodePresets([]byte(strings.Replace(goldenPresets, `"local_sources": "allow"`, `"local_sources": true`, 1)))
+			return err
+		}, "presets.default.local_sources"},
+		{"a number among the nodes of a rule", func() error {
+			_, err := config.DecodePolicy([]byte(strings.Replace(goldenPolicy, `"`+node1Text+`",`, `1,`, 1)))
+			return err
+		}, "rules[4].nodes[0]"},
+		{"a number for a flag", func() error {
+			_, err := config.DecodeNode([]byte(strings.Replace(goldenNode, `"reply_permission": true`, `"reply_permission": 1`, 1)))
+			return err
+		}, "settings.reply_permission"},
+		{"an object for a number", func() error {
+			_, err := config.DecodeNode([]byte(strings.Replace(goldenNode, `"version": 3,`, `"version": {},`, 1)))
+			return err
+		}, "version"},
+		{"a string for a count in an endpoint setting", func() error {
+			_, err := config.DecodeInstances([]byte(strings.Replace(goldenInstances, `"backlog_limit": 400`, `"backlog_limit": "many"`, 1)))
+			return err
+		}, "instances.example.endpoints." + ep3Text + ".backlog_limit"},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			err := r.decode()
+			if err == nil {
+				t.Fatal("accepted")
+			}
+			fe := fileError(t, err)
+			if fe.Field != r.field || fe.Reason != config.FileMalformed {
+				t.Errorf("field %q reason %v, want %q malformed: %v", fe.Field, fe.Reason, r.field, err)
+			}
+		})
+	}
+}

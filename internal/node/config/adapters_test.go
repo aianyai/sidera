@@ -269,6 +269,9 @@ func TestUnstage(t *testing.T) {
 	})
 	t.Run("a version directory that was renamed in and did not become current", func(t *testing.T) {
 		rg, c := loaded(t)
+		if _, err := c.DisableAdapter(request(1, 4), "example", nil, result(new([]config.Instances), `{}`)); err != nil {
+			t.Fatal(err)
+		}
 		staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
 		if err != nil {
 			t.Fatal(err)
@@ -476,8 +479,8 @@ func TestAdapterGCWork(t *testing.T) {
 			mkdirAll(t, mem, config.AdapterVersionDir("example", "0.9.0"))
 			mkdirAll(t, mem, config.AdapterDir("half"))
 		}, []config.GCItem{
-			{Path: config.AdapterVersionDir("example", "0.9.0"), Reason: config.GCSuperseded},
 			{Path: config.AdapterStageDir("example", "beef"), Reason: config.GCStaging},
+			{Path: config.AdapterVersionDir("example", "0.9.0"), Reason: config.GCSuperseded},
 			{Path: config.AdapterDir("half"), Reason: config.GCNotInstalled},
 		}},
 	}

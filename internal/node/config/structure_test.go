@@ -18,7 +18,7 @@ import (
 func TestConfigHoldsNoWritableFileSystem(t *testing.T) {
 	allowed := map[string]bool{
 		"Reader": true, "Mode": true, "ModePrivate": true, "ModePrivateExec": true,
-		"Entry": true, "Info": true, "IsLeftover": true,
+		"Entry": true, "Info": true, "IsLeftover": true, "TempPrefix": true, "TrashPrefix": true,
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil || len(files) == 0 {

@@ -70,6 +70,10 @@ type crashCase struct {
 	// state says "before" or "after" for a configuration read after a restart,
 	// and fails the test for a state that is neither.
 	state func(t *testing.T, where string, c *config.Config) string
+	// invisible is true for a transaction that changes nothing a restart can
+	// read: staging and unstaging only prepare or clean, so the state is always
+	// "before".
+	invisible bool
 	// done checks the disk after the transaction ran to its end, without a crash.
 	done func(t *testing.T, rg *rig, c *config.Config)
 }
@@ -175,8 +179,9 @@ func crashCases(t *testing.T) []crashCase {
 			state: versionState(func(c *config.Config) admin.Version { return c.Instances().Version }, 4),
 		},
 		{
-			name: "adapter-stage/upgrade",
-			disk: treeDisk,
+			name:      "adapter-stage/upgrade",
+			invisible: true,
+			disk:      treeDisk,
 			run: func(t *testing.T, rg *rig, c *config.Config) error {
 				_, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
 				return err
@@ -196,8 +201,9 @@ func crashCases(t *testing.T) []crashCase {
 			},
 		},
 		{
-			name: "adapter-stage/first installation",
-			disk: treeDisk,
+			name:      "adapter-stage/first installation",
+			invisible: true,
+			disk:      treeDisk,
 			run: func(t *testing.T, rg *rig, c *config.Config) error {
 				_, err := c.StageAdapter(srcPackage(t, "fresh", "0.1.0", nil), suffixReader())
 				return err
@@ -215,8 +221,9 @@ func crashCases(t *testing.T) []crashCase {
 			},
 		},
 		{
-			name: "adapter-unstage/upgrade",
-			disk: treeDisk, prepare: prepStage("example", "2.0.0"),
+			name:      "adapter-unstage/upgrade",
+			invisible: true,
+			disk:      treeDisk, prepare: prepStage("example", "2.0.0"),
 			run: func(t *testing.T, rg *rig, c *config.Config) error {
 				return c.Unstage(staged)
 			},
@@ -233,8 +240,9 @@ func crashCases(t *testing.T) []crashCase {
 			},
 		},
 		{
-			name: "adapter-unstage/first installation",
-			disk: treeDisk, prepare: prepStage("fresh", "0.1.0"),
+			name:      "adapter-unstage/first installation",
+			invisible: true,
+			disk:      treeDisk, prepare: prepStage("fresh", "0.1.0"),
 			run: func(t *testing.T, rg *rig, c *config.Config) error {
 				return c.Unstage(staged)
 			},
@@ -493,15 +501,20 @@ func TestEveryConfigTransactionSurvivesACrashAtEveryPoint(t *testing.T) {
 			if len(w.points) == 0 || checks == 0 {
 				t.Fatal("no step of the transaction was reached: the crash injection did not happen")
 			}
-			if !visible {
+			t.Logf("%d steps, %d crash states examined", len(w.points), checks)
+			if !tc.invisible && !visible {
 				t.Error("the transaction never became visible at any point")
 			}
 			final, err := restart(t, mem.Clone())
 			if err != nil {
 				t.Fatalf("restart after the run: %v", err)
 			}
-			if got := tc.state(t, "after the run", final); got != "after" {
-				t.Errorf("the run ended in state %q, want after", got)
+			want := "after"
+			if tc.invisible {
+				want = "before"
+			}
+			if got := tc.state(t, "after the run", final); got != want {
+				t.Errorf("the run ended in state %q, want %s", got, want)
 			}
 			if tc.done != nil {
 				tc.done(t, rg, c)

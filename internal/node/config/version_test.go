@@ -185,3 +185,43 @@ func TestVersionAdvancesByOnePerChange(t *testing.T) {
 		t.Errorf("result functions saw %d states, the last at version %v", len(seen), seen[len(seen)-1].Version)
 	}
 }
+
+// Reads from other goroutines while a change is made see either the state
+// before or the state after, never a mixture, and the race detector sees no
+// unsynchronised access.
+func TestReadsDuringChangesAreSafe(t *testing.T) {
+	_, c := loaded(t)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			n := c.Node()
+			if n.Version < 3 || (n.Version == 3) != n.Settings.ReplyPermission {
+				// Version 3 has the reply permission on, every later one off.
+				t.Errorf("a torn read: version %d with reply permission %v", n.Version, n.Settings.ReplyPermission)
+				return
+			}
+			_ = c.Instances()
+			_ = c.Presets()
+			_ = c.Adapters()
+			_ = c.LastOperations()
+		}
+	}()
+	var seen []config.Node
+	if _, err := c.SetNodeSettings(request(1, 3), []byte(`{"reply_permission": false}`), result(&seen, `{}`)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20; i++ {
+		if _, err := c.SetNodeSettings(request(byte(i+2), admin.Version(4+i)), []byte(`{"node_prompt_turns": 3}`), result(&seen, `{}`)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	<-done
+}
