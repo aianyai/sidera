@@ -152,6 +152,268 @@ func (e *InvalidRecordError) Unwrap() error { return ErrInvalidRecord }
 // first invariant it fails. A caller that restores a record from storage calls
 // it after decoding, so a well-formed but impossible record is refused instead
 // of being trusted by Apply, Tick and Handout.
+//
+// The invariants are those of the transitions: what moveTo clears when the
+// state changes, what only the target or only the sender sets, and what a lease
+// can look like after Handout, Renew and Tick. The checks run in the order of
+// the Violation constants, so the answer for a record with several faults does
+// not depend on how many there are.
 func (r Record) Valid() error {
+	for _, check := range []func() Violation{
+		r.checkKind, r.checkDeadlines, r.checkBlocked, r.checkReported, r.checkLease, r.checkOutcome,
+	} {
+		if v := check(); v != ViolationNone {
+			return &InvalidRecordError{Violation: v}
+		}
+	}
 	return nil
+}
+
+// stateAllowed reports whether a record of this side and kind can be in its
+// state: a target starts at accepted and is never queued or expired_unconfirmed,
+// and a control record is delivered or left unknown but never rejected, because
+// it counts as handed over from acceptance (see closeForcibly).
+func (r Record) stateAllowed() bool {
+	switch r.State {
+	case StateAccepted, StateDelivered, StateDeliveryUnknown, StateClosedUnconfirmed:
+		return true
+	case StateRejected:
+		return !r.Control
+	case StateQueued, StateExpiredUnconfirmed:
+		return r.Side == SideSource
+	}
+	return false
+}
+
+// checkKind covers the fields that say what kind of record this is and in
+// which state: side, control, state, rejection reason and sub-state.
+func (r Record) checkKind() Violation {
+	if !r.Side.known() {
+		return ViolationSide
+	}
+	if r.Control && r.Side != SideTarget {
+		return ViolationControlSide
+	}
+	if !r.stateAllowed() {
+		return ViolationState
+	}
+	if r.State == StateRejected && r.Reject == RejectNone {
+		return ViolationRejectReason
+	}
+	if r.State != StateRejected && r.Reject != RejectNone {
+		return ViolationRejectReason
+	}
+	if !r.Reject.known() {
+		return ViolationRejectReason
+	}
+	if !r.Sub.known() {
+		return ViolationSubState
+	}
+	if r.Sub == SubNotified && !(r.hasQueue() && r.State == StateAccepted) {
+		return ViolationSubState
+	}
+	return ViolationNone
+}
+
+// checkDeadlines covers AcceptBefore, ReportBy and BacklogDeadline. Only a
+// message in the target's queue has a backlog deadline, and it never lies past
+// SettleBy (see BacklogDeadline).
+func (r Record) checkDeadlines() Violation {
+	if r.AcceptBefore.IsZero() || r.ReportBy.IsZero() {
+		return ViolationDeadlinesUnset
+	}
+	if !r.ReportBy.Equal(ReportBy(r.AcceptBefore)) {
+		return ViolationReportBy
+	}
+	if r.hasQueue() && (r.BacklogDeadline.IsZero() || r.BacklogDeadline.After(SettleBy(r.ReportBy))) {
+		return ViolationBacklogDeadline
+	}
+	if !r.hasQueue() && !r.BacklogDeadline.IsZero() {
+		return ViolationBacklogDeadline
+	}
+	return ViolationNone
+}
+
+// checkBlocked covers the block flag and the cause of the last block. moveTo
+// clears the flag when the state leaves accepted and keeps the cause, which the
+// recovery notice names; a control record is never blocked.
+func (r Record) checkBlocked() Violation {
+	if r.Blocked && (r.State != StateAccepted || r.Control) {
+		return ViolationBlockedState
+	}
+	if r.BlockedCause != CauseNone && !r.BlockedCause.isBlocked() {
+		return ViolationBlockedCause
+	}
+	if r.Blocked && r.BlockedCause == CauseNone {
+		return ViolationBlockedCause
+	}
+	if r.Control && r.BlockedCause != CauseNone {
+		return ViolationBlockedCause
+	}
+	return ViolationNone
+}
+
+// checkReported covers the feedback a sender's record remembers having
+// produced. The sets of kinds that can go with a state follow from
+// TransitionFeedback and from the note functions, which add the unreachable,
+// blocked and recovered kinds: a notice is produced on entering the state it
+// reports and stays in the set afterwards, and a state is only left for a state
+// of a higher rank.
+func (r Record) checkReported() Violation {
+	if r.Side == SideTarget && r.Reported != 0 {
+		return ViolationReportedOnTarget
+	}
+	if !r.Reported.known() {
+		return ViolationReportedUnknownKind
+	}
+	if r.Side != SideSource {
+		return ViolationNone
+	}
+	has, s := r.Reported.Has, r.State
+	if has(KindRejected) != (s == StateRejected) {
+		return ViolationReportedRejected
+	}
+	// delivery_unknown is reported on entering it; the states after it are
+	// delivered (which reports the correction) and closed_unconfirmed.
+	if s == StateDeliveryUnknown && !has(KindDeliveryUnknown) {
+		return ViolationReportedDeliveryUnknown
+	}
+	if has(KindDeliveryUnknown) && s != StateDeliveryUnknown && s != StateDelivered && s != StateClosedUnconfirmed {
+		return ViolationReportedDeliveryUnknown
+	}
+	if has(KindUnknownCorrected) != (s == StateDelivered && has(KindDeliveryUnknown)) {
+		return ViolationReportedDeliveryUnknown
+	}
+	// expired_unconfirmed is reported on entering it from queued and corrected
+	// on the way to accepted or delivered; a rejection or delivery_unknown that
+	// follows replaces it, so those leave it uncorrected.
+	if s == StateExpiredUnconfirmed && !has(KindExpiredUnconfirmed) {
+		return ViolationReportedExpiry
+	}
+	if has(KindExpiredUnconfirmed) && s == StateQueued {
+		return ViolationReportedExpiry
+	}
+	if has(KindExpiredCorrected) && !has(KindExpiredUnconfirmed) {
+		return ViolationReportedExpiry
+	}
+	if has(KindExpiredCorrected) && (s == StateQueued || s == StateExpiredUnconfirmed) {
+		return ViolationReportedExpiry
+	}
+	if s == StateAccepted && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) {
+		return ViolationReportedExpiry
+	}
+	if s == StateDelivered && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) && !has(KindDeliveryUnknown) {
+		return ViolationReportedExpiry
+	}
+	// A block is noticed only in accepted, so the notice comes after queued and
+	// expired_unconfirmed, and a record that was expired went through accepted,
+	// which corrected the expiry. The cause of the last block is recorded with
+	// the notice. Delivered reports the recovery if there was a block, and so
+	// does unblocking while accepted.
+	if has(KindDeliveryBlocked) && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) {
+		return ViolationReportedExpiry
+	}
+	if has(KindBlockedRecovered) && !has(KindDeliveryBlocked) {
+		return ViolationReportedBlocked
+	}
+	if has(KindDeliveryBlocked) && (s == StateQueued || s == StateExpiredUnconfirmed) {
+		return ViolationReportedBlocked
+	}
+	if has(KindDeliveryBlocked) != r.BlockedCause.isBlocked() {
+		return ViolationReportedBlocked
+	}
+	if s == StateDelivered && has(KindDeliveryBlocked) && !has(KindBlockedRecovered) {
+		return ViolationReportedBlocked
+	}
+	if s == StateAccepted && !r.Blocked && has(KindDeliveryBlocked) && !has(KindBlockedRecovered) {
+		return ViolationReportedBlocked
+	}
+	return ViolationNone
+}
+
+// checkLease covers the pull-lease bookkeeping, which only a message in the
+// target's queue has. The shapes are those Handout produces (chunk flags
+// allocated together at the first hand-out, an identifier recorded once, times
+// set when a lease is issued) as Renew and Tick leave them.
+func (r Record) checkLease() Violation {
+	l := r.Lease
+	if !r.hasQueue() {
+		if !l.isZero() {
+			return ViolationLeaseUnused
+		}
+		return ViolationNone
+	}
+	if l.Chunks < 0 || len(l.HandedOut) != l.Chunks || len(l.Acked) != l.Chunks {
+		return ViolationLeaseChunks
+	}
+	if l.Chunks == 0 {
+		if !l.isZero() {
+			return ViolationLeaseChunks
+		}
+		return ViolationNone
+	}
+	handedOut := false
+	for i := range l.HandedOut {
+		if l.Acked[i] && !l.HandedOut[i] {
+			return ViolationLeaseAckedUnseen
+		}
+		handedOut = handedOut || l.HandedOut[i]
+	}
+	if l.Handouts < 1 || !handedOut {
+		return ViolationLeaseNoHandout
+	}
+	if len(l.IDs) == 0 {
+		return ViolationLeaseIDs
+	}
+	for i, id := range l.IDs {
+		if id.IsZero() {
+			return ViolationLeaseIDs
+		}
+		for _, earlier := range l.IDs[:i] {
+			if earlier == id {
+				return ViolationLeaseIDs
+			}
+		}
+	}
+	// The last allowed lease cannot end with the message still queued: Tick
+	// makes it delivery_unknown, and Handout never issues another.
+	if l.Handouts > MaxLeases || (r.State == StateAccepted && l.Handouts == MaxLeases && !l.Active) {
+		return ViolationLeaseCount
+	}
+	if l.Active && r.State != StateAccepted {
+		return ViolationLeaseActive
+	}
+	if l.IssuedAt.IsZero() || l.ExpiresAt.IsZero() || l.ExpiresAt.Before(firstExpiry(l.IssuedAt)) || l.ExpiresAt.After(l.renewalLimit()) {
+		return ViolationLeaseTimes
+	}
+	if !l.IssuedAt.Before(r.BacklogDeadline) {
+		return ViolationLeaseAfterBacklog
+	}
+	return ViolationNone
+}
+
+// checkOutcome ties the state of a target to what was handed out and
+// acknowledged: a message is delivered by its last acknowledgement only, and a
+// delivery that was handed over is never rejected (see closeForcibly) while one
+// that was not never becomes delivery_unknown.
+func (r Record) checkOutcome() Violation {
+	if r.Side != SideTarget {
+		return ViolationNone
+	}
+	if r.hasQueue() {
+		allAcked := r.Lease.Chunks > 0
+		for _, acked := range r.Lease.Acked {
+			allAcked = allAcked && acked
+		}
+		if (r.State == StateDelivered) != allAcked {
+			return ViolationDelivered
+		}
+	}
+	if r.State == StateDeliveryUnknown && !r.handedOver() {
+		return ViolationDeliveryUnknownUnhandled
+	}
+	if r.State == StateRejected && r.handedOver() {
+		return ViolationRejectedHandedOver
+	}
+	return ViolationNone
 }

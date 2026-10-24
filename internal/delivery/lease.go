@@ -31,6 +31,21 @@ type Lease struct {
 	Acked     []bool
 }
 
+// isZero reports whether no lease was ever issued: the state of a message
+// before its first hand-out, and the only state of a record that is never
+// queued for recv.
+func (l Lease) isZero() bool {
+	return l.Handouts == 0 && len(l.IDs) == 0 && !l.Active && l.IssuedAt.IsZero() && l.ExpiresAt.IsZero() &&
+		l.Chunks == 0 && len(l.HandedOut) == 0 && len(l.Acked) == 0
+}
+
+// firstExpiry returns when a lease issued at issuedAt runs out unless renewed.
+func firstExpiry(issuedAt time.Time) time.Time { return issuedAt.Add(LeaseDuration) }
+
+// renewalLimit returns the instant past which the lease cannot be renewed, however
+// often: LeaseRenewalCap after it was issued.
+func (l Lease) renewalLimit() time.Time { return l.IssuedAt.Add(LeaseRenewalCap) }
+
 // issued reports whether id is an identifier under which some part of this
 // message was handed out. The unset ID never is.
 func (l Lease) issued(id LeaseID) bool {
@@ -160,7 +175,7 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int,
 	r.Lease.Handouts++
 	r.Lease.Active = true
 	r.Lease.IssuedAt = now
-	r.Lease.ExpiresAt = now.Add(LeaseDuration)
+	r.Lease.ExpiresAt = firstExpiry(now)
 	return r, HandoutResult{
 		Action:            HandoutGranted,
 		PossibleDuplicate: dup,
@@ -239,7 +254,7 @@ func (r Record) Renew(now time.Time, activeTurn bool) (Record, RenewResult) {
 	case !activeTurn:
 		return r, RenewNoActiveTurn
 	}
-	limit := r.Lease.IssuedAt.Add(LeaseRenewalCap)
+	limit := r.Lease.renewalLimit()
 	if !r.Lease.ExpiresAt.Before(limit) {
 		return r, RenewCapReached
 	}

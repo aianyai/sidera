@@ -14,6 +14,7 @@ reasons behind the rules.
 | ----------- | ------- |
 | `NewSourceRecord`, `NewTargetRecord` | Create the sender's or the recipient node's `Record` of a delivery. |
 | `NewTargetControlRecord(acceptBefore, reportBy)` | Create the target's `Record` of a control signal: never queued for `recv`, no backlog deadline, delivered by `EventReplyCommitted`. |
+| `Record.Valid()` | Says whether a record is one the constructors and transitions can produce, and names the first invariant it breaks (`*InvalidRecordError`, `ErrInvalidRecord`, `Violation`). For a record restored from storage. |
 | `Record.Apply(now, Event)` | Applies one fact or occurrence. Returns the new record and an `Outcome` (applied or ignored with a reason, the transition, and the feedback to give). |
 | `Record.Tick(now)` | Everything due by time alone: lease expiry, backlog expiry, the settle deadline, closing after `report_by`. |
 | `Record.NextTick()` | The earliest instant at which `Tick` could change the record; the zero time for a final record. |
@@ -149,6 +150,41 @@ reaches the sender through the control reply.
 - `StatusReport` reports `delivered` once the reply is committed. The sender
   applies the reply with the existing `EventDelivered`.
 
+## A restored record is checked
+
+`Record.Valid` is the contract's own answer to "could the transitions have
+produced this record". It returns nil exactly for the records the constructors
+and the transitions reach, and otherwise an `*InvalidRecordError` (matching
+`ErrInvalidRecord` with `errors.Is`) whose `Violation` names the first invariant
+broken. It reads only the record, never a clock.
+
+- Kind and state: a target is never `queued` or `expired_unconfirmed`, a control
+  record is never `rejected` and exists only on the target; a rejection reason is
+  recorded exactly while the state is `rejected`; `notified` only on an accepted
+  message record of the target.
+- Deadlines: `ReportBy` is `ReportBy(AcceptBefore)`; a queued message has a
+  backlog deadline no later than `SettleBy`, every other record has none.
+- Produced feedback (`Reported`) is the sender's alone, and the kinds that go
+  together with a state follow `TransitionFeedback`: the rejection notice exactly
+  for `rejected`, `delivery_unknown` and its correction only on the way to
+  `delivered` or `closed_unconfirmed`, an expiry notice corrected on the way to
+  `accepted` or `delivered` unless a rejection or `delivery_unknown` replaced it,
+  a recovery after every block that ended in `delivered` or in `accepted`.
+- Blocked: only an accepted record that is not a control record, with a blocking
+  cause; the cause outlives the flag because the recovery notice names it.
+- Lease: only a message in the target's queue has one. Chunk flags and the
+  chunk count agree, an acknowledged chunk was handed out, page identifiers are
+  set and distinct, at most `MaxLeases` leases were issued and the last one is
+  not over while the message is still accepted, a lease is outstanding only
+  while accepted, its times lie between `LeaseDuration` and `LeaseRenewalCap`
+  after the issue time, and it was issued before the backlog deadline.
+- Outcome: a target message is `delivered` exactly when every chunk is
+  acknowledged; a target is `delivery_unknown` only for a delivery that was
+  handed over and `rejected` only for one that was not.
+
+Where a check reads a rule the transitions also use (`hasQueue`, `handedOver`,
+`SettleBy`, `ReportBy`, the lease bounds), it calls the same function.
+
 ## Applying a status report
 
 The sender's node applies a pulled `StatusReport` with
@@ -162,6 +198,10 @@ correction and the blocked notice.
 
 - `now` is UTC and comes from the caller; records are persisted atomically with
   the effects the outcome calls for.
+- A record read back from storage is passed to `Valid` after decoding, before
+  anything calls `Apply`, `Tick` or `Handout` on it; those trust the record, and
+  a record that is well formed but impossible would otherwise be acted on. An
+  invalid record is treated as corrupt, never repaired.
 - `report_by` in a target record equals `ReportBy(accept_before)` and the
   envelope is otherwise valid; this package does not validate the envelope.
 - The authorization verdict is the policy's (`authz.Evaluate`). `Intake` takes

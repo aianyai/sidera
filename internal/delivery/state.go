@@ -54,6 +54,9 @@ func (s State) String() string {
 	return "invalid"
 }
 
+// known reports whether s is one of the states, StateInvalid excluded.
+func (s State) known() bool { return s >= StateQueued && s <= StateClosedUnconfirmed }
+
 // IsTerminal reports whether no further fact can change the state.
 func (s State) IsTerminal() bool {
 	return s == StateDelivered || s == StateRejected || s == StateClosedUnconfirmed
@@ -121,6 +124,8 @@ const (
 	SubNotified
 )
 
+func (s SubState) known() bool { return s == SubNone || s == SubNotified }
+
 // RejectReason says why a delivery is StateRejected.
 type RejectReason uint8
 
@@ -177,6 +182,9 @@ var rejectNames = [...]string{
 	RejectDeadlineOutOfRange: "deadline_out_of_range",
 	RejectBacklogFull:        "backlog_full",
 }
+
+// known reports whether r is a reason or RejectNone.
+func (r RejectReason) known() bool { return r <= RejectBacklogFull }
 
 func (r RejectReason) String() string {
 	if int(r) < len(rejectNames) {

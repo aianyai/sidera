@@ -91,6 +91,14 @@ type KindSet uint16
 // Has reports whether k is in the set.
 func (s KindSet) Has(k Kind) bool { return s&(1<<k) != 0 }
 
+// known reports whether the set holds only kinds that exist.
+func (s KindSet) known() bool {
+	for k := KindUnreachable; k.valid(); k++ {
+		s &^= 1 << k
+	}
+	return s == 0
+}
+
 // With returns the set with k added.
 func (s KindSet) With(k Kind) KindSet { return s | 1<<k }
 

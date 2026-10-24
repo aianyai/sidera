@@ -508,7 +508,7 @@ func recordMutators() []recordMutator {
 		{"side to an unknown value", true, func(rng *rand.Rand, r *Record) { r.Side = []Side{0, 3, 255}[rng.Intn(3)] }, 0},
 		{"side swapped", true, func(rng *rand.Rand, r *Record) { r.Side = SideSource + SideTarget - r.Side }, 0},
 		{"control flipped", true, func(rng *rand.Rand, r *Record) { r.Control = !r.Control }, 0},
-		{"state to another", false, func(rng *rand.Rand, r *Record) { r.State = State(otherInt(rng, int(r.State), 0, 8)) }, 0.5},
+		{"state to another", false, func(rng *rand.Rand, r *Record) { r.State = State(otherInt(rng, int(r.State), 0, 8)) }, 0.6},
 		{"state to another with the matching reason", false, func(rng *rand.Rand, r *Record) {
 			r.State = State(otherInt(rng, int(r.State), 1, 7))
 			r.Reject = RejectNone
@@ -517,8 +517,8 @@ func recordMutators() []recordMutator {
 			}
 		}, 0.5},
 		{"reject reason to an unknown value", true, func(rng *rand.Rand, r *Record) { r.Reject = RejectReason(100 + rng.Intn(100)) }, 0},
-		{"reject reason to another known one", false, func(rng *rand.Rand, r *Record) { r.Reject = RejectReason(otherInt(rng, int(r.Reject), 0, 11)) }, 0.5},
-		{"sub-state flipped", false, func(rng *rand.Rand, r *Record) { r.Sub = SubNotified - r.Sub }, 0.25},
+		{"reject reason to another known one", false, func(rng *rand.Rand, r *Record) { r.Reject = RejectReason(otherInt(rng, int(r.Reject), 0, 11)) }, 0.85},
+		{"sub-state flipped", false, func(rng *rand.Rand, r *Record) { r.Sub = SubNotified - r.Sub }, 0.9},
 		{"accept_before shifted", true, func(rng *rand.Rand, r *Record) { r.AcceptBefore = r.AcceptBefore.Add(randomShift(rng)) }, 0},
 		{"report_by shifted", true, func(rng *rand.Rand, r *Record) { r.ReportBy = r.ReportBy.Add(randomShift(rng)) }, 0},
 		{"a deadline unset", true, func(rng *rand.Rand, r *Record) {
@@ -528,67 +528,67 @@ func recordMutators() []recordMutator {
 				r.ReportBy = time.Time{}
 			}
 		}, 0},
-		{"backlog deadline unset", false, func(rng *rand.Rand, r *Record) { r.BacklogDeadline = time.Time{} }, 0.5},
-		{"backlog deadline shifted", false, func(rng *rand.Rand, r *Record) { r.BacklogDeadline = r.BacklogDeadline.Add(randomShift(rng)) }, 0.25},
+		{"backlog deadline unset", true, func(rng *rand.Rand, r *Record) { r.BacklogDeadline = time.Time{} }, 0},
+		{"backlog deadline shifted", false, func(rng *rand.Rand, r *Record) { r.BacklogDeadline = r.BacklogDeadline.Add(randomShift(rng)) }, 0.8},
 		{"backlog deadline set past the settle deadline", false, func(rng *rand.Rand, r *Record) {
 			r.BacklogDeadline = SettleBy(r.ReportBy).Add(time.Duration(1+rng.Intn(3600)) * time.Second)
 		}, 0.5},
-		{"produced feedback: one kind flipped", false, func(rng *rand.Rand, r *Record) { r.Reported ^= 1 << (1 + rng.Intn(int(KindUnknownCorrected))) }, 0.5},
+		{"produced feedback: one kind flipped", false, func(rng *rand.Rand, r *Record) { r.Reported ^= 1 << (1 + rng.Intn(int(KindUnknownCorrected))) }, 0.8},
 		{"produced feedback: a bit outside the kinds", true, func(rng *rand.Rand, r *Record) { r.Reported |= 1 << (9 + rng.Intn(7)) }, 0},
-		{"blocked flipped", false, func(rng *rand.Rand, r *Record) { r.Blocked = !r.Blocked }, 0.25},
-		{"block cause to another", false, func(rng *rand.Rand, r *Record) { r.BlockedCause = Cause(otherInt(rng, int(r.BlockedCause), 0, 6)) }, 0.5},
-		{"lease: hand-out count to another", false, func(rng *rand.Rand, r *Record) { r.Lease.Handouts = otherInt(rng, r.Lease.Handouts, 0, MaxLeases+2) }, 0.5},
-		{"lease: chunk count to another", false, func(rng *rand.Rand, r *Record) { r.Lease.Chunks = otherInt(rng, r.Lease.Chunks, -1, 4) }, 0.5},
-		{"lease: active flipped", false, func(rng *rand.Rand, r *Record) { r.Lease.Active = !r.Lease.Active }, 0.25},
+		{"blocked flipped", false, func(rng *rand.Rand, r *Record) { r.Blocked = !r.Blocked }, 0.9},
+		{"block cause to another", false, func(rng *rand.Rand, r *Record) { r.BlockedCause = Cause(otherInt(rng, int(r.BlockedCause), 0, 6)) }, 0.85},
+		{"lease: hand-out count to another", false, func(rng *rand.Rand, r *Record) { r.Lease.Handouts = otherInt(rng, r.Lease.Handouts, 0, MaxLeases+2) }, 0.9},
+		{"lease: chunk count to another", true, func(rng *rand.Rand, r *Record) { r.Lease.Chunks = otherInt(rng, r.Lease.Chunks, -1, 4) }, 0},
+		{"lease: active flipped", false, func(rng *rand.Rand, r *Record) { r.Lease.Active = !r.Lease.Active }, 0.9},
 		{"lease: page identifier dropped", false, func(rng *rand.Rand, r *Record) {
 			if n := len(r.Lease.IDs); n > 0 {
 				r.Lease.IDs = r.Lease.IDs[:n-1]
 			}
-		}, 0.25},
-		{"lease: page identifier unset", false, func(rng *rand.Rand, r *Record) {
+		}, 0.4},
+		{"lease: page identifier unset", true, func(rng *rand.Rand, r *Record) {
 			if n := len(r.Lease.IDs); n > 0 {
 				r.Lease.IDs[rng.Intn(n)] = LeaseID{}
 			}
-		}, 0.5},
-		{"lease: page identifier repeated", false, func(rng *rand.Rand, r *Record) {
+		}, 0},
+		{"lease: page identifier repeated", true, func(rng *rand.Rand, r *Record) {
 			if n := len(r.Lease.IDs); n > 0 {
 				r.Lease.IDs = append(r.Lease.IDs, r.Lease.IDs[rng.Intn(n)])
 			}
-		}, 0.5},
+		}, 0},
 		{"lease: issue time shifted", false, func(rng *rand.Rand, r *Record) {
 			if !r.Lease.IssuedAt.IsZero() {
 				r.Lease.IssuedAt = r.Lease.IssuedAt.Add(randomShift(rng))
 			}
-		}, 0.5},
+		}, 0.65},
 		{"lease: expiry time shifted", false, func(rng *rand.Rand, r *Record) {
 			if !r.Lease.ExpiresAt.IsZero() {
 				r.Lease.ExpiresAt = r.Lease.ExpiresAt.Add(randomShift(rng))
 			}
-		}, 0.5},
-		{"lease: a lease time unset", false, func(rng *rand.Rand, r *Record) {
+		}, 0.65},
+		{"lease: a lease time unset", true, func(rng *rand.Rand, r *Record) {
 			if rng.Intn(2) == 0 {
 				r.Lease.IssuedAt = time.Time{}
 			} else {
 				r.Lease.ExpiresAt = time.Time{}
 			}
-		}, 0.5},
+		}, 0},
 		{"lease: hand-out flag flipped", false, func(rng *rand.Rand, r *Record) {
 			if n := len(r.Lease.HandedOut); n > 0 {
 				i := rng.Intn(n)
 				r.Lease.HandedOut[i] = !r.Lease.HandedOut[i]
 			}
-		}, 0.1},
+		}, 0.5},
 		{"lease: acknowledgement flag flipped", false, func(rng *rand.Rand, r *Record) {
 			if n := len(r.Lease.Acked); n > 0 {
 				i := rng.Intn(n)
 				r.Lease.Acked[i] = !r.Lease.Acked[i]
 			}
-		}, 0.5},
-		{"lease: flag slice cut short", false, func(rng *rand.Rand, r *Record) {
+		}, 0.55},
+		{"lease: flag slice cut short", true, func(rng *rand.Rand, r *Record) {
 			if n := len(r.Lease.Acked); n > 0 {
 				r.Lease.Acked = r.Lease.Acked[:n-1]
 			}
-		}, 0.5},
+		}, 0},
 	}
 }
 

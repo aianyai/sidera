@@ -228,6 +228,24 @@ does not end the sender's record: the reply carries the result and the session
 endpoint, so the sender keeps pulling until it has the reply (see
 [envelope](../envelope/README.md)).
 
+### Validity of a restored record
+
+`Record.Valid` returns nil exactly for the records that the constructors
+(`NewSourceRecord`, `NewTargetRecord`, `NewTargetControlRecord`) and the
+transitions (`Apply`, `Tick`, `Handout`, `Renew`, `Ack`) can produce, and an
+`*InvalidRecordError` otherwise; its `Violation` is a typed reason naming the
+first invariant broken, in a fixed order of checks (kind and state, deadlines,
+block flags, produced feedback, lease, outcome against lease). The invariants
+are listed in the package README; each is a property the transitions keep:
+
+- what `moveTo` clears on leaving `accepted` (block flag, outstanding lease, sub-state);
+- what only one side or one kind of record has (feedback and expiry on the
+  sender, leases, backlog deadline and sub-state on a queued target message);
+- the shapes `Handout` creates and `Renew` and `Tick` leave (chunk flags,
+  identifiers, times, lease count);
+- the end states of a target (delivered by the last acknowledgement, rejected
+  only before a hand-out, delivery_unknown only after one).
+
 ### Status reports
 
 A target reports its state, the rejection reason, and whether the accepted
@@ -431,6 +449,31 @@ permission still reads it.
   while a lease is open does nothing until the lease ends, so reporting it would
   wake the scheduler for no change.
 
+- **A restored record is checked by the contract, not by the store.** The
+  transitions trust their input; a record read back from disk that is well
+  formed but impossible (a lease on a delivered message, a rejection that
+  followed a hand-out) would be acted on silently, and the first sign would be a
+  wrong notice to a sender. The storage layer only knows the encoding, so the rule
+  for what a delivery can look like lives here, next to the transitions that
+  define it, and a change to a transition changes `Valid` in the same package.
+  The one place where the check restates a rule instead of calling it is the set
+  of feedback kinds that go with a state, which is the effect of
+  `TransitionFeedback` seen from the outside; `TestRecordValidSourceFeedbackBookkeepingIsExact`
+  enumerates every sender record the transitions reach and every record that
+  differs only in those fields, and fails when `Valid` and the transitions
+  disagree in either direction.
+- **Exactness is tested where it can be enumerated.** For the lease and the
+  deadlines the set of valid records is infinite, so there the tests are a table
+  with a row per invariant, a property test over every record the random
+  deliveries and control signals produce, and a mutation campaign with a
+  measured detection rate per field and a floor on how many mutations each
+  invariant must catch. A row is deleted from the table only with its invariant.
+- **Rejected alternatives.** Computing the valid set by replaying the legal paths
+  of `TransitionFeedback` at each call was rejected: a store that decodes
+  thousands of records at start would pay for a search per record, and a
+  table cached at package level is global state. Checking only the fields the
+  engine reads was rejected because a record is trusted in whole once accepted.
+
 ## Where
 
 - `internal/delivery/state.go`: states, sub-state, reject reasons, causes,
@@ -483,6 +526,15 @@ permission still reads it.
   (the hourly cap stays within the prompt cap of an endpoint), `TestMergeKey`,
   `TestFeedbackParamsValidate`, `TestFeedbackQueue` (among its cases, the exact
   instant at which a sent notice leaves the rate window).
+- `internal/delivery/valid.go`: `Record.Valid`, `Violation`,
+  `InvalidRecordError`. Tests in `internal/delivery/valid_test.go`:
+  `TestRecordValidRefusesImpossibleRecords` (one row per invariant, each starting
+  from a record the package produces, and a check that every `Violation` has a
+  row), `TestRecordValidAcceptsFreshRecords`, `TestRecordValidReportsTheFirstViolation`,
+  `TestRecordValidSourceFeedbackBookkeepingIsExact`,
+  `TestPropertyEveryProducedRecordIsValid` (the random deliveries and control
+  signals of the other property tests, through the observer they take, with
+  coverage assertions per kind of record) and `TestPropertyMutatedRecordsAreCaught`.
 - `internal/delivery/schedule.go`: the deadlines `Tick` consults,
   `Record.NextTick`, `FeedbackQueue.NextFlush`. Tests:
   `TestNextTickNamesEachDeadline` and `TestNextFlushNamesEachDeadline` (instants

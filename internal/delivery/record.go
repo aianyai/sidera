@@ -37,6 +37,8 @@ const (
 	SideTarget
 )
 
+func (s Side) known() bool { return s == SideSource || s == SideTarget }
+
 // Record is one delivery as one side sees it. Build it with NewSourceRecord,
 // NewTargetRecord or NewTargetControlRecord and change it only through its
 // methods. The zero value is not usable.
