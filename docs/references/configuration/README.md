@@ -204,9 +204,9 @@ A preset cannot be changed, only removed and added again.
 ```
 
 An instance name has the syntax of an adapter id (it becomes a file name and a
-lock name). `adapter enable` creates an instance when it is new (the name
-defaults to the adapter's id) and turns an existing one on, keeping what the
-owner set; `adapter disable` only sets `enabled` to false and never deletes the
+lock name). `adapter enable` creates an instance when it is new (a request that
+names no instance gets the adapter's id, which the management layer passes) and
+turns an existing one on, keeping what the owner set; `adapter disable` only sets `enabled` to false and never deletes the
 instance, because its stable endpoint ids belong to it.
 
 `enable` refuses an adapter that is not installed, an existing instance of

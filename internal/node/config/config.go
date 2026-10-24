@@ -190,7 +190,9 @@ func readEndpointIDs(r fsx.Reader, st *state) error {
 		if err != nil {
 			return err
 		}
-		for id, what := range ids.every() {
+		all := ids.every()
+		for _, id := range sortedEndpoints(all) {
+			what := all[id]
 			if other, dup := owners[id]; dup {
 				return &FileError{Path: p, Kind: KindEndpointIDs, Reason: FileInvalid, Field: what,
 					Err: errors.New("the id " + id.String() + " is already the id of an endpoint in " + other)}

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/authz"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
 )
 
@@ -58,6 +59,8 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"node reserve below what the queue can grow", config.NodePath, edit(goldenNode, `"disk_reserve_bytes": 268435456`, `"disk_reserve_bytes": 1048576`), config.KindNode, config.FileInvalid, "disk_reserve_bytes"},
 		{"node retention zero", config.NodePath, edit(goldenNode, `"archive_retention_days": 30`, `"archive_retention_days": 0`), config.KindNode, config.FileInvalid, "archive_retention_days"},
 		{"node queue time no duration holds", config.NodePath, edit(goldenNode, `"max_queue_s": 1800`, `"max_queue_s": 9223372036854775807`), config.KindNode, config.FileInvalid, "max_queue_s"},
+		{"node queue time that wraps around a duration", config.NodePath, edit(goldenNode, `"max_queue_s": 1800`, `"max_queue_s": 18446744074`), config.KindNode, config.FileInvalid, "max_queue_s"},
+		{"node operation id zero", config.NodePath, edit(goldenNode, opIDText, "00000000000000000000000000000000"), config.KindNode, config.FileInvalid, "last_operation.id"},
 		{"node operation id of the wrong length", config.NodePath, edit(goldenNode, opIDText, "0011"), config.KindNode, config.FileInvalid, "last_operation.id"},
 		{"node operation person unknown", config.NodePath, edit(goldenNode, `"person": "local"`, `"person": "someone"`), config.KindNode, config.FileInvalid, "last_operation.person"},
 		{"node operation result not an object", config.NodePath, edit(goldenNode, "\"result\": {\n      \"version\": 3\n    }", `"result": [1]`), config.KindNode, config.FileInvalid, "last_operation.result"},
@@ -103,6 +106,7 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"instance endpoint explicit zero", config.InstancesPath, edit(goldenInstances, `"backlog_limit": 50`, `"backlog_limit": 0`), config.KindInstances, config.FileMalformed, "backlog_limit"},
 		{"instance endpoint queue time beyond the cap", config.InstancesPath, edit(goldenInstances, `"max_queue_s": 3600`, `"max_queue_s": 90000`), config.KindInstances, config.FileInvalid, "max_queue_s"},
 		{"instance endpoint queue time no duration holds", config.InstancesPath, edit(goldenInstances, `"max_queue_s": 3600`, `"max_queue_s": 9223372036854775807`), config.KindInstances, config.FileInvalid, "max_queue_s"},
+		{"instance endpoint queue time that wraps around a duration", config.InstancesPath, edit(goldenInstances, `"max_queue_s": 3600`, `"max_queue_s": 18446744074`), config.KindInstances, config.FileInvalid, "max_queue_s"},
 		{"instance endpoint negative backlog", config.InstancesPath, edit(goldenInstances, `"backlog_limit": 400`, `"backlog_limit": -1`), config.KindInstances, config.FileInvalid, "backlog_limit"},
 
 		// endpoint-ids
@@ -112,6 +116,7 @@ func TestInvalidFileRefusesStartupAndNamesTheFile(t *testing.T) {
 		{"endpoint ids the same id twice", config.EndpointIDsPath("example"), edit(goldenEndpointIDs, `"notes": "`+ep2Text+`"`, `"notes": "`+ep1Text+`"`), config.KindEndpointIDs, config.FileInvalid, "notes"},
 		{"endpoint ids empty key", config.EndpointIDsPath("example"), edit(goldenEndpointIDs, `"notes"`, `""`), config.KindEndpointIDs, config.FileInvalid, ""},
 		{"endpoint ids key beyond the length bound", config.EndpointIDsPath("example"), edit(goldenEndpointIDs, `"notes"`, `"`+strings.Repeat("k", 129)+`"`), config.KindEndpointIDs, config.FileInvalid, ""},
+		{"endpoint ids runtime that is the system endpoint", config.EndpointIDsPath("example"), edit(goldenEndpointIDs, `"runtime": "`+ep1Text+`"`, `"runtime": "`+ident.SystemEndpoint().String()+`"`), config.KindEndpointIDs, config.FileInvalid, "runtime"},
 		{"endpoint ids unknown field", config.EndpointIDsPath("example"), edit(goldenEndpointIDs, `"format": 1,`, `"format": 1, "extra": 1,`), config.KindEndpointIDs, config.FileMalformed, "extra"},
 		{"endpoint ids file of an instance with no valid name", config.EndpointIDsPath("Bad Name"), goldenEndpointIDs, config.KindEndpointIDs, config.FileMisnamed, ""},
 		{"endpoint ids id of another instance", config.EndpointIDsPath("other"), `{"format": 1, "direct": {"y": "` + ep1Text + `"}}`, config.KindEndpointIDs, config.FileInvalid, ""},
