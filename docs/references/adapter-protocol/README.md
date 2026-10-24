@@ -362,6 +362,10 @@ with the rest. `1001` to `1011` are the protocol's own (`adapterproto.Code*`):
 | 1010 | lease_unknown | the lease does not belong to the endpoint |
 | 1011 | instance_locked | another process holds the instance lock |
 
+An error may carry `data`, always an object. The three codes marked above define
+its shape and require it; any other code may carry an object of the sender's
+choosing, which a reader may show or log but must not act on.
+
 Whether a failed request had an effect is the peer layer's effect rule, applied
 to the error a call returned (`peer.NoEffect`, `peer.ResultUnknown`; the daemon
 does not sort codes itself). Only for the methods with side effects
@@ -376,6 +380,12 @@ an unknown outcome call for reconciliation or an idempotent retry.
 - **The version is an integer range.** One round trip lets both sides give up old
   versions explicitly, and the error data shows both ranges. A minor version has
   no meaning on a wire where additions go through capabilities.
+- **Data is allowed on any error code.** JSON-RPC libraries attach details to
+  `-32602` and `-32603` routinely; a reader that refused them would turn a useful
+  error into a protocol violation, and the sender of such an error could not
+  tell which of its replies a peer would reject. Only the three codes whose
+  receiver acts on the data fix its shape; the object for any other code is
+  for people.
 - **Strictness fails closed.** A lenient reader that ignores an unknown field
   silently does the wrong thing when the field was a safety restriction.
 - **Identifiers stay opaque.** The adapter never parses them, so copying their
@@ -395,7 +405,7 @@ an unknown outcome call for reconciliation or an idempotent retry.
   `validate.go`.
 - `sdk/go/internal/strictjson`: the strict decoder.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
-  `TestErrorObjectKnowsEveryCode`, `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
+  `TestErrorObjectKnowsEveryCode`, `TestErrorObjectValidate`, `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
   `FuzzDecodeMessages`.
 
 ## Capabilities and endpoint kinds

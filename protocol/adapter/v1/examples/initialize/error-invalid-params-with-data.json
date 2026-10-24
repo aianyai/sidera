@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "error": {
+    "code": -32602,
+    "message": "instance.lock_path must not be empty",
+    "data": {
+      "field": "instance.lock_path"
+    }
+  }
+}

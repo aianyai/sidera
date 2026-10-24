@@ -80,7 +80,7 @@
       ]
     },
     "ErrorObject": {
-      "description": "Data is present exactly for the three codes that define a shape for it.",
+      "description": "Data is an object. Three codes define its shape and require it; any other code may carry an object of the sender's choosing, as JSON-RPC libraries attach details to -32602 and -32603.",
       "type": "object",
       "required": ["code", "message"],
       "additionalProperties": false,
@@ -101,10 +101,6 @@
         {
           "if": { "properties": { "code": { "const": 1009 } }, "required": ["code"] },
           "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/SendRefusedData" } } }
-        },
-        {
-          "if": { "properties": { "code": { "not": { "enum": [-32022, 1008, 1009] } } }, "required": ["code"] },
-          "then": { "properties": { "data": false } }
         }
       ]
     },

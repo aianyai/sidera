@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "error": {
+    "code": -32603,
+    "message": "internal error",
+    "data": {
+      "retry_after_s": 5
+    }
+  }
+}

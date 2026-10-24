@@ -91,9 +91,11 @@ func (d SendRefusedData) Validate() error {
 
 // ErrorObject is the "error" member of an error response: the JSON-RPC error
 // object of package peer, which owns its shape, with the protocol's rules for
-// it. Data is present exactly for the codes that define a data shape:
+// it. Data is required, in a defined shape, for the codes that define one:
 // peer.CodeUnsupportedProtocolVersion, CodeInvalidAddress and CodeSendRefused.
-// Convert with (*peer.Error)(&e) to hand one to a peer.
+// Any other code may carry data, which must be a JSON object: libraries attach
+// details to -32602 and -32603 routinely, and a reader that refused them would
+// turn a useful error into a protocol violation. Convert with (*peer.Error)(&e) to hand one to a peer.
 type ErrorObject peer.Error
 
 // Validate checks the code, the message and the shape of the data.
@@ -113,14 +115,23 @@ func (e ErrorObject) Validate() error {
 	case CodeSendRefused:
 		data = new(SendRefusedData)
 	default:
-		c.ok(e.Data == nil, "error %d carries no data", e.Code)
-		return c.err
+		if e.Data == nil {
+			return nil
+		}
+		return at("data", decodeInto(e.Data, new(objectData)))
 	}
 	if e.Data == nil {
 		return at("data", bad("error %d requires data", e.Code))
 	}
 	return at("data", decodeInto(e.Data, data))
 }
+
+// objectData is the data of a code that defines no shape for it: any JSON
+// object.
+type objectData map[string]json.RawMessage
+
+// Validate accepts every object.
+func (objectData) Validate() error { return nil }
 
 // decodeInto strictly decodes raw into v, a pointer to a type with Validate, and
 // validates it.
