@@ -451,8 +451,9 @@ func (r InitiatorRecord) Validate() error {
 	return nil
 }
 
-// ownsSignature reports whether a signature of this node may exist outside it
-// and so needs a revocation unless the pairing completed.
+// needsRevocation reports whether a signature of this node may exist outside it
+// and the pairing ended without the complete credential, so the credential must
+// be revoked.
 func (r InitiatorRecord) needsRevocation() bool {
 	return r.Released && r.Status != InitiatorActive && r.Status != InitiatorComplete
 }

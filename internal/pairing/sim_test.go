@@ -59,6 +59,13 @@ type simNode struct {
 	opCounter   uint64
 
 	nextSID SessionID
+
+	// crashAt, when positive, makes the node crash before it performs the
+	// crashAt-th action counted from the start of the run (applied counts them).
+	crashAt, applied int
+	// crashed is set when a crash happened inside apply; the caller that was
+	// about to send a frame after the actions then does not send it.
+	crashed bool
 }
 
 type simStream struct {
@@ -105,8 +112,12 @@ type simEvent struct {
 	ID   ID
 	Peer ident.NodeID
 	Aux  string
-	// Frame is set on sent frames.
+	// Frame is set on sent frames and, for record events, holds the persisted
+	// bytes.
 	Frame []byte
+	// Times and Nodes carry the persisted counters and expectations.
+	Times []time.Time
+	Nodes []ident.NodeID
 }
 
 func newSim(t testing.TB) *sim { return &sim{t: t, now: testNow} }
@@ -169,6 +180,15 @@ func (n *simNode) conn(to *simNode) Conn {
 func (n *simNode) apply(actions []Action, stream *simStream) {
 	t := n.t
 	for _, a := range actions {
+		if n.crashAt > 0 && n.applied == n.crashAt {
+			// The node crashes before this action: the ones before it happened,
+			// the rest, and the state they came from, are lost.
+			n.crashAt = 0
+			n.crashed = true
+			n.restart()
+			return
+		}
+		n.applied++
 		switch a := a.(type) {
 		case Send:
 			st, toTarget := n.streamOf(a.Session)
@@ -201,7 +221,7 @@ func (n *simNode) apply(actions []Action, stream *simStream) {
 				t.Fatal("limits do not round trip")
 			}
 			n.disk["limits"] = b
-			n.sim.log(simEvent{Node: n.name, Kind: "limits"})
+			n.sim.log(simEvent{Node: n.name, Kind: "limits", Times: a.Limits.Reveals()})
 		case PersistExpectations:
 			b, err := EncodeExpectations(a.Expectations)
 			must(t, err)
@@ -209,6 +229,11 @@ func (n *simNode) apply(actions []Action, stream *simStream) {
 				t.Fatal(err)
 			}
 			n.disk["expectations"] = b
+			var nodes []ident.NodeID
+			for _, e := range a.Expectations {
+				nodes = append(nodes, e.Node)
+			}
+			n.sim.log(simEvent{Node: n.name, Kind: "expectations", Nodes: nodes})
 		case PersistTarget:
 			b, err := a.Record.Encode()
 			must(t, err)
@@ -221,6 +246,7 @@ func (n *simNode) apply(actions []Action, stream *simStream) {
 				t.Fatal("target record does not round trip")
 			}
 			n.disk["target/"+fmt.Sprintf("%x", a.Record.ID())] = b
+			n.sim.log(simEvent{Node: n.name, Kind: "record", Aux: "target", ID: a.Record.ID(), Frame: b})
 		case DeleteTarget:
 			delete(n.disk, "target/"+fmt.Sprintf("%x", a.ID))
 		case PersistInitiator:
@@ -232,7 +258,7 @@ func (n *simNode) apply(actions []Action, stream *simStream) {
 				t.Fatal("initiator record does not round trip")
 			}
 			n.disk["initiator/"+fmt.Sprintf("%x", a.Record.ID())] = b
-			n.sim.log(simEvent{Node: n.name, Kind: "persist-initiator", ID: a.Record.ID(), Aux: a.Record.Status.String()})
+			n.sim.log(simEvent{Node: n.name, Kind: "record", Aux: "initiator", ID: a.Record.ID(), Frame: b})
 		case DeleteInitiator:
 			delete(n.disk, "initiator/"+fmt.Sprintf("%x", a.ID))
 		case StoreCredential:
@@ -398,15 +424,22 @@ func (s *sim) runFetch(i int, drop bool) {
 	next, actions, err := to.state.TargetReceive(to.world(), to.conn(from), tsid, f.frame, to.rng, s.now)
 	must(s.t, err)
 	to.state = next
+	// The answer is the last action; every action before it is performed first,
+	// and a crash on the way means the answer is never sent.
 	var reply []byte
+	to.crashed = false
 	for _, a := range actions {
 		if snd, ok := a.(Send); ok {
 			reply = snd.Frame
 			continue
 		}
 		to.apply([]Action{a}, st)
+		if to.crashed {
+			break
+		}
 	}
-	if reply == nil {
+	if reply == nil || to.crashed {
+		to.crashed = false
 		fail()
 		return
 	}
@@ -721,4 +754,27 @@ func seedPersisted(f *testing.F, pick func(s *sim, a, b *simNode) [][]byte) {
 			f.Add(seed)
 		}
 	}
+}
+
+// oracleCredentialDigest is the digest of the credential the transcript's two
+// sides must both sign, computed from the construction with its own HKDF.
+func oracleCredentialDigest(t testing.TB, tr Transcript) record.Digest {
+	t.Helper()
+	terms := tr.Terms()
+	fields := framedFields(oracleFields(terms))
+	c := tr.Commitment()
+	nB, nA := tr.Nonces()
+	lp := func(b []byte) []byte { return append(uvarintBytes(len(b)), b...) }
+	body := append(append(append(fields, uvarintBytes(32)...), c[:]...), uvarintBytes(32)...)
+	body = append(append(append(body, nB[:]...), uvarintBytes(32)...), nA[:]...)
+	ikm := append(append([]byte(nil), nA[:]...), nB[:]...)
+	prk := hmacSHA256(make([]byte, 32), ikm)
+	info := append(lp([]byte("sidera/pairing/credential-nonce/1")), body...)
+	okm := hmacSHA256(prk, append(info, 1))[:16]
+	var nonce credential.Nonce
+	copy(nonce[:], okm)
+	cred := credential.New(terms.Initiator.Node(), terms.Target.Node(), terms.CreatedAt, terms.NotAfter, nonce)
+	d, err := cred.Digest()
+	must(t, err)
+	return d
 }

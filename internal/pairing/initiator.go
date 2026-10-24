@@ -290,9 +290,10 @@ func (s State) OnFetchResult(w World, id ID, responder Party, frame []byte, rand
 // signature is revoked.
 func (s State) initiatorComplete(w World, rec InitiatorRecord, cred record.Record, rand io.Reader, now time.Time) (State, []Action, error) {
 	ver, err := checkComplete(rec.Transcript, cred)
-	if err != nil {
+	if err != nil || rec.Signature == nil {
 		// A target that returns something else than the credential has not
-		// completed anything; ask again later.
+		// completed anything; ask again later. A credential that carries this
+		// node's signature before this node signed is not one it made.
 		plan := s.plans[s.planIndex(rec.ID())]
 		plan.nextAt = now.Add(backoff(w.Params, plan.attempts, rand))
 		return s.withPlan(plan), nil, nil
