@@ -46,12 +46,12 @@ type Record struct {
 	Sub    SubState
 	Reject RejectReason // set while State is StateRejected
 
-	// Control marks the target's record of a control signal (only
-	// NewTargetControlRecord sets it, so it is never set on the source side). A control signal
-	// is executed by the adapter when it is accepted and answered with a reply;
-	// it is never queued for recv, so it has no lease, no chunks and no backlog
-	// deadline, and it is delivered by EventReplyCommitted, not by Ack. False
-	// for every other record.
+	// Control marks the target's record of a control signal; only
+	// NewTargetControlRecord sets it, so it is never set on the source side. A
+	// control signal is executed by the adapter when it is accepted and answered
+	// with a reply; it is never queued for recv, so it has no lease, no chunks
+	// and no backlog deadline, and it is delivered by EventReplyCommitted, not
+	// by Ack. False for every other record.
 	Control bool
 
 	// AcceptBefore is the delivery deadline from the envelope.
@@ -226,7 +226,7 @@ func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 		}
 		return r.moveTo(StateDelivered, RejectNone)
 	case EventReplyCommitted:
-		if !r.Control {
+		if r.Side != SideTarget || !r.Control {
 			return r, Outcome{}, fmt.Errorf("%w: a reply is committed only for a control signal on the target", ErrWrongSide)
 		}
 		return r.moveTo(StateDelivered, RejectNone)

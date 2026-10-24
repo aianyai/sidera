@@ -152,6 +152,11 @@ func TestReplyCommittedAppliesToControlRecordsOnly(t *testing.T) {
 		rec  func(*testing.T) Record
 	}{
 		{"a source record refuses a committed reply", func(*testing.T) Record { return NewSourceRecord(controlAcceptBefore) }},
+		{"a source record flagged as control still refuses a committed reply", func(*testing.T) Record {
+			rec := NewSourceRecord(controlAcceptBefore)
+			rec.Control = true
+			return rec
+		}},
 		{"an accepted source record refuses a committed reply", func(t *testing.T) Record {
 			rec, _ := mustApply(t, NewSourceRecord(controlAcceptBefore), at(time.Second), Event{Type: EventReceipt})
 			return rec
