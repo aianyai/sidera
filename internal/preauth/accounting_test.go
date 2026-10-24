@@ -181,7 +181,7 @@ func TestDisconnectReleasesWhateverTheConnectionHeld(t *testing.T) {
 	admit(t, a, un, at(0), AdmitCounted)
 	admit(t, a, ex, at(0), AdmitKnownMember)
 	admit(t, a, nm, at(0), AdmitCounted)
-	a.Completed(nm, StateNonMember, at(1))
+	a.Completed(nm, StateNonMemberNode, at(1))
 	wantCounts(t, a, 1, 1, 1)
 	for _, k := range []ConnKey{un, ex, nm} {
 		a.Disconnected(k)
@@ -222,17 +222,17 @@ func TestNonMemberConcurrencyLimit(t *testing.T) {
 		admit(t, a, k, at(0), AdmitCounted)
 	}
 	for i, k := range ks[:2] {
-		if p := a.Completed(k, StateNonMember, at(1)); p != (Placement{VerdictAllow, PlaceNonMember}) {
+		if p := a.Completed(k, StateNonMemberNode, at(1)); p != (Placement{VerdictAllow, PlaceNonMember}) {
 			t.Fatalf("non-member %d: %v/%v", i, p.Verdict, p.Reason)
 		}
 	}
 	wantCounts(t, a, 1, 0, 2)
-	if p := a.Completed(ks[2], StateNonMember, at(1)); p != (Placement{VerdictRefuse, RefuseNonMemberFull}) {
+	if p := a.Completed(ks[2], StateNonMemberNode, at(1)); p != (Placement{VerdictRefuse, RefuseNonMemberFull}) {
 		t.Fatalf("beyond the limit: %v/%v", p.Verdict, p.Reason)
 	}
 	wantCounts(t, a, 0, 0, 2) // the refused one gave up its aggregate slot too
 	// Deciding the same non-member again changes nothing.
-	if p := a.Completed(ks[0], StateNonMember, at(2)); p != (Placement{VerdictAllow, PlaceAlreadyNonMember}) {
+	if p := a.Completed(ks[0], StateNonMemberNode, at(2)); p != (Placement{VerdictAllow, PlaceAlreadyNonMember}) {
 		t.Fatalf("again: %v/%v", p.Verdict, p.Reason)
 	}
 	wantCounts(t, a, 0, 0, 2)
@@ -242,7 +242,7 @@ func TestANonMemberThatBecomesAMemberFreesItsPlace(t *testing.T) {
 	a := newAccounting(t)
 	k := key(t, 1, "a")
 	admit(t, a, k, at(0), AdmitCounted)
-	a.Completed(k, StateNonMember, at(1))
+	a.Completed(k, StateNonMemberNode, at(1))
 	wantCounts(t, a, 0, 0, 1)
 	if p := a.Completed(k, StateMember, at(10)); p != (Placement{VerdictAllow, PlaceReleased}) {
 		t.Fatalf("pairing made it a member: %v/%v", p.Verdict, p.Reason)
@@ -253,13 +253,51 @@ func TestANonMemberThatBecomesAMemberFreesItsPlace(t *testing.T) {
 	}
 }
 
+// The limits are about strangers holding connections, whatever they present: a
+// person without a standing takes one of the same places as a node that is not
+// a member.
+func TestNonMemberPersonsAndNodesShareTheNonMemberLimits(t *testing.T) {
+	a := newAccounting(t)
+	ks := []ConnKey{key(t, 1, "a"), key(t, 2, "a"), key(t, 3, "a")}
+	for _, k := range ks {
+		admit(t, a, k, at(0), AdmitCounted)
+	}
+	if p := a.Completed(ks[0], StateNonMemberPerson, at(1)); p != (Placement{VerdictAllow, PlaceNonMember}) {
+		t.Fatalf("person: %v/%v", p.Verdict, p.Reason)
+	}
+	if p := a.Completed(ks[1], StateNonMemberNode, at(1)); p != (Placement{VerdictAllow, PlaceNonMember}) {
+		t.Fatalf("node: %v/%v", p.Verdict, p.Reason)
+	}
+	wantCounts(t, a, 1, 0, 2)
+	if p := a.Completed(ks[2], StateNonMemberPerson, at(1)); p != (Placement{VerdictRefuse, RefuseNonMemberFull}) {
+		t.Fatalf("person beyond the limit: %v/%v", p.Verdict, p.Reason)
+	}
+	a.Connected(ks[0], at(1))
+	if got := a.Overdue(at(41)); len(got) != 1 || got[0] != ks[0] {
+		t.Errorf("a non-member person is bound by the non-member lifetime: %v", got)
+	}
+}
+
+func TestANonMemberPersonTakesAwayWhatWasKnown(t *testing.T) {
+	a := newAccounting(t)
+	k := key(t, 1, "a")
+	admit(t, a, k, at(0), AdmitCounted)
+	a.Completed(k, StateAuthorizedPerson, at(1))
+	k2 := ConnKey{k.Peer, "b"}
+	admit(t, a, k2, at(2), AdmitKnownMember)
+	a.Completed(k2, StateNonMemberPerson, at(3)) // the person was removed from the list
+	if a.Known(k.Peer) {
+		t.Error("a person decided as a non-member is still known")
+	}
+}
+
 func TestANonMemberDecisionTakesAwayWhatWasKnown(t *testing.T) {
 	a := newAccounting(t)
 	member := peerKey(t, 50)
 	a.SetHeld([]ident.PublicKey{member}) // from a certificate the node holds
 	k := ConnKey{member, "a"}
 	admit(t, a, k, at(0), AdmitKnownMember)
-	a.Completed(k, StateNonMember, at(1)) // its trust was revoked meanwhile
+	a.Completed(k, StateNonMemberNode, at(1)) // its trust was revoked meanwhile
 	if a.Known(member) {
 		t.Error("a peer decided as a non-member is still known as a member")
 	}
@@ -275,7 +313,7 @@ func TestCompletedWithoutAnEntryOnlyLearns(t *testing.T) {
 	if !a.Known(k.Peer) {
 		t.Error("an untracked member is not learned")
 	}
-	if p := a.Completed(k, StateNonMember, at(0)); p != (Placement{VerdictAllow, PlaceUntracked}) {
+	if p := a.Completed(k, StateNonMemberNode, at(0)); p != (Placement{VerdictAllow, PlaceUntracked}) {
 		t.Fatalf("non-member: %v/%v", p.Verdict, p.Reason)
 	}
 	wantCounts(t, a, 0, 0, 0)
@@ -430,7 +468,7 @@ func TestOverdueNonMemberAfterItsLifetime(t *testing.T) {
 	k := key(t, 1, "a")
 	admit(t, a, k, at(0), AdmitCounted)
 	a.Connected(k, at(0))
-	a.Completed(k, StateNonMember, at(2))
+	a.Completed(k, StateNonMemberNode, at(2))
 	if got := a.Overdue(at(39.999)); len(got) != 0 {
 		t.Fatalf("a non-member is overdue before its lifetime, counted from the connection: %v", got)
 	}

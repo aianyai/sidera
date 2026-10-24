@@ -19,6 +19,12 @@ const (
 	// is open to authorized persons only; what each request may do is the
 	// administration rules' decision, not this package's.
 	ProtocolManagement ProtocolID = "/sidera/manage/1.0.0"
+	// ProtocolReachabilityQuery carries a person's request for a node's
+	// reachability record, made with an administrator's reachability proof. It
+	// is open to persons whose device certificate was accepted, whether or not
+	// they are on the local list, and to no node. The query handler checks the
+	// proof; this package does not.
+	ProtocolReachabilityQuery ProtocolID = "/sidera/reachability-query/1.0.0"
 )
 
 // The libp2p protocols that stay open in every state. The library registers
@@ -45,9 +51,10 @@ const (
 // Class says how a protocol is treated. Only the classes with a rule of their
 // own are named; every other protocol, which means every protocol Sidera defines
 // for its cluster (messages, control signals, trust and revocation
-// synchronization, reachability) and anything unknown, is ClassApplication,
-// which only members may use. A new cluster protocol therefore needs no entry
-// here to be safe, and a protocol that must be open to someone else needs one.
+// synchronization, the reachability records members exchange) and anything
+// unknown, is ClassApplication, which only members may use. A new cluster
+// protocol therefore needs no entry here to be safe, and a protocol that must be
+// open to someone else needs one.
 type Class uint8
 
 const (
@@ -64,6 +71,8 @@ const (
 	ClassPairing
 	// ClassManagement: the authorized person's management requests.
 	ClassManagement
+	// ClassReachabilityQuery: a person's query for a node's reachability record.
+	ClassReachabilityQuery
 	// ClassApplication: everything else; members only.
 	ClassApplication
 )
@@ -80,6 +89,8 @@ func (c Class) String() string {
 		return "pairing"
 	case ClassManagement:
 		return "management"
+	case ClassReachabilityQuery:
+		return "reachability-query"
 	case ClassApplication:
 		return "application"
 	}
@@ -102,6 +113,8 @@ func ClassOf(id ProtocolID) Class {
 		return ClassPairing
 	case ProtocolManagement:
 		return ClassManagement
+	case ProtocolReachabilityQuery:
+		return ClassReachabilityQuery
 	}
 	return ClassApplication
 }

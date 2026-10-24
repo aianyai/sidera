@@ -12,10 +12,15 @@ const (
 	// connection. Also the state of a connection whose exchange was refused; the
 	// network layer closes such a connection.
 	StateUnauthenticated
-	// StateNonMember: the exchange completed with a valid certificate, but the
-	// peer is not a member of the local cluster and not an authorized person. It
-	// may only ask to establish trust.
-	StateNonMember
+	// StateNonMemberNode: the exchange completed with a valid network-key
+	// certificate, but the node is not a member of the local cluster. It may
+	// only ask to establish trust.
+	StateNonMemberNode
+	// StateNonMemberPerson: the exchange completed with a valid, checked device
+	// certificate, but the person has no standing on the local authorized-persons
+	// list. It may only query a node's reachability record, and the query handler
+	// decides on the proof the person presents.
+	StateNonMemberPerson
 	// StateMember: the peer is a node the local node trusts directly or by
 	// inheritance, or whose trust is suspended (see Decide).
 	StateMember
@@ -28,8 +33,10 @@ func (s State) String() string {
 	switch s {
 	case StateUnauthenticated:
 		return "unauthenticated"
-	case StateNonMember:
-		return "non-member"
+	case StateNonMemberNode:
+		return "non-member-node"
+	case StateNonMemberPerson:
+		return "non-member-person"
 	case StateMember:
 		return "member"
 	case StateAuthorizedPerson:
@@ -38,7 +45,7 @@ func (s State) String() string {
 	return "unset"
 }
 
-// Valid reports whether s is one of the four states.
+// Valid reports whether s is one of the five states.
 func (s State) Valid() bool { return s >= StateUnauthenticated && s <= StateAuthorizedPerson }
 
 // Verdict is the allow-or-refuse half of a decision; the reason is a typed value
@@ -63,3 +70,7 @@ func (v Verdict) String() string {
 	}
 	return "unset"
 }
+
+// NonMember reports whether s is one of the two non-member states, the states
+// that share the non-member limits of the accounting.
+func (s State) NonMember() bool { return s == StateNonMemberNode || s == StateNonMemberPerson }

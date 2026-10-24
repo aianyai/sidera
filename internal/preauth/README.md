@@ -12,13 +12,13 @@ timers, and applies the answers.
 
 | Name                                                    | Purpose                                                                                                         |
 | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `ProtocolCertExchange`, `ProtocolPairing`, `ProtocolManagement` | The Sidera protocol identifiers whose handling differs by state. Defined here and nowhere else.         |
+| `ProtocolCertExchange`, `ProtocolPairing`, `ProtocolManagement`, `ProtocolReachabilityQuery` | The Sidera protocol identifiers whose handling differs by state. Defined here and nowhere else. |
 | `BuiltinIdentify`, `BuiltinIdentifyPush`, `BuiltinPing`, `BuiltinCircuitStop`, `BuiltinCircuitHop`, `BuiltinDCUtR` | The libp2p protocols that stay open in every state, as names. |
-| `ClassOf(protocol)`                                     | The class of a protocol: built-in, relay, exchange, pairing, management, or application (members only).         |
-| `State`                                                 | `StateUnauthenticated`, `StateNonMember`, `StateMember`, `StateAuthorizedPerson`; the zero value is unset.     |
+| `ClassOf(protocol)`                                     | The class of a protocol: built-in, relay, exchange, pairing, management, reachability query, or application (members only). |
+| `State`                                                 | `StateUnauthenticated`, `StateNonMemberNode`, `StateNonMemberPerson`, `StateMember`, `StateAuthorizedPerson`; the zero value is unset. |
 | `Exchange`, `NewNodeExchange`, `NewPersonExchange`, `Encode`, `DecodeExchange` | The certificate exchange message: kind plus the certificate record, canonical CBOR, at most `MaxMessageSize` bytes. Not a signed record. |
 | `ExchangeDeadline`                                      | The 5 seconds a connection has to complete the exchange.                                                        |
-| `Decide(Facts, peerKey, Exchange)`                      | From a received exchange and the local facts to a `Decision{State, Reason, ...}`: unauthenticated (refused), non-member, member or authorized person. |
+| `Decide(Facts, peerKey, Exchange)`                      | From a received exchange and the local facts to a `Decision{State, Reason, ...}`: unauthenticated (refused), non-member node, non-member person, member or authorized person. |
 | `Params`, `Params.Validate`, `ParamsError`                | The numbers of the accounting model, none decided here; the check that `NonMemberLifetime >= ExchangeDeadline + PairingOnlineTimeout`. |
 | `Accounting`, `NewAccounting`                           | The connection-accounting model as pure state transitions: `Secured`, `Connected`, `Completed`, `Disconnected`, `Sweep`, `Overdue`, `SetHeld`, `Known`, `Counts`. |
 | `HeldMembers(Facts, certificates)`                      | The network keys of held certificates that belong to members; what `SetHeld` is given. |
@@ -36,14 +36,22 @@ timers, and applies the answers.
   circuit stop, DCUtR), the relay stream itself, and the certificate exchange.
   Peers need them before any certificate exists, and refusing them would stop
   two nodes behind NATs from ever reaching each other.
-- **A stranger that completed the exchange may only pair.** A non-member may use
-  the pairing protocol and a relay circuit request, nothing else. A member may
-  also pair.
+- **A node that is not a member may only pair.** A non-member node may use the
+  pairing protocol and a relay circuit request, nothing else. A member may also
+  pair.
+- **A person with a valid certificate but no standing may only query
+  reachability.** A non-member person (a valid, checked device certificate, not
+  on this node's list) may use the reachability-query protocol and a relay
+  circuit request, nothing else; an authorized person may also query. The query
+  is how a person holding an administrator's reachability proof asks any member
+  for a node's reachability record, so it cannot depend on the list. This
+  package only opens the stream: the query handler checks the proof with
+  `admin.CheckReachabilityProof`, and no node may use the protocol.
 - **Relay operations are decided one by one.** A reservation needs a member, so
   it can only follow a completed exchange; a circuit request needs a completed
   exchange. The relay's allow list and rate limit decide beyond that.
 - **Management is for authorized persons.** Pairing is between nodes, so a
-  person's device cannot use it.
+  person's device cannot use it, listed or not.
 - **Unjudgeable input is refused.** An unset state, an empty protocol identifier
   and a relay operation on a protocol that is not the relay protocol are refused
   with `RefusedInvalid`.
@@ -77,14 +85,14 @@ timers, and applies the answers.
     expired or not yet valid, or it names a network key other than the one the
     secure handshake authenticated. Otherwise `trust.Evaluate` decides: allowed
     directly or by inheritance and **suspended** are members, denied is a
-    non-member. A suspended node stays a member because its trust is waiting for
-    a voucher, not gone; the policy layer gets the suspended outcome in
+    non-member node. A suspended node stays a member because its trust is
+    waiting for a voucher, not gone; the policy layer gets the suspended outcome in
     `Decision.Trust` and holds what it must.
   - A person exchange is refused when the device certificate does not verify,
     names a device key other than the authenticated one, is revoked (the device
     key, or the person's root key), expired or not yet valid. Otherwise
     `admin.EffectiveLevel` decides: a level is an authorized person, anything
-    else (not listed, entry expired) a non-member.
+    else (not listed, entry expired) a non-member person.
   - **Failure closed.** An unset time, an unset peer key, an unset kind and a
     `nil` revocation set are refused. A `nil` set is not "nothing revoked" here,
     as it is in `revocation`: use `revocation.NewSet()` for a node that has
@@ -113,10 +121,10 @@ timers, and applies the answers.
     exchange that decides non-member removes the peer from both. The first
     connection of an authorized person's new device is a stranger's.
   - `Completed` (the exchange was decided): a member or authorized person is
-    released from the accounting; a non-member takes one of
-    `NonMemberConcurrency` places or, when none is free, is refused and dropped
+    released from the accounting; a non-member (node or person alike) takes one
+    of `NonMemberConcurrency` places or, when none is free, is refused and dropped
     (the caller closes it). The decision may change later on the same connection
-    (pairing made a non-member a member): call `Completed` again.
+    (pairing made a non-member node a member): call `Completed` again.
   - `Disconnected` releases whatever the connection held.
   - `Sweep` forgets entries not seen connected within `SweepInterval`: a
     connection can be rejected after the handshake without any other callback.

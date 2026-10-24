@@ -38,7 +38,8 @@ const (
 	ReasonAuthorizedPerson
 
 	// Reasons of a non-member: the certificate is valid and the peer is neither a
-	// member nor an authorized person.
+	// member nor an authorized person. A node is a non-member node, a person a
+	// non-member person.
 
 	// ReasonNotTrusted: a node whose certificate is valid and whom trust.Evaluate
 	// denied (never paired, revoked locally, retired as an intermediate, and so
@@ -161,14 +162,15 @@ type Decision struct {
 	Reason Reason
 
 	// Node is the node whose certificate was accepted, for State member or
-	// non-member after a node exchange. Zero otherwise.
+	// non-member node after a node exchange. Zero otherwise.
 	Node ident.NodeID
 	// Person is the person whose device certificate was accepted, for State
-	// authorized person or non-member after a person exchange. Zero otherwise.
+	// authorized person or non-member person after a person exchange. Zero
+	// otherwise.
 	Person ident.PersonID
 
 	// Trust is trust.Evaluate's verdict for the node, set when it was asked
-	// (member and non-member after a node exchange). Its Outcome is what the
+	// (member and non-member node after a node exchange). Its Outcome is what the
 	// policy layer takes as the sender's trust.
 	Trust trust.Verdict
 	// Standing is admin.EffectiveLevel's answer, set when it was asked (a person
@@ -192,7 +194,8 @@ type Decision struct {
 }
 
 // Completed reports whether the exchange was accepted: the connection is a
-// non-member, a member or an authorized person. Otherwise it was refused.
+// non-member node or person, a member or an authorized person. Otherwise it was
+// refused.
 func (d Decision) Completed() bool { return d.State.Valid() && d.State != StateUnauthenticated }
 
 // Decide turns a received exchange message into a connection state. peer is the
@@ -205,8 +208,8 @@ func (d Decision) Completed() bool { return d.State.Valid() && d.State != StateU
 //     older than the highest seen or conflicts with it, the node is retired, the
 //     certificate is revoked, expired or not yet valid, or it names a network key
 //     other than peer.
-//   - non-member: the certificate is valid and names peer, and trust.Evaluate
-//     denies the node.
+//   - non-member node: the certificate is valid and names peer, and
+//     trust.Evaluate denies the node.
 //   - member: trust.Evaluate allows the node directly or by inheritance, or
 //     suspends it. A suspended node is a member because its trust is not gone,
 //     only waiting for a voucher; the policy layer is handed the suspended
@@ -218,8 +221,8 @@ func (d Decision) Completed() bool { return d.State.Valid() && d.State != StateU
 //   - refused: the device certificate does not verify, names a device key other
 //     than peer, is revoked (the key or the person's root key), expired or not
 //     yet valid.
-//   - non-member: the certificate is valid and the person has no standing on the
-//     list (not listed, entry expired).
+//   - non-member person: the certificate is valid and the person has no standing
+//     on the list (not listed, entry expired).
 //   - authorized person: admin.EffectiveLevel gives a level.
 //
 // Decide fails closed: whatever it cannot judge is a refusal, and a node or
@@ -286,7 +289,7 @@ func decideNode(f Facts, peer ident.PublicKey, rec record.Record) Decision {
 
 // nodeState maps trust's outcome for a node with a valid certificate to a state.
 // Allowed directly, allowed by inheritance and suspended are members; denied,
-// and any outcome this package does not know, is a non-member and never a
+// and any outcome this package does not know, is a non-member node and never a
 // member.
 func nodeState(o trust.Outcome) (State, Reason) {
 	switch o {
@@ -297,7 +300,7 @@ func nodeState(o trust.Outcome) (State, Reason) {
 	case trust.Suspended:
 		return StateMember, ReasonMemberSuspended
 	}
-	return StateNonMember, ReasonNotTrusted
+	return StateNonMemberNode, ReasonNotTrusted
 }
 
 // checkSerial applies the rule "only the highest serial seen counts" to a
@@ -391,6 +394,6 @@ func decidePerson(f Facts, peer ident.PublicKey, rec record.Record) Decision {
 	// Not on the list, entry expired, cap too low, or a reason this package does
 	// not know: a valid certificate without a standing, never an authorized
 	// person.
-	d.State, d.Reason = StateNonMember, ReasonPersonNotAuthorized
+	d.State, d.Reason = StateNonMemberPerson, ReasonPersonNotAuthorized
 	return d
 }

@@ -171,16 +171,16 @@ func TestDecideNode(t *testing.T) {
 			rec, _ := w.cert(1)
 			return w.facts(), w.peer.Public(), NewNodeExchange(rec)
 		}, want{StateMember, ReasonMemberSuspended, trust.Suspended, trust.ReasonVoucherMissing}},
-		{"a stranger with a valid certificate is a non-member", func(w *world) (Facts, ident.PublicKey, Exchange) {
+		{"a stranger with a valid certificate is a non-member node", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			rec, _ := w.cert(1)
 			return w.facts(), w.peer.Public(), NewNodeExchange(rec)
-		}, want{StateNonMember, ReasonNotTrusted, trust.Denied, trust.ReasonNoPath}},
-		{"a node revoked locally is a non-member, whatever its credentials say", func(w *world) (Facts, ident.PublicKey, Exchange) {
+		}, want{StateNonMemberNode, ReasonNotTrusted, trust.Denied, trust.ReasonNoPath}},
+		{"a node revoked locally is a non-member node, whatever its credentials say", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			w.trusts()
 			w.view.LocallyRevoked[w.remoteNode()] = struct{}{}
 			rec, _ := w.cert(1)
 			return w.facts(), w.peer.Public(), NewNodeExchange(rec)
-		}, want{StateNonMember, ReasonNotTrusted, trust.Denied, trust.ReasonLocallyRevoked}},
+		}, want{StateNonMemberNode, ReasonNotTrusted, trust.Denied, trust.ReasonLocallyRevoked}},
 		{"a trusted node presenting another network key is refused", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			w.trusts()
 			rec, _ := w.cert(1)
@@ -383,15 +383,15 @@ func TestDecidePerson(t *testing.T) {
 			rec, _ := w.deviceCert(admin.LevelFullControl, epoch, endTime)
 			return w.facts(), w.device.Public(), NewPersonExchange(rec)
 		}, StateAuthorizedPerson, ReasonAuthorizedPerson, admin.LevelView},
-		{"a person who is not listed is a non-member", func(w *world) (Facts, ident.PublicKey, Exchange) {
+		{"a person who is not listed is a non-member person", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			rec, _ := w.deviceCert(admin.LevelManage, epoch, endTime)
 			return w.facts(), w.device.Public(), NewPersonExchange(rec)
-		}, StateNonMember, ReasonPersonNotAuthorized, admin.LevelNone},
-		{"a person whose list entry expired is a non-member", func(w *world) (Facts, ident.PublicKey, Exchange) {
+		}, StateNonMemberPerson, ReasonPersonNotAuthorized, admin.LevelNone},
+		{"a person whose list entry expired is a non-member person", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			w.listPerson(admin.LevelManage, epoch.Add(30*time.Minute))
 			rec, _ := w.deviceCert(admin.LevelManage, epoch, endTime)
 			return w.facts(), w.device.Public(), NewPersonExchange(rec)
-		}, StateNonMember, ReasonPersonNotAuthorized, admin.LevelNone},
+		}, StateNonMemberPerson, ReasonPersonNotAuthorized, admin.LevelNone},
 		{"a listed person presenting another key than the device key is refused", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			w.listPerson(admin.LevelManage, time.Time{})
 			rec, _ := w.deviceCert(admin.LevelManage, epoch, endTime)
@@ -456,7 +456,8 @@ func TestDecidePerson(t *testing.T) {
 }
 
 // A person is never a member and a node is never an authorized person, whatever
-// the lists say: the state follows the kind of certificate.
+// the lists say: the state follows the kind of certificate, also for those the
+// local node does not know.
 func TestKindDecidesWhichStatesArePossible(t *testing.T) {
 	w := newWorld(t).trusts().listPerson(admin.LevelFullControl, time.Time{})
 	nodeRec, _ := w.cert(1)
@@ -466,6 +467,16 @@ func TestKindDecidesWhichStatesArePossible(t *testing.T) {
 	}
 	if d := Decide(w.facts(), w.device.Public(), NewPersonExchange(personRec)); d.State != StateAuthorizedPerson {
 		t.Errorf("person: %v", d.State)
+	}
+
+	strangers := newWorld(t)
+	nodeRec, _ = strangers.cert(1)
+	personRec, _ = strangers.deviceCert(admin.LevelFullControl, epoch, endTime)
+	if d := Decide(strangers.facts(), strangers.peer.Public(), NewNodeExchange(nodeRec)); d.State != StateNonMemberNode {
+		t.Errorf("unknown node: %v", d.State)
+	}
+	if d := Decide(strangers.facts(), strangers.device.Public(), NewPersonExchange(personRec)); d.State != StateNonMemberPerson {
+		t.Errorf("unlisted person: %v", d.State)
 	}
 }
 

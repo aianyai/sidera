@@ -10,13 +10,14 @@ the network layer, which applies these answers.
 
 ### Connection states
 
-Each connection is in one of four states, and the state belongs to the
+Each connection is in one of five states, and the state belongs to the
 connection, not to the peer:
 
 | State | Meaning |
 | --- | --- |
 | unauthenticated | The secure handshake is done, so the peer's network key is known. No certificate exchange has been accepted on this connection. |
-| non-member | The exchange completed with a valid certificate, but the peer is not a member and not an authorized person. It may only ask to establish trust. |
+| non-member node | The exchange completed with a valid network-key certificate, but the node is not a member. It may only ask to establish trust. |
+| non-member person | The exchange completed with a valid, checked device certificate, but the person has no standing on the local list. It may only query a node's reachability record. |
 | member | The peer is a node the local node trusts directly or by inheritance, or whose trust is suspended. |
 | authorized person | The peer is a person's device with a valid device certificate and a standing on the local authorized-persons list. |
 
@@ -25,19 +26,21 @@ connection, not to the peer:
 One function, `Allowed(state, use)`, answers it. `use` is a protocol or, on the
 relay protocol, one relay operation.
 
-| Use | unauthenticated | non-member | member | authorized person |
-| --- | :---: | :---: | :---: | :---: |
-| libp2p built-ins: identify, identify push, ping, circuit stop, DCUtR | yes | yes | yes | yes |
-| relay stream (hop) | yes | yes | yes | yes |
-| relay reservation | no | no | yes | no |
-| relay circuit request | no | yes | yes | yes |
-| certificate exchange | yes | yes | yes | yes |
-| pairing | no | yes | yes | no |
-| management | no | no | no | yes |
-| every other protocol | no | no | yes | no |
+| Use | unauthenticated | non-member node | non-member person | member | authorized person |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| libp2p built-ins: identify, identify push, ping, circuit stop, DCUtR | yes | yes | yes | yes | yes |
+| relay stream (hop) | yes | yes | yes | yes | yes |
+| relay reservation | no | no | no | yes | no |
+| relay circuit request | no | yes | yes | yes | yes |
+| certificate exchange | yes | yes | yes | yes | yes |
+| pairing | no | yes | no | yes | no |
+| reachability query | no | no | yes | no | yes |
+| management | no | no | no | no | yes |
+| every other protocol | no | no | no | yes | no |
 
 The protocol identifiers are defined once, in `internal/preauth`:
-`/sidera/cert-exchange/1.0.0`, `/sidera/pairing/1.0.0`, `/sidera/manage/1.0.0`.
+`/sidera/cert-exchange/1.0.0`, `/sidera/pairing/1.0.0`, `/sidera/manage/1.0.0`,
+`/sidera/reachability-query/1.0.0`.
 The built-ins are listed by name only (`/ipfs/id/1.0.0`, `/ipfs/id/push/1.0.0`,
 `/ipfs/ping/1.0.0`, `/libp2p/circuit/relay/0.2.0/stop`,
 `/libp2p/circuit/relay/0.2.0/hop`, `/libp2p/dcutr`); the library registers them
@@ -113,7 +116,7 @@ For a node:
    expired one or one that has not begun is refused. A node whose identity key
    has a self-revocation is refused as retired.
 4. `trust.Evaluate` decides: allowed directly or by inheritance is a member,
-   **suspended is a member**, denied is a non-member (pairing only).
+   **suspended is a member**, denied is a non-member node (pairing only).
 
 For a person:
 
@@ -121,7 +124,8 @@ For a person:
    device key it names. Otherwise refused.
 2. `admin.EffectiveLevel` with the local list decides. A revoked device key or
    root key, an expired certificate or one that has not begun is refused. A
-   person with no standing on the list is a non-member. A level makes an
+   person with no standing on the list is a non-member person (reachability
+   query only). A level makes an
    authorized person, at the lower of the list level and the certificate's cap.
 
 A refused exchange leaves the state unauthenticated; the connection is closed.
@@ -145,7 +149,8 @@ Three limits keep strangers from crowding out the cluster:
   device, and a node with a new network key, are strangers until their first
   exchange completes.
 - **The non-member limits.** A connection whose exchange completed as a
-  non-member counts toward `NonMemberConcurrency`; when none is free the
+  non-member, node or person alike, counts toward `NonMemberConcurrency`; when
+  none is free the
   connection is closed. A non-member lives at most `NonMemberLifetime`, counted
   from the connection, so the limit covers the exchange and the online part of
   pairing and has to be at least `ExchangeDeadline` plus the pairing online
@@ -211,6 +216,17 @@ cache of who is known: the accounting keeps its own known set.
   after the exchange, because a stranger who wants to pair with a node behind a
   relay has no other way to reach it; who gets through is the relay's allow list
   and rate limit.
+- **A person without a standing is not a node without trust.** The two
+  non-member states differ in what they may ask for. A node that is not a member
+  may ask to establish trust, which is a request between nodes. A person has no
+  trust to establish: a person with a valid, checked device certificate may ask
+  any member for a node's reachability record by presenting an administrator's
+  reachability proof, and that proof, not the person's standing on this node's
+  list, is what entitles the person to the answer. The query handler checks the
+  proof with `admin.CheckReachabilityProof`; the access table only opens the
+  stream, to persons and to no node, so a node cannot probe reachability records
+  and a person cannot start pairing. Both states are strangers for the
+  accounting and share its limits.
 - **The management protocol is its own class.** An authorized person is not a
   node and is not a member, and members are not people; neither may use the
   other's protocol. What a management request may do is the administration
@@ -250,11 +266,12 @@ cache of who is known: the accounting keeps its own known set.
   issue that serial. An expired or revoked certificate with a higher serial still
   makes every lower serial an old key, which is the point of keeping the highest
   seen apart from the accepted certificate.
-- **A person without a standing is a non-member, not refused.** The certificate
-  is valid; the person is merely not listed here. Refusing would force the
-  connection down for a fact that is not wrong with the peer, and the state
-  leaves room for protocols a valid certificate alone may use. Such a connection
-  is bounded by the non-member lifetime and concurrency limits like any other.
+- **A person without a standing is a non-member person, not refused.** The
+  certificate is valid; the person is merely not listed here. Refusing would
+  force the connection down for a fact that is not wrong with the peer, and the
+  reachability query is exactly a use a valid certificate alone opens. Such a
+  connection is bounded by the non-member lifetime and concurrency limits like
+  any other.
 - **A missing revocation set is a refusal.** In `revocation` a `nil` set revokes
   nothing, which suits callers that load it first. A pre-authentication decision
   made without having looked at revocations would let a revoked key in, so it
@@ -288,8 +305,8 @@ cache of who is known: the accounting keeps its own known set.
 | --- | --- |
 | States, verdicts | `internal/preauth/state.go` |
 | Protocol identifiers and classes | `internal/preauth/protocol.go` |
-| The access table | `internal/preauth/access.go`; tests `TestAllowedMatrix` (one row per rule, every cell written out), `TestBusinessProtocolBeforeTheExchangeIsRefused`, `TestStrangerAfterTheExchangeMayOnlyPair`, `TestRelayReservationBeforeTheExchangeIsRefused`, `TestAllowedRefusesAnInvalidState`, `TestProtocolIdentifiers` |
+| The access table | `internal/preauth/access.go`; tests `TestAllowedMatrix` (one row per rule, every cell written out), `TestBusinessProtocolBeforeTheExchangeIsRefused`, `TestNonMemberNodeMayOnlyPair`, `TestNonMemberPersonMayOnlyQueryReachability`, `TestRelayReservationBeforeTheExchangeIsRefused`, `TestAllowedRefusesAnInvalidState`, `TestProtocolIdentifiers` |
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
 | The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestHeldMembers`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
 | Parameters | `internal/preauth/params.go`; test `TestParamsValidate` |
-| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` compares every answer with a second implementation under 40,000 random events and asserts how often each path was taken |
+| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestNonMemberPersonsAndNodesShareTheNonMemberLimits`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` compares every answer with a second implementation under 40,000 random events and asserts how often each path was taken |

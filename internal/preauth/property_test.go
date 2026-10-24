@@ -219,7 +219,7 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 
 	cover := map[string]int{}
 	now := t0
-	states := []State{StateMember, StateAuthorizedPerson, StateNonMember, StateNonMember, StateNonMember, StateUnauthenticated}
+	states := []State{StateMember, StateAuthorizedPerson, StateNonMemberNode, StateNonMemberNode, StateNonMemberPerson, StateUnauthenticated}
 	for step := 0; step < steps; step++ {
 		now = now.Add(time.Duration(rng.Intn(3)) * time.Second) // 0, 1 or 2 seconds
 		peer, addr := rng.Intn(peers), rng.Intn(addrs)
@@ -261,6 +261,9 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 				t.Fatalf("step %d: Completed(%v) = %v/%v, want %v/%v", step, s, got.Verdict, got.Reason, want.Verdict, want.Reason)
 			}
 			cover["completed:"+want.Reason.String()]++
+			if s == StateNonMemberPerson && want.Reason == PlaceNonMember {
+				cover["non-member-person-placed"]++
+			}
 		case ev < 76:
 			ref.disconnect(peer, addr)
 			a.Disconnected(k)
@@ -335,6 +338,7 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 		"completed:" + RefuseNonMemberFull.String():   50,
 		"completed:" + PlaceAlreadyNonMember.String(): 20,
 		"completed:" + PlaceUntracked.String():        200,
+		"non-member-person-placed":                    50,
 		"completed:" + RefuseNotCompleted.String():    200,
 		"sweep-calls-with-removals":                   200,
 		"sweep-removed-entries":                       200,

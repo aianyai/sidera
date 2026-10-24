@@ -56,6 +56,9 @@ const (
 	AccessApplication
 	// AccessManagement: an authorized person uses the management protocol.
 	AccessManagement
+	// AccessReachabilityQuery: a person whose device certificate was accepted,
+	// listed or not, asks for a node's reachability record.
+	AccessReachabilityQuery
 	// AccessRelayReservation: a member reserves a slot on the local relay.
 	AccessRelayReservation
 	// AccessRelayConnect: a peer whose exchange completed asks for a circuit;
@@ -75,11 +78,11 @@ const (
 	// RefusedMemberOnly: a cluster protocol or a relay reservation, and the peer
 	// is not a member.
 	RefusedMemberOnly
-	// RefusedPersonOnly: the management protocol, and the peer is not an
-	// authorized person.
+	// RefusedPersonOnly: the management protocol and the peer is not an authorized
+	// person, or the reachability query and the peer is not a person.
 	RefusedPersonOnly
 	// RefusedNodeOnly: the pairing protocol is between nodes; a person's device
-	// is not one.
+	// is not one, listed or not.
 	RefusedNodeOnly
 )
 
@@ -95,6 +98,8 @@ func (r AccessReason) String() string {
 		return "application"
 	case AccessManagement:
 		return "management"
+	case AccessReachabilityQuery:
+		return "reachability-query"
 	case AccessRelayReservation:
 		return "relay-reservation"
 	case AccessRelayConnect:
@@ -130,15 +135,23 @@ func refuse(r AccessReason) Access { return Access{VerdictRefuse, r} }
 //
 // The table, with "x" for allowed:
 //
-//	                     unauth.  non-member  member  person
-//	built-in libp2p         x         x          x       x
-//	relay stream (hop)      x         x          x       x
-//	relay reserve                                x
-//	relay connect                     x          x       x
-//	certificate exchange    x         x          x       x
-//	pairing                           x          x
-//	management                                           x
-//	any other protocol                           x
+//	                  unauth.  non-member  non-member  member  authorized
+//	                           node        person              person
+//	built-in libp2p      x        x           x          x       x
+//	relay stream (hop)   x        x           x          x       x
+//	relay reserve                                        x
+//	relay connect                 x           x          x       x
+//	certificate exchange x        x           x          x       x
+//	pairing                       x                      x
+//	reachability query                        x                  x
+//	management                                                   x
+//	any other protocol                                   x
+//
+// The reachability query is open to every person whose device certificate was
+// accepted, because the person's right to the answer is not their standing on
+// this node's list but the administrator's reachability proof they present,
+// which the query handler checks (admin.CheckReachabilityProof); no node may
+// use it.
 //
 // An input that cannot be judged (an unset state, an empty protocol, a relay
 // operation on another protocol) is refused.
@@ -156,12 +169,20 @@ func Allowed(s State, u Use) Access {
 		return allowedRelay(s, u.Relay)
 	case ClassPairing:
 		switch s {
-		case StateNonMember, StateMember:
+		case StateNonMemberNode, StateMember:
 			return allow(AccessPairing)
-		case StateAuthorizedPerson:
+		case StateNonMemberPerson, StateAuthorizedPerson:
 			return refuse(RefusedNodeOnly)
 		}
 		return refuse(RefusedExchangeRequired)
+	case ClassReachabilityQuery:
+		switch s {
+		case StateNonMemberPerson, StateAuthorizedPerson:
+			return allow(AccessReachabilityQuery)
+		case StateUnauthenticated:
+			return refuse(RefusedExchangeRequired)
+		}
+		return refuse(RefusedPersonOnly)
 	case ClassManagement:
 		switch s {
 		case StateAuthorizedPerson:

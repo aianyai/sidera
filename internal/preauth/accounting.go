@@ -101,8 +101,9 @@ const (
 	// PlaceReleased: the connection became a member or an authorized person; it
 	// no longer counts and the peer is known as a member from now on.
 	PlaceReleased
-	// PlaceNonMember: the connection became a non-member and holds one of the
-	// NonMemberConcurrency places until it ends or its lifetime runs out.
+	// PlaceNonMember: the connection became a non-member (node or person) and
+	// holds one of the NonMemberConcurrency places until it ends or its lifetime
+	// runs out.
 	PlaceNonMember
 	// PlaceAlreadyNonMember: the connection already is a non-member; nothing
 	// changes.
@@ -279,7 +280,9 @@ func (a *Accounting) Connected(key ConnKey, now time.Time) bool {
 // accounting and its peer is learned as known; a non-member takes a place among
 // NonMemberConcurrency, or is refused when none is free; a non-member also stops
 // being known as a member, by either source, until the next SetHeld lists it
-// again.
+// again. A non-member node and a non-member person are the same to the
+// accounting: the limits are about how many strangers may hold a connection,
+// whatever they present.
 func (a *Accounting) Completed(key ConnKey, s State, now time.Time) Placement {
 	if !key.valid() || now.IsZero() || !s.Valid() {
 		return Placement{VerdictRefuse, RefusePlacementInput}
@@ -297,7 +300,7 @@ func (a *Accounting) Completed(key ConnKey, s State, now time.Time) Placement {
 		a.remove(key, e)
 		return Placement{VerdictAllow, PlaceReleased}
 	}
-	// StateNonMember.
+	// A non-member node or person.
 	delete(a.learned, key.Peer)
 	delete(a.held, key.Peer)
 	switch {
