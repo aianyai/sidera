@@ -337,6 +337,7 @@ var controlPaths = []string{
 	"reply committed again", "settled to delivery_unknown", "closed after report_by",
 	"forced closure is delivery_unknown", "hand-out refused", "ack refused", "prompt refused",
 	"source told delivery_unknown", "source told unknown corrected", "source delivered", "refused on a message record",
+	"block refused",
 }
 
 // TestPropertyControlSignalsAreNeverQueuedAndAlwaysEnd drives a control record
@@ -387,6 +388,11 @@ func runRandomControl(t *testing.T, seed int64, paths map[string]int) {
 	}
 	committed := false // a reply was committed while it could still count
 	told := map[Kind]int{}
+	// What the sender must have been told, by the rules in words: delivery_unknown
+	// only if it pulled while the target was delivery_unknown, and the correction
+	// only if it pulled delivered after having been told unknown. Nothing else:
+	// no rejection and no block, because a control record has neither.
+	modelToldUnknown, modelToldCorrected := false, false
 
 	// Some control signals are executed promptly, some never get their reply
 	// committed before the deadlines.
@@ -404,9 +410,10 @@ func runRandomControl(t *testing.T, seed int64, paths map[string]int) {
 		opForce
 		opPull
 		opMessageRecord
+		opBlock
 		opCount
 	)
-	weights := map[opKind]int{opCommit: commitWeight, opTick: 4, opHandout: 1, opAck: 1, opPrompt: 1, opForce: 1, opPull: 4, opMessageRecord: 1}
+	weights := map[opKind]int{opCommit: commitWeight, opTick: 4, opHandout: 1, opAck: 1, opPrompt: 1, opForce: 1, opPull: 4, opMessageRecord: 1, opBlock: 1}
 	var wheel []opKind
 	for o := opKind(0); o < opCount; o++ {
 		for i := 0; i < weights[o]; i++ {
@@ -516,16 +523,30 @@ func runRandomControl(t *testing.T, seed int64, paths map[string]int) {
 				fail("a message record took a committed reply: %v", err)
 			}
 			paths["refused on a message record"]++
+		case opBlock:
+			if _, _, err := tgt.Apply(now, Event{Type: EventBlocked, Cause: CauseAdapterOffline}); !errors.Is(err, ErrWrongSide) {
+				fail("block: %v", err)
+			}
+			paths["block refused"]++
 		case opPull:
 			if tgt.State == StateClosedUnconfirmed {
 				break
+			}
+			var wantKinds []Kind
+			switch {
+			case model == StateDeliveryUnknown && !modelToldUnknown:
+				wantKinds, modelToldUnknown = []Kind{KindDeliveryUnknown}, true
+			case model == StateDelivered && modelToldUnknown && !modelToldCorrected:
+				wantKinds, modelToldCorrected = []Kind{KindUnknownCorrected}, true
 			}
 			n, outs, err := src.ApplyStatusReport(now, tgt.StatusReport())
 			if err != nil {
 				fail("ApplyStatusReport(%+v) in %s: %v", tgt.StatusReport(), src.State, err)
 			}
 			src = n
+			var gotKinds []Kind
 			for _, o := range outs {
+				gotKinds = append(gotKinds, kindsOf(o.Feedback)...)
 				for _, fb := range o.Feedback {
 					told[fb.Kind]++
 					if told[fb.Kind] > 1 {
@@ -539,6 +560,9 @@ func runRandomControl(t *testing.T, seed int64, paths map[string]int) {
 					}
 				}
 			}
+			if !sameKinds(gotKinds, wantKinds) {
+				fail("pulled %s from a target in %s: feedback %v, want %v", tgt.StatusReport().State, model, gotKinds, wantKinds)
+			}
 			if src.State == StateDelivered {
 				paths["source delivered"]++
 				if tgt.State != StateDelivered {
@@ -548,6 +572,16 @@ func runRandomControl(t *testing.T, seed int64, paths map[string]int) {
 		}
 		advanceModel(now)
 		check(now)
+	}
+	wantTold := map[Kind]int{}
+	if modelToldUnknown {
+		wantTold[KindDeliveryUnknown] = 1
+	}
+	if modelToldCorrected {
+		wantTold[KindUnknownCorrected] = 1
+	}
+	if !reflect.DeepEqual(told, wantTold) {
+		fail("the sender was told %v, the model expects %v", told, wantTold)
 	}
 	now = end
 	advanceModel(now)
