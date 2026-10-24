@@ -91,6 +91,12 @@ type rig struct {
 // over base(mem), which is the Mem itself when base is nil.
 func newRig(t testing.TB, base func(*fsxtest.Mem) fsx.FS, decls ...*txn.Decl) *rig {
 	t.Helper()
+	return newRigUnrecovered(t, base, decls...)
+}
+
+// newRigUnrecovered is a rig whose Writer has not run Recover.
+func newRigUnrecovered(t testing.TB, base func(*fsxtest.Mem) fsx.FS, decls ...*txn.Decl) *rig {
+	t.Helper()
 	mem := fsxtest.NewMem()
 	mkdirs(t, mem, "a", "b")
 	var fsys fsx.FS = mem
