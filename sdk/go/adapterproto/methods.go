@@ -1,13 +1,17 @@
 package adapterproto
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/aianyai/sidera/sdk/go/peer"
+)
 
 // Method names. The names are verbs on nouns, "noun.verb"; "$/" marks a
 // protocol-level method that has no business meaning.
 const (
 	MethodInitialize            = "initialize"
 	MethodPing                  = "ping"
-	MethodCancelRequest         = "$/cancel_request"
+	MethodCancelRequest         = peer.MethodCancelRequest
 	MethodShutdown              = "shutdown"
 	MethodAdapterStart          = "adapter.start"
 	MethodAdapterProbe          = "adapter.probe"

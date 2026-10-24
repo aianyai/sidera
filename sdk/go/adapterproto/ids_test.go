@@ -1,7 +1,6 @@
 package adapterproto_test
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -70,67 +69,6 @@ func TestTokenCanonicalLastCharacters(t *testing.T) {
 		if want := strings.ContainsRune(canonical, c); (err == nil) != want {
 			t.Errorf("last character %q: valid=%v, want %v", c, err == nil, want)
 		}
-	}
-}
-
-func TestRequestIDJSON(t *testing.T) {
-	tests := []struct {
-		in   string
-		want adapterproto.RequestID
-		ok   bool
-	}{
-		{`7`, adapterproto.NumberID(7), true},
-		{`0`, adapterproto.NumberID(0), true},
-		{`-0`, adapterproto.NumberID(0), true},
-		{`-12`, adapterproto.NumberID(-12), true},
-		{`9007199254740991`, adapterproto.NumberID(1<<53 - 1), true},
-		{`"probe-2"`, adapterproto.StringID("probe-2"), true},
-		{`"é\n"`, adapterproto.StringID("é\n"), true},
-		{`"a\"b"`, adapterproto.StringID(`a"b`), true},
-		{`1.5`, adapterproto.RequestID{}, false},
-		{`1e2`, adapterproto.RequestID{}, false},
-		{`1.0`, adapterproto.RequestID{}, false},
-		{`null`, adapterproto.RequestID{}, false},
-		{`true`, adapterproto.RequestID{}, false},
-		{`[]`, adapterproto.RequestID{}, false},
-		{`{}`, adapterproto.RequestID{}, false},
-		{`""`, adapterproto.RequestID{}, false},
-		{`9007199254740992`, adapterproto.RequestID{}, false},
-		{`99999999999999999999`, adapterproto.RequestID{}, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.in, func(t *testing.T) {
-			var got adapterproto.RequestID
-			err := json.Unmarshal([]byte(tc.in), &got)
-			if err == nil {
-				err = got.Validate()
-			}
-			if (err == nil) != tc.ok {
-				t.Fatalf("decode+validate = %v, want ok=%v", err, tc.ok)
-			}
-			if tc.ok {
-				if got != tc.want {
-					t.Fatalf("got %+v, want %+v", got, tc.want)
-				}
-				out, err := json.Marshal(got)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var back adapterproto.RequestID
-				if err := json.Unmarshal(out, &back); err != nil || back != got {
-					t.Fatalf("round trip: %s -> %+v, %v", out, back, err)
-				}
-			}
-		})
-	}
-	if _, err := json.Marshal(adapterproto.RequestID{}); err == nil {
-		t.Error("marshaling an unset id succeeded")
-	}
-	if id := adapterproto.NumberID(5); id.IsString() || id.Number() != 5 || id.String() != "5" {
-		t.Errorf("number id accessors: %+v", id)
-	}
-	if id := adapterproto.StringID("x"); !id.IsString() || id.String() != "x" {
-		t.Errorf("string id accessors: %+v", id)
 	}
 }
 

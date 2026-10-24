@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"strconv"
+
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // MaxTimestampMS bounds a millisecond timestamp: the largest integer every JSON
@@ -659,9 +661,6 @@ type Empty struct{}
 func (Empty) Validate() error { return nil }
 
 // CancelRequestParams asks the peer to stop working on a request it received.
-type CancelRequestParams struct {
-	RequestID RequestID `json:"request_id"`
-}
-
-// Validate checks the identifier.
-func (p CancelRequestParams) Validate() error { return at("request_id", p.RequestID.Validate()) }
+// The peer layer handles the notification itself and owns its params and the
+// request id rule; the type is listed here so the method table is complete.
+type CancelRequestParams = peer.CancelRequestParams

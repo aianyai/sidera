@@ -19,6 +19,7 @@ for what each message means and why the protocol is shaped this way.
 | `MethodInfo.DecodeParams`, `DecodeResult` | Strict decode and validate for a method |
 | `Decode(data, &msg)`, `Encode(msg)` | Strict decoding of any message type and validation before encoding |
 | `msg.Validate()` | The rules of one message, on every type |
+| `CancelRequestParams`, `MethodCancelRequest` | The params and name of `$/cancel_request`, which belong to the `peer` package together with the request id rule; listed here so the method table is complete |
 | `EnumTables()`, `Patterns()`, `ErrorCodes()` | The vocabularies the schema is compared with |
 | `ControlReply` and the `Control*` enums | The replies to the control signals, with their numeric codes |
 

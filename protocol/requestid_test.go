@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
@@ -54,7 +55,7 @@ var requestIDCases = []struct {
 
 // TestRequestIDRuleMatchesSchema: the schema and the Go rule for a request id
 // agree, at the id itself, in a request frame and in the params of
-// $/cancel_request, and the peer applies the rule to the frames it reads.
+// $/cancel_request, and the peer and the message types apply the one rule.
 func TestRequestIDRuleMatchesSchema(t *testing.T) {
 	s := schemas(t)
 	wire := newWire(t)
@@ -79,6 +80,10 @@ func TestRequestIDRuleMatchesSchema(t *testing.T) {
 			var id peer.RequestID
 			if err := json.Unmarshal([]byte(tc.id), &id); (err == nil) != tc.wire {
 				t.Errorf("peer.RequestID accepts the id: %v, want %v", err == nil, tc.wire)
+			}
+			var cancelParams adapterproto.CancelRequestParams
+			if err := adapterproto.Decode([]byte(`{"request_id":`+tc.id+`}`), &cancelParams); (err == nil) != tc.wire {
+				t.Errorf("adapterproto accepts the id in cancel params: %v, want %v", err == nil, tc.wire)
 			}
 			if got := wire.answersRequest(t, frame); got != tc.wire {
 				t.Errorf("the peer answers a request with the id: %v, want %v", got, tc.wire)

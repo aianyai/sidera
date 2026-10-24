@@ -21,13 +21,13 @@ func Decode(data []byte, v Message) error {
 	if err := strictjson.Decode(data, v); err != nil {
 		return &ValidationError{Msg: strings.TrimPrefix(err.Error(), "strictjson: ")}
 	}
-	return v.Validate()
+	return asValidation(v.Validate())
 }
 
 // Encode validates v and encodes it as JSON. A message that fails validation is
 // never written.
 func Encode(v Message) ([]byte, error) {
-	if err := v.Validate(); err != nil {
+	if err := asValidation(v.Validate()); err != nil {
 		return nil, err
 	}
 	return json.Marshal(v)

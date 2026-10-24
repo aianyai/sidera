@@ -216,7 +216,7 @@ only says the request was not understood or not allowed.
 | ------ | --------- | ---- | ------ | ------ |
 | `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
 | `ping` | both | request | none | none |
-| `$/cancel_request` | both | notification | `request_id` | |
+| `$/cancel_request` | both | notification | `request_id`, an id as the peer layer defines it | |
 | `shutdown` | D to A | request | none | none |
 | `adapter.start` | D to A | request | `node`, `runtime_endpoint?`, `config`, `presets`, `sessions`, `direct_endpoints` | `sessions` (`endpoint`, `state`, `turn_active`, `process?`) |
 | `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?`, `auth`, `dependencies`, `presets`, `tool_probes` |
@@ -245,7 +245,10 @@ characters, handed out by the daemon and returned unchanged; the SDK never parse
 them. `AttemptID` is a lowercase UUID version 4. `LeaseRef` is 32 lowercase hex
 characters, not all zero. `Token` is 32 random bytes in unpadded base64url.
 `NativeRef` and `TurnRef` are opaque strings of up to 256 characters that only the
-adapter interprets.
+adapter interprets. The id of a request, and so the `request_id` of
+`$/cancel_request`, is the peer layer's `RequestID`; `adapterproto` takes the
+type and the params of the cancel notification from `peer` and does not restate
+the rule.
 
 **Version negotiation.** A version is a positive integer and each side announces a
 closed range. The adapter picks the highest version in both. With no overlap it

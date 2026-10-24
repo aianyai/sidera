@@ -70,6 +70,17 @@ func at(field string, err error) error {
 	return &ValidationError{Field: f, Msg: ve.Msg, Beyond: ve.Beyond}
 }
 
+// asValidation gives an error from the Validate method of a type owned by
+// another package, which has no field path of its own, the shape of the rest. A
+// message "field: reason" is split into its field and reason.
+func asValidation(err error) error {
+	var ve *ValidationError
+	if err == nil || errors.As(err, &ve) {
+		return err
+	}
+	return newError(err.Error(), false)
+}
+
 func index(i int) string { return fmt.Sprintf("[%d]", i) }
 
 // checker collects the first failure of a Validate method.

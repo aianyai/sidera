@@ -2,9 +2,7 @@ package adapterproto
 
 import (
 	"encoding/base64"
-	"encoding/json"
 	"regexp"
-	"strconv"
 )
 
 // Limits on identifier-like strings. The schema states the same numbers.
@@ -94,76 +92,5 @@ func (t Token) Validate() error {
 	if err != nil || len(b) != 32 {
 		return bad("token is not 32 bytes of unpadded base64url")
 	}
-	return nil
-}
-
-// RequestID is the identifier of a request: a string or an integer, as in
-// JSON-RPC. The zero value is unset and invalid.
-type RequestID struct {
-	set   bool
-	isStr bool
-	str   string
-	num   int64
-}
-
-// MaxRequestNumber is the largest absolute value of a numeric request identifier,
-// the largest integer every JSON implementation represents exactly.
-const MaxRequestNumber = 1<<53 - 1
-
-// NumberID returns the numeric request identifier n.
-func NumberID(n int64) RequestID { return RequestID{set: true, num: n} }
-
-// StringID returns the string request identifier s.
-func StringID(s string) RequestID { return RequestID{set: true, isStr: true, str: s} }
-
-// IsString reports whether the identifier is a string.
-func (r RequestID) IsString() bool { return r.isStr }
-
-// Number returns the numeric value; it is 0 for a string identifier.
-func (r RequestID) Number() int64 { return r.num }
-
-// String returns the text of a string identifier, or the decimal of a number.
-func (r RequestID) String() string {
-	if r.isStr {
-		return r.str
-	}
-	return strconv.FormatInt(r.num, 10)
-}
-
-// Validate checks the identifier is set and within bounds.
-func (r RequestID) Validate() error {
-	switch {
-	case !r.set:
-		return bad("request id is missing")
-	case r.isStr:
-		return strLen(r.str, 1, MaxIdentLen)
-	}
-	return intRange(r.num, -MaxRequestNumber, MaxRequestNumber)
-}
-
-func (r RequestID) MarshalJSON() ([]byte, error) {
-	if err := r.Validate(); err != nil {
-		return nil, err
-	}
-	if r.isStr {
-		return json.Marshal(r.str)
-	}
-	return strconv.AppendInt(nil, r.num, 10), nil
-}
-
-func (r *RequestID) UnmarshalJSON(b []byte) error {
-	if len(b) > 0 && b[0] == '"' {
-		var s string
-		if err := json.Unmarshal(b, &s); err != nil {
-			return bad("request id: %v", err)
-		}
-		*r = StringID(s)
-		return nil
-	}
-	n, err := strconv.ParseInt(string(b), 10, 64)
-	if err != nil {
-		return bad("request id is neither a string nor a plain integer")
-	}
-	*r = NumberID(n)
 	return nil
 }

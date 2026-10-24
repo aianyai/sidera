@@ -155,7 +155,6 @@ func TestIntegerBounds(t *testing.T) {
 		}},
 		{"range.min", 1, 65535, func(v int64) error { return adapterproto.Range{Min: int(v), Max: 65535}.Validate() }},
 		{"range.max", 1, 65535, func(v int64) error { return adapterproto.Range{Min: 1, Max: int(v)}.Validate() }},
-		{"request id", -exact, exact, func(v int64) error { return adapterproto.NumberID(v).Validate() }},
 		{"timestamp", 1, exact, func(v int64) error {
 			return adapterproto.TurnEndedParams{Endpoint: ep1, Turn: "t", Final: "failed", AtMS: v}.Validate()
 		}},

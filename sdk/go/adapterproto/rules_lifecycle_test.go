@@ -1,9 +1,12 @@
 package adapterproto_test
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 func TestInitializeParamsRules(t *testing.T) {
@@ -340,29 +343,53 @@ func TestAvailabilityRules(t *testing.T) {
 	})
 }
 
+// TestCancelRequestRules: the type is the peer layer's, so only that the method
+// table and Decode apply its rule and report a failure like any other message.
 func TestCancelRequestRules(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		id   adapterproto.RequestID
-		ok   bool
+		in     string
+		ok     bool
+		field  string
+		reason string
 	}{
-		{"a number", adapterproto.NumberID(14), true},
-		{"zero", adapterproto.NumberID(0), true},
-		{"a negative number", adapterproto.NumberID(-5), true},
-		{"the largest exact number", adapterproto.NumberID(1<<53 - 1), true},
-		{"a number beyond the exact range", adapterproto.NumberID(1 << 53), false},
-		{"the smallest exact number", adapterproto.NumberID(-(1<<53 - 1)), true},
-		{"a string", adapterproto.StringID("probe-2"), true},
-		{"a string of 128", adapterproto.StringID(repeat("s", 128)), true},
-		{"a string of 129", adapterproto.StringID(repeat("s", 129)), false},
-		{"an empty string", adapterproto.StringID(""), false},
-		{"unset", adapterproto.RequestID{}, false},
+		{`{"request_id":14}`, true, "", ""},
+		{`{"request_id":"probe-2"}`, true, "", ""},
+		{`{"request_id":9007199254740992}`, false, "", "request id"},
+		{`{"request_id":""}`, false, "", "request id"},
+		{`{"request_id":1.5}`, false, "", "request id"},
+		{`{"request_id":null}`, false, "", "null"},
+		{`{}`, false, "", "request_id"},
+		{`{"request_id":1,"extra":2}`, false, "", "extra"},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			err := adapterproto.CancelRequestParams{RequestID: tc.id}.Validate()
+		t.Run(tc.in, func(t *testing.T) {
+			var p adapterproto.CancelRequestParams
+			err := adapterproto.Decode([]byte(tc.in), &p)
 			if (err == nil) != tc.ok {
-				t.Fatalf("Validate = %v", err)
+				t.Fatalf("Decode = %v, want ok=%v", err, tc.ok)
+			}
+			if err == nil {
+				return
+			}
+			var ve *adapterproto.ValidationError
+			if !errors.As(err, &ve) {
+				t.Fatalf("error is %T, want a *ValidationError", err)
+			}
+			if !strings.Contains(err.Error(), tc.reason) {
+				t.Errorf("error %q does not mention %q", err, tc.reason)
 			}
 		})
+	}
+	var p adapterproto.CancelRequestParams
+	err := adapterproto.Decode([]byte(`{"request_id":1}`), &p)
+	if err != nil || p.RequestID != peer.NumberID(1) {
+		t.Fatalf("decoded %+v, %v", p, err)
+	}
+	if _, err := adapterproto.Encode(&adapterproto.CancelRequestParams{}); err == nil {
+		t.Error("an unset id was encoded")
+	} else if ve := new(adapterproto.ValidationError); !errors.As(err, &ve) || ve.Field != "request_id" {
+		t.Errorf("Encode error %v, want a ValidationError at request_id", err)
+	}
+	if adapterproto.MethodCancelRequest != peer.MethodCancelRequest {
+		t.Errorf("method name %q differs from the peer's %q", adapterproto.MethodCancelRequest, peer.MethodCancelRequest)
 	}
 }

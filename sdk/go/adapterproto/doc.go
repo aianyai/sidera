@@ -4,8 +4,8 @@
 //
 // The two sides exchange newline-delimited JSON-RPC 2.0 over the adapter's
 // standard input and output, and either may send requests and notifications.
-// This package knows nothing about framing or transport; it holds what is
-// specific to the protocol:
+// This package knows nothing about framing or transport; the JSON-RPC rules of
+// a frame, such as the request id, belong to package peer. It holds what is specific to the protocol:
 //
 //   - the version range and its negotiation (Range, Negotiate);
 //   - the name, direction and kind of every method (Methods, Lookup) and the
