@@ -239,7 +239,7 @@ only says the request was not understood or not allowed.
 
 | Method | Direction | Kind | Params | Result |
 | ------ | --------- | ---- | ------ | ------ |
-| `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
+| `initialize` | D to A | request | `protocol` range, `daemon.version`, `instance` (`id`, `lock_path`), `capabilities` (the daemon's own, empty for now) | `protocol_version`, `adapter` (`id`, `version`), `capabilities` |
 | `ping` | both | request | none | none |
 | `$/cancel_request` | both | notification | `request_id`, an id as the peer layer defines it | |
 | `shutdown` | D to A | request | none | none |
@@ -278,13 +278,28 @@ the rule.
 **Version negotiation.** A version is a positive integer and each side announces a
 closed range. The adapter picks the highest version in both. With no overlap it
 answers `-32022` with `data` `{requested, supported}`, each a range. Inside a
-negotiated version nothing is added that an older reader would misread: new
-behaviour is a new capability the peer declares first, or a new version.
+negotiated version nothing is added that an older reader would misread. A
+protocol addition is made in one of three ways, and only these:
 
-**Strict decoding.** Within a version an unknown field is `-32602`. The same rule
-makes a field name that differs in case, `null`, a missing required field, a
+1. a new **capability**, declared before it is used: the adapter in the
+   `capabilities` of the `initialize` result, the daemon in the `capabilities` of
+   the `initialize` params. A peer uses an addition only when the other side has
+   declared it;
+2. a reader **ignores a capability key it does not know**: the capability
+   objects (`capabilities` and its `runtime` and `direct` parts, and the daemon's
+   `capabilities`) are open, so a newer adapter that declares a new capability
+   still completes the handshake with an older daemon, which then simply does not
+   use it;
+3. everything else that would change a message, a new member of any other
+   object included, needs a **new protocol version**.
+
+**Strict decoding.** Within a version an unknown field is `-32602`, except in the
+capability objects, which ignore unknown keys (see version negotiation). The same
+rule makes a field name that differs in case, `null`, a missing required field, a
 repeated key and an explicit empty value for an optional field errors: they
-would otherwise let two implementations read one message two ways.
+would otherwise let two implementations read one message two ways. The known
+members of a capability object are decoded as strictly as any other, and a key
+repeated anywhere in it is still an error, ignored members included.
 
 **Instance lock.** The adapter takes an exclusive lock on `instance.lock_path`
 before it answers `initialize`, and answers `1011` when it cannot. A hung old
@@ -386,8 +401,17 @@ an unknown outcome call for reconciliation or an idempotent retry.
   tell which of its replies a peer would reject. Only the three codes whose
   receiver acts on the data fix its shape; the object for any other code is
   for people.
-- **Strictness fails closed.** A lenient reader that ignores an unknown field
-  silently does the wrong thing when the field was a safety restriction.
+- **Strictness fails closed, and capabilities are the one open place.** A
+  lenient reader that ignores an unknown field silently does the wrong thing when
+  the field was a safety restriction. A capability is different in kind: the
+  peer that declares it also uses it, and a reader that does not know it never
+  declares it back, so ignoring it only means the feature is not used. LSP, MCP
+  and ACP treat capabilities the same way. Without this a newer adapter could not
+  complete the handshake with an older daemon, and every addition would need a
+  new version. The daemon declares its own capabilities for the symmetric
+  reason: an adapter must be able to learn which daemon-side additions it may
+  use, and the object has to exist from the first version for the first addition
+  not to need one.
 - **Identifiers stay opaque.** The adapter never parses them, so copying their
   syntax into the SDK would only make a second place to keep in step with the
   daemon, for the benefit of an earlier error message.
@@ -405,7 +429,7 @@ an unknown outcome call for reconciliation or an idempotent retry.
   `validate.go`.
 - `sdk/go/internal/strictjson`: the strict decoder.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
-  `TestErrorObjectKnowsEveryCode`, `TestErrorObjectValidate`, `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
+  `TestErrorObjectKnowsEveryCode`, `TestErrorObjectValidate`, `TestCapabilitiesAreOpen`, `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
   `FuzzDecodeMessages`.
 
 ## Capabilities and endpoint kinds
@@ -418,6 +442,12 @@ An adapter declares what it supports in the result of `initialize`:
 {"runtime": {"interrupt": true, "ack_on_behalf": true, "server_requests": false, "frontends": ["cli", "mcp"]},
  "direct": {"max_endpoints": 50}}
 ```
+
+The declaration is an open object, as are `runtime` and `direct` inside it: a key
+this version does not know is ignored, so a newer adapter can declare a
+capability to an older daemon. The daemon declares its own capabilities in the
+`capabilities` of the `initialize` params, an open object that version 1 sends
+empty; an adapter uses a daemon-side addition only when it finds it there.
 
 `runtime` and `direct` are each absent when the adapter provides no such
 endpoints. `frontends` lists the agent tool front ends a session can be set up
@@ -700,7 +730,12 @@ SDK module keeps no dependencies) checks:
    names and the patterns are the same in the schema and in Go; every method has a
    request and a result example; every enum value and error code appears in an
    example, counted per Go type by reflection, not by string;
-4. every invalid example is rejected at the layer it names;
+4. every invalid example is rejected at the layer it names, and every `open/`
+   example, a document with unknown capability keys, is accepted by both and read
+   by Go as the same document without them; an unknown key added to any object of
+   an `initialize` message is refused by the schema and by Go everywhere except
+   in the capability objects, where both accept it
+   (`TestOpenExamples`, `TestMembersAreClosedExceptInCapabilities`);
 5. differential tests give the same document to the schema and to Go and
    require the same verdict, both ways, except for the rules the schema cannot
    state, which Go must report as such. Four of them: a seeded random mutation of

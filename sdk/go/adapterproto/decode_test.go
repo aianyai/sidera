@@ -292,3 +292,100 @@ func ExampleNegotiate() {
 	// 3 <nil>
 	// adapterproto: no common protocol version: requested 4..5, supported 1..3
 }
+
+// TestCapabilitiesAreOpen: the declarations of capabilities ignore members they
+// do not know, so a newer adapter or daemon can declare more than an older
+// reader understands; the members they do know, and every other message, stay
+// strict.
+func TestCapabilitiesAreOpen(t *testing.T) {
+	const runtime = `"interrupt":true,"ack_on_behalf":false,"server_requests":false,"frontends":["cli"]`
+	tests := []struct {
+		name string
+		in   string
+		// want is the re-encoding of what was read, empty when decoding must fail.
+		want string
+	}{
+		{"known members only", `{"runtime":{` + runtime + `},"direct":{"max_endpoints":5}}`,
+			`{"runtime":{"interrupt":true,"ack_on_behalf":false,"server_requests":false,"frontends":["cli"]},"direct":{"max_endpoints":5}}`},
+		{"empty declaration", `{}`, `{}`},
+		{"an unknown capability", `{"relay":{"hops":2}}`, `{}`},
+		{"an unknown capability of any JSON type", `{"a":null,"b":1.5,"c":"s","d":[],"e":false}`, `{}`},
+		{"an unknown member inside runtime", `{"runtime":{` + runtime + `,"tool_search":true}}`,
+			`{"runtime":{"interrupt":true,"ack_on_behalf":false,"server_requests":false,"frontends":["cli"]}}`},
+		{"an unknown member inside direct", `{"direct":{"max_endpoints":5,"rate":{"per_s":1}}}`, `{"direct":{"max_endpoints":5}}`},
+		{"a member in another case is an unknown member", `{"Runtime":{` + runtime + `}}`, `{}`},
+		{"a known member still has its type", `{"runtime":{"interrupt":"yes","ack_on_behalf":false,"server_requests":false,"frontends":["cli"],"x":1}}`, ""},
+		{"a known member is still required", `{"runtime":{"ack_on_behalf":false,"server_requests":false,"frontends":["cli"],"x":1}}`, ""},
+		{"a known member still has its rules", `{"direct":{"max_endpoints":1001,"x":1}}`, ""},
+		{"a front end is still one of the known ones", `{"runtime":{"interrupt":true,"ack_on_behalf":false,"server_requests":false,"frontends":["web"],"x":1}}`, ""},
+		{"runtime is not null", `{"runtime":null}`, ""},
+		{"runtime is not a list", `{"runtime":[]}`, ""},
+		{"capabilities are not null", `null`, ""},
+		{"capabilities are not a list", `[]`, ""},
+		{"a repeated unknown member", `{"x":1,"x":2}`, ""},
+		{"a repeated member inside an unknown member", `{"x":{"y":1,"y":2}}`, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var c adapterproto.Capabilities
+			err := adapterproto.Decode([]byte(tc.in), &c)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatalf("Decode accepted %s", tc.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Decode(%s) = %v", tc.in, err)
+			}
+			b, err := adapterproto.Encode(c)
+			if err != nil || string(b) != tc.want {
+				t.Fatalf("read as %s (%v), want %s", b, err, tc.want)
+			}
+		})
+	}
+
+	t.Run("the result of initialize is strict around the open part", func(t *testing.T) {
+		const head = `"protocol_version":1,"adapter":{"id":"example","version":"0.3.1"}`
+		var r adapterproto.InitializeResult
+		if err := adapterproto.Decode([]byte(`{`+head+`,"capabilities":{"relay":{}}}`), &r); err != nil {
+			t.Fatalf("an unknown capability: %v", err)
+		}
+		for _, in := range []string{
+			`{` + head + `,"capabilities":{},"extra":1}`,
+			`{"protocol_version":1,"adapter":{"id":"example","version":"0.3.1","extra":1},"capabilities":{}}`,
+			`{` + head + `}`,
+		} {
+			if err := adapterproto.Decode([]byte(in), new(adapterproto.InitializeResult)); err == nil {
+				t.Errorf("Decode accepted %s", in)
+			}
+		}
+	})
+
+	t.Run("the daemon declares its own capabilities in initialize", func(t *testing.T) {
+		const rest = `"protocol":{"min":1,"max":1},"daemon":{"version":"0.1.0"},"instance":{"id":"work","lock_path":"/x/lock"}`
+		var p adapterproto.InitializeParams
+		if err := adapterproto.Decode([]byte(`{`+rest+`,"capabilities":{}}`), &p); err != nil {
+			t.Fatalf("empty daemon capabilities: %v", err)
+		}
+		if err := adapterproto.Decode([]byte(`{`+rest+`,"capabilities":{"push_status":true}}`), &p); err != nil {
+			t.Fatalf("an unknown daemon capability: %v", err)
+		}
+		for name, in := range map[string]string{
+			"missing":              `{` + rest + `}`,
+			"null":                 `{` + rest + `,"capabilities":null}`,
+			"a list":               `{` + rest + `,"capabilities":[]}`,
+			"an unknown parameter": `{` + rest + `,"capabilities":{},"extra":1}`,
+		} {
+			if err := adapterproto.Decode([]byte(in), new(adapterproto.InitializeParams)); err == nil {
+				t.Errorf("%s: Decode accepted %s", name, in)
+			}
+		}
+		b, err := adapterproto.Encode(adapterproto.InitializeParams{
+			Protocol: adapterproto.Range{Min: 1, Max: 1}, Daemon: adapterproto.DaemonInfo{Version: "0.1.0"},
+			Instance: adapterproto.InstanceInfo{ID: "work", LockPath: "/x/lock"}})
+		if err != nil || !strings.Contains(string(b), `"capabilities":{}`) {
+			t.Fatalf("the daemon's capabilities are always sent, even empty: %s (%v)", b, err)
+		}
+	})
+}

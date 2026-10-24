@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 
+	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
@@ -60,12 +61,32 @@ func (i InstanceInfo) Validate() error {
 	return c.err
 }
 
+// DaemonCapabilities are the additions to version 1 that the daemon supports,
+// declared in initialize so that an adapter knows which of them it may use. It
+// is an open object, like Capabilities: a reader ignores the members it does
+// not know, and an adapter that does not find a capability here must not use
+// the behaviour it stands for. Version 1 has no such member yet; the object is
+// always sent, empty, so that the first one can be added without a new version.
+type DaemonCapabilities struct{}
+
+// UnmarshalJSON decodes the object and ignores every member.
+func (c *DaemonCapabilities) UnmarshalJSON(data []byte) error {
+	type plain DaemonCapabilities
+	return strictjson.DecodeOpen(data, (*plain)(c))
+}
+
+// Validate accepts every declaration: there is nothing to check yet.
+func (DaemonCapabilities) Validate() error { return nil }
+
 // InitializeParams is the first request, from the daemon.
 type InitializeParams struct {
 	// Protocol is the range of versions the daemon supports.
 	Protocol Range        `json:"protocol"`
 	Daemon   DaemonInfo   `json:"daemon"`
 	Instance InstanceInfo `json:"instance"`
+	// Capabilities are the daemon's own additions to the version; see
+	// DaemonCapabilities. It is required, and may be empty.
+	Capabilities DaemonCapabilities `json:"capabilities"`
 }
 
 // Validate checks the parameters.
@@ -74,6 +95,7 @@ func (p InitializeParams) Validate() error {
 	c.field("protocol", p.Protocol.Validate())
 	c.field("daemon", p.Daemon.Validate())
 	c.field("instance", p.Instance.Validate())
+	c.field("capabilities", p.Capabilities.Validate())
 	return c.err
 }
 
@@ -93,6 +115,9 @@ func (a AdapterInfo) Validate() error {
 
 // RuntimeCapabilities declares that the adapter drives a native agent runtime:
 // it provides one runtime endpoint and the session endpoints created under it.
+// Members this version does not know are ignored when decoding, so that a newer
+// adapter can declare more than an older daemon understands; the daemon then
+// simply does not use what it does not know.
 type RuntimeCapabilities struct {
 	// Interrupt: the adapter implements session.interrupt.
 	Interrupt bool `json:"interrupt"`
@@ -104,6 +129,13 @@ type RuntimeCapabilities struct {
 	ServerRequests bool `json:"server_requests"`
 	// Frontends are the agent tool front ends a session can be set up with.
 	Frontends []Frontend `json:"frontends"`
+}
+
+// UnmarshalJSON decodes the declaration strictly, except that members it has no
+// field for are ignored.
+func (r *RuntimeCapabilities) UnmarshalJSON(data []byte) error {
+	type plain RuntimeCapabilities
+	return strictjson.DecodeOpen(data, (*plain)(r))
 }
 
 // Validate checks the front-end list: at least one, no repeats.
@@ -118,10 +150,18 @@ func (r RuntimeCapabilities) Validate() error {
 }
 
 // DirectCapabilities declares that the adapter owns endpoints it reads itself,
-// such as a chat bridge that stands for people.
+// such as a chat bridge that stands for people. Like RuntimeCapabilities it
+// ignores members it does not know when decoding.
 type DirectCapabilities struct {
 	// MaxEndpoints is the most direct endpoints the adapter registers.
 	MaxEndpoints int `json:"max_endpoints"`
+}
+
+// UnmarshalJSON decodes the declaration strictly, except that members it has no
+// field for are ignored.
+func (d *DirectCapabilities) UnmarshalJSON(data []byte) error {
+	type plain DirectCapabilities
+	return strictjson.DecodeOpen(data, (*plain)(d))
 }
 
 // Validate checks the limit.
@@ -131,11 +171,24 @@ func (d DirectCapabilities) Validate() error {
 
 // Capabilities are what an adapter declares it supports. Declaring is separate
 // from being available: availability comes from probing and from snapshots.
+//
+// The declaration is an open object, here and in its runtime and direct parts:
+// a member this version does not know is ignored when decoding, so a newer
+// adapter that declares a new capability still completes the handshake with an
+// older daemon. Ignoring a capability means not using the feature, which is the
+// safe side. Everything else in the protocol is decoded strictly.
 type Capabilities struct {
 	// Runtime is absent when the adapter provides no runtime and session endpoints.
 	Runtime *RuntimeCapabilities `json:"runtime,omitempty"`
 	// Direct is absent when the adapter provides no direct endpoints.
 	Direct *DirectCapabilities `json:"direct,omitempty"`
+}
+
+// UnmarshalJSON decodes the declaration strictly, except that members it has no
+// field for are ignored.
+func (cp *Capabilities) UnmarshalJSON(data []byte) error {
+	type plain Capabilities
+	return strictjson.DecodeOpen(data, (*plain)(cp))
 }
 
 // Validate checks each declared part.

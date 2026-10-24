@@ -23,7 +23,10 @@ protocol/
 ```
 
 All four files are JSON Schema 2020-12, written by hand, with
-`additionalProperties: false` wherever the set of members is closed. Each has an
+`additionalProperties: false` wherever the set of members is closed. The only
+open objects are the ones that declare capabilities (`Capabilities` and its
+`runtime` and `direct` parts, and `DaemonCapabilities`): they say nothing about
+unknown members, which a reader ignores. Each has an
 `$id` under `https://sidera.invalid/adapter/v1/`; the identifiers are never
 fetched, they only let the files refer to each other
 (`types.schema.json#/$defs/...`). A validator must be told to resolve those
@@ -87,6 +90,11 @@ Go types against.
   in `cancel_request/`. A result file is the response to the method of its
   directory. `frame/` holds errors that belong to no method.
 - `manifest/<case>.json`.
+- `open/<case>.json`: a document with members that a reader of this version does
+  not know, in the places the protocol leaves open. A wrapper
+  `{"kind", "method", "note", "ignoring": [JSON pointers], "document"}`: the schema
+  and Go accept the document, and Go reads it as the same document without the
+  members named in `ignoring`.
 - `invalid/<case>.json`: one wrapper per case,
 
   ```json
@@ -116,8 +124,12 @@ item; every invalid case is checked at the layer it names; a differential test
 mutates every golden message hundreds of thousands of times and requires the
 schema and Go to give the same verdict (a fuzz target, `FuzzDifferential`, does
 the same with the fuzzer's inputs). New behaviour inside version 1 is only ever
-added when the peer has declared a capability that allows it; anything else is
-version 2.
+added as a capability: the peer that offers it declares it first (the adapter in
+the `capabilities` of the `initialize` result, the daemon in the `capabilities`
+of its `initialize` params), a reader ignores a capability it does not know, and
+a sender never uses what the other side has not declared. Everything else that
+would change a message, a new member of a message included, needs version 2.
+Capabilities are the only place where an unknown member is not an error.
 
 Run from the repository root, in the workspace:
 

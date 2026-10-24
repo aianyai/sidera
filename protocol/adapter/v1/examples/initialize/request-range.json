@@ -13,6 +13,7 @@
     "instance": {
       "id": "work",
       "lock_path": "C:\\Users\\dev\\AppData\\Local\\sidera\\adapters\\work\\instance.lock"
-    }
+    },
+    "capabilities": {}
   }
 }

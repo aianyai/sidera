@@ -13,7 +13,7 @@
 //     pointer field accepts any value of its type, including zero, and false is
 //     always accepted for a bool.
 //   - The input is one valid UTF-8 JSON value with nothing after it, and unknown
-//     fields are errors.
+//     fields are errors, except in a value decoded with DecodeOpen.
 //   - No object has the same key twice, at any depth. Parsers disagree about
 //     which duplicate wins, and a message must mean one thing to every reader.
 //
@@ -76,6 +76,46 @@ func Decode(data []byte, v any) error {
 		return &Error{Msg: err.Error()}
 	}
 	return nil
+}
+
+// DecodeOpen is Decode for an object that ignores the members it has no field
+// for, which lets a newer sender add members that an older reader skips. It is
+// meant for the UnmarshalJSON method of such a type, where Decode would
+// otherwise be reached recursively: v is a pointer to a struct of a type
+// without that method (a defined type with the same fields), and data holds one
+// JSON object.
+//
+// Only the members of this object are open. The members that have a field, and
+// everything under them, are decoded exactly as Decode does, and a key that
+// occurs twice anywhere in data is an error, ignored members included, since
+// two readers could otherwise disagree about which of the two they skipped.
+func DecodeOpen(data []byte, v any) error {
+	rt := reflect.TypeOf(v)
+	if rt == nil || rt.Kind() != reflect.Pointer || reflect.ValueOf(v).IsNil() || rt.Elem().Kind() != reflect.Struct {
+		return errors.New("strictjson: DecodeOpen needs a non-nil pointer to a struct")
+	}
+	if !utf8.Valid(data) {
+		return &Error{Msg: "input is not valid UTF-8"}
+	}
+	if err := noDuplicateKeys(data); err != nil {
+		return err
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(data, &members); err != nil || members == nil {
+		return &Error{Msg: "expected an object"}
+	}
+	// A field that is missing stays missing for Decode to report.
+	known := make(map[string]json.RawMessage, len(members))
+	for _, f := range fields(rt.Elem()) {
+		if raw, ok := members[f.name]; ok {
+			known[f.name] = raw
+		}
+	}
+	kept, err := json.Marshal(known)
+	if err != nil {
+		return &Error{Msg: err.Error()}
+	}
+	return Decode(kept, v)
 }
 
 // noDuplicateKeys reports the first object that has a key twice, at any depth.

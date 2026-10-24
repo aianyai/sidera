@@ -153,8 +153,8 @@ func seedsFor(tb testing.TB, includeInvalid bool) map[string][][]byte {
 		case "manifest":
 			add("manifest", ex.Raw)
 			continue
-		case "invalid":
-			if !includeInvalid {
+		case "invalid", "open":
+			if ex.Kind == "invalid" && !includeInvalid {
 				continue
 			}
 			var w struct {

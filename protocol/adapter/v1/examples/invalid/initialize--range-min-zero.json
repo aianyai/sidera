@@ -18,7 +18,8 @@
       "instance": {
         "id": "work",
         "lock_path": "/x/lock"
-      }
+      },
+      "capabilities": {}
     }
   }
 }

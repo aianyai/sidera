@@ -1,0 +1,29 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "initialize",
+  "note": "an unknown member does not excuse a wrong type in a known one",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocol_version": 1,
+      "adapter": {
+        "id": "example",
+        "version": "0.3.1"
+      },
+      "capabilities": {
+        "runtime": {
+          "interrupt": "yes",
+          "ack_on_behalf": true,
+          "server_requests": false,
+          "frontends": [
+            "cli",
+            "mcp"
+          ],
+          "future": true
+        }
+      }
+    }
+  }
+}

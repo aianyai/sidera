@@ -31,6 +31,13 @@ for what each message means and why the protocol is shaped this way.
   string, zero, list or object for an optional field (omit it instead). `false`
   is accepted for a boolean. A pointer field accepts any value of its type,
   zero included.
+- **Open capability declarations.** The one exception to the unknown-field rule:
+  `Capabilities`, `RuntimeCapabilities`, `DirectCapabilities` and
+  `DaemonCapabilities` ignore the members they have no field for, so a newer
+  peer can declare a capability that this version does not know. Their known
+  members are decoded as strictly as everything else, and a repeated key is
+  refused even inside an ignored member. Ignoring a capability means not using
+  the feature, which is the safe side.
 - **A required list or map may be empty but is never nil.** A nil one would
   encode as `null`; `Validate` refuses it.
 - **Optional means omitted.** Optional fields have `omitempty`; their zero value

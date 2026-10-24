@@ -1,0 +1,42 @@
+{
+  "kind": "result",
+  "method": "initialize",
+  "note": "a newer adapter declares capabilities this version does not know, at the top and inside runtime and direct; the reader ignores them and reads the rest",
+  "ignoring": [
+    "/result/capabilities/relay",
+    "/result/capabilities/runtime/tool_search",
+    "/result/capabilities/direct/rate"
+  ],
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocol_version": 1,
+      "adapter": {
+        "id": "example",
+        "version": "0.3.1"
+      },
+      "capabilities": {
+        "runtime": {
+          "interrupt": true,
+          "ack_on_behalf": true,
+          "server_requests": false,
+          "frontends": [
+            "cli",
+            "mcp"
+          ],
+          "tool_search": true
+        },
+        "direct": {
+          "max_endpoints": 50,
+          "rate": {
+            "per_s": 5
+          }
+        },
+        "relay": {
+          "hops": 2
+        }
+      }
+    }
+  }
+}

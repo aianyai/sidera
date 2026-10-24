@@ -19,7 +19,8 @@
         "id": "work",
         "lock_path": "/x/lock"
       },
-      "extra": 1
+      "extra": 1,
+      "capabilities": {}
     }
   }
 }

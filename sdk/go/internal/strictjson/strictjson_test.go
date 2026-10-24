@@ -180,3 +180,89 @@ func TestNoDuplicateTopLevelKeys(t *testing.T) {
 		})
 	}
 }
+
+// openInner ignores members it has no field for; the document around it does not.
+type openInner struct {
+	N    int       `json:"n"`
+	Deep *inner    `json:"deep,omitempty"`
+	Open *openLeaf `json:"open,omitempty"`
+}
+
+func (o *openInner) UnmarshalJSON(b []byte) error {
+	type plain openInner
+	return strictjson.DecodeOpen(b, (*plain)(o))
+}
+
+type openLeaf struct {
+	M int `json:"m"`
+}
+
+func (o *openLeaf) UnmarshalJSON(b []byte) error {
+	type plain openLeaf
+	return strictjson.DecodeOpen(b, (*plain)(o))
+}
+
+type openDoc struct {
+	Name  string    `json:"name"`
+	Inner openInner `json:"inner"`
+}
+
+func TestDecodeOpen(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		want    *openDoc
+		wantErr string
+	}{
+		{"decodes an object without extras", `{"name":"a","inner":{"n":1}}`, &openDoc{Name: "a", Inner: openInner{N: 1}}, ""},
+		{"ignores an unknown member of the open object", `{"name":"a","inner":{"n":1,"future":{"x":[1,2]}}}`, &openDoc{Name: "a", Inner: openInner{N: 1}}, ""},
+		{"ignores an unknown member of any JSON type", `{"name":"a","inner":{"n":1,"a":null,"b":"s","c":[],"d":1.5,"e":true}}`, &openDoc{Name: "a", Inner: openInner{N: 1}}, ""},
+		{"ignores a member that differs only in case", `{"name":"a","inner":{"n":1,"N":2}}`, &openDoc{Name: "a", Inner: openInner{N: 1}}, ""},
+		{"still refuses an unknown member of the document around it", `{"name":"a","inner":{"n":1},"future":1}`, nil, "future: unknown field"},
+		{"still refuses an unknown member below a known member", `{"name":"a","inner":{"n":1,"deep":{"n":1,"future":1}}}`, nil, "unknown field"},
+		{"opens a nested open object too", `{"name":"a","inner":{"n":1,"open":{"m":2,"future":true}}}`, &openDoc{Name: "a", Inner: openInner{N: 1, Open: &openLeaf{M: 2}}}, ""},
+		{"still requires a known member", `{"name":"a","inner":{"future":1}}`, nil, "required field is missing"},
+		{"still refuses null for a known member", `{"name":"a","inner":{"n":null}}`, nil, "null"},
+		{"still checks the type of a known member", `{"name":"a","inner":{"n":"x"}}`, nil, "strictjson"},
+		{"refuses null for the open object", `{"name":"a","inner":null}`, nil, "null"},
+		{"refuses a list for the open object", `{"name":"a","inner":[]}`, nil, "strictjson"},
+		{"refuses a repeated key among the ignored members", `{"name":"a","inner":{"n":1,"future":1,"future":2}}`, nil, "duplicate key"},
+		{"refuses a repeated key inside an ignored member", `{"name":"a","inner":{"n":1,"future":{"k":1,"k":2}}}`, nil, "duplicate key"},
+		{"refuses a repeated known key", `{"name":"a","inner":{"n":1,"n":2}}`, nil, "duplicate key"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var d openDoc
+			err := strictjson.Decode([]byte(tc.in), &d)
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("got %v, want an error containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := toJSON(t, d), toJSON(t, *tc.want); got != want {
+				t.Fatalf("decoded %s, want %s", got, want)
+			}
+		})
+	}
+}
+
+func toJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+func TestDecodeOpenNeedsAPointerToAStruct(t *testing.T) {
+	for _, v := range []any{nil, openLeaf{}, (*openLeaf)(nil), new(int), new(map[string]int)} {
+		if err := strictjson.DecodeOpen([]byte(`{}`), v); err == nil {
+			t.Errorf("DecodeOpen into %T succeeded", v)
+		}
+	}
+}

@@ -59,10 +59,11 @@
 
     "initialize.params": {
       "type": "object",
-      "required": ["protocol", "daemon", "instance"],
+      "required": ["protocol", "daemon", "instance", "capabilities"],
       "additionalProperties": false,
       "properties": {
         "protocol": { "$ref": "types.schema.json#/$defs/Range" },
+        "capabilities": { "$ref": "types.schema.json#/$defs/DaemonCapabilities" },
         "daemon": {
           "type": "object",
           "required": ["version"],

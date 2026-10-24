@@ -23,8 +23,10 @@ import (
 )
 
 // positive reports whether the example is a message or manifest that must be
-// accepted.
-func (e example) positive() bool { return e.Kind != "invalid" }
+// accepted and that encodes back to the same data. The wrappers under open/ are
+// accepted too, but drop the members a reader ignores, so they are checked by
+// TestOpenExamples instead.
+func (e example) positive() bool { return e.Kind != "invalid" && e.Kind != "open" }
 
 // TestGoldenMessagesValid: every positive example is accepted by the schemas.
 func TestGoldenMessagesValid(t *testing.T) {
@@ -652,6 +654,130 @@ func TestInvalidExamples(t *testing.T) {
 	}
 	if counts["both"] < 100 || counts["schema"] == 0 || counts["go"] < 10 {
 		t.Errorf("too few invalid cases: %v", counts)
+	}
+}
+
+// TestOpenExamples: a document with members that a reader of this version does
+// not know, in the places the protocol leaves open, is accepted by the schema and
+// by Go, and Go reads it as the same document without those members.
+func TestOpenExamples(t *testing.T) {
+	n := 0
+	for _, ex := range loadExamples(t) {
+		if ex.Dir != "open" {
+			continue
+		}
+		n++
+		var wrapper struct {
+			Kind     string          `json:"kind"`
+			Method   string          `json:"method"`
+			Note     string          `json:"note"`
+			Ignoring []string        `json:"ignoring"`
+			Document json.RawMessage `json:"document"`
+		}
+		if err := json.Unmarshal(ex.Raw, &wrapper); err != nil {
+			t.Fatalf("%s: %v", ex.Path, err)
+		}
+		t.Run(ex.Name, func(t *testing.T) {
+			if len(wrapper.Ignoring) == 0 {
+				t.Fatal("an open example names the members that are ignored")
+			}
+			if err := schemaVerdict(t, wrapper.Kind, wrapper.Method, wrapper.Document); err != nil {
+				t.Fatalf("the schema rejects it: %v", err)
+			}
+			value, err := goVerdict(wrapper.Kind, wrapper.Method, wrapper.Document)
+			if err != nil {
+				t.Fatalf("Go rejects it: %v", err)
+			}
+			encoded, err := adapterproto.Encode(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// What Go read is the document without the ignored members.
+			tree, _ := parseTree(t, wrapper.Document)
+			for _, ptr := range wrapper.Ignoring {
+				steps := strings.Split(strings.TrimPrefix(ptr, "/"), "/")
+				p := make(pos, len(steps))
+				for i, s := range steps {
+					p[i] = s
+				}
+				if at(tree, p) == nil {
+					t.Fatalf("the document has no member %s to ignore", ptr)
+				}
+				delete(parentOf(tree, p).(map[string]any), steps[len(steps)-1])
+			}
+			var f frame
+			whole, _ := json.Marshal(tree)
+			if err := json.Unmarshal(whole, &f); err != nil {
+				t.Fatal(err)
+			}
+			want := f.Params
+			if wrapper.Kind == "result" {
+				want = f.Result
+			}
+			if same, err := equalJSON(want, encoded); err != nil || !same {
+				t.Fatalf("Go read\n  %s\nwant\n  %s", compact(encoded), compact(want))
+			}
+		})
+	}
+	if n < 3 {
+		t.Fatalf("only %d open examples", n)
+	}
+}
+
+// TestMembersAreClosedExceptInCapabilities: an unknown member added to any object
+// of an initialize message is refused by the schema and by Go, except in the
+// objects that declare capabilities, which both accept it in. This is the whole
+// extent of the openness: a new member anywhere else needs a new protocol
+// version.
+func TestMembersAreClosedExceptInCapabilities(t *testing.T) {
+	open := map[string]bool{
+		".params.capabilities": true, ".result.capabilities": true,
+		".result.capabilities.runtime": true, ".result.capabilities.direct": true,
+	}
+	var closedChecked, openChecked int
+	for _, ex := range loadExamples(t) {
+		if ex.Dir != "initialize" || !ex.positive() || ex.Kind == "error" {
+			continue
+		}
+		tree, ok := parseTree(t, ex.Raw)
+		if !ok {
+			t.Fatal(ex.Path)
+		}
+		var all []pos
+		positions(tree, nil, &all)
+		for _, p := range all {
+			if _, isObject := at(tree, p).(map[string]any); !isObject {
+				continue
+			}
+			t.Run(ex.Path+p.String(), func(t *testing.T) {
+				edited, _ := parseTree(t, ex.Raw)
+				at(edited, p).(map[string]any)["x_unknown_member"] = json.Number("1")
+				raw, err := json.Marshal(edited)
+				if err != nil {
+					t.Fatal(err)
+				}
+				method := ""
+				if ex.Kind == "result" {
+					method = "initialize"
+				}
+				schemaErr := schemaVerdict(t, ex.Kind, method, raw)
+				_, goErr := goVerdict(ex.Kind, method, raw)
+				if open[p.String()] {
+					openChecked++
+					if schemaErr != nil || goErr != nil {
+						t.Errorf("an open object refuses an unknown member: schema %v, Go %v", schemaErr, goErr)
+					}
+					return
+				}
+				closedChecked++
+				if schemaErr == nil || goErr == nil {
+					t.Errorf("a closed object accepts an unknown member: schema %v, Go %v", schemaErr, goErr)
+				}
+			})
+		}
+	}
+	if closedChecked < 10 || openChecked < 4 {
+		t.Errorf("checked %d closed and %d open objects", closedChecked, openChecked)
 	}
 }
 

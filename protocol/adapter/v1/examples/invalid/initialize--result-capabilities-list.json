@@ -1,0 +1,18 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "initialize",
+  "note": "capabilities are an object, not a list",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "protocol_version": 1,
+      "adapter": {
+        "id": "example",
+        "version": "0.3.1"
+      },
+      "capabilities": []
+    }
+  }
+}

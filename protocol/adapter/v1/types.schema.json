@@ -196,14 +196,12 @@
       "properties": { "env": { "$ref": "#/$defs/Env" } }
     },
     "Capabilities": {
-      "description": "What an adapter declares it supports. An absent runtime or direct part means the adapter provides no such endpoints.",
+      "description": "What an adapter declares it supports. An absent runtime or direct part means the adapter provides no such endpoints. This object, runtime and direct are open: a member this version of the protocol does not define is ignored by the reader, so a newer adapter can declare a new capability to an older daemon, which then does not use it. Nothing else in the protocol is open. Members that are defined are checked as usual.",
       "type": "object",
-      "additionalProperties": false,
       "properties": {
         "runtime": {
           "type": "object",
           "required": ["interrupt", "ack_on_behalf", "server_requests", "frontends"],
-          "additionalProperties": false,
           "properties": {
             "interrupt": { "type": "boolean" },
             "ack_on_behalf": { "type": "boolean" },
@@ -214,10 +212,13 @@
         "direct": {
           "type": "object",
           "required": ["max_endpoints"],
-          "additionalProperties": false,
           "properties": { "max_endpoints": { "type": "integer", "minimum": 1, "maximum": 1000 } }
         }
       }
+    },
+    "DaemonCapabilities": {
+      "description": "What the daemon supports beyond the bare version, declared in initialize so that an adapter knows which additions it may use. Open like Capabilities: a reader ignores members it does not know, and an adapter must not use an addition the daemon did not declare. Version 1 defines no member yet, so the object is empty, but it is always sent.",
+      "type": "object"
     },
     "Grounds": {
       "type": "object",

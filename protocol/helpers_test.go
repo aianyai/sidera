@@ -164,7 +164,7 @@ func dirOf(method string) string { return strings.TrimPrefix(method, "$/") }
 type example struct {
 	Path string
 	Dir  string // first path element below examples/
-	Kind string // request, result, error, notification, manifest or invalid
+	Kind string // request, result, error, notification, manifest, invalid or open
 	Name string
 	Raw  []byte
 }
@@ -188,7 +188,7 @@ func loadExamples(tb testing.TB) []example {
 		}
 		ex := example{Path: rel, Dir: parts[0], Name: strings.TrimSuffix(parts[1], ".json"), Raw: raw}
 		switch ex.Dir {
-		case "manifest", "invalid":
+		case "manifest", "invalid", "open":
 			ex.Kind = ex.Dir
 		default:
 			kind, _, ok := strings.Cut(ex.Name, "-")

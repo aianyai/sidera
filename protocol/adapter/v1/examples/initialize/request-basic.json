@@ -13,6 +13,7 @@
     "instance": {
       "id": "work",
       "lock_path": "/home/dev/.local/state/sidera/adapters/work/instance.lock"
-    }
+    },
+    "capabilities": {}
   }
 }

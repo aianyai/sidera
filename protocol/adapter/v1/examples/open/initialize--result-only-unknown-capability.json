@@ -1,8 +1,10 @@
 {
-  "expect": "both",
   "kind": "result",
   "method": "initialize",
-  "note": "capabilities unknown part",
+  "note": "a declaration with nothing this version knows is valid on the wire; whether an adapter that offers no endpoints is admitted is the daemon's decision",
+  "ignoring": [
+    "/result/capabilities/relay"
+  ],
   "document": {
     "jsonrpc": "2.0",
     "id": 1,
