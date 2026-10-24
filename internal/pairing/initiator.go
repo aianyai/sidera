@@ -335,6 +335,27 @@ func (s State) endInitiator(w World, rec InitiatorRecord, status InitiatorStatus
 	return s.withInitiator(rec), actions, nil
 }
 
+// withdraw ends an active request on this side with the reason and tells the
+// target. A signature that may have left the node is revoked first, in the same
+// call, so that it is dead before anything else happens, and the request is
+// never handed out again: the exchanges that follow carry only the withdrawal.
+func (s State) withdraw(w World, rec InitiatorRecord, reason WithdrawReason, now time.Time) (State, []Action, error) {
+	rec.Status, rec.Reason, rec.EndedAt = InitiatorWithdrawing, reason, now
+	var actions []Action
+	if rec.needsRevocation() {
+		rev, err := revocationOf(w, rec)
+		if err != nil {
+			return s, nil, err
+		}
+		actions = append(actions, StoreRevocation{Revocation: rev.verified, Record: rev.record})
+	}
+	actions = append(actions, PersistInitiator{rec})
+	if rec.needsRevocation() {
+		actions = append(actions, Notify{Notice{Kind: NoticeRevoked, ID: rec.ID(), Remote: rec.Transcript.terms.Target.node}})
+	}
+	return s.withInitiator(rec).withPlan(fetchPlan{id: rec.ID(), nextAt: now}), actions, nil
+}
+
 // revocationOf is the revocation of the credential the record's transcript
 // computes, signed by this node's identity key. The credential is known
 // locally, so the revocation does not wait for the target or depend on it.

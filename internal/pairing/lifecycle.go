@@ -87,13 +87,16 @@ func (s State) Tick(w World, rand io.Reader, now time.Time) (State, []Action, er
 	return next, actions, nil
 }
 
-// tickInitiator applies the time rules to one initiator record: ending an
+// tickInitiator applies the time rules to one initiator record: withdrawing a
+// request whose peer has become a node this node would not pair with, ending an
 // unconfirmed request that ran out, giving up on an answer that never came
 // (revoking the signature if it may have left), and removing a record whose
 // retention is over.
 func (s State) tickInitiator(w World, rec InitiatorRecord, now time.Time) (State, []Action, error) {
 	giveUpAt := rec.ExpiresAt.Add(w.Params.ResultRetention)
 	switch {
+	case rec.Status == InitiatorActive && w.peerUnfit(rec.Transcript.terms.Target.node, now):
+		return s.withdraw(w, rec, WithdrawDeclined, now)
 	case rec.Status == InitiatorActive && rec.Signature == nil && !now.Before(rec.ExpiresAt):
 		return s.endInitiator(w, rec, InitiatorExpired, now)
 	case rec.Status == InitiatorActive && rec.Signature != nil && !now.Before(giveUpAt):

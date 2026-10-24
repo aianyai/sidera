@@ -113,6 +113,13 @@ const (
 	peerTrusted
 )
 
+// peerUnfit reports whether a pairing under way with the node must end: it has
+// been retired or its owner has revoked it locally since the request started.
+func (w World) peerUnfit(peer ident.NodeID, now time.Time) bool {
+	f := w.peerFaultOf(peer, now, false)
+	return f == peerRetired || f == peerLocallyRevoked
+}
+
 // peerFaultOf judges a node as a pairing partner. direct adds the test for a
 // direct credential that is already usable, which stops a new pairing from
 // starting but not one that is under way from finishing.

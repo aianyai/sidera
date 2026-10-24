@@ -77,6 +77,10 @@ them, and stores the records it hands out.
   keeps no certificate serial per request: an initiator whose certificate is
   older than one the node has seen never becomes a `Party` (`NewParty` refuses
   it), so no fetch is made on it.
+- **A request under way ends when its peer stops being a partner.** If the
+  target of an active initiator request is retired or revoked locally, the next
+  `Tick` turns the request into a withdrawal as declined, revokes a signature
+  that may have left, and never hands the signature out again.
 - **The initiator never reruns the online segment by itself.** It reports a
   segment that ended after it opened its nonce as an attempt used.
 

@@ -134,7 +134,11 @@ signature may have left the node (the record is persisted as released before the
 first F1 that carries it), any end that is not the complete credential (rejected,
 expired, cancelled, unknown, given up, or withdrawn by its owner) makes it issue
 the revocation of the credential it computed, at once and without waiting for
-the target. A credential that arrives by synchronisation with a withdrawn
+the target. A peer that becomes retired or is revoked locally while a request is
+under way ends it the same way: the next `Tick` turns the request into a
+withdrawal as declined (before any exchange is due, so the signature is not
+handed out again), because a credential signed with such a node would be void
+from the start and the target should not be left to complete it. A credential that arrives by synchronisation with a withdrawn
 digest is refused. The initiator asks until the target stops keeping results
 (24 hours after the request's expiry), then gives up.
 

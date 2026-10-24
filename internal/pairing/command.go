@@ -289,21 +289,12 @@ func (s State) Reject(w World, req Request, id ID, reason WithdrawReason, now ti
 		if rec.Status != InitiatorActive {
 			return s, executed(out, ResultWrongState), nil, nil
 		}
-		rec.Status, rec.Reason, rec.EndedAt = InitiatorWithdrawing, reason, now
 		next, actions := failing(s)
-		if rec.needsRevocation() {
-			rev, err := revocationOf(w, rec)
-			if err != nil {
-				return s, Outcome{}, nil, err
-			}
-			actions = append(actions, StoreRevocation{Revocation: rev.verified, Record: rev.record})
+		next, withdrawal, err := next.withdraw(w, rec, reason, now)
+		if err != nil {
+			return s, Outcome{}, nil, err
 		}
-		actions = append(actions, PersistInitiator{rec})
-		if rec.needsRevocation() {
-			actions = append(actions, Notify{Notice{Kind: NoticeRevoked, ID: id, Remote: rec.Transcript.terms.Target.node}})
-		}
-		next = next.withInitiator(rec).withPlan(fetchPlan{id: id, nextAt: now})
-		return next, executed(out, ResultOK), actions, nil
+		return next, executed(out, ResultOK), append(actions, withdrawal...), nil
 	}
 	return s, executed(out, ResultNotFound), nil, nil
 }

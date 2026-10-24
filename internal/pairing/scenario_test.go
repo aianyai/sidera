@@ -3,6 +3,7 @@ package pairing
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -956,10 +957,68 @@ func TestPeerRevokedMeanwhileIsNotSignedFor(t *testing.T) {
 		if len(a.credentials) != 0 {
 			t.Fatal("A stored a credential with a node it had revoked")
 		}
-		if r, _ := a.state.Initiator(ia.ID()); r.Status != InitiatorRejected || len(a.revocations) != 1 {
-			t.Fatalf("A record %v, %d revocations", r.Status, len(a.revocations))
+		// The next Tick withdraws the request as soon as the node is locally
+		// revoked, before the target's answer arrives.
+		if r, _ := a.state.Initiator(ia.ID()); r.Status != InitiatorWithdrawn || r.Reason != WithdrawDeclined || len(a.revocations) != 1 {
+			t.Fatalf("A record %v (%v), %d revocations", r.Status, r.Reason, len(a.revocations))
 		}
 	})
+}
+
+// A request under way ends when its peer is retired or removed locally: the next
+// Tick turns it into a withdrawal, a signature that left is revoked in the same
+// call, and no exchange carries the signature again.
+func TestInitiatorWithdrawsWhenThePeerIsRetiredOrRemoved(t *testing.T) {
+	changes := map[string]func(a, b *simNode){
+		"retired": func(a, b *simNode) {
+			rev, err := revocation.Verify(mustRetire(t, seedTest3))
+			must(t, err)
+			must(t, a.retired.Add(rev))
+		},
+		"removed locally": func(a, b *simNode) { a.view.LocallyRevoked[b.party.node] = struct{}{} },
+	}
+	for name, change := range changes {
+		for _, released := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s, signature released %v", name, released), func(t *testing.T) {
+				s, a, b := standardPair(t)
+				ia, _ := startPairing(t, s, a, b)
+				a.confirm(ia.ID(), ia.Transcript.Code())
+				if released {
+					s.run(10*time.Second, time.Second)
+				}
+				if r, _ := a.state.Initiator(ia.ID()); r.Released != released {
+					t.Fatalf("test setup: released = %v", r.Released)
+				}
+				change(a, b)
+				next, actions, err := a.state.Tick(a.world(), a.rng, s.now)
+				must(t, err)
+				r, _ := next.Initiator(ia.ID())
+				if r.Status != InitiatorWithdrawing || r.Reason != WithdrawDeclined {
+					t.Fatalf("record %v (%v), want withdrawing for a declined request", r.Status, r.Reason)
+				}
+				var revoked, fetches int
+				for _, act := range actions {
+					switch act := act.(type) {
+					case StoreRevocation:
+						revoked++
+					case FetchRequest:
+						fetches++
+						f, err := DecodeFetch(act.Frame)
+						must(t, err)
+						if f.Signed != nil || f.Withdraw != WithdrawDeclined {
+							t.Fatalf("the exchange after the change carries %+v", f)
+						}
+					}
+				}
+				if fetches != 1 {
+					t.Fatalf("%d exchanges issued, want the withdrawal", fetches)
+				}
+				if want := map[bool]int{true: 1, false: 0}[released]; revoked != want {
+					t.Fatalf("%d revocations stored, want %d", revoked, want)
+				}
+			})
+		}
+	}
 }
 
 func TestAcceptedExpiryIsClampedByTheInitiator(t *testing.T) {
