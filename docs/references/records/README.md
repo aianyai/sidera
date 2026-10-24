@@ -459,11 +459,17 @@ identity key.
   second: a record the counter would accept but that has expired is refused as
   expired and does not move the state. The serial rule of the certificate
   (`DecideSerial`) does advance on an expired higher certificate; the two differ
-  on purpose: a higher serial is the identity key's statement that lower
-  certificates are void, a fact that does not depend on the receiver's clock,
-  while an expired reachability record carries no information and is judged by the
-  receiver's clock, which, if fast, must not raise the bar on a record still valid
-  by real time.
+  on purpose, for two reasons that each rest on what the expiry means:
+  - A reachability record that the local clock calls expired does not advance
+    the counter state, because the local clock may be wrong. If a fast clock
+    made the node record the counter of a record that is still valid, the
+    record would turn stale for good once the clock was corrected, and the
+    node would refuse a record it should have kept.
+  - `DecideSerial` advances on an expired certificate that has a higher serial.
+    A certificate that is expired never becomes valid again, so no correction of
+    the clock can undo the advance, and the higher serial is the identity key's
+    statement that every lower certificate is void. Advancing is what keeps an
+    old network key from coming back when the newest certificate has lapsed.
 - **Proof.** It lets a person ask any cluster member for the node's reachability
   record and grants no management right. Its `NotAfter` is passed on to
   `admin.CheckReachabilityProof`.

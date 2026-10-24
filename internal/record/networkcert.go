@@ -208,8 +208,9 @@ const (
 // the state for the incoming certificate's node, or nil if none has been seen.
 // incoming must have passed Verify, which is what the type says. The decision
 // ignores validity in time and revocation: an expired certificate with a higher
-// serial still advances the serial seen, and a revoked one keeps it where it
-// was, so an older key cannot come back either way.
+// serial still advances the serial seen (it never becomes valid again, so the
+// advance cannot be wrong, and it keeps an older key from coming back), and a
+// revoked one keeps it where it was.
 func DecideSerial(seen *SerialSeen, incoming Verified[NetworkKeyCertificate]) SerialVerdict {
 	c := incoming.payload
 	if c.Serial < 1 || c.Node.IsZero() || incoming.digest.IsZero() {

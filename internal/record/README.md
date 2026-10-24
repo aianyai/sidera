@@ -128,7 +128,11 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   stale, and the same serial with another digest is a conflict (another network
   key or the same key with another window: the identity key signed two
   certificates under one serial). An expired certificate with a higher serial
-  advances the serial; a revocation never lowers it.
+  advances the serial, because an expired certificate never becomes valid again
+  and advancing keeps an older network key from coming back; a revocation never
+  lowers it. (The reachability record's counter rule differs on purpose: a record
+  expired by the local clock does not advance its state, as the publication
+  package explains.)
 - **Device certificate.** Signed by the root key whose derived person identifier
   is the certificate's person. Its validity window is carried as written and is
   not judged here.

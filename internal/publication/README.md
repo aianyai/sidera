@@ -73,11 +73,12 @@ package follows, and
   tolerance, and for a record without an expiry time. Verification does not
   judge it. `DecideReachability` does, after the counter: a record that the
   counter would accept but that has expired is `VerdictExpired`, and the state
-  does not move. This differs from `record.DecideSerial`, which advances on an
-  expired higher certificate: a higher serial is the identity key's statement that
-  lower certificates are void, while an expired reachability record is judged by
-  the peer's own clock and carries no information, so a peer with a fast clock
-  must not raise the bar on a record that is still valid by real time.
+  does not move. The state stays put because the judgement uses the peer's own
+  clock: if a fast clock made the peer record the counter of a record that is
+  still valid by real time, the record would be stale for good once the clock
+  was corrected. This differs from `record.DecideSerial`, which advances on an
+  expired higher certificate: an expired certificate never becomes valid again,
+  and advancing keeps an older network key from coming back.
 - **Addresses and relays are opaque.** An address is a byte string of 1 to
   `MaxAddressLen` bytes (at most `MaxAddresses` of them); this package never
   parses it. A relay is a node ID (at most `MaxRelays`), listed once: a record
