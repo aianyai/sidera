@@ -20,7 +20,8 @@ reasons behind the rules.
 | `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
 | `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A page's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
 | `Record.StatusReport`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery, and the one rule by which the sender applies it. |
-| `Intake(now, acceptBefore, Authorization)` | Target-side validation of the delivery deadline plus the authorization verdict (kind and, for a denial, the reason), for a request deduplication found new. |
+| `Intake(now, acceptBefore, traffic, Authorization, Backlog)` | Target-side validation of the delivery deadline, the authorization verdict (kind and, for a denial, the reason) and the endpoint's backlog limit, for a request deduplication found new. |
+| `Backlog`, `Record.OccupiesBacklogSlot(traffic)`, `DefaultEndpointBacklogLimit`, `ValidateEndpointBacklogLimit` | The endpoint's backlog limit: the count and limit `Intake` takes, the one rule for which records are counted, the default and its validation. |
 | `IntakeAuthorization(authz.Verdict)` | The one mapping from the policy's verdict to an `Authorization`: allow, suspend, or a denial with the `RejectReason` the sender hears. |
 | `CheckDedup`, `NewDedupRecord`, `DedupRecord.WithReply` | Deduplication, with the stored reply of a control signal. |
 | `TransitionFeedback`, `Kind` | Which feedback a change of state calls for; the fixed wording of each kind. |
@@ -90,6 +91,28 @@ with the trust and admin packages.
 redelivery period (4 leases, each at most 15 min, which is the only thing it
 depends on), and the tolerance. The target settles every delivery by
 `report_by - 5 min`; the sender closes whatever is still open after `report_by`.
+
+## Backlog limit
+
+An endpoint holds at most `DefaultEndpointBacklogLimit` (200, or the limit its
+owner set) queued messages. A message that arrives when the count is at the
+limit is `rejected` with `backlog_full`, a final state, and nothing is stored.
+
+- Judged last in `Intake`: after the deadline checks, and only if authorization
+  allows. A denied sender hears its denial and learns nothing of the queue; a
+  suspension stores nothing, so the limit is not consulted until the retry.
+- Governs ordinary messages only. Control signals are executed, never queued,
+  and refusing one would keep the owner from closing or interrupting a flooded
+  endpoint. Status reports, control replies and system feedback are exempt
+  traffic: refusing a notice because the endpoint is behind would silence the
+  anomaly it reports. For these `Intake` does not read the `Backlog`.
+- `Record.OccupiesBacklogSlot` is the one rule for the count: a target record
+  that is `accepted` (queued, leased or prompted for) and is not a control
+  record. System feedback is not counted either, so notices the node sends
+  itself never take room from other senders. The count may therefore exceed the
+  limit by the notices that are exempt from it.
+- The limit is a count, not a deadline: nothing in `Tick` changes with it, so
+  it adds no timed rule.
 
 ## Closing a delivery by force
 
@@ -186,5 +209,13 @@ correction and the blocked notice.
   `rateReleaseAt` for the rate window.
 - Whether delivery is blocked is decided by the caller (the prompt logic); this
   package only turns the decision into feedback.
+- `Intake` gets, as `Backlog`, the number of the recipient endpoint's records
+  for which `Record.OccupiesBacklogSlot(traffic)` is true (each with the traffic
+  it was made for) and the endpoint's limit, which is validated with
+  `ValidateEndpointBacklogLimit`; an unset limit (zero) is invalid input, not
+  "no limit". `traffic` is what the request is; trust maintenance is not
+  delivered to an endpoint and is invalid input. The count and the intake
+  decision are made in one atomic step with storing the record, or two requests
+  can both see room for the last slot.
 - Digests passed to dedup are computed by the caller over everything that must
   match on a retry.

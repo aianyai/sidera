@@ -90,7 +90,7 @@ key.
 | 1 | message | the id |
 | 2 | recipient | the endpoint the message was delivered to; for the initial message of a created session, the session endpoint |
 | 3 | state | 1 accepted, 2 delivered, 3 rejected, 4 delivery_unknown, 5 closed_unconfirmed |
-| 4 | reject reason | exactly when rejected: 1 unauthorized, 2 endpoint_missing, 3 endpoint_closed, 4 endpoint_declined, 5 too_large, 6 expired, 7 backlog_expired, 8 second_check_failed, 9 malformed, 10 deadline_out_of_range |
+| 4 | reject reason | exactly when rejected: 1 unauthorized, 2 endpoint_missing, 3 endpoint_closed, 4 endpoint_declined, 5 too_large, 6 expired, 7 backlog_expired, 8 second_check_failed, 9 malformed, 10 deadline_out_of_range, 11 backlog_full |
 | 5 | block cause | present exactly when the delivery is blocked (only with accepted): 1 adapter_offline, 2 runtime_auth, 3 native_unavailable |
 | 6 | reported_at | when the target recorded the state the report states |
 | 7 | delivered_at | exactly when delivered; not after `reported_at` |
@@ -133,6 +133,17 @@ layer carries the cause a sender that applies a `lost_at_target` report is told
 the ordinary delivery_unknown wording (the target handed it over); no code
 produces `lost_at_target` reports yet. A sender's loss of its own record (`lost_at_sender`) is never
 reported by a target and has no wire value.
+
+The reject reason codes are written down in this table, not taken from the
+order of the Go constants of `delivery`, so reordering those never changes what
+a signed report means; a new reason is appended with the next number and a code
+already issued is never reused. Code 11, `backlog_full`, is the rejection of an
+ordinary message that arrived at an endpoint whose queue was at its limit (see
+the [delivery](../delivery/README.md) reference). A node that predates a code
+refuses the report as malformed, so a sender and a target must run versions
+that know the same codes. Tests: `TestStatusReportWireTablesAreIndependentOfGoOrder`
+(fails when a reason has no pinned code) and the `rejected, backlog full` case of
+`TestGoldenStatusReports`.
 
 `reported_at` is the moment the target recorded the state, not the moment it
 signed. A target that sends the report again for an unchanged state (as evidence

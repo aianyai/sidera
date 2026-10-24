@@ -114,6 +114,7 @@ var (
 		8:  delivery.RejectSecondCheckFailed,
 		9:  delivery.RejectMalformed,
 		10: delivery.RejectDeadlineOutOfRange,
+		11: delivery.RejectBacklogFull,
 	}
 	causeWire = []delivery.Cause{
 		1: delivery.CauseAdapterOffline,

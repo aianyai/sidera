@@ -18,7 +18,7 @@ signals on the target). This document describes the committed code of `internal/
 | `queued` | The sender's node has recorded the message. Sender view only. | no |
 | `accepted` | The target authorized, deduplicated and stored it. On the target this covers waiting in the queue and being leased. | no |
 | `delivered` | The whole body reached the agent and was acknowledged; for a control signal, its reply was committed. | yes |
-| `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range). On the target only for a body that was never handed out. | yes |
+| `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range, backlog full). On the target only for a body that was never handed out. | yes |
 | `expired_unconfirmed` | The deadline passed and an active query found no receipt. The target may have the message. | no, correctable |
 | `delivery_unknown` | The body was handed out and whether the agent saw it cannot be told; for a control signal, it was accepted for execution and its reply was never committed. The target produces it only for a delivery that was handed over: a body handed out at least once, or any accepted control signal. | no, correctable |
 | `closed_unconfirmed` | `report_by` passed while the delivery was open. | yes, silent |
@@ -94,7 +94,8 @@ Intake of a new request: a deadline already past is rejected as expired; one
 beyond now plus cap plus tolerance is rejected as out of range; denied
 authorization is rejected with the reason the denial carries (a denial without
 one is invalid input); suspended authorization is a non-final result and the
-sender keeps retrying until the deadline. `IntakeAuthorization` is the single
+sender keeps retrying until the deadline; an ordinary message for an endpoint
+whose queue is at its limit is rejected as backlog full (below). `IntakeAuthorization` is the single
 place where the verdict of the [policy](../policy/README.md) becomes that
 authorization:
 
@@ -113,6 +114,28 @@ authorization:
 The mapping is used only at intake. At `recv`, `Handout` takes only the kind
 (`IntakeAuthorization(v).Kind`), and a refusal there is always reported as
 `second_check_failed`, so no specific rule is revealed.
+
+### Backlog limit
+
+`DefaultEndpointBacklogLimit` is 200 per endpoint, and an endpoint's owner may
+set another. A message that arrives when the endpoint holds as many queued
+messages as the limit is `rejected` with `backlog_full`, in `Intake`.
+
+| Case | Result |
+| ---- | ------ |
+| ordinary message, count below the limit | accepted |
+| ordinary message, count at or above the limit | rejected, `backlog_full` |
+| ordinary message, authorization denied | rejected with the denial's reason, whatever the count |
+| ordinary message, authorization suspended | suspended, whatever the count |
+| deadline already past, out of range or missing | rejected as `expired`, `deadline_out_of_range`, `malformed`, whatever the count |
+| control signal | accepted: never queued, so no slot is taken and none is needed |
+| status report, control reply, system feedback | accepted: exempt traffic, the count is not read |
+| limit unset (zero) or negative, negative count, traffic that is not delivered to an endpoint | invalid input |
+
+Which records are counted is `Record.OccupiesBacklogSlot`: a target record that
+is `accepted` (queued, leased or prompted for) and not a control record. A
+record that was handed over (`delivery_unknown`), delivered or rejected is not
+queued any more. System feedback is not counted.
 
 A hidden endpoint is reported as not existing, so the sender cannot tell it from
 an endpoint that is absent, and all the rules that refuse without a declaration
@@ -299,6 +322,32 @@ permission still reads it.
   of intake can tell a sender a reason of its own. At `recv` a denial is always
   `second_check_failed`, so the sender learns that the check failed and not
   which rule refused it.
+- **Over the backlog limit is a final rejection, not backpressure.** An endpoint
+  is full because its agent is not reading, and only the endpoint's owner can
+  change that. Backpressure would leave the sender retrying until its delivery
+  deadline and then telling it only that the delivery expired unconfirmed, which
+  the sender must read as "the target may have it". A rejection tells it at once,
+  with a reason of its own, and the sender can act. Reusing `endpoint_declined`
+  would blur "the endpoint refuses this sender" with "the endpoint is behind".
+  The same rejection keeps the node's queue bounded per endpoint without any
+  shared state between endpoints.
+- **Why 200.** A node holds at most 10,000 unsettled deliveries and about 50
+  endpoints, and 10,000 / 50 = 200: one flooded endpoint can take at most its
+  share. Ordinary traffic stays far below it, a few messages a minute over the
+  30 minute default queue time is at most about 100.
+- **The limit is judged last.** A sender that may not write to the endpoint
+  must not learn how full its queue is, and a suspension stores nothing, so the
+  limit has nothing to bound until the retry that is accepted.
+- **Control signals and notices are not refused, and notices are not counted.**
+  A control signal is never queued; refusing it would stop the owner from
+  closing or interrupting the flooded endpoint. A system feedback notice that
+  was refused would let the anomaly it reports go unheard, and the loop guard
+  (no notice about a notice) would make that silent. Notices are not counted
+  either, so ordinary messages are never refused because notices took the room.
+  What bounds the notices is the feedback rate cap, at most 30 per endpoint in a
+  queue time, so the count of an endpoint can exceed the limit only by that.
+  Counting them would instead let the node's own traffic refuse other senders'
+  messages.
 - **One rule for applying a report.** If every caller turned the report into
   events itself, one of them would apply the receipt and forget the block, and a
   block reported while the receipt was still unknown would never be told.
@@ -413,6 +462,10 @@ permission still reads it.
   `TestIntakeAuthorization`, `TestIntakeAuthorizationRejectReasons`,
   `TestIntakeAuthorizationMapsEveryReason` (fails when a policy reason has no
   explicit mapping).
+  The backlog limit: `Backlog`, `DefaultEndpointBacklogLimit`,
+  `ValidateEndpointBacklogLimit`, `Record.OccupiesBacklogSlot`. Tests:
+  `TestIntakeBacklogLimit` (the rule table), `TestIntakeBacklogInputs`,
+  `TestEndpointBacklogLimit`, `TestOccupiesBacklogSlot`.
 - `internal/delivery/dedup.go`: deduplication. Tests: `TestCheckDedup`,
   `TestDedupReply`.
 - `internal/delivery/merge.go`: merge keys, `FeedbackQueue`,

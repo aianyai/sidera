@@ -1,10 +1,69 @@
 package delivery
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
+	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/timing"
 )
+
+// DefaultEndpointBacklogLimit is how many messages an endpoint may hold in its
+// queue before further ones are refused. It is the node's queue limit divided by
+// the node's endpoint scale, so one endpoint that is flooded can take at most
+// its share of the node, and it is well above what ordinary traffic queues in
+// the endpoint's longest queue time. An endpoint's owner may set another limit.
+const DefaultEndpointBacklogLimit = 200
+
+// ErrBacklogLimit reports an endpoint backlog limit below one.
+var ErrBacklogLimit = errors.New("endpoint backlog limit out of range")
+
+// ValidateEndpointBacklogLimit checks an endpoint owner's backlog limit. Zero
+// is no limit set, not "no limit": a limit that refuses every message or none
+// is never what an unset value should mean.
+func ValidateEndpointBacklogLimit(limit int) error {
+	if limit < 1 {
+		return fmt.Errorf("%w: %d (at least 1)", ErrBacklogLimit, limit)
+	}
+	return nil
+}
+
+// Backlog is the state of the recipient endpoint's queue at intake.
+type Backlog struct {
+	// Queued is the number of the endpoint's records that occupy a slot now,
+	// counted with Record.OccupiesBacklogSlot.
+	Queued int
+	// Limit is the endpoint's backlog limit (ValidateEndpointBacklogLimit).
+	Limit int
+}
+
+// backlogGoverned reports whether the backlog limit applies to traffic of this
+// kind. It governs ordinary messages only: they are what a sender can pile up in
+// an endpoint's queue. A control signal is executed, never queued, and refusing
+// it would keep the owner from closing or interrupting an endpoint that is
+// flooded. Status reports, control replies and system feedback are exempt
+// traffic: refusing a notice because the endpoint is behind would silence the
+// anomaly it reports.
+func backlogGoverned(traffic authz.TrafficKind) bool {
+	return traffic == authz.TrafficMessage
+}
+
+// validIntakeTraffic reports whether traffic of this kind is delivered to an
+// endpoint, which is what Intake judges. Trust maintenance is not.
+func validIntakeTraffic(traffic authz.TrafficKind) bool {
+	return traffic >= authz.TrafficMessage && traffic <= authz.TrafficSystemFeedback
+}
+
+// OccupiesBacklogSlot reports whether a record counts toward its endpoint's
+// backlog, given the traffic the record was made for. Only a target record that
+// still waits to be handed out or acknowledged does: a control record is never
+// queued, a delivered, rejected or handed-over record is no longer queued, and
+// system feedback does not count, so that notices the node itself sends can
+// never take room from the messages other senders may queue.
+func (r Record) OccupiesBacklogSlot(traffic authz.TrafficKind) bool {
+	return r.hasQueue() && r.State == StateAccepted && backlogGoverned(traffic)
+}
 
 // IntakeOutcome is the target's answer to a first-time request.
 type IntakeOutcome uint8
@@ -39,9 +98,27 @@ type IntakeVerdict struct {
 // deadline come before authorization: a suspension can only be retried until
 // the deadline, and an expired request has none left. A refusal is reported
 // with the reason the authorization carries.
-func Intake(now, acceptBefore time.Time, auth Authorization) (IntakeVerdict, error) {
+//
+// A message that arrives when the endpoint already holds Backlog.Limit queued
+// messages is rejected as RejectBacklogFull. That is judged last: a sender that
+// is not allowed to write to the endpoint is told so and learns nothing of its
+// queue, and a suspension stores nothing, so there is nothing yet for the limit
+// to bound. Other traffic is never refused by the limit (backlogGoverned), and
+// for it the Backlog is not read.
+func Intake(now, acceptBefore time.Time, traffic authz.TrafficKind, auth Authorization, backlog Backlog) (IntakeVerdict, error) {
 	if err := auth.validate(); err != nil {
 		return IntakeVerdict{}, err
+	}
+	if !validIntakeTraffic(traffic) {
+		return IntakeVerdict{}, fmt.Errorf("%w: traffic kind %d is not delivered to an endpoint", ErrInvalidInput, traffic)
+	}
+	if backlogGoverned(traffic) {
+		if err := ValidateEndpointBacklogLimit(backlog.Limit); err != nil {
+			return IntakeVerdict{}, fmt.Errorf("%w: %w", ErrInvalidInput, err)
+		}
+		if backlog.Queued < 0 {
+			return IntakeVerdict{}, fmt.Errorf("%w: backlog count %d", ErrInvalidInput, backlog.Queued)
+		}
 	}
 	switch {
 	case acceptBefore.IsZero():
@@ -56,6 +133,9 @@ func Intake(now, acceptBefore time.Time, auth Authorization) (IntakeVerdict, err
 		return IntakeVerdict{Outcome: IntakeReject, Reject: auth.Reject}, nil
 	case AuthorizationSuspend:
 		return IntakeVerdict{Outcome: IntakeSuspended}, nil
+	}
+	if backlogGoverned(traffic) && backlog.Queued >= backlog.Limit {
+		return IntakeVerdict{Outcome: IntakeReject, Reject: RejectBacklogFull}, nil
 	}
 	return IntakeVerdict{Outcome: IntakeAccept}, nil
 }

@@ -156,6 +156,11 @@ const (
 	// RejectDeadlineOutOfRange: the delivery deadline lies further in the future
 	// than the protocol allows.
 	RejectDeadlineOutOfRange
+	// RejectBacklogFull: the recipient endpoint already holds as many queued
+	// messages as its backlog limit allows. Final at intake, so the sender
+	// learns at once that the endpoint is not reading and does not wait for a
+	// deadline.
+	RejectBacklogFull
 )
 
 var rejectNames = [...]string{
@@ -170,6 +175,7 @@ var rejectNames = [...]string{
 	RejectSecondCheckFailed:  "second_check_failed",
 	RejectMalformed:          "malformed",
 	RejectDeadlineOutOfRange: "deadline_out_of_range",
+	RejectBacklogFull:        "backlog_full",
 }
 
 func (r RejectReason) String() string {
