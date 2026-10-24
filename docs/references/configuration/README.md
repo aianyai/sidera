@@ -494,10 +494,6 @@ endpoints and not to others for a reason nobody remembers.
 
 ## Known gaps
 
-- `strictjson` reports a value of the wrong type without a path. `config`
-  recovers the path by decoding the same input again with the standard library
-  and walking the document to the offset it reports (`typeErrorPath`). If
-  `strictjson` names such values itself, that function can go.
 - The mode of a staged file (the entry program is written executable, the rest
   private) is chosen by `config` and not observed by the tests: the in-memory
   file system does not model modes.

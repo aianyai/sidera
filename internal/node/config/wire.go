@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -33,7 +32,11 @@ func encodeJSON(v any) ([]byte, error) {
 }
 
 // decodeStrict decodes a document with the strictness of strictjson and turns
-// its error into a FieldError that says the document is malformed.
+// its error into a FieldError that says the document is malformed. The message
+// of strictjson is shown as it is: it says what was expected and never repeats
+// a value, except for self-decoding types, fields with the string option and
+// json.Number, none of which a wire type of this package uses. A wire type that
+// does must not reach this function, since a configuration may hold secrets.
 func decodeStrict(data []byte, v any) error {
 	err := strictjson.Decode(data, v)
 	if err == nil {
@@ -41,97 +44,9 @@ func decodeStrict(data []byte, v any) error {
 	}
 	var se *strictjson.Error
 	if errors.As(err, &se) {
-		path := se.Path
-		if path == "" {
-			path = typeErrorPath(data, v)
-		}
-		return &FieldError{Field: path, Malformed: true, Err: errors.New(se.Msg)}
+		return &FieldError{Field: se.Path, Malformed: true, Err: errors.New(se.Msg)}
 	}
 	return &FieldError{Malformed: true, Err: err}
-}
-
-// typeErrorPath finds the path of a value of the wrong type. strictjson reports
-// such a value without a path. The standard library's decoder, run again on the
-// same input, reports where the value is but not under which keys (its own
-// field path leaves out the keys of maps), so the path is found by walking the
-// document up to that offset.
-func typeErrorPath(data []byte, v any) string {
-	var ute *json.UnmarshalTypeError
-	if err := json.Unmarshal(data, v); !errors.As(err, &ute) {
-		return ""
-	}
-	return pathEndingAt(data, ute.Offset)
-}
-
-// pathEndingAt returns the JSON path of the value at offset, as the standard
-// library reports it: the end of a scalar, or the position just after the
-// opening bracket of an object or array. It returns "" when no value is there.
-func pathEndingAt(data []byte, offset int64) string {
-	type frame struct {
-		object    bool
-		key       string
-		index     int
-		expectKey bool
-	}
-	var stack []frame
-	path := func() string {
-		var b strings.Builder
-		for _, f := range stack {
-			if f.object {
-				if b.Len() > 0 {
-					b.WriteByte('.')
-				}
-				b.WriteString(f.key)
-			} else {
-				fmt.Fprintf(&b, "[%d]", f.index)
-			}
-		}
-		return b.String()
-	}
-	// valueDone records that a value of the enclosing object or array is complete.
-	valueDone := func() {
-		if n := len(stack); n > 0 && stack[n-1].object {
-			stack[n-1].expectKey = true
-		}
-	}
-	// valueStarts is called when a value begins; an array element has its index.
-	valueStarts := func() {
-		if n := len(stack); n > 0 && !stack[n-1].object {
-			stack[n-1].index++
-		}
-	}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	for {
-		tok, err := dec.Token()
-		if err != nil {
-			return ""
-		}
-		switch t := tok.(type) {
-		case json.Delim:
-			switch t {
-			case '{', '[':
-				valueStarts()
-				if dec.InputOffset() == offset {
-					return path()
-				}
-				stack = append(stack, frame{object: t == '{', index: -1, expectKey: t == '{'})
-			default:
-				stack = stack[:len(stack)-1]
-				valueDone()
-			}
-			continue
-		case string:
-			if n := len(stack); n > 0 && stack[n-1].object && stack[n-1].expectKey {
-				stack[n-1].key, stack[n-1].expectKey = t, false
-				continue
-			}
-		}
-		valueStarts()
-		if dec.InputOffset() == offset {
-			return path()
-		}
-		valueDone()
-	}
 }
 
 func invalid(field string, err error) error { return &FieldError{Field: field, Err: err} }
