@@ -336,7 +336,12 @@ Why these shapes:
   because a node whose identity was retired can later be paired by an attacker
   holding the stolen key, and an expectation the owner entered confirms that
   pairing by itself; a retirement passed on once and dropped could not be seen at
-  confirmation. Classification is separate from the set: the set only answers
+  confirmation. `Classify` judges once, on arrival: a node-level revocation
+  passed on once before any relationship with the node existed is not fetched
+  again by this package, because a re-fetch needs the peers a relationship
+  brings and the synchronisation protocol that talks to them; that protocol owns
+  fetching it again once a relationship is established. Classification is
+  separate from the set: the set only answers
   questions, and what to put in it is `Classify`'s decision, so the rule has one
   home.
 

@@ -98,7 +98,11 @@ of it.
   related revocation is never refused for the cap. The reason says which rule
   decided. An invalid input (zero `Revocation`, negative count, unset cap for an
   unrelated revocation) is `Dropped` with `ReasonInvalidInput`; nothing is kept
-  on an input the rule cannot judge.
+  on an input the rule cannot judge. `Classify` judges once, on arrival, with
+  the facts the node holds then. A node-level revocation that was forwarded
+  once, or dropped, before any relationship with the node existed is not
+  fetched again by this package; fetching it again after a relationship is
+  established belongs to the synchronisation protocol.
 
 ## What the caller must guarantee
 
