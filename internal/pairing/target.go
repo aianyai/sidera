@@ -244,8 +244,8 @@ func (s State) targetOpen(w World, sess onlineSession, frame []byte, now time.Ti
 
 // targetFetch answers an initiator that asks for the result. peer is the
 // authenticated party of the connection; it is the initiator of the request
-// only if its node and identity key equal the transcript's, whatever
-// connection or network key it comes from, and its certificate serial is not
+// only if its node equals the transcript's (which fixes the identity key),
+// whatever connection or network key it comes from, and its certificate serial is not
 // older than one already seen. Anyone else gets exactly the answer for a
 // request that does not exist.
 func (s State) targetFetch(w World, peer Party, f FetchMsg, now time.Time) (State, ResultMsg, []Action, error) {
@@ -255,8 +255,12 @@ func (s State) targetFetch(w World, peer Party, f FetchMsg, now time.Time) (Stat
 		return s, unknown, nil, nil
 	}
 	rec := s.targets[i]
-	initiator := rec.Transcript.terms.Initiator
-	if peer.node != initiator.node || peer.identity != initiator.identity || peer.serial < rec.HighestSerial {
+	// The peer is the initiator when its node is: a node identifier is the
+	// digest of the identity key, which a Party always derives it from, so the
+	// identity key needs no comparison of its own. Neither the connection nor the
+	// network key matters, only that the certificate serial is not older than one
+	// already seen.
+	if peer.node != rec.Transcript.terms.Initiator.node || peer.serial < rec.HighestSerial {
 		return s, unknown, nil, nil
 	}
 
@@ -278,21 +282,19 @@ func (s State) targetFetch(w World, peer Party, f FetchMsg, now time.Time) (Stat
 		case f.Signed != nil && rec.InitiatorSignature == nil && checkPartial(rec.Transcript, *f.Signed) == nil:
 			rec.InitiatorSignature = f.Signed
 			changed = true
-			if rec.Confirmation != nil {
-				done, doneActions, err := s.completeTarget(w, rec, now)
-				if err != nil {
-					return s, ResultMsg{}, nil, err
-				}
-				rec, actions, changed = done, doneActions, false
-			}
 		}
 	}
-	next := s
 	if changed {
 		actions = append(actions, PersistTarget{rec})
 	}
-	next = next.withTarget(rec)
-	return next, targetResult(rec), actions, nil
+	if rec.readyToComplete() {
+		done, doneActions, err := s.completeTarget(w, rec, now)
+		if err != nil {
+			return s, ResultMsg{}, nil, err
+		}
+		rec, actions = done, append(actions, doneActions...)
+	}
+	return s.withTarget(rec), targetResult(rec), actions, nil
 }
 
 // targetResult is the answer the target gives for a record.
@@ -323,7 +325,7 @@ func targetResult(rec TargetRecord) ResultMsg {
 // between the two is repaired by running this again, which yields the same
 // bytes: the signature is deterministic and the digest does not cover it.
 func (s State) completeTarget(w World, rec TargetRecord, now time.Time) (TargetRecord, []Action, error) {
-	if rec.Status != TargetPending || rec.Confirmation == nil || rec.InitiatorSignature == nil {
+	if !rec.readyToComplete() {
 		return rec, nil, errors.New("pairing: completing a request that is not ready")
 	}
 	terms := rec.Transcript.terms

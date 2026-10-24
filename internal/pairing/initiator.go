@@ -224,8 +224,7 @@ func (s State) OnFetchFailed(w World, id ID, rand io.Reader, now time.Time) (Sta
 
 // OnFetchResult handles the answer to a FetchRequest. responder is the
 // authenticated party of the connection the answer came on: it must be the
-// target of the request, by node and identity key, whatever network key it
-// uses now. An answer from anyone else, malformed, or for another request is
+// target of the request, by node, whatever network key it uses now. An answer from anyone else, malformed, or for another request is
 // treated as a failed exchange.
 func (s State) OnFetchResult(w World, id ID, responder Party, frame []byte, rand io.Reader, now time.Time) (State, []Action, error) {
 	if err := w.validate(); err != nil {
@@ -238,8 +237,10 @@ func (s State) OnFetchResult(w World, id ID, responder Party, frame []byte, rand
 	}
 	rec := s.initiators[i]
 	target := rec.Transcript.terms.Target
+	// The responder is the target when its node is, whatever network key it uses
+	// now; its identity key follows from its node identifier.
 	msg, err := DecodeResult(frame)
-	if err != nil || msg.ID != id || responder.node != target.node || responder.identity != target.identity {
+	if err != nil || msg.ID != id || responder.node != target.node {
 		return s.OnFetchFailed(w, id, rand, now)
 	}
 	if rec.Status != InitiatorActive && rec.Status != InitiatorWithdrawing {

@@ -120,7 +120,7 @@ func (s State) Recover(w World, now time.Time) (State, []Action, error) {
 	now = wholeNow(now)
 	next, actions := s, []Action(nil)
 	for _, rec := range s.targets {
-		if !rec.Waiting(now) || rec.Confirmation == nil || rec.InitiatorSignature == nil {
+		if !rec.Waiting(now) || !rec.readyToComplete() {
 			continue
 		}
 		done, acts, err := next.completeTarget(w, rec, now)

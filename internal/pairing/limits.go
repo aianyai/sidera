@@ -65,11 +65,11 @@ func inWindow(ts []time.Time, window time.Duration, now time.Time) []time.Time {
 }
 
 // retryHint turns the instant a counter frees into a hint relative to now:
-// whole seconds, rounded up, at least one, because a zero hint is not a hint.
+// whole seconds, rounded up. An entry that still counts is less than a window
+// old, so free is after now and the hint is at least one second, which matters
+// because a zero hint is not a hint.
 func retryHint(free, now time.Time) time.Duration {
-	d := free.Sub(now)
-	hint := (d + time.Second - 1) / time.Second * time.Second
-	return max(hint, time.Second)
+	return (free.Sub(now) + time.Second - 1) / time.Second * time.Second
 }
 
 // RevealAllowed reports whether the target may reveal its nonce to an

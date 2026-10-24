@@ -218,6 +218,14 @@ func (r TargetRecord) ID() ID { return r.Transcript.id }
 // Display returns what the target's owner compares.
 func (r TargetRecord) Display() Display { return displayOf(r.Transcript, false, r.ExpiresAt) }
 
+// readyToComplete reports whether the request has what completing needs: it
+// still waits, its owner confirmed (or an expectation did), and the initiator's
+// signature is in. It is the one place that says so; the target signs only when
+// it holds.
+func (r TargetRecord) readyToComplete() bool {
+	return r.Status == TargetPending && r.Confirmation != nil && r.InitiatorSignature != nil
+}
+
 // Terminal reports whether the request has ended.
 func (r TargetRecord) Terminal() bool { return r.Status != TargetPending }
 

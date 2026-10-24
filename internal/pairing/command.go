@@ -211,14 +211,15 @@ func (s State) Confirm(w World, req Request, id ID, code Code, now time.Time) (S
 			return s, executed(out, r), nil, nil
 		}
 		rec.Confirmation = conf
-		if rec.InitiatorSignature == nil {
-			return s.withTarget(rec), executed(out, ResultOK), []Action{PersistTarget{rec}}, nil
+		actions := []Action{PersistTarget{rec}}
+		if rec.readyToComplete() {
+			done, doneActions, err := s.completeTarget(w, rec, now)
+			if err != nil {
+				return s, Outcome{}, nil, err
+			}
+			rec, actions = done, append(actions, doneActions...)
 		}
-		done, actions, err := s.completeTarget(w, rec, now)
-		if err != nil {
-			return s, Outcome{}, nil, err
-		}
-		return s.withTarget(done), executed(out, ResultOK), actions, nil
+		return s.withTarget(rec), executed(out, ResultOK), actions, nil
 	}
 
 	if i := s.initiatorIndex(id); i >= 0 {
