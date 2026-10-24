@@ -175,8 +175,8 @@ Reply permission reads facts that outlive the delivery. The source node keeps th
 outbound record, with its arrival facts and the digest of the accepted control
 reply, at least until `report_by` plus `timing.ClockTolerance` plus the reply
 window (24 hours). The target keeps the control reply payload and the delivery
-facts it reports on for the same period. Both are terminal records, which the
-node keeps for 30 days, so the period is covered. The target stores payloads
+facts it reports on for the same period, which is longer than delivery keeps
+its dedup records and status reports. The target stores payloads
 only; the signature is made when a report or reply is sent.
 
 ### Reply permission

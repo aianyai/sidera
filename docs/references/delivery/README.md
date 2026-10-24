@@ -73,7 +73,9 @@ parameters without defaults; notices over the cap are held, not dropped.
 The redelivery period is the lease count times the lease life cap and depends on
 nothing else. Dedup records are kept until `report_by`; status reports for the
 longer of until `report_by` and a full `report_by` window from their creation;
-the sender's idempotency keys as long as the dedup records.
+the sender's idempotency keys as long as the dedup records. Reply permission
+reads some of these facts for longer; see
+[what each side keeps](../envelope/README.md#what-each-side-keeps).
 
 Target guarantee: by `report_by - margin` every delivery is final or reported as
 `delivery_unknown`. A queued message becomes `rejected` (backlog expired) at the

@@ -116,7 +116,7 @@ caller stops pulling from that peer for the message and logs it.
 - Storage keeps, at least until `report_by` plus `timing.ClockTolerance` plus the
   reply window (24 hours), the source's `Outbound` with its arrival facts and the
   digest of the accepted control reply, and the target's control reply payload and
-  delivery facts; the 30-day retention of terminal records covers it. The target
+  delivery facts, longer than delivery keeps its dedup records. The target
   stores payloads only and signs a status report or control reply with its
   current network key each time it sends one as evidence or in answer to a pull;
   the digest excludes signatures, so signing again does not change it.
