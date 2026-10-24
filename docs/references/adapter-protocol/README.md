@@ -472,6 +472,28 @@ does not sort codes itself). Only for the methods with side effects
 (`session.create`, `prompt.deliver`, `session.interrupt`, `session.close`) does
 an unknown outcome call for reconciliation or an idempotent retry.
 
+**Rejection reasons.** A recipient of `endpoint.message_status` in state
+`rejected` carries one `reason`, by name (`RejectReason`), and no other state
+carries one. The names are those the daemon's delivery package gives its
+rejection reasons, so nothing is translated on the way to the sender. A body
+that was handed out is never rejected afterwards; it becomes `delivery_unknown`.
+The rules are those of [`../delivery/README.md`](../delivery/README.md), which
+is authoritative.
+
+| Reason | Meaning |
+| ------ | ------- |
+| `unauthorized` | the authorization check at intake denied the message |
+| `endpoint_missing` | the recipient endpoint does not exist |
+| `endpoint_closed` | the recipient endpoint was closed or deleted, possibly while the message was queued |
+| `endpoint_declined` | the endpoint declared that it does not accept this message, for example one with several recipients |
+| `too_large` | the body exceeds the size limit |
+| `expired` | the delivery deadline had already passed when the message first arrived |
+| `backlog_expired` | the message stayed queued, never handed out, past the endpoint's longest queue time or the settle deadline |
+| `second_check_failed` | the authorization check made when the body was first to be handed out denied it |
+| `malformed` | the envelope is not valid |
+| `deadline_out_of_range` | the delivery deadline lies further in the future than the protocol allows |
+| `backlog_full` | the recipient endpoint already held as many queued messages as its backlog limit allows when the message arrived; the rejection is final at intake and nothing was stored |
+
 ### Why
 
 - **Results carry the semantics, errors only misuse.** A refusal the daemon must
@@ -500,6 +522,16 @@ an unknown outcome call for reconciliation or an idempotent retry.
 - **Identifiers stay opaque.** The adapter never parses them, so copying their
   syntax into the SDK would only make a second place to keep in step with the
   daemon, for the benefit of an earlier error message.
+- **A rejection reason is a name, and the set is closed within a version.** A
+  sender that stored or compared a reason must still read it later, so a name
+  once sent is never renamed, removed or reused. Within a released protocol
+  version the set of reasons is closed: strict decoding refuses an unknown
+  reason, so a reason added after a version is released follows the version rule
+  above and needs a new protocol version. `backlog_full` is its own reason
+  because the sender can act on it, by retrying later or sending elsewhere,
+  where `backlog_expired` means a message that was accepted and then waited too
+  long, and `endpoint_declined` means the endpoint refused this sender or
+  message, where `backlog_full` means the endpoint's own queue was full.
 - **Rejected:** per-request version metadata (the connection is long-lived and
   stateful, so one negotiation is enough); streaming the model's output (the
   channel does not read it); forwarding permission requests to the daemon
@@ -515,8 +547,10 @@ an unknown outcome call for reconciliation or an idempotent retry.
 - `sdk/go/strictjson`: the strict decoder. It is a public package so that readers
   outside the SDK apply the same rules instead of a second copy.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
-  `TestErrorObjectKnowsEveryCode`, `TestErrorObjectValidate`, `TestCapabilitiesAreOpen`, `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
-  `FuzzDecodeMessages`.
+  `TestRejectReasonTable`, `TestEnumNamesMatchContractPackages` (the reasons are
+  the delivery package's own names), `TestErrorObjectKnowsEveryCode`,
+  `TestErrorObjectValidate`, `TestCapabilitiesAreOpen`, `TestDecodeStrictness`,
+  the `Test*Rules` tables (one row per rule), `FuzzDecodeMessages`.
 
 ## Capabilities and endpoint kinds
 

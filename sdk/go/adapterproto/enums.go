@@ -461,11 +461,13 @@ const (
 	RejectSecondCheckFailed  RejectReason = "second_check_failed"
 	RejectMalformed          RejectReason = "malformed"
 	RejectDeadlineOutOfRange RejectReason = "deadline_out_of_range"
+	RejectBacklogFull        RejectReason = "backlog_full"
 )
 
 var rejectReasons = []RejectReason{
 	RejectUnauthorized, RejectEndpointMissing, RejectEndpointClosed, RejectEndpointDeclined, RejectTooLarge,
 	RejectExpired, RejectBacklogExpired, RejectSecondCheckFailed, RejectMalformed, RejectDeadlineOutOfRange,
+	RejectBacklogFull,
 }
 
 // Valid reports whether r is a known reason.

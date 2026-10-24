@@ -152,7 +152,7 @@
     },
     "RejectReason": {
       "type": "string",
-      "enum": ["unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired", "backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range"]
+      "enum": ["unauthorized", "endpoint_missing", "endpoint_closed", "endpoint_declined", "too_large", "expired", "backlog_expired", "second_check_failed", "malformed", "deadline_out_of_range", "backlog_full"]
     },
     "ControlSignal": { "type": "string", "enum": ["session.create", "session.close", "session.interrupt", "endpoint.status"] },
 
