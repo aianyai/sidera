@@ -364,6 +364,9 @@ func (s *sim) deliverOne(i int, drop bool) {
 	d := s.queue[i]
 	s.queue = append(s.queue[:i], s.queue[i+1:]...)
 	st := d.stream
+	if drop {
+		return
+	}
 	if d.closing {
 		if d.toTarget && !st.tgtClosed {
 			st.tgtClosed = true

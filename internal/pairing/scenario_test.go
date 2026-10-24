@@ -1582,3 +1582,411 @@ func FuzzDecodeExpectations(f *testing.F) {
 		}
 	})
 }
+
+// An expectation is asked again when the request is saved, not only when the
+// segment starts: an author demoted in between does not pre-confirm anything.
+func TestAuthorDemotedBetweenRevealAndOpen(t *testing.T) {
+	s, a, b := standardPair(t)
+	_, boss := b.grantPerson(3, admin.LevelFullControl)
+	req := b.as(boss)
+	next, out, actions, err := b.state.Expect(b.world(), req, a.party.node, s.now)
+	must(t, err)
+	if out.Result != ResultOK {
+		t.Fatal(out)
+	}
+	b.state = next
+	b.apply(actions, nil)
+
+	s.initiate(a, b, Initiation{})
+	s.deliverOne(0, false) // M1: B reveals as it would to an expected node
+	entries := b.list.Entries()
+	entries[0].Level = admin.LevelManage
+	b.list, _ = admin.NewList(entries)
+	s.pump()
+	if len(b.state.Targets()) != 0 {
+		t.Fatal("a request was saved on the strength of an expectation that no longer stood")
+	}
+	if n := lastNotice(a); n.Kind != NoticeAttemptUsed {
+		t.Fatalf("notice %+v", n)
+	}
+}
+
+// A newer segment from the same initiator replaces its older one that is still
+// open, so a retry never holds two reservations.
+func TestNewerSegmentFromTheSameInitiatorReplacesTheOlder(t *testing.T) {
+	s, a, b := standardPair(t)
+	s.initiate(a, b, Initiation{})
+	s.deliverOne(0, false) // M1
+	for len(s.queue) > 0 {
+		s.deliverOne(0, true)
+	}
+	if got := b.state.unexpectedWaiting(s.now, ident.NodeID{}); got != 1 {
+		t.Fatalf("reservations %d", got)
+	}
+	a.restart() // A's segment is gone; B's lingers
+	s.queue = nil
+	s.initiate(a, b, Initiation{})
+	s.deliverOne(0, false)
+	if got := b.state.unexpectedWaiting(s.now, ident.NodeID{}); got != 1 {
+		t.Fatalf("reservations after the retry: %d, want 1", got)
+	}
+	if len(b.state.sessions) != 1 {
+		t.Fatalf("B keeps %d sessions", len(b.state.sessions))
+	}
+}
+
+// fetchAs sends a fetch frame to the target as the given party and returns the
+// status it answers.
+func fetchAs(t testing.TB, s *sim, b *simNode, from Party, f FetchMsg) ResultMsg {
+	t.Helper()
+	sid := b.nextSID
+	b.nextSID++
+	next, _, err := b.state.TargetOpen(b.world(), sid, s.now)
+	must(t, err)
+	b.state = next
+	next, actions, err := b.state.TargetReceive(b.world(), Conn{Local: b.party, Remote: from, Protocol: simProtocol}, sid, mustEncode(t, f), b.rng, s.now)
+	must(t, err)
+	b.state = next
+	b.apply(actions, nil)
+	r, err := DecodeResult(firstSend(t, actions))
+	must(t, err)
+	return r
+}
+
+// A signature that is not the initiator's, or is over another credential, is
+// not kept and does not complete anything.
+func TestTargetIgnoresAnInitiatorSignatureThatIsNotTheInitiators(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, tb := startPairing(t, s, a, b)
+	b.confirm(tb.ID(), tb.Transcript.Code())
+	cred := ia.Transcript.Credential()
+
+	byTarget, err := record.Seal(credential.Descriptor, cred, b.signer) // right payload, the target's own key
+	must(t, err)
+	other := credential.New(a.party.node, b.party.node, ia.Transcript.Terms().CreatedAt, time.Time{}, credential.Nonce{9})
+	otherPayload, err := record.Seal(credential.Descriptor, other, a.signer) // the initiator's key, another payload
+	must(t, err)
+	both, err := record.CoSign(credential.Descriptor, mustSeal(t, cred, a.signer), b.signer) // a complete record
+	must(t, err)
+	for name, rec := range map[string]record.Record{"signed by the target": byTarget, "another payload": otherPayload, "already complete": both} {
+		rec := rec
+		r := fetchAs(t, s, b, a.party, FetchMsg{ID: tb.ID(), Signed: &rec})
+		if r.Status != StatusAwaitingInitiatorSignature {
+			t.Fatalf("%s: answered %v", name, r.Status)
+		}
+		if got, _ := b.state.Target(tb.ID()); got.InitiatorSignature != nil || got.Status != TargetPending {
+			t.Fatalf("%s: the record changed", name)
+		}
+	}
+	if len(b.credentials) != 0 {
+		t.Fatal("a credential was made from a signature that is not the initiator's")
+	}
+}
+
+func mustSeal(t testing.TB, c credential.Credential, signer record.Signer) record.Record {
+	t.Helper()
+	r, err := record.Seal(credential.Descriptor, c, signer)
+	must(t, err)
+	return r
+}
+
+// A target does not complete after its request expired, even when it was
+// confirmed and the initiator's signature arrives late.
+func TestLateSignatureDoesNotCompleteAnExpiredRequest(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, tb := startPairing(t, s, a, b)
+	b.confirm(tb.ID(), tb.Transcript.Code())
+	sig := mustSeal(t, ia.Transcript.Credential(), a.signer)
+	s.advance(time.Hour) // no tick: the expiry is applied by the fetch itself
+	r := fetchAs(t, s, b, a.party, FetchMsg{ID: tb.ID(), Signed: &sig})
+	if r.Status != StatusExpired {
+		t.Fatalf("answered %v", r.Status)
+	}
+	if len(b.credentials) != 0 {
+		t.Fatal("completed after expiry")
+	}
+}
+
+func TestInitiatorEndsAtTheTimeLimitOnAReveal(t *testing.T) {
+	s, a, b := standardPair(t)
+	s.initiate(a, b, Initiation{})
+	s.deliverOne(0, false) // M1: B's reveal is queued
+	s.advance(31 * time.Second)
+	for len(s.queue) > 0 {
+		s.deliverOne(0, false)
+	}
+	for _, e := range s.events {
+		if e.Node == "A" && e.Kind == "send" {
+			if _, err := DecodeOpen(e.Frame); err == nil && e.Frame != nil {
+				// The only open sent is the one of the first M1/M2 round, which never happened here.
+				t.Fatal("A opened its nonce after its own time limit")
+			}
+		}
+	}
+	if n := lastNotice(a); n.Kind != NoticeNotStarted {
+		t.Fatalf("notice %+v", n)
+	}
+}
+
+func TestInitiatorIgnoresAnAnswerFromAnotherNode(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, tb := startPairing(t, s, a, b)
+	a.confirm(ia.ID(), ia.Transcript.Code())
+	other := s.addGenerated("C", 5)
+	// A forged "unknown" from a node that is not the target must not end anything.
+	next, _, err := a.state.OnFetchResult(a.world(), ia.ID(), other.party, mustEncode(t, ResultMsg{ID: ia.ID(), Status: StatusUnknown}), a.rng, s.now)
+	must(t, err)
+	if r, _ := next.Initiator(ia.ID()); r.Status != InitiatorActive {
+		t.Fatalf("A ended its request on the word of another node: %v", r.Status)
+	}
+	next, _, err = a.state.OnFetchResult(a.world(), ia.ID(), b.party, mustEncode(t, ResultMsg{ID: ia.ID(), Status: StatusUnknown}), a.rng, s.now)
+	must(t, err)
+	if r, _ := next.Initiator(ia.ID()); r.Status != InitiatorUnknown {
+		t.Fatalf("the target's own answer was ignored: %v", r.Status)
+	}
+	_ = tb
+}
+
+func TestInitiatorGivesUpAndRevokesWhenTheTargetNeverAnswers(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, _ := startPairing(t, s, a, b)
+	a.confirm(ia.ID(), ia.Transcript.Code())
+	s.run(30*time.Second, 5*time.Second)
+	s.dropFetch = func(simFetch) bool { return true }
+	s.run(24*time.Hour+30*time.Minute, 10*time.Minute) // up to the target's expiry plus retention is not yet over
+	if r, _ := a.state.Initiator(ia.ID()); r.Status != InitiatorActive {
+		t.Fatalf("A gave up early: %v", r.Status)
+	}
+	if len(a.revocations) != 0 {
+		t.Fatal("revoked while the answer could still come")
+	}
+	s.run(2*time.Hour, 10*time.Minute)
+	r, _ := a.state.Initiator(ia.ID())
+	if r.Status != InitiatorGaveUp {
+		t.Fatalf("A record %v", r.Status)
+	}
+	if len(a.revocations) != 1 {
+		t.Fatalf("revocations %d", len(a.revocations))
+	}
+}
+
+func TestFetchBackoff(t *testing.T) {
+	p := DefaultParams()
+	rng := detReader{rand.New(rand.NewSource(3))}
+	prev := time.Duration(0)
+	for n := 1; n <= 12; n++ {
+		want := p.FetchBackoffMin << (n - 1)
+		if want > p.FetchBackoffMax {
+			want = p.FetchBackoffMax
+		}
+		low, high := time.Hour, time.Duration(0)
+		for i := 0; i < 200; i++ {
+			d := backoff(p, n, rng)
+			low, high = min(low, d), max(high, d)
+			if d > want || d < max(want/2, p.FetchBackoffMin) {
+				t.Fatalf("attempt %d: %v outside [%v, %v]", n, d, max(want/2, p.FetchBackoffMin), want)
+			}
+		}
+		if n >= 3 && high-low < want/4 {
+			t.Fatalf("attempt %d: no jitter (%v to %v)", n, low, high)
+		}
+		if want < prev {
+			t.Fatal("not monotone")
+		}
+		prev = want
+	}
+	if got := backoff(p, 1, rng); got != time.Second {
+		t.Fatalf("first delay %v", got)
+	}
+	if got := backoff(p, 40, bytes.NewReader(nil)); got != p.FetchBackoffMax {
+		t.Fatalf("a failing source of randomness: %v, want the unjittered delay", got)
+	}
+}
+
+func TestPauseStopsConfirmingAnUnexpectedRequest(t *testing.T) {
+	s, a, b := standardPair(t)
+	_, tb := startPairing(t, s, a, b)
+	for i := 0; i < 3; i++ {
+		b.state = b.state.withLimits(b.state.limits.RecordFailure(b.params, s.now.Add(-30*time.Minute)))
+	}
+	out := b.confirm(tb.ID(), tb.Transcript.Code())
+	if out.Result != ResultPaused || out.RetryAfter != 30*time.Minute {
+		t.Fatalf("outcome %+v", out)
+	}
+	if r, _ := b.state.Target(tb.ID()); r.Confirmation != nil {
+		t.Fatal("confirmed during the pause")
+	}
+	// The request is kept; after the pause it can be confirmed.
+	s.advance(30 * time.Minute)
+	if out := b.confirm(tb.ID(), tb.Transcript.Code()); out.Result != ResultOK {
+		t.Fatalf("after the pause: %+v", out)
+	}
+}
+
+func TestInitiateNamesTheNodeItReaches(t *testing.T) {
+	s, a, b := standardPair(t)
+	c := s.addGenerated("C", 4)
+	_, out := s.initiate(a, b, Initiation{Target: c.party.node})
+	if out.Disposition != DispositionExecuted || out.Result != ResultWrongPeer {
+		t.Fatalf("outcome %+v", out)
+	}
+	if len(s.queue) != 0 {
+		t.Fatal("a frame was sent to a node that is not the one named")
+	}
+}
+
+// Recovery repeats what a crash may have left undone, from records alone.
+func TestRecoverRepeatsTheRevocationOfAReleasedSignature(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, _ := startPairing(t, s, a, b)
+	a.confirm(ia.ID(), ia.Transcript.Code())
+	s.run(10*time.Second, time.Second)
+	a.reject(ia.ID(), WithdrawDeclined)
+	// The revocation store lost what it had.
+	a.revocations = map[record.Digest]record.Record{}
+	a.restart()
+	if len(a.revocations) != 1 {
+		t.Fatalf("revocations after recovery: %d", len(a.revocations))
+	}
+}
+
+func TestRecoverCompletesAConfirmedRequestThatHoldsTheSignature(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, tb := startPairing(t, s, a, b)
+	rec := tb
+	conf := Confirmation{Method: ConfirmedByCode, By: LocalAuthor(), Operation: admin.OperationID{1}, At: wholeNow(s.now)}
+	sig := mustSeal(t, ia.Transcript.Credential(), a.signer)
+	rec.Confirmation, rec.InitiatorSignature = &conf, &sig
+	st, err := Restore(Snapshot{Targets: []TargetRecord{rec}})
+	must(t, err)
+	b.state = st
+	next, actions, err := b.state.Recover(b.world(), s.now)
+	must(t, err)
+	b.state = next
+	b.apply(actions, nil)
+	if len(b.credentials) != 1 {
+		t.Fatal("recovery did not complete the request")
+	}
+	if got, _ := b.state.Target(tb.ID()); got.Status != TargetComplete {
+		t.Fatalf("record %v", got.Status)
+	}
+}
+
+func TestDecodingRefusesAnInconsistentRecord(t *testing.T) {
+	s, a, b := standardPair(t)
+	_, tb := startPairing(t, s, a, b)
+	var w targetWire
+	must(t, record.UnmarshalStrict(b.disk["target/"+hexID(tb.ID())], &w, MaxPersisted))
+	for name, mutate := range map[string]func(*targetWire){
+		"complete without a credential":  func(w *targetWire) { w.Status = uint64(TargetComplete) },
+		"rejected without a reason":      func(w *targetWire) { w.Status = uint64(TargetRejected); e := int64(5); w.EndedAt = &e },
+		"a status outside the table":     func(w *targetWire) { w.Status = 9 },
+		"expires before it was received": func(w *targetWire) { w.ExpiresAt = w.ReceivedAt },
+	} {
+		bad := w
+		mutate(&bad)
+		if _, err := DecodeTargetRecord(mustMarshal(t, bad)); err == nil {
+			t.Fatalf("%s: decoded", name)
+		}
+	}
+}
+
+// A target that answers "complete" with anything but the credential this node
+// computed, signed by both identity keys, has completed nothing.
+func TestInitiatorStoresOnlyTheCredentialItComputed(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, _ := startPairing(t, s, a, b)
+	a.confirm(ia.ID(), ia.Transcript.Code())
+	c := s.addGenerated("C", 8)
+	cred := ia.Transcript.Credential()
+	other := credential.New(a.party.node, b.party.node, cred.CreatedAt, time.Time{}, credential.Nonce{7})
+	otherDone, err := record.CoSign(credential.Descriptor, mustSeal(t, other, a.signer), b.signer)
+	must(t, err)
+	withStranger := credential.New(a.party.node, c.party.node, cred.CreatedAt, time.Time{}, cred.Nonce)
+	strangerDone, err := record.CoSign(credential.Descriptor, mustSeal(t, withStranger, a.signer), c.signer)
+	must(t, err)
+	partial := mustSeal(t, cred, a.signer)
+	for name, rec := range map[string]record.Record{"another credential": otherDone, "a credential with a third node": strangerDone, "only the initiator's signature": partial} {
+		rec := rec
+		frame := mustEncode(t, ResultMsg{ID: ia.ID(), Status: StatusComplete, Credential: &rec})
+		next, actions, err := a.state.OnFetchResult(a.world(), ia.ID(), b.party, frame, a.rng, s.now)
+		must(t, err)
+		for _, act := range actions {
+			if _, stored := act.(StoreCredential); stored {
+				t.Fatalf("%s: stored", name)
+			}
+		}
+		if r, _ := next.Initiator(ia.ID()); r.Status != InitiatorActive {
+			t.Fatalf("%s: record %v", name, r.Status)
+		}
+	}
+}
+
+func TestOnePairingAtATimePerTarget(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, _ := startPairing(t, s, a, b)
+	_, out := s.initiate(a, b, Initiation{})
+	if out.Result != ResultInProgress {
+		t.Fatalf("second initiation while one is active: %+v", out)
+	}
+	// Withdrawn, a new one may start.
+	a.reject(ia.ID(), WithdrawDeclined)
+	s.run(time.Minute, 5*time.Second)
+	if _, out := s.initiate(a, b, Initiation{}); out.Result != ResultOK {
+		t.Fatalf("initiation after the withdrawal: %+v", out)
+	}
+}
+
+func TestDecodingRefusesAnInconsistentInitiatorRecord(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, _ := startPairing(t, s, a, b)
+	var w initiatorWire
+	must(t, record.UnmarshalStrict(a.disk["initiator/"+hexID(ia.ID())], &w, MaxPersisted))
+	for name, mutate := range map[string]func(*initiatorWire){
+		"complete without a credential": func(w *initiatorWire) { w.Status = uint64(InitiatorComplete); e := int64(5); w.EndedAt = &e },
+		"released without a signature":  func(w *initiatorWire) { w.Released = true },
+		"withdrawing without a reason":  func(w *initiatorWire) { w.Status = uint64(InitiatorWithdrawing); e := int64(5); w.EndedAt = &e },
+		"an address of length zero":     func(w *initiatorWire) { w.Addresses = []string{""} },
+	} {
+		bad := w
+		mutate(&bad)
+		if _, err := DecodeInitiatorRecord(mustMarshal(t, bad)); err == nil {
+			t.Fatalf("%s: decoded", name)
+		}
+	}
+}
+
+func FuzzParseCode(f *testing.F) {
+	for _, s := range []string{"482 019", "482019", "000 000", "", "1234567", "abc def"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, in string) {
+		c, err := ParseCode(in)
+		if err != nil {
+			return
+		}
+		if c > 999999 {
+			t.Fatalf("code %d out of range", c)
+		}
+		if again, err := ParseCode(c.String()); err != nil || again != c {
+			t.Fatalf("text form does not round trip: %q", c.String())
+		}
+	})
+}
+
+// The initiator's signature is kept by the target when it arrives, before its
+// owner has confirmed, so a restart does not lose it.
+func TestTargetKeepsTheInitiatorSignatureAcrossARestart(t *testing.T) {
+	s, a, b := standardPair(t)
+	ia, tb := startPairing(t, s, a, b)
+	a.confirm(ia.ID(), ia.Transcript.Code())
+	s.run(10*time.Second, time.Second)
+	b.restart()
+	if r, _ := b.state.Target(tb.ID()); r.InitiatorSignature == nil {
+		t.Fatal("the signature did not survive the restart")
+	}
+	b.confirm(tb.ID(), tb.Transcript.Code()) // completes at once, without asking A again
+	if len(b.credentials) != 1 {
+		t.Fatal("not completed from the kept signature")
+	}
+}
