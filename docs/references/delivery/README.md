@@ -17,7 +17,7 @@ signals on the target). This document describes the committed code of `internal/
 | ----- | ------- | ----- |
 | `queued` | The sender's node has recorded the message. Sender view only. | no |
 | `accepted` | The target authorized, deduplicated and stored it. On the target this covers waiting in the queue and being leased. | no |
-| `delivered` | The whole body reached the agent and was acknowledged. | yes |
+| `delivered` | The whole body reached the agent and was acknowledged; for a control signal, its reply was committed. | yes |
 | `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range). On the target only for a body that was never handed out. | yes |
 | `expired_unconfirmed` | The deadline passed and an active query found no receipt. The target may have the message. | no, correctable |
 | `delivery_unknown` | The body was handed out and whether the agent saw it cannot be told; for a control signal, it was accepted for execution and its reply was never committed. The target produces it only for a delivery that was handed over: a body handed out at least once, or any accepted control signal. | no, correctable |
@@ -285,8 +285,12 @@ the dedup record and returned on every repeat.
   and at its backlog deadline would be turned into `rejected(backlog_expired)`,
   telling the sender that a signal the adapter may have executed was refused.
   Giving it a constructor of its own, instead of a flag on queued messages, keeps
-  every lease and backlog rule free of a control special case: the record has
-  neither.
+  the special case in one place: the record carries the `Control` flag, the
+  entry points that only make sense for a queued message (`Handout`, `Ack`,
+  `EventNotified`, `EventBlocked`) refuse a flagged record, and the lease and
+  backlog rules in `Tick` are guarded by one predicate (`hasQueue`, a target
+  record that is not a control record), so none of them needs a control case of
+  its own.
 - **An accepted control signal is already handed over.** `delivery_unknown`
   exists so that the target never claims "not delivered" for something the other
   party may have seen. For a message that point is the first hand-out; for a
@@ -306,16 +310,20 @@ the dedup record and returned on every repeat.
 - `internal/delivery/feedback.go`: kinds, wording, `TransitionFeedback`. Tests:
   `TestTransitionFeedback`, `TestSummaries`.
 - `internal/delivery/record.go`: `Record`, `NewTargetControlRecord`, `Apply`,
-  `Tick`, `closeForcibly`, `StatusReport`, `ApplyStatusReport`. Control record
-  tests (`internal/delivery/control_test.go`): `TestNewTargetControlRecord`,
-  `TestControlRecordIsNeverHandedOut`, `TestReplyCommitted`,
+  `Tick`, `closeForcibly`, `StatusReport`, `ApplyStatusReport`. Tests:
+  `TestSourceTransitions`, `TestRejectionReasonIsCarried`,
+  `TestUnreachableHint`, `TestDeliveryBlocked`,
+  `TestTargetRecordProducesNoFeedback`, `TestTargetDeliveryUnknownNeedsHandout`,
+  `TestSideRules` (including that a source record has no queue),
+  `TestNotifiedSubState`.
+- Control records (`record.go`, tests in `internal/delivery/control_test.go`):
+  `TestNewTargetControlRecord`, `TestControlRecordIsNeverHandedOut` (also
+  prompts and blocks refused), `TestReplyCommitted`,
   `TestReplyCommittedAppliesToControlRecordsOnly`,
   `TestControlRecordSettlement`, `TestControlStatusReport`,
   `TestScenarioControlSignalLifecycle`,
-  `TestPropertyControlSignalsAreNeverQueuedAndAlwaysEnd`. Tests: `TestSourceTransitions`,
-  `TestRejectionReasonIsCarried`, `TestUnreachableHint`, `TestDeliveryBlocked`,
-  `TestTargetRecordProducesNoFeedback`, `TestTargetDeliveryUnknownNeedsHandout`,
-  `TestSideRules`, `TestNotifiedSubState`.
+  `TestPropertyControlSignalsAreNeverQueuedAndAlwaysEnd` (state and the
+  feedback the sender is told, against an independent model).
 - `internal/delivery/timing.go`: constants, `ReportBy`, retention, backlog
   deadline. Tests: `TestReportByDerivation`, `TestDecidedValues`,
   `TestRetention`, `TestValidateEndpointMaxQueue`, `TestBacklogDeadline`.
