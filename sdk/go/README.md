@@ -11,6 +11,7 @@ the daemon's dependency graph.
 | [`peer`](peer/README.md) | The symmetric JSON-RPC 2.0 peer: line framing and limits, queues and overload, cancellation, the request id rule, the JSON-RPC and server-range error codes and the effect rule |
 | [`adapterproto`](adapterproto/README.md) | Protocol version and negotiation, method names, the parameter and result type of every method, enums, the application error codes, capabilities |
 | [`manifest`](manifest/README.md) | The adapter package manifest: types, strict parsing and structural validation |
+| [`strictjson`](strictjson/README.md) | The strict JSON decoder the packages above share: exact key names, no repeated key, no `null`, required fields; public so that any other reader of the same kinds of documents applies the same rules |
 
 The module root holds no package.
 

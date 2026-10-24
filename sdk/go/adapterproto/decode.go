@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 // Message is a parameter or result type of the protocol.

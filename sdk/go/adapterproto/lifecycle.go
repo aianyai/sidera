@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
 	"github.com/aianyai/sidera/sdk/go/peer"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 // MaxTimestampMS bounds a millisecond timestamp: the largest integer every JSON

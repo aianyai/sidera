@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
 	"github.com/aianyai/sidera/sdk/go/peer"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 // Application error codes: the protocol's own, in the range package peer sets

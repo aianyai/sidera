@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 // The values below are what a control signal carries and what its reply says.

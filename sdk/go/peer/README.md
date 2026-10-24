@@ -8,12 +8,11 @@ against a counterpart that is buggy or hostile. Read
 for the reasons behind the rules.
 
 The package depends on the standard library and on the strict JSON scanner
-of its own module (`sdk/go/internal/strictjson`), which nothing outside the SDK
-can import. Method names, parameter
-schemas and the meaning of results belong to the layer above (`adapterproto`);
-`initialize`, `ping`, `shutdown` and the rest of that layer's methods are
-registered by the owner with `Handle`, never special-cased here. The one
-method the peer handles itself is the `$/cancel_request` notification.
+of its own module (`sdk/go/strictjson`). Method names, parameter schemas and
+the meaning of results belong to the layer above (`adapterproto`); `initialize`,
+`ping`, `shutdown` and the rest of that layer's methods are registered by the
+owner with `Handle`, never special-cased here. The one method the peer handles
+itself is the `$/cancel_request` notification.
 
 ## Entry points
 

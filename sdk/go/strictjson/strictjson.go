@@ -1,5 +1,8 @@
-// Package strictjson decodes JSON into Go values with the strictness the adapter
-// protocol and the manifest require, which encoding/json alone does not give:
+// Package strictjson decodes JSON into Go values with the strictness that wire
+// messages, manifests and configuration files need, which encoding/json alone
+// does not give. It is the one definition of these rules: every reader of such a
+// document, in the SDK or outside it, decodes with this package instead of
+// restating them. Decoding is strict in these ways:
 //
 //   - Object keys match field names exactly. encoding/json matches them
 //     case-insensitively, so {"PID": 7} would fill a field named "pid".
@@ -21,6 +24,13 @@
 // the sender wrote, null included, and the owner validates them. A type with its
 // own UnmarshalJSON or UnmarshalText is opaque as well and is responsible for
 // its own strictness (it may call Decode).
+//
+// What the caller must guarantee: every exported field of a struct that a
+// document is decoded into carries a json tag (the tag "-" leaves it out) and is
+// not embedded. Decode panics on a struct that breaks this, because the mistake
+// is in the program and not in the input. A target that is not a non-nil pointer is also a programming error,
+// reported as a plain error. Every problem with the input is an *Error, which
+// names the JSON path of the offending value.
 package strictjson
 
 import (

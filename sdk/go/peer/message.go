@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"unicode/utf8"
 
-	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 const jsonrpcVersion = "2.0"

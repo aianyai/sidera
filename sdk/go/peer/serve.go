@@ -8,7 +8,7 @@ import (
 	"runtime/debug"
 	"strconv"
 
-	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 // handleLine classifies one inbound line and acts on it. It runs on the read

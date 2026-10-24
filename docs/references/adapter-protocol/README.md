@@ -470,7 +470,8 @@ an unknown outcome call for reconciliation or an idempotent retry.
   `enums.go`, `lifecycle.go`, `session.go`, `prompt.go`,
   `recv.go`, `endpoints.go` (the messages), `decode.go` (`Decode`, `Encode`),
   `validate.go`.
-- `sdk/go/internal/strictjson`: the strict decoder.
+- `sdk/go/strictjson`: the strict decoder. It is a public package so that readers
+  outside the SDK apply the same rules instead of a second copy.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
   `TestErrorObjectKnowsEveryCode`, `TestErrorObjectValidate`, `TestCapabilitiesAreOpen`, `TestDecodeStrictness`, the `Test*Rules` tables (one row per rule),
   `FuzzDecodeMessages`.

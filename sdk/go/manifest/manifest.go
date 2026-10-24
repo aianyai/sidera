@@ -19,7 +19,7 @@ import (
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/internal/semver"
-	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 // FileName is the name of the manifest in a package's root directory.

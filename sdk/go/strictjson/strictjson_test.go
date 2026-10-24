@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/aianyai/sidera/sdk/go/internal/strictjson"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 type level string
