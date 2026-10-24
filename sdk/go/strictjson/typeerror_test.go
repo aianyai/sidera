@@ -266,3 +266,34 @@ func FuzzDecodeTypeErrorsHavePaths(f *testing.F) {
 		}
 	})
 }
+
+type openList struct {
+	Leaves []openLeaf `json:"leaves"`
+}
+
+// A type that decodes itself reports a refusal at the position of its value,
+// however deep that is, because the standard library does not say where.
+func TestDecodeRefusalOfATypeThatDecodesItselfHasPath(t *testing.T) {
+	tests := []struct {
+		name   string
+		target func() any
+		in     string
+		path   string
+	}{
+		{"a text type that refuses its value", func() any { return new(doc) }, base + `,"level":"` + secret + `"}`, "level"},
+		{"a text type given a number", func() any { return new(doc) }, base + `,"level":31337}`, "level"},
+		{"a text type given an object", func() any { return new(doc) }, base + `,"level":{"k":"` + secret + `"}}`, "level"},
+		{"a field of an open object", func() any { return new(openDoc) }, `{"name":"a","inner":{"n":"` + secret + `"}}`, "inner.n"},
+		{"a field of an open object inside another", func() any { return new(openDoc) }, `{"name":"a","inner":{"n":1,"open":{"m":"` + secret + `"}}}`, "inner.open.m"},
+		{"an unknown field below an open object", func() any { return new(openDoc) }, `{"name":"a","inner":{"n":1,"deep":{"n":1,"future":1}}}`, "inner.deep.future"},
+		{"a missing field of an open object", func() any { return new(openDoc) }, `{"name":"a","inner":{"future":1}}`, "inner.n"},
+		{"null for a field of an open object", func() any { return new(openDoc) }, `{"name":"a","inner":{"n":null}}`, "inner.n"},
+		{"an open object that is not an object", func() any { return new(openDoc) }, `{"name":"a","inner":[]}`, "inner"},
+		{"an element of a list of open objects", func() any { return new(openList) }, `{"leaves":[{"m":1},{"m":"` + secret + `"}]}`, "leaves[1].m"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assertPath(t, tc.in, strictjson.Decode([]byte(tc.in), tc.target()), tc.path)
+		})
+	}
+}
