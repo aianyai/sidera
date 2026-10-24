@@ -22,7 +22,8 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | 1 | `fsx`, `clock` | layer 0, the standard library, `golang.org/x/sys`; `fsx` may import `clock` only to obtain the real clock |
 | 1, test support | `fsx/fsxtest`, `clock/clocktest` | their parent package, layer 0 |
 | 2 | `txn` | `fsx` |
-| 3 | `store`, `keys`, `config` | `txn`, layer 0; from `fsx` and `clock` only types, so none of them can obtain a writable file system or read the time |
+| 2 | `recfile` | the standard library only: the framing of a record file (first line, checksum, file name), shared by the owners of records |
+| 3 | `store`, `keys`, `config` | `txn`, `recfile`, layer 0; from `fsx` and `clock` only types, so none of them can obtain a writable file system or read the time |
 | 4 | `transport`, `adapterhost`, `ipc` | layers 0 to 3; `ipc` checks directories only through the read-only part of `fsx` |
 | 5 | `engine` | layers 0 to 4; it reaches `store`, `transport` and `clock` through interfaces |
 | 6 | `agentapi`, `manageapi` | the `engine` service interface, `ipc`, layer 0 |
