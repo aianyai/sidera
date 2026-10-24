@@ -99,6 +99,19 @@ func TestEnvelopeDecodeRules(t *testing.T) {
 		}, ErrRecipients},
 		{"a recipient node is not zero", message, func(w *envelopeWire) { w.To[0].Node = make([]byte, 32) }, ErrRecipients},
 		{"a recipient endpoint has 16 bytes", message, func(w *envelopeWire) { w.To[0].Endpoint = []byte{1} }, ErrRecipients},
+		{"the system endpoint is not a recipient", message, func(w *envelopeWire) {
+			w.To[0].Endpoint = ident.SystemEndpoint().Bytes()
+			w.Seq[0].Endpoint = ident.SystemEndpoint().Bytes()
+		}, ErrSystemRecipient},
+		{"the system endpoint is not a recipient among several", message, func(w *envelopeWire) {
+			w.MultiRecipient = true
+			w.To = append(w.To, addrWire(nodeA, 9), addressWire{Node: nodeB.Bytes(), Endpoint: ident.SystemEndpoint().Bytes()})
+			w.Seq = append(w.Seq, seqWire{Endpoint: ep(9).Bytes(), Seq: 1})
+		}, ErrSystemRecipient},
+		{"the system endpoint is not the recipient of a control signal", create, func(w *envelopeWire) {
+			w.To[0].Endpoint = ident.SystemEndpoint().Bytes()
+			w.Seq[0].Endpoint = ident.SystemEndpoint().Bytes()
+		}, ErrSystemRecipient},
 		{"an address is listed once", message, func(w *envelopeWire) {
 			w.MultiRecipient = true
 			w.To = append(w.To, w.To[0])
@@ -733,5 +746,37 @@ func TestRetryAndDeduplication(t *testing.T) {
 		if !rec.RetainUntil.Equal(first.ReportBy) {
 			t.Errorf("retained until %v, want %v", rec.RetainUntil, first.ReportBy)
 		}
+	})
+}
+
+// The system endpoint is the sender of a node's own channel feedback, so no
+// message may be addressed to it, whichever way the envelope is built.
+func TestSystemEndpointIsNoRecipient(t *testing.T) {
+	system := ident.SystemEndpoint()
+
+	t.Run("the reason is a recipient error", func(t *testing.T) {
+		if !errors.Is(ErrSystemRecipient, ErrRecipients) {
+			t.Fatal("ErrSystemRecipient does not wrap ErrRecipients")
+		}
+	})
+	t.Run("Encode refuses an envelope addressed to it", func(t *testing.T) {
+		e := baseMessage(t)
+		e.To[0].Endpoint = system
+		e.Seq = map[ident.EndpointID]uint64{system: 1}
+		_, err := e.Encode(testLimits)
+		requireErr(t, err, ErrSystemRecipient, ErrRecipients)
+	})
+	t.Run("a neighbouring identifier is a recipient like any other", func(t *testing.T) {
+		near := system.Bytes()
+		near[len(near)-1] = 0xfe
+		nearID, err := ident.EndpointIDFromBytes(near)
+		requireNoErr(t, err)
+		e := baseMessage(t)
+		e.To[0].Endpoint = nearID
+		e.Seq = map[ident.EndpointID]uint64{nearID: 1}
+		b, err := e.Encode(testLimits)
+		requireNoErr(t, err)
+		_, err = Decode(b, testLimits)
+		requireNoErr(t, err)
 	})
 }
