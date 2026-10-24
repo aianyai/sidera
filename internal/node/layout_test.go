@@ -7,6 +7,7 @@ import (
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -38,15 +39,20 @@ var (
 		"internal/node/clock/clocktest",
 	}
 
-	// fileExceptions may use the operating system's file functions directly:
-	// fsx is the file-system layer; ipc creates and protects socket files,
-	// which net and the operating system own; the ledger and the fixtures are
-	// test oracles that must stay independent of the fsx under test.
+	// fileExceptions may use the operating system's file functions directly.
+	// fsx is the file-system layer and ipc creates and protects socket files,
+	// which net and the operating system own. The testkit packages stand in for
+	// the outside world in tests: a third-party adapter, a native runtime and
+	// the ledger that records what happened. They import only the standard
+	// library and sdk/go, as a real third party would, so they cannot reach
+	// fsx; the files they touch are not daemon state; and the ledger is a test
+	// oracle that must stay independent of the fsx under test.
 	fileExceptions = []string{
 		"internal/node/fsx",
 		"internal/node/ipc",
 		"internal/node/testkit/ledger",
-		"internal/node/testkit/fixture",
+		"internal/node/testkit/fakeadapter",
+		"internal/node/testkit/fakeruntime",
 	}
 
 	// randomnessExceptions may import math/rand: the crash model draws its
@@ -68,9 +74,11 @@ var bannedTimeFuncs = map[string]map[string]bool{
 	"time": setOf("Now", "Since", "Until", "After", "AfterFunc", "NewTimer", "NewTicker", "Tick", "Sleep"),
 }
 
-// bannedFileFuncs are the file functions of package os and their counterparts
-// in syscall and golang.org/x/sys. Functions that only read the process
-// environment (Getenv, Exit, Getpid) and the standard streams are not here.
+// bannedFileFuncs are the file functions of package os, their counterparts in
+// io/ioutil, path/filepath, syscall and golang.org/x/sys, and the
+// whole-directory helpers that open files underneath. Functions that only read
+// the process environment (Getenv, Exit, Getpid), the standard streams and the
+// pure reader helpers of io/ioutil (ReadAll, NopCloser, Discard) are not here.
 var bannedFileFuncs = map[string]map[string]bool{
 	"os": setOf(
 		"Create", "CreateTemp", "OpenFile", "Open", "ReadFile", "WriteFile",
@@ -78,18 +86,12 @@ var bannedFileFuncs = map[string]map[string]bool{
 		"ReadDir", "Stat", "Lstat", "Chmod", "Chown", "Lchown", "Chtimes",
 		"Link", "Symlink", "Readlink", "Truncate", "OpenRoot", "DirFS", "CopyFS",
 	),
-	"syscall":               unixFileFuncs(),
-	"golang.org/x/sys/unix": unixFileFuncs(),
-	"golang.org/x/sys/windows": setOf(
-		"CreateFile", "CreateFile2", "DeleteFile", "MoveFile", "MoveFileEx",
-		"ReplaceFile", "CopyFile", "CreateDirectory", "RemoveDirectory",
-		"FlushFileBuffers", "WriteFile", "ReadFile", "SetEndOfFile",
-		"SetFilePointer", "SetFileAttributes", "GetFileAttributes",
-		"GetFileAttributesEx", "FindFirstFile", "LockFileEx", "UnlockFileEx",
-		"CreateHardLink", "CreateSymbolicLink", "Open", "Stat", "Mkdir",
-		"Rmdir", "Unlink", "Rename", "Fsync", "Ftruncate", "Chmod", "Symlink",
-		"Link",
-	),
+	"io/ioutil":     setOf("ReadFile", "WriteFile", "ReadDir", "TempFile", "TempDir"),
+	"path/filepath": setOf("Walk", "WalkDir", "Glob", "EvalSymlinks"),
+	// syscall carries the file functions of every platform.
+	"syscall":                  union(unixFileFuncs(), windowsFileFuncs()),
+	"golang.org/x/sys/unix":    unixFileFuncs(),
+	"golang.org/x/sys/windows": windowsFileFuncs(),
 }
 
 func unixFileFuncs() map[string]bool {
@@ -100,6 +102,29 @@ func unixFileFuncs() map[string]bool {
 		"Linkat", "Symlink", "Symlinkat", "Readlink", "Truncate", "Ftruncate",
 		"Fsync", "Fdatasync", "Flock", "Mknod", "Mkfifo", "FcntlFlock",
 	)
+}
+
+func windowsFileFuncs() map[string]bool {
+	return setOf(
+		"CreateFile", "CreateFile2", "DeleteFile", "MoveFile", "MoveFileEx",
+		"ReplaceFile", "CopyFile", "CreateDirectory", "RemoveDirectory",
+		"FlushFileBuffers", "WriteFile", "ReadFile", "SetEndOfFile",
+		"SetFilePointer", "SetFileAttributes", "GetFileAttributes",
+		"GetFileAttributesEx", "FindFirstFile", "LockFileEx", "UnlockFileEx",
+		"CreateHardLink", "CreateSymbolicLink", "Open", "Stat", "Mkdir",
+		"Rmdir", "Unlink", "Rename", "Fsync", "Ftruncate", "Chmod", "Symlink",
+		"Link",
+	)
+}
+
+func union(sets ...map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	for _, set := range sets {
+		for name := range set {
+			out[name] = true
+		}
+	}
+	return out
 }
 
 func setOf(names ...string) map[string]bool {
@@ -123,7 +148,7 @@ func TestContractPackagesDoNotImportRuntime(t *testing.T) {
 	forbidden := []string{module + "/" + runtimeDir, module + "/cmd"}
 
 	for _, goos := range []string{"darwin", "linux", "windows"} {
-		for _, tags := range []string{"", "crashtest,testclock"} {
+		for _, tags := range []string{"", "crashtest,testclock,acceptance"} {
 			name := goos + "/tags=" + tags
 			t.Run(name, func(t *testing.T) {
 				env := append(os.Environ(), "GOOS="+goos, "CGO_ENABLED=0")
@@ -287,23 +312,44 @@ func TestRuntimeTakesRandomnessAsReader(t *testing.T) {
 	})
 }
 
+// dirCheck reports violations in one parsed file. dir is the file's directory
+// relative to the scanned root, with forward slashes.
+type dirCheck func(dir string, fset *token.FileSet, f *ast.File) []string
+
 func scanRuntime(t *testing.T, exceptions []string, check func(*token.FileSet, *ast.File) []string) {
 	t.Helper()
-	scanRuntimeDirs(t, func(dir string, fset *token.FileSet, f *ast.File) []string {
+	scanRuntimeDirs(t, exemptDirs(exceptions, check))
+}
+
+// exemptDirs applies check to every directory except the exact ones listed.
+func exemptDirs(exceptions []string, check func(*token.FileSet, *ast.File) []string) dirCheck {
+	return func(dir string, fset *token.FileSet, f *ast.File) []string {
 		if slices.Contains(exceptions, dir) {
 			return nil
 		}
 		return check(fset, f)
-	})
+	}
 }
 
-// scanRuntimeDirs parses every non-test Go file below internal/node, whatever
-// its build constraints, and reports what check returns for it. dir is the
-// file's directory relative to the module root, with forward slashes.
-func scanRuntimeDirs(t *testing.T, check func(dir string, fset *token.FileSet, f *ast.File) []string) {
+// scanRuntimeDirs scans the runtime tree of the module and fails the test on
+// every violation.
+func scanRuntimeDirs(t *testing.T, check dirCheck) {
 	t.Helper()
 	root := moduleRoot(t)
-	base := filepath.Join(root, filepath.FromSlash(runtimeDir))
+	violations, err := scanTree(root, filepath.Join(root, filepath.FromSlash(runtimeDir)), check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range violations {
+		t.Error(v)
+	}
+}
+
+// scanTree parses every non-test Go file below base, whatever its build
+// constraints, and returns what check reports for it. Directories named
+// testdata and those starting with "." or "_" are skipped, as the go tool
+// skips them. Directories passed to check are relative to root.
+func scanTree(root, base string, check dirCheck) ([]string, error) {
 	fset := token.NewFileSet()
 	var violations []string
 	err := filepath.WalkDir(base, func(p string, d fs.DirEntry, err error) error {
@@ -331,12 +377,7 @@ func scanRuntimeDirs(t *testing.T, check func(dir string, fset *token.FileSet, f
 		violations = append(violations, check(filepath.ToSlash(rel), fset, f)...)
 		return nil
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, v := range violations {
-		t.Error(v)
-	}
+	return violations, err
 }
 
 // bannedSelectors returns one message per selector pkg.Name in f where pkg is
@@ -428,10 +469,22 @@ func TestRuntimeScansDetectViolations(t *testing.T) {
 		{"os.Stat as a function value", fileScan, `package p; import "os"; var stat = os.Stat`, 1},
 		{"os under an alias", fileScan, `package p; import o "os"; var _ = o.Remove("x")`, 1},
 		{"syscall.Open call", fileScan, `package p; import "syscall"; var _, _ = syscall.Open("x", 0, 0)`, 1},
+		{"syscall.CreateFile call", fileScan, `package p; import "syscall"; var _, _ = syscall.CreateFile(nil, 0, 0, nil, 0, 0, 0)`, 1},
+		{"io/ioutil.ReadFile call", fileScan, `package p; import "io/ioutil"; var _, _ = ioutil.ReadFile("x")`, 1},
+		{"io/ioutil.WriteFile call", fileScan, `package p; import "io/ioutil"; var _ = ioutil.WriteFile("x", nil, 0)`, 1},
+		{"io/ioutil.ReadDir call", fileScan, `package p; import "io/ioutil"; var _, _ = ioutil.ReadDir("x")`, 1},
+		{"io/ioutil.TempFile call", fileScan, `package p; import "io/ioutil"; var _, _ = ioutil.TempFile("", "x")`, 1},
+		{"io/ioutil.TempDir call", fileScan, `package p; import "io/ioutil"; var _, _ = ioutil.TempDir("", "x")`, 1},
+		{"path/filepath.Walk call", fileScan, `package p; import "path/filepath"; var _ = filepath.Walk("x", nil)`, 1},
+		{"path/filepath.WalkDir call", fileScan, `package p; import "path/filepath"; var _ = filepath.WalkDir("x", nil)`, 1},
+		{"path/filepath.Glob call", fileScan, `package p; import "path/filepath"; var _, _ = filepath.Glob("x")`, 1},
+		{"path/filepath.EvalSymlinks call", fileScan, `package p; import "path/filepath"; var _, _ = filepath.EvalSymlinks("x")`, 1},
 		{"x/sys/unix.Fsync call", fileScan, `package p; import "golang.org/x/sys/unix"; var _ = unix.Fsync(3)`, 1},
 		{"x/sys/windows.CreateFile call", fileScan, `package p; import "golang.org/x/sys/windows"; var _, _ = windows.CreateFile(nil, 0, 0, nil, 0, 0, 0)`, 1},
 		{"os dot import", fileScan, `package p; import . "os"; var _ = Remove`, 1},
 		{"os environment and streams are fine", fileScan, `package p; import "os"; var _ = os.Getenv("x"); var _ = os.Stdout; var _ = os.ErrNotExist; func f() { os.Exit(1) }`, 0},
+		{"io/ioutil reader helpers are fine", fileScan, `package p; import "io/ioutil"; var _, _ = ioutil.ReadAll(nil); var _ = ioutil.NopCloser(nil); var _ = ioutil.Discard`, 0},
+		{"path/filepath path helpers are fine", fileScan, `package p; import "path/filepath"; var _ = filepath.Join("a", "b"); var _ = filepath.Base("a")`, 0},
 		{"syscall signals are fine", fileScan, `package p; import "syscall"; var _ = syscall.SIGTERM`, 0},
 		{"math/rand import", randScan, `package p; import "math/rand"; var _ = rand.Int()`, 1},
 		{"math/rand/v2 import", randScan, `package p; import "math/rand/v2"; var _ = rand.Int()`, 1},
@@ -450,5 +503,53 @@ func TestRuntimeScansDetectViolations(t *testing.T) {
 				t.Fatalf("got %d reports %q, want %d", len(got), got, r.want)
 			}
 		})
+	}
+}
+
+// TestRuntimeScanWalksTree proves the directory walk: it reaches nested
+// directories and platform files, honors the exact-directory exemptions, and
+// skips test files and testdata.
+func TestRuntimeScanWalksTree(t *testing.T) {
+	root := t.TempDir()
+	const violating = "package a\n\nimport \"os\"\n\nvar _ = os.Remove\n"
+	files := map[string]string{
+		"internal/node/a/a.go":          violating,
+		"internal/node/a/a_test.go":     violating,
+		"internal/node/a/a_windows.go":  "//go:build windows\n\n" + violating,
+		"internal/node/fsx/x.go":        violating,
+		"internal/node/fsx/sub/x.go":    violating,
+		"internal/node/a/testdata/x.go": violating,
+	}
+	for name, src := range files {
+		full := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(src), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fileScan := func(fset *token.FileSet, f *ast.File) []string { return bannedSelectors(fset, f, bannedFileFuncs) }
+	got, err := scanTree(root, filepath.Join(root, "internal", "node"), exemptDirs([]string{"internal/node/fsx"}, fileScan))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reported := map[string]int{}
+	for _, v := range got {
+		for name := range files {
+			if strings.Contains(filepath.ToSlash(v), "/"+name+":") {
+				reported[name]++
+			}
+		}
+	}
+	want := map[string]int{
+		"internal/node/a/a.go":         1,
+		"internal/node/a/a_windows.go": 1,
+		"internal/node/fsx/sub/x.go":   1,
+	}
+	if len(got) != len(want) || !maps.Equal(reported, want) {
+		t.Fatalf("reports per file %v (all reports %q), want %v", reported, got, want)
 	}
 }

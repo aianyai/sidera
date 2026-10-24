@@ -4,7 +4,7 @@ Runtime packages: the code that does I/O, runs goroutines and talks to the
 operating system. They sit on top of the pure contract packages in
 [`internal/`](../README.md), apply the rules those packages define, and are
 private to this module, so the daemon, the CLI and the mobile and web clients
-that live in it can import them while nothing outside the module can.
+that may later live in it can import them while nothing outside the module can.
 
 Code that belongs only to the command line lives in `cmd/sidera/internal/` and
 is not part of this tree.
@@ -27,7 +27,7 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | 5 | `engine` | layers 0 to 4; it reaches `store`, `transport` and `clock` through interfaces |
 | 6 | `agentapi`, `manageapi` | the `engine` service interface, `ipc`, layer 0 |
 | 7 | `daemon` | everything above; the composition root that wires the packages together |
-| none | `testkit/fakeadapter` | `sdk/go` and the standard library only, so it exercises the adapter protocol the way a third-party adapter does |
+| none | `testkit/ledger`, `testkit/fakectl`, `testkit/fakeruntime`, `testkit/fakeadapter` | the standard library, `sdk/go/...` and each other only, so they use the adapter protocol as a third party would |
 | none | `cmd/sidera/...` | any package of this tree |
 
 Which of `engine`, `adapterhost`, `agentapi` and `manageapi` defines the
@@ -43,30 +43,43 @@ connects across layers.
   says so by calling `clock.System()`, which keeps real time visible at the call
   site; tests inject a fake clock and drive time themselves. Contexts with a
   timeout and connection deadlines computed from the clock are fine.
-- **Files only through `fsx`.** No direct use of the `os`, `syscall` or
-  `golang.org/x/sys` file functions. Every file operation goes through `fsx`,
-  so the in-memory crash model sees every write and no write path escapes the
+- **Files only through `fsx`.** No direct use of the file functions of `os`,
+  `io/ioutil`, `path/filepath` (`Walk`, `WalkDir`, `Glob`, `EvalSymlinks`),
+  `syscall` or `golang.org/x/sys`. Every file operation goes through `fsx`, so
+  the in-memory crash model sees every write and no write path escapes the
   crash tests.
 - **Randomness only as an `io.Reader`.** No `math/rand`. `crypto/rand` appears
   only in the composition root (`daemon`) and in `cmd/`, which pass its reader
-  down.
+  down. The scan looks at imports, so it has a known blind spot:
+  `ed25519.GenerateKey(nil)` reads the system random source without importing
+  `crypto/rand`, and since Go 1.26 `ecdh.Curve.GenerateKey` ignores the reader
+  it is given unless `GODEBUG=cryptocustomrand=1` is set. Key generation
+  therefore takes the injected reader explicitly, and deterministic test keys
+  are built with `NewKeyFromSeed`.
 - **Every goroutine has an owner.** It runs under a `context` and stops on
   shutdown; tests check for leaks.
 
 Each rule has a few exceptions, because some package has to be the one that
 touches the real thing: `clock` and `clock/clocktest` read the time, `fsx`,
-`ipc` and the test oracles touch files, `daemon` reads `crypto/rand`, and the
+`ipc` and the testkit packages `testkit/ledger`, `testkit/fakeadapter` and
+`testkit/fakeruntime` touch files, `daemon` reads `crypto/rand`, and the
 crash model in `fsx/fsxtest` takes a seeded `math/rand` source injected by the
 test. The exception lists are written in `layout_test.go`; extending one is a
-change to that file and gets reviewed as such.
+change to that file and gets reviewed as such. The testkit packages stand in
+for the outside world in tests (a third-party adapter, a native runtime, the
+ledger of what happened). They import only the standard library and `sdk/go`,
+as a real third party would, so they cannot reach `fsx`; the files they touch
+are not daemon state; and the ledger is a test oracle that must stay
+independent of the `fsx` under test.
 
 ## Enforcement
 
-`layout_test.go` holds four tests that scan the module:
+`layout_test.go` holds four tests that scan the module, and further tests
+that prove the scans themselves detect what they should:
 
 | Test | Rule |
 | ---- | ---- |
-| `TestContractPackagesDoNotImportRuntime` | No contract package, tests included, depends on `internal/node/` or `cmd/`, directly or transitively, on any of darwin, linux and windows, with and without the `crashtest,testclock` tags. A platform file or a tagged file can bring in a dependency the default build does not. |
+| `TestContractPackagesDoNotImportRuntime` | No contract package, tests included, depends on `internal/node/` or `cmd/`, directly or transitively, on any of darwin, linux and windows, with and without the `crashtest,testclock,acceptance` tags. A platform file or a tagged file can bring in a dependency the default build does not. |
 | `TestRuntimeReadsTimeOnlyThroughClock` | The clock rule above. |
 | `TestRuntimeTouchesFilesOnlyThroughFsx` | The file rule above. |
 | `TestRuntimeTakesRandomnessAsReader` | The randomness rule above. |
