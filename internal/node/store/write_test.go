@@ -96,13 +96,13 @@ func TestTargetRecordsAreWrittenWithTheNextRevision(t *testing.T) {
 		t.Fatalf("after Deliver: %+v", sc.In)
 	}
 	in := sc.In[0]
-	in.Record.Lease.Handouts = 1
+	in.Record = leasedRecord(in.Record, base)
 	mustDo(t, r.st.Lease([]store.InRecord{in}))
 	in = r.scan().In[0]
 	if in.Rev != 2 || in.Record.Lease.Handouts != 1 {
 		t.Errorf("after Lease: rev %d, handouts %d, want 2 and 1", in.Rev, in.Record.Lease.Handouts)
 	}
-	in.Record.State = delivery.StateDelivered
+	in.Record = deliveredRecord(in.Record)
 	mustDo(t, r.st.Ack([]store.InRecord{in}, nil))
 	if got := r.scan().In[0].Rev; got != 3 {
 		t.Errorf("after Ack: rev %d, want 3", got)

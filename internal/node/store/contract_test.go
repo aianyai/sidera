@@ -25,9 +25,9 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 		typ    reflect.Type
 		fields string
 	}{
-		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Control AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
+		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Unknown Lost Control AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
 		{"delivery.Lease", reflect.TypeOf(delivery.Lease{}), "Handouts IDs Active IssuedAt ExpiresAt Chunks HandedOut Acked"},
-		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply"},
+		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply DigestLost"},
 		{"delivery.Authorization", reflect.TypeOf(delivery.Authorization{}), "Kind Reject"},
 		{"delivery.Item", reflect.TypeOf(delivery.Item{}), "Ref Feedback At"},
 		{"delivery.Feedback", reflect.TypeOf(delivery.Feedback{}), "Kind Cause Reject State"},
@@ -57,44 +57,166 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 	}
 }
 
-// Every field of the stored types, set to a value that is not the zero value,
-// comes back: nothing is dropped on the way to the disk.
-func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
-	lid1, _ := delivery.ParseLeaseID("00112233445566778899aabbccddeeff")
-	lid2, _ := delivery.ParseLeaseID("ffeeddccbbaa99887766554433221100")
-	full := delivery.Record{
-		Side: delivery.SideTarget, State: delivery.StateAccepted, Sub: delivery.SubNotified, Reject: delivery.RejectNone, Control: false,
-		AcceptBefore: base.Add(time.Minute), ReportBy: base.Add(5 * time.Hour), BacklogDeadline: base.Add(30 * time.Minute),
-		Reported: delivery.KindSet(0).With(delivery.KindUnreachable).With(delivery.KindDeliveryBlocked).With(delivery.KindUnknownCorrected),
-		Blocked:  true, BlockedCause: delivery.CauseNativeUnavailable,
-		Lease: delivery.Lease{Handouts: 3, IDs: []delivery.LeaseID{lid1, lid2}, Active: true, IssuedAt: base.Add(time.Second), ExpiresAt: base.Add(time.Hour),
-			Chunks: 3, HandedOut: []bool{true, true, false}, Acked: []bool{true, false, false}},
-	}
-	in := tgtIn(1)
-	in.Rev = 7
-	in.Record = full
-	in.Auth = delivery.Authorization{Kind: delivery.AuthorizationSuspend}
-	in.ReplyDecision = reply.Decision{Reason: reply.ReasonArrivalWindow, Until: base.Add(25 * time.Hour)}
-	in.Handout = store.HandoutFields{ContentType: "text/plain; charset=utf-8", ReplyTo: msgID(8), Thread: "thread", Seq: 3, SentAt: base.Add(time.Second)}
-	in.AcceptedAt = base.Add(2 * time.Second)
-	data, err := store.EncodeRecord(in)
+// The delivery records that cover, between them, every field of delivery.Record
+// and every kind of feedback it can have reported. Each is a record the delivery
+// rules make, by a constructor and the events that lead to its state: a record
+// with every field set at once would be one no rule produces.
+func deliveryRecordsOfEveryShape(t *testing.T) (source, target []delivery.Record) {
+	t.Helper()
+	accept := base.Add(time.Minute)
+	src := func() delivery.Record { return delivery.NewSourceRecord(accept) }
+
+	// Contact fails, the result becomes unknown, then it is delivered: the notice
+	// of the failure, of the unknown result and its correction.
+	a := src()
+	a = applied(t, a, delivery.Event{Type: delivery.EventContactFailing, Cause: delivery.CauseNetwork, Since: base.Add(-delivery.UnreachableHintAfter)})
+	a = applied(t, a, delivery.Event{Type: delivery.EventDeliveryUnknown, Unknown: delivery.UnknownHandedOver})
+	a = applied(t, a, delivery.Event{Type: delivery.EventDelivered})
+
+	// Expired, received, blocked and unblocked: four notices of the sender's.
+	b := src()
+	b = applied(t, b, delivery.Event{Type: delivery.EventExpiryQueried, QueriedAt: delivery.ExpiryJudgeableAfter(accept).Add(time.Nanosecond)})
+	b = applied(t, b, delivery.Event{Type: delivery.EventReceipt})
+	b = applied(t, b, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseRuntimeAuth})
+	b = applied(t, b, delivery.Event{Type: delivery.EventUnblocked})
+
+	// Rejected at the target, and the target's loss told by a status report.
+	c := applied(t, src(), delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectBacklogFull})
+	d := applied(t, src(), delivery.Event{Type: delivery.EventDeliveryUnknown, Unknown: delivery.UnknownLostAtTarget})
+
+	// The sender's own loss.
+	e, _ := lostRecord(delivery.SideSource, false, base.Add(time.Hour))
+
+	// A target message with two chunks, the first acknowledged, notified and blocked.
+	f := tgtIn(1).Record
+	f, _, err := f.Handout(base.Add(time.Minute), delivery.AuthorizationAllow, 2, 1, fixedLease)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, dmg := store.DecodeRecord(store.InDir, in.Name(), data)
-	if dmg != nil {
-		t.Fatalf("%+v", dmg)
+	f, _, _, err = f.Ack(base.Add(time.Minute), delivery.Ack{Part: 1, Lease: fixedLease, TokenMatches: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !equalRecords(got, in) {
-		t.Errorf("a field was dropped:\n got  %#v\n want %#v", got, in)
+	f = applied(t, f, delivery.Event{Type: delivery.EventNotified})
+	f = applied(t, f, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseRuntimeAuth})
+
+	// A target message whose backlog deadline passed: rejected with its reason.
+	g := tgtIn(2).Record
+	g, _, err = g.Tick(g.BacklogDeadline.Add(time.Nanosecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A control record, delivered by its committed reply, and one whose result is unknown.
+	h := deliveredRecord(sessionCtl(1, 5).Record)
+	i, _ := lostRecord(delivery.SideTarget, true, base.Add(time.Hour))
+	j, _ := lostRecord(delivery.SideTarget, false, base.Add(time.Hour))
+	return []delivery.Record{a, b, c, d, e}, []delivery.Record{f, g, h, i, j}
+}
+
+// Every field of the stored types, set to a value that is not the zero value in
+// at least one record, comes back: nothing is dropped on the way to the disk.
+func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
+	source, target := deliveryRecordsOfEveryShape(t)
+
+	var kinds delivery.KindSet
+	var all []delivery.Record
+	for n, r := range source {
+		out := srcOut(10+n, false)
+		out.Outbound.Recipients[0].Delivery = r
+		out.Body = nil
+		data, err := store.EncodeRecord(out)
+		if err != nil {
+			t.Fatalf("source record %d (%v): %v", n, r.State, err)
+		}
+		got, dmg := store.DecodeRecord(store.OutDir, out.Name(), data)
+		if dmg != nil {
+			t.Fatalf("source record %d: %+v", n, dmg)
+		}
+		if !equalRecords(got, out) {
+			t.Errorf("source record %d lost a field:\n got  %#v\n want %#v", n, got, out)
+		}
+		kinds |= r.Reported
+		all = append(all, r)
+	}
+	var dedups []delivery.DedupRecord
+	for n, r := range target {
+		in := tgtIn(20 + n)
+		in.Rev = uint64(n + 1)
+		in.Record = r
+		switch {
+		case r.Control && r.Lost:
+			c := lostCtlAt(ctlKey(20+n), base.Add(time.Hour))
+			data, err := store.EncodeRecord(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, dmg := store.DecodeRecord(store.CtlDir, c.Name(), data)
+			if dmg != nil || !equalRecords(got, c) {
+				t.Errorf("lost control record: %+v\n got  %#v\n want %#v", dmg, got, c)
+			}
+			dedups = append(dedups, c.Dedup)
+			all = append(all, c.Record)
+			continue
+		case r.Control:
+			continue // the control record of a session is covered below
+		case r.Lost:
+			in = lostInAt(in.Key, base.Add(time.Hour))
+		}
+		in.Auth = delivery.Authorization{Kind: delivery.AuthorizationSuspend}
+		if in.Lost {
+			in.Auth = delivery.Authorization{}
+		} else {
+			in.ReplyDecision = reply.Decision{Reason: reply.ReasonArrivalWindow, Until: base.Add(25 * time.Hour)}
+			in.Handout = store.HandoutFields{ContentType: "text/plain; charset=utf-8", ReplyTo: msgID(8), Thread: "thread", Seq: 3, SentAt: base.Add(time.Second)}
+			in.AcceptedAt = base.Add(2 * time.Second)
+		}
+		data, err := store.EncodeRecord(in)
+		if err != nil {
+			t.Fatalf("target record %d (%v): %v", n, r.State, err)
+		}
+		got, dmg := store.DecodeRecord(store.InDir, in.Name(), data)
+		if dmg != nil {
+			t.Fatalf("target record %d: %+v", n, dmg)
+		}
+		if !equalRecords(got, in) {
+			t.Errorf("target record %d lost a field:\n got  %#v\n want %#v", n, got, in)
+		}
+		dedups = append(dedups, in.Dedup)
+		all = append(all, in.Record)
 	}
 
+	// Every field of the delivery record is set in some record above, and every
+	// kind of feedback is reported in some.
+	for fi := 0; fi < reflect.TypeOf(delivery.Record{}).NumField(); fi++ {
+		name := reflect.TypeOf(delivery.Record{}).Field(fi).Name
+		seen := false
+		for _, r := range all {
+			seen = seen || !reflect.ValueOf(r).Field(fi).IsZero()
+		}
+		if !seen {
+			t.Errorf("no record of the test has the field Record.%s set: the test does not show it survives the disk", name)
+		}
+	}
+	for k := delivery.KindUnreachable; !strings.HasPrefix(k.String(), "invalid"); k++ {
+		if !kinds.Has(k) {
+			t.Errorf("no source record of the test reports the feedback kind %s", k)
+		}
+	}
+	lost := false
+	for _, d := range dedups {
+		lost = lost || d.DigestLost
+	}
+	if !lost {
+		t.Errorf("no deduplication record of the test has DigestLost set")
+	}
+
+	var data []byte
+	var err error
+	var got store.Record
+	var dmg *store.Damage
 	out := srcOut(1, false)
-	out.Outbound.Recipients[0].Delivery = func() delivery.Record {
-		r := delivery.NewSourceRecord(out.Outbound.AcceptBefore)
-		r.Reported = delivery.KindSet(0).With(delivery.KindRejected)
-		return r
-	}()
+	out.Outbound.Recipients[0].Delivery = applied(t, delivery.NewSourceRecord(out.Outbound.AcceptBefore),
+		delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectBacklogFull})
 	out.Outbound.Recipients[0].Arrival = envelope.Arrival{DeliveredAt: base.Add(time.Hour), ArrivedAt: base.Add(time.Minute)}
 	out.Outbound.ControlReplyDigest = [32]byte{1, 2, 3}
 	out.Outbound.Kind = envelope.KindSessionCreate

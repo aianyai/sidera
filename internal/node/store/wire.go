@@ -245,6 +245,8 @@ type recordJSON struct {
 	State           string     `json:"state"`
 	Sub             string     `json:"sub,omitempty"`
 	Reject          string     `json:"reject,omitempty"`
+	Unknown         string     `json:"unknown,omitempty"`
+	Lost            bool       `json:"lost,omitempty"`
 	Control         bool       `json:"control,omitempty"`
 	AcceptBefore    *wtime     `json:"accept_before,omitempty"`
 	ReportBy        *wtime     `json:"report_by,omitempty"`
@@ -263,6 +265,9 @@ func leaseIsZero(l delivery.Lease) bool {
 func toRecord(r delivery.Record) (recordJSON, error) {
 	var j recordJSON
 	var err error
+	if err = checkDelivery(r); err != nil {
+		return j, err
+	}
 	if j.Side, err = sideNames.name(r.Side, "side"); err != nil {
 		return j, err
 	}
@@ -281,9 +286,14 @@ func toRecord(r delivery.Record) (recordJSON, error) {
 			return j, err
 		}
 	}
-	j.Control = r.Control
+	if r.Unknown != delivery.UnknownCauseNone {
+		if j.Unknown, err = enumName(r.Unknown, delivery.UnknownCause.String, "unknown cause"); err != nil {
+			return j, err
+		}
+	}
+	j.Lost, j.Control = r.Lost, r.Control
 	j.AcceptBefore, j.ReportBy, j.BacklogDeadline = tptr(r.AcceptBefore), tptr(r.ReportBy), tptr(r.BacklogDeadline)
-	for k := delivery.KindUnreachable; k <= delivery.KindUnknownCorrected; k++ {
+	for k := delivery.KindUnreachable; k <= lastFeedbackKind; k++ {
 		if r.Reported.Has(k) {
 			j.Reported = append(j.Reported, k.String())
 		}
@@ -315,9 +325,14 @@ func toRecord(r delivery.Record) (recordJSON, error) {
 	return j, nil
 }
 
+// lastFeedbackKind is the highest feedback kind: the reported set is stored as
+// the names of the kinds from the first to this one. A kind added after it is
+// refused at encoding (the set has a bit that is no kind), never dropped.
+const lastFeedbackKind = delivery.KindLostAtTarget
+
 func kindSetBeyond(s delivery.KindSet) bool {
 	var known delivery.KindSet
-	for k := delivery.KindUnreachable; k <= delivery.KindUnknownCorrected; k++ {
+	for k := delivery.KindUnreachable; k <= lastFeedbackKind; k++ {
 		known = known.With(k)
 	}
 	return s&^known != 0
@@ -344,7 +359,12 @@ func fromRecord(j recordJSON) (delivery.Record, error) {
 			return r, err
 		}
 	}
-	r.Control = j.Control
+	if j.Unknown != "" {
+		if r.Unknown, err = enumValue(j.Unknown, delivery.UnknownCause.String, "unknown cause"); err != nil {
+			return r, err
+		}
+	}
+	r.Lost, r.Control = j.Lost, j.Control
 	r.AcceptBefore, r.ReportBy, r.BacklogDeadline = tval(j.AcceptBefore), tval(j.ReportBy), tval(j.BacklogDeadline)
 	last := delivery.Kind(0)
 	for _, n := range j.Reported {
@@ -382,9 +402,12 @@ func fromRecord(j recordJSON) (delivery.Record, error) {
 	return r, checkDelivery(r)
 }
 
-// checkDelivery is where the consistency of a delivery record is asked of the
-// delivery package once it offers the question.
-func checkDelivery(delivery.Record) error { return nil }
+// checkDelivery asks the delivery package whether a record, written or decoded, is one its
+// constructors and transitions can produce. It is the first thing done with a
+// decoded record: Apply, Tick, Handout and Ack trust the record, and a lease
+// whose chunk flags disagree with its chunk count would make them index out of
+// range. A record it refuses is a damaged body, whatever its checksum says.
+func checkDelivery(r delivery.Record) error { return r.Valid() }
 
 // ---- dedup, authorization, reply decision
 
@@ -392,6 +415,7 @@ type dedupJSON struct {
 	Digest      string  `json:"digest"`
 	RetainUntil wtime   `json:"retain_until"`
 	Reply       *string `json:"reply,omitempty"`
+	DigestLost  bool    `json:"digest_lost,omitempty"`
 }
 
 func toDedup(d delivery.DedupRecord, key TargetKey) (dedupJSON, error) {
@@ -402,7 +426,7 @@ func toDedup(d delivery.DedupRecord, key TargetKey) (dedupJSON, error) {
 	if err != nil {
 		return dedupJSON{}, err
 	}
-	j := dedupJSON{Digest: hex.EncodeToString(d.Digest[:]), RetainUntil: ru}
+	j := dedupJSON{Digest: hex.EncodeToString(d.Digest[:]), RetainUntil: ru, DigestLost: d.DigestLost}
 	if d.HasReply {
 		s := b64(d.Reply)
 		j.Reply = &s
@@ -413,7 +437,7 @@ func toDedup(d delivery.DedupRecord, key TargetKey) (dedupJSON, error) {
 }
 
 func fromDedup(j dedupJSON, key TargetKey) (delivery.DedupRecord, error) {
-	d := delivery.DedupRecord{Key: key.Dedup(), RetainUntil: time.Time(j.RetainUntil)}
+	d := delivery.DedupRecord{Key: key.Dedup(), RetainUntil: time.Time(j.RetainUntil), DigestLost: j.DigestLost}
 	dig, err := hexN(j.Digest, 32)
 	if err != nil {
 		return d, fmt.Errorf("digest: %w", err)

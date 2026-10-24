@@ -177,8 +177,7 @@ func recoveryScenarios() []scenario {
 			name: "quarantine of a replacement that is damaged in its turn",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				first := store.AlertID{7}
-				lost := store.InRecord{Key: tgtKey(1), Lost: true, DiscoveredAt: base, Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: base.Add(3 * 3600e9)},
-					Dedup: delivery.NewDedupRecord(tgtKey(1).Dedup(), delivery.BodyDigest{}, base.Add(3*3600e9))}
+				lost := lostInAt(tgtKey(1), base)
 				seed(t, mem, lost, store.AlertRecord{ID: first, Kind: "corrupt_record", At: base, Detail: "d", Subject: "in"})
 				seedRaw(t, mem, store.InDir, corruptName(lost, first), []byte("the first damaged file"))
 				damageBody(t, mem, path.Join(store.InDir, lost.Name()))
@@ -204,7 +203,7 @@ func recoveryScenarios() []scenario {
 				// Every record refers to the one body.
 				in2, d3, in5 := inRev(2, 1), inRev(3, 1), inRev(5, 1)
 				in2.Body, d3.Body, in5.Body = bodyRef(1), bodyRef(1), bodyRef(1)
-				d3.Record.State = delivery.StateDelivered
+				d3.Record = deliveredRecord(d3.Record)
 				seed(t, mem, srcOut(1, false), in2, d3, ctl, in5)
 			},
 			durable: "quarantine-body/body.sync-dir#1",
@@ -328,7 +327,7 @@ func recoveryScenarios() []scenario {
 				closed := directEndpoint(7, "chat")
 				closed.Status, closed.Token = store.EndpointClosed, nil
 				done := inFor(2, 7, 2)
-				done.Record.State = delivery.StateDelivered
+				done.Record = deliveredRecord(done.Record)
 				done.Body = nil
 				c := sessionCtl(3, 5)
 				c.Key.Recipient = ep(7)

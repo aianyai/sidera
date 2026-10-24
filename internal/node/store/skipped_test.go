@@ -5,12 +5,6 @@ import "testing"
 // The tests below are questions the store cannot settle alone. Each is skipped
 // with the question as the reason; the answer decides what the test asserts.
 
-// A delivery record read from disk is checked by the delivery package, not by
-// the store: the consistency of state, substate, reason and lease is its rule.
-func TestStoreRefusesAnInvalidDecodedRecord(t *testing.T) {
-	t.Skip("delivery.Record.Valid is not on the task branch yet; once it is, DecodeRecord must call it on every delivery record of an out, in and ctl body and treat a failure as a damaged body, and this test sets a record that Valid refuses and expects a body damage")
-}
-
 // The quarantined file of a delivery record whose first line cannot be read has
 // no replacement, so nothing says when it may go but the time the node found it.
 func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *testing.T) {
@@ -20,5 +14,5 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 // The drain of the records queued for a closed endpoint is the engine's
 // decision, with the delivery rules; the store names candidates.
 func TestDrainCandidatesAreExactlyTheRecordsAForcedCloseChanges(t *testing.T) {
-	t.Skip("question: is the store's candidate (an accepted, not lost, target or control record whose endpoint is closed or has no record) the whole predicate of the drain replay, or does a forced close also change records in other states once the lost-record rules land? The engine's plan decides; this test would compare the candidates with the delivery package's answer for every state of both sides")
+	t.Skip("open question for the engine's plan: DrainCandidates names the accepted target and control records, never a lost replacement, whose endpoint is closed or has no record, and the engine decides whether that is the complete predicate of the endpoint-drain replay, that is, whether closing an endpoint forcibly changes a record in any other state or shape (a lost replacement, a record whose state is not accepted, a record under a live lease). This test compares the candidates with what the delivery package's forced close changes for every state of both sides, and can be written once that predicate is fixed")
 }

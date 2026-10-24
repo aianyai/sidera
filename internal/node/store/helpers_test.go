@@ -631,3 +631,80 @@ func derivedIn(ctl, session int, rev uint64) store.InRecord {
 
 // zeroRec is a record file name no record has.
 const zeroRec = "0000000000000000000000000000000000000000000000000000000000000000.rec"
+
+// fixedLease is the page identifier of every lease a fixture takes.
+var fixedLease = func() delivery.LeaseID {
+	id, err := delivery.ParseLeaseID("00112233445566778899aabbccddeeff")
+	if err != nil {
+		panic(err)
+	}
+	return id
+}()
+
+// leasedRecord is the target record r after its only chunk was handed out at
+// now: the record Handout makes, never one assembled by hand.
+func leasedRecord(r delivery.Record, now time.Time) delivery.Record {
+	out, res, err := r.Handout(now, delivery.AuthorizationAllow, 1, 1, fixedLease)
+	if err != nil || res.Action != delivery.HandoutGranted {
+		panic(fmt.Sprintf("Handout: %+v %v", res, err))
+	}
+	return out
+}
+
+// deliveredRecord is the record r after the delivery rules delivered it: the
+// acknowledgement of its only chunk for a message, the committed reply for a
+// control record.
+func deliveredRecord(r delivery.Record) delivery.Record {
+	if r.Control {
+		return applied0(r)
+	}
+	if r.Lease.Chunks == 0 {
+		r = leasedRecord(r, base)
+	}
+	out, verdict, _, err := r.Ack(base, delivery.Ack{Part: 1, Lease: r.Lease.IDs[0], TokenMatches: true})
+	if err != nil || verdict != delivery.AckCompleted {
+		panic(fmt.Sprintf("Ack: %v %v", verdict, err))
+	}
+	return out
+}
+
+// lostRecord is the record that replaces a delivery record lost to storage
+// corruption at at, with the feedback its construction owes, from the delivery
+// package's own constructor.
+func lostRecord(side delivery.Side, control bool, at time.Time) (delivery.Record, []delivery.Feedback) {
+	r, o, err := delivery.NewLostRecord(side, control, at)
+	if err != nil {
+		panic(err)
+	}
+	return r, o.Feedback
+}
+
+// lostOutAt is the replacement of the source record under k: one lost delivery
+// per recipient and the feedback each owes.
+func lostOutAt(k store.OutKey, at time.Time) store.OutRecord {
+	rec := store.OutRecord{Key: k, Lost: &store.LostOut{DiscoveredAt: at}}
+	for _, to := range k.Recipients {
+		r, feedback := lostRecord(delivery.SideSource, false, at)
+		rec.Lost.Deliveries = append(rec.Lost.Deliveries, r)
+		for _, f := range feedback {
+			rec.Feedback = append(rec.Feedback, delivery.Item{
+				Ref:      delivery.DeliveryRef{Sender: ident.Address{Node: node(local), Endpoint: k.Sender}, Message: k.Message, Recipient: to},
+				Feedback: f, At: at,
+			})
+		}
+	}
+	return rec
+}
+
+// lostInAt is the replacement of the target record under k, with the dedup
+// record that stands in for the lost one.
+func lostInAt(k store.TargetKey, at time.Time) store.InRecord {
+	r, _ := lostRecord(delivery.SideTarget, false, at)
+	return store.InRecord{Key: k, Lost: true, DiscoveredAt: at, Record: r, Dedup: delivery.NewLostDedupRecord(k.Dedup(), at)}
+}
+
+// lostCtlAt is the replacement of the control record under k.
+func lostCtlAt(k store.TargetKey, at time.Time) store.CtlRecord {
+	r, _ := lostRecord(delivery.SideTarget, true, at)
+	return store.CtlRecord{Key: k, Lost: true, DiscoveredAt: at, Record: r, Dedup: delivery.NewLostDedupRecord(k.Dedup(), at)}
+}

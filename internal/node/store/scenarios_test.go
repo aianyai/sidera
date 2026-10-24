@@ -234,7 +234,7 @@ func scenarios() []scenario {
 				var ins []store.InRecord
 				for i := 1; i <= 3; i++ {
 					in := inRev(i, 1)
-					in.Record.Lease = delivery.Lease{Handouts: 1, Active: true, IssuedAt: base, ExpiresAt: base.Add(5 * time.Minute), Chunks: 1, HandedOut: []bool{true}, Acked: []bool{false}}
+					in.Record = leasedRecord(in.Record, base)
 					ins = append(ins, in)
 				}
 				return r.st.Lease(ins)
@@ -254,7 +254,7 @@ func scenarios() []scenario {
 			run: func(t *testing.T, r *rig, s *sim) error {
 				a, b := inRev(1, 2), inRev(2, 2)
 				a.Body, b.Body = nil, nil
-				a.Record.State, b.Record.State = delivery.StateDelivered, delivery.StateDelivered
+				a.Record, b.Record = deliveredRecord(a.Record), deliveredRecord(b.Record)
 				return r.st.Ack([]store.InRecord{a, b}, []store.BodyRef{*bodyRef(1)})
 			},
 			bodiesResolve: true,
@@ -494,18 +494,17 @@ func promptScenario(name string, ev store.PendingEvent, cause delivery.Cause) sc
 // sweepScenario is a sweep of every kind of thing a sweep removes.
 func sweepScenario(farFuture time.Time) scenario {
 	world := func(t *testing.T, mem *fsxtest.Mem) {
-		o1 := srcOutFinished(1)                       // a finished source record whose number must be remembered
-		o2 := srcOutFinished(2)                       // another, of the same pair
-		inDone := inRev(3, 2)                         // a finished target record
-		inDone.Record.State = delivery.StateDelivered // it still refers to its body: the release never happened
-		c := created(t, 4, 5)                         // a control record of a session creation
-		c.Record.State = delivery.StateDelivered
+		o1 := srcOutFinished(1)                        // a finished source record whose number must be remembered
+		o2 := srcOutFinished(2)                        // another, of the same pair
+		inDone := inRev(3, 2)                          // a finished target record
+		inDone.Record = deliveredRecord(inDone.Record) // it still refers to its body: the release never happened
+		c := created(t, 4, 5)                          // a control record of a session creation
+		c.Record = deliveredRecord(c.Record)
 		derived := derivedIn(4, 5, 2) // its derived delivery
-		derived.Record.State = delivery.StateDelivered
+		derived.Record = deliveredRecord(derived.Record)
 		derived.Body = nil
 		lost := inRev(6, 1) // a replacement and its quarantined file
-		lost = store.InRecord{Key: lost.Key, Lost: true, DiscoveredAt: base, Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: base.Add(3 * time.Hour)},
-			Dedup: delivery.NewDedupRecord(lost.Key.Dedup(), digestOf(6), base.Add(3*time.Hour))}
+		lost = lostInAt(lost.Key, base)
 		closed := session(5, store.EndpointClosed, ctlName(4))
 		seed(t, mem, o1, o2, inDone, c, derived, lost, closed,
 			store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "in/x"},

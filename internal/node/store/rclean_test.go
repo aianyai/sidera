@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path"
 	"testing"
-	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -78,11 +77,11 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 
 	// Leases and acknowledgements; the body goes with the last reference.
 	a4 := withRev(a3, 4)
-	a4.Record.Lease = delivery.Lease{Handouts: 1, Active: true, IssuedAt: base, ExpiresAt: base.Add(5 * time.Minute), Chunks: 1, HandedOut: []bool{true}, Acked: []bool{false}}
+	a4.Record = leasedRecord(a4.Record, base)
 	mustDo(t, r.st.Lease([]store.InRecord{a4}))
 	check("lease")
 	a5 := withRev(a4, 5)
-	a5.Record.State, a5.Body = delivery.StateDelivered, nil
+	a5.Record, a5.Body = deliveredRecord(a5.Record), nil
 	mustDo(t, r.st.Ack([]store.InRecord{a5}, nil))
 	check("ack")
 	out1 := srcOut(1, true)

@@ -385,10 +385,10 @@ validated in seven steps, and each failure has a class:
 | 1 | the first line is at most 8 KiB, ends in a newline, has six fields of single spaces, the magic and the version | first line unreadable |
 | 2 | the kind is one the directory holds | first line unreadable |
 | 3 | the key is unpadded base64url and the file name is the hash of kind and key | first line unreadable |
-| 4 | the key parses as a key of the kind, field by field with the parser of the package that owns the field | first line unreadable |
+| 4 | the key parses as a key of the kind, field by field with the parser of the package that owns the field (a message id with `envelope.ValidMessageID`, so a key accepts exactly the ids a peer can send) | first line unreadable |
 | 5 | the bytes after the first line are as many as the length says (at most 256 KiB) | body damaged |
 | 6 | their CRC32C is the checksum | body damaged |
-| 7 | the body decodes strictly, is the canonical encoding of what it decodes to, and passes the checks of its kind | body damaged |
+| 7 | the body decodes strictly, is the canonical encoding of what it decodes to, and passes the checks of its kind; every delivery record in it also passes `delivery.Record.Valid()` | body damaged |
 
 A first line whose checksum or length field is itself damaged while the body is
 intact fails step 5 or 6 and is treated as a damaged body: a delivery record is
@@ -402,6 +402,19 @@ zeros, and read with `strictjson`. Step 7 also requires the body to be exactly
 what the encoder gives for what it decoded to, so no two files mean the same
 record, a bit of rot that leaves valid JSON cannot pass as another record, and
 decoding then encoding gives the bytes back for every file that decodes.
+
+A delivery record is checked by the delivery package, not by the store: after
+decoding, `Record.Valid()` says whether the record is one the constructors and
+transitions can produce, and a well-formed record that is impossible (a lease
+whose chunk flags disagree with its chunk count would make a later hand-out index
+out of range) is a damaged body like any other. The same check runs before a
+record is written, so a defect upstream is refused where it happens and not
+written down as a file that would be quarantined and replaced by a lost record
+when it is read. Besides the fields of a delivery record that every record has,
+the stored form carries the cause of an unknown result and the lost marker (which
+a replacement keeps after it closes, so that it is not judged by the shape of a
+delivery accepted normally), and the deduplication record carries the flag that
+says its digest was lost.
 
 **Two shapes.** A source, target or control record is regular or lost. A lost
 record is what replaces a delivery record that was damaged: it has the key of the
@@ -741,11 +754,14 @@ so that the double cannot drift from what it stands for.
   against a real kernel.
 
 - **The sweep leaves a quarantined file whose first line is unreadable**, in a
-  directory of delivery records, where it is: the bound after which it may go is a
-  function of the delivery package that is not on this branch.
-- **A decoded delivery record is not checked for consistency** by the store:
-  the delivery package decides what a valid record is, and the store calls it once
-  it can.
+  directory of delivery records, where it is: the bound after which it may go is
+  not applied yet.
+- **`DrainCandidates` is not known to be the whole predicate** of the replay that
+  drains the records queued for a closed endpoint: it names the accepted target and
+  control records that are not lost replacements, and the engine decides whether a
+  forced close also changes records in other states or shapes. The test that would
+  compare it with the delivery package for every state is skipped, with the
+  question as its reason.
 - **The records are tested on the in-memory file system and, for the cold start,
   on the real one of macOS.** Windows and Linux numbers and the Windows ordering
   of renames are pending verification by CI on main.
@@ -776,8 +792,8 @@ so that the double cannot drift from what it stands for.
 | coverage | `internal/node/txn/writer.go` | `coverage_test.go` |
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `FuzzDecodeFrame` |
-| keys | `internal/node/store/key.go` | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
-| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
+| keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
+| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go`, `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |

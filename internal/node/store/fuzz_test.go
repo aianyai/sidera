@@ -112,8 +112,10 @@ func FuzzDecodeRecordBody(f *testing.F) {
 	keys := map[store.Kind]string{}
 	for _, g := range goldenRecords {
 		_, key, _ := goldenParts(g.file)
-		kind := strings.Fields(g.file)[2]
-		keys[store.Kind(kind)] = key
+		kind := store.Kind(strings.Fields(g.file)[2])
+		if _, ok := keys[kind]; !ok { // the first vector of a kind: its key is the one the fuzzer frames bodies under
+			keys[kind] = key
+		}
 	}
 	kindsInOrder := []store.Kind{store.KindOut, store.KindIn, store.KindCtl, store.KindEndpoint, store.KindAttempts, store.KindCheckpoint, store.KindAdmin, store.KindAlert, store.KindSeq}
 	for i, k := range kindsInOrder {

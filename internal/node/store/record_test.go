@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash/crc32"
 	"strings"
@@ -75,6 +76,20 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return srcOut(1, false)
 	case "ctl":
 		return sessionCtl(1, 5)
+	case "out lost at the sender":
+		return lostOutAt(outKey(2, false), base.Add(time.Hour))
+	case "in lost at the target":
+		return lostInAt(tgtKey(2), base.Add(time.Hour))
+	case "in lost and closed":
+		in := lostInAt(tgtKey(2), base.Add(time.Hour))
+		closed, _, err := in.Record.Tick(in.Record.ReportBy.Add(time.Nanosecond))
+		if err != nil || closed.State != delivery.StateClosedUnconfirmed {
+			t.Fatalf("Tick of a replacement at its report_by: %v %v", closed.State, err)
+		}
+		in.Record = closed
+		return in
+	case "ctl lost at the target":
+		return lostCtlAt(ctlKey(2), base.Add(time.Hour))
 	}
 	t.Fatalf("no record for the golden vector %q", name)
 	return nil
@@ -292,22 +307,84 @@ func frameHead(t *testing.T, vector string) []byte {
 // The shapes: a record is regular or lost, never a mixture.
 func TestLostShapesAreExclusive(t *testing.T) {
 	_, key, body := golden(t, "in")
-	lost := `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":{"side":"target","state":"delivery_unknown","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z"},"dedup":{"digest":"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20","retain_until":"2026-10-24T12:03:00Z"}}`
+	lost := `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":{"side":"target","state":"delivery_unknown","unknown":"lost_at_target","lost":true,"report_by":"2026-10-24T14:04:00Z"},"dedup":{"digest":"0000000000000000000000000000000000000000000000000000000000000000","retain_until":"2026-10-24T14:04:00Z","digest_lost":true}}`
 	if _, dmg := store.DecodeRecord(store.InDir, nameOf("in", key), frameOf("in", key, lost)); dmg != nil {
 		t.Fatalf("a lost in record: %+v", dmg)
 	}
 	for name, mixed := range map[string]string{
-		"a lost record with a revision":       strings.Replace(lost, `{"lost":true,`, `{"rev":1,"lost":true,`, 1),
-		"a lost record with an authorization": strings.Replace(lost, `"dedup"`, `"auth":{"kind":"allow"},"dedup"`, 1),
-		"a lost record with a body":           strings.Replace(lost, `"dedup"`, `"body":{"sha256":"ea8c004183bd3bd33e27907ed5cb35a24808cb99ab2bb41a727d0c675f5bcdfc","len":17},"dedup"`, 1),
-		"a lost record without a discovery":   strings.Replace(lost, `"discovered_at":"2026-10-24T10:00:00Z",`, ``, 1),
-		"a regular record with a discovery":   strings.Replace(body, `{"rev":1,`, `{"rev":1,"discovered_at":"2026-10-24T10:00:00Z",`, 1),
+		"a lost record with a revision":           strings.Replace(lost, `{"lost":true,`, `{"rev":1,"lost":true,`, 1),
+		"a lost record with an authorization":     strings.Replace(lost, `"dedup"`, `"auth":{"kind":"allow"},"dedup"`, 1),
+		"a lost record with a body":               strings.Replace(lost, `"dedup"`, `"body":{"sha256":"ea8c004183bd3bd33e27907ed5cb35a24808cb99ab2bb41a727d0c675f5bcdfc","len":17},"dedup"`, 1),
+		"a lost record without a discovery":       strings.Replace(lost, `"discovered_at":"2026-10-24T10:00:00Z",`, ``, 1),
+		"a replacement that is not marked lost":   strings.Replace(lost, `"lost":true,"report_by"`, `"report_by"`, 1),
+		"a replacement without its unknown cause": strings.Replace(lost, `"unknown":"lost_at_target",`, ``, 1),
+		"a replacement of the wrong side's cause": strings.Replace(lost, `lost_at_target`, `lost_at_sender`, 1),
+		"a regular record with a discovery":       strings.Replace(body, `{"rev":1,`, `{"rev":1,"discovered_at":"2026-10-24T10:00:00Z",`, 1),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, dmg := store.DecodeRecord(store.InDir, nameOf("in", key), frameOf("in", key, mixed)); dmg == nil {
 				t.Error("accepted")
 			}
 		})
+	}
+}
+
+// A delivery record read from disk is checked by the delivery package, not by
+// the store: a body that is well formed, canonical and right by its checksum but
+// holds a record no constructor or transition can make is a damaged body, for
+// every kind that holds delivery records, and the store does not write one either.
+func TestStoreRefusesAnInvalidDecodedRecord(t *testing.T) {
+	for _, c := range []struct {
+		rule   string
+		kind   string
+		dir    string
+		edit   func(string) string
+		reason string
+	}{
+		{"a target record that was never handed out is not delivery_unknown", "in", store.InDir,
+			func(b string) string {
+				return strings.Replace(b, `"state":"accepted"`, `"state":"delivery_unknown"`, 1)
+			}, "an unknown result without a cause"},
+		{"a control record is never rejected", "ctl", store.CtlDir,
+			func(b string) string {
+				return strings.Replace(b, `"state":"accepted","control":true`, `"state":"rejected","reject":"unauthorized","control":true`, 1)
+			}, "a rejected control record"},
+		{"a source delivery has no backlog deadline", "out", store.OutDir,
+			func(b string) string {
+				return strings.Replace(b, `"report_by":"2026-10-24T12:03:00Z"}}],"to"`, `"report_by":"2026-10-24T12:03:00Z","backlog_deadline":"2026-10-24T09:30:00Z"}}],"to"`, 1)
+			}, "a backlog deadline on a source record"},
+		{"a lost marker needs the shape of a replacement", "in", store.InDir,
+			func(b string) string {
+				return strings.Replace(b, `"state":"accepted","accept_before"`, `"state":"accepted","lost":true,"accept_before"`, 1)
+			}, "a lost marker on a delivery with deadlines"},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			_, key, body := golden(t, c.kind)
+			edited := c.edit(body)
+			if edited == body {
+				t.Fatalf("the edit changed nothing")
+			}
+			rec, dmg := store.DecodeRecord(c.dir, nameOf(c.kind, key), frameOf(c.kind, key, edited))
+			if dmg == nil {
+				t.Fatalf("accepted %s, as %#v", c.reason, rec)
+			}
+			if dmg.Class != store.BodyDamaged || dmg.Reason != store.ReasonBodyInvalid || dmg.Kind != c.kind || string(dmg.Key) != key {
+				t.Errorf("damage = class %d reason %d kind %q key %q (%s), want a body damage that carries the verified kind and key", dmg.Class, dmg.Reason, dmg.Kind, dmg.Key, dmg.Detail)
+			}
+			if !strings.Contains(dmg.Detail, delivery.ErrInvalidRecord.Error()) {
+				t.Errorf("the damage detail %q does not say the delivery package refused the record", dmg.Detail)
+			}
+		})
+	}
+
+	// The same record is refused on the way out, so that a bug upstream is not
+	// written down as a record that would be quarantined when it is read.
+	in := tgtIn(1)
+	in.Record.State = delivery.StateDeliveryUnknown
+	if data, err := store.EncodeRecord(in); err == nil {
+		t.Errorf("EncodeRecord wrote an impossible record: %q", data)
+	} else if !errors.Is(err, delivery.ErrInvalidRecord) {
+		t.Errorf("EncodeRecord error = %v, want one that wraps delivery.ErrInvalidRecord", err)
 	}
 }
 
@@ -405,16 +482,7 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	derived := envelope.Tracked{Address: addr(2, 6), Delivery: delivery.NewSourceRecord(ctl.Outbound.AcceptBefore)}
 	ctl.Outbound.Derived = &derived
 	recs["out of a session creation with a derived delivery"] = ctl
-	recs["out lost"] = store.OutRecord{
-		Key: outKey(7, false),
-		Lost: &store.LostOut{DiscoveredAt: base.Add(time.Hour), Deliveries: []delivery.Record{
-			{Side: delivery.SideSource, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: base.Add(3 * time.Hour)},
-		}},
-		Feedback: []delivery.Item{{
-			Ref:      delivery.DeliveryRef{Sender: addr(local, 1), Message: msgID(7), Recipient: addr(2, 2)},
-			Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: base,
-		}},
-	}
+	recs["out lost"] = lostOutAt(outKey(7, false), base.Add(time.Hour))
 
 	// Target records.
 	in := tgtIn(1)
@@ -422,15 +490,23 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	recs["in accepted"] = in
 	leased := tgtIn(2)
 	leased.Rev = 5
-	lid, _ := delivery.ParseLeaseID("00112233445566778899aabbccddeeff")
-	leased.Record.Sub = delivery.SubNotified
-	leased.Record.Reported = delivery.KindSet(0).With(delivery.KindDeliveryBlocked)
-	leased.Record.Blocked, leased.Record.BlockedCause = true, delivery.CauseRuntimeAuth
-	leased.Record.Lease = delivery.Lease{
-		Handouts: 2, IDs: []delivery.LeaseID{lid}, Active: true,
-		IssuedAt: base.Add(time.Minute), ExpiresAt: base.Add(6 * time.Minute),
-		Chunks: 2, HandedOut: []bool{true, false}, Acked: []bool{true, false},
+	// Two chunks, the first handed out and acknowledged, then a prompt and a block:
+	// the record the delivery rules make, not one put together field by field.
+	leasing := leased.Record
+	leasing, _, err := leasing.Handout(base.Add(time.Minute), delivery.AuthorizationAllow, 2, 1, fixedLease)
+	if err != nil {
+		t.Fatal(err)
 	}
+	leasing, _, _, err = leasing.Ack(base.Add(time.Minute), delivery.Ack{Part: 1, Lease: fixedLease, TokenMatches: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range []delivery.Event{{Type: delivery.EventNotified}, {Type: delivery.EventBlocked, Cause: delivery.CauseRuntimeAuth}} {
+		if leasing, _, err = leasing.Apply(base.Add(2*time.Minute), ev); err != nil {
+			t.Fatalf("Apply(%v): %v", ev.Type, err)
+		}
+	}
+	leased.Record = leasing
 	leased.ReplyDecision = reply.Decision{Reason: reply.ReasonDeliveredWindow, Until: base.Add(time.Hour)}
 	leased.Handout = store.HandoutFields{ContentType: "text/markdown", ReplyTo: msgID(1), Thread: "t", Seq: 12, SentAt: base}
 	recs["in leased, notified and blocked"] = leased
@@ -452,11 +528,7 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	notice.Dedup = delivery.NewDedupRecord(notice.Key.Dedup(), digestOf(5), notice.Record.ReportBy)
 	notice.Covers = []store.CoverRef{{Out: srcOut(4, false).Name(), Recipient: addr(2, 2), Kind: delivery.KindRejected}}
 	recs["in notice that covers feedback"] = notice
-	recs["in lost"] = store.InRecord{
-		Key: tgtKey(6), Lost: true, DiscoveredAt: base.Add(time.Hour),
-		Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: base.Add(3 * time.Hour)},
-		Dedup:  delivery.NewDedupRecord(tgtKey(6).Dedup(), digestOf(6), base.Add(3*time.Hour)),
-	}
+	recs["in lost"] = lostInAt(tgtKey(6), base.Add(time.Hour))
 
 	// Control records.
 	c := sessionCtl(1, 5)
@@ -476,11 +548,7 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	closeCtl.Preset, closeCtl.SessionEndpoint, closeCtl.Intent = "", ident.EndpointID{}, nil
 	closeCtl.ClosedEndpoint = ep(6)
 	recs["ctl that closed a session"] = closeCtl
-	recs["ctl lost"] = store.CtlRecord{
-		Key: ctlKey(4), Lost: true, DiscoveredAt: base.Add(time.Hour),
-		Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, Control: true, AcceptBefore: base, ReportBy: base.Add(3 * time.Hour)},
-		Dedup:  delivery.NewDedupRecord(ctlKey(4).Dedup(), digestOf(4), base.Add(3*time.Hour)),
-	}
+	recs["ctl lost"] = lostCtlAt(ctlKey(4), base.Add(time.Hour))
 
 	// The rest.
 	recs["endpoint direct"] = directEndpoint(7, "chat")

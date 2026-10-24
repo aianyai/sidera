@@ -21,7 +21,7 @@ engine applies the delivery rules and calls the writes.
 | Name | Purpose |
 | ---- | ------- |
 | `New(w)`, `Transactions()` | One `Store` over the program's writer; the declarations the composition root adds to its table. |
-| `EncodeRecord`, `DecodeRecord` | The file of a record, and its validation in seven steps with a class of damage. |
+| `EncodeRecord`, `DecodeRecord` | The file of a record, and its validation in seven steps with a class of damage. The seventh step asks the delivery package whether every delivery record in the body is one its rules can produce (`Record.Valid()`), and the same question is asked before a record is written. A message id in a key is judged by `envelope.ValidMessageID`. |
 | `OutRecord`, `InRecord`, `CtlRecord`, `EndpointRecord`, `AttemptsRecord`, `CheckpointRecord`, `AdminRecord`, `AlertRecord`, `SeqRecord` | The records, in the contract types of the other packages. |
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
@@ -65,3 +65,8 @@ engine applies the delivery rules and calls the writes.
   the engine's choosing; the store accepts any size.
 - Give `Quarantine` a replacement only for a delivery record whose first line was
   readable, built with the delivery package's constructor for a lost record.
+- On a body that does not hash to its name, replace a record with a lost record
+  only when `delivery.Record.NeedsBody()` says it still needs the bytes (the
+  replacement comes from `delivery.NewLostRecord`, and on the target side
+  `delivery.NewLostDedupRecord`); any other record keeps its state and only drops
+  the reference to the body.

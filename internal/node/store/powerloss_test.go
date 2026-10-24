@@ -95,7 +95,7 @@ func (w *powerLossWorld) next() *operation {
 				after:  func() { w.stage[i] = 3; w.rev[i]++ }}
 		case 3:
 			in := w.leased(i)
-			in.Record.State, in.Body = delivery.StateDelivered, nil
+			in.Record, in.Body = deliveredRecord(in.Record), nil
 			return &operation{name: "ack", call: func() error { return r.st.Ack([]store.InRecord{in}, nil) },
 				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, in.Rev+1))},
 				after:  func() { w.stage[i] = 4; w.rev[i]++ }}
@@ -215,7 +215,7 @@ func (w *powerLossWorld) leased(i int) store.InRecord {
 	in := inRev(i, w.rev[i])
 	in.Key.Recipient = ep(2)
 	in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(i), in.Record.ReportBy)
-	in.Record.Lease = delivery.Lease{Handouts: 1, Active: true, IssuedAt: base, ExpiresAt: base.Add(5 * time.Minute), Chunks: 1, HandedOut: []bool{true}, Acked: []bool{false}}
+	in.Record = leasedRecord(in.Record, base)
 	if w.stage[i] == 3 {
 		in.Record.State = delivery.StateAccepted
 	}

@@ -20,8 +20,12 @@ import (
 func TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds(t *testing.T) {
 	reportBy := base.Add(time.Minute).Add(3*time.Hour + 2*time.Minute) // fixture 1
 	want := reportBy.Add(24*time.Hour + 2*time.Minute)
+	// A replacement is reported until the report_by of the latest delivery that
+	// can have been accepted before the loss was found: an hour of delivery
+	// deadline, the clock tolerance and the report offset after the discovery.
+	lostWant := base.Add(time.Hour + 2*time.Minute).Add(3*time.Hour + 2*time.Minute).Add(24*time.Hour + 2*time.Minute)
 	finishedIn := inRev(1, 1)
-	finishedIn.Record.State = delivery.StateDelivered
+	finishedIn.Record = deliveredRecord(finishedIn.Record)
 	rejected := inRev(1, 1)
 	rejected.Record.State, rejected.Record.Reject = delivery.StateRejected, delivery.RejectUnauthorized
 	closedUnc := inRev(1, 1)
@@ -32,7 +36,7 @@ func TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds(t *testing.T) {
 	idem.Idempotency = &store.Idempotency{Key: "k", RetainUntil: want.Add(72 * time.Hour)}
 	queued := srcOut(1, false)
 	closedCtl := sessionCtl(1, 5)
-	closedCtl.Record.State = delivery.StateDelivered
+	closedCtl.Record = deliveredRecord(closedCtl.Record)
 
 	for _, c := range []struct {
 		name     string
@@ -49,9 +53,7 @@ func TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds(t *testing.T) {
 		{"a source record waiting for a receipt", queued, want, false},
 		{"a source record's idempotency key outlives its facts", idem, want.Add(72 * time.Hour), true},
 		{"a delivered control record", closedCtl, want, true},
-		{"a lost record is finished by its retention alone", store.InRecord{Key: tgtKey(1), Lost: true, DiscoveredAt: base,
-			Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: reportBy},
-			Dedup:  delivery.NewDedupRecord(tgtKey(1).Dedup(), delivery.BodyDigest{}, reportBy)}, want, true},
+		{"a lost record is finished by its retention alone", lostInAt(tgtKey(1), base), lostWant, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			until, finished := store.RetainUntil(c.rec)
@@ -68,7 +70,7 @@ func TestRetainUntilNeverDecreasesWithReportBy(t *testing.T) {
 	var last time.Time
 	for i := 0; i < 50; i++ {
 		in := inRev(1, 1)
-		in.Record.State = delivery.StateDelivered
+		in.Record = deliveredRecord(in.Record)
 		in.Record.ReportBy = base.Add(time.Duration(i) * 7 * time.Minute)
 		in.Dedup.RetainUntil = in.Record.ReportBy
 		until, _ := store.RetainUntil(in)
@@ -89,19 +91,17 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	build := func(t *testing.T) *rig {
 		r := newRig(t)
 		done := inRev(1, 2)
-		done.Record.State = delivery.StateDelivered // still refers to its body: the release never happened
-		held := inRev(2, 1)                         // accepted: not finished, never swept
+		done.Record = deliveredRecord(done.Record) // still refers to its body: the release never happened
+		held := inRev(2, 1)                        // accepted: not finished, never swept
 		c := created(t, 4, 5)
-		c.Record.State = delivery.StateDelivered
+		c.Record = deliveredRecord(c.Record)
 		derived := derivedIn(4, 5, 2)
-		derived.Record.State = delivery.StateDelivered
+		derived.Record = deliveredRecord(derived.Record)
 		derived.Body = bodyRef(2)           // shares its body with a record that stays
 		orphanDerived := derivedIn(6, 9, 2) // its control record is gone: swept by its own retention
-		orphanDerived.Record.State = delivery.StateDelivered
+		orphanDerived.Record = deliveredRecord(orphanDerived.Record)
 		orphanDerived.Body = bodyRef(4)
-		lost := store.InRecord{Key: tgtKey(7), Lost: true, DiscoveredAt: base,
-			Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: base.Add(time.Hour)},
-			Dedup:  delivery.NewDedupRecord(tgtKey(7).Dedup(), delivery.BodyDigest{}, base.Add(time.Hour))}
+		lost := lostInAt(tgtKey(7), base)
 		closed := session(5, store.EndpointClosed, ctlName(4))
 		open := directEndpoint(7, "chat")
 		stillQueued := inFor(8, 3, 1) // targets a closed endpoint but is not final: the endpoint stays
@@ -228,7 +228,7 @@ func TestPlanSweepKeepsADerivedDeliveryWhileItsControlRecordIsLive(t *testing.T)
 	r := newRig(t)
 	c := sessionCtl(4, 5) // accepted: not finished
 	derived := derivedIn(4, 5, 2)
-	derived.Record.State = delivery.StateDelivered
+	derived.Record = deliveredRecord(derived.Record)
 	derived.Body = nil
 	seed(t, r.mem, c, derived)
 	plan := store.PlanSweep(r.scan(), base.Add(100*24*time.Hour))

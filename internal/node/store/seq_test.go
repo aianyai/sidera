@@ -4,7 +4,6 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
@@ -44,7 +43,7 @@ func TestSeqBookStartsAboveFloorAndRecords(t *testing.T) {
 		{"a floor and no records", map[ident.Address]uint64{pair: 7}, nil, 8},
 		{"a floor for another pair counts for nothing", map[ident.Address]uint64{addr(3, 3): 50}, []store.OutRecord{withSeq(1, 2, false)}, 3},
 		{"a control signal counts like a message", nil, []store.OutRecord{func() store.OutRecord { o := outCtlRecord(1); o.Envelope.Seq[ep(2)] = 6; return o }()}, 7},
-		{"a lost record has no number and counts for nothing", nil, []store.OutRecord{{Key: outKey(1, false), Lost: &store.LostOut{DiscoveredAt: base, Deliveries: []delivery.Record{{Side: delivery.SideSource, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: base}}}}}, 1},
+		{"a lost record has no number and counts for nothing", nil, []store.OutRecord{lostOutAt(outKey(1, false), base)}, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			b := store.NewSeqBook(scanWith(t, c.floors, c.outs...))

@@ -63,37 +63,11 @@ func (s *sim) alert(id store.AlertID, kind, subject string) store.AlertRecord {
 	return store.AlertRecord{ID: id, Kind: kind, At: s.now, Detail: "damaged: " + subject, Subject: subject}
 }
 
-// lostOut is the replacement of a source record: one lost delivery per
-// recipient and the feedback it owes.
-func (s *sim) lostOut(k store.OutKey) store.OutRecord {
-	rec := store.OutRecord{Key: k, Lost: &store.LostOut{DiscoveredAt: s.now}}
-	for _, to := range k.Recipients {
-		rec.Lost.Deliveries = append(rec.Lost.Deliveries, delivery.Record{
-			Side: delivery.SideSource, State: delivery.StateDeliveryUnknown, AcceptBefore: s.now, ReportBy: s.now.Add(3 * time.Hour),
-		})
-		rec.Feedback = append(rec.Feedback, delivery.Item{
-			Ref:      delivery.DeliveryRef{Sender: ident.Address{Node: node(local), Endpoint: k.Sender}, Message: k.Message, Recipient: to},
-			Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: s.now,
-		})
-	}
-	return rec
-}
+func (s *sim) lostOut(k store.OutKey) store.OutRecord { return lostOutAt(k, s.now) }
 
-func (s *sim) lostIn(k store.TargetKey) store.InRecord {
-	return store.InRecord{
-		Key: k, Lost: true, DiscoveredAt: s.now,
-		Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, AcceptBefore: s.now, ReportBy: s.now.Add(3 * time.Hour)},
-		Dedup:  delivery.NewDedupRecord(k.Dedup(), delivery.BodyDigest{}, s.now.Add(3*time.Hour)),
-	}
-}
+func (s *sim) lostIn(k store.TargetKey) store.InRecord { return lostInAt(k, s.now) }
 
-func (s *sim) lostCtl(k store.TargetKey) store.CtlRecord {
-	return store.CtlRecord{
-		Key: k, Lost: true, DiscoveredAt: s.now,
-		Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, Control: true, AcceptBefore: s.now, ReportBy: s.now.Add(3 * time.Hour)},
-		Dedup:  delivery.NewDedupRecord(k.Dedup(), delivery.BodyDigest{}, s.now.Add(3*time.Hour)),
-	}
-}
+func (s *sim) lostCtl(k store.TargetKey) store.CtlRecord { return lostCtlAt(k, s.now) }
 
 // replacement is the record that goes under the name of a damaged delivery
 // record, or nil when there is none to build.
@@ -360,8 +334,15 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 		if o.Body != nil && o.Body.Name() == name {
 			o.Body = nil
 			for i, tr := range o.Outbound.Recipients {
-				if tr.Delivery.State == delivery.StateQueued {
-					o.Outbound.Recipients[i].Delivery = delivery.Record{Side: delivery.SideSource, State: delivery.StateDeliveryUnknown, AcceptBefore: s.now, ReportBy: s.now.Add(3 * time.Hour)}
+				if tr.Delivery.NeedsBody() {
+					lost, feedback := lostRecord(delivery.SideSource, false, s.now)
+					o.Outbound.Recipients[i].Delivery = lost
+					for _, f := range feedback {
+						o.Feedback = append(o.Feedback, delivery.Item{
+							Ref:      delivery.DeliveryRef{Sender: ident.Address{Node: node(local), Endpoint: o.Key.Sender}, Message: o.Key.Message, Recipient: tr.Address},
+							Feedback: f, At: s.now,
+						})
+					}
 				}
 			}
 			outs = append(outs, o)
@@ -369,7 +350,7 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 	}
 	for _, in := range sc.In {
 		if in.Body != nil && in.Body.Name() == name {
-			if in.Record.State == delivery.StateAccepted && !in.Record.Control {
+			if in.Record.NeedsBody() {
 				in = s.lostIn(in.Key)
 				in.Rev = 0
 			} else {
@@ -380,7 +361,11 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 	}
 	for _, c := range sc.Ctl {
 		if c.Body != nil && c.Body.Name() == name {
-			c.Body = nil
+			if c.Record.NeedsBody() {
+				c = s.lostCtl(c.Key)
+			} else {
+				c.Body = nil
+			}
 			ctls = append(ctls, c)
 		}
 	}
