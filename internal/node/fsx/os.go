@@ -28,6 +28,9 @@ var _ FS = (*osFS)(nil)
 // OpenOS returns the FS for the existing directory root. rand supplies the
 // random part of temporary file names.
 func OpenOS(root string, rand io.Reader) (FS, error) {
+	if rand == nil {
+		return nil, errors.New("fsx: OpenOS needs a random source for temporary names")
+	}
 	abs, err := filepath.Abs(root)
 	if err != nil {
 		return nil, err

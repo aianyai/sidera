@@ -90,6 +90,7 @@ func TestParsePointRejectsWhatIsNotCanonical(t *testing.T) {
 		{"role-too-long", "intake/" + strings.Repeat("a", 33) + ".rename#1"},
 		{"commit-with-role", "intake/out.commit#1"},
 		{"role-without-step-name", "intake/out.#1"},
+		{"commit-with-empty-role", "a/.commit#1"},
 		{"two-ordinals", "intake/out.rename#1#2"},
 		{"trailing-newline", "intake/commit#1\n"},
 	}

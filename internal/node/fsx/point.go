@@ -132,6 +132,9 @@ func ParseKey(s string) (Key, error) {
 		if err != nil {
 			return Key{}, err
 		}
+		if st == StepCommit {
+			return Key{}, fmt.Errorf("fsx: crash point key %q: a commit is written without a role", s)
+		}
 		k.Tag.Role, k.Step = role, st
 	}
 	if err := k.Validate(); err != nil {

@@ -70,6 +70,12 @@ func TestOpenOSNeedsAnExistingDirectory(t *testing.T) {
 	}
 }
 
+func TestOpenOSNeedsARandomSource(t *testing.T) {
+	if _, err := fsx.OpenOS(t.TempDir(), nil); err == nil {
+		t.Error("OpenOS accepted a nil random source")
+	}
+}
+
 func TestOSTemporaryNamesComeFromTheInjectedReader(t *testing.T) {
 	root := t.TempDir()
 	fsys, err := fsx.OpenOS(root, &chunkReader{chunks: [][]byte{
