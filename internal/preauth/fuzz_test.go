@@ -72,7 +72,7 @@ func FuzzDecide(f *testing.F) {
 		switch ex.Kind {
 		case KindNode:
 			v, err := record.Verify(record.NetworkKeyCertificateDescriptor, ex.Record)
-			if err != nil || v.Payload.NetworkKey != peer || d.Node != v.Payload.Node {
+			if err != nil || v.Payload().NetworkKey != peer || d.Node != v.Payload().Node {
 				t.Fatalf("completed on a node certificate that does not verify or does not name the peer: %v", err)
 			}
 			if d.State == StateAuthorizedPerson {
@@ -80,7 +80,7 @@ func FuzzDecide(f *testing.F) {
 			}
 		case KindPerson:
 			v, err := record.Verify(record.DeviceCertificateDescriptor, ex.Record)
-			if err != nil || v.Payload.DeviceKey != peer || d.Person != v.Payload.Person {
+			if err != nil || v.Payload().DeviceKey != peer || d.Person != v.Payload().Person {
 				t.Fatalf("completed on a device certificate that does not verify or does not name the peer: %v", err)
 			}
 			if d.State == StateMember {

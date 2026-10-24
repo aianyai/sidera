@@ -248,7 +248,7 @@ func decideNode(f Facts, peer ident.PublicKey, rec record.Record) Decision {
 	if err != nil {
 		return refused(ReasonCertificateInvalid)
 	}
-	node := cert.Payload.Node
+	node := cert.Payload().Node
 
 	// The serial comes first and is kept whatever else is found: the node did
 	// issue this serial, so an older certificate must not come back.
@@ -308,14 +308,14 @@ func nodeState(o trust.Outcome) (State, Reason) {
 // a peer that connects again; only a lower serial is an old certificate.
 func checkSerial(seen map[ident.NodeID]record.SerialSeen, cert record.Verified[record.NetworkKeyCertificate]) (record.SerialSeen, Reason) {
 	var prior *record.SerialSeen
-	if s, ok := seen[cert.Payload.Node]; ok {
+	if s, ok := seen[cert.Payload().Node]; ok {
 		prior = &s
 	}
 	switch record.DecideSerial(prior, cert) {
 	case record.SerialAccept:
 		return record.SerialSeenOf(cert), ReasonUnset
 	case record.SerialStale:
-		if prior == nil || prior.Serial != cert.Payload.Serial {
+		if prior == nil || prior.Serial != cert.Payload().Serial {
 			return record.SerialSeen{}, ReasonCertificateStale
 		}
 		return record.SerialSeen{}, ReasonUnset
@@ -339,7 +339,7 @@ func HeldMembers(f Facts, certs []record.Verified[record.NetworkKeyCertificate])
 	var out []ident.PublicKey
 	seen := map[ident.PublicKey]bool{}
 	for _, cert := range certs {
-		c := cert.Payload
+		c := cert.Payload()
 		if _, refusal := checkSerial(f.SerialSeen, cert); refusal != ReasonUnset {
 			continue
 		}
@@ -365,10 +365,10 @@ func decidePerson(f Facts, peer ident.PublicKey, rec record.Record) Decision {
 	if err != nil {
 		return refused(ReasonCertificateInvalid)
 	}
-	if cert.Payload.DeviceKey != peer {
+	if cert.Payload().DeviceKey != peer {
 		return refused(ReasonKeyMismatch)
 	}
-	person := cert.Payload.Person
+	person := cert.Payload().Person
 	standing := admin.EffectiveLevel(f.Authorized, person, f.Revocations.DeviceCertificate(cert), f.Now)
 	d := Decision{Person: person, Standing: standing, DeviceCertificate: cert}
 	switch standing.Reason {

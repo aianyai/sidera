@@ -301,7 +301,7 @@ func TestDecideNode(t *testing.T) {
 				t.Errorf("Completed() = %v", d.Completed())
 			}
 			if row.want.state == StateUnauthenticated {
-				if !d.Node.IsZero() || !d.Person.IsZero() || d.Trust.Outcome != trust.Denied || !d.NodeCertificate.Digest.IsZero() {
+				if !d.Node.IsZero() || !d.Person.IsZero() || d.Trust.Outcome != trust.Denied || !d.NodeCertificate.Digest().IsZero() {
 					t.Errorf("a refused exchange carries identity or trust: %+v", d)
 				}
 				return
@@ -312,7 +312,7 @@ func TestDecideNode(t *testing.T) {
 			if row.want.trustR != 0 && d.Trust.Reason != row.want.trustR {
 				t.Errorf("trust reason %v, want %v", d.Trust.Reason, row.want.trustR)
 			}
-			if d.Node != nodeOf(t, seedSigner(t, 0x11)) || d.NodeCertificate.Digest.IsZero() {
+			if d.Node != nodeOf(t, seedSigner(t, 0x11)) || d.NodeCertificate.Digest().IsZero() {
 				t.Errorf("an accepted node exchange must name the node and keep the verified certificate: %+v", d)
 			}
 		})
@@ -443,12 +443,12 @@ func TestDecidePerson(t *testing.T) {
 				t.Errorf("level %v, want %v", d.Standing.Level, row.level)
 			}
 			if row.state == StateUnauthenticated {
-				if !d.Person.IsZero() || !d.DeviceCertificate.Digest.IsZero() {
+				if !d.Person.IsZero() || !d.DeviceCertificate.Digest().IsZero() {
 					t.Errorf("a refused exchange carries identity: %+v", d)
 				}
 				return
 			}
-			if d.Person != personOf(t, seedSigner(t, 0x21)) || d.DeviceCertificate.Digest.IsZero() {
+			if d.Person != personOf(t, seedSigner(t, 0x21)) || d.DeviceCertificate.Digest().IsZero() {
 				t.Errorf("an accepted person exchange must name the person and keep the verified certificate: %+v", d)
 			}
 		})
