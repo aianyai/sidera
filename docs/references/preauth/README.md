@@ -129,6 +129,67 @@ Failure closed throughout: an unset time or peer key, an unset kind, and a
 missing revocation set are refused, and a member or an authorized person exists
 only through a positive answer from `trust` or `admin`.
 
+### Connection accounting
+
+Three limits keep strangers from crowding out the cluster:
+
+- **The aggregate cap.** At most `UnauthenticatedCap` inbound connections may be
+  unauthenticated at once. The check runs where the connection gater still can
+  refuse, right after the secure handshake, when the peer's key is known.
+- **The known-member exemption.** An inbound connection of a peer known as a
+  member is let through and not counted. Known members are the peers whose
+  exchange completed as a member or an authorized person, and the members whose
+  valid network-key certificates the node holds. A peer decided as a non-member
+  stops being known. A person's new device, and a node with a new network key,
+  are strangers until their first exchange completes.
+- **The non-member limits.** A connection whose exchange completed as a
+  non-member counts toward `NonMemberConcurrency`; when none is free the
+  connection is closed. A non-member lives at most `NonMemberLifetime`, counted
+  from the connection, so the limit covers the exchange and the online part of
+  pairing and has to be at least `ExchangeDeadline` plus the pairing online
+  timeout (checked by `Params.Validate`).
+
+The model is a set of state transitions the network layer drives with the events
+it sees (handshake done, connected, exchange decided, disconnected) and a clock
+passed in. It has no timers: `Overdue` says which connections to close now, and
+`Sweep` forgets entries never seen connected. All numbers are `Params`; none is
+decided in this package.
+
+Honest limits, as measured with the library:
+
+- **The cap bounds occupancy, not cost.** The secure handshake runs before the
+  cap is consulted, so a refused stranger has already cost a handshake of CPU
+  and bandwidth. Before the handshake only the resource manager's per-address
+  limits apply, which do not tell strangers from members.
+- **Per-address limits hurt members behind one address.** With the library's
+  defaults a single IPv4 address may hold 8 concurrent connections, so several
+  members behind one egress address contend. The network layer configures it.
+- **Refusals look like resets.** A refused protocol is negotiated and then the
+  stream is reset; a connection refused by the cap is closed after a successful
+  handshake.
+- **The hole-punch direction disagrees.** A hole-punched connection is inbound
+  at the handshake and reports outbound afterwards on both sides, so entries are
+  keyed without direction and both ends may start an exchange.
+- **Entries can leak without a sweep.** After the handshake the connection can
+  still be rejected (resource limits on the peer, multiplexer negotiation,
+  upgrade checks) with no connected or disconnected callback.
+- **A flood starves members without the exemption.** In the measurement with 1,000
+  new identities arriving in a burst against a cap of 64 and a 5-second exchange
+  deadline, only 9 of 20 members completed within 10 seconds; with the exemption
+  all 20 completed in about 20 ms.
+
+Per-peer limits belong to the network layer. The resource manager asks its
+limiter once, when it creates a peer's scope, and keeps the returned object,
+re-reading its values on every check. So the limiter must return one mutable
+limit object per peer for as long as a scope may live (scopes with no use are
+collected every minute and recreated on reconnect), move it between tiers when
+the connection state changes, reset it to the unauthenticated tier at the peer's
+last disconnect instead of deleting it (a stranger reconnecting under the same
+identity would otherwise inherit a member's allowance from a live scope), and
+reconcile its table with the manager's peer list, since the table grows with the
+identities seen. The connection manager's protection is for members and is not a
+cache of who is known: the accounting keeps its own known set.
+
 ## Why
 
 - **Default closed.** The table lists the exceptions and every other protocol
@@ -199,6 +260,28 @@ only through a positive answer from `trust` or `admin`.
   made without having looked at revocations would let a revoked key in, so it
   asks for an explicit empty set instead.
 
+- **Exempt known members from the cap.** The cap exists so that strangers cannot
+  hold the node's connections. The same cap shuts out members that reconnect
+  during a flood, and the flood costs the attacker nothing. A key authenticated
+  by the handshake cannot be spoofed, so exempting it gives an attacker nothing;
+  it also keeps its own deadline. The residual risk is a revoked member that
+  keeps connecting: it holds no slot but it is closed at the deadline, and its
+  next exchange removes it from the known.
+- **Key without direction.** The first version of the model keyed entries with
+  direction and leaked the entry of every hole-punched connection.
+- **Count inbound only.** The node chooses its outbound connections; inbound
+  ones are what a stranger controls.
+- **Lifetime counted from the connection.** The online part of pairing starts
+  after the exchange, so a lifetime counted from the exchange would need only the
+  pairing timeout. Counting from the connection keeps one clock per connection
+  for the deadline and the lifetime, and the requirement is stated on the sum.
+- **No timers in the model.** `Overdue` is a question about state and time, so
+  a late or missed timer delays a close and cannot leak a slot, and tests step
+  the clock in seconds instead of sleeping.
+- **Sweep, not trust in callbacks.** Waiting for a disconnect that never comes
+  would make the cap shrink over time until strangers and members alike are
+  refused.
+
 ## Where
 
 | Part | Code |
@@ -208,3 +291,5 @@ only through a positive answer from `trust` or `admin`.
 | The access table | `internal/preauth/access.go`; tests `TestAllowedMatrix` (one row per rule, every cell written out), `TestBusinessProtocolBeforeTheExchangeIsRefused`, `TestStrangerAfterTheExchangeMayOnlyPair`, `TestRelayReservationBeforeTheExchangeIsRefused`, `TestAllowedRefusesAnInvalidState`, `TestProtocolIdentifiers` |
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
 | The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
+| Parameters | `internal/preauth/params.go`; test `TestParamsValidate` |
+| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` compares every answer with a second implementation under 40,000 random events and asserts how often each path was taken |

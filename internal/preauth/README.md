@@ -19,6 +19,8 @@ timers, and applies the answers.
 | `Exchange`, `NewNodeExchange`, `NewPersonExchange`, `Encode`, `DecodeExchange` | The certificate exchange message: kind plus the certificate record, canonical CBOR, at most `MaxMessageSize` bytes. Not a signed record. |
 | `ExchangeDeadline`                                      | The 5 seconds a connection has to complete the exchange.                                                        |
 | `Decide(Facts, peerKey, Exchange)`                      | From a received exchange and the local facts to a `Decision{State, Reason, ...}`: unauthenticated (refused), non-member, member or authorized person. |
+| `Params`, `Params.Validate`, `ParamsError`                | The numbers of the accounting model, none decided here; the check that `NonMemberLifetime >= ExchangeDeadline + PairingOnlineTimeout`. |
+| `Accounting`, `NewAccounting`                           | The connection-accounting model as pure state transitions: `Secured`, `Connected`, `Completed`, `Disconnected`, `Sweep`, `Overdue`, `Learn`, `Forget`, `Counts`. |
 | `Allowed(state, Use)`                                   | The one table: whether a peer in a state may open a stream of a protocol or make a relay request. `Access{Verdict, Reason}`. |
 
 ## Rules
@@ -86,6 +88,36 @@ timers, and applies the answers.
     another reason. The same certificate again (the normal reconnect) is not
     stale; only a lower serial is.
 
+- **Accounting.** Only inbound connections are counted. A connection is named by
+  the peer's network key and the remote address, with no direction. Rules, in the
+  order a connection lives them:
+  - `Secured` (the handshake is done, the gater can still refuse): an inbound
+    connection of a peer not known as a member is refused when
+    `UnauthenticatedCap` connections are already unauthenticated; one of a known
+    member is always let through and does not count. Outbound connections are
+    let through and not accounted.
+  - Known members are the peers whose exchange completed as a member or an
+    authorized person (`Completed` learns them), plus the ones the caller
+    `Learn`s from valid certificates of members it holds. A completed exchange
+    that decides non-member removes the peer from the known. The first
+    connection of an authorized person's new device is a stranger's.
+  - `Completed` (the exchange was decided): a member or authorized person is
+    released from the accounting; a non-member takes one of
+    `NonMemberConcurrency` places or, when none is free, is refused and dropped
+    (the caller closes it). The decision may change later on the same connection
+    (pairing made a non-member a member): call `Completed` again.
+  - `Disconnected` releases whatever the connection held.
+  - `Sweep` forgets entries not seen connected within `SweepInterval`: a
+    connection can be rejected after the handshake without any other callback.
+  - `Overdue` lists, in a fixed order, the connections to close: unauthenticated
+    ones `ExchangeDeadline` after they were connected, non-members
+    `NonMemberLifetime` after they were connected (the lifetime therefore covers
+    the exchange and pairing's online part). It changes nothing; the closing
+    ends the connection and so releases it.
+- **Parameters.** `Params` has no default and no field is decided here; zero is
+  refused. `NonMemberLifetime` must be at least `ExchangeDeadline` plus the
+  pairing online timeout, which pairing owns and the caller copies in.
+
 ## What the caller must guarantee
 
 - **The exchange runs on the specific connection**, opened with the
@@ -108,6 +140,19 @@ timers, and applies the answers.
   stored state per node. The caller stores `Decision.SerialSeen` when it is not
   the zero value and keeps `Decision.NodeCertificate` as the node's accepted
   certificate when the exchange completed.
+- The accounting is driven from the connection gater's secured callback, the
+  network notifee's connected and disconnected callbacks and the exchange's
+  outcome, and `Sweep` and `Overdue` are called at least every `SweepInterval`
+  and every second respectively (a timer is a wake-up, `Overdue` is the truth).
+  `SweepInterval` is longer than the longest time between the handshake and the
+  connection being established. An `Accounting` is not safe for concurrent use.
+- Per-peer resource limits (a stage of the network layer, not modelled here): the
+  resource manager asks its limiter once when it creates a peer's scope and then
+  keeps the object and re-reads it on every check, so the limiter must return the
+  same mutable limit object for a peer for as long as the scope may live, move it
+  between the unauthenticated tier and the member tier as the state changes, and
+  on the peer's last disconnect reset it to the unauthenticated tier rather than
+  delete it; reconcile the table with the manager's peer list from time to time.
 - Applications register their stream handlers only through the gated host that
   asks `Allowed` first. A handler registered on the raw host bypasses the gate;
   the library's own protocols are the ones registered that way on purpose.
