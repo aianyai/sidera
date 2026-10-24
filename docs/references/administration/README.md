@@ -56,9 +56,18 @@ certificate's cap. A certificate that states no cap is passed as full control, s
 only the list level limits the person; a zero cap grants nothing. They have no
 rights if they are not on this node's list, the entry or certificate has expired
 (at the expiry instant), the certificate is not valid yet (it is valid from its
-`NotBefore` instant), or the certificate or root key is revoked. Rights on other nodes are
-irrelevant. The denial reason names the first failing fact, and distinguishes a
+`NotBefore` instant), or the certificate or root key is revoked, or nobody
+looked the revocation sets up. Rights on other nodes are irrelevant. The denial reason names the first failing fact, and distinguishes a
 list level that is too low from a certificate cap that is too low.
+
+**Revocation status is three-valued.** The caller states the outcome of the
+revocation lookup in `DeviceCert.Revocation`: clear, certificate revoked, or root
+key revoked. The zero value means nobody looked and grants nothing; it is refused
+with its own reason (`revocation_unchecked`), checked before the validity window
+and the list, so a forgotten lookup is never mistaken for an expired certificate
+or an unlisted person. A status outside the known values counts as unchecked.
+When both the certificate and the root key are revoked, the status is the root
+key's, the wider fact, and that is the reason reported.
 
 **Removal is immediate.** There is no cached grant: every request is judged
 against the current list, so removal or downgrade applies to the next request.
@@ -74,7 +83,8 @@ returns it checks the directive in this order, and the first failure decides:
    recorded as losing contact, minus the clock tolerance;
 4. it is addressed to this node;
 5. its kind is "revoke trust edge" (the only kind there is);
-6. the signer's certificate and root key are not revoked, and the certificate was
+6. the signer's certificate and root key were looked up and are not revoked, and
+   the certificate was
    valid at the signing time (from `NotBefore`, until `NotAfter` exclusive);
 7. the signer is on the current list, unexpired, with at least the level the
    catalogue requires for issuing a directive (manage) after the certificate
@@ -184,6 +194,14 @@ neither file nor probe results.
   of this node. Two places judging edges would drift, and naming the credential
   rather than the two nodes means a re-established edge is never cut by a
   replayed old directive.
+- **Unchecked is not unrevoked.** A boolean "revoked" flag whose zero value
+  means "not revoked" lets a caller that forgot the lookup execute a directive
+  signed by a revoked device key, which cuts a trust edge irreversibly. The
+  status's zero value is therefore "unchecked", and an unchecked certificate is
+  rejected for a directive (never turned into a warning) and denied for a
+  request. One status rather than two flags: it is one lookup with one result,
+  and "both revoked" needs no representation because the root key's revocation
+  already decides.
 - **Warn versus reject.** A suggestion from someone with no authority is not an
   attack to drop silently; the owner may want to see it. A directive that
   claims authority but fails (revoked key, wrong node, wrong kind, bad signing

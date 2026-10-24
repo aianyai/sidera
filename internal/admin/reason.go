@@ -26,6 +26,10 @@ const (
 	ReasonCertRevoked Reason = "cert_revoked"
 	// ReasonRootKeyRevoked means the person's root key is revoked.
 	ReasonRootKeyRevoked Reason = "root_key_revoked"
+	// ReasonRevocationUnchecked means nobody looked the device certificate and
+	// the root key up in the revocation sets, so the certificate cannot be
+	// trusted. It is a caller bug and is refused, never treated as unrevoked.
+	ReasonRevocationUnchecked Reason = "revocation_unchecked"
 
 	// Reasons why a person with rights may not do the requested operation.
 

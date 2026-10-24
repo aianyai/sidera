@@ -504,38 +504,51 @@ func TestDeviceCertificateRules(t *testing.T) {
 	})
 }
 
+// checkedAdminCert is c's administration facts after a revocation lookup that
+// found nothing revoked.
+func checkedAdminCert(c DeviceCertificate) admin.DeviceCert {
+	a := c.AdminCert()
+	a.Revocation = admin.RevocationClear
+	return a
+}
+
 func TestDeviceCertificateToAdminFacts(t *testing.T) {
 	root, device := rfcSigner(t, 3), rfcSigner(t, 2)
 	for _, level := range []admin.Level{admin.LevelView, admin.LevelManage, admin.LevelFullControl} {
 		t.Run(level.String()+" cap is carried over", func(t *testing.T) {
 			c := devCert(t, root, device, level)
 			got := c.AdminCert()
-			want := admin.DeviceCert{MaxLevel: level, NotBefore: c.NotBefore, NotAfter: c.NotAfter}
+			want := admin.DeviceCert{MaxLevel: level, NotBefore: c.NotBefore, NotAfter: c.NotAfter, Revocation: admin.RevocationUnchecked}
 			if got != want {
 				t.Fatalf("AdminCert = %+v, want %+v", got, want)
 			}
-			if got.CertRevoked || got.RootKeyRevoked {
-				t.Fatal("revocation flags are filled in later, from the revocation sets")
-			}
 		})
 	}
+	t.Run("a certificate not looked up in the revocation sets gets no rights from admin", func(t *testing.T) {
+		c := devCert(t, root, device, admin.LevelFullControl)
+		list, _ := admin.NewList([]admin.Entry{{Person: c.Person, Level: admin.LevelFullControl}})
+		got := admin.EffectiveLevel(list, c.Person, c.AdminCert(), c.NotBefore.Add(time.Minute))
+		if got.Level != admin.LevelNone || got.Reason != admin.ReasonRevocationUnchecked {
+			t.Fatalf("standing = %+v", got)
+		}
+	})
 	t.Run("the facts are the ones admin judges: valid inside the window only", func(t *testing.T) {
 		c := devCert(t, root, device, admin.LevelFullControl)
 		list, problems := admin.NewList([]admin.Entry{{Person: c.Person, Level: admin.LevelFullControl}})
 		if len(problems) != 0 {
 			t.Fatal(problems)
 		}
-		if got := admin.EffectiveLevel(list, c.Person, c.AdminCert(), c.NotBefore.Add(time.Minute)); got.Level != admin.LevelFullControl {
+		if got := admin.EffectiveLevel(list, c.Person, checkedAdminCert(c), c.NotBefore.Add(time.Minute)); got.Level != admin.LevelFullControl {
 			t.Fatalf("inside the window: %+v", got)
 		}
-		if got := admin.EffectiveLevel(list, c.Person, c.AdminCert(), c.NotAfter); got.Level != admin.LevelNone {
+		if got := admin.EffectiveLevel(list, c.Person, checkedAdminCert(c), c.NotAfter); got.Level != admin.LevelNone {
 			t.Fatalf("at expiry: %+v", got)
 		}
 	})
 	t.Run("a view cap limits a full-control list entry", func(t *testing.T) {
 		c := devCert(t, root, device, admin.LevelView)
 		list, _ := admin.NewList([]admin.Entry{{Person: c.Person, Level: admin.LevelFullControl}})
-		if got := admin.EffectiveLevel(list, c.Person, c.AdminCert(), c.NotBefore.Add(time.Minute)); got.Level != admin.LevelView {
+		if got := admin.EffectiveLevel(list, c.Person, checkedAdminCert(c), c.NotBefore.Add(time.Minute)); got.Level != admin.LevelView {
 			t.Fatalf("standing = %+v", got)
 		}
 	})
@@ -754,7 +767,9 @@ func TestIssuedCertificatesAreBackdatedByTheClockTolerance(t *testing.T) {
 			t.Fatalf("Verify = %+v, %v", v, err)
 		}
 		list, _ := admin.NewList([]admin.Entry{{Person: c.Person, Level: admin.LevelFullControl}})
-		at := func(now time.Time) admin.Level { return admin.EffectiveLevel(list, c.Person, c.AdminCert(), now).Level }
+		at := func(now time.Time) admin.Level {
+			return admin.EffectiveLevel(list, c.Person, checkedAdminCert(c), now).Level
+		}
 		if got := at(issued.Add(-timing.ClockTolerance)); got != admin.LevelManage {
 			t.Fatalf("a verifier behind by the tolerance sees level %v", got)
 		}

@@ -130,8 +130,9 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   `SerialSeen` per node and moves it forward with `SerialSeenOf` whenever
   `DecideSerial` answers accept, whether or not the certificate is also taken as
   the accepted one.
-- `AdminCert()` leaves `CertRevoked` and `RootKeyRevoked` false. They must be
-  filled from the revocation sets before the value is handed to `admin`.
+- `AdminCert()` leaves `Revocation` at `admin.RevocationUnchecked`, which `admin`
+  refuses. The caller sets it from the revocation lookup of the certificate and
+  of the person's root key before the value is handed to `admin`.
   `MaxLevel` is never `LevelNone`: a certificate without a level does not decode.
 - A time or optional field converted by a record type goes through the helpers
   in `timeconv.go`; a zero `time.Time` in an optional position means "not

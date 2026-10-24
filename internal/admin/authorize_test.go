@@ -203,7 +203,7 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 		{
 			name:       "a certificate with no usable cap grants nothing",
 			list:       mustList(t, Entry{Person: a, Level: LevelFullControl}),
-			actor:      RemotePerson(a, DeviceCert{NotBefore: t0.Add(-time.Hour), NotAfter: t0.Add(time.Hour)}),
+			actor:      RemotePerson(a, DeviceCert{Revocation: RevocationClear, NotBefore: t0.Add(-time.Hour), NotAfter: t0.Add(time.Hour)}),
 			op:         read,
 			now:        t0,
 			wantReason: ReasonDeviceCapTooLow,
@@ -251,7 +251,7 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 		{
 			name: "a temporary subkey stops working when its certificate expires",
 			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
-			actor: RemotePerson(a, DeviceCert{
+			actor: RemotePerson(a, DeviceCert{Revocation: RevocationClear,
 				MaxLevel: LevelFullControl, NotBefore: t0.Add(-2 * time.Hour), NotAfter: t0,
 			}),
 			op:         read,
@@ -261,7 +261,7 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 		{
 			name: "a temporary subkey works until its expiry",
 			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
-			actor: RemotePerson(a, DeviceCert{
+			actor: RemotePerson(a, DeviceCert{Revocation: RevocationClear,
 				MaxLevel: LevelFullControl, NotBefore: t0.Add(-2 * time.Hour), NotAfter: t0.Add(time.Nanosecond),
 			}),
 			op:     read,
@@ -271,7 +271,7 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 		{
 			name: "a certificate with no expiry set counts as expired",
 			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
-			actor: RemotePerson(a, DeviceCert{
+			actor: RemotePerson(a, DeviceCert{Revocation: RevocationClear,
 				MaxLevel: LevelFullControl, NotBefore: t0.Add(-time.Hour),
 			}),
 			op:         read,
@@ -281,7 +281,7 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 		{
 			name: "a certificate that is not valid yet grants nothing",
 			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
-			actor: RemotePerson(a, DeviceCert{
+			actor: RemotePerson(a, DeviceCert{Revocation: RevocationClear,
 				MaxLevel: LevelFullControl, NotBefore: t0.Add(time.Second), NotAfter: t0.Add(time.Hour),
 			}),
 			op:         read,
@@ -291,7 +291,7 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 		{
 			name: "a certificate is valid at the instant of its NotBefore",
 			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
-			actor: RemotePerson(a, DeviceCert{
+			actor: RemotePerson(a, DeviceCert{Revocation: RevocationClear,
 				MaxLevel: LevelFullControl, NotBefore: t0, NotAfter: t0.Add(time.Hour),
 			}),
 			op:     read,
@@ -301,7 +301,7 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 		{
 			name: "a certificate is not valid one instant before its NotBefore",
 			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
-			actor: RemotePerson(a, DeviceCert{
+			actor: RemotePerson(a, DeviceCert{Revocation: RevocationClear,
 				MaxLevel: LevelFullControl, NotBefore: t0.Add(time.Nanosecond), NotAfter: t0.Add(time.Hour),
 			}),
 			op:         read,
@@ -312,7 +312,7 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 			name: "a revoked device certificate grants nothing",
 			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
 			actor: RemotePerson(a, DeviceCert{
-				MaxLevel: LevelFullControl, NotBefore: t0.Add(-time.Hour), NotAfter: t0.Add(time.Hour), CertRevoked: true,
+				MaxLevel: LevelFullControl, NotBefore: t0.Add(-time.Hour), NotAfter: t0.Add(time.Hour), Revocation: RevocationCertRevoked,
 			}),
 			op:         read,
 			now:        t0,
@@ -322,11 +322,39 @@ func TestEffectiveLevelAndAuthorizeRules(t *testing.T) {
 			name: "a revoked root key grants nothing on any device",
 			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
 			actor: RemotePerson(a, DeviceCert{
-				MaxLevel: LevelFullControl, NotBefore: t0.Add(-time.Hour), NotAfter: t0.Add(time.Hour), RootKeyRevoked: true,
+				MaxLevel: LevelFullControl, NotBefore: t0.Add(-time.Hour), NotAfter: t0.Add(time.Hour), Revocation: RevocationRootKeyRevoked,
 			}),
 			op:         read,
 			now:        t0,
 			wantReason: ReasonRootKeyRevoked,
+		},
+		{
+			name:       "a certificate whose revocation was never looked up grants nothing",
+			list:       mustList(t, Entry{Person: a, Level: LevelFullControl}),
+			actor:      RemotePerson(a, DeviceCert{MaxLevel: LevelFullControl, NotBefore: t0.Add(-time.Hour), NotAfter: t0.Add(time.Hour)}),
+			op:         read,
+			now:        t0,
+			wantReason: ReasonRevocationUnchecked,
+		},
+		{
+			name: "an unknown revocation status counts as unchecked",
+			list: mustList(t, Entry{Person: a, Level: LevelFullControl}),
+			actor: RemotePerson(a, DeviceCert{
+				MaxLevel: LevelFullControl, NotBefore: t0.Add(-time.Hour), NotAfter: t0.Add(time.Hour), Revocation: 99,
+			}),
+			op:         read,
+			now:        t0,
+			wantReason: ReasonRevocationUnchecked,
+		},
+		{
+			name: "an unchecked certificate is refused before its window and the list are consulted",
+			list: mustList(t),
+			actor: RemotePerson(a, DeviceCert{
+				MaxLevel: LevelFullControl, NotBefore: t0.Add(time.Hour), NotAfter: t0.Add(2 * time.Hour),
+			}),
+			op:         read,
+			now:        t0,
+			wantReason: ReasonRevocationUnchecked,
 		},
 		{
 			name:       "a remote full-control person cannot modify the authorized list",

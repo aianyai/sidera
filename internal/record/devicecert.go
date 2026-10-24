@@ -127,9 +127,10 @@ func checkDeviceCertificate(person ident.PersonID, key ident.PublicKey, notBefor
 
 // AdminCert returns the signature-derived facts that administration reads: the
 // cap and the validity window, taken as written. Validity is not judged here;
-// administration judges it. Both revocation flags are false: the revocation
-// sets fill them in before the value reaches administration, so a certificate
-// that has not been checked against them must not be handed on.
+// administration judges it. The revocation status is left unchecked, which
+// administration refuses: the revocation lookup sets it before the value
+// reaches administration, so a certificate that was not looked up gets no
+// rights.
 func (c DeviceCertificate) AdminCert() admin.DeviceCert {
 	return admin.DeviceCert{MaxLevel: c.MaxLevel, NotBefore: c.NotBefore, NotAfter: c.NotAfter}
 }

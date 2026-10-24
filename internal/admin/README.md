@@ -42,7 +42,8 @@ every node answers with its own verdict from its own list.
   it is denied to every remote person.
 - Effective level is `min(list level, certificate cap)`. A person who is not on
   this node's list, whose entry or certificate has expired, or whose
-  certificate or root key is revoked has no rights, whatever they can do on
+  certificate or root key is revoked, or whose revocation status is unchecked (the
+  zero value of `DeviceCert.Revocation`), has no rights, whatever they can do on
   other nodes. Expiry takes effect at the expiry instant; a certificate is valid
   from its `NotBefore` instant.
 - One criterion places every operation: what lets more nodes in or back, lets
@@ -87,8 +88,10 @@ own `KeyFor`, so nobody sees another person's results.
 ## What the caller must guarantee
 
 - Signatures, certificate chains and revocation sets are already verified.
-  `DeviceCert` carries only the verified facts (cap, validity window, whether the
-  certificate or the root key is revoked); a certificate that does not chain to
+  `DeviceCert` carries only the verified facts (cap, validity window, the result of
+  the revocation lookup); the caller sets `Revocation` to a checked outcome after
+  looking up both the certificate and the root key, and leaving it zero is refused
+  with `ReasonRevocationUnchecked`; a certificate that does not chain to
   the person's root key must never reach this package. A certificate that states
   no cap is passed with `MaxLevel` set to `LevelFullControl`; the zero value
   `LevelNone` grants nothing.

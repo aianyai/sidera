@@ -205,8 +205,9 @@ the same record with a short window.
   a device that held the root key could certify further devices, and its loss
   would be the loss of the person.
 - `DeviceCertificate.AdminCert()` yields the signature-derived part of
-  `admin.DeviceCert`: the cap and the window as written. The two revocation flags
-  are false; the revocation records fill them in before the value is used.
+  `admin.DeviceCert`: the cap and the window as written. The revocation status is
+  left unchecked, which administration refuses; the revocation lookup sets it
+  before the value is used.
 
 ## Why
 

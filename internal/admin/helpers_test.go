@@ -40,11 +40,13 @@ func mustList(t *testing.T, entries ...Entry) List {
 	return l
 }
 
-// validCert returns a certificate valid around t0 with the given cap.
+// validCert returns a certificate valid around t0 with the given cap and a
+// clear revocation lookup.
 func validCert(max Level) DeviceCert {
 	return DeviceCert{
-		MaxLevel:  max,
-		NotBefore: t0.Add(-24 * time.Hour),
-		NotAfter:  t0.Add(24 * time.Hour),
+		MaxLevel:   max,
+		NotBefore:  t0.Add(-24 * time.Hour),
+		NotAfter:   t0.Add(24 * time.Hour),
+		Revocation: RevocationClear,
 	}
 }

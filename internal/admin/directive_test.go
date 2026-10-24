@@ -25,7 +25,7 @@ func TestAcceptDirective(t *testing.T) {
 		d := Directive{
 			Kind: DirectiveRevokeTrustEdge, Node: self,
 			SignedAt: signedAt, Signer: mgr,
-			Cert: DeviceCert{MaxLevel: LevelFullControl, NotBefore: signedAt.Add(-time.Hour), NotAfter: signedAt.Add(time.Hour)},
+			Cert: DeviceCert{Revocation: RevocationClear, MaxLevel: LevelFullControl, NotBefore: signedAt.Add(-time.Hour), NotAfter: signedAt.Add(time.Hour)},
 		}
 		if mut != nil {
 			mut(&d)
@@ -82,13 +82,22 @@ func TestAcceptDirective(t *testing.T) {
 			DirectiveVerdict{DispositionReject, ReasonDirectiveNotForThisNode}},
 
 		{"a revoked device certificate is rejected", list,
-			good(func(d *Directive) { d.Cert.CertRevoked = true }), t0,
+			good(func(d *Directive) { d.Cert.Revocation = RevocationCertRevoked }), t0,
 			DirectiveVerdict{DispositionReject, ReasonCertRevoked}},
 		{"a revoked root key is rejected", list,
-			good(func(d *Directive) { d.Cert.RootKeyRevoked = true }), t0,
+			good(func(d *Directive) { d.Cert.Revocation = RevocationRootKeyRevoked }), t0,
 			DirectiveVerdict{DispositionReject, ReasonRootKeyRevoked}},
+		{"a certificate whose revocation was never looked up is rejected, not executed", list,
+			good(func(d *Directive) { d.Cert.Revocation = RevocationUnchecked }), t0,
+			DirectiveVerdict{DispositionReject, ReasonRevocationUnchecked}},
+		{"an unchecked certificate of an unlisted signer is rejected, not shown as a warning", list,
+			good(func(d *Directive) { d.Signer = unlisted; d.Cert.Revocation = RevocationUnchecked }), t0,
+			DirectiveVerdict{DispositionReject, ReasonRevocationUnchecked}},
 		{"a certificate revoked after signing is still rejected: a compromised key can claim any signing time", list,
-			good(func(d *Directive) { d.Cert.CertRevoked = true; d.SignedAt = signedAt.Add(-30 * time.Minute) }), t0,
+			good(func(d *Directive) {
+				d.Cert.Revocation = RevocationCertRevoked
+				d.SignedAt = signedAt.Add(-30 * time.Minute)
+			}), t0,
 			DirectiveVerdict{DispositionReject, ReasonCertRevoked}},
 		{"a certificate already expired at signing time is rejected", list,
 			good(func(d *Directive) { d.Cert.NotAfter = signedAt }), t0,
@@ -164,7 +173,7 @@ func TestAcceptDirectiveSigningTimeAgainstOfflineWindow(t *testing.T) {
 	signed := func(at time.Time) Directive {
 		return Directive{
 			Kind: DirectiveRevokeTrustEdge, Node: self, SignedAt: at, Signer: mgr,
-			Cert: DeviceCert{MaxLevel: LevelFullControl, NotBefore: at.Add(-time.Hour), NotAfter: at.Add(time.Hour)},
+			Cert: DeviceCert{Revocation: RevocationClear, MaxLevel: LevelFullControl, NotBefore: at.Add(-time.Hour), NotAfter: at.Add(time.Hour)},
 		}
 	}
 	// An expired temporary subkey: valid until t0-1h, so it was not valid when
@@ -172,7 +181,7 @@ func TestAcceptDirectiveSigningTimeAgainstOfflineWindow(t *testing.T) {
 	expiredKey := Directive{
 		Kind: DirectiveRevokeTrustEdge, Node: self, Signer: mgr,
 		SignedAt: t0.Add(-90 * time.Minute),
-		Cert:     DeviceCert{MaxLevel: LevelFullControl, NotBefore: t0.Add(-2 * time.Hour), NotAfter: t0.Add(-time.Hour)},
+		Cert:     DeviceCert{Revocation: RevocationClear, MaxLevel: LevelFullControl, NotBefore: t0.Add(-2 * time.Hour), NotAfter: t0.Add(-time.Hour)},
 	}
 
 	tests := []struct {
