@@ -73,8 +73,10 @@ them, and stores the records it hands out.
   initiator computed itself; `State.Withdrawn` refuses the credential if it
   arrives by synchronisation.
 - **Fetching is indistinguishable.** Anyone who is not the initiator of a
-  request, or who presents an older certificate than one already seen, gets
-  exactly the answer for a request that does not exist.
+  request gets exactly the answer for a request that does not exist. The target
+  keeps no certificate serial per request: an initiator whose certificate is
+  older than one the node has seen never becomes a `Party` (`NewParty` refuses
+  it), so no fetch is made on it.
 - **The initiator never reruns the online segment by itself.** It reports a
   segment that ended after it opened its nonce as an attempt used.
 
@@ -91,10 +93,14 @@ them, and stores the records it hands out.
   exchanges that are due, including the one right after a confirmation.
 - Build `Party` values from certificates it has verified, with the revocation
   lookup stated, for the connection the stream runs on. The certificate given to
-  `NewParty` must be the one the serial rule (`record.DecideSerial`) accepted in
-  the certificate exchange of that connection, for the remote end as for the
-  local one: a certificate that was merely seen, or an older one, would bind a
-  key the node no longer stands behind into the transcript. The negotiated
+  `NewParty` must be the one `preauth.Decide` accepted on that connection
+  (`Decision.NodeCertificate`), for the remote end as for the local one, and the
+  highest serial seen for its node is passed with it: a certificate that was
+  merely seen, or an older one, would bind a key the node no longer stands
+  behind into the transcript. (A reconnect with the same certificate is
+  `SerialStale` in `record.DecideSerial` yet accepted by `Decide`, so the rule is
+  "the certificate `Decide` accepted", not "a certificate `DecideSerial`
+  accepts".) The negotiated
   protocol identifier comes from the stream.
 - Give `crypto/rand` as the source of randomness. A target that repeats a nonce
   lets an attacker learn it in one session and use it in the next, so the

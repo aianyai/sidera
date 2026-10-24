@@ -189,10 +189,6 @@ type TargetRecord struct {
 	// ReceivedAt is when the target accepted the request; ExpiresAt when it
 	// stops waiting (ReceivedAt plus PendingTTL).
 	ReceivedAt, ExpiresAt time.Time
-	// HighestSerial is the highest certificate serial of the initiator seen on
-	// a connection that fetched this request; only that serial or a higher one
-	// is accepted afterwards.
-	HighestSerial uint64
 	// Expected is set when the initiator was an expected node: the author of the
 	// expectation. Such a request is confirmed from the start and used none of
 	// the unexpected-node limits.
@@ -248,8 +244,6 @@ func (r TargetRecord) Validate() error {
 	switch {
 	case !wholeSecond(r.ReceivedAt) || !wholeSecond(r.ExpiresAt) || !r.ExpiresAt.After(r.ReceivedAt):
 		return fmt.Errorf("%w: times", ErrRecord)
-	case r.HighestSerial < r.Transcript.terms.Initiator.serial:
-		return fmt.Errorf("%w: highest serial is below the initiator's own", ErrRecord)
 	case !r.Status.valid():
 		return fmt.Errorf("%w: status", ErrRecord)
 	case !r.Expected.IsZero() && !r.Expected.valid():

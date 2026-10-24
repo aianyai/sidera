@@ -68,17 +68,16 @@ type completionWire struct {
 }
 
 type targetWire struct {
-	Transcript    transcriptWire    `cbor:"1,keyasint"`
-	ReceivedAt    int64             `cbor:"2,keyasint"`
-	ExpiresAt     int64             `cbor:"3,keyasint"`
-	HighestSerial uint64            `cbor:"4,keyasint"`
-	Expected      *authorWire       `cbor:"5,keyasint,omitempty"`
-	Status        uint64            `cbor:"6,keyasint"`
-	Confirmation  *confirmationWire `cbor:"7,keyasint,omitempty"`
-	Signature     []byte            `cbor:"8,keyasint,omitempty"`
-	Rejection     uint64            `cbor:"9,keyasint,omitempty"`
-	Completed     *completionWire   `cbor:"10,keyasint,omitempty"`
-	EndedAt       *int64            `cbor:"11,keyasint,omitempty"`
+	Transcript   transcriptWire    `cbor:"1,keyasint"`
+	ReceivedAt   int64             `cbor:"2,keyasint"`
+	ExpiresAt    int64             `cbor:"3,keyasint"`
+	Expected     *authorWire       `cbor:"5,keyasint,omitempty"`
+	Status       uint64            `cbor:"6,keyasint"`
+	Confirmation *confirmationWire `cbor:"7,keyasint,omitempty"`
+	Signature    []byte            `cbor:"8,keyasint,omitempty"`
+	Rejection    uint64            `cbor:"9,keyasint,omitempty"`
+	Completed    *completionWire   `cbor:"10,keyasint,omitempty"`
+	EndedAt      *int64            `cbor:"11,keyasint,omitempty"`
 }
 
 type initiatorWire struct {
@@ -370,7 +369,7 @@ func (r TargetRecord) Encode() ([]byte, error) {
 	}
 	return record.MarshalCanonical(wrap(TypeTargetRecord, targetWire{
 		Transcript: transcriptToWire(r.Transcript),
-		ReceivedAt: secs(r.ReceivedAt), ExpiresAt: secs(r.ExpiresAt), HighestSerial: r.HighestSerial,
+		ReceivedAt: secs(r.ReceivedAt), ExpiresAt: secs(r.ExpiresAt),
 		Expected: optAuthorToWire(r.Expected), Status: uint64(r.Status), Confirmation: confirmationToWire(r.Confirmation),
 		Signature: sig, Rejection: uint64(r.Rejection), Completed: done, EndedAt: optSecs(r.EndedAt),
 	}))
@@ -389,7 +388,7 @@ func DecodeTargetRecord(data []byte) (TargetRecord, error) {
 	if err != nil {
 		return TargetRecord{}, err
 	}
-	r := TargetRecord{Transcript: tr, HighestSerial: w.HighestSerial, Status: TargetStatus(w.Status), Rejection: WithdrawReason(w.Rejection)}
+	r := TargetRecord{Transcript: tr, Status: TargetStatus(w.Status), Rejection: WithdrawReason(w.Rejection)}
 	if r.ReceivedAt, err = fromSecs(w.ReceivedAt); err != nil {
 		return TargetRecord{}, err
 	}

@@ -2,6 +2,7 @@ package pairing
 
 import (
 	"bytes"
+	"errors"
 	"math/rand"
 	"testing"
 	"time"
@@ -859,11 +860,12 @@ func TestFetchByAnyoneElseLooksLikeNoSuchRequest(t *testing.T) {
 	}
 }
 
-func TestFetchRefusesAnOlderCertificateSerial(t *testing.T) {
+// The target keeps no serial of its own for the initiator: a certificate below
+// the highest serial seen builds no Party, so a fetch on it never reaches the
+// target, and a newer certificate of the initiator is answered like any other.
+func TestFetchOnAnOlderCertificateSerialNeverBuildsAParty(t *testing.T) {
 	s, a, b := standardPair(t)
 	_, tb := startPairing(t, s, a, b)
-	newer := partyFromSerial(t, seedTest1, seedTest2, 5)
-	older := partyFromSerial(t, seedTest1, seedTest2, 3)
 	ask := func(p Party) ResultStatus {
 		frame := mustEncode(t, FetchMsg{ID: tb.ID()})
 		sid := b.nextSID
@@ -878,17 +880,18 @@ func TestFetchRefusesAnOlderCertificateSerial(t *testing.T) {
 		must(t, err)
 		return r.Status
 	}
-	if got := ask(newer); got != StatusAwaitingInitiatorSignature {
+	if got := ask(partyFromSerial(t, seedTest1, seedTest2, 5)); got != StatusAwaitingInitiatorSignature {
 		t.Fatalf("newer serial: %v", got)
 	}
-	if got := ask(older); got != StatusUnknown {
-		t.Fatalf("older serial after a newer one: %v", got)
-	}
-	if got := ask(a.party); got != StatusUnknown { // serial 1
-		t.Fatalf("the original serial: %v", got)
-	}
-	if r, _ := b.state.Target(tb.ID()); r.HighestSerial != 5 {
-		t.Fatalf("highest serial %d", r.HighestSerial)
+	idSigner, netSigner := signerFromSeed(t, seedTest1), signerFromSeed(t, seedTest2)
+	node, err := ident.NodeIDFromKey(idSigner.Public())
+	must(t, err)
+	rec, err := record.Seal(record.NetworkKeyCertificateDescriptor, record.IssueNetworkKeyCertificate(node, netSigner.Public(), 3, testNow.Add(-time.Hour), testNow.Add(24*time.Hour)), idSigner)
+	must(t, err)
+	older, err := record.Verify(record.NetworkKeyCertificateDescriptor, rec)
+	must(t, err)
+	if _, err := NewParty(older, record.KeyRevocationClear, 5, netSigner.Public(), testNow); !errors.Is(err, ErrParty) {
+		t.Fatalf("a serial-3 certificate with serial 5 seen builds a party: %v", err)
 	}
 }
 
@@ -1423,7 +1426,7 @@ func TestEqualCodesRefuseConfirmation(t *testing.T) {
 		commit, _ := terms.Commit(nA)
 		tr, err := Open(terms, commit, nB, nA)
 		must(t, err)
-		rec := TargetRecord{Transcript: tr, ReceivedAt: wholeNow(s.now), ExpiresAt: wholeNow(s.now).Add(time.Hour), HighestSerial: c.party.serial, Status: TargetPending}
+		rec := TargetRecord{Transcript: tr, ReceivedAt: wholeNow(s.now), ExpiresAt: wholeNow(s.now).Add(time.Hour), Status: TargetPending}
 		if prev, ok := byCode[tr.Code()]; ok && prev.Transcript.terms.Initiator.node != c.party.node {
 			first, second = prev, rec
 			break

@@ -139,9 +139,12 @@ digest is refused. The initiator asks until the target stops keeping results
 (24 hours after the request's expiry), then gives up.
 
 **The fetch answers.** Only the initiator, by node (a node identifier fixes its identity key; not by
-connection or network key), with a certificate serial not older than the highest
-seen, gets a real answer. Everyone else gets `unknown`, the answer for a request
-that does not exist or was forgotten.
+connection or network key), gets a real answer. Everyone else gets `unknown`, the
+answer for a request that does not exist or was forgotten. The target keeps no
+certificate serial per request: an old certificate of the initiator is refused
+where the connection's party is built (`NewParty` takes the highest serial seen
+and relies on `record.NetworkKeyBelongs`), so the serial rule has one home and
+cannot disagree with the one the certificate exchange applies.
 
 **Restart.** Records are persisted as bytes, one per request; the identifier,
 the code and the credential are recomputed on every load. Streams and fetch

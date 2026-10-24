@@ -194,11 +194,10 @@ func (s State) targetOpen(w World, sess onlineSession, frame []byte, now time.Ti
 	initiator := sess.conn.Remote.node
 
 	rec := TargetRecord{
-		Transcript:    tr,
-		ReceivedAt:    now,
-		ExpiresAt:     now.Add(w.Params.PendingTTL),
-		HighestSerial: sess.conn.Remote.serial,
-		Status:        TargetPending,
+		Transcript: tr,
+		ReceivedAt: now,
+		ExpiresAt:  now.Add(w.Params.PendingTTL),
+		Status:     TargetPending,
 	}
 	next := s.withoutSession(sess.id)
 	var actions []Action
@@ -245,9 +244,10 @@ func (s State) targetOpen(w World, sess onlineSession, frame []byte, now time.Ti
 // targetFetch answers an initiator that asks for the result. peer is the
 // authenticated party of the connection; it is the initiator of the request
 // only if its node equals the transcript's (which fixes the identity key),
-// whatever connection or network key it comes from, and its certificate serial is not
-// older than one already seen. Anyone else gets exactly the answer for a
-// request that does not exist.
+// whatever connection or network key it comes from. A certificate older than one
+// the node has seen never becomes a Party (NewParty refuses it), so the
+// connection layer cannot present it here. Anyone else gets exactly the answer
+// for a request that does not exist.
 func (s State) targetFetch(w World, peer Party, f FetchMsg, now time.Time) (State, ResultMsg, []Action, error) {
 	unknown := ResultMsg{ID: f.ID, Status: StatusUnknown}
 	i := s.targetIndex(f.ID)
@@ -258,18 +258,13 @@ func (s State) targetFetch(w World, peer Party, f FetchMsg, now time.Time) (Stat
 	// The peer is the initiator when its node is: a node identifier is the
 	// digest of the identity key, which a Party always derives it from, so the
 	// identity key needs no comparison of its own. Neither the connection nor the
-	// network key matters, only that the certificate serial is not older than one
-	// already seen.
-	if peer.node != rec.Transcript.terms.Initiator.node || peer.serial < rec.HighestSerial {
+	// network key matters.
+	if peer.node != rec.Transcript.terms.Initiator.node {
 		return s, unknown, nil, nil
 	}
 
 	var actions []Action
 	changed := false
-	if peer.serial > rec.HighestSerial {
-		rec.HighestSerial = peer.serial
-		changed = true
-	}
 	if rec.ExpiredAt(now) {
 		rec.Status, rec.EndedAt = TargetExpired, rec.ExpiresAt
 		changed = true
