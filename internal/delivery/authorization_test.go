@@ -43,6 +43,7 @@ var rejectMapping = map[authz.Reason]RejectReason{
 	authz.ReasonEndpointRefusesMultiRecipient: RejectEndpointDeclined,
 	authz.ReasonSenderNotAccepted:             RejectEndpointDeclined,
 	authz.ReasonEndpointHidden:                RejectEndpointMissing,
+	authz.ReasonPresetClosedToLocalSources:    RejectUnauthorized,
 }
 
 func TestIntakeAuthorizationRejectReasons(t *testing.T) {
@@ -61,6 +62,7 @@ func TestIntakeAuthorizationRejectReasons(t *testing.T) {
 		{"an endpoint refusing several recipients declares it does not accept", authz.ReasonEndpointRefusesMultiRecipient, RejectEndpointDeclined},
 		{"a sender the endpoint does not accept is declined by the endpoint", authz.ReasonSenderNotAccepted, RejectEndpointDeclined},
 		{"a hidden endpoint is reported as not existing, so it is not revealed", authz.ReasonEndpointHidden, RejectEndpointMissing},
+		{"a preset closed to local sources is unauthorized, as the other refusals that need no declaration", authz.ReasonPresetClosedToLocalSources, RejectUnauthorized},
 		{"an unknown reason is unauthorized", authz.Reason(250), RejectUnauthorized},
 	}
 	for _, r := range rows {

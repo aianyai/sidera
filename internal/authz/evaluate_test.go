@@ -603,7 +603,7 @@ func TestDefaultPolicyGrantsEveryActionOnEveryObject(t *testing.T) {
 }
 
 func TestReasonOutcomePairing(t *testing.T) {
-	for r := ReasonGranted; r <= ReasonEndpointHidden; r++ {
+	for r := ReasonGranted; r <= ReasonPresetClosedToLocalSources; r++ {
 		if r.Outcome() == 0 {
 			t.Errorf("reason %d (%v) has no outcome", r, r)
 		}
