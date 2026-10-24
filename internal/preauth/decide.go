@@ -252,25 +252,9 @@ func decideNode(f Facts, peer ident.PublicKey, rec record.Record) Decision {
 
 	// The serial comes first and is kept whatever else is found: the node did
 	// issue this serial, so an older certificate must not come back.
-	var seen *record.SerialSeen
-	if s, ok := f.SerialSeen[node]; ok {
-		seen = &s
-	}
-	var advance record.SerialSeen
-	switch record.DecideSerial(seen, cert) {
-	case record.SerialAccept:
-		advance = record.SerialSeenOf(cert)
-	case record.SerialStale:
-		// The very certificate seen at the highest serial is stale too, and is
-		// the normal case of a peer that connects again; only a lower serial is
-		// an old certificate.
-		if seen == nil || seen.Serial != cert.Payload.Serial {
-			return withSerial(refused(ReasonCertificateStale), advance)
-		}
-	case record.SerialConflict:
-		return withSerial(refused(ReasonSerialConflict), advance)
-	default:
-		return withSerial(refused(ReasonInvalidInput), advance)
+	advance, refusal := checkSerial(f.SerialSeen, cert)
+	if refusal != ReasonUnset {
+		return withSerial(refused(refusal), advance)
 	}
 
 	switch record.NetworkKeyBelongs(f.Revocations.NetworkKey(cert), node, peer, f.Now) {
@@ -296,18 +280,79 @@ func decideNode(f Facts, peer ident.PublicKey, rec record.Record) Decision {
 
 	verdict := trust.Evaluate(f.Trust, node, f.Now)
 	d := Decision{Node: node, Trust: verdict, NodeCertificate: cert, SerialSeen: advance}
-	switch verdict.Outcome {
-	case trust.AllowedDirect:
-		d.State, d.Reason = StateMember, ReasonMemberDirect
-	case trust.AllowedInherited:
-		d.State, d.Reason = StateMember, ReasonMemberInherited
-	case trust.Suspended:
-		d.State, d.Reason = StateMember, ReasonMemberSuspended
-	default:
-		// Denied, and any outcome this package does not know: never a member.
-		d.State, d.Reason = StateNonMember, ReasonNotTrusted
-	}
+	d.State, d.Reason = nodeState(verdict.Outcome)
 	return d
+}
+
+// nodeState maps trust's outcome for a node with a valid certificate to a state.
+// Allowed directly, allowed by inheritance and suspended are members; denied,
+// and any outcome this package does not know, is a non-member and never a
+// member.
+func nodeState(o trust.Outcome) (State, Reason) {
+	switch o {
+	case trust.AllowedDirect:
+		return StateMember, ReasonMemberDirect
+	case trust.AllowedInherited:
+		return StateMember, ReasonMemberInherited
+	case trust.Suspended:
+		return StateMember, ReasonMemberSuspended
+	}
+	return StateNonMember, ReasonNotTrusted
+}
+
+// checkSerial applies the rule "only the highest serial seen counts" to a
+// verified certificate. It returns the state to store when the serial advanced
+// (the zero value otherwise) and ReasonUnset when the certificate may go on, or
+// the reason it is refused. The very certificate seen at the highest serial is
+// stale for DecideSerial, which answers "nothing new", and is the normal case of
+// a peer that connects again; only a lower serial is an old certificate.
+func checkSerial(seen map[ident.NodeID]record.SerialSeen, cert record.Verified[record.NetworkKeyCertificate]) (record.SerialSeen, Reason) {
+	var prior *record.SerialSeen
+	if s, ok := seen[cert.Payload.Node]; ok {
+		prior = &s
+	}
+	switch record.DecideSerial(prior, cert) {
+	case record.SerialAccept:
+		return record.SerialSeenOf(cert), ReasonUnset
+	case record.SerialStale:
+		if prior == nil || prior.Serial != cert.Payload.Serial {
+			return record.SerialSeen{}, ReasonCertificateStale
+		}
+		return record.SerialSeen{}, ReasonUnset
+	case record.SerialConflict:
+		return record.SerialSeen{}, ReasonSerialConflict
+	}
+	return record.SerialSeen{}, ReasonInvalidInput
+}
+
+// HeldMembers returns, in the order given and without repeats, the network keys
+// of the held certificates that belong to members: the certificate is the
+// current one for its node, valid now and not revoked, and the node is a member
+// as Decide would decide (trusted directly, by inheritance, or suspended). The
+// accounting exempts these peers from the aggregate cap before they have
+// completed an exchange on this run. Facts without a time or a revocation set
+// give none.
+func HeldMembers(f Facts, certs []record.Verified[record.NetworkKeyCertificate]) []ident.PublicKey {
+	if f.Now.IsZero() || f.Revocations == nil {
+		return nil
+	}
+	var out []ident.PublicKey
+	seen := map[ident.PublicKey]bool{}
+	for _, cert := range certs {
+		c := cert.Payload
+		if _, refusal := checkSerial(f.SerialSeen, cert); refusal != ReasonUnset {
+			continue
+		}
+		if record.NetworkKeyBelongs(f.Revocations.NetworkKey(cert), c.Node, c.NetworkKey, f.Now) != record.BindingOK {
+			continue
+		}
+		if state, _ := nodeState(trust.Evaluate(f.Trust, c.Node, f.Now).Outcome); state != StateMember || seen[c.NetworkKey] {
+			continue
+		}
+		seen[c.NetworkKey] = true
+		out = append(out, c.NetworkKey)
+	}
+	return out
 }
 
 func withSerial(d Decision, s record.SerialSeen) Decision {

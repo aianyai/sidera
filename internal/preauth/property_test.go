@@ -25,10 +25,13 @@ type refConn struct {
 }
 
 type reference struct {
-	p     Params
-	conns []*refConn
-	known map[int]bool
+	p       Params
+	conns   []*refConn
+	learned map[int]bool
+	held    map[int]bool
 }
+
+func (r *reference) isKnown(peer int) bool { return r.learned[peer] || r.held[peer] }
 
 func (r *reference) find(peer, addr int) *refConn {
 	for _, c := range r.conns {
@@ -71,7 +74,7 @@ func (r *reference) secured(peer, addr int, inbound bool, now time.Time) Admissi
 	if r.find(peer, addr) != nil {
 		return Admission{VerdictAllow, AdmitAlreadyTracked}
 	}
-	if r.known[peer] {
+	if r.isKnown(peer) {
 		r.conns = append(r.conns, &refConn{peer: peer, addr: addr, exempt: true, securedAt: now})
 		return Admission{VerdictAllow, AdmitKnownMember}
 	}
@@ -99,14 +102,14 @@ func (r *reference) completed(peer, addr int, s State) Placement {
 	}
 	c := r.find(peer, addr)
 	if s == StateMember || s == StateAuthorizedPerson {
-		r.known[peer] = true
+		r.learned[peer] = true
 		if c == nil {
 			return Placement{VerdictAllow, PlaceUntracked}
 		}
 		r.drop(c)
 		return Placement{VerdictAllow, PlaceReleased}
 	}
-	r.known[peer] = false
+	r.learned[peer], r.held[peer] = false, false
 	switch {
 	case c == nil:
 		return Placement{VerdictAllow, PlaceUntracked}
@@ -205,7 +208,7 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref := &reference{p: p, known: map[int]bool{}}
+	ref := &reference{p: p, learned: map[int]bool{}, held: map[int]bool{}}
 	rng := rand.New(rand.NewSource(20261023))
 
 	pubs := make([]ident.PublicKey, peers)
@@ -243,6 +246,9 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 			if want.Reason == AdmitKnownMember && capBefore {
 				cover["exempt-while-cap-reached"]++
 			}
+			if want.Reason == AdmitKnownMember && ref.held[peer] && !ref.learned[peer] {
+				cover["exempt-by-held-certificate"]++
+			}
 		case ev < 50:
 			want := ref.connect(peer, addr, now)
 			if got := a.Connected(k, now); got != want {
@@ -258,12 +264,19 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 		case ev < 76:
 			ref.disconnect(peer, addr)
 			a.Disconnected(k)
-		case ev < 77:
-			ref.known[peer] = true
-			a.Learn(pubs[peer])
 		case ev < 82:
-			ref.known[peer] = false
-			a.Forget(pubs[peer])
+			// The certificates held change: a random few peers are held members.
+			var held []ident.PublicKey
+			ref.held = map[int]bool{}
+			if rng.Intn(4) == 0 {
+				for i := range pubs {
+					if rng.Intn(6) == 0 {
+						ref.held[i] = true
+						held = append(held, pubs[i])
+					}
+				}
+			}
+			a.SetHeld(held)
 		case ev < 88:
 			want := asKeys(ref.sweep(now), keyOf)
 			got := a.Sweep(now)
@@ -301,7 +314,7 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 			t.Fatalf("step %d: a limit is exceeded: %+v", step, c)
 		}
 		for i := range pubs {
-			if a.Known(pubs[i]) != ref.known[i] {
+			if a.Known(pubs[i]) != ref.isKnown(i) {
 				t.Fatalf("step %d: Known(%d) = %v", step, i, a.Known(pubs[i]))
 			}
 		}
@@ -312,10 +325,11 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 	for name, min := range map[string]int{
 		"secured:" + AdmitCounted.String():            2000,
 		"secured:" + AdmitKnownMember.String():        500,
-		"secured:" + RefuseCapReached.String():        500,
+		"secured:" + RefuseCapReached.String():        300,
 		"secured:" + AdmitOutbound.String():           1000,
 		"secured:" + AdmitAlreadyTracked.String():     200,
 		"exempt-while-cap-reached":                    100,
+		"exempt-by-held-certificate":                  100,
 		"completed:" + PlaceReleased.String():         200,
 		"completed:" + PlaceNonMember.String():        200,
 		"completed:" + RefuseNonMemberFull.String():   50,

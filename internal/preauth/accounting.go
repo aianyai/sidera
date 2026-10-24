@@ -187,7 +187,10 @@ type entry struct {
 type Accounting struct {
 	p       Params
 	entries map[ConnKey]*entry
-	known   map[ident.PublicKey]struct{}
+	// learned holds the peers whose exchange completed as a member or an
+	// authorized person; held holds the members of the certificates the node has.
+	learned map[ident.PublicKey]struct{}
+	held    map[ident.PublicKey]struct{}
 	counts  Counts
 }
 
@@ -196,30 +199,33 @@ func NewAccounting(p Params) (*Accounting, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	return &Accounting{p: p, entries: map[ConnKey]*entry{}, known: map[ident.PublicKey]struct{}{}}, nil
+	return &Accounting{p: p, entries: map[ConnKey]*entry{}, learned: map[ident.PublicKey]struct{}{}, held: map[ident.PublicKey]struct{}{}}, nil
 }
 
 // Counts returns the sizes of the tracked sets.
 func (a *Accounting) Counts() Counts { return a.counts }
 
-// Learn records that peer is a known member: its inbound connections are
-// exempt from the aggregate cap. Members found by a completed exchange are
-// learned by Completed; the caller learns the ones it knows from certificates it
-// holds (a member's network key with a valid certificate), at start and
-// whenever those certificates change. An authorized person's new device is not
-// known until its first exchange completed.
-func (a *Accounting) Learn(peer ident.PublicKey) {
-	if !peer.IsZero() {
-		a.known[peer] = struct{}{}
+// SetHeld replaces the set of peers known as members from the certificates the
+// node holds (see HeldMembers). The caller calls it at start and whenever a
+// held certificate, a revocation or the trust view changes. Peers learned from
+// completed exchanges are kept apart and survive it. An authorized person's new
+// device is in neither until its first exchange completed.
+func (a *Accounting) SetHeld(peers []ident.PublicKey) {
+	a.held = make(map[ident.PublicKey]struct{}, len(peers))
+	for _, p := range peers {
+		if !p.IsZero() {
+			a.held[p] = struct{}{}
+		}
 	}
 }
 
-// Forget removes peer from the known members.
-func (a *Accounting) Forget(peer ident.PublicKey) { delete(a.known, peer) }
-
-// Known reports whether peer is a known member.
+// Known reports whether peer is known as a member, by a completed exchange or
+// by a held certificate.
 func (a *Accounting) Known(peer ident.PublicKey) bool {
-	_, ok := a.known[peer]
+	if _, ok := a.learned[peer]; ok {
+		return true
+	}
+	_, ok := a.held[peer]
 	return ok
 }
 
@@ -272,7 +278,8 @@ func (a *Accounting) Connected(key ConnKey, now time.Time) bool {
 // non-member a member). A member or an authorized person is released from the
 // accounting and its peer is learned as known; a non-member takes a place among
 // NonMemberConcurrency, or is refused when none is free; a non-member also stops
-// being known as a member.
+// being known as a member, by either source, until the next SetHeld lists it
+// again.
 func (a *Accounting) Completed(key ConnKey, s State, now time.Time) Placement {
 	if !key.valid() || now.IsZero() || !s.Valid() {
 		return Placement{VerdictRefuse, RefusePlacementInput}
@@ -283,7 +290,7 @@ func (a *Accounting) Completed(key ConnKey, s State, now time.Time) Placement {
 	e, tracked := a.entries[key]
 	switch s {
 	case StateMember, StateAuthorizedPerson:
-		a.known[key.Peer] = struct{}{}
+		a.learned[key.Peer] = struct{}{}
 		if !tracked {
 			return Placement{VerdictAllow, PlaceUntracked}
 		}
@@ -291,7 +298,8 @@ func (a *Accounting) Completed(key ConnKey, s State, now time.Time) Placement {
 		return Placement{VerdictAllow, PlaceReleased}
 	}
 	// StateNonMember.
-	delete(a.known, key.Peer)
+	delete(a.learned, key.Peer)
+	delete(a.held, key.Peer)
 	switch {
 	case !tracked:
 		return Placement{VerdictAllow, PlaceUntracked}

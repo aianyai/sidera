@@ -496,3 +496,104 @@ func TestDecideOnTheGoldenMessages(t *testing.T) {
 		t.Errorf("person: %v/%v level %v", d.State, d.Reason, d.Standing.Level)
 	}
 }
+
+func TestHeldMembers(t *testing.T) {
+	rows := []struct {
+		rule  string
+		setup func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate])
+		want  int // number of keys; they are all the remote node's network key
+	}{
+		{"the valid certificate of a directly trusted node", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.cert(1)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 1},
+		{"the valid certificate of a node trusted by inheritance", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trustsThrough(false)
+			_, v := w.cert(1)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 1},
+		{"the valid certificate of a node whose trust is suspended", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trustsThrough(true)
+			_, v := w.cert(1)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 1},
+		{"a stranger's certificate is not a member's", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			_, v := w.cert(1)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
+		{"an expired certificate of a member", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.certWindow(1, epoch, epoch.Add(30*time.Minute))
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
+		{"a certificate of a member that has not begun", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.certWindow(1, epoch.Add(2*time.Hour), endTime)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
+		{"a revoked certificate of a member", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.cert(1)
+			w.revoke(revocation.IssueNetworkKeyCertificateRevocation(v, w.identity))
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
+		{"a certificate of a retired node", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.cert(1)
+			w.revoke(revocation.IssueNodeSelfRevocation(w.identity))
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
+		{"a certificate older than the highest serial seen", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, newer := w.cert(2)
+			w.seen[w.remoteNode()] = record.SerialSeenOf(newer)
+			_, v := w.cert(1)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
+		{"the certificate seen at the highest serial", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.cert(2)
+			w.seen[w.remoteNode()] = record.SerialSeenOf(v)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 1},
+		{"the same key twice is listed once", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.cert(1)
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{v, v}
+		}, 1},
+		{"no revocation set gives none", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.cert(1)
+			f := w.facts()
+			f.Revocations = nil
+			return f, []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
+		{"no time gives none", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			_, v := w.cert(1)
+			f := w.facts()
+			f.Now = time.Time{}
+			return f, []record.Verified[record.NetworkKeyCertificate]{v}
+		}, 0},
+		{"a zero certificate gives none", func(w *world) (Facts, []record.Verified[record.NetworkKeyCertificate]) {
+			w.trusts()
+			return w.facts(), []record.Verified[record.NetworkKeyCertificate]{{}}
+		}, 0},
+	}
+	for _, row := range rows {
+		t.Run(row.rule, func(t *testing.T) {
+			w := newWorld(t)
+			f, certs := row.setup(w)
+			got := HeldMembers(f, certs)
+			if len(got) != row.want {
+				t.Fatalf("got %d keys, want %d", len(got), row.want)
+			}
+			for _, k := range got {
+				if k != w.network.Public() {
+					t.Errorf("returned a key that is not the member's network key")
+				}
+			}
+		})
+	}
+}

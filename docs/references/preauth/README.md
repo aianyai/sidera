@@ -139,8 +139,9 @@ Three limits keep strangers from crowding out the cluster:
 - **The known-member exemption.** An inbound connection of a peer known as a
   member is let through and not counted. Known members are the peers whose
   exchange completed as a member or an authorized person, and the members whose
-  valid network-key certificates the node holds. A peer decided as a non-member
-  stops being known. A person's new device, and a node with a new network key,
+  valid network-key certificates the node holds (`HeldMembers` picks them with
+  the same rules `Decide` uses: current serial, valid, unrevoked, and a member by
+  `trust`). A peer decided as a non-member stops being known. A person's new device, and a node with a new network key,
   are strangers until their first exchange completes.
 - **The non-member limits.** A connection whose exchange completed as a
   non-member counts toward `NonMemberConcurrency`; when none is free the
@@ -292,4 +293,4 @@ cache of who is known: the accounting keeps its own known set.
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
 | The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
 | Parameters | `internal/preauth/params.go`; test `TestParamsValidate` |
-| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` compares every answer with a second implementation under 40,000 random events and asserts how often each path was taken |
+| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestHeldMembers`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` compares every answer with a second implementation under 40,000 random events and asserts how often each path was taken |

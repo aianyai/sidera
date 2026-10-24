@@ -127,7 +127,7 @@ func TestOutboundConnectionsAreNotAccounted(t *testing.T) {
 func TestAKnownMemberIsExemptFromTheCapUnderAFlood(t *testing.T) {
 	a := newAccounting(t)
 	member := peerKey(t, 50)
-	a.Learn(member)
+	a.SetHeld([]ident.PublicKey{member})
 	for i := byte(1); i <= 3; i++ {
 		admit(t, a, key(t, i, "a"), at(0), AdmitCounted)
 	}
@@ -176,7 +176,7 @@ func TestExchangeCompletionReleasesTheAggregateSlot(t *testing.T) {
 
 func TestDisconnectReleasesWhateverTheConnectionHeld(t *testing.T) {
 	a := newAccounting(t)
-	a.Learn(peerKey(t, 50))
+	a.SetHeld([]ident.PublicKey{peerKey(t, 50)})
 	un, ex, nm := key(t, 1, "a"), ConnKey{peerKey(t, 50), "a"}, key(t, 2, "a")
 	admit(t, a, un, at(0), AdmitCounted)
 	admit(t, a, ex, at(0), AdmitKnownMember)
@@ -256,7 +256,7 @@ func TestANonMemberThatBecomesAMemberFreesItsPlace(t *testing.T) {
 func TestANonMemberDecisionTakesAwayWhatWasKnown(t *testing.T) {
 	a := newAccounting(t)
 	member := peerKey(t, 50)
-	a.Learn(member) // from a certificate the node holds
+	a.SetHeld([]ident.PublicKey{member}) // from a certificate the node holds
 	k := ConnKey{member, "a"}
 	admit(t, a, k, at(0), AdmitKnownMember)
 	a.Completed(k, StateNonMember, at(1)) // its trust was revoked meanwhile
@@ -362,7 +362,7 @@ func TestSweepForgetsConnectionsNeverSeenConnected(t *testing.T) {
 func TestSweepAlsoFreesExemptEntries(t *testing.T) {
 	a := newAccounting(t)
 	m := peerKey(t, 50)
-	a.Learn(m)
+	a.SetHeld([]ident.PublicKey{m})
 	admit(t, a, ConnKey{m, "a"}, at(0), AdmitKnownMember)
 	a.Sweep(at(3))
 	wantCounts(t, a, 0, 0, 0)
@@ -417,7 +417,7 @@ func TestOverdueCountsFromTheConnectionNotFromTheHandshake(t *testing.T) {
 func TestOverdueKnownMembersHaveTheDeadlineToo(t *testing.T) {
 	a := newAccounting(t)
 	m := ConnKey{peerKey(t, 50), "a"}
-	a.Learn(m.Peer)
+	a.SetHeld([]ident.PublicKey{m.Peer})
 	admit(t, a, m, at(0), AdmitKnownMember)
 	a.Connected(m, at(0))
 	if got := a.Overdue(at(5)); len(got) != 1 {
@@ -470,19 +470,33 @@ func TestOverdueAndSweepComeInAFixedOrder(t *testing.T) {
 	}
 }
 
-func TestLearnAndForget(t *testing.T) {
+func TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes(t *testing.T) {
 	a := newAccounting(t)
-	p := peerKey(t, 1)
-	a.Learn(p)
-	if !a.Known(p) {
-		t.Error("not known after Learn")
+	learned, h1, h2 := key(t, 1, "a"), peerKey(t, 2), peerKey(t, 3)
+	admit(t, a, learned, at(0), AdmitCounted)
+	a.Completed(learned, StateMember, at(1))
+	a.SetHeld([]ident.PublicKey{h1})
+	for p, want := range map[ident.PublicKey]bool{learned.Peer: true, h1: true, h2: false} {
+		if a.Known(p) != want {
+			t.Errorf("after the first SetHeld: Known = %v, want %v", a.Known(p), want)
+		}
 	}
-	a.Forget(p)
-	if a.Known(p) {
-		t.Error("known after Forget")
+	a.SetHeld([]ident.PublicKey{h2})
+	for p, want := range map[ident.PublicKey]bool{learned.Peer: true, h1: false, h2: true} {
+		if a.Known(p) != want {
+			t.Errorf("after the second SetHeld: Known = %v, want %v", a.Known(p), want)
+		}
 	}
-	a.Learn(ident.PublicKey{})
+	a.SetHeld(nil)
+	if a.Known(h2) || !a.Known(learned.Peer) {
+		t.Error("SetHeld(nil) must drop the held members only")
+	}
+}
+
+func TestSetHeldIgnoresTheZeroKey(t *testing.T) {
+	a := newAccounting(t)
+	a.SetHeld([]ident.PublicKey{{}})
 	if a.Known(ident.PublicKey{}) {
-		t.Error("the zero key was learned")
+		t.Error("the zero key is known")
 	}
 }
