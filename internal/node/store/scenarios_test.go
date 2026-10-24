@@ -646,6 +646,25 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	if len(missing) > 0 {
 		t.Errorf("%d declared crash points were never reached by the walks:\n%s", len(missing), strings.Join(missing, "\n"))
 	}
+	// Reaching a point is not crashing at it: every declared point must have had
+	// a crash state taken at it, of every kind of crash, by the walk of a
+	// workflow (a point only a recovery after another workflow's crash reaches
+	// needs a workflow of its own that starts from that state).
+	var models []string
+	for _, cs := range crashKinds(fsxtest.NewMem(), newRand(1)) {
+		models = append(models, cs.name)
+	}
+	var uncrashed []string
+	for _, k := range tab {
+		for _, m := range models {
+			if sink.taken[k.Key][m] == 0 {
+				uncrashed = append(uncrashed, fmt.Sprintf("%s (%v) under %s", k.Key, kindName(k.Kind), m))
+			}
+		}
+	}
+	if len(uncrashed) > 0 {
+		t.Errorf("%d declared crash points have no crash state taken at them by a walk, for the kind of crash named:\n%s", len(uncrashed), strings.Join(uncrashed, "\n"))
+	}
 	if total.nested == 0 && !testing.Short() {
 		t.Error("no recovery was crashed in the middle")
 	}

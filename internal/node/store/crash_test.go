@@ -254,6 +254,7 @@ func runScenario(t *testing.T, sc *scenario, sink *coverageSink, seed uint64) sc
 		for _, cs := range crashKinds(r.mem, rng) {
 			st.clones++
 			sc.exercise(t, fmt.Sprintf("%s before %v", cs.name, p), cs, before, after, durable, sink, &st, !strings.HasPrefix(cs.name, "power-loss"))
+			sink.took(p, cs.name)
 		}
 	}
 	if err := sc.run(t, r, sc.newSimFor(t, r)); err != nil {

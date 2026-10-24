@@ -67,10 +67,24 @@ type coverageSink struct {
 	mu   sync.Mutex
 	hits map[fsx.Key]int
 	kind map[fsx.Key]txn.Kind
+	// taken counts, for each crash point and each kind of crash, the crash
+	// states the walk of a workflow took there and judged: reaching a point is
+	// not crashing at it.
+	taken map[fsx.Key]map[string]int
 }
 
 func newSink() *coverageSink {
-	return &coverageSink{hits: map[fsx.Key]int{}, kind: map[fsx.Key]txn.Kind{}}
+	return &coverageSink{hits: map[fsx.Key]int{}, kind: map[fsx.Key]txn.Kind{}, taken: map[fsx.Key]map[string]int{}}
+}
+
+// took records that the walk took a crash state of the given kind at p.
+func (c *coverageSink) took(p fsx.Point, model string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.taken[p.Key] == nil {
+		c.taken[p.Key] = map[string]int{}
+	}
+	c.taken[p.Key][model]++
 }
 
 func (c *coverageSink) add(p fsx.Point, k txn.Kind) {
