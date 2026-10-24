@@ -330,7 +330,7 @@ func (s *Store) pendingLost(except string) ([]OutKey, error) {
 		if !ok || original == except {
 			continue
 		}
-		there, err := s.present(path.Join(AlertsDir, recfile.FileName(string(KindAlert), AlertKeyBytes(id))))
+		there, err := fsx.Exists(s.r, path.Join(AlertsDir, recfile.FileName(string(KindAlert), AlertKeyBytes(id))))
 		if err != nil {
 			return nil, err
 		}
@@ -530,7 +530,7 @@ func (s *Store) Quarantine(q Quarantine) error {
 }
 
 func (s *Store) presentOrErr(p string) (bool, error) {
-	there, err := s.present(p)
+	there, err := fsx.Exists(s.r, p)
 	if err == nil && !there {
 		err = fmt.Errorf("store: %s is not there", p)
 	}

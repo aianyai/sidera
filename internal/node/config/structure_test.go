@@ -17,7 +17,7 @@ import (
 // and not only when a crash test happens to walk it.
 func TestConfigHoldsNoWritableFileSystem(t *testing.T) {
 	allowed := map[string]bool{
-		"Reader": true, "Mode": true, "ModePrivate": true, "ModePrivateExec": true,
+		"Reader": true, "Exists": true, "Mode": true, "ModePrivate": true, "ModePrivateExec": true,
 		"Entry": true, "Info": true, "IsLeftover": true, "TempPrefix": true, "TrashPrefix": true,
 	}
 	files, err := filepath.Glob("*.go")

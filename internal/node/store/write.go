@@ -118,15 +118,6 @@ func (s *Store) replace(tx *txn.Tx, role string, f file) error {
 	return tx.Replace(role, f.path, f.data, fsx.ModePrivate)
 }
 
-// present reports whether a path exists.
-func (s *Store) present(p string) (bool, error) {
-	_, err := s.r.Stat(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return false, nil
-	}
-	return err == nil, err
-}
-
 // release removes the body files named, those that are there, and syncs
 // bodies/. A body that is already gone was removed by an earlier, interrupted
 // release.
@@ -136,7 +127,7 @@ func (s *Store) release(tx *txn.Tx, refs []BodyRef) error {
 	}
 	for _, r := range dedupe(refs) {
 		p := path.Join(BodiesDir, r.Name())
-		there, err := s.present(p)
+		there, err := fsx.Exists(s.r, p)
 		if err != nil {
 			return err
 		}
@@ -749,7 +740,7 @@ func (s *Store) AlertAck(a AlertAckInput) error {
 	tx := s.w.Begin(&declAlertAck)
 	defer tx.Close()
 	if q != "" {
-		there, err := s.present(q)
+		there, err := fsx.Exists(s.r, q)
 		if err != nil {
 			return err
 		}
@@ -838,7 +829,7 @@ func (s *Store) ArchiveExpire(names []string) error {
 	var present []string
 	for _, n := range names {
 		p := path.Join(ArchiveDir, n)
-		there, err := s.present(p)
+		there, err := fsx.Exists(s.r, p)
 		if err != nil {
 			return err
 		}
@@ -1100,7 +1091,7 @@ func sortedDirs(m map[string]bool) []string {
 // removeRef removes a file if it is there, reporting whether it did.
 func (s *Store) removeRef(tx *txn.Tx, role string, f FileRef) (bool, error) {
 	p := path.Join(f.Dir, f.Name)
-	there, err := s.present(p)
+	there, err := fsx.Exists(s.r, p)
 	if err != nil || !there {
 		return false, err
 	}

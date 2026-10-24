@@ -64,6 +64,20 @@ type Reader interface {
 	Available(dir string) (uint64, error)
 }
 
+// Exists reports whether a file or directory is there. A path that is not there
+// is false with no error; any other failure of Stat is returned, because a
+// caller that cannot tell whether a path exists must not guess.
+func Exists(r Reader, p string) (bool, error) {
+	_, err := r.Stat(p)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	}
+	return false, err
+}
+
 // Entry is one name in a directory.
 type Entry struct {
 	Name  string

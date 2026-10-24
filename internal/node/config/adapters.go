@@ -26,11 +26,6 @@ func reservedName(name string) bool {
 	return strings.HasPrefix(name, fsx.TempPrefix) || strings.HasPrefix(name, fsx.TrashPrefix) || strings.HasPrefix(name, stagePrefix)
 }
 
-func present(r fsx.Reader, p string) bool {
-	_, err := r.Stat(p)
-	return err == nil
-}
-
 func readAdapters(r fsx.Reader, st *state) error {
 	entries, err := listDir(r, AdaptersDir)
 	if err != nil {
@@ -245,7 +240,11 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) error {
 	tx := c.w.Begin(adapterStage)
 	defer tx.Close()
 	for _, d := range []string{AdapterDir(staged.ID), AdapterVersionsDir(staged.ID)} {
-		if !present(r, d) {
+		there, err := fsx.Exists(r, d)
+		if err != nil {
+			return err
+		}
+		if !there {
 			if err := tx.MakeDir(roleParent, d); err != nil {
 				return err
 			}
@@ -299,9 +298,21 @@ func (c *Config) unstage(s Staged) error {
 		return &FileError{Path: AdapterCurrentPath(s.ID), Kind: KindAdapterCurrent, Reason: FileUnreadable, Err: err}
 	}
 	versionDir := AdapterVersionDir(s.ID, s.Version)
-	dropStage := present(r, s.Dir)
-	dropVersion := hasCurrent && current != s.Version && present(r, versionDir)
-	dropParent := !hasCurrent && present(r, AdapterDir(s.ID))
+	dropStage, err := fsx.Exists(r, s.Dir)
+	if err != nil {
+		return err
+	}
+	dropVersion, dropParent := false, false
+	if hasCurrent && current != s.Version {
+		if dropVersion, err = fsx.Exists(r, versionDir); err != nil {
+			return err
+		}
+	}
+	if !hasCurrent {
+		if dropParent, err = fsx.Exists(r, AdapterDir(s.ID)); err != nil {
+			return err
+		}
+	}
 	if !dropStage && !dropVersion && !dropParent {
 		return nil
 	}
@@ -365,7 +376,11 @@ func (c *Config) PlanInstall(s Staged) (Install, error) {
 		}
 		plan.previous = cur.Version
 	}
-	plan.stale = present(c.w.Reader(), AdapterVersionDir(s.ID, s.Version))
+	stale, err := fsx.Exists(c.w.Reader(), AdapterVersionDir(s.ID, s.Version))
+	if err != nil {
+		return Install{}, err
+	}
+	plan.stale = stale
 	return plan, nil
 }
 
