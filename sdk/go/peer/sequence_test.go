@@ -26,7 +26,10 @@ import (
 //   - a request answered -32001 never reached its handler, and no handler ran
 //     twice for one request;
 //   - a duplicate of an id in flight is answered -32600 and never runs;
-//   - a reply of -32800 only follows a cancel for that request;
+//   - a reply of -32800 only follows a cancel for that request, or the close of
+//     the peer, which cancels every handler's context so that a handler that
+//     returns ctx.Err() is answered -32800 and the answer can win the race with
+//     the transport being closed;
 //   - a malformed line gets one error with a null id, and a notification, a stray
 //     response or a cancel gets no reply at all.
 //
@@ -200,12 +203,13 @@ func playScript(t *testing.T, script []seqStep) seqCoverage {
 	}
 
 	var (
-		reqs         []*seqRequest    // every request line with a valid id, in order
-		released     = map[int]bool{} // gate requests sent before a release: not duplicate targets any more
-		malformed    int
-		closedEarly  bool
-		sentIDs      []string
-		lastDupOfSeq = map[string]int{}
+		reqs           []*seqRequest    // every request line with a valid id, in order
+		released       = map[int]bool{} // gate requests sent before a release: not duplicate targets any more
+		malformed      int
+		closedEarly    bool
+		repliesAtClose int // replies seen before Close was called: later ones may be answers to the close
+		sentIDs        []string
+		lastDupOfSeq   = map[string]int{}
 	)
 	nextSeq := 0
 	newID := func(seq int) string {
@@ -315,6 +319,7 @@ func playScript(t *testing.T, script []seqStep) seqCoverage {
 		case opClose:
 			closedEarly = true
 			cov["early close"]++
+			repliesAtClose = len(snapshot())
 			p.Close()
 		}
 	}
@@ -371,7 +376,8 @@ func playScript(t *testing.T, script []seqStep) seqCoverage {
 	all := snapshot()
 	nullReplies := 0
 	perID := map[string][]frame{}
-	for _, f := range all {
+	cancelledByClose := map[string]bool{} // ids whose -32800 arrived after Close was called
+	for i, f := range all {
 		if f.Error == nil && f.Result == nil {
 			t.Errorf("the peer wrote %+v, neither a result nor an error", f)
 		}
@@ -383,6 +389,9 @@ func playScript(t *testing.T, script []seqStep) seqCoverage {
 			continue
 		}
 		perID[string(f.ID)] = append(perID[string(f.ID)], f)
+		if closedEarly && i >= repliesAtClose && f.errCode() == peer.CodeRequestCancelled {
+			cancelledByClose[string(f.ID)] = true
+		}
 	}
 
 	// Malformed lines: one error each; nothing else is answered with a null id.
@@ -451,7 +460,9 @@ func playScript(t *testing.T, script []seqStep) seqCoverage {
 			}
 		case peer.CodeRequestCancelled:
 			cov["cancelled"]++
-			if !rq.cancelled {
+			if cancelledByClose[rq.id] {
+				cov["cancelled by close"]++
+			} else if !rq.cancelled {
 				t.Errorf("request %d was answered -32800 without a cancel", rq.seq)
 			}
 			if ran == 0 {

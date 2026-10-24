@@ -243,7 +243,7 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | Effect rule | `TestEffectClassification`, `TestHandlerErrorsAndEffectRule` |
 | No bodies in logs | `TestLogsNeverContainMessageBodies` |
 | Many concurrent calls both ways against an independent wire model | `TestConcurrentCallsInBothDirections` |
-| Random sequences of requests, duplicates, cancellations, notifications, malformed lines, stray responses and a close, checked against a model that keeps its own books: every well-formed request answered exactly once, no handler after an overload reply, a duplicate of an id in flight rejected, nothing but a cancel answered `-32800` | `TestRandomOperationSequences`, `FuzzOperationSequence` |
+| Random sequences of requests, duplicates, cancellations, notifications, malformed lines, stray responses and a close, checked against a model that keeps its own books: every well-formed request answered exactly once, no handler after an overload reply, a duplicate of an id in flight rejected, nothing but a cancel or the close of the peer answered `-32800` | `TestRandomOperationSequences`, `FuzzOperationSequence` |
 | The id is free again before its reply is queued, even when the reply must wait for room | `TestRequestIDIsReleasedBeforeItsReplyIsQueued` (white box) |
 | Frame reader and classifier against separate oracles | `TestFrameReader`, `TestClassify`, `FuzzFrameReader`, `FuzzClassify` |
 
