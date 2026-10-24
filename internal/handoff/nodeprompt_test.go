@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -335,44 +336,106 @@ func TestNodeCapHoldIsNeitherAnAttemptNorBlocked(t *testing.T) {
 	}
 }
 
-// nodeOracle is written apart from DecideNodePrompts: it keeps the endpoints
-// in an insertion-sorted list, compares IDs as hex text, and picks the
-// released endpoints one at a time. Whether one endpoint may be prompted at all
-// is DecidePrompt's rule, which these tests do not repeat.
-func nodeOracle(t *testing.T, waiting []WaitingPrompt, running int, p PromptParams, now time.Time) []NodePromptDecision {
+// newMessageWaiter has an unread delivered prompt, and a message arrived after
+// it, long enough ago that the minimum interval has passed: the arrival renews
+// the allowance.
+func newMessageWaiter(n byte, since time.Duration) WaitingPrompt {
+	w := waiter(n, since)
+	w.Input.Attempts = []Attempt{delivered(since, PromptKindFirst)}
+	w.Input.LastArrivalAt = after(since + time.Minute)
+	return w
+}
+
+// repromptSpentWaiter left a prompt unread, was prompted again once, and its
+// turn ended: no repeat is left and no newer message renews the allowance.
+func repromptSpentWaiter(n byte, since time.Duration) WaitingPrompt {
+	w := waiter(n, since)
+	w.Input.Trigger = TriggerTurnEnd
+	w.Input.LastArrivalAt = after(since - time.Minute)
+	w.Input.Attempts = []Attempt{delivered(since, PromptKindFirst), delivered(since+time.Minute, PromptKindReprompt)}
+	return w
+}
+
+// nodeCounts is what checkNodeProperties found in one output, for the
+// coverage assertions.
+type nodeCounts struct {
+	candidates, released int
+}
+
+// checkNodeProperties asserts the declared properties of an output of
+// DecideNodePrompts, without recomputing the release by the same procedure.
+// Whether one endpoint may be prompted at all is DecidePrompt's rule, which is
+// read here only to tell the candidates from the others.
+func checkNodeProperties(t *testing.T, waiting []WaitingPrompt, running int, p PromptParams, now time.Time, got []NodePromptDecision, shuffled []NodePromptDecision) nodeCounts {
 	t.Helper()
-	less := func(a, b WaitingPrompt) bool {
-		if !a.WaitingSince.Equal(b.WaitingSince) {
-			return a.WaitingSince.Before(b.WaitingSince)
-		}
-		return fmt.Sprintf("%x", a.Endpoint.Bytes()) < fmt.Sprintf("%x", b.Endpoint.Bytes())
+	key := func(w WaitingPrompt) string {
+		return fmt.Sprintf("%020d/%x", w.WaitingSince.UnixNano(), w.Endpoint.Bytes())
 	}
-	var sorted []WaitingPrompt
+
+	// A permutation of the input endpoints, ordered by wait start, then by ID.
+	if len(got) != len(waiting) {
+		t.Fatalf("got %d decisions for %d endpoints", len(got), len(waiting))
+	}
+	input := map[ident.EndpointID]WaitingPrompt{}
 	for _, w := range waiting {
-		i := len(sorted)
-		sorted = append(sorted, w)
-		for i > 0 && less(sorted[i], sorted[i-1]) {
-			sorted[i], sorted[i-1] = sorted[i-1], sorted[i]
-			i--
+		input[w.Endpoint] = w
+	}
+	seen := map[ident.EndpointID]bool{}
+	prevKey := ""
+	for i, g := range got {
+		w, ok := input[g.Endpoint]
+		if !ok || seen[g.Endpoint] {
+			t.Fatalf("decision %d is for %v, which is not a waiting endpoint or is decided twice", i, g.Endpoint)
+		}
+		seen[g.Endpoint] = true
+		if k := key(w); i > 0 && k <= prevKey {
+			t.Fatalf("decision %d (key %s) does not follow decision %d (key %s) in (WaitingSince, ID) order", i, k, i-1, prevKey)
+		} else {
+			prevKey = k
 		}
 	}
-	free := p.MaxConcurrentTurns - running
-	out := make([]NodePromptDecision, 0, len(sorted))
-	for _, w := range sorted {
-		d, err := DecidePrompt(w.Input, p, now)
+
+	var c nodeCounts
+	nodeFullSeen := false
+	for i, g := range got {
+		own, err := DecidePrompt(input[g.Endpoint].Input, p, now)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d.Action == PromptSend {
-			if free > 0 {
-				free--
-			} else {
-				d = PromptDecision{Action: PromptHold, Reason: PromptNodeFull}
+		switch {
+		case own.Action != PromptSend:
+			// An endpoint DecidePrompt does not prompt keeps exactly that decision.
+			if g.Decision != own {
+				t.Fatalf("decision %d: got %+v, DecidePrompt says %+v", i, g.Decision, own)
+			}
+		case g.Decision.Action == PromptSend:
+			c.candidates++
+			c.released++
+			if nodeFullSeen {
+				t.Fatalf("decision %d releases an endpoint after a candidate was held by the node cap", i)
+			}
+			if g.Decision != own {
+				t.Fatalf("decision %d: released with %+v, DecidePrompt says %+v", i, g.Decision, own)
+			}
+		default:
+			c.candidates++
+			nodeFullSeen = true
+			// A node-full hold carries only its action and reason.
+			if g.Decision != (PromptDecision{Action: PromptHold, Reason: PromptNodeFull}) {
+				t.Fatalf("decision %d: a candidate was held with %+v, want a bare node-full hold", i, g.Decision)
 			}
 		}
-		out = append(out, NodePromptDecision{Endpoint: w.Endpoint, Decision: d})
 	}
-	return out
+	if want := min(max(0, p.MaxConcurrentTurns-running), c.candidates); c.released != want {
+		t.Fatalf("released %d endpoints, want min(max(0, cap %d - running %d), candidates %d) = %d",
+			c.released, p.MaxConcurrentTurns, running, c.candidates, want)
+	}
+
+	// The order of the input does not matter.
+	if !reflect.DeepEqual(got, shuffled) {
+		t.Fatalf("a shuffled input gives another output:\n got %+v\nwant %+v", shuffled, got)
+	}
+	return c
 }
 
 func TestDecideNodePromptsProperties(t *testing.T) {
@@ -391,7 +454,7 @@ func TestDecideNodePromptsProperties(t *testing.T) {
 			// Few distinct minutes, so that equal wait starts are common.
 			since := time.Duration(rng.Intn(6)) * time.Minute
 			var w WaitingPrompt
-			switch rng.Intn(6) {
+			switch rng.Intn(8) {
 			case 0, 1:
 				w = waiter(byte(ids[i]+1), since)
 				if rng.Intn(2) == 0 {
@@ -410,6 +473,10 @@ func TestDecideNodePromptsProperties(t *testing.T) {
 				} else {
 					w = repromptWaiter(byte(ids[i]+1), since)
 				}
+			case 6:
+				w = newMessageWaiter(byte(ids[i]+1), since)
+			case 7:
+				w = repromptSpentWaiter(byte(ids[i]+1), since)
 			}
 			waiting = append(waiting, w)
 		}
@@ -418,22 +485,19 @@ func TestDecideNodePromptsProperties(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		want := nodeOracle(t, waiting, running, p, now)
-		if !reflect.DeepEqual(got, want) {
-			t.Fatalf("iteration %d (cap %d, running %d):\n got %+v\nwant %+v\nwaiting %+v", iter, p.MaxConcurrentTurns, running, got, want, waiting)
+		shuffledInput := slices.Clone(waiting)
+		rng.Shuffle(len(shuffledInput), func(i, j int) { shuffledInput[i], shuffledInput[j] = shuffledInput[j], shuffledInput[i] })
+		shuffled, err := DecideNodePrompts(shuffledInput, running, p, now)
+		if err != nil {
+			t.Fatal(err)
 		}
+		c := checkNodeProperties(t, waiting, running, p, now, got, shuffled)
 
-		// Coverage of the paths the oracle was supposed to exercise.
+		// Coverage of the paths the assertions were supposed to exercise.
 		free := p.MaxConcurrentTurns - running
-		candidates, released := 0, 0
+		candidates := c.candidates
 		for _, g := range got {
 			counts["reason "+fmt.Sprint(g.Decision.Reason)]++
-			if g.Decision.Action == PromptSend {
-				released++
-			}
-			if g.Decision.Action == PromptSend || g.Decision.Reason == PromptNodeFull {
-				candidates++
-			}
 		}
 		switch {
 		case candidates == 0:
@@ -450,8 +514,16 @@ func TestDecideNodePromptsProperties(t *testing.T) {
 		if running > p.MaxConcurrentTurns {
 			counts["running above cap"]++
 		}
-		if released < len(got) && released > 0 {
-			counts["a non-released endpoint among released ones"]++
+		// A non-candidate that sorts before a released endpoint proves that
+		// skipping it costs no slot.
+		for i := range got {
+			if got[i].Decision.Action == PromptSend || got[i].Decision.Reason == PromptNodeFull {
+				continue
+			}
+			if slices.ContainsFunc(got[i+1:], func(g NodePromptDecision) bool { return g.Decision.Action == PromptSend }) {
+				counts["a non-candidate sorts before a released endpoint"]++
+				break
+			}
 		}
 		// A tie of wait starts across the boundary between released and held.
 		var last, first *WaitingPrompt
@@ -476,11 +548,12 @@ func TestDecideNodePromptsProperties(t *testing.T) {
 	for _, key := range []string{
 		"no candidates", "candidates, no free slot", "candidates exceed free slots",
 		"free slots exceed candidates", "candidates equal free slots", "running above cap",
-		"a non-released endpoint among released ones", "tie across the release boundary",
+		"a non-candidate sorts before a released endpoint", "tie across the release boundary",
 		"reason " + fmt.Sprint(PromptFirst), "reason " + fmt.Sprint(PromptReprompt),
 		"reason " + fmt.Sprint(PromptSessionBusy), "reason " + fmt.Sprint(PromptNothingPending),
 		"reason " + fmt.Sprint(PromptHourlyCap), "reason " + fmt.Sprint(PromptUnreadWaiting),
-		"reason " + fmt.Sprint(PromptNodeFull),
+		"reason " + fmt.Sprint(PromptNodeFull), "reason " + fmt.Sprint(PromptNewMessage),
+		"reason " + fmt.Sprint(PromptRepromptSpent),
 	} {
 		if counts[key] < 100 {
 			t.Errorf("path %q taken %d times, want at least 100", key, counts[key])
