@@ -349,7 +349,7 @@ var controlPaths = []string{
 func TestPropertyControlSignalsAreNeverQueuedAndAlwaysEnd(t *testing.T) {
 	paths := map[string]int{}
 	for seed := int64(1); seed <= propertySeeds; seed++ {
-		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) { runRandomControl(t, seed, paths) })
+		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) { runRandomControl(t, seed, paths, func(*testing.T, Record) {}) })
 	}
 	if t.Failed() {
 		return
@@ -369,7 +369,9 @@ func TestPropertyControlSignalsAreNeverQueuedAndAlwaysEnd(t *testing.T) {
 	}
 }
 
-func runRandomControl(t *testing.T, seed int64, paths map[string]int) {
+// observe is called with the control record and the sender's record after every
+// step.
+func runRandomControl(t *testing.T, seed int64, paths map[string]int, observe func(*testing.T, Record)) {
 	rng := rand.New(rand.NewSource(seed))
 	fail := func(format string, args ...any) {
 		t.Helper()
@@ -441,6 +443,8 @@ func runRandomControl(t *testing.T, seed int64, paths map[string]int) {
 		}
 	}
 	check := func(now time.Time) {
+		observe(t, tgt)
+		observe(t, src)
 		if tgt.State != model {
 			fail("target %s, model %s at %v", tgt.State, model, now.Sub(t0))
 		}

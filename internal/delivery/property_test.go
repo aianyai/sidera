@@ -44,7 +44,7 @@ func TestPropertyEveryDeliveryClosesAndNoFeedbackRepeats(t *testing.T) {
 	for seed := int64(1); seed <= propertySeeds; seed++ {
 		t.Run(fmt.Sprintf("seed %d", seed), func(t *testing.T) {
 			ran++
-			runRandomDelivery(t, seed, paths)
+			runRandomDelivery(t, seed, paths, func(*testing.T, Record) {})
 		})
 	}
 	if t.Failed() || ran < propertySeeds {
@@ -95,7 +95,9 @@ func randomStep(rng *rand.Rand) time.Duration {
 	}
 }
 
-func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
+// observe is called with every record of both sides after every step, so a
+// test can check the records the walk produces.
+func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe func(*testing.T, Record)) {
 	rng := rand.New(rand.NewSource(seed))
 	fail := func(format string, args ...any) {
 		t.Helper()
@@ -154,6 +156,7 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 			visits = append(visits, n.State)
 		}
 		src = n
+		observe(t, src)
 	}
 	apply := func(r Record, now time.Time, ev Event) (Record, Outcome) {
 		n, out, err := r.Apply(now, ev)
@@ -397,6 +400,9 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 				srcApply(now, Event{Type: EventExpiryQueried, QueriedAt: now})
 			}
 		}
+		if tgt != nil {
+			observe(t, *tgt)
+		}
 		srcApply(now, Event{Type: EventReportByPassed})
 		checkAgreement()
 		if now.After(reportBy) && !src.State.IsTerminal() {
@@ -408,6 +414,9 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 	now = end
 	tgtTick(now)
 	checkTarget(now)
+	if tgt != nil {
+		observe(t, *tgt)
+	}
 	srcPull(now)
 	srcApply(now, Event{Type: EventReportByPassed})
 	checkAgreement()
