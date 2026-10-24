@@ -1,9 +1,17 @@
 package store
 
 import (
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"github.com/aianyai/sidera/internal/node/recfile"
+	"strings"
+
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // The key of a record is its identity, in the first line of its file. The key
@@ -45,51 +53,267 @@ type CheckpointKey struct {
 type AlertID [16]byte
 
 // Kind is the kind of the file of an out key.
-func (k OutKey) Kind() Kind { panic(errNotImplemented) }
+func (k OutKey) Kind() Kind {
+	if k.Control {
+		return KindOutCtl
+	}
+	return KindOut
+}
+
+// checkMessage accepts what a message id can be in a key: 1 to MaxIDLen bytes
+// of visible ASCII. The key joins its fields with a space and a person reads
+// it in a log, so a space or a control character cannot be part of one. The
+// envelope package judges the id itself; this is what the key text can carry.
+func checkMessage(m delivery.MessageID) error {
+	if len(m) < 1 || len(m) > envelope.MaxIDLen {
+		return fmt.Errorf("message id of %d bytes, want 1 to %d", len(m), envelope.MaxIDLen)
+	}
+	for i := 0; i < len(m); i++ {
+		if m[i] < 0x21 || m[i] > 0x7e {
+			return fmt.Errorf("message id has the byte 0x%02x", m[i])
+		}
+	}
+	return nil
+}
 
 // Bytes is the key text.
-func (k OutKey) Bytes() ([]byte, error) { panic(errNotImplemented) }
+func (k OutKey) Bytes() ([]byte, error) {
+	if k.Sender.IsZero() {
+		return nil, errors.New("out key without a sending endpoint")
+	}
+	if err := checkMessage(k.Message); err != nil {
+		return nil, err
+	}
+	if n := len(k.Recipients); n < 1 || n > envelope.MaxRecipients {
+		return nil, fmt.Errorf("out key with %d recipients, want 1 to %d", n, envelope.MaxRecipients)
+	}
+	parts := []string{k.Sender.String(), string(k.Message)}
+	for _, to := range k.Recipients {
+		if to.IsZero() {
+			return nil, errors.New("out key with a recipient that is not an address")
+		}
+		parts = append(parts, to.String())
+	}
+	return []byte(strings.Join(parts, " ")), nil
+}
 
 // FileName is the name of the record file.
-func (k OutKey) FileName() string { panic(errNotImplemented) }
+func (k OutKey) FileName() string {
+	parts := []string{k.Sender.String(), string(k.Message)}
+	for _, to := range k.Recipients {
+		parts = append(parts, to.String())
+	}
+	return recfile.FileName(string(k.Kind()), []byte(strings.Join(parts, " ")))
+}
 
 // Bytes is the key text.
-func (k TargetKey) Bytes() ([]byte, error) { panic(errNotImplemented) }
+func (k TargetKey) Bytes() ([]byte, error) {
+	if k.SenderNode.IsZero() || k.Sender.IsZero() || k.Recipient.IsZero() {
+		return nil, errors.New("target key with an identifier that is not set")
+	}
+	if err := checkMessage(k.Message); err != nil {
+		return nil, err
+	}
+	return []byte(k.String()), nil
+}
 
 // FileName is the name of the record file of the given kind (KindIn or
 // KindCtl).
-func (k TargetKey) FileName(kind Kind) string { panic(errNotImplemented) }
+func (k TargetKey) FileName(kind Kind) string {
+	return recfile.FileName(string(kind), []byte(k.String()))
+}
 
 // String is the key text, for a log or a reference inside another record.
-func (k TargetKey) String() string { panic(errNotImplemented) }
+func (k TargetKey) String() string {
+	return strings.Join([]string{k.SenderNode.String(), k.Sender.String(), string(k.Message), k.Recipient.String()}, " ")
+}
 
 // ParseTargetKey is the inverse of String.
-func ParseTargetKey(s string) (TargetKey, error) { panic(errNotImplemented) }
+func ParseTargetKey(s string) (TargetKey, error) {
+	v, err := ParseKey(KindIn, []byte(s))
+	if err != nil {
+		return TargetKey{}, err
+	}
+	return v.(TargetKey), nil
+}
 
 // Dedup is the deduplication key of the request the record is about.
-func (k TargetKey) Dedup() delivery.DedupKey { panic(errNotImplemented) }
+func (k TargetKey) Dedup() delivery.DedupKey {
+	return delivery.DedupKey{SenderNode: k.SenderNode, Message: k.Message, Recipient: k.Recipient}
+}
 
 // String is the lowercase hex form.
-func (id AlertID) String() string { panic(errNotImplemented) }
+func (id AlertID) String() string { return hex.EncodeToString(id[:]) }
 
 // ParseAlertID parses the form String produces: 32 lowercase hex digits, not
 // all zero.
-func ParseAlertID(s string) (AlertID, error) { panic(errNotImplemented) }
+func ParseAlertID(s string) (AlertID, error) {
+	var id AlertID
+	if err := parseHex(id[:], s); err != nil {
+		return AlertID{}, fmt.Errorf("alert id: %w", err)
+	}
+	if id == (AlertID{}) {
+		return AlertID{}, errors.New("alert id: all zero")
+	}
+	return id, nil
+}
+
+// parseHex fills dst from exactly 2*len(dst) lowercase hex digits.
+func parseHex(dst []byte, s string) error {
+	if len(s) != 2*len(dst) {
+		return fmt.Errorf("%d characters, want %d", len(s), 2*len(dst))
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; !('0' <= c && c <= '9' || 'a' <= c && c <= 'f') {
+			return fmt.Errorf("character %q is not a lowercase hex digit", c)
+		}
+	}
+	_, err := hex.Decode(dst, []byte(s))
+	return err
+}
 
 // EndpointKeyBytes is the key text of an endpoint, attempts or seq record.
-func EndpointKeyBytes(id ident.EndpointID) []byte { panic(errNotImplemented) }
+func EndpointKeyBytes(id ident.EndpointID) []byte { return []byte(id.String()) }
+
+// Scopes of a checkpoint.
+const (
+	CheckpointScopeAttempt = "attempt"
+	CheckpointScopeSession = "session"
+)
+
+func (k CheckpointKey) check() error {
+	switch k.Scope {
+	case CheckpointScopeAttempt:
+		if err := adapterproto.AttemptID(k.ID).Validate(); err != nil {
+			return fmt.Errorf("checkpoint id: %w", err)
+		}
+	case CheckpointScopeSession:
+		if _, err := ident.ParseEndpointID(k.ID); err != nil {
+			return fmt.Errorf("checkpoint id: %w", err)
+		}
+	default:
+		return fmt.Errorf("checkpoint scope %q", k.Scope)
+	}
+	return nil
+}
 
 // CheckpointKeyBytes is the key text of a checkpoint.
-func CheckpointKeyBytes(k CheckpointKey) ([]byte, error) { panic(errNotImplemented) }
+func CheckpointKeyBytes(k CheckpointKey) ([]byte, error) {
+	if err := k.check(); err != nil {
+		return nil, err
+	}
+	return []byte(k.Scope + " " + k.ID), nil
+}
 
 // AdminKeyBytes is the key text of an admin result: "local" or the person, and
 // the operation.
-func AdminKeyBytes(k admin.RequestKey) []byte { panic(errNotImplemented) }
+func AdminKeyBytes(k admin.RequestKey) []byte {
+	who := "local"
+	if !k.Person.IsZero() {
+		who = k.Person.String()
+	}
+	return []byte(who + " " + hex.EncodeToString(k.ID[:]))
+}
 
 // AlertKeyBytes is the key text of an alert.
-func AlertKeyBytes(id AlertID) []byte { panic(errNotImplemented) }
+func AlertKeyBytes(id AlertID) []byte { return []byte(id.String()) }
 
 // ParseKey parses key bytes as a key of the kind: an OutKey, TargetKey,
 // ident.EndpointID, CheckpointKey, admin.RequestKey or AlertID. It is step 4 of
 // the validation of a record file.
-func ParseKey(kind Kind, key []byte) (any, error) { panic(errNotImplemented) }
+func ParseKey(kind Kind, key []byte) (any, error) {
+	fields := strings.Split(string(key), " ")
+	for _, f := range fields {
+		if f == "" {
+			return nil, errors.New("key with an empty field")
+		}
+	}
+	want := func(n int) error {
+		if len(fields) != n {
+			return fmt.Errorf("key of %d fields, want %d", len(fields), n)
+		}
+		return nil
+	}
+	switch kind {
+	case KindOut, KindOutCtl:
+		if len(fields) < 3 || len(fields) > 2+envelope.MaxRecipients {
+			return nil, fmt.Errorf("out key of %d fields", len(fields))
+		}
+		sender, err := ident.ParseEndpointID(fields[0])
+		if err != nil {
+			return nil, err
+		}
+		k := OutKey{Sender: sender, Message: delivery.MessageID(fields[1]), Control: kind == KindOutCtl}
+		if err := checkMessage(k.Message); err != nil {
+			return nil, err
+		}
+		for _, f := range fields[2:] {
+			to, err := ident.ParseAddress(f)
+			if err != nil {
+				return nil, err
+			}
+			k.Recipients = append(k.Recipients, to)
+		}
+		return k, nil
+	case KindIn, KindCtl:
+		if err := want(4); err != nil {
+			return nil, err
+		}
+		node, err := ident.ParseNodeID(fields[0])
+		if err != nil {
+			return nil, err
+		}
+		sender, err := ident.ParseEndpointID(fields[1])
+		if err != nil {
+			return nil, err
+		}
+		recipient, err := ident.ParseEndpointID(fields[3])
+		if err != nil {
+			return nil, err
+		}
+		k := TargetKey{SenderNode: node, Sender: sender, Message: delivery.MessageID(fields[2]), Recipient: recipient}
+		if err := checkMessage(k.Message); err != nil {
+			return nil, err
+		}
+		return k, nil
+	case KindEndpoint, KindAttempts, KindSeq:
+		if err := want(1); err != nil {
+			return nil, err
+		}
+		return ident.ParseEndpointID(fields[0])
+	case KindCheckpoint:
+		if err := want(2); err != nil {
+			return nil, err
+		}
+		k := CheckpointKey{Scope: fields[0], ID: fields[1]}
+		if err := k.check(); err != nil {
+			return nil, err
+		}
+		return k, nil
+	case KindAdmin:
+		if err := want(2); err != nil {
+			return nil, err
+		}
+		var k admin.RequestKey
+		if fields[0] != "local" {
+			p, err := ident.ParsePersonID(fields[0])
+			if err != nil {
+				return nil, err
+			}
+			k.Person = p
+		}
+		if err := parseHex(k.ID[:], fields[1]); err != nil {
+			return nil, fmt.Errorf("operation id: %w", err)
+		}
+		if k.ID.IsZero() {
+			return nil, errors.New("operation id: all zero")
+		}
+		return k, nil
+	case KindAlert:
+		if err := want(1); err != nil {
+			return nil, err
+		}
+		return ParseAlertID(fields[0])
+	}
+	return nil, fmt.Errorf("%q is not a kind of state/", kind)
+}

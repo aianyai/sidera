@@ -106,11 +106,11 @@ func TestTargetRecordsAreWrittenWithTheNextRevision(t *testing.T) {
 	if got := r.scan().In[0].Rev; got != 3 {
 		t.Errorf("after Ack: rev %d, want 3", got)
 	}
-	// A record written again from a stale read gets the stale revision plus one:
-	// the revision tells that a write happened, it does not order the writers.
+	// A record written again from an older read (revision 2) gets that revision
+	// plus one: the revision tells that a write happened, it does not order writers.
 	mustDo(t, r.st.Lease([]store.InRecord{in}))
-	if got := r.scan().In[0].Rev; got != 4 {
-		t.Errorf("after a second write of the same read: rev %d, want 4", got)
+	if got := r.scan().In[0].Rev; got != 3 {
+		t.Errorf("after a write of an older read: rev %d, want 3", got)
 	}
 }
 

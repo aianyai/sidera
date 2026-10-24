@@ -93,14 +93,12 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 		held := inRev(2, 1)                         // accepted: not finished, never swept
 		c := created(t, 4, 5)
 		c.Record.State = delivery.StateDelivered
-		derived := inFor(5, 5, 2)
+		derived := derivedIn(4, 5, 2)
 		derived.Record.State = delivery.StateDelivered
-		derived.Body = bodyRef(2) // shares its body with a record that stays
-		derived.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{}`)}
-		orphanDerived := inFor(6, 9, 2) // its control record is gone: swept by its own retention
+		derived.Body = bodyRef(2)           // shares its body with a record that stays
+		orphanDerived := derivedIn(6, 9, 2) // its control record is gone: swept by its own retention
 		orphanDerived.Record.State = delivery.StateDelivered
 		orphanDerived.Body = bodyRef(4)
-		orphanDerived.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{}`)}
 		lost := store.InRecord{Key: tgtKey(7), Lost: true, DiscoveredAt: base,
 			Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: base.Add(time.Hour)},
 			Dedup:  delivery.NewDedupRecord(tgtKey(7).Dedup(), delivery.BodyDigest{}, base.Add(time.Hour))}
@@ -126,7 +124,7 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 			store.SeqRecord{Sender: ep(7), Floors: map[ident.Address]uint64{addr(2, 2): 3}},
 			srcOutFinished(10), srcOut(11, false))
 		seedRaw(t, r.mem, store.InDir, lost.Name()+"."+store.AlertID{9}.String()+".corrupt", []byte("junk"))
-		seedRaw(t, r.mem, store.EndpointsDir, "00.rec."+alertHeld.ID.String()+".corrupt", []byte("junk"))
+		seedRaw(t, r.mem, store.EndpointsDir, zeroRec+"."+alertHeld.ID.String()+".corrupt", []byte("junk"))
 		seedBodies(t, r.mem, bodyBytes(1), bodyBytes(2), bodyBytes(4), bodyBytes(9))
 		_ = soon
 		return r
@@ -146,9 +144,9 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	c4 := created(t, 4, 5)
 
 	wantRecords := []string{
-		p(store.InDir, inRev(1, 2)),    // finished, past retention
-		p(store.InDir, inFor(5, 5, 2)), // derived of a control record that goes in the same plan
-		p(store.InDir, inFor(6, 9, 2)), // derived whose control record is gone
+		p(store.InDir, inRev(1, 2)),        // finished, past retention
+		p(store.InDir, derivedIn(4, 5, 2)), // derived of a control record that goes in the same plan
+		p(store.InDir, derivedIn(6, 9, 2)), // derived whose control record is gone
 		p(store.InDir, store.InRecord{Key: tgtKey(7)}),
 		p(store.EndpointsDir, session(5, store.EndpointClosed, ctlName(4))),
 		p(store.AttemptsDir, store.AttemptsRecord{Endpoint: ep(5)}),
@@ -229,10 +227,9 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 func TestPlanSweepKeepsADerivedDeliveryWhileItsControlRecordIsLive(t *testing.T) {
 	r := newRig(t)
 	c := sessionCtl(4, 5) // accepted: not finished
-	derived := inFor(5, 5, 2)
+	derived := derivedIn(4, 5, 2)
 	derived.Record.State = delivery.StateDelivered
 	derived.Body = nil
-	derived.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{}`)}
 	seed(t, r.mem, c, derived)
 	plan := store.PlanSweep(r.scan(), base.Add(100*24*time.Hour))
 	if len(plan.Records)+len(plan.Ctl) != 0 {

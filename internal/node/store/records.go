@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"github.com/aianyai/sidera/internal/node/recfile"
 	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
@@ -11,7 +12,6 @@ import (
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
-	"github.com/aianyai/sidera/internal/node/recfile"
 	"github.com/aianyai/sidera/internal/reply"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )

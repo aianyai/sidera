@@ -1,71 +1,477 @@
 package store
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"path"
+	"slices"
+	"sort"
 	"time"
 
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
-// The methods of this file are the transactions of the same name. Each opens a
-// transaction, writes in the order of its declaration, commits and returns; an
-// error is the txn error of the failed write, with its class, never wrapped
-// into another. The caller acknowledges and updates its memory only after nil.
+// The methods of this file are the transactions of the same name. Each encodes
+// everything first, so that what cannot be written is refused before a
+// transaction opens; then opens the transaction, writes in the order of its
+// declaration, commits and returns. An error is the txn error of the failed
+// write, with its class, never wrapped into another. The caller acknowledges and
+// updates its memory only after nil.
 //
 // A record that replaces another is passed whole. A target record carries the
 // revision it was read with, and is written with the next one.
 
+// file is one file to write: its path and its bytes.
+type file struct {
+	path string
+	data []byte
+}
+
+func recordFile(dir string, rec Record) (file, error) {
+	data, err := EncodeRecord(rec)
+	if err != nil {
+		return file{}, err
+	}
+	return file{path.Join(dir, rec.Name()), data}, nil
+}
+
+// bumped is a target record as it is written: one revision on. A lost record
+// has none.
+func bumped(in InRecord) InRecord {
+	if !in.Lost {
+		in.Rev++
+	}
+	return in
+}
+
+func outFiles(outs []OutRecord) ([]file, error) {
+	var fs []file
+	for _, o := range outs {
+		f, err := recordFile(OutDir, o)
+		if err != nil {
+			return nil, err
+		}
+		fs = append(fs, f)
+	}
+	return fs, nil
+}
+
+func inFiles(ins []InRecord) ([]file, error) {
+	var fs []file
+	for _, in := range ins {
+		f, err := recordFile(InDir, bumped(in))
+		if err != nil {
+			return nil, err
+		}
+		fs = append(fs, f)
+	}
+	return fs, nil
+}
+
+func ctlFiles(ctls []CtlRecord) ([]file, error) {
+	var fs []file
+	for _, c := range ctls {
+		f, err := recordFile(CtlDir, c)
+		if err != nil {
+			return nil, err
+		}
+		fs = append(fs, f)
+	}
+	return fs, nil
+}
+
+// bodyFile is the file of a body, which must be what the reference of the
+// record that holds it says.
+func bodyFile(content []byte, ref *BodyRef) (*file, error) {
+	if content == nil {
+		return nil, nil
+	}
+	if len(content) > envelope.MaxBody {
+		return nil, fmt.Errorf("store: a body of %d bytes is over the limit of %d", len(content), envelope.MaxBody)
+	}
+	want := BodyRefOf(content)
+	if ref == nil || *ref != want {
+		return nil, errors.New("store: the record does not refer to the body written with it")
+	}
+	return &file{path.Join(BodiesDir, want.Name()), content}, nil
+}
+
+// groups writes files with ReplaceDefer under role and syncs dir once after
+// them. With no files it writes nothing.
+func writeGroup(tx *txn.Tx, role, syncRole, dir string, files []file) error {
+	if len(files) == 0 {
+		return nil
+	}
+	for _, f := range files {
+		if err := tx.ReplaceDefer(role, f.path, f.data, fsx.ModePrivate); err != nil {
+			return err
+		}
+	}
+	return tx.SyncDir(syncRole, dir)
+}
+
+func (s *Store) replace(tx *txn.Tx, role string, f file) error {
+	return tx.Replace(role, f.path, f.data, fsx.ModePrivate)
+}
+
+// present reports whether a path exists.
+func (s *Store) present(p string) (bool, error) {
+	_, err := s.r.Stat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// release removes the body files named, those that are there, and syncs
+// bodies/. A body that is already gone was removed by an earlier, interrupted
+// release.
+func (s *Store) release(tx *txn.Tx, refs []BodyRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	for _, r := range dedupe(refs) {
+		p := path.Join(BodiesDir, r.Name())
+		there, err := s.present(p)
+		if err != nil {
+			return err
+		}
+		if !there {
+			continue
+		}
+		if err := tx.Remove("body", p); err != nil {
+			return err
+		}
+	}
+	return tx.SyncDir("body-dir", BodiesDir)
+}
+
+func dedupe(refs []BodyRef) []BodyRef {
+	seen := map[BodyRef]bool{}
+	var out []BodyRef
+	for _, r := range refs {
+		if !seen[r] {
+			seen[r] = true
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
 // Intake records a message accepted from a local sender: the body, if any, and
 // the source record.
-func (s *Store) Intake(body []byte, out OutRecord) error { panic(errNotImplemented) }
+func (s *Store) Intake(body []byte, out OutRecord) error {
+	of, err := recordFile(OutDir, out)
+	if err != nil {
+		return err
+	}
+	if out.Lost != nil {
+		return errors.New("store: a lost record is never accepted")
+	}
+	bf, err := bodyFile(body, out.Body)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declIntake)
+	defer tx.Close()
+	if bf != nil {
+		if err := s.replace(tx, "body", *bf); err != nil {
+			return err
+		}
+	}
+	if err := s.replace(tx, "out", of); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // Deliver records the messages accepted for the endpoints of this node. The
 // body is nil when the message was rejected, or when it is already there
 // because the source on this node wrote it.
-func (s *Store) Deliver(body []byte, ins []InRecord) error { panic(errNotImplemented) }
+func (s *Store) Deliver(body []byte, ins []InRecord) error {
+	if len(ins) == 0 {
+		return errors.New("store: Deliver needs a record")
+	}
+	files, err := inFiles(ins)
+	if err != nil {
+		return err
+	}
+	var bf *file
+	if body != nil {
+		if bf, err = bodyFile(body, ins[0].Body); err != nil {
+			return err
+		}
+	}
+	tx := s.w.Begin(&declDeliver)
+	defer tx.Close()
+	if bf != nil {
+		if err := s.replace(tx, "body", *bf); err != nil {
+			return err
+		}
+	}
+	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // DeliverReply records a reply that carries evidence: the updated source
 // record of the message it answers, if the evidence changed it, before the
 // target records of the reply.
 func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord) error {
-	panic(errNotImplemented)
+	if len(ins) == 0 {
+		return errors.New("store: DeliverReply needs a record")
+	}
+	files, err := inFiles(ins)
+	if err != nil {
+		return err
+	}
+	var of *file
+	if out != nil {
+		f, err := recordFile(OutDir, *out)
+		if err != nil {
+			return err
+		}
+		of = &f
+	}
+	var bf *file
+	if body != nil {
+		if bf, err = bodyFile(body, ins[0].Body); err != nil {
+			return err
+		}
+	}
+	tx := s.w.Begin(&declDeliverReply)
+	defer tx.Close()
+	if bf != nil {
+		if err := s.replace(tx, "body", *bf); err != nil {
+			return err
+		}
+	}
+	if of != nil {
+		if err := s.replace(tx, "out", *of); err != nil {
+			return err
+		}
+	}
+	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // SourceUpdate replaces one source record and removes the bodies whose last
 // reference it dropped.
-func (s *Store) SourceUpdate(out OutRecord, release []BodyRef) error { panic(errNotImplemented) }
+func (s *Store) SourceUpdate(out OutRecord, release []BodyRef) error {
+	of, err := recordFile(OutDir, out)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declSourceUpdate)
+	defer tx.Close()
+	if err := s.replace(tx, "out", of); err != nil {
+		return err
+	}
+	if err := s.release(tx, release); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // ControlIntake records a control signal accepted on the target: the initial
 // message's body and the session endpoint it created, as preparation, then the
 // control record.
 func (s *Store) ControlIntake(body []byte, endpoint *EndpointRecord, ctl CtlRecord) error {
-	panic(errNotImplemented)
+	cf, err := recordFile(CtlDir, ctl)
+	if err != nil {
+		return err
+	}
+	var ef *file
+	if endpoint != nil {
+		if endpoint.Status != EndpointCreating || endpoint.CreatedBy != trimRec(ctl.Name()) {
+			return errors.New("store: a session endpoint made with a control record is being created and names the record as its creator")
+		}
+		f, err := recordFile(EndpointsDir, *endpoint)
+		if err != nil {
+			return err
+		}
+		ef = &f
+	}
+	bf, err := bodyFile(body, ctl.Body)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declControlIntake)
+	defer tx.Close()
+	if bf != nil {
+		if err := s.replace(tx, "body", *bf); err != nil {
+			return err
+		}
+	}
+	if ef != nil {
+		if err := s.replace(tx, "endpoint", *ef); err != nil {
+			return err
+		}
+	}
+	if err := s.replace(tx, "ctl", cf); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
+
+func trimRec(name string) string { return name[:len(name)-len(recordSuffix)] }
 
 // ControlResult records the result of a control signal, then the session
 // endpoint it moves, then removes the bodies it released.
 func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord, release []BodyRef) error {
-	panic(errNotImplemented)
+	cf, err := recordFile(CtlDir, ctl)
+	if err != nil {
+		return err
+	}
+	var ef *file
+	if endpoint != nil {
+		f, err := recordFile(EndpointsDir, *endpoint)
+		if err != nil {
+			return err
+		}
+		ef = &f
+	}
+	tx := s.w.Begin(&declControlResult)
+	defer tx.Close()
+	if err := s.replace(tx, "ctl", cf); err != nil {
+		return err
+	}
+	if ef != nil {
+		if err := s.replace(tx, "endpoint", *ef); err != nil {
+			return err
+		}
+	}
+	if err := s.release(tx, release); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ControlReply replaces a source record that handled a control reply.
-func (s *Store) ControlReply(out OutRecord) error { panic(errNotImplemented) }
+func (s *Store) ControlReply(out OutRecord) error {
+	of, err := recordFile(OutDir, out)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declControlReply)
+	defer tx.Close()
+	if err := s.replace(tx, "out", of); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // PromptBegin records that a prompt is about to be handed to an adapter.
-func (s *Store) PromptBegin(a AttemptsRecord) error { panic(errNotImplemented) }
+func (s *Store) PromptBegin(a AttemptsRecord) error {
+	af, err := recordFile(AttemptsDir, a)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declPromptBegin)
+	defer tx.Close()
+	if err := s.replace(tx, "attempts", af); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// checkFollowers verifies that the records written with a head record are
+// followers it lists, as they were read: the same revision and acceptance time.
+// A head that lists a revision the follower does not have would never be
+// replayed, and one that lists a record it does not write would lose it.
+func checkFollowers(head AttemptsRecord, events []PendingEvent, ins []InRecord) error {
+	if !slices.Contains(events, head.Pending.Event) {
+		return fmt.Errorf("store: the head record's pending event is %d, not one of %v", head.Pending.Event, events)
+	}
+	for _, in := range ins {
+		i := slices.IndexFunc(head.Pending.Items, func(it PendingItem) bool { return it.Key == in.Key })
+		if i < 0 {
+			return fmt.Errorf("store: %s is written with the head record but not listed in it", in.Key)
+		}
+		if it := head.Pending.Items[i]; it.Rev != in.Rev || !it.AcceptedAt.Equal(in.AcceptedAt) {
+			return fmt.Errorf("store: %s is listed with revision %d accepted at %v, and written as revision %d accepted at %v", in.Key, it.Rev, it.AcceptedAt, in.Rev, in.AcceptedAt)
+		}
+	}
+	return nil
+}
+
+func (s *Store) headAndFollowers(decl *txn.Decl, head AttemptsRecord, events []PendingEvent, ins []InRecord) error {
+	if err := checkFollowers(head, events, ins); err != nil {
+		return err
+	}
+	af, err := recordFile(AttemptsDir, head)
+	if err != nil {
+		return err
+	}
+	files, err := inFiles(ins)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(decl)
+	defer tx.Close()
+	if err := s.replace(tx, "attempts", af); err != nil {
+		return err
+	}
+	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // PromptEnd records the result of a prompt, then the notified target records
 // its Pending lists.
-func (s *Store) PromptEnd(a AttemptsRecord, ins []InRecord) error { panic(errNotImplemented) }
+func (s *Store) PromptEnd(a AttemptsRecord, ins []InRecord) error {
+	return s.headAndFollowers(&declPromptEnd, a, []PendingEvent{PendingNotified}, ins)
+}
 
 // Blocked records a blocked report, then the target records its Pending lists.
-func (s *Store) Blocked(a AttemptsRecord, ins []InRecord) error { panic(errNotImplemented) }
+func (s *Store) Blocked(a AttemptsRecord, ins []InRecord) error {
+	return s.headAndFollowers(&declBlocked, a, []PendingEvent{PendingBlocked, PendingUnblocked}, ins)
+}
 
 // Lease records the leases of one page of target records.
-func (s *Store) Lease(ins []InRecord) error { panic(errNotImplemented) }
+func (s *Store) Lease(ins []InRecord) error {
+	if len(ins) == 0 {
+		return errors.New("store: Lease needs a record")
+	}
+	files, err := inFiles(ins)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declLease)
+	defer tx.Close()
+	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // Ack records acknowledgements and removes the bodies they released.
-func (s *Store) Ack(ins []InRecord, release []BodyRef) error { panic(errNotImplemented) }
+func (s *Store) Ack(ins []InRecord, release []BodyRef) error {
+	if len(ins) == 0 {
+		return errors.New("store: Ack needs a record")
+	}
+	files, err := inFiles(ins)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declAck)
+	defer tx.Close()
+	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
+		return err
+	}
+	if err := s.release(tx, release); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // TickBatch is the records one Tick moved.
 type TickBatch struct {
@@ -76,15 +482,82 @@ type TickBatch struct {
 }
 
 // Tick records records moved by the passing of time.
-func (s *Store) Tick(b TickBatch) error { panic(errNotImplemented) }
+func (s *Store) Tick(b TickBatch) error {
+	of, err := outFiles(b.Out)
+	if err != nil {
+		return err
+	}
+	inf, err := inFiles(b.In)
+	if err != nil {
+		return err
+	}
+	cf, err := ctlFiles(b.Ctl)
+	if err != nil {
+		return err
+	}
+	if len(of)+len(inf)+len(cf) == 0 {
+		return errors.New("store: Tick needs a record")
+	}
+	tx := s.w.Begin(&declTick)
+	defer tx.Close()
+	if err := writeGroup(tx, "out", "out-dir", OutDir, of); err != nil {
+		return err
+	}
+	if err := writeGroup(tx, "in", "in-dir", InDir, inf); err != nil {
+		return err
+	}
+	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
+		return err
+	}
+	if err := s.release(tx, b.Release); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // EndpointUpdate replaces an endpoint record.
-func (s *Store) EndpointUpdate(ep EndpointRecord) error { panic(errNotImplemented) }
+func (s *Store) EndpointUpdate(ep EndpointRecord) error {
+	ef, err := recordFile(EndpointsDir, ep)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declEndpointUpdate)
+	defer tx.Close()
+	if err := s.replace(tx, "endpoint", ef); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // EndpointClose records the closing of an endpoint, the head record of a
 // closure, and the result of the operation that asked for it, if any.
 func (s *Store) EndpointClose(ep EndpointRecord, result *AdminRecord) error {
-	panic(errNotImplemented)
+	if ep.Status != EndpointClosed {
+		return errors.New("store: EndpointClose writes a closed endpoint")
+	}
+	ef, err := recordFile(EndpointsDir, ep)
+	if err != nil {
+		return err
+	}
+	var rf *file
+	if result != nil {
+		f, err := recordFile(AdminDir, *result)
+		if err != nil {
+			return err
+		}
+		rf = &f
+	}
+	tx := s.w.Begin(&declEndpointClose)
+	defer tx.Close()
+	if err := s.replace(tx, "endpoint", ef); err != nil {
+		return err
+	}
+	if rf != nil {
+		if err := s.replace(tx, "result", *rf); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // DrainBatch is a chunk of the records closed because their endpoint is.
@@ -94,31 +567,151 @@ type DrainBatch struct {
 	Release []BodyRef
 }
 
+// drain writes the endpoint records that close an instance's endpoints, when
+// there are any, and a chunk of closed deliveries.
+func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, withHead bool) error {
+	var ep []file
+	for _, e := range closed {
+		if e.Status != EndpointClosed {
+			return errors.New("store: an endpoint closed by a drain is closed")
+		}
+		f, err := recordFile(EndpointsDir, e)
+		if err != nil {
+			return err
+		}
+		ep = append(ep, f)
+	}
+	inf, err := inFiles(b.In)
+	if err != nil {
+		return err
+	}
+	cf, err := ctlFiles(b.Ctl)
+	if err != nil {
+		return err
+	}
+	if withHead && len(ep) == 0 {
+		return errors.New("store: an instance drain closes an endpoint")
+	}
+	if !withHead && len(inf)+len(cf) == 0 {
+		return errors.New("store: a drain closes a record")
+	}
+	tx := s.w.Begin(decl)
+	defer tx.Close()
+	if withHead {
+		if err := writeGroup(tx, "endpoint", "endpoint-dir", EndpointsDir, ep); err != nil {
+			return err
+		}
+	}
+	if err := writeGroup(tx, "in", "in-dir", InDir, inf); err != nil {
+		return err
+	}
+	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
+		return err
+	}
+	if err := s.release(tx, b.Release); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // EndpointDrain records a chunk of the deliveries closed by an endpoint's
 // closing.
-func (s *Store) EndpointDrain(b DrainBatch) error { panic(errNotImplemented) }
+func (s *Store) EndpointDrain(b DrainBatch) error {
+	return s.drain(&declEndpointDrain, nil, b, false)
+}
 
 // InstanceDrain records the closing of the endpoints of a disabled instance
 // and a chunk of the deliveries closed with them.
 func (s *Store) InstanceDrain(closed []EndpointRecord, b DrainBatch) error {
-	panic(errNotImplemented)
+	return s.drain(&declInstanceDrain, closed, b, true)
 }
 
 // FeedbackForm records a notice to a sender's endpoint and its body.
-func (s *Store) FeedbackForm(body []byte, notice InRecord) error { panic(errNotImplemented) }
+func (s *Store) FeedbackForm(body []byte, notice InRecord) error {
+	if !notice.Key.Sender.IsSystem() {
+		return errors.New("store: a notice is sent by the system endpoint")
+	}
+	nf, err := recordFile(InDir, bumped(notice))
+	if err != nil {
+		return err
+	}
+	bf, err := bodyFile(body, notice.Body)
+	if err != nil {
+		return err
+	}
+	if bf == nil {
+		return errors.New("store: a notice has a body")
+	}
+	tx := s.w.Begin(&declFeedbackForm)
+	defer tx.Close()
+	if err := s.replace(tx, "body", *bf); err != nil {
+		return err
+	}
+	if err := s.replace(tx, "notice", nf); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // FeedbackClear replaces the source records whose feedback items were covered
 // by a notice.
-func (s *Store) FeedbackClear(outs []OutRecord) error { panic(errNotImplemented) }
+func (s *Store) FeedbackClear(outs []OutRecord) error {
+	if len(outs) == 0 {
+		return errors.New("store: FeedbackClear needs a record")
+	}
+	files, err := outFiles(outs)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declFeedbackClear)
+	defer tx.Close()
+	if err := writeGroup(tx, "out", "out-dir", OutDir, files); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // CheckpointPut records an adapter's checkpoint.
-func (s *Store) CheckpointPut(c CheckpointRecord) error { panic(errNotImplemented) }
+func (s *Store) CheckpointPut(c CheckpointRecord) error {
+	f, err := recordFile(CheckpointsDir, c)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declCheckpointPut)
+	defer tx.Close()
+	if err := s.replace(tx, "checkpoint", f); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // AlertRaise records an owner alert.
-func (s *Store) AlertRaise(a AlertRecord) error { panic(errNotImplemented) }
+func (s *Store) AlertRaise(a AlertRecord) error {
+	f, err := recordFile(AlertsDir, a)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declAlertRaise)
+	defer tx.Close()
+	if err := s.replace(tx, "alert", f); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // DaemonStop records the result of the stop operation.
-func (s *Store) DaemonStop(result AdminRecord) error { panic(errNotImplemented) }
+func (s *Store) DaemonStop(result AdminRecord) error {
+	f, err := recordFile(AdminDir, result)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declDaemonStop)
+	defer tx.Close()
+	if err := s.replace(tx, "result", f); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // AlertAckInput is an acknowledgement of an alert by the owner.
 type AlertAckInput struct {
@@ -131,17 +724,74 @@ type AlertAckInput struct {
 }
 
 // AlertAck records an acknowledgement.
-func (s *Store) AlertAck(a AlertAckInput) error { panic(errNotImplemented) }
+func (s *Store) AlertAck(a AlertAckInput) error {
+	if a.Alert.Acked == nil {
+		return errors.New("store: AlertAck writes an acknowledged alert")
+	}
+	af, err := recordFile(AlertsDir, a.Alert)
+	if err != nil {
+		return err
+	}
+	rf, err := recordFile(AdminDir, a.Result)
+	if err != nil {
+		return err
+	}
+	var q string
+	if a.Quarantined != nil {
+		if err := checkRef(FileRef{Dir: a.Quarantined.Dir, Name: a.Quarantined.Name}, true); err != nil {
+			return err
+		}
+		if a.Quarantined.Dir == OutDir || a.Quarantined.Dir == InDir || a.Quarantined.Dir == CtlDir {
+			return errors.New("store: an alert does not remove the quarantined file of a delivery record: the sweep does")
+		}
+		q = path.Join(a.Quarantined.Dir, a.Quarantined.Name)
+	}
+	tx := s.w.Begin(&declAlertAck)
+	defer tx.Close()
+	if q != "" {
+		there, err := s.present(q)
+		if err != nil {
+			return err
+		}
+		if there {
+			if err := tx.Remove("quarantined", q); err != nil {
+				return err
+			}
+			if err := tx.SyncDir("quarantined-dir", a.Quarantined.Dir); err != nil {
+				return err
+			}
+		}
+	}
+	if err := s.replace(tx, "alert", af); err != nil {
+		return err
+	}
+	if err := s.replace(tx, "result", rf); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // PutEndpoint writes an endpoint record in a transaction another package
 // opened, under the role the declaration gives it (RoleEndpoint by
 // convention). The package that opened the transaction does the commit.
-func PutEndpoint(tx *txn.Tx, role string, ep EndpointRecord) error { panic(errNotImplemented) }
+func PutEndpoint(tx *txn.Tx, role string, ep EndpointRecord) error {
+	f, err := recordFile(EndpointsDir, ep)
+	if err != nil {
+		return err
+	}
+	return tx.Replace(role, f.path, f.data, fsx.ModePrivate)
+}
 
 // PutAdminResult writes the result of an administrative operation in a
 // transaction another package opened, under the role the declaration gives it
 // (RoleResult by convention).
-func PutAdminResult(tx *txn.Tx, role string, r AdminRecord) error { panic(errNotImplemented) }
+func PutAdminResult(tx *txn.Tx, role string, r AdminRecord) error {
+	f, err := recordFile(AdminDir, r)
+	if err != nil {
+		return err
+	}
+	return tx.Replace(role, f.path, f.data, fsx.ModePrivate)
+}
 
 // ArchiveEvent is one diagnostic event of the archive.
 type ArchiveEvent struct {
@@ -155,17 +805,88 @@ type ArchiveEvent struct {
 // Nothing is synced: events are diagnostics, and a later sync of the same
 // file makes them durable.
 func (s *Store) ArchiveEvents(at time.Time, events []ArchiveEvent) error {
-	panic(errNotImplemented)
+	if len(events) == 0 {
+		return nil
+	}
+	lines := []byte("\n")
+	for _, e := range events {
+		l, err := eventLine(e)
+		if err != nil {
+			return err
+		}
+		lines = append(lines, l...)
+	}
+	tx := s.w.Begin(&declArchiveEvents)
+	defer tx.Close()
+	if err := tx.Append("archive", path.Join(ArchiveDir, ArchiveDay(at)), lines); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ArchiveExpire removes the archive files named, which are older than the
 // retention.
-func (s *Store) ArchiveExpire(names []string) error { panic(errNotImplemented) }
+func (s *Store) ArchiveExpire(names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	for _, n := range names {
+		if _, ok := archiveDate(n); !ok {
+			return fmt.Errorf("store: %q is not the name of an archive file", n)
+		}
+	}
+	var present []string
+	for _, n := range names {
+		p := path.Join(ArchiveDir, n)
+		there, err := s.present(p)
+		if err != nil {
+			return err
+		}
+		if there {
+			present = append(present, p)
+		}
+	}
+	if len(present) == 0 {
+		return nil
+	}
+	tx := s.w.Begin(&declArchiveExpire)
+	defer tx.Close()
+	for _, p := range present {
+		if err := tx.Remove("file", p); err != nil {
+			return err
+		}
+	}
+	if err := tx.SyncDir("dir", ArchiveDir); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // FileRef names a file of state/.
 type FileRef struct {
 	Dir  string
 	Name string
+}
+
+// checkRef refuses a name that would reach outside the directory it names or a
+// file that is not one a sweep removes.
+func checkRef(f FileRef, corrupt bool) error {
+	if !slices.Contains(recordDirs, f.Dir) && f.Dir != BodiesDir {
+		return fmt.Errorf("store: %q is not a directory of records", f.Dir)
+	}
+	if f.Name == "" || path.Base(f.Name) != f.Name || fsx.IsLeftover(f.Name) {
+		return fmt.Errorf("store: %q is not a file name", f.Name)
+	}
+	if corrupt {
+		if _, _, ok := corruptParts(f.Dir, f.Name); !ok {
+			return fmt.Errorf("store: %q is not a quarantined file", f.Name)
+		}
+		return nil
+	}
+	if !isRecordName(f.Name) {
+		return fmt.Errorf("store: %q is not a record file", f.Name)
+	}
+	return nil
 }
 
 // FloorWrite raises the sequence floors of one sending endpoint.
@@ -194,8 +915,198 @@ type SweepChunk struct {
 	KeepTarget func(ident.Address) bool
 }
 
+// floorFile is the floor file of a sender with the given raises merged into
+// what the disk holds: a floor is never lowered.
+func (s *Store) floorFile(sender ident.EndpointID, raises map[ident.Address]uint64, keep func(ident.Address) bool) (file, error) {
+	rec := SeqRecord{Sender: sender, Floors: map[ident.Address]uint64{}}
+	name := rec.Name()
+	data, err := s.r.ReadFile(path.Join(SeqDir, name))
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+	case err != nil:
+		return file{}, err
+	default:
+		// A floor file that is damaged is the quarantine's business: what it held
+		// is lost, and the floors start again from what is raised now.
+		if old, dmg := DecodeRecord(SeqDir, name, data); dmg == nil {
+			for a, n := range old.(SeqRecord).Floors {
+				rec.Floors[a] = n
+			}
+		}
+	}
+	for a, n := range raises {
+		if n == 0 || a.IsZero() {
+			return file{}, errors.New("store: a floor is for an address and at least 1")
+		}
+		if n > rec.Floors[a] {
+			rec.Floors[a] = n
+		}
+	}
+	if keep != nil {
+		for a := range rec.Floors {
+			if !keep(a) {
+				delete(rec.Floors, a)
+			}
+		}
+	}
+	return recordFile(SeqDir, rec)
+}
+
 // ArchiveSweep appends the summaries to the archive, makes them durable,
 // raises the sequence floors and removes the records. The order is the
 // guarantee: no record is removed before its summary and the floors of its
 // sequence numbers are durable.
-func (s *Store) ArchiveSweep(c SweepChunk) error { panic(errNotImplemented) }
+func (s *Store) ArchiveSweep(c SweepChunk) error {
+	for _, f := range c.Corrupt {
+		if err := checkRef(f, true); err != nil {
+			return err
+		}
+	}
+	for _, f := range c.Ctl {
+		if f.Dir != CtlDir {
+			return errors.New("store: the control records of a sweep are in ctl/")
+		}
+		if err := checkRef(f, false); err != nil {
+			return err
+		}
+	}
+	for _, f := range c.Records {
+		if f.Dir == BodiesDir {
+			return errors.New("store: bodies are removed as bodies")
+		}
+		if err := checkRef(f, false); err != nil {
+			return err
+		}
+	}
+	var lines []byte
+	for _, sm := range c.Summaries {
+		l, err := summaryLine(sm)
+		if err != nil {
+			return err
+		}
+		lines = append(lines, l...)
+	}
+	var floors []file
+	for _, w := range c.Floors {
+		f, err := s.floorFile(w.Sender, w.Floors, c.KeepTarget)
+		if err != nil {
+			return err
+		}
+		floors = append(floors, f)
+	}
+	if len(lines)+len(floors)+len(c.Corrupt)+len(c.Ctl)+len(c.Records)+len(c.Bodies) == 0 {
+		return nil
+	}
+
+	tx := s.w.Begin(&declArchiveSweep)
+	defer tx.Close()
+	if len(lines) > 0 {
+		p := path.Join(ArchiveDir, ArchiveDay(c.Now))
+		if err := tx.Append("archive", p, append([]byte("\n"), lines...)); err != nil {
+			return err
+		}
+		if err := tx.SyncFile("archive", p); err != nil {
+			return err
+		}
+	}
+	for _, f := range floors {
+		if err := s.replace(tx, "seq-floor", f); err != nil {
+			return err
+		}
+	}
+	if err := s.removeAll(tx, "corrupt", "corrupt-dir", c.Corrupt, true); err != nil {
+		return err
+	}
+	if err := s.removeAll(tx, "ctl", "ctl-dir", c.Ctl, false); err != nil {
+		return err
+	}
+	dirs := map[string]bool{}
+	for _, f := range c.Records {
+		if removed, err := s.removeRef(tx, "record", f); err != nil {
+			return err
+		} else if removed {
+			dirs[f.Dir] = true
+		}
+	}
+	for _, r := range dedupe(c.Bodies) {
+		if removed, err := s.removeRef(tx, "body", FileRef{Dir: BodiesDir, Name: r.Name()}); err != nil {
+			return err
+		} else if removed {
+			dirs[BodiesDir] = true
+		}
+	}
+	for _, d := range sortedDirs(dirs) {
+		if err := tx.SyncDir("dir", d); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func sortedDirs(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for d := range m {
+		out = append(out, d)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// removeRef removes a file if it is there, reporting whether it did.
+func (s *Store) removeRef(tx *txn.Tx, role string, f FileRef) (bool, error) {
+	p := path.Join(f.Dir, f.Name)
+	there, err := s.present(p)
+	if err != nil || !there {
+		return false, err
+	}
+	return true, tx.Remove(role, p)
+}
+
+// removeAll removes files under one role and syncs each directory they were in
+// under another.
+func (s *Store) removeAll(tx *txn.Tx, role, syncRole string, refs []FileRef, perDir bool) error {
+	dirs := map[string]bool{}
+	for _, f := range refs {
+		if removed, err := s.removeRef(tx, role, f); err != nil {
+			return err
+		} else if removed {
+			dirs[f.Dir] = true
+		}
+	}
+	for _, d := range sortedDirs(dirs) {
+		if err := tx.SyncDir(syncRole, d); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Settle makes every directory of state/ durable. A process calls it first when
+// it starts, after the leftovers of the interrupted writes are removed and the
+// missing directories made, and before it reads anything to act on: what a
+// crashed process left may be visible without being durable, and the recovery
+// rules write their followers durably, so the head they follow must be durable
+// before they do.
+func (s *Store) Settle() error {
+	var dirs []string
+	for _, d := range StateDirs() {
+		there, err := s.present(d)
+		if err != nil {
+			return err
+		}
+		if there {
+			dirs = append(dirs, d)
+		}
+	}
+	if len(dirs) == 0 {
+		return nil
+	}
+	tx := s.w.Begin(&declSettle)
+	defer tx.Close()
+	for _, d := range dirs {
+		if err := tx.SyncDir("dir", d); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}

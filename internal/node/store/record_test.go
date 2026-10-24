@@ -17,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/recfile"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/reply"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -204,7 +205,7 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 	}
 	rules := []edit{
 		{"insignificant whitespace is not canonical", "seq", `{"floors":`, `{ "floors":`},
-		{"an escaped character that need not be escaped is not canonical", "alert", `"corrupt_record"`, `"corrupt_record"`},
+		{"an escaped character that need not be escaped is not canonical", "alert", `"corrupt_record"`, `"corrupt` + string(rune(0x5c)) + `u005frecord"`},
 		{"an unknown field", "seq", `{"floors"`, `{"extra":1,"floors"`},
 		{"a duplicate key", "seq", `{"floors":{`, `{"floors":{},"floors":{`},
 		{"null is no value", "seq", `"floors":{`, `"floors":null,"x":{`},
@@ -513,4 +514,31 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	recs["seq two floors"] = store.SeqRecord{Sender: ep(3), Floors: map[ident.Address]uint64{addr(2, 2): 7, addr(local, 4): 1}}
 	recs["checkpoint session scope"] = store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{}`)}
 	return recs
+}
+
+// The first line of a frame is the one place the kind and the key are written,
+// and the file name is the way they are checked: flipping any single bit of
+// the first line of a record file changes what DecodeRecord sees, and no flip
+// of the first line is a body damage with a different key.
+func TestFirstLineFlipsNeverGiveATrustedWrongKey(t *testing.T) {
+	key := []byte("node1abc ep1def message-1 ep1ghi")
+	file, err := recfile.EncodeFrame("in", key, []byte("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := recfile.FileName("in", key)
+	header := bytes.IndexByte(file, '\n')
+	for i := 0; i < header; i++ {
+		for bit := 0; bit < 8; bit++ {
+			flipped := append([]byte(nil), file...)
+			flipped[i] ^= 1 << bit
+			_, dmg := store.DecodeRecord(store.InDir, name, flipped)
+			if dmg == nil {
+				t.Fatalf("flipping bit %d of byte %d of the first line was accepted", bit, i)
+			}
+			if dmg.Class == store.BodyDamaged && (dmg.Kind != "in" || !bytes.Equal(dmg.Key, key)) {
+				t.Fatalf("flip of byte %d bit %d: a body damage with the wrong kind or key %q %q", i, bit, dmg.Kind, dmg.Key)
+			}
+		}
+	}
 }

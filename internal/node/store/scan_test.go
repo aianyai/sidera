@@ -137,7 +137,7 @@ func TestScanReadsTheKeyOfQuarantinedFiles(t *testing.T) {
 	data := mustEncode(t, o)
 	id := store.AlertID{1}
 	seedRaw(t, r.mem, store.OutDir, o.Name()+"."+id.String()+".corrupt", data[:len(data)-3]) // cut short: the first line is whole
-	seedRaw(t, r.mem, store.OutDir, "x.rec."+store.AlertID{2}.String()+".corrupt", []byte("no first line"))
+	seedRaw(t, r.mem, store.OutDir, zeroRec+"."+store.AlertID{2}.String()+".corrupt", []byte("no first line"))
 	sc := r.scan()
 	if len(sc.Corrupt) != 2 {
 		t.Fatalf("%v", sc.Corrupt)

@@ -100,6 +100,21 @@ func (r *recorder) count() int {
 	return len(r.points)
 }
 
+// working counts the points of everything but the barrier that makes the
+// directories durable: the writes a process that has nothing to do still makes
+// are the barrier's alone.
+func (r *recorder) working() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	n := 0
+	for _, p := range r.points {
+		if p.Tag.Tx != "settle" {
+			n++
+		}
+	}
+	return n
+}
+
 // Cross-owner declarations that exercise the write functions another package
 // calls. The first role of each belongs to a package that is not this one.
 var (
@@ -480,8 +495,11 @@ func newFaultyRig(t *testing.T, mem *fsxtest.Mem) *faultyRig {
 }
 
 // srcOutFinished is a source record whose only delivery was delivered.
-func srcOutFinished(i int) store.OutRecord {
-	r := srcOut(i, false)
+func srcOutFinished(i int) store.OutRecord { return finishedOut(i, false) }
+
+// finishedOut is a source record whose only delivery was delivered.
+func finishedOut(i int, toLocal bool) store.OutRecord {
+	r := srcOut(i, toLocal)
 	d, _, err := r.Outbound.Recipients[0].Delivery.Apply(base, delivery.Event{Type: delivery.EventDelivered})
 	if err != nil {
 		panic(err)
@@ -598,3 +616,18 @@ func applied0(r delivery.Record) delivery.Record {
 	}
 	return out
 }
+
+// derivedIn is the delivery of the initial message of control signal ctl to the
+// session endpoint it created: same sender and message as the control record,
+// addressed to the session.
+func derivedIn(ctl, session int, rev uint64) store.InRecord {
+	r := tgtIn(ctl)
+	r.Key.Recipient = ep(session)
+	r.Dedup = delivery.NewDedupRecord(r.Key.Dedup(), digestOf(ctl), r.Record.ReportBy)
+	r.Rev = rev
+	r.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{"stage":"intake"}`)}
+	return r
+}
+
+// zeroRec is a record file name no record has.
+const zeroRec = "0000000000000000000000000000000000000000000000000000000000000000.rec"

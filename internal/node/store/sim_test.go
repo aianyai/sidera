@@ -114,24 +114,40 @@ func (s *sim) replacement(dir string, key any) store.Record {
 	return nil
 }
 
-// sessionToClose is the closed record of the session endpoint still being
-// created whose control record has this file name.
-func (s *sim) sessionToClose(sc *store.Scan, ctlFile string) *store.EndpointRecord {
+// sessionFor is the session endpoint a control record created, whatever its state.
+func (s *sim) sessionFor(sc *store.Scan, ctlFile string) *store.EndpointRecord {
 	h := strings.TrimSuffix(ctlFile, ".rec")
-	for _, e := range sc.Endpoints {
-		if e.Status == store.EndpointCreating && e.CreatedBy == h {
-			c := e
-			c.Status, c.Token = store.EndpointClosed, nil
-			return &c
+	for i := range sc.Endpoints {
+		if sc.Endpoints[i].CreatedBy == h {
+			return &sc.Endpoints[i]
 		}
 	}
 	return nil
+}
+
+// sessionToClose is the closed record of the session endpoint of a control
+// record that is being created or was closed already (what an interrupted
+// quarantine did may not be durable, so it is written again); nil for an
+// endpoint that is open. unknown tells that a session may have been created
+// without anyone controlling it.
+func (s *sim) sessionToClose(sc *store.Scan, ctlFile string) (closed *store.EndpointRecord, unknown bool) {
+	e := s.sessionFor(sc, ctlFile)
+	if e == nil {
+		return nil, false
+	}
+	if e.Status == store.EndpointOpen {
+		return nil, false // an endpoint that was opened stays open
+	}
+	c := *e // being created, or closed by an interrupted quarantine: closed, once more
+	c.Status, c.Token = store.EndpointClosed, nil
+	return &c, true
 }
 
 // recover runs the rules of the startup until none has work, as the engine's
 // scan entry does, and returns how many passes it took.
 func (s *sim) recoverAll() int {
 	s.t.Helper()
+	s.must(s.st.Settle(), "Settle")
 	for pass := 1; pass <= 12; pass++ {
 		if !s.pass() {
 			return pass
@@ -158,8 +174,9 @@ func (s *sim) pass() bool {
 			q.Replacement = s.replacement(d.Dir, d.Key)
 		}
 		if d.Dir == store.CtlDir {
-			if c := s.sessionToClose(sc, d.Name); c != nil {
-				q.Session = c
+			c, unknown := s.sessionToClose(sc, d.Name)
+			q.Session = c
+			if unknown {
 				kindName = "control_unknown"
 			}
 		}
@@ -175,8 +192,9 @@ func (s *sim) pass() bool {
 			q.Replacement = s.replacement(c.Dir, c.Key)
 		}
 		if c.Dir == store.CtlDir {
-			if cl := s.sessionToClose(sc, c.Original); cl != nil {
-				q.Session = cl
+			cl, unknown := s.sessionToClose(sc, c.Original)
+			q.Session = cl
+			if unknown {
 				kindName = "control_unknown"
 			}
 		}
@@ -194,7 +212,7 @@ func (s *sim) pass() bool {
 		do("ctl-effect-replay")
 	}
 	if eps := store.InstanceDrainWork(s.scan(), s.enabled); len(eps) > 0 {
-		s.must(s.st.InstanceDrainReplay(eps, store.DrainBatch{}), "InstanceDrainReplay")
+		s.must(s.st.InstanceDrainReplay(eps, s.drainFor(s.scan(), eps)), "InstanceDrainReplay")
 		do("instance-drain-replay")
 	}
 	if eps := store.OrphanEndpoints(s.scan()); len(eps) > 0 {
@@ -367,7 +385,7 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 		}
 	}
 	first := rename
-	for len(outs)+len(ins)+len(ctls) > 0 || first {
+	for {
 		q := store.BodyQuarantine{Name: name, AlertID: id, Rename: first}
 		room := s.chunk
 		take := func(n int) int {
@@ -383,16 +401,36 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 		q.In, ins = ins[:n], ins[n:]
 		n = take(len(ctls))
 		q.Ctl, ctls = ctls[:n], ctls[n:]
-		if len(outs)+len(ins)+len(ctls) == 0 {
+		last := len(outs)+len(ins)+len(ctls) == 0
+		if last {
 			a := s.alert(id, "corrupt_body", store.BodiesDir+"/"+name)
 			q.Alert = &a
 		}
 		s.must(s.st.QuarantineBody(q), "QuarantineBody "+name)
 		first = false
-		if q.Alert != nil {
-			break
+		if last {
+			return
 		}
 	}
+}
+
+// drainFor is the batch of a drain of the deliveries queued for the given
+// endpoints, which are about to be closed.
+func (s *sim) drainFor(sc *store.Scan, closed []store.EndpointRecord) store.DrainBatch {
+	gone := map[ident.EndpointID]bool{}
+	for _, e := range closed {
+		gone[e.ID] = true
+	}
+	shadow := *sc
+	shadow.Endpoints = nil
+	for _, e := range sc.Endpoints {
+		if gone[e.ID] {
+			e.Status = store.EndpointClosed
+		}
+		shadow.Endpoints = append(shadow.Endpoints, e)
+	}
+	b := s.drainBatch(&shadow)
+	return b
 }
 
 // work lists, by rule, what the predicates of the store find in a scan: the

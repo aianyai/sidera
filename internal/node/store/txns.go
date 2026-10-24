@@ -124,6 +124,11 @@ var (
 	declAlertAck = txn.Decl{Name: "alert-ack", Kind: txn.Normal, Writes: []txn.Write{
 		rm("quarantined", optional), syncDir("quarantined-dir", optional), rep("alert"), rep("result"),
 	}}
+	// settle makes the directories of state/ durable at the start of a process,
+	// before any recovery rule runs: after a process crash what a rule finds may
+	// be visible and not durable, and a rule that wrote its followers durably on
+	// top of such a head would leave them without it after a power loss.
+	declSettle     = txn.Decl{Name: "settle", Kind: txn.Normal, Writes: []txn.Write{syncDir("dir", many)}}
 	declDaemonStop = txn.Decl{Name: "daemon-stop", Kind: txn.Normal, Writes: []txn.Write{rep("result")}}
 
 	// The recovery transactions. The alert is the last write of every
@@ -181,7 +186,7 @@ func Transactions() []*txn.Decl {
 		&declLease, &declAck, &declTick, &declEndpointUpdate, &declEndpointClose,
 		&declEndpointDrain, &declInstanceDrain, &declFeedbackForm, &declFeedbackClear,
 		&declCheckpointPut, &declAlertRaise, &declArchiveEvents, &declArchiveSweep,
-		&declArchiveExpire, &declAlertAck, &declDaemonStop,
+		&declArchiveExpire, &declAlertAck, &declDaemonStop, &declSettle,
 		&declQuarantine, &declQuarantineResume, &declQuarantineBody, &declOrphanGC,
 		&declOrphanGCEndpoint, &declCtlEffectReplay, &declEndpointDrainReplay,
 		&declInstanceDrainReplay, &declPromptReplay, &declBlockedReplay, &declFeedbackReplay,

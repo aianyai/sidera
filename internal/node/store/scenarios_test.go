@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,6 +110,7 @@ func scenarios() []scenario {
 		{
 			name: "deliver",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seed(t, mem, srcOut(1, true), srcOut(2, true)) // the source records on this node refer to the bodies
 				seedBodies(t, mem, bodyBytes(1), bodyBytes(2))
 			},
 			durable: "deliver/in-dir.sync-dir#1",
@@ -130,7 +132,7 @@ func scenarios() []scenario {
 		{
 			name: "deliver-reply",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(9))
+				seedBodies(t, mem, bodyBytes(1))
 				seed(t, mem, srcOut(1, true))
 			},
 			durable: "deliver-reply/in-dir.sync-dir#1",
@@ -161,7 +163,7 @@ func scenarios() []scenario {
 			durable: "source-update/out.sync-dir#1",
 			mode:    atomic,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return r.st.SourceUpdate(srcOutFinished(1), []store.BodyRef{*bodyRef(1)})
+				return r.st.SourceUpdate(finishedOut(1, true), []store.BodyRef{*bodyRef(1)})
 			},
 		},
 		{
@@ -297,7 +299,7 @@ func scenarios() []scenario {
 		{
 			name: "endpoint-close",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seed(t, mem, directEndpoint(7, "chat"), inFor(1, 7, 1), inFor(2, 7, 1), inFor(3, 2, 1))
+				seed(t, mem, directEndpoint(7, "chat"), inFor(1, 7, 1), inFor(2, 7, 1), inFor(3, 2, 1), ctlTo(4, 7))
 				seedBodies(t, mem, bodyBytes(1), bodyBytes(2), bodyBytes(3))
 			},
 			durable:  "endpoint-close/endpoint.sync-dir#1",
@@ -317,7 +319,7 @@ func scenarios() []scenario {
 			name: "instance-drain",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				seed(t, mem, directEndpoint(7, "chat"), directEndpoint(8, "chat"), directEndpoint(9, "other"),
-					inFor(1, 7, 1), inFor(2, 8, 1), inFor(3, 9, 1))
+					inFor(1, 7, 1), inFor(2, 8, 1), inFor(3, 9, 1), ctlTo(4, 8))
 				seedBodies(t, mem, bodyBytes(1), bodyBytes(2), bodyBytes(3))
 			},
 			mode:         atomic,
@@ -331,10 +333,12 @@ func scenarios() []scenario {
 						closed = append(closed, e)
 					}
 				}
-				if err := r.st.InstanceDrain(closed, store.DrainBatch{}); err != nil {
+				// The head and the first chunk in one transaction; what is left of the
+				// drain, if any, is another.
+				if err := r.st.InstanceDrain(closed, s.drainFor(r.scan(), closed)); err != nil {
 					return err
 				}
-				return r.st.EndpointDrain(s.drainBatch(r.scan()))
+				return nil
 			},
 		},
 		{
@@ -403,14 +407,14 @@ func scenarios() []scenario {
 			name: "alert-ack",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				seed(t, mem, store.AlertRecord{ID: store.AlertID{5}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "endpoints/x"})
-				seedRaw(t, mem, store.EndpointsDir, "00.rec."+store.AlertID{5}.String()+".corrupt", []byte("junk"))
+				seedRaw(t, mem, store.EndpointsDir, zeroRec+"."+store.AlertID{5}.String()+".corrupt", []byte("junk"))
 			},
 			durable: "alert-ack/result.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				a := store.AlertRecord{ID: store.AlertID{5}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "endpoints/x",
 					Acked: &store.AlertAcked{At: base.Add(time.Hour), Operation: adminResult(2).Key.ID}}
-				c := store.CorruptFile{Dir: store.EndpointsDir, Name: "00.rec." + store.AlertID{5}.String() + ".corrupt"}
+				c := store.CorruptFile{Dir: store.EndpointsDir, Name: zeroRec + "." + store.AlertID{5}.String() + ".corrupt"}
 				return r.st.AlertAck(store.AlertAckInput{Alert: a, Result: adminResult(2), Quarantined: &c})
 			},
 		},
@@ -490,17 +494,15 @@ func promptScenario(name string, ev store.PendingEvent, cause delivery.Cause) sc
 // sweepScenario is a sweep of every kind of thing a sweep removes.
 func sweepScenario(farFuture time.Time) scenario {
 	world := func(t *testing.T, mem *fsxtest.Mem) {
-		o1 := srcOutFinished(1) // a finished source record whose number must be remembered
-		o2 := srcOutFinished(2) // another, of the same pair
-		inDone := inRev(3, 2)   // a finished target record
-		inDone.Record.State = delivery.StateDelivered
-		inDone.Body = nil
-		c := created(t, 4, 5) // a control record of a session creation
+		o1 := srcOutFinished(1)                       // a finished source record whose number must be remembered
+		o2 := srcOutFinished(2)                       // another, of the same pair
+		inDone := inRev(3, 2)                         // a finished target record
+		inDone.Record.State = delivery.StateDelivered // it still refers to its body: the release never happened
+		c := created(t, 4, 5)                         // a control record of a session creation
 		c.Record.State = delivery.StateDelivered
-		derived := inFor(5, 5, 2) // its derived delivery
+		derived := derivedIn(4, 5, 2) // its derived delivery
 		derived.Record.State = delivery.StateDelivered
 		derived.Body = nil
-		derived.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{}`)}
 		lost := inRev(6, 1) // a replacement and its quarantined file
 		lost = store.InRecord{Key: lost.Key, Lost: true, DiscoveredAt: base, Record: delivery.Record{Side: delivery.SideTarget, State: delivery.StateDeliveryUnknown, AcceptBefore: base, ReportBy: base.Add(3 * time.Hour)},
 			Dedup: delivery.NewDedupRecord(lost.Key.Dedup(), digestOf(6), base.Add(3*time.Hour))}
@@ -509,7 +511,7 @@ func sweepScenario(farFuture time.Time) scenario {
 			store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "in/x"},
 			adminResult(1))
 		seedRaw(t, mem, store.InDir, lost.Name()+"."+store.AlertID{6}.String()+".corrupt", []byte("damaged"))
-		seedBodies(t, mem, bodyBytes(1))
+		seedBodies(t, mem, bodyBytes(3))
 	}
 	return scenario{
 		name:  "archive-sweep",
@@ -603,7 +605,7 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 	if _, ok := snap[statePath(store.CtlDir, created(t, 4, 5).Name())]; ok {
 		ctlThere = true
 	}
-	if _, derivedThere := snap[statePath(store.InDir, inFor(5, 5, 2).Name())]; ctlThere && !derivedThere {
+	if _, derivedThere := snap[statePath(store.InDir, derivedIn(4, 5, 2).Name())]; ctlThere && !derivedThere {
 		t.Errorf("%s: the derived delivery is gone while its control record is still there", where)
 	}
 }
@@ -617,17 +619,25 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	sink := newSink()
 	all := append(scenarios(), recoveryScenarios()...)
 	total := scenarioStats{}
-	for i := range all {
-		sc := all[i]
-		t.Run(sc.name, func(t *testing.T) {
-			st := runScenario(t, &sc, sink, uint64(100+i))
-			t.Logf("%d points, %d crash states, %d recoveries, %d recoveries after a crash during recovery", st.points, st.clones, st.recoveries, st.nested)
-			total.points += st.points
-			total.clones += st.clones
-			total.recoveries += st.recoveries
-			total.nested += st.nested
-		})
-	}
+	var mu sync.Mutex
+	// The walks are independent: they run side by side, and the coverage is
+	// asserted when the group of them is done.
+	t.Run("walks", func(t *testing.T) {
+		for i := range all {
+			sc := all[i]
+			t.Run(sc.name, func(t *testing.T) {
+				t.Parallel()
+				st := runScenario(t, &sc, sink, uint64(100+i))
+				t.Logf("%d points, %d crash states, %d recoveries, %d recoveries after a crash during recovery", st.points, st.clones, st.recoveries, st.nested)
+				mu.Lock()
+				defer mu.Unlock()
+				total.points += st.points
+				total.clones += st.clones
+				total.recoveries += st.recoveries
+				total.nested += st.nested
+			})
+		}
+	})
 	t.Logf("in all: %d points, %d crash states, %d recoveries, %d nested", total.points, total.clones, total.recoveries, total.nested)
 
 	// The coverage assertion: the walks reached every declared point, and the
@@ -652,3 +662,13 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 }
 
 var _ = fsx.StepWrite
+
+// ctlTo is an accepted control record for the local endpoint e.
+func ctlTo(i, e int) store.CtlRecord {
+	c := sessionCtl(i, 5)
+	c.Key.Recipient = ep(e)
+	c.Dedup = delivery.NewDedupRecord(c.Key.Dedup(), digestOf(i), c.Record.ReportBy)
+	c.Intent, c.SessionEndpoint, c.Preset = nil, ident.EndpointID{}, ""
+	c.Kind = envelope.KindEndpointStatus
+	return c
+}

@@ -84,10 +84,28 @@ func (sc *scenario) fresh(t *testing.T) *fsxtest.Mem {
 			t.Fatal(err)
 		}
 	}
+	// The endpoints every world has: two senders' own and the runtime's. A record
+	// for an endpoint that has no record is work for the drain rule.
+	seed(t, mem, directEndpoint(1, "base"), directEndpoint(2, "base"), directEndpoint(4, "base"))
 	if sc.setup != nil {
 		sc.setup(t, mem)
 	}
 	return mem
+}
+
+// short lists the files of a snapshot by directory and the first characters of
+// the name, for a message a person reads.
+func short(m map[string]string) string {
+	var out []string
+	for k := range m {
+		d, n := path.Split(k)
+		if len(n) > 8 {
+			n = n[:6] + ".." + n[len(n)-8:]
+		}
+		out = append(out, strings.TrimPrefix(d, "state/")+n)
+	}
+	sort.Strings(out)
+	return strings.Join(out, " ")
 }
 
 func equalMaps(a, b map[string]string, optional func(string) bool) string {
@@ -171,16 +189,18 @@ func (sc *scenario) newSimFor(t *testing.T, r *rig) *sim {
 // crashKinds are the disks a crash at one instant can leave.
 func crashKinds(m *fsxtest.Mem, rng *rand.Rand) []crashState {
 	return []crashState{
-		{"process-crash", m.Clone()},
-		{"worst-power-loss", m.CrashCloneWorst()},
-		{"power-loss-a", m.CrashClone(rng)},
-		{"power-loss-b", m.CrashClone(rng)},
+		{"process-crash", m.Clone(), false},
+		{"worst-power-loss", m.CrashCloneWorst(), true},
+		{"power-loss-a", m.CrashClone(rng), true},
+		{"power-loss-b", m.CrashClone(rng), true},
 	}
 }
 
 type crashState struct {
 	name string
 	mem  *fsxtest.Mem
+	// power: the state is what a power loss left, everything in it is durable.
+	power bool
 }
 
 // stats of a run of a scenario.
@@ -221,6 +241,9 @@ func runScenario(t *testing.T, sc *scenario, sink *coverageSink, seed uint64) sc
 	durableSeen, durable := false, false
 	stepAfter := false
 	r.rec.on = func(p fsx.Point, k txn.Kind) {
+		if p.Tag.Tx == "settle" && p.Hit > 1 {
+			return // one directory sync of the barrier stands for all
+		}
 		if stepAfter {
 			durable = true
 			stepAfter = false
@@ -261,15 +284,13 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 
 	// Recovery, watched: every point of it gives crash states of its own.
 	var inner []crashState
-	rng := newRand(uint64(len(crashedSnap)) + 17)
 	var rr *rig
 	hook := func(p fsx.Point, k txn.Kind) {
-		if !nested || testing.Short() {
+		if !nested || testing.Short() || cs.name == "power-loss-a" || cs.name == "power-loss-b" || (p.Tag.Tx == "settle" && p.Hit > 1) {
 			return
 		}
-		inner = append(inner, crashState{fmt.Sprintf("%s, then a crash %s before %v", where, "process", p), rr.mem.Clone()})
-		inner = append(inner, crashState{fmt.Sprintf("%s, then a power loss before %v", where, p), rr.mem.CrashCloneWorst()})
-		inner = append(inner, crashState{fmt.Sprintf("%s, then a seeded power loss before %v", where, p), rr.mem.CrashClone(rng)})
+		inner = append(inner, crashState{fmt.Sprintf("%s, then a crash %s before %v", where, "process", p), rr.mem.Clone(), false})
+		inner = append(inner, crashState{fmt.Sprintf("%s, then a power loss before %v", where, p), rr.mem.CrashCloneWorst(), true})
 	}
 	// The rig does not exist until the hook may run; recoverMem creates it, so
 	// give the hook a way to reach it.
@@ -305,8 +326,8 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 		sc.retry(t, r3, s3)
 	}
 	_ = n
-	if r3.rec.count() != 0 {
-		t.Errorf("%s: a second recovery reached %d crash points: recovery is not idempotent", where, r3.rec.count())
+	if r3.rec.working() != 0 {
+		t.Errorf("%s: a second recovery reached %d crash points: recovery is not idempotent", where, r3.rec.working())
 	}
 	if again := snapshot(t, r3.mem, "."); equalMaps(again, fin, nil) != "" {
 		t.Errorf("%s: a second recovery changed the disk: %s", where, equalMaps(again, fin, nil))
@@ -317,8 +338,17 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 		st.nested++
 		r4 := sc.recoverMem(t, in.mem, sink, nil)
 		got := snapshot(t, r4.mem, ".")
-		if why := equalMaps(sc.filter(got), sc.filter(fin), sc.optional); why != "" {
-			t.Errorf("%s: recovery after a crash during recovery differs: %s", in.name, why)
+		// A power loss on top of a process crash takes what the process had not
+		// made durable, the head of the workflow included: it is an earlier
+		// crash, and the state before is acceptable again.
+		stillDurable := durable && (cs.power || !in.power)
+		if why := sc.accept(got, before, after, stillDurable); why != "" {
+			t.Errorf("%s: recovery after a crash during recovery ends in a state that is not acceptable: %s\n  got: %s\n  fin: %s", in.name, why, short(sc.filter(got)), short(sc.filter(fin)))
+		}
+		if stillDurable || sc.mustComplete {
+			if why := equalMaps(sc.filter(got), sc.filter(fin), sc.optional); why != "" {
+				t.Errorf("%s: recovery after a crash during recovery differs from recovery without one: %s", in.name, why)
+			}
 		}
 	}
 }

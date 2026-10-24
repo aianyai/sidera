@@ -1,8 +1,13 @@
 package store
 
-import "errors"
+import (
+	"fmt"
+	"github.com/aianyai/sidera/internal/node/recfile"
+	"slices"
 
-var errNotImplemented = errors.New("store: not implemented")
+	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/ident"
+)
 
 // Record is a decoded record of state/: one of OutRecord, InRecord, CtlRecord,
 // EndpointRecord, AttemptsRecord, CheckpointRecord, AdminRecord, AlertRecord
@@ -15,7 +20,57 @@ type Record interface {
 // EncodeRecord returns the bytes of the file of a record. Nothing it returns
 // can fail decoding, and a record that cannot be encoded (a field outside its
 // domain, a key or body over the limits) is an error here, not later.
-func EncodeRecord(rec Record) ([]byte, error) { panic(errNotImplemented) }
+func EncodeRecord(rec Record) ([]byte, error) {
+	var (
+		kind Kind
+		key  []byte
+		body []byte
+		err  error
+	)
+	switch r := rec.(type) {
+	case OutRecord:
+		kind = r.Key.Kind()
+		if key, err = r.Key.Bytes(); err == nil {
+			body, err = encodeOut(r)
+		}
+	case InRecord:
+		kind = KindIn
+		if key, err = r.Key.Bytes(); err == nil {
+			body, err = encodeIn(r)
+		}
+	case CtlRecord:
+		kind = KindCtl
+		if key, err = r.Key.Bytes(); err == nil {
+			body, err = encodeCtl(r)
+		}
+	case EndpointRecord:
+		kind, key = KindEndpoint, EndpointKeyBytes(r.ID)
+		body, err = encodeEndpoint(r)
+	case AttemptsRecord:
+		kind, key = KindAttempts, EndpointKeyBytes(r.Endpoint)
+		body, err = encodeAttempts(r)
+	case CheckpointRecord:
+		kind = KindCheckpoint
+		if key, err = CheckpointKeyBytes(r.Key); err == nil {
+			body, err = encodeCheckpoint(r)
+		}
+	case AdminRecord:
+		kind, key = KindAdmin, AdminKeyBytes(r.Key)
+		body, err = encodeAdmin(r)
+	case AlertRecord:
+		kind, key = KindAlert, AlertKeyBytes(r.ID)
+		body, err = encodeAlert(r)
+	case SeqRecord:
+		kind, key = KindSeq, EndpointKeyBytes(r.Sender)
+		body, err = encodeSeq(r)
+	default:
+		return nil, fmt.Errorf("store: %T is not a record of state/", rec)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: %s record: %w", kind, err)
+	}
+	return recfile.EncodeFrame(string(kind), key, body)
+}
 
 // DecodeRecord validates the file `name` of directory dir with the contents
 // data and returns its record. The steps, in order, and the class of the
@@ -32,4 +87,55 @@ func EncodeRecord(rec Record) ([]byte, error) { panic(errNotImplemented) }
 //  6. their CRC32C is the checksum (BodyDamaged);
 //  7. the body decodes strictly, is the canonical encoding of what it decodes
 //     to, and passes the checks of its kind (BodyDamaged).
-func DecodeRecord(dir, name string, data []byte) (Record, *Damage) { panic(errNotImplemented) }
+func DecodeRecord(dir, name string, data []byte) (Record, *Damage) {
+	h, body, dmg := recfile.ParseHeader(data)
+	if dmg != nil {
+		return nil, dmg
+	}
+	if !slices.Contains(kindsOf(dir), Kind(h.Kind)) {
+		return nil, headerDamage(ReasonKindNotAllowed, "%s does not hold %q", dir, h.Kind)
+	}
+	if want := recfile.FileName(h.Kind, h.Key); name != want {
+		return nil, headerDamage(ReasonNameMismatch, "the name is %q, kind and key hash to %q", name, want)
+	}
+	key, err := ParseKey(Kind(h.Kind), h.Key)
+	if err != nil {
+		return nil, headerDamage(ReasonKeyInvalid, "%v", err)
+	}
+	if dmg := recfile.CheckBody(h, body); dmg != nil {
+		return nil, dmg
+	}
+	rec, err := decodeBody(Kind(h.Kind), key, body)
+	if err != nil {
+		return nil, &Damage{Class: BodyDamaged, Reason: ReasonBodyInvalid, Detail: err.Error(), Kind: h.Kind, Key: h.Key}
+	}
+	return rec, nil
+}
+
+func decodeBody(kind Kind, key any, body []byte) (Record, error) {
+	switch kind {
+	case KindOut, KindOutCtl:
+		return decodeOut(key.(OutKey), body)
+	case KindIn:
+		return decodeIn(key.(TargetKey), body)
+	case KindCtl:
+		return decodeCtl(key.(TargetKey), body)
+	case KindEndpoint:
+		return decodeEndpoint(key.(ident.EndpointID), body)
+	case KindAttempts:
+		return decodeAttempts(key.(ident.EndpointID), body)
+	case KindCheckpoint:
+		return decodeCheckpoint(key.(CheckpointKey), body)
+	case KindAdmin:
+		return decodeAdmin(key.(admin.RequestKey), body)
+	case KindAlert:
+		return decodeAlert(key.(AlertID), body)
+	case KindSeq:
+		return decodeSeq(key.(ident.EndpointID), body)
+	}
+	return nil, fmt.Errorf("no body of kind %q", kind)
+}
+
+func headerDamage(r DamageReason, format string, args ...any) *Damage {
+	return recfile.HeaderDamage(r, format, args...)
+}

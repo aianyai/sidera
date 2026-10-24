@@ -323,6 +323,11 @@ func TestPowerLossCloneKeepsAcknowledgedWrites(t *testing.T) {
 				led:   ledger{files: map[string][]byte{}, summaries: map[string]bool{}},
 				stage: map[int]int{}, rev: map[int]uint64{}, counts: counts,
 			}
+			// The endpoint the messages are for exists: a record for an endpoint with
+			// no record is work for the drain rule.
+			e2 := directEndpoint(2, "chat")
+			mustDo(t, r.st.EndpointUpdate(e2))
+			w.led.files[path.Join(store.EndpointsDir, e2.Name())] = w.enc(e2)
 			clones := newRand(seed + 1000)
 			r.rec.on = func(p fsx.Point, k txn.Kind) {
 				if w.cur == nil || rng.IntN(3) != 0 {

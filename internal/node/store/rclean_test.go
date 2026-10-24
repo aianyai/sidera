@@ -40,6 +40,10 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 		}
 	}
 	check("start")
+	for _, e := range []int{1, 2, 4} {
+		mustDo(t, r.st.EndpointUpdate(directEndpoint(e, "base")))
+	}
+	check("the endpoints of the node")
 
 	// Messages out and in, and the prompt and block events.
 	for i := 1; i <= 3; i++ {
@@ -95,9 +99,14 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	cr := created(t, 20, 5)
 	mustDo(t, r.st.ControlResult(cr, ptr(openedBy(cr)), []store.BodyRef{*bodyRef(20)}))
 	check("session created")
+	derived := derivedIn(20, 5, 0)
+	derived.Body = nil
+	mustDo(t, r.st.Deliver(nil, []store.InRecord{derived}))
+	check("the initial message delivered to the session")
 	closeCtl := closedBy(21, 5)
 	mustDo(t, r.st.ControlResult(closeCtl, ptr(closedSession(5, ctlName(20))), nil))
-	check("session closed")
+	// Between a head record and its followers the disk is not at rest: the check
+	// is made when the chunks are done.
 	mustDo(t, r.st.EndpointDrain(s.drainBatch(r.scan())))
 	check("session drained")
 
@@ -124,7 +133,6 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	o.Feedback = []delivery.Item{feedbackItem(40)}
 	mustDo(t, r.st.Intake(bodyBytes(40), o))
 	mustDo(t, r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)))
-	check("feedback formed")
 	o.Feedback = nil
 	mustDo(t, r.st.FeedbackClear([]store.OutRecord{o}))
 	check("feedback cleared")

@@ -168,7 +168,7 @@ func recoveryScenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
 				name := directEndpoint(7, "chat").Name()
-				if !hasCorrupt(sc, store.EndpointsDir, name, alertFor(store.EndpointsDir, name)) || len(sc.Endpoints) != 0 || len(sc.Checkpoints) != 1 {
+				if !hasCorrupt(sc, store.EndpointsDir, name, alertFor(store.EndpointsDir, name)) || hasEndpoint(sc, ep(7)) || len(sc.Checkpoints) != 1 {
 					t.Errorf("the damaged endpoint record must be quarantined without a replacement: %v %v", sc.Corrupt, sc.Endpoints)
 				}
 			},
@@ -201,9 +201,11 @@ func recoveryScenarios() []scenario {
 				seedRaw(t, mem, store.BodiesDir, name, []byte("tampered content"))
 				ctl := sessionCtl(4, 5)
 				ctl.Body = bodyRef(1)
-				d3 := inRev(3, 1)
+				// Every record refers to the one body.
+				in2, d3, in5 := inRev(2, 1), inRev(3, 1), inRev(5, 1)
+				in2.Body, d3.Body, in5.Body = bodyRef(1), bodyRef(1), bodyRef(1)
 				d3.Record.State = delivery.StateDelivered
-				seed(t, mem, srcOut(1, false), inRev(2, 1), d3, ctl, inRev(5, 1))
+				seed(t, mem, srcOut(1, false), in2, d3, ctl, in5)
 			},
 			durable: "quarantine-body/body.sync-dir#1",
 			mode:    atomic,
@@ -278,7 +280,7 @@ func recoveryScenarios() []scenario {
 				for _, e := range sc.Endpoints {
 					ids = append(ids, e.ID.String())
 				}
-				want := []string{ep(6).String(), ep(7).String(), ep(8).String()}
+				want := []string{ep(1).String(), ep(2).String(), ep(4).String(), ep(6).String(), ep(7).String(), ep(8).String()}
 				if strings.Join(sortedStrings(ids), ",") != strings.Join(sortedStrings(want), ",") {
 					t.Errorf("endpoints = %v, want only the orphan removed (%v)", ids, want)
 				}
@@ -330,6 +332,7 @@ func recoveryScenarios() []scenario {
 				done.Body = nil
 				c := sessionCtl(3, 5)
 				c.Key.Recipient = ep(7)
+				c.Dedup = delivery.NewDedupRecord(c.Key.Dedup(), digestOf(3), c.Record.ReportBy)
 				seed(t, mem, closed, directEndpoint(8, "chat"), inFor(1, 7, 1), done, c, inFor(4, 9, 1), inFor(5, 8, 1))
 				seedBodies(t, mem, bodyBytes(1), bodyBytes(4), bodyBytes(5))
 			},
@@ -345,8 +348,10 @@ func recoveryScenarios() []scenario {
 						t.Errorf("%s is %v, want %v", m, states[m], want)
 					}
 				}
-				if len(sc.Ctl) != 1 || sc.Ctl[0].Record.State != delivery.StateRejected {
-					t.Errorf("the control record for the closed endpoint must be closed: %#v", sc.Ctl)
+				// A control signal was handed to the adapter the moment it was accepted: a forced
+				// close of it is "unknown", never "rejected".
+				if len(sc.Ctl) != 1 || sc.Ctl[0].Record.State != delivery.StateDeliveryUnknown {
+					t.Errorf("the control record for the closed endpoint must be closed as unknown: %#v", sc.Ctl)
 				}
 				if len(sc.Bodies) != 1 || sc.Bodies[0] != bodyRef(5).Name() {
 					t.Errorf("the bodies of the closed deliveries must go and the other stay: %v", sc.Bodies)
@@ -358,7 +363,7 @@ func recoveryScenarios() []scenario {
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				closed := directEndpoint(8, "chat")
 				closed.Status, closed.Token = store.EndpointClosed, nil
-				seed(t, mem, directEndpoint(7, "chat"), closed, directEndpoint(9, "other"), inFor(1, 7, 1), inFor(2, 9, 1))
+				seed(t, mem, directEndpoint(7, "chat"), closed, directEndpoint(9, "other"), inFor(1, 7, 1), inFor(2, 9, 1), ctlTo(4, 7))
 				seedBodies(t, mem, bodyBytes(1), bodyBytes(2))
 			},
 			enabled: func(inst string) bool { return inst != "chat" },
@@ -493,9 +498,8 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 		setup: func(t *testing.T, mem *fsxtest.Mem) {
 			c := sessionCtl(1, 5)
 			c.Body = bodyRef(1)
-			derived := inFor(10, 5, 1)
+			derived := derivedIn(1, 5, 1)
 			derived.Body = bodyRef(1)
-			derived.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{}`)}
 			seed(t, mem, session(5, store.EndpointCreating, ctlName(1)), c, derived)
 			seedBodies(t, mem, bodyBytes(1))
 			damage(t, mem, path.Join(store.CtlDir, c.Name()))
@@ -514,10 +518,10 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 			if _, _, c := find(t, sc, name); (c != nil) != replaced || (c != nil && !c.Lost) {
 				t.Errorf("replacement present = %v, want %v", c != nil, replaced)
 			}
-			if len(sc.Endpoints) != 1 || sc.Endpoints[0].Status != store.EndpointClosed || sc.Endpoints[0].Token != nil {
-				t.Errorf("the session endpoint still being created must be closed: %#v", sc.Endpoints)
+			if e := endpointOf(sc, ep(5)); e == nil || e.Status != store.EndpointClosed || e.Token != nil {
+				t.Errorf("the session endpoint still being created must be closed: %#v", e)
 			}
-			if _, d, _ := find(t, sc, inFor(10, 5, 1).Name()); d == nil || d.Record.State != delivery.StateRejected || d.Record.Reject != delivery.RejectEndpointClosed {
+			if _, d, _ := find(t, sc, derivedIn(1, 5, 1).Name()); d == nil || d.Record.State != delivery.StateRejected || d.Record.Reject != delivery.RejectEndpointClosed {
 				t.Errorf("the delivery derived from the lost control record must be rejected as the endpoint closed: %#v", d)
 			}
 			if len(sc.Bodies) != 0 {
@@ -526,3 +530,14 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 		},
 	}
 }
+
+func endpointOf(sc *store.Scan, id ident.EndpointID) *store.EndpointRecord {
+	for i := range sc.Endpoints {
+		if sc.Endpoints[i].ID == id {
+			return &sc.Endpoints[i]
+		}
+	}
+	return nil
+}
+
+func hasEndpoint(sc *store.Scan, id ident.EndpointID) bool { return endpointOf(sc, id) != nil }
