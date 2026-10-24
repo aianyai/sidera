@@ -1,0 +1,23 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "endpoint.send",
+  "note": "a control signal has exactly one recipient",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "endpoint.send",
+    "params": {
+      "endpoint": "44444444444444444444444444444444",
+      "to": [
+        "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
+        "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3/22222222222222222222222222222222"
+      ],
+      "content_type": "text/plain",
+      "body": "x",
+      "control": {
+        "signal": "session.close"
+      }
+    }
+  }
+}

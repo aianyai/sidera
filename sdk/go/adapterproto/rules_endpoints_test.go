@@ -231,6 +231,18 @@ func TestEndpointSendRules(t *testing.T) {
 		{"control endpoint.status with params", func(p *adapterproto.SendParams) {
 			p.Control = &adapterproto.Control{Signal: "endpoint.status", Params: &adapterproto.ControlParams{Preset: "default"}}
 		}, "control.params", false},
+		{"control signal with two recipients", func(p *adapterproto.SendParams) {
+			p.To = manyAddrs(2)
+			p.Control = &adapterproto.Control{Signal: "session.close"}
+		}, "to", false},
+		{"control create with two recipients", func(p *adapterproto.SendParams) {
+			p.To = manyAddrs(2)
+			p.Control = &adapterproto.Control{Signal: "session.create", Params: &adapterproto.ControlParams{Preset: "default"}}
+		}, "to", false},
+		{"control signal with fifty recipients", func(p *adapterproto.SendParams) {
+			p.To = manyAddrs(50)
+			p.Control = &adapterproto.Control{Signal: "endpoint.status"}
+		}, "to", false},
 		{"control signal unknown", func(p *adapterproto.SendParams) { p.Control = &adapterproto.Control{Signal: "message.send"} }, "control.signal", false},
 		{"control signal required", func(p *adapterproto.SendParams) { p.Control = &adapterproto.Control{} }, "control.signal", false},
 	})

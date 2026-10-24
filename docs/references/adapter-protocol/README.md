@@ -262,7 +262,7 @@ only says the request was not understood or not allowed.
 | `endpoint.pending` | D to A | notification | `endpoint`, `count` | |
 | `endpoint.recv` | A to D | request | `endpoint`, `wait_s?`, `message_id?` with `part?` | `page` |
 | `endpoint.ack` | A to D | request | `endpoint`, `lease`, `items` | `items` with the outcome of each |
-| `endpoint.send` | A to D | request | `endpoint`, `to`, `content_type`, `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
+| `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type`, `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
 | `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
 
 Identifiers: `EndpointRef` and `Address` are opaque strings of 1 to 128
@@ -528,7 +528,9 @@ A message can carry a control signal for its target endpoint instead of text for
 its agent. The values below are defined as protocol types in `adapterproto`, with
 the integer a binary encoding will carry and the name a JSON reply uses. Every
 enum is a small integer from 1; 0 is never valid; a field that does not apply is
-absent.
+absent. A message with a control signal has exactly one recipient (`endpoint.send`
+with `control` takes a single address in `to`): one adapter executes the signal
+and one reply comes back; to act on several endpoints, send one message to each.
 
 `control.session.create` (target: a runtime endpoint). Parameter: the preset name,
 1 to 64 characters of `[a-z0-9][a-z0-9._-]*`. The initial message is the body of
@@ -565,6 +567,11 @@ with `signal` beside its fields, and enums are their names.
 
 ### Why
 
+- **One recipient per control signal.** A signal is executed once, by one
+  adapter, and has one reply; several recipients would bundle several executions
+  and their different outcomes under one message identifier and one
+  `control_reply`. The schema states it (`if` `control` is present, `to` has at
+  most one entry) and `SendParams.Validate` repeats it.
 - `version_untested` is a sixth condition because an untested runtime version must
   show in the status without stopping the endpoint.
 - A creation that times out is `unconfirmed` and not `failed` because a session
@@ -578,7 +585,7 @@ with `signal` beside its fields, and enums are their names.
 
 - `sdk/go/adapterproto/control.go`; tests `TestControlEnumCodes`,
   `TestControlCreateReplyRules`, `TestControlStatusReplyRules`,
-  `TestControlReplyJSON`.
+  `TestControlReplyJSON`; `TestEndpointSendRules` (rows "control ... with two recipients").
 
 ## Native process identity
 

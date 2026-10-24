@@ -184,7 +184,7 @@ type SendParams struct {
 	IdempotencyKey string   `json:"idempotency_key,omitempty"`
 }
 
-// Validate checks the parameters. Address syntax, the number of recipients that
+// Validate checks the parameters. A control signal has exactly one recipient. Address syntax, the number of recipients that
 // is acceptable and the size of the body are judged by the daemon, which refuses
 // with CodeInvalidAddress or CodeSendRefused.
 func (p SendParams) Validate() error {
@@ -205,6 +205,7 @@ func (p SendParams) Validate() error {
 		c.field("accept_before_s", intRange(p.AcceptBeforeS, 1, maxAcceptBeforeSeconds))
 	}
 	if p.Control != nil {
+		c.ok(len(p.To) == 1, "to: a control signal has exactly one recipient, got %d", len(p.To))
 		c.field("control", p.Control.Validate())
 	}
 	if p.IdempotencyKey != "" {
