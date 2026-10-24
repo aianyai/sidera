@@ -96,6 +96,13 @@ slot is filled by exactly one signature and every signature fills a slot.
 order), a type of its own; only `Verify` returns a `Verified`, so a record that
 still lacks a signer cannot be passed on as verified.
 
+`Peek` reads the payload without checking any signature or signer rule: it checks
+the type string and runs the descriptor's own decoding path, and returns an
+`Unverified`, a type of its own that does not convert to `Verified` or `Partial`.
+It exists for a record whose signer rule depends on a node or key the payload
+names: the caller needs that claim to choose which certificate to verify
+against, before verification can run. Nothing it returns is trustworthy.
+
 A rule that depends on the caller is stated with the slot built for that
 context. `NetworkKeyOf(node, accepted, now)` accepts the keys `NetworkKeyBelongs`
 accepts, so a record signed by a network key is checked by the one binding
@@ -286,6 +293,16 @@ the same record with a short window.
   complete records. Two types make the mistake a compile error. Slot states are
   reported in the rule's order, not the record's, because the record sorts
   signatures by key bytes and that order says nothing about who is missing.
+- **Peek is one entry, and its result is a type of its own.** A descriptor
+  whose signer rule depends on the claimed node needs that node before it can
+  verify. Without one shared entry every record type would re-implement the
+  decoding, and two decoders for one payload drift apart: the one used to
+  choose the context could accept a payload the verifier refuses, or read a
+  field differently. `Peek` goes through the decoding path that `Verify` and
+  `Seal` use. Its result is distinct from `Verified` and `Partial` for the same
+  reason `Partial` is distinct from `Verified`: a payload no signature backs
+  must not be passable where a checked one is expected. It carries no digest
+  and no signer list, so there is nothing to mistake for the result of a check.
 - **Network-key slots are built per verification, with reasons.** Whether a
   key is a node's network key depends on the certificate accepted now, on its
   revocation and on the time. A descriptor created once could not hold that,
@@ -316,7 +333,7 @@ the same record with a short window.
   `Encode`, `Signer`.
 - `internal/record/descriptor.go`: `Descriptor`, signer slots (`NodeIdentityKey`,
   `PersonRootKey`, `NetworkKeyOf`, `BindingError`), `Seal`, `Verify`,
-  `VerifyPartial`, `CoSign`, `Verified`, `Partial`.
+  `VerifyPartial`, `CoSign`, `Peek`, `Verified`, `Partial`, `Unverified`.
 - `internal/record/codec.go`: hardened decoding options and `UnmarshalStrict`.
 - `internal/record/timeconv.go`, `level.go`: the conversions.
 - `internal/record/networkcert.go`, `devicecert.go`: the two certificates,
@@ -328,6 +345,8 @@ the same record with a short window.
   `TestPartialSignatures`, `TestCoSign`, `TestDecodeRejects`, `TestVerifyRejects`,
   `TestEveryBitOfARecordIsProtected`, `TestEnvelopeRules`,
   `TestSealRunsTheDecodingPath`, `TestSignerFailuresAreCaughtAtTheSigner`),
+  `peek_test.go` (`TestPeek`, `TestPeekChoosesTheVerificationContext`,
+  `TestUnverifiedIsADistinctType`),
   `codec_test.go` (`TestStrictUnmarshal`, `TestNestingLimit`,
   `TestTimeConversion`, `TestLevelTable`, `TestOptionalFieldsInAnExternalRecordType`),
   `certs_test.go` (`TestNetworkKeyCertificateRules`, `TestDecideSerial`,

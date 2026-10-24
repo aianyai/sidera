@@ -18,6 +18,7 @@ for the format and the reasons behind it. Identifiers and keys come from
 | `Sign`, `CoSign(d, r, signer)`                    | Sign a raw payload; verify a partial record against its descriptor and append a second party's signature to an empty slot. |
 | `Descriptor[P]`, `NewDescriptor`                  | One record type: type string, payload codec, signer rule. Exported by the package that defines the type.  |
 | `Seal`, `Verify`, `VerifyPartial`                 | Encode and sign a typed payload; check a complete record (`Verified[P]`); check a record that may still lack signers (`Partial[P]`). |
+| `Peek`, `Unverified[P]`                           | Read a record's payload before verifying it, only to find which node or key it claims and so pick the verification context. Nothing it returns is trusted. |
 | `SignedBytes`, `DigestOf`, `Record.Digest`        | The bytes that are signed and the signature-free digest.                                                  |
 | `SignerSlot`, `NodeIdentityKey`, `PersonRootKey`, `NetworkKeyOf`, `BindingError` | Signer slots: "the key that derives this node / person identifier", "the network key `NetworkKeyBelongs` accepts for this node". A refusal by `NetworkKeyOf` is a `*BindingError` with the specific reason. |
 | `TimeToWire`, `TimeFromWire`, `OptionalTime*`, `RequireCounter`, `LevelToWire`, `LevelFromWire` | The one place wire times, counters and levels are converted. |
@@ -75,6 +76,13 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   types do not convert into each other, so a record that still lacks a signer can
   never be handed on as verified by mistake; a complete `Partial` is still
   checked again by `Verify`.
+- **Peek is not verification.** `Peek(descriptor, record)` checks the type string
+  and decodes the payload through the descriptor's own decoding path (strict
+  decoding, then the type's validation), and checks no signature and no signer
+  rule. It returns an `Unverified[P]`, which does not convert to `Verified[P]` or
+  `Partial[P]`. Its only legitimate use is learning which node or key a record
+  claims, to build the context `Verify` needs; whatever it returns may be forged
+  and is never acted on, stored as fact or forwarded.
 - **Partial signatures.** The first party calls `Seal` (or `Sign`) with its
   signer and sends the encoded record. The second party decodes it, calls
   `CoSign(descriptor, record, signer)`, which verifies the record as

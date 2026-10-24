@@ -282,6 +282,44 @@ func VerifyPartial[P any](d Descriptor[P], r Record) (Partial[P], error) {
 	return Partial[P]{Payload: p, Digest: r.Digest(), Slots: state}, nil
 }
 
+// Unverified is a payload read from a record whose signatures were not checked.
+// Only Peek returns it. It is a type of its own, not convertible to or from
+// Verified or Partial, so a payload nobody vouches for cannot be handed on as
+// one that was checked.
+//
+// Nothing in it is trustworthy: the payload is exactly what the sender wrote,
+// and any claim in it (a node, a key, a time) is a claim.
+type Unverified[P any] struct {
+	Payload P
+}
+
+// Peek reads the payload of r as the record type d describes, without checking
+// any signature or the signer rule. It checks only what decoding needs: that r
+// has d's type and that its payload passes the descriptor's own decoding path
+// (strict decoding and the type's validation), the same path Verify and Seal
+// use.
+//
+// The one legitimate use is finding which node or key a record claims, in order
+// to choose the context that verification needs: a record whose signer rule
+// depends on the node it names (a declaration signed by that node's network key)
+// cannot be verified before the caller knows which node's certificate to look
+// up. The caller then passes the record to Verify, with the descriptor built for
+// that context, and trusts nothing until Verify accepts. Whatever Peek returns
+// may be forged, and it must not be acted on, stored as fact or sent on.
+func Peek[P any](d Descriptor[P], r Record) (Unverified[P], error) {
+	if !d.valid() {
+		return Unverified[P]{}, ErrDescriptor
+	}
+	if r.Type != d.typ {
+		return Unverified[P]{}, fmt.Errorf("%w: got %q, want %q", ErrType, r.Type, d.typ)
+	}
+	p, err := d.decode(r.Payload)
+	if err != nil {
+		return Unverified[P]{}, err
+	}
+	return Unverified[P]{Payload: p}, nil
+}
+
 // CoSign adds s's signature to r, a record of the type d describes that is
 // still waiting for signers. The first party signs with Seal and sends the
 // record; the second party calls CoSign on what it received. Before signing,

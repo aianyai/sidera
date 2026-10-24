@@ -33,6 +33,15 @@ func FuzzDecodeRecord(f *testing.F) {
 		_, _ = Verify(DeviceCertificateDescriptor, rec)
 		_, _ = VerifyPartial(pairDescriptor, rec)
 		_, _ = VerifyPartial(noteDescriptor, rec)
+		// Peeking never panics, and a record that verifies peeks to the same payload.
+		if v, err := VerifyPartial(pairDescriptor, rec); err == nil {
+			if u, err := Peek(pairDescriptor, rec); err != nil || u.Payload != v.Payload {
+				t.Fatalf("a record that verifies does not peek to its payload: %v", err)
+			}
+		}
+		_, _ = Peek(NetworkKeyCertificateDescriptor, rec)
+		_, _ = Peek(DeviceCertificateDescriptor, rec)
+		_, _ = Peek(noteDescriptor, rec)
 		// A decoded record may be co-signed and encoded again.
 		for _, n := range []int{1, 2} {
 			if more, err := CoSign(pairDescriptor, rec, rfcSigner(t, n)); err == nil {
