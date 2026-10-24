@@ -1,8 +1,9 @@
 package fsx
 
 import (
-	"context"
 	"time"
+
+	"github.com/aianyai/sidera/internal/node/clock"
 )
 
 // Bounded retry with exponential backoff for primitives that fail transiently
@@ -10,9 +11,11 @@ import (
 // the file open) holds a handle. Only the Windows primitives use it, but the
 // logic is platform independent and tested everywhere.
 //
-// The backoff follows the Go toolchain's own retry loop: sleeps of 1, 2, 4, ...
-// milliseconds, the last one shortened, until two seconds have been slept in
-// total.
+// The backoff is modelled on the Go toolchain's own retry loop
+// (cmd/internal/robustio), which sleeps for exponentially growing intervals.
+// This one doubles deterministically from one millisecond, with no jitter, the
+// last sleep shortened, and gives up once two seconds have been slept in total:
+// a budget of accumulated sleep rather than a count of attempts.
 
 const (
 	retryFirstSleep = time.Millisecond
@@ -39,11 +42,10 @@ func retry(sleep func(time.Duration), f func() (mayRetry bool, err error)) error
 	}
 }
 
-// sleepSystem sleeps for real. It is the only place in this package that waits,
-// so that a system clock can replace it in one place. It waits on a context
-// deadline rather than reading or sleeping on the time package's clock.
+// sleepSystem sleeps for real, on a timer of the system clock. It is the only
+// place in this package that waits, so that another clock can replace it in one
+// place.
 func sleepSystem(d time.Duration) {
-	ctx, cancel := context.WithTimeout(context.Background(), d)
-	<-ctx.Done()
-	cancel()
+	t := clock.System().NewTimer(d)
+	<-t.C()
 }

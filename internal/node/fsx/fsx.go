@@ -76,9 +76,11 @@ type Info struct {
 	Size  int64
 	IsDir bool
 	// OwnerOnly is true when only the owner can reach the file. Unix: owned by
-	// the effective user with no group or other permission bit. Windows: the
-	// DACL grants access only to the owner, the user running the process,
-	// SYSTEM and Administrators.
+	// the effective user with no group or other permission bit. Windows, which
+	// fails closed: the owner is the user running the process, Administrators or
+	// SYSTEM, and the DACL has only deny entries and allow entries for the user
+	// running the process, SYSTEM and Administrators; an entry of any other type
+	// or a descriptor that cannot be read makes it false.
 	OwnerOnly bool
 }
 

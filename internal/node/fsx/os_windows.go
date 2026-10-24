@@ -26,21 +26,32 @@ func retryable(err error) bool {
 		errors.Is(err, windows.ERROR_FILE_NOT_FOUND)
 }
 
+// retryableRead is retryable without file not found. A rename or a remove that
+// reports it may be racing a scanner that holds the file, as Go's own loop
+// assumes, but a read of a file that does not exist is an answer: Go's
+// cmd/internal/robustio leaves file not found out of its read retry for the
+// same reason, and retrying would cost every absent file the whole budget.
+func retryableRead(err error) bool {
+	return retryable(err) && !errors.Is(err, windows.ERROR_FILE_NOT_FOUND)
+}
+
 // withRetry runs one operation under the retry loop. Retries happen inside the
 // primitive, below Observe, so a logical step reaches the observer once.
-func withRetry(do func() error) error {
+func withRetry(do func() error) error { return withRetryWhile(retryable, do) }
+
+func withRetryWhile(mayRetry func(error) bool, do func() error) error {
 	return retry(sleepSystem, func() (bool, error) {
 		err := do()
-		return retryable(err), err
+		return mayRetry(err), err
 	})
 }
 
 // readFile reads and closes at once: Go opens files without FILE_SHARE_DELETE,
 // so a handle that stays open makes replacing the file fail. A read that fails
-// transiently is retried.
+// transiently is retried, except when the file is not found.
 func readFile(abs string) ([]byte, error) {
 	var data []byte
-	err := withRetry(func() error {
+	err := withRetryWhile(retryableRead, func() error {
 		var err error
 		data, err = os.ReadFile(abs)
 		return err
@@ -171,11 +182,32 @@ func lockFile(abs string) (func() error, error) {
 	}, nil
 }
 
-// trustedSIDs are the identities whose access to a private file is expected:
-// the object's owner, the user running this process (which differs from the
-// owner when an elevated process creates the file and Administrators own it),
-// SYSTEM and Administrators.
-func trustedSIDs(owner *windows.SID) ([]*windows.SID, error) {
+// Access-denied entry types other than ACCESS_DENIED_ACE_TYPE, which
+// golang.org/x/sys does not name.
+const (
+	accessDeniedObjectACEType         = 0x6
+	accessDeniedCallbackACEType       = 0xA
+	accessDeniedCallbackObjectACEType = 0xC
+)
+
+// isDenyACE reports the entry types that can only remove access, which
+// ownerOnly may skip. Every other type is judged: an allow entry by its SID, any
+// type this code does not know as not private.
+func isDenyACE(aceType byte) bool {
+	switch aceType {
+	case windows.ACCESS_DENIED_ACE_TYPE, accessDeniedObjectACEType,
+		accessDeniedCallbackACEType, accessDeniedCallbackObjectACEType:
+		return true
+	}
+	return false
+}
+
+// trustedSIDs are the identities that may own a private file or be granted
+// access to it: the user running this process, SYSTEM and Administrators.
+// Administrators matter because an elevated process creates files owned by that
+// group. The owner of the object is not trusted by being the owner: it must be
+// one of these.
+func trustedSIDs() ([]*windows.SID, error) {
 	tu, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return nil, err
@@ -188,19 +220,33 @@ func trustedSIDs(owner *windows.SID) ([]*windows.SID, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []*windows.SID{owner, tu.User.Sid, system, admins}, nil
+	return []*windows.SID{tu.User.Sid, system, admins}, nil
 }
 
-// ownerOnly: the DACL exists and every access-allowed entry names a trusted
-// identity. Entries that deny access cannot widen it and are ignored. Any
-// failure to read the descriptor reports false: the caller refuses to start
-// rather than assume a key file is private.
+func isTrusted(sid *windows.SID, trusted []*windows.SID) bool {
+	for _, t := range trusted {
+		if windows.EqualSid(sid, t) {
+			return true
+		}
+	}
+	return false
+}
+
+// ownerOnly fails closed: it is true only when the owner is trusted, a DACL
+// exists, every access-allowed entry names a trusted identity, and every other
+// entry is of a type that can only deny access. Entries that deny access cannot
+// widen it and are skipped; an entry of any other type (a callback or object
+// allow entry, for example) may grant access in a way this check does not
+// evaluate, so it makes the answer false, as does any failure to read the
+// descriptor: the caller refuses to start rather than assume a key file is
+// private.
 func ownerOnly(abs string, _ fs.FileInfo) bool {
 	sd, err := windows.GetNamedSecurityInfo(abs, windows.SE_FILE_OBJECT,
 		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return false
 	}
+	defer runtime.KeepAlive(sd) // owner and dacl point into the descriptor
 	owner, _, err := sd.Owner()
 	if err != nil || owner == nil {
 		return false
@@ -209,28 +255,22 @@ func ownerOnly(abs string, _ fs.FileInfo) bool {
 	if err != nil || dacl == nil {
 		return false // no DACL grants everyone full access
 	}
-	trusted, err := trustedSIDs(owner)
-	if err != nil {
+	trusted, err := trustedSIDs()
+	if err != nil || !isTrusted(owner, trusted) {
 		return false
 	}
-	defer runtime.KeepAlive(sd) // owner and dacl point into the descriptor
 	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if err := windows.GetAce(dacl, i, &ace); err != nil {
 			return false
 		}
-		if ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+		switch {
+		case isDenyACE(ace.Header.AceType):
 			continue
+		case ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE:
+			return false
 		}
-		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
-		known := false
-		for _, t := range trusted {
-			if windows.EqualSid(sid, t) {
-				known = true
-				break
-			}
-		}
-		if !known {
+		if !isTrusted((*windows.SID)(unsafe.Pointer(&ace.SidStart)), trusted) {
 			return false
 		}
 	}

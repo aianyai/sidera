@@ -5,10 +5,11 @@ durable write sequences built on it. Read
 [../../../docs/references/storage/README.md](../../../docs/references/storage/README.md)
 for the reasons, the platform behaviour and what the crash model proves.
 
-This is a runtime package: it does I/O. It imports only the standard library
-and `golang.org/x/sys`. It reads no clock: the one real wait, the backoff of the
-Windows retry, goes through a single unexported function, `sleepSystem`, so that
-a system clock can replace it in one place.
+This is a runtime package: it does I/O. It imports the standard library,
+`golang.org/x/sys` and, only to obtain the real clock, `internal/node/clock`, as
+the layer table of [`internal/node/README.md`](../README.md) allows. It reads no
+clock: the one real wait, the backoff of the Windows retry, goes through a single
+unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 
 ## Entry points
 
@@ -58,6 +59,8 @@ a system clock can replace it in one place.
 - **`RenameDir` never replaces.** The target must not exist on any platform.
 - **Reads are not steps and hold nothing.** `ReadFile` reads and closes at once,
   so a reader never blocks a replacement on Windows.
+- **A Windows read does not retry `file not found`.** The file may genuinely not
+  exist; renames and removals do retry it.
 - **Retries on Windows happen below `Observe`.** One logical step reaches the
   hook once, however many times the rename was retried.
 - **`.tmp-*` and `.trash-*` are debris.** Anything starting with one of the

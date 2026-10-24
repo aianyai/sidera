@@ -142,7 +142,7 @@ system: on NFS `flock` is emulated with `fcntl` byte-range locks.
 | `SyncDir` | open read-only and `fsync` the directory | the same; that this makes a rename durable on APFS is not documented by Apple | no flush; a check that the directory exists |
 | `Rename` | `rename(2)`, atomic over an existing target | the same | `MoveFileExW` with `MOVEFILE_REPLACE_EXISTING` and `MOVEFILE_WRITE_THROUGH`, retried for about two seconds on access denied, sharing violation and file not found |
 | `RenameDir` | target checked absent, then `rename(2)` | the same | target checked absent, `MoveFileExW` with `MOVEFILE_WRITE_THROUGH` and without `REPLACE_EXISTING` |
-| `ReadFile` | read and close | the same | read and close at once, retried like a rename |
+| `ReadFile` | read and close | the same | read and close at once, retried like a rename, except file not found |
 | `OpenAppend` | `O_WRONLY`, `O_APPEND` and `O_CREATE` at 0600 | the same | `CreateFile` with `GENERIC_WRITE`, positioned at the end |
 | `Available` | `statfs`, `Bavail * Bsize` | the same | `GetDiskFreeSpaceExW`, the free bytes available to the caller |
 | root creation | `mkdir` 0700 | the same | a directory with a protected DACL for the current user, inherited by what is created inside |
@@ -167,9 +167,13 @@ Windows paragraphs are pending verification by CI on main. Specifically:
   stays open makes a rename over that file fail. `ReadFile` reads and closes at
   once, and a rename retries (1, 2, 4, ... milliseconds, two seconds in total)
   for the error set that the Go toolchain itself retries, which covers
-  antivirus scanners and indexers briefly holding a file. A read of a file that
-  does not exist also retries `file not found`, so it costs the whole retry
-  budget on Windows.
+  antivirus scanners and indexers briefly holding a file. The loop is modelled
+  on Go's own (`cmd/internal/robustio`); this one doubles deterministically from
+  one millisecond with no jitter and gives up after a budget of accumulated
+  sleep, not a count of attempts. A read does not retry `file not found`, which
+  Go's own read retry also leaves out: the file may genuinely not exist, and an
+  absent file would otherwise cost the whole budget. The waits use a timer of
+  `clock.System()`, the one use of a clock in `fsx`.
 - **Append handles.** Go maps `O_APPEND` on Windows to a handle without
   `GENERIC_WRITE`, on which `FlushFileBuffers` fails; `fsx` opens the handle
   itself.
@@ -182,10 +186,16 @@ Windows paragraphs are pending verification by CI on main. Specifically:
 - **Permissions.** The data directory root is created with the security
   descriptor `D:P(A;OICI;FA;;;<current user SID>)`: protected, so it inherits
   nothing from its parent, with full control for the user running the process,
-  inherited by files and directories created inside. `Info.OwnerOnly` is true
-  when the descriptor has a DACL and every allow entry names the object's
-  owner, the user running the process, SYSTEM or Administrators. Reading the
-  descriptor failing reports false, so a key file is never assumed private.
+  inherited by files and directories created inside. `Info.OwnerOnly` fails
+  closed. It is true only when the object's owner is the user running the
+  process, Administrators or SYSTEM (an owner can always rewrite the DACL), the
+  descriptor has a DACL, every access-allowed entry names the user running the
+  process, SYSTEM or Administrators, and every other entry is of a type that can
+  only deny access (the four deny types: plain, object, callback, callback
+  object), which cannot widen access and is skipped. An entry of any other type,
+  such as a callback or object allow entry, may grant access in a way the check
+  does not evaluate and makes the answer false, as does failing to read the
+  descriptor, so a key file is never assumed private.
 
 Linux paragraphs (the `fsync` and directory `fsync` semantics, `flock`, `statfs`)
 are pending verification by CI on main: the development machine is macOS.
@@ -324,10 +334,12 @@ so that the double cannot drift from what it stands for.
 
 ## Known gaps
 
-- **Reading an absent file on Windows** costs the retry budget, because
-  `file not found` is in the retried set.
 - **Symbolic links.** The test that `Stat` does not follow a final symbolic link
   skips where the platform refuses to create one without privilege.
+- **Assigning another owner on Windows.** The tests that a file owned by
+  Everyone or by another user is not owner-only skip where the account lacks
+  the privilege to assign that owner, which is the usual case; the decision they
+  cover is a short comparison against the trusted set.
 - **Cross-user permission checks** (a different user opening the data directory)
   are not tested: CI has one user.
 
@@ -341,7 +353,7 @@ so that the double cannot drift from what it stands for.
 | composite operations | `internal/node/fsx/ops.go` | `TestCompositeOperationsRunTheirFixedSteps`, `TestReplaceLeavesNoTemporaryAndKeepsTheTargetWhenAnyStepBeforeTheRenameFails`, `TestCleanupAfterAFailureIsNotAStep`, `TestAppendShortWriteIsAFailureThatLeavesAPartialTail`, `TestSyncFileStepsCarryTheTagTheFileWasOpenedWith`, `TestEachCompositeOperationIsDurableWhenItReturns`, `TestDiscardRenamesToAGarbageNameBeforeDeleting` and the `RenameDir`, path and root tests in `ops_test.go` |
 | `Observe`, `PointOf` | `internal/node/fsx/observe.go`, `error.go` | `observe_test.go` |
 | leftovers | `internal/node/fsx/leftovers.go` | `leftovers_test.go` |
-| retry | `internal/node/fsx/retry.go` | `retry_internal_test.go` |
+| retry | `internal/node/fsx/retry.go`, `os_windows.go` | `retry_internal_test.go`, `retry_windows_test.go` |
 | real file system | `internal/node/fsx/os.go`, `os_unix.go`, `os_windows.go` | `os_test.go`, `os_unix_test.go`, `os_windows_test.go`, `retry_windows_test.go` |
 | crash model | `internal/node/fsx/fsxtest/mem.go`, `crash.go` | `mem_test.go` (each rule above, and the append and directory-rename result table `TestAppendAndRenameDirResultTable`), `counterexample_test.go` |
 | fault injection | `internal/node/fsx/fsxtest/faulty.go` | `faulty_test.go` |
@@ -355,4 +367,4 @@ handle is held (succeeds once the handle is released within the retry budget,
 and fails as an ordinary failure with the target intact when it is not), the
 retried error set, the directory flush attempt (logs the measured result), `Sync`
 on an append handle, `RenameDir` refusing an existing target, a second `Lock`
-getting `ErrLocked`, and the owner-only descriptor of a created data directory.
+getting `ErrLocked`, the owner-only descriptor of a created data directory (and that Everyone, an untrusted owner or a callback allow entry make it false), and that reading a missing file returns `fs.ErrNotExist` at once.

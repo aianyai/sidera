@@ -29,3 +29,24 @@ func TestWindowsRetriesOnlyTheTransientErrorSet(t *testing.T) {
 		}
 	}
 }
+
+// A read of a file that does not exist gets its answer at once; the other
+// transient errors are retried for a read as they are for a rename.
+func TestWindowsReadDoesNotRetryFileNotFound(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"file-not-found", windows.ERROR_FILE_NOT_FOUND, false},
+		{"file-not-found-in-a-path-error", &fs.PathError{Op: "open", Path: "x", Err: windows.ERROR_FILE_NOT_FOUND}, false},
+		{"access-denied", windows.ERROR_ACCESS_DENIED, true},
+		{"sharing-violation", windows.ERROR_SHARING_VIOLATION, true},
+		{"path-not-found", windows.ERROR_PATH_NOT_FOUND, false},
+		{"nil", nil, false},
+	} {
+		if got := retryableRead(tc.err); got != tc.want {
+			t.Errorf("%s: retryableRead = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

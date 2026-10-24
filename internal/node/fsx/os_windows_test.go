@@ -288,3 +288,108 @@ func TestWindowsOwnerOnlyIsFalseWhenEveryoneHasAccess(t *testing.T) {
 		t.Errorf("Stat(key) = %+v, %v; want OwnerOnly false once Everyone can read it", info, err)
 	}
 }
+
+// Reading a file that is not there is an answer, not a transient failure: it
+// must return fs.ErrNotExist without spending the retry budget. The elapsed
+// time is logged so one CI log shows what a miss costs.
+func TestWindowsReadOfAMissingFileReturnsNotExistImmediately(t *testing.T) {
+	fsys, _ := openTemp(t)
+	start := time.Now()
+	_, err := fsys.ReadFile("absent")
+	elapsed := time.Since(start)
+	t.Logf("ReadFile of a missing file took %v and returned %v", elapsed, err)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("ReadFile of a missing file = %v, want fs.ErrNotExist", err)
+	}
+	if elapsed > time.Second {
+		t.Errorf("ReadFile of a missing file took %v, want no retrying (the budget is 2s)", elapsed)
+	}
+}
+
+// createOwnedKey returns an FS over a fresh data directory and the absolute
+// path of a file in it, "key".
+func createOwnedKey(t *testing.T) (fsx.FS, string) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), ".sidera")
+	if err := fsx.MakeRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	fsys, err := fsx.OpenOS(root, &countingReader{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fsx.Replace(fsys, tx, "key", []byte("secret"), fsx.ModePrivate); err != nil {
+		t.Fatal(err)
+	}
+	return fsys, filepath.Join(root, "key")
+}
+
+func currentUserSID(t *testing.T) *windows.SID {
+	t.Helper()
+	tu, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tu.User.Sid
+}
+
+// An owner that is not the user running the process, Administrators or SYSTEM
+// makes a file not owner-only, even when every DACL entry is trusted: the owner
+// can always rewrite the DACL.
+func TestWindowsOwnerOnlyIsFalseWhenTheOwnerIsNotTrusted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		sid  func(t *testing.T) *windows.SID
+	}{
+		{"everyone", func(t *testing.T) *windows.SID {
+			sid, err := windows.CreateWellKnownSid(windows.WinWorldSid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return sid
+		}},
+		{"another-user", func(t *testing.T) *windows.SID {
+			sid, err := windows.CreateWellKnownSid(windows.WinBuiltinUsersSid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return sid
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fsys, abs := createOwnedKey(t)
+			owner := tc.sid(t)
+			err := windows.SetNamedSecurityInfo(abs, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, owner, nil, nil, nil)
+			if err != nil {
+				t.Skipf("cannot assign owner %s without the privilege to do so (%v); known untested item", owner, err)
+			}
+			if info, err := fsys.Stat("key"); err != nil || info.OwnerOnly {
+				t.Errorf("Stat(key) = %+v, %v; want OwnerOnly false for owner %s", info, err, owner)
+			}
+		})
+	}
+}
+
+// An entry that is not a plain allow or deny entry may grant access in a way
+// the check does not evaluate, so it counts as not private even when it names
+// the current user.
+func TestWindowsOwnerOnlyIsFalseWithACallbackAllowEntry(t *testing.T) {
+	fsys, abs := createOwnedKey(t)
+	// XA is an access-allowed callback (conditional) entry.
+	sd, err := windows.SecurityDescriptorFromString(`D:P(XA;;FA;;;` + currentUserSID(t).String() + `;(@User.Title=="PM"))`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = windows.SetNamedSecurityInfo(abs, windows.SE_FILE_OBJECT,
+		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+	if err != nil {
+		t.Fatalf("SetNamedSecurityInfo: %v", err)
+	}
+	if info, err := fsys.Stat("key"); err != nil || info.OwnerOnly {
+		t.Errorf("Stat(key) = %+v, %v; want OwnerOnly false with a callback allow entry", info, err)
+	}
+}
