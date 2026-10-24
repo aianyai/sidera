@@ -90,8 +90,12 @@ them, and stores the records it hands out.
 - Call `Tick` on a timer and after every command and event; it issues the result
   exchanges that are due, including the one right after a confirmation.
 - Build `Party` values from certificates it has verified, with the revocation
-  lookup stated, for the connection the stream runs on. The negotiated protocol
-  identifier comes from the stream.
+  lookup stated, for the connection the stream runs on. The certificate given to
+  `NewParty` must be the one the serial rule (`record.DecideSerial`) accepted in
+  the certificate exchange of that connection, for the remote end as for the
+  local one: a certificate that was merely seen, or an older one, would bind a
+  key the node no longer stands behind into the transcript. The negotiated
+  protocol identifier comes from the stream.
 - Give `crypto/rand` as the source of randomness. A target that repeats a nonce
   lets an attacker learn it in one session and use it in the next, so the
   randomness must not repeat after a virtual machine is snapshotted, cloned or
