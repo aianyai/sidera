@@ -2,14 +2,15 @@
   "expect": "both",
   "kind": "result",
   "method": "adapter.probe",
-  "note": "runtime tested missing",
+  "note": "the adapter does not report whether the runtime version is tested: the daemon decides from the manifest",
   "document": {
     "jsonrpc": "2.0",
     "id": 1,
     "result": {
       "runtime": {
         "name": "r",
-        "version": "1"
+        "version": "1",
+        "tested": true
       },
       "auth": "valid",
       "dependencies": [],

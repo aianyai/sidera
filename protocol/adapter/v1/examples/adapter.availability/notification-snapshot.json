@@ -19,10 +19,6 @@
       {
         "condition": "dependency_missing",
         "detail": "systemd-run not found"
-      },
-      {
-        "condition": "version_untested",
-        "detail": "runtime 3.0.0 is outside every tested range"
       }
     ]
   }

@@ -124,7 +124,7 @@
     "DependencyState": { "type": "string", "enum": ["ok", "missing", "wrong_version"] },
     "ProbeOutcome": { "type": "string", "enum": ["ran", "not_run", "failed"] },
     "ProbeMethod": { "type": "string", "enum": ["sandboxed", "unsandboxed", "native_turn"] },
-    "AvailabilityCondition": { "type": "string", "enum": ["runtime_auth", "native_unavailable", "dependency_missing", "version_untested"] },
+    "AvailabilityCondition": { "type": "string", "enum": ["runtime_auth", "native_unavailable", "dependency_missing"] },
     "AttachState": { "type": "string", "enum": ["attached", "unreachable", "lost"] },
     "CreateOutcome": { "type": "string", "enum": ["created", "failed", "indeterminate"] },
     "CreateFailure": { "type": "string", "enum": ["preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error"] },

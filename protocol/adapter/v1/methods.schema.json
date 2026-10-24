@@ -190,12 +190,12 @@
       "properties": {
         "runtime": {
           "type": "object",
-          "required": ["name", "version", "tested"],
+          "description": "What the adapter found: the runtime's name and version. Whether that version is inside a tested range of the manifest is the daemon's decision, so the adapter does not report it.",
+          "required": ["name", "version"],
           "additionalProperties": false,
           "properties": {
             "name": { "type": "string", "minLength": 1, "maxLength": 64 },
-            "version": { "type": "string", "minLength": 1, "maxLength": 64 },
-            "tested": { "type": "boolean" }
+            "version": { "type": "string", "minLength": 1, "maxLength": 64 }
           }
         },
         "auth": { "$ref": "types.schema.json#/$defs/AuthState" },

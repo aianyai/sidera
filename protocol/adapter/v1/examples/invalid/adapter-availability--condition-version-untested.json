@@ -1,0 +1,17 @@
+{
+  "expect": "both",
+  "kind": "notification",
+  "method": "adapter.availability",
+  "note": "version_untested is the daemon's judgment, not an availability condition an adapter reports",
+  "document": {
+    "jsonrpc": "2.0",
+    "method": "adapter.availability",
+    "params": {
+      "conditions": [
+        {
+          "condition": "version_untested"
+        }
+      ]
+    }
+  }
+}

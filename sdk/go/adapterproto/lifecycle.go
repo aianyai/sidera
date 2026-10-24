@@ -557,14 +557,15 @@ func (p ProbeParams) Validate() error {
 	return c.err
 }
 
-// RuntimeInfo is what a probe found out about the native runtime.
+// RuntimeInfo is what a probe found out about the native runtime: its name and
+// version, nothing more. Whether the version is inside a tested range of the
+// manifest is decided by the daemon alone, so that there is one judge of it and
+// an adapter cannot disagree with its own manifest.
 type RuntimeInfo struct {
 	// Name is the runtime's product name, matching a "runtime" of the manifest's
 	// tested ranges.
 	Name    string `json:"name"`
 	Version string `json:"version"`
-	// Tested says the version is inside one of the manifest's tested ranges.
-	Tested bool `json:"tested"`
 }
 
 // Validate checks the fields.

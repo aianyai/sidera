@@ -12,6 +12,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
@@ -121,7 +122,6 @@ func TestSignals(t *testing.T) {
 		{"runtime_auth is AuthInvalid", []adapterproto.Availability{av("runtime_auth", early)}, false, handoff.Signals{AuthInvalid: true, Since: early}},
 		{"native_unavailable is ServiceUnavailable", []adapterproto.Availability{av("native_unavailable", early)}, false, handoff.Signals{ServiceUnavailable: true, Since: early}},
 		{"dependency_missing is ServiceUnavailable", []adapterproto.Availability{av("dependency_missing", early)}, false, handoff.Signals{ServiceUnavailable: true, Since: early}},
-		{"version_untested is no cause", []adapterproto.Availability{av("version_untested", early)}, false, handoff.Signals{}},
 		{"since is optional and then unknown", []adapterproto.Availability{av("runtime_auth", time.Time{})}, false, handoff.Signals{AuthInvalid: true}},
 		{"since in the future is unknown", []adapterproto.Availability{av("runtime_auth", future)}, false, handoff.Signals{AuthInvalid: true}},
 		{"since exactly at receipt is kept", []adapterproto.Availability{av("runtime_auth", received)}, false, handoff.Signals{AuthInvalid: true, Since: received}},
@@ -173,27 +173,28 @@ func TestStatusConditions(t *testing.T) {
 		return adapterproto.Availability{Condition: cond, Endpoints: endpoints}
 	}
 	tests := []struct {
-		name                          string
-		conditions                    []adapterproto.Availability
-		offline, rejected, controlUnk bool
-		want                          []adapterproto.ControlCondition
+		name                                       string
+		conditions                                 []adapterproto.Availability
+		offline, rejected, controlUnk, versionUnte bool
+		want                                       []adapterproto.ControlCondition
 	}{
-		{"nothing wrong", nil, false, false, false, nil},
-		{"offline", nil, true, false, false, []adapterproto.ControlCondition{1}},
-		{"runtime_auth", []adapterproto.Availability{av("runtime_auth")}, false, false, false, []adapterproto.ControlCondition{2}},
-		{"native_unavailable", []adapterproto.Availability{av("native_unavailable")}, false, false, false, []adapterproto.ControlCondition{3}},
-		{"dependency_missing shows as native_unavailable", []adapterproto.Availability{av("dependency_missing")}, false, false, false, []adapterproto.ControlCondition{3}},
-		{"both of those once", []adapterproto.Availability{av("dependency_missing"), av("native_unavailable")}, false, false, false, []adapterproto.ControlCondition{3}},
-		{"server requests rejected", nil, false, true, false, []adapterproto.ControlCondition{4}},
-		{"control unknown", nil, false, false, true, []adapterproto.ControlCondition{5}},
-		{"version_untested", []adapterproto.Availability{av("version_untested")}, false, false, false, []adapterproto.ControlCondition{6}},
-		{"another endpoint's condition", []adapterproto.Availability{av("runtime_auth", other)}, false, false, false, nil},
-		{"everything, ascending", []adapterproto.Availability{av("version_untested"), av("native_unavailable", ep), av("runtime_auth")}, true, true, true,
+		{"nothing wrong", nil, false, false, false, false, nil},
+		{"offline", nil, true, false, false, false, []adapterproto.ControlCondition{1}},
+		{"runtime_auth", []adapterproto.Availability{av("runtime_auth")}, false, false, false, false, []adapterproto.ControlCondition{2}},
+		{"native_unavailable", []adapterproto.Availability{av("native_unavailable")}, false, false, false, false, []adapterproto.ControlCondition{3}},
+		{"dependency_missing shows as native_unavailable", []adapterproto.Availability{av("dependency_missing")}, false, false, false, false, []adapterproto.ControlCondition{3}},
+		{"both of those once", []adapterproto.Availability{av("dependency_missing"), av("native_unavailable")}, false, false, false, false, []adapterproto.ControlCondition{3}},
+		{"server requests rejected", nil, false, true, false, false, []adapterproto.ControlCondition{4}},
+		{"control unknown", nil, false, false, true, false, []adapterproto.ControlCondition{5}},
+		{"version untested is the daemon's verdict, not the snapshot's", nil, false, false, false, true, []adapterproto.ControlCondition{6}},
+		{"a snapshot cannot carry it", []adapterproto.Availability{av("version_untested")}, false, false, false, false, nil},
+		{"another endpoint's condition", []adapterproto.Availability{av("runtime_auth", other)}, false, false, false, false, nil},
+		{"everything, ascending", []adapterproto.Availability{av("native_unavailable", ep), av("runtime_auth")}, true, true, true, true,
 			[]adapterproto.ControlCondition{1, 2, 3, 4, 5, 6}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := adapterreg.StatusConditions(tc.conditions, ep, tc.offline, tc.rejected, tc.controlUnk)
+			got := adapterreg.StatusConditions(tc.conditions, ep, tc.offline, tc.rejected, tc.controlUnk, tc.versionUnte)
 			if len(got) != len(tc.want) {
 				t.Fatalf("StatusConditions = %v, want %v", got, tc.want)
 			}
@@ -414,5 +415,55 @@ func TestCheckHandshake(t *testing.T) {
 		if r.String() != want {
 			t.Errorf("%d: %q", r, r.String())
 		}
+	}
+}
+
+// TestRuntimeVersionUntested: the daemon alone judges a probed runtime version
+// against the manifest's closed SemVer ranges. The expectations are written out
+// by hand from the ranges, not computed with the comparison under test.
+func TestRuntimeVersionUntested(t *testing.T) {
+	one := manifest.Manifest{Tested: []manifest.TestedRange{{Runtime: "example-runtime", Min: "2.1.306", Max: "2.1.308"}}}
+	two := manifest.Manifest{Tested: []manifest.TestedRange{
+		{Runtime: "example-runtime", Min: "2.1.306", Max: "2.1.308"},
+		{Runtime: "example-runtime", Min: "3.0.0", Max: "3.0.0"},
+		{Runtime: "other-runtime", Min: "1.0.0", Max: "9.9.9"},
+	}}
+	rt := func(name, version string) *adapterproto.RuntimeInfo {
+		return &adapterproto.RuntimeInfo{Name: name, Version: version}
+	}
+	tests := []struct {
+		name     string
+		m        manifest.Manifest
+		runtime  *adapterproto.RuntimeInfo
+		untested bool
+	}{
+		{"the lower bound is inside", one, rt("example-runtime", "2.1.306"), false},
+		{"between the bounds is inside", one, rt("example-runtime", "2.1.307"), false},
+		{"the upper bound is inside", one, rt("example-runtime", "2.1.308"), false},
+		{"one below the range", one, rt("example-runtime", "2.1.305"), true},
+		{"one above the range", one, rt("example-runtime", "2.1.309"), true},
+		{"a later minor version", one, rt("example-runtime", "2.2.0"), true},
+		{"numbers compare as numbers, not as text", one, rt("example-runtime", "2.1.1000"), true},
+		{"a short patch number is below, not above", one, rt("example-runtime", "2.1.31"), true},
+		{"a pre-release between the bounds is inside", one, rt("example-runtime", "2.1.307-rc.1"), false},
+		{"a pre-release of the upper bound sorts below it", one, rt("example-runtime", "2.1.308-rc.1"), false},
+		{"a pre-release of the lower bound sorts below it", one, rt("example-runtime", "2.1.306-rc.1"), true},
+		{"build metadata is ignored", one, rt("example-runtime", "2.1.307+build.5"), false},
+		{"a version that is not SemVer is never inside", one, rt("example-runtime", "latest"), true},
+		{"another runtime's name does not match", one, rt("other-runtime", "2.1.307"), true},
+		{"a second range of the same runtime", two, rt("example-runtime", "3.0.0"), false},
+		{"between two ranges", two, rt("example-runtime", "2.5.0"), true},
+		{"a range of another runtime is not this one's", two, rt("example-runtime", "5.0.0"), true},
+		{"the other runtime's own range", two, rt("other-runtime", "5.0.0"), false},
+		{"no tested range at all contains no version", manifest.Manifest{}, rt("example-runtime", "2.1.307"), true},
+		{"no runtime probed makes no claim", one, nil, false},
+		{"no runtime probed and no range makes no claim", manifest.Manifest{}, nil, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := adapterreg.RuntimeVersionUntested(tc.m, tc.runtime); got != tc.untested {
+				t.Fatalf("RuntimeVersionUntested = %v, want %v", got, tc.untested)
+			}
+		})
 	}
 }

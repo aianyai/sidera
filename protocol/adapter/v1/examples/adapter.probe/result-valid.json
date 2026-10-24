@@ -4,8 +4,7 @@
   "result": {
     "runtime": {
       "name": "example-runtime",
-      "version": "2.1.307",
-      "tested": true
+      "version": "2.1.307"
     },
     "auth": "valid",
     "dependencies": [

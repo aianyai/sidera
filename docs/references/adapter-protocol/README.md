@@ -244,7 +244,7 @@ only says the request was not understood or not allowed.
 | `$/cancel_request` | both | notification | `request_id`, an id as the peer layer defines it | |
 | `shutdown` | D to A | request | none | none |
 | `adapter.start` | D to A | request | `node`, `runtime_endpoint?`, `config`, `presets`, `sessions`, `direct_endpoints` | `sessions` (`endpoint`, `state`, `turn_active`, `process?`) |
-| `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?`, `auth`, `dependencies`, `presets`, `tool_probes` |
+| `adapter.probe` | D to A | request | `tool_probes` (`preset`, `frontend`, `token`, `env`) | `runtime?` (`name`, `version`), `auth`, `dependencies`, `presets`, `tool_probes` |
 | `adapter.availability` | A to D | notification | `conditions`: a full snapshot, empty when all is well | |
 | `session.create` | D to A | request | `attempt`, `runtime_endpoint`, `session_endpoint`, `preset`, `first_prompt`, `tool_access`, `checkpoint?` | `outcome` created, failed or indeterminate, with the fields each needs |
 | `checkpoint.put` | A to D | request | `scope` (attempt or session), `id`, `state` (object, at most 16 KiB compact) | none; answered once the state is durable |
@@ -522,7 +522,7 @@ except the two that are plain calls (marked "call"):
 | `turn.started` with an attempt | call: proof the attempt was delivered, as a `found` verdict |
 | availability `runtime_auth` | `Signals.AuthInvalid` |
 | availability `native_unavailable`, `dependency_missing` | `Signals.ServiceUnavailable` |
-| availability `version_untested` | no cause; shown in the status |
+| probed runtime name and version outside every tested range of the manifest (`RuntimeVersionUntested`) | no cause; status condition 6 `version_untested`, written by the daemon |
 | the daemon's own loss of the connection or two failed pings | `Signals.AdapterOffline`, with `Since` the moment it dropped |
 | `since_ms` | `Signals.Since`; zero (unknown) when absent or later than the moment the snapshot arrived, or when any condition of the cause lacks one |
 | `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`); keep reconciling, then unconfirmed |
@@ -547,7 +547,7 @@ except the two that are plain calls (marked "call"):
 
 - `internal/adapterreg` (`admit.go`, `methods.go`, `mappings.go`); tests
   `TestAdmitDecisions`, `TestDeclaredKindsAndSignals`, `TestMethodMatrix`,
-  `TestCheck`, `TestSignals`, `TestCreateReply`, `TestInterruptReply`,
+  `TestCheck`, `TestSignals`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestInterruptReply`,
   `TestCloseReply`, `TestCheckHandshake`.
 
 ## Control signals
@@ -603,7 +603,13 @@ with `signal` beside its fields, and enums are their names.
   `control_reply`. The schema states it (`if` `control` is present, `to` has at
   most one entry) and `SendParams.Validate` repeats it.
 - `version_untested` is a sixth condition because an untested runtime version must
-  show in the status without stopping the endpoint.
+  show in the status without stopping the endpoint. The daemon writes it from the
+  manifest (`adapterreg.RuntimeVersionUntested`) and the name and version the
+  probe reported; the adapter neither reports a `tested` flag in the probe result
+  nor a `version_untested` availability condition. The ranges are the
+  manifest's, and the daemon is the only reader of the manifest that decides
+  anything, so there is one judge and an adapter cannot disagree with its own
+  manifest.
 - A creation that times out is `unconfirmed` and not `failed` because a session
   may exist; the pre-allocated endpoint is returned either way so a retry cannot
   create a second one.
@@ -678,9 +684,10 @@ announcement are checked against each other; `tested` ranges are closed SemVer
 ranges; configuration uses a small field vocabulary; budgets map to the output
 budget of `recv` for that front end, and a front end without one gets the default.
 
-A native version outside the tested ranges still runs. It produces an
-availability condition `version_untested`, shown to the owner and in the status of
-the endpoints, but it is not blocked: blocking would disconnect users after every
+A native version outside the tested ranges still runs. The daemon compares the
+name and version that `adapter.probe` reported with the ranges and produces the
+status condition `version_untested`, shown to the owner and in the status of the
+endpoints, but it is not blocked: blocking would disconnect users after every
 automatic update of the runtime, while a wrong reconciliation can only end as
 "cannot tell".
 

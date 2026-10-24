@@ -26,7 +26,8 @@ not frame, send or store anything.
 | `CheckHandshake(sent, result, manifest)` | That the adapter reports the manifest's id and version, and a protocol version in both ranges. |
 | `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, the error a `prompt.deliver` call returned and a reconciliation verdict as `handoff.AttemptOutcome`. |
 | `Signals(conditions, endpoint, received, offline, offlineSince)` | An availability snapshot as `handoff.Signals`, with `Since`. |
-| `StatusConditions(...)` | The `conditions` of a status reply. |
+| `StatusConditions(...)` | The `conditions` of a status reply, from the snapshot and the daemon's own observations, `version_untested` among them. |
+| `RuntimeVersionUntested(manifest, runtime)` | Whether the probed runtime version is outside every tested range of the manifest: the one judge of the status condition `version_untested`. |
 | `CreateReply`, `CreateUnconfirmed`, `InterruptReply`, `CloseReply` | Adapter results as the reply to a control signal. |
 | `ItemAck`, `AckReason`, `ActionOf` | Names of `delivery` and `handoff` values and of authorization actions as the protocol spells them. |
 
@@ -59,6 +60,13 @@ not frame, send or store anything.
   proves the request had no effect the attempt failed, otherwise (`-32603`,
   `-32800`, a missing response, a timeout, a closed connection, anything the
   rule does not know) the attempt is unknown, to be reconciled.
+- **Tested runtime version.** The adapter's probe result reports only the
+  runtime's name and version; the daemon alone compares them with
+  `manifest.Manifest.Tests` (`RuntimeVersionUntested`) and writes status
+  condition 6 itself. An adapter cannot report it, because a second judge could
+  disagree with the manifest it was admitted under. It is no availability cause
+  and blocks nothing. No probed runtime makes no claim; a manifest without
+  tested ranges contains no version, so any probed version is untested.
 - **`Since` of a cause** is unknown (zero) unless every condition of the winning
   cause reports a start that is not later than the moment the daemon received the
   snapshot; the adapter's clock is for reference only.

@@ -68,8 +68,10 @@ func ReconcileOutcome(r adapterproto.ReconcileResult) (handoff.AttemptOutcome, e
 // delivery by, for one endpoint.
 //
 //   - runtime_auth is AuthInvalid;
-//   - native_unavailable and dependency_missing are ServiceUnavailable;
-//   - version_untested is no cause: the runtime still works.
+//   - native_unavailable and dependency_missing are ServiceUnavailable.
+//
+// A runtime version outside the tested ranges is no cause, and no condition of
+// a snapshot: the runtime still works, and RuntimeVersionUntested judges it.
 //
 // A condition names endpoints or, with none named, applies to all of them.
 // adapterOffline is the daemon's own observation (the connection dropped, or
@@ -133,10 +135,27 @@ func earliest(cs []adapterproto.Availability, received time.Time) time.Time {
 	return first
 }
 
+// RuntimeVersionUntested reports whether the runtime a probe found runs a version
+// that no tested range of the manifest contains. It is the only place that
+// judges this: the adapter reports the runtime's name and version and nothing
+// about the ranges, so the manifest the daemon admitted cannot be contradicted
+// by its adapter. The verdict is the status condition version_untested
+// (adapterproto.ControlConditionVersionUntested), which the daemon writes into
+// the status of the endpoints and shows the owner; it blocks nothing.
+//
+// A nil runtime, as for an adapter with no runtime or one that has not been
+// probed, makes no claim and is not untested. A manifest with no tested range
+// at all contains no version, so every probed version is untested.
+func RuntimeVersionUntested(m manifest.Manifest, runtime *adapterproto.RuntimeInfo) bool {
+	return runtime != nil && !m.Tests(runtime.Name, runtime.Version)
+}
+
 // StatusConditions builds the conditions list of a status reply for one endpoint
 // from the snapshot and the daemon's own observations: ascending, without repeats.
 // dependency_missing is shown as native_unavailable, as handoff counts it.
-func StatusConditions(conditions []adapterproto.Availability, endpoint adapterproto.EndpointRef, adapterOffline, serverRequestRejected, controlUnknown bool) []adapterproto.ControlCondition {
+// versionUntested is the verdict of RuntimeVersionUntested, which only the daemon
+// can give; it adds the sixth condition.
+func StatusConditions(conditions []adapterproto.Availability, endpoint adapterproto.EndpointRef, adapterOffline, serverRequestRejected, controlUnknown, versionUntested bool) []adapterproto.ControlCondition {
 	set := map[adapterproto.ControlCondition]bool{}
 	if adapterOffline {
 		set[adapterproto.ControlConditionAdapterOffline] = true
@@ -147,6 +166,9 @@ func StatusConditions(conditions []adapterproto.Availability, endpoint adapterpr
 	if controlUnknown {
 		set[adapterproto.ControlConditionControlUnknown] = true
 	}
+	if versionUntested {
+		set[adapterproto.ControlConditionVersionUntested] = true
+	}
 	for _, c := range conditions {
 		if !appliesTo(c, endpoint) {
 			continue
@@ -156,8 +178,6 @@ func StatusConditions(conditions []adapterproto.Availability, endpoint adapterpr
 			set[adapterproto.ControlConditionRuntimeAuth] = true
 		case adapterproto.ConditionNativeUnavailable, adapterproto.ConditionDependencyMissing:
 			set[adapterproto.ControlConditionNativeUnavailable] = true
-		case adapterproto.ConditionVersionUntested:
-			set[adapterproto.ControlConditionVersionUntested] = true
 		}
 	}
 	var out []adapterproto.ControlCondition

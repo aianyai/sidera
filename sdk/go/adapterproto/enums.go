@@ -96,7 +96,9 @@ var probeMethods = []ProbeMethod{ProbeSandboxed, ProbeUnsandboxed, ProbeNativeTu
 func (m ProbeMethod) Valid() bool { return slices.Contains(probeMethods, m) }
 
 // AvailabilityCondition is something that keeps a runtime from working, as the
-// adapter reports it in an availability snapshot.
+// adapter reports it in an availability snapshot. A runtime version outside the
+// manifest's tested ranges is not one: the runtime still works, and the daemon
+// alone decides whether to show it (adapterreg.RuntimeVersionUntested).
 type AvailabilityCondition string
 
 const (
@@ -106,12 +108,9 @@ const (
 	ConditionNativeUnavailable AvailabilityCondition = "native_unavailable"
 	// ConditionDependencyMissing: a program or service the adapter needs is missing.
 	ConditionDependencyMissing AvailabilityCondition = "dependency_missing"
-	// ConditionVersionUntested: the runtime's version is outside every range the
-	// manifest lists as tested. The runtime still works.
-	ConditionVersionUntested AvailabilityCondition = "version_untested"
 )
 
-var availabilityConditions = []AvailabilityCondition{ConditionRuntimeAuth, ConditionNativeUnavailable, ConditionDependencyMissing, ConditionVersionUntested}
+var availabilityConditions = []AvailabilityCondition{ConditionRuntimeAuth, ConditionNativeUnavailable, ConditionDependencyMissing}
 
 // Valid reports whether c is a known condition.
 func (c AvailabilityCondition) Valid() bool { return slices.Contains(availabilityConditions, c) }
