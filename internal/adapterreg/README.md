@@ -22,7 +22,7 @@ not frame, send or store anything.
 | `Admission.Declares`, `DeclaredKinds`, `Signals(kind)`, `AcceptsSignal` | The endpoint kinds the adapter may own and the control signals each accepts. |
 | `Admission.Budget(frontend)`, `Markers()` | The output budget of `recv` per front end (the default when the manifest gives none) and the compiled acknowledgement markers. |
 | `MethodAllowed(kind, method)`, `RequirementOf` | The method requirement matrix: forbidden, optional or required per kind. |
-| `Admission.Check(kind, method)` | The error code to answer a call with (`0` when it is acceptable): wrong endpoint kind, or a capability not declared. |
+| `Admission.Check(kind, method)` | The error code to answer a call the adapter made with (`0` when it is acceptable): method not found (unknown, or a method only the daemon may call), wrong endpoint kind, or a capability not declared. |
 | `CheckHandshake(sent, result, manifest)` | That the adapter reports the manifest's id and version, and a protocol version in both ranges. |
 | `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, the error a `prompt.deliver` call returned and a reconciliation verdict as `handoff.AttemptOutcome`. |
 | `Signals(conditions, endpoint, received, offline, offlineSince)` | An availability snapshot as `handoff.Signals`, with `Since`. |
@@ -38,6 +38,9 @@ not frame, send or store anything.
   endpoints brings `direct`. Declaring neither is refused, because the adapter
   could never own an endpoint. A capability flag cannot be declared without a
   runtime, because the flags are part of the runtime declaration.
+  `EndpointKind.TargetKind` gives the target kind authorization uses; a value
+  that is not a kind gives the zero one, which authorization refuses as
+  malformed.
 - **Signals** an endpoint accepts: runtime: `session.create`, `endpoint.status`;
   session: `message.send` (delivered as a prompt), `session.close`,
   `endpoint.status`, and `session.interrupt` when the adapter declared interrupt;
@@ -53,13 +56,21 @@ not frame, send or store anything.
   for direct ones, except that `recv.observed` concerns session endpoints only.
   The `endpoint.*` methods are forbidden on session endpoints: their messages
   must be read by the model itself, and an adapter reading them for it would
-  swallow them. `session.interrupt`, `recv.observed` and `native_request.handled`
-  also need the capability that enables them.
+  swallow them. `recv.observed` and `native_request.handled` also need the
+  capability that enables them; `session.interrupt` is the daemon's call, so
+  whether it is sent is `Signals` and `AcceptsSignal`, not `Check`.
+- **Direction.** `Check` judges calls the adapter made. A method that only the
+  daemon may call (`session.create`, `prompt.deliver`, `initialize`, ...) is
+  answered `-32601`, as an unknown method is, whatever the kind and the
+  declaration: it does not exist in that direction.
 - **Errors and attempts.** The error of a `prompt.deliver` call is judged by the
-  effect rule of `sdk/go/peer`, which this package does not restate: when it
-  proves the request had no effect the attempt failed, otherwise (`-32603`,
-  `-32800`, a missing response, a timeout, a closed connection, anything the
-  rule does not know) the attempt is unknown, to be reconciled.
+  effect rule of `sdk/go/peer`, which this package restates only where it
+  differs: when the rule proves the request had no effect the attempt failed,
+  otherwise (`-32603`, `-32800`, a missing response, a timeout, a closed
+  connection, anything the rule does not know) the attempt is unknown, to be
+  reconciled. The difference is `1005 attempt_conflict`: the attempt identifier
+  is already known with other parameters, so an earlier request of the same
+  attempt reached the adapter and may have delivered; the attempt is unknown.
 - **Tested runtime version.** The adapter's probe result reports only the
   runtime's name and version; the daemon alone compares them with
   `manifest.Manifest.Tests` (`RuntimeVersionUntested`) and writes status

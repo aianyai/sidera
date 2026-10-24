@@ -81,7 +81,7 @@ func TestMethodAllowedUnknowns(t *testing.T) {
 // each answer came up so no answer is left untested.
 func TestCheck(t *testing.T) {
 	kinds := []adapterreg.EndpointKind{adapterreg.KindRuntime, adapterreg.KindSession, adapterreg.KindDirect}
-	gates := map[string]string{"session.interrupt": "interrupt", "recv.observed": "ack", "native_request.handled": "server"}
+	gates := map[string]string{"recv.observed": "ack", "native_request.handled": "server"}
 	answers := map[int]int{}
 	for mask := 0; mask < 16; mask++ {
 		interrupt, ack, server, direct := mask&1 != 0, mask&2 != 0, mask&4 != 0, mask&8 != 0
@@ -106,16 +106,14 @@ func TestCheck(t *testing.T) {
 					want := 0
 					declared := (k == adapterreg.KindDirect && direct) || (k != adapterreg.KindDirect && withRuntime)
 					switch {
+					case m.Direction == adapterproto.DaemonToAdapter:
+						want = peer.CodeMethodNotFound
 					case row[i] == 'F':
 						want = adapterproto.CodeWrongEndpointKind
 					case !declared:
 						want = adapterproto.CodeCapabilityNotDeclared
 					default:
 						switch gates[m.Name] {
-						case "interrupt":
-							if !(withRuntime && interrupt) {
-								want = adapterproto.CodeCapabilityNotDeclared
-							}
 						case "ack":
 							if !(withRuntime && ack) {
 								want = adapterproto.CodeCapabilityNotDeclared
@@ -134,7 +132,7 @@ func TestCheck(t *testing.T) {
 			}
 		}
 	}
-	for _, code := range []int{0, adapterproto.CodeWrongEndpointKind, adapterproto.CodeCapabilityNotDeclared} {
+	for _, code := range []int{0, peer.CodeMethodNotFound, adapterproto.CodeWrongEndpointKind, adapterproto.CodeCapabilityNotDeclared} {
 		if answers[code] < 50 {
 			t.Errorf("answer %d came up only %d times", code, answers[code])
 		}
@@ -143,7 +141,45 @@ func TestCheck(t *testing.T) {
 	if got := a.Check(adapterreg.KindSession, "no.such.method"); got != peer.CodeMethodNotFound {
 		t.Errorf("Check of an unknown method = %d", got)
 	}
-	if got := (adapterreg.Admission{}).Check(adapterreg.KindSession, "prompt.deliver"); got != adapterproto.CodeCapabilityNotDeclared {
-		t.Errorf("the zero admission allows prompt.deliver: %d", got)
+	if got := (adapterreg.Admission{}).Check(adapterreg.KindSession, "turn.started"); got != adapterproto.CodeCapabilityNotDeclared {
+		t.Errorf("the zero admission allows turn.started: %d", got)
+	}
+}
+
+// A method only the daemon may call is not a method of the adapter's side: when
+// the adapter calls it, the answer is method-not-found for every kind and every
+// declaration, before the kind or a capability is looked at.
+func TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter(t *testing.T) {
+	caps := runtimeCaps(true, true, true, "cli")
+	caps.Direct = directCaps(3)
+	a, err := adapterreg.Admit(caps, man())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var daemonOnly, other int
+	for _, m := range adapterproto.Methods() {
+		for _, k := range []adapterreg.EndpointKind{adapterreg.KindRuntime, adapterreg.KindSession, adapterreg.KindDirect} {
+			got := a.Check(k, m.Name)
+			if m.Direction == adapterproto.DaemonToAdapter {
+				daemonOnly++
+				if got != peer.CodeMethodNotFound {
+					t.Errorf("the adapter calls %s (daemon to adapter) on %v: Check = %d, want %d", m.Name, k, got, peer.CodeMethodNotFound)
+				}
+			} else {
+				other++
+				if got == peer.CodeMethodNotFound {
+					t.Errorf("the adapter may call %s (%s) on %v: Check = method not found", m.Name, m.Direction, k)
+				}
+			}
+		}
+	}
+	if daemonOnly == 0 || other == 0 {
+		t.Fatalf("the table has %d daemon-only and %d other rows", daemonOnly, other)
+	}
+	// Written out, not read from the table: these are the daemon's to call.
+	for _, name := range []string{"initialize", "shutdown", "adapter.start", "adapter.probe", "session.create", "prompt.deliver", "session.interrupt", "session.close", "prompt.reconcile", "endpoint.pending"} {
+		if got := a.Check(adapterreg.KindSession, name); got != peer.CodeMethodNotFound {
+			t.Errorf("Check(%s) = %d, want method not found", name, got)
+		}
 	}
 }

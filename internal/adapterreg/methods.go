@@ -37,7 +37,6 @@ type gate uint8
 
 const (
 	gateNone gate = iota
-	gateInterrupt
 	gateAckOnBehalf
 	gateServerRequests
 )
@@ -72,7 +71,7 @@ var requirements = map[string]rule{
 
 	adapterproto.MethodCheckpointPut: {Optional, Optional, Optional, gateNone},
 
-	adapterproto.MethodSessionInterrupt:     {Optional, Optional, Forbidden, gateInterrupt},
+	adapterproto.MethodSessionInterrupt:     {Optional, Optional, Forbidden, gateNone},
 	adapterproto.MethodRecvObserved:         {Forbidden, Optional, Forbidden, gateAckOnBehalf},
 	adapterproto.MethodNativeRequestHandled: {Required, Required, Forbidden, gateServerRequests},
 
@@ -121,14 +120,21 @@ func MethodAllowed(k EndpointKind, method string) bool {
 // acceptable from this adapter. It returns 0 when it is, and otherwise the error
 // code the daemon answers with:
 //
-//   - peer.CodeMethodNotFound: no such method;
+//   - peer.CodeMethodNotFound: no such method, or a method only the daemon may
+//     call (the method does not exist in this direction);
 //   - adapterproto.CodeWrongEndpointKind: the method is forbidden for the kind;
 //   - adapterproto.CodeCapabilityNotDeclared: the adapter did not declare the kind,
-//     or the capability the method needs (interrupt, ack on behalf, server
-//     requests).
+//     or the capability the method needs (ack on behalf, server requests).
+//
+// Whether the daemon may send an adapter a method that needs a capability (an
+// interrupt) is not judged here, since the daemon is the caller then: it is
+// Signals and AcceptsSignal.
 func (a Admission) Check(k EndpointKind, method string) int {
 	r, ok := requirements[method]
 	if !ok {
+		return peer.CodeMethodNotFound
+	}
+	if info, ok := adapterproto.Lookup(method); !ok || !info.Direction.CalledBy(false) {
 		return peer.CodeMethodNotFound
 	}
 	if r.of(k) == Forbidden {
@@ -139,10 +145,6 @@ func (a Admission) Check(k EndpointKind, method string) int {
 	}
 	if a.caps.Runtime != nil {
 		switch r.gate {
-		case gateInterrupt:
-			if !a.caps.Runtime.Interrupt {
-				return adapterproto.CodeCapabilityNotDeclared
-			}
 		case gateAckOnBehalf:
 			if !a.caps.Runtime.AckOnBehalf {
 				return adapterproto.CodeCapabilityNotDeclared

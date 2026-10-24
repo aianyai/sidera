@@ -54,10 +54,15 @@ func (k EndpointKind) String() string {
 }
 
 // TargetKind is the kind authorization uses for a request aimed at an endpoint
-// of this kind.
+// of this kind. A value that is not a kind gives the zero authz.TargetKind,
+// which authorization refuses as a malformed request, so a request about it is
+// never judged as one aimed at an ordinary endpoint.
 func (k EndpointKind) TargetKind() authz.TargetKind {
-	if k == KindRuntime {
+	switch k {
+	case KindRuntime:
 		return authz.TargetRuntime
+	case KindSession, KindDirect:
+		return authz.TargetEndpoint
 	}
-	return authz.TargetEndpoint
+	return 0
 }

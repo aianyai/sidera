@@ -39,10 +39,21 @@ func PromptOutcome(r adapterproto.PromptDeliverResult) (handoff.AttemptOutcome, 
 // it was written) means the prompt certainly did not reach the session. Every
 // other failure leaves the attempt unknown, to be reconciled: an internal error,
 // a cancellation, no response at all, a timeout, a closed connection, and any
-// error the rule does not know. A nil error is no failure; it maps to unknown
-// as well, so that a caller that mistakenly passes one never records a delivery
-// as failed.
+// error the rule does not know.
+//
+// 1005 attempt_conflict is one of those, although it is an application code the
+// rule counts as no effect: it says the attempt identifier is already known with
+// other parameters, so an earlier request of the same attempt reached the
+// adapter and may have delivered the prompt. The conflicting request itself did
+// nothing, but the attempt's outcome is exactly what the earlier one left.
+//
+// A nil error is no failure; it maps to unknown as well, so that a caller that
+// mistakenly passes one never records a delivery as failed.
 func PromptOutcomeOnError(err error) handoff.AttemptOutcome {
+	var remote *peer.Error
+	if errors.As(err, &remote) && remote.Code == adapterproto.CodeAttemptConflict {
+		return handoff.AttemptUnknown
+	}
 	if peer.NoEffect(err) {
 		return handoff.AttemptFailed
 	}

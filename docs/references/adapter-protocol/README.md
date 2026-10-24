@@ -506,7 +506,12 @@ the endpoint does not accept is answered by the daemon as unsupported, without
 calling the adapter.
 
 Which methods apply to which kind (forbidden is refused with `1002`; a method
-that needs a capability the adapter did not declare is refused with `1003`):
+that needs a capability the adapter did not declare is refused with `1003`). The
+table judges calls the adapter makes: a method only the daemon may call
+(`initialize`, `session.create`, `prompt.deliver`, `session.interrupt`, ...) is
+`-32601` when the adapter calls it, as an unknown method is, before the kind or a
+capability is looked at. `session.interrupt` needs `interrupt` for the daemon to
+send it, which the signals an endpoint accepts (above) already state:
 
 | Method | runtime and session endpoints | direct endpoints |
 | ------ | ----------------------------- | ---------------- |
@@ -538,8 +543,8 @@ except the two that are plain calls (marked "call"):
 | ----------- | ------- |
 | `prompt.deliver` returns `accepted` or `persisted` | `handoff.AttemptDelivered` |
 | `prompt.deliver` returns `refused` | `AttemptFailed` |
-| an error response with a code of the effect rule's no-effect list (`-32700`, `-32600`, `-32601`, `-32602`, `-32001` to `-32004`, `-32022`, and any code in the application range 1001 to 1099) | `AttemptFailed` (the request had no effect) |
-| no response, a timeout, `-32603`, `-32800`, a closed connection, and an error response with any other code, a code of no package's table included | `AttemptUnknown`, then `prompt.reconcile` |
+| an error response with a code of the effect rule's no-effect list (`-32700`, `-32600`, `-32601`, `-32602`, `-32001` to `-32004`, `-32022`, and any code in the application range 1001 to 1099 except `1005`) | `AttemptFailed` (the request had no effect) |
+| no response, a timeout, `-32603`, `-32800`, `1005 attempt_conflict`, a closed connection, and an error response with any other code, a code of no package's table included | `AttemptUnknown`, then `prompt.reconcile` |
 | reconcile `found`, `provably_absent`, `indeterminate` | `AttemptDelivered`, `AttemptFailed`, `AttemptUnknown` |
 | `turn.started` with an attempt | call: proof the attempt was delivered, as a `found` verdict |
 | availability `runtime_auth` | `Signals.AuthInvalid` |
@@ -561,6 +566,11 @@ except the two that are plain calls (marked "call"):
   its own messages; an adapter reading them for it would swallow them.
 - **An undeclared capability is `1003`, a wrong kind `1002`**, so an adapter
   author can tell a bug in their choice of endpoint from a missing declaration.
+  A method of the other direction is `-32601`: it does not exist for the sender,
+  so neither the kind nor a capability could make it valid.
+- **`1005 attempt_conflict` leaves a prompt attempt unknown** although the
+  conflicting request itself did nothing: the identifier is already known, so an
+  earlier request of the attempt reached the adapter and may have delivered.
 - **The daemon, not the adapter, judges acknowledgements.** The adapter only
   reports what it saw in the durable record, so one rule decides what counts as
   seen.
@@ -569,7 +579,7 @@ except the two that are plain calls (marked "call"):
 
 - `internal/adapterreg` (`admit.go`, `methods.go`, `mappings.go`); tests
   `TestAdmitDecisions`, `TestDeclaredKindsAndSignals`, `TestMethodMatrix`,
-  `TestCheck`, `TestSignals`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestInterruptReply`,
+  `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestInterruptReply`,
   `TestCloseReply`, `TestCheckHandshake`.
 
 ## Control signals

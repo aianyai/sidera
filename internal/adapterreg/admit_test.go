@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/trust"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
@@ -209,6 +211,11 @@ func TestEndpointKindTargets(t *testing.T) {
 			t.Errorf("%v.TargetKind() = %v, want %v", k, k.TargetKind(), want)
 		}
 	}
+	for _, k := range []adapterreg.EndpointKind{0, 4, 255} {
+		if got := k.TargetKind(); got != 0 {
+			t.Errorf("%v.TargetKind() = %v, want the zero target kind", k, got)
+		}
+	}
 	for k, want := range map[adapterreg.EndpointKind]string{adapterreg.KindRuntime: "runtime", adapterreg.KindSession: "session", adapterreg.KindDirect: "direct", 9: "invalid(9)"} {
 		if k.String() != want {
 			t.Errorf("String(%d) = %q", k, k.String())
@@ -321,5 +328,38 @@ func TestAdmissionIsIndependentOfItsInputs(t *testing.T) {
 	got.Runtime.Frontends[1] = "cli"
 	if a.Capabilities().Runtime.Frontends[1] != "mcp" {
 		t.Error("Capabilities returns the admission's own slice")
+	}
+}
+
+// A value that is not an endpoint kind must not be judged as an ordinary
+// endpoint: its target kind is the zero one, and authorization refuses a request
+// about it as malformed, while the three real kinds are well formed.
+func TestInvalidEndpointKindFailsClosedInAuthorization(t *testing.T) {
+	nodeBytes := bytes.Repeat([]byte{1}, ident.NodeIDLen)
+	endpointBytes := bytes.Repeat([]byte{2}, ident.EndpointIDLen)
+	node, err := ident.NodeIDFromBytes(nodeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint, err := ident.EndpointIDFromBytes(endpointBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reason := func(k adapterreg.EndpointKind) authz.Reason {
+		return authz.Evaluate(authz.Policy{}, authz.Request{
+			Now: time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC), Trust: trust.AllowedDirect, Stage: authz.StageIntake,
+			Sender: authz.Sender{Node: node}, Action: authz.ActionEndpointStatus,
+			Target: authz.Target{Kind: k.TargetKind(), Endpoint: endpoint},
+		}).Reason
+	}
+	for _, k := range []adapterreg.EndpointKind{0, 4, 255} {
+		if got := reason(k); got != authz.ReasonMalformedRequest {
+			t.Errorf("kind %d: reason %v, want malformed request", k, got)
+		}
+	}
+	for _, k := range adapterreg.Kinds() {
+		if got := reason(k); got == authz.ReasonMalformedRequest {
+			t.Errorf("kind %v: a real kind is refused as malformed", k)
+		}
 	}
 }

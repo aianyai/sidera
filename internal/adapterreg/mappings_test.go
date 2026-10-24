@@ -51,9 +51,9 @@ func TestPromptOutcomeOnError(t *testing.T) {
 		codes = append(codes, c.Code)
 	}
 	for _, code := range codes {
-		// Written out: only these two codes leave the outcome open.
+		// Written out: only these codes leave the outcome open.
 		want := handoff.AttemptFailed
-		if code == -32603 || code == -32800 {
+		if code == -32603 || code == -32800 || code == 1005 {
 			want = handoff.AttemptUnknown
 		}
 		if got := adapterreg.PromptOutcomeOnError(&peer.Error{Code: code}); got != want {
@@ -67,6 +67,7 @@ func TestPromptOutcomeOnError(t *testing.T) {
 		"refused before it was written": {peer.ErrOverloaded, handoff.AttemptFailed},
 		"not sent":                      {peer.ErrMessageTooLarge, handoff.AttemptFailed},
 		"wrapped error response":        {fmt.Errorf("call: %w", &peer.Error{Code: adapterproto.CodeUnknownAttempt}), handoff.AttemptFailed},
+		"wrapped attempt conflict":      {fmt.Errorf("call: %w", &peer.Error{Code: adapterproto.CodeAttemptConflict}), handoff.AttemptUnknown},
 		"closed connection":             {peer.ErrClosed, handoff.AttemptUnknown},
 		"timeout":                       {context.DeadlineExceeded, handoff.AttemptUnknown},
 		"malformed response":            {peer.ErrInvalidResponse, handoff.AttemptUnknown},
@@ -465,5 +466,26 @@ func TestRuntimeVersionUntested(t *testing.T) {
 				t.Fatalf("RuntimeVersionUntested = %v, want %v", got, tc.untested)
 			}
 		})
+	}
+}
+
+// An attempt_conflict answer to prompt.deliver says the attempt identifier is
+// already known with other parameters: an earlier request of the attempt reached
+// the adapter and may have delivered, so the attempt is unknown and reconciled,
+// not failed and retried.
+func TestPromptOutcomeOnAttemptConflictIsUnknown(t *testing.T) {
+	err := &peer.Error{Code: adapterproto.CodeAttemptConflict, Message: "attempt conflict"}
+	if !peer.NoEffect(err) {
+		t.Fatal("the premise changed: the effect rule no longer counts attempt_conflict as no effect")
+	}
+	if got := adapterreg.PromptOutcomeOnError(err); got != handoff.AttemptUnknown {
+		t.Errorf("PromptOutcomeOnError(attempt_conflict) = %v, want unknown", got)
+	}
+	// The neighbours in the same range stay failed: the request did nothing and
+	// names no earlier attempt.
+	for _, code := range []int{adapterproto.CodeUnknownAttempt, adapterproto.CodeUnknownEndpoint, adapterproto.CodeSendRefused} {
+		if got := adapterreg.PromptOutcomeOnError(&peer.Error{Code: code}); got != handoff.AttemptFailed {
+			t.Errorf("PromptOutcomeOnError(%d) = %v, want failed", code, got)
+		}
 	}
 }
