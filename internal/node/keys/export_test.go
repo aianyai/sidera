@@ -136,3 +136,15 @@ func TestReadSelfRevocationRefusals(t *testing.T) {
 		})
 	}
 }
+
+// The zero SelfRevocation is not a statement: exporting it would hand the owner
+// an empty backup that looks like a success. Only this package makes a
+// statement, so a zero one is a programming error and the formatter panics.
+func TestFormatRevocationExportPanicsOnAZeroSelfRevocation(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("FormatRevocationExport of the zero SelfRevocation did not panic")
+		}
+	}()
+	keys.FormatRevocationExport(keys.SelfRevocation{})
+}

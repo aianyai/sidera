@@ -23,7 +23,14 @@ const (
 // text with its trailing newline, and the record digest. It is the one formatter
 // behind both ways of exporting, for a statement from Keys.SelfRevocation or from
 // ReadSelfRevocation. The file an export writes is the plain Wire bytes.
+//
+// It panics on the zero SelfRevocation, which no statement of this package is:
+// an export of nothing would read as a backup that succeeded, and only a caller
+// that built a statement by hand could reach it.
 func FormatRevocationExport(sr SelfRevocation) (text []byte, digest record.Digest) {
+	if len(sr.wire) == 0 {
+		panic("keys: FormatRevocationExport of the zero SelfRevocation")
+	}
 	body := base64.StdEncoding.EncodeToString(sr.wire)
 	var b strings.Builder
 	b.WriteString(exportBegin)

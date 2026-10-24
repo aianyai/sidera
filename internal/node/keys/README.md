@@ -22,7 +22,7 @@ transaction of `txn`; nothing here calls an `fsx` write.
 | `Keys.RenewalDue`, `RenewalDue`, `Keys.Renew` | The renewal rule (a pure function with a typed verdict and reason) and the renewal itself, which is also the repair of an interrupted one. |
 | `Keys.RenewalInterrupted`, `RenewalInterrupted`, `RecoveryWork` | The recovery predicate: the serial file is ahead of the certificate. Pure functions of the disk, for the load, the startup repair and the clean-scenario test. |
 | `ReadClock`, `Keys.SaveClock`, `PutClockCleared` | The clock record. `SaveClock` is the periodic write and never goes back; `PutClockCleared` is the write of the owner's clear, for the engine's transaction. |
-| `Keys.SelfRevocation`, `ReadSelfRevocation`, `FormatRevocationExport` | The statement `Load` verified as this node's, for a running node; the reader of the file for a caller with no loaded keys; the one formatter of the export. |
+| `Keys.SelfRevocation`, `ReadSelfRevocation`, `FormatRevocationExport` | The statement `Load` verified as this node's, for a running node; the reader of the file for a caller with no loaded keys; the one formatter of the export, which panics on the zero statement. |
 | `Keys.CheckNotRetired` | The refusal to run a node whose identity is among the loaded revocations. |
 | `PlanInit`, `InitPlan.WriteKeys`, `WriteMarker`, `Initialized` | The key side of `init`, and the marker. |
 | `CheckPermissions` | The permission sweep of `keys/`, for a caller that checks before it loads. |

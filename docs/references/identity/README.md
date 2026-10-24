@@ -202,7 +202,9 @@ statement with its own. `ReadSelfRevocation` reads and verifies the file for a
 caller that has not loaded the keys, such as an export while the node is stopped;
 it cannot say that the statement is this node's, only that it verifies under the
 key of the node it names. `FormatRevocationExport` is the one formatter of the
-export:
+export, and panics on the zero statement (which only a caller that built one by
+hand could pass): an export of nothing would read as a backup that succeeded
+(`TestFormatRevocationExportPanicsOnAZeroSelfRevocation`):
 
 ```
 -----BEGIN SIDERA SELF-REVOCATION-----
