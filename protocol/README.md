@@ -45,7 +45,8 @@ fetched, they only let the files refer to each other
   example `wait_s`) says so.
 - **Identifiers** (`EndpointRef`, `Address`, `MessageID`) are strings of 1 to 128
   characters with no pattern: they are opaque to adapters, and the daemon is the
-  only place that parses their syntax.
+  only place that parses their syntax. The examples write them as hexadecimal
+  strings for readability; no sender or reader may rely on that spelling.
 - **Numbers** are integers written as plain integer literals. The schema accepts
   `1.0` as an integer, as the specification says; the Go types do not, and
   neither should a sender.

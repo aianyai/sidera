@@ -17,7 +17,7 @@ const (
 	MaxDetailLen = 1024
 )
 
-// Patterns of identifiers whose text form the protocol itself fixes. The same
+// Patterns of identifiers whose syntax the protocol itself fixes. The same
 // expressions appear in the schema, which a test compares.
 const (
 	attemptIDPattern = `^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`
@@ -35,13 +35,13 @@ var (
 
 const zeroLeaseRef = "00000000000000000000000000000000"
 
-// EndpointRef names an endpoint of this node. It is the text form of an endpoint
-// identifier, but the protocol treats it as an opaque string the daemon hands
-// out and the adapter hands back unchanged; only the daemon checks its syntax.
+// EndpointRef names an endpoint of this node. The protocol treats it as an
+// opaque string the daemon hands out and the adapter hands back unchanged; only
+// the daemon checks its syntax.
 type EndpointRef string
 
-// Address is the text form of a recipient or sender, "<node>/<endpoint>". It is
-// opaque to the SDK for the same reason as EndpointRef.
+// Address names a recipient or sender. It is opaque to the SDK for the same
+// reason as EndpointRef.
 type Address string
 
 // AttemptID numbers an attempt to create a session or to send a prompt: a random
@@ -49,8 +49,8 @@ type Address string
 // session can be used as the user-message identifier a runtime wants.
 type AttemptID string
 
-// LeaseRef is the identifier of one page handed out by a recv: the lowercase
-// hexadecimal text of a delivery lease identifier.
+// LeaseRef is the identifier of one page handed out by a recv: 32 lowercase
+// hexadecimal characters, not all zero.
 type LeaseRef string
 
 // Token is an endpoint or probe token: 32 random bytes in unpadded base64url.

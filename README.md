@@ -23,8 +23,8 @@ nothing else is implemented yet.
 - `protocol/`: the language-neutral definition of the adapter protocol (JSON Schema
   and golden messages) and the tests that hold the Go types to it, see its
   [README](protocol/README.md).
-- `sdk/go/`: the Go module adapters and the daemon share, with the protocol
-  messages and the adapter manifest, see its [README](sdk/go/README.md).
+- `sdk/go/`: the Go module adapters and the daemon share, with the JSON-RPC peer,
+  the protocol messages and the adapter manifest, see its [README](sdk/go/README.md).
 - `docs/references/`: engineering references by topic (what, why, where), see its
   [README](docs/references/README.md).
 

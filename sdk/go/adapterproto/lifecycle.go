@@ -408,7 +408,7 @@ func (d DirectAttach) Validate() error {
 // reconnect. It is a full re-attachment, so an adapter keeps no memory of an
 // earlier connection that it relies on.
 type StartParams struct {
-	// Node is the text form of this node's identifier, opaque to the adapter.
+	// Node names this node. It is opaque to the adapter.
 	Node string `json:"node"`
 	// RuntimeEndpoint is the runtime endpoint the daemon allocated; present
 	// exactly when the adapter declared runtime capabilities.

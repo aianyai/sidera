@@ -1,14 +1,15 @@
 # sdk/go
 
-The Go module that adapters and the daemon share: the adapter protocol's
-message types and the adapter package manifest. It is a separate module,
-`github.com/aianyai/sidera/sdk/go`, and depends on the standard library only, so
-a third-party adapter can import it without pulling in the daemon's dependency
-graph.
+The Go module that adapters and the daemon share: the JSON-RPC peer that frames
+the adapter protocol, its message types and the adapter package manifest. It is
+a separate module, `github.com/aianyai/sidera/sdk/go`, and depends on the
+standard library only, so a third-party adapter can import it without pulling in
+the daemon's dependency graph.
 
 | Package | Holds |
 | ------- | ----- |
-| [`adapterproto`](adapterproto/README.md) | Protocol version and negotiation, method names, the parameter and result type of every method, enums, error codes, capabilities |
+| [`peer`](peer/README.md) | The symmetric JSON-RPC 2.0 peer: line framing and limits, queues and overload, cancellation, the request id rule, the JSON-RPC and server-range error codes and the effect rule |
+| [`adapterproto`](adapterproto/README.md) | Protocol version and negotiation, method names, the parameter and result type of every method, enums, the application error codes, capabilities |
 | [`manifest`](manifest/README.md) | The adapter package manifest: types, strict parsing and structural validation |
 
 The module root holds no package.
