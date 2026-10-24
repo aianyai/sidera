@@ -348,7 +348,7 @@ func (r ControlStatusReply) Validate() error {
 	}
 	c.beyond(len(duplicates(names)) == 0, "presets: two entries share a name")
 	c.beyond(slices.IsSorted(names), "presets: not sorted by name")
-	c.field("as_of", intRange(r.AsOf, 1, MaxTimestampMS))
+	c.field("as_of", intRange(r.AsOf, 1, MaxTimestampS))
 	return c.err
 }
 

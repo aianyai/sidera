@@ -140,7 +140,7 @@ func TestIntegerBounds(t *testing.T) {
 		{"status.queued", 0, 1<<31 - 1, func(v int64) error {
 			return adapterproto.ControlStatusReply{Activity: adapterproto.ActivityIdle, Queued: int(v), AsOf: 1}.Validate()
 		}},
-		{"status.as_of", 1, exact, func(v int64) error {
+		{"status.as_of", 1, 253402300799, func(v int64) error {
 			return adapterproto.ControlStatusReply{Activity: adapterproto.ActivityIdle, AsOf: v}.Validate()
 		}},
 		{"recv.part", 1, 1000000, func(v int64) error {

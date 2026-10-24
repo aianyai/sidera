@@ -14,6 +14,11 @@ import (
 // display and diagnosis only; the daemon judges time by its own clock.
 const MaxTimestampMS = 1<<53 - 1
 
+// MaxTimestampS bounds a timestamp in Unix seconds: 9999-12-31T23:59:59Z, the
+// latest time any record of the channel carries. A second count is not held to
+// the millisecond bound, which would admit times billions of years away.
+const MaxTimestampS = 253402300799
+
 func timestampMS(v int64) error { return intRange(v, 1, MaxTimestampMS) }
 
 // Limits of the lifecycle messages.

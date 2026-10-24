@@ -398,7 +398,7 @@
                 }
               }
             },
-            "as_of": { "description": "Unix seconds.", "type": "integer", "minimum": 1, "maximum": 9007199254740991 }
+            "as_of": { "description": "Unix seconds, up to 9999-12-31T23:59:59Z.", "type": "integer", "minimum": 1, "maximum": 253402300799 }
           }
         }
       ]
