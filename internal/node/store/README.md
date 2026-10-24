@@ -48,6 +48,11 @@ engine applies the delivery rules and calls the writes.
 - **Bodies first, and removed last.** The caller works out which bodies lost their
   last reference (the reference count is in the engine's view) and says so; a body
   already gone is not an error.
+- **A header-unreadable quarantined file of a delivery directory is swept after a
+  lost record's retention.** With no replacement, nothing but the time of its
+  alert says when it may go: the retention of a lost record found then (from
+  `delivery.LostReportBy`) is the bound. A file with a record under its name goes
+  with that record.
 - **A removal is checked.** The sweep refuses a name that is not a record file or a
   quarantined file of a directory of records.
 - **A control record goes before the delivery derived from it** in a sweep, and a

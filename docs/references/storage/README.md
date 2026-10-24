@@ -469,7 +469,13 @@ and the idempotency key until `report_by`, the status report until `report_by` o
 whole `report_by` window after its creation, and the facts reply permission reads
 until `report_by` plus the clock tolerance plus the reply window. That is about 27
 hours after the delivery deadline. Then a summary goes to the archive and the file
-is removed, a quarantined file with its replacement (the file first). Administrative
+is removed, a quarantined file with its replacement (the file first). A quarantined
+file of a delivery directory whose first line was unreadable has no replacement,
+and nothing in it says what it was; it stays until the retention a lost record
+would have if it were found at the time of the file's alert has passed (the
+longest delivery deadline, the clock tolerance, the report offset and the reply
+facts window, counted from the discovery), because until then a delivery related
+to it may still be live. The alert goes after it. Administrative
 results are kept 7 days, acknowledged alerts 7 days after the acknowledgement, and
 archive files 30 days, uncompressed. An archived message costs about 2.4 KiB (two
 summaries and about eight events), so at 3,000 messages an hour, the upper scale
@@ -753,9 +759,6 @@ so that the double cannot drift from what it stands for.
   step sequences, the classes and the ordering against the crash model, not
   against a real kernel.
 
-- **The sweep leaves a quarantined file whose first line is unreadable**, in a
-  directory of delivery records, where it is: the bound after which it may go is
-  not applied yet.
 - **`DrainCandidates` is not known to be the whole predicate** of the replay that
   drains the records queued for a closed endpoint: it names the accepted target and
   control records that are not lost replacements, and the engine decides whether a
@@ -800,7 +803,7 @@ so that the double cannot drift from what it stands for.
 | recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `TestCleanScenariosLeaveNoRecoveryWork` |
 | sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` |
 | archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |
-| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` |
+| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound` among them) |
 | deleting `state/`, the layout rule | `internal/node/store/recovery.go` | `state_deleted_test.go` |
 | cold start | `internal/node/store/bench_test.go` | `BenchmarkColdStartScan`, `TestColdStartFixtureScansBack` |
 

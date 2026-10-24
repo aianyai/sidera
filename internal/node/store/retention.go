@@ -95,6 +95,34 @@ func RetainUntil(rec Record) (until time.Time, finished bool) {
 	return time.Time{}, false
 }
 
+func isDeliveryDir(dir string) bool { return dir == OutDir || dir == InDir || dir == CtlDir }
+
+// lostRetention is the instant until which a record of the delivery directory
+// dir that was lost at the time at, and replaced then, would be kept: the
+// retention of the replacement the delivery package makes for it. It bounds the
+// retention of every delivery that was accepted before at, so once it has passed
+// nothing that could be related to the lost file is still live. It is computed
+// with the same function the sweep uses for a replacement that exists.
+func lostRetention(dir string, at time.Time) (until time.Time, ok bool) {
+	side, control := delivery.SideTarget, dir == CtlDir
+	if dir == OutDir {
+		side = delivery.SideSource
+	}
+	rec, _, err := delivery.NewLostRecord(side, control, at)
+	if err != nil {
+		return time.Time{}, false // an alert without a time: nothing says when, so the file stays
+	}
+	switch dir {
+	case OutDir:
+		until, _ = RetainUntil(OutRecord{Lost: &LostOut{DiscoveredAt: at, Deliveries: []delivery.Record{rec}}})
+	case CtlDir:
+		until, _ = RetainUntil(CtlRecord{Lost: true, DiscoveredAt: at, Record: rec, Dedup: delivery.NewLostDedupRecord(delivery.DedupKey{}, at)})
+	default:
+		until, _ = RetainUntil(InRecord{Lost: true, DiscoveredAt: at, Record: rec, Dedup: delivery.NewLostDedupRecord(delivery.DedupKey{}, at)})
+	}
+	return until, true
+}
+
 // SweepPlan is the work of one pass of the archive sweep.
 type SweepPlan struct {
 	Summaries []ArchiveSummary
@@ -189,6 +217,40 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 			continue
 		}
 		plan.Corrupt = append(plan.Corrupt, FileRef{Dir: c.Dir, Name: c.Name})
+	}
+	// A quarantined file of a delivery directory whose first line is unreadable
+	// has no replacement, so no record's retention ends with it. Until a lost
+	// record's own retention from the time the loss was found has passed, the name
+	// still counts as a record that may exist (see lostRetention), and then the
+	// file goes.
+	discovered := map[AlertID]time.Time{}
+	for _, a := range sc.Alerts {
+		discovered[a.ID] = a.At
+	}
+	exists := map[string]bool{} // delivery files under their names, whole or damaged
+	for _, o := range sc.Out {
+		exists[path.Join(OutDir, o.Name())] = true
+	}
+	for _, in := range sc.In {
+		exists[path.Join(InDir, in.Name())] = true
+	}
+	for _, c := range sc.Ctl {
+		exists[path.Join(CtlDir, c.Name())] = true
+	}
+	for _, d := range sc.Damaged {
+		exists[path.Join(d.Dir, d.Name)] = true
+	}
+	for _, c := range sc.Corrupt {
+		if c.Key != nil || !isDeliveryDir(c.Dir) || exists[path.Join(c.Dir, c.Original)] {
+			continue // with a file under the name, the file's own retention decides
+		}
+		at, ok := discovered[c.Alert]
+		if !ok {
+			continue // an unfinished quarantine: its alert is not written yet
+		}
+		if until, ok := lostRetention(c.Dir, at); ok && !now.Before(until) {
+			plan.Corrupt = append(plan.Corrupt, FileRef{Dir: c.Dir, Name: c.Name})
+		}
 	}
 	for _, a := range sc.Admin {
 		if ready(a) {

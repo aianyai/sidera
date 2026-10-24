@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"fmt"
 	"path"
 	"sort"
 	"strings"
@@ -234,5 +235,68 @@ func TestPlanSweepKeepsADerivedDeliveryWhileItsControlRecordIsLive(t *testing.T)
 	plan := store.PlanSweep(r.scan(), base.Add(100*24*time.Hour))
 	if len(plan.Records)+len(plan.Ctl) != 0 {
 		t.Errorf("the derived delivery was swept while its control record is live: %+v", plan)
+	}
+}
+
+// The quarantined file of a delivery record whose first line cannot be read has
+// no replacement, so nothing says when it may go but the time the node found it
+// (the time of its alert). It stays until what a lost record found at that time
+// would be kept: the longest delivery deadline an accepted message can have (1
+// hour), the clock tolerance (2 minutes), the report offset (3 hours 2 minutes)
+// and the retention of the facts reply permission reads (24 hours 2 minutes),
+// counted from the discovery. Not a nanosecond earlier.
+func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *testing.T) {
+	bound := base.Add(time.Hour + 2*time.Minute).Add(3*time.Hour + 2*time.Minute).Add(24*time.Hour + 2*time.Minute)
+	name := func(i int) string { return fmt.Sprintf("%064x.rec", i) }
+	corrupt := func(dir string, i int, id store.AlertID) string { return name(i) + "." + id.String() + ".corrupt" }
+
+	build := func(t *testing.T) *rig {
+		r := newRig(t)
+		for i, dir := range []string{store.OutDir, store.InDir, store.CtlDir} {
+			id := store.AlertID{byte(i + 1)}
+			seed(t, r.mem, store.AlertRecord{ID: id, Kind: "corrupt_record", At: base, Detail: "d", Subject: dir})
+			seedRaw(t, r.mem, dir, corrupt(dir, i, id), []byte("not a first line"))
+		}
+		// No alert yet: the quarantine is unfinished, and its rule runs before any sweep.
+		seedRaw(t, r.mem, store.InDir, corrupt(store.InDir, 9, store.AlertID{9}), []byte("not a first line"))
+		// A directory that holds no delivery records is the owner's to acknowledge.
+		seed(t, r.mem, store.AlertRecord{ID: store.AlertID{7}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "checkpoints"})
+		seedRaw(t, r.mem, store.CheckpointsDir, corrupt(store.CheckpointsDir, 7, store.AlertID{7}), []byte("not a first line"))
+		return r
+	}
+	want := []string{
+		path.Join(store.CtlDir, corrupt(store.CtlDir, 2, store.AlertID{3})),
+		path.Join(store.InDir, corrupt(store.InDir, 1, store.AlertID{2})),
+		path.Join(store.OutDir, corrupt(store.OutDir, 0, store.AlertID{1})),
+	} // in the order of the plan, sorted by path
+	for _, c := range []struct {
+		rule string
+		now  time.Time
+		want []string
+	}{
+		{"not at the discovery", base, nil},
+		{"not a nanosecond before the bound", bound.Add(-time.Nanosecond), nil},
+		{"at the bound", bound, want},
+		{"after the bound", bound.Add(24 * time.Hour), want},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			var got []string
+			for _, f := range store.PlanSweep(build(t).scan(), c.now).Corrupt {
+				got = append(got, path.Join(f.Dir, f.Name))
+			}
+			sort.Strings(got)
+			if strings.Join(got, "\n") != strings.Join(c.want, "\n") {
+				t.Errorf("quarantined files swept at %v:\n got  %v\n want %v", c.now, got, c.want)
+			}
+		})
+	}
+
+	// What the plan names can be removed: the sweep takes the files and the
+	// alerts of the next pass follow.
+	r := build(t)
+	plan := store.PlanSweep(r.scan(), bound)
+	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: bound, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records, Bodies: plan.Bodies}))
+	if left := r.scan().Corrupt; len(left) != 2 {
+		t.Errorf("%d quarantined files left after the sweep, want the two that must stay (no alert yet, not a delivery directory): %v", len(left), left)
 	}
 }
