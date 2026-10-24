@@ -6,6 +6,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
@@ -269,4 +270,47 @@ func TestEveryFileIsOwnerOnly(t *testing.T) {
 			t.Errorf("%s is not owner-only: %+v %v", p, info, err)
 		}
 	}
+}
+
+// A head record lists its followers as they were read, and the followers written
+// with it must be those: a revision or an acceptance time that is not the listed
+// one would never be replayed, and a follower that is not listed would be lost.
+func TestHeadRecordRefusesAFollowerItDoesNotListAsItWasRead(t *testing.T) {
+	a, b := inRev(1, 1), inRev(2, 1)
+	event := delivery.Event{Type: delivery.EventNotified}
+	notify := func(in store.InRecord) store.InRecord {
+		in.Record, _, _ = in.Record.Apply(base, event)
+		return in
+	}
+	head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingNotified, delivery.CauseNone, a)}
+	for name, run := range map[string]func(r *rig) error{
+		"a follower that is not listed": func(r *rig) error { return r.st.PromptEnd(head, []store.InRecord{notify(a), notify(b)}) },
+		"a follower with another revision than the one listed": func(r *rig) error {
+			stale := notify(a)
+			stale.Rev = 5
+			return r.st.PromptEnd(head, []store.InRecord{stale})
+		},
+		"a follower accepted at another time than the one listed": func(r *rig) error {
+			other := notify(a)
+			other.AcceptedAt = other.AcceptedAt.Add(time.Second)
+			return r.st.PromptEnd(head, []store.InRecord{other})
+		},
+		"an event the transaction does not carry": func(r *rig) error {
+			blocked := head
+			blocked.Pending.Event = store.PendingBlocked
+			return r.st.PromptEnd(blocked, []store.InRecord{notify(a)})
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t)
+			if err := run(r); err == nil {
+				t.Error("accepted")
+			}
+			if r.rec.count() != 0 {
+				t.Errorf("%d crash points were reached by a call that was refused", r.rec.count())
+			}
+		})
+	}
+	r := newRig(t)
+	mustDo(t, r.st.PromptEnd(head, []store.InRecord{notify(a)}))
 }
