@@ -328,11 +328,11 @@ func TestUnsyncedNamesSurviveIndependently(t *testing.T) {
 	}
 }
 
-// A rename over an existing target leaves the old or the new file under the
-// target name, nothing else; the source name is decided on its own, so a clone
-// can hold the new file under both names, or the old one with the source name
-// still present.
-func TestRenameOverATargetIsOldOrNewAndTheSourceNameIsIndependent(t *testing.T) {
+// A single rename is atomic, so a rename over an existing target leaves either
+// the old file under the target name with the source name still present, or the
+// new file under the target name with the source name gone. The target never
+// holds a third value, and the new file never has two names or none.
+func TestRenameOverATargetIsOldWithTheSourceOrNewWithoutIt(t *testing.T) {
 	mem := fsxtest.NewMem()
 	durable(t, mem, "target", "old")
 	f, err := mem.CreateTemp(tag, ".", fsx.ModePrivate)
@@ -357,16 +357,52 @@ func TestRenameOverATargetIsOldOrNewAndTheSourceNameIsIndependent(t *testing.T) 
 				t.Fatalf("the source name holds %q, want the renamed file", b)
 			}
 		}
+		if (string(got) == "new") == tmpPresent {
+			t.Fatalf("target = %q with source present = %v: the rename must have happened (new, source gone) or not (old, source present)", got, tmpPresent)
+		}
 		combos[fmt.Sprintf("%s/source-present=%v", got, tmpPresent)]++
 	}
 	t.Logf("combinations %v", combos)
-	for _, want := range []string{"old/source-present=false", "old/source-present=true", "new/source-present=false", "new/source-present=true"} {
+	for _, want := range []string{"old/source-present=true", "new/source-present=false"} {
 		if combos[want] == 0 {
 			t.Errorf("combination %s never occurred in %d seeds", want, manySeeds)
 		}
 	}
 	if got, _ := readFile(t, mem.CrashCloneWorst(), "target"); string(got) != "old" {
 		t.Errorf("worst mode: target = %q, want the old content", got)
+	}
+}
+
+// A file has one name at a time, like a directory: a rename of a file to a free
+// name is moved or not, and both names are never present, nor neither.
+func TestFileRenameMovesOrDoesNotButNeverDuplicatesOrLoses(t *testing.T) {
+	mem := fsxtest.NewMem()
+	durable(t, mem, "rec", "payload")
+	// Quarantining a damaged file: the rename is made, its directory sync is not.
+	must(t, mem.Rename(tag, "rec", "rec.corrupt"))
+
+	moved, notMoved := 0, 0
+	for _, c := range crashes(mem) {
+		rec, corrupt := exists(c, "rec"), exists(c, "rec.corrupt")
+		if rec == corrupt {
+			t.Fatalf("rec present = %v, rec.corrupt present = %v: a renamed file must have exactly one name", rec, corrupt)
+		}
+		name := "rec"
+		if corrupt {
+			name = "rec.corrupt"
+			moved++
+		} else {
+			notMoved++
+		}
+		if got, _ := readFile(t, c, name); string(got) != "payload" {
+			t.Fatalf("%s = %q, want the renamed file's content", name, got)
+		}
+	}
+	if moved == 0 || notMoved == 0 {
+		t.Errorf("moved = %d, not moved = %d over %d seeds; both outcomes must occur", moved, notMoved, manySeeds)
+	}
+	if w := mem.CrashCloneWorst(); !exists(w, "rec") || exists(w, "rec.corrupt") {
+		t.Error("worst mode: want the file under its old name")
 	}
 }
 

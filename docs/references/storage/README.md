@@ -178,8 +178,8 @@ are pending verification by CI on main: the development machine is macOS.
 `fsxtest.Mem` is an in-memory `FS` that keeps, for every file, the current
 content and how much of it is synced, and for every directory the current
 entries and the entries as of its last sync. It produces the states a crash
-can leave. Its rules are the weakest guarantees POSIX gives, each with its
-source:
+can leave. Its rules are weaker than any journaling or copy-on-write file
+system (POSIX itself says nothing about crashes), each with its source:
 
 | Rule | Basis |
 | ---- | ----- |
@@ -188,8 +188,8 @@ source:
 | After `SyncDir`, the directory's own entries survive. It does not cover the content of the files in it or the entries of its subdirectories. | `fsync(2)` on a directory descriptor |
 | Unsynced file data, after a power loss: the length is anything from the synced length to the written length, and each 4 KiB block beyond the synced length is independently the real data, zeros (the size grew but the data never arrived) or garbage. The synced part is a prefix of the content because files are never overwritten. | OSDI 2014: an append is not atomic across blocks and a file may contain garbage when its size was updated before its data; Pebble's `MemFS.CrashClone` cuts at 4096-byte blocks |
 | Unsynced directory entries, after a power loss: each name independently keeps its synced binding or its current one. Different directories are independent. A name never takes a third value. | OSDI 2014: ext2 and btrfs reorder directory operations freely; Pebble's crash clone adds each unsynced entry independently |
-| A rename over an existing target leaves the old or the new file under the target name, nothing else; the source name is decided on its own, so a clone can hold the new file under both names, or the old one with the source still present. | `rename(2)`: the target is atomically replaced and an instance of it always exists |
-| A directory rename moves or does not move: its two names (and the names of a chain of renames) are decided together, so a directory never has two names or none. | a directory cannot be hard-linked, so it has one name at a time; deciding the names independently would create a state no file system produces |
+| A single rename is atomic: a rename over an existing target leaves the old file under the target name with the source still present, or the new file under the target name with the source gone, so the renamed file has exactly one name and the target never holds a third value. Different renames, and different names, stay independent. A name rebound several times between two syncs of its directory shows its synced binding or its last one, never one in between. | OSDI 2014 section 2.2.1: `rename()` and `link()` are seemingly atomic on all file systems that use techniques like journaling or copy-on-write; their table of directory operation atomicity fails only on ext2, ext2 in synchronous mode and reiserfs without a log, which are not modelled. `rename(2)`: the target is atomically replaced and an instance of it always exists |
+| A directory rename is one rename like any other: its two names (and the names of a chain of renames that share a name) are decided together, so a directory never has two names or none. | a directory cannot be hard-linked, so it has one name at a time |
 | The new name can be durable while the renamed file's content is not, so the target holds a cut or damaged file. | the zero-length-file problem of ext4 after a rename without a file sync |
 | An unsynced `mkdir` can vanish together with everything in the directory. | a directory is one name in its parent |
 | `RemoveAll` is many unbindings, each with its own fate, so a power loss can leave any subset of a tree. | a consequence of the entry rule; it is why a tree is first renamed to a garbage name |
@@ -226,8 +226,8 @@ probability below 10^-38.
   lies about flushing, no software test can tell.
 - It does not model Windows. Windows does no directory sync and the
   power-loss behaviour of its write-through rename is not documented, so `Mem`
-  represents only the POSIX minimum; the Windows paragraphs above stand on
-  their own tests.
+  stands for a file system weaker than any journaling or copy-on-write one; the
+  Windows paragraphs above stand on their own tests.
 - It takes clones at an instant between calls. A crash in the middle of a
   system call is covered only by the block rule (partial data) and the
   `RemoveAll` rule (partial removal).
@@ -274,10 +274,14 @@ so that the double cannot drift from what it stands for.
 - **Names decided independently, not by operation order.** A model where each
   directory keeps a prefix of its operation log would assume ordered directory
   operations, which btrfs and ext2 do not provide, and would hide bugs there. The
-  independent model is weaker than any real file system, never loses a synced
+  independent model is weaker than any journaling or copy-on-write file system, never loses a synced
   binding and never gives a target name a middle value; what it adds is leftover
-  temporary or garbage names, which startup removes anyway. A directory rename is
-  the exception: its two names are decided together.
+  temporary or garbage names, which startup removes anyway. A rename, of a file
+  or of a directory, is the exception: its two names are decided together,
+  because the reordering studied there is of different directory operations
+  relative to each other, not a tear inside one rename. Every operation of `fsx`
+  that binds a name syncs the directory before it returns, so a name is not bound
+  a second time before the first binding is durable.
 - **Fault injection through the interface, not build tags.** A tag changes the
   program under test; a wrapper does not, and a wrapper can also wrap the real
   file system.

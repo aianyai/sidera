@@ -8,9 +8,10 @@
 // and for every directory the current entries and the entries synced by the
 // last SyncDir. A process crash (Clone) loses nothing that a call completed. A
 // power loss (CrashClone, CrashCloneWorst) keeps what was synced and chooses
-// among the rest; the README of this package lists the rules. They are the
-// weakest guarantees POSIX gives, not the behaviour of one file system, so code
-// that survives Mem does not depend on the luck of a particular one.
+// among the rest; the README of this package lists the rules. They are weaker
+// than any journaling or copy-on-write file system and are not the behaviour of
+// one file system, so code that survives Mem does not depend on the luck of a
+// particular one.
 //
 // # The distribution of CrashClone
 //
@@ -19,8 +20,12 @@
 //   - Every directory name whose current binding differs from its synced one
 //     keeps the current binding with probability 1/2, otherwise it reverts to
 //     the synced binding (or to absent). Names are decided independently,
-//     except that the two names of a directory rename (and every name of a chain
-//     of them) are decided together.
+//     except that the two names of a rename, of a file or of a directory (and
+//     every name of a chain of renames that share names), are decided together:
+//     a single rename is atomic on journaling and copy-on-write file systems.
+//     Different renames, and different names, stay independent. A name rebound
+//     several times between two syncs of its directory shows either its synced
+//     binding or its last one, never one in between.
 //   - Every file with unsynced bytes keeps its full current length with
 //     probability 1/2, otherwise a length drawn uniformly from the synced
 //     length to the current length inclusive. The part beyond the synced length
@@ -53,8 +58,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 )
 
-// node is a file or a directory. Two names may refer to the same node after a
-// simulated crash of a non-atomic rename; it then behaves like a hard link.
+// node is a file or a directory.
 type node struct {
 	dir bool
 
@@ -66,12 +70,14 @@ type node struct {
 	wide   bool // permissions wider than owner-only (SetOwnerOnly)
 
 	// Directory: the current entries, the entries as of the last SyncDir, and the
-	// directory renames since then.
+	// renames since then.
 	entries       map[string]*node
 	syncedEntries map[string]*node
 	moves         []move
 }
 
+// move is one rename inside a directory. The two names of a rename are decided
+// together in a power loss: the rename is atomic, so it happened or it did not.
 type move struct{ from, to string }
 
 func newDir() *node {
@@ -379,6 +385,7 @@ func (m *Mem) Rename(_ fsx.Tag, from, to string) error {
 	}
 	delete(d.entries, fromName)
 	d.entries[toName] = n
+	d.moves = append(d.moves, move{from: fromName, to: toName})
 	return nil
 }
 

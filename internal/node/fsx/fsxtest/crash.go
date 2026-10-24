@@ -162,9 +162,9 @@ func unionNames(a, b map[string]*node) []string {
 	return names
 }
 
-// nameGroups joins the two names of every directory rename since the last
-// sync, and the names of chained renames, into groups whose fate is shared: a
-// directory has one name at a time, so it is either moved or not.
+// nameGroups joins the two names of every rename since the last sync, and the
+// names of renames that share a name, into groups whose fate is shared: a
+// single rename is atomic, so the renamed node is either moved or not.
 type nameGroups map[string]string
 
 func newNameGroups(moves []move) nameGroups {

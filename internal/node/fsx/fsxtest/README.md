@@ -31,12 +31,23 @@ for the crash model, its sources and what it can and cannot prove.
   length, and each 4 KiB block beyond the synced length is independently real,
   zero or garbage.
 - Each unsynced directory name independently keeps its synced or its current
-  binding. A rename over a target leaves the old or the new file under the target
-  name only. The two names of a directory rename are decided together.
+  binding, except that the two names of a rename are decided together, for a file
+  as for a directory (and every name of renames that share a name): a single
+  rename is atomic on journaling and copy-on-write file systems, so it is moved or
+  not, never duplicated and never lost. A rename over a target leaves the old
+  file under the target name with the source present, or the new file under the
+  target name with the source gone. Different renames, and different names, stay
+  independent. Non-journaling ext2, where a rename can be torn, is not modelled.
+- A name rebound several times between two syncs of its directory shows either its
+  synced binding or its last one, never one in between. Every operation of `fsx`
+  that binds a name syncs the directory before it returns, so the next binding of
+  the same name starts from a synced one.
 - An unsynced `mkdir` can vanish with its content; `RemoveAll` can be half done.
 - Unsynced data and entries are kept with the probabilities in the package
   comment; a seed fixes the result, so tests are reproducible.
-- Windows is not modelled: `Mem` stands for the POSIX minimum.
+- Windows is not modelled: `Mem` is weaker than any journaling or copy-on-write
+  file system, and the Windows paragraphs of the reference stand on their own
+  tests.
 
 ## Rules of the doubles
 
