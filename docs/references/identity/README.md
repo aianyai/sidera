@@ -333,7 +333,11 @@ certificate below.
   damaged or not; the decoders report which check failed. Keys print as a fixed text that names only
   their node, as a pointer or as a copy, and holders of keys are held behind a
   pointer so that they print as an address, because `fmt` shows the unexported
-  fields of a struct whatever methods its members have.
+  fields of a struct whatever methods its members have. The self-revocation is
+  handled the same way for the same reason: its wire bytes are a declaration that
+  anyone holding them can publish to retire the identity irreversibly, so it
+  prints as a fixed text naming only its node and digest
+  (`TestSelfRevocationPrintsOnlyItsNodeAndDigest`).
 - **The serial is written before the certificate and is the commit point.** If the
   certificate came first, a crash between the writes would leave a published
   certificate whose serial the serial file did not know, and the next renewal could

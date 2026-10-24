@@ -2,6 +2,7 @@ package keys
 
 import (
 	"fmt"
+	"io"
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/txn"
@@ -29,11 +30,22 @@ type state struct {
 // is stored: the record wire bytes, the record digest and the node it names. Only
 // this package makes one, from a statement it verified, so the three always
 // belong together.
+//
+// Anyone who holds the wire bytes can publish them and retire the identity for
+// good, so the statement is as secret as a key: it prints as a fixed text that
+// names only its node and its digest, under every fmt verb. The printing methods
+// have value receivers, so that a copy prints no secret either.
 type SelfRevocation struct {
 	wire   []byte
 	digest record.Digest
 	node   ident.NodeID
 }
+
+func (s SelfRevocation) Format(f fmt.State, _ rune) { _, _ = io.WriteString(f, s.String()) }
+func (s SelfRevocation) String() string {
+	return "keys.SelfRevocation(" + s.node.String() + ", " + s.digest.String() + ")"
+}
+func (s SelfRevocation) GoString() string { return s.String() }
 
 // Wire is a copy of the record wire bytes.
 func (s SelfRevocation) Wire() []byte { return append([]byte(nil), s.wire...) }

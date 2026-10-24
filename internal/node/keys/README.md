@@ -51,7 +51,10 @@ transaction of `txn`; nothing here calls an `fsx` write.
 - **Errors never quote a file.** The decoders say which check failed, not what
   they found, because a key file is secret. Keys print as a fixed text that names only
   their node, by pointer or as a copy, and anything that holds one prints as an
-  address.
+  address. The self-revocation is as secret as a key, because whoever holds its
+  bytes can retire the identity for good: it prints as its node and its digest
+  under every verb, as a value or by pointer, and `Wire` is the only way to its
+  bytes.
 - **Only the marker says init finished.** Every write of `init` is optional for
   the transaction layer, which cannot require a file that was reused, so a disk on
   which `init` stopped can hold every key, the certificate and the
