@@ -198,9 +198,11 @@ func (l syncLog) SyncDir(tag fsx.Tag, dir string) error {
 	return l.FS.SyncDir(tag, dir)
 }
 
-// The settle transaction syncs every directory under the data directory,
-// parents before their children, names sorted, once each. A directory that the
-// cleanup removed is not synced.
+// The settle transaction runs before the cleanup and syncs every directory
+// under the data directory, parents before their children, names sorted, once
+// each. The directories of debris, which the cleanup removes next, are not
+// synced, and the rename that gave them their garbage name is made durable in
+// their parent.
 func TestRecoverSettlesEveryDirectoryInAStableOrder(t *testing.T) {
 	mem := fsxtest.NewMem()
 	mkdirs(t, mem, "b", "a", "a/z", "a/m", "c", "c/.trash-1", "c/.trash-1/inner")

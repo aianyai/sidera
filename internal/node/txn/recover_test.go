@@ -80,37 +80,38 @@ func TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards(t *testing
 		t.Errorf("predicate after a power loss following Recover = %v, %v; want empty", work, err)
 	}
 
-	// The cleanup transaction is a recovery one: the files go before the
-	// directories and the directories are synced last. The settle transaction
-	// follows it, of the normal kind, so that only the cleanup counts as a
-	// recovery.
+	// The settle transaction, of the normal kind, comes first: what the cleanup
+	// removes is then removed from a durable state. The cleanup transaction
+	// follows and is the recovery one: the files go before the directories and
+	// the directories are synced last.
 	names := rec.names()
-	wantPrefix := []string{
-		"txn-cleanup/tmp.remove#1", "txn-cleanup/tmp.remove#2", "txn-cleanup/tmp.remove#3",
-		"txn-cleanup/trash.remove-all#1", "txn-cleanup/trash.remove-all#2",
+	settleEnd := slices.Index(names, "txn-settle/commit#1")
+	if settleEnd < 1 {
+		t.Fatalf("points = %v, want the settle transaction first, ending in txn-settle/commit#1", names)
 	}
-	end := slices.Index(names, "txn-cleanup/commit#1")
-	if end < len(wantPrefix)+1 || !reflect.DeepEqual(names[:len(wantPrefix)], wantPrefix) {
-		t.Fatalf("points = %v, want them to start with %v and have the cleanup commit after the directory syncs", names, wantPrefix)
-	}
-	for _, n := range names[len(wantPrefix):end] {
-		if !strings.HasPrefix(n, "txn-cleanup/dir.sync-dir#") {
-			t.Errorf("point %s among the directory syncs of the cleanup", n)
-		}
-	}
-	settle := names[end+1:]
-	if len(settle) < 2 || settle[len(settle)-1] != "txn-settle/commit#1" {
-		t.Fatalf("points after the cleanup = %v, want the settle transaction ending in txn-settle/commit#1", settle)
-	}
-	for _, n := range settle[:len(settle)-1] {
+	for _, n := range names[:settleEnd] {
 		if !strings.HasPrefix(n, "txn-settle/dir.sync-dir#") {
 			t.Errorf("point %s among the directory syncs of the settle", n)
 		}
 	}
+	cleanup := names[settleEnd+1:]
+	wantPrefix := []string{
+		"txn-cleanup/tmp.remove#1", "txn-cleanup/tmp.remove#2", "txn-cleanup/tmp.remove#3",
+		"txn-cleanup/trash.remove-all#1", "txn-cleanup/trash.remove-all#2",
+	}
+	end := slices.Index(cleanup, "txn-cleanup/commit#1")
+	if end < len(wantPrefix)+1 || !reflect.DeepEqual(cleanup[:len(wantPrefix)], wantPrefix) || end != len(cleanup)-1 {
+		t.Fatalf("points after the settle = %v, want them to start with %v and end with the cleanup commit after the directory syncs", cleanup, wantPrefix)
+	}
+	for _, n := range cleanup[len(wantPrefix):end] {
+		if !strings.HasPrefix(n, "txn-cleanup/dir.sync-dir#") {
+			t.Errorf("point %s among the directory syncs of the cleanup", n)
+		}
+	}
 	for i, k := range rec.kinds {
-		want := txn.Recovery
-		if i > end {
-			want = txn.Normal
+		want := txn.Normal
+		if i > settleEnd {
+			want = txn.Recovery
 		}
 		if k != want {
 			t.Errorf("point %s reported as kind %d, want %d", names[i], k, want)

@@ -27,7 +27,7 @@ declaration of its own.
 | `Tx.Replace`, `ReplaceDefer`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | One method per operation; the first argument is the declared role. |
 | `Tx.Commit`, `Tx.Close` | `Commit` ends the transaction and reaches its commit point; `Close` is for `defer` and does nothing after `Commit`, and panics when the `Tx` is closed after its commit point with neither `Commit` nor a recorded failure. |
 | `Writer.Reader()` | The read side, as an `fsx.Reader` that offers nothing else. |
-| `Writer.Recover()`, `CleanupWork(reader)` | Remove every `.tmp-*` file and `.trash-*` directory, then make every directory durable; and the list of what the removal would remove, which a test evaluates on a copy of the disk. |
+| `Writer.Recover()`, `CleanupWork(reader)` | Make every directory durable, then remove every `.tmp-*` file and `.trash-*` directory; and the list of what the removal would remove, which a test evaluates on a copy of the disk. |
 | `Writer.Coverage()` | Every key of the table with its hit count, zeros included, each key carrying its transaction's kind. |
 | `Observer` | Told of every point before its step runs; the hook of a crash test. |
 | `Error`, `IsFatal` | What a failed write returns, and the one question a caller asks of it. |
@@ -93,24 +93,29 @@ declaration of its own.
   does not leave a commit point of a recovery transaction on a clean start. A
   declaration with a required write that was not made still panics: that is an
   incomplete transaction, not an empty one.
-- **Cleanup is one `Recovery` transaction.** `Recover` removes the leftover
-  files, then the leftover directories, then syncs each directory that held one.
-  With nothing to remove the cleanup does nothing and reaches no point. `Recover`
-  panics when the table has no cleanup or settle declaration, on a clean disk as
-  well, so a composition root that left out `Internal()` fails at its first
-  start.
-- **Settle is one `Normal` transaction, run at every start.** After a process
-  crash a rename or a removal can be visible in a directory and not yet durable.
-  The recovery of an owner reads existence and acts on it durably (it deletes
-  what a pointer or a reference no longer names), so a power loss afterwards
-  could bring the pointer or reference back to something that is gone. `Recover`
-  therefore ends by syncing every directory under the data directory, the root
-  included, once each, after the cleanup so a directory the cleanup removed is
-  not synced. No order is needed for durability, since a directory sync covers
-  that directory's entries only and a rename stays inside one directory; the
-  order is parents before children, names sorted, so crash point numbers are
-  stable. The cost is one directory sync per directory at every start. The
-  transaction is `Normal`, so a clean start is not counted as a recovery.
+- **Cleanup is one `Recovery` transaction, run after the settle.** `Recover`
+  removes the leftover files, then the leftover directories, then syncs each
+  directory that held one. With nothing to remove the cleanup does nothing and
+  reaches no point. `Recover` panics when the table has no cleanup or settle
+  declaration, on a clean disk as well, so a composition root that left out
+  `Internal()` fails at its first start.
+- **Settle is one `Normal` transaction, run first at every start.** After a
+  process crash a rename or a removal can be visible in a directory and not yet
+  durable. What follows reads existence and acts on it durably: the recovery of
+  an owner deletes what a pointer or a reference no longer names, and the cleanup
+  removes the contents of a directory that `Discard` renamed to a garbage name. A
+  power loss afterwards could bring the pointer or reference back to something
+  that is gone, or bring the directory back under its original name with only
+  some of its files, because the rename was not durable when the removal was.
+  `Recover` therefore starts by syncing every directory under the data directory,
+  the root included, once each, before the cleanup removes anything. Directories
+  of debris are not synced: the rename that gave one its garbage name is in its
+  parent, which is, and what is inside goes next. No order is needed for
+  durability, since a directory sync covers that directory's entries only and a
+  rename stays inside one directory; the order is parents before children, names
+  sorted, so crash point numbers are stable. The cost is one directory sync per
+  directory at every start. The transaction is `Normal`, so a clean start is not
+  counted as a recovery.
 
 ## What the caller must guarantee
 

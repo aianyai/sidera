@@ -302,8 +302,8 @@ reader's to skip. The framing of what is appended, including a separator at the
 start of a `Tx`'s first append to a file that may end in a partial record, belongs
 to the format's owner: this layer writes the bytes it is given.
 
-**Cleanup and the clean-state requirement.** `Writer.Recover` is one `Recovery`
-transaction, `txn-cleanup`: it removes every `.tmp-*` file and `.trash-*`
+**Cleanup and the clean-state requirement.** `Writer.Recover` runs the settle
+below first and then one `Recovery` transaction, `txn-cleanup`: it removes every `.tmp-*` file and `.trash-*`
 directory anywhere under the data directory, files first, then directories, then
 one directory sync per directory that held one. The list it works from is the
 exported pure function `CleanupWork`, which only reads, so a test evaluates it on
@@ -320,27 +320,33 @@ fails at its first start rather than at the first crash. Every other
 of the disk, used by the repair and by the scenario tests, and holds only for
 states a crash or damage can produce.
 
-**Settle.** `Recover` ends with `txn-settle`, a `Normal` transaction that syncs
+**Settle.** `Recover` starts with `txn-settle`, a `Normal` transaction that syncs
 every directory under the data directory, the root included, once each, parents
-before children and names sorted. After a process crash a rename or a removal
-can be visible in a directory and not durable: the page cache outlives the
-process, the directory entry may not have reached the disk. The recovery of an
-owner reads existence and acts on it durably (an orphan collector deletes a body
-no reference names, an adapter repair discards a version directory the current
-pointer no longer names), and a power loss afterwards can restore the change it
-acted on: a durable consequence of a change that no longer exists, such as a
-current pointer back at a version that is gone. Settling first makes the state
-every recovery predicate reads one a power loss cannot take back. The caller
-guarantees that the predicates of every owner run after `Recover` returned. The
-transaction sits in this package because `Recover` already runs first at startup
-and walks the whole data directory, so there is one home for the rule and no
-owner repeats it. No order of the syncs is needed for durability (a directory
-sync covers that directory's entries only and renames stay inside one
-directory); the order only keeps crash point numbers stable. It is `Normal`,
-not `Recovery`, because it runs at every start and a clean start is not a
-recovery. The cost is one directory sync per directory at every start. A crash inside it leaves a state that the next `Recover` settles again.
-It walks the tree after the cleanup, not with it, so a directory the cleanup
-removed is never synced.
+before children and names sorted, and only then runs the cleanup. After a process
+crash a rename or a removal can be visible in a directory and not durable: the
+page cache outlives the process, the directory entry may not have reached the
+disk. What follows reads existence and acts on it durably. The recovery of an
+owner deletes a body no reference names, or discards a version directory the
+current pointer no longer names, and a power loss afterwards can restore the
+change it acted on: a durable consequence of a change that no longer exists, such
+as a current pointer back at a version that is gone. The cleanup removes the
+contents of a directory that `Discard` renamed to a garbage name, and the
+removal of the files of that directory is durable on its own, so a power loss
+during it could keep the removal of some files and lose the rename, which brings
+the directory back under its original name with only some of its files. Settling
+first makes the state that every recovery predicate and the cleanup read one a
+power loss cannot take back. The caller guarantees that the predicates of every
+owner run after `Recover` returned. The transaction sits in this package because
+`Recover` already runs first at startup and walks the whole data directory, so
+there is one home for the rule and no owner repeats it. No order of the syncs is
+needed for durability (a directory sync covers that directory's entries only and
+renames stay inside one directory); the order only keeps crash point numbers
+stable. The directories of debris (`.trash-*`) are not synced: the rename that
+gave one its garbage name is an entry of its parent, which is synced, and what is
+inside is about to be removed. It is `Normal`, not `Recovery`, because it runs at
+every start and a clean start is not a recovery. The cost is one directory sync
+per directory at every start. A crash inside it leaves a state that the next
+`Recover` settles again.
 
 **Coverage.** `Writer.Coverage()` returns every key of the table with its hit
 count, zeros included, each key with the kind of its transaction, so a caller
@@ -559,7 +565,7 @@ of such a run.
 **Settle.** The rules above write their followers durably after reading a head
 record that, after a process crash, may be visible and not durable; a power loss
 that followed would leave the followers without their head. The store does not
-guard against this itself: it relies on the settle transaction that ends
+guard against this itself: it relies on the settle transaction that starts
 `txn.Writer.Recover` (the Settle paragraph of the transaction section), which makes every directory
 durable before any rule runs. The caller guarantees that the rules run after
 `Recover` returned. The store's crash walk runs its restarts through the real
@@ -749,7 +755,7 @@ so that the double cannot drift from what it stands for.
 - **The cleanup of `Recover` does nothing on a clean disk.** An empty
   transaction would still reach a commit point of a recovery transaction at every
   start, which would make "a clean run reaches no recovery point" false and blur
-  the coverage of the recovery path. The settle that follows is of the normal
+  the coverage of the recovery path. The settle that precedes it is of the normal
   kind for the same reason.
 
 ### Why the records are shaped as they are
@@ -846,7 +852,7 @@ so that the double cannot drift from what it stands for.
 | crash states and durability | `internal/node/txn/tx.go` | `crash_test.go` (`TestEveryDeclaredKeyIsReachedInOrder`, `TestCrashStatesAtEveryPointOfAMultiWriteTransaction`, `TestAcknowledgedWritesSurvivePowerLoss`), `TestRandomTransactionsHonourTheCommitPointOrderingAndDurability` |
 | appended files | `internal/node/txn/tx.go` | `append_test.go` (`TestFailedAppendDropsTheHandle`, `TestHandlesAreClosedWhenTheTransactionEnds`) |
 | cleanup and its predicate | `internal/node/txn/cleanup.go` | `recover_test.go` (`TestRecoverRemovesAllLeftoversAndTheirPredicateIsEmptyAfterwards`, `TestCleanupPredicateIsEmptyOnEveryCleanState`, `TestRecoverOnACleanDiskReachesNoRecoveryPoint`, `TestRecoverPanicsWithoutTheCleanupDeclarationEvenOnACleanDisk`) |
-| settle at every start | `internal/node/txn/cleanup.go` | `settle_test.go` (`TestPowerLossCloneAfterRecoverKeepsWhatAProcessCrashLeftVisible`, `TestPowerLossCloneAfterACrashDuringTheSettle`, `TestRecoverSettlesEveryDirectoryInAStableOrder`); `internal/node/config/settle_test.go` (`TestPowerLossCloneAdapterGCAfterAnInstallCrashedBeforeTheDirectorySync`) |
+| settle at every start | `internal/node/txn/cleanup.go` | `settle_test.go` (`TestPowerLossCloneAfterRecoverKeepsWhatAProcessCrashLeftVisible`, `TestPowerLossCloneAfterACrashDuringTheSettle`, `TestRecoverSettlesEveryDirectoryInAStableOrder`); `internal/node/txn/discard_test.go` (`TestPowerLossCloneAfterACrashDuringTheCleanupOfADiscardedDirectory`); `internal/node/config/settle_test.go` (`TestPowerLossCloneAdapterGCAfterAnInstallCrashedBeforeTheDirectorySync`) |
 | coverage | `internal/node/txn/writer.go` | `coverage_test.go` |
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `TestHeaderDamageNeverEchoesTheFirstLine`, `FuzzDecodeFrame` |

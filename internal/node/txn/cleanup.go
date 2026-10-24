@@ -56,7 +56,19 @@ func CleanupWork(r fsx.Reader) ([]fsx.Leftover, error) {
 // the instance lock and before it loads anything, so nothing is writing. It
 // does two things, in this order.
 //
-// First it removes every leftover of an interrupted operation: `.tmp-*` files
+// First it makes every directory durable, in one Normal transaction that syncs
+// each directory under the data directory, also on a clean disk. After a
+// process crash a rename or a removal can be visible and not yet durable, and
+// what follows reads existence and acts on it durably: the recovery of an owner
+// deletes what a pointer or a reference no longer names, and the cleanup below
+// removes the contents of a discarded directory. A power loss after that could
+// bring the old pointer or reference back to something that is gone, or a
+// discarded directory back under its original name with only some of its files.
+// Making what is visible durable first means everything that follows acts on a
+// state that cannot be taken back. The cost is one directory sync per directory
+// at every start.
+//
+// Then it removes every leftover of an interrupted operation: `.tmp-*` files
 // and `.trash-*` directories, anywhere under the data directory. That is one
 // Recovery transaction, all removals first and the directory syncs after them;
 // with nothing to remove it does nothing and reaches no point, so a start on a
@@ -64,26 +76,16 @@ func CleanupWork(r fsx.Reader) ([]fsx.Leftover, error) {
 // finished transaction left behind is for the package that owns those files to
 // repair.
 //
-// Then it makes every directory durable, in one Normal transaction that syncs
-// each directory under the data directory, also on a clean disk. After a
-// process crash a rename or a removal can be visible and not yet durable, and
-// the recovery of an owner reads existence and acts on it durably: it deletes
-// what a pointer or a reference no longer names. A power loss after that could
-// bring the old pointer or reference back to something that is gone. Making
-// what is visible durable first means every owner's recovery predicate runs
-// against a state that cannot be taken back. The cost is one directory sync per
-// directory at every start.
-//
 // The table must hold both declarations even on a clean disk: a composition
 // root that left out Internal() fails at its first start, not at the first
 // crash.
 func (w *Writer) Recover() error {
 	cleanup := w.internal(cleanupName)
 	settle := w.internal(settleName)
-	if err := w.cleanup(cleanup); err != nil {
+	if err := w.settle(settle); err != nil {
 		return err
 	}
-	return w.settle(settle)
+	return w.cleanup(cleanup)
 }
 
 func (w *Writer) internal(name string) *compiled {
@@ -139,8 +141,10 @@ func (w *Writer) cleanup(c *compiled) error {
 	return tx.Commit()
 }
 
-// settle syncs every directory under the data directory, as the tree is after
-// the cleanup: a directory the cleanup removed is not there to sync.
+// settle syncs every directory under the data directory, but not the
+// directories of the debris the cleanup removes next: the rename that gave a
+// directory its garbage name lives in its parent, which is synced, and what is
+// inside is about to go.
 //
 // No order is needed for durability. A directory sync makes durable the entries
 // of that directory and no others, and every rename stays inside one directory,
@@ -162,8 +166,8 @@ func (w *Writer) settle(c *compiled) error {
 	return tx.Commit()
 }
 
-// directories lists the data directory root and every directory under it,
-// each directory before what it contains, names sorted.
+// directories lists the data directory root and every directory under it that
+// is not debris, each directory before what it contains, names sorted.
 func directories(r fsx.Reader) ([]string, error) {
 	dirs := []string{"."}
 	var walk func(dir string) error
@@ -173,7 +177,7 @@ func directories(r fsx.Reader) ([]string, error) {
 			return err
 		}
 		for _, e := range entries {
-			if !e.IsDir {
+			if !e.IsDir || fsx.IsLeftover(e.Name) {
 				continue
 			}
 			p := path.Join(dir, e.Name)
