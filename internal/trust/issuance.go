@@ -55,8 +55,10 @@ type IssuanceState struct {
 	// the current sync round. The gate does not wait for them: requiring every
 	// party to be online would let one long-offline machine stop an
 	// intermediate from ever vouching again. A directive held only by
-	// unreachable parties is missed for now, and the eviction view keeps
-	// showing the eviction as incomplete and names that node.
+	// unreachable parties is missed for now (admin.AcceptDirective keeps
+	// accepting it while the caller's offlineSince stays at the earliest
+	// unsynchronised offline start), and the eviction view keeps showing the
+	// eviction as incomplete and names that node.
 	Unreachable NodeSet
 	// PendingDirectives counts offline directives received but not yet
 	// verified and carried out.

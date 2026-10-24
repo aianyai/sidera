@@ -60,10 +60,14 @@ type DirectiveVerdict struct {
 }
 
 // AcceptDirective decides whether this node (local) executes an offline
-// directive when it comes back online, at now. offlineSince is the time this
-// node itself recorded as losing contact; it is a parameter, not a field of
-// Directive, because it is the node's own fact and not something the signer
-// claims. The zero time is a caller bug and is rejected.
+// directive when it comes back online, at now. offlineSince is the start of the
+// earliest offline period that is not yet synchronised with every directly
+// trusted party, as this node itself recorded it; it is a parameter, not a
+// field of Directive, because it is the node's own fact and not something the
+// signer claims. It stays unchanged when the issuance gate lets issuance
+// through while some parties are unreachable, so a directive signed during the
+// first period and received only after a second one is still inside the window.
+// The zero time is a caller bug and is rejected.
 //
 // Checks run in this order and the first failure decides: the signing time is
 // present, not in the future and not before the offline window; the directive

@@ -95,7 +95,10 @@ reasons behind the rules.
   directive. Unreachable parties (connection attempt failed in the current
   round) are not waited for: requiring every party online would let one
   long-offline machine stop an intermediate from ever vouching again. A
-  directive held only by unreachable parties is missed for now, and the eviction
+  directive held only by unreachable parties is missed for now (the caller keeps
+  `offlineSince` at the earliest unsynchronised offline start, as
+  [admin](../admin/README.md) defines it, so the directive is still accepted
+  when it arrives after a later offline period), and the eviction
   view keeps showing the eviction as incomplete and names that node. The direct
   parties are the other ends of the usable local credentials in the view
   (deduplicated) and the grace period is `View.Settings.GracePeriod`, so callers

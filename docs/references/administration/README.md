@@ -177,7 +177,14 @@ neither file nor probe results.
   claim a date inside its old validity window. The signature time is the
   signer's claim, so the only anchor the node can trust is its own record of
   when it lost contact; a directive meant for an offline node cannot predate
-  that, up to the clock tolerance. Residual risk, accepted: a stolen device key
+  that, up to the clock tolerance. The anchor is the start of the earliest
+  offline period not yet synchronised with every directly trusted party, not
+  the latest offline start: the issuance gate lets issuance through while some
+  parties are unreachable, so a directive missed on the first return can still
+  be held by one of them. A node that slept a second time before receiving it
+  would otherwise measure the window from the second sleep and reject the
+  directive as backdated. The anchor moves forward only once every directly
+  trusted party has been synchronised. Residual risk, accepted: a stolen device key
   that is unexpired and unrevoked can still sign directives during the offline
   window; only revocation or expiry of that key limits it, and a directive can
   only cut an edge, which the owner can rebuild. A zero offline start is
@@ -261,7 +268,8 @@ neither file nor probe results.
   - `directive_test.go`: `TestAcceptDirective`,
     `TestAcceptDirectiveWithUnsetLocalNodeRejects`,
     `TestAcceptDirectiveWithoutOfflineSinceRejects`,
-    `TestAcceptDirectiveSigningTimeAgainstOfflineWindow`.
+    `TestAcceptDirectiveSigningTimeAgainstOfflineWindow`,
+    `TestAcceptDirectiveAfterTwoOfflinePeriods`.
   - `reachability_test.go`: `TestMayIssueReachabilityProof`,
     `TestCheckReachabilityProof`; with `publication`,
     `TestAProofOfARetiredNodeIsRefused`.

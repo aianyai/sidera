@@ -100,9 +100,15 @@ own `KeyFor`, so nobody sees another person's results.
   effect on the next request. The connection of a person whose `EffectiveLevel`
   drops to none is closed by the re-decision `preauth` requires when the list
   changes (`Decision.Keeps`); the person reconnects as a non-member person.
-- `offlineSince` passed to `AcceptDirective` is the time this node itself
-  recorded as losing contact, never a value taken from a directive. The zero
-  time is refused.
+- `offlineSince` passed to `AcceptDirective` is the start of the earliest
+  offline period that is not yet synchronised with every directly trusted
+  party, recorded by this node itself and never taken from a directive. The
+  zero time is refused. A return to contact does not move it while some party
+  was unreachable: the issuance gate lets voucher issuance through then
+  (`trust.IssuanceState.Unreachable`), but a directive held by that party may
+  still arrive, and a later offline period must not push the bound past it.
+  It moves forward only when every directly trusted party has been
+  synchronised, and it starts afresh with the next offline period after that.
 - A request that touches several settings is authorized as every operation it
   contains and applied only if all are allowed. `OpEditDeclaration` covers only
   declaration fields that have no operation of their own; flipping inheritance

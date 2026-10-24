@@ -209,3 +209,30 @@ func TestAcceptDirectiveSigningTimeAgainstOfflineWindow(t *testing.T) {
 		})
 	}
 }
+
+// TestAcceptDirectiveAfterTwoOfflinePeriods covers a directive signed after the
+// first offline start, missed on the first return because the party holding it
+// was unreachable, and received after a second short offline period. The
+// bound is the start of the earliest offline period not yet synchronised with
+// every directly trusted party, so the directive is executed; measured from the
+// second offline start it would be rejected as backdated.
+func TestAcceptDirectiveAfterTwoOfflinePeriods(t *testing.T) {
+	self := node(t, 1)
+	mgr := person(t, 10)
+	list := mustList(t, Entry{Person: mgr, Level: LevelManage})
+
+	firstOfflineStart := t0.Add(-5 * time.Hour)
+	secondOfflineStart := t0.Add(-1 * time.Hour)
+	d := Directive{
+		Kind: DirectiveRevokeTrustEdge, Node: self, Signer: mgr,
+		SignedAt: firstOfflineStart.Add(30 * time.Minute),
+		Cert:     validCert(LevelFullControl),
+	}
+
+	if got, want := AcceptDirective(self, list, d, firstOfflineStart, t0), (DirectiveVerdict{DispositionExecute, ReasonOK}); got != want {
+		t.Fatalf("bound at the earliest unsynchronised offline start: verdict = %+v, want %+v", got, want)
+	}
+	if got, want := AcceptDirective(self, list, d, secondOfflineStart, t0), (DirectiveVerdict{DispositionReject, ReasonDirectiveSignedBeforeOffline}); got != want {
+		t.Fatalf("bound at the latest offline start: verdict = %+v, want %+v (the value the definition rules out)", got, want)
+	}
+}

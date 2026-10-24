@@ -187,7 +187,10 @@ revoke; it can neither create trust nor loosen anything.
   online would let one long-offline machine stop an intermediate from ever
   vouching again. A directive held only by unreachable parties is missed for now;
   the eviction view keeps showing the eviction as incomplete and names that
-  node, so the gap stays visible.
+  node, so the gap stays visible. The directive is not lost when it arrives
+  later: administration measures its signing time against the earliest offline
+  start not yet synchronised with every direct party, which does not move on
+  this return.
 - **The gate derives its inputs from the view.** The direct parties and the grace
   period are facts the trust rules already hold, so a caller that passed its own
   copies could disagree with them.
