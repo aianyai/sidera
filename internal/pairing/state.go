@@ -48,7 +48,8 @@ type World struct {
 	// package that owns it defines.
 	Revocations *revocation.Set
 	// Trust is the trust view: whom the node trusts directly and whom its owner
-	// has revoked locally.
+	// has revoked locally. Its Retired set is not read: retirement is judged
+	// from Revocations alone.
 	Trust trust.View
 	// List is the authorized-persons list.
 	List admin.List
@@ -125,7 +126,7 @@ func (w World) peerFaultOf(peer ident.NodeID, now time.Time, direct bool) peerFa
 	if _, revoked := w.Trust.LocallyRevoked[peer]; revoked {
 		return peerLocallyRevoked
 	}
-	if direct && trust.Evaluate(w.Trust, peer, now).Outcome == trust.AllowedDirect {
+	if direct && trust.Evaluate(w.Revocations.TrustView(w.Trust), peer, now).Outcome == trust.AllowedDirect {
 		return peerTrusted
 	}
 	return peerFine

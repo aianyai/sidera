@@ -149,10 +149,10 @@ type Facts struct {
 	// not a crash. An empty set from revocation.NewSet says "looked, found
 	// nothing".
 	Revocations *revocation.Set
-	// Trust is the view trust.Evaluate decides on. Revocations.Retired() is added
-	// to its Retired set before every evaluation, so retirement has one source,
-	// the revocation set, and the caller fills nothing in; nodes the view itself
-	// lists as retired stay retired.
+	// Trust is the view trust.Evaluate decides on. Its Retired set is replaced by
+	// Revocations.TrustView before every evaluation, so retirement has one
+	// source, the revocation set, and the caller fills nothing in; a Retired set
+	// the view brings is not read.
 	Trust trust.View
 	// SerialSeen is the highest network-key certificate serial seen, per node. A
 	// node missing from the map has had none seen. The map must be loaded: a nil
@@ -435,20 +435,13 @@ func NextHeldExpiry(f Facts, certs []record.Verified[record.NetworkKeyCertificat
 	return next
 }
 
-// trustView is the view trust.Evaluate decides on: Facts.Trust with every node
-// the revocation set retires added to its Retired set. A retired intermediate
-// carries no trust, so the set must reach trust.Evaluate, not only the check of
-// the node itself; deriving it here from the one source keeps the caller from
-// having to remember it. Facts.Revocations must not be nil. Facts.Trust itself
-// is not changed: the view is a copy with its own Retired map.
-func (f Facts) trustView() trust.View {
-	view := f.Trust
-	view.Retired = f.Revocations.Retired()
-	for n := range f.Trust.Retired {
-		view.Retired[n] = struct{}{}
-	}
-	return view
-}
+// trustView is the view trust.Evaluate decides on: Facts.Trust with its Retired
+// set taken from the revocation set (Revocations.TrustView). A retired
+// intermediate carries no trust, so the set must reach trust.Evaluate, not only
+// the check of the node itself; deriving it here from the one source keeps the
+// caller from having to remember it. Facts.Revocations must not be nil.
+// Facts.Trust itself is not changed.
+func (f Facts) trustView() trust.View { return f.Revocations.TrustView(f.Trust) }
 
 func withSerial(d Decision, s record.SerialSeen) Decision {
 	d.SerialSeen = s

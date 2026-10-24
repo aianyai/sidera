@@ -115,7 +115,9 @@ reasons behind the rules.
   domain separation and digests. This package never sees keys or encodings.
 - `View.Retired` holds only nodes whose self-revocation statement has been
   verified (the signature, that it is the node's own key), and a node never
-  leaves it.
+  leaves it. It is filled from the revocation set by `revocation.Set.TrustView`
+  and from nowhere else, so every reader of a view judges retirement from the
+  same facts.
 - The caller refuses to run under a retired local identity. This package never
   reads the local node's own entry in `View.Retired`, so a daemon that kept
   running under a void identity would go on deciding as if it were valid.

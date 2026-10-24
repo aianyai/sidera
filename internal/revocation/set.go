@@ -165,6 +165,17 @@ func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
 	return ok
 }
 
+// TrustView returns v with its Retired set replaced by the nodes this set
+// retires. It is the one way a trust.View gets its retired nodes, so that the
+// decision of a connection, the pairing of two nodes and every other reader of
+// the view judge retirement from the same facts: the revocation set is the only
+// source, a Retired set that came with v is not merged in, and the caller's v
+// is not changed.
+func (s *Set) TrustView(v trust.View) trust.View {
+	v.Retired = s.Retired()
+	return v
+}
+
 // NetworkKey returns the accepted network key for cert with the highest serial
 // seen for its node and its revocation status filled in, ready for
 // record.NetworkKeyBelongs. highestSerial is the serial of the caller's

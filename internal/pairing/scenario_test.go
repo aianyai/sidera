@@ -2138,3 +2138,26 @@ func TestTargetKeepsTheInitiatorSignatureAcrossARestart(t *testing.T) {
 		t.Fatal("not completed from the kept signature")
 	}
 }
+
+// Retirement has one source: the revocation set. A Retired set that the trust
+// view brings is not read, so pairing and the connection decision cannot
+// disagree about the same node.
+func TestRetirementIsReadFromTheRevocationSetOnly(t *testing.T) {
+	t.Run("a node only the view lists as retired is judged by its credential, as the connection decision does", func(t *testing.T) {
+		_, a, b := standardPair(t)
+		a.view.Credentials = append(a.view.Credentials, trust.Credential{Digest: trust.CredentialDigest{9}, A: a.party.node, B: b.party.node})
+		a.view.Retired = map[ident.NodeID]struct{}{b.party.node: {}}
+		if got := a.world().peerFaultOf(b.party.node, testNow, true); got != peerTrusted {
+			t.Fatalf("fault = %v, want trusted", got)
+		}
+	})
+	t.Run("a node the revocation set retires is not", func(t *testing.T) {
+		_, a, b := standardPair(t)
+		rev, err := revocation.Verify(mustRetire(t, seedTest3))
+		must(t, err)
+		must(t, a.retired.Add(rev))
+		if got := a.world().peerFaultOf(b.party.node, testNow, true); got != peerRetired {
+			t.Fatalf("fault = %v, want retired", got)
+		}
+	})
+}

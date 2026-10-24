@@ -187,12 +187,12 @@ func TestDecideNode(t *testing.T) {
 			rec, _ := w.cert(1)
 			return w.facts(), w.peer.Public(), NewNodeExchange(rec)
 		}, want{StateNonMemberNode, ReasonNotTrusted, trust.Denied, trust.ReasonRetired}},
-		{"a node trusted through an intermediate that only the view lists as retired is a non-member", func(w *world) (Facts, ident.PublicKey, Exchange) {
+		{"a Retired set the view brings is not a source: only the revocation set retires, so the node stays a member", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			w.trustsThrough(false)
 			w.view.Retired[nodeOf(t, seedSigner(t, 0x02))] = struct{}{}
 			rec, _ := w.cert(1)
 			return w.facts(), w.peer.Public(), NewNodeExchange(rec)
-		}, want{StateNonMemberNode, ReasonNotTrusted, trust.Denied, trust.ReasonRetired}},
+		}, want{StateMember, ReasonMemberInherited, trust.AllowedInherited, trust.ReasonInherited}},
 		{"a trusted node presenting another network key is refused", func(w *world) (Facts, ident.PublicKey, Exchange) {
 			w.trusts()
 			rec, _ := w.cert(1)

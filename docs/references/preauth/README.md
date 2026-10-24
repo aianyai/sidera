@@ -289,8 +289,12 @@ cache of who is known: the accounting keeps its own known set.
   intermediates of a path as well as for the target. If the caller had to copy the
   set into the trust view, forgetting to would silently trust through a retired
   intermediate, and the decision and the held-member selection could disagree
-  about the same node. Both read it where the decision is made, as the union of
-  the view's own set and the revocation set, and leave the caller's view alone.
+  about the same node. Everything that judges a node (the connection decision,
+  the held-member selection, pairing) reads it where the decision is made,
+  through `revocation.Set.TrustView`, and no union with a set the view brings
+  exists: two sources could disagree, and the one that is not the verified
+  revocation set would be a statement nobody verified. The caller's view is left
+  alone.
 - **The same certificate again is not stale.** `DecideSerial` answers stale for a
   certificate it has seen, because for storage "nothing new" is the right answer;
   for a connection the very certificate at the highest serial is exactly what a

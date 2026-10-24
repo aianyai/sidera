@@ -371,3 +371,25 @@ func TestNilSetPanics(t *testing.T) {
 		})
 	}
 }
+
+// TrustView is the one way a trust view gets its retired nodes: the set's, with
+// nothing merged in from the view it was given, and the given view unchanged.
+func TestTrustViewTakesRetirementFromTheSetOnly(t *testing.T) {
+	k1, k2 := rfcSigner(t, 1), rfcSigner(t, 2)
+	n1, n2 := nodeOf(t, k1), nodeOf(t, k2)
+	given := trust.View{Local: n2, Retired: trust.NodeSet{n2: {}}}
+	set := addAll(t, must(IssueNodeSelfRevocation(k1)))
+	got := set.TrustView(given)
+	if _, ok := got.Retired[n1]; !ok || len(got.Retired) != 1 {
+		t.Fatalf("Retired = %v, want only the set's node", got.Retired)
+	}
+	if got.Local != given.Local {
+		t.Fatal("the rest of the view changed")
+	}
+	if _, ok := given.Retired[n2]; !ok || len(given.Retired) != 1 {
+		t.Fatalf("the given view was changed: %v", given.Retired)
+	}
+	if len(NewSet().TrustView(given).Retired) != 0 {
+		t.Fatal("an empty set retires nobody, whatever the view said")
+	}
+}

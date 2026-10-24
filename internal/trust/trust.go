@@ -141,7 +141,8 @@ type View struct {
 	// LocallyRevoked holds the nodes the local owner stopped trusting.
 	LocallyRevoked NodeSet
 	// Retired holds the nodes whose identity key published a verified
-	// self-revocation statement. Such an identity is void for good: it is
+	// self-revocation statement. It is filled from the revocation set by
+	// revocation.Set.TrustView, the one source of retirement, and nowhere else. Such an identity is void for good: it is
 	// never trusted, not even through a path, and no credential with it can
 	// carry trust. Unlike LocallyRevoked, no owner decides it and nothing
 	// clears it. An empty or nil set means no node is retired. The local

@@ -98,11 +98,11 @@ timers, and applies the answers.
     key, or the person's root key), expired or not yet valid. Otherwise
     `admin.EffectiveLevel` decides: a level is an authorized person, anything
     else (not listed, entry expired) a non-member person.
-  - **Retirement has one source.** `Decide` and `HeldMembers` add
-    `Revocations.Retired()` to the view's `Retired` set before every
-    `trust.Evaluate`, so a retired intermediate carries no trust whether or not the
-    caller copied the set into the view. Nodes the view lists itself stay retired.
-    The caller's view is not changed.
+  - **Retirement has one source.** `Decide` and `HeldMembers` build the view for
+    every `trust.Evaluate` with `Revocations.TrustView`, so a retired intermediate
+    carries no trust whether or not the caller copied the set into the view, and
+    a `Retired` set the view brings is not read. The caller's view is not
+    changed.
   - **Failure closed.** An unset time, an unset peer key, an unset kind, a
     `nil` revocation set and a `nil` serial state are refused (the last with
     `ReasonInvalidInput`; an empty map is how a node that has seen nothing says
