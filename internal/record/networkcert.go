@@ -231,16 +231,34 @@ func DecideSerial(seen *SerialSeen, incoming Verified[NetworkKeyCertificate]) Se
 	return SerialStale
 }
 
+// KeyRevocationStatus is the outcome of looking an accepted network-key
+// certificate up in the revocation records. Its zero value means nobody looked:
+// a caller that forgot the lookup must get a refusal, never a certificate that
+// merely looks unrevoked.
+type KeyRevocationStatus int
+
+const (
+	// KeyRevocationUnchecked is the zero value: the revocation records were not
+	// consulted. NetworkKeyBelongs refuses it.
+	KeyRevocationUnchecked KeyRevocationStatus = iota
+	// KeyRevocationClear means the certificate was looked up and is not revoked.
+	KeyRevocationClear
+	// KeyRevocationRevoked means the certificate has been revoked.
+	KeyRevocationRevoked
+)
+
 // AcceptedNetworkKey is what a node currently accepts as another node's
-// network key: the accepted certificate and whether it has been revoked. The
-// accepted certificate is the highest-serial certificate that was verified and
-// taken in; it is kept apart from SerialSeen.
+// network key: the accepted certificate and the result of its revocation
+// lookup. The accepted certificate is the highest-serial certificate that was
+// verified and taken in; it is kept apart from SerialSeen.
 type AcceptedNetworkKey struct {
 	// Cert is the accepted certificate; nil if none is known.
 	Cert *NetworkKeyCertificate
-	// Revoked reports that the certificate has been revoked. This package does
-	// not read revocations; the caller fills it from the revocation records.
-	Revoked bool
+	// Revocation is the result of looking Cert up in the revocation records.
+	// This package does not read revocations; the caller fills it. The zero
+	// value KeyRevocationUnchecked is refused, and so is any value outside the
+	// known outcomes.
+	Revocation KeyRevocationStatus
 }
 
 // Binding is the answer to "does this network key belong to this node".
@@ -249,8 +267,8 @@ type Binding int
 const (
 	// BindingInvalid is the zero value; it is never returned as an answer.
 	BindingInvalid Binding = iota
-	// BindingOK: the accepted certificate names this key for this node, has not
-	// been revoked and is valid now.
+	// BindingOK: the accepted certificate names this key for this node, was
+	// checked as not revoked and is valid now.
 	BindingOK
 	// BindingNoCertificate: no accepted certificate for the node is known.
 	BindingNoCertificate
@@ -265,6 +283,10 @@ const (
 	// BindingRevoked: the certificate names this key for this node but has been
 	// revoked.
 	BindingRevoked
+	// BindingRevocationUnchecked: the certificate names this key for this node
+	// but nobody looked it up in the revocation records. It is a caller bug and
+	// is refused, never read as "not revoked".
+	BindingRevocationUnchecked
 )
 
 func (b Binding) String() string {
@@ -283,6 +305,8 @@ func (b Binding) String() string {
 		return "expired"
 	case BindingRevoked:
 		return "revoked"
+	case BindingRevocationUnchecked:
+		return "revocation-unchecked"
 	}
 	return "invalid"
 }
@@ -292,7 +316,8 @@ func (b Binding) String() string {
 // every record signed by a network key (declarations, vouchers, reachability
 // records, delivery reports) relies on it. A key that is not the certificate's
 // is a mismatch whatever the certificate's state; a certificate that names the
-// key is judged next for revocation, then for its window.
+// key is judged next for revocation, where a certificate that was never looked
+// up is refused like a revoked one, then for its window.
 func NetworkKeyBelongs(accepted AcceptedNetworkKey, node ident.NodeID, key ident.PublicKey, now time.Time) Binding {
 	cert := accepted.Cert
 	switch {
@@ -302,8 +327,10 @@ func NetworkKeyBelongs(accepted AcceptedNetworkKey, node ident.NodeID, key ident
 		return BindingNodeMismatch
 	case key.IsZero() || cert.NetworkKey != key:
 		return BindingKeyMismatch
-	case accepted.Revoked:
+	case accepted.Revocation == KeyRevocationRevoked:
 		return BindingRevoked
+	case accepted.Revocation != KeyRevocationClear:
+		return BindingRevocationUnchecked
 	}
 	switch cert.ValidityAt(now) {
 	case NotYetValid:

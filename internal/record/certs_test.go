@@ -274,7 +274,7 @@ func TestDecideSerial(t *testing.T) {
 		}
 	})
 	t.Run("a revocation is not an input: the serial seen stays", func(t *testing.T) {
-		accepted := AcceptedNetworkKey{Cert: &known.Payload, Revoked: true}
+		accepted := AcceptedNetworkKey{Cert: &known.Payload, Revocation: KeyRevocationRevoked}
 		if got := NetworkKeyBelongs(accepted, known.Payload.Node, a.Public(), epoch.Add(time.Hour)); got != BindingRevoked {
 			t.Fatalf("binding = %v", got)
 		}
@@ -297,8 +297,10 @@ func TestNetworkKeyBelongs(t *testing.T) {
 	cert := netCert(t, identity, a, 3)
 	node := cert.Node
 	mid := epoch.Add(time.Hour)
-	ok := AcceptedNetworkKey{Cert: &cert}
-	revoked := AcceptedNetworkKey{Cert: &cert, Revoked: true}
+	ok := AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationClear}
+	revoked := AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationRevoked}
+	unchecked := AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationUnchecked}
+	unknown := AcceptedNetworkKey{Cert: &cert, Revocation: 99}
 	rows := []struct {
 		rule string
 		acc  AcceptedNetworkKey
@@ -310,7 +312,7 @@ func TestNetworkKeyBelongs(t *testing.T) {
 		{"the certified key of the node, inside the window", ok, node, a.Public(), mid, BindingOK},
 		{"valid at NotBefore", ok, node, a.Public(), epoch, BindingOK},
 		{"no certificate known", AcceptedNetworkKey{}, node, a.Public(), mid, BindingNoCertificate},
-		{"no certificate known, revoked flag set", AcceptedNetworkKey{Revoked: true}, node, a.Public(), mid, BindingNoCertificate},
+		{"no certificate known, revoked status set", AcceptedNetworkKey{Revocation: KeyRevocationRevoked}, node, a.Public(), mid, BindingNoCertificate},
 		{"another node", ok, nodeOf(t, b), a.Public(), mid, BindingNodeMismatch},
 		{"zero node", ok, ident.NodeID{}, a.Public(), mid, BindingNodeMismatch},
 		{"a key the certificate does not name", ok, node, b.Public(), mid, BindingKeyMismatch},
@@ -319,11 +321,17 @@ func TestNetworkKeyBelongs(t *testing.T) {
 		{"before the window", ok, node, a.Public(), epoch.Add(-time.Second), BindingNotYetValid},
 		{"at expiry", ok, node, a.Public(), endTime, BindingExpired},
 		{"after expiry", ok, node, a.Public(), endTime.Add(time.Hour), BindingExpired},
-		{"a certificate with an unset window", AcceptedNetworkKey{Cert: &NetworkKeyCertificate{Node: node, NetworkKey: a.Public(), Serial: 1}}, node, a.Public(), mid, BindingNoCertificate},
+		{"a certificate with an unset window", AcceptedNetworkKey{Cert: &NetworkKeyCertificate{Node: node, NetworkKey: a.Public(), Serial: 1}, Revocation: KeyRevocationClear}, node, a.Public(), mid, BindingNoCertificate},
 		{"a revoked certificate, inside the window", revoked, node, a.Public(), mid, BindingRevoked},
 		{"a revoked certificate, expired", revoked, node, a.Public(), endTime.Add(time.Hour), BindingRevoked},
 		{"a revoked certificate asked about another key", revoked, node, b.Public(), mid, BindingKeyMismatch},
 		{"a revoked certificate asked about another node", revoked, nodeOf(t, b), a.Public(), mid, BindingNodeMismatch},
+		{"a certificate never looked up in the revocation records, inside the window", unchecked, node, a.Public(), mid, BindingRevocationUnchecked},
+		{"a certificate never looked up, expired: the missing lookup is reported first", unchecked, node, a.Public(), endTime.Add(time.Hour), BindingRevocationUnchecked},
+		{"a certificate never looked up asked about another key", unchecked, node, b.Public(), mid, BindingKeyMismatch},
+		{"a certificate never looked up asked about another node", unchecked, nodeOf(t, b), a.Public(), mid, BindingNodeMismatch},
+		{"an unknown revocation status counts as unchecked", unknown, node, a.Public(), mid, BindingRevocationUnchecked},
+		{"no certificate known and no lookup", AcceptedNetworkKey{Revocation: KeyRevocationUnchecked}, node, a.Public(), mid, BindingNoCertificate},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
@@ -353,7 +361,7 @@ func TestRotatingTheNetworkKeyKeepsTheNodeID(t *testing.T) {
 	}
 	seen := SerialSeenOf(v1)
 	c1 := v1.Payload
-	if got := NetworkKeyBelongs(AcceptedNetworkKey{Cert: &c1}, node, oldKey.Public(), now); got != BindingOK {
+	if got := NetworkKeyBelongs(AcceptedNetworkKey{Cert: &c1, Revocation: KeyRevocationClear}, node, oldKey.Public(), now); got != BindingOK {
 		t.Fatalf("old key before rotation: %v", got)
 	}
 
@@ -369,7 +377,7 @@ func TestRotatingTheNetworkKeyKeepsTheNodeID(t *testing.T) {
 	if c2.NetworkKey == c1.NetworkKey {
 		t.Fatal("test setup: the key did not change")
 	}
-	acc2 := AcceptedNetworkKey{Cert: &c2}
+	acc2 := AcceptedNetworkKey{Cert: &c2, Revocation: KeyRevocationClear}
 	if got := NetworkKeyBelongs(acc2, node, newKey.Public(), now); got != BindingOK {
 		t.Fatalf("new key after rotation: %v", got)
 	}
@@ -565,7 +573,7 @@ func TestNetworkKeySignedRecords(t *testing.T) {
 	mid := epoch.Add(time.Hour)
 	decl := declRecord{Node: node, Text: "hello"}
 	signedBy := func(s Signer) Record {
-		b, err := declDescriptor(AcceptedNetworkKey{Cert: &cert}, mid).encode(decl)
+		b, err := declDescriptor(AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationClear}, mid).encode(decl)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -584,13 +592,14 @@ func TestNetworkKeySignedRecords(t *testing.T) {
 		now    time.Time
 		want   Binding // BindingOK: the record verifies
 	}{
-		{"the node's certified network key, inside the window", network, AcceptedNetworkKey{Cert: &cert}, mid, BindingOK},
-		{"the certificate has expired", network, AcceptedNetworkKey{Cert: &cert}, endTime, BindingExpired},
-		{"the certificate is not yet valid", network, AcceptedNetworkKey{Cert: &cert}, epoch.Add(-time.Second), BindingNotYetValid},
-		{"the certificate has been revoked", network, AcceptedNetworkKey{Cert: &cert, Revoked: true}, mid, BindingRevoked},
-		{"another key than the certified one", other, AcceptedNetworkKey{Cert: &cert}, mid, BindingKeyMismatch},
-		{"the identity key in place of the network key", identity, AcceptedNetworkKey{Cert: &cert}, mid, BindingKeyMismatch},
-		{"the accepted certificate is another node's", network, AcceptedNetworkKey{Cert: &foreign}, mid, BindingNodeMismatch},
+		{"the node's certified network key, inside the window", network, AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationClear}, mid, BindingOK},
+		{"the certificate has expired", network, AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationClear}, endTime, BindingExpired},
+		{"the certificate is not yet valid", network, AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationClear}, epoch.Add(-time.Second), BindingNotYetValid},
+		{"the certificate has been revoked", network, AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationRevoked}, mid, BindingRevoked},
+		{"another key than the certified one", other, AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationClear}, mid, BindingKeyMismatch},
+		{"the identity key in place of the network key", identity, AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationClear}, mid, BindingKeyMismatch},
+		{"the accepted certificate is another node's", network, AcceptedNetworkKey{Cert: &foreign, Revocation: KeyRevocationClear}, mid, BindingNodeMismatch},
+		{"the certificate was never looked up in the revocation records", network, AcceptedNetworkKey{Cert: &cert}, mid, BindingRevocationUnchecked},
 		{"no certificate is accepted for the node", network, AcceptedNetworkKey{}, mid, BindingNoCertificate},
 	}
 	for _, r := range rows {
@@ -634,7 +643,7 @@ func TestNetworkKeySignedRecords(t *testing.T) {
 
 	t.Run("a descriptor built for one moment does not follow the clock: it is built again to verify later", func(t *testing.T) {
 		rec := signedBy(network)
-		acc := AcceptedNetworkKey{Cert: &cert}
+		acc := AcceptedNetworkKey{Cert: &cert, Revocation: KeyRevocationClear}
 		if _, err := Verify(declDescriptor(acc, mid), rec); err != nil {
 			t.Fatal(err)
 		}
@@ -733,7 +742,7 @@ func TestIssuedCertificatesAreBackdatedByTheClockTolerance(t *testing.T) {
 		if v.Payload != c {
 			t.Fatalf("read back %+v, want %+v", v.Payload, c)
 		}
-		acc := AcceptedNetworkKey{Cert: &c}
+		acc := AcceptedNetworkKey{Cert: &c, Revocation: KeyRevocationClear}
 		node, key := c.Node, network.Public()
 		for _, row := range []struct {
 			rule string

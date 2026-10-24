@@ -178,11 +178,16 @@ key and not a peer identifier, so the contract packages do not depend on libp2p.
   certificate never lowers it, so an older key cannot come back.
 - **`NetworkKeyBelongs`** is the only function that decides whether a network
   public key is a node's key, given what is accepted for the node
-  (`AcceptedNetworkKey`: the certificate and a revoked flag the caller fills from
-  the revocation records). Declarations, vouchers, reachability records and
+  (`AcceptedNetworkKey`: the certificate and the revocation status the caller fills
+  from the revocation records). Declarations, vouchers, reachability records and
   delivery reports that a network key signs all rely on it. A key the certificate
   does not name is a mismatch whatever the certificate's state; a certificate
-  that names it is then judged for revocation, then for its window.
+  that names it is then judged for revocation, then for its window. The
+  revocation status is three-valued: its zero value means nobody looked the
+  certificate up and is refused with its own binding
+  (`BindingRevocationUnchecked`), surfaced by `NetworkKeyOf` through
+  `BindingError` like the others. A boolean whose zero value meant "not revoked"
+  would let a caller that forgot the lookup accept a revoked network key.
 
 Rotating the network key therefore leaves the node ID unchanged: a certificate
 with serial 2 names the new key for the same node ID, the old key stops

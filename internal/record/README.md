@@ -24,7 +24,7 @@ for the format and the reasons behind it. Identifiers and keys come from
 | `MarshalCanonical`, `UnmarshalStrict`             | The canonical codec for payload wire structs defined elsewhere.                                            |
 | `NetworkKeyCertificate`, `NetworkKeyCertificateDescriptor`, `IssueNetworkKeyCertificate` | Node ID, network public key, serial, validity; signed by the identity key. The issue constructor sets `NotBefore` back by the clock tolerance. |
 | `SerialSeen`, `SerialSeenOf(v)`, `DecideSerial(seen, incoming)` | The highest serial seen for a node with the digest of the certificate seen at it; accept, stale, conflict, wrong node or invalid for a new verified certificate. |
-| `AcceptedNetworkKey`, `NetworkKeyBelongs(accepted, node, key, now)` | The accepted certificate and its revocation flag; the one answer to "is this network key this node's key": every network-key record relies on it. |
+| `AcceptedNetworkKey`, `NetworkKeyBelongs(accepted, node, key, now)` | The accepted certificate and the result of its revocation lookup; the one answer to "is this network key this node's key": every network-key record relies on it. |
 | `DeviceCertificate`, `DeviceCertificateDescriptor`, `IssueDeviceCertificate`, `DeviceCertificate.AdminCert()` | Person ID, device key, level cap, validity; signed by the root key; conversion to `admin.DeviceCert`. The issue constructor sets `NotBefore` back by the clock tolerance. |
 
 Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
@@ -67,8 +67,8 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   accepts exactly the keys `NetworkKeyBelongs` accepts, so the binding rules live
   in one function. When it refuses, the verification error wraps
   `ErrSignerNotAllowed` and a `*BindingError` whose `Binding` is the specific
-  reason (expired, not yet valid, key mismatch, node mismatch, revoked, no
-  certificate); read it with `errors.As`.
+  reason (expired, not yet valid, key mismatch, node mismatch, revoked, revocation not
+  checked, no certificate); read it with `errors.As`.
 - **Partial is not verified.** `Verify` is the only function that returns a
   `Verified[P]`. `VerifyPartial` returns a `Partial[P]`: the payload, the digest
   and, per slot in the rule's order, whether it is signed and by whom. The two
@@ -124,9 +124,11 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   the highest seen, and whether a device certificate is expired or revoked are
   separate decisions, made by the functions above, by `admin` and by the
   revocation records.
-- `AcceptedNetworkKey.Revoked` is filled by the caller from the revocation
-  records; this package never reads them. A caller without a revocation source
-  leaves it false and so reports every certificate as unrevoked. The caller keeps
+- `AcceptedNetworkKey.Revocation` is filled by the caller from the revocation
+  records; this package never reads them. Its zero value `KeyRevocationUnchecked`
+  means nobody looked, and `NetworkKeyBelongs` refuses it with
+  `BindingRevocationUnchecked`, so a caller without a revocation source gets
+  refusals, never certificates that look unrevoked. The caller keeps
   `SerialSeen` per node and moves it forward with `SerialSeenOf` whenever
   `DecideSerial` answers accept, whether or not the certificate is also taken as
   the accepted one.
