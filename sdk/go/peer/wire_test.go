@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -518,11 +519,25 @@ func TestNotificationsAreHandledInArrivalOrder(t *testing.T) {
 	}
 }
 
+// enteredWriter reports, once, that the peer's writer has started a Write.
+type enteredWriter struct {
+	io.WriteCloser
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (w *enteredWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	return w.WriteCloser.Write(p)
+}
+
 func TestOutboundQueueFullReturnsErrOverloadedAndWritesNothing(t *testing.T) {
 	leakGuard(t)
 	in, _ := io.Pipe()
 	outR, outW := io.Pipe()
-	p, err := peer.New(in, captured(outW), peer.Config{Params: peer.Params{MaxOutbound: 4, WriteTimeout: time.Minute}})
+	w := &enteredWriter{WriteCloser: captured(outW), entered: make(chan struct{})}
+	const maxOutbound = 4
+	p, err := peer.New(in, w, peer.Config{Params: peer.Params{MaxOutbound: maxOutbound, WriteTimeout: time.Minute}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +545,19 @@ func TestOutboundQueueFullReturnsErrOverloadedAndWritesNothing(t *testing.T) {
 	t.Cleanup(func() { p.Close(); outR.Close() })
 
 	ctx := context.Background()
-	accepted := 0
+	// Nothing reads outR, so the writer stays inside its first Write and takes
+	// nothing more from the queue. Wait for it to be there: until then the
+	// writer may still take a line off a full queue, and room would reappear
+	// between the refusal and the Call.
+	if err := p.Notify(ctx, "n", map[string]int{"i": 0}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-w.entered:
+	case <-time.After(wait):
+		t.Fatal("the writer never started writing")
+	}
+	accepted := 1
 	for {
 		err := p.Notify(ctx, "n", map[string]int{"i": accepted})
 		if err == peer.ErrOverloaded {
@@ -544,9 +571,9 @@ func TestOutboundQueueFullReturnsErrOverloadedAndWritesNothing(t *testing.T) {
 			t.Fatal("the outbound queue never filled")
 		}
 	}
-	// The queue holds MaxOutbound lines and the writer may hold one more.
-	if accepted < 4 || accepted > 5 {
-		t.Fatalf("accepted %d notifications before the queue was full, want 4 or 5", accepted)
+	// The queue holds MaxOutbound lines and the writer holds one more.
+	if accepted != maxOutbound+1 {
+		t.Fatalf("accepted %d notifications before the queue was full, want %d", accepted, maxOutbound+1)
 	}
 	err = p.Call(ctx, "m", nil, nil)
 	if err != peer.ErrOverloaded || !peer.NoEffect(err) {
