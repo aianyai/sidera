@@ -57,8 +57,9 @@ only the list level limits the person; a zero cap grants nothing. They have no
 rights if they are not on this node's list, the entry or certificate has expired
 (at the expiry instant), the certificate is not valid yet (it is valid from its
 `NotBefore` instant), or the certificate or root key is revoked, or nobody
-looked the revocation sets up. Rights on other nodes are irrelevant. The denial reason names the first failing fact, and distinguishes a
-list level that is too low from a certificate cap that is too low.
+looked the revocation sets up. Rights on other nodes are irrelevant. The denial
+reason names the first failing fact, and distinguishes a list level that is too
+low from a certificate cap that is too low.
 
 **Revocation status is three-valued.** The caller states the outcome of the
 revocation lookup in `DeviceCert.Revocation`: clear, certificate revoked, or root
@@ -84,8 +85,8 @@ returns it checks the directive in this order, and the first failure decides:
 4. it is addressed to this node;
 5. its kind is "revoke trust edge" (the only kind there is);
 6. the signer's certificate and root key were looked up and are not revoked, and
-   the certificate was
-   valid at the signing time (from `NotBefore`, until `NotAfter` exclusive);
+   the certificate was valid at the signing time (from `NotBefore`, until
+   `NotAfter` exclusive);
 7. the signer is on the current list, unexpired, with at least the level the
    catalogue requires for issuing a directive (manage) after the certificate
    cap.

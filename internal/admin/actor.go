@@ -97,9 +97,9 @@ type Standing struct {
 }
 
 // EffectiveLevel returns a remote person's rights on this node at now. The
-// certificate must be valid and checked as unrevoked, the person must be on the list with
-// an unexpired entry, and the level is the lower of the list level and the
-// certificate's cap. Whatever the person may do on other nodes is irrelevant.
+// certificate must be valid and checked as unrevoked, the person must be on the
+// list with an unexpired entry, and the level is the lower of the list level and
+// the certificate's cap. Whatever the person may do on other nodes is irrelevant.
 //
 // The caller re-evaluates this for requests on a live connection, so removing
 // or downgrading an entry takes effect on the next request.

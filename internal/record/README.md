@@ -86,8 +86,9 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   it. `Signers()` and `Slots()` return copies.
 - **Peek is not verification.** `Peek(descriptor, record)` checks the type string
   and decodes the payload through the descriptor's own decoding path (strict
-  decoding, then the type's validation), and checks no signature and no signer
-  rule. It returns an `Unverified[P]`, which does not convert to `Verified[P]` or
+  decoding, then the type's validation), and checks no signature, no signer
+  rule and not the envelope (signature count, lengths, order), so a successful
+  peek says nothing about the record's shape. It returns an `Unverified[P]`, which does not convert to `Verified[P]` or
   `Partial[P]`. Its only legitimate use is learning which node or key a record
   claims, to build the context `Verify` needs; whatever it returns may be forged
   and is never acted on, stored as fact or forwarded.
@@ -107,8 +108,8 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   identifier is the certificate's node. The window is `NotBefore <= now <
   NotAfter` with no tolerance; this package judges it
   (`NetworkKeyCertificate.ValidityAt`, `NetworkKeyBelongs`). A binding answer is
-  one of ok, no certificate, node mismatch, key mismatch, not yet valid, expired
-  or revoked.
+  one of ok, no certificate, node mismatch, key mismatch, not yet valid, expired,
+  revoked or revocation unchecked.
 - **Issuing.** Certificates are issued with `IssueNetworkKeyCertificate` and
   `IssueDeviceCertificate`, which set `NotBefore` to the issue time minus
   `timing.ClockTolerance` (whole seconds). A higher serial replaces the old

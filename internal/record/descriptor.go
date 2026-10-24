@@ -333,7 +333,9 @@ func (u Unverified[P]) Payload() P { return u.payload }
 // any signature or the signer rule. It checks only what decoding needs: that r
 // has d's type and that its payload passes the descriptor's own decoding path
 // (strict decoding and the type's validation), the same path Verify and Seal
-// use.
+// use. The envelope is not checked either (signature count, lengths, key order),
+// so a successful peek says nothing about the shape of the record, let alone
+// that it could be verified.
 //
 // The one legitimate use is finding which node or key a record claims, in order
 // to choose the context that verification needs: a record whose signer rule

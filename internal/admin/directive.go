@@ -91,7 +91,7 @@ type DirectiveVerdict struct {
 //
 // A signer who is not an administrator of this node (not listed, entry expired,
 // level too low) yields DispositionWarn for a structurally valid directive: it
-// is only a suggestion to show the owner. A revoked or out-of-window
+// is only a suggestion to show the owner. A revoked, unchecked or out-of-window
 // certificate, or a directive for another node or of a kind other than revoking
 // a trust edge, is rejected. A directive can only withdraw trust, so nothing a
 // signer asks for can let a node in.
