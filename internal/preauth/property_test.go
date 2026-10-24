@@ -113,6 +113,7 @@ func (r *reference) connect(peer, addr int, now time.Time) bool {
 
 func (r *reference) completed(peer, addr int, s State) Placement {
 	if s == StateUnauthenticated {
+		r.learned[peer], r.held[peer] = false, false
 		return Placement{VerdictRefuse, RefuseNotCompleted}
 	}
 	e := r.find(peer, addr)
@@ -389,12 +390,21 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 				break
 			}
 			s := states[rng.Intn(len(states))]
+			wasKnown := ref.isKnown(c.peer)
 			want := ref.completed(c.peer, addrOf(c), s)
 			got := a.Completed(keyOfConn(c), s, now)
 			if got != want {
 				t.Fatalf("step %d: Completed(%v) = %v/%v, want %v/%v", step, s, got.Verdict, got.Reason, want.Verdict, want.Reason)
 			}
 			cover["completed:"+want.Reason.String()]++
+			if wasKnown && !ref.isKnown(c.peer) {
+				switch s {
+				case StateUnauthenticated:
+					cover["refused-exchange-withdrew-the-exemption"]++
+				default:
+					cover["non-member-exchange-withdrew-the-exemption"]++
+				}
+			}
 			switch want.Reason {
 			case PlaceReleased:
 				c.accounted, c.released = false, true
@@ -425,7 +435,7 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 			default:
 				endAccounted(c)
 			}
-		case ev < 82:
+		case ev < 80:
 			// The certificates held change: a random few peers are held members.
 			var held []ident.PublicKey
 			ref.held = map[int]bool{}
@@ -438,6 +448,14 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 				}
 			}
 			a.SetHeld(held)
+		case ev < 82:
+			// The caller ends a peer's standing (trust ended, person removed).
+			peer := rng.Intn(peers)
+			if ref.isKnown(peer) {
+				cover["forget-withdrew-the-exemption"]++
+			}
+			ref.learned[peer], ref.held[peer] = false, false
+			a.Forget(pubs[peer])
 		case ev < 88:
 			wantEntries := ref.sweep(now)
 			var want []ConnKey
@@ -528,6 +546,9 @@ func TestAccountingAgainstTheReference(t *testing.T) {
 		"completed:" + PlaceAlreadyNonMember.String():    20,
 		"completed:" + PlaceUntracked.String():           200,
 		"completed:" + RefuseNotCompleted.String():       200,
+		"refused-exchange-withdrew-the-exemption":        50,
+		"non-member-exchange-withdrew-the-exemption":     30,
+		"forget-withdrew-the-exemption":                  100,
 		"non-member-person-placed":                       50,
 		"sweep-calls-with-removals":                      200,
 		"sweep-removed-entries":                          200,

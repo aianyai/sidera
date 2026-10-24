@@ -396,6 +396,79 @@ func TestANonMemberDecisionTakesAwayWhatWasKnown(t *testing.T) {
 	wantCounts(t, a, 0, 0, 1)
 }
 
+// A refused exchange means the peer's certificate is not a member's: the
+// exemption an earlier exchange gave the peer ends with it, whichever source
+// made it known.
+func TestARefusedExchangeWithdrawsTheExemption(t *testing.T) {
+	for _, source := range []string{"learned from an exchange", "held certificate"} {
+		t.Run(source, func(t *testing.T) {
+			a := newAccounting(t)
+			peer, other := peerKey(t, 50), peerKey(t, 51)
+			if source == "held certificate" {
+				a.SetHeld([]ident.PublicKey{peer, other})
+			} else {
+				for _, p := range []ident.PublicKey{peer, other} {
+					a.Completed(ConnKey{p, "x"}, StateMember, at(0))
+				}
+			}
+			k := ConnKey{peer, "a"}
+			admit(t, a, k, at(1), AdmitKnownMember)
+			if p := a.Completed(k, StateUnauthenticated, at(2)); p != (Placement{VerdictRefuse, RefuseNotCompleted}) {
+				t.Fatalf("Completed = %v/%v", p.Verdict, p.Reason)
+			}
+			if a.Known(peer) {
+				t.Error("a peer whose exchange was refused is still known")
+			}
+			if !a.Known(other) {
+				t.Error("a refused exchange of one peer made another unknown")
+			}
+			wantCounts(t, a, 0, 1, 0) // the entry stays until the connection ends
+			a.Disconnected(k)
+			// The next connection is a stranger's and counts against the cap.
+			for i := byte(1); i <= 3; i++ {
+				admit(t, a, key(t, i, "a"), at(3), AdmitCounted)
+			}
+			admit(t, a, ConnKey{peer, "b"}, at(3), RefuseCapReached)
+			admit(t, a, ConnKey{other, "b"}, at(3), AdmitKnownMember)
+		})
+	}
+}
+
+func TestAnInvalidCompletedCallDoesNotWithdrawTheExemption(t *testing.T) {
+	a := newAccounting(t)
+	k := key(t, 1, "a")
+	a.Completed(k, StateMember, at(0))
+	a.Completed(k, StateUnauthenticated, time.Time{})
+	a.Completed(ConnKey{Peer: k.Peer}, StateUnauthenticated, at(1))
+	if !a.Known(k.Peer) {
+		t.Error("a call that could not be judged forgot the peer")
+	}
+}
+
+func TestForgetEndsTheKnownStandingFromEitherSource(t *testing.T) {
+	a := newAccounting(t)
+	learned, held, untouched := key(t, 1, "a"), peerKey(t, 2), peerKey(t, 3)
+	a.Completed(learned, StateAuthorizedPerson, at(0))
+	a.SetHeld([]ident.PublicKey{held, learned.Peer, untouched})
+	a.Forget(learned.Peer)
+	a.Forget(held)
+	a.Forget(peerKey(t, 99)) // an unknown peer: nothing happens
+	a.Forget(ident.PublicKey{})
+	if a.Known(learned.Peer) || a.Known(held) {
+		t.Error("a forgotten peer is still known")
+	}
+	if !a.Known(untouched) {
+		t.Error("Forget touched another peer")
+	}
+	admit(t, a, ConnKey{learned.Peer, "b"}, at(1), AdmitCounted)
+	// The held set is the caller's to refresh: SetHeld lists the peer again when
+	// its certificate still belongs to a member.
+	a.SetHeld([]ident.PublicKey{held})
+	if !a.Known(held) {
+		t.Error("SetHeld did not list the peer again")
+	}
+}
+
 func TestCompletedWithoutAnEntryOnlyLearns(t *testing.T) {
 	a := newAccounting(t)
 	k := key(t, 1, "outbound")

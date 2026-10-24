@@ -20,7 +20,7 @@ timers, and applies the answers.
 | `ExchangeDeadline`                                      | The 5 seconds a connection has to complete the exchange.                                                        |
 | `Decide(Facts, peerKey, Exchange)`                      | From a received exchange and the local facts to a `Decision{State, Reason, ...}`: unauthenticated (refused), non-member node, non-member person, member or authorized person. |
 | `Params`, `Params.Validate`, `ParamsError`                | The numbers of the accounting model, none decided here; the check that `NonMemberLifetime >= ExchangeDeadline + PairingOnlineTimeout`. |
-| `Accounting`, `NewAccounting`                           | The connection-accounting model as pure state transitions: `Secured`, `Connected`, `Completed`, `Disconnected`, `Sweep`, `Overdue`, `SetHeld`, `Known`, `Counts`. |
+| `Accounting`, `NewAccounting`                           | The connection-accounting model as pure state transitions: `Secured`, `Connected`, `Completed`, `Disconnected`, `Sweep`, `Overdue`, `SetHeld`, `Forget`, `Known`, `Counts`. |
 | `HeldMembers(Facts, certificates)`                      | The network keys of held certificates that belong to members; what `SetHeld` is given. |
 | `Allowed(state, Use)`                                   | The one table: whether a peer in a state may open a stream of a protocol or make a relay request. `Access{Verdict, Reason}`. |
 
@@ -125,7 +125,9 @@ timers, and applies the answers.
     certificates the node holds: `HeldMembers` selects them (the certificate is
     the current one for its node, valid now, not revoked, and the node is a member
     as `Decide` would decide) and `SetHeld` replaces that set. A completed
-    exchange that decides non-member removes the peer from both. The first
+    exchange that decides non-member, and a refused exchange (`Completed` with the
+    unauthenticated state), remove the peer from both. `Forget` does the same
+    on the caller's word. The first
     connection of an authorized person's new device is a stranger's.
   - `Completed` (the exchange was decided): a member or authorized person is
     released from the accounting; a non-member (node or person alike) takes one
@@ -178,7 +180,10 @@ timers, and applies the answers.
   enough that a connection is closed soon after its deadline; a timer is only a
   wake-up and `Overdue` is the truth. `SetHeld` is refreshed from `HeldMembers`
   at start and whenever a held certificate, a revocation or the trust view
-  changes. `SweepInterval` is longer than the longest time between the
+  changes. The caller calls `Forget` for a peer when the standing that made it
+  known ends: a member node's trust ends, or a person is removed from the
+  authorized-persons list or revoked; without it the exemption would last until
+  the peer's next exchange, which it need not make. `SweepInterval` is longer than the longest time between the
   handshake and the connection being established. An `Accounting` is not safe
   for concurrent use.
 - Per-peer resource limits (the network layer's part, not modelled here): the

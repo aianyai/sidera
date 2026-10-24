@@ -127,7 +127,9 @@ const (
 	// reporting it as disconnected.
 	RefuseNonMemberFull
 	// RefuseNotCompleted: the state is unauthenticated, which a completed
-	// exchange never is; nothing changes.
+	// exchange never is: the exchange was refused. The peer is no longer known as
+	// a member, and nothing else changes: the caller closes the connection, and
+	// its Disconnected releases the entry.
 	RefuseNotCompleted
 	// RefusePlacementInput: an unset state, key or time.
 	RefusePlacementInput
@@ -231,6 +233,17 @@ func (a *Accounting) SetHeld(peers []ident.PublicKey) {
 	}
 }
 
+// Forget removes peer from the known members, by both sources, until a completed
+// exchange learns it again or SetHeld lists it again. The caller uses it when
+// the standing that made a peer known ends: the trust in a member node, or a
+// person's place on the authorized-persons list or their certificate. Without
+// it a peer learned from an earlier exchange would keep its exemption from the
+// cap until its next exchange, which it need not attempt.
+func (a *Accounting) Forget(peer ident.PublicKey) {
+	delete(a.learned, peer)
+	delete(a.held, peer)
+}
+
 // Known reports whether peer is known as a member, by a completed exchange or
 // by a held certificate.
 func (a *Accounting) Known(peer ident.PublicKey) bool {
@@ -312,19 +325,27 @@ func (a *Accounting) Connected(key ConnKey, now time.Time) bool {
 }
 
 // Completed is called when the exchange on a connection was decided, with the
-// state Decide returned, and again when a decision changes (pairing made a
-// non-member a member). A member or an authorized person is released from the
-// accounting and its peer is learned as known; a non-member takes a place among
-// NonMemberConcurrency, or is refused when none is free; a non-member also stops
-// being known as a member, by either source, until the next SetHeld lists it
-// again. A non-member node and a non-member person are the same to the
-// accounting: the limits are about how many strangers may hold a connection,
-// whatever they present.
+// state Decide returned (the unauthenticated state when the exchange was
+// refused), and again when a decision changes (pairing made a non-member node a
+// member).
+//
+// A member or an authorized person is released from the accounting and its peer
+// is learned as known. A non-member, node or person alike, takes a place among
+// NonMemberConcurrency, or is refused when none is free; the limits are about
+// how many strangers may hold a connection, whatever they present.
+//
+// A non-member and a refused exchange both take the peer out of the known
+// members, by either source, until the next completed member exchange or the
+// next SetHeld lists it again: a peer whose certificate is refused or whose
+// trust is gone is not a member, and the exemption an earlier exchange gave it
+// ends with that decision rather than at the end of a connection that may
+// never come.
 func (a *Accounting) Completed(key ConnKey, s State, now time.Time) Placement {
 	if !key.valid() || now.IsZero() || !s.Valid() {
 		return Placement{VerdictRefuse, RefusePlacementInput}
 	}
 	if s == StateUnauthenticated {
+		a.Forget(key.Peer)
 		return Placement{VerdictRefuse, RefuseNotCompleted}
 	}
 	e, tracked := a.entries[key]
@@ -338,8 +359,7 @@ func (a *Accounting) Completed(key ConnKey, s State, now time.Time) Placement {
 		return Placement{VerdictAllow, PlaceReleased}
 	}
 	// A non-member node or person.
-	delete(a.learned, key.Peer)
-	delete(a.held, key.Peer)
+	a.Forget(key.Peer)
 	switch {
 	case !tracked:
 		return Placement{VerdictAllow, PlaceUntracked}

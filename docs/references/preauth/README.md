@@ -148,7 +148,9 @@ key and the remote address) is tracked at a time, and a second one is refused.
   exchange completed as a member or an authorized person, and the members whose
   valid network-key certificates the node holds (`HeldMembers` picks them with
   the same rules `Decide` uses: current serial, valid, unrevoked, and a member by
-  `trust`). A peer decided as a non-member stops being known. A person's new
+  `trust`). A peer stops being known when an exchange decides it a non-member
+  or is refused, and when the caller says its standing ended (`Forget`: a
+  member's trust ended, a person was removed from the list or revoked). A person's new
   device, and a node with a new network key, are strangers until their first
   exchange completes.
 - **The non-member limits.** A connection whose exchange completed as a
@@ -283,9 +285,15 @@ cache of who is known: the accounting keeps its own known set.
   hold the node's connections. The same cap shuts out members that reconnect
   during a flood, and the flood costs the attacker nothing. A key authenticated
   by the handshake cannot be spoofed, so exempting it gives an attacker nothing;
-  it also keeps its own deadline. The residual risk is a revoked member that
-  keeps connecting: it holds no slot but it is closed at the deadline, and its
-  next exchange removes it from the known.
+  it also keeps its own deadline. The exemption is withdrawn when the standing
+  behind it ends, not left to expire: a refused exchange (the certificate was
+  revoked or replaced, so the peer is not who the exemption was for) and a
+  non-member decision forget the peer at once, and the caller forgets a peer when
+  a member's trust ends or a person leaves the list. The residual risk is a
+  peer whose standing ended without the caller saying so and that never
+  exchanges again: it holds no slot of the cap's and is closed at its deadline,
+  but its connections are not counted until the next exchange or the next
+  refresh of the held members.
 - **One inbound connection per key.** The connection gater is asked once per
   connection, before the library has given it an identifier, so (peer, address)
   is the finest key both the gater and the later connection events can obtain.
@@ -332,4 +340,4 @@ cache of who is known: the accounting keeps its own known set.
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
 | The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestHeldMembers`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
 | Parameters | `internal/preauth/params.go`; test `TestParamsValidate` |
-| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestASecondInboundConnectionOnATrackedKeyIsRefused`, `TestADuplicateKeyIsRefusedBeforeTheCapIsLookedAt`, `TestADuplicateKeyOfAKnownMemberIsRefusedWithoutLeakingAnEntry`, `TestADuplicateKeyOfANonMemberIsRefused`, `TestADuplicateKeyIsRefusedUntilTheSweepForgetsALostEntry`, `TestAKeyIsFreeAgainOnceItsConnectionBecameAMember`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestNonMemberPersonsAndNodesShareTheNonMemberLimits`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` follows every connection by an identifier of its own that the model never sees, compares every answer with a second implementation under 40,000 random events, asserts at every step that each live inbound connection is on the books and bound by a deadline or was released as a member, that every connected entry has an open connection behind it and that nothing remains once all connections ended, and asserts how often each path was taken |
+| The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestASecondInboundConnectionOnATrackedKeyIsRefused`, `TestADuplicateKeyIsRefusedBeforeTheCapIsLookedAt`, `TestADuplicateKeyOfAKnownMemberIsRefusedWithoutLeakingAnEntry`, `TestADuplicateKeyOfANonMemberIsRefused`, `TestADuplicateKeyIsRefusedUntilTheSweepForgetsALostEntry`, `TestAKeyIsFreeAgainOnceItsConnectionBecameAMember`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestARefusedExchangeWithdrawsTheExemption`, `TestAnInvalidCompletedCallDoesNotWithdrawTheExemption`, `TestForgetEndsTheKnownStandingFromEitherSource`, `TestNonMemberPersonsAndNodesShareTheNonMemberLimits`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` follows every connection by an identifier of its own that the model never sees, compares every answer with a second implementation under 40,000 random events, asserts at every step that each live inbound connection is on the books and bound by a deadline or was released as a member, that every connected entry has an open connection behind it and that nothing remains once all connections ended, and asserts how often each path was taken |
