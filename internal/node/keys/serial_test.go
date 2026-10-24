@@ -8,6 +8,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/keys"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // The serial of a certificate a node issued never goes back: not across a
@@ -16,10 +17,14 @@ import (
 // reissued a lower or an equal serial would be unverifiable to peers that had
 // seen the higher one.
 //
-// The oracle is a model written in the test: the serials of the renewals whose
-// Commit returned nil are acknowledged, and an acknowledged serial is durable
-// and strictly above every earlier one; whatever the disk looks like after any
-// crash, the next load and the next renewal stay above all of them.
+// The oracle is a model written in the test, with two records. The serials of the
+// renewals whose Commit returned nil are acknowledged, and an acknowledged serial
+// is durable and strictly above every earlier one. Every serial that any load
+// ever showed, acknowledged or not (a crashed renewal leaves the reserved one
+// behind), is also never issued again: each renewal must land strictly above the
+// highest serial loaded so far, and one serial never stands for two digests,
+// which is what the serial file exists to prevent. Whatever the disk looks like
+// after any crash, the next load and the next renewal stay above all of them.
 func TestSerialNeverGoesBackAcrossRestartsAndCrashes(t *testing.T) {
 	const renewPoints = 11 // 5 steps of the serial, 5 of the certificate, the commit point
 	rng := rand.New(rand.NewPCG(21, 22))
@@ -27,7 +32,18 @@ func TestSerialNeverGoesBackAcrossRestartsAndCrashes(t *testing.T) {
 	r.mustInit(1, t0)
 	now := t0
 
-	maxAcked := uint64(1) // the certificate init issued
+	maxAcked := uint64(1)  // the certificate init issued
+	maxLoaded := uint64(1) // the highest serial any load showed, whether acknowledged or not
+	digestAt := map[uint64]record.Digest{}
+	// seeing records a serial with the digest it stands for, and fails when the
+	// serial has stood for another digest before
+	seeing := func(step int, what string, serial uint64, d record.Digest) {
+		t.Helper()
+		if prev, ok := digestAt[serial]; ok && prev != d {
+			t.Fatalf("step %d: serial %d stands for two digests: %s and, in %s, %s", step, serial, prev, what, d)
+		}
+		digestAt[serial] = d
+	}
 	stats := map[string]int{}
 	pointCrashes := make([]int, renewPoints+1)
 	crashes := 0
@@ -43,6 +59,9 @@ func TestSerialNeverGoesBackAcrossRestartsAndCrashes(t *testing.T) {
 		if node, serial, _ := oracleSerial(t, r.read(keys.SerialPath)); node != goldenNodeOf(k) || serial != seen {
 			t.Fatalf("step %d: the serial file says %s/%d, Load says %d", step, node, serial, seen)
 		}
+		seeing(step, "the certificate loaded", cert, k.Certificate().Digest())
+		seeing(step, "the serial file loaded", seen, k.SerialSeen().Digest)
+		maxLoaded = max(maxLoaded, seen)
 		if k.RenewalInterrupted() {
 			stats["interrupted-at-load"]++
 		}
@@ -53,9 +72,15 @@ func TestSerialNeverGoesBackAcrossRestartsAndCrashes(t *testing.T) {
 				t.Fatalf("step %d: Renew: %v", step, err)
 			}
 			got := k.Certificate().Payload().Serial
-			if got <= maxAcked {
-				t.Fatalf("step %d: renewal issued serial %d, acknowledged %d before", step, got, maxAcked)
+			if got <= maxAcked || got <= maxLoaded {
+				t.Fatalf("step %d: renewal issued serial %d, acknowledged %d and loaded %d before", step, got, maxAcked, maxLoaded)
 			}
+			if maxLoaded > maxAcked {
+				stats["renewal-above-an-unacknowledged-serial"]++
+			}
+			seeing(step, "the certificate renewed", got, k.Certificate().Digest())
+			seeing(step, "the serial file renewed", k.SerialSeen().Serial, k.SerialSeen().Digest)
+			maxLoaded = got
 			if k.SerialSeen().Serial != got || k.RenewalInterrupted() {
 				t.Fatalf("step %d: after a renewal seen=%d cert=%d interrupted=%v", step, k.SerialSeen().Serial, got, k.RenewalInterrupted())
 			}
@@ -92,12 +117,13 @@ func TestSerialNeverGoesBackAcrossRestartsAndCrashes(t *testing.T) {
 		}
 	}
 
+	t.Logf("coverage: %v", stats)
 	for p := 1; p <= renewPoints; p++ {
 		if pointCrashes[p] < 3 {
 			t.Errorf("point %d of the renewal was crashed at %d times, want at least 3", p, pointCrashes[p])
 		}
 	}
-	for name, min := range map[string]int{"renewal": 60, "crash-in-renewal": 50, "power-loss": 30, "process-crash": 30, "interrupted-at-load": 5} {
+	for name, min := range map[string]int{"renewal": 60, "crash-in-renewal": 50, "power-loss": 30, "process-crash": 30, "interrupted-at-load": 5, "renewal-above-an-unacknowledged-serial": 20} {
 		if stats[name] < min {
 			t.Errorf("%s happened %d times, want at least %d (all: %v)", name, stats[name], min, stats)
 		}
