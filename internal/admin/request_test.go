@@ -68,6 +68,58 @@ func TestEveryConfigChangeIsSideEffecting(t *testing.T) {
 	}
 }
 
+// TestSideEffectingOperations pins which operations are not side-effecting:
+// reads, the lookup of a stored result, the unknown kind and the export of the
+// revocation statement. The export changes nothing and its result, which can
+// void this node, must never be filed away; every other operation is
+// side-effecting. The expectation is the list below, not the code under test.
+func TestSideEffectingOperations(t *testing.T) {
+	notSideEffecting := map[OpKind]bool{
+		OpUnknown: true, OpRead: true, OpQueryOperationResult: true, OpExportRevocation: true,
+	}
+	for k := OpUnknown; k < opEnd; k++ {
+		if got, want := (Operation{Kind: k}).SideEffecting(), !notSideEffecting[k]; got != want {
+			t.Errorf("operation kind %d: SideEffecting = %v, want %v", k, got, want)
+		}
+	}
+}
+
+// TestValidateRequestForSingleNodeManagementOperations: exporting the
+// revocation statement needs no operation ID (it is never stored); each of the
+// other nine needs one, and the four that change a versioned setting also need
+// an expected version.
+func TestValidateRequestForSingleNodeManagementOperations(t *testing.T) {
+	id := OperationID{1}
+	versioned := map[OpKind]bool{
+		OpEnableAdapter: true, OpDisableAdapter: true,
+		OpChangeEndpointSettings: true, OpChangeNodeSettings: true,
+	}
+	for _, tc := range singleNodeManagementOperations {
+		op := Operation{Kind: tc.kind}
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.kind == OpExportRevocation {
+				if got := ValidateRequest(Request{Op: op}); got != ReasonOK {
+					t.Fatalf("without an operation ID: ValidateRequest = %s, want %s", got, ReasonOK)
+				}
+				return
+			}
+			if got := ValidateRequest(Request{Op: op}); got != ReasonMissingOperationID {
+				t.Fatalf("without an operation ID: ValidateRequest = %s, want %s", got, ReasonMissingOperationID)
+			}
+			want := ReasonOK
+			if versioned[tc.kind] {
+				want = ReasonMissingExpectedVersion
+			}
+			if got := ValidateRequest(Request{ID: id, Op: op}); got != want {
+				t.Fatalf("with an operation ID: ValidateRequest = %s, want %s", got, want)
+			}
+			if got := ValidateRequest(Request{ID: id, Op: op, ExpectedVersion: 2}); got != ReasonOK {
+				t.Fatalf("with an operation ID and a version: ValidateRequest = %s, want %s", got, ReasonOK)
+			}
+		})
+	}
+}
+
 func TestConfigChangesAreTheVersionedSettings(t *testing.T) {
 	want := map[OpKind]bool{
 		OpEnableInheritance: true, OpDisableInheritance: true,
@@ -75,6 +127,9 @@ func TestConfigChangesAreTheVersionedSettings(t *testing.T) {
 		OpChangePolicy: true, OpChangePreset: true,
 		OpEditDeclaration: true, OpChangeRelaySettings: true,
 		OpSetLANDiscovery: true,
+		// Each of these changes one versioned setting.
+		OpEnableAdapter: true, OpDisableAdapter: true,
+		OpChangeEndpointSettings: true, OpChangeNodeSettings: true,
 	}
 	for _, tc := range catalogue {
 		if got := tc.op.IsConfigChange(); got != want[tc.op.Kind] {

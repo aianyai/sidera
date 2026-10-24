@@ -48,6 +48,19 @@ var catalogue = []struct {
 
 	// The list itself belongs to the local owner.
 	{"modifying the authorized-persons list is for the local owner only", Operation{Kind: OpModifyAuthorizedList}, RequireLocalOwner},
+
+	// Operations for single-node management are held to the local owner until
+	// remote management exists.
+	{"enabling an adapter instance is for the local owner only", Operation{Kind: OpEnableAdapter}, RequireLocalOwner},
+	{"disabling an adapter instance is for the local owner only", Operation{Kind: OpDisableAdapter}, RequireLocalOwner},
+	{"changing an endpoint's settings is for the local owner only", Operation{Kind: OpChangeEndpointSettings}, RequireLocalOwner},
+	{"changing the node's settings is for the local owner only", Operation{Kind: OpChangeNodeSettings}, RequireLocalOwner},
+	{"acknowledging an alert is for the local owner only", Operation{Kind: OpAcknowledgeAlert}, RequireLocalOwner},
+	{"clearing the clock-rollback pause is for the local owner only", Operation{Kind: OpClearClockRollback}, RequireLocalOwner},
+	{"confirming the revocation backup is for the local owner only", Operation{Kind: OpConfirmRevocationBackup}, RequireLocalOwner},
+	{"retiring the identity is for the local owner only", Operation{Kind: OpRetireIdentity}, RequireLocalOwner},
+	{"exporting the revocation statement is for the local owner only, not a read level", Operation{Kind: OpExportRevocation}, RequireLocalOwner},
+	{"stopping the daemon is for the local owner only", Operation{Kind: OpStopDaemon}, RequireLocalOwner},
 }
 
 func TestRequirementOf(t *testing.T) {
@@ -70,6 +83,54 @@ func TestCatalogueCoversEveryOperation(t *testing.T) {
 		if !covered[k] {
 			t.Errorf("operation kind %d has no catalogue row", k)
 		}
+		if _, ok := RequirementOf(Operation{Kind: k}); !ok {
+			t.Errorf("operation kind %d is in no requirement of RequirementOf", k)
+		}
+	}
+}
+
+// singleNodeManagementOperations are the operations added for managing one
+// node. Each is named here, independently of the catalogue table above.
+var singleNodeManagementOperations = []struct {
+	name string
+	kind OpKind
+}{
+	{"enable adapter", OpEnableAdapter},
+	{"disable adapter", OpDisableAdapter},
+	{"change endpoint settings", OpChangeEndpointSettings},
+	{"change node settings", OpChangeNodeSettings},
+	{"acknowledge alert", OpAcknowledgeAlert},
+	{"clear clock rollback", OpClearClockRollback},
+	{"confirm revocation backup", OpConfirmRevocationBackup},
+	{"retire identity", OpRetireIdentity},
+	{"export revocation", OpExportRevocation},
+	{"stop daemon", OpStopDaemon},
+}
+
+// TestSingleNodeManagementOperationsNeedTheLocalOwner checks, per operation,
+// that the requirement is the local owner alone and that no remote person is
+// allowed whatever their level, while the local owner is. Exporting the
+// revocation statement in particular must not be read level.
+func TestSingleNodeManagementOperationsNeedTheLocalOwner(t *testing.T) {
+	a := person(t, 1)
+	list := mustList(t, Entry{Person: a, Level: LevelFullControl})
+	remote := RemotePerson(a, validCert(LevelFullControl))
+	for _, tc := range singleNodeManagementOperations {
+		t.Run(tc.name, func(t *testing.T) {
+			op := Operation{Kind: tc.kind}
+			if got, ok := RequirementOf(op); !ok || got != RequireLocalOwner {
+				t.Fatalf("RequirementOf = %v, %v; want %v, true", got, ok, RequireLocalOwner)
+			}
+			if v := Authorize(list, remote, op, t0); v.Allowed || v.Reason != ReasonLocalOwnerOnly {
+				t.Fatalf("remote full control: verdict = %+v, want denied as local owner only", v)
+			}
+			if v := Authorize(List{}, LocalOwner(), op, t0); !v.Allowed || v.Reason != ReasonLocalOwner {
+				t.Fatalf("local owner: verdict = %+v, want allowed", v)
+			}
+		})
+	}
+	if len(singleNodeManagementOperations) != 10 {
+		t.Fatalf("%d single-node management operations listed, want 10", len(singleNodeManagementOperations))
 	}
 }
 
