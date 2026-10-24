@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math/rand"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ type simNode struct {
 	signer record.Signer
 	party  Party
 	params Params
-	rng    detReader
+	rng    io.Reader
 
 	state State
 	disk  map[string][]byte
@@ -641,10 +642,15 @@ func (n *simNode) codeOf(id ID) Code {
 // transcript, written from the construction and sharing nothing with it.
 func oracle(t testing.TB, tr Transcript) (ID, Code) {
 	t.Helper()
-	terms := tr.Terms()
-	fields := framedFields(oracleFields(terms))
-	c := tr.Commitment()
 	nB, nA := tr.Nonces()
+	return oracleOf(t, tr.Terms(), tr.Commitment(), nB, nA)
+}
+
+// oracleOf is oracle for the four inputs of a transcript, which need not have
+// passed the commitment check: an attacker searching for nonces has only these.
+func oracleOf(t testing.TB, terms Terms, c Commitment, nB, nA Nonce) (ID, Code) {
+	t.Helper()
+	fields := framedFields(oracleFields(terms))
 	body := append(append(append(fields, uvarintBytes(32)...), c[:]...), uvarintBytes(32)...)
 	body = append(append(append(body, nB[:]...), uvarintBytes(32)...), nA[:]...)
 	lp := func(b []byte) []byte { return append(uvarintBytes(len(b)), b...) }

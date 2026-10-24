@@ -233,6 +233,7 @@ revealed.
 | Target and initiator | `target.go`, `initiator.go`, `lifecycle.go`, `command.go`, `state.go` |
 | Persisted records | `records.go`, `codec.go`; `codec_test.go` (golden bytes, wrong shapes, `TestPersistedAuthorKinds`) |
 | Scenarios | `scenario_test.go` (`TestRestartAfterExpiryCompletesARequestDecidedBeforeIt`) |
+| A man in the middle relaying two sessions | `relay_test.go` (`TestRelayAttackerGetsOneGuessPerRevealAndNoMoreThanTheBudgetPerHour`, `TestRelayAttackerThatGuessesRightPassesOnlyByCollision`) |
 | Properties under faults | `property_test.go` (`TestPropertyRandomSchedules`, `TestCrashAtEveryPersistedStep`) |
 
 The expected values of the vectors were computed by an independent Python 3
