@@ -337,6 +337,16 @@ then send `prompt.persisted`, or the daemon reconciles. `refused` means certainl
 nothing was delivered. `turn.started.attempt` also proves the attempt reached the
 session.
 
+**Session creation.** `session.create` carries a `first_prompt`: an `attempt`
+identifier and the text of the first prompt. Its record is `handoff`'s (see the
+handoff reference): with an initial message in the creating control signal it is
+that message's first prompt attempt, counted as one; without one the text is
+`NewSessionPromptText`, which announces no message and is not a prompt attempt
+of the endpoint, so it does not count toward the hourly cap or hold back the
+first real message. In both cases its attempt identifier is the one the adapter
+finds in the native record to show the session is ready, and the one the daemon
+reconciles by after an unknown outcome.
+
 **Reconciliation.** `prompt.reconcile` answers whether an attempt reached the
 runtime. The `grounds.code` belongs to the verdict: `found` goes with
 `attempt_in_record` and carries the turn; `provably_absent` with

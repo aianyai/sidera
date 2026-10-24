@@ -5,9 +5,17 @@ import "encoding/json"
 // maxPromptText bounds the text of a prompt. A prompt is a short wake-up line.
 const maxPromptText = 8192
 
-// FirstPrompt is the first prompt of a new session. It is an ordinary prompt
-// attempt: once it is in the native record it is both the proof the session is
-// ready and a delivered prompt.
+// FirstPrompt is the first prompt of a new session. Once it is in the native
+// record it is both the proof the session is ready and a delivered prompt, and
+// its attempt identifier serves readiness and reconciliation like any prompt
+// attempt's.
+//
+// What the daemon records for it follows package handoff. When the creating
+// message carries an initial message, it is that message's first prompt attempt
+// and counts as one. Without an initial message the text is
+// handoff.NewSessionPromptText, which announces no message and is not counted as
+// a prompt attempt of the endpoint; the attempt identifier is still the one the
+// adapter finds in the native record and the daemon reconciles by.
 type FirstPrompt struct {
 	Attempt AttemptID `json:"attempt"`
 	Text    string    `json:"text"`
