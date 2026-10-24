@@ -159,7 +159,7 @@ timers, and applies the answers.
   changes. `SweepInterval` is longer than the longest time between the
   handshake and the connection being established. An `Accounting` is not safe
   for concurrent use.
-- Per-peer resource limits (a stage of the network layer, not modelled here): the
+- Per-peer resource limits (the network layer's part, not modelled here): the
   resource manager asks its limiter once when it creates a peer's scope and then
   keeps the object and re-reads it on every check, so the limiter must return the
   same mutable limit object for a peer for as long as the scope may live, move it
