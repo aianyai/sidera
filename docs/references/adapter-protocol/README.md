@@ -63,6 +63,24 @@ Behaviour, each point pinned by the tests named in "Where":
   the params of every method, so a cancel with an unknown or repeated member
   cancels nothing. The request is still answered exactly
   once: with its result, or with `-32800`.
+- **Dialect.** `peer.Config.Dialect` sets the three conventions that another
+  JSON-RPC protocol on the same line rules may do differently, and nothing
+  else: the cancel notification (name, how its params name the request, what
+  `Call` sends), `SilentOnCancel`, and replacement codes for the peer's own
+  `-32001` and `-32004`. The zero value is this protocol's, so the adapter
+  protocol and its dependents never name a dialect. Under `SilentOnCancel` the
+  request answer is *at most once*: a request whose cancellation found it in
+  flight before its answer was queued is not answered, and its id is released;
+  a cancellation after the answer was queued changes nothing. The effect rules
+  (`NoEffect`, `ResultUnknown`) stay defined by this protocol's code table; a
+  dialect that is only used for answering requests does not use them. `New`
+  refuses a `CancelMethod` that is not a valid method name (1 to 128
+  characters) and a `CancelParams` whose result does not marshal to a JSON
+  object. A dialect's replacement codes and the shape of its `CancelParams` are
+  the responsibility of the protocol that uses the dialect; the schema covers
+  neither. `CancelTarget` runs on the read loop on input from the other side
+  and the read loop does not recover, so it must be fast, must not block and
+  must not panic.
 - **Write timeout.** A timer per write closes the transport when a line is not
   written within `WriteTimeout`.
 - **Backpressure.** When the outbound queue is full, local `Call` and `Notify`
@@ -73,8 +91,8 @@ Behaviour, each point pinned by the tests named in "Where":
   128 characters: `peer.RequestID`, the only statement of the rule, which the
   schema repeats and a conformance test holds equal. A late response, one whose
   call has timed out or been cancelled, is dropped and logged.
-- **Frames the peer sends.** Only lines that `message.schema.json` accepts:
-  `params` is always an object (`nil` is sent as `{}`, a list or a scalar is
+- **Frames the peer sends.** Under the zero-value dialect, only lines that
+  `message.schema.json` accepts: `params` is always an object (`nil` is sent as `{}`, a list or a scalar is
   refused with `ErrNotSent`), a result is always an object (anything else a
   handler returns is answered `-32603`), a method name has 1 to 128 characters
   (a longer one is refused locally), an error carries a message of 1 to 1024
@@ -140,6 +158,22 @@ anything not listed, including unknown codes, counts as unknown.
   the caller could not tell "cancelled" from "lost". One answer per request,
   always, keeps the caller's bookkeeping simple. A cancel only asks the handler
   to stop, so a handler that finishes anyway has its real result delivered.
+- **A dialect instead of a second message layer.** Another protocol that needs
+  this peer's framing, classification, bounded queues, in-flight table and write
+  timeout differs from it only in the cancel convention and in two error codes.
+  Writing it a message layer of its own would give the queue, concurrency and
+  write-timeout rules a second home; exporting framing and classification as
+  public API would leave them a second home as well and commit the SDK to a
+  larger surface; splitting a protocol-agnostic line layer out of the peer
+  reorganises the package and every dependent for the same result. The dialect
+  is a parameter of the one place that already owns the rules, and the peer
+  names no protocol: the values belong to the layer that uses them.
+- **Silence after a cancel is a dialect, not a mode of this protocol.** Here
+  "cancelled" and "lost" must be told apart, hence the answer to every
+  cancelled request. A protocol whose rule is that a cancelled request gets no
+  answer sets `SilentOnCancel`, and the cancel is ordered against the answer
+  under the same lock that releases the id, so a request is never answered after
+  a cancellation that preceded the queuing of its answer, and never twice.
 - **Cancel is handled by the read loop.** A cancel queued behind the work it is
   meant to stop would arrive after the work finished.
 - **The write guard is a timer that closes the transport.** Deadlines on files
@@ -170,7 +204,8 @@ anything not listed, including unknown codes, counts as unknown.
   answer to a call and which the other side's peer logs and drops. The reply
   is kept rather than replaced by a log line only so that a counterpart that
   speaks a broken dialect gets a visible signal.
-- **The peer writes only what the schema accepts.** Third parties implement the
+- **The peer writes only what the schema accepts** (under the zero-value
+  dialect, which is the protocol's own). Third parties implement the
   schema, not the Go code: a frame the Go peer wrote that the schema rejects
   would be the Go side's bug that every other implementation has to work around.
   The peer is the one writer of frames, so the guarantee is kept in one place
@@ -212,6 +247,7 @@ anything not listed, including unknown codes, counts as unknown.
 | Peer lifecycle, parameters, termination | `sdk/go/peer/peer.go` |
 | Writer, write timeout, read loop | `sdk/go/peer/io.go` |
 | Request and notification dispatch, cancellation | `sdk/go/peer/serve.go` |
+| The dialect, its defaults | `sdk/go/peer/dialect.go` (`Dialect`) |
 | `Call`, `Notify` | `sdk/go/peer/call.go` |
 | Package guide | `sdk/go/peer/README.md` |
 
@@ -231,6 +267,12 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | Batch rejected, connection kept | `TestBatchIsRejectedAndConnectionContinues` |
 | Overload before params and handler | `TestOverloadedIsDecidedBeforeParamsAndHandler` |
 | Cancellation, one reply | `TestCancellation`, `TestCallContextCancellation` |
+| A cancelled request is not answered under `SilentOnCancel` and its id is released, whether the handler honours the cancel, ignores it or never started | `TestDialectCancelledRequestIsNotAnswered` |
+| `CancelTarget` is given the params as received; `false` or an invalid id cancels nothing | `TestDialectCancelTargetReadsTheParamsItIsGiven`, `TestDialectCancelTargetFalseCancelsNothing`, `TestDialectCancelTargetWithAnInvalidIDCancelsNothing` |
+| Renaming the cancel notification alone keeps the answer to a cancelled request | `TestDialectWithoutSilentOnCancelStillAnswersCancelledRequests` |
+| A cancellation after the answer was queued still gets that one answer | `TestDialectCancelAfterTheAnswerWasQueuedStillGetsThatOneAnswer` |
+| The replacement codes are what is sent, each on its own | `TestDialectReplacementCodesAreSent` |
+| `Call` sends the dialect's cancel notification and params; the dialect's cancel method is reserved and must be a valid method name | `TestCallSendsTheDialectsCancelNotification`, `TestDialectCancelNotificationIsReservedAndMustBeAValidMethodName`, `TestDialectCancelParamsMustBuildAnObject` |
 | Write timeout; slow reader tolerated; also when the last line is the reply to an overlong line | `TestWriteTimeoutClosesTransportOnStalledReader`, `TestSlowButProgressingReaderDoesNotTimeOut`, `TestOverlongLineWithStalledReaderStillCloses` |
 | Owed error replies wait for room and are never dropped (flood backpressure) | `TestReadLoopWaitsWhenErrorRepliesCannotBeQueued` |
 | Notification order and overflow | `TestNotificationsAreHandledInArrivalOrder`, `TestNotificationOverflowClosesConnection` |

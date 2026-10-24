@@ -81,7 +81,7 @@ func (p *Peer) readFailed(err error) {
 	case errors.Is(err, ErrLineTooLong):
 		// Reply, then close; never skip to the next newline, which would
 		// resynchronize in the middle of the oversized message.
-		p.terminate(ErrLineTooLong, errorLine(nil, NewError(CodeLineTooLong, "line too long")))
+		p.terminate(ErrLineTooLong, errorLine(nil, NewError(p.dialect.LineTooLongCode, "line too long")))
 	case err == io.EOF:
 		p.terminate(ErrRemoteClosed, nil)
 	default:

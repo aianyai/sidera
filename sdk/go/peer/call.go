@@ -13,9 +13,10 @@ import (
 //
 // The error says what is known about the request's effect; see NoEffect and
 // ResultUnknown. A *Error is the other side's error response. When ctx is done
-// before the answer arrives, Call tells the other side to stop with
-// $/cancel_request, returns ctx.Err() and treats the outcome as unknown; an
-// answer that arrives later is dropped.
+// before the answer arrives, Call tells the other side to stop with the
+// dialect's cancel notification ($/cancel_request by default), returns
+// ctx.Err() and treats the outcome as unknown; an answer that arrives later is
+// dropped.
 func (p *Peer) Call(ctx context.Context, method string, params, result any) error {
 	line, id, err := p.encodeCall(ctx, method, params)
 	if err != nil {
@@ -92,12 +93,14 @@ func decodeResult(res callResult, into any) error {
 // sendCancel asks the other side to stop working on request id. It is
 // advisory, so it is dropped rather than waiting when the queue is full.
 func (p *Peer) sendCancel(id int64) {
-	params, err := marshalValue(CancelRequestParams{RequestID: NumberID(id)})
+	params, err := marshalParams(p.dialect.CancelParams(NumberID(id)))
 	if err != nil {
+		p.log.Error("cancel request not sent: the dialect's cancel params are unusable", "err", err)
 		return
 	}
-	line, err := notificationLine(MethodCancelRequest, params)
+	line, err := notificationLine(p.dialect.CancelMethod, params)
 	if err != nil {
+		p.log.Error("cancel request not sent", "err", err)
 		return
 	}
 	select {

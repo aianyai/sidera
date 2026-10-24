@@ -12,13 +12,15 @@ of its own module (`sdk/go/strictjson`). Method names, parameter schemas and
 the meaning of results belong to the layer above (`adapterproto`); `initialize`,
 `ping`, `shutdown` and the rest of that layer's methods are registered by the
 owner with `Handle`, never special-cased here. The one method the peer handles
-itself is the `$/cancel_request` notification.
+itself is the cancel notification: `$/cancel_request` unless the owner's
+`Dialect` names another.
 
 ## Entry points
 
 | API | Purpose |
 | --- | ------- |
 | `New(r io.Reader, w io.WriteCloser, Config)`, `Start()` | Create a peer over the streams, register handlers, then start it. Nothing is read or written before `Start`. |
+| `Config.Dialect`, `Dialect` | The few conventions a protocol built on the peer may set differently: the cancel notification (its name, how its params name the request, what `Call` sends), whether a cancelled request is answered, and the codes of the peer's own overload and line-too-long errors. The zero value is the adapter protocol's. `New` fails when `CancelMethod` is not a valid method name (1 to 128 characters) or `CancelParams` does not build a JSON object. |
 | `Params`, `DefaultParams()` | The limits. A zero field means "use the default"; a negative field is an error from `New`. |
 | `Handle(method, RequestHandler)`, `HandleNotification(method, NotificationHandler)` | Register what the other side may call. Requests for unregistered methods get `-32601`; unregistered notifications are logged and dropped. |
 | `Call(ctx, method, params, result)`, `Notify(ctx, method, params)` | Send a request and wait, or send a notification. `params` must marshal to an object, or be nil (sent as `{}`). The method name is 1 to 128 characters. |
@@ -50,33 +52,55 @@ itself is the `$/cancel_request` notification.
   taken for the answer to a call of the other side.
 - **Overload is decided first.** The read loop classifies a request, finds its
   handler and checks its id; if the request queue (`MaxPendingRequests`) is
-  full it answers `-32001` immediately. Parameters are not examined and no
-  handler runs, so a caller that gets `-32001` may retry safely.
+  full it answers `-32001` (`Dialect.OverloadedCode`) immediately. Parameters
+  are not examined and no handler runs, so a caller that gets `-32001` may retry
+  safely.
 - **Handlers.** `MaxConcurrentHandlers` request handlers run at once. Each
   request is answered exactly once, with a result, an `*Error`, or `-32603`
   (any other error, a typed-nil `*Error`, a panic, a result that is not a JSON
   object or does not marshal, or a reply over the line limit; the error text is
-  logged, never sent).
-- **The peer sends only frames that `message.schema.json` accepts.** `params` is
-  always an object (`nil` is sent as `{}`; a list or scalar is refused with
+  logged, never sent). Under a dialect with `SilentOnCancel` it is answered at
+  most once: see Cancellation.
+- **Under the zero-value dialect the peer sends only frames that
+  `message.schema.json` accepts.** `params` is always an object (`nil` is sent as `{}`; a list or scalar is refused with
   `ErrNotSent`), a result is always an object, a method name has 1 to 128
   characters, and an error has a message of 1 to 1024 characters (an empty one
   becomes the name of the code, or `error`; a longer one is cut), `data` only
   when it is a JSON object (for any code; `WithData` leaves out anything else),
   and a line within `MaxLineBytes`. What the peer cannot know is which
   application codes the protocol defines: a handler returns only those
-  (`adapterproto.ApplicationCodes`).
+  (`adapterproto.ApplicationCodes`). A dialect's replacement codes and the shape
+  of its `CancelParams` are the responsibility of the protocol that uses the
+  dialect: the schema covers neither.
 - **Notifications** are handled one at a time in arrival order. When
   `MaxPendingNotifications` is exceeded the connection is closed: dropping one
   could leave the owner with a wrong picture of the other side, and the owner
   resynchronizes after reconnecting.
 - **Cancellation.** `$/cancel_request {"request_id": …}` is handled directly by
   the read loop; its params are decoded as strictly as any other (an unknown or
-  repeated member, a member in another case or a null cancels nothing). It cancels the handler's context; the request is still
-  answered exactly once, with the handler's result or with `-32800`. A request
+  repeated member, a member in another case or a null cancels nothing). It
+  cancels the handler's context; the request is still answered exactly once, with the handler's result or with `-32800`. A request
   cancelled while still queued is answered `-32800` without running its handler.
   When a `Call` context ends, the peer sends the cancel notification, returns
   the context error and drops the answer if it arrives later.
+  A `Dialect` changes only what is named in it. `CancelMethod` is the
+  notification the read loop handles and `Call` sends (registering a handler for
+  it panics, as for `$/cancel_request`). `CancelTarget` reads the cancelled id
+  from that notification's params, which are `nil` when the notification has
+  none; `false`, or an id that breaks the request id rule, cancels nothing, and
+  the default reads `CancelRequestParams` as strictly as above. `CancelParams`
+  builds what `Call` sends (an object, like any params; `New` calls it once and
+  refuses a function whose result does not marshal to an object). With `SilentOnCancel`
+  the answer to a request is dropped when a cancellation found the request in
+  flight before the answer was queued, whether the handler honoured it,
+  ignored it or never started; the id is released as always. A cancellation
+  that arrives after the answer was queued finds nothing in flight and changes
+  nothing, so that answer is still sent: at most once, never twice.
+- **Dialect codes.** `OverloadedCode` and `LineTooLongCode` replace `-32001`
+  and `-32004` in what the peer sends on its own, with the same message and the
+  same behaviour (the overload refusal is still decided before anything runs,
+  the line-too-long reply still carries a null id and is followed by the close).
+  Nothing else the peer sends or accepts depends on a dialect.
 - **Ids in flight.** A request whose id is already in flight gets `-32600`. The
   id is released before its answer is queued, so the other side can reuse it as
   soon as it has read the answer.
@@ -113,5 +137,11 @@ itself is the `$/cancel_request` notification.
   and does not wait for it; the reader goroutine ends when the reader returns.
   Child-process pipes and `io.Pipe` readers are closers.
 - After an error, apply the effect rule rather than guessing: retry only on
-  `NoEffect`, reconcile or retry idempotently on `ResultUnknown`.
+  `NoEffect`, reconcile or retry idempotently on `ResultUnknown`. The rule is
+  defined by the adapter protocol's code table (`Codes`), also under a dialect,
+  and a replacement code is not in that table. A dialect used only for
+  answering requests never calls `Call` and so does not use the rule.
+- A `Dialect.CancelTarget` runs on the read loop on input from the other side,
+  and the read loop does not recover: it must be fast, must not block and must
+  not panic.
 - Use one peer per connection. `Close` closes both streams.

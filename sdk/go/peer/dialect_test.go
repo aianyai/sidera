@@ -561,3 +561,24 @@ func TestDialectCancelNotificationIsReservedAndMustBeAValidMethodName(t *testing
 		t.Error("New accepted a cancel method name that is longer than a method name may be")
 	}
 }
+
+func TestDialectCancelParamsMustBuildAnObject(t *testing.T) {
+	for name, tc := range map[string]struct {
+		params func(peer.RequestID) any
+		ok     bool
+	}{
+		"an object":                      {func(id peer.RequestID) any { return map[string]any{"id": id} }, true},
+		"nil is sent as an empty object": {func(peer.RequestID) any { return nil }, true},
+		"a number":                       {func(peer.RequestID) any { return 1 }, false},
+		"a list":                         {func(id peer.RequestID) any { return []any{id} }, false},
+		"a value that does not marshal":  {func(peer.RequestID) any { return make(chan int) }, false},
+	} {
+		_, err := peer.New(strings.NewReader(""), nopWriteCloser{}, peer.Config{Dialect: peer.Dialect{CancelParams: tc.params}})
+		if tc.ok && err != nil {
+			t.Errorf("%s: New refused it: %v", name, err)
+		}
+		if !tc.ok && err == nil {
+			t.Errorf("%s: New accepted cancel params that are not a JSON object", name)
+		}
+	}
+}

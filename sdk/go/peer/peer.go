@@ -92,8 +92,8 @@ type Config struct {
 
 // RequestHandler answers one inbound request. params is the raw "params"
 // member, nil when absent; when present it is an object or an array. The
-// context is cancelled when the other side sends $/cancel_request for this
-// request and when the peer closes. A handler that is cancelled may stop early
+// context is cancelled when the other side sends the cancel notification for
+// this request and when the peer closes. A handler that is cancelled may stop early
 // and return ctx.Err(), which is answered with CodeRequestCancelled, or may
 // ignore the cancellation and return its result.
 //
@@ -131,6 +131,9 @@ type inboundRequest struct {
 	handler RequestHandler
 	ctx     context.Context
 	cancel  context.CancelFunc
+	// cancelled is set, under Peer.mu, by a cancel notification that found the
+	// request in flight. It is read when the answer is about to be queued.
+	cancelled bool
 }
 
 type inboundNotification struct {
@@ -142,10 +145,11 @@ type inboundNotification struct {
 // Peer is one end of a JSON-RPC 2.0 connection. Create it with New, register
 // handlers, then call Start.
 type Peer struct {
-	params Params
-	log    *slog.Logger
-	r      io.Reader
-	w      io.WriteCloser
+	params  Params
+	dialect Dialect // resolved: no field is unset
+	log     *slog.Logger
+	r       io.Reader
+	w       io.WriteCloser
 
 	baseCtx    context.Context
 	cancelBase context.CancelFunc
@@ -183,8 +187,16 @@ type Peer struct {
 // the reader returns and Close does not wait for it.
 //
 // Nothing is read or written until Start.
+//
+// New fails when a Params field is negative, when the dialect's CancelMethod is
+// not a valid method name (1 to 128 characters), or when its CancelParams does
+// not marshal to a JSON object.
 func New(r io.Reader, w io.WriteCloser, cfg Config) (*Peer, error) {
 	params, err := cfg.Params.resolve()
+	if err != nil {
+		return nil, err
+	}
+	dialect, err := cfg.Dialect.resolve()
 	if err != nil {
 		return nil, err
 	}
@@ -195,6 +207,7 @@ func New(r io.Reader, w io.WriteCloser, cfg Config) (*Peer, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Peer{
 		params:               params,
+		dialect:              dialect,
 		log:                  log,
 		r:                    r,
 		w:                    w,
@@ -212,11 +225,12 @@ func New(r io.Reader, w io.WriteCloser, cfg Config) (*Peer, error) {
 }
 
 // Handle registers the handler for a request method, replacing any earlier
-// one. It panics on an empty method, a nil handler or MethodCancelRequest,
-// which the peer handles itself. Requests for methods without a handler are
-// answered with CodeMethodNotFound.
+// one. It panics on an empty method, a nil handler or the dialect's cancel
+// notification (MethodCancelRequest by default), which the peer handles
+// itself. Requests for methods without a handler are answered with
+// CodeMethodNotFound.
 func (p *Peer) Handle(method string, h RequestHandler) {
-	checkRegistration(method, h == nil)
+	p.checkRegistration(method, h == nil)
 	p.handlersMu.Lock()
 	defer p.handlersMu.Unlock()
 	p.requestHandlers[method] = h
@@ -226,18 +240,18 @@ func (p *Peer) Handle(method string, h RequestHandler) {
 // same registration rules as Handle apply. Notifications without a handler are
 // logged and dropped.
 func (p *Peer) HandleNotification(method string, h NotificationHandler) {
-	checkRegistration(method, h == nil)
+	p.checkRegistration(method, h == nil)
 	p.handlersMu.Lock()
 	defer p.handlersMu.Unlock()
 	p.notificationHandlers[method] = h
 }
 
-func checkRegistration(method string, nilHandler bool) {
+func (p *Peer) checkRegistration(method string, nilHandler bool) {
 	switch {
 	case method == "":
 		panic("peer: empty method name")
-	case method == MethodCancelRequest:
-		panic("peer: " + MethodCancelRequest + " is handled by the peer itself")
+	case method == p.dialect.CancelMethod:
+		panic("peer: " + method + " is handled by the peer itself")
 	case nilHandler:
 		panic("peer: nil handler for " + method)
 	}

@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strconv"
-
-	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 // handleLine classifies one inbound line and acts on it. It runs on the read
@@ -65,12 +63,12 @@ func (p *Peer) acceptRequest(msg message) {
 		p.mu.Unlock()
 		cancel()
 		p.log.Warn("request queue full", "method", clip(msg.method, 64))
-		p.send(errorLine(msg.id, NewError(CodeOverloaded, "overloaded")))
+		p.send(errorLine(msg.id, NewError(p.dialect.OverloadedCode, "overloaded")))
 	}
 }
 
 func (p *Peer) acceptNotification(msg message) {
-	if msg.method == MethodCancelRequest {
+	if msg.method == p.dialect.CancelMethod {
 		p.cancelRequest(msg.params)
 		return
 	}
@@ -89,21 +87,20 @@ func (p *Peer) acceptNotification(msg message) {
 	}
 }
 
-// cancelRequest cancels the context of an in-flight inbound request. The
-// request is still answered, exactly once, by its worker.
+// cancelRequest cancels the context of an in-flight inbound request and marks
+// it cancelled. Unless the dialect is SilentOnCancel the request is still
+// answered, exactly once, by its worker.
 func (p *Peer) cancelRequest(params json.RawMessage) {
-	var body CancelRequestParams
-	if err := strictjson.Decode(params, &body); err != nil {
-		p.log.Warn("cancel request with unusable params")
+	id, ok := p.dialect.CancelTarget(params)
+	if !ok || id.Validate() != nil {
+		p.log.Warn("cancel request names no usable request id")
 		return
 	}
-	if body.Validate() != nil {
-		p.log.Warn("cancel request with unusable request_id")
-		return
-	}
-	key := body.RequestID.key()
 	p.mu.Lock()
-	req := p.inbound[key]
+	req := p.inbound[id.key()]
+	if req != nil {
+		req.cancelled = true
+	}
 	p.mu.Unlock()
 	if req == nil {
 		p.log.Debug("cancel for a request that is not in flight")
@@ -167,7 +164,8 @@ func (p *Peer) requestWorker() {
 	}
 }
 
-// serve answers one request exactly once.
+// serve answers one request exactly once, or not at all when the dialect is
+// SilentOnCancel and a cancellation arrived before the answer was queued.
 func (p *Peer) serve(req *inboundRequest) {
 	defer req.cancel()
 	var line []byte
@@ -182,11 +180,18 @@ func (p *Peer) serve(req *inboundRequest) {
 	}
 	// The id stops being in flight before the answer is queued: the other
 	// side may reuse it as soon as it reads the answer.
+	// A cancellation that finds the request in flight is thereby ordered before
+	// the answer; one that comes later finds nothing and changes nothing.
 	p.mu.Lock()
 	if p.inbound[req.key] == req {
 		delete(p.inbound, req.key)
 	}
+	silent := p.dialect.SilentOnCancel && req.cancelled
 	p.mu.Unlock()
+	if silent {
+		p.log.Debug("cancelled request not answered", "method", clip(req.method, 64))
+		return
+	}
 	p.send(line)
 }
 
