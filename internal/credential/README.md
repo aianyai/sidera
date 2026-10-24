@@ -72,9 +72,11 @@ first for the conventions every contract package follows, and
   (`DeviceCertificateFacts`, implemented by the revocation set): it returns the
   `admin.DeviceCert` of the attached certificate with `Revocation` set to the
   outcome of looking up both the certificate and the person's root key. A source
-  that has not looked returns the zero status, which `admin` refuses. A nil source
-  panics. Tests here use a fake source that returns each status explicitly; the
-  path through the real revocation set is tested at integration.
+  that has not looked returns the zero status, which `admin` refuses. A nil
+  interface panics; a nil `*revocation.Set` is not one, and answers like an empty
+  set with a checked status (clear). Most tests here use a fake source that
+  returns each status explicitly; `TestOfflineDirectiveThroughTheRevocationSet`
+  runs a directive through the real revocation set.
 - A verifier of a voucher reads the claimed issuer with `VoucherIssuer`, looks up
   the network-key certificate it accepted for that node and the result of its
   revocation lookup (`record.AcceptedNetworkKey`, status stated), and builds

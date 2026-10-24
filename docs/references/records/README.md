@@ -408,8 +408,8 @@ Where: `internal/credential` (`credential.go`, `revocation.go`, `voucher.go`,
 implementation), `credential_test.go`, `revocation_test.go`, `voucher_test.go`,
 `directive_test.go` (rules, signers, every bit protected, the revocation source
 with every status), `e2e_test.go` (the records through `admin` and `trust`, with a
-fake revocation source: the path through the real revocation set is tested where
-that set is available), `property_test.go` (payload bytes against
+fake revocation source, and `TestOfflineDirectiveThroughTheRevocationSet`, which
+runs a directive through the real revocation set), `property_test.go` (payload bytes against
 an oracle), `fuzz_test.go`.
 
 ### Publication records

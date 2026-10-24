@@ -7,6 +7,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/internal/revocation"
 	"github.com/aianyai/sidera/internal/trust"
 )
 
@@ -152,6 +153,94 @@ func TestDirectiveThroughAdminAndTrust(t *testing.T) {
 				}
 			} else if len(tv.Effects.RevokeCredentials) != 0 {
 				t.Fatalf("effects without apply: %+v", tv.Effects)
+			}
+		})
+	}
+}
+
+// TestOfflineDirectiveThroughTheRevocationSet carries a directive through the
+// real revocation records: directive record -> OfflineDirective ->
+// AdminDirective(revocation set) -> admin.AcceptDirective -> trust.ApplyDirective.
+// The set is the source of the certificate's revocation status, so what it
+// holds decides the admin verdict.
+func TestOfflineDirectiveThroughTheRevocationSet(t *testing.T) {
+	const keyOtherRoot = 0x66
+	a, b := nodeOf(t, keyA), nodeOf(t, keyB)
+	cred := verifiedCredential(t, sampleCredential(t))
+	digest := trust.CredentialDigest(cred.Digest())
+	cert := deviceCertRecord(t, keyRoot, keyDevice, admin.LevelManage, t0, t0.Add(2*time.Hour))
+	device := signerOf(t, keyDevice).Public()
+	offlineSince, signedAt, now := t0, t0.Add(1000*time.Second), t0.Add(2000*time.Second)
+
+	setOf := func(t *testing.T, statements ...record.Record) *revocation.Set {
+		set := revocation.NewSet()
+		for _, r := range statements {
+			rev, err := revocation.Verify(r)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := set.Add(rev); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return set
+	}
+	issue := func(t *testing.T, r record.Record, err error) record.Record {
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+
+	tests := []struct {
+		name       string
+		set        func(t *testing.T) *revocation.Set
+		wantAdmin  admin.Disposition
+		wantReason admin.Reason
+	}{
+		{"a clear set executes the directive", func(t *testing.T) *revocation.Set { return setOf(t) },
+			admin.DispositionExecute, admin.ReasonOK},
+		{"the device key revoked by its person's root is rejected", func(t *testing.T) *revocation.Set {
+			r, err := revocation.IssueDeviceKeyRevocation(signerOf(t, keyRoot), device)
+			return setOf(t, issue(t, r, err))
+		}, admin.DispositionReject, admin.ReasonCertRevoked},
+		{"a person who revoked their own root key is rejected", func(t *testing.T) *revocation.Set {
+			r, err := revocation.IssuePersonSelfRevocation(signerOf(t, keyRoot))
+			return setOf(t, issue(t, r, err))
+		}, admin.DispositionReject, admin.ReasonRootKeyRevoked},
+		{"the same device key revoked by another person still executes", func(t *testing.T) *revocation.Set {
+			r, err := revocation.IssueDeviceKeyRevocation(signerOf(t, keyOtherRoot), device)
+			return setOf(t, issue(t, r, err))
+		}, admin.DispositionExecute, admin.ReasonOK},
+		// A nil set answers every query as an empty set does, with a checked
+		// status, so a caller that holds no revocations is not refused as
+		// "revocation unchecked".
+		{"a nil set is an empty checked set and executes", func(*testing.T) *revocation.Set { return nil },
+			admin.DispositionExecute, admin.ReasonOK},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			set := tc.set(t)
+			v := makeDirective(t, a, digest, a, b, signedAt, cert)
+			got := admin.AcceptDirective(a, listWith(t, admin.LevelManage), v.Payload().AdminDirective(set), offlineSince, now)
+			if got.Disposition != tc.wantAdmin || got.Reason != tc.wantReason {
+				t.Fatalf("admin: %v %v, want %v %v", got.Disposition, got.Reason, tc.wantAdmin, tc.wantReason)
+			}
+			if tc.wantAdmin != admin.DispositionExecute {
+				return
+			}
+			view := trust.View{Local: a, Settings: trust.DefaultSettings(), Credentials: []trust.Credential{Facts(cred)}}
+			tv := trust.ApplyDirective(view, v.Payload().TrustDirective())
+			if tv.Disposition != trust.DirectiveApply || len(tv.Effects.RevokeCredentials) != 1 || tv.Effects.RevokeCredentials[0] != digest {
+				t.Fatalf("trust: %v, effects %+v", tv.Disposition, tv.Effects)
+			}
+			// Carrying the effect out revokes the edge.
+			if out := trust.Evaluate(view, b, now); out.Outcome != trust.AllowedDirect {
+				t.Fatalf("before: %v %v", out.Outcome, out.Reason)
+			}
+			view.RevokedCredentials = trust.DigestSet{digest: {}}
+			if out := trust.Evaluate(view, b, now); out.Outcome != trust.Denied || out.Reason != trust.ReasonCredentialRevoked {
+				t.Fatalf("after: %v %v", out.Outcome, out.Reason)
 			}
 		})
 	}

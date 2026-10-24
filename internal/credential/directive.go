@@ -176,9 +176,9 @@ type DeviceCertificateFacts interface {
 // with the facts of the attached certificate, which facts supplies, so the
 // revocation status of the certificate cannot be left out. facts must not be
 // nil: AdminDirective panics at once on a nil source rather than report a
-// certificate nobody looked up. Whether the path through the real revocation set
-// ends in the right admin verdict is tested where the revocation set is
-// available, not in this package.
+// certificate nobody looked up. A source whose own methods answer for an empty
+// source, such as a nil *revocation.Set, is not a nil interface and is used as
+// the checked, empty source it stands for.
 func (d OfflineDirective) AdminDirective(facts DeviceCertificateFacts) admin.Directive {
 	if facts == nil {
 		panic("credential: AdminDirective needs a revocation source")
