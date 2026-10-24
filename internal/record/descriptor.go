@@ -230,14 +230,23 @@ func (p Partial[P]) Complete() bool {
 	return true
 }
 
+// EncodePayload returns the payload bytes of p under d: the bytes a record of
+// this type carries and its signers sign. It is the one place that says what
+// bytes a payload has; Seal writes exactly these. It refuses what Seal refuses:
+// a payload that has no wire form or that no receiver would accept (the bytes
+// are read back through the descriptor's decoding path), and a zero descriptor.
+func EncodePayload[P any](d Descriptor[P], p P) ([]byte, error) {
+	if !d.valid() {
+		return nil, ErrDescriptor
+	}
+	return d.encode(p)
+}
+
 // Seal encodes payload and signs it with signers, which must be keys the
 // record type allows. For a record that needs two signatures, pass one signer
 // now and let the second party call CoSign on the result.
 func Seal[P any](d Descriptor[P], payload P, signers ...Signer) (Record, error) {
-	if !d.valid() {
-		return Record{}, ErrDescriptor
-	}
-	b, err := d.encode(payload)
+	b, err := EncodePayload(d, payload)
 	if err != nil {
 		return Record{}, err
 	}

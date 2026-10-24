@@ -17,6 +17,7 @@ for the format and the reasons behind it. Identifiers and keys come from
 | `Signer`, `NewEd25519Signer`                      | The signing interface callers inject, and an in-memory implementation.                                     |
 | `Sign`, `CoSign(d, r, signer)`                    | Sign a raw payload; verify a partial record against its descriptor and append a second party's signature to an empty slot. |
 | `Descriptor[P]`, `NewDescriptor`                  | One record type: type string, payload codec, signer rule. Exported by the package that defines the type.  |
+| `EncodePayload(d, p)`                             | The payload bytes of `p` under `d`: what `Seal` carries and its signers sign, refused exactly where `Seal` refuses. The one answer to "what bytes does this payload have", for callers that need them before a record exists (a digest known before anyone signs). |
 | `Seal`, `Verify`, `VerifyPartial`                 | Encode and sign a typed payload; check a complete record (`Verified[P]`); check a record that may still lack signers (`Partial[P]`). |
 | `Peek`, `Unverified[P]`                           | Read a record's payload before verifying it, only to find which node or key it claims and so pick the verification context. Nothing it returns is trusted. |
 | `SignedBytes`, `DigestOf`, `Record.Digest`        | The bytes that are signed and the signature-free digest.                                                  |

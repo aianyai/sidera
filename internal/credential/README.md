@@ -16,7 +16,7 @@ first for the conventions every contract package follows, and
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `Credential`, `New`, `Descriptor`, `Type`                     | The credential payload and its record type. `New(x, y, createdAt, notAfter, nonce)` puts the two nodes in the fixed order. Signed by both ends' identity keys. |
 | `Nonce`, `NewNonce(r)`, `NonceLen`                            | The 16-byte nonce, supplied by the caller or read from an injected `io.Reader`.                                  |
-| `Credential.Payload()`, `Credential.Digest()`                 | The exact payload bytes (the descriptor's own conversion, read back through `record.Peek`) and the record digest, known to both sides before anyone signs.                   |
+| `Credential.Payload()`, `Credential.Digest()`                 | The exact payload bytes (`record.EncodePayload` under the credential descriptor) and the record digest, known to both sides before anyone signs.                   |
 | `Facts(v) trust.Credential`                                   | What `trust` reads of a verified credential.                                                                     |
 | `Revocation`, `NewRevocation`, `IssueRevocation(c, signer)`, `RevocationDescriptor` | A credential revocation: it embeds the revoked credential's payload; either end signs. `Revocation.Digest()` is the entry for `trust.View.RevokedCredentials`. |
 | `Voucher`, `VoucherDescriptor(accepted, now)`                 | An online voucher, signed by the issuer's network key (`record.NetworkKeyOf`).                                   |

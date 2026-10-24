@@ -533,6 +533,10 @@ implementation), `declaration_test.go` (rules, protocol limits, signer binding),
   rules of the decoding one, the two copies would drift and a node could seal a
   payload its peers refuse, a failure that shows only on the far side. Checking
   by decoding what was encoded makes the receiver's rule the only rule.
+  `EncodePayload` exports that same step, so a caller that needs the payload
+  bytes before a record exists (to know a digest before the second party has
+  signed) asks the descriptor and cannot compose its own conversion, canonical
+  encoding and read-back, which would be a second copy of the rule.
 - **Descriptors, not a registry.** Another package can define a record type
   without a change here, tests can define their own, and no global state is
   needed; the descriptor passed to `Verify` also stops a record of one type
@@ -605,8 +609,8 @@ implementation), `declaration_test.go` (rules, protocol limits, signer binding),
 - `internal/record/record.go`: envelope, signed bytes, digest, `Sign`, `Decode`,
   `Encode`, `Signer`.
 - `internal/record/descriptor.go`: `Descriptor`, signer slots (`NodeIdentityKey`,
-  `PersonRootKey`, `NetworkKeyOf`, `BindingError`), `Seal`, `Verify`,
-  `VerifyPartial`, `CoSign`, `Peek`, `Verified`, `Partial`, `Unverified`.
+  `PersonRootKey`, `NetworkKeyOf`, `BindingError`), `EncodePayload`, `Seal`,
+  `Verify`, `VerifyPartial`, `CoSign`, `Peek`, `Verified`, `Partial`, `Unverified`.
 - `internal/record/codec.go`: hardened decoding options and `UnmarshalStrict`.
 - `internal/record/timeconv.go`, `level.go`: the conversions.
 - `internal/record/networkcert.go`, `devicecert.go`: the two certificates,
@@ -617,7 +621,7 @@ implementation), `declaration_test.go` (rules, protocol limits, signer binding),
   implementation from RFC 8032 keys), `record_test.go` (`TestGoldenPairRecord`,
   `TestPartialSignatures`, `TestCoSign`, `TestDecodeRejects`, `TestVerifyRejects`,
   `TestEveryBitOfARecordIsProtected`, `TestEnvelopeRules`,
-  `TestSealRunsTheDecodingPath`, `TestSignerFailuresAreCaughtAtTheSigner`),
+  `TestSealRunsTheDecodingPath`, `TestEncodePayload`, `TestSignerFailuresAreCaughtAtTheSigner`),
   `peek_test.go` (`TestPeek`, `TestPeekChoosesTheVerificationContext`,
   `TestResultTypesAreMutuallyDistinct`,
   `TestResultTypesHaveNoExportedField`, `TestResultAccessorsReturnCopies`),

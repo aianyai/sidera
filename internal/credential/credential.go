@@ -137,23 +137,11 @@ var Descriptor = record.NewDescriptor(Type,
 	},
 )
 
-// Payload returns the exact payload bytes of c, the bytes both signers sign. It
-// is the descriptor's own conversion (credentialToWire) written canonically and
-// read back through the descriptor (record.Peek), so it refuses a credential
-// that no receiver would accept and cannot drift from what Seal writes.
+// Payload returns the exact payload bytes of c, the bytes both signers sign:
+// record.EncodePayload under Descriptor, so it refuses a credential that no
+// receiver would accept and cannot drift from what Seal writes.
 func (c Credential) Payload() ([]byte, error) {
-	w, err := credentialToWire(c)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %w", record.ErrPayload, err)
-	}
-	b, err := record.MarshalCanonical(w)
-	if err != nil {
-		return nil, err
-	}
-	if _, err := decodePayload(b); err != nil {
-		return nil, err
-	}
-	return b, nil
+	return record.EncodePayload(Descriptor, c)
 }
 
 // Digest returns the digest of the credential record c becomes: the same

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"math/big"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
 )
@@ -767,6 +769,57 @@ func TestSealRunsTheDecodingPath(t *testing.T) {
 			t.Fatalf("Verify = %+v, %v", v, err)
 		}
 	})
+}
+
+// EncodePayload is the one home of "what bytes a payload has": Seal carries its
+// result, and it refuses a payload exactly as Seal does.
+func TestEncodePayload(t *testing.T) {
+	s := rfcSigner(t, 1)
+	t.Run("the bytes are the payload inside a sealed record", func(t *testing.T) {
+		in := noteRecord{Text: "hello", NotAfter: epoch}
+		b, err := EncodePayload(noteDescriptor, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rec, err := Seal(noteDescriptor, in, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(b, rec.Payload) {
+			t.Fatalf("EncodePayload = %x, Seal carries %x", b, rec.Payload)
+		}
+	})
+	t.Run("the bytes of the pair record are the golden payload", func(t *testing.T) {
+		b, err := EncodePayload(pairDescriptor, pairOf(t))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := hex.EncodeToString(b); got != goldenPairCompletePayload {
+			t.Fatalf("EncodePayload = %s, want %s", got, goldenPairCompletePayload)
+		}
+	})
+	refused := []struct {
+		rule    string
+		d       Descriptor[noteRecord]
+		in      noteRecord
+		wantErr error
+	}{
+		{"a payload the decoding path refuses (empty text)", noteDescriptor, noteRecord{Text: ""}, ErrPayload},
+		{"a payload with no wire form (time out of range)", noteDescriptor, noteRecord{Text: "x", NotAfter: time.Unix(MaxUnixSeconds+1, 0)}, ErrTime},
+		{"a zero descriptor", Descriptor[noteRecord]{}, noteRecord{Text: "x"}, ErrDescriptor},
+	}
+	for _, row := range refused {
+		t.Run("refuses "+row.rule+" as Seal does", func(t *testing.T) {
+			b, err := EncodePayload(row.d, row.in)
+			if !errors.Is(err, row.wantErr) || b != nil {
+				t.Fatalf("EncodePayload = %x, %v, want %v", b, err, row.wantErr)
+			}
+			_, sealErr := Seal(row.d, row.in, s)
+			if sealErr == nil || sealErr.Error() != err.Error() {
+				t.Fatalf("Seal error = %v, EncodePayload error = %v", sealErr, err)
+			}
+		})
+	}
 }
 
 func TestMalformedDescriptorPanics(t *testing.T) {
