@@ -142,6 +142,9 @@ system: on NFS `flock` is emulated with `fcntl` byte-range locks.
 
 ### Platform behaviour
 
+The Windows column of this table and the Windows paragraphs after it are pending
+verification by CI on main.
+
 | Primitive | Linux | macOS | Windows |
 | --------- | ----- | ----- | ------- |
 | file `Sync` | `fsync(2)` | `F_FULLFSYNC` through Go's `File.Sync`; plain `fsync` only hands data to the drive, which may delay or reorder it | `FlushFileBuffers`, which needs a handle opened for writing; temporary files and append handles are |
@@ -153,7 +156,7 @@ system: on NFS `flock` is emulated with `fcntl` byte-range locks.
 | `Available` | `statfs`, `Bavail * Bsize` | the same | `GetDiskFreeSpaceExW`, the free bytes available to the caller |
 | root creation | `mkdir` 0700 | the same | a directory with a protected DACL for the current user, inherited by what is created inside |
 
-Windows paragraphs are pending verification by CI on main. Specifically:
+Specifically, for Windows:
 
 - **Directory flush.** Windows does not flush directories in `fsx`. The
   documentation of `FlushFileBuffers` mentions files and volumes only and
@@ -162,6 +165,13 @@ Windows paragraphs are pending verification by CI on main. Specifically:
   directory with write access and with backup semantics, calls
   `FlushFileBuffers`, and logs the result. If it succeeds, making `SyncDir` a
   real flush is a change inside the Windows file only. The measured result is
+  pending verification by CI on main. Until then `SyncDir` persists nothing on
+  Windows: it only checks that the directory exists. So the directory barriers of
+  the layers above (the `SyncDir` after a group of `ReplaceDefer`, after a batch
+  of removals and after a rename of a directory, and the settle of every start)
+  make nothing durable there by themselves. The durability of directory entries
+  on Windows rests on the ordering of NTFS metadata journaling and on
+  `MOVEFILE_WRITE_THROUGH`, which no test in this repository establishes; this is
   pending verification by CI on main.
 - **Rename durability.** The documentation of `MOVEFILE_WRITE_THROUGH` says the
   call does not return until the file is moved on disk, but its guarantee is
@@ -567,7 +577,9 @@ record that, after a process crash, may be visible and not durable; a power loss
 that followed would leave the followers without their head. The store does not
 guard against this itself: it relies on the settle transaction that starts
 `txn.Writer.Recover` (the Settle paragraph of the transaction section), which makes every directory
-durable before any rule runs. The caller guarantees that the rules run after
+durable before any rule runs. On Windows `SyncDir` flushes nothing, so that
+barrier persists nothing there (the platform section says what durability rests
+on); pending verification by CI on main. The caller guarantees that the rules run after
 `Recover` returned. The store's crash walk runs its restarts through the real
 `Recover`, so it exercises that barrier: without it the walk fails on orphan
 collection after a process crash.
@@ -623,10 +635,13 @@ probability below 10^-38.
   real file system is stronger (ext4 in ordered mode, a copy-on-write file
   system), code that passes the model is still correct; where a real device
   lies about flushing, no software test can tell.
-- It does not model Windows. Windows does no directory sync and the
-  power-loss behaviour of its write-through rename is not documented, so `Mem`
-  stands for a file system weaker than any journaling or copy-on-write one; the
-  Windows paragraphs above stand on their own tests.
+- It does not model Windows. Windows does no directory sync (`SyncDir` only
+  checks that the directory exists) and the power-loss behaviour of its
+  write-through rename is not documented, so `Mem` stands for a file system
+  weaker than any journaling or copy-on-write one, and the barriers that the
+  crash tests show to be sufficient on `Mem` persist nothing on Windows by
+  themselves; the Windows paragraphs above stand on their own tests, pending
+  verification by CI on main.
 - It takes clones at an instant between calls. A crash in the middle of a
   system call is covered only by the block rule (partial data) and the
   `RemoveAll` rule (partial removal).

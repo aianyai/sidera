@@ -116,6 +116,12 @@ declaration of its own.
   sorted, so crash point numbers are stable. The cost is one directory sync per
   directory at every start. The transaction is `Normal`, so a clean start is not
   counted as a recovery.
+  On Windows `fsx` does not flush a directory (`SyncDir` only checks that it
+  exists), so this barrier, the `SyncDir` after a deferred group and the one after
+  a batch of removals persist nothing there by themselves: the durability of
+  directory entries on Windows rests on NTFS metadata journaling order and on
+  `MOVEFILE_WRITE_THROUGH`, which no test here establishes. Pending verification
+  by CI on main.
 
 ## What the caller must guarantee
 
