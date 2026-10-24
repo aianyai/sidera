@@ -80,7 +80,10 @@ type Request struct {
 
 	// Reply is the caller's verified fact that this message is a reply inside an
 	// outstanding reply permission: the evidence has been checked against the
-	// node's own send records. It is read for message.send only.
+	// node's own send records. It is read for message.send only. The verdict is
+	// made once, at intake; at StageRecv the caller passes the value stored with
+	// the message record unchanged, because the window governs entry, not reading.
+	// An explicit deny still refuses it at both stages.
 	Reply bool
 
 	// TargetDeclaration is the target endpoint's self-declaration, looked up by

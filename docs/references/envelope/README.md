@@ -223,6 +223,14 @@ which may still admit it.
   permission. A control reply never starts the window. The window ends at the
   instant start plus 24 hours.
 - The owner can turn it off; the zero request is off.
+- The verdict is made once, at intake, and stored with the target's record of the
+  message, as the rest of the request that admitted it is. At the second check
+  (`recv`) the target passes the stored verdict unchanged as
+  `authz.Request.Reply` with `StageRecv`: the window governs entry, not reading
+  (pausing is applied at intake only for the same reason), so a reply admitted
+  inside the window is still handed out after it ended, and an explicit deny
+  rule still refuses it. Deciding again at `recv` would turn a reply that was
+  let in into a rejected delivery.
 
 ## Why
 

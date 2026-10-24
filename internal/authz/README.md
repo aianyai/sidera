@@ -131,6 +131,13 @@ declaration at intake, a multi-recipient refusal and connection trust. A reply
 admitted without an allow rule has no size cap, because the caps belong to rules
 that did not grant it, and a reply never carries a rate obligation.
 
+The verdict is made once, at intake. The caller stores it with the target record
+of the message and passes the stored value unchanged at `StageRecv`: the window
+of the permission governs entry, not reading, as a pause applies at intake only,
+so a reply admitted inside the window is still handed out after the window ended.
+An explicit deny still refuses it at `StageRecv`; a restriction or a missing allow
+rule does not.
+
 ## Endpoint self-declarations
 
 `Request.TargetDeclaration` is looked up by the caller. Paused, multi-recipient
@@ -186,7 +193,8 @@ control may loosen).
   current. `Request.Trust` is a `trust.Outcome`: `AllowedDirect` is read as a
   direct sender, `AllowedInherited` and `Suspended` as an inherited one.
 - `Stage` says which check is being made.
-- `Reply` is true only after the reply evidence was verified.
+- `Reply` is true only after the reply evidence was verified. At `StageRecv` it
+  is the verdict stored at intake, unchanged, not a new decision.
 - `Now` is the caller's clock reading in UTC; the same request at the same time
   gets the same verdict on every node.
 - `TargetDeclaration` is the target endpoint's current declaration.

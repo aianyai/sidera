@@ -553,6 +553,27 @@ func TestEvaluateTwoChecks(t *testing.T) {
 			t.Fatalf("recv = %v, want reject", got.Outcome)
 		}
 	})
+	t.Run("a reply admitted at intake is handed out at recv after the inbound policy was tightened; an explicit deny still refuses it", func(t *testing.T) {
+		reply := with(req, func(r *Request) { r.Reply = true })
+		recvReply := with(reply, func(r *Request) { r.Stage = StageRecv; r.Now = t0.Add(48 * time.Hour) })
+		nothing := mustPolicy(t)
+		restricted := mustPolicy(t, Allow(member, allEps, ActionMessageSend, Conditions{}), OnlyFrom(allEps, ActionMessageSend, node(9)))
+		for name, p := range map[string]Policy{"an empty policy": nothing, "a restriction that excludes the sender": restricted} {
+			if got := Evaluate(p, reply); got.Outcome != OutcomeAllow || got.Reason != ReasonReplyPermission {
+				t.Fatalf("%s, intake: %v/%v", name, got.Outcome, got.Reason)
+			}
+			if got := Evaluate(p, recvReply); got.Outcome != OutcomeAllow || got.Reason != ReasonReplyPermission {
+				t.Errorf("%s, recv: %v/%v, want allow/reply_permission", name, got.Outcome, got.Reason)
+			}
+		}
+		deny := mustPolicy(t, Allow(member, allEps, ActionMessageSend, Conditions{}), Deny(AnyEndpointOf(node(1)), allEps, ActionMessageSend, Conditions{}))
+		if got := Evaluate(deny, recvReply); got.Outcome != OutcomeReject || got.Reason != ReasonExplicitDeny {
+			t.Errorf("explicit deny, recv: %v/%v, want reject/explicit_deny", got.Outcome, got.Reason)
+		}
+		if got := Evaluate(nothing, with(recvReply, func(r *Request) { r.Reply = false })); got.Outcome != OutcomeReject {
+			t.Errorf("without the stored verdict the empty policy lets it in: %v", got.Outcome)
+		}
+	})
 	t.Run("trust restored: the same request is allowed again", func(t *testing.T) {
 		if got := Evaluate(loose, req); got.Outcome != OutcomeAllow {
 			t.Fatalf("got %v", got.Reason)

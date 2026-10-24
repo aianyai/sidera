@@ -86,7 +86,12 @@ type Decision struct {
 }
 
 // Granted reports whether the reply is allowed. It is the value of
-// authz.Request.Reply for the message.
+// authz.Request.Reply for the message. The target stores it with the record of
+// the message it admitted at intake, and passes that stored value unchanged as
+// authz.Request.Reply at the second check (authz.StageRecv): the window
+// governs entry, not reading, so a reply admitted inside the window is still
+// handed to its endpoint after the window has ended. An explicit deny still
+// wins there.
 func (d Decision) Granted() bool {
 	return d.Reason == ReasonDeliveredWindow || d.Reason == ReasonArrivalWindow
 }

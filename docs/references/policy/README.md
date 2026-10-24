@@ -76,7 +76,12 @@ from the request's size.
 For `message.send` it stands in for a missing allow rule and lifts both a
 restriction and an accept-only-from list. It never overrides an explicit deny, a
 paused endpoint at intake, a multi-recipient refusal or connection trust. It
-carries no rate obligation and no size cap.
+carries no rate obligation and no size cap. The verdict is made once, at intake,
+and stored with the target's record of the message; at the `recv` check the
+caller passes the stored value unchanged. The window of the permission governs
+entry, not reading, as pausing is applied at intake only, so a reply admitted
+inside the window is still handed out after it ended, and an explicit deny still
+refuses it there.
 
 **Endpoint self-declarations.** An endpoint can pause itself, refuse
 multi-recipient messages, accept only listed senders, and hide from the
@@ -164,6 +169,13 @@ Tighten, because it stops their replies.
 - **Pause applies at intake only.** Pausing stops new messages. The endpoint
   pulling a message that is already queued wants it, and rejecting it at `recv`
   would end a delivery that was accepted.
+- **A reply's permission is decided once.** The reply window is a limit on how
+  long a conversation may be answered, and the endpoint's agent has by then been
+  promised the message: a reply that was let in and is queued must not be refused
+  at `recv` because the window ended while it waited, the same reason a pause does
+  not apply at `recv`. Deciding again would also need the sender's records at the
+  second check. An explicit deny stays effective, as it does for any other
+  queued message.
 - **Reply lifts policy, not trust, deny or pause.** A tightened inbound policy
   would otherwise break every conversation the node started. A reply can only
   come back to an endpoint that wrote first, so it needs no standing grant; but a
@@ -186,7 +198,7 @@ Tighten, because it stops their replies.
 | Evaluation                                           | `internal/authz/evaluate.go`                                     |
 | Change classification                                | `internal/authz/classify.go`                                     |
 | Exempt traffic                                       | `internal/authz/traffic.go`                                      |
-| Evaluation table, rate obligations and keys, the two checks | `evaluate_test.go`: `TestEvaluate`, `TestEvaluateRateObligations`, `TestEvaluateRateKeys`, `TestEvaluateTwoChecks`, `TestDefaultPolicyGrantsEveryActionOnEveryObject` |
+| Evaluation table, rate obligations and keys, the two checks | `evaluate_test.go`: `TestEvaluate`, `TestEvaluateRateObligations`, `TestEvaluateRateKeys`, `TestEvaluateTwoChecks` (including the stored reply verdict at `StageRecv`; `internal/reply`: `TestTheIntakeVerdictOfAReplyStillStandsAtTheSecondCheck`), `TestDefaultPolicyGrantsEveryActionOnEveryObject` |
 | Rule validation, rate containment and selection, exempt traffic | `policy_test.go`: `TestRuleProblems`, `TestNewPolicyRejectsMalformedRulesWithReasons`, `TestRateWithin`, `TestRateCmp`, `TestPolicyExemptTraffic` |
 | Classification table and exhaustive oracle           | `classify_test.go`: `TestClassify`, `TestClassifyAgainstExhaustiveOracle`, `TestClassifyArgumentSwap` |
 | Trust, declaration and reply properties              | `property_test.go`                                               |

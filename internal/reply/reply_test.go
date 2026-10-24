@@ -61,6 +61,54 @@ func TestAfterInboundTighteningAReplyAndASessionCreateReplyStillGetBack(t *testi
 	})
 }
 
+// The verdict of reply permission is made once, at intake, and stored with the
+// message; the second check (recv) passes it on unchanged. The window governs
+// entry, not reading: a reply admitted inside the window is still handed out
+// after the window has ended, and only an explicit deny stops it.
+func TestTheIntakeVerdictOfAReplyStillStandsAtTheSecondCheck(t *testing.T) {
+	deliveredAt := t0.Add(2 * time.Minute)
+	intake := t0.Add(3 * time.Hour)
+	recv := deliveredAt.Add(Window + time.Hour)
+
+	o := learn(t, messageOutbound(), deliveredReport(t, runtimeR, t0.Add(3*time.Minute), deliveredAt), t0.Add(4*time.Minute))
+	req := request(&o, onA(2), intake)
+	stored := mustAdmit(t, req).Decision.Granted()
+	if !stored {
+		t.Fatal("setup: the reply was not admitted at intake")
+	}
+	// Deciding again at the second check would refuse it: the permission is not
+	// recomputed there, the stored verdict is what the check reads.
+	again := req
+	again.Now = recv
+	if d := mustAdmit(t, again).Decision; d.Reason != ReasonWindowClosed {
+		t.Fatalf("setup: a decision at the second check gives %v", d.Reason)
+	}
+
+	recvVerdict := func(rules ...authz.Rule) authz.Verdict {
+		p, err := authz.NewPolicy(rules)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return authz.Evaluate(p, authz.Request{
+			Now: recv, Trust: trust.AllowedDirect, Stage: authz.StageRecv,
+			Sender: authz.Sender{Node: req.Replier.Node, Endpoint: req.Replier.Endpoint},
+			Action: authz.ActionMessageSend, Target: authz.Target{Kind: authz.TargetEndpoint, Endpoint: senderEndpoint()},
+			BodySize: 20, Reply: stored,
+		})
+	}
+	t.Run("after the inbound policy was tightened and the window ended, the stored verdict still lets it be handed out", func(t *testing.T) {
+		if v := recvVerdict(); v.Outcome != authz.OutcomeAllow || v.Reason != authz.ReasonReplyPermission {
+			t.Errorf("verdict %+v", v)
+		}
+	})
+	t.Run("an explicit deny still refuses it", func(t *testing.T) {
+		deny := authz.Deny(authz.AnyEndpointOf(req.Replier.Node), authz.AllLocalEndpoints(), authz.ActionMessageSend, authz.Conditions{})
+		if v := recvVerdict(deny); v.Outcome != authz.OutcomeReject || v.Reason != authz.ReasonExplicitDeny {
+			t.Errorf("verdict %+v", v)
+		}
+	})
+}
+
 func TestTheSourceBehindNATAcceptsAReplyCarryingEvidence(t *testing.T) {
 	now := t0.Add(time.Hour)
 	o := messageOutbound() // the delivery report was never pulled: the record is still queued

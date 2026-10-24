@@ -84,5 +84,11 @@ every contract package follows, and
   `Request.Reply` set to `Decision.Granted()`; `authz` reads it for
   `message.send` only. The evidence is applied even when the policy later
   refuses the reply: it is a true fact either way.
+- The verdict is made once, at intake. The caller stores `Decision.Granted()`
+  with the record of the message it admitted and passes that stored value
+  unchanged as `authz.Request.Reply` at the second check (`authz.StageRecv`);
+  it does not call `Admit` again there. The window governs entry, not reading, so
+  a reply admitted inside the window is still handed out after the window ended;
+  an explicit deny rule still refuses it.
 - Reply permission is a message-level verdict for one replier. For a message
   with several recipients, each replier is decided separately.
