@@ -268,3 +268,41 @@ func TestDecodeOpenNeedsAPointerToAStruct(t *testing.T) {
 		}
 	}
 }
+
+type arrays struct {
+	Pair  [2]inner  `json:"pair"`
+	Ptrs  [2]*inner `json:"ptrs"`
+	Names [2]string `json:"names"`
+}
+
+// The rules hold inside a Go array as they do inside a slice: a document that
+// a slice field would refuse must be refused for an array field too.
+func TestDecodeAppliesTheRulesInsideGoArrays(t *testing.T) {
+	tests := []struct {
+		name    string
+		in      string
+		wantErr string // empty means success
+	}{
+		{"accepts a well-formed document", `{"pair":[{"n":1},{"n":2}],"ptrs":[{"n":1},{"n":2}],"names":["a","b"]}`, ""},
+		{"rejects an element that is null", `{"pair":[{"n":1},{"n":2}],"ptrs":[{"n":1},null],"names":["a","b"]}`, "ptrs[1]: null is not a value"},
+		{"rejects a null scalar element", `{"pair":[{"n":1},{"n":2}],"ptrs":[{"n":1},{"n":2}],"names":[null,"b"]}`, "names[0]: null is not a value"},
+		{"rejects a struct element that misses a required field", `{"pair":[{"n":1},{}],"ptrs":[{"n":1},{"n":2}],"names":["a","b"]}`, "pair[1].n: required field is missing"},
+		{"rejects a key of the wrong case in an element", `{"pair":[{"N":1},{"n":2}],"ptrs":[{"n":1},{"n":2}],"names":["a","b"]}`, "pair[0].N: unknown field"},
+		{"rejects an unknown field in an element", `{"pair":[{"n":1},{"n":2,"x":1}],"ptrs":[{"n":1},{"n":2}],"names":["a","b"]}`, "pair[1].x: unknown field"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var a arrays
+			err := strictjson.Decode([]byte(tc.in), &a)
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Decode(%s) = %v, want success", tc.in, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Decode(%s) = %v, want an error containing %q", tc.in, err, tc.wantErr)
+			}
+		})
+	}
+}

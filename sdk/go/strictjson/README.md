@@ -37,6 +37,8 @@ for how the protocol layers use it.
   Unknown fields are errors, except in the object given to `DecodeOpen`.
 - **No repeated key**, at any depth (ignored members of an open object included),
   because parsers disagree about which duplicate wins.
+- **Any depth.** The rules about keys, required fields and `null` apply inside
+  nested structs, slices, Go arrays and map values alike.
 - **Opaque positions.** `json.RawMessage`, `any` and a type with its own
   `UnmarshalJSON` or `UnmarshalText` keep or decode their value themselves and
   answer for its strictness; such a type may call `Decode`.

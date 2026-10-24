@@ -20,6 +20,9 @@
 //   - No object has the same key twice, at any depth. Parsers disagree about
 //     which duplicate wins, and a message must mean one thing to every reader.
 //
+// The rules about keys, required fields and null apply at any depth: inside
+// nested structs, slices, Go arrays and map values alike.
+//
 // Positions typed json.RawMessage or any are opaque: they keep whatever JSON
 // the sender wrote, null included, and the owner validates them. A type with its
 // own UnmarshalJSON or UnmarshalText is opaque as well and is responsible for
@@ -263,7 +266,7 @@ func check(tree any, t reflect.Type, path string) error {
 			return &Error{Path: path, Msg: "expected an object"}
 		}
 		return checkStruct(obj, t, path)
-	case reflect.Slice:
+	case reflect.Slice, reflect.Array:
 		arr, ok := tree.([]any)
 		if !ok {
 			return &Error{Path: path, Msg: "expected an array"}
