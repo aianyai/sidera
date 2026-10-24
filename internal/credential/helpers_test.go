@@ -197,7 +197,7 @@ func acceptedNetworkKey(t testing.TB, node, netSeed int) record.AcceptedNetworkK
 		Serial:     1,
 		NotBefore:  t0,
 		NotAfter:   t0.Add(30 * 24 * time.Hour),
-	}, Revocation: record.KeyRevocationClear}
+	}, Revocation: record.KeyRevocationClear, HighestSerial: 1}
 }
 
 // certFacts is a revocation source for the directive tests: it answers for every

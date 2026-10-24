@@ -18,7 +18,7 @@ them, and stores the records it hands out.
 
 | Name | Purpose |
 | ---- | ------- |
-| `NewParty(cert, revocation, connectionKey, now)` | One end of a pairing as a connection shows it: node, identity key, the network key the connection is authenticated with, and the certificate serial. Judged by `record.NetworkKeyBelongs`. |
+| `NewParty(cert, revocation, highestSerial, connectionKey, now)` | One end of a pairing as a connection shows it: node, identity key, the network key the connection is authenticated with, and the certificate serial. Judged by `record.NetworkKeyBelongs`, which also refuses a certificate below the highest serial seen. |
 | `Terms`, `Terms.Commit(nA)`, `Open(terms, c, nB, nA)`, `Transcript` | The commitment, and the transcript it opens to: `ID()`, `Code()`, `Credential()` (the credential both sides sign, never sent). |
 | `Code`, `Code.String()`, `ParseCode` | The six digits, shown as two groups of three. |
 | `CommitMsg` (M1), `RevealMsg` (M2), `OpenMsg` (M3), `AcceptedMsg` (M4), `RefusalMsg`, `FetchMsg` (F1), `ResultMsg` (F2), `DecodeOpening` | The typed canonical CBOR messages, each with `Encode` and a strict `Decode...`. |

@@ -231,12 +231,15 @@ func TestNetworkKeyRevoked(t *testing.T) {
 	}
 	for _, row := range rows {
 		t.Run(row.rule, func(t *testing.T) {
-			got := row.set.NetworkKey(row.cert)
+			got := row.set.NetworkKey(row.cert, row.cert.Payload().Serial)
 			if got.Revocation != row.want {
 				t.Fatalf("Revocation = %v, want %v", got.Revocation, row.want)
 			}
 			if got.Cert == nil || *got.Cert != row.cert.Payload() {
 				t.Fatalf("Cert = %+v, want the verified payload", got.Cert)
+			}
+			if got.HighestSerial != row.cert.Payload().Serial {
+				t.Fatalf("HighestSerial = %d, want the serial given", got.HighestSerial)
 			}
 		})
 	}
@@ -278,7 +281,7 @@ func TestAnswersDoNotDependOnOrder(t *testing.T) {
 		rng.Shuffle(len(recs), func(a, b int) { recs[a], recs[b] = recs[b], recs[a] })
 		got := addAll(t, recs...)
 		if got.DeviceCertificate(dcert) != want.DeviceCertificate(dcert) ||
-			got.NetworkKey(cert).Revocation != want.NetworkKey(cert).Revocation ||
+			got.NetworkKey(cert, cert.Payload().Serial).Revocation != want.NetworkKey(cert, cert.Payload().Serial).Revocation ||
 			len(got.Retired()) != len(want.Retired()) {
 			t.Fatalf("order %d changed an answer", i)
 		}
@@ -353,7 +356,7 @@ func TestNilSetPanics(t *testing.T) {
 		{"Retired on a nil set panics", func() { nilSet.Retired() }},
 		{"DeviceCertificate on a nil set panics", func() { nilSet.DeviceCertificate(cert) }},
 		{"RemotePerson on a nil set panics", func() { nilSet.RemotePerson(cert) }},
-		{"NetworkKey on a nil set panics", func() { nilSet.NetworkKey(netCert) }},
+		{"NetworkKey on a nil set panics", func() { nilSet.NetworkKey(netCert, netCert.Payload().Serial) }},
 	}
 	for _, row := range rows {
 		t.Run(row.rule, func(t *testing.T) {

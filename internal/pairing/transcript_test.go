@@ -500,31 +500,39 @@ func TestNewPartyRefusals(t *testing.T) {
 		do   func() error
 	}{
 		{"identity key equal to the network key", func() error {
-			_, e := NewParty(issue(idSigner.Public(), 1), record.KeyRevocationClear, idSigner.Public(), testNow)
+			_, e := NewParty(issue(idSigner.Public(), 1), record.KeyRevocationClear, 1, idSigner.Public(), testNow)
 			return e
 		}},
 		{"connection authenticated another key", func() error {
-			_, e := NewParty(good, record.KeyRevocationClear, signerFromSeed(t, seedTest3).Public(), testNow)
+			_, e := NewParty(good, record.KeyRevocationClear, 1, signerFromSeed(t, seedTest3).Public(), testNow)
 			return e
 		}},
 		{"revocation never looked up", func() error {
-			_, e := NewParty(good, record.KeyRevocationUnchecked, netSigner.Public(), testNow)
+			_, e := NewParty(good, record.KeyRevocationUnchecked, 1, netSigner.Public(), testNow)
 			return e
 		}},
 		{"certificate revoked", func() error {
-			_, e := NewParty(good, record.KeyRevocationRevoked, netSigner.Public(), testNow)
+			_, e := NewParty(good, record.KeyRevocationRevoked, 1, netSigner.Public(), testNow)
 			return e
 		}},
 		{"certificate expired", func() error {
-			_, e := NewParty(good, record.KeyRevocationClear, netSigner.Public(), testNow.Add(2*time.Hour))
+			_, e := NewParty(good, record.KeyRevocationClear, 1, netSigner.Public(), testNow.Add(2*time.Hour))
 			return e
 		}},
 		{"certificate not yet valid", func() error {
-			_, e := NewParty(good, record.KeyRevocationClear, netSigner.Public(), testNow.Add(-3*time.Hour))
+			_, e := NewParty(good, record.KeyRevocationClear, 1, netSigner.Public(), testNow.Add(-3*time.Hour))
+			return e
+		}},
+		{"a higher serial was seen: the certificate is stale", func() error {
+			_, e := NewParty(good, record.KeyRevocationClear, 2, netSigner.Public(), testNow)
+			return e
+		}},
+		{"no highest serial given", func() error {
+			_, e := NewParty(good, record.KeyRevocationClear, 0, netSigner.Public(), testNow)
 			return e
 		}},
 		{"no certificate", func() error {
-			_, e := NewParty(record.Verified[record.NetworkKeyCertificate]{}, record.KeyRevocationClear, netSigner.Public(), testNow)
+			_, e := NewParty(record.Verified[record.NetworkKeyCertificate]{}, record.KeyRevocationClear, 1, netSigner.Public(), testNow)
 			return e
 		}},
 	}

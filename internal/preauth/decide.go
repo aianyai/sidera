@@ -274,7 +274,7 @@ func decideNode(f Facts, peer ident.PublicKey, rec record.Record) Decision {
 		return withSerial(refused(refusal), advance)
 	}
 
-	switch record.NetworkKeyBelongs(f.Revocations.NetworkKey(cert), node, peer, f.Now) {
+	switch record.NetworkKeyBelongs(f.Revocations.NetworkKey(cert, highestSeen(f.SerialSeen, advance, node).Serial), node, peer, f.Now) {
 	case record.BindingOK:
 	case record.BindingKeyMismatch:
 		return withSerial(refused(ReasonKeyMismatch), advance)
@@ -342,6 +342,18 @@ func checkSerial(seen map[ident.NodeID]record.SerialSeen, cert record.Verified[r
 	return record.SerialSeen{}, ReasonInvalidInput
 }
 
+// highestSeen is the highest serial seen for node after the certificate just
+// decided on: the advance when it raised the serial, otherwise what is stored.
+// It is what record.NetworkKeyBelongs judges the certificate against, so the
+// network key of a certificate that is not the highest is refused there as well
+// as by checkSerial.
+func highestSeen(seen map[ident.NodeID]record.SerialSeen, advance record.SerialSeen, node ident.NodeID) record.SerialSeen {
+	if !advance.Node.IsZero() {
+		return advance
+	}
+	return seen[node]
+}
+
 // HeldMembers returns, in the order given and without repeats, the network keys
 // of the held certificates that belong to members: the certificate is the
 // current one for its node, valid now and not revoked, and the node is a member
@@ -358,10 +370,11 @@ func HeldMembers(f Facts, certs []record.Verified[record.NetworkKeyCertificate])
 	seen := map[ident.PublicKey]bool{}
 	for _, cert := range certs {
 		c := cert.Payload()
-		if _, refusal := checkSerial(f.SerialSeen, cert); refusal != ReasonUnset {
+		advance, refusal := checkSerial(f.SerialSeen, cert)
+		if refusal != ReasonUnset {
 			continue
 		}
-		if record.NetworkKeyBelongs(f.Revocations.NetworkKey(cert), c.Node, c.NetworkKey, f.Now) != record.BindingOK {
+		if record.NetworkKeyBelongs(f.Revocations.NetworkKey(cert, highestSeen(f.SerialSeen, advance, c.Node).Serial), c.Node, c.NetworkKey, f.Now) != record.BindingOK {
 			continue
 		}
 		if state, _ := nodeState(trust.Evaluate(view, c.Node, f.Now).Outcome); state != StateMember || seen[c.NetworkKey] {

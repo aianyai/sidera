@@ -23,7 +23,7 @@ of it.
 | `Set.DeviceCertificate(cert)`                                         | `admin.DeviceCert` with `Revocation` set to a checked status: clear, cert revoked or root key revoked.    |
 | `Set.RemotePerson(cert)`                                              | The `admin.Actor` for a remote person: the person and the facts both come from the one certificate. The way to build a remote actor. |
 | `Set.Retired()`, `Set.NodeRetired(n)`, `Set.PersonRevoked(p)`         | The nodes with a verified self-revocation, as `trust.NodeSet` for `trust.View.Retired`; single lookups.   |
-| `Set.NetworkKey(cert)`                                                | `record.AcceptedNetworkKey` with `Revocation` set to a checked status (clear or revoked), for `record.NetworkKeyBelongs`. |
+| `Set.NetworkKey(cert, highestSerial)`                                 | `record.AcceptedNetworkKey` with `Revocation` set to a checked status (clear or revoked) and `HighestSerial` as given, for `record.NetworkKeyBelongs`. |
 | `Classify(rev, ctx, held, params)`, `Context`, `Params`, `Retention`  | Long-term, forward-once or dropped, with a reason.                                                        |
 
 ## Rules

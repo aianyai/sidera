@@ -79,7 +79,8 @@ first for the conventions every contract package follows, and
   runs a directive through the real revocation set.
 - A verifier of a voucher reads the claimed issuer with `VoucherIssuer`, looks up
   the network-key certificate it accepted for that node and the result of its
-  revocation lookup (`record.AcceptedNetworkKey`, status stated), and builds
+  revocation lookup (`record.AcceptedNetworkKey`, status stated) and the highest
+  serial it has seen for that node (a certificate below it is stale), and builds
   `VoucherDescriptor` from them. The peeked issuer is untrusted.
 - Times in the payloads have the precision of the wire: whole seconds.
 

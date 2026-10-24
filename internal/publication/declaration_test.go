@@ -106,7 +106,7 @@ func TestDeclarationSignerBinding(t *testing.T) {
 	unchecked.Revocation = record.KeyRevocationUnchecked
 	otherNode := record.AcceptedNetworkKey{Cert: &record.NetworkKeyCertificate{
 		Node: nodeOf(t, keyOther), NetworkKey: signerOf(t, keyNetA).Public(), Serial: 1, NotBefore: t0, NotAfter: t0.Add(time.Hour * 24),
-	}, Revocation: record.KeyRevocationClear}
+	}, Revocation: record.KeyRevocationClear, HighestSerial: 1}
 	tests := []struct {
 		name     string
 		accepted record.AcceptedNetworkKey

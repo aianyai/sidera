@@ -38,7 +38,7 @@ func acceptedFor(t testing.TB, idSeed int) record.AcceptedNetworkKey {
 		t.Fatal(err)
 	}
 	c := cert.Payload()
-	return record.AcceptedNetworkKey{Cert: &c, Revocation: record.KeyRevocationClear}
+	return record.AcceptedNetworkKey{Cert: &c, Revocation: record.KeyRevocationClear, HighestSerial: c.Serial}
 }
 
 // verifiedDeclaration seals a declaration of the node with identity key idSeed

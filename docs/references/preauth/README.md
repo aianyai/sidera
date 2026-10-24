@@ -114,8 +114,9 @@ For a node:
    accepted; a lower serial is an old network key and is refused; the same serial
    with another digest is a conflict and is refused.
 3. The certificate must belong to the peer (`NetworkKeyBelongs` with the
-   revocation lookup of the set): a different key, a revoked certificate, an
-   expired one or one that has not begun is refused. A node whose identity key
+   revocation lookup of the set and the highest serial seen, the serial this
+   very certificate may have just raised): a different key, a revoked
+   certificate, an expired one or one that has not begun is refused. A node whose identity key
    has a self-revocation is refused as retired.
 4. `trust.Evaluate` decides, on the trust view with the retired nodes of the
    revocation set added to its own (a retired intermediate carries no trust):

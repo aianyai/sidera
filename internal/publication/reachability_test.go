@@ -78,7 +78,7 @@ func TestVerifierWithoutTheCertificateStartsFromTheEmbeddedOne(t *testing.T) {
 	if got := record.DecideSerial(nil, cert); got != record.SerialAccept {
 		t.Fatalf("serial verdict = %v", got)
 	}
-	accepted := record.AcceptedNetworkKey{Cert: ptrTo(cert.Payload()), Revocation: record.KeyRevocationClear}
+	accepted := record.AcceptedNetworkKey{Cert: ptrTo(cert.Payload()), Revocation: record.KeyRevocationClear, HighestSerial: cert.Payload().Serial}
 	if _, err := record.Verify(ReachabilityDescriptor(accepted, reachNow), r); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestVerifierWithoutTheCertificateStartsFromTheEmbeddedOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = record.Verify(ReachabilityDescriptor(record.AcceptedNetworkKey{Cert: ptrTo(nv.Payload()), Revocation: record.KeyRevocationClear}, reachNow), r)
+	_, err = record.Verify(ReachabilityDescriptor(record.AcceptedNetworkKey{Cert: ptrTo(nv.Payload()), Revocation: record.KeyRevocationClear, HighestSerial: nv.Payload().Serial}, reachNow), r)
 	var be *record.BindingError
 	if !errors.As(err, &be) || be.Binding != record.BindingKeyMismatch {
 		t.Fatalf("err = %v, want a key mismatch", err)
@@ -153,7 +153,7 @@ func TestReachabilityMustBeSignedByTheEmbeddedCertificateKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	clear := func(c *record.NetworkKeyCertificate) record.AcceptedNetworkKey {
-		return record.AcceptedNetworkKey{Cert: c, Revocation: record.KeyRevocationClear}
+		return record.AcceptedNetworkKey{Cert: c, Revocation: record.KeyRevocationClear, HighestSerial: c.Serial}
 	}
 	verifiers := []struct {
 		name     string

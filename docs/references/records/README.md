@@ -189,13 +189,24 @@ key and not a peer identifier, so the contract packages do not depend on libp2p.
   expiry nor revocation enters this decision: an expired certificate with a
   higher serial still raises the serial seen, and revoking the accepted
   certificate never lowers it, so an older key cannot come back.
+- **The accepted certificate only moves forward.** A certificate is valid for
+  binding only while no higher serial has been seen for its node. Without that,
+  a network key that leaked before a rotation would keep binding after it for
+  every record a network key signs, as long as the old certificate was neither
+  expired nor revoked, and the new key's owner could do nothing about it but
+  revoke each old certificate by hand. So the serial seen enters the binding
+  judgment itself (below), and not each caller's own check.
 - **`NetworkKeyBelongs`** is the only function that decides whether a network
   public key is a node's key, given what is accepted for the node
-  (`AcceptedNetworkKey`: the certificate and the revocation status the caller fills
-  from the revocation records). Declarations, vouchers, reachability records and
-  delivery reports that a network key signs all rely on it. A key the certificate
-  does not name is a mismatch whatever the certificate's state; a certificate
-  that names it is then judged for revocation, then for its window. The
+  (`AcceptedNetworkKey`: the certificate, the highest serial seen for its node
+  and the revocation status the caller fills from its own state). Declarations,
+  vouchers, reachability records, status reports, control replies and pairing
+  parties that a network key signs all rely on it. A key the certificate does
+  not name is a mismatch whatever the certificate's state; a certificate that
+  names it is then judged against the serial seen (`BindingStale` when a higher
+  serial was seen, `BindingSerialUnchecked` when the caller gave none or one
+  below the certificate's own, which a seen serial cannot be), then for
+  revocation, then for its window. The
   revocation status is three-valued: its zero value means nobody looked the
   certificate up and is refused with its own binding
   (`BindingRevocationUnchecked`), surfaced by `NetworkKeyOf` through
@@ -259,9 +270,10 @@ keeps a revocation.
   `RevocationClear`; `Set.RemotePerson` builds the remote `admin.Actor` from one
   certificate, taking the person from it, and is the way to build one;
   `Set.Retired` returns the node IDs with a verified self-revocation as the
-  `trust.NodeSet` that `trust.View.Retired` takes; `Set.NetworkKey` sets
-  `AcceptedNetworkKey.Revocation` to `KeyRevocationRevoked` (the certificate's
-  own revocation, or any self-revocation of its node) or `KeyRevocationClear`.
+  `trust.NodeSet` that `trust.View.Retired` takes; `Set.NetworkKey(cert,
+  highestSerial)` sets `AcceptedNetworkKey.Revocation` to `KeyRevocationRevoked`
+  (the certificate's own revocation, or any self-revocation of its node) or
+  `KeyRevocationClear`, and passes the highest serial seen on.
   The two certificate queries never return the unchecked status, which `admin`
   and `record.NetworkKeyBelongs` refuse; this package is the one place that turns
   the revocation set into those statuses. None of them reads a clock or touches
@@ -659,6 +671,7 @@ sender's message of the same id. The formats and the reasons are in [envelope](.
   `TestTimeConversion`, `TestLevelTable`, `TestOptionalFieldsInAnExternalRecordType`),
   `certs_test.go` (`TestNetworkKeyCertificateRules`, `TestDecideSerial`,
   `TestNetworkKeyBelongs`, `TestNetworkKeySignedRecords`,
+  `TestRotationVoidsTheOldNetworkKey`,
   `TestRotatingTheNetworkKeyKeepsTheNodeID`, `TestRolesAreSeparated`,
   `TestIssuedCertificatesAreBackdatedByTheClockTolerance`,
   `TestDeviceCertificateRules`, `TestDeviceCertificateToAdminFacts`),

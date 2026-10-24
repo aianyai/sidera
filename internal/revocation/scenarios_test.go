@@ -43,7 +43,7 @@ func TestOldCertificateRevocationRefusesTheOldKey(t *testing.T) {
 	revocation := mustRevocation(t, must(IssueNetworkKeyCertificateRevocation(cert1, identity)), nil)
 
 	t.Run("before the revocation the old key belongs to the node", func(t *testing.T) {
-		if got := record.NetworkKeyBelongs(NewSet().NetworkKey(cert1), node, oldNet.Public(), now); got != record.BindingOK {
+		if got := record.NetworkKeyBelongs(NewSet().NetworkKey(cert1, cert1.Payload().Serial), node, oldNet.Public(), now); got != record.BindingOK {
 			t.Fatalf("got %v", got)
 		}
 	})
@@ -53,17 +53,17 @@ func TestOldCertificateRevocationRefusesTheOldKey(t *testing.T) {
 		if err := set.Add(revocation); err != nil {
 			t.Fatal(err)
 		}
-		got := record.NetworkKeyBelongs(set.NetworkKey(cert1), node, oldNet.Public(), now)
+		got := record.NetworkKeyBelongs(set.NetworkKey(cert1, cert1.Payload().Serial), node, oldNet.Public(), now)
 		if got != record.BindingRevoked {
 			t.Fatalf("got %v, want revoked", got)
 		}
 		// A record the old key signs is refused with the specific reason.
 		n := note{Node: node}
-		r, err := record.Seal(noteDescriptor(NewSet().NetworkKey(cert1), now), n, oldNet)
+		r, err := record.Seal(noteDescriptor(NewSet().NetworkKey(cert1, cert1.Payload().Serial), now), n, oldNet)
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = record.Verify(noteDescriptor(set.NetworkKey(cert1), now), r)
+		_, err = record.Verify(noteDescriptor(set.NetworkKey(cert1, cert1.Payload().Serial), now), r)
 		var be *record.BindingError
 		if !errors.Is(err, record.ErrSignerNotAllowed) || !errors.As(err, &be) || be.Binding != record.BindingRevoked {
 			t.Fatalf("got %v", err)
@@ -75,10 +75,10 @@ func TestOldCertificateRevocationRefusesTheOldKey(t *testing.T) {
 		if err := set.Add(revocation); err != nil {
 			t.Fatal(err)
 		}
-		if got := record.NetworkKeyBelongs(set.NetworkKey(cert2), node, oldNet.Public(), now); got != record.BindingKeyMismatch {
+		if got := record.NetworkKeyBelongs(set.NetworkKey(cert2, cert2.Payload().Serial), node, oldNet.Public(), now); got != record.BindingKeyMismatch {
 			t.Fatalf("old key: got %v", got)
 		}
-		if got := record.NetworkKeyBelongs(set.NetworkKey(cert2), node, newNet.Public(), now); got != record.BindingOK {
+		if got := record.NetworkKeyBelongs(set.NetworkKey(cert2, cert2.Payload().Serial), node, newNet.Public(), now); got != record.BindingOK {
 			t.Fatalf("new key: got %v", got)
 		}
 	})
@@ -105,11 +105,13 @@ func TestOldCertificateRevocationRefusesTheOldKey(t *testing.T) {
 		if got := record.DecideSerial(&seen, cert1); got != record.SerialStale {
 			t.Fatalf("after revoking the newest: got %v, want stale", got)
 		}
-		if got := record.NetworkKeyBelongs(set.NetworkKey(cert2), node, newNet.Public(), now); got != record.BindingRevoked {
+		if got := record.NetworkKeyBelongs(set.NetworkKey(cert2, cert2.Payload().Serial), node, newNet.Public(), now); got != record.BindingRevoked {
 			t.Fatalf("revoked newest: got %v", got)
 		}
-		if got := record.NetworkKeyBelongs(set.NetworkKey(cert1), node, oldNet.Public(), now); got != record.BindingRevoked {
-			t.Fatalf("revoked oldest: got %v", got)
+		// The old certificate is also revoked, but the serial seen passes it, and
+		// that is what the binding reports.
+		if got := record.NetworkKeyBelongs(set.NetworkKey(cert1, seen.Serial), node, oldNet.Public(), now); got != record.BindingStale {
+			t.Fatalf("old certificate below the serial seen: got %v, want stale", got)
 		}
 	})
 }
@@ -160,7 +162,7 @@ func TestIdentityKeyCompromise(t *testing.T) {
 	// the node's peers accept his key: the window in which a leaked identity key is still believed.
 	attackerNet := seedSigner(t, 99)
 	_, attackerCert := networkCertificate(t, identity, attackerNet, 7, epoch, endTime)
-	if got := record.NetworkKeyBelongs(NewSet().NetworkKey(attackerCert), n, attackerNet.Public(), now); got != record.BindingOK {
+	if got := record.NetworkKeyBelongs(NewSet().NetworkKey(attackerCert, attackerCert.Payload().Serial), n, attackerNet.Public(), now); got != record.BindingOK {
 		t.Fatalf("before: attacker's key: %v", got)
 	}
 
@@ -181,7 +183,7 @@ func TestIdentityKeyCompromise(t *testing.T) {
 		}
 	})
 	t.Run("a certificate the attacker signs with the leaked key is revoked", func(t *testing.T) {
-		got := record.NetworkKeyBelongs(set.NetworkKey(attackerCert), n, attackerNet.Public(), now)
+		got := record.NetworkKeyBelongs(set.NetworkKey(attackerCert, attackerCert.Payload().Serial), n, attackerNet.Public(), now)
 		if got != record.BindingRevoked {
 			t.Fatalf("got %v", got)
 		}

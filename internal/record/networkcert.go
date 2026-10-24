@@ -249,12 +249,26 @@ const (
 )
 
 // AcceptedNetworkKey is what a node currently accepts as another node's
-// network key: the accepted certificate and the result of its revocation
-// lookup. The accepted certificate is the highest-serial certificate that was
-// verified and taken in; it is kept apart from SerialSeen.
+// network key: the accepted certificate, the highest serial seen for its node
+// and the result of its revocation lookup. The accepted certificate is the
+// highest-serial certificate that was verified and taken in; it is kept apart
+// from SerialSeen.
+//
+// The accepted certificate only moves forward: it is replaced by a certificate
+// of a higher or the same serial, never a lower one, and it is invalid the
+// moment the serial seen passes it. Rotating the network key therefore ends the
+// old key's standing for every record it signs, whether or not the old
+// certificate was ever revoked: a key that leaked before the rotation signs
+// nothing a verifier accepts afterwards.
 type AcceptedNetworkKey struct {
 	// Cert is the accepted certificate; nil if none is known.
 	Cert *NetworkKeyCertificate
+	// HighestSerial is the highest certificate serial seen for Cert's node
+	// (SerialSeen.Serial), read when the verification is made. A certificate
+	// below it is stale. The zero value, and any value below Cert.Serial (a seen
+	// serial cannot be lower than a certificate that was accepted), is refused
+	// like a revocation nobody looked up.
+	HighestSerial uint64
 	// Revocation is the result of looking Cert up in the revocation records.
 	// This package does not read revocations; the caller fills it. The zero
 	// value KeyRevocationUnchecked is refused, and so is any value outside the
@@ -288,6 +302,14 @@ const (
 	// but nobody looked it up in the revocation records. It is a caller bug and
 	// is refused, never read as "not revoked".
 	BindingRevocationUnchecked
+	// BindingStale: the certificate names this key for this node but a higher
+	// serial has been seen for the node, so the certificate and its key are
+	// void.
+	BindingStale
+	// BindingSerialUnchecked: the certificate names this key for this node but
+	// the highest serial seen was not given, or is below the certificate's own.
+	// It is a caller bug and is refused, never read as "nothing newer seen".
+	BindingSerialUnchecked
 )
 
 func (b Binding) String() string {
@@ -308,6 +330,10 @@ func (b Binding) String() string {
 		return "revoked"
 	case BindingRevocationUnchecked:
 		return "revocation-unchecked"
+	case BindingStale:
+		return "stale"
+	case BindingSerialUnchecked:
+		return "serial-unchecked"
 	}
 	return "invalid"
 }
@@ -317,8 +343,10 @@ func (b Binding) String() string {
 // every record signed by a network key (declarations, vouchers, reachability
 // records, delivery reports) relies on it. A key that is not the certificate's
 // is a mismatch whatever the certificate's state; a certificate that names the
-// key is judged next for revocation, where a certificate that was never looked
-// up is refused like a revoked one, then for its window.
+// key is judged next against the highest serial seen for the node, where a
+// lower serial is stale and a serial seen that was not given is refused, then
+// for revocation, where a certificate that was never looked up is refused like
+// a revoked one, then for its window.
 func NetworkKeyBelongs(accepted AcceptedNetworkKey, node ident.NodeID, key ident.PublicKey, now time.Time) Binding {
 	cert := accepted.Cert
 	switch {
@@ -328,6 +356,10 @@ func NetworkKeyBelongs(accepted AcceptedNetworkKey, node ident.NodeID, key ident
 		return BindingNodeMismatch
 	case key.IsZero() || cert.NetworkKey != key:
 		return BindingKeyMismatch
+	case accepted.HighestSerial < cert.Serial:
+		return BindingSerialUnchecked
+	case accepted.HighestSerial > cert.Serial:
+		return BindingStale
 	case accepted.Revocation == KeyRevocationRevoked:
 		return BindingRevoked
 	case accepted.Revocation != KeyRevocationClear:

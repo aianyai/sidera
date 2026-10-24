@@ -165,8 +165,12 @@ func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
 	return ok
 }
 
-// NetworkKey returns the accepted network key for cert with its revocation
-// status filled in, ready for record.NetworkKeyBelongs. The status is always a
+// NetworkKey returns the accepted network key for cert with the highest serial
+// seen for its node and its revocation status filled in, ready for
+// record.NetworkKeyBelongs. highestSerial is the serial of the caller's
+// record.SerialSeen for cert's node, including a serial that cert itself just
+// raised; zero, or a serial below cert's own, is refused by
+// record.NetworkKeyBelongs. The status is always a
 // checked one, never record.KeyRevocationUnchecked: it is
 // record.KeyRevocationRevoked when
 //
@@ -179,17 +183,17 @@ func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
 //
 // and record.KeyRevocationClear otherwise.
 //
-// It does not touch the highest serial seen; a revocation never lowers it (see
+// It does not change the highest serial seen; a revocation never lowers it (see
 // record.SerialSeen). cert must have been verified against
 // record.NetworkKeyCertificateDescriptor.
-func (s *Set) NetworkKey(cert record.Verified[record.NetworkKeyCertificate]) record.AcceptedNetworkKey {
+func (s *Set) NetworkKey(cert record.Verified[record.NetworkKeyCertificate], highestSerial uint64) record.AcceptedNetworkKey {
 	s.mustBeLoaded()
 	c := cert.Payload()
 	status := record.KeyRevocationClear
 	if s.certificateRevoked(c.Node, c.Serial, cert.Digest()) {
 		status = record.KeyRevocationRevoked
 	}
-	return record.AcceptedNetworkKey{Cert: &c, Revocation: status}
+	return record.AcceptedNetworkKey{Cert: &c, Revocation: status, HighestSerial: highestSerial}
 }
 
 func (s *Set) certificateRevoked(node ident.NodeID, serial uint64, digest record.Digest) bool {

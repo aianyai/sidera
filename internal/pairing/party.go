@@ -30,19 +30,20 @@ type Party struct {
 // itself is authenticated with: for the remote end the key libp2p verified in
 // the handshake, for the local end the key of this connection, not the key the
 // configuration holds now. revocation is the result of the caller's lookup of
-// cert in the revocation records.
+// cert in the revocation records, and highestSerial the highest certificate
+// serial the caller has seen for cert's node (cert's own included).
 //
 // The binding of the connection key to the node is decided by
 // record.NetworkKeyBelongs, the one place that answers it, so a certificate
-// that is expired, revoked, never looked up, for another node or for another
-// key is refused here. The identity key is the one signer of the certificate,
+// that is expired, revoked, never looked up, below the highest serial seen, for
+// another node or for another key is refused here. The identity key is the one signer of the certificate,
 // which record.Verify already showed derives the node.
-func NewParty(cert record.Verified[record.NetworkKeyCertificate], revocation record.KeyRevocationStatus, connectionKey ident.PublicKey, now time.Time) (Party, error) {
+func NewParty(cert record.Verified[record.NetworkKeyCertificate], revocation record.KeyRevocationStatus, highestSerial uint64, connectionKey ident.PublicKey, now time.Time) (Party, error) {
 	if cert.Digest().IsZero() {
 		return Party{}, fmt.Errorf("%w: no verified certificate", ErrParty)
 	}
 	c := cert.Payload()
-	accepted := record.AcceptedNetworkKey{Cert: &c, Revocation: revocation}
+	accepted := record.AcceptedNetworkKey{Cert: &c, Revocation: revocation, HighestSerial: highestSerial}
 	if b := record.NetworkKeyBelongs(accepted, c.Node, connectionKey, now); b != record.BindingOK {
 		return Party{}, fmt.Errorf("%w: network key of the connection is not the certificate's: %s", ErrParty, b)
 	}

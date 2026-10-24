@@ -115,7 +115,7 @@ func acceptedA(t testing.TB) record.AcceptedNetworkKey {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return record.AcceptedNetworkKey{Cert: ptrTo(v.Payload()), Revocation: record.KeyRevocationClear}
+	return record.AcceptedNetworkKey{Cert: ptrTo(v.Payload()), Revocation: record.KeyRevocationClear, HighestSerial: v.Payload().Serial}
 }
 
 // networkCertRecord issues a certificate record for node (identity key seed

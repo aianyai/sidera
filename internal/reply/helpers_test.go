@@ -62,7 +62,8 @@ func acceptedFor(idSeed, netSeed int) record.AcceptedNetworkKey {
 			Node: nodeOf(idSeed), NetworkKey: signerOf(netSeed).Public(), Serial: 1,
 			NotBefore: t0.Add(-24 * time.Hour), NotAfter: t0.Add(60 * 24 * time.Hour),
 		},
-		Revocation: record.KeyRevocationClear,
+		Revocation:    record.KeyRevocationClear,
+		HighestSerial: 1,
 	}
 }
 

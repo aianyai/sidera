@@ -115,7 +115,7 @@ func TestPeekChoosesTheVerificationContext(t *testing.T) {
 	node := cert.Node
 	mid := epoch.Add(time.Hour)
 	accepted := map[string]AcceptedNetworkKey{
-		node.String(): {Cert: &cert, Revocation: KeyRevocationClear},
+		node.String(): {Cert: &cert, Revocation: KeyRevocationClear, HighestSerial: cert.Serial},
 	}
 
 	// The descriptor used for Seal is only for building the test record.

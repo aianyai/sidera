@@ -187,7 +187,12 @@ timers, and applies the answers.
   only when its serial is higher than the stored one; otherwise a concurrent
   decision could roll the serial back and let an old network key return. The
   caller keeps `Decision.NodeCertificate` as the node's accepted certificate
-  when the exchange completed.
+  when the exchange completed. The accepted certificate only moves forward: a
+  completed decision replaces the stored certificate only when its serial is the
+  same or higher, never a lower one (decisions on several connections run against
+  the facts each loaded, so a slower one can carry an older certificate than the
+  one stored now), and the certificate is invalid once the serial seen passes it
+  (see `record.AcceptedNetworkKey`).
 - The accounting is driven from the connection gater's secured callback, the
   network notifee's connected and disconnected callbacks and the exchange's
   outcome. `Sweep` is called at least every `SweepInterval`, and `Overdue` often

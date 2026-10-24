@@ -68,7 +68,7 @@ func partyFrom(t testing.TB, identSeed, netSeed string, serial uint64) Party {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := NewParty(ver, record.KeyRevocationClear, netSigner.Public(), testNow)
+	p, err := NewParty(ver, record.KeyRevocationClear, serial, netSigner.Public(), testNow)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -100,7 +100,9 @@ package follows, and
   a verifier that already holds a certificate for the node, since the record is
   verified against the embedded certificate's key. A declaration's verifier reads
   the node with `DeclarationNode` and looks up its accepted certificate and the
-  result of its revocation lookup (`record.AcceptedNetworkKey`, status stated).
+  result of its revocation lookup (`record.AcceptedNetworkKey`, status and the
+  highest certificate serial seen for the node stated: a certificate below it is
+  stale and its key signs nothing a verifier accepts).
 - The caller puts `Declaration.DeclaredInheritance()` of the declaration the
   decision last accepted for a node into `trust.View.DeclaredAcceptsInheritance`.
   A node with no accepted declaration is absent from the map, which `trust` reads
