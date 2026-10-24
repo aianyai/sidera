@@ -71,6 +71,10 @@ func (v Verdict) String() string {
 	return "unset"
 }
 
+// HasStanding reports whether s is a state with standing: a member or an
+// authorized person, the two states Completed releases from the accounting.
+func (s State) HasStanding() bool { return s == StateMember || s == StateAuthorizedPerson }
+
 // NonMember reports whether s is one of the two non-member states, the states
 // that share the non-member limits of the accounting.
 func (s State) NonMember() bool { return s == StateNonMemberNode || s == StateNonMemberPerson }

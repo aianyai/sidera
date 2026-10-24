@@ -269,8 +269,18 @@ cache of who is known: the accounting keeps its own known set.
   outcome on its own: it neither hands out nor rejects what it holds, and the
   sender sees nothing until trust returns or is denied. Refusing the connection
   would turn a pause into a denial, and the vouchers that end it travel on member
-  protocols. The connection state follows `trust`'s outcome, the policy layer
-  gets the outcome itself.
+  protocols. The connection state follows `trust`'s outcome as of the exchange;
+  the policy layer takes the current outcome for every request.
+- **A demotion closes the connection.** The facts a decision read (revocations,
+  the trust view, the authorized-persons list) change while connections live, so
+  the caller decides again for the connections of the affected peers. Refusing a
+  connection that is now refused is obvious. Closing one that is only demoted is
+  not, and the reason is the accounting: a member is released from it, so a
+  connection that stayed open as a non-member would hold no place among
+  `NonMemberConcurrency` and no `NonMemberLifetime` (`Completed` would answer
+  `PlaceUntracked`), and a revoked peer could hold a connection indefinitely
+  outside every limit. Closing costs the peer a reconnect, after which it is
+  accounted as a non-member from the start. A promotion keeps the connection.
 - **Retirement is read from the revocation set, once.** Whether a node is
   retired is a fact of the revocation set, and `trust` needs it for the
   intermediates of a path as well as for the target. If the caller had to copy the

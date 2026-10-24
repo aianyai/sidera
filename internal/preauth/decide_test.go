@@ -655,3 +655,91 @@ func TestDecideRecordsNothingForASerialConflict(t *testing.T) {
 		t.Errorf("a conflict recorded %+v", d.SerialSeen)
 	}
 }
+
+// When the facts change, the caller decides again for the live connections and
+// applies Keeps. A refusal and a demotion close the connection; an unchanged
+// state and a promotion keep it.
+func TestADemotedMemberConnectionIsClosed(t *testing.T) {
+	// decideAfter decides on the remote node's certificate after change has been
+	// applied to the world.
+	decideAfter := func(t *testing.T, member bool, change func(w *world)) Decision {
+		w := newWorld(t)
+		if member {
+			w.trusts()
+		}
+		rec, _ := w.cert(1)
+		change(w)
+		return Decide(w.facts(), w.peer.Public(), NewNodeExchange(rec))
+	}
+	rows := []struct {
+		rule    string
+		current State
+		member  bool
+		change  func(w *world)
+		want    State
+		keeps   bool
+	}{
+		{"a member whose local credential is gone is demoted to a non-member node and closed", StateMember, false, func(w *world) {}, StateNonMemberNode, false},
+		{"a member revoked locally is demoted and closed", StateMember, true, func(w *world) { w.view.LocallyRevoked[w.remoteNode()] = struct{}{} }, StateNonMemberNode, false},
+		{"a member retired in the revocation set is refused and closed", StateMember, true, func(w *world) {
+			w.revoke(revocation.IssueNodeSelfRevocation(w.identity))
+		}, StateUnauthenticated, false},
+		{"a member whose trust is unchanged is kept", StateMember, true, func(w *world) {}, StateMember, true},
+		{"a non-member that pairing made a member is kept", StateNonMemberNode, true, func(w *world) {}, StateMember, true},
+		{"a non-member that stays one is kept", StateNonMemberNode, false, func(w *world) {}, StateNonMemberNode, true},
+		{"an unauthenticated connection that completes is kept", StateUnauthenticated, false, func(w *world) {}, StateNonMemberNode, true},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			d := decideAfter(t, r.member, r.change)
+			if d.State != r.want {
+				t.Fatalf("state = %v (%v), want %v", d.State, d.Reason, r.want)
+			}
+			if got := d.Keeps(r.current); got != r.keeps {
+				t.Fatalf("Keeps(%v) = %v, want %v", r.current, got, r.keeps)
+			}
+		})
+	}
+
+	t.Run("an authorized person removed from the list is demoted and closed", func(t *testing.T) {
+		w := newWorld(t)
+		w.listPerson(admin.LevelManage, time.Time{})
+		rec, _ := w.deviceCert(admin.LevelManage, epoch, endTime)
+		ex := NewPersonExchange(rec)
+		if d := Decide(w.facts(), w.device.Public(), ex); d.State != StateAuthorizedPerson {
+			t.Fatalf("before: %v", d.State)
+		}
+		w.list = admin.List{}
+		d := Decide(w.facts(), w.device.Public(), ex)
+		if d.State != StateNonMemberPerson || d.Keeps(StateAuthorizedPerson) {
+			t.Fatalf("after: state %v, keeps %v", d.State, d.Keeps(StateAuthorizedPerson))
+		}
+	})
+
+	t.Run("the hole the closing prevents: a kept demoted member holds no place and no lifetime", func(t *testing.T) {
+		// The accounting released the member's connection, so reporting the
+		// demotion for it finds nothing to place. This is why the connection is
+		// closed instead of kept.
+		a := newAccounting(t)
+		k := key(t, 7, "a")
+		admit(t, a, k, at(0), AdmitCounted)
+		a.Connected(k, at(0))
+		a.Completed(k, StateMember, at(1))
+		if got := a.Completed(k, StateNonMemberNode, at(2)); got.Reason != PlaceUntracked {
+			t.Fatalf("a demoted member's connection: %v", got.Reason)
+		}
+		wantCounts(t, a, 0, 0, 0)
+		if over := a.Overdue(at(1000)); len(over) != 0 {
+			t.Fatalf("overdue = %v: the untracked connection would be bound by nothing", over)
+		}
+		// Closed and reconnected, the peer is accounted as the non-member it is.
+		admit(t, a, k, at(3), AdmitCounted)
+		a.Connected(k, at(3))
+		if got := a.Completed(k, StateNonMemberNode, at(4)); got.Reason != PlaceNonMember {
+			t.Fatalf("after the reconnect: %v", got.Reason)
+		}
+		if over := a.Overdue(at(3 + 40)); len(over) != 1 {
+			t.Fatalf("overdue = %v, want the non-member after its lifetime", over)
+		}
+	})
+}

@@ -97,8 +97,9 @@ own `KeyFor`, so nobody sees another person's results.
   `LevelNone` grants nothing.
 - `now` is UTC and comes from the caller's clock. Callers re-run `Authorize` for
   every request on a live connection, so removing or downgrading an entry takes
-  effect on the next request, and disconnect a person whose `EffectiveLevel`
-  drops to none.
+  effect on the next request. The connection of a person whose `EffectiveLevel`
+  drops to none is closed by the re-decision `preauth` requires when the list
+  changes (`Decision.Keeps`); the person reconnects as a non-member person.
 - `offlineSince` passed to `AcceptDirective` is the time this node itself
   recorded as losing contact, never a value taken from a directive. The zero
   time is refused.

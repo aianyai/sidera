@@ -88,8 +88,10 @@ timers, and applies the answers.
     secure handshake authenticated. Otherwise `trust.Evaluate` decides: allowed
     directly or by inheritance and **suspended** are members, denied is a
     non-member node. A suspended node stays a member because its trust is
-    waiting for a voucher, not gone; the policy layer gets the suspended outcome in
-    `Decision.Trust` and holds what it must.
+    waiting for a voucher, not gone; the policy layer holds what it must. The
+    trust in `Decision.Trust` is the verdict at the time of the exchange; the
+    policy layer takes the current verdict of `trust.Evaluate` for every request,
+    so a trust that ended on a live connection is seen there at once.
   - A person exchange is refused when the device certificate does not verify,
     names a device key other than the authenticated one, is revoked (the device
     key, or the person's root key), expired or not yet valid. Otherwise
@@ -193,6 +195,16 @@ timers, and applies the answers.
   the facts each loaded, so a slower one can carry an older certificate than the
   one stored now), and the certificate is invalid once the serial seen passes it
   (see `record.AcceptedNetworkKey`).
+- **Decisions are made again when the facts change.** When the revocation set,
+  the trust view or the authorized-persons list changes, the caller runs `Decide`
+  again, with current facts, for every existing connection of the affected peers
+  and applies `Decision.Keeps(current)`: a connection that is now refused is
+  closed, and so is one demoted from member (or authorized person) to
+  non-member. A kept connection reports `Completed` again. The demotion must
+  close the connection: `Completed` released it from the accounting when it
+  became a member, so left open it would be a non-member that holds no place
+  among `NonMemberConcurrency` and no `NonMemberLifetime`. The peer reconnects
+  and is accounted as the non-member it now is.
 - The accounting is driven from the connection gater's secured callback, the
   network notifee's connected and disconnected callbacks and the exchange's
   outcome. `Sweep` is called at least every `SweepInterval`, and `Overdue` often

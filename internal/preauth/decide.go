@@ -177,9 +177,13 @@ type Decision struct {
 	// otherwise.
 	Person ident.PersonID
 
-	// Trust is trust.Evaluate's verdict for the node, set when it was asked
-	// (member and non-member node after a node exchange). Its Outcome is what the
-	// policy layer takes as the sender's trust.
+	// Trust is trust.Evaluate's verdict for the node at the time of the exchange,
+	// set when it was asked (member and non-member node after a node exchange).
+	// It says why the state is what it is; it is not the sender's trust for a
+	// request made later on the connection. The policy layer takes the current
+	// verdict of trust.Evaluate for every request, so a trust that ended after
+	// the exchange is seen there at once, and Keeps closes the connection that
+	// the change demoted.
 	Trust trust.Verdict
 	// Standing is admin.EffectiveLevel's answer, set when it was asked (a person
 	// whose device certificate is valid). Standing.Level is the person's level.
@@ -211,6 +215,19 @@ type Decision struct {
 // non-member node or person, a member or an authorized person. Otherwise it was
 // refused.
 func (d Decision) Completed() bool { return d.State.Valid() && d.State != StateUnauthenticated }
+
+// Keeps reports whether a connection now in state current stays open when d is
+// the decision made on it again with the current facts (see the caller
+// guarantees in the README). A refused decision closes it. So does a demotion:
+// a member or authorized person that is now a non-member. The accounting
+// released the connection when it became a member, so it holds no non-member
+// place and no NonMemberLifetime would end it; the peer reconnects and is
+// accounted as the non-member it now is. A promotion (pairing made a non-member
+// a member) or an unchanged state keeps the connection, and Completed is called
+// again.
+func (d Decision) Keeps(current State) bool {
+	return d.Completed() && !(current.HasStanding() && d.State.NonMember())
+}
 
 // Decide turns a received exchange message into a connection state. peer is the
 // public key the secure handshake authenticated for the remote side, which is
