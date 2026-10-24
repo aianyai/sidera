@@ -66,3 +66,21 @@ func TestStateClasses(t *testing.T) {
 		}
 	})
 }
+
+func TestRejectReasonNames(t *testing.T) {
+	// The names are part of the vocabulary senders and the protocol use.
+	names := map[RejectReason]string{
+		RejectNone: "none", RejectUnauthorized: "unauthorized", RejectEndpointMissing: "endpoint_missing",
+		RejectEndpointClosed: "endpoint_closed", RejectEndpointDeclined: "endpoint_declined", RejectTooLarge: "too_large",
+		RejectExpired: "expired", RejectBacklogExpired: "backlog_expired", RejectSecondCheckFailed: "second_check_failed",
+		RejectMalformed: "malformed", RejectDeadlineOutOfRange: "deadline_out_of_range", RejectBacklogFull: "backlog_full",
+	}
+	for r, want := range names {
+		if got := r.String(); got != want {
+			t.Errorf("reason %d is %q, want %q", r, got, want)
+		}
+	}
+	if got := RejectReason(len(names)).String(); got != "invalid" {
+		t.Errorf("the reason after the last is %q, want invalid: a reason is missing from this table", got)
+	}
+}

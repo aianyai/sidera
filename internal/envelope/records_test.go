@@ -45,7 +45,7 @@ func TestStatusReportRules(t *testing.T) {
 		{"state six is not a state", func(w *statusReportWire) { w.State = 6 }},
 		{"a reject reason comes only with rejected", func(w *statusReportWire) { w.Reject = 1 }},
 		{"rejected has a reason", func(w *statusReportWire) { w.State, w.DeliveredAt = 3, nil }},
-		{"the reject reason is known", func(w *statusReportWire) { w.State, w.Reject, w.DeliveredAt = 3, 11, nil }},
+		{"the reject reason is known", func(w *statusReportWire) { w.State, w.Reject, w.DeliveredAt = 3, 12, nil }},
 		{"an unknown cause comes only with delivery_unknown", func(w *statusReportWire) { w.UnknownCause = 1 }},
 		{"a block cause comes only with accepted", func(w *statusReportWire) { w.BlockedCause = 1 }},
 		{"the block cause is known", func(w *statusReportWire) { w.State, w.BlockedCause, w.DeliveredAt = 1, 4, nil }},
@@ -91,7 +91,7 @@ func TestStatusReportWireTablesAreIndependentOfGoOrder(t *testing.T) {
 		delivery.RejectUnauthorized: 1, delivery.RejectEndpointMissing: 2, delivery.RejectEndpointClosed: 3,
 		delivery.RejectEndpointDeclined: 4, delivery.RejectTooLarge: 5, delivery.RejectExpired: 6,
 		delivery.RejectBacklogExpired: 7, delivery.RejectSecondCheckFailed: 8, delivery.RejectMalformed: 9,
-		delivery.RejectDeadlineOutOfRange: 10,
+		delivery.RejectDeadlineOutOfRange: 10, delivery.RejectBacklogFull: 11,
 	}
 	for r := delivery.RejectNone + 1; r.String() != "invalid"; r++ {
 		want, ok := reasons[r]

@@ -6,6 +6,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/authz"
 )
 
 // propertySeeds is how many random deliveries the property test runs. It is
@@ -268,7 +270,7 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int) {
 	for ops := 0; now.Before(end) && ops < 600; ops++ {
 		now = now.Add(randomStep(rng))
 		if tgt == nil && targetReachable && !now.Before(acceptedAt) && !now.After(ab) {
-			if v, err := Intake(now, ab, allow); err != nil || v.Outcome != IntakeAccept {
+			if v, err := Intake(now, ab, authz.TrafficMessage, allow, roomy); err != nil || v.Outcome != IntakeAccept {
 				fail("intake %+v %v", v, err)
 			}
 			r, err := NewTargetRecord(now, ab, reportBy, maxQueue)

@@ -164,6 +164,18 @@ func TestApplyReport(t *testing.T) {
 			t.Errorf("outcomes %+v: the sender must hear of a rejection once", outs)
 		}
 	})
+	t.Run("a report of a full backlog rejects the delivery with that reason and the sender hears of it once", func(t *testing.T) {
+		n, _, outs, err := outboundTo(t, KindMessage, true).ApplyReport(now, signedReport(t,
+			reportFor("ctl-0001", 2, delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectBacklogFull}, 100*time.Second, 0)))
+		requireNoErr(t, err)
+		got := n.Recipients[0]
+		if got.Delivery.State != delivery.StateRejected || got.Delivery.Reject != delivery.RejectBacklogFull || got.Arrival != (Arrival{}) {
+			t.Errorf("state %v reason %v arrival %+v", got.Delivery.State, got.Delivery.Reject, got.Arrival)
+		}
+		if len(outs) == 0 || len(outs[0].Feedback) != 1 || outs[0].Feedback[0].Kind != delivery.KindRejected || outs[0].Feedback[0].Reject != delivery.RejectBacklogFull {
+			t.Errorf("outcomes %+v: the sender must hear of the rejection once, with its reason", outs)
+		}
+	})
 	t.Run("the earliest report that proves arrival is kept", func(t *testing.T) {
 		o := outboundTo(t, KindMessage, true)
 		for _, at := range []time.Duration{300, 100, 200} {

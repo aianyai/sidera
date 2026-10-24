@@ -83,6 +83,11 @@ func TestGoldenStatusReports(t *testing.T) {
 		Status:     delivery.StatusReport{State: delivery.StateDeliveryUnknown},
 		ReportedAt: t0.Add(950 * time.Second),
 	})
+	goldenRecord(t, "rejected, backlog full", goldenReportBacklogFull, goldenReportBacklogFullDigest, goldenReportBacklogFullSignedBytes, d, StatusReport{
+		Sender: b, Message: "msg-0004", Recipient: ep(1),
+		Status:     delivery.StatusReport{State: delivery.StateRejected, Reject: delivery.RejectBacklogFull},
+		ReportedAt: t0.Add(4100 * time.Second),
+	})
 }
 
 func TestGoldenControlReplies(t *testing.T) {

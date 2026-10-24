@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/authz"
 )
 
 // pull gives the source what the target's status report says right now, the way
@@ -211,7 +213,7 @@ func TestScenarioLeaseRenewalBeyondCapEndsUnknownOnce(t *testing.T) {
 func TestScenarioAuthorizationSuspended(t *testing.T) {
 	ab := at(10 * time.Minute)
 	t.Run("at intake the sender keeps retrying and hears an unreachable hint with the trust cause", func(t *testing.T) {
-		v, _ := Intake(at(time.Minute), ab, suspend)
+		v, _ := Intake(at(time.Minute), ab, authz.TrafficMessage, suspend, roomy)
 		if v.Outcome != IntakeSuspended {
 			t.Fatalf("verdict %+v", v)
 		}
@@ -220,7 +222,7 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 		if len(out.Feedback) != 1 || out.Feedback[0].Cause != CauseTrustSuspended || src.State != StateQueued {
 			t.Errorf("outcome %+v state %s", out, src.State)
 		}
-		v, _ = Intake(at(8*time.Minute), ab, allow)
+		v, _ = Intake(at(8*time.Minute), ab, authz.TrafficMessage, allow, roomy)
 		if v.Outcome != IntakeAccept {
 			t.Errorf("after recovery: %+v", v)
 		}

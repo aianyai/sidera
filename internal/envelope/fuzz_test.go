@@ -52,7 +52,7 @@ func replyCarryingLostAtTargetReport(tb testing.TB) []byte {
 }
 
 func FuzzVerifyStatusReport(f *testing.F) {
-	for _, g := range [][]byte{goldenReportDelivered, goldenReportBlocked, goldenReportRejected, goldenReportLostAtTarget, goldenReportHandedOver} {
+	for _, g := range [][]byte{goldenReportDelivered, goldenReportBlocked, goldenReportRejected, goldenReportLostAtTarget, goldenReportHandedOver, goldenReportBacklogFull} {
 		f.Add(g)
 	}
 	node := nodeOf(f, keyIdentityA)

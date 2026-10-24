@@ -110,7 +110,7 @@ func TestRejectionReasonIsCarried(t *testing.T) {
 	reasons := []RejectReason{
 		RejectUnauthorized, RejectEndpointMissing, RejectEndpointClosed, RejectEndpointDeclined,
 		RejectTooLarge, RejectExpired, RejectBacklogExpired, RejectSecondCheckFailed,
-		RejectMalformed, RejectDeadlineOutOfRange,
+		RejectMalformed, RejectDeadlineOutOfRange, RejectBacklogFull,
 	}
 	for _, why := range reasons {
 		t.Run(why.String(), func(t *testing.T) {

@@ -199,6 +199,42 @@ var goldenReportHandedOver = hexcat(
 const goldenReportHandedOverDigest = "d0c5d80182e91d18e2defb4b9adc9acf2ba3baf0080825a4c395f8286826c650"
 const goldenReportHandedOverSignedBytes = "117369646572612f7265636f72642d736967167369646572612f7374617475732d7265706f72742f3148a501686d73672d303030350250010101010101010101010101010101010304061a6553f4b608582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7"
 
+// A status report: msg-0004 was rejected because the recipient endpoint's backlog was full.
+var goldenReportBacklogFull = hexcat(
+	"a3", // { 3 pairs: the record
+	"01", // 1: type
+	"767369646572612f7374617475732d7265706f72742f31", // "sidera/status-report/1"
+	"02",                                 // 2: payload
+	"584a",                               // bstr(74) payload
+	"a6",                                 // embedded { 6 pairs: status report payload
+	"01",                                 // embedded 1: message
+	"686d73672d30303034",                 // embedded "msg-0004"
+	"02",                                 // embedded 2: recipient
+	"5001010101010101010101010101010101", // embedded h'01010101010101010101010101010101'
+	"03",                                 // embedded 3: state
+	"03",                                 // embedded 3 (rejected)
+	"04",                                 // embedded 4: reject reason
+	"0b",                                 // embedded 11 (backlog_full)
+	"06",                                 // embedded 6: reported_at
+	"1a65540104",                         // embedded 1700004100
+	"08",                                 // embedded 8: sender
+	"582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7", // embedded h'64e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7' (node B, the sending node)
+	"03", // 3: signatures
+	"81", // [ 1 signature, sorted by encoded public key
+	"a2", // { 2 pairs: signature item
+	"01", // 1: public key
+	"a2", // { 2 pairs: public key
+	"01", // 1: algorithm
+	"01", // 1 (Ed25519)
+	"02", // 2: key bytes
+	"5820d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737", // h'd04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737' (seed 0x11 x32)
+	"02", // 2: signature
+	"5840f7934c4e4017503c50bb29aa8987963e47e66a9a4559cca0abd4ce8121372bf0febdf57b98ecf2f9eb7ebf4122ffd05ed1a2e1eca1615ee652ca751bb9135e0b", // bstr(64) Ed25519 signature
+)
+
+const goldenReportBacklogFullDigest = "b94768214a638de70925fdeeedef9b7a7f17c4b7a0b5fd359b3a9a234dbb26b3"
+const goldenReportBacklogFullSignedBytes = "117369646572612f7265636f72642d736967167369646572612f7374617475732d7265706f72742f314aa601686d73672d303030340250010101010101010101010101010101010303040b061a6554010408582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7"
+
 // A control reply: ctl-0001 created session endpoint 0x03.
 var goldenReplyCreated = hexcat(
 	"a3", // { 3 pairs: the record
