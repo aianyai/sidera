@@ -160,7 +160,9 @@ type DirectiveVerdict struct {
 // local node's own trust; callers pass the directive as claimed and add no
 // check of their own on its ends. When the credential is in the view, the
 // directive's claimed ends must match the credential's ends, in either order.
-// A credential not in the view cannot be checked, and the claimed ends decide.
+// A credential not in the view cannot be checked, and the claimed ends decide;
+// the effects then carry its digest only, and the payload needed to sign the
+// revocation comes from the pairing initiator's record.
 func ApplyDirective(v View, d EdgeRevocationDirective) DirectiveVerdict {
 	if c, known := v.credential(d.Credential); known && !endsMatch(c, d.A, d.B) {
 		return DirectiveVerdict{Disposition: DirectiveMismatch}

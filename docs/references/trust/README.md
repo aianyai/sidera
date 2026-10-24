@@ -209,7 +209,10 @@ revoke; it can neither create trust nor loosen anything.
   credential may revoke it. Judging the directive's claimed ends alone would let
   a directive that names the local node revoke a credential of two other nodes,
   so the claimed ends are compared with the credential's when it is known. The
-  decision lives in this one function so callers keep no second check.
+  decision lives in this one function so callers keep no second check. For a
+  credential the view has not seen, the effects carry the digest alone: the view
+  holds no payload for it, so the caller takes what the revocation signature
+  needs from the pairing initiator's record.
 
 ## Where
 

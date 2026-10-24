@@ -115,7 +115,9 @@ reasons behind the rules.
   directive's claimed ends must be the credential's two ends in either order,
   otherwise the disposition is `DirectiveMismatch` and nothing happens: only the
   two parties of a credential may revoke it. A credential the view has not seen
-  is judged by the claimed ends alone.
+  is judged by the claimed ends alone. `DirectiveApply` for such a credential
+  gives its digest only; the payload needed to sign the revocation comes from
+  the pairing initiator's record of that credential, not from this package.
 
 ## What the caller must guarantee
 
