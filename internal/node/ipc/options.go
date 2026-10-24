@@ -3,6 +3,7 @@ package ipc
 import (
 	"io/fs"
 	"log/slog"
+	"net"
 )
 
 // Options tune Listen and Dial. The zero value is valid.
@@ -15,6 +16,10 @@ type Options struct {
 	// file system below the data directory. Tests replace it to present a
 	// directory that another user owns, which a test cannot create.
 	files lstater
+
+	// peerUID reads the user at the other end of a connected Unix socket. Nil
+	// means the platform's call. Tests replace it to present another user.
+	peerUID func(*net.UnixConn) (uint32, error)
 }
 
 // lstater is the part of a read-only view of the data directory that the

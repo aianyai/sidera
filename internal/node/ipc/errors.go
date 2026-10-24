@@ -23,28 +23,31 @@ var (
 // Failure says which check failed, as a stable machine-readable value.
 type Failure string
 
+// Unix: the directory and socket checks of the listener and the client, and the
+// credentials of the process serving the socket.
 const (
-	FailDirectoryMissing    Failure = "directory_missing"
-	FailDirectoryNotDir     Failure = "directory_not_directory"
-	FailDirectorySymlink    Failure = "directory_symlink"
-	FailDirectoryOwner      Failure = "directory_owner"
-	FailDirectoryMode       Failure = "directory_mode"
-	FailSocketMissing       Failure = "socket_missing"
-	FailSocketNotSocket     Failure = "socket_not_socket"
-	FailSocketOwner         Failure = "socket_owner"
-	FailStat                Failure = "stat_failed"
-	FailServerCredentials   Failure = "server_credentials"
-	FailServerUID           Failure = "server_uid"
-	FailOwnSID              Failure = "own_sid"
-	FailServerProcessID     Failure = "server_process_id"
-	FailServerProcessOpen   Failure = "server_process_open"
-	FailServerTokenOpen     Failure = "server_token_open"
-	FailServerTokenUser     Failure = "server_token_user"
-	FailServerSID           Failure = "server_sid"
-	FailPipeHandle          Failure = "pipe_handle"
-	FailListenerNotOwner    Failure = "listener_not_owner"
-	FailStaleSocketNotOurs  Failure = "stale_socket_not_ours"
-	FailUnsupportedPlatform Failure = "unsupported_platform"
+	FailDirectoryMissing  Failure = "directory_missing"
+	FailDirectoryNotDir   Failure = "directory_not_directory"
+	FailDirectorySymlink  Failure = "directory_symlink"
+	FailDirectoryOwner    Failure = "directory_owner"
+	FailDirectoryMode     Failure = "directory_mode"
+	FailSocketMissing     Failure = "socket_missing"
+	FailSocketNotSocket   Failure = "socket_not_socket"
+	FailSocketOwner       Failure = "socket_owner"
+	FailStat              Failure = "stat_failed"
+	FailServerCredentials Failure = "server_credentials"
+	FailServerUID         Failure = "server_uid"
+)
+
+// Windows: the client's check of the process serving the pipe, one value per
+// step so that a log line says which step the system refused.
+const (
+	FailOwnSID            Failure = "own_sid"
+	FailServerProcessID   Failure = "server_process_id"
+	FailServerProcessOpen Failure = "server_process_open"
+	FailServerTokenOpen   Failure = "server_token_open"
+	FailServerTokenUser   Failure = "server_token_user"
+	FailServerSID         Failure = "server_sid"
 )
 
 // PeerCheckError reports that the path to an interface or the process at its

@@ -25,5 +25,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [adapter-claude](adapter-claude/README.md) | The Claude adapter's session-creation state machine: crash-safe start, retry and readiness without a second process or session |
 | [layout](layout/README.md) | Where code lives: contract packages and runtime packages, the import directions between them, and the rules that make the runtime's use of time, files and randomness checkable |
 | [ci](ci/README.md) | What the GitHub Actions workflow checks on which platform, what is deferred until the first release and why, and how to run the same checks locally |
+| [local-ipc](local-ipc/README.md) | How the Agent and management interfaces are reached on one machine: Unix sockets and Windows named pipes, directory and socket permissions, peer checks on both sides, socket path limits, stale socket removal |
 
 Language: everything in this directory is English.

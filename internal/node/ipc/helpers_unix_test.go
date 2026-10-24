@@ -13,6 +13,9 @@ import (
 	"testing"
 )
 
+// testHome is the data directory a test uses.
+func testHome(t *testing.T) string { return shortHome(t) }
+
 // shortHome returns a fresh data directory whose socket paths fit the
 // platform: the default temporary directory on macOS is too long for them.
 func shortHome(t *testing.T) string {
@@ -45,13 +48,14 @@ func mkdirExact(t *testing.T, path string, perm os.FileMode) {
 }
 
 // foreignOwner presents the same files as the real file system, except that
-// every one of them looks owned by a different user.
-type foreignOwner struct{ root string }
+// the file called only, or every file when only is empty, looks owned by a
+// different user. Names are relative to the data directory, as for lstater.
+type foreignOwner struct{ root, only string }
 
 func (f foreignOwner) Lstat(name string) (fs.FileInfo, error) {
 	fi, err := os.Lstat(filepath.Join(f.root, filepath.FromSlash(name)))
-	if err != nil {
-		return nil, err
+	if err != nil || (f.only != "" && f.only != name) {
+		return fi, err
 	}
 	st := *fi.Sys().(*syscall.Stat_t)
 	st.Uid = uint32(os.Geteuid()) + 1
