@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -158,6 +159,8 @@ func TestParseKeyRefusals(t *testing.T) {
 		{"in key with a message id over the limit", store.KindIn, join(fields[0], fields[1], long, fields[3])},
 		{"in key with a message id of control characters", store.KindIn, join(fields[0], fields[1], "a\x00b", fields[3])},
 		{"in key with a trailing space", store.KindIn, good + " "},
+		{"out key with a message id over the limit", store.KindOut, join(e1, long, n2+"/"+e2)},
+		{"out key with a message id of control characters", store.KindOut, join(e1, "a\x00b", n2+"/"+e2)},
 		{"out key with no recipient", store.KindOut, join(e1, "m")},
 		{"out key with a recipient that is not an address", store.KindOut, join(e1, "m", e2)},
 		{"out key with a node-less recipient", store.KindOut, join(e1, "m", "/"+e2)},
@@ -203,6 +206,13 @@ func TestKeysThatCannotBeWrittenAreRefused(t *testing.T) {
 	bad.Message = ""
 	if _, err := bad.Bytes(); err == nil {
 		t.Error("an empty message id was accepted")
+	}
+	for _, id := range []delivery.MessageID{"has a space", "a\x00b", delivery.MessageID(strings.Repeat("x", 129)), ""} {
+		o := outKey(1, false)
+		o.Message = id
+		if _, err := o.Bytes(); err == nil {
+			t.Errorf("the message id %q was accepted by OutKey.Bytes", id)
+		}
 	}
 	o := outKey(1, false)
 	o.Recipients = nil

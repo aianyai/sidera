@@ -259,6 +259,21 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 		}
 		// No alert yet: the quarantine is unfinished, and its rule runs before any sweep.
 		seedRaw(t, r.mem, store.InDir, corrupt(store.InDir, 9, store.AlertID{9}), []byte("not a first line"))
+		// A quarantined file whose first line is readable has a replacement of its
+		// own, which is what takes it along; with none, the bound is not its rule.
+		damaged := inRev(5, 1)
+		damagedData, err := store.EncodeRecord(damaged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		damagedData[len(damagedData)-1] ^= 1
+		seed(t, r.mem, store.AlertRecord{ID: store.AlertID{5}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "in"})
+		seedRaw(t, r.mem, store.InDir, damaged.Name()+"."+store.AlertID{5}.String()+".corrupt", damagedData)
+		// A replacement and the quarantined file it replaced (here with an unreadable
+		// first line): the file goes with the replacement, once.
+		replacement := lostInAt(tgtKey(6), base)
+		seed(t, r.mem, replacement, store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "in"})
+		seedRaw(t, r.mem, store.InDir, replacement.Name()+"."+store.AlertID{6}.String()+".corrupt", []byte("not a first line"))
 		// A directory that holds no delivery records is the owner's to acknowledge.
 		seed(t, r.mem, store.AlertRecord{ID: store.AlertID{7}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "checkpoints"})
 		seedRaw(t, r.mem, store.CheckpointsDir, corrupt(store.CheckpointsDir, 7, store.AlertID{7}), []byte("not a first line"))
@@ -268,7 +283,9 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 		path.Join(store.CtlDir, corrupt(store.CtlDir, 2, store.AlertID{3})),
 		path.Join(store.InDir, corrupt(store.InDir, 1, store.AlertID{2})),
 		path.Join(store.OutDir, corrupt(store.OutDir, 0, store.AlertID{1})),
-	} // in the order of the plan, sorted by path
+		path.Join(store.InDir, lostInAt(tgtKey(6), base).Name()+"."+store.AlertID{6}.String()+".corrupt"),
+	}
+	sort.Strings(want)
 	for _, c := range []struct {
 		rule string
 		now  time.Time
@@ -296,7 +313,7 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 	r := build(t)
 	plan := store.PlanSweep(r.scan(), bound)
 	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: bound, Summaries: plan.Summaries, Corrupt: plan.Corrupt, Ctl: plan.Ctl, Records: plan.Records, Bodies: plan.Bodies}))
-	if left := r.scan().Corrupt; len(left) != 2 {
-		t.Errorf("%d quarantined files left after the sweep, want the two that must stay (no alert yet, not a delivery directory): %v", len(left), left)
+	if left := r.scan().Corrupt; len(left) != 3 {
+		t.Errorf("%d quarantined files left after the sweep, want the three that must stay (no alert yet, a readable first line without a replacement, not a delivery directory): %v", len(left), left)
 	}
 }
