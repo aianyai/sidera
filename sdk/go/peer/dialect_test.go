@@ -151,6 +151,11 @@ func TestDialectCancelledRequestIsNotAnswered(t *testing.T) {
 		r.send(`{"jsonrpc":"2.0","id":"abc","method":"stubborn"}`)
 		<-started
 		r.send(cancelNote(`{"requestId":"abc"}`))
+		// The read loop answers this on its own, so once the reply is here the cancel was processed.
+		r.send(`{"jsonrpc":"2.0","id":7,"method":"no.such.method"}`)
+		if f := r.recv(); string(f.ID) != "7" {
+			t.Fatalf("got %+v", f)
+		}
 		close(release)
 		r.expectNoLineFor(100 * time.Millisecond)
 		if f := answerAfterRelease(t, r, `"abc"`); string(f.ID) != `"abc"` || f.Error != nil {
