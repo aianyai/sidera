@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
+
 	"github.com/aianyai/sidera/internal/record"
 )
 
@@ -18,10 +20,11 @@ const MaxMessage = 8 << 10
 const MaxRetryAfter = 24 * time.Hour
 
 // Message type strings. Every protocol message is a deterministic CBOR map
-// whose key 0 is its type string and whose other keys are the fields the
-// message defines. A message of one type never decodes as another: the type is
-// checked, and so are unknown fields. Only credentials are signed records; the
-// sender of a protocol message is authenticated by the connection.
+// {1: type string, 2: payload}, the same outer shape as a signed record, and
+// the payload is a map of the fields the message defines. A message of one type
+// never decodes as another: the type is checked, and so are unknown fields.
+// Only credentials are signed records; the sender of a protocol message is
+// authenticated by the connection.
 const (
 	TypeCommit   = "sidera/pairing-commit/1"
 	TypeReveal   = "sidera/pairing-reveal/1"
@@ -218,46 +221,49 @@ type ResultMsg struct {
 	Rejection WithdrawReason
 }
 
-// Wire structs. Key 0 is the message type; keys 1 and up are the fields.
+// envelope is the outer shape of every message and every persisted record:
+// {1: type string, 2: payload}. Integer keys start at 1, so the type takes key 1
+// and the payload key 2, as in a signed record.
+type envelope[P any] struct {
+	Type    string `cbor:"1,keyasint"`
+	Payload P      `cbor:"2,keyasint"`
+}
+
+func wrap[P any](typ string, payload P) envelope[P] { return envelope[P]{Type: typ, Payload: payload} }
+
+// Wire payloads of the messages: keys 1 and up are the fields.
 
 type commitWire struct {
-	Type      string `cbor:"0,keyasint"`
 	Commit    []byte `cbor:"1,keyasint"`
 	CreatedAt int64  `cbor:"2,keyasint"`
 	NotAfter  *int64 `cbor:"3,keyasint,omitempty"`
 }
 
 type revealWire struct {
-	Type string `cbor:"0,keyasint"`
-	NB   []byte `cbor:"1,keyasint"`
+	NB []byte `cbor:"1,keyasint"`
 }
 
 type openWire struct {
-	Type string `cbor:"0,keyasint"`
-	NA   []byte `cbor:"1,keyasint"`
+	NA []byte `cbor:"1,keyasint"`
 }
 
 type acceptedWire struct {
-	Type      string `cbor:"0,keyasint"`
 	ID        []byte `cbor:"1,keyasint"`
 	ExpiresAt int64  `cbor:"2,keyasint"`
 }
 
 type refusalWire struct {
-	Type       string `cbor:"0,keyasint"`
 	Reason     uint64 `cbor:"1,keyasint"`
 	RetryAfter *int64 `cbor:"2,keyasint,omitempty"`
 }
 
 type fetchWire struct {
-	Type     string `cbor:"0,keyasint"`
 	ID       []byte `cbor:"1,keyasint"`
 	Signed   []byte `cbor:"2,keyasint,omitempty"`
 	Withdraw uint64 `cbor:"3,keyasint,omitempty"`
 }
 
 type resultWire struct {
-	Type       string `cbor:"0,keyasint"`
 	ID         []byte `cbor:"1,keyasint"`
 	Status     uint64 `cbor:"2,keyasint"`
 	Credential []byte `cbor:"3,keyasint,omitempty"`
@@ -265,15 +271,16 @@ type resultWire struct {
 	Rejection  uint64 `cbor:"5,keyasint,omitempty"`
 }
 
-// decodeWire reads b strictly into w and checks the message type.
-func decodeWire[W any](b []byte, w *W, typ string, gotType func(*W) string) error {
-	if err := record.UnmarshalStrict(b, w, MaxMessage); err != nil {
-		return fmt.Errorf("%w: %w", ErrMessage, err)
+// decodeWire reads b strictly, checks the message type and returns the payload.
+func decodeWire[P any](b []byte, typ string) (P, error) {
+	var env envelope[P]
+	if err := record.UnmarshalStrict(b, &env, MaxMessage); err != nil {
+		return env.Payload, fmt.Errorf("%w: %w", ErrMessage, err)
 	}
-	if got := gotType(w); got != typ {
-		return fmt.Errorf("%w: type %q, want %q", ErrMessage, got, typ)
+	if env.Type != typ {
+		return env.Payload, fmt.Errorf("%w: type %q, want %q", ErrMessage, env.Type, typ)
 	}
-	return nil
+	return env.Payload, nil
 }
 
 func fixed32(b []byte, what string) ([32]byte, error) {
@@ -370,8 +377,8 @@ func encoded[W any, M any](w W, decode func([]byte) (M, error)) ([]byte, error) 
 
 // DecodeCommit reads M1.
 func DecodeCommit(b []byte) (CommitMsg, error) {
-	var w commitWire
-	if err := decodeWire(b, &w, TypeCommit, func(w *commitWire) string { return w.Type }); err != nil {
+	w, err := decodeWire[commitWire](b, TypeCommit)
+	if err != nil {
 		return CommitMsg{}, err
 	}
 	c, err := fixed32(w.Commit, "commitment")
@@ -407,13 +414,13 @@ func (m CommitMsg) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: not_after: %w", ErrMessage, err)
 	}
-	return encoded(commitWire{Type: TypeCommit, Commit: m.Commitment[:], CreatedAt: created, NotAfter: notAfter}, DecodeCommit)
+	return encoded(wrap(TypeCommit, commitWire{Commit: m.Commitment[:], CreatedAt: created, NotAfter: notAfter}), DecodeCommit)
 }
 
 // DecodeReveal reads M2.
 func DecodeReveal(b []byte) (RevealMsg, error) {
-	var w revealWire
-	if err := decodeWire(b, &w, TypeReveal, func(w *revealWire) string { return w.Type }); err != nil {
+	w, err := decodeWire[revealWire](b, TypeReveal)
+	if err != nil {
 		return RevealMsg{}, err
 	}
 	n, err := nonceFrom(w.NB, "nB")
@@ -422,13 +429,13 @@ func DecodeReveal(b []byte) (RevealMsg, error) {
 
 // Encode returns the canonical bytes of M2.
 func (m RevealMsg) Encode() ([]byte, error) {
-	return encoded(revealWire{Type: TypeReveal, NB: m.NB[:]}, DecodeReveal)
+	return encoded(wrap(TypeReveal, revealWire{NB: m.NB[:]}), DecodeReveal)
 }
 
 // DecodeOpen reads M3.
 func DecodeOpen(b []byte) (OpenMsg, error) {
-	var w openWire
-	if err := decodeWire(b, &w, TypeOpen, func(w *openWire) string { return w.Type }); err != nil {
+	w, err := decodeWire[openWire](b, TypeOpen)
+	if err != nil {
 		return OpenMsg{}, err
 	}
 	n, err := nonceFrom(w.NA, "nA")
@@ -437,13 +444,13 @@ func DecodeOpen(b []byte) (OpenMsg, error) {
 
 // Encode returns the canonical bytes of M3.
 func (m OpenMsg) Encode() ([]byte, error) {
-	return encoded(openWire{Type: TypeOpen, NA: m.NA[:]}, DecodeOpen)
+	return encoded(wrap(TypeOpen, openWire{NA: m.NA[:]}), DecodeOpen)
 }
 
 // DecodeAccepted reads M4.
 func DecodeAccepted(b []byte) (AcceptedMsg, error) {
-	var w acceptedWire
-	if err := decodeWire(b, &w, TypeAccepted, func(w *acceptedWire) string { return w.Type }); err != nil {
+	w, err := decodeWire[acceptedWire](b, TypeAccepted)
+	if err != nil {
 		return AcceptedMsg{}, err
 	}
 	id, err := idFrom(w.ID)
@@ -463,13 +470,13 @@ func (m AcceptedMsg) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: expires_at: %w", ErrMessage, err)
 	}
-	return encoded(acceptedWire{Type: TypeAccepted, ID: m.ID[:], ExpiresAt: expires}, DecodeAccepted)
+	return encoded(wrap(TypeAccepted, acceptedWire{ID: m.ID[:], ExpiresAt: expires}), DecodeAccepted)
 }
 
 // DecodeRefusal reads a refusal.
 func DecodeRefusal(b []byte) (RefusalMsg, error) {
-	var w refusalWire
-	if err := decodeWire(b, &w, TypeRefused, func(w *refusalWire) string { return w.Type }); err != nil {
+	w, err := decodeWire[refusalWire](b, TypeRefused)
+	if err != nil {
 		return RefusalMsg{}, err
 	}
 	reason := RefusalReason(w.Reason)
@@ -489,13 +496,13 @@ func (m RefusalMsg) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return encoded(refusalWire{Type: TypeRefused, Reason: uint64(m.Reason), RetryAfter: retry}, DecodeRefusal)
+	return encoded(wrap(TypeRefused, refusalWire{Reason: uint64(m.Reason), RetryAfter: retry}), DecodeRefusal)
 }
 
 // DecodeFetch reads F1.
 func DecodeFetch(b []byte) (FetchMsg, error) {
-	var w fetchWire
-	if err := decodeWire(b, &w, TypeFetch, func(w *fetchWire) string { return w.Type }); err != nil {
+	w, err := decodeWire[fetchWire](b, TypeFetch)
+	if err != nil {
 		return FetchMsg{}, err
 	}
 	id, err := idFrom(w.ID)
@@ -526,13 +533,13 @@ func (m FetchMsg) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return encoded(fetchWire{Type: TypeFetch, ID: m.ID[:], Signed: signed, Withdraw: uint64(m.Withdraw)}, DecodeFetch)
+	return encoded(wrap(TypeFetch, fetchWire{ID: m.ID[:], Signed: signed, Withdraw: uint64(m.Withdraw)}), DecodeFetch)
 }
 
 // DecodeResult reads F2.
 func DecodeResult(b []byte) (ResultMsg, error) {
-	var w resultWire
-	if err := decodeWire(b, &w, TypeResult, func(w *resultWire) string { return w.Type }); err != nil {
+	w, err := decodeWire[resultWire](b, TypeResult)
+	if err != nil {
 		return ResultMsg{}, err
 	}
 	id, err := idFrom(w.ID)
@@ -575,7 +582,7 @@ func (m ResultMsg) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return encoded(resultWire{Type: TypeResult, ID: m.ID[:], Status: uint64(m.Status), Credential: cred, RetryAfter: retry, Rejection: uint64(m.Rejection)}, DecodeResult)
+	return encoded(wrap(TypeResult, resultWire{ID: m.ID[:], Status: uint64(m.Status), Credential: cred, RetryAfter: retry, Rejection: uint64(m.Rejection)}), DecodeResult)
 }
 
 // Opening is the first frame of a stream on the target: either the commitment
@@ -586,14 +593,27 @@ type Opening struct {
 	Fetch  *FetchMsg
 }
 
-// DecodeOpening reads the first frame of a stream. Its type decides which
-// segment the stream carries.
+// DecodeOpening reads the first frame of a stream. Its outer type decides which
+// segment the stream carries, and the decoder of that message reads the frame
+// in full.
 func DecodeOpening(b []byte) (Opening, error) {
-	if c, err := DecodeCommit(b); err == nil {
-		return Opening{Commit: &c}, nil
+	var outer envelope[cbor.RawMessage]
+	if err := record.UnmarshalStrict(b, &outer, MaxMessage); err != nil {
+		return Opening{}, fmt.Errorf("%w: %w", ErrMessage, err)
 	}
-	if f, err := DecodeFetch(b); err == nil {
+	switch outer.Type {
+	case TypeCommit:
+		c, err := DecodeCommit(b)
+		if err != nil {
+			return Opening{}, err
+		}
+		return Opening{Commit: &c}, nil
+	case TypeFetch:
+		f, err := DecodeFetch(b)
+		if err != nil {
+			return Opening{}, err
+		}
 		return Opening{Fetch: &f}, nil
 	}
-	return Opening{}, fmt.Errorf("%w: neither a commitment nor a fetch", ErrMessage)
+	return Opening{}, fmt.Errorf("%w: type %q is neither a commitment nor a fetch", ErrMessage, outer.Type)
 }

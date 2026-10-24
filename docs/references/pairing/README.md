@@ -20,11 +20,15 @@ series of request-and-answer exchanges, on any connection the initiator can make
 by which the initiator learns what became of the request and receives the
 complete credential. An initiator behind NAT needs no inbound connection.
 
-**Messages.** Every message is a deterministic CBOR map whose key 0 is a type
-string (`sidera/pairing-commit/1` and so on) and whose other keys are the
-fields; each is decoded strictly (unknown fields, non-canonical encodings and
-frames over 8 KiB are refused). Only credentials are signed records; the sender of
-a message is authenticated by the connection.
+**Messages.** Every message is a deterministic CBOR map `{1: type, 2: payload}`,
+the outer shape of a signed record, where the type is a string
+(`sidera/pairing-commit/1` and so on) and the payload is a map of the fields
+below; each is decoded strictly (unknown fields at either level, non-canonical
+encodings and frames over 8 KiB are refused). The first frame of a stream is
+routed by its outer type alone, so a frame is never tried as one message and then
+as another. Only credentials are signed records; the sender of a message is
+authenticated by the connection. The records a node persists have the same outer
+shape.
 
 | Message | From | Fields |
 | ------- | ---- | ------ |
@@ -209,10 +213,10 @@ revealed.
 | What | Where |
 | ---- | ----- |
 | Construction, vectors | `internal/pairing/transcript.go`, `code.go`, `hkdf.go`; `transcript_test.go` (`TestTranscriptVectors`, `TestCredentialRecordVectors`, `TestRejectionVectorEndToEnd`, `TestSampleCodeUnitVectors`, `TestNegativeVectors`, `TestEveryInputByteChangesThePairingID`), `hkdf_test.go` (RFC 5869 A.1 to A.3) |
-| Messages | `message.go`; `message_test.go` (golden bytes, refusals, fuzz of every decoder) |
+| Messages | `message.go`; `message_test.go` (golden bytes, refusals, `TestDecodeOpening`, fuzz of every decoder) |
 | Limits, expectations | `limits.go`, `expectation.go`, `params.go`; `limits_test.go` (`TestLimitsAgainstAModel`) |
 | Target and initiator | `target.go`, `initiator.go`, `lifecycle.go`, `command.go`, `state.go` |
-| Persisted records | `records.go`, `codec.go` |
+| Persisted records | `records.go`, `codec.go`; `codec_test.go` (golden bytes, wrong shapes) |
 | Scenarios | `scenario_test.go` |
 | Properties under faults | `property_test.go` (`TestPropertyRandomSchedules`, `TestCrashAtEveryPersistedStep`) |
 

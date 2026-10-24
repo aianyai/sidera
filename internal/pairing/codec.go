@@ -15,9 +15,9 @@ import (
 const MaxPersisted = 64 << 10
 
 // Type strings of the persisted records. Like the messages, a persisted record
-// is a deterministic CBOR map whose key 0 is its type; it is read back
-// strictly, and everything derived from the transcript (the identifier, the
-// code, the credential) is recomputed on loading and never stored.
+// is a deterministic CBOR map {1: type, 2: payload}; it is read back strictly,
+// and everything derived from the transcript (the identifier, the code, the
+// credential) is recomputed on loading and never stored.
 const (
 	TypeTargetRecord    = "sidera/pairing-target-record/1"
 	TypeInitiatorRecord = "sidera/pairing-initiator-record/1"
@@ -68,7 +68,6 @@ type completionWire struct {
 }
 
 type targetWire struct {
-	Type          string            `cbor:"0,keyasint"`
 	Transcript    transcriptWire    `cbor:"1,keyasint"`
 	ReceivedAt    int64             `cbor:"2,keyasint"`
 	ExpiresAt     int64             `cbor:"3,keyasint"`
@@ -83,7 +82,6 @@ type targetWire struct {
 }
 
 type initiatorWire struct {
-	Type         string            `cbor:"0,keyasint"`
 	Transcript   transcriptWire    `cbor:"1,keyasint"`
 	ReceivedAt   int64             `cbor:"2,keyasint"`
 	ExpiresAt    int64             `cbor:"3,keyasint"`
@@ -99,7 +97,6 @@ type initiatorWire struct {
 }
 
 type limitsWire struct {
-	Type     string  `cbor:"0,keyasint"`
 	Reveals  []int64 `cbor:"1,keyasint,omitempty"`
 	Failures []int64 `cbor:"2,keyasint,omitempty"`
 }
@@ -112,20 +109,22 @@ type expectationWire struct {
 }
 
 type expectationsWire struct {
-	Type string            `cbor:"0,keyasint"`
 	List []expectationWire `cbor:"1,keyasint,omitempty"`
 }
 
 func persisted(err error) error { return fmt.Errorf("%w: %w", ErrPersisted, err) }
 
-func decodePersisted[W any](data []byte, w *W, want string, typeOf func(*W) string) error {
-	if err := record.UnmarshalStrict(data, w, MaxPersisted); err != nil {
-		return persisted(err)
+// decodePersisted reads data strictly, checks the record type and returns the
+// payload.
+func decodePersisted[P any](data []byte, want string) (P, error) {
+	var env envelope[P]
+	if err := record.UnmarshalStrict(data, &env, MaxPersisted); err != nil {
+		return env.Payload, persisted(err)
 	}
-	if got := typeOf(w); got != want {
-		return persisted(fmt.Errorf("type %q, want %q", got, want))
+	if env.Type != want {
+		return env.Payload, persisted(fmt.Errorf("type %q, want %q", env.Type, want))
 	}
-	return nil
+	return env.Payload, nil
 }
 
 func secs(t time.Time) int64 { return t.Unix() }
@@ -353,12 +352,12 @@ func (r TargetRecord) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return record.MarshalCanonical(targetWire{
-		Type: TypeTargetRecord, Transcript: transcriptToWire(r.Transcript),
+	return record.MarshalCanonical(wrap(TypeTargetRecord, targetWire{
+		Transcript: transcriptToWire(r.Transcript),
 		ReceivedAt: secs(r.ReceivedAt), ExpiresAt: secs(r.ExpiresAt), HighestSerial: r.HighestSerial,
 		Expected: optAuthorToWire(r.Expected), Status: uint64(r.Status), Confirmation: confirmationToWire(r.Confirmation),
 		Signature: sig, Rejection: uint64(r.Rejection), Completed: done, EndedAt: optSecs(r.EndedAt),
-	})
+	}))
 }
 
 // DecodeTargetRecord reads a target record, recomputing the identifier, the
@@ -366,8 +365,8 @@ func (r TargetRecord) Encode() ([]byte, error) {
 // the name the bytes were stored under and refuses a mismatch: a record moved
 // under another name is not the request that name stands for.
 func DecodeTargetRecord(data []byte) (TargetRecord, error) {
-	var w targetWire
-	if err := decodePersisted(data, &w, TypeTargetRecord, func(w *targetWire) string { return w.Type }); err != nil {
+	w, err := decodePersisted[targetWire](data, TypeTargetRecord)
+	if err != nil {
 		return TargetRecord{}, err
 	}
 	tr, err := transcriptFromWire(w.Transcript)
@@ -415,18 +414,18 @@ func (r InitiatorRecord) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return record.MarshalCanonical(initiatorWire{
-		Type: TypeInitiatorRecord, Transcript: transcriptToWire(r.Transcript),
+	return record.MarshalCanonical(wrap(TypeInitiatorRecord, initiatorWire{
+		Transcript: transcriptToWire(r.Transcript),
 		ReceivedAt: secs(r.ReceivedAt), ExpiresAt: secs(r.ExpiresAt), Addresses: slices.Clone(r.Addresses),
 		Expected: optAuthorToWire(r.Expected), Status: uint64(r.Status), Confirmation: confirmationToWire(r.Confirmation),
 		Signature: sig, Released: r.Released, Reason: uint64(r.Reason), Completed: done, EndedAt: optSecs(r.EndedAt),
-	})
+	}))
 }
 
 // DecodeInitiatorRecord reads an initiator record; see DecodeTargetRecord.
 func DecodeInitiatorRecord(data []byte) (InitiatorRecord, error) {
-	var w initiatorWire
-	if err := decodePersisted(data, &w, TypeInitiatorRecord, func(w *initiatorWire) string { return w.Type }); err != nil {
+	w, err := decodePersisted[initiatorWire](data, TypeInitiatorRecord)
+	if err != nil {
 		return InitiatorRecord{}, err
 	}
 	tr, err := transcriptFromWire(w.Transcript)
@@ -486,13 +485,13 @@ func timesFromWire(ws []int64) ([]time.Time, error) {
 
 // Encode returns the persisted bytes of the counters.
 func (l Limits) Encode() ([]byte, error) {
-	return record.MarshalCanonical(limitsWire{Type: TypeLimits, Reveals: timesToWire(l.reveals), Failures: timesToWire(l.failures)})
+	return record.MarshalCanonical(wrap(TypeLimits, limitsWire{Reveals: timesToWire(l.reveals), Failures: timesToWire(l.failures)}))
 }
 
 // DecodeLimits reads persisted counters.
 func DecodeLimits(data []byte) (Limits, error) {
-	var w limitsWire
-	if err := decodePersisted(data, &w, TypeLimits, func(w *limitsWire) string { return w.Type }); err != nil {
+	w, err := decodePersisted[limitsWire](data, TypeLimits)
+	if err != nil {
 		return Limits{}, err
 	}
 	reveals, err := timesFromWire(w.Reveals)
@@ -512,7 +511,7 @@ func DecodeLimits(data []byte) (Limits, error) {
 
 // EncodeExpectations returns the persisted bytes of the list of expectations.
 func EncodeExpectations(list []Expectation) ([]byte, error) {
-	w := expectationsWire{Type: TypeExpectations}
+	var w expectationsWire
 	seen := map[ident.NodeID]bool{}
 	for _, e := range list {
 		if err := e.validate(); err != nil {
@@ -524,13 +523,13 @@ func EncodeExpectations(list []Expectation) ([]byte, error) {
 		seen[e.Node] = true
 		w.List = append(w.List, expectationWire{Node: e.Node.Bytes(), Author: authorToWire(e.Author), Operation: e.Operation[:], CreatedAt: secs(e.CreatedAt)})
 	}
-	return record.MarshalCanonical(w)
+	return record.MarshalCanonical(wrap(TypeExpectations, w))
 }
 
 // DecodeExpectations reads a persisted list of expectations.
 func DecodeExpectations(data []byte) ([]Expectation, error) {
-	var w expectationsWire
-	if err := decodePersisted(data, &w, TypeExpectations, func(w *expectationsWire) string { return w.Type }); err != nil {
+	w, err := decodePersisted[expectationsWire](data, TypeExpectations)
+	if err != nil {
 		return nil, err
 	}
 	var out []Expectation

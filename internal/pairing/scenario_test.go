@@ -641,8 +641,8 @@ func TestInitiatorWritesNothingBeforeAValidReveal(t *testing.T) {
 		"an M3":          mustEncode(t, OpenMsg{NA: nonceOf(1)}),
 		"an M4":          mustEncode(t, AcceptedMsg{ID: ID{1}, ExpiresAt: s.now.Add(time.Hour)}),
 		"a result":       mustEncode(t, ResultMsg{ID: ID{1}, Status: StatusUnknown}),
-		"a zero reveal":  mustMarshal(t, revealWire{Type: TypeReveal, NB: make([]byte, 32)}),
-		"a short reveal": mustMarshal(t, revealWire{Type: TypeReveal, NB: make([]byte, 31)}),
+		"a zero reveal":  mustMarshal(t, wrap(TypeReveal, revealWire{NB: make([]byte, 32)})),
+		"a short reveal": mustMarshal(t, wrap(TypeReveal, revealWire{NB: make([]byte, 31)})),
 	}
 	for name, frame := range garbage {
 		t.Run(name, func(t *testing.T) {
@@ -1875,16 +1875,16 @@ func TestRecoverCompletesAConfirmedRequestThatHoldsTheSignature(t *testing.T) {
 func TestDecodingRefusesAnInconsistentRecord(t *testing.T) {
 	s, a, b := standardPair(t)
 	_, tb := startPairing(t, s, a, b)
-	var w targetWire
-	must(t, record.UnmarshalStrict(b.disk["target/"+hexID(tb.ID())], &w, MaxPersisted))
+	var stored envelope[targetWire]
+	must(t, record.UnmarshalStrict(b.disk["target/"+hexID(tb.ID())], &stored, MaxPersisted))
 	for name, mutate := range map[string]func(*targetWire){
 		"complete without a credential":  func(w *targetWire) { w.Status = uint64(TargetComplete) },
 		"rejected without a reason":      func(w *targetWire) { w.Status = uint64(TargetRejected); e := int64(5); w.EndedAt = &e },
 		"a status outside the table":     func(w *targetWire) { w.Status = 9 },
 		"expires before it was received": func(w *targetWire) { w.ExpiresAt = w.ReceivedAt },
 	} {
-		bad := w
-		mutate(&bad)
+		bad := stored
+		mutate(&bad.Payload)
 		if _, err := DecodeTargetRecord(mustMarshal(t, bad)); err == nil {
 			t.Fatalf("%s: decoded", name)
 		}
@@ -1940,16 +1940,16 @@ func TestOnePairingAtATimePerTarget(t *testing.T) {
 func TestDecodingRefusesAnInconsistentInitiatorRecord(t *testing.T) {
 	s, a, b := standardPair(t)
 	ia, _ := startPairing(t, s, a, b)
-	var w initiatorWire
-	must(t, record.UnmarshalStrict(a.disk["initiator/"+hexID(ia.ID())], &w, MaxPersisted))
+	var stored envelope[initiatorWire]
+	must(t, record.UnmarshalStrict(a.disk["initiator/"+hexID(ia.ID())], &stored, MaxPersisted))
 	for name, mutate := range map[string]func(*initiatorWire){
 		"complete without a credential": func(w *initiatorWire) { w.Status = uint64(InitiatorComplete); e := int64(5); w.EndedAt = &e },
 		"released without a signature":  func(w *initiatorWire) { w.Released = true },
 		"withdrawing without a reason":  func(w *initiatorWire) { w.Status = uint64(InitiatorWithdrawing); e := int64(5); w.EndedAt = &e },
 		"an address of length zero":     func(w *initiatorWire) { w.Addresses = []string{""} },
 	} {
-		bad := w
-		mutate(&bad)
+		bad := stored
+		mutate(&bad.Payload)
 		if _, err := DecodeInitiatorRecord(mustMarshal(t, bad)); err == nil {
 			t.Fatalf("%s: decoded", name)
 		}
