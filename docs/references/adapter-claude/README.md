@@ -21,8 +21,14 @@ Each later step is committed as it happens:
 | intent | attempt id, uuid, project directory | no `<uuid>.jsonl` in the project directory and no process with the uuid on its command line: nothing started, so start |
 | started | PID and process start time of the turn process | PID alive with the recorded start time: the turn is running, wait and start nothing |
 | uuid seen | the session file contains the uuid | file exists and contains the uuid |
-| ready | the first prompt is in the session record | find the first prompt in the record; only then report the control reply |
-| failed | the failure reason, together with the control reply | final: no process is ever started for this uuid again |
+| ready | the first prompt is in the session record | find the first prompt in the record; only then answer `session.create` |
+| failed | the failure reason | final: no process is ever started for this uuid again; `session.create` is answered failed |
+
+Each stage is persisted before `session.create` is answered from it. The answer
+is a result of the adapter protocol; the control reply the sender reads is a
+record the daemon signs in another process, so the two cannot be one
+transaction. A crash between persisting and answering is repaired by the
+repeated `session.create`, which is answered from the stored state.
 
 `Decide` turns the committed state and the observations into the next action
 (`StartNew`, `StartResume`, `Wait`, `RecordProcess`, `MarkUUIDSeen`,
@@ -39,10 +45,9 @@ normal step and the check after a restart, so there is one set of rules.
 - Two or more distinct processes with the uuid, or a process that only the
   registry shows (confirmed by the process table, not the recorded one, uuid
   not on its command line: the user resumed the session by hand), end the
-  attempt as control unknown. Nothing is started and no process is touched; the
-  caller marks the session's control as unknown and notifies the local owner.
-  The check comes before readiness: with the first prompt on disk a second
-  writer is still a second writer.
+  attempt as control unknown. Nothing is started and no process is touched. The
+  check comes before readiness: with the first prompt on disk a second writer is
+  still a second writer.
 - `--session-id` is used only while `<project dir>/<uuid>.jsonl` does not
   exist. When it exists, `--resume` is used.
 - A PID held with a different start is a reused number: not running, not the
@@ -59,6 +64,21 @@ normal step and the check after a restart, so there is one set of rules.
   reason; a process that is still running is left alone, and a first prompt that
   it writes later does not make the attempt ready, because the failure was
   already reported.
+- A failure is reported to the daemon as `session.create` `failed` with the
+  reason `Reason.CreateFailure` gives, which is the one place a failure reason
+  becomes a protocol value:
+
+  | Failure | Reported as |
+  | ------- | ----------- |
+  | two or more distinct processes with the uuid | `control_unknown` |
+  | a process only the registry shows (an outside writer) | `control_unknown` |
+  | a start that timed out while its process still runs | `control_unknown` |
+  | `MaxStarts` processes ended without the first prompt | `native_error` |
+
+  `failed` means no session will be attached to the channel for this attempt. For
+  `control_unknown` a native process may remain; the adapter leaves it alone, and
+  the daemon notifies the local owner when it receives the reason (see
+  [the adapter protocol](../adapter-protocol/README.md)).
 
 ### What the caller provides
 
@@ -71,9 +91,9 @@ times in Unix seconds from the process table; the record looked up in the
 attempt's project directory (`Decide` refuses another one). The argument
 vector of every process of the same user must be readable, and an unreadable
 one is an observation error reported as an error result, never "not running".
-Transitions are committed atomically; `Ready` and `Failed` are committed
-together with the control reply, and for control unknown the mark and the
-owner notification too. `Started` is committed immediately after spawning.
+Transitions are committed atomically; `Ready` and `Failed` are persisted before
+`session.create` is answered, never after. `Started` is committed immediately
+after spawning.
 
 ## Why
 
@@ -124,11 +144,17 @@ owner notification too. `Started` is committed immediately after spawning.
 - **Control unknown is a failure the caller cannot overlook.** Two writers
   interleave one record into branches, and neither can be stopped safely by the
   adapter. Waiting would never settle the attempt while both live, so the attempt
-  ends with a dedicated action; the caller marks the session control-unknown and
-  notifies the owner, and this package only decides.
+  ends with a dedicated action and the dedicated reason `control_unknown`, which
+  the daemon turns into a notice to the local owner. A start that timed out is the
+  same case in effect: its process still runs and may still write the first
+  prompt, so the adapter cannot say who controls the session. The protocol had no
+  value for this, and `failed` with `native_error` would have said the runtime
+  broke. The reason is therefore part of the `failed` group, and `failed` means
+  "no session will be attached", not "nothing was created": a native process may
+  remain.
 - **Failure is persisted and final.** A process that timed out may still write
   the first prompt later, and a retry after the failure was reported would put a
-  second writer beside it. The failure is committed with the control reply, like
+  second writer beside it. The failure is persisted before it is reported, like
   readiness, and from then on the decision never starts anything or becomes
   ready, whatever the world shows.
 - **Record before ready.** A live unrecorded process is recorded before
@@ -162,9 +188,11 @@ owner notification too. `Started` is committed immediately after spawning.
 - `cmd/sidera-adapter-claude/internal/create/state.go`: `State`, stages,
   transitions, `Process`, `SessionID`.
 - `.../observe.go`: `Observations`, `Lookup`, `RegistryEntry`, `SessionRecord`.
-- `.../decide.go`: `Decide`, `Action`, `Reason`, `Decision`.
+- `.../decide.go`: `Decide`, `Action`, `Reason`, `Reason.CreateFailure`
+  (failure reason to protocol reason), `Decision`.
 - `.../params.go`: `Params`, `DefaultParams`.
-- Tests: `decide_test.go` (`TestDecide` rows named after each rule,
+- Tests: `failure_test.go` (`TestCreateFailureOfEveryReason`: every reason
+  against a table written by hand), `decide_test.go` (`TestDecide` rows named after each rule,
   `TestDecideStartGuards`, `TestDecideRefusesInvalidInput`),
   `scenario_test.go` (`TestCrashAfterStartBeforePIDRecordedKeepsOneProcessAndOneSession`,
   `TestCrashDuringTheResumeRetryIsFoundToo`,

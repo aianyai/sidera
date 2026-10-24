@@ -356,7 +356,7 @@ func TestControlReplyRules(t *testing.T) {
 		{"a failed creation has a reason", failed, func(w *controlReplyWire) { w.Create.Reason = 0 }},
 		{"a create outcome is known", created, func(w *controlReplyWire) { w.Create.Outcome = 4 }},
 		{"a create outcome fits a byte", created, func(w *controlReplyWire) { w.Create.Outcome = 257 }},
-		{"a create reason is known", failed, func(w *controlReplyWire) { w.Create.Reason = 9 }},
+		{"a create reason is known", failed, func(w *controlReplyWire) { w.Create.Reason = 10 }},
 		{"a close outcome is known", closed, func(w *controlReplyWire) { w.Close.Outcome = 4 }},
 		{"a close reason comes with close_unconfirmed", closed, func(w *controlReplyWire) { w.Close.Outcome = 1 }},
 		{"close_unconfirmed has a reason", closed, func(w *controlReplyWire) { w.Close.Reason = 0 }},
@@ -385,6 +385,11 @@ func TestControlReplyRules(t *testing.T) {
 	t.Run("an unconfirmed creation with an endpoint and a reason is valid", func(t *testing.T) {
 		w := created(t)
 		w.Create.Outcome, w.Create.Reason = 2, 8
+		requireNoErr(t, checkReplyWire(t, w))
+	})
+	t.Run("a failed creation because control is unknown is valid", func(t *testing.T) {
+		w := failed(t)
+		w.Create.Reason = uint64(adapterproto.CreateReasonControlUnknown)
 		requireNoErr(t, checkReplyWire(t, w))
 	})
 	t.Run("a status reply with nothing to report is valid", func(t *testing.T) {

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 36,
+  "result": {
+    "outcome": "failed",
+    "reason": "control_unknown",
+    "detail": "two processes carry the session id"
+  }
+}

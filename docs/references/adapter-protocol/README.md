@@ -347,6 +347,17 @@ first real message. In both cases its attempt identifier is the one the adapter
 finds in the native record to show the session is ready, and the one the daemon
 reconciles by after an unknown outcome.
 
+The result is `created`, `failed` or `indeterminate`. `failed` means that no
+session will be attached to the channel for this attempt, and `reason` says why:
+`preset_unknown`, `preset_invalid`, `runtime_auth`, `native_unavailable`,
+`dependency_missing`, `native_error`, or `control_unknown`. With every reason but
+the last, certainly no native session was created. `control_unknown` is for an
+adapter that cannot tell who controls the native session it was creating (two
+processes hold its identifier, a writer other than the adapter does, or a start
+timed out while its process still runs): a native process may remain, the adapter
+leaves it alone and the daemon notifies the local owner when it receives the
+reason.
+
 **Reconciliation.** `prompt.reconcile` answers whether an attempt reached the
 runtime. The `grounds.code` belongs to the verdict: `found` goes with
 `attempt_in_record` and carries the turn; `provably_absent` with
@@ -562,7 +573,7 @@ except the two that are plain calls (marked "call"):
 | probed runtime name and version outside every tested range of the manifest (`RuntimeVersionUntested`) | no cause; status condition 6 `version_untested`, written by the daemon |
 | the daemon's own loss of the connection or two failed pings | `Signals.AdapterOffline`, with `Since` the moment it dropped |
 | `since_ms` | `Signals.Since`; zero (unknown) when absent or later than the moment the snapshot arrived, or when any condition of the cause lacks one |
-| `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`); keep reconciling, then unconfirmed |
+| `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`, `control_unknown` stays `control_unknown`, the others keep their names); keep reconciling, then unconfirmed |
 | `session.interrupt` stopped, requested, not_running, refused | reply stopped; stopped if `turn.ended` came in time else requested; not_running; failed |
 | `session.close` closed, close_unconfirmed | reply closed; close_unconfirmed with the same reason |
 | `recv.observed` verdict and reason | call: `handoff.CheckBeforeAck` over the observed text and the stored page output; allowed settles every part through `delivery.Record.Ack`. The reasons and the item acknowledgements are named by `AckReason` and `ItemAck` |
@@ -589,7 +600,7 @@ except the two that are plain calls (marked "call"):
 
 - `internal/adapterreg` (`admit.go`, `methods.go`, `mappings.go`); tests
   `TestAdmitDecisions`, `TestDeclaredKindsAndSignals`, `TestMethodMatrix`,
-  `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestInterruptReply`,
+  `TestCreateReplyMapsEveryCreateFailure`, `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestInterruptReply`,
   `TestCloseReply`, `TestCheckHandshake`.
 
 ## Control signals
@@ -610,9 +621,9 @@ the carrying message; an empty body means none. Reply:
 
 | Field | Values | Present |
 | ----- | ------ | ------- |
-| `outcome` | 1 created (readiness shown), 2 unconfirmed (may exist; no readiness before the deadline), 3 failed (certainly not created) | always |
+| `outcome` | 1 created (readiness shown), 2 unconfirmed (may exist; no readiness before the deadline), 3 failed (no session will be attached to the channel; certainly not created, except for reason 9) | always |
 | `session_endpoint` | the endpoint allocated for the session | outcome 1 or 2 |
-| `reason` | failed: 1 preset_unknown, 2 preset_unavailable, 3 adapter_offline, 4 runtime_auth, 5 native_unavailable, 6 native_error; unconfirmed: 7 ready_timeout, 8 adapter_lost | outcome 2 or 3, from its group |
+| `reason` | failed: 1 preset_unknown, 2 preset_unavailable, 3 adapter_offline, 4 runtime_auth, 5 native_unavailable, 6 native_error, 9 control_unknown; unconfirmed: 7 ready_timeout, 8 adapter_lost | outcome 2 or 3, from its group |
 
 `control.session.close` (target: a session endpoint), no parameters. Reply
 `outcome`: 1 closed, 2 close_unconfirmed, 3 unsupported; `reason` only with 2:
@@ -655,6 +666,14 @@ with `signal` beside its fields, and enums are their names.
 - A creation that times out is `unconfirmed` and not `failed` because a session
   may exist; the pre-allocated endpoint is returned either way so a retry cannot
   create a second one.
+- `control_unknown` is a reason of `failed` and not a third outcome because for
+  the channel the attempt is over either way: no session is attached. What
+  differs is what the owner must be told, a native process that nobody controls,
+  so the reason has its own name and its own number (9: the numbers are the ones
+  signed records carry and never change, so it follows the unconfirmed group
+  instead of renumbering it) and the daemon notifies the local owner on receiving
+  it. The adapter does not stop the process: it cannot do so safely when two
+  writers hold the session.
 - One reply per signal, with `requested` and `stopped` as values of the same
   field, because a second report later would need a second record; `status`
   answers the question afterwards.

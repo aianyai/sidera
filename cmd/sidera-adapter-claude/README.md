@@ -21,5 +21,7 @@ package under `cmd/sidera-adapter-claude/internal/` importable only from within
 `cmd/sidera-adapter-claude/`, so the compiler, not a review, keeps Claude
 specifics out of the core. Packages here still follow the purity conventions of
 [`internal/README.md`](../../internal/README.md): no I/O, no goroutines, no
-clock reads, no global state, standard library only. The reasons behind the
+clock reads, no global state, standard library and the protocol types of
+`sdk/go/adapterproto` only (the adapter is a client of the SDK, as a third-party
+adapter would be). The reasons behind the
 rules are in [`docs/references/adapter-claude/`](../../docs/references/adapter-claude/README.md).

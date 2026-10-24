@@ -65,8 +65,9 @@ func (v *ControlCreateOutcome) UnmarshalText(b []byte) error {
 	return createOutcomeText.unmarshal(b, v)
 }
 
-// ControlCreateReason says why a creation failed (values 1 to 6) or is
-// unconfirmed (7 and 8).
+// ControlCreateReason says why a creation failed (values 1 to 6 and 9) or is
+// unconfirmed (7 and 8). The values are persisted in signed records: a new one
+// takes the next number, whichever group it belongs to.
 type ControlCreateReason uint8
 
 const (
@@ -80,11 +81,16 @@ const (
 	CreateReasonReadyTimeout
 	// CreateReasonAdapterLost: the adapter was lost before readiness was shown.
 	CreateReasonAdapterLost
+	// CreateReasonControlUnknown: no session will be attached, but the adapter
+	// cannot tell who controls the native session it was creating (two writers,
+	// an outside writer, or a start that timed out with its process still
+	// running). The daemon notifies the local owner.
+	CreateReasonControlUnknown
 )
 
 var createReasonText = enumText[ControlCreateReason]{[]string{
 	"preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error",
-	"ready_timeout", "adapter_lost",
+	"ready_timeout", "adapter_lost", "control_unknown",
 }}
 
 func (v ControlCreateReason) String() string                { return createReasonText.name(v) }
@@ -94,7 +100,7 @@ func (v *ControlCreateReason) UnmarshalText(b []byte) error { return createReaso
 
 // FailureReason reports whether the reason belongs to a failed creation.
 func (v ControlCreateReason) FailureReason() bool {
-	return v >= CreateReasonPresetUnknown && v <= CreateReasonNativeError
+	return v >= CreateReasonPresetUnknown && v <= CreateReasonNativeError || v == CreateReasonControlUnknown
 }
 
 // UnconfirmedReason reports whether the reason belongs to an unconfirmed creation.

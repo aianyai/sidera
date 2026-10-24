@@ -1,0 +1,17 @@
+{
+  "expect": "both",
+  "kind": "result",
+  "method": "session.create",
+  "note": "indeterminate with the failure reason control_unknown: only a failed outcome has a reason",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "result": {
+      "outcome": "indeterminate",
+      "reason": "control_unknown",
+      "grounds": {
+        "code": "turn_running"
+      }
+    }
+  }
+}

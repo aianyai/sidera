@@ -86,7 +86,10 @@ var indeterminateCodes = []GroundsCode{GroundsTurnRunning, GroundsRecordUnreadab
 //     (for a runtime that keeps its record on disk, the record is written). It
 //     carries NativeRef and Frontends, the front ends actually set up, which
 //     decide the output budget of recv.
-//   - Failed: certainly no session was created; Reason says why.
+//   - Failed: no session will be attached to the channel for this attempt;
+//     Reason says why. Certainly none was created, except for
+//     CreateFailControlUnknown, where a native session or process may remain
+//     and the adapter leaves it alone.
 //   - Indeterminate: a session may exist. Grounds says why it cannot be told yet
 //     and NativeRef may already be known; the daemon asks again by repeating the
 //     attempt.

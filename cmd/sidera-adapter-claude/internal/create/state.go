@@ -102,12 +102,12 @@ const (
 	StageStarted
 	// StageUUIDSeen: the session record in the project directory contains the uuid.
 	StageUUIDSeen
-	// StageReady: the first prompt is in the session record and the control
-	// reply has been reported.
+	// StageReady: the first prompt is in the session record. The caller answers
+	// session.create from this state, and again from it after a crash.
 	StageReady
-	// StageFailed: the attempt ended in failure and the control reply says so.
-	// No process is ever started for this uuid afterwards; a process that is
-	// still running is left alone.
+	// StageFailed: the attempt ended in failure; session.create is answered
+	// failed, with the reason's CreateFailure. No process is ever started for
+	// this uuid afterwards; a process that is still running is left alone.
 	StageFailed
 )
 
@@ -184,8 +184,9 @@ func (s State) UUIDSeen() (State, error) {
 }
 
 // Ready records that the first prompt is in the session record. The caller
-// commits it together with the control reply, so a ready attempt never needs
-// its reply reported again. A failed attempt is never ready.
+// persists it, then answers session.create; a crash between the two is repaired
+// by the repeated session.create, which Decide answers from this state with
+// ActionDone. A failed attempt is never ready.
 func (s State) Ready() (State, error) {
 	if err := s.validate(); err != nil {
 		return State{}, err
@@ -199,8 +200,8 @@ func (s State) Ready() (State, error) {
 
 // Failed records that the attempt failed for the given reason, one of the
 // reasons of a terminal failure (ReasonStartTimedOut, ReasonStartsExhausted,
-// ReasonMultipleProcesses, ReasonOutsideWriter). The caller commits it
-// together with the control reply, symmetrically to Ready. Failing a failed
+// ReasonMultipleProcesses, ReasonOutsideWriter). The caller persists it, then
+// answers session.create, symmetrically to Ready. Failing a failed
 // attempt for the same reason changes nothing; a ready attempt cannot fail
 // and a failed one keeps its first reason.
 func (s State) Failed(reason Reason) (State, error) {

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"time"
+
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Action is the next step of the attempt.
@@ -29,21 +31,24 @@ const (
 	ActionRecordProcess
 	// ActionMarkUUIDSeen: commit State.UUIDSeen.
 	ActionMarkUUIDSeen
-	// ActionMarkReady: commit State.Ready together with the control reply.
+	// ActionMarkReady: persist State.Ready, then answer session.create created.
 	ActionMarkReady
-	// ActionDone: the attempt is final and its reply was committed (ready, or
-	// failed with Decision.FailReason); nothing to do.
+	// ActionDone: the attempt is final (ready, or failed with
+	// Decision.FailReason). Nothing is decided; the caller answers a repeated
+	// session.create from the stored state.
 	ActionDone
-	// ActionFail: the attempt failed for good; commit State.Failed with
-	// Decision.Reason together with the failure reply. Whatever process is
+	// ActionFail: the attempt failed for good; persist State.Failed with
+	// Decision.Reason, then answer session.create failed with
+	// Decision.Reason.CreateFailure(). Whatever process is
 	// still running is not touched, and no process is started for this uuid
 	// afterwards.
 	ActionFail
 	// ActionControlUnknown: more than one process works on the session, or a
 	// process that is not the adapter's does. Like ActionFail it ends the
-	// attempt for good (commit State.Failed with Decision.Reason), and nothing
-	// is started or touched. In the same transaction the caller marks the
-	// session's control as unknown and notifies the local owner;
+	// attempt for good (persist State.Failed with Decision.Reason, then answer
+	// session.create failed with control_unknown), and nothing is started or
+	// touched. The session never attaches to the channel, so nothing is marked
+	// there; the daemon notifies the local owner when it receives the reason.
 	// Decision.Processes lists every process seen.
 	ActionControlUnknown
 )
@@ -87,7 +92,8 @@ const (
 	// ReasonAlreadyReady: the attempt reached the ready stage earlier.
 	ReasonAlreadyReady
 	// ReasonStartTimedOut: a turn process ran longer than StartTimeout without
-	// the first prompt reaching the session record. Fails the attempt.
+	// the first prompt reaching the session record. Fails the attempt; the
+	// process is still running, so the session's control is unknown.
 	ReasonStartTimedOut
 	// ReasonStartsExhausted: MaxStarts processes ended without the first
 	// prompt reaching the session record. Fails the attempt.
@@ -114,21 +120,40 @@ var reasonNames = map[Reason]string{
 
 func (r Reason) String() string { return nameOf(reasonNames, r, "Reason") }
 
+// CreateFailure is the reason session.create reports when an attempt failed
+// with r. It is the one place that maps a failure reason to the protocol, and
+// the answer to "can an attempt fail with r": ok is false for every reason that
+// is not a failure.
+//
+//   - A second writer (ReasonMultipleProcesses, ReasonOutsideWriter) or a turn
+//     process that is still running after the start timed out
+//     (ReasonStartTimedOut) means a native process works on the session and the
+//     adapter does not control it: control_unknown. The adapter leaves the
+//     process alone and the daemon notifies the local owner.
+//   - ReasonStartsExhausted means every process ended without the first prompt:
+//     the runtime cannot start, which is native_error. Nothing is running.
+func (r Reason) CreateFailure() (failure adapterproto.CreateFailure, ok bool) {
+	switch r {
+	case ReasonMultipleProcesses, ReasonOutsideWriter, ReasonStartTimedOut:
+		return adapterproto.CreateFailControlUnknown, true
+	case ReasonStartsExhausted:
+		return adapterproto.CreateFailNativeError, true
+	}
+	return "", false
+}
+
 // endsAttempt reports whether r is a reason an attempt can fail with: the
 // reasons of ActionFail and ActionControlUnknown.
 func (r Reason) endsAttempt() bool {
-	switch r {
-	case ReasonStartTimedOut, ReasonStartsExhausted, ReasonMultipleProcesses, ReasonOutsideWriter:
-		return true
-	}
-	return false
+	_, ok := r.CreateFailure()
+	return ok
 }
 
 // ControlUnknown reports whether r is a reason that leaves the session's
-// control unknown: the failure of ActionControlUnknown, which the caller marks
-// on the session and notifies to the local owner, unlike the plain failures.
+// control unknown, which is how session.create reports it (control_unknown).
 func (r Reason) ControlUnknown() bool {
-	return r == ReasonMultipleProcesses || r == ReasonOutsideWriter
+	failure, ok := r.CreateFailure()
+	return ok && failure == adapterproto.CreateFailControlUnknown
 }
 
 func nameOf[K ~int](names map[K]string, k K, kind string) string {

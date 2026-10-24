@@ -139,7 +139,10 @@ const (
 	// CreateCreated: the session exists and the first prompt is in its native
 	// record, which is the proof of readiness.
 	CreateCreated CreateOutcome = "created"
-	// CreateFailed: certainly no session was created.
+	// CreateFailed: no session will be attached to the channel for this
+	// attempt. Certainly none was created, except for the reason
+	// CreateFailControlUnknown, where a native session or process may exist; the
+	// adapter leaves it alone.
 	CreateFailed CreateOutcome = "failed"
 	// CreateIndeterminate: a session may or may not exist; the daemon reconciles.
 	CreateIndeterminate CreateOutcome = "indeterminate"
@@ -150,7 +153,8 @@ var createOutcomes = []CreateOutcome{CreateCreated, CreateFailed, CreateIndeterm
 // Valid reports whether o is a known outcome.
 func (o CreateOutcome) Valid() bool { return slices.Contains(createOutcomes, o) }
 
-// CreateFailure says why a session was certainly not created.
+// CreateFailure says why no session will be attached to the channel for a
+// creation attempt.
 type CreateFailure string
 
 const (
@@ -160,9 +164,15 @@ const (
 	CreateFailNativeUnavailable CreateFailure = "native_unavailable"
 	CreateFailDependencyMissing CreateFailure = "dependency_missing"
 	CreateFailNativeError       CreateFailure = "native_error"
+	// CreateFailControlUnknown: the adapter cannot tell who controls the native
+	// session. Two processes work on it, a writer other than the adapter does, or
+	// a start timed out while its process still runs. A native session or
+	// process may remain; the adapter does not touch it and the daemon notifies
+	// the local owner.
+	CreateFailControlUnknown CreateFailure = "control_unknown"
 )
 
-var createFailures = []CreateFailure{CreateFailPresetUnknown, CreateFailPresetInvalid, CreateFailRuntimeAuth, CreateFailNativeUnavailable, CreateFailDependencyMissing, CreateFailNativeError}
+var createFailures = []CreateFailure{CreateFailPresetUnknown, CreateFailPresetInvalid, CreateFailRuntimeAuth, CreateFailNativeUnavailable, CreateFailDependencyMissing, CreateFailNativeError, CreateFailControlUnknown}
 
 // Valid reports whether f is a known failure.
 func (f CreateFailure) Valid() bool { return slices.Contains(createFailures, f) }

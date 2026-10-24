@@ -207,7 +207,7 @@ func TestReasonControlUnknown(t *testing.T) {
 	}{
 		{ReasonMultipleProcesses, true},
 		{ReasonOutsideWriter, true},
-		{ReasonStartTimedOut, false},
+		{ReasonStartTimedOut, true},
 		{ReasonStartsExhausted, false},
 		{ReasonTurnRunning, false},
 	} {

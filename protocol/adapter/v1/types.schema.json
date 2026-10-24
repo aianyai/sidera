@@ -127,7 +127,7 @@
     "AvailabilityCondition": { "type": "string", "enum": ["runtime_auth", "native_unavailable", "dependency_missing"] },
     "AttachState": { "type": "string", "enum": ["attached", "unreachable", "lost"] },
     "CreateOutcome": { "type": "string", "enum": ["created", "failed", "indeterminate"] },
-    "CreateFailure": { "type": "string", "enum": ["preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error"] },
+    "CreateFailure": { "type": "string", "enum": ["preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error", "control_unknown"] },
     "CheckpointScope": { "type": "string", "enum": ["attempt", "session"] },
     "PromptStage": { "type": "string", "enum": ["accepted", "persisted", "refused"] },
     "PromptRefusal": { "type": "string", "enum": ["busy", "runtime_auth", "native_unavailable", "session_lost", "control_unknown"] },
@@ -322,7 +322,7 @@
             "signal": { "const": "session.create" },
             "outcome": { "enum": ["created", "unconfirmed", "failed"] },
             "session_endpoint": { "$ref": "#/$defs/EndpointRef" },
-            "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "ready_timeout", "adapter_lost"] }
+            "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "ready_timeout", "adapter_lost", "control_unknown"] }
           },
           "oneOf": [
             {
@@ -337,7 +337,7 @@
               "properties": {
                 "outcome": { "const": "failed" },
                 "session_endpoint": false,
-                "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error"] }
+                "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "control_unknown"] }
               },
               "required": ["reason"]
             }

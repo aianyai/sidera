@@ -229,6 +229,7 @@ func TestCreateReply(t *testing.T) {
 		{"native_unavailable", adapterproto.SessionCreateResult{Outcome: "failed", Reason: "native_unavailable"}, c{Outcome: 3, Reason: 5}, true, false},
 		{"dependency_missing becomes native_unavailable", adapterproto.SessionCreateResult{Outcome: "failed", Reason: "dependency_missing"}, c{Outcome: 3, Reason: 5}, true, false},
 		{"native_error", adapterproto.SessionCreateResult{Outcome: "failed", Reason: "native_error"}, c{Outcome: 3, Reason: 6}, true, false},
+		{"control_unknown", adapterproto.SessionCreateResult{Outcome: "failed", Reason: "control_unknown"}, c{Outcome: 3, Reason: 9}, true, false},
 		{"indeterminate is not final", adapterproto.SessionCreateResult{Outcome: "indeterminate"}, c{}, false, false},
 		{"a failure without a reason", adapterproto.SessionCreateResult{Outcome: "failed"}, c{}, false, true},
 		{"an unknown reason", adapterproto.SessionCreateResult{Outcome: "failed", Reason: "adapter_offline"}, c{}, false, true},
@@ -486,6 +487,30 @@ func TestPromptOutcomeOnAttemptConflictIsUnknown(t *testing.T) {
 	for _, code := range []int{adapterproto.CodeUnknownAttempt, adapterproto.CodeUnknownEndpoint, adapterproto.CodeSendRefused} {
 		if got := adapterreg.PromptOutcomeOnError(&peer.Error{Code: code}); got != handoff.AttemptFailed {
 			t.Errorf("PromptOutcomeOnError(%d) = %v, want failed", code, got)
+		}
+	}
+}
+
+// Every failure reason a session.create result can carry has a reply reason, and
+// the reply is valid. The expected numbers are written out here, not derived.
+func TestCreateReplyMapsEveryCreateFailure(t *testing.T) {
+	want := map[string]adapterproto.ControlCreateReason{
+		"preset_unknown": 1, "preset_invalid": 2, "runtime_auth": 4, "native_unavailable": 5,
+		"dependency_missing": 5, "native_error": 6, "control_unknown": 9,
+	}
+	listed := adapterproto.EnumTables()["CreateFailure"]
+	if len(listed) != len(want) {
+		t.Fatalf("the protocol has %d creation failures %v, the table %d", len(listed), listed, len(want))
+	}
+	for _, f := range listed {
+		reason, ok := want[f]
+		if !ok {
+			t.Errorf("creation failure %q has no row", f)
+			continue
+		}
+		got, final, err := adapterreg.CreateReply(adapterproto.SessionCreateResult{Outcome: "failed", Reason: adapterproto.CreateFailure(f)}, "e")
+		if err != nil || !final || got.Outcome != adapterproto.CreateReplyFailed || got.Reason != reason || got.SessionEndpoint != "" || got.Validate() != nil {
+			t.Errorf("%s: CreateReply = %+v, %v, %v, want reason %d", f, got, final, err, reason)
 		}
 	}
 }

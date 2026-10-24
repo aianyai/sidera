@@ -67,6 +67,7 @@ func TestSessionCreateResultRules(t *testing.T) {
 		method(t, failed, []row[adapterproto.SessionCreateResult]{
 			{"reason required", func(r *adapterproto.SessionCreateResult) { r.Reason = "" }, "reason", false},
 			{"reason unknown", func(r *adapterproto.SessionCreateResult) { r.Reason = "adapter_offline" }, "reason", false},
+			{"reason control_unknown", func(r *adapterproto.SessionCreateResult) { r.Reason = "control_unknown" }, "", false},
 			{"native ref forbidden", func(r *adapterproto.SessionCreateResult) { r.NativeRef = "s" }, "no session to describe", false},
 			{"process forbidden", func(r *adapterproto.SessionCreateResult) { r.Process = proc() }, "no session to describe", false},
 			{"frontends forbidden", func(r *adapterproto.SessionCreateResult) { r.Frontends = []adapterproto.Frontend{"cli"} }, "no session to describe", false},
@@ -83,6 +84,7 @@ func TestSessionCreateResultRules(t *testing.T) {
 			{"grounds of an absent attempt", func(r *adapterproto.SessionCreateResult) { r.Grounds.Code = "never_dispatched" }, "grounds.code", false},
 			{"grounds code unknown", func(r *adapterproto.SessionCreateResult) { r.Grounds.Code = "who_knows" }, "grounds.code", false},
 			{"reason forbidden", func(r *adapterproto.SessionCreateResult) { r.Reason = "native_error" }, "reason", false},
+			{"reason control_unknown forbidden", func(r *adapterproto.SessionCreateResult) { r.Reason = "control_unknown" }, "reason", false},
 			{"frontends forbidden", func(r *adapterproto.SessionCreateResult) { r.Frontends = []adapterproto.Frontend{"cli"} }, "frontends", false},
 			{"native ref optional", func(r *adapterproto.SessionCreateResult) { r.NativeRef = ""; r.Process = nil }, "", false},
 		})
@@ -93,7 +95,7 @@ func TestSessionCreateResultRules(t *testing.T) {
 			{"outcome unknown", func(r *adapterproto.SessionCreateResult) { r.Outcome = "pending" }, "outcome", false},
 		})
 	})
-	for _, f := range []adapterproto.CreateFailure{"preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error"} {
+	for _, f := range []adapterproto.CreateFailure{"preset_unknown", "preset_invalid", "runtime_auth", "native_unavailable", "dependency_missing", "native_error", "control_unknown"} {
 		if err := (adapterproto.SessionCreateResult{Outcome: "failed", Reason: f}).Validate(); err != nil {
 			t.Errorf("failure %s: %v", f, err)
 		}

@@ -10,7 +10,10 @@ clock. The caller observes, calls `Decide`, executes the action, commits the
 matching state transition and observes again. Any of those steps may be cut off
 by a crash; the next `Decide` runs from the committed state and fresh
 observations. The persisted `State` is what the adapter stores as its
-checkpoint.
+checkpoint. A result is never committed together with an answer to the daemon:
+the state is persisted first, then `session.create` is answered from it, and a
+repeated `session.create` after a crash between the two is answered from the
+stored state (`Done`).
 
 ## Entry points
 
@@ -20,9 +23,10 @@ checkpoint.
 | `Decide(State, Observations, Params, now)` | The next `Action` with a typed `Reason`. For `ActionRecordProcess` the decision also carries the `Process`; for `ActionWait` a `RecheckBy`; for `ActionControlUnknown` every process seen; for `ActionDone` after a failure the stored `FailReason`. |
 | `State.Started(Process)` | Records a started or found turn process (PID and start second). |
 | `State.UUIDSeen()` | Records that the session file contains the uuid. |
-| `State.Ready()` | Records readiness; the caller commits it together with the control reply. |
-| `State.Failed(Reason)` | Records the failure; the caller commits it together with the control reply, symmetrically to `Ready`. |
-| `Reason.ControlUnknown()` | Whether a stored failure reason left the session's control unknown. |
+| `State.Ready()` | Records readiness; the caller persists it, then answers `session.create` created. |
+| `State.Failed(Reason)` | Records the failure; the caller persists it, then answers `session.create` failed, symmetrically to `Ready`. |
+| `Reason.CreateFailure()` | The `adapterproto.CreateFailure` that `session.create` reports for a failure reason, and whether the reason is a failure at all: the only place a failure reason is mapped to the protocol. |
+| `Reason.ControlUnknown()` | Whether the failure is reported as `control_unknown`. |
 | `DefaultParams()`, `Params.Validate()` | The not-yet-decided numbers: `StartTimeout`, `MaxStarts`. |
 
 ## Actions
@@ -34,10 +38,10 @@ checkpoint.
 | `Wait` | Start nothing; decide again when the turn ends, when the clock passes `RecheckBy` (the process start plus `StartTimeout`, in Unix seconds) or on the next observation. |
 | `RecordProcess` | Commit `Started(decision.Process)`. |
 | `MarkUUIDSeen` | Commit `UUIDSeen()`. |
-| `MarkReady` | Commit `Ready()` and the control reply in one transaction. |
+| `MarkReady` | Persist `Ready()`, then answer `session.create` created. |
 | `Done` | Nothing; the attempt is final: ready (`ReasonAlreadyReady`) or failed (`ReasonAlreadyFailed`, with `FailReason` the stored reason). |
-| `Fail` | Commit `Failed(decision.Reason)` and report the failure in the control reply in one transaction. A process that is still running is left alone. |
-| `ControlUnknown` | Terminal, like `Fail`: commit `Failed(decision.Reason)`, mark the session's control as unknown and notify the local owner, listing `decision.Processes`, in the same transaction. Start nothing and touch no process. The mark itself belongs to the runtime and its session mapping; this package only decides. |
+| `Fail` | Persist `Failed(decision.Reason)`, then answer `session.create` failed with `decision.Reason.CreateFailure()`. A process that is still running is left alone. |
+| `ControlUnknown` | Terminal, like `Fail`, and answered `failed` with `control_unknown`: persist `Failed(decision.Reason)`, then answer. Start nothing and touch no process; `decision.Processes` lists every process seen. The session never attaches to the channel, so nothing is marked there; the daemon notifies the local owner when it receives `control_unknown`. |
 
 ## Rules
 
@@ -77,6 +81,13 @@ checkpoint.
   `Failed` refuses a ready one. After a failure no process is ever started for
   this uuid; a process that is still running is left alone, and if it writes the
   first prompt later the attempt stays failed.
+- A failed attempt is reported as `failed` with the `CreateFailure` of its
+  reason (`Reason.CreateFailure`). `control_unknown` is reported for a second
+  writer (`ReasonMultipleProcesses`), an outside writer (`ReasonOutsideWriter`)
+  and a start that timed out while its process still runs
+  (`ReasonStartTimedOut`): a native process may remain, which the adapter leaves
+  alone. `ReasonStartsExhausted` is `native_error`: every process ended, none
+  remains.
 - Contradictions are errors, not decisions: a session file that disappeared
   after the uuid was seen, a lookup although the state records no process, a
   lookup of another PID than the recorded one, a state at the intent stage with
@@ -109,8 +120,10 @@ checkpoint.
   `StartResume`, with the launch, and `Started` is committed immediately after
   spawning.
 - Every `State` transition is committed atomically before the next `Decide`.
-  After `Fail` or `ControlUnknown` the failure reply (and for control unknown the
-  mark and the notification) is committed with `Failed`.
+  `Ready` and `Failed` are persisted before `session.create` is answered, never
+  the other way round, so an answer the daemon holds always has its state behind
+  it; the repeated `session.create` after a crash in between gets the same
+  answer from the stored state.
 - Zero is never valid input: an empty attempt id, session id, first prompt id,
   project directory or time, a zero PID or start, a stage of 0 or a non-positive
   parameter makes `Decide` return an error wrapping `ErrInvalidInput` or

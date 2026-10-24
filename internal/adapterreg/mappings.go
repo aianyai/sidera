@@ -220,6 +220,8 @@ func CreateReply(r adapterproto.SessionCreateResult, session adapterproto.Endpoi
 			reason = adapterproto.CreateReasonNativeUnavailable
 		case adapterproto.CreateFailNativeError:
 			reason = adapterproto.CreateReasonNativeError
+		case adapterproto.CreateFailControlUnknown:
+			reason = adapterproto.CreateReasonControlUnknown
 		default:
 			return adapterproto.ControlCreateReply{}, false, unmapped("creation failure", string(r.Reason))
 		}
