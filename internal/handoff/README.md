@@ -17,6 +17,7 @@ to the delivery side, which calls into this package.
 | `PromptText(count)`, `NewSessionPromptText` | The wake-up text for waiting messages, and the first prompt of a session created without an initial message. No message body, ever. Provisional wording. |
 | `DecidePrompt(PromptInput, PromptParams, now)` | The per-endpoint rule that `DecideNodePrompts` applies: send or hold, with a typed reason, the prompt kind to record and the count for the text. A hold may carry `RetryAt`, when to evaluate again. A `PromptSend` from it alone never authorizes a prompt. |
 | `DecideNodePrompts([]WaitingPrompt, running, PromptParams, now)` | Which waiting endpoints of the node are prompted now, so that prompt-started turns never exceed `MaxConcurrentTurns`: one `PromptDecision` per endpoint, ordered earliest waiter first, held ones with `PromptNodeFull`. It calls `DecidePrompt` for each endpoint and adds only the node-wide limit. |
+| `DefaultPromptParams()`, `DefaultBlockedParams()` | The decided values of `PromptParams` and `BlockedParams`. |
 | `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. |
 | `Pack(queue, delivery.LeaseID, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the first part not yet acknowledged). |
 | `Part(msg, k, delivery.LeaseID, Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
@@ -239,6 +240,9 @@ Before acknowledging:
 - A page prints the lease as its text form, `MaxLeaseLen`
   (`delivery.LeaseIDTextLen`, 32) lowercase hex characters, which JSON does not
   escape.
-- `PromptParams` has no default: `MaxPerHour`, `MinInterval` and
-  `MaxConcurrentTurns` must be configured, and all three must be positive. An
-  unset node cap is an error, never no cap.
+- `DefaultPromptParams()` is the decided values: 60 prompts per endpoint and
+  hour (`MaxPerHour`), 2 minutes between a prompt and the next wake-up by a new
+  message (`MinInterval`) and 8 prompt-started turns per node
+  (`MaxConcurrentTurns`). A caller may pass other values, for example a lower
+  node cap; all three must be positive. An unset node cap is an error, never no
+  cap.

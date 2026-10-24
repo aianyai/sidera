@@ -67,8 +67,9 @@ checks that the model saw it before acknowledging for the agent.
   the node cap can make an endpoint wait long, the caller gives the instant an
   adapter went offline as the start of that cause; otherwise the time held back
   would be counted as failure time.
-- Parameters this package gives no default: the hourly cap, the minimum interval
-  and the node cap. The prompt wording is provisional.
+- Decided values (`DefaultPromptParams`): 60 prompts per endpoint and hour, a
+  re-prompt interval of 2 minutes, and 8 prompt-started turns per node. The
+  reasons are under Why. The prompt wording is provisional.
 
 ### Delivery blocked
 
@@ -196,6 +197,39 @@ The delivery side that these rules call into is described in
   briefly run more turns than the cap when they come back, which is why the free
   slots never go below zero and nothing is released until the count falls under
   the cap.
+- **A node cap of 8.** The cap decides how many endpoints that wake together
+  get a turn before their messages expire. The k-th waiting endpoint, earliest
+  first, starts after (k-1) divided by the cap, rounded down, full turns, and
+  has to start about a minute before the 30-minute queue time ends, so that its
+  `recv` can still lease the message. For a cap C and turns of T minutes that
+  admits C x (29 / T rounded down + 1) simultaneous waiters: with 15-minute turns
+  2 turns admit 4 endpoints, 4 admit 8 and 8 admit 16; with 5-minute turns 8
+  admit 48, close to the 50 endpoints of a node at the sizes the channel is
+  designed for. A cap of 2 would let the node's own throttling expire messages,
+  so a sender would be told `rejected` for a message the target never refused.
+  No cap would let one burst of arrivals start a turn in every session on the
+  machine at once. Not counting the throttled time in the queue time was
+  rejected: it would need a contract change in `delivery` and a write for every
+  entry into and exit from throttling, and a sender could wait about three hours
+  without any news. The cap is a default; the owner can lower it, and real turn lengths and resource
+  use should decide whether it stays.
+- **60 prompts per endpoint and hour.** An endpoint is prompted only while its
+  session is idle, so a turn of a minute or more cannot reach 60 in an hour. The
+  cap is hit only by a loop of wake-ups that do next to nothing. A cap of 30
+  would be hit by quick question and answer exchanges that take two minutes a
+  round, and an endpoint at the cap waits up to the queue time for a slot; a cap
+  of 120 would protect nothing. How much an agent converses is not what the cap
+  limits: loops of `recv --wait` inside one turn are not prompts.
+- **A re-prompt interval of 2 minutes.** An agent that responds normally starts
+  reading about a minute after a prompt, so an interval of 2 minutes does not
+  add a wake-up for it, and it merges a run of messages into one wake-up. A new
+  message waits at most 2 minutes for its wake-up, leaving 28 of the 30 queue
+  minutes. An endpoint that never reads is woken about 30 times an hour at most,
+  below the hourly cap, so the two limits cover different cases: the interval
+  the ones that do not read, the cap the ones that read fast. It equals the time
+  after which a target counts as unreachable, so both timings of the channel
+  run at the same pace. 5 minutes would make a late message wait too long; 1
+  minute would wake the endpoint for every message of a run.
 - **An unset cap is an error.** Zero meaning no limit would silently remove the
   protection on a configuration that forgot it. `DecidePrompt` does not read the
   cap, but it rejects the same params, so that one value is validated in one place.
@@ -315,10 +349,13 @@ The delivery side that these rules call into is described in
 
 ## Where
 
-- `internal/handoff/prompt.go`: prompt text, parameters, `DecidePrompt`.
-  Tests: `TestPromptText`, `TestNewSessionPromptText`, `TestNewSessionPromptIsNotAnAttempt`,
-  `TestDecidePrompt`,
-  `TestPromptScenario*`, `TestPromptParamsValidate`.
+- `internal/handoff/prompt.go`: prompt text, parameters and their decided
+  values (`DefaultPromptParams`), `DecidePrompt`.
+  Tests: `TestDefaultPromptParamsValidate`, `TestDefaultPromptParamsValues` (each
+  value, named after its reason), `TestDefaultPromptParamsReasons` (the figures
+  above recomputed from the defaults with a separate count), `TestPromptText`,
+  `TestNewSessionPromptText`, `TestNewSessionPromptIsNotAnAttempt`,
+  `TestDecidePrompt`, `TestPromptScenario*`, `TestPromptParamsValidate`.
 - `internal/handoff/nodeprompt.go`: `DecideNodePrompts`, `WaitingPrompt`,
   `NodePromptDecision`. Tests: `TestDecideNodePrompts` (one row per rule),
   `TestDecideNodePromptsRejectsInvalidInput`,

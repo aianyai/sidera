@@ -15,9 +15,34 @@ const MaxReprompts = 1
 // hourlyWindow is the span over which PromptParams.MaxPerHour is counted.
 const hourlyWindow = time.Hour
 
-// PromptParams holds the prompt values that this package gives no default. The
-// caller must supply all of them, and DecidePrompt and DecideNodePrompts reject
-// a value that is not positive: an unset cap is never read as no cap.
+// Decided prompt values. Each has its reason with it, and DefaultPromptParams
+// returns them together.
+const (
+	// DefaultMaxConcurrentTurns is the node cap on turns that prompts started.
+	// With the queue time an endpoint's messages wait before they expire (30
+	// minutes), a cap of 8 gives a turn to every endpoint of 16 that wake at
+	// once when turns last 15 minutes, and of 48 when they last 5 minutes. A
+	// smaller cap would let the node's own throttling expire messages; no cap
+	// would let one burst start a turn in every session of the node.
+	DefaultMaxConcurrentTurns = 8
+	// DefaultMaxPerHour is the cap on prompts per endpoint and hour. A turn
+	// that lasts a minute or more cannot reach 60 in an hour, so the cap stops
+	// only a loop of wake-ups that do next to nothing. A lower cap would be hit
+	// by quick question and answer exchanges and make a message wait up to the
+	// queue time; a higher one would protect nothing.
+	DefaultMaxPerHour = 60
+	// DefaultMinInterval is how long a newly arrived message waits after the
+	// last prompt before it wakes the endpoint again. An agent that answers
+	// normally starts reading within about a minute, so two minutes adds no
+	// wake-up for it, merges a run of messages into one wake-up, and leaves 28
+	// of the 30 queue minutes after the last one. An endpoint that never reads
+	// is woken about 30 times an hour at most, below DefaultMaxPerHour.
+	DefaultMinInterval = 2 * time.Minute
+)
+
+// PromptParams holds the values of the prompt rules. DecidePrompt and
+// DecideNodePrompts reject a value that is not positive: an unset cap is never
+// read as no cap. DefaultPromptParams returns the decided values.
 type PromptParams struct {
 	// MaxPerHour caps the prompts that may have woken an endpoint within any
 	// one hour: delivered attempts and attempts with an unknown outcome.
@@ -30,6 +55,15 @@ type PromptParams struct {
 	// still running on one node, across all endpoints. Only DecideNodePrompts
 	// reads it; DecidePrompt, which judges one endpoint, does not.
 	MaxConcurrentTurns int
+}
+
+// DefaultPromptParams returns the decided values.
+func DefaultPromptParams() PromptParams {
+	return PromptParams{
+		MaxPerHour:         DefaultMaxPerHour,
+		MinInterval:        DefaultMinInterval,
+		MaxConcurrentTurns: DefaultMaxConcurrentTurns,
+	}
 }
 
 // ErrInvalidParams is wrapped by errors about parameters that are not positive.
