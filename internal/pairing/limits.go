@@ -64,12 +64,28 @@ func inWindow(ts []time.Time, window time.Duration, now time.Time) []time.Time {
 	return ts[i:]
 }
 
+// appendAscending adds an entry made at now to a list that is in ascending
+// order. If the clock stepped back and now is before the last entry, the entry
+// is recorded at that last entry instead: the list stays ascending, and the
+// window only gets more conservative, because an entry is never recorded
+// earlier than it happened.
+func appendAscending(ts []time.Time, now time.Time) []time.Time {
+	out := slices.Clone(ts)
+	if len(out) > 0 && now.Before(out[len(out)-1]) {
+		now = out[len(out)-1]
+	}
+	return append(out, now)
+}
+
 // retryHint turns the instant a counter frees into a hint relative to now:
-// whole seconds, rounded up. An entry that still counts is less than a window
-// old, so free is after now and the hint is at least one second, which matters
-// because a zero hint is not a hint.
+// whole seconds, rounded up, at least one second because a zero hint is not a
+// hint, and at most MaxRetryAfter because a longer hint does not encode. An
+// entry that still counts is less than a window old, so free is after now; the
+// upper bound matters only when the clock stepped back so far that entries lie
+// in the future.
 func retryHint(free, now time.Time) time.Duration {
-	return (free.Sub(now) + time.Second - 1) / time.Second * time.Second
+	hint := (free.Sub(now) + time.Second - 1) / time.Second * time.Second
+	return min(hint, MaxRetryAfter)
 }
 
 // RevealAllowed reports whether the target may reveal its nonce to an
@@ -82,24 +98,24 @@ func (l Limits) RevealAllowed(p Params, now time.Time) (bool, time.Duration) {
 	return false, retryHint(live[len(live)-p.RevealBudget].Add(p.RevealWindow), now)
 }
 
-// SpendReveal records a reveal at now. It fails with ErrBudget when the budget
-// is spent; the caller persists the result before the reveal leaves the node,
-// so a crash can never hand out a reveal that was not counted.
+// SpendReveal records a reveal at now, or at the last recorded reveal if the
+// clock stepped back. It fails with ErrBudget when the budget is spent; the
+// caller persists the result before the reveal leaves the node, so a crash can
+// never hand out a reveal that was not counted.
 func (l Limits) SpendReveal(p Params, now time.Time) (Limits, error) {
 	if ok, _ := l.RevealAllowed(p, now); !ok {
 		return l, ErrBudget
 	}
 	live := inWindow(l.reveals, p.RevealWindow, now)
-	out := Limits{failures: l.failures, reveals: append(slices.Clone(live), now)}
-	return out, nil
+	return Limits{failures: l.failures, reveals: appendAscending(live, now)}, nil
 }
 
-// RecordFailure records that an owner reported differing codes at now. Only the
-// most recent FailureLimit failures are kept: the pause depends on no others,
-// and the list stays bounded.
+// RecordFailure records that an owner reported differing codes at now, or at
+// the last recorded failure if the clock stepped back. Only the most recent
+// FailureLimit failures are kept: the pause depends on no others, and the list
+// stays bounded.
 func (l Limits) RecordFailure(p Params, now time.Time) Limits {
-	live := inWindow(l.failures, p.FailureWindow, now)
-	live = append(slices.Clone(live), now)
+	live := appendAscending(inWindow(l.failures, p.FailureWindow, now), now)
 	if len(live) > p.FailureLimit {
 		live = live[len(live)-p.FailureLimit:]
 	}

@@ -115,6 +115,12 @@ expectations.
   that are not expected: no new request is accepted or started, and requests
   already held are not confirmed. It lifts by itself when the failure that holds
   the count at the limit slides out.
+- *A clock that steps back.* An entry is recorded at the later of now and the
+  last entry, so the persisted lists stay in ascending order (a list out of order
+  is refused on loading, and the node would lose its counters) and the windows
+  only become more conservative. The retry hint is capped at 24 hours, the most
+  a message can carry; a clock that stepped back by days therefore still yields a
+  refusal the initiator can read.
 - *Cap.* At most 16 unexpected requests wait at once, counting streams that
   reserved a slot. A full list answers `busy`; nothing is evicted. A request of
   the same initiator replaces an older one of its own only while that one holds
@@ -214,7 +220,7 @@ revealed.
 | ---- | ----- |
 | Construction, vectors | `internal/pairing/transcript.go`, `code.go`, `hkdf.go`; `transcript_test.go` (`TestTranscriptVectors`, `TestCredentialRecordVectors`, `TestRejectionVectorEndToEnd`, `TestSampleCodeUnitVectors`, `TestNegativeVectors`, `TestEveryInputByteChangesThePairingID`), `hkdf_test.go` (RFC 5869 A.1 to A.3) |
 | Messages | `message.go`; `message_test.go` (golden bytes, refusals, `TestDecodeOpening`, fuzz of every decoder) |
-| Limits, expectations | `limits.go`, `expectation.go`, `params.go`; `limits_test.go` (`TestLimitsAgainstAModel`) |
+| Limits, expectations | `limits.go`, `expectation.go`, `params.go`; `limits_test.go` (`TestLimitsAgainstAModel`, `TestLimitsSurviveTheClockSteppingBack`) |
 | Target and initiator | `target.go`, `initiator.go`, `lifecycle.go`, `command.go`, `state.go` |
 | Persisted records | `records.go`, `codec.go`; `codec_test.go` (golden bytes, wrong shapes) |
 | Scenarios | `scenario_test.go` |

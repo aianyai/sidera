@@ -286,6 +286,46 @@ func TestRevealBudgetBoundsAbortAndRetry(t *testing.T) {
 	}
 }
 
+// The target's clock stepping back, even by days, neither corrupts the counters
+// it persists nor makes it send a refusal the initiator cannot read.
+func TestRevealBudgetAcrossTheClockSteppingBack(t *testing.T) {
+	s, a, b := standardPair(t)
+	for i := 0; i < 2; i++ {
+		if out := dropReveal(t, s, a, b); out.Result != ResultOK {
+			t.Fatalf("attempt %d: %+v", i, out)
+		}
+		s.advance(31 * time.Second)
+		s.tick()
+	}
+	s.advance(-2 * time.Second)
+	if out := dropReveal(t, s, a, b); out.Result != ResultOK {
+		t.Fatalf("attempt after the step back: %+v", out)
+	}
+	b.restart() // the persisted counters must read back
+	if got := len(b.state.Limits().Reveals()); got != 3 {
+		t.Fatalf("after a restart the target kept %d reveals, want 3", got)
+	}
+	for i := 0; i < 2; i++ {
+		s.advance(31 * time.Second)
+		s.tick()
+		if out := dropReveal(t, s, a, b); out.Result != ResultOK {
+			t.Fatalf("attempt %d: %+v", i+3, out)
+		}
+	}
+	s.advance(31 * time.Second)
+	s.tick()
+	s.advance(-3 * 24 * time.Hour)
+	_, out := s.initiate(a, b, Initiation{})
+	if out.Result != ResultOK {
+		t.Fatal(out)
+	}
+	s.pump()
+	last := a.notices[len(a.notices)-1]
+	if last.Kind != NoticeNotStarted || last.Refusal != RefusalPaused || last.RetryAfter != MaxRetryAfter {
+		t.Fatalf("notice %+v, want paused with the retry hint clamped to %v", last, MaxRetryAfter)
+	}
+}
+
 func TestExpectedInitiatorSpendsNoReveal(t *testing.T) {
 	s, a, b := standardPair(t)
 	b.expect(a)

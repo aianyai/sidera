@@ -134,6 +134,107 @@ func TestVerificationFailurePause(t *testing.T) {
 	})
 }
 
+// A clock that steps back must not make the persisted lists unreadable: an
+// entry is recorded no earlier than the last one, so the lists stay ascending,
+// survive an encode and a decode, and keep counting every entry.
+func TestLimitsSurviveTheClockSteppingBack(t *testing.T) {
+	p := DefaultParams()
+	roundTrip := func(t *testing.T, l Limits) Limits {
+		t.Helper()
+		b, err := l.Encode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := DecodeLimits(b)
+		if err != nil {
+			t.Fatalf("limits written after a step back do not read back: %v", err)
+		}
+		return got
+	}
+	t.Run("reveals", func(t *testing.T) {
+		l, err := Limits{}.SpendReveal(p, at(0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l, err = l.SpendReveal(p, at(0).Add(-2*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if got := l.Reveals(); len(got) != 2 || !got[0].Equal(at(0)) || !got[1].Equal(at(0)) {
+			t.Fatalf("reveals = %v, want both at the first instant", got)
+		}
+		l = roundTrip(t, l)
+		for i := 2; i < p.RevealBudget; i++ {
+			if l, err = l.SpendReveal(p, at(1)); err != nil {
+				t.Fatalf("reveal %d: %v", i+1, err)
+			}
+		}
+		if _, err := l.SpendReveal(p, at(1)); !errors.Is(err, ErrBudget) {
+			t.Fatalf("a reveal beyond the budget after a step back: %v", err)
+		}
+	})
+	t.Run("failures", func(t *testing.T) {
+		l := Limits{}.RecordFailure(p, at(0))
+		l = l.RecordFailure(p, at(0).Add(-2*time.Second))
+		if got := l.Failures(); len(got) != 2 || !got[0].Equal(at(0)) || !got[1].Equal(at(0)) {
+			t.Fatalf("failures = %v, want both at the first instant", got)
+		}
+		l = roundTrip(t, l)
+		if paused, _ := l.Paused(p, at(1)); paused {
+			t.Fatal("paused after two failures")
+		}
+		if paused, _ := l.RecordFailure(p, at(1)).Paused(p, at(1)); !paused {
+			t.Fatal("not paused by the third failure: a failure recorded after a step back was not counted")
+		}
+	})
+	t.Run("an entry lands at the last one, not at an earlier one", func(t *testing.T) {
+		later := at(0).Add(10 * time.Second)
+		l, err := Limits{}.SpendReveal(p, at(0))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l, err = l.SpendReveal(p, later); err != nil {
+			t.Fatal(err)
+		}
+		if l, err = l.SpendReveal(p, at(0).Add(5*time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		f := Limits{}.RecordFailure(p, at(0)).RecordFailure(p, later).RecordFailure(p, at(0).Add(5*time.Second))
+		for name, got := range map[string][]time.Time{"reveals": l.Reveals(), "failures": f.Failures()} {
+			if len(got) != 3 || !got[2].Equal(later) {
+				t.Fatalf("%s = %v, want the third recorded at %v", name, got, later)
+			}
+		}
+		roundTrip(t, l)
+		roundTrip(t, f)
+	})
+	t.Run("a step back of more than a day still gives a refusal that encodes", func(t *testing.T) {
+		var l Limits
+		var err error
+		for i := 0; i < p.RevealBudget; i++ {
+			if l, err = l.SpendReveal(p, at(0)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for i := 0; i < p.FailureLimit; i++ {
+			l = l.RecordFailure(p, at(0))
+		}
+		behind := at(0).Add(-2 * MaxRetryAfter)
+		ok, revealRetry := l.RevealAllowed(p, behind)
+		paused, pauseRetry := l.Paused(p, behind)
+		if ok || !paused {
+			t.Fatalf("allowed=%v paused=%v: entries in the future must keep counting", ok, paused)
+		}
+		for name, retry := range map[string]time.Duration{"reveal budget": revealRetry, "pause": pauseRetry} {
+			if retry != MaxRetryAfter {
+				t.Fatalf("%s hint = %v, want it clamped to %v", name, retry, MaxRetryAfter)
+			}
+			if _, err := (RefusalMsg{Reason: RefusalPaused, RetryAfter: retry}).Encode(); err != nil {
+				t.Fatalf("%s: the refusal does not encode: %v", name, err)
+			}
+		}
+	})
+}
+
 // A model of both counters that keeps every timestamp and counts by looking at
 // the whole history, compared with Limits over random histories.
 func TestLimitsAgainstAModel(t *testing.T) {
