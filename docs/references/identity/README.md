@@ -456,7 +456,13 @@ certificate below.
   `TestInitReplaysToAConsistentStateFromEveryCrashState`,
   `TestClockHighWaterIsOldOrNewAfterEveryCrashState`,
   `TestClockClearIsPausedOrClearedAfterEveryCrashState`;
-  `TestRecoveryPredicatesAreEmptyOnCleanScenarios`;
+  `TestRecoveryPredicatesAreEmptyOnCleanScenarios`,
+  `TestRecoveryWorkOfAnUnfinishedInitIsEmpty`;
+  `TestLoadedKeysHandOutTheVerifiedSelfRevocationOfThisNode`,
+  `TestLoadAndRecoveryWorkRefuseADisagreeingSerialFileWithTheSameWords`,
+  `TestPlanInitRefusesATimeTheDecodersRefuse`,
+  `TestClearingTheRollbackRefusesATimeTheDecoderRefuses`,
+  `TestAFileOverTheLargestRecordIsRefusedWithoutBeingRead`;
   `TestKeyGenerationWithAnInjectedReaderIsReproducible`,
   `TestKeysSourceNeverReachesAGlobalRandomSource`,
   `TestPrivateKeysNeverPrintThemselves`; fuzz targets `FuzzDecodeKeyFile`,

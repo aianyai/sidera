@@ -160,7 +160,13 @@ The named tests of the row: `TestPermissionsTooBroadAreRefusedNamingTheFile`
 `TestInitReplaysToAConsistentStateFromEveryCrashState`,
 `TestClockHighWaterIsOldOrNewAfterEveryCrashState`,
 `TestClockClearIsPausedOrClearedAfterEveryCrashState`),
-`TestRecoveryPredicatesAreEmptyOnCleanScenarios`, and the randomness tests
+`TestRecoveryPredicatesAreEmptyOnCleanScenarios`,
+`TestRecoveryWorkOfAnUnfinishedInitIsEmpty`, the tests of the rules named above
+(`TestLoadedKeysHandOutTheVerifiedSelfRevocationOfThisNode`,
+`TestLoadAndRecoveryWorkRefuseADisagreeingSerialFileWithTheSameWords`,
+`TestPlanInitRefusesATimeTheDecodersRefuse`,
+`TestClearingTheRollbackRefusesATimeTheDecoderRefuses`,
+`TestAFileOverTheLargestRecordIsRefusedWithoutBeingRead`), and the randomness tests
 (`TestKeyGenerationWithAnInjectedReaderIsReproducible`,
 `TestKeysSourceNeverReachesAGlobalRandomSource`). Fuzz targets for the decoders
 are in `codec_internal_test.go`.
