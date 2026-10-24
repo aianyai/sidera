@@ -22,13 +22,20 @@ const RevocationType = "sidera/trust-credential-revocation/1"
 // checked against anyone, and a third party could cut any edge whose digest
 // it had seen.
 type Revocation struct {
-	// Credential is the revoked credential's payload.
+	// Credential is the revoked credential's payload. It is the one input:
+	// encoding reads only this field.
 	Credential Credential
-	// Digest is the digest of the revoked credential, recomputed from the
+	// digest is the digest of the revoked credential, recomputed from the
 	// embedded payload. It is derived, never taken from the sender: NewRevocation
-	// and decoding set it, and encoding reads only Credential.
-	Digest trust.CredentialDigest
+	// and decoding set it, and it is unexported so that it cannot disagree with
+	// Credential. Read it with Digest.
+	digest trust.CredentialDigest
 }
+
+// Digest returns the digest of the revoked credential, the entry for
+// trust.View.RevokedCredentials. It is zero on a Revocation that was neither
+// built by NewRevocation nor produced by verification.
+func (r Revocation) Digest() trust.CredentialDigest { return r.digest }
 
 // NewRevocation builds the revocation of c.
 func NewRevocation(c Credential) (Revocation, error) {
@@ -36,7 +43,18 @@ func NewRevocation(c Credential) (Revocation, error) {
 	if err != nil {
 		return Revocation{}, err
 	}
-	return Revocation{Credential: c, Digest: trust.CredentialDigest(d)}, nil
+	return Revocation{Credential: c, digest: trust.CredentialDigest(d)}, nil
+}
+
+// IssueRevocation revokes c and signs the revocation with identity, the identity
+// key of one of c's two ends. A signer that is neither end is refused here, as
+// the verifier would refuse it.
+func IssueRevocation(c Credential, identity record.Signer) (record.Record, error) {
+	rev, err := NewRevocation(c)
+	if err != nil {
+		return record.Record{}, err
+	}
+	return record.Seal(RevocationDescriptor, rev, identity)
 }
 
 type revocationWire struct {
@@ -82,5 +100,5 @@ func revocationFromWire(w revocationWire) (Revocation, error) {
 	if err != nil {
 		return Revocation{}, fmt.Errorf("%w: %w", ErrEmbedded, err)
 	}
-	return Revocation{Credential: c, Digest: trust.CredentialDigest(record.DigestOf(Type, w.Credential))}, nil
+	return Revocation{Credential: c, digest: trust.CredentialDigest(record.DigestOf(Type, w.Credential))}, nil
 }

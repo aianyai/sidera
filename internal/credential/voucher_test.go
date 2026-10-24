@@ -57,7 +57,9 @@ func TestVoucherSignerBinding(t *testing.T) {
 	notYet := acceptedNetworkKey(t, keyA, keyNetA)
 	notYet.Cert.NotBefore = voucherNow.Add(time.Hour)
 	revoked := acceptedNetworkKey(t, keyA, keyNetA)
-	revoked.Revoked = true
+	revoked.Revocation = record.KeyRevocationRevoked
+	unchecked := acceptedNetworkKey(t, keyA, keyNetA)
+	unchecked.Revocation = record.KeyRevocationUnchecked
 	tests := []struct {
 		name     string
 		accepted record.AcceptedNetworkKey
@@ -71,6 +73,7 @@ func TestVoucherSignerBinding(t *testing.T) {
 		{"the certificate has expired", expired, keyNetA, record.BindingExpired},
 		{"the certificate is not valid yet", notYet, keyNetA, record.BindingNotYetValid},
 		{"the certificate was revoked", revoked, keyNetA, record.BindingRevoked},
+		{"the revocation records were never looked up", unchecked, keyNetA, record.BindingRevocationUnchecked},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -228,5 +231,35 @@ func TestCheckVoucher(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The issuer is read before verification, only to choose the context. It is
+// whatever the sender wrote, so a forged record yields it too.
+func TestVoucherIssuerReadsTheClaimedIssuer(t *testing.T) {
+	got, err := VoucherIssuer(mustDecode(t, goldenVoucher))
+	if err != nil || got != nodeOf(t, keyA) {
+		t.Fatalf("VoucherIssuer = %v, %v", got, err)
+	}
+	forged, err := record.Sign(VoucherType, mustDecode(t, goldenVoucher).Payload, signerOf(t, keyNetOther))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := VoucherIssuer(forged); err != nil || got != nodeOf(t, keyA) {
+		t.Errorf("a forged voucher claims %v, %v", got, err)
+	}
+	if _, err := record.Verify(VoucherDescriptor(acceptedNetworkKey(t, keyA, keyNetA), voucherNow), forged); err == nil {
+		t.Error("the forged voucher verifies")
+	}
+}
+
+func TestVoucherIssuerRefuses(t *testing.T) {
+	_, err := VoucherIssuer(mustDecode(t, goldenRevocation))
+	requireErr(t, err, record.ErrType)
+	bad := mustDecode(t, goldenVoucher)
+	bad.Payload = append([]byte{}, bad.Payload...)
+	bad.Payload[0] ^= 0xff
+	if _, err := VoucherIssuer(bad); err == nil {
+		t.Error("a payload that does not decode was read")
 	}
 }

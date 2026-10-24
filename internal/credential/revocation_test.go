@@ -20,8 +20,8 @@ func TestGoldenRevocation(t *testing.T) {
 	}
 	// The digest is recomputed from the embedded payload and equals the
 	// credential record's digest, which the independent reference computed.
-	if got := trust.CredentialDigest(mustHex(t, goldenCredentialDigest)[0:32:32]); v.Payload.Digest != got {
-		t.Errorf("revoked digest = %s, want %s", v.Payload.Digest, got)
+	if got := trust.CredentialDigest(mustHex(t, goldenCredentialDigest)[0:32:32]); v.Payload.Digest() != got {
+		t.Errorf("revoked digest = %s, want %s", v.Payload.Digest(), got)
 	}
 	if v.Signers[0] != signerOf(t, keyB).Public() {
 		t.Error("signed by an unexpected key")
@@ -61,7 +61,7 @@ func TestEitherEndMayRevoke(t *testing.T) {
 		if err != nil {
 			t.Fatalf("verify by %d: %v", signer, err)
 		}
-		digests = append(digests, v.Payload.Digest)
+		digests = append(digests, v.Payload.Digest())
 	}
 	if digests[0] != digests[1] {
 		t.Error("the revoked digest depends on who signed")
@@ -159,15 +159,15 @@ func TestRevokedDigestIsRecomputedFromThePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if [32]byte(rev.Digest) != want {
-		t.Errorf("NewRevocation digest = %s, independent = %x", rev.Digest, want)
+	if [32]byte(rev.Digest()) != want {
+		t.Errorf("NewRevocation digest = %s, independent = %x", rev.Digest(), want)
 	}
 	v, err := record.Verify(RevocationDescriptor, mustDecode(t, goldenRevocation))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if [32]byte(v.Payload.Digest) != want {
-		t.Errorf("decoded digest = %s, independent = %x", v.Payload.Digest, want)
+	if [32]byte(v.Payload.Digest()) != want {
+		t.Errorf("decoded digest = %s, independent = %x", v.Payload.Digest(), want)
 	}
 
 	c2 := c
@@ -176,7 +176,7 @@ func TestRevokedDigestIsRecomputedFromThePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rev2.Digest == rev.Digest {
+	if rev2.Digest() == rev.Digest() {
 		t.Error("two credentials that differ in the nonce share a digest")
 	}
 }
@@ -237,4 +237,23 @@ func TestExpiredCredentialCanBeRevoked(t *testing.T) {
 	if _, err := record.Verify(RevocationDescriptor, r); err != nil {
 		t.Fatalf("verify: %v", err)
 	}
+}
+
+// IssueRevocation writes the golden revocation when the second end signs, and
+// refuses a signer that is neither end as the verifier would.
+func TestIssueRevocation(t *testing.T) {
+	r, err := IssueRevocation(sampleCredential(t), signerOf(t, keyB))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := mustEncode(t, r); !bytes.Equal(got, goldenRevocation) {
+		t.Errorf("revocation differs from the vector:\n got %x\nwant %x", got, goldenRevocation)
+	}
+	if _, err := IssueRevocation(sampleCredential(t), signerOf(t, keyA)); err != nil {
+		t.Errorf("the first end may revoke too: %v", err)
+	}
+	_, err = IssueRevocation(sampleCredential(t), signerOf(t, keyOther))
+	requireErr(t, err, record.ErrSignerNotAllowed)
+	_, err = IssueRevocation(Credential{}, signerOf(t, keyA))
+	requireErr(t, err, record.ErrPayload)
 }

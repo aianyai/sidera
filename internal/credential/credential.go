@@ -138,7 +138,9 @@ var Descriptor = record.NewDescriptor(Type,
 )
 
 // Payload returns the exact payload bytes of c, the bytes both signers sign. It
-// refuses a credential that no receiver would accept.
+// is the descriptor's own conversion (credentialToWire) written canonically and
+// read back through the descriptor (record.Peek), so it refuses a credential
+// that no receiver would accept and cannot drift from what Seal writes.
 func (c Credential) Payload() ([]byte, error) {
 	w, err := credentialToWire(c)
 	if err != nil {
@@ -149,7 +151,7 @@ func (c Credential) Payload() ([]byte, error) {
 		return nil, err
 	}
 	if _, err := decodePayload(b); err != nil {
-		return nil, fmt.Errorf("%w: %w", record.ErrPayload, err)
+		return nil, err
 	}
 	return b, nil
 }
@@ -165,14 +167,14 @@ func (c Credential) Digest() (record.Digest, error) {
 	return record.DigestOf(Type, b), nil
 }
 
-// decodePayload reads credential payload bytes with the same strictness as the
-// descriptor. The revocation record uses it for the payload it embeds.
+// decodePayload reads credential payload bytes through the descriptor, the one
+// decoding path. The revocation record uses it for the payload it embeds.
 func decodePayload(b []byte) (Credential, error) {
-	var w credentialWire
-	if err := record.UnmarshalStrict(b, &w, len(b)); err != nil {
+	u, err := record.Peek(Descriptor, record.Record{Type: Type, Payload: b})
+	if err != nil {
 		return Credential{}, err
 	}
-	return credentialFromWire(w)
+	return u.Payload, nil
 }
 
 // Facts returns what package trust reads of a verified credential: the digest,

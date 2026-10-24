@@ -363,10 +363,15 @@ order, so the same facts give the same bytes.
   therefore safe: a record naming only a digest could not be checked against
   anyone, and a third party that had seen a digest could cut that edge for good.
   Exactly one signature is accepted. The type string includes the credential
-  type it embeds.
+  type it embeds. The digest is derived from the embedded payload and is
+  readable only through an accessor, so it cannot disagree with it;
+  `IssueRevocation(credential, signer)` builds and signs the revocation and
+  refuses a signer that is neither end, as the verifier would.
 - **Voucher.** It carries the issuer's node ID because the signer rule needs it:
   the network key is bound to a node through the accepted certificate
-  (`NetworkKeyOf`). It carries no validity period; the verifier computes validity
+  (`NetworkKeyOf`); `VoucherIssuer` reads that claim through `Peek` before the
+  signature is checked, only to find the certificate to verify against, and what
+  it returns is untrusted until `Verify` accepts the record. It carries no validity period; the verifier computes validity
   from `issued_at`, its clock and its grace period, so a future-dated voucher is
   `trust.Vouchers.Accept`'s to refuse. That the issuer is an end of the credential
   the digest names is checked by `CheckVoucher`, which needs the credential.
@@ -376,9 +381,15 @@ order, so the same facts give the same bytes.
   device key; whether the person is on the node's list, the level, and the
   certificate's window at the signing time are `admin`'s decisions. The claimed
   ends are compared with the credential by `trust.ApplyDirective`, not here. The
-  directive yields the `admin.Directive` (kind, node, signing time, person, cap
-  and window of the certificate, with the two revocation flags filled by the
-  caller) and the `trust.EdgeRevocationDirective`.
+  directive yields the `admin.Directive` (kind, node, signing time, person, and
+  the certificate facts) and the `trust.EdgeRevocationDirective`. The
+  certificate facts come from a `DeviceCertificateFacts` source passed to
+  `AdminDirective`, a revocation set in production: the revocation status of the
+  certificate and of the person's root key is therefore part of the call and
+  cannot be left out, a source that has not looked returns the unchecked status
+  that `admin` refuses, and a nil source panics at once. The certificate decoded
+  from the directive is derived from the embedded record and exposed through an
+  accessor for the same reason as the revocation digest.
 
 Why these shapes: a credential revocation that embeds the payload makes the
 signer check possible and the digest unforgeable by the sender; a fixed order of
@@ -388,11 +399,17 @@ the whole chain from the directive alone, and it carries the claimed ends so tha
 a directive for an edge the node is not part of is recognised without the
 credential.
 
+The payload of a credential is produced by the descriptor's own conversion and
+read back through `Peek`, so there is one validation path for a credential
+whether it is a record of its own or embedded in a revocation.
+
 Where: `internal/credential` (`credential.go`, `revocation.go`, `voucher.go`,
 `directive.go`). Tests: `golden_test.go` (vectors computed with an independent
 implementation), `credential_test.go`, `revocation_test.go`, `voucher_test.go`,
-`directive_test.go` (rules, signers, every bit protected), `e2e_test.go` (the
-records through `admin` and `trust`), `property_test.go` (payload bytes against
+`directive_test.go` (rules, signers, every bit protected, the revocation source
+with every status), `e2e_test.go` (the records through `admin` and `trust`, with a
+fake revocation source: the path through the real revocation set is tested where
+that set is available), `property_test.go` (payload bytes against
 an oracle), `fuzz_test.go`.
 
 ### Publication records

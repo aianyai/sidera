@@ -65,7 +65,8 @@ func TestDirectiveThroughAdminAndTrust(t *testing.T) {
 		ends        [2]ident.NodeID
 		signedAt    time.Time
 		now         time.Time
-		revoked     CertRevocation
+		revoked     admin.RevocationStatus
+		unchecked   bool // the revocation source answers "not looked up"
 		wantAdmin   admin.Disposition
 		wantReason  admin.Reason
 		wantTrust   trust.DirectiveDisposition // checked only when admin executes
@@ -92,9 +93,11 @@ func TestDirectiveThroughAdminAndTrust(t *testing.T) {
 		{name: "signed before the certificate starts", list: listWith(t, admin.LevelManage), cert: validCert(admin.LevelManage),
 			signedAt: t0.Add(-30 * time.Second), wantAdmin: admin.DispositionReject, wantReason: admin.ReasonCertNotYetValid},
 		{name: "certificate revoked", list: listWith(t, admin.LevelManage), cert: validCert(admin.LevelManage),
-			revoked: CertRevocation{CertRevoked: true}, wantAdmin: admin.DispositionReject, wantReason: admin.ReasonCertRevoked},
+			revoked: admin.RevocationCertRevoked, wantAdmin: admin.DispositionReject, wantReason: admin.ReasonCertRevoked},
 		{name: "root key revoked", list: listWith(t, admin.LevelManage), cert: validCert(admin.LevelManage),
-			revoked: CertRevocation{RootKeyRevoked: true}, wantAdmin: admin.DispositionReject, wantReason: admin.ReasonRootKeyRevoked},
+			revoked: admin.RevocationRootKeyRevoked, wantAdmin: admin.DispositionReject, wantReason: admin.ReasonRootKeyRevoked},
+		{name: "revocation source has not looked", list: listWith(t, admin.LevelManage), cert: validCert(admin.LevelManage),
+			unchecked: true, wantAdmin: admin.DispositionReject, wantReason: admin.ReasonRevocationUnchecked},
 		{name: "signer not on the list is only a warning", list: admin.List{}, cert: validCert(admin.LevelManage),
 			wantAdmin: admin.DispositionWarn, wantReason: admin.ReasonNotOnList},
 		{name: "addressed to another node", list: listWith(t, admin.LevelManage), cert: validCert(admin.LevelManage), node: b,
@@ -117,8 +120,12 @@ func TestDirectiveThroughAdminAndTrust(t *testing.T) {
 			if n.IsZero() {
 				n = now
 			}
+			status := tc.revoked
+			if status == admin.RevocationUnchecked && !tc.unchecked {
+				status = admin.RevocationClear
+			}
 			v := makeDirective(t, node, digest, ends[0], ends[1], at, tc.cert)
-			got := admin.AcceptDirective(a, tc.list, v.Payload.AdminDirective(tc.revoked), offlineSince, n)
+			got := admin.AcceptDirective(a, tc.list, v.Payload.AdminDirective(certFacts{status}), offlineSince, n)
 			if got.Disposition != tc.wantAdmin || got.Reason != tc.wantReason {
 				t.Fatalf("admin: %v %v, want %v %v", got.Disposition, got.Reason, tc.wantAdmin, tc.wantReason)
 			}
@@ -360,10 +367,10 @@ func TestRevocationThroughTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v.Payload.Digest != trust.CredentialDigest(cred.Digest) || v.Payload.Digest == trust.CredentialDigest(again.Digest) {
-		t.Fatalf("revoked digest %s is not the credential's %s alone", v.Payload.Digest, trust.CredentialDigest(cred.Digest))
+	if v.Payload.Digest() != trust.CredentialDigest(cred.Digest) || v.Payload.Digest() == trust.CredentialDigest(again.Digest) {
+		t.Fatalf("revoked digest %s is not the credential's %s alone", v.Payload.Digest(), trust.CredentialDigest(cred.Digest))
 	}
-	view.RevokedCredentials = trust.DigestSet{v.Payload.Digest: {}}
+	view.RevokedCredentials = trust.DigestSet{v.Payload.Digest(): {}}
 	if got := trust.Evaluate(view, x, t0); got.Outcome != trust.Denied || got.Reason != trust.ReasonCredentialRevoked {
 		t.Fatalf("after: %v %v", got.Outcome, got.Reason)
 	}

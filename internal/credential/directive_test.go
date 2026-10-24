@@ -2,6 +2,7 @@ package credential
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -67,8 +68,8 @@ func TestGoldenDirective(t *testing.T) {
 	if !bytes.Equal(mustEncode(t, d.CertificateRecord), goldenDeviceCertificate) {
 		t.Error("embedded certificate differs from the vector")
 	}
-	if d.Certificate.Digest.String() != goldenDeviceCertificateDigest {
-		t.Errorf("certificate digest = %s", d.Certificate.Digest)
+	if d.Certificate().Digest.String() != goldenDeviceCertificateDigest {
+		t.Errorf("certificate digest = %s", d.Certificate().Digest)
 	}
 	if v.Signers[0] != signerOf(t, keyDevice).Public() {
 		t.Error("signed by an unexpected key")
@@ -94,23 +95,25 @@ func TestDirectiveFacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := v.Payload
-	got := d.AdminDirective(CertRevocation{})
+	got := d.AdminDirective(clearFacts)
 	want := admin.Directive{
 		Kind:     admin.DirectiveRevokeTrustEdge,
 		Node:     nodeOf(t, keyA),
 		SignedAt: directiveSignedAt,
 		Signer:   personOf(t, keyRoot),
-		Cert:     admin.DeviceCert{MaxLevel: admin.LevelManage, NotBefore: t0, NotAfter: t0.Add(2 * time.Hour)},
+		Cert:     admin.DeviceCert{MaxLevel: admin.LevelManage, NotBefore: t0, NotAfter: t0.Add(2 * time.Hour), Revocation: admin.RevocationClear},
 	}
 	if got != want {
 		t.Errorf("admin directive = %+v\nwant           %+v", got, want)
 	}
-	rev := d.AdminDirective(CertRevocation{CertRevoked: true, RootKeyRevoked: true})
-	if !rev.Cert.CertRevoked || !rev.Cert.RootKeyRevoked || rev.Cert.MaxLevel != admin.LevelManage {
-		t.Errorf("revocation facts not applied: %+v", rev.Cert)
-	}
-	if only := d.AdminDirective(CertRevocation{RootKeyRevoked: true}); only.Cert.CertRevoked || !only.Cert.RootKeyRevoked {
-		t.Errorf("flags mixed up: %+v", only.Cert)
+	// The certificate facts are exactly what the revocation source returns, each
+	// status as it is: the directive adds nothing and drops nothing.
+	for _, status := range []admin.RevocationStatus{
+		admin.RevocationUnchecked, admin.RevocationClear, admin.RevocationCertRevoked, admin.RevocationRootKeyRevoked,
+	} {
+		if cert := d.AdminDirective(certFacts{status}).Cert; cert.Revocation != status || cert.MaxLevel != admin.LevelManage {
+			t.Errorf("status %v: cert = %+v", status, cert)
+		}
 	}
 	td := d.TrustDirective()
 	if td.Credential != d.Credential || td.A != nodeOf(t, keyB) || td.B != nodeOf(t, keyA) {
@@ -135,7 +138,7 @@ func TestDirectiveCarriesTheCertificateCap(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := v.Payload.AdminDirective(CertRevocation{}).Cert.MaxLevel; got != level {
+		if got := v.Payload.AdminDirective(clearFacts).Cert.MaxLevel; got != level {
 			t.Errorf("cap = %v, want %v", got, level)
 		}
 	}
@@ -301,7 +304,7 @@ func TestSealRefusesInvalidDirectives(t *testing.T) {
 		{"no credential", func(d *OfflineDirective) { d.Credential = trust.CredentialDigest{} }, ErrIdentifier},
 		{"no certificate", func(d *OfflineDirective) {
 			d.CertificateRecord = record.Record{}
-			d.Certificate = record.Verified[record.DeviceCertificate]{}
+			d.certificate = record.Verified[record.DeviceCertificate]{}
 		}, ErrCertificate},
 	}
 	for _, tc := range tests {
@@ -327,5 +330,63 @@ func TestNewOfflineDirectiveOrdersTheEnds(t *testing.T) {
 	}
 	if d1.A != d2.A || d1.B != d2.B || bytes.Compare(d1.A.Bytes(), d1.B.Bytes()) >= 0 {
 		t.Errorf("ends not ordered: %v %v", d1, d2)
+	}
+}
+
+// recordingFacts remembers the certificate it was asked about.
+type recordingFacts struct {
+	asked  record.Verified[record.DeviceCertificate]
+	status admin.RevocationStatus
+}
+
+func (f *recordingFacts) DeviceCertificate(v record.Verified[record.DeviceCertificate]) admin.DeviceCert {
+	f.asked = v
+	return certFacts{f.status}.DeviceCertificate(v)
+}
+
+// The revocation source is asked about the certificate the directive carries, and
+// nothing but its answer becomes the signer's certificate facts.
+func TestAdminDirectiveAsksTheSourceAboutTheAttachedCertificate(t *testing.T) {
+	d := sampleDirective(t)
+	src := &recordingFacts{status: admin.RevocationCertRevoked}
+	got := d.AdminDirective(src)
+	if src.asked.Digest != d.Certificate().Digest || src.asked.Payload != d.Certificate().Payload || src.asked.Digest.IsZero() {
+		t.Errorf("asked about %+v, want the attached certificate %+v", src.asked, d.Certificate())
+	}
+	if got.Cert.Revocation != admin.RevocationCertRevoked {
+		t.Errorf("cert = %+v", got.Cert)
+	}
+}
+
+// A directive cannot be turned into admin facts without a revocation source.
+func TestAdminDirectivePanicsWithoutARevocationSource(t *testing.T) {
+	defer func() {
+		got := recover()
+		msg, _ := got.(string)
+		if !strings.Contains(msg, "revocation source") {
+			t.Errorf("AdminDirective(nil) panicked with %v, want the revocation-source message", got)
+		}
+	}()
+	sampleDirective(t).AdminDirective(nil)
+}
+
+// A source that has not looked yields facts that admin refuses.
+func TestUncheckedRevocationIsRefusedByAdmin(t *testing.T) {
+	d := sampleDirective(t)
+	got := admin.AcceptDirective(nodeOf(t, keyA), admin.List{}, d.AdminDirective(certFacts{admin.RevocationUnchecked}), t0, directiveSignedAt.Add(time.Minute))
+	if got.Disposition != admin.DispositionReject || got.Reason != admin.ReasonRevocationUnchecked {
+		t.Errorf("got %v %v", got.Disposition, got.Reason)
+	}
+}
+
+// The derived certificate cannot disagree with the embedded record.
+func TestDirectiveCertificateIsDerivedFromTheEmbeddedRecord(t *testing.T) {
+	d := sampleDirective(t)
+	want, err := record.Verify(record.DeviceCertificateDescriptor, d.CertificateRecord)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := d.Certificate(); got.Digest != want.Digest || got.Payload != want.Payload {
+		t.Errorf("Certificate() = %+v, want %+v", got, want)
 	}
 }

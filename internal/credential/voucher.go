@@ -51,6 +51,20 @@ func VoucherDescriptor(accepted record.AcceptedNetworkKey, now time.Time) record
 	)
 }
 
+// VoucherIssuer returns the node a voucher claims to be from, read before the
+// signature is checked, only so that the verifier can look up the network-key
+// certificate it has accepted for that node and build the VoucherDescriptor.
+// The result is untrusted: anyone can write any issuer into a record. Nothing
+// may be done with it until record.Verify accepts the record under the
+// descriptor built from it.
+func VoucherIssuer(r record.Record) (ident.NodeID, error) {
+	u, err := record.Peek(VoucherDescriptor(record.AcceptedNetworkKey{}, time.Time{}), r)
+	if err != nil {
+		return ident.NodeID{}, err
+	}
+	return u.Payload.Issuer, nil
+}
+
 func voucherToWire(v Voucher) (voucherWire, error) {
 	issued, err := record.TimeToWire(v.IssuedAt)
 	if err != nil {

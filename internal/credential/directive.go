@@ -43,10 +43,18 @@ type OfflineDirective struct {
 	// embedded in the payload. It is the one input: NewOfflineDirective takes it,
 	// and encoding reads only this field.
 	CertificateRecord record.Record
-	// Certificate is the verified content of CertificateRecord. It is derived:
+	// certificate is the verified content of CertificateRecord. It is derived:
 	// NewOfflineDirective and decoding set it, and it names the one key allowed
-	// to sign the directive.
-	Certificate record.Verified[record.DeviceCertificate]
+	// to sign the directive. It is unexported so that it cannot disagree with
+	// CertificateRecord; read it with Certificate.
+	certificate record.Verified[record.DeviceCertificate]
+}
+
+// Certificate returns the verified content of the embedded device certificate.
+// It is the zero value on an OfflineDirective that was neither built by
+// NewOfflineDirective nor produced by verification.
+func (d OfflineDirective) Certificate() record.Verified[record.DeviceCertificate] {
+	return d.certificate
 }
 
 // NewOfflineDirective builds a directive for the edge x-y (either order) of the
@@ -64,7 +72,7 @@ func NewOfflineDirective(node ident.NodeID, credential trust.CredentialDigest, x
 	}
 	return OfflineDirective{
 		Node: node, Credential: credential, A: a, B: b, SignedAt: signedAt,
-		CertificateRecord: certificate, Certificate: cert,
+		CertificateRecord: certificate, certificate: cert,
 	}, nil
 }
 
@@ -90,7 +98,7 @@ var DirectiveDescriptor = record.NewDescriptor(DirectiveType,
 	directiveToWire,
 	directiveFromWire,
 	func(d OfflineDirective) []record.SignerSlot {
-		key := d.Certificate.Payload.DeviceKey
+		key := d.certificate.Payload.DeviceKey
 		return []record.SignerSlot{func(k ident.PublicKey) error {
 			if k != key {
 				return errNotTheDeviceKey
@@ -149,37 +157,38 @@ func directiveFromWire(w directiveWire) (OfflineDirective, error) {
 	}
 	return OfflineDirective{
 		Node: node, Credential: credential, A: a, B: b, SignedAt: signedAt,
-		CertificateRecord: certRecord, Certificate: cert,
+		CertificateRecord: certRecord, certificate: cert,
 	}, nil
 }
 
-// CertRevocation holds the revocation facts about the certificate attached to a
-// directive. They come from the revocation records, which this package never
-// reads. The zero value says nothing is revoked, so a caller without a
-// revocation source reports every certificate as unrevoked; a caller that has one
-// must fill both fields before the directive reaches admin.AcceptDirective.
-type CertRevocation struct {
-	// CertRevoked: the device certificate itself is revoked.
-	CertRevoked bool
-	// RootKeyRevoked: the root key of the person who issued the certificate is
-	// revoked.
-	RootKeyRevoked bool
+// DeviceCertificateFacts is the source of the revocation facts about a device
+// certificate: the revocation records, which this package never reads. It
+// returns the facts package admin reads, with Revocation set to the outcome of
+// looking up both the certificate and the person's root key. An implementation
+// that has not looked returns the zero status (admin.RevocationUnchecked), which
+// admin refuses.
+type DeviceCertificateFacts interface {
+	DeviceCertificate(record.Verified[record.DeviceCertificate]) admin.DeviceCert
 }
 
 // AdminDirective returns the facts package admin reads: the kind (fixed by the
 // record type), the addressed node, the claimed signing time, and the signer
-// with the facts of the attached certificate (its cap and window as written,
-// and the revocation flags given).
-func (d OfflineDirective) AdminDirective(revoked CertRevocation) admin.Directive {
-	cert := d.Certificate.Payload.AdminCert()
-	cert.CertRevoked = revoked.CertRevoked
-	cert.RootKeyRevoked = revoked.RootKeyRevoked
+// with the facts of the attached certificate, which facts supplies, so the
+// revocation status of the certificate cannot be left out. facts must not be
+// nil: AdminDirective panics at once on a nil source rather than report a
+// certificate nobody looked up. Whether the path through the real revocation set
+// ends in the right admin verdict is tested where the revocation set is
+// available, not in this package.
+func (d OfflineDirective) AdminDirective(facts DeviceCertificateFacts) admin.Directive {
+	if facts == nil {
+		panic("credential: AdminDirective needs a revocation source")
+	}
 	return admin.Directive{
 		Kind:     admin.DirectiveRevokeTrustEdge,
 		Node:     d.Node,
 		SignedAt: d.SignedAt,
-		Signer:   d.Certificate.Payload.Person,
-		Cert:     cert,
+		Signer:   d.certificate.Payload.Person,
+		Cert:     facts.DeviceCertificate(d.certificate),
 	}
 }
 

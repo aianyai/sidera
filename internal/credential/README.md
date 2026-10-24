@@ -16,13 +16,14 @@ first for the conventions every contract package follows, and
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
 | `Credential`, `New`, `Descriptor`, `Type`                     | The credential payload and its record type. `New(x, y, createdAt, notAfter, nonce)` puts the two nodes in the fixed order. Signed by both ends' identity keys. |
 | `Nonce`, `NewNonce(r)`, `NonceLen`                            | The 16-byte nonce, supplied by the caller or read from an injected `io.Reader`.                                  |
-| `Credential.Payload()`, `Credential.Digest()`                 | The exact payload bytes and the record digest, known to both sides before anyone signs.                         |
+| `Credential.Payload()`, `Credential.Digest()`                 | The exact payload bytes (the descriptor's own conversion, read back through `record.Peek`) and the record digest, known to both sides before anyone signs.                   |
 | `Facts(v) trust.Credential`                                   | What `trust` reads of a verified credential.                                                                     |
-| `Revocation`, `NewRevocation`, `RevocationDescriptor`         | A credential revocation: it embeds the revoked credential's payload; either end signs. `Revocation.Digest` is the entry for `trust.View.RevokedCredentials`. |
+| `Revocation`, `NewRevocation`, `IssueRevocation(c, signer)`, `RevocationDescriptor` | A credential revocation: it embeds the revoked credential's payload; either end signs. `Revocation.Digest()` is the entry for `trust.View.RevokedCredentials`. |
 | `Voucher`, `VoucherDescriptor(accepted, now)`                 | An online voucher, signed by the issuer's network key (`record.NetworkKeyOf`).                                   |
+| `VoucherIssuer(r) (ident.NodeID, error)`                      | The node a voucher claims to be from, read with `record.Peek` before verification to choose the context. Untrusted until `record.Verify` accepts the record. |
 | `CheckVoucher(v, cred) (trust.Voucher, VoucherReason)`        | The one rule `trust` leaves to its caller: the issuer is an end of the credential the voucher names. Returns what `trust.Vouchers.Accept` takes. |
 | `OfflineDirective`, `NewOfflineDirective`, `DirectiveDescriptor` | An offline directive that carries the administrator's device certificate and is signed by that device key.      |
-| `OfflineDirective.AdminDirective(CertRevocation)`, `.TrustDirective()` | The `admin.Directive` and the `trust.EdgeRevocationDirective` of a verified directive.                  |
+| `OfflineDirective.AdminDirective(DeviceCertificateFacts)`, `.TrustDirective()`, `.Certificate()` | The `admin.Directive` (certificate facts and revocation status from the given source) and the `trust.EdgeRevocationDirective` of a verified directive; the verified embedded certificate. |
 
 ## Rules
 
@@ -67,13 +68,17 @@ first for the conventions every contract package follows, and
   already verified. The caller keeps the voucher only if the answer is
   `VoucherOK`, and then passes it to `trust.Vouchers.Accept` at the time of
   receipt.
-- `AdminDirective` leaves the two revocation flags to the caller: they come from
-  the revocation records (`CertRevocation`), which this package never reads. The
-  zero value says nothing is revoked, so a caller with a revocation source fills
-  both fields before the directive reaches `admin.AcceptDirective`.
-- A verifier of a voucher builds `VoucherDescriptor` from the network-key
-  certificate it accepted for the issuer and its revocation flag
-  (`record.AcceptedNetworkKey`).
+- `AdminDirective` takes the revocation source as an argument
+  (`DeviceCertificateFacts`, implemented by the revocation set): it returns the
+  `admin.DeviceCert` of the attached certificate with `Revocation` set to the
+  outcome of looking up both the certificate and the person's root key. A source
+  that has not looked returns the zero status, which `admin` refuses. A nil source
+  panics. Tests here use a fake source that returns each status explicitly; the
+  path through the real revocation set is tested at integration.
+- A verifier of a voucher reads the claimed issuer with `VoucherIssuer`, looks up
+  the network-key certificate it accepted for that node and the result of its
+  revocation lookup (`record.AcceptedNetworkKey`, status stated), and builds
+  `VoucherDescriptor` from them. The peeked issuer is untrusted.
 - Times in the payloads have the precision of the wire: whole seconds.
 
 ## Dependencies

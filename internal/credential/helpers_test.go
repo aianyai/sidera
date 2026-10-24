@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/trust"
@@ -196,8 +197,22 @@ func acceptedNetworkKey(t testing.TB, node, netSeed int) record.AcceptedNetworkK
 		Serial:     1,
 		NotBefore:  t0,
 		NotAfter:   t0.Add(30 * 24 * time.Hour),
-	}}
+	}, Revocation: record.KeyRevocationClear}
 }
+
+// certFacts is a revocation source for the directive tests: it answers for every
+// certificate with the status it was given, on top of the facts the certificate
+// itself carries. The path through the real revocation records is tested where
+// they are available.
+type certFacts struct{ status admin.RevocationStatus }
+
+func (f certFacts) DeviceCertificate(v record.Verified[record.DeviceCertificate]) admin.DeviceCert {
+	c := v.Payload.AdminCert()
+	c.Revocation = f.status
+	return c
+}
+
+var clearFacts = certFacts{admin.RevocationClear}
 
 // requireErr fails unless err wraps every one of want.
 func requireErr(t *testing.T, err error, want ...error) {
