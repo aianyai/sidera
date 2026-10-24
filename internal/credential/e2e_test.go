@@ -1,6 +1,7 @@
 package credential
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -212,11 +213,6 @@ func TestOfflineDirectiveThroughTheRevocationSet(t *testing.T) {
 			r, err := revocation.IssueDeviceKeyRevocation(signerOf(t, keyOtherRoot), device)
 			return setOf(t, issue(t, r, err))
 		}, admin.DispositionExecute, admin.ReasonOK},
-		// A nil set answers every query as an empty set does, with a checked
-		// status, so a caller that holds no revocations is not refused as
-		// "revocation unchecked".
-		{"a nil set is an empty checked set and executes", func(*testing.T) *revocation.Set { return nil },
-			admin.DispositionExecute, admin.ReasonOK},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -243,6 +239,24 @@ func TestOfflineDirectiveThroughTheRevocationSet(t *testing.T) {
 				t.Fatalf("after: %v %v", out.Outcome, out.Reason)
 			}
 		})
+	}
+}
+
+// A nil set is a set nobody loaded, not an empty checked one: asking it panics
+// instead of reporting the certificate clear.
+func TestOfflineDirectiveFromANilRevocationSetPanics(t *testing.T) {
+	a, b := nodeOf(t, keyA), nodeOf(t, keyB)
+	cert := deviceCertRecord(t, keyRoot, keyDevice, admin.LevelManage, t0, t0.Add(2*time.Hour))
+	digest := trust.CredentialDigest(verifiedCredential(t, sampleCredential(t)).Digest())
+	v := makeDirective(t, a, digest, a, b, t0.Add(time.Second), cert)
+	var msg string
+	func() {
+		defer func() { msg, _ = recover().(string) }()
+		var set *revocation.Set
+		v.Payload().AdminDirective(set)
+	}()
+	if !strings.Contains(msg, "revocation set not loaded") {
+		t.Fatalf("panic = %q, want the not-loaded message", msg)
 	}
 }
 

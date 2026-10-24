@@ -73,8 +73,8 @@ first for the conventions every contract package follows, and
   `admin.DeviceCert` of the attached certificate with `Revocation` set to the
   outcome of looking up both the certificate and the person's root key. A source
   that has not looked returns the zero status, which `admin` refuses. A nil
-  interface panics; a nil `*revocation.Set` is not one, and answers like an empty
-  set with a checked status (clear). Most tests here use a fake source that
+  interface panics, and so does a nil `*revocation.Set`, which is a set nobody
+  loaded (an empty set that was checked is `revocation.NewSet()`). Most tests here use a fake source that
   returns each status explicitly; `TestOfflineDirectiveThroughTheRevocationSet`
   runs a directive through the real revocation set.
 - A verifier of a voucher reads the claimed issuer with `VoucherIssuer`, looks up

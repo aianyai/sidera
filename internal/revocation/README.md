@@ -110,10 +110,16 @@ of it.
   it when one has been passed on.
 - A `Set` is not safe for concurrent use: `Add` writes the maps the queries
   read, so a caller that shares one between goroutines serializes the calls.
-- A `nil` `*Set` and an empty one revoke nothing: both report everything as
-  clear (a checked status, not "unchecked"), so every caller loads the set
-  before it judges. Other cross-package zero values: `Retired()` is a non-nil
-  empty `trust.NodeSet` for no retired node, which `trust` reads as "nobody retired";
+- A `nil` `*Set` is a set that was never loaded, and every query and `Add` panics
+  on it with "revocation set not loaded": answering "nothing is revoked" for a
+  set nobody loaded would be the fail-open path the three-valued status exists to
+  close, and a forgotten field would never be noticed. A set that has really been
+  checked and holds no revocation is `NewSet()`, whose queries report everything
+  as clear (a checked status, not "unchecked"), so every caller loads the set
+  before it judges. A caller that holds a `*Set` field initialises it with
+  `NewSet()` or loads it before the first query.
+- Other cross-package zero values: `Retired()` is a non-nil empty
+  `trust.NodeSet` for no retired node, which `trust` reads as "nobody retired";
   `DeviceCertificate` of a zero `Verified` gives `LevelNone` and a zero
   `NotAfter`, which `admin` reads as "grants nothing" and "expired";
   `NetworkKey` always returns a non-nil certificate and

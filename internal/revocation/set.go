@@ -1,8 +1,6 @@
 package revocation
 
 import (
-	"fmt"
-
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
@@ -14,9 +12,12 @@ import (
 // permanent: nothing is ever removed, and adding the same fact twice changes
 // nothing, so the answers do not depend on the order revocations arrived in.
 //
-// Every query is on *Set; a nil *Set is the empty set, which revokes nothing: the
-// two certificate queries answer "looked up, clear" for it, never "unchecked".
-// Add on a nil Set fails.
+// A nil *Set is a set that was never loaded, not an empty one: every query and
+// Add panics on it with a message naming the cause. Answering "nothing is
+// revoked" for a set nobody loaded would be the fail-open path the three-valued
+// revocation status exists to close, and a caller that forgot to initialise its
+// set would never notice. The set of a node that has really checked and holds no
+// revocation is NewSet(), which answers "clear".
 //
 // A Set is not safe for concurrent use: Add writes and the queries read the same
 // maps, so a caller that shares one between goroutines serializes the calls.
@@ -42,7 +43,19 @@ type deviceKey struct {
 	key    ident.PublicKey
 }
 
-// NewSet returns an empty set.
+// notLoaded is the panic value of every method called on a nil *Set.
+const notLoaded = "revocation: revocation set not loaded"
+
+// mustBeLoaded panics on a nil Set. Every exported method calls it first, so no
+// answer is ever given on behalf of a set that was never loaded.
+func (s *Set) mustBeLoaded() {
+	if s == nil {
+		panic(notLoaded)
+	}
+}
+
+// NewSet returns an empty set that has been checked: it revokes nothing and its
+// queries say so.
 func NewSet() *Set {
 	return &Set{
 		nodes:   map[ident.NodeID]struct{}{},
@@ -53,12 +66,10 @@ func NewSet() *Set {
 }
 
 // Add keeps r. The caller decides what to keep (see Classify); a revocation
-// that is not added has no effect on any answer. It fails on a nil Set and on an
-// invalid Revocation.
+// that is not added has no effect on any answer. It fails on an invalid
+// Revocation and panics on a nil Set.
 func (s *Set) Add(r Revocation) error {
-	if s == nil {
-		return fmt.Errorf("%w: nil set", ErrInvalidRevocation)
-	}
+	s.mustBeLoaded()
 	if err := r.check(); err != nil {
 		return err
 	}
@@ -77,9 +88,7 @@ func (s *Set) Add(r Revocation) error {
 
 // NodeRetired reports whether n has a verified self-revocation.
 func (s *Set) NodeRetired(n ident.NodeID) bool {
-	if s == nil {
-		return false
-	}
+	s.mustBeLoaded()
 	_, ok := s.nodes[n]
 	return ok
 }
@@ -87,9 +96,7 @@ func (s *Set) NodeRetired(n ident.NodeID) bool {
 // PersonRevoked reports whether p has a verified self-revocation: the root key
 // is void, and so is every certificate it signed.
 func (s *Set) PersonRevoked(p ident.PersonID) bool {
-	if s == nil {
-		return false
-	}
+	s.mustBeLoaded()
 	_, ok := s.persons[p]
 	return ok
 }
@@ -98,10 +105,8 @@ func (s *Set) PersonRevoked(p ident.PersonID) bool {
 // trust.View.Retired takes. The result is a copy; an empty set gives an empty
 // map, which retires nobody.
 func (s *Set) Retired() trust.NodeSet {
+	s.mustBeLoaded()
 	out := trust.NodeSet{}
-	if s == nil {
-		return out
-	}
 	for n := range s.nodes {
 		out[n] = struct{}{}
 	}
@@ -129,6 +134,7 @@ func (s *Set) Retired() trust.NodeSet {
 // verified against record.DeviceCertificateDescriptor; a zero Verified yields a
 // certificate that grants nothing.
 func (s *Set) DeviceCertificate(cert record.Verified[record.DeviceCertificate]) admin.DeviceCert {
+	s.mustBeLoaded()
 	c := cert.Payload()
 	out := c.AdminCert()
 	switch {
@@ -150,13 +156,11 @@ func (s *Set) DeviceCertificate(cert record.Verified[record.DeviceCertificate]) 
 // certificate; cert must have been verified against
 // record.DeviceCertificateDescriptor.
 func (s *Set) RemotePerson(cert record.Verified[record.DeviceCertificate]) admin.Actor {
+	s.mustBeLoaded()
 	return admin.RemotePerson(cert.Payload().Person, s.DeviceCertificate(cert))
 }
 
 func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
-	if s == nil {
-		return false
-	}
 	_, ok := s.devices[deviceKey{p, k}]
 	return ok
 }
@@ -179,6 +183,7 @@ func (s *Set) deviceRevoked(p ident.PersonID, k ident.PublicKey) bool {
 // record.SerialSeen). cert must have been verified against
 // record.NetworkKeyCertificateDescriptor.
 func (s *Set) NetworkKey(cert record.Verified[record.NetworkKeyCertificate]) record.AcceptedNetworkKey {
+	s.mustBeLoaded()
 	c := cert.Payload()
 	status := record.KeyRevocationClear
 	if s.certificateRevoked(c.Node, c.Serial, cert.Digest()) {
@@ -188,9 +193,6 @@ func (s *Set) NetworkKey(cert record.Verified[record.NetworkKeyCertificate]) rec
 }
 
 func (s *Set) certificateRevoked(node ident.NodeID, serial uint64, digest record.Digest) bool {
-	if s == nil {
-		return false
-	}
 	if _, ok := s.nodes[node]; ok {
 		return true
 	}

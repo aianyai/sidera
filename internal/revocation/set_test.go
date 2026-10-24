@@ -3,6 +3,7 @@ package revocation
 import (
 	"errors"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,7 +62,6 @@ func TestDeviceCertificateStanding(t *testing.T) {
 		cert record.Verified[record.DeviceCertificate]
 		want admin.RevocationStatus
 	}{
-		{"a nil set revokes nothing and has looked", nil, certP, admin.RevocationClear},
 		{"an empty set revokes nothing and has looked", NewSet(), certP, admin.RevocationClear},
 		{"the person's revocation of the device key revokes the certificate", addAll(t, pRevokesD), certP, admin.RevocationCertRevoked},
 		{"the person's self-revocation revokes the root key", addAll(t, pSelf), certP, admin.RevocationRootKeyRevoked},
@@ -176,11 +176,9 @@ func TestRetired(t *testing.T) {
 			t.Fatalf("got %v", s.Retired())
 		}
 	})
-	t.Run("an empty or nil set gives an empty non-nil set that retires nobody", func(t *testing.T) {
-		for _, s := range []*Set{nil, NewSet()} {
-			if got := s.Retired(); got == nil || len(got) != 0 {
-				t.Fatalf("got %#v", got)
-			}
+	t.Run("an empty set gives an empty non-nil set that retires nobody", func(t *testing.T) {
+		if got := NewSet().Retired(); got == nil || len(got) != 0 {
+			t.Fatalf("got %#v", got)
 		}
 	})
 	t.Run("the result is a copy", func(t *testing.T) {
@@ -196,10 +194,6 @@ func TestRetired(t *testing.T) {
 		p3 := personOf(t, rfcSigner(t, 3))
 		if addAll(t, certRev, devRev).PersonRevoked(p3) || !addAll(t, personSelf).PersonRevoked(p3) {
 			t.Fatal("wrong person standing")
-		}
-		var nilSet *Set
-		if nilSet.PersonRevoked(p3) {
-			t.Fatal("nil set revokes a person")
 		}
 	})
 	t.Run("the retired set is the form trust takes", func(t *testing.T) {
@@ -225,7 +219,6 @@ func TestNetworkKeyRevoked(t *testing.T) {
 		cert record.Verified[record.NetworkKeyCertificate]
 		want record.KeyRevocationStatus
 	}{
-		{"a nil set revokes nothing and has looked", nil, cert1, record.KeyRevocationClear},
 		{"an empty set revokes nothing and has looked", NewSet(), cert1, record.KeyRevocationClear},
 		{"the revocation names this certificate", addAll(t, rev1), cert1, record.KeyRevocationRevoked},
 		{"the revocation of serial 1 does not revoke serial 2", addAll(t, rev1), cert2, record.KeyRevocationClear},
@@ -253,10 +246,6 @@ func TestNetworkKeyRevoked(t *testing.T) {
 func TestSetAdd(t *testing.T) {
 	k1 := rfcSigner(t, 1)
 	rev := mustRevocation(t, must(IssueNodeSelfRevocation(k1)), nil)
-	var nilSet *Set
-	if err := nilSet.Add(rev); !errors.Is(err, ErrInvalidRevocation) {
-		t.Fatalf("nil set: %v", err)
-	}
 	s := NewSet()
 	for i := 0; i < 3; i++ {
 		if err := s.Add(rev); err != nil {
@@ -321,7 +310,7 @@ func TestRemotePerson(t *testing.T) {
 		wantStatus admin.RevocationStatus
 		wantLevel  admin.Level
 	}{
-		{"a nil set gives a checked, clear actor", nil, certP, personOf(t, p), admin.RevocationClear, admin.LevelFullControl},
+		{"an empty set gives a checked, clear actor", NewSet(), certP, personOf(t, p), admin.RevocationClear, admin.LevelFullControl},
 		{"the person is the certificate's person", NewSet(), certQ, personOf(t, q), admin.RevocationClear, admin.LevelFullControl},
 		{"the device revocation of the certificate's person reaches the actor", addAll(t, must(IssueDeviceKeyRevocation(p, d.Public()))), certP, personOf(t, p), admin.RevocationCertRevoked, admin.LevelNone},
 		{"the root revocation of the certificate's person reaches the actor", addAll(t, must(IssuePersonSelfRevocation(p))), certP, personOf(t, p), admin.RevocationRootKeyRevoked, admin.LevelNone},
@@ -339,6 +328,43 @@ func TestRemotePerson(t *testing.T) {
 			if got := admin.EffectiveLevel(list, actor.Person, actor.Cert, now).Level; got != row.wantLevel {
 				t.Fatalf("effective level %v, want %v", got, row.wantLevel)
 			}
+		})
+	}
+}
+
+// Rule: a nil *Set is a set that was never loaded, and every method panics on it
+// rather than answer "nothing is revoked" for a set nobody checked.
+func TestNilSetPanics(t *testing.T) {
+	p, d := rfcSigner(t, 1), rfcSigner(t, 2)
+	node := rfcSigner(t, 3)
+	cert := deviceCertificate(t, p, d, admin.LevelManage)
+	netKey := seedSigner(t, 5)
+	_, netCert := networkCertificate(t, node, netKey, 1, epoch, endTime)
+	rev := mustRevocation(t, must(IssueNodeSelfRevocation(node)), nil)
+
+	var nilSet *Set
+	rows := []struct {
+		rule string
+		call func()
+	}{
+		{"Add on a nil set panics", func() { _ = nilSet.Add(rev) }},
+		{"NodeRetired on a nil set panics", func() { nilSet.NodeRetired(rev.node) }},
+		{"PersonRevoked on a nil set panics", func() { nilSet.PersonRevoked(personOf(t, p)) }},
+		{"Retired on a nil set panics", func() { nilSet.Retired() }},
+		{"DeviceCertificate on a nil set panics", func() { nilSet.DeviceCertificate(cert) }},
+		{"RemotePerson on a nil set panics", func() { nilSet.RemotePerson(cert) }},
+		{"NetworkKey on a nil set panics", func() { nilSet.NetworkKey(netCert) }},
+	}
+	for _, row := range rows {
+		t.Run(row.rule, func(t *testing.T) {
+			defer func() {
+				got, _ := recover().(string)
+				if !strings.Contains(got, "revocation set not loaded") {
+					t.Fatalf("panic = %q, want the not-loaded message", got)
+				}
+			}()
+			row.call()
+			t.Fatal("returned an answer for a set that was never loaded")
 		})
 	}
 }

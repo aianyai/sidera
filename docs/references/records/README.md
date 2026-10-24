@@ -259,8 +259,10 @@ keeps a revocation.
   The two certificate queries never return the unchecked status, which `admin`
   and `record.NetworkKeyBelongs` refuse; this package is the one place that turns
   the revocation set into those statuses. None of them reads a clock or touches
-  `SerialSeen`, so a revocation never lowers the highest serial seen. A `Set` is
-  not safe for concurrent use.
+  `SerialSeen`, so a revocation never lowers the highest serial seen. A nil
+  `*Set` is a set that was never loaded, and every query and `Add` panics on it;
+  an empty set that has really been checked is `NewSet()` and answers "clear". A
+  `Set` is not safe for concurrent use.
 - **Retention.** `Classify` returns long-term for person self-revocations and
   device key revocations, and for node-level revocations (self-revocations and
   certificate revocations) of the local node, of a node in the local trust graph,
@@ -298,7 +300,10 @@ Why these shapes:
   is revoked, so an absent one would be a second way to write a weaker statement.
 - A status of three values with a zero "unchecked" keeps a caller that forgot the
   lookup from presenting a revoked key as clear; the set answers "clear" for
-  itself, empty or nil, because it did look. `RemotePerson` exists so the person
+  itself when it is empty, because it did look. A nil set did not look: it is an
+  uninitialised field, and answering "clear" for it would be the same
+  fail-open path through the set itself, so every method on it panics, the way
+  `AdminDirective` panics on a nil source. `RemotePerson` exists so the person
   and the certificate facts cannot come from different certificates.
 - Retention is asymmetric. Person and device revocations are few and a node
   cannot tell which concern its peers (the authorized list is local), so all are
