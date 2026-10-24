@@ -8,7 +8,8 @@ follows, and
 [../../docs/references/envelope/README.md](../../docs/references/envelope/README.md)
 for the formats and the reasons behind them. Signed records are built on
 [`record`](../record/README.md); rules about deliveries come from
-[`delivery`](../delivery/README.md).
+[`delivery`](../delivery/README.md); the reply-permission decision that uses
+this package is [`reply`](../reply/README.md).
 
 ## Entry points
 
@@ -56,7 +57,7 @@ Errors wrap the sentinels in `errors.go`; match them with `errors.Is`.
   them; the preset follows `adapterproto.ValidatePresetName`.
 - **Evidence.** At most two records: a control reply, then a status report. An
   envelope with evidence has a `reply_to`. Signatures are not checked in the
-  envelope: the verifier names the node and checks them against its own records.
+  envelope; `reply` checks them against the sender's own records.
 - **One mapping from kind to action.** `Kind.Action()`; no caller maps kinds
   itself.
 - **Status report and control reply** are signed by the target node's network

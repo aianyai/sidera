@@ -1,11 +1,13 @@
-# Envelope and evidence
+# Envelope, evidence and reply permission
 
 The message envelope that carries one message or control signal from a sender's
 node to a target node; the two signed records a target node issues about a
 delivery (the status report and the control reply); the single rule by which a
-sender's node takes a control reply in. This document describes the committed
-code of `internal/envelope`. The record format they build on is in
-[records](../records/README.md), and the delivery states in [delivery](../delivery/README.md).
+sender's node takes a control reply in; and the decision whether a reply is
+allowed back in. This document describes the committed code of
+`internal/envelope` and `internal/reply`. The record format they build on is in
+[records](../records/README.md), the delivery states in [delivery](../delivery/README.md),
+and the access policy that reads the reply fact in [policy](../policy/README.md).
 
 ## What
 
@@ -128,6 +130,25 @@ same state in either order. If the control signal had been judged
 `expired_unconfirmed`, the reply corrects it (one correction notice) and the
 session is still bound.
 
+### Reply permission
+
+`reply.Admit` decides whether a message that says it answers one of this node's
+own is allowed back in, and its verdict is `authz.Request.Reply`.
+
+- The replier is an original recipient of the message, or the session endpoint
+  bound by a verified control reply of a `session.create` with a non-empty body.
+- The reply is addressed to the endpoint that sent the message, and `reply_to`
+  matches the node's own record of it.
+- Evidence is read only if the replier's node is a recipient's node. It must be
+  signed by that node's network key, name the message, and a report must be about
+  the replier's own delivery. It is applied (control reply first) before the
+  replier is looked up. Evidence that fails refuses the reply.
+- The window is 24 hours from the delivery time the target reported; otherwise
+  from the earliest signed report that proves arrival; otherwise there is no
+  permission. A control reply never starts the window. The window ends at the
+  instant start plus 24 hours.
+- The owner can turn it off; the zero request is off.
+
 ## Why
 
 - **Unsigned envelope.** The sender is known from the connection and the sending
@@ -164,8 +185,25 @@ session is still bound.
   endpoint of node Y must not change Y's delivery; checking that at every call
   site is a rule enforced many times. The verified value carries the node and the
   one rule checks it.
+- **Evidence is checked, not skipped.** A reply with evidence that does not
+  verify is refused even if the node already knows enough to admit it. The
+  sender of evidence is the node's own automation, so a failure means a
+  malfunctioning or hostile peer, and silence would hide it.
+- **Window start.** Many replies come within the turn in which the agent read
+  the message, before the message is acknowledged, so the delivery time does not
+  exist yet; the report that proves arrival is the next best fact and is signed.
+  The earliest such report is kept so that re-issued reports cannot extend a
+  window. With nothing, there is no permission: failing closed. A report of
+  rejection or a closed delivery does not prove that the agent could have seen
+  the message.
+- **Third parties.** A reply from a node that is not a recipient's is refused
+  before its evidence is read, and from another endpoint of a recipient's node it
+  is refused because it is neither a recipient nor a bound session. The evidence
+  of the real target replayed by a stranger is true and harmless to apply, and
+  gives the stranger nothing.
 - **Parameters without defaults.** The longest body and the most recipients are
-  not decided, so a zero `Limits` is refused rather than read as no limit.
+  not decided. The reply switch's zero value is off, as every security-relevant
+  zero is.
 
 ## Where
 
@@ -176,6 +214,7 @@ session is still bound.
   records, their descriptors and the verified values.
 - `internal/envelope/outbound.go`: `Outbound`, `Tracked`, `Arrival`,
   `ApplyReport`; `handle.go`: `HandleControlReply`.
+- `internal/reply/reply.go`: `Admit`.
 - Tests: `internal/envelope/golden_vectors_test.go` (bytes written out with CBOR
   diagnostic notation; node identifiers, digests and signatures computed by an
   independent script) with `golden_test.go`; `envelope_test.go`
@@ -184,4 +223,13 @@ session is still bound.
   `TestRetryAndDeduplication`); `records_test.go` (`TestStatusReportRules`,
   `TestControlReplyRules`, `TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey`);
   `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`); `fuzz_test.go`.
-- `internal/envelope/README.md`: entry points and what callers must guarantee.
+  `internal/reply/reply_test.go` holds the named acceptance scenarios
+  (`TestAfterInboundTighteningAReplyAndASessionCreateReplyStillGetBack`,
+  `TestTheSourceBehindNATAcceptsAReplyCarryingEvidence`,
+  `TestAReplyFromTheNewSessionArrivingBeforeTheControlReplyIsAccepted`,
+  `TestAForgedReplyToFromAThirdPartyIsRefused`), `TestWindow`,
+  `TestEvidenceThatIsNotSignedByTheTargetNodeAboutThisMessageIsRefused`, and
+  `property_test.go` compares random orders of replies, evidence and pulled
+  reports with an oracle written separately.
+- `internal/envelope/README.md`, `internal/reply/README.md`: entry points and
+  what callers must guarantee.

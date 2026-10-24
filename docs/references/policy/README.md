@@ -72,7 +72,7 @@ question, answered by containment: cap a is within cap b when
 `a.Count * ceil(b.Window / a.Window) <= b.Count`. Body size caps are decided here
 from the request's size.
 
-**Reply permission.** The caller verifies the reply evidence and passes the fact.
+**Reply permission.** The caller verifies the reply evidence and passes the fact (`reply.Admit`, see [envelope](../envelope/README.md)).
 For `message.send` it stands in for a missing allow rule and lifts both a
 restriction and an accept-only-from list. It never overrides an explicit deny, a
 paused endpoint at intake, a multi-recipient refusal or connection trust. It
