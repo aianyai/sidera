@@ -474,13 +474,21 @@ identity key.
   refuses, and every verifier must reach the same verdict. The expiry is the one
   time window judged by this package: expired at `expires_at` and after, without
   tolerance.
-- **Highest counter.** Both records carry a monotonic counter from 1 and a peer
-  keeps only the highest. The decision is accept for a higher counter, stale for
-  a lower one or the very record seen, conflict for the same counter with another
-  digest (two records signed under one counter: a copied key or a restored copy),
-  and wrong node for a state of another node. The state (counter and digest) is
-  kept apart from the record kept, so an expired or dropped record's counter
-  still stands. For the reachability record the counter decides first and expiry
+- **Highest counter, per certificate serial.** Both records carry a monotonic
+  counter from 1 and a peer keeps only the highest, compared as (serial of the
+  network-key certificate the record was verified under, counter), serial first.
+  The decision is accept for a higher serial whatever the counter, or the same
+  serial and a higher counter; stale for a lower serial, a lower counter within
+  the serial, or the very record seen; conflict for the same serial and counter
+  with another digest (two records signed under one counter: a copied key or a
+  restored copy); and wrong node for a state of another node. The serial is not
+  on the wire: a declaration's comes from the accepted certificate it was
+  verified under (the caller passes it), a reachability record's from the
+  certificate it embeds, under which it is verified. Without it a network key
+  that leaked before a rotation could sign counter `MaxUint64` and freeze the
+  node's real records forever, since a counter is only ever raised. The state
+  (serial, counter and digest) is kept apart from the record kept, so an expired
+  or dropped record's counter still stands. For the reachability record the counter decides first and expiry
   second: a record the counter would accept but that has expired is refused as
   expired and does not move the state. The serial rule of the certificate
   (`DecideSerial`) does advance on an expired higher certificate; the two differ
@@ -510,8 +518,9 @@ Where: `internal/publication` (`declaration.go`, `reachability.go`, `proof.go`,
 `decide.go`). Tests: `golden_test.go` (vectors computed with an independent
 implementation), `declaration_test.go` (rules, protocol limits, signer binding),
 `reachability_test.go`, `proof_test.go` (through `admin`), `decide_test.go`
-(decisions against an oracle under random arrival orders; a declaration through
-`trust`), `fuzz_test.go` (every bit protected, every decoder).
+(`TestDecideDeclaration` and `TestDecideReachability` with the leaked-key rows;
+decisions against an oracle under random arrival orders and certificate
+serials; a declaration through `trust`), `fuzz_test.go` (every bit protected, every decoder).
 
 ### Delivery records
 

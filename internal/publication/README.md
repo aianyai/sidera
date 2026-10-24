@@ -17,7 +17,7 @@ package follows, and
 | `Declaration`, `EndpointDeclaration`, `Reception`, `DeclarationDescriptor(accepted, now)` | The declaration payload and its record type, signed by the node's network key.                        |
 | `DeclarationNode(r) (ident.NodeID, error)`                           | The node a declaration claims to be about, read with `record.Peek` before verification to choose the context. Untrusted until `record.Verify` accepts the record. |
 | `Declaration.DeclaredInheritance()`                                  | The entry of `trust.View.DeclaredAcceptsInheritance` this declaration stands for.                                   |
-| `DeclarationSeen`, `DeclarationSeenOf(v)`, `DecideDeclaration(seen, v)` | The highest declaration counter seen for a node, and the accept / stale / conflict decision for a new one.        |
+| `DeclarationSeen`, `DeclarationSeenOf(v, certSerial)`, `DecideDeclaration(seen, v, certSerial)` | The highest (certificate serial, counter) declaration seen for a node, and the accept / stale / conflict decision for a new one. |
 | `ReachabilityRecord`, `NewReachabilityRecord`, `ReachabilityDescriptor(accepted, now)` | The reachability record: addresses, reserved relays, the embedded network-key certificate, counter, expiry. |
 | `EmbeddedNetworkKeyCertificate(r)`, `ReachabilityRecord.Certificate()` | Reads the embedded certificate of a record whose own signature has not been checked yet (through `record.Peek`; untrusted); the accessor of the derived certificate. |
 | `ReachabilityRecord.ExpiredAt(now)`, `ReachabilitySeen`, `ReachabilitySeenOf(v)`, `DecideReachability(seen, v, now)` | Expiry, and the decision for a reachability record: accept, stale, conflict or expired. |
@@ -58,10 +58,18 @@ package follows, and
   bytes and is for people only. Reception preferences are four flags per
   endpoint; the list of accepted senders stays on the node. The inheritance and
   relay switches are always written, never implied by absence.
-- **Highest counter.** `DecideDeclaration` and `DecideReachability` compare an
-  incoming verified record with the highest counter seen for its node. A higher
-  counter is `VerdictAccept`; a lower counter, or the very record already seen,
-  is `VerdictStale`; the same counter with another digest is `VerdictConflict`
+- **Highest counter, per certificate serial.** `DecideDeclaration` and
+  `DecideReachability` compare an incoming verified record with the highest
+  (certificate serial, counter) seen for its node, serial first: the serial is
+  that of the network-key certificate the record was verified under, so a record
+  under a higher serial supersedes whatever its counter (a key that leaked before
+  a rotation cannot freeze the node's records by signing a huge counter). A
+  declaration does not carry its serial: the caller passes the serial of the
+  accepted certificate it verified the declaration under, to `DecideDeclaration`
+  and `DeclarationSeenOf`; a reachability record's is the embedded certificate's.
+  A higher (serial, counter) is `VerdictAccept`; a lower one, or the very record
+  already seen, is `VerdictStale`; the same serial and counter with another digest
+  is `VerdictConflict`
   (the network key signed two records under one counter: a copied key or a node
   restored from an old copy); a record of another node than the state is
   `VerdictWrongNode`; a record without a node, counter or digest is
@@ -92,8 +100,9 @@ package follows, and
 ## What the caller must guarantee
 
 - The caller moves the state forward with `DeclarationSeenOf` or
-  `ReachabilitySeenOf` whenever a decision answers `VerdictAccept`, and keeps one
-  state per node and per kind of record. It keeps the accepted record apart from
+  `ReachabilitySeenOf` (with the certificate serial for a declaration) whenever a
+  decision answers `VerdictAccept`, and keeps one state per node and per kind of
+  record. It keeps the accepted record apart from
   the state.
 - Every verifier of a reachability record first reads the embedded certificate
   with `EmbeddedNetworkKeyCertificate` (through `record.Peek`), runs it through
