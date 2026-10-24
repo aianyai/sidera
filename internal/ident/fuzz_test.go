@@ -8,7 +8,7 @@ import (
 // Whatever parses must print back to the identical text, and a parser never
 // panics.
 func FuzzParseID(f *testing.F) {
-	for _, s := range []string{vecNode, vecPerson, vecEndpoint, vecNodeZero, vecNodeBech32, vecNodePadBits, vecPersonOverNodeBytes, "", "node1", "A1LQFN3A"} {
+	for _, s := range []string{vecNode, vecPerson, vecEndpoint, vecEndpointSystem, vecNodeZero, vecNodeBech32, vecNodePadBits, vecPersonOverNodeBytes, "", "node1", "A1LQFN3A"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
@@ -26,6 +26,7 @@ func FuzzParseID(f *testing.F) {
 
 func FuzzParseAddress(f *testing.F) {
 	f.Add(vecNode + "/" + vecEndpoint)
+	f.Add(vecNode + "/" + vecEndpointSystem)
 	f.Add("/")
 	f.Add(vecNode + "/" + vecEndpoint + "/")
 	f.Fuzz(func(t *testing.T, s string) {

@@ -111,6 +111,11 @@ const (
 	vecPersonZero   = "person1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqh4l2zv"
 	vecEndpointZero = "ep1qqqqqqqqqqqqqqqqqqqqqqqqqq2uzx7q"
 
+	// Sixteen 0xff bytes: 128 bits make 25 full groups of five set bits ("l")
+	// and a last group of three set bits and two padding zeros ("u"). Computed
+	// with an independent bech32m implementation written from BIP 350.
+	vecEndpointSystem = "ep1lllllllllllllllllllllllllusa628q"
+
 	// Same bytes as vecNode, with the older bech32 checksum constant.
 	vecNodeBech32 = "node130llww2yztfmjn2fsslfx45qzye83306u3q7nzfs300qvxly7wpqav6pqt"
 	// Same bytes as vecNode, last data character carries a set padding bit and
@@ -414,6 +419,121 @@ func TestComparableAndMapKey(t *testing.T) {
 		}
 		if _, ok := m[Address{b, e1}]; ok {
 			t.Fatal("lookup by different address succeeded")
+		}
+	})
+}
+
+func systemBytes() []byte { return bytes.Repeat([]byte{0xff}, EndpointIDLen) }
+
+func TestSystemEndpointValue(t *testing.T) {
+	sys := SystemEndpoint()
+	if got := hex.EncodeToString(sys.Bytes()); got != "ffffffffffffffffffffffffffffffff" {
+		t.Fatalf("SystemEndpoint bytes = %s, want sixteen 0xff bytes", got)
+	}
+	if sys.IsZero() {
+		t.Fatal("SystemEndpoint is the unset value")
+	}
+}
+
+func TestSystemEndpointTextGolden(t *testing.T) {
+	if got := SystemEndpoint().String(); got != vecEndpointSystem {
+		t.Fatalf("SystemEndpoint text = %q, want %q", got, vecEndpointSystem)
+	}
+	if n := strings.Count(vecEndpointSystem, "l"); n != 25 {
+		t.Fatalf("golden vector has %d 'l' characters, want 25 (vector typo)", n)
+	}
+}
+
+// The node must be able to hold the system endpoint in records and pages, so
+// both entry points that build an identifier from outside accept it and give
+// back the reserved value.
+func TestSystemEndpointRoundTrip(t *testing.T) {
+	fromText, err := ParseEndpointID(vecEndpointSystem)
+	if err != nil {
+		t.Fatalf("ParseEndpointID(%q): %v", vecEndpointSystem, err)
+	}
+	fromBytes, err := EndpointIDFromBytes(systemBytes())
+	if err != nil {
+		t.Fatalf("EndpointIDFromBytes(system bytes): %v", err)
+	}
+	for name, id := range map[string]EndpointID{"parsed text": fromText, "from bytes": fromBytes} {
+		if id != SystemEndpoint() || !id.IsSystem() {
+			t.Fatalf("%s = %v, want the system endpoint", name, id)
+		}
+		if got := id.String(); got != vecEndpointSystem {
+			t.Fatalf("%s prints as %q, want %q", name, got, vecEndpointSystem)
+		}
+	}
+
+	node, _ := NodeIDFromBytes(seq(NodeIDLen, 1))
+	addr, err := ParseAddress(node.String() + "/" + vecEndpointSystem)
+	if err != nil {
+		t.Fatalf("ParseAddress with the system endpoint: %v", err)
+	}
+	if addr.Endpoint != SystemEndpoint() || addr.String() != node.String()+"/"+vecEndpointSystem {
+		t.Fatalf("address = %v", addr)
+	}
+}
+
+func TestIsSystem(t *testing.T) {
+	oneBitOff := systemBytes()
+	oneBitOff[EndpointIDLen-1] = 0xfe
+	rows := []struct {
+		rule string
+		id   EndpointID
+		want bool
+	}{
+		{"the reserved value is the system endpoint", SystemEndpoint(), true},
+		{"sixteen 0xff bytes are the system endpoint", mustEndpoint(t, systemBytes()), true},
+		{"the unset value is not the system endpoint", EndpointID{}, false},
+		{"one bit off the reserved value is not the system endpoint", mustEndpoint(t, oneBitOff), false},
+		{"an ordinary id is not the system endpoint", mustEndpoint(t, seq(EndpointIDLen, 1)), false},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			if got := r.id.IsSystem(); got != r.want {
+				t.Fatalf("IsSystem = %v, want %v", got, r.want)
+			}
+		})
+	}
+}
+
+func mustEndpoint(t *testing.T, b []byte) EndpointID {
+	t.Helper()
+	id, err := EndpointIDFromBytes(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// A node never issues the reserved value, even when the randomness source
+// produces exactly its bytes, and it treats that like the all-zero draw: a
+// failure, not a silent substitute.
+func TestNewEndpointIDNeverIssuesReserved(t *testing.T) {
+	rows := []struct {
+		rule string
+		src  []byte
+		want error
+	}{
+		{"randomness equal to the reserved value is refused", systemBytes(), ErrReserved},
+		{"randomness equal to the reserved value is refused with more bytes behind it", append(systemBytes(), seq(EndpointIDLen, 1)...), ErrReserved},
+		{"all-zero randomness is still refused", make([]byte, EndpointIDLen), ErrZero},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			id, err := NewEndpointID(bytes.NewReader(r.src))
+			if !errors.Is(err, r.want) {
+				t.Fatalf("error = %v, want %v", err, r.want)
+			}
+			if id != (EndpointID{}) {
+				t.Fatalf("returned %v with an error, want the zero value", id)
+			}
+		})
+	}
+	t.Run("the reserved value is distinct from the zero error", func(t *testing.T) {
+		if errors.Is(ErrReserved, ErrZero) || errors.Is(ErrZero, ErrReserved) {
+			t.Fatal("ErrReserved and ErrZero are the same error")
 		}
 	})
 }
