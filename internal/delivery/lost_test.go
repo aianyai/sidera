@@ -858,7 +858,7 @@ func TestPropertyLostRecordLifecycle(t *testing.T) {
 				t.Fatalf("run %d: ended %s", i, end.State)
 			}
 		}
-		hits["side/"+m.side.String()+"/"+map[bool]string{false: "message", true: "control"}[m.control]]++
+		hits["side/"+map[Side]string{SideSource: "source", SideTarget: "target"}[m.side]+"/"+map[bool]string{false: "message", true: "control"}[m.control]]++
 	}
 	for _, p := range []string{
 		"handout refused", "ack refused", "tick", "report_by passed", "forced closure ignored", "control reply corrects",

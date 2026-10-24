@@ -40,13 +40,15 @@ const (
 func (s Side) known() bool { return s == SideSource || s == SideTarget }
 
 // Record is one delivery as one side sees it. Build it with NewSourceRecord,
-// NewTargetRecord or NewTargetControlRecord and change it only through its
-// methods. The zero value is not usable.
+// NewTargetRecord, NewTargetControlRecord or, for a record lost to storage
+// corruption, NewLostRecord, and change it only through its methods. The zero
+// value is not usable.
 type Record struct {
-	Side   Side
-	State  State
-	Sub    SubState
-	Reject RejectReason // set while State is StateRejected
+	Side    Side
+	State   State
+	Sub     SubState
+	Reject  RejectReason // set while State is StateRejected
+	Unknown UnknownCause // set while State is StateDeliveryUnknown
 
 	// Control marks the target's record of a control signal; only
 	// NewTargetControlRecord sets it, so it is never set on the source side. A
@@ -117,6 +119,45 @@ func NewTargetControlRecord(acceptBefore, reportBy time.Time) Record {
 	}
 }
 
+// NewLostRecord returns the record that replaces a delivery record lost to
+// storage corruption, discovered at discoveredAt. Only what the lost file's
+// first line tells survives: the side, whether it was a control signal, and the
+// delivery's identity, which the caller keeps as it does for every record. The
+// record is delivery_unknown with the side's own loss cause: it is neither
+// delivered nor rejected, because nobody can tell whether the delivery was
+// handed over. A source record also returns the one feedback the sender must
+// get (KindLostAtSender), already marked as reported; a target record produces
+// none and reports lost_at_target when the sender pulls.
+//
+// ReportBy is LostReportBy(discoveredAt), an upper bound of the lost record's
+// own report_by. AcceptBefore and BacklogDeadline stay zero because they are
+// unknown, so Tick closes the record at ReportBy and at no other time.
+//
+// This is the only way into a storage loss: it is a way to start a record, like
+// the other constructors, and no event reaches it, so a healthy record can never
+// be turned into a lost one. The caller must pass a discoveredAt that is not
+// earlier than the lost record's acceptance, which makes the bound hold. A
+// control signal exists only on the target, so a source control record is
+// ErrInvalidInput, as are an invalid side and a zero discoveredAt.
+func NewLostRecord(side Side, control bool, discoveredAt time.Time) (Record, Outcome, error) {
+	var cause UnknownCause
+	switch {
+	case discoveredAt.IsZero():
+		return Record{}, Outcome{}, fmt.Errorf("%w: a lost record needs the time the loss was discovered", ErrInvalidInput)
+	case side == SideSource && control:
+		return Record{}, Outcome{}, fmt.Errorf("%w: a control signal has no record on the sender's side", ErrInvalidInput)
+	case side == SideSource:
+		cause = UnknownLostAtSender
+	case side == SideTarget:
+		cause = UnknownLostAtTarget
+	default:
+		return Record{}, Outcome{}, fmt.Errorf("%w: side %d", ErrInvalidInput, side)
+	}
+	r := Record{Side: side, State: StateDeliveryUnknown, Unknown: cause, Control: control, ReportBy: LostReportBy(discoveredAt)}
+	n, feedback := r.withFeedback(StateInvalid, StateDeliveryUnknown, RejectNone)
+	return n, Outcome{Result: ResultApplied, From: StateInvalid, To: StateDeliveryUnknown, Feedback: feedback}, nil
+}
+
 // EventType names a fact or occurrence that Apply understands.
 type EventType uint8
 
@@ -128,7 +169,8 @@ const (
 	EventDelivered
 	// EventRejected: the target reports a rejection; Event.Reject says why.
 	EventRejected
-	// EventDeliveryUnknown: the target reports the delivery result unknown.
+	// EventDeliveryUnknown: the target reports the delivery result unknown;
+	// Event.Unknown says why: UnknownHandedOver or UnknownLostAtTarget.
 	EventDeliveryUnknown
 	// EventExpiryQueried: the sender actively queried the target at
 	// Event.QueriedAt and got no receipt.
@@ -156,6 +198,7 @@ const (
 type Event struct {
 	Type      EventType
 	Reject    RejectReason // EventRejected
+	Unknown   UnknownCause // EventDeliveryUnknown
 	Cause     Cause        // EventContactFailing, EventBlocked
 	Since     time.Time    // EventContactFailing
 	QueriedAt time.Time    // EventExpiryQueried
@@ -191,6 +234,10 @@ const (
 	IgnoreAlreadyReported
 	// IgnoreRetryEnded: the sender no longer retries, so the hint is moot.
 	IgnoreRetryEnded
+	// IgnoreRecordLost: the record replaces one lost to storage corruption on
+	// the sender's own node. It was rebuilt without the history that facts are
+	// judged against, and the sender was already told the outcome is unknown.
+	IgnoreRecordLost
 )
 
 // Outcome is the machine-readable result of one change to a Record.
@@ -214,10 +261,11 @@ func ignored(from State, why IgnoreReason) Outcome {
 // Apply applies one event at time now and returns the updated record.
 //
 // Apply, Tick, Handout and Ack are the ways a record changes; every state
-// change among them goes through moveTo. A target message record is delivered
+// change among them goes through change. A target message record is delivered
 // only by Ack and a target control record only by EventReplyCommitted, and a
 // rejection reported to a target record is a forced closure (see
-// closeForcibly).
+// closeForcibly). No event puts a record into a storage loss: NewLostRecord
+// alone makes one.
 func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 	switch ev.Type {
 	case EventReceipt:
@@ -241,7 +289,7 @@ func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 		}
 		return r.moveTo(StateRejected, ev.Reject)
 	case EventDeliveryUnknown:
-		return r.moveTo(StateDeliveryUnknown, RejectNone)
+		return r.applyUnknown(ev.Unknown)
 	case EventExpiryQueried:
 		return r.judgeExpiry(ev)
 	case EventReportByPassed:
@@ -258,10 +306,42 @@ func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 	return r, Outcome{}, fmt.Errorf("%w: unknown event type %d", ErrInvalidEvent, ev.Type)
 }
 
-// moveTo is the only place that changes State.
+// applyUnknown applies the fact that the delivery's result is unknown for the
+// given cause. Only a handed-over delivery or a loss the target reports to the
+// sender is such a fact: a loss at the sender is never reported, and a loss at
+// the target is made by NewLostRecord on the target, never by an event on it.
+func (r Record) applyUnknown(cause UnknownCause) (Record, Outcome, error) {
+	switch cause {
+	case UnknownHandedOver:
+	case UnknownLostAtTarget:
+		if r.Side == SideTarget {
+			return r, Outcome{}, fmt.Errorf("%w: a target's own storage loss is made only by NewLostRecord", ErrIllegalTransition)
+		}
+	default:
+		return r, Outcome{}, fmt.Errorf("%w: delivery_unknown for cause %s", ErrInvalidEvent, cause)
+	}
+	return r.moveToUnknown(cause)
+}
+
+// moveTo changes the state to any state but delivery_unknown, which moveToUnknown
+// reaches.
 func (r Record) moveTo(to State, reason RejectReason) (Record, Outcome, error) {
+	return r.change(to, reason, UnknownCauseNone)
+}
+
+// moveToUnknown changes the state to delivery_unknown for the given cause.
+func (r Record) moveToUnknown(cause UnknownCause) (Record, Outcome, error) {
+	return r.change(StateDeliveryUnknown, RejectNone, cause)
+}
+
+// change is the only place that changes State. The reason and the cause are set
+// with the states they belong to (the callers pass a cause exactly when to is
+// delivery_unknown) and cleared when the state moves on.
+func (r Record) change(to State, reason RejectReason, unknown UnknownCause) (Record, Outcome, error) {
 	from := r.State
 	switch {
+	case r.Unknown == UnknownLostAtSender && to != StateClosedUnconfirmed:
+		return r, ignored(from, IgnoreRecordLost), nil
 	case from == to:
 		return r, ignored(from, IgnoreDuplicate), nil
 	case from == StateClosedUnconfirmed:
@@ -276,6 +356,7 @@ func (r Record) moveTo(to State, reason RejectReason) (Record, Outcome, error) {
 	n := r
 	n.State = to
 	n.Sub = SubNone
+	n.Unknown = unknown
 	if to == StateRejected {
 		n.Reject = reason
 	}
@@ -283,27 +364,38 @@ func (r Record) moveTo(to State, reason RejectReason) (Record, Outcome, error) {
 		n.Blocked = false
 		n.Lease.Active = false
 	}
-	out := Outcome{Result: ResultApplied, From: from, To: to}
-	if r.Side == SideSource {
-		for _, k := range TransitionFeedback(from, to, r.Reported) {
-			fb := Feedback{Kind: k, State: to}
-			switch k {
-			case KindRejected:
-				fb.Reject = reason
-			case KindBlockedRecovered:
-				fb.Cause = r.BlockedCause
-			}
-			n.Reported = n.Reported.With(k)
-			out.Feedback = append(out.Feedback, fb)
-		}
+	n, feedback := n.withFeedback(from, to, reason)
+	return n, Outcome{Result: ResultApplied, From: from, To: to, Feedback: feedback}, nil
+}
+
+// withFeedback returns the record, which has just entered state to from state
+// from, with the feedback that change calls for marked as reported, and that
+// feedback. Only a source record produces any. Reject is the reason of a
+// rejection; the cause of the entered delivery_unknown is the record's own.
+func (r Record) withFeedback(from, to State, reject RejectReason) (Record, []Feedback) {
+	if r.Side != SideSource {
+		return r, nil
 	}
-	return n, out, nil
+	var feedback []Feedback
+	for _, k := range TransitionFeedback(from, to, r.Unknown, r.Reported) {
+		fb := Feedback{Kind: k, State: to}
+		switch k {
+		case KindRejected:
+			fb.Reject = reject
+		case KindBlockedRecovered:
+			fb.Cause = r.BlockedCause
+		}
+		r.Reported = r.Reported.With(k)
+		feedback = append(feedback, fb)
+	}
+	return r, feedback
 }
 
 // handedOver reports whether the target has passed the delivery on to where
 // it can act on it unseen, so that its result may be unknown: a message body
 // was handed out at least once, or a control signal was accepted, which hands
-// it to the adapter to execute.
+// it to the adapter to execute. A record that replaces one lost to storage
+// corruption is not handed over; it starts as delivery_unknown instead.
 func (r Record) handedOver() bool {
 	return r.Control || r.Lease.Handouts > 0
 }
@@ -314,6 +406,24 @@ func (r Record) hasQueue() bool {
 	return r.Side == SideTarget && !r.Control
 }
 
+// NeedsBody reports whether the delivery still needs the bytes of its body: a
+// sender that has no receipt yet may have to send it again, and a target
+// message waiting in the queue or under a lease has still to hand it out. A
+// control record never does: its own content is in the record, and the body it
+// references is the initial message, which the delivery derived from it hands
+// out. A record whose body turns out to be corrupt and which needs it is
+// replaced by NewLostRecord; any other record keeps its state and merely drops
+// its reference to the body.
+func (r Record) NeedsBody() bool {
+	switch r.Side {
+	case SideSource:
+		return r.State == StateQueued
+	case SideTarget:
+		return !r.Control && r.State == StateAccepted
+	}
+	return false
+}
+
 // closeForcibly ends a target delivery that cannot go on for a reason other
 // than the agent's own handling: its backlog deadline passed, the second
 // authorization check denied it, or its endpoint was closed. The reason is
@@ -321,10 +431,15 @@ func (r Record) hasQueue() bool {
 // it was, the agent may have seen the body or the adapter may have executed
 // the signal, and "rejected" would tell the sender it was not delivered, so the
 // delivery becomes delivery_unknown, which a late acknowledgement or committed
-// reply can still correct.
+// reply can still correct. A delivery whose result is already unknown stays so,
+// whatever the cause: a record that replaces a loss was never handed out, yet it
+// may have been, and "rejected" would be as untrue for it.
 func (r Record) closeForcibly(reason RejectReason) (Record, Outcome, error) {
+	if r.State == StateDeliveryUnknown {
+		return r, ignored(r.State, IgnoreDuplicate), nil
+	}
 	if r.handedOver() {
-		return r.moveTo(StateDeliveryUnknown, RejectNone)
+		return r.moveToUnknown(UnknownHandedOver)
 	}
 	return r.moveTo(StateRejected, reason)
 }
@@ -454,6 +569,9 @@ func (r Record) noteUnblocked() (Record, Outcome, error) {
 type StatusReport struct {
 	State  State
 	Reject RejectReason // set when State is StateRejected
+	// Unknown says why the result is unknown. It is set exactly when State is
+	// StateDeliveryUnknown (see Validate).
+	Unknown UnknownCause
 	// Blocked and BlockedCause describe a delivery that is accepted but cannot
 	// be put in front of the agent. They are set only while State is
 	// StateAccepted.
@@ -461,9 +579,18 @@ type StatusReport struct {
 	BlockedCause Cause
 }
 
+// Validate checks that the cause of an unknown result is set exactly with the
+// state delivery_unknown. A report that breaks it was not made by a record.
+func (s StatusReport) Validate() error {
+	if (s.State == StateDeliveryUnknown) != (s.Unknown != UnknownCauseNone) {
+		return fmt.Errorf("%w: a report of state %s with unknown cause %s", ErrInvalidInput, s.State, s.Unknown)
+	}
+	return nil
+}
+
 // StatusReport returns the report a target gives for this record.
 func (r Record) StatusReport() StatusReport {
-	rep := StatusReport{State: r.State, Reject: r.Reject}
+	rep := StatusReport{State: r.State, Reject: r.Reject, Unknown: r.Unknown}
 	if r.Blocked {
 		rep.Blocked, rep.BlockedCause = true, r.BlockedCause
 	}
@@ -480,6 +607,9 @@ func (r Record) ApplyStatusReport(now time.Time, rep StatusReport) (Record, []Ou
 	if r.Side != SideSource {
 		return r, nil, fmt.Errorf("%w: only the sender applies status reports", ErrWrongSide)
 	}
+	if err := rep.Validate(); err != nil {
+		return r, nil, err
+	}
 	var state Event
 	switch rep.State {
 	case StateAccepted:
@@ -489,7 +619,7 @@ func (r Record) ApplyStatusReport(now time.Time, rep StatusReport) (Record, []Ou
 	case StateRejected:
 		state = Event{Type: EventRejected, Reject: rep.Reject}
 	case StateDeliveryUnknown:
-		state = Event{Type: EventDeliveryUnknown}
+		state = Event{Type: EventDeliveryUnknown, Unknown: rep.Unknown}
 	case StateClosedUnconfirmed:
 		return r, nil, nil
 	default:
@@ -544,18 +674,18 @@ func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 		return nil
 	}
 	if r.controlSettleDeadline().reachedBy(now) {
-		if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
+		if err := step(r.moveToUnknown(UnknownHandedOver)); err != nil {
 			return r, outs, err
 		}
 	}
 	switch {
 	case r.leaseSettleDeadline().reachedBy(now):
-		if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
+		if err := step(r.moveToUnknown(UnknownHandedOver)); err != nil {
 			return r, outs, err
 		}
 	case r.leaseExpiryDeadline().reachedBy(now):
 		if r.Lease.Handouts >= MaxLeases {
-			if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
+			if err := step(r.moveToUnknown(UnknownHandedOver)); err != nil {
 				return r, outs, err
 			}
 		} else {

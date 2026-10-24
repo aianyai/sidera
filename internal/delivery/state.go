@@ -23,13 +23,16 @@ const (
 	// found no receipt. The target may nevertheless have the message. Not final:
 	// later facts correct it.
 	StateExpiredUnconfirmed
-	// StateDeliveryUnknown: the body was handed out but whether the agent saw
-	// it cannot be told. The target produces it only for a delivery whose body
-	// was handed out at least once: when the leases run out, when the settle
-	// deadline passes under a lease, and when a delivery that was handed out is
-	// closed forcibly (backlog deadline, a denied second check, a closed
-	// endpoint), because "rejected" would tell the sender the message was not
-	// delivered. Not final: a late acknowledgement corrects it.
+	// StateDeliveryUnknown: whether the delivery reached the agent cannot be
+	// told, for the cause in Record.Unknown. The target produces it for a
+	// delivery that was handed over: a body handed out at least once, when the
+	// leases run out, when the settle deadline passes under a lease, and when a
+	// delivery that was handed out is closed forcibly (backlog deadline, a
+	// denied second check, a closed endpoint), because "rejected" would tell the
+	// sender the message was not delivered; or any accepted control signal. A
+	// record that replaces one lost to storage corruption starts here too, and
+	// only NewLostRecord makes one. Not final: a late acknowledgement or a
+	// committed reply corrects it.
 	StateDeliveryUnknown
 	// StateClosedUnconfirmed: report_by passed while the delivery was not
 	// final. Final and silent.
@@ -122,6 +125,39 @@ const (
 )
 
 func (s SubState) known() bool { return s == SubNone || s == SubNotified }
+
+// UnknownCause says why a delivery is StateDeliveryUnknown. It is set exactly
+// while the state is StateDeliveryUnknown, the way Reject is set exactly while
+// the state is StateRejected.
+type UnknownCause uint8
+
+const (
+	// UnknownCauseNone is the zero value: the delivery is not delivery_unknown.
+	UnknownCauseNone UnknownCause = iota
+	// UnknownHandedOver: the target handed the delivery over (a body handed out
+	// at least once, or an accepted control signal) and cannot tell the result.
+	UnknownHandedOver
+	// UnknownLostAtSender: the sender's node lost what it had stored about the
+	// delivery to storage corruption. A target never reports it.
+	UnknownLostAtSender
+	// UnknownLostAtTarget: the target node lost what it had stored about the
+	// delivery to storage corruption.
+	UnknownLostAtTarget
+)
+
+var unknownCauseNames = [...]string{
+	UnknownCauseNone:    "none",
+	UnknownHandedOver:   "handed_over",
+	UnknownLostAtSender: "lost_at_sender",
+	UnknownLostAtTarget: "lost_at_target",
+}
+
+func (c UnknownCause) String() string {
+	if int(c) < len(unknownCauseNames) {
+		return unknownCauseNames[c]
+	}
+	return "invalid"
+}
 
 // RejectReason says why a delivery is StateRejected.
 type RejectReason uint8

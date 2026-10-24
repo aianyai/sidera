@@ -37,6 +37,13 @@ const (
 	// KindUnknownCorrected: a message reported as KindDeliveryUnknown was
 	// delivered after all.
 	KindUnknownCorrected
+	// KindLostAtSender: the sender's node lost what it had stored about the
+	// delivery to storage corruption, so whether the message was delivered, or a
+	// control signal executed, is unknown. It says nothing of the target.
+	KindLostAtSender
+	// KindLostAtTarget: the target's node lost what it had stored about the
+	// delivery to storage corruption, with the same consequence.
+	KindLostAtTarget
 )
 
 var kindNames = [...]string{
@@ -48,6 +55,8 @@ var kindNames = [...]string{
 	KindRejected:           "rejected",
 	KindDeliveryUnknown:    "delivery_unknown",
 	KindUnknownCorrected:   "unknown_corrected",
+	KindLostAtSender:       "lost_at_sender",
+	KindLostAtTarget:       "lost_at_target",
 }
 
 func (k Kind) String() string {
@@ -78,11 +87,15 @@ func (k Kind) Summary() string {
 		return "the target handed it over, to the agent or, for a control signal, to the adapter that executes it, but whether it was seen or executed is unknown; do not assume it was not delivered"
 	case KindUnknownCorrected:
 		return "correction: the message whose result was unknown was delivered"
+	case KindLostAtSender:
+		return "this node lost what it had stored about the message to storage corruption, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"
+	case KindLostAtTarget:
+		return "the target node lost what it had stored about the message to storage corruption, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"
 	}
 	return ""
 }
 
-func (k Kind) valid() bool { return k >= KindUnreachable && k <= KindUnknownCorrected }
+func (k Kind) valid() bool { return k >= KindUnreachable && k <= KindLostAtTarget }
 
 // KindSet is a set of Kind values. A Record uses it to remember which
 // feedback it has already produced.
@@ -116,24 +129,33 @@ type Feedback struct {
 
 // TransitionFeedback returns the feedback a change of state calls for, given
 // what has already been reported for the delivery. It never returns a kind that
-// is in reported, so repeating a transition cannot repeat a notice.
+// is in reported, so repeating a transition cannot repeat a notice. unknown is
+// the cause of the delivery_unknown being entered and is read only then.
 //
 //   - Entering rejected, expired_unconfirmed or delivery_unknown reports that
-//     anomaly. Entering rejected or delivery_unknown from expired_unconfirmed
-//     replaces the earlier report instead of correcting it, because the new
-//     notice already contradicts it.
+//     anomaly; the kind of a delivery_unknown follows its cause. Entering
+//     rejected or delivery_unknown from expired_unconfirmed replaces the earlier
+//     report instead of correcting it, because the new notice already
+//     contradicts it.
 //   - Leaving expired_unconfirmed for accepted or delivered, and leaving
 //     delivery_unknown for delivered, reports a correction.
 //   - Delivered after a reported block that was never reported recovered also
 //     reports the recovery, since delivered itself is silent.
 //   - Progress (queued, accepted, delivered) and closed_unconfirmed are silent.
-func TransitionFeedback(from, to State, reported KindSet) []Kind {
+func TransitionFeedback(from, to State, unknown UnknownCause, reported KindSet) []Kind {
 	var kinds []Kind
 	switch to {
 	case StateRejected:
 		kinds = append(kinds, KindRejected)
 	case StateDeliveryUnknown:
-		kinds = append(kinds, KindDeliveryUnknown)
+		switch unknown {
+		case UnknownHandedOver:
+			kinds = append(kinds, KindDeliveryUnknown)
+		case UnknownLostAtTarget:
+			kinds = append(kinds, KindLostAtTarget)
+		case UnknownLostAtSender:
+			kinds = append(kinds, KindLostAtSender)
+		}
 	case StateExpiredUnconfirmed:
 		kinds = append(kinds, KindExpiredUnconfirmed)
 	case StateAccepted:

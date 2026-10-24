@@ -6,7 +6,8 @@ told along the way. A delivery is one message to one recipient endpoint; a
 message with several recipients has several deliveries that share a message id.
 Control signals use the same states, the same deduplication and the same
 feedback, including the wording of each notice (the delivery_unknown wording
-covers both a message and a control signal); on the target they differ only in how a delivery ends (see Control
+covers both a message and a control signal, and the two storage-loss wordings
+the same); on the target they differ only in how a delivery ends (see Control
 signals on the target). This document describes the committed code of `internal/delivery`.
 
 ## What
@@ -20,7 +21,7 @@ signals on the target). This document describes the committed code of `internal/
 | `delivered` | The whole body reached the agent and was acknowledged; for a control signal, its reply was committed. | yes |
 | `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range, backlog full). On the target only for a body that was never handed out. | yes |
 | `expired_unconfirmed` | The deadline passed and an active query found no receipt. The target may have the message. | no, correctable |
-| `delivery_unknown` | The body was handed out and whether the agent saw it cannot be told; for a control signal, it was accepted for execution and its reply was never committed. The target produces it only for a delivery that was handed over: a body handed out at least once, or any accepted control signal. | no, correctable |
+| `delivery_unknown` | Whether the delivery reached the agent cannot be told, for the cause in `Record.Unknown`. `handed_over`: the body was handed out and whether the agent saw it cannot be told; for a control signal, it was accepted for execution and its reply was never committed. `lost_at_sender`, `lost_at_target`: the node lost its record of the delivery to storage corruption, so nothing is known. The target produces `handed_over` only for a delivery that was handed over: a body handed out at least once, or any accepted control signal. A storage loss comes only from `NewLostRecord`. | no, correctable |
 | `closed_unconfirmed` | `report_by` passed while the delivery was open. | yes, silent |
 
 `notified` is a target-internal sub-state of `accepted`: a prompt was handed to
@@ -33,7 +34,11 @@ from `accepted` to `delivered`, `rejected`, `delivery_unknown`,
 `closed_unconfirmed`. Nothing leaves a final state. On the target, `delivered`
 is reached only through the acknowledgement of every chunk (a control signal:
 through the committed reply) and `delivery_unknown` only for a delivery that was
-handed over; a fact that asks for either otherwise is an error. A fact that describes an
+handed over or for a record that replaces one lost to storage corruption, which
+only `NewLostRecord` makes; a fact that asks for either otherwise is an error.
+The cause is part of the fact: `EventDeliveryUnknown` without one, or with
+`lost_at_sender` (never a reported fact), is `ErrInvalidEvent`, and
+`lost_at_target` on a target record is `ErrIllegalTransition`. A fact that describes an
 earlier stage than the record shows is ignored; a fact that contradicts a final
 state is an error.
 
@@ -49,10 +54,13 @@ state is an error.
 | rejected | The target refused. | Carries the reason. |
 | delivery unknown | Lease redelivery exhausted, leases unsettled at the settle deadline, or a delivery whose body was handed out closed by force (backlog deadline, denied second check, closed endpoint); for a control signal, no committed reply by the settle deadline or a forced closure. | Wording: the target handed it over (to the agent, or to the adapter that executes a control signal), whether it was seen or executed is unknown, and the sender must not assume it was not delivered. |
 | unknown corrected | A late acknowledgement completed an unknown delivery. | |
+| lost at sender | The sender's node lost its record of the delivery to storage corruption. Given once, when the replacement record is made. | Wording: this node lost what it had stored about the message, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered. Never says the target handed anything over. |
+| lost at target | The target reported `delivery_unknown` with the cause `lost_at_target`. | Wording: the same, about the target node. |
 
 Rules: normal progress and `closed_unconfirmed` give nothing; each kind is given
-at most once per delivery; moving from expired to rejected or unknown gives the
-new news instead of a correction. Merging: one notice per message for its
+at most once per delivery; moving from expired to rejected, unknown or a storage
+loss gives the new news instead of a correction. A recipient endpoint is never
+told of a loss: feedback goes only to the sender. Merging: one notice per message for its
 anomalies, per (sender endpoint, target node) for unreachable hints and, as a
 notice of their own, for expired_unconfirmed notices, per (sender endpoint,
 target endpoint) for blocked reports with the recovery as its own notice. The
@@ -263,18 +271,57 @@ needs a migration of the stored records.
 
 ### Status reports
 
-A target reports its state, the rejection reason, and whether the accepted
-message is blocked. The sender applies the report in one place: the state
+A target reports its state, the rejection reason, the cause of an unknown result
+and whether the accepted message is blocked. The cause is set exactly with
+`delivery_unknown` (`StatusReport.Validate`); it is how a loss at the target
+reaches the sender with its own wording instead of the handed-over one. The sender applies the report in one place: the state
 first, then, if the record is accepted, the block or its end. So a block
 reported before the receipt was pulled is still reported, and an expired
 delivery that turns out accepted and blocked gives both the correction and the
 blocked notice.
 
+### Records lost to storage corruption
+
+A delivery record that storage finds corrupt keeps only the key on its first
+line: the side, whether it was a control signal, and the delivery's identity.
+`NewLostRecord(side, control, discoveredAt)` makes the record that replaces it.
+
+| Replacement | State and cause | Feedback | Later facts |
+| ----------- | --------------- | -------- | ----------- |
+| source message | `delivery_unknown`, `lost_at_sender` | `KindLostAtSender`, once, already in `Reported` | every receipt, delivery, rejection and unknown result is ignored as `IgnoreRecordLost`; only time closes it |
+| target message | `delivery_unknown`, `lost_at_target` | none (a target record never produces any) | never handed out; an acknowledgement is refused for lack of a hand-out; a forced closure is `IgnoreDuplicate` |
+| target control | as target message, `Control` kept | none | as target message; a committed reply still corrects it |
+| source control | not a record: `ErrInvalidInput` | | a control signal has no record on the sender's side |
+
+`ReportBy` is `LostReportBy(discoveredAt)`, `ReportBy(discoveredAt +
+MaxAcceptBefore + clock tolerance)`: an upper bound of the lost record's own
+`report_by`, because every accepted deadline lies at most that far after its
+acceptance and the acceptance was not after the discovery. `AcceptBefore` and
+`BacklogDeadline` are unknown and zero. The record is closed by `Tick` after
+`ReportBy` like any other; nothing else is timed for it, so `tickDeadlines` has
+no new entry. A replacement of the target is reported as
+`delivery_unknown`/`lost_at_target`; the sender's record applies it and gives
+`KindLostAtTarget` once, and a repeated pull gives `IgnoreDuplicate`.
+
+The deduplication record of a lost target record is replaced by
+`NewLostDedupRecord(key, discoveredAt)`, kept until
+`DedupRetainUntil(LostReportBy(discoveredAt))`. Its digest is unknown
+(`DigestLost`), so `CheckDedup` answers every request under the key as a replay.
+
+`Record.NeedsBody()` says whether a record still needs the bytes of its body: a
+source record that is `queued`, and a target message record that is `accepted`
+(queued or under a lease). A caller that finds a stored body corrupt replaces
+exactly those records with `NewLostRecord`; every other record that references
+the body keeps its state and drops only the reference. A control record never
+needs the body: the body it references is the initial message, which the
+delivery derived from it hands out.
+
 ### Deduplication
 
 A request is identified by (sender node, message id, recipient endpoint) and a
 body digest. The same key and digest returns the original record; the same key
-with another digest is a conflict. A control signal's reply is stored once
+with another digest is a conflict; a record whose digest was lost (`DigestLost`)
+returns itself for every digest. A control signal's reply is stored once
 in the dedup record and returned on every repeat. The stored reply outlives the
 record's own retention and is kept until `reply.RetainFactsUntil`, because reply
 permission still reads it.
@@ -306,6 +353,49 @@ permission still reads it.
   assume non-delivery has to stay in one place. The wording names both
   hand-overs, to the agent and to the adapter, instead of the agent alone, which
   would be wrong for a control signal.
+- **A lost record is `delivery_unknown`, not a new state and not `rejected`.**
+  "The result is unknown, do not assume it was not delivered" is exactly what a
+  node that lost its record has to say, so the state stays and gains a cause that
+  selects the wording. `rejected` would tell the sender the message was not
+  delivered, about a delivery that may have been handed out. Silence would let
+  the sender read the loss as delivery. A new state would need a new wire code,
+  a new place in the transition table and the ordering, and would say the same
+  thing.
+- **The replacement is a way to start a record, not an event.** It has no earlier
+  state to apply an event to, and if an event could produce it, any caller
+  holding a healthy record could turn it into a lost one, which is the shortcut
+  the target rules exist to prevent. So `Apply` refuses every route into a loss
+  and `NewLostRecord` is the only way.
+- **The loss wordings never say "handed".** A node that lost its record cannot
+  know whether the target handed anything over, and the loss at the sender says
+  nothing of the target at all. Both keep the closing warning of the other
+  unknown wording so that the sender asks before resending.
+- **A lost source record ignores later facts.** It has no history: what the sender
+  already heard (`Reported` holds only the loss) and what the record went through
+  are gone, so the usual rules would misjudge a later fact, for example a target
+  that later reports `rejected` would hit the illegal move from
+  `delivery_unknown`. The sender was told the result is unknown, which stays
+  true, so ignoring is the safe answer. The price is that a later `delivered`
+  gives no correction; that is rare and does not mislead.
+- **A lost target record is told to the sender through the status report.**
+  Otherwise the sender's record stays `accepted` or `queued` until it closes
+  silently, and silence means delivered.
+- **The lost deduplication record still answers.** If a lost target record let a
+  resend look new, the target would accept the message again and might hand it to
+  the agent a second time, when the lost record may already have done so. Without
+  the digest a conflict cannot be told from a replay; answering as a replay is
+  the one answer that cannot deliver twice.
+- **`LostReportBy` is an upper bound, not a guess.** Keeping a replacement for
+  too short a time would close it before the sender's last pull; too long only
+  keeps a small record a little longer. The bound reuses the cap on accepted
+  deadlines and the report window, so no number is repeated.
+- **"Still needs the body" is not "not final".** A record needs the body bytes
+  when something still has to send or hand them out. A source that is already
+  accepted, delivered or rejected needs no resend; a target `delivery_unknown`
+  will not lease again, and a late acknowledgement may still correct it, which a
+  replacement would throw away. So only the records that `NeedsBody` are
+  replaced. The rule lives in `delivery` because which states need body bytes is
+  delivery semantics.
 - **Corrections are separate kinds.** A delivery can be wrong twice (expired,
   then unknown); a single "correction" kind would silence the second.
 - **Replacement, not correction, when news changes.** Telling a sender "the
@@ -495,7 +585,23 @@ permission still reads it.
   the transition table. Tests: `TestCanTransition`, `TestStateClasses`,
   `TestRejectReasonNames`.
 - `internal/delivery/feedback.go`: kinds, wording, `TransitionFeedback`. Tests:
-  `TestTransitionFeedback`, `TestSummaries`.
+  `TestTransitionFeedback`, `TestSummaries`, `TestStorageLossWordingVectors`,
+  `TestTransitionFeedbackChoosesKindByUnknownCause`,
+  `TestStorageLossKindsMergeByMessage`.
+- Records lost to storage corruption (`record.go`, `timing.go`, `dedup.go`;
+  tests in `internal/delivery/lost_test.go`):
+  `TestNewLostRecordStartsDeliveryUnknownWithTheSidesLossCause`,
+  `TestLostReportByBoundsEveryAcceptedDeadline`,
+  `TestSourceLostRecordReportsOnceWithSenderWording`,
+  `TestTargetLostRecordProducesNoFeedbackAndReportsLostAtTarget`,
+  `TestApplyRefusesEveryOtherWayIntoStorageLoss`,
+  `TestSourceAppliesTargetLossOnceWithTargetWording`,
+  `TestSourceLostRecordIgnoresLaterFacts`,
+  `TestTargetLostRecordStaysUnknownUnderForcedClosure`,
+  `TestStatusReportCarriesUnknownCause`,
+  `TestLostDedupRecordAnswersEveryRetryAsReplay`, `TestNeedsBodyByStateAndSide`,
+  and `TestPropertyLostRecordLifecycle` (fixed seed, a model written in the test:
+  a replacement never delivers again, reports at most once, and closes).
 - `internal/delivery/record.go`: `Record`, `NewTargetControlRecord`, `Apply`,
   `Tick`, `closeForcibly`, `StatusReport`, `ApplyStatusReport`. Tests:
   `TestSourceTransitions`, `TestRejectionReasonIsCarried`,

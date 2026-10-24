@@ -35,11 +35,23 @@ type DedupRecord struct {
 	RetainUntil time.Time
 	Reply       []byte
 	HasReply    bool
+	// DigestLost marks the record that replaces one lost, together with its
+	// delivery record, to storage corruption: the digest is unknown, so every
+	// request under the key is a replay of the lost one. Treating the request as
+	// new would accept and deliver the message a second time.
+	DigestLost bool
 }
 
 // NewDedupRecord returns the record for a request that was just accepted.
 func NewDedupRecord(key DedupKey, digest BodyDigest, reportBy time.Time) DedupRecord {
 	return DedupRecord{Key: key, Digest: digest, RetainUntil: DedupRetainUntil(reportBy)}
+}
+
+// NewLostDedupRecord returns the deduplication record that replaces one lost to
+// storage corruption, discovered at discoveredAt. It is kept as long as the
+// record it replaces could have been: until DedupRetainUntil(LostReportBy).
+func NewLostDedupRecord(key DedupKey, discoveredAt time.Time) DedupRecord {
+	return DedupRecord{Key: key, RetainUntil: DedupRetainUntil(LostReportBy(discoveredAt)), DigestLost: true}
 }
 
 // DedupVerdict says how to treat a request.
@@ -56,14 +68,16 @@ const (
 )
 
 // CheckDedup compares a request with the record stored under its key, nil when
-// there is none. A record that outlived its retention still counts: a retry
+// there is none. A record whose digest was lost (DigestLost) cannot tell a
+// conflict from a replay and always answers as a replay: the one answer that
+// cannot deliver the message twice. A record that outlived its retention still counts: a retry
 // that late is refused as expired by Intake anyway, so keeping or dropping the
 // record gives the same answer.
 func CheckDedup(existing *DedupRecord, digest BodyDigest) DedupVerdict {
 	switch {
 	case existing == nil:
 		return DedupNew
-	case existing.Digest == digest:
+	case existing.DigestLost, existing.Digest == digest:
 		return DedupReplay
 	}
 	return DedupConflict

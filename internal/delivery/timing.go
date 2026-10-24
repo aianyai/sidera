@@ -63,6 +63,15 @@ func ReportBy(acceptBefore time.Time) time.Time {
 	return acceptBefore.Add(ReportByOffset)
 }
 
+// LostReportBy returns the report_by a record that replaces one lost to storage
+// corruption is kept and reported until: an upper bound of the report_by of any
+// delivery accepted no later than discoveredAt. Intake refuses a deadline later
+// than its own time plus MaxAcceptBefore plus the clock tolerance, and the
+// lost record was accepted no later than discoveredAt.
+func LostReportBy(discoveredAt time.Time) time.Time {
+	return ReportBy(discoveredAt.Add(MaxAcceptBefore + timing.ClockTolerance))
+}
+
 // SettleBy returns the instant by which the target must have given every
 // delivery with this report_by a final state or a reported non-final one.
 func SettleBy(reportBy time.Time) time.Time {

@@ -15,22 +15,24 @@ reasons behind the rules.
 | `NewSourceRecord`, `NewTargetRecord` | Create the sender's or the recipient node's `Record` of a delivery. |
 | `NewTargetControlRecord(acceptBefore, reportBy)` | Create the target's `Record` of a control signal: never queued for `recv`, no backlog deadline, delivered by `EventReplyCommitted`. |
 | `Record.Valid()` | Says whether a record is one the constructors and transitions can produce, and names the first invariant it breaks (`*InvalidRecordError`, `ErrInvalidRecord`, `Violation`). For a record restored from storage. |
+| `NewLostRecord(side, control, discoveredAt)`, `LostReportBy`, `NewLostDedupRecord(key, discoveredAt)`, `Record.NeedsBody()` | The replacement for a delivery record, and for a deduplication record, lost to storage corruption; the instant a replacement is kept until; whether a record still needs the bytes of its body. |
 | `Record.Apply(now, Event)` | Applies one fact or occurrence. Returns the new record and an `Outcome` (applied or ignored with a reason, the transition, and the feedback to give). |
 | `Record.Tick(now)` | Everything due by time alone: lease expiry, backlog expiry, the settle deadline, closing after `report_by`. |
 | `Record.NextTick()` | The earliest instant at which `Tick` could change the record; the zero time for a final record. |
 | `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
 | `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A page's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
-| `Record.StatusReport`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery, and the one rule by which the sender applies it. |
+| `Record.StatusReport`, `StatusReport.Validate`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery (with the cause of an unknown result), and the one rule by which the sender applies it. |
 | `Intake(now, acceptBefore, traffic, Authorization, Backlog)` | Target-side validation of the delivery deadline, the authorization verdict (kind and, for a denial, the reason) and the endpoint's backlog limit, for a request deduplication found new. |
 | `Backlog`, `Record.OccupiesBacklogSlot(traffic)`, `DefaultEndpointBacklogLimit`, `ValidateEndpointBacklogLimit` | The endpoint's backlog limit: the count and limit `Intake` takes, the one rule for which records are counted, the default and its validation. |
 | `IntakeAuthorization(authz.Verdict)` | The one mapping from the policy's verdict to an `Authorization`: allow, suspend, or a denial with the `RejectReason` the sender hears. |
 | `CheckDedup`, `NewDedupRecord`, `DedupRecord.WithReply` | Deduplication, with the stored reply of a control signal. |
-| `TransitionFeedback`, `Kind` | Which feedback a change of state calls for; the fixed wording of each kind. |
+| `TransitionFeedback(from, to, unknown, reported)`, `Kind` | Which feedback a change of state calls for; the fixed wording of each kind. |
 | `FeedbackQueue` (`Add`, `Flush`, `NextFlush`), `FeedbackParams`, `DefaultFeedbackParams()`, `MergeKeyOf` | Merging and rate-capping pending feedback into notices; `NextFlush` is the earliest instant at which `Flush` would send one. `DefaultFeedbackParams` is the decided window and cap. |
 | `ReportBy`, `SettleBy`, `BacklogDeadline`, `DedupRetainUntil`, `StatusReportRetainUntil`, `IdempotencyKeyRetainUntil`, `ValidateEndpointMaxQueue` | Deadline and retention arithmetic. |
 
 `Apply`, `Tick`, `Handout` and `Ack` change a record; every state change goes
-through one transition function.
+through one transition function. The constructors start one: no event makes a
+record out of nothing.
 
 ## States
 
@@ -44,8 +46,17 @@ target-internal sub-state `notified` of `accepted`.
   `delivered` only).
 - On the target, `delivered` is reached only by acknowledging every chunk
   (`Ack`) or, for a control record, by `EventReplyCommitted`; `delivery_unknown`
-  only for a delivery that was handed over: a body handed out at least once, or
-  any control record. `Apply` refuses both shortcuts.
+  only for a delivery that was handed over (a body handed out at least once, or
+  any control record), or for a record that replaces one lost to storage
+  corruption, which only `NewLostRecord` makes. `Apply` refuses every other
+  shortcut: no event puts a record into a storage loss.
+- `Record.Unknown` says why a delivery is `delivery_unknown` and is set exactly
+  then: `handed_over`, `lost_at_sender` or `lost_at_target`. `EventDeliveryUnknown`
+  must name its cause, and only `handed_over` and `lost_at_target` are facts an
+  event can carry. `lost_at_sender` is never reported (`ErrInvalidEvent`); a
+  `lost_at_target` on a target record is `ErrIllegalTransition`, because a target
+  loses a record only by `NewLostRecord`; a `handed_over` target record needs a
+  hand-out as before.
 - A repeated or older fact is ignored with a reason, not an error. A fact that
   contradicts the state (a rejection for a delivered message) is
   `ErrIllegalTransition`.
@@ -56,19 +67,26 @@ target-internal sub-state `notified` of `accepted`.
 
 Only anomalies produce feedback: unreachable (network or suspended trust chain),
 delivery blocked and its recovery, expired_unconfirmed, rejected,
-delivery_unknown, and the corrections of expired_unconfirmed and
-delivery_unknown. Normal progress and `closed_unconfirmed` never do.
+delivery_unknown, the two storage losses, and the corrections of
+expired_unconfirmed and delivery_unknown. Normal progress and `closed_unconfirmed` never do.
 
 - At most once per delivery per kind. Corrections are kinds of their own, so a
   delivery corrected twice is told twice.
 - The expiry notice says the target may have received the message.
+- The two storage-loss notices (`lost_at_sender`, `lost_at_target`) say that a
+  node lost what it had stored about the message to storage corruption, that
+  whether it was delivered, or for a control signal executed, is unknown, and that
+  the sender must not assume it was not delivered. They never say the target
+  handed anything over: a node that lost its record cannot know. They are kinds of
+  their own, merge by message, and are corrected like `delivery_unknown` by a
+  later `delivered`.
 - The delivery_unknown notice says the target handed the delivery over (to the
   agent, or to the adapter that executes a control signal), that whether it was
   seen or executed is unknown, and that the sender must not assume it was not
   delivered. One wording serves messages and control signals, because the
   sender's record cannot tell them apart.
-- A rejection or delivery_unknown that follows expired_unconfirmed replaces it
-  instead of correcting it.
+- A rejection, delivery_unknown or storage loss that follows
+  expired_unconfirmed replaces it instead of correcting it.
 - Merging: anomalies of one message are one notice; unreachable hints and, as
   a notice of their own, expired_unconfirmed notices per (sender endpoint,
   target node); blocked reports per (sender endpoint, target endpoint), with the
@@ -127,7 +145,48 @@ it becomes `delivery_unknown`, because the agent may have seen the body and
 then corrects it to `delivered`. Handing out is what counts, not prompting: a
 delivery that was only announced with a prompt is still rejected. A control record
 counts as handed out from acceptance, so its forced closure is always
-`delivery_unknown`.
+`delivery_unknown`. A delivery that is already `delivery_unknown`, whatever the
+cause, stays so: a forced closure of a record that replaces a loss is
+`IgnoreDuplicate`, never `rejected`.
+
+## Records lost to storage corruption
+
+When storage finds a delivery record corrupt, only the key on its first line
+survives: the side, whether it was a control signal, and the identity of the
+delivery. `NewLostRecord(side, control, discoveredAt)` makes the replacement. It
+starts `delivery_unknown`, because the delivery may or may not have been handed
+over and neither `rejected` nor silence would be true, with the cause of its side.
+
+- A source replacement is `lost_at_sender` and returns the one feedback the
+  sender must get (`KindLostAtSender`), already marked as reported. Every later
+  fact about it (receipt, delivery, rejection, an unknown result) is ignored as
+  `IgnoreRecordLost`: it has none of the history facts are judged against, and
+  the sender was already told the result is unknown. Only time ends it. A control
+  signal has no record on the sender's side, so a source control replacement is
+  `ErrInvalidInput`.
+- A target replacement is `lost_at_target` and produces no feedback, like every
+  target record; its status report carries the cause, and the sender's record
+  applies it and gives `KindLostAtTarget` once. It is never handed out
+  (`Handout` finds it not queued) and an acknowledgement is refused for lack of a
+  hand-out, so the body is never delivered a second time. A forced closure leaves
+  it unknown. A control replacement keeps `Control`, and a committed reply can
+  still correct it.
+- `ReportBy` is `LostReportBy(discoveredAt)`, an upper bound of the lost record's
+  own `report_by`: an accepted deadline lies at most `MaxAcceptBefore` plus the
+  clock tolerance after its acceptance, and the acceptance was not after
+  `discoveredAt`. `AcceptBefore` and `BacklogDeadline` stay zero because they are
+  unknown. `Tick` closes the record after `ReportBy`, silently, like any other;
+  no other deadline applies, so it adds no timed rule.
+- `NewLostDedupRecord(key, discoveredAt)` replaces the deduplication record of a
+  lost target record. It is marked `DigestLost`, and `CheckDedup` answers every
+  request under its key as a replay: without it a resend of the message would
+  look new and be accepted and delivered a second time.
+- `Record.NeedsBody()` is true for the records that still need the bytes of the
+  body: a source record that is `queued`, and a target message record that is
+  `accepted` (queued or under a lease). When a stored body is found corrupt, the
+  caller replaces exactly those records with `NewLostRecord` and gives every
+  other record that references it its state unchanged, only dropping the
+  reference.
 
 ## Control signals on the target
 
@@ -202,6 +261,14 @@ report of accepted and blocked pulled from `expired_unconfirmed` produces the
 correction and the blocked notice.
 
 ## What the caller must guarantee
+
+- `discoveredAt` of `NewLostRecord` and `NewLostDedupRecord` is not earlier than
+  the lost record's acceptance: the later of the clock reading and the
+  persisted wall-clock high-water mark. The bound of `LostReportBy` holds only
+  then.
+- A source replacement's feedback is queued in the same step that stores the
+  record, because it is the only notice the sender gets; the replacement carries
+  `Reported`, so a rebuild after the notice was queued does not repeat it.
 
 - `now` is UTC and comes from the caller; records are persisted atomically with
   the effects the outcome calls for.
