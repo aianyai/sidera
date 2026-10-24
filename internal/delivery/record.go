@@ -14,8 +14,8 @@ var (
 	// example a rejection reported for a delivered message.
 	ErrIllegalTransition = errors.New("illegal delivery transition")
 	// ErrWrongSide: the operation belongs to the other side of the delivery, or
-	// to the other kind of target record (a control record is never handed out
-	// and a message record never has its reply committed).
+	// to the other kind of target record (a control record is never handed out,
+	// notified or blocked, and a message record never has its reply committed).
 	ErrWrongSide = errors.New("operation does not apply to this side of the delivery")
 	// ErrInvalidEvent: the event is malformed.
 	ErrInvalidEvent = errors.New("invalid event")
@@ -139,7 +139,7 @@ const (
 	// Event.Since, for Event.Cause (source only).
 	EventContactFailing
 	// EventBlocked: delivery is blocked for Event.Cause. Whether and when it
-	// counts as blocked is decided by the caller.
+	// counts as blocked is decided by the caller. Never for a control record.
 	EventBlocked
 	// EventUnblocked: the cause of the block is gone.
 	EventUnblocked
@@ -404,8 +404,14 @@ func (r Record) noteUnreachable(now time.Time, ev Event) (Record, Outcome, error
 
 // noteBlocked records that delivery is blocked. Blocking is not a state: the
 // message stays accepted and queued. The sender hears of it once per delivery,
-// even if the delivery is blocked again later.
+// even if the delivery is blocked again later. A control record is never
+// blocked: blocked means prompts persistently fail to reach a session, and a
+// control signal has neither prompts nor a session. An adapter that cannot be
+// reached is told to the sender by the control reply.
 func (r Record) noteBlocked(ev Event) (Record, Outcome, error) {
+	if r.Control {
+		return r, Outcome{}, fmt.Errorf("%w: a control signal has no prompts or session to be blocked", ErrWrongSide)
+	}
 	if !ev.Cause.isBlocked() {
 		return r, Outcome{}, fmt.Errorf("%w: blocked needs an adapter, runtime or native cause", ErrInvalidEvent)
 	}

@@ -105,8 +105,11 @@ counts as handed out from acceptance, so its forced closure is always
 A control signal is executed by the adapter and answered with a reply that is
 committed together with the execution result. Its target record
 (`NewTargetControlRecord`, `Record.Control`) is never queued for `recv`:
-`Handout` and `Ack` return `ErrWrongSide`, `Renew` finds no lease, a prompt is
-refused, and there is no backlog deadline.
+`Handout` and `Ack` return `ErrWrongSide`, `Renew` finds no lease, a prompt
+(`EventNotified`) and a block (`EventBlocked`) are refused with `ErrWrongSide`,
+and there is no backlog deadline. Blocked means prompts persistently fail to
+reach a session; a control signal has neither, and an adapter that is offline
+reaches the sender through the control reply.
 
 - `EventReplyCommitted` is the only fact that delivers it, from `accepted` or,
   as a correction, from `delivery_unknown`. Any other record refuses it with
@@ -160,7 +163,8 @@ correction and the blocked notice.
 - A control signal's record is built with `NewTargetControlRecord`, never
   `NewTargetRecord`, and `EventReplyCommitted` is applied in the same
   transaction that commits the control reply and the execution result. A caller
-  never passes a control record to `Handout` or `Ack`.
+  never passes a control record to `Handout`, `Ack`, `EventNotified` or
+  `EventBlocked`.
 - Run `Tick` before `Handout`, and whenever a lease, backlog, settle or
   `report_by` instant may have passed.
 - Whether delivery is blocked is decided by the caller (the prompt logic); this

@@ -81,6 +81,15 @@ func TestControlRecordIsNeverHandedOut(t *testing.T) {
 			t.Error("a control record holds a lease")
 		}
 	})
+	t.Run("a control record is never blocked, whatever the cause", func(t *testing.T) {
+		for _, cause := range []Cause{CauseAdapterOffline, CauseRuntimeAuth, CauseNativeUnavailable} {
+			rec := controlRecord()
+			after, _, err := rec.Apply(at(time.Minute), Event{Type: EventBlocked, Cause: cause})
+			if !errors.Is(err, ErrWrongSide) || !reflect.DeepEqual(after, rec) {
+				t.Errorf("cause %v: err = %v, record %+v", cause, err, after)
+			}
+		}
+	})
 	t.Run("a control signal is never announced with a prompt", func(t *testing.T) {
 		rec := controlRecord()
 		after, _, err := rec.Apply(at(time.Minute), Event{Type: EventNotified})
@@ -98,13 +107,6 @@ func TestReplyCommitted(t *testing.T) {
 		}
 		if rec.Lease.Handouts != 0 || rec.Lease.Chunks != 0 {
 			t.Errorf("the reply must not invent a hand-out: %+v", rec.Lease)
-		}
-	})
-	t.Run("a delivered control record clears its blocked mark", func(t *testing.T) {
-		rec, _ := mustApply(t, controlRecord(), at(time.Minute), Event{Type: EventBlocked, Cause: CauseAdapterOffline})
-		rec, _ = mustApply(t, rec, at(2*time.Minute), replyCommitted())
-		if rec.Blocked || rec.State != StateDelivered {
-			t.Errorf("blocked %v state %s", rec.Blocked, rec.State)
 		}
 	})
 	t.Run("a repeated committed reply is a duplicate", func(t *testing.T) {
@@ -239,12 +241,6 @@ func TestControlRecordSettlement(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
-	t.Run("a block on a control record is recorded and ends with the reply", func(t *testing.T) {
-		rec, out := mustApply(t, controlRecord(), at(time.Minute), Event{Type: EventBlocked, Cause: CauseAdapterOffline})
-		if !rec.Blocked || out.Result != ResultApplied {
-			t.Errorf("blocked %v outcome %+v", rec.Blocked, out)
-		}
-	})
 }
 
 func TestControlStatusReport(t *testing.T) {
@@ -265,10 +261,6 @@ func TestControlStatusReport(t *testing.T) {
 			}
 			return rec
 		}, StatusReport{State: StateDeliveryUnknown}},
-		{"a blocked executing control record is reported blocked", func(t *testing.T) Record {
-			rec, _ := mustApply(t, controlRecord(), at(time.Minute), Event{Type: EventBlocked, Cause: CauseRuntimeAuth})
-			return rec
-		}, StatusReport{State: StateAccepted, Blocked: true, BlockedCause: CauseRuntimeAuth}},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {

@@ -148,8 +148,11 @@ target record is built by `NewTargetControlRecord(acceptBefore, reportBy)` and
 differs from a message record in four ways:
 
 - It is never queued for `recv`: `Handout` and `Ack` refuse it (`ErrWrongSide`),
-  `Renew` finds no lease, a prompt (`EventNotified`) is refused, and it has no
-  backlog deadline, so it is never `rejected` as backlog expired.
+  `Renew` finds no lease, a prompt (`EventNotified`) and a block
+  (`EventBlocked`) are refused, and it has no backlog deadline, so it is never
+  `rejected` as backlog expired. Blocked is defined as prompts persistently
+  failing to reach a session; a control signal has neither, and an adapter that
+  is offline reaches the sender through the control reply instead.
 - `EventReplyCommitted` moves it from `accepted` (or from `delivery_unknown`,
   as a correction) to `delivered`. Any other record, source or target message
   record, refuses the event with `ErrWrongSide`.
@@ -158,8 +161,9 @@ differs from a message record in four ways:
   `delivery_unknown` in `Tick`, and a forced closure (`EventRejected`) also
   gives `delivery_unknown`, never `rejected`. After `report_by` it closes like
   any other record.
-- `StatusReport` needs no new rule: it reports `accepted`, then `delivered` once
-  the reply is committed, or `delivery_unknown` after settlement.
+- `StatusReport` needs no new rule: it reports `accepted` (never blocked), then
+  `delivered` once the reply is committed, or `delivery_unknown` after
+  settlement.
 
 The sender applies the signed reply with the existing `EventDelivered` (or
 `ApplyStatusReport` of a `delivered` report); nothing on the source side
