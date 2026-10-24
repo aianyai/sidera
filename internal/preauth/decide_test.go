@@ -639,3 +639,19 @@ func TestDecideLeavesTheCallersTrustViewAlone(t *testing.T) {
 		t.Errorf("the caller's Retired set was changed: %v", w.view.Retired)
 	}
 }
+
+// Two certificates under one serial: the one seen first stays, and nothing is
+// recorded for the conflict.
+func TestDecideRecordsNothingForASerialConflict(t *testing.T) {
+	w := newWorld(t).trusts()
+	_, first := w.certWindow(2, epoch, epoch.Add(48*time.Hour))
+	w.seen[w.remoteNode()] = record.SerialSeenOf(first)
+	rec, _ := w.cert(2)
+	d := Decide(w.facts(), w.peer.Public(), NewNodeExchange(rec))
+	if d.State != StateUnauthenticated || d.Reason != ReasonSerialConflict {
+		t.Fatalf("got %v/%v", d.State, d.Reason)
+	}
+	if d.SerialSeen != (record.SerialSeen{}) {
+		t.Errorf("a conflict recorded %+v", d.SerialSeen)
+	}
+}

@@ -56,8 +56,10 @@ const (
 	// ReasonInvalidInput: the facts or the message cannot be judged: no time, no
 	// peer key, an unset kind, a serial state filed under the wrong node.
 	ReasonInvalidInput
-	// ReasonRevocationsUnavailable: no revocation set was given. Without one
-	// nothing can be known to be unrevoked.
+	// ReasonRevocationsUnavailable: no revocation set was given (a nil set).
+	// Without one nothing can be known to be unrevoked, and the revocation
+	// package panics on a nil set, so this package refuses first: a missing set is
+	// a decision, not a crash.
 	ReasonRevocationsUnavailable
 	// ReasonCertificateInvalid: the record does not verify against its type, or
 	// names a state the verification cannot make sense of.
@@ -71,7 +73,9 @@ const (
 	// come back.
 	ReasonCertificateStale
 	// ReasonSerialConflict: the identity key signed two certificates under one
-	// serial. Neither is trusted until the owner sorts it out.
+	// serial, which points to a copied or compromised identity key. The first
+	// certificate seen stays the trusted one and this one is refused; nothing is
+	// recorded for the conflict, so the stored serial state is unchanged.
 	ReasonSerialConflict
 	// ReasonNodeRetired: the node's identity key has a verified self-revocation.
 	ReasonNodeRetired
@@ -139,9 +143,11 @@ type Facts struct {
 	// Now is the time of the decision, UTC. The zero value is refused.
 	Now time.Time
 	// Revocations is every identity-level revocation the node keeps. It must be
-	// loaded: nil is refused (ReasonRevocationsUnavailable), unlike the
-	// revocation package, where a nil set means "nothing revoked". An empty set
-	// from revocation.NewSet says "looked, found nothing".
+	// loaded. The revocation package panics on a nil set so that a set nobody
+	// loaded cannot read as "nothing revoked"; this package refuses a nil set
+	// first (ReasonRevocationsUnavailable), so a missing set is a decision and
+	// not a crash. An empty set from revocation.NewSet says "looked, found
+	// nothing".
 	Revocations *revocation.Set
 	// Trust is the view trust.Evaluate decides on. Revocations.Retired() is added
 	// to its Retired set before every evaluation, so retirement has one source,
@@ -192,6 +198,12 @@ type Decision struct {
 	// certificate advanced the serial, also when the exchange is refused for
 	// another reason, because the node did issue that serial and an older
 	// certificate must not come back.
+	//
+	// Decisions on several connections may run at once, each against the facts it
+	// loaded, so the caller stores the value only after re-checking it against the
+	// state stored now (record.DecideSerial accepts it), or only when its serial
+	// is higher than the stored one. A lower serial stored over a higher one would
+	// bring the old network key back.
 	SerialSeen record.SerialSeen
 }
 

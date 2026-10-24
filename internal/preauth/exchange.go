@@ -12,7 +12,10 @@ import (
 // exchange, counted from the moment the connection exists. A connection that is
 // still unauthenticated then is closed. The value is a protocol rule, not a
 // tuning knob: it is the same on every node, and the longest time a stranger
-// can hold an unauthenticated slot.
+// can hold an unauthenticated slot. It binds the inbound connections the
+// accounting tracks; the time an outbound connection may take is the network
+// layer's own, because the node chose to dial it and its dial timeout already
+// bounds it.
 const ExchangeDeadline = 5 * time.Second
 
 // MaxMessageSize is the largest exchange message, in bytes, on the wire. A
@@ -20,6 +23,11 @@ const ExchangeDeadline = 5 * time.Second
 // future type string and a few more signatures, and is small enough that a
 // stranger cannot make a node buffer anything of consequence before it is
 // authenticated. A decoder reads at most this many bytes and refuses more.
+//
+// The bound covers Ed25519 certificates. Raising it, for example to carry the
+// larger signatures of a post-quantum algorithm, is a protocol change: a node
+// that keeps the old bound refuses the longer message, so the exchange protocol
+// gets a new version identifier alongside.
 const MaxMessageSize = 1024
 
 // Kind says which certificate an exchange message carries. It is the type the

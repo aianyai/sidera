@@ -80,8 +80,10 @@ list from the certificate alone. Whether the certificate is revoked or the perso
 is on the list are the receiver's own facts.
 
 The exchange has a fixed deadline of 5 seconds from the moment the connection
-exists, after which an unauthenticated connection is closed. Requirements on the
-network layer:
+exists, after which an unauthenticated inbound connection is closed. The time
+an outbound connection may take is the network layer's own: the node chose to
+dial it, and its dial timeout already bounds it. Requirements on the network
+layer:
 
 - The exchange runs on the specific connection, opened with the connection's own
   stream function. The host's stream function picks the best connection to the
@@ -253,7 +255,10 @@ cache of who is known: the accounting keeps its own known set.
   fact that could disagree with the first.
 - **The size bound is a protocol rule.** It is the same on every node and small,
   because an unauthenticated peer must not be able to make a node buffer or
-  decode anything of consequence.
+  decode anything of consequence. It covers Ed25519 certificates. Raising it, for
+  example to carry the larger signatures of a post-quantum algorithm, is a
+  protocol change: a node that keeps the old bound refuses the longer message, so
+  the exchange protocol gets a new version identifier alongside.
 - **Exchange on the specific connection.** Observed with the library: the host's
   stream function chooses a direct connection when there is one, so a relayed
   connection never receives an exchange and is closed at the deadline. Opening
@@ -276,6 +281,12 @@ cache of who is known: the accounting keeps its own known set.
   certificate it has seen, because for storage "nothing new" is the right answer;
   for a connection the very certificate at the highest serial is exactly what a
   returning peer presents. Only a lower serial is an old key.
+- **The stored serial only moves forward.** Exchanges on different connections
+  are decided at the same time, each against the facts it loaded. The caller
+  therefore stores `Decision.SerialSeen` only after re-deciding against the state
+  stored now, or only when its serial is higher; storing a decision's value
+  blindly would let a slower decision with a lower serial overwrite a higher one
+  and bring an old network key back.
 - **The serial moves forward even when the exchange is refused.** The node did
   issue that serial. An expired or revoked certificate with a higher serial still
   makes every lower serial an old key, which is the point of keeping the highest
@@ -286,10 +297,13 @@ cache of who is known: the accounting keeps its own known set.
   reachability query is exactly a use a valid certificate alone opens. Such a
   connection is bounded by the non-member lifetime and concurrency limits like
   any other.
-- **A missing revocation set is a refusal.** In `revocation` a `nil` set revokes
-  nothing, which suits callers that load it first. A pre-authentication decision
-  made without having looked at revocations would let a revoked key in, so it
-  asks for an explicit empty set instead.
+- **A missing revocation set is a refusal.** `revocation` panics on a `nil` set,
+  so that a set nobody loaded cannot read as "nothing revoked". A
+  pre-authentication decision runs on a connection a stranger controls, and a
+  panic there would be a crash that peer can cause by timing alone, so this
+  package refuses a `nil` set first, with a reason of its own: a missing set is a
+  decision, not a crash. A node that has revoked nothing passes an explicit empty
+  set.
 - **Exempt known members from the cap.** The cap exists so that strangers cannot
   hold the node's connections. The same cap shuts out members that reconnect
   during a flood, and the flood costs the attacker nothing. A key authenticated
@@ -347,6 +361,6 @@ cache of who is known: the accounting keeps its own known set.
 | Protocol identifiers and classes | `internal/preauth/protocol.go` |
 | The access table | `internal/preauth/access.go`; tests `TestAllowedMatrix` (one row per rule, every cell written out), `TestBusinessProtocolBeforeTheExchangeIsRefused`, `TestNonMemberNodeMayOnlyPair`, `TestNonMemberPersonMayOnlyQueryReachability`, `TestRelayReservationBeforeTheExchangeIsRefused`, `TestAllowedRefusesAnInvalidState`, `TestProtocolIdentifiers` |
 | The exchange message and the deadline | `internal/preauth/exchange.go`; tests `TestGoldenExchangeDecodes`, `TestExchangeEncodesTheGoldenBytes` (hand-written bytes, the signatures inside verified by an independent program), `TestDecodeExchangeRefuses` (one row per rule), `TestEncodeExchangeRefuses`, `FuzzDecodeExchange` |
-| The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestHeldMembers`, `TestDecideLeavesTheCallersTrustViewAlone`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
+| The decision | `internal/preauth/decide.go`; tests `TestDecideNode`, `TestDecidePerson` (one row per rule), `TestDecideAdvancesTheSerialSeen`, `TestDecideRecordsNothingForASerialConflict`, `TestHeldMembers`, `TestDecideLeavesTheCallersTrustViewAlone`, `TestKindDecidesWhichStatesArePossible`, `TestDecideOnTheGoldenMessages`, `FuzzDecide` |
 | Parameters | `internal/preauth/params.go`; test `TestParamsValidate` |
 | The accounting model | `internal/preauth/accounting.go`; tests `TestAggregateCapRefusesBeyondTheCap`, `TestOutboundConnectionsAreNotAccounted`, `TestAKnownMemberIsExemptFromTheCapUnderAFlood`, `TestAMemberLearnedFromACompletedExchangeIsExemptNextTime`, `TestASecondInboundConnectionOnATrackedKeyIsRefused`, `TestADuplicateKeyIsRefusedBeforeTheCapIsLookedAt`, `TestADuplicateKeyOfAKnownMemberIsRefusedWithoutLeakingAnEntry`, `TestADuplicateKeyOfANonMemberIsRefused`, `TestADuplicateKeyIsRefusedUntilTheSweepForgetsALostEntry`, `TestAKeyIsFreeAgainOnceItsConnectionBecameAMember`, `TestAnAuthorizedPersonIsKnownAfterItsFirstExchangeOnly`, `TestSetHeldReplacesTheHeldMembersAndKeepsTheLearnedOnes`, `TestExchangeCompletionReleasesTheAggregateSlot`, `TestDisconnectReleasesWhateverTheConnectionHeld`, `TestTheKeyHasNoDirection`, `TestNonMemberConcurrencyLimit`, `TestANonMemberThatBecomesAMemberFreesItsPlace`, `TestANonMemberDecisionTakesAwayWhatWasKnown`, `TestARefusedExchangeWithdrawsTheExemption`, `TestAnInvalidCompletedCallDoesNotWithdrawTheExemption`, `TestForgetEndsTheKnownStandingFromEitherSource`, `TestNonMemberPersonsAndNodesShareTheNonMemberLimits`, `TestSweepForgetsConnectionsNeverSeenConnected`, `TestOverdue*`; the property test `TestAccountingAgainstTheReference` follows every connection by an identifier of its own that the model never sees, compares every answer with a second implementation under 40,000 random events, asserts at every step that each live inbound connection is on the books and bound by a deadline or was released as a member, that every connected entry has an open connection behind it and that nothing remains once all connections ended, and asserts how often each path was taken |

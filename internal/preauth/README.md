@@ -68,7 +68,9 @@ timers, and applies the answers.
   verification checks that, so the receiver has what it needs to look the
   person up. Revocations and the authorized-persons list are the receiver's own.
 - **Strict decoding, bounded first.** `DecodeExchange` applies the size bound
-  (`MaxMessageSize`, 1 KiB) before anything else, then the strict rules of
+  (`MaxMessageSize`, 1 KiB, enough for Ed25519 certificates; raising it, for
+  larger post-quantum signatures, is a protocol change that needs a new protocol
+  version) before anything else, then the strict rules of
   `record` (no duplicate keys, unknown fields, indefinite lengths, tags; the
   bytes must be the canonical encoding), then decodes the certificate record the
   same way. It checks no signature and not that the record's type fits the kind;
@@ -99,9 +101,10 @@ timers, and applies the answers.
     caller copied the set into the view. Nodes the view lists itself stay retired.
     The caller's view is not changed.
   - **Failure closed.** An unset time, an unset peer key, an unset kind and a
-    `nil` revocation set are refused. A `nil` set is not "nothing revoked" here,
-    as it is in `revocation`: use `revocation.NewSet()` for a node that has
-    revoked nothing. No code path makes a node a member or a person authorized
+    `nil` revocation set are refused. `revocation` panics on a `nil` set so that a
+    set nobody loaded cannot read as "nothing revoked"; `Decide` refuses it first
+    with `ReasonRevocationsUnavailable`, so a missing set is a decision and not a
+    crash. Use `revocation.NewSet()` for a node that has revoked nothing. No code path makes a node a member or a person authorized
     without the positive answer of `trust` or `admin`.
   - **The serial seen** is advanced in `Decision.SerialSeen` whenever a verified
     certificate carries a higher serial, also when the exchange is refused for
@@ -170,15 +173,21 @@ timers, and applies the answers.
   and refuses more. After a hole punch both ends may start one; the later
   exchange on a connection that is already authenticated is ignored.
 - **The deadline is `ExchangeDeadline` from the moment the connection exists**;
-  a connection still unauthenticated then is closed.
+  a connection still unauthenticated then is closed. It binds the inbound
+  connections the accounting tracks. The limit on an outbound connection, which
+  the node chose to open, is the network layer's own (its dial timeout).
 - The peer key passed to `Decide` is the public key the secure handshake
   authenticated on this connection, and nothing else. It is the only identity the
   peer proved; the message is what it claims.
 - `Facts` is loaded fresh: the revocation set holds every revocation the node
   keeps (the retired nodes are taken from it, see below), and `SerialSeen` is the
-  stored state per node. The caller stores `Decision.SerialSeen` when it is not
-  the zero value and keeps `Decision.NodeCertificate` as the node's accepted
-  certificate when the exchange completed.
+  stored state per node. Decisions on several connections can run at once, each
+  against the facts it loaded, so the caller stores `Decision.SerialSeen` (when it
+  is not the zero value) only after re-deciding against the state stored now, or
+  only when its serial is higher than the stored one; otherwise a concurrent
+  decision could roll the serial back and let an old network key return. The
+  caller keeps `Decision.NodeCertificate` as the node's accepted certificate
+  when the exchange completed.
 - The accounting is driven from the connection gater's secured callback, the
   network notifee's connected and disconnected callbacks and the exchange's
   outcome. `Sweep` is called at least every `SweepInterval`, and `Overdue` often
@@ -210,9 +219,10 @@ timers, and applies the answers.
 
 - `State`, `Verdict`, `Kind`, `Direction`, every reason enum and `Params` fields:
   zero is unset and is refused or reported as invalid, never a valid input.
-- `Facts.Revocations == nil` is refused. In `revocation`, a `nil` set reads as
-  "nothing revoked"; here an unloaded set must not let a revoked key in, so the
-  caller passes `revocation.NewSet()` to say "looked, found nothing".
+- `Facts.Revocations == nil` is refused with `ReasonRevocationsUnavailable`.
+  `revocation` panics on a `nil` set; here the refusal comes first, so an unloaded
+  set can neither let a revoked key in nor crash the decision. The caller passes
+  `revocation.NewSet()` to say "looked, found nothing".
 - `Facts.SerialSeen`: a node missing from the map has had no serial seen; an
   entry for the wrong node is an invalid input. `Decision.SerialSeen` zero means
   "keep what is stored".
