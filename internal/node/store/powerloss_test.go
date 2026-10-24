@@ -43,13 +43,16 @@ type ledger struct {
 // powerLossWorld drives random operations over the store and judges power-loss
 // clones against the ledger.
 type powerLossWorld struct {
-	t      *testing.T
-	r      *rig
-	rng    func(n int) int
-	led    ledger
-	stage  map[int]int
-	rev    map[int]uint64
-	cur    *operation
+	t     *testing.T
+	r     *rig
+	rng   func(n int) int
+	led   ledger
+	stage map[int]int
+	rev   map[int]uint64
+	cur   *operation
+	// damage and restarts turn on two more kinds of step, for the test that
+	// compares the whole disk with the ledger.
+	damage bool
 	counts map[string]int
 	stats  struct{ clones, mid, ahead, behind int }
 }
@@ -146,6 +149,61 @@ func (w *powerLossWorld) next() *operation {
 			}}
 	case 9:
 		return w.sweep()
+	case 10:
+		if w.damage {
+			return w.damageOp()
+		}
+	case 11:
+		if w.damage {
+			return &operation{name: "restart", call: func() error {
+				w.r = openRig(w.t, w.r.mem.CrashCloneWorst())
+				return nil
+			}}
+		}
+	}
+	return nil
+}
+
+// damageOp damages the body of a target record that is on the disk, as the
+// disk may while the node is stopped, and runs the startup rules over it: the
+// record is quarantined and replaced by a lost record, with an alert.
+func (w *powerLossWorld) damageOp() *operation {
+	if w.rng(6) != 0 {
+		return nil // rare: most messages live a full life
+	}
+	r := w.r
+	for off := 0; off < messages; off++ {
+		i := 1 + (w.rng(messages)+off)%messages
+		if st := w.stage[i]; st < 2 || st > 4 {
+			continue
+		}
+		in := tgtIn(i)
+		name := in.Name()
+		p := path.Join(store.InDir, name)
+		if _, there := w.led.files[p]; !there {
+			continue // swept already
+		}
+		damaged := append([]byte(nil), w.led.files[p]...)
+		damaged[len(damaged)-2] ^= 1
+		s := newSim(w.t, r.st)
+		id := alertFor(store.InDir, name)
+		alert := s.alert(id, "corrupt_record", store.InDir+"/"+name)
+		return &operation{
+			name: "damage",
+			call: func() error {
+				if err := fsx.Replace(r.mem, setupTag, p, damaged, fsx.ModePrivate); err != nil {
+					return err
+				}
+				s.recoverAll()
+				return nil
+			},
+			writes: map[string][]byte{
+				p: w.enc(s.lostIn(in.Key)),
+				path.Join(store.InDir, corruptName(in, id)): damaged,
+				path.Join(store.AlertsDir, alert.Name()):    w.enc(alert),
+			},
+			after: func() { w.stage[i] = 7 },
+		}
 	}
 	return nil
 }

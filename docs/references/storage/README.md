@@ -8,7 +8,10 @@ interface and the durable write sequences) and
 [`internal/node/fsx/fsxtest`](../../../internal/node/fsx/fsxtest/README.md)
 (the crashable in-memory file system and the fault injector) and
 [`internal/node/txn`](../../../internal/node/txn/README.md) (the transaction
-layer every persistent write goes through).
+layer every persistent write goes through),
+[`internal/node/recfile`](../../../internal/node/recfile/README.md) (the framing
+of a record file) and [`internal/node/store`](../../../internal/node/store/README.md)
+(the records of `state/`).
 
 Platform paragraphs that say "pending verification by CI on main" describe
 behaviour no one has observed on that platform yet: the code and its tests are
@@ -343,6 +346,160 @@ returns nil; do not read back a path written in the same `Tx`; an append that no
 `SyncFile` followed is not durable even after `Commit` returns nil; exit and
 rescan on `IsFatal`; serialise the transactions of one declaration.
 
+### The records of `state/`
+
+`state/` is the runtime data of a node and is owned by the `store` package;
+`keys/` and `config/` have their own owners. Deleting `state/` is a crash that
+loses what was in flight and nothing more: the stable identifiers, the keys and
+every decision of the owner live outside it.
+
+```
+state/
+  out/<h>.rec          source record: one per message or control signal sent from this node
+  in/<h>.rec           target record: one per message for one endpoint, deduplication included
+  ctl/<h>.rec          target control record: deduplication, stored reply, creation intent
+  bodies/<sha256>      a body, bare bytes, named by its digest
+  endpoints/<h>.rec    endpoint runtime state: kind, instance, token, session mapping
+  attempts/<h>.rec     prompt attempts, blocked report, the followers a head record owes
+  checkpoints/<h>.rec  an adapter's checkpoint
+  admin/<h>.rec        result and fingerprint of an administrative operation
+  alerts/<h>.rec       owner alerts
+  seq/<h>.rec          sequence floors of one sending endpoint
+  archive/<date>.jsonl summaries and events of records that left the live files
+  <dir>/<name>.<alert id>.corrupt   a quarantined file
+```
+
+`<h>` is the SHA-256 of the kind, a space and the key, in lowercase hex. The
+kind is part of it because `out/` holds two kinds (a message and a control
+signal) that share a key text.
+
+**Record file.** The first line is `sidera-record 1 <kind> <crc32c> <length> <key>`
+(`recfile`), the body follows. The checksum covers the body only; the kind and
+the key of the first line are verified by the file name, which is their hash, so
+a first line that passed can be trusted to name its key even when the body is
+gone, which is what a replacement of a damaged delivery record needs. A file is
+validated in seven steps, and each failure has a class:
+
+| Step | Check | Class |
+| ---- | ----- | ----- |
+| 1 | the first line is at most 8 KiB, ends in a newline, has six fields of single spaces, the magic and the version | first line unreadable |
+| 2 | the kind is one the directory holds | first line unreadable |
+| 3 | the key is unpadded base64url and the file name is the hash of kind and key | first line unreadable |
+| 4 | the key parses as a key of the kind, field by field with the parser of the package that owns the field | first line unreadable |
+| 5 | the bytes after the first line are as many as the length says (at most 256 KiB) | body damaged |
+| 6 | their CRC32C is the checksum | body damaged |
+| 7 | the body decodes strictly, is the canonical encoding of what it decodes to, and passes the checks of its kind | body damaged |
+
+A first line whose checksum or length field is itself damaged while the body is
+intact fails step 5 or 6 and is treated as a damaged body: a delivery record is
+then replaced by a lost record. That reports "lost, outcome unknown" to the sender
+where the record might have been read; nothing is lost and the failure is
+visible, so there is no separate path for it.
+
+A body is JSON written by `encoding/json` from structs of the package, with
+times as RFC 3339 in UTC with a `Z` and fractional seconds without trailing
+zeros, and read with `strictjson`. Step 7 also requires the body to be exactly
+what the encoder gives for what it decoded to, so no two files mean the same
+record, a bit of rot that leaves valid JSON cannot pass as another record, and
+decoding then encoding gives the bytes back for every file that decodes.
+
+**Two shapes.** A source, target or control record is regular or lost. A lost
+record is what replaces a delivery record that was damaged: it has the key of the
+damaged one, the delivery records the delivery package builds for that case, the
+discovery time and, on the source side, the feedback it owes. It has no envelope,
+no sequence numbers, no body reference and, on the target side, no revision.
+
+**Revision.** A regular target record carries `rev`, which the store raises by one
+at each write. A head record (the prompt or block of an endpoint) lists the
+followers it still owes, each with the revision and the acceptance time the record
+had before the head was written. A rule that replays a prompt or a block acts on a
+listed follower only if it is the same record and nothing has written it since.
+
+**Bodies** are content-addressed and written before the record that refers to
+them; a body is removed in the transaction that drops its last reference. What a
+crash leaves between the two is an orphan, removed by the first rule of the next
+start. A body is checked against its name when it is read (a start does not read
+them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch quarantines the body and
+every record that refers to it either becomes a lost record, if it still needs the
+bytes, or loses the reference.
+
+**Quarantine.** A damaged file is renamed `<name>.<alert id>.corrupt`, where the
+alert id is chosen before and never repeats, so a replacement that is damaged in
+its turn gets a file of its own. The last write of every quarantine is the alert,
+and an alert is deleted only after the file it names. So "a quarantined file with
+no alert" is exactly an unfinished quarantine, and the rule that finishes it never
+builds a replacement twice. Configuration and key files are never quarantined: a
+damaged one stops the start and is named.
+
+**Sequence numbers.** The next number of a (sending endpoint, target address)
+pair is the highest of the floor of the pair and the numbers of the source records
+still there, plus one. A number is given again until the record that carries it is
+acknowledged, so a crash makes no gap. The sweep writes the floor of every pair it
+is about to remove a record of before it removes anything. Quarantining a source
+record whose numbers are lost raises the floor above everything known, by one for
+each lost record of the pair. A damaged floor file, or a source record whose first
+line is damaged, loses what it said, and a number of that pair may then be given
+twice; the owner has an alert. Deleting `state/` starts every pair at 1.
+
+**Archive.** A line is `{"crc":"<8 hex>","rec":<compact JSON>}` and a newline; the
+checksum covers the record. A transaction that appends starts with a newline, so
+the torn tail a crash leaves, and the half line a failed append leaves in the
+middle of a file, are lines of their own and cannot swallow the first line that
+follows. A reader resumes at every newline, skips empty lines, drops and counts a
+line that is not intact and ignores a last line without a newline. Events are not
+synced; a summary is appended and synced before any record it stands for is
+removed.
+
+**Retention.** A delivery record is a live file until its deliveries are final and
+the latest of the retentions of what it holds has passed: the deduplication record
+and the idempotency key until `report_by`, the status report until `report_by` or a
+whole `report_by` window after its creation, and the facts reply permission reads
+until `report_by` plus the clock tolerance plus the reply window. That is about 27
+hours after the delivery deadline. Then a summary goes to the archive and the file
+is removed, a quarantined file with its replacement (the file first). Administrative
+results are kept 7 days, acknowledged alerts 7 days after the acknowledgement, and
+archive files 30 days, uncompressed. An archived message costs about 2.4 KiB (two
+summaries and about eight events), so at 3,000 messages an hour, the upper scale
+the design assumes, a day is about 169 MiB and 30 days about 4.9 GiB; at 500 an
+hour about 0.8 GiB. The archive is not part of the free-space reserve a node keeps
+for new work.
+
+**Retained facts are single files.** A segment file per hour would need a second
+representation, its own compaction and crash rules, and a records index fed from
+two places; a record can still change until `report_by`, and a late proof can
+change it after. With the work bounded (the number of unfinished deliveries is
+limited), the number of live files is the thing to measure. The cold start scan of
+live files, measured on the real file system of macOS with a warm page cache (Apple
+M4, `BenchmarkColdStartScan`, 2/3 target records and 1/3 source records):
+
+| Live files | Scan |
+| ---------- | ---- |
+| 10,000 | 0.83 s |
+| 50,000 | 3.2 s |
+| 200,000 | 11-13 s |
+
+The threshold at which segment files become a task of their own is a cold start of
+200,000 files above 30 s on macOS or above 60 s on the CI of Windows; Windows and
+Linux numbers, and a cold page cache, are pending verification by CI on main.
+
+**The rules of recovery.** Each rule has a predicate, a pure function of a scan,
+and the store offers the write that carries it out. The predicates the store owns:
+orphan bodies; session endpoints being created with no control record; quarantined
+files with no alert (records, and bodies, which continue in chunks); a session
+endpoint whose control record holds the end of its creation or its close; the
+followers a prompt or a block owes; feedback a notice already covers; the endpoints
+of a disabled instance; and the candidates of the drain of records queued for a
+closed endpoint, which the engine narrows with the delivery rules. A run with no
+crash and no damage finds none of them at any quiet point, and a finished recovery
+leaves none; tests evaluate the predicates on a copy of the disk after every step
+of such a run.
+
+**Settle.** A start makes the directories of `state/` durable before it runs any
+rule. After a process crash a head record may be visible and not durable; a rule
+writes its followers durably, and a power loss that followed would leave the
+followers without their head. The crash tests found this; the barrier is one
+directory sync per directory.
+
 ## The crash model and what it can prove
 
 `fsxtest.Mem` is an in-memory `FS` that keeps, for every file, the current
@@ -529,6 +686,38 @@ so that the double cannot drift from what it stands for.
   the coverage of the recovery path. The settle that follows is of the normal
   kind for the same reason.
 
+### Why the records are shaped as they are
+
+- **One file per record, replaced whole.** A state change rewrites a few KiB, the
+  record is the truth a person can read, and there is no second copy to disagree
+  with it. The alternatives were a log or a manifest that every multi-file
+  transaction replays (more fsyncs, an opaque second copy, and a special case for
+  every deleted `state/`) and a database (a dependency the problem does not need).
+- **A transaction is a head and followers the head determines.** None of the
+  transactions needs several files that cannot be derived from one another to
+  appear together. The authority is written first and durably; the followers are
+  written after, and a rule that can recompute them from the authority repairs a
+  crash between. The rules are stated as implications that hold on every state a
+  crash cannot have caused, so they find no work on a clean disk: "closed" is
+  absorbing, a follower that no longer exists is done, and a follower of a head
+  record is listed with the revision it had.
+- **The alert is the last write of a quarantine, and the quarantined file goes
+  before the replacement and the alert.** An interrupted quarantine is then
+  recognised by an effect (a quarantined file whose alert does not exist), not by a
+  guess, and a sweep interrupted between the two removals cannot leave a state the
+  rule would repair by building a second replacement and reporting twice.
+- **The sweep removes a control record before the delivery derived from it.** The
+  other order can leave the delivery without the record that explains it, and a
+  rule that rebuilds deliveries from control records would give it a second life.
+- **Floors are written before records are removed.** A number derived from the
+  records that happen to be there would be given again after a sweep.
+- **The kind is hashed into the file name.** One flipped bit would otherwise turn a
+  message record into a control record.
+- **Nothing is skipped on a resumption because it seems to be done.** What a
+  crashed process left may be visible and not durable, and the alert, which says the
+  quarantine is finished, must not become durable ahead of the replacement it
+  stands for.
+
 ## Known gaps
 
 - **Symbolic links.** The test that `Stat` does not follow a final symbolic link
@@ -550,6 +739,17 @@ so that the double cannot drift from what it stands for.
 - **The tests of this layer run on the in-memory file system.** They prove the
   step sequences, the classes and the ordering against the crash model, not
   against a real kernel.
+
+- **The sweep leaves a quarantined file whose first line is unreadable**, in a
+  directory of delivery records, where it is: the bound after which it may go is a
+  function of the delivery package that is not on this branch.
+- **A decoded delivery record is not checked for consistency** by the store:
+  the delivery package decides what a valid record is, and the store calls it once
+  it can.
+- **The records are tested on the in-memory file system and, for the cold start,
+  on the real one of macOS.** Windows and Linux numbers and the Windows ordering
+  of renames are pending verification by CI on main.
+- **A cold page cache is not measured.**
 
 ## Where
 
@@ -575,6 +775,18 @@ so that the double cannot drift from what it stands for.
 | settle at every start | `internal/node/txn/cleanup.go` | `settle_test.go` (`TestPowerLossCloneAfterRecoverKeepsWhatAProcessCrashLeftVisible`, `TestPowerLossCloneAfterACrashDuringTheSettle`, `TestRecoverSettlesEveryDirectoryInAStableOrder`); `internal/node/config/settle_test.go` (`TestPowerLossCloneAdapterGCAfterAnInstallCrashedBeforeTheDirectorySync`) |
 | coverage | `internal/node/txn/writer.go` | `coverage_test.go` |
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
+| record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `FuzzDecodeFrame` |
+| keys | `internal/node/store/key.go` | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
+| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
+| scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go`, `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
+| declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
+| the transactions | `internal/node/store/write.go` | `write_test.go`, `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
+| recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `TestCleanScenariosLeaveNoRecoveryWork` |
+| sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` |
+| archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |
+| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` |
+| deleting `state/`, the layout rule | `internal/node/store/recovery.go` | `state_deleted_test.go` |
+| cold start | `internal/node/store/bench_test.go` | `BenchmarkColdStartScan`, `TestColdStartFixtureScansBack` |
 
 ### Windows tests
 

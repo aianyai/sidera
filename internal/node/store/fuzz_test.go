@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"bytes"
+	"encoding/base64"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/recfile"
@@ -100,4 +102,55 @@ func FuzzParseArchive(f *testing.F) {
 			t.Fatalf("%d records and drops out of %d lines", n, bytes.Count(data, []byte("\n"))+1)
 		}
 	})
+}
+
+// Whatever body is put in a frame with a right checksum under a valid key of a
+// kind, DecodeRecord either refuses it as a damaged body or returns a record that
+// encodes to the same bytes: the fuzzer reaches the checks of every body, which a
+// mutated whole file seldom does.
+func FuzzDecodeRecordBody(f *testing.F) {
+	keys := map[store.Kind]string{}
+	for _, g := range goldenRecords {
+		_, key, _ := goldenParts(g.file)
+		kind := strings.Fields(g.file)[2]
+		keys[store.Kind(kind)] = key
+	}
+	kindsInOrder := []store.Kind{store.KindOut, store.KindIn, store.KindCtl, store.KindEndpoint, store.KindAttempts, store.KindCheckpoint, store.KindAdmin, store.KindAlert, store.KindSeq}
+	for i, k := range kindsInOrder {
+		for _, g := range goldenRecords {
+			if strings.Fields(g.file)[2] == string(k) {
+				_, _, body := goldenParts(g.file)
+				f.Add(uint8(i), []byte(body))
+			}
+		}
+	}
+	f.Fuzz(func(t *testing.T, kindIdx uint8, body []byte) {
+		kind := kindsInOrder[int(kindIdx)%len(kindsInOrder)]
+		key := keys[kind]
+		dir := kind.Dir()
+		file, err := recfile.EncodeFrame(string(kind), []byte(key), body)
+		if err != nil {
+			return
+		}
+		rec, dmg := store.DecodeRecord(dir, recfile.FileName(string(kind), []byte(key)), file)
+		if dmg != nil {
+			if dmg.Class != store.BodyDamaged {
+				t.Fatalf("a frame with a valid key and checksum is damaged in its first line: %+v", dmg)
+			}
+			return
+		}
+		again, err := store.EncodeRecord(rec)
+		if err != nil || !bytes.Equal(again, file) {
+			t.Fatalf("decode then encode changed the file (%v):\n in  %q\n out %q", err, file, again)
+		}
+	})
+}
+
+// goldenParts splits a golden file into its kind's directory (unused), its key and
+// its body.
+func goldenParts(file string) (string, string, string) {
+	nl := strings.IndexByte(file, '\n')
+	fields := strings.Split(file[:nl], " ")
+	raw, _ := base64.RawURLEncoding.DecodeString(fields[5])
+	return "", string(raw), file[nl+1:]
 }
