@@ -60,8 +60,15 @@ type IssuanceState struct {
 	// unsynchronised offline start), and the eviction view keeps showing the
 	// eviction as incomplete and names that node.
 	Unreachable NodeSet
-	// PendingDirectives counts offline directives received but not yet
-	// verified and carried out.
+	// PendingDirectives counts received offline directives whose verdict is
+	// not yet reached: the caller has not yet run admin.AcceptDirective and,
+	// on execute, ApplyDirective on them. Every other verdict settles a
+	// directive and removes it from the count: executed and applied, warned
+	// about, rejected, mismatched, not for this node, already effective.
+	// Counting a directive until it takes effect would let anyone sign a
+	// structurally valid directive and stop voucher issuance for good. A cap on
+	// the directives held belongs to the synchronisation protocol that receives
+	// them.
 	PendingDirectives int
 }
 
@@ -108,7 +115,7 @@ func (v View) directParties(now time.Time) []ident.NodeID {
 
 // IssuanceGate decides whether the node may issue vouchers now. A node that
 // requires sync issues none until it has synced with every direct party it
-// could reach and carried out all pending offline directives. The direct
+// could reach and brought every received offline directive to a verdict. The direct
 // parties come from the usable local credentials in v and the grace period from
 // v.Settings, so callers cannot disagree with the trust rules about either.
 func IssuanceGate(v View, s IssuanceState, now time.Time) IssuanceVerdict {

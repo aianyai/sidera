@@ -90,8 +90,8 @@ credentials still count, so its other parties are told: an edge with a retired
 end means a stolen identity key is signing new credentials.
 
 **Voucher issuance gate.** A node issues no vouchers until it has synced
-revocations and trust graph with its direct parties and carried out pending
-offline directives, when it is recovering right after the daemon started, was
+revocations and trust graph with its direct parties and brought every received
+offline directive to a verdict, when it is recovering right after the daemon started, was
 restored from a backup, or was out of contact with every direct party for longer
 than its grace period. The caller measures the time out of contact; it covers a
 stopped process, a sleeping host and a lost network. Direct parties whose
@@ -183,6 +183,12 @@ revoke; it can neither create trust nor loosen anything.
   meanwhile before vouching again, which is why the gate keys on time out of
   contact and not on the process having been stopped, and why a start always
   passes through it however short the stop.
+- **A directive is pending only until its verdict.** Every verdict settles it:
+  executed and applied, warning, rejection, mismatch, not for this node,
+  already effective. Counting a directive until it takes effect would let anyone
+  sign a structurally valid directive that the node warns about or rejects and
+  keep voucher issuance shut for good. A cap on the directives a node holds
+  belongs to the synchronisation protocol that receives them.
 - **The gate does not wait for unreachable parties.** Requiring every party
   online would let one long-offline machine stop an intermediate from ever
   vouching again. A directive held only by unreachable parties is missed for now;

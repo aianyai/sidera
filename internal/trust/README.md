@@ -92,7 +92,12 @@ reasons behind the rules.
   learn the revocations issued meanwhile before it vouches again, and a restart
   cannot be used to skip the gate. Syncing means a completed sync with every
   direct party that is neither synced nor `Unreachable`, then no pending offline
-  directive. Unreachable parties (connection attempt failed in the current
+  directive. A directive is pending only until its verdict is reached, that is,
+  until `admin.AcceptDirective` and, on execute, `ApplyDirective` have judged
+  it; every verdict (executed and applied, warn, reject, mismatch, not for this
+  node, already effective) settles it, so a structurally valid directive that
+  nobody will act on cannot hold issuance shut. How many directives a node
+  holds is capped by the synchronisation protocol that receives them, not here. Unreachable parties (connection attempt failed in the current
   round) are not waited for: requiring every party online would let one
   long-offline machine stop an intermediate from ever vouching again. A
   directive held only by unreachable parties is missed for now (the caller keeps
