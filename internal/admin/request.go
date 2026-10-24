@@ -70,12 +70,14 @@ type Request struct {
 // operation ID and a configuration change has an expected version. It returns
 // ReasonOK for a well-formed request.
 //
-// The order of handling a request is fixed: Authorize, ValidateRequest,
-// CheckReplay under KeyFor(actor, id), and only when CheckReplay says execute,
-// CheckVersion, the execution and the storing of the result with its
-// fingerprint. A stored result is returned as it is, without a version check:
-// the request already ran, and a later version change must not turn its answer
-// into a conflict.
+// The order of handling a request is fixed: Authorize, ValidateRequest; then,
+// for a side-effecting request only, CheckReplay under KeyFor(actor, id), and
+// only when CheckReplay says execute, CheckVersion, the execution and the
+// storing of the result with its fingerprint. A stored result is returned as it
+// is, without a version check: the request already ran, and a later version
+// change must not turn its answer into a conflict. A request that is not
+// side-effecting is executed after validation; it is never checked for replay
+// and its result is never stored.
 func ValidateRequest(r Request) Reason {
 	switch {
 	case r.Op.SideEffecting() && r.ID.IsZero():

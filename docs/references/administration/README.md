@@ -150,12 +150,14 @@ and applied only if all are allowed, so flipping inheritance through the
 declaration is `OpEnableInheritance` or `OpDisableInheritance`, never a manage
 level edit.
 
-The only order of handling a request is: authorize; validate its shape; check
-replay under the sender-scoped key (a stored result is returned as it is, with
-no version check, because the request already ran); and only when it is to
-execute, check the version, execute, and store the result with its fingerprint.
-The key is built only for a sender that was authorized, so a denied caller can
-neither file nor probe results.
+The only order of handling a request is: authorize; validate its shape; then,
+for a side-effecting request only, check replay under the sender-scoped key (a
+stored result is returned as it is, with no version check, because the request
+already ran), and only when it is to execute, check the version, execute, and
+store the result with its fingerprint. A request that is not side-effecting is
+executed after validation; it is never checked for replay and its result is
+never stored. The key is built only for a sender that was authorized, so a
+denied caller can neither file nor probe results.
 
 ## Why
 
