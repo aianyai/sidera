@@ -13,7 +13,9 @@ var (
 	// ErrIllegalTransition: the fact contradicts the delivery's state, for
 	// example a rejection reported for a delivered message.
 	ErrIllegalTransition = errors.New("illegal delivery transition")
-	// ErrWrongSide: the operation belongs to the other side of the delivery.
+	// ErrWrongSide: the operation belongs to the other side of the delivery, or
+	// to the other kind of target record (a control record is never handed out
+	// and a message record never has its reply committed).
 	ErrWrongSide = errors.New("operation does not apply to this side of the delivery")
 	// ErrInvalidEvent: the event is malformed.
 	ErrInvalidEvent = errors.New("invalid event")
@@ -35,14 +37,22 @@ const (
 	SideTarget
 )
 
-// Record is one delivery as one side sees it. Build it with NewSourceRecord or
-// NewTargetRecord and change it only through its methods. The zero value is
-// not usable.
+// Record is one delivery as one side sees it. Build it with NewSourceRecord,
+// NewTargetRecord or NewTargetControlRecord and change it only through its
+// methods. The zero value is not usable.
 type Record struct {
 	Side   Side
 	State  State
 	Sub    SubState
 	Reject RejectReason // set while State is StateRejected
+
+	// Control marks the target's record of a control signal (only
+	// NewTargetControlRecord sets it, so it is never set on the source side). A control signal
+	// is executed by the adapter when it is accepted and answered with a reply;
+	// it is never queued for recv, so it has no lease, no chunks and no backlog
+	// deadline, and it is delivered by EventReplyCommitted, not by Ack. False
+	// for every other record.
+	Control bool
 
 	// AcceptBefore is the delivery deadline from the envelope.
 	AcceptBefore time.Time
@@ -89,6 +99,22 @@ func NewTargetRecord(acceptedAt, acceptBefore, reportBy time.Time, endpointMaxQu
 	}, nil
 }
 
+// NewTargetControlRecord returns the target's record of a control signal it has
+// just accepted. acceptBefore and reportBy are the envelope's values, already
+// validated by the caller. The record is never queued for recv and has no
+// backlog deadline: the signal is executed, not handed to an agent, and the
+// delivery ends when the control reply is committed (EventReplyCommitted) or,
+// failing that, is settled by Tick.
+func NewTargetControlRecord(acceptBefore, reportBy time.Time) Record {
+	return Record{
+		Side:         SideTarget,
+		State:        StateAccepted,
+		Control:      true,
+		AcceptBefore: acceptBefore,
+		ReportBy:     reportBy,
+	}
+}
+
 // EventType names a fact or occurrence that Apply understands.
 type EventType uint8
 
@@ -117,6 +143,11 @@ const (
 	EventBlocked
 	// EventUnblocked: the cause of the block is gone.
 	EventUnblocked
+	// EventReplyCommitted: the control reply was committed together with the
+	// execution result (target control records only). It is the only fact that
+	// delivers a control record; the sender applies the reply with
+	// EventDelivered.
+	EventReplyCommitted
 )
 
 // Event is one input to Record.Apply.
@@ -181,8 +212,9 @@ func ignored(from State, why IgnoreReason) Outcome {
 // Apply applies one event at time now and returns the updated record.
 //
 // Apply, Tick, Handout and Ack are the ways a record changes; every state
-// change among them goes through moveTo. A target record is delivered only by
-// Ack, and a rejection reported to a target record is a forced closure (see
+// change among them goes through moveTo. A target message record is delivered
+// only by Ack and a target control record only by EventReplyCommitted, and a
+// rejection reported to a target record is a forced closure (see
 // closeForcibly).
 func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 	switch ev.Type {
@@ -190,7 +222,12 @@ func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 		return r.moveTo(StateAccepted, RejectNone)
 	case EventDelivered:
 		if r.Side == SideTarget {
-			return r, Outcome{}, fmt.Errorf("%w: on the target a delivery becomes delivered only through Ack", ErrWrongSide)
+			return r, Outcome{}, fmt.Errorf("%w: on the target a delivery becomes delivered only through Ack, or through EventReplyCommitted for a control signal", ErrWrongSide)
+		}
+		return r.moveTo(StateDelivered, RejectNone)
+	case EventReplyCommitted:
+		if !r.Control {
+			return r, Outcome{}, fmt.Errorf("%w: a reply is committed only for a control signal on the target", ErrWrongSide)
 		}
 		return r.moveTo(StateDelivered, RejectNone)
 	case EventRejected:
@@ -231,7 +268,7 @@ func (r Record) moveTo(to State, reason RejectReason) (Record, Outcome, error) {
 		return r, ignored(from, IgnoreStale), nil
 	case !CanTransition(from, to):
 		return r, Outcome{}, fmt.Errorf("%w: %s to %s", ErrIllegalTransition, from, to)
-	case to == StateDeliveryUnknown && r.Side == SideTarget && r.Lease.Handouts == 0:
+	case to == StateDeliveryUnknown && r.Side == SideTarget && !r.handedOver():
 		return r, Outcome{}, fmt.Errorf("%w: delivery_unknown needs a body that was handed out", ErrIllegalTransition)
 	}
 	n := r
@@ -261,15 +298,30 @@ func (r Record) moveTo(to State, reason RejectReason) (Record, Outcome, error) {
 	return n, out, nil
 }
 
+// handedOver reports whether the target has passed the delivery on to where
+// it can act on it unseen, so that its result may be unknown: a message body
+// was handed out at least once, or a control signal was accepted, which hands
+// it to the adapter to execute.
+func (r Record) handedOver() bool {
+	return r.Control || r.Lease.Handouts > 0
+}
+
+// hasQueue reports whether the record waits in the target's recv queue, with
+// leases and a backlog deadline. A control record never does.
+func (r Record) hasQueue() bool {
+	return r.Side == SideTarget && !r.Control
+}
+
 // closeForcibly ends a target delivery that cannot go on for a reason other
 // than the agent's own handling: its backlog deadline passed, the second
 // authorization check denied it, or its endpoint was closed. The reason is
-// recorded only when the body was never handed out. Once it was, the agent may
-// have seen the body, and "rejected" would tell the sender the message was not
-// delivered, so the delivery becomes delivery_unknown, which a late
-// acknowledgement can still correct.
+// recorded only when the delivery was never handed over (see handedOver). Once
+// it was, the agent may have seen the body or the adapter may have executed
+// the signal, and "rejected" would tell the sender it was not delivered, so the
+// delivery becomes delivery_unknown, which a late acknowledgement or committed
+// reply can still correct.
 func (r Record) closeForcibly(reason RejectReason) (Record, Outcome, error) {
-	if r.Lease.Handouts > 0 {
+	if r.handedOver() {
 		return r.moveTo(StateDeliveryUnknown, RejectNone)
 	}
 	return r.moveTo(StateRejected, reason)
@@ -306,6 +358,9 @@ func (r Record) closeIfDue(now time.Time) (Record, Outcome, error) {
 func (r Record) markNotified() (Record, Outcome, error) {
 	if r.Side != SideTarget {
 		return r, Outcome{}, fmt.Errorf("%w: prompts are handed out by the target", ErrWrongSide)
+	}
+	if r.Control {
+		return r, Outcome{}, fmt.Errorf("%w: a control signal is executed, never put in front of an agent as a prompt", ErrWrongSide)
 	}
 	switch {
 	case r.State != StateAccepted:
@@ -461,7 +516,9 @@ func (r Record) ApplyStatusReport(now time.Time, rep StatusReport) (Record, []Ou
 // the last allowed lease expired; a message in the queue at BacklogDeadline
 // becomes rejected with RejectBacklogExpired, or delivery_unknown when its body
 // was handed out before; and any record that is not final after ReportBy
-// closes.
+// closes. A control record has no lease and no backlog: accepted at SettleBy it
+// becomes delivery_unknown, because the signal was handed to the adapter and
+// its reply was never committed, and then closes after ReportBy like any other.
 func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 	var outs []Outcome
 	step := func(n Record, o Outcome, err error) error {
@@ -472,7 +529,12 @@ func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 		outs = append(outs, o)
 		return nil
 	}
-	if r.Side == SideTarget && r.State == StateAccepted && r.Lease.Active {
+	if r.Side == SideTarget && r.Control && r.State == StateAccepted && !now.Before(SettleBy(r.ReportBy)) {
+		if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
+			return r, outs, err
+		}
+	}
+	if r.hasQueue() && r.State == StateAccepted && r.Lease.Active {
 		switch {
 		case !now.Before(SettleBy(r.ReportBy)):
 			if err := step(r.moveTo(StateDeliveryUnknown, RejectNone)); err != nil {
@@ -489,7 +551,7 @@ func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 			}
 		}
 	}
-	if r.Side == SideTarget && r.State == StateAccepted && !r.Lease.Active && !now.Before(r.BacklogDeadline) {
+	if r.hasQueue() && r.State == StateAccepted && !r.Lease.Active && !now.Before(r.BacklogDeadline) {
 		if err := step(r.closeForcibly(RejectBacklogExpired)); err != nil {
 			return r, outs, err
 		}

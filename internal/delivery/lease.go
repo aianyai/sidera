@@ -119,6 +119,9 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int,
 	if r.Side != SideTarget {
 		return r, HandoutResult{}, fmt.Errorf("%w: only the target hands out bodies", ErrWrongSide)
 	}
+	if r.Control {
+		return r, HandoutResult{}, fmt.Errorf("%w: a control signal is never handed out by recv", ErrWrongSide)
+	}
 	if !auth.valid() || chunks < 1 || part < 1 || part > chunks || lease.IsZero() {
 		return r, HandoutResult{}, fmt.Errorf("%w: authorization %d, part %d of %d chunks, lease %s", ErrInvalidInput, auth, part, chunks, lease)
 	}
@@ -300,6 +303,9 @@ const (
 func (r Record) Ack(now time.Time, a Ack) (Record, AckVerdict, Outcome, error) {
 	if r.Side != SideTarget {
 		return r, 0, Outcome{}, fmt.Errorf("%w: only the target settles leases", ErrWrongSide)
+	}
+	if r.Control {
+		return r, 0, Outcome{}, fmt.Errorf("%w: a control signal has no lease to acknowledge", ErrWrongSide)
 	}
 	if !a.TokenMatches {
 		return r, AckRefusedToken, Outcome{}, nil

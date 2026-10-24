@@ -13,6 +13,7 @@ reasons behind the rules.
 | Entry point | Purpose |
 | ----------- | ------- |
 | `NewSourceRecord`, `NewTargetRecord` | Create the sender's or the recipient node's `Record` of a delivery. |
+| `NewTargetControlRecord(acceptBefore, reportBy)` | Create the target's `Record` of a control signal: never queued for `recv`, no backlog deadline, delivered by `EventReplyCommitted`. |
 | `Record.Apply(now, Event)` | Applies one fact or occurrence. Returns the new record and an `Outcome` (applied or ignored with a reason, the transition, and the feedback to give). |
 | `Record.Tick(now)` | Everything due by time alone: lease expiry, backlog expiry, the settle deadline, closing after `report_by`. |
 | `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
@@ -39,8 +40,9 @@ target-internal sub-state `notified` of `accepted`.
   `delivered`, `rejected`, `delivery_unknown`) and `delivery_unknown` (to
   `delivered` only).
 - On the target, `delivered` is reached only by acknowledging every chunk
-  (`Ack`), and `delivery_unknown` only for a delivery whose body was handed out
-  at least once. `Apply` refuses both shortcuts.
+  (`Ack`) or, for a control record, by `EventReplyCommitted`; `delivery_unknown`
+  only for a delivery that was handed over: a body handed out at least once, or
+  any control record. `Apply` refuses both shortcuts.
 - A repeated or older fact is ignored with a reason, not an error. A fact that
   contradicts the state (a rejection for a delivered message) is
   `ErrIllegalTransition`.
@@ -89,7 +91,27 @@ out it becomes `rejected` with that reason. If it was handed out at least once
 it becomes `delivery_unknown`, because the agent may have seen the body and
 `rejected` would tell the sender it was not delivered; a late acknowledgement
 then corrects it to `delivered`. Handing out is what counts, not prompting: a
-delivery that was only announced with a prompt is still rejected.
+delivery that was only announced with a prompt is still rejected. A control record
+counts as handed out from acceptance, so its forced closure is always
+`delivery_unknown`.
+
+## Control signals on the target
+
+A control signal is executed by the adapter and answered with a reply that is
+committed together with the execution result. Its target record
+(`NewTargetControlRecord`, `Record.Control`) is never queued for `recv`:
+`Handout` and `Ack` return `ErrWrongSide`, `Renew` finds no lease, a prompt is
+refused, and there is no backlog deadline.
+
+- `EventReplyCommitted` is the only fact that delivers it, from `accepted` or,
+  as a correction, from `delivery_unknown`. Any other record refuses it with
+  `ErrWrongSide`.
+- Accepting it hands it over to execution, so one that is not final at
+  `report_by - 5 min` becomes `delivery_unknown` in `Tick` (never `rejected`,
+  never silent), and a forced closure also gives `delivery_unknown`. It closes
+  after `report_by` like any other record.
+- `StatusReport` reports `delivered` once the reply is committed. The sender
+  applies the reply with the existing `EventDelivered`.
 
 ## Applying a status report
 
@@ -130,6 +152,10 @@ correction and the blocked notice.
 - The caller splits bodies into chunks and passes the count and the chunk it is
   handing out (starting from `NextPart`) to `Handout`; the count is fixed at
   the first hand-out. Only chunks handed out can be acknowledged.
+- A control signal's record is built with `NewTargetControlRecord`, never
+  `NewTargetRecord`, and `EventReplyCommitted` is applied in the same
+  transaction that commits the control reply and the execution result. A caller
+  never passes a control record to `Handout` or `Ack`.
 - Run `Tick` before `Handout`, and whenever a lease, backlog, settle or
   `report_by` instant may have passed.
 - Whether delivery is blocked is decided by the caller (the prompt logic); this

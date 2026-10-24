@@ -5,7 +5,8 @@ to the moment it is delivered, refused, or given up on, and what the sender is
 told along the way. A delivery is one message to one recipient endpoint; a
 message with several recipients has several deliveries that share a message id.
 Control signals use the same states, the same deduplication and the same
-feedback. This document describes the committed code of `internal/delivery`.
+feedback; on the target they differ only in how a delivery ends (see Control
+signals on the target). This document describes the committed code of `internal/delivery`.
 
 ## What
 
@@ -18,7 +19,7 @@ feedback. This document describes the committed code of `internal/delivery`.
 | `delivered` | The whole body reached the agent and was acknowledged. | yes |
 | `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range). On the target only for a body that was never handed out. | yes |
 | `expired_unconfirmed` | The deadline passed and an active query found no receipt. The target may have the message. | no, correctable |
-| `delivery_unknown` | The body was handed out and whether the agent saw it cannot be told. The target produces it only for a delivery whose body was handed out at least once. | no, correctable |
+| `delivery_unknown` | The body was handed out and whether the agent saw it cannot be told; for a control signal, it was accepted for execution and its reply was never committed. The target produces it only for a delivery that was handed over: a body handed out at least once, or any accepted control signal. | no, correctable |
 | `closed_unconfirmed` | `report_by` passed while the delivery was open. | yes, silent |
 
 `notified` is a target-internal sub-state of `accepted`: a prompt was handed to
@@ -29,9 +30,9 @@ Legal moves: from `queued` to any other state; from `expired_unconfirmed` to
 from `accepted` to `delivered`, `rejected`, `delivery_unknown`,
 `closed_unconfirmed`; from `delivery_unknown` to `delivered` and
 `closed_unconfirmed`. Nothing leaves a final state. On the target, `delivered`
-is reached only through the acknowledgement of every chunk and
-`delivery_unknown` only after a hand-out; a fact that asks for either otherwise
-is an error. A fact that describes an
+is reached only through the acknowledgement of every chunk (a control signal:
+through the committed reply) and `delivery_unknown` only for a delivery that was
+handed over; a fact that asks for either otherwise is an error. A fact that describes an
 earlier stage than the record shows is ignored; a fact that contradicts a final
 state is an error.
 
@@ -138,6 +139,31 @@ to hand out. At `recv`, suspended authorization skips the message (no lease, no
 prompt, no feedback); denied authorization closes it: `rejected` if the body
 was never handed out, `delivery_unknown` if it was.
 
+### Control signals on the target
+
+A control signal is executed by the runtime's adapter, not handed to an agent by
+`recv`, and its reply is committed together with the execution result. Its
+target record is built by `NewTargetControlRecord(acceptBefore, reportBy)` and
+differs from a message record in four ways:
+
+- It is never queued for `recv`: `Handout` and `Ack` refuse it (`ErrWrongSide`),
+  `Renew` finds no lease, a prompt (`EventNotified`) is refused, and it has no
+  backlog deadline, so it is never `rejected` as backlog expired.
+- `EventReplyCommitted` moves it from `accepted` (or from `delivery_unknown`,
+  as a correction) to `delivered`. Any other record, source or target message
+  record, refuses the event with `ErrWrongSide`.
+- Accepting it counts as handing it over, because the adapter may execute it at
+  once. A control record not final at `report_by - margin` therefore becomes
+  `delivery_unknown` in `Tick`, and a forced closure (`EventRejected`) also
+  gives `delivery_unknown`, never `rejected`. After `report_by` it closes like
+  any other record.
+- `StatusReport` needs no new rule: it reports `accepted`, then `delivered` once
+  the reply is committed, or `delivery_unknown` after settlement.
+
+The sender applies the signed reply with the existing `EventDelivered` (or
+`ApplyStatusReport` of a `delivered` report); nothing on the source side
+changes.
+
 ### Status reports
 
 A target reports its state, the rejection reason, and whether the accepted
@@ -242,6 +268,24 @@ the dedup record and returned on every repeat.
   the transition table so they cannot disagree about what a move means; the
   record carries its side because only the sender produces feedback and only the
   target hands out bodies.
+- **A control signal is delivered by its reply, not by an acknowledgement.** The
+  adapter executes it and the reply is committed with the execution result in
+  one transaction, so "reply committed" is the one fact that says the signal
+  reached its end. Without it the target-side record could only stay `accepted`,
+  and at its backlog deadline would be turned into `rejected(backlog_expired)`,
+  telling the sender that a signal the adapter may have executed was refused.
+  Giving it a constructor of its own, instead of a flag on queued messages, keeps
+  every lease and backlog rule free of a control special case: the record has
+  neither.
+- **An accepted control signal is already handed over.** `delivery_unknown`
+  exists so that the target never claims "not delivered" for something the other
+  party may have seen. For a message that point is the first hand-out; for a
+  control signal the execution may begin at acceptance and the record cannot
+  tell whether it did, so the point is acceptance. Settling an unreplied
+  control record as `delivery_unknown` keeps the guarantee that the sender hears
+  of every delivery before it stops asking; leaving it to close silently would
+  tell the sender nothing about a signal that may have been executed. A reply
+  committed late still corrects it.
 - **No scheduler.** A timer inside the package would need a clock; contract
   packages read none, so callers run `Tick` when an instant may have passed.
 
@@ -251,8 +295,14 @@ the dedup record and returned on every repeat.
   the transition table. Tests: `TestCanTransition`, `TestStateClasses`.
 - `internal/delivery/feedback.go`: kinds, wording, `TransitionFeedback`. Tests:
   `TestTransitionFeedback`, `TestSummaries`.
-- `internal/delivery/record.go`: `Record`, `Apply`, `Tick`, `closeForcibly`,
-  `StatusReport`, `ApplyStatusReport`. Tests: `TestSourceTransitions`,
+- `internal/delivery/record.go`: `Record`, `NewTargetControlRecord`, `Apply`,
+  `Tick`, `closeForcibly`, `StatusReport`, `ApplyStatusReport`. Control record
+  tests (`internal/delivery/control_test.go`): `TestNewTargetControlRecord`,
+  `TestControlRecordIsNeverHandedOut`, `TestReplyCommitted`,
+  `TestReplyCommittedAppliesToControlRecordsOnly`,
+  `TestControlRecordSettlement`, `TestControlStatusReport`,
+  `TestScenarioControlSignalLifecycle`,
+  `TestPropertyControlSignalsAreNeverQueuedAndAlwaysEnd`. Tests: `TestSourceTransitions`,
   `TestRejectionReasonIsCarried`, `TestUnreachableHint`, `TestDeliveryBlocked`,
   `TestTargetRecordProducesNoFeedback`, `TestTargetDeliveryUnknownNeedsHandout`,
   `TestSideRules`, `TestNotifiedSubState`.
