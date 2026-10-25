@@ -348,6 +348,9 @@ func (s *Server) send(w http.ResponseWriter, status int, v any) {
 		b.WriteString(`{"error":{"category":"internal","code":"internal","message":"internal error"}}` + "\n")
 	}
 	w.Header().Set("Content-Type", "application/json")
+	// The answer is whole as soon as it is written: a client reads exactly this many
+	// bytes and does not wait for the handler to return.
+	w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
 	w.WriteHeader(status)
 	if _, err := w.Write(b.Bytes()); err != nil {
 		s.log.Debug("management answer was not delivered", "error", err.Error())

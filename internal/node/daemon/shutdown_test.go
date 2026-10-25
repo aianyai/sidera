@@ -31,8 +31,15 @@ func TestShutdownRunsInTheOrderOfTheDesign(t *testing.T) {
 	var doneAtAdapters bool
 	var d *daemon.Daemon
 	c.Attach = p.attachments()
+	// the lock is held until the end: another daemon cannot start while any step runs
+	stillLocked := func(where string) {
+		if _, err := daemon.Start(context.Background(), initialConfigOf(c)); !errors.Is(err, daemon.ErrAlreadyRunning) {
+			t.Errorf("a daemon started while the shutdown was at %s: %v", where, err)
+		}
+	}
 	c.Attach.StopInterfaces = func(ctx context.Context) error {
 		phaseAtInterfaces = d.Engine().Phase()
+		stillLocked("the interfaces")
 		return p.stop("interfaces")(ctx)
 	}
 	c.Attach.StopAdapters = func(ctx context.Context) error {
@@ -42,6 +49,7 @@ func TestShutdownRunsInTheOrderOfTheDesign(t *testing.T) {
 			doneAtAdapters = true
 		default:
 		}
+		stillLocked("the adapters")
 		// the management interface no longer answers
 		if tryManage(c.Home, "endpoints.list") == 200 {
 			t.Error("the management interface still answered when the adapters were stopped")
@@ -81,6 +89,11 @@ func TestShutdownRunsInTheOrderOfTheDesign(t *testing.T) {
 	}
 	// the lock is let go: the same directory starts again
 	started(t, c)
+}
+
+// initialConfigOf is the configuration of a second daemon over the home of c.
+func initialConfigOf(c daemon.Config) daemon.Config {
+	return daemon.Config{Home: c.Home, Clock: c.Clock, Rand: seeded(5)}
 }
 
 func indexOf(s []string, v string) int {

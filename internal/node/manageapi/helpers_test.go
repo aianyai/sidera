@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -99,11 +100,22 @@ type stops struct {
 	mu      sync.Mutex
 	reasons []string
 	ch      chan struct{}
+	// hold, when set, makes a stop wait until it is closed, for at most five
+	// seconds, and says in timedOut whether it had to give up waiting.
+	hold     chan struct{}
+	timedOut atomic.Bool
 }
 
 func newStops() *stops { return &stops{ch: make(chan struct{}, 8)} }
 
 func (s *stops) stop(reason string) {
+	if s.hold != nil {
+		select {
+		case <-s.hold:
+		case <-time.After(5 * time.Second):
+			s.timedOut.Store(true)
+		}
+	}
 	s.mu.Lock()
 	s.reasons = append(s.reasons, reason)
 	s.mu.Unlock()

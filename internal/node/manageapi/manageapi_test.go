@@ -355,7 +355,11 @@ func TestStopIsRequestedAfterTheAnswerIsWrittenAndOnlyForAnOperationThatStops(t 
 	if r.stop.count() != 0 {
 		t.Fatal("a request that does not stop the daemon asked for the stop")
 	}
+	// the stop waits for the client to have its answer: asked for before the answer
+	// was written and flushed, it would wait for a client that waits for it
+	r.stop.hold = make(chan struct{})
 	status, out = r.post("daemon.stop", `{"operation_id":"`+opID(2)+`"}`)
+	close(r.stop.hold)
 	if status != 200 || !strings.Contains(string(out), `"stopping":true`) {
 		t.Fatalf("the answer of the stop: %d %s", status, out)
 	}
@@ -363,6 +367,9 @@ func TestStopIsRequestedAfterTheAnswerIsWrittenAndOnlyForAnOperationThatStops(t 
 	case <-r.stop.ch:
 	case <-time.After(10 * time.Second):
 		t.Fatal("the stop was never asked for")
+	}
+	if r.stop.timedOut.Load() {
+		t.Error("the stop was asked for before the client had its answer")
 	}
 	// a refused request asks for no stop
 	r.svc.execute = func(context.Context, engine.ManagementCommand) (engine.StoredResult, error) {
