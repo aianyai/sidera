@@ -5,17 +5,20 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/daemon"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/ipc"
 )
 
@@ -116,4 +119,86 @@ func manage(t testing.TB, home, method string, body any) (int, []byte) {
 		t.Fatalf("reading the answer to %s: %v", method, err)
 	}
 	return resp.StatusCode, out
+}
+
+// memConfig is a configuration over a file system in memory: the disk of a test
+// that crashes, or injects a fault into, what the daemon writes. The home is
+// still a path on the real disk, because the sockets are.
+func memConfig(home string, clk *clocktest.Fake, fsys fsx.FS) daemon.Config {
+	c := config(home, clk)
+	c.FS = fsys
+	return c
+}
+
+// snapshot lists every file and directory below root with its mode and content.
+func snapshot(t testing.TB, root string) map[string]string {
+	t.Helper()
+	out := map[string]string{}
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(root, p)
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case d.IsDir():
+			out[rel+"/"] = info.Mode().String()
+		case info.Mode()&fs.ModeSymlink != 0:
+			target, _ := os.Readlink(p)
+			out[rel] = info.Mode().String() + " -> " + target
+		case info.Mode()&fs.ModeSocket != 0:
+			out[rel] = info.Mode().String()
+		default:
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			out[rel] = info.Mode().String() + " " + string(b)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walking %s: %v", root, err)
+	}
+	return out
+}
+
+// logLines are the lines of logs/daemon.log of a home.
+func logLines(t testing.TB, home string) []string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(home, "logs", "daemon.log"))
+	if err != nil {
+		t.Fatalf("reading the log of the daemon: %v", err)
+	}
+	return strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+}
+
+// steps picks the "startup step N begin|end" and "shutdown step N begin|end" lines
+// out of the log, as "startup N begin" and so on, in order.
+func steps(lines []string) []string {
+	var out []string
+	for _, l := range lines {
+		for _, kind := range []string{"startup", "shutdown"} {
+			if i := strings.Index(l, "msg=\""+kind+" step "); i >= 0 {
+				rest := strings.TrimPrefix(l[i:], "msg=\""+kind+" step ")
+				fields := strings.Fields(strings.SplitN(rest, "\"", 2)[0])
+				if len(fields) == 2 {
+					out = append(out, kind+" "+fields[0]+" "+fields[1])
+				}
+			}
+		}
+	}
+	return out
+}
+
+// requireUnix skips a test that is about permission bits and symbolic links,
+// which the Windows tests check in their own files.
+func requireUnix(t testing.TB) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits and symbolic links of Unix; the Windows checks are in the files of that platform")
+	}
 }
