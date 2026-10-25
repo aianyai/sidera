@@ -103,6 +103,14 @@ Behaviour, each point pinned by the tests named in "Where":
 - **Close** is idempotent, ends every pending call with `ErrClosed`, cancels
   handler contexts and leaves no goroutine behind once handlers return.
   `Peer.Err()` says why the connection ended.
+- **Start and Close are safe to call concurrently**, in either order. The adapter
+  host closes a peer on shutdown, and shutdown can arrive while the peer is still
+  being started; a `Close` that waited for the reader and writer while `Start`
+  was still registering them would return early and leave them running. Both
+  operations decide under the peer's lock which came first: a `Start` after
+  `Close` (or one that loses the race) launches nothing, and `Close` waits for
+  everything a winning `Start` launched. `Start` has no result, so the late call
+  is silent rather than an error.
 
 The error codes of the peer layer are constants in `sdk/go/peer/errors.go`
 (`peer.Codes()` lists them): `-32700` parse error, `-32600` invalid request,
@@ -281,7 +289,7 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | A cancel without a usable id, or with an unknown or repeated member, cancels nothing | `TestCancelWithoutAUsableRequestIDCancelsNothing` |
 | Late response, malformed response | `TestLateResponseIsDroppedAndLogged`, `TestMalformedResponseFailsTheCall` |
 | Unknown method and notification | `TestUnknownMethodIsMethodNotFound`, `TestUnknownNotificationIsLoggedAndDropped` |
-| Close, pending calls, goroutines | `TestCloseEndsPendingCallsWithErrClosed`, `TestCloseWithoutStartAndCloseFromHandler`, `TestCloseWaitsForReaderAndWriter`, `TestNoGoroutineLeakAfterManyPeers` |
+| Close, pending calls, goroutines | `TestCloseEndsPendingCallsWithErrClosed`, `TestCloseWithoutStartAndCloseFromHandler`, `TestCloseWaitsForReaderAndWriter`, `TestNoGoroutineLeakAfterManyPeers`, `TestStartAndCloseAreSafeConcurrently`, `TestStartAfterCloseDoesNothing` |
 | Effect rule | `TestEffectClassification`, `TestHandlerErrorsAndEffectRule` |
 | No bodies in logs | `TestLogsNeverContainMessageBodies` |
 | Many concurrent calls both ways against an independent wire model | `TestConcurrentCallsInBothDirections` |

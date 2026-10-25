@@ -161,10 +161,11 @@ type Peer struct {
 	nextID atomic.Int64
 	ended  atomic.Bool // set once the connection has begun to end
 
-	// mu guards closed, cause, pending and inbound. The outbound queue is only
+	// mu guards started, closed, cause, pending and inbound. The outbound queue is only
 	// ever sent to without blocking while mu is held, so that closing cannot
 	// interleave with an enqueue.
 	mu      sync.Mutex
+	started bool // Start has launched the peer's goroutines
 	closed  bool // guarded by mu; ended mirrors it for lock-free reads
 	cause   error
 	pending map[int64]*pendingCall
@@ -174,7 +175,6 @@ type Peer struct {
 	reqQ  chan *inboundRequest
 	noteQ chan inboundNotification
 
-	startOnce sync.Once
 	closeOnce sync.Once
 	closeErr  error
 	done      chan struct{}
@@ -259,21 +259,30 @@ func (p *Peer) checkRegistration(method string, nilHandler bool) {
 
 // Start begins reading and writing. Handlers registered later are still
 // found; messages that arrive before their handler exists are refused or
-// dropped as unknown. Start is idempotent.
+// dropped as unknown. Start is idempotent, and safe to call while another
+// goroutine calls Close: when Close came first, Start does nothing, and when
+// Start came first, Close waits for the goroutines it launched.
 func (p *Peer) Start() {
-	p.startOnce.Do(func() {
+	// mu orders Start against Close: terminate sets closed under it before
+	// Close waits, so every wg.Add either happens before that wait or finds the
+	// peer closed and launches nothing.
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.started || p.closed {
+		return
+	}
+	p.started = true
+	p.wg.Add(1)
+	go p.writeLoop()
+	_, interruptible := p.r.(io.Closer)
+	if interruptible {
 		p.wg.Add(1)
-		go p.writeLoop()
-		_, interruptible := p.r.(io.Closer)
-		if interruptible {
-			p.wg.Add(1)
-		}
-		go p.readLoop(interruptible)
-		go p.notificationLoop()
-		for range p.params.MaxConcurrentHandlers {
-			go p.requestWorker()
-		}
-	})
+	}
+	go p.readLoop(interruptible)
+	go p.notificationLoop()
+	for range p.params.MaxConcurrentHandlers {
+		go p.requestWorker()
+	}
 }
 
 // Done is closed when the connection has ended and the transport is closed.
@@ -294,7 +303,9 @@ func (p *Peer) Err() error {
 // contexts are cancelled, queued lines that have not been written are
 // discarded and the transport is closed. It waits for the peer's reader and
 // writer goroutines but not for handlers, which must return when their
-// context is cancelled. Close is idempotent and safe to call from a handler.
+// context is cancelled. Close is idempotent, safe to call from a handler and
+// safe to call while another goroutine calls Start: a Start that comes after
+// Close does nothing.
 func (p *Peer) Close() error {
 	p.terminate(ErrClosed, nil)
 	p.closeTransport()

@@ -125,6 +125,14 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   is closed. `Err()` reports the cause: `ErrClosed` (local `Close`),
   `ErrRemoteClosed`, `ErrLineTooLong`, `ErrNotificationOverflow`,
   `ErrWriteTimeout`, or a wrapped read or write error.
+- **Start and Close may race.** `Start` and `Close` are safe to call at the same
+  time from different goroutines, in either order; an owner that shuts a peer
+  down while another goroutine is still starting it needs no lock of its own.
+  Both take the peer's lock, so one of them is first. If `Close` is first,
+  `Start` launches nothing (it has no result to report that in), and so does any
+  `Start` after `Close`. If `Start` is first, `Close` waits for the reader and
+  writer it launched, exactly as when the two are not concurrent. A second
+  `Start` also does nothing.
 - **Logging.** Through the `*slog.Logger` in `Config`. Message bodies, params
   and results are never logged; method names are logged clipped to 64 bytes.
 
