@@ -40,7 +40,7 @@ func (r *recorder) finish() {
 func TestQuiesceWaitsForEveryConditionOfTheFixtureAndNamesTheOneThatDoesNotHold(t *testing.T) {
 	h := New(t, Options{})
 	var open atomic.Bool
-	h.addQuiet("the fake is idle", func() bool { return open.Load() })
+	h.addQuiet("the fake is idle", func() (bool, uint64) { return open.Load(), 0 })
 
 	err := h.Quiesce(scenario.WithTimeout(100 * time.Millisecond))
 	var qe *QuiesceError
@@ -64,7 +64,7 @@ func TestQuiesceWaitsForEveryConditionOfTheFixtureAndNamesTheOneThatDoesNotHold(
 func TestQuiesceChecksTheFixtureAgainAfterTheEngineWasQuiet(t *testing.T) {
 	h := New(t, Options{})
 	var checks atomic.Int32
-	h.addQuiet("busy twice", func() bool { return checks.Add(1) > 3 })
+	h.addQuiet("busy twice", func() (bool, uint64) { return checks.Add(1) > 3, 0 })
 	if err := h.Quiesce(); err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +131,7 @@ func TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages(t *testing.T) {
 func TestQuiesceDoesNotReturnOnAConditionThatStoppedHoldingWhileTheEngineSettled(t *testing.T) {
 	h := New(t, Options{})
 	var checks atomic.Int32
-	h.addQuiet("busy once, in the middle", func() bool { return checks.Add(1) != 2 })
+	h.addQuiet("busy once, in the middle", func() (bool, uint64) { return checks.Add(1) != 2, 0 })
 	if err := h.Quiesce(); err != nil {
 		t.Fatal(err)
 	}

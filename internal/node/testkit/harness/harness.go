@@ -433,15 +433,20 @@ func (h *H) Restart() {
 // The conditions of quiet that the fixture's own parts answer, besides the
 // engine's. A part that is added to the fixture (the adapter host and the fake
 // adapter, the fake runtime) registers its conditions here.
+//
+// A condition answers whether it holds and how much it has done so far (a count
+// that never goes down: the notifications a fake sent, the turns it ended). Holding
+// is a state; the count is what shows that the state was not left and reached
+// again in between.
 type quietCondition struct {
-	name string
-	ok   func() bool
+	name  string
+	state func() (holds bool, progress uint64)
 }
 
-func (h *H) addQuiet(name string, ok func() bool) {
+func (h *H) addQuiet(name string, state func() (holds bool, progress uint64)) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.quiet = append(h.quiet, quietCondition{name, ok})
+	h.quiet = append(h.quiet, quietCondition{name, state})
 }
 
 // unmet names the conditions of the fixture that do not hold.
@@ -451,7 +456,7 @@ func (h *H) unmet() []string {
 	h.mu.Unlock()
 	var out []string
 	for _, c := range conds {
-		if !c.ok() {
+		if holds, _ := c.state(); !holds {
 			out = append(out, c.name)
 		}
 	}
