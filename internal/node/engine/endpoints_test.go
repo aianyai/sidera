@@ -110,11 +110,10 @@ func TestTheNodeCapCountsOtherKindsOfEndpointOnTheRegistrationPath(t *testing.T)
 	for i := 0; i < publication.MaxEndpointsPerNode-others; i++ {
 		register(t, e, keyName(i))
 	}
-	cnt, err := e.Counts(context.Background())
-	if err != nil || cnt.Endpoints != publication.MaxEndpointsPerNode {
-		t.Fatalf("Counts = %+v, %v; want %d endpoints", cnt, err, publication.MaxEndpointsPerNode)
+	if got := openEndpoints(t, e); got != publication.MaxEndpointsPerNode {
+		t.Fatalf("%d endpoints open or being created, want %d", got, publication.MaxEndpointsPerNode)
 	}
-	_, err = e.RegisterDirect(context.Background(), "chat", registerParams(keyName(publication.MaxEndpointsPerNode)))
+	_, err := e.RegisterDirect(context.Background(), "chat", registerParams(keyName(publication.MaxEndpointsPerNode)))
 	if ref := wantReason(t, err, engine.ReasonEndpointLimit); ref.Limit != engine.LimitNode {
 		t.Errorf("refusal limit %s, want node", ref.Limit)
 	}
@@ -237,9 +236,8 @@ func TestSystemEndpointIsNotRegisteredCountedOrClosable(t *testing.T) {
 	}
 	_, err = e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: ident.SystemEndpoint()})
 	wantReason(t, err, engine.ReasonEndpointUnknown)
-	cnt, err := e.Counts(context.Background())
-	if err != nil || cnt.Endpoints != 1 {
-		t.Errorf("Counts = %+v, %v; want one endpoint", cnt, err)
+	if got := openEndpoints(t, e); got != 1 {
+		t.Errorf("%d endpoints open or being created, want one", got)
 	}
 }
 

@@ -275,16 +275,6 @@ func (s NodeSettings) WireJSON() ([]byte, error) {
 	return json.Marshal(w)
 }
 
-// WireJSON is the settings of an endpoint as the owner's commands show them: the
-// compact JSON object of its two settings, named as `endpoint set` takes them.
-func (s EndpointSettings) WireJSON() ([]byte, error) {
-	maxQueue, err := durationSeconds("max_queue_s", s.MaxQueue)
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(endpointDefaultsWire{MaxQueueS: maxQueue, BacklogLimit: s.BacklogLimit})
-}
-
 // EndpointPatch names the endpoint settings a request changes; a nil field is
 // not named.
 type EndpointPatch struct {

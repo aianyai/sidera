@@ -257,9 +257,10 @@ func TestOpenBuildsTheViewOfWhatSurvived(t *testing.T) {
 	r.restart()
 	r.queue(1, 4, a)
 	e = r.start()
-	cnt, err := e.Counts(context.Background())
-	if err != nil || cnt != (engine.Counts{Endpoints: 1, Unfinished: 4, Alerts: 1}) {
-		t.Errorf("Counts = %+v, %v; want 1 endpoint, 4 unfinished deliveries, 1 alert", cnt, err)
+	st, err := e.Status(context.Background())
+	if err != nil || openEndpoints(t, e) != 1 || st.Capacity.OpenDeliveries != 4 || st.AlertsOpen != 1 {
+		t.Errorf("Status = %d open endpoints, %d open deliveries, %d open alerts (%v); want 1, 4 and 1",
+			openEndpoints(t, e), st.Capacity.OpenDeliveries, st.AlertsOpen, err)
 	}
 }
 
@@ -318,8 +319,8 @@ func TestWhileRecoveringSideEffectsAreRefusedReadsAnswerAndAdapterRequestsWait(t
 	if _, err := e.Endpoints(ctx); err != nil {
 		t.Errorf("Endpoints while recovering: %v", err)
 	}
-	if _, err := e.Counts(ctx); err != nil {
-		t.Errorf("Counts while recovering: %v", err)
+	if _, err := e.Status(ctx); err != nil {
+		t.Errorf("Status while recovering: %v", err)
 	}
 	_, err = e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: mustEndpoint(t, 1)})
 	wantReason(t, err, engine.ReasonRecovering)

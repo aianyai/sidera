@@ -31,7 +31,6 @@ type AgentService interface {
 // stores nothing.
 type ManageService interface {
 	Endpoints(ctx context.Context) ([]EndpointView, error)
-	Counts(ctx context.Context) (Counts, error)
 	Alerts(ctx context.Context) ([]store.AlertRecord, error)
 	Status(ctx context.Context) (NodeStatus, error)
 	NodeSettings(ctx context.Context) (config.Node, error)

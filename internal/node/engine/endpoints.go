@@ -505,35 +505,3 @@ func (e *Engine) Endpoints(ctx context.Context) ([]EndpointView, error) {
 	c := &cmdEndpoints{call: newCall[[]EndpointView]()}
 	return roundTrip(ctx, e, submitExternal, c, c.call)
 }
-
-// Counts are the numbers the owner's status shows.
-type Counts struct {
-	// Endpoints is how many endpoints are open or being created, the ones that
-	// count against the cap.
-	Endpoints int
-	// Unfinished is how many deliveries the node holds that still have work behind
-	// them: messages waiting to be handed out, accepted control signals and sent
-	// messages that no receipt answered.
-	Unfinished int
-	// Alerts is how many alerts the owner has not acknowledged.
-	Alerts int
-}
-
-type cmdCounts struct{ call[Counts] }
-
-func (c *cmdCounts) gate() gate { return gateRead }
-func (c *cmdCounts) run(e *Engine, _ time.Time) {
-	n := 0
-	for _, a := range e.view.alerts {
-		if a.Acked == nil {
-			n++
-		}
-	}
-	c.done(Counts{Endpoints: e.view.OpenEndpoints(), Unfinished: e.view.Unfinished(), Alerts: n}, nil)
-}
-
-// Counts returns the numbers of the node's status.
-func (e *Engine) Counts(ctx context.Context) (Counts, error) {
-	c := &cmdCounts{call: newCall[Counts]()}
-	return roundTrip(ctx, e, submitExternal, c, c.call)
-}

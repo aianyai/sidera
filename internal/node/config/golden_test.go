@@ -326,10 +326,6 @@ func TestSettingsAreShownAsTheFileHoldsThem(t *testing.T) {
 	if !strings.Contains(strings.Join(strings.Fields(goldenNode), ""), strings.ReplaceAll(nodeSettings, " ", "")) {
 		t.Error("the golden node.json does not hold the settings in the form the commands show")
 	}
-	ep, err := s.EndpointDefaults.WireJSON()
-	if want := `{"max_queue_s":1800,"backlog_limit":200}`; err != nil || string(ep) != want {
-		t.Errorf("EndpointSettings.WireJSON = %s, %v; want %s", ep, err, want)
-	}
 	// What the owner gave an endpoint names only what is set.
 	for _, o := range []struct {
 		name string
@@ -354,8 +350,5 @@ func TestSettingsAreShownAsTheFileHoldsThem(t *testing.T) {
 	bad.EndpointDefaults.MaxQueue = 1500 * time.Millisecond
 	if _, err := bad.WireJSON(); err == nil {
 		t.Error("settings with a fraction of a second were shown")
-	}
-	if _, err := bad.EndpointDefaults.WireJSON(); err == nil {
-		t.Error("endpoint settings with a fraction of a second were shown")
 	}
 }

@@ -517,7 +517,7 @@ func TestNoEvidenceIsSignedWhileTheWallClockCannotBeTrusted(t *testing.T) {
 	// The wall clock is set back beyond the tolerance, and then runs on past the
 	// time the answer is due again.
 	h.Set(h.Clock().Now().Add(-10 * time.Minute))
-	if _, err := h.Engine().Counts(h.Ctx()); err != nil {
+	if _, err := h.Engine().Status(h.Ctx()); err != nil { // a command, in which the loop reads the clock
 		t.Fatal(err)
 	}
 	quiet(t, h)

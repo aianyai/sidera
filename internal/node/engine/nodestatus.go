@@ -39,15 +39,6 @@ func (k ReminderKind) String() string {
 	return "invalid"
 }
 
-// ReminderKinds lists every reminder, in order.
-func ReminderKinds() []ReminderKind {
-	out := make([]ReminderKind, 0, reminderEnd-1)
-	for k := ReminderKind(1); k < reminderEnd; k++ {
-		out = append(out, k)
-	}
-	return out
-}
-
 // ClockStatus is what the owner is shown of the wall clock.
 type ClockStatus struct {
 	// RollbackPaused: the clock was set back beyond the tolerance and the owner has

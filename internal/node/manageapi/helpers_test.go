@@ -86,7 +86,6 @@ func (f *fakeService) Endpoints(context.Context) ([]engine.EndpointView, error) 
 	defer f.mu.Unlock()
 	return f.endpoints, nil
 }
-func (f *fakeService) Counts(context.Context) (engine.Counts, error) { return engine.Counts{}, nil }
 func (f *fakeService) Alerts(context.Context) ([]store.AlertRecord, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
