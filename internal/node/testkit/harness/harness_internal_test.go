@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
@@ -218,5 +219,36 @@ func TestQuiesceReturnsAfterOneRoundWhenNoCountMoves(t *testing.T) {
 	}
 	if got := asks.Load(); got != 2 {
 		t.Errorf("the condition was asked %d times, want once before the engine and once after it", got)
+	}
+}
+
+// The report says what was found. A loop that never answered is inside a command;
+// an engine that refused the probe (it is shutting down) answered, and a fixture
+// condition that did not hold never reached the engine at all: neither is a
+// command that is still running.
+func TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer(t *testing.T) {
+	const running = "a command is still running"
+
+	h := New(t, Options{})
+	if err := h.Engine().Stop(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	err := h.Quiesce(scenario.WithTimeout(time.Second))
+	var qe *QuiesceError
+	if !errors.As(err, &qe) {
+		t.Fatalf("Quiesce on a stopped engine returned %v, want a *QuiesceError", err)
+	}
+	if strings.Contains(err.Error(), running) {
+		t.Errorf("error %q blames a running command for the engine's refusal", err)
+	}
+	if r, ok := engine.ReasonOf(err); !ok || r != engine.ReasonShuttingDown {
+		t.Errorf("error %v does not carry the engine's refusal", err)
+	}
+
+	h = New(t, Options{})
+	h.addQuiet("a fake that is busy", func() (bool, uint64) { return false, 0 })
+	err = h.Quiesce(scenario.WithTimeout(50 * time.Millisecond))
+	if strings.Contains(err.Error(), running) {
+		t.Errorf("error %q blames a running command although the engine was never asked", err)
 	}
 }
