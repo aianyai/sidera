@@ -8,8 +8,9 @@ records the node keeps, and the installed adapter packages. All of it is JSON
 by one package, [`internal/node/config`](../../../internal/node/config/README.md),
 which reads it strictly at start and writes it only through transactions.
 
-Platform paragraphs that say "pending verification by CI on main" describe
-behaviour no one has observed on that platform yet.
+Platform paragraphs that say "not exercised by CI" describe behaviour that no CI
+job can observe, for the reason given where it appears (for example, no job loses
+power).
 
 ## What
 
@@ -544,8 +545,8 @@ endpoints and not to others for a reason nobody remembers.
   caller says which endpoints are open; a caller that cannot say gets no check.
 - Windows: the order of two renames after a power loss is not documented by the
   platform. The installation depends on the rename of the staging directory
-  becoming durable before the replacement of `current`; pending verification by
-  CI on main. The repair makes either order harmless for the files of
+  becoming durable before the replacement of `current`; not exercised by CI, no
+  job loses power. The repair makes either order harmless for the files of
   `config`: a pointer that names a version that is not there refuses startup,
   naming the manifest, rather than starting on half an installation.
 - A direct-endpoint key is never forgotten: `endpoint-ids/` only grows.

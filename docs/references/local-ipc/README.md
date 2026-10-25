@@ -31,10 +31,9 @@ allow a second daemon while it is gone.
   lock; the assertion is a precondition that catches ordering mistakes in the
   composition root, not a security boundary.
 - The listener reads the peer's uid for every accepted connection (macOS
-  `LOCAL_PEERCRED`, Linux `SO_PEERCRED`; the Linux call is pending verification
-  by CI on main) and closes a connection whose uid is not its own, or whose
-  credentials cannot be read. The listener it returns has only `Accept`, `Close`
-  and `Addr`; the underlying listener's `AcceptUnix`, `File` and
+  `LOCAL_PEERCRED`, Linux `SO_PEERCRED`) and closes a connection whose uid is not
+  its own, or whose credentials cannot be read. The listener it returns has only
+  `Accept`, `Close` and `Addr`; the underlying listener's `AcceptUnix`, `File` and
   `SetUnlinkOnClose` are not reachable, because they would accept or hand out the
   descriptor without that check.
 - The client, before connecting: the directory is a real directory (not a
@@ -52,9 +51,10 @@ allow a second daemon while it is gone.
 The absolute path in bytes must not exceed 103 on macOS and 107 on Linux. The
 numbers: macOS `sun_path` is 104 bytes and a 104-byte path was measured to fail
 with "invalid argument", so 103 is the longest that works; Linux `sun_path` is
-108 bytes including the NUL (the Linux limit is pending verification by CI on
-main). Some other Unix implementations are as short as 92
-bytes; they are not supported. `Locate` is the one check, shared by `init`,
+108 bytes including the NUL (the Linux limit is not exercised by CI, that is, no
+CI job observes it: the tests check the length rule, none binds a socket on a
+path of that length). Some other Unix implementations are as short as 92 bytes;
+they are not supported. `Locate` is the one check, shared by `init`,
 daemon start and client connect, and its error names the path, its length and
 the limit. Leave room for a long user name and for a `SIDERA_HOME` override.
 
@@ -79,7 +79,9 @@ name, and it has to be read-only for the agent (connect only).
 
 ### Windows
 
-*Pending verification by CI on main.*
+Established by the Windows tests listed under Where, which pass on the
+GitHub-hosted `windows-latest` runner. What they do not establish is listed under
+Known untested items.
 
 - Name: `<h>` is the first 16 hex characters of
   `SHA-256(user SID string, 0x00, data directory)`, the directory absolute,
@@ -240,7 +242,8 @@ taken by someone else, and sending the user to start a daemon would hide that.
 - Tests (every platform, pure rules): `TestSocketPathLengthLimit`,
   `TestPipeHashKnownAnswers`, `TestPipeSDDLGrantsOnlyTheUser`,
   `TestCanonicalPipeHomeIsAbsoluteCleanAndLowerCase`.
-- Tests (Windows, pending verification by CI on main):
+- Tests (Windows, run by the Windows CI jobs, all of them passing; the one
+  test that needs a second local user is skipped, see Known untested items):
   `TestSecondListenerOnSamePipeNameFails`, `TestTwoConsecutiveConnectionsSucceed`,
   `TestConnectionsMayOverlap`, `TestClientCanReadTheServerProcessAndItsTokenUser`,
   `TestPipeIsOwnedByAndGrantedToTheUserOnly`, `TestPipeNameFollowsUserSIDAndDataDirectory`,
@@ -255,8 +258,17 @@ taken by someone else, and sending the user to start a daemon would hide that.
 
 ## Known untested items
 
-- **Windows, all of it:** pending verification by CI on main. The Windows
-  tests print what they measure (process id, `TokenUser`, security descriptor).
+"Pending verification by CI on main" marks what a CI job can observe and does not
+yet; "not exercised by CI" marks what no CI job can observe, with the reason.
+
+- **Windows measurements:** the Windows tests print what they measure (process
+  id, `TokenUser`, security descriptor), but CI runs `go test` without `-v`, so
+  those values are not in its log; pending verification by CI on main. Running the
+  tests with `-v` on a Windows machine shows them.
+- **Remote pipe clients and junction spellings on Windows:** that the listener
+  rejects remote clients, and that two spellings of one directory through a
+  junction give two pipe names, follow from go-winio's behavior and from the
+  hash rule; no test connects remotely or through a junction.
 - A listener's error code when the name exists: not asserted, the requirement is
   only that the second listener fails.
 - Whether go-winio accepts further instances under this descriptor (`GA`
@@ -264,11 +276,13 @@ taken by someone else, and sending the user to start a daemon would hide that.
   test of consecutive connections.
 - Whether `GetNamedPipeServerProcessId` accepts a client handle, whether
   `GetSecurityInfo` reads the owner from a client handle, and whether the owner
-  under elevation is the user: asserted by Windows tests whose first result
-  comes from CI. The owner is the first line of the client check and the server
-  token the second; if the token step is refused in common elevated and
-  unelevated combinations, that is a fix to make then, because the owner check
-  already holds on its own.
+  under elevation is the user: asserted by Windows tests that pass on the
+  `windows-latest` runner (`TestClientCanReadTheServerProcessAndItsTokenUser`,
+  `TestPipeIsOwnedByAndGrantedToTheUserOnly`); whether that runner's process is
+  elevated is not recorded, so the elevated case is not established by them. The
+  owner is the first line of the client check and the server token the second; if
+  the token step is refused in common elevated and unelevated combinations, that
+  is a fix to make then, because the owner check already holds on its own.
 - **Cross-user takeover is not tested on any platform:** a single-user CI can
   prove that the owner can connect and that a same-name listener fails, not
   that another user is refused. `TestClientRefusesAPipeServedByAnotherUser`
@@ -280,9 +294,14 @@ taken by someone else, and sending the user to start a daemon would hide that.
   server id can be stale (a process can hand the pipe handle to another and
   exit, and its id can be reused), so the token of that process is not the
   decisive check; the pipe's owner is, and it does not depend on a process id.
-- Linux `SO_PEERCRED`, the 107-byte limit and `EACCES` on connect to a socket
-  without write permission: pending verification by CI on main. macOS behavior
-  is verified locally.
+- The Linux 107-byte limit: that the kernel accepts a 107-byte socket path and
+  refuses a 108-byte one is not exercised by CI;
+  `TestLocateAcceptsALongestFittingPath` builds a path of that length, but only
+  `Locate` sees it, nothing binds it. Linux `SO_PEERCRED` and `EACCES` on connect
+  to a socket without write permission are exercised on the Linux CI runner
+  (`TestPeerUIDOfARealConnectionIsTheCurrentUser`,
+  `TestClientReportsASocketTheSystemRefusesAsAFailedCheck`). macOS behavior is
+  verified locally.
 - The cross-user claims of the owner check (an unprivileged process cannot make
   another user the owner of a pipe it creates) rest on Microsoft's documentation
   and on how .NET validates the same property; no test creates a pipe as another

@@ -141,8 +141,8 @@ declaration of its own.
   exists), so this barrier, the `SyncDir` after a deferred group and the one after
   a batch of removals persist nothing there by themselves: the durability of
   directory entries on Windows rests on NTFS metadata journaling order and on
-  `MOVEFILE_WRITE_THROUGH`, which no test here establishes. Pending verification
-  by CI on main.
+  `MOVEFILE_WRITE_THROUGH`, which no test here establishes. Not exercised by CI, that is,
+  no CI job can observe it: no job loses power.
 
 ## What the caller must guarantee
 

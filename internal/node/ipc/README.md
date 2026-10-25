@@ -118,5 +118,6 @@ the management socket `<home>/manage/manage.sock`, and on Windows the pipes are
 
 ## Follow-ups
 
-- Windows and Linux behavior is pending verification by CI on main; see the
-  reference for the items that stay untested.
+- The Windows and Linux tests pass in the CI jobs of each platform; the reference
+  lists the items that stay untested, pending verification by CI on main or not
+  exercised by CI.

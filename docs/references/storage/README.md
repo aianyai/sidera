@@ -13,10 +13,12 @@ layer every persistent write goes through),
 of a record file) and [`internal/node/store`](../../../internal/node/store/README.md)
 (the records of `state/`).
 
-Platform paragraphs that say "pending verification by CI on main" describe
-behaviour no one has observed on that platform yet: the code and its tests are
-written from the platform documentation, type-checked by cross-compilation, and
-first run by the CI that follows the first landing on `main`.
+Platform paragraphs carry one of two markers. "Pending verification by CI on
+main" means a CI job can observe the behaviour and does not yet: the code and its
+tests are written from the platform documentation, and the CI log does not show
+the outcome. "Not exercised by CI" means no CI job can observe it, for the reason
+given where it appears (for example, no job loses power, so what a platform makes
+durable at a power loss is never observed).
 
 ## What
 
@@ -154,8 +156,12 @@ system: on NFS `flock` is emulated with `fcntl` byte-range locks.
 
 ### Platform behaviour
 
-The Windows column of this table and the Windows paragraphs after it are pending
-verification by CI on main.
+The Windows column of this table and the Windows paragraphs after it are
+exercised by the Windows tests listed under Windows tests and by the contract
+tests of every file system implementation (`TestOSFSConformsToTheFSContract`),
+which pass in the Windows CI jobs. What Windows makes durable at a power loss is
+not observable by a test, and the tests that log a result or skip without a
+privilege are marked where they occur.
 
 | Primitive | Linux | macOS | Windows |
 | --------- | ----- | ----- | ------- |
@@ -183,8 +189,8 @@ Specifically, for Windows:
   of removals and after a rename of a directory, and the settle of every start)
   make nothing durable there by themselves. The durability of directory entries
   on Windows rests on the ordering of NTFS metadata journaling and on
-  `MOVEFILE_WRITE_THROUGH`, which no test in this repository establishes; this is
-  pending verification by CI on main.
+  `MOVEFILE_WRITE_THROUGH`, which no test in this repository establishes; not
+  exercised by CI: no job loses power.
 - **Rename durability.** The documentation of `MOVEFILE_WRITE_THROUGH` says the
   call does not return until the file is moved on disk, but its guarantee is
   spelled out only for a move done as copy and delete. The power-loss behaviour
@@ -225,8 +231,11 @@ Specifically, for Windows:
   does not evaluate and makes the answer false, as does failing to read the
   descriptor, so a key file is never assumed private.
 
-Linux paragraphs (the `fsync` and directory `fsync` semantics, `flock`, `statfs`)
-are pending verification by CI on main: the development machine is macOS.
+On Linux, `flock` (`TestOSUnixLockConflictsAcrossInstancesAndIsReleasedOnUnlock`)
+and `statfs` (`TestOSFSConformsToTheFSContract`) are exercised on the Linux CI
+runner, and the `fsync` and directory `fsync` calls run in
+`TestOSDurableOperationsEndToEnd`. That they make data and renames durable is
+not exercised by CI, because no job loses power; the development machine is macOS.
 
 ### The transaction layer
 
@@ -606,8 +615,10 @@ M4, `BenchmarkColdStartScan`, 2/3 target records and 1/3 source records):
 | 200,000 | 11-13 s |
 
 The threshold at which segment files become a task of their own is a cold start of
-200,000 files above 30 s on macOS or above 60 s on the CI of Windows; Windows and
-Linux numbers, and a cold page cache, are pending verification by CI on main.
+200,000 files above 30 s on macOS or above 60 s on the CI of Windows. The numbers
+above were measured on the development machine; no CI job runs
+`BenchmarkColdStartScan`, so the Windows and Linux numbers and a cold page cache
+are not exercised by CI.
 
 **The rules of recovery.** Each rule has a predicate, a pure function of a scan,
 and the store offers the write that carries it out. The predicates the store owns:
@@ -654,7 +665,7 @@ guard against this itself: it relies on the settle transaction that starts
 makes every directory durable before any rule runs, and `Begin` refuses the
 store's transactions until it has returned nil. On Windows `SyncDir` flushes nothing, so that
 barrier persists nothing there (the platform section says what durability rests
-on); pending verification by CI on main. The rules run after
+on); not exercised by CI, no job loses power. The rules run after
 `Recover` returned nil. The store's crash walk runs its restarts through the real
 `Recover`, so it exercises that barrier: without it the walk fails on orphan
 collection after a process crash.
@@ -715,8 +726,8 @@ probability below 10^-38.
   write-through rename is not documented, so `Mem` stands for a file system
   weaker than any journaling or copy-on-write one, and the barriers that the
   crash tests show to be sufficient on `Mem` persist nothing on Windows by
-  themselves; the Windows paragraphs above stand on their own tests, pending
-  verification by CI on main.
+  themselves; the Windows paragraphs above stand on their own tests, which pass in
+  the Windows CI jobs. No CI job observes what Windows does at a power loss.
 - It takes clones at an instant between calls. A crash in the middle of a
   system call is covered only by the block rule (partial data) and the
   `RemoveAll` rule (partial removal).
@@ -915,8 +926,8 @@ so that the double cannot drift from what it stands for.
 
 - **The ordering of renames on Windows.** The transaction layer relies on one
   rename becoming durable before the next, which `MoveFileEx` with write-through
-  does not document. It is the same weakness the file system layer has; pending
-  verification by CI on main.
+  does not document. It is the same weakness the file system layer has; not
+  exercised by CI, no job loses power.
 - **Handles are closed without checking.** A close error of an appended file is
   ignored: a file that was synced is durable, and one that was not is not
   promised to be.
@@ -932,7 +943,7 @@ so that the double cannot drift from what it stands for.
   question as its reason.
 - **The records are tested on the in-memory file system and, for the cold start,
   on the real one of macOS.** Windows and Linux numbers and the Windows ordering
-  of renames are pending verification by CI on main.
+  of renames are not exercised by CI: no job runs the benchmark or loses power.
 - **A cold page cache is not measured.**
 
 ## Where
@@ -977,9 +988,15 @@ so that the double cannot drift from what it stands for.
 ### Windows tests
 
 All are ordinary tests in `_windows_test.go` files, with no build tag and no
-manual step, pending verification by CI on main: replacing a file while a read
+manual step; the Windows CI jobs run them and report no failure: replacing a file while a read
 handle is held (succeeds once the handle is released within the retry budget,
 and fails as an ordinary failure with the target intact when it is not), the
 retried error set, the directory flush attempt (logs the measured result), `Sync`
 on an append handle, `RenameDir` refusing an existing target, a second `Lock`
 getting `ErrLocked`, the owner-only descriptor of a created data directory (and that Everyone, an untrusted owner, a callback allow entry or a symbolic link make it false), and that reading a missing file returns `fs.ErrNotExist` at once.
+
+The CI log comes from `go test` without `-v`, so two things in it stay
+invisible: the result that the directory flush attempt logs, and whether the
+tests of an untrusted owner and of a symbolic link ran or skipped for want of the
+privilege to assign that owner or to create a link. Both are pending verification
+by CI on main.

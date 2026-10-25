@@ -162,17 +162,18 @@ transaction of `txn`; nothing here calls an `fsx` write.
 
 ## Platform notes
 
-- Windows (pending verification by CI on main): the permission check is
-  `fsx.Info.OwnerOnly`, a DACL with only the owner, SYSTEM and Administrators
-  granted. `permissions_windows_test.go` widens the DACL of each file and expects
-  the refusal; it runs only in Windows CI. Reading `self-revocation.rec` for the
+- Windows: the permission check is `fsx.Info.OwnerOnly`, a DACL with only the
+  owner, SYSTEM and Administrators granted. `permissions_windows_test.go` widens
+  the DACL of each file and expects the refusal; it runs only on Windows and
+  passes in the Windows CI jobs. Reading `self-revocation.rec` for the
   export relies on `fsx.ReadFile`, which reads and closes at once. The order of
   two renames at a power loss is not documented for Windows: if the certificate
   survived and the serial file did not, `Load` refuses naming `network-serial`,
   which is the fail-closed answer; the error says how to mend it (delete
   `keys/init.rec` and run `init` again, which signs a new certificate above both
   serials). The file system layer does not flush a directory on Windows, so the two
-  renames can reach the disk in either order.
+  renames can reach the disk in either order (not exercised by CI, that is, no CI
+  job can observe it: no job loses power).
 
 ## Where the tests are
 

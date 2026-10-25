@@ -221,15 +221,16 @@ with which permissions are the caller's. The package writes nothing into `keys/`
 for a retirement; `CheckNotRetired` refuses to run a node whose identity is among
 the loaded revocations, because a retired identity cannot become valid again.
 
-**Windows (pending verification by CI on main).** The owner-only check is the
-DACL rule of the file system layer: the owner is the user, Administrators or
-SYSTEM, and only those are granted. The test that widens the DACL of each file
-runs only in Windows CI. The order in which two renames reach the disk after a
-power loss is not documented for Windows, and the file system layer does not
-flush a directory there, so the certificate's rename can survive while the serial
-file's is lost. The node then refuses to start naming `network-serial`, and the
-owner mends it as described under the refusal of a serial file behind the
-certificate below.
+**Windows.** The owner-only check is the DACL rule of the file system layer: the
+owner is the user, Administrators or SYSTEM, and only those are granted.
+`TestWindowsDACLWiderThanTheOwnerIsRefusedNamingTheFile` widens the DACL of each
+file and runs only on Windows; it passes in the Windows CI jobs. The order in
+which two renames reach the disk after a power loss is not documented for
+Windows, and the file system layer does not flush a directory there, so the
+certificate's rename can survive while the serial file's is lost (not exercised
+by CI, that is, no CI job can observe it: no job loses power). The node then
+refuses to start naming `network-serial`, and the owner mends it as described
+under the refusal of a serial file behind the certificate below.
 
 ## Why
 
