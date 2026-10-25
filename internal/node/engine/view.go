@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -37,10 +38,21 @@ type view struct {
 	// still accepted and whole: the ones a closed endpoint has to close.
 	queued map[ident.EndpointID]map[store.TargetKey]bool
 
+	// results are the stored results of administrative operations by request key,
+	// as far as the loop needs them: the fingerprint that tells a resend of a
+	// request from the reuse of its identifier, and the answer to hand back.
+	results map[admin.RequestKey]storedResult
+
 	bodyRefs   bodyCounts
 	unfinished int
 	alerts     []store.AlertRecord
 	seq        *store.SeqBook
+}
+
+// storedResult is the part of a stored administrative result the loop reads.
+type storedResult struct {
+	fingerprint admin.Fingerprint
+	result      []byte
 }
 
 // bodyCounts is how many records refer to each body, by the name of its file.
@@ -77,8 +89,12 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		ctl:       map[store.TargetKey]store.CtlRecord{},
 		out:       map[string]store.OutRecord{},
 		queued:    map[ident.EndpointID]map[store.TargetKey]bool{},
+		results:   map[admin.RequestKey]storedResult{},
 		bodyRefs:  bodyCounts{},
 		seq:       store.NewSeqBook(sc),
+	}
+	for _, a := range sc.Admin {
+		v.putResult(a)
 	}
 	for _, ep := range sc.Endpoints {
 		meta, err := decodeMeta(ep.Declaration)
@@ -116,6 +132,12 @@ func (v *view) putEndpoint(rec store.EndpointRecord, meta endpointMeta) {
 		return
 	}
 	v.tokens.add(rec.ID, rec.Token)
+}
+
+// putResult records the stored result of an administrative operation as it is on
+// disk now.
+func (v *view) putResult(a store.AdminRecord) {
+	v.results[a.Key] = storedResult{fingerprint: a.Fingerprint, result: a.Result}
 }
 
 // OpenEndpoints is how many endpoints are open or being created: the ones that

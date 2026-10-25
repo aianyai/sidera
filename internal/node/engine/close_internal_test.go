@@ -27,12 +27,13 @@ func TestCloseEndpointAnswersForWhatCannotBeClosed(t *testing.T) {
 		reason  Reason
 	}{
 		{"a runtime endpoint stands for its instance", runtime.ID, 0, ReasonWrongEndpointKind},
-		{"an endpoint that is closed already", closed.ID, CloseOutcomeAlreadyClosed, 0},
+		{"an endpoint that is closed already says so and writes nothing", closed.ID, CloseOutcomeAlreadyClosed, 0},
 		{"an endpoint nobody has", idOf(t, 99), 0, ReasonEndpointUnknown},
 		{"the system endpoint", ident.SystemEndpoint(), 0, ReasonEndpointUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			o, err := e.closeEndpoint(now, tc.id, nil)
+			res, err := e.closeEndpoint(now, tc.id, nil)
+			o := res.Outcome
 			if tc.reason != 0 {
 				if r, ok := ReasonOf(err); !ok || r != tc.reason {
 					t.Errorf("error %v, want reason %s", err, tc.reason)

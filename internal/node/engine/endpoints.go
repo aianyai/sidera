@@ -3,10 +3,12 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
@@ -188,8 +190,7 @@ type cmdUnregister struct {
 
 func (c *cmdUnregister) gate() gate { return gateAdapter }
 func (c *cmdUnregister) run(e *Engine, now time.Time) {
-	_, err := e.unregisterDirect(now, c.instance, c.params)
-	c.done(struct{}{}, e.classify(err))
+	c.done(struct{}{}, e.classify(e.unregisterDirect(now, c.instance, c.params)))
 }
 
 // UnregisterDirect closes a direct endpoint of the adapter instance, as the
@@ -201,15 +202,16 @@ func (e *Engine) UnregisterDirect(ctx context.Context, instance string, p adapte
 	return err
 }
 
-func (e *Engine) unregisterDirect(now time.Time, inst string, p adapterproto.UnregisterParams) (CloseOutcome, error) {
+func (e *Engine) unregisterDirect(now time.Time, inst string, p adapterproto.UnregisterParams) error {
 	if _, ok := e.adm[inst]; !ok {
-		return 0, refuse(ReasonInstanceUnknown)
+		return refuse(ReasonInstanceUnknown)
 	}
 	st, err := e.view.resolve(ByAdapter(inst, p.Endpoint))
 	if err != nil {
-		return 0, err
+		return err
 	}
-	return e.closeEndpoint(now, st.rec.ID, nil)
+	_, err = e.closeEndpoint(now, st.rec.ID, nil)
+	return err
 }
 
 // ---------------------------------------------------------------------------
@@ -340,18 +342,42 @@ func closeOutcomeOf(k adapterreg.EndpointKind) CloseOutcome {
 	return CloseOutcomeClosed
 }
 
+// CloseOperation is the administrative operation that asks for a close. The loop
+// makes the record of its result, so the result says what the close did and not
+// what the caller expected, and stores it in the transaction of the close.
+type CloseOperation struct {
+	// Key and Fingerprint identify the request: the same key and fingerprint is a
+	// resend, which gets the stored result; the same key with another fingerprint
+	// is refused with ReasonOperationIDReused.
+	Key         admin.RequestKey
+	Fingerprint admin.Fingerprint
+	// Name is the name of the operation, as the stored record carries it.
+	Name string
+	// Encode makes the result, compact JSON, from the outcome of the close. It
+	// runs in the loop and must not wait.
+	Encode func(CloseOutcome) ([]byte, error)
+}
+
 // CloseRequest asks to close an endpoint at the owner's request.
 type CloseRequest struct {
 	Endpoint ident.EndpointID
-	// Result is the record of the administrative operation that asks for it,
-	// stored in the same transaction as the head record of the closing: a crash
-	// leaves both or neither. Nil when no operation asks (the adapter's own
-	// unregistration).
-	Result *store.AdminRecord
+	// Operation is the administrative operation that asks for it; its result is
+	// stored in the same transaction as the head record of the closing, whatever
+	// the outcome, so a crash leaves both or neither. Nil when no operation asks.
+	Operation *CloseOperation
 }
 
 // CloseResult is the answer to a close.
-type CloseResult struct{ Outcome CloseOutcome }
+type CloseResult struct {
+	// Outcome is what the close did. It is the zero value when Replayed.
+	Outcome CloseOutcome
+	// Result is the result of the operation as stored, nil when the request had no
+	// operation.
+	Result []byte
+	// Replayed: the operation had been executed before, and Result is the one
+	// stored then; nothing was executed.
+	Replayed bool
+}
 
 type cmdClose struct {
 	call[CloseResult]
@@ -360,8 +386,8 @@ type cmdClose struct {
 
 func (c *cmdClose) gate() gate { return gateWrite }
 func (c *cmdClose) run(e *Engine, now time.Time) {
-	o, err := e.closeEndpoint(now, c.req.Endpoint, c.req.Result)
-	c.done(CloseResult{Outcome: o}, e.classify(err))
+	res, err := e.closeEndpoint(now, c.req.Endpoint, c.req.Operation)
+	c.done(res, e.classify(err))
 }
 
 // CloseEndpoint closes an endpoint at the owner's request. The head record, which
@@ -370,31 +396,84 @@ func (c *cmdClose) run(e *Engine, now time.Time) {
 // time. An endpoint that is not one of the node's is unknown, the system endpoint
 // among them; a runtime endpoint stands for its adapter instance and is closed by
 // disabling the instance.
+//
+// With an Operation the command is the one step the administrative rules ask for:
+// a resend of a request that was executed returns its stored result, otherwise
+// the close is made and the result, built from its outcome, is stored with the
+// fingerprint in the same transaction. That holds for every outcome, an endpoint
+// that was closed already included.
 func (e *Engine) CloseEndpoint(ctx context.Context, r CloseRequest) (CloseResult, error) {
 	c := &cmdClose{call: newCall[CloseResult](), req: r}
 	return roundTrip(ctx, e, submitExternal, c, c.call)
 }
 
-func (e *Engine) closeEndpoint(now time.Time, id ident.EndpointID, result *store.AdminRecord) (CloseOutcome, error) {
+func (e *Engine) closeEndpoint(now time.Time, id ident.EndpointID, op *CloseOperation) (CloseResult, error) {
+	if op != nil {
+		stored, seen := e.view.results[op.Key]
+		var s *admin.StoredRequest
+		if seen {
+			s = &admin.StoredRequest{Fingerprint: stored.fingerprint}
+		}
+		switch v := admin.CheckReplay(s, op.Fingerprint); v.Action {
+		case admin.ReplayReturnStored:
+			return CloseResult{Result: stored.result, Replayed: true}, nil
+		case admin.ReplayConflict:
+			return CloseResult{}, refuse(ReasonOperationIDReused)
+		}
+	}
 	st := e.view.endpoints[id]
 	switch {
 	case st == nil:
-		return 0, refuse(ReasonEndpointUnknown)
+		return CloseResult{}, refuse(ReasonEndpointUnknown)
 	case st.rec.Kind == adapterreg.KindRuntime:
-		return 0, refuse(ReasonWrongEndpointKind)
-	case st.rec.Status == store.EndpointClosed:
-		return CloseOutcomeAlreadyClosed, nil
+		return CloseResult{}, refuse(ReasonWrongEndpointKind)
 	}
 	rec := st.rec
-	rec.Status, rec.Token = store.EndpointClosed, nil
-	if err := e.d.Store.EndpointClose(rec, result); err != nil {
-		return 0, err
+	outcome := CloseOutcomeAlreadyClosed
+	if rec.Status != store.EndpointClosed {
+		rec.Status, rec.Token = store.EndpointClosed, nil
+		outcome = closeOutcomeOf(rec.Kind)
 	}
-	e.view.putEndpoint(rec, st.meta)
-	if e.view.Draining(id) {
-		e.later(&cmdDrain{endpoint: id})
+	res := CloseResult{Outcome: outcome}
+	switch {
+	case op != nil:
+		stored, err := e.closeWithResult(now, rec, op, outcome)
+		if err != nil {
+			return CloseResult{}, err
+		}
+		res.Result = stored
+	case outcome != CloseOutcomeAlreadyClosed:
+		if err := e.d.Store.EndpointClose(rec, nil); err != nil {
+			return CloseResult{}, err
+		}
 	}
-	return closeOutcomeOf(rec.Kind), nil
+	if outcome != CloseOutcomeAlreadyClosed {
+		e.view.putEndpoint(rec, st.meta)
+		if e.view.Draining(id) {
+			e.later(&cmdDrain{endpoint: id})
+		}
+	}
+	return res, nil
+}
+
+// closeWithResult writes the closed record of an endpoint together with the result
+// of the operation, built from what the close did, and returns the result. An
+// endpoint that was closed already is written again as it is, so that the result
+// and its fingerprint are stored all the same.
+func (e *Engine) closeWithResult(now time.Time, rec store.EndpointRecord, op *CloseOperation, outcome CloseOutcome) ([]byte, error) {
+	result, err := op.Encode(outcome)
+	if err != nil {
+		return nil, fmt.Errorf("engine: the result of %s: %w", op.Name, err)
+	}
+	a := store.AdminRecord{
+		Key: op.Key, Fingerprint: op.Fingerprint, Op: op.Name, Result: result,
+		At: now, RetainUntil: now.Add(store.AdminResultRetention),
+	}
+	if err := e.d.Store.EndpointClose(rec, &a); err != nil {
+		return nil, err
+	}
+	e.view.putResult(a)
+	return result, nil
 }
 
 // ---------------------------------------------------------------------------

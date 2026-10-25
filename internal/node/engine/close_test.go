@@ -1,11 +1,15 @@
 package engine_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"reflect"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -69,7 +73,9 @@ func TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies(t *testin
 	}
 }
 
-func TestCloseTwiceIsTheSameAnswer(t *testing.T) {
+// Closing an endpoint that is closed already changes nothing and says so; the
+// management interface maps the word to its own.
+func TestClosingAnEndpointThatIsClosedAlreadySaysSo(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)
 	e := r.start()
@@ -78,36 +84,136 @@ func TestCloseTwiceIsTheSameAnswer(t *testing.T) {
 		t.Fatalf("first close: %+v, %v", res, err)
 	}
 	res, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a})
-	if err != nil || res.Outcome != engine.CloseOutcomeAlreadyClosed {
-		t.Errorf("second close: %+v, %v; want already closed", res, err)
+	if err != nil || res.Outcome != engine.CloseOutcomeAlreadyClosed || res.Result != nil {
+		t.Errorf("second close: %+v, %v; want already closed and no stored result", res, err)
+	}
+	if got := r.commits("endpoint-close"); got != 1 {
+		t.Errorf("%d transactions closed the endpoint, want the first only", got)
 	}
 }
 
+// closeOp is the operation that closes an endpoint, as the management interface
+// builds it: the identifier of the request, the fingerprint of its content and the
+// shape of its result.
+func closeOp(b byte, content string) *engine.CloseOperation {
+	var op admin.OperationID
+	op[0] = b
+	return &engine.CloseOperation{
+		Key: admin.KeyFor(admin.LocalOwner(), op), Fingerprint: sha256.Sum256([]byte(content)), Name: "endpoints.close",
+		Encode: func(o engine.CloseOutcome) ([]byte, error) { return []byte(`{"outcome":"` + o.String() + `"}`), nil },
+	}
+}
+
+// adminResults is the results of administrative operations on disk, by key.
+func (r *rig) adminResults() map[admin.RequestKey]store.AdminRecord {
+	out := map[admin.RequestKey]store.AdminRecord{}
+	for _, a := range r.scan().Admin {
+		out[a.Key] = a
+	}
+	return out
+}
+
 // The result of the operation that asked for the close goes in the same
-// transaction as the head record: a crash cannot leave one without the other.
+// transaction as the head record, and it is the result of what the close did: a
+// crash cannot leave one without the other.
 func TestCloseStoresTheResultOfTheOperationWithTheHeadRecord(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)
 	e := r.start()
 	a := register(t, e, "a")
-	var op admin.OperationID
-	op[0] = 42
-	res := store.AdminRecord{
-		Key: admin.KeyFor(admin.LocalOwner(), op), Op: "endpoint.close", Result: []byte(`{"outcome":"closed"}`),
-		At: t0, RetainUntil: t0.Add(store.AdminResultRetention),
-	}
-	if _, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a, Result: &res}); err != nil {
+	before := r.scan().Admin // what the setting up of the node wrote
+	op := closeOp(42, "close a")
+	res, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a, Operation: op})
+	if err != nil {
 		t.Fatal(err)
 	}
-	var found *store.AdminRecord
-	for _, a := range r.scan().Admin {
-		if a.Key == res.Key {
-			a := a
-			found = &a
-		}
+	if string(res.Result) != `{"outcome":"closed"}` || res.Replayed {
+		t.Errorf("answered %+v, want the result of the close", res)
 	}
-	if found == nil || string(found.Result) != string(res.Result) || found.Op != res.Op {
-		t.Errorf("the stored result is %+v, want the one given", found)
+	after := r.scan().Admin
+	if len(after) != len(before)+1 {
+		t.Fatalf("%d stored results, want the %d of the setting up and exactly one for the close", len(after), len(before))
+	}
+	found, ok := r.adminResults()[op.Key]
+	if !ok || string(found.Result) != `{"outcome":"closed"}` || found.Op != "endpoints.close" || found.Fingerprint != op.Fingerprint {
+		t.Errorf("the stored result is %+v (found %v)", found, ok)
+	}
+	if got := r.commits("endpoint-close"); got != 1 {
+		t.Errorf("%d transactions, want one for the head record and the result together", got)
+	}
+}
+
+// What is stored is what the loop did, not what the caller guessed: a session
+// endpoint says closing, because the session behind it is still to be released.
+func TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	direct := register(t, e, "a")
+	session := mustEndpoint(t, 80)
+	r.restart()
+	r.seedRecord(store.EndpointRecord{
+		ID: session, Kind: sessionKind, Instance: "chat", Status: store.EndpointOpen,
+		Token: bytes.Repeat([]byte{0x5a}, store.TokenLen), Session: &store.SessionInfo{Preset: "default"},
+	})
+	e = r.start()
+	for _, tc := range []struct {
+		name string
+		id   ident.EndpointID
+		op   *engine.CloseOperation
+		want string
+	}{
+		{"a direct endpoint", direct, closeOp(101, "a"), "closed"},
+		{"a session endpoint", session, closeOp(102, "b"), "closing"},
+		{"an endpoint that is closed already", direct, closeOp(103, "c"), "already_closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: tc.id, Operation: tc.op})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := `{"outcome":"` + tc.want + `"}`
+			if string(res.Result) != want {
+				t.Errorf("answered %s, want %s", res.Result, want)
+			}
+			if got := r.adminResults()[tc.op.Key]; string(got.Result) != want {
+				t.Errorf("stored %s, want %s", got.Result, want)
+			}
+		})
+	}
+}
+
+// One identifier has one result: a resend of the request returns the stored
+// result without closing or writing anything, and the identifier of another
+// request is refused. Without the replay check the second close would store
+// already_closed over the answer the first one gave.
+func TestAResendOfAClosingReturnsTheStoredResultAndAReusedIdentifierIsRefused(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	a := register(t, e, "a")
+	ctx := context.Background()
+	first, err := e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: a, Operation: closeOp(7, "close a")})
+	if err != nil || string(first.Result) != `{"outcome":"closed"}` {
+		t.Fatalf("first: %+v, %v", first, err)
+	}
+	before := r.snapshot()
+
+	again, err := e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: a, Operation: closeOp(7, "close a")})
+	if err != nil || !again.Replayed || string(again.Result) != `{"outcome":"closed"}` {
+		t.Errorf("a resend answered %+v, %v; want the stored result, replayed", again, err)
+	}
+	_, err = e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: a, Operation: closeOp(7, "close b")})
+	wantReason(t, err, engine.ReasonOperationIDReused)
+	if !reflect.DeepEqual(before, r.snapshot()) {
+		t.Error("a resend and a reused identifier wrote to the disk")
+	}
+	// The stored result is still what the first close said, after a restart too.
+	r.restart()
+	e = r.start()
+	again, err = e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: a, Operation: closeOp(7, "close a")})
+	if err != nil || !again.Replayed || string(again.Result) != `{"outcome":"closed"}` {
+		t.Errorf("after a restart a resend answered %+v, %v", again, err)
 	}
 }
 

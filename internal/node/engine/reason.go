@@ -33,6 +33,10 @@ const (
 	// ReasonInvalidArgument: a request value is not acceptable; the Field of
 	// the Refusal names it.
 	ReasonInvalidArgument
+	// ReasonOperationIDReused: the identifier of an administrative operation was
+	// used before for a different request, so nothing is executed and the stored
+	// result is not shown.
+	ReasonOperationIDReused
 	// ReasonNodeQueueFull: the node holds as many unfinished deliveries as it
 	// may. Backpressure: nothing was recorded.
 	ReasonNodeQueueFull
@@ -67,6 +71,7 @@ var reasonNames = [reasonEnd]string{
 	ReasonEndpointLimit:      "endpoint_limit",
 	ReasonEndpointDraining:   "endpoint_draining",
 	ReasonInvalidArgument:    "invalid_argument",
+	ReasonOperationIDReused:  "operation_id_reused",
 	ReasonNodeQueueFull:      "node_queue_full",
 	ReasonStorageFull:        "storage_full",
 	ReasonStorageUnavailable: "storage_unavailable",

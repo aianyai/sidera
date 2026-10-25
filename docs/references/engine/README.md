@@ -48,13 +48,22 @@ instance (`Admission.MaxDirectEndpoints`) and the cap of the node
 being created, whatever its kind. The refusal is `endpoint_limit` and says which.
 The system endpoint is not registered, counted, listed or closable.
 
-Closing an endpoint is a head record (closed, token gone, with the result of the
-administrative operation that asked, if any), then chunks of at most
+Closing an endpoint is a head record (closed, token gone), then chunks of at most
 `ChunkReplaces` (16) records queued for it, each closed by the delivery rules and
 stripped of its body reference, the bodies nothing refers to any more released.
 While queued records remain the endpoint is draining and its key is not
 registered again (`endpoint_draining`). A runtime endpoint cannot be closed: it
 stands for its instance.
+
+When an administrative operation asks for the close, one loop command does what
+the rules for such operations fix: a request whose key and fingerprint were seen
+returns the stored result and executes nothing (`Replayed`), the same key with
+another fingerprint is refused (`operation_id_reused`), and otherwise the loop
+closes the endpoint and builds the result from the outcome it reached
+(`closed`, `closing` for a session endpoint, `already_closed` for one that was
+closed before), then stores it with the fingerprint in the transaction of the head
+record. A close of an endpoint that is closed already writes that record again as
+it is, only to carry the result.
 
 `Declare` changes the declaration of the endpoint the caller is: `ByToken` is the
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's
@@ -130,6 +139,15 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   and `TestAContinuationIsNotStarvedByAnInboxThatIsNeverEmpty` pin both ends.
 - **Chunks by count, not time.** A time budget would move the boundary of a chunk,
   and so the crash point that a write is, with the speed of the machine.
+- **The loop builds the result record, from the outcome.** A result made by the
+  caller before the command ran can only guess the outcome (a session endpoint says
+  `closing`, a direct one `closed`, and a repeated close `already_closed`), and a
+  caller that stores it separately loses the one-transaction guarantee. The request
+  carries the key, the fingerprint, the name of the operation and the encoder; the
+  command checks the replay, closes and stores in one step. A result is stored in
+  every outcome, because the stored answer to an identifier must be the one the
+  first execution gave: without the replay check the second close of a resent
+  request would overwrite `closed` with `already_closed`.
 - **The head record first.** Whatever a chunk would do is derived from the head
   record, so a crash between chunks is repaired by the same rule at the next start.
 - **No registration over a draining endpoint.** The records still queued would land
@@ -172,6 +190,7 @@ reproducible).
 | The 257th endpoint is refused | `endpoints.go` (`registerDirect`) | `TestEndpointBeyondNodeCapRefused`, `TestInstanceLimitRefusesBeforeTheNodeCap` |
 | Same key, same endpoint; a new token on reopening | `endpoints.go`, `tokens.go` | `TestSameKeyGivesTheSameEndpointAcrossARestart`, `TestReopeningAnEndpointKeepsItsIdAndGivesItANewToken` |
 | The registration crashes anywhere | `transactions.go` | `TestDirectRegisterRecoversFromACrashAtEveryPoint` |
+| The result of a close is stored with it, and replayed | `endpoints.go` (`closeEndpoint`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint`, `TestAResendOfAClosingReturnsTheStoredResultAndAReusedIdentifierIsRefused` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingIsRefused` |
 | Declarations and callers | `endpoints.go`, `meta.go`, `view.go` | `declare_test.go`, `meta_internal_test.go` (golden vectors, refusals, `FuzzDecodeMeta`), `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable`, `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
