@@ -25,7 +25,7 @@ commands and add their methods to this list.
 | ---- | ------- |
 | `Open(ctx, Deps, Params)` | The scan entry: scans `state/`, runs the recovery rules until none has work, builds the view. Returns a `ScanReport`. |
 | `Start`, `RecoverDelivery`, `Serve`, `BeginShutdown`, `Stop`, `Done`, `Err`, `Phase` | The life of the loop: opened, recovering, running, stopping, stopped or failed. `RecoverDelivery` is the second recovery entry; the table of the start steps is in the reference. |
-| `AddPeriodic`, `Task`, `TaskInput` | A task the composition root has the loop run every period, before `Start`. |
+| `AddPeriodic`, `AddClockState`, `Task`, `TaskInput` | A task the composition root has the loop run every period, before `Start`. The clock state's task is also run at once by the command that finds the wall clock set back. |
 | `Quiesce` | Returns when no command waits, nothing is due and no goroutine of the engine runs. |
 | `AdapterAdmitted`, `RegisterDirect`, `UnregisterDirect` | What the adapter host calls: the admission of an instance, and the registration and unregistration of its direct endpoints. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
@@ -54,7 +54,7 @@ commands and add their methods to this list.
 - **One reading of the clock per command**, observed against the high water mark
   before anything else. A wall clock set back beyond the tolerance pauses new
   work that depends on a deadline until the owner clears it; moving the clock on
-  does not clear it.
+  does not clear it. The pause is made durable by the command that finds it.
 - **Disk first, memory second.** Everything that can be refused is checked before
   `Begin`. A write that failed before its commit point was acknowledged to no one
   and changed nothing: `ReasonStorageFull` for a full volume, otherwise
@@ -113,8 +113,10 @@ commands and add their methods to this list.
 - Call `txn.Writer.Recover` and make the directories of `state/` exist before
   `Open`; load the configuration after `Recover`. `Open` reads what a power loss
   cannot take back only because the transaction layer settled it.
-- Pass the persisted high water mark and the persisted pause in `Deps`, and write
-  `TaskInput.HighWater` in the periodic task that persists it.
+- Pass the persisted high water mark and the persisted pause in `Deps`, and add
+  the task that persists them with `AddClockState`: it writes `TaskInput.HighWater`
+  and `TaskInput.RollbackPaused`, and it is the loop that runs it at once when the
+  pause begins, so the pause is on disk before the command that found it goes on.
 - Call `AddPeriodic` before `Start`, `RecoverDelivery` between `Start` and
   `Serve`, and `BeginShutdown` before `Stop`.
 - Admit an adapter instance with `AdapterAdmitted` before its endpoints register,

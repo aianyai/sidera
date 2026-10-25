@@ -39,6 +39,15 @@ task is due one period after `Start` and one period after each run; a clock that
 jumps over several periods runs it once. A task that fails with an error a retry
 may cure runs again after `RetryBackoff` (1 minute); a fatal error stops the loop.
 
+**The clock.** Every command and every wake of the timer reads the wall clock once
+and observes it against the high water mark. A reading set back beyond the tolerance
+pauses the work that depends on a deadline, and the command that found it runs the
+task registered with `AddClockState` before it goes on, so the pause is on disk
+before anything else happens: a pause kept only in memory until the next period
+would be lost by a crash, and the clock that was set back trusted again after the
+restart. A fatal error of that write stops the engine, a retryable one is retried
+after `RetryBackoff` while the pause already holds in memory.
+
 **Endpoints.** `RegisterDirect` gives an adapter instance the same endpoint for the
 same key, for ever: the id is minted once and kept in `config/endpoint-ids/`, in
 the same transaction (`direct-register`) as the endpoint record. A new endpoint,
@@ -200,6 +209,7 @@ reproducible).
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable`, `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |
 | The schedule | `sched.go`, `engine.go` | `sched_test.go`, `sched_internal_test.go` |
+| The pause of a clock set back is persisted at once | `engine.go` (`observe`, `AddClockState`) | `TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash`, `TestAFatalErrorWhilePersistingThePauseStopsTheEngine` |
 | Recovery | `recovery.go` | `recovery_test.go` |
 | Waiting |  `waiters.go` | `waiters_test.go` |
 | The view agrees with the disk | `view.go` | `TestViewAgreesWithTheDiskAfterAWrite` |

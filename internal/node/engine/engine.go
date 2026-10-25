@@ -77,19 +77,20 @@ type Engine struct {
 	err   error
 
 	// Owned by the loop from Start on.
-	view     *view
-	hw       clock.HighWater
-	paused   bool
-	adm      map[string]adapterreg.Admission
-	sched    *scheduler
-	timer    clock.Timer
-	periodic map[string]*periodicTask
-	order    []string // names of the periodic tasks, in the order they were added
-	waits    map[ident.EndpointID]*waiter
-	cont     []continuation
-	ran      uint64 // how many commands the loop has taken from the inbox
-	fatal    error  // set by classify; the loop stops after the command that set it
-	probed   bool   // the command that just ran was a probe of Quiesce
+	view      *view
+	hw        clock.HighWater
+	paused    bool
+	adm       map[string]adapterreg.Admission
+	sched     *scheduler
+	timer     clock.Timer
+	periodic  map[string]*periodicTask
+	order     []string // names of the periodic tasks, in the order they were added
+	clockTask string   // the periodic task that persists the clock state, if one was added
+	waits     map[ident.EndpointID]*waiter
+	cont      []continuation
+	ran       uint64 // how many commands the loop has taken from the inbox
+	fatal     error  // set by classify; the loop stops after the command that set it
+	probed    bool   // the command that just ran was a probe of Quiesce
 }
 
 // continuation is a command the loop queued for itself: the next chunk of a long
@@ -189,6 +190,23 @@ func (e *Engine) AddPeriodic(name string, every time.Duration, t Task) error {
 	}
 	e.periodic[name] = &periodicTask{every: every, task: t}
 	e.order = append(e.order, name)
+	return nil
+}
+
+// AddClockState is AddPeriodic for the task that persists the high water mark of
+// the wall clock and the rollback pause (TaskInput.HighWater and RollbackPaused).
+// Besides its period, the loop runs it at once, in the command that finds the wall
+// clock set back: a pause that only memory knows is lost by a crash, and the clock
+// that was set back is then trusted again after the restart. At most one task is
+// the clock state's.
+func (e *Engine) AddClockState(name string, every time.Duration, t Task) error {
+	if e.clockTask != "" {
+		return errors.New("engine: the clock state has a task already")
+	}
+	if err := e.AddPeriodic(name, every, t); err != nil {
+		return err
+	}
+	e.clockTask = name
 	return nil
 }
 
@@ -546,11 +564,16 @@ func (e *Engine) armTimer() {
 }
 
 // observe reads the wall clock into the high water mark: a reading far behind it
-// pauses everything that depends on a deadline until the owner clears it.
+// pauses everything that depends on a deadline until the owner clears it. The
+// pause is made durable before the command goes on, by running the task of the
+// clock state now.
 func (e *Engine) observe(now time.Time) {
 	if v, _ := e.hw.Observe(now); v == clock.WallRolledBack && !e.paused {
 		e.paused = true
 		e.log.Warn("the wall clock was set back; new work that depends on a deadline is refused until the owner clears it")
+		if e.clockTask != "" {
+			e.fire(schedKey{schedPeriodic, e.clockTask}, now)
+		}
 	}
 }
 
@@ -568,6 +591,10 @@ func (e *Engine) clearRollback(now time.Time) {
 func (e *Engine) step(c command) {
 	now := e.d.Clock.Now()
 	e.observe(now)
+	if e.fatal != nil { // making the pause durable failed for good
+		c.fail(refuse(ReasonStorageFatal))
+		return
+	}
 	ph := e.Phase()
 	switch c.gate() {
 	case gateRead:
@@ -593,6 +620,9 @@ func (e *Engine) step(c command) {
 func (e *Engine) fireDue() {
 	now := e.d.Clock.Now()
 	e.observe(now)
+	if e.fatal != nil {
+		return
+	}
 	for _, key := range e.sched.takeDue(now) {
 		e.fire(key, now)
 		if e.fatal != nil {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/txn"
@@ -221,4 +222,122 @@ func TestAddPeriodicRefusesWhatCannotBeScheduled(t *testing.T) {
 	if err := e.AddPeriodic("late", time.Minute, ok); err == nil {
 		t.Error("a task was added to a running engine: the loop owns the schedule from Start on")
 	}
+}
+
+// clockDisk stands for the file the clock state is persisted in: the task that
+// the composition root hands the engine writes what it is told into it, and a
+// restart reads it back.
+type clockDisk struct {
+	mu     sync.Mutex
+	hw     time.Time
+	paused bool
+	writes int
+}
+
+func (c *clockDisk) task(in engine.TaskInput) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hw, c.paused = in.HighWater, in.RollbackPaused
+	c.writes++
+	return nil
+}
+
+func (c *clockDisk) state() (hw time.Time, paused bool, writes int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.hw, c.paused, c.writes
+}
+
+// Entering the pause of a wall clock set back is made durable in the command that
+// finds it, not at the next period: a crash right after it must not give back the
+// trust in a clock that was set back.
+func TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	var disk clockDisk
+	e := openWith(t, r, func(e *engine.Engine) {
+		if err := e.AddClockState("clock-state", time.Minute, disk.task); err != nil {
+			t.Fatal(err)
+		}
+	})
+	ctx := context.Background()
+	r.clk.Advance(time.Hour)
+	settle(t, e) // the period passes and the mark moves to the hour
+	if err := engine.AdmitNewWork(ctx, e, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, paused, _ := disk.state(); paused {
+		t.Fatal("the pause was persisted before the clock was set back")
+	}
+	_, _, before := disk.state()
+
+	r.clk.Set(t0.Add(30 * time.Minute)) // half an hour behind the mark, and no period has passed
+	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
+	hw, paused, writes := disk.state()
+	if !paused || writes != before+1 {
+		t.Fatalf("after the command that found the clock set back: paused %v, %d writes (%d before); want the pause persisted by that command", paused, writes, before)
+	}
+	if want := t0.Add(time.Hour); !hw.Equal(want) {
+		t.Errorf("the persisted high water mark is %v, want %v", hw, want)
+	}
+	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
+	if _, _, again := disk.state(); again != writes {
+		t.Errorf("a second command in the pause wrote the clock state again (%d writes, %d before)", again, writes)
+	}
+
+	// The process dies here. The next one starts from what was persisted.
+	r.restart()
+	r.paused, r.hw = paused, clock.NewHighWater(hw)
+	e = r.start()
+	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
+}
+
+// A pause that cannot be made durable for good stops the engine, like any other
+// write that failed after its commit point, and nothing runs after it.
+func TestAFatalErrorWhilePersistingThePauseStopsTheEngine(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	fatal := &txn.Error{Tx: "clock-high-water", Class: fsx.Fatal, Err: errors.New("directory sync failed")}
+	e := openWith(t, r, func(e *engine.Engine) {
+		task := func(in engine.TaskInput) error {
+			if in.RollbackPaused {
+				return fatal
+			}
+			return nil
+		}
+		if err := e.AddClockState("clock-state", time.Minute, task); err != nil {
+			t.Fatal(err)
+		}
+	})
+	ctx := context.Background()
+	r.clk.Advance(time.Hour)
+	settle(t, e)
+	r.clk.Set(t0.Add(30 * time.Minute))
+	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonStorageFatal)
+	select {
+	case <-e.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the engine did not stop")
+	}
+	if !errors.Is(e.Err(), fatal) || e.Phase() != engine.PhaseFailed {
+		t.Errorf("Err = %v, phase %v; want the fatal error and the failed phase", e.Err(), e.Phase())
+	}
+}
+
+func TestTheClockStateHasOneTask(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e, _, err := r.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok := func(engine.TaskInput) error { return nil }
+	if err := e.AddClockState("clock-state", time.Minute, ok); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AddClockState("another", time.Minute, ok); err == nil {
+		t.Error("a second task of the clock state was accepted")
+	}
+	e.Start()
+	t.Cleanup(func() { r.stop2(e) })
 }

@@ -15,7 +15,7 @@ import (
 // of review: a new method is added to it by a change that says what it is for.
 func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 	allowed := []string{
-		"AdapterAdmitted", "AddPeriodic", "Alerts", "BeginShutdown", "CloseEndpoint", "Counts", "Declare", "Done",
+		"AdapterAdmitted", "AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CloseEndpoint", "Counts", "Declare", "Done",
 		"Endpoints", "Err", "Phase", "Quiesce", "RaiseAlert", "RecoverDelivery", "RegisterDirect", "Serve",
 		"Start", "Stop", "SystemAddress", "UnregisterDirect",
 	}
