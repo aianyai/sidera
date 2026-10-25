@@ -144,6 +144,11 @@ transaction of `txn`; nothing here calls an `fsx` write.
   directory (`Dir`) first when it does not exist.
 - Call `Initialized` first at startup, to tell an `init` that never ran from one that
   stopped before the marker, and to say so before the configuration is read.
+- Sign with `NetworkSigner` only while nothing forbids signing: never after the
+  local revocation of this node is committed, and never while a rollback pause
+  is in force, including a pause held in memory that `SaveClock` has not
+  persisted yet. The signer has no view of either, and `Renew`'s own refusal
+  covers only the pause that is on disk.
 - Retire and export a running node with `Keys.SelfRevocation`, never with a
   statement read again.
 - After `Load`, call `CheckNotRetired` with the loaded revocations, and renew at
