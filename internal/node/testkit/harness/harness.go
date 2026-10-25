@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -449,19 +450,36 @@ func (h *H) addQuiet(name string, state func() (holds bool, progress uint64)) {
 	h.quiet = append(h.quiet, quietCondition{name, state})
 }
 
-// unmet names the conditions of the fixture that do not hold.
-func (h *H) unmet() []string {
+// reading is one look at every condition of the fixture.
+type reading struct {
+	// unmet names the conditions that do not hold.
+	unmet []string
+	// progress is the count of each condition, in the order they were added.
+	progress []uint64
+}
+
+// look reads every condition of the fixture once.
+func (h *H) look() reading {
 	h.mu.Lock()
 	conds := append([]quietCondition(nil), h.quiet...)
 	h.mu.Unlock()
-	var out []string
-	for _, c := range conds {
-		if holds, _ := c.state(); !holds {
-			out = append(out, c.name)
+	r := reading{progress: make([]uint64, len(conds))}
+	for i, c := range conds {
+		holds, progress := c.state()
+		r.progress[i] = progress
+		if !holds {
+			r.unmet = append(r.unmet, c.name)
 		}
 	}
-	return out
+	return r
 }
+
+// expect is what the engine is asked to be quiet against: the numbers the fixture's
+// parts know from outside the engine. It is made again for every round, because
+// those numbers grow with what the fakes did while the engine was being asked.
+// The engine's Expect has no field yet; the adapter host adds the notification
+// and hold counts, which this takes from the conditions' counters.
+func (h *H) expect() engine.Expect { return engine.Expect{} }
 
 // QuiesceError says why the system did not go quiet in time.
 type QuiesceError struct {
@@ -497,9 +515,12 @@ func (e *QuiesceError) Unwrap() error { return e.Err }
 const quietPoll = time.Millisecond
 
 // Quiesce returns when the system has stopped reacting at the time of the clock
-// now: the conditions of the fixture hold, and then the engine's do, and the
-// fixture's still hold, since what the engine did may have made a fake busy. It
-// fails with a *QuiesceError when the limit, on the real clock, ends first.
+// now: one whole round has changed no count. A round is a look at the conditions of
+// the fixture, which must all hold, then the engine's own conditions, then a look
+// at the fixture's again: what the engine did may have made a fake busy, and a fake
+// that took work during the round, finished it and went idle again holds on both
+// looks, so the counts of the two looks must be equal as well. It fails with a
+// *QuiesceError when the limit, on the real clock, ends first.
 func (h *H) Quiesce(opts ...scenario.QuiesceOption) error {
 	o := scenario.ResolveQuiesce(opts)
 	ctx, cancel := context.WithTimeout(h.ctx, o.Timeout)
@@ -519,8 +540,10 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 	if err := ctx.Err(); err != nil {
 		return fail(engine.Report{}, nil, err)
 	}
+	var unmet []string
 	for {
-		if unmet := h.unmet(); len(unmet) > 0 {
+		before := h.look()
+		if unmet = before.unmet; len(unmet) > 0 {
 			timer := sys.NewTimer(quietPoll)
 			select {
 			case <-timer.C():
@@ -530,11 +553,12 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 			}
 			continue
 		}
-		rep, err := h.Engine().Quiesce(ctx, engine.Expect{})
+		rep, err := h.Engine().Quiesce(ctx, h.expect())
 		if err != nil {
 			return fail(rep, nil, err)
 		}
-		if unmet := h.unmet(); len(unmet) == 0 {
+		after := h.look()
+		if unmet = after.unmet; len(unmet) == 0 && slices.Equal(before.progress, after.progress) {
 			return nil
 		}
 	}
