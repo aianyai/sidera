@@ -5,6 +5,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/authz"
+	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -33,6 +34,7 @@ type ManageService interface {
 	Counts(ctx context.Context) (Counts, error)
 	Alerts(ctx context.Context) ([]store.AlertRecord, error)
 	Status(ctx context.Context) (NodeStatus, error)
+	NodeSettings(ctx context.Context) (config.Node, error)
 	ExportRevocation(ctx context.Context) (RevocationExport, error)
 	Execute(ctx context.Context, c ManagementCommand) (StoredResult, error)
 	OperationResult(ctx context.Context, key admin.RequestKey) ([]byte, bool, error)

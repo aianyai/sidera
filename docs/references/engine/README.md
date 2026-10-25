@@ -159,6 +159,7 @@ while the confirmation on disk is not of the statement this node holds, and has 
 record of its own. `ExportRevocation` is the one thing of the interface that is
 neither a read of the loop nor stored: the statement does not change while the node
 runs, and its result is not stored because the statement can retire the node.
+`NodeSettings` reads `node.json` in the loop, with the version a change names.
 
 `Declare` changes the declaration of the endpoint the caller is: `ByToken` is the
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's

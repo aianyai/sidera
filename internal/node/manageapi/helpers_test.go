@@ -20,6 +20,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
+	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -76,6 +77,7 @@ type fakeService struct {
 	// alerts, status and export are what the reads of the same names answer.
 	alerts []store.AlertRecord
 	status engine.NodeStatus
+	node   config.Node
 	export engine.RevocationExport
 }
 
@@ -94,6 +96,11 @@ func (f *fakeService) Status(context.Context) (engine.NodeStatus, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.status, nil
+}
+func (f *fakeService) NodeSettings(context.Context) (config.Node, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.node, nil
 }
 func (f *fakeService) ExportRevocation(context.Context) (engine.RevocationExport, error) {
 	f.mu.Lock()

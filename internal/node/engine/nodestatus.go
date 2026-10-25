@@ -7,6 +7,7 @@ import (
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/config"
 	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/record"
@@ -173,6 +174,19 @@ func (e *Engine) nodeStatus(now time.Time) (NodeStatus, error) {
 		st.Endpoints = append(st.Endpoints, EndpointStatus{Address: ep.Address, Kind: ep.Kind, Instance: ep.Instance, Status: ep.Status})
 	}
 	return st, nil
+}
+
+type cmdNodeSettings struct{ call[config.Node] }
+
+func (c *cmdNodeSettings) gate() gate                 { return gateRead }
+func (c *cmdNodeSettings) run(e *Engine, _ time.Time) { c.done(e.d.Config.Node(), nil) }
+
+// NodeSettings is node.json as the loop sees it: the settings, the version a
+// change of them has to name, and the operation that made the version. A read of
+// the loop, so it is the same configuration the next command uses.
+func (e *Engine) NodeSettings(ctx context.Context) (config.Node, error) {
+	c := &cmdNodeSettings{call: newCall[config.Node]()}
+	return roundTrip(ctx, e, submitExternal, c, c.call)
 }
 
 // backupConfirmed says whether the owner has confirmed the backup of the
