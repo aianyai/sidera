@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -69,6 +70,22 @@ type Report struct {
 	MainRuns     int
 	BoundaryRuns int
 	RecoveryRuns int
+	// Normal counts the declared writes of normal transactions and how many the
+	// recordings reached; Recovery counts those of recovery transactions and how
+	// many the generations restarted after a crash reached. A smoke walk reaches
+	// only the recovery writes it chose, so only a full walk can reach all.
+	Normal, Recovery PathCount
+	// Triggers, in a full walk only, say which main crash point made the system
+	// write which recovery writes when it restarted: what a scenario's author
+	// needs to fill its recovery cases. Only the runs of the shard are in it.
+	Triggers []Triggered
+}
+
+// Triggered is a main crash point and the recovery writes the restart after it
+// reached.
+type Triggered struct {
+	At    fsx.Point
+	Items []fsx.Key
 }
 
 // Walk runs every scenario: a recording without a crash, then the planned runs of
@@ -82,6 +99,15 @@ type Report struct {
 // cheap, and the coverage assertion is about the whole program.
 func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario, opts Options) (Report, error) {
 	var rep Report
+	// The runs are numbered in the order of the scenarios' names, so that every
+	// shard numbers them alike whatever order the caller lists the scenarios in.
+	scenarios = append([]Scenario(nil), scenarios...)
+	sort.SliceStable(scenarios, func(i, j int) bool { return scenarios[i].Name() < scenarios[j].Name() })
+	for i := 1; i < len(scenarios); i++ {
+		if scenarios[i].Name() == scenarios[i-1].Name() {
+			return rep, fmt.Errorf("crashwalk: two scenarios are named %q", scenarios[i].Name())
+		}
+	}
 	if opts.Mode != Smoke && opts.Mode != Full {
 		return rep, errors.New("crashwalk: Options.Mode is not set")
 	}
@@ -95,7 +121,7 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 	for _, k := range table.Keys() {
 		kinds[k.Key] = k.Kind
 	}
-	w := walker{ctx: ctx, b: b, opts: opts, kinds: kinds, rep: &rep}
+	w := walker{ctx: ctx, b: b, opts: opts, kinds: kinds, rep: &rep, chosen: chosenRecovery(scenarios, opts.Mode)}
 	var recorded []Hit
 	for _, s := range scenarios {
 		hits, err := w.record(s)
@@ -111,6 +137,9 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 		}
 	}
 	cov := Assess(table, recorded)
+	rep.Normal = cov.Normal
+	rep.Recovery = Assess(table, w.afterCrash).Recovery
+	sort.Slice(rep.Triggers, func(i, j int) bool { return pointLess(rep.Triggers[i].At, rep.Triggers[j].At) })
 	if len(cov.MissingNormal) > 0 {
 		var names []string
 		for _, k := range cov.MissingNormal {
@@ -128,6 +157,26 @@ type walker struct {
 	kinds map[fsx.Key]txn.Kind
 	rep   *Report
 	next  int // runs planned so far, for sharding
+	// chosen are the recovery writes the mode runs a case for, over all scenarios.
+	chosen map[fsx.Key]bool
+	// afterCrash are the hits of every generation after the first, in every run:
+	// the writes of a restart.
+	afterCrash []Hit
+}
+
+// chosenRecovery picks the recovery writes a walk of the mode crashes. The choice
+// is made over the cases of all scenarios together: a recovery transaction is
+// crashed once, however its writes are shared among scenarios.
+func chosenRecovery(scenarios []Scenario, mode Mode) map[fsx.Key]bool {
+	var all []RecoveryCase
+	for _, s := range scenarios {
+		all = append(all, s.Recovery()...)
+	}
+	chosen := map[fsx.Key]bool{}
+	for _, c := range PlanRecovery(all, mode) {
+		chosen[c.Item] = true
+	}
+	return chosen
 }
 
 func (w *walker) observe(e Event) {
@@ -224,12 +273,44 @@ func (w *walker) mainRuns(s Scenario, rec []Hit) error {
 				return fmt.Errorf("scenario %q: %w", s.Name(), err)
 			}
 		}
+		w.noteTriggers(tg, res)
 	}
 	return nil
 }
 
+// restartHits keeps the hits of the generations after the first: the writes of a
+// restart, which are the recovery path's coverage.
+func (w *walker) restartHits(res RunResult) [][]Hit {
+	later := res.Hits[min(1, len(res.Hits)):]
+	for _, gen := range later {
+		w.afterCrash = append(w.afterCrash, gen...)
+	}
+	return later
+}
+
+// noteTriggers records, in a full walk, the recovery writes the restart after a
+// main crash point reached.
+func (w *walker) noteTriggers(tg Target, res RunResult) {
+	var items []fsx.Key
+	seen := map[fsx.Key]bool{}
+	for _, gen := range w.restartHits(res) {
+		for _, h := range gen {
+			if w.kinds[h.Point.Key] == txn.Recovery && !seen[h.Point.Key] {
+				seen[h.Point.Key] = true
+				items = append(items, h.Point.Key)
+			}
+		}
+	}
+	if w.opts.Mode == Full && tg.AfterStep == "" && len(items) > 0 {
+		w.rep.Triggers = append(w.rep.Triggers, Triggered{At: tg.Point, Items: items})
+	}
+}
+
 func (w *walker) recoveryRuns(s Scenario) error {
-	for _, c := range PlanRecovery(s.Recovery(), w.opts.Mode) {
+	for _, c := range PlanRecovery(s.Recovery(), Full) {
+		if !w.chosen[c.Item] {
+			continue
+		}
 		k := w.next
 		w.next++
 		if !w.opts.Shard.Keep(k) {
@@ -242,6 +323,7 @@ func (w *walker) recoveryRuns(s Scenario) error {
 			return err
 		}
 		w.rep.RecoveryRuns++
+		w.restartHits(res)
 		if len(res.Reached) != 1 || !res.Reached[0] {
 			return fmt.Errorf("crashwalk: scenario %q: the recovery write %v was not reached after its trigger: the trigger no longer causes it, or the recovery code changed", s.Name(), c.Item)
 		}

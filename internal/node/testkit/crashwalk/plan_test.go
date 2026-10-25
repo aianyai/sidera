@@ -130,15 +130,18 @@ func pointsOf(targets []crashwalk.Target) []string {
 // so a kill before a sync and a kill after the previous step leave the same disk.
 func TestPlanFullTakesEveryWindowPointExceptTheSyncSteps(t *testing.T) {
 	got := crashwalk.Plan(recordingHits(t), crashwalk.Full, []string{"send", "deliver"})
+	// The points come sorted by key, not in the order the recording made them:
+	// the order of a shard's numbering must not depend on the recording's
+	// interleaving. The step boundaries follow in the order of the steps.
 	want := []string{
 		// intake: body then out, each create, write, rename, and the commit
-		"intake/body.create#1", "intake/body.write#1", "intake/body.rename#1",
-		"intake/out.create#1", "intake/out.write#1", "intake/out.rename#1",
+		"intake/body.create#1", "intake/body.rename#1", "intake/body.write#1",
 		"intake/commit#1",
-		// status in the deliver step is the second use of the keys: ordinal 2
-		"status/file.create#2", "status/file.write#2", "status/file.rename#2", "status/commit#2",
+		"intake/out.create#1", "intake/out.rename#1", "intake/out.write#1",
 		// the journal: the open and the write, no sync
-		"journal/events.open#1", "journal/events.write#1", "journal/commit#1",
+		"journal/commit#1", "journal/events.open#1", "journal/events.write#1",
+		// status in the deliver step is the second use of the keys: ordinal 2
+		"status/commit#2", "status/file.create#2", "status/file.rename#2", "status/file.write#2",
 		// step boundaries
 		"after:send", "after:deliver",
 	}
@@ -173,8 +176,8 @@ func TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole(t *testing.T)
 	got := crashwalk.Plan(recordingHits(t), crashwalk.Smoke, []string{"send", "deliver"})
 	want := []string{
 		"intake/out.rename#1",    // out is written after body: stop before its rename
-		"status/file.rename#2",   // the single file of status, its first use in the window
 		"journal/events.write#1", // an appended file has no rename: its first append
+		"status/file.rename#2",   // the single file of status, its first use in the window
 	}
 	if g := pointsOf(got); !reflect.DeepEqual(g, want) {
 		t.Fatalf("Plan(smoke):\n got %v\nwant %v", g, want)
@@ -448,4 +451,32 @@ func FuzzParseShardAndMode(f *testing.F) {
 		}
 		_, _ = crashwalk.ParseMode(s)
 	})
+}
+
+// TestPlanOrderDoesNotDependOnTheInterleavingOfTransactions: two recordings in
+// which the transactions interleave differently (each pair of transaction and
+// role keeps its own order, so CompareRuns accepts either as the other) must plan
+// the same targets in the same order, or shard k of one is not target k of the
+// other.
+func TestPlanOrderDoesNotDependOnTheInterleavingOfTransactions(t *testing.T) {
+	mk := func(points ...string) []crashwalk.Hit {
+		var hits []crashwalk.Hit
+		for _, s := range points {
+			hits = append(hits, crashwalk.Hit{Gen: 1, Point: point(t, s), Path: "x"})
+		}
+		return hits
+	}
+	a := mk("intake/out.create#1", "status/file.create#1", "intake/out.rename#1", "status/file.rename#1")
+	b := mk("status/file.create#1", "intake/out.create#1", "status/file.rename#1", "intake/out.rename#1")
+	for _, mode := range []crashwalk.Mode{crashwalk.Full, crashwalk.Smoke} {
+		ga, gb := pointsOf(crashwalk.Plan(a, mode, []string{"s1", "s2"})), pointsOf(crashwalk.Plan(b, mode, []string{"s1", "s2"}))
+		if !reflect.DeepEqual(ga, gb) {
+			t.Errorf("mode %v: the plans differ with the interleaving:\n %v\n %v", mode, ga, gb)
+		}
+	}
+	// Hit numbers sort as numbers: hit 10 follows hit 9.
+	hits := mk("status/file.create#9", "status/file.create#10")
+	if got := pointsOf(crashwalk.Plan(hits, crashwalk.Full, nil)); !reflect.DeepEqual(got, []string{"status/file.create#9", "status/file.create#10"}) {
+		t.Errorf("hit numbers are not ordered as numbers: %v", got)
+	}
 }

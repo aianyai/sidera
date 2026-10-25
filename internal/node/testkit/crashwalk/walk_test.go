@@ -262,3 +262,203 @@ func TestWalkStopsWhenItsContextEnds(t *testing.T) {
 		t.Fatal("a walk with a finished context ran")
 	}
 }
+
+// interleaved is the program of system with the writes of its first step in
+// another order across transactions: each pair of transaction and role writes the
+// same steps in the same order, as CompareRuns allows, but the transactions
+// interleave differently.
+func interleaved(t *testing.T, intakeFirst bool) (*fakeBackend, scenario) {
+	t.Helper()
+	b, sc := system(t)
+	sc.steps = []string{"work", "log"}
+	intake := cat(replaced("intake", "body", "state/body/m1.tmp"), replaced("intake", "out", "state/out/m1.rec"), []rawHit{commit("intake")})
+	status := cat(replaced("status", "file", "state/status.rec"), []rawHit{commit("status")})
+	work := cat(status, intake)
+	if intakeFirst {
+		work = cat(intake, status)
+	}
+	if !intakeFirst {
+		// the pairs also interleave inside the step
+		work = cat(status[:4], intake[:5], status[4:], intake[5:])
+	}
+	b.progs["send"] = program{steps: []programStep{
+		{"work", work},
+		{"log", []rawHit{{"journal/events.open", "archive/a.jsonl"}, {"journal/events.write", "archive/a.jsonl"}, {"journal/events.sync", "archive/a.jsonl"}, {"journal/events.sync-dir", "archive"}, commit("journal")}},
+	}}
+	return b, sc
+}
+
+// mainTargets are the targets of the runs a backend was asked to make that are
+// neither the recording nor a recovery case.
+func mainTargets(b *fakeBackend) []string {
+	var out []string
+	for _, r := range b.runs {
+		if r.Record || r.Trigger != nil {
+			continue
+		}
+		for _, tg := range r.Targets {
+			if tg.AfterStep != "" {
+				out = append(out, "after:"+tg.AfterStep)
+			} else {
+				out = append(out, tg.Point.String())
+			}
+		}
+	}
+	return out
+}
+
+// TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce: a shard
+// numbers the targets of a scenario from its own recording. Writes of different
+// transactions may interleave differently from one process to the next, so the
+// number must follow an order that does not depend on the interleaving, or two
+// shards would run one target twice and another never.
+func TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce(t *testing.T) {
+	for _, mode := range []crashwalk.Mode{crashwalk.Full, crashwalk.Smoke} {
+		for count := 2; count <= 4; count++ {
+			ran := map[string]int{}
+			for i := 1; i <= count; i++ {
+				b, sc := interleaved(t, i%2 == 0)
+				if _, err := walk(t, b, sc, mode, crashwalk.Shard{Index: i, Count: count}); err != nil {
+					t.Fatalf("mode %v shard %d/%d: %v", mode, i, count, err)
+				}
+				for _, tg := range mainTargets(b) {
+					ran[tg]++
+				}
+			}
+			whole, sc := interleaved(t, true)
+			if _, err := walk(t, whole, sc, mode, wholeRun); err != nil {
+				t.Fatal(err)
+			}
+			want := mainTargets(whole)
+			if len(ran) != len(want) {
+				t.Errorf("mode %v, %d shards: the shards ran %d different targets, the whole walk %d", mode, count, len(ran), len(want))
+			}
+			for _, tg := range want {
+				if ran[tg] != 1 {
+					t.Errorf("mode %v, %d shards: target %s ran %d times, want exactly once", mode, count, tg, ran[tg])
+				}
+			}
+		}
+	}
+}
+
+// TestWalkNumbersRunsByScenarioNameNotByTheOrderTheyAreListed: the shards of one
+// CI run build their scenario lists independently.
+func TestWalkNumbersRunsByScenarioNameNotByTheOrderTheyAreListed(t *testing.T) {
+	two := func(first, second string) (*fakeBackend, []crashwalk.Scenario) {
+		b, sc := system(t)
+		a, c := sc, sc
+		a.name, c.name = first, second
+		a.recovery, c.recovery = nil, nil
+		b.progs[first], b.progs[second] = b.progs["send"], b.progs["send"]
+		// the recovery cases belong to one scenario
+		if first < second {
+			a.recovery = sc.recovery
+		} else {
+			c.recovery = sc.recovery
+		}
+		return b, []crashwalk.Scenario{a, c}
+	}
+	order := func(first, second string, list func(a, c crashwalk.Scenario) []crashwalk.Scenario) []string {
+		b, sc := two(first, second)
+		if _, err := crashwalk.Walk(context.Background(), b, table(t), list(sc[0], sc[1]), crashwalk.Options{Mode: crashwalk.Smoke, Shard: crashwalk.Shard{Index: 2, Count: 3}}); err != nil {
+			t.Fatal(err)
+		}
+		return mainTargets(b)
+	}
+	sorted := order("alpha", "beta", func(a, c crashwalk.Scenario) []crashwalk.Scenario { return []crashwalk.Scenario{a, c} })
+	swapped := order("alpha", "beta", func(a, c crashwalk.Scenario) []crashwalk.Scenario { return []crashwalk.Scenario{c, a} })
+	if strings.Join(sorted, " ") != strings.Join(swapped, " ") {
+		t.Fatalf("listing the scenarios in another order changed the runs of a shard:\n %v\n %v", sorted, swapped)
+	}
+}
+
+func TestWalkRefusesTwoScenariosWithTheSameName(t *testing.T) {
+	b, sc := system(t)
+	_, err := crashwalk.Walk(context.Background(), b, table(t), []crashwalk.Scenario{sc, sc}, crashwalk.Options{Mode: crashwalk.Smoke, Shard: wholeRun})
+	if err == nil || !strings.Contains(err.Error(), "named") {
+		t.Fatalf("err = %v, want a refusal of the repeated name", err)
+	}
+}
+
+// TestWalkSmokeCrashesARecoveryTransactionOnceWhateverScenarioListsItsWrites: two
+// scenarios that each list a write of the same recovery transaction run one case
+// between them in smoke, not one each.
+func TestWalkSmokeCrashesARecoveryTransactionOnceWhateverScenarioListsItsWrites(t *testing.T) {
+	b, sc := system(t)
+	var orphans, replay []crashwalk.RecoveryCase
+	for _, c := range sc.recovery {
+		if c.Item.Tag.Tx == "orphans" {
+			orphans = append(orphans, c)
+		} else {
+			replay = append(replay, c)
+		}
+	}
+	// Both scenarios list one write of "replay".
+	first, second := sc, sc
+	first.name, second.name = "a-first", "b-second"
+	first.recovery = append(append([]crashwalk.RecoveryCase(nil), orphans...), replay[:2]...)
+	second.recovery = replay[2:]
+	b.progs["a-first"], b.progs["b-second"] = b.progs["send"], b.progs["send"]
+	rep, err := crashwalk.Walk(context.Background(), b, table(t), []crashwalk.Scenario{first, second}, crashwalk.Options{Mode: crashwalk.Smoke, Shard: wholeRun})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.RecoveryRuns != 2 {
+		t.Fatalf("%d recovery runs in smoke, want one per recovery transaction (2)", rep.RecoveryRuns)
+	}
+}
+
+// TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites: the author of a
+// scenario fills its recovery cases from this.
+func TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites(t *testing.T) {
+	b, sc := system(t)
+	b.afterMain = func(tg crashwalk.Target) []rawHit {
+		if tg.Point.String() == "intake/out.rename#1" {
+			return []rawHit{{"orphans/body.remove", "state/body/m1.tmp"}, {"orphans/dir.sync-dir", "state/body"}, {"orphans/commit", ""}}
+		}
+		return nil
+	}
+	rep, err := walk(t, b, sc, crashwalk.Full, wholeRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Triggers) != 1 || rep.Triggers[0].At.String() != "intake/out.rename#1" {
+		t.Fatalf("Triggers = %+v, want one entry for intake/out.rename#1", rep.Triggers)
+	}
+	var items []string
+	for _, k := range rep.Triggers[0].Items {
+		items = append(items, k.String())
+	}
+	if want := "orphans/body.remove orphans/dir.sync-dir orphans/commit"; strings.Join(items, " ") != want {
+		t.Fatalf("items %v, want %s", items, want)
+	}
+	b, sc = system(t)
+	rep, err = walk(t, b, sc, crashwalk.Smoke, wholeRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Triggers) != 0 {
+		t.Fatalf("a smoke walk reported triggers %+v: only a full walk keeps them", rep.Triggers)
+	}
+}
+
+// TestWalkReportsCoverageOfNormalAndRecoveryPathsApart: the two kinds are reached
+// by different runs, and a count that mixed them would hide a recovery write that
+// no restart reached.
+func TestWalkReportsCoverageOfNormalAndRecoveryPathsApart(t *testing.T) {
+	b, sc := system(t)
+	rep, err := walk(t, b, sc, crashwalk.Full, wholeRun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The table declares 9 recovery writes (orphans: remove, dir sync, commit;
+	// replay: create, write, sync, rename, dir sync, commit) and the scripted
+	// restarts of system() write all but the directory sync of the replay: 8. The normal writes are all reached by the recording.
+	if rep.Normal.Declared != rep.Normal.Reached || rep.Normal.Declared == 0 {
+		t.Errorf("normal paths %+v, want all declared writes reached", rep.Normal)
+	}
+	if rep.Recovery.Declared != 9 || rep.Recovery.Reached != 8 {
+		t.Errorf("recovery paths %+v, want 8 of 9", rep.Recovery)
+	}
+}

@@ -138,6 +138,7 @@ type fakeBackend struct {
 	alter      func(crashwalk.Target, *[]crashwalk.Hit) // change the rerun's hits
 	violate    func(crashwalk.RunPlan) []string         // invariants that failed
 	cleanExtra []rawHit                                 // hits a clean recording makes beyond the program
+	afterMain  func(crashwalk.Target) []rawHit          // hits the restart after a main crash makes
 
 	runs []crashwalk.RunPlan
 }
@@ -199,6 +200,18 @@ func (b *fakeBackend) Run(_ context.Context, s crashwalk.Scenario, p crashwalk.R
 		}
 		res.Hits = append(res.Hits, hits)
 		res.Reached = append(res.Reached, reached)
+		if b.afterMain != nil {
+			counts := map[fsx.Key]int{}
+			var gen2 []crashwalk.Hit
+			for _, h := range b.afterMain(tg) {
+				k := key(b.t, h.key)
+				counts[k]++
+				gen2 = append(gen2, crashwalk.Hit{Gen: 2, Point: fsx.Point{Key: k, Hit: counts[k]}, Path: h.path})
+			}
+			if len(gen2) > 0 {
+				res.Hits = append(res.Hits, gen2)
+			}
+		}
 	}
 	if b.violate != nil {
 		res.Violations = b.violate(p)

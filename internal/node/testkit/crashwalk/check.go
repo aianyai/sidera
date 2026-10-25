@@ -121,6 +121,15 @@ type Coverage struct {
 	// Undeclared are keys that were hit and that no declaration lists: a write that
 	// does not go through a declared transaction.
 	Undeclared []fsx.Key
+	// Normal and Recovery count the declared writes of each kind and how many of
+	// them were reached; the two kinds are reported apart because they are
+	// reached by different runs.
+	Normal, Recovery PathCount
+}
+
+// PathCount is how many writes of a kind are declared and how many were reached.
+type PathCount struct {
+	Declared, Reached int
 }
 
 // Assess compares hits with the declared keys of the table. A sync step counts as
@@ -141,13 +150,15 @@ func Assess(table *txn.Table, hits []Hit) Coverage {
 	}
 	var c Coverage
 	for _, k := range table.Keys() {
-		if reached[k.Key] {
-			continue
-		}
+		count, missing := &c.Normal, &c.MissingNormal
 		if k.Kind == txn.Recovery {
-			c.MissingRecovery = append(c.MissingRecovery, k.Key)
+			count, missing = &c.Recovery, &c.MissingRecovery
+		}
+		count.Declared++
+		if reached[k.Key] {
+			count.Reached++
 		} else {
-			c.MissingNormal = append(c.MissingNormal, k.Key)
+			*missing = append(*missing, k.Key)
 		}
 	}
 	for k := range undeclared {

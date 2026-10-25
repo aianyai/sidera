@@ -1,6 +1,8 @@
 package crashwalk
 
 import (
+	"sort"
+
 	"github.com/aianyai/sidera/internal/node/fsx"
 )
 
@@ -94,21 +96,40 @@ func window(rec []Hit) []Hit {
 // per transaction: the first time it reaches the visible step of the last file it
 // writes before its commit, which is the point at which the transaction is most
 // nearly done and not done.
+//
+// The targets come in a canonical order that does not depend on the recording's
+// interleaving: the points sorted by key and then by hit number, then the step
+// boundaries in the order of steps. A shard numbers the targets of a scenario by
+// this order, so two shards whose recordings interleave writes of different
+// transactions differently still agree on which target is number k.
 func Plan(rec []Hit, mode Mode, steps []string) []Target {
 	win := window(rec)
+	var out []Target
 	if mode == Full {
-		var out []Target
 		for _, h := range win {
 			if !IsSync(h.Point.Step) {
 				out = append(out, Target{Gen: 1, Point: h.Point})
 			}
 		}
+	} else {
+		out = smoke(win)
+	}
+	sort.Slice(out, func(i, j int) bool { return pointLess(out[i].Point, out[j].Point) })
+	if mode == Full {
 		for _, s := range steps {
 			out = append(out, Target{Gen: 1, AfterStep: s})
 		}
-		return out
 	}
-	return smoke(win)
+	return out
+}
+
+// pointLess orders crash points by key and then by hit number, so that hit 10
+// follows hit 9.
+func pointLess(a, b fsx.Point) bool {
+	if ka, kb := a.Key.String(), b.Key.String(); ka != kb {
+		return ka < kb
+	}
+	return a.Hit < b.Hit
 }
 
 // smoke picks, for each transaction in the order it first appears, the point
@@ -186,18 +207,23 @@ func beforeLastFile(hits []Hit) (fsx.Point, bool) {
 }
 
 // PlanRecovery returns the recovery cases a walk runs: all of them in Full, the
-// first of each recovery transaction in Smoke.
+// first listed of each recovery transaction in Smoke, in both modes ordered by the
+// write they name. The cases of a scenario are a static list, so the choice does
+// not depend on a recording; the order is fixed anyway so that the numbering of a
+// shard does not depend on how a scenario happens to list its cases.
 func PlanRecovery(cases []RecoveryCase, mode Mode) []RecoveryCase {
-	if mode == Full {
-		return append([]RecoveryCase(nil), cases...)
-	}
 	var out []RecoveryCase
-	seen := map[string]bool{}
-	for _, c := range cases {
-		if tx := c.Item.Tag.Tx; !seen[tx] {
-			seen[tx] = true
-			out = append(out, c)
+	if mode == Full {
+		out = append(out, cases...)
+	} else {
+		seen := map[string]bool{}
+		for _, c := range cases {
+			if tx := c.Item.Tag.Tx; !seen[tx] {
+				seen[tx] = true
+				out = append(out, c)
+			}
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Item.String() < out[j].Item.String() })
 	return out
 }

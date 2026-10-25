@@ -19,7 +19,7 @@ the runs through `Options.Observe`.
 | `Walk(ctx, backend, table, scenarios, options)` | The whole walk: a recording per scenario, the planned runs that belong to the shard, the recovery cases, the checks below. Returns a `Report` of what it ran. |
 | `Backend`, `RunPlan`, `RunResult`, `Target`, `Trigger` | The interface a backend implements and what it is asked and answers. |
 | `Scenario` | What the walk needs of a script: its name, its step names, its budget and its recovery cases. |
-| `Plan`, `PlanRecovery` | The targets of a mode. |
+| `Plan`, `PlanRecovery` | The targets of a mode, in the canonical order that sharding numbers by. |
 | `CheckBudget`, `CompareRuns`, `Assess`, `CheckRecoveryCases` | The individual checks, usable alone. |
 | `Mode`, `Shard`, `ParseMode`, `ParseShard`, `EnvMode`, `EnvShard` | `full` or `smoke`, and the part of the walk a CI job takes. |
 | `Hit`, `NormalizePath`, `IsSync` | A crash point a run reached, the path fingerprint, and the sync steps. |
@@ -68,9 +68,24 @@ the runs through `Options.Observe`.
   first time it reaches the write, restarts it again and has the backend drain and
   check. The cases of all scenarios together must be exactly the recovery writes
   that are not sync steps, each once; that is checked before anything runs.
-- **Sharding partitions the runs.** Runs are numbered in the order they are
-  planned, across scenarios and kinds, and a shard takes those that are its
-  residue. Every shard records every scenario.
+- **Sharding partitions the runs.** Runs are numbered across scenarios and kinds,
+  and a shard takes those whose number is its residue. The number follows an order
+  that no shard's own recording can change: the scenarios by name; within a
+  scenario the main crash points sorted by key and then by hit number, then the
+  step boundaries in the order of the steps, then the recovery cases sorted by the
+  write they name. Writes of different transactions may interleave differently in
+  two recordings (the comparison of a rerun allows it), so numbering by the order of
+  a shard's own recording would run one target twice and another never. Every shard
+  records every scenario. Two scenarios must not share a name.
+- **Recovery cases are chosen over all scenarios.** In smoke the first listed case
+  of each recovery transaction is run once, however the scenarios share the writes
+  of that transaction.
+- **A walk reports what it reached.** `Report.Normal` and `Report.Recovery` count the
+  declared writes of each kind and how many the recordings (normal) or the
+  restarted generations (recovery) reached, apart because different runs reach
+  them. In a full walk `Report.Triggers` says which main crash point made the
+  restart write which recovery writes, which is what the author of a scenario
+  needs to fill its recovery cases.
 
 ## What the caller must guarantee
 
@@ -86,7 +101,12 @@ the runs through `Options.Observe`.
 
 `TestPlanFullTakesEveryWindowPointExceptTheSyncSteps`,
 `TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole`,
-`TestShardsPartitionTheTargets`, `TestCompareRuns`, `TestCheckBudget`,
+`TestShardsPartitionTheTargets`, `TestPlanOrderDoesNotDependOnTheInterleavingOfTransactions`,
+`TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce`,
+`TestWalkNumbersRunsByScenarioNameNotByTheOrderTheyAreListed`,
+`TestWalkSmokeCrashesARecoveryTransactionOnceWhateverScenarioListsItsWrites`,
+`TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`,
+`TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`,
 `TestAssessCoverage`, `TestCheckRecoveryCasesUnion`, and the `TestWalk…` tests
 (`…FailsWhenATargetIsNotReached`, `…FailsWhenARerunDivergesFromTheRecording`,
 `…FailsWhenACleanRunWritesARecoveryPath`, `…FailsOnAWriteNoDeclarationLists`,
