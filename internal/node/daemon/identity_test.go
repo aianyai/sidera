@@ -35,6 +35,12 @@ func certificateOnDisk(t testing.TB, home string) (serial uint64, notAfter time.
 	if err != nil {
 		t.Fatalf("reading the certificate: %v", err)
 	}
+	return certificateOf(t, data)
+}
+
+// certificateOf reads the certificate from its record bytes.
+func certificateOf(t testing.TB, data []byte) (serial uint64, notAfter time.Time) {
+	t.Helper()
 	rec, err := record.Decode(data, record.DefaultMaxInput)
 	if err != nil {
 		t.Fatalf("decoding the certificate: %v", err)

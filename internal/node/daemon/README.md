@@ -24,7 +24,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
 | `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
 | `Table`, `Declarations`, `Transactions`, `LayoutWork`, `RepairLayout` | The one table of the program's transactions, the two this package declares (`init` and `layout`), and the layout rule. |
-| `ClockStateEvery` | The period of the clock state. |
+| `ClockStateEvery`, `CertificateCheckEvery` | The period of the clock state, and of the look at the certificate. |
 
 ## Rules
 
@@ -39,6 +39,13 @@ touches files only through `fsx`, and reads time only through the injected clock
   start take the same five steps; `RequestStop` runs it once.
 - **The engine is the single writer; this package writes only what is its own:**
   `init` and the layout rule, both declared here and covered by the crash tests.
+- **The certificate is renewed at step 5 and every hour in the loop, never on a clock
+  in doubt.** Step 5 is the one goroutine there is, so it does not meet the loop; the
+  hourly check runs in the loop, where the engine reads the certificate it signs
+  under, so a renewal and a signature are never concurrent. A certificate that is due
+  while the node is paused waits for the owner, and the log says so. The keys are not
+  safe for concurrent use: a hook reads them through `KeysView` only from the
+  goroutine of its step, and reads that come later go through the engine.
 - **The actor of the local owner is not made here.** The management interface is
   `manageapi`, and a scan keeps the actor out of this package.
 - **A hook is called inside its step** with an `Env`, in the state of the engine the
@@ -79,7 +86,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 `second_test.go` has `TestSecondDaemonOnSameHomeRefused`; `init_test.go` init, its
 crash states and the declared crash points; `permissions_test.go` and
 `permissions_windows_test.go` the checks of the data directory and of `keys/`;
-`startup_test.go` the order of the start, the hooks, the layout, the log, the share
+`identity_test.go` the retirement, the renewal of the certificate, the reminder and the rollback pause through the whole daemon; `certificate_test.go` the failures of the renewal and its crash states; `owner_test.go` the settings, the alerts and the status through the management interface; `startup_test.go` the order of the start, the hooks, the layout, the log, the share
 of the log budget, the periodic tasks and the clock; `shutdown_test.go` the order of
 the shutdown, the stop through the management interface, `Run` and a fatal failure;
 `fatal_start_test.go` a fatal failure in each step of the start that can be injected

@@ -31,7 +31,7 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 | 2 | config | The transaction layer recovers (settle, then removal of every `.tmp-*`); the layout of `state/`, `run/`, `manage/` and `logs/` is made again where the owner removed it; the log opens; `config/` is loaded strictly and a file that is not valid stops the start and is named. | this package, `txn`, `config` |
 | 3 | keys | Keys, the revocations the owner kept and the serial seen are loaded; a node whose own identity was retired refuses to run. Nothing is signed. | this package, `keys` |
 | 4 | clock | The wall clock is judged against the saved high water mark, before anything is signed. A clock found behind it by more than `timing.ClockTolerance` pauses the node: the pause is made durable at once with the mark that was, which is never lowered. | this package, `clock` |
-| 5 | certificate | Renewal of the certificate when it has ten days or less left, never while the clock is in doubt. | the owner of renewal (empty here) |
+| 5 | certificate | The certificate is renewed when it has ten days or less left, when it has expired, or when an earlier renewal was interrupted; never while the clock is in doubt (the pause step 4 found is respected: a certificate that is due waits, and the log says so). | this package, `keys` |
 | 6 | scan | The engine's first recovery entry: `state/` is scanned, damaged files are quarantined, the recovery rules run until none has work, the view is built. The periodic tasks are registered. | `engine` |
 | 7 | trust | Hook `TrustSync`: synchronisation of revocations and the trust graph, the gate of vouchers. Empty for a node of one machine. | later stage |
 | 8 | manage | The loop starts in the phase of recovery and the management interface opens: reads answer, anything that changes state is refused as `unavailable/recovering`. | this package |
@@ -136,7 +136,14 @@ children, and has no work on a data directory that init made or a start repaired
 ### Periodic tasks
 
 The tasks are entries of the engine's schedule on the injected clock, registered
-at step 6. The daemon's own is the clock state, every minute (`ClockStateEvery`):
+at step 6. The daemon has two of its own. The certificate check runs every hour
+(`CertificateCheckEvery`) and does what step 5 does, with the clock of the command:
+the certificate lasts 30 days and is renewed with 10 or fewer left, so an hour is a
+small part of the margin, and a node that was down is brought up to date by the
+start, not by waiting for the next hour. It runs in the loop, as everything that
+signs does. A paused node does not renew; the check after the owner clears the pause
+does. A failure that a retry may cure is tried again after the engine's backoff, a
+fatal one ends the daemon as any other. The other is the clock state, every minute (`ClockStateEvery`):
 the high water mark and the pause are made durable, and a crash loses at most a
 minute of a mark, which only makes the next start trust the clock less. The pause
 keeps the time it began while it lasts and forgets it when the owner clears it, so
@@ -202,6 +209,16 @@ The methods the daemon has:
 | `endpoints.list` | `OpRead`; params `{"instance"?}` | `{"endpoints":[{address, kind, instance, state, queued, draining}]}`, never a token |
 | `endpoints.close` | `OpManageEndpointSession`; params `{"endpoint": "<node>/<endpoint>"}` | `{"endpoint","outcome"}`, outcome `closed`, `closing` or `already_closed`; a runtime endpoint is refused `endpoint_kind`, an address of another node is `endpoint_unknown` |
 | `daemon.stop` | `OpStopDaemon`; no params | `{"stopping":true}`; the daemon then shuts down; a resend, even to a daemon that was started again, asks for the stop again |
+| `status` | `OpRead`; no params | `{"node":{id,version},"daemon":{state,started_at},"reminders":[{kind,message}],"alerts":{open},"clock":{rollback_paused,rollback_paused_since?,high_water?},"certificate":{not_after,remaining_s},"capacity":{open_deliveries,node_queue_limit,outbound_backlog,disk_free_bytes,disk_reserve_bytes},"deliveries":{<every state>:n},"endpoints":[{address,kind,instance,state}]}`. The reminders come first for a reader and stay until done: `revocation_backup_unconfirmed` is true while the confirmation on disk is not of the statement this node holds. `deliveries` counts the deliveries the node holds as a target, the control signals among them, and lists every state, with zero where there is none. The endpoints that are blocked and the turns started by prompts are the figures of the features that do not exist yet |
+| `alerts.list` | `OpRead`; params `{"include_acknowledged"?}` | `{"alerts":[{id,kind,since,subject?,detail,acknowledged}]}`, oldest first, the acknowledged ones only on request. While the clock is paused the list ends with the alert of the pause, `id` `clock_rollback`, which is no record and is lifted by clearing the pause |
+| `alerts.ack` | `OpAcknowledgeAlert`; params `{"alert": "<32 hex digits>"}` | `{"alert","acknowledged":true}`; `not_found/alert_unknown` for an alert the node does not hold; an identifier that is not 32 hex digits is `malformed_request` |
+| `identity.export_revocation` | `OpExportRevocation`; no params, no operation identifier | `{"armored","digest"}`: the statement that retires this node, in the armor the keys format, and the digest the backup is confirmed with. Authorized as an operation of the owner's alone and stored nowhere: its result would be a copy of the statement |
+| `identity.confirm_backup` | `OpConfirmRevocationBackup`; params `{"digest"}` (64 lower-case hex digits) | `{"confirmed_at"}`; a digest that is not the one of this node's statement is `invalid_argument/digest_mismatch` and changes nothing |
+| `identity.retire` | `OpRetireIdentity`; params `{"node"}` | `{"node","retired":true,"stopping":true}`; the node must be this node (`invalid_argument/node_mismatch`); the daemon then stops, and every later start refuses to run. A resend asks for the stop again |
+| `clock.clear_rollback` | `OpClearClockRollback`; no params | `{"cleared","high_water","now"}`; `cleared` is false when no pause was in force |
+| `node.show` | `OpRead`; no params | `{"node","version","settings":{…}}`, the settings as `node.json` holds them |
+| `node.set` | `OpChangeNodeSettings`; params `{"settings":{…patch}}`, carries the expected version | `{"settings":{…},"version"}`; a patch is judged whole by `config`: `invalid_argument/config_invalid` (with the path), `empty_patch`, and `conflict/version_conflict` with the current version |
+| `endpoints.set` | `OpChangeEndpointSettings`; params `{"endpoint","settings":{…patch}}`, carries the expected version of the instances | `{"endpoint","settings":{…},"version"}`, the settings the owner has given the endpoint, those left to the node default not among them; an endpoint the node does not have is `endpoint_unknown` |
 | `operation.result` | `OpQueryOperationResult`; params `{"operation_id"}` | the result stored for that identifier of the owner, as the request that ran it was answered; `not_found/operation_unknown` when there is none (never used, or refused, which stores nothing). A read of the table the replay check uses, so it finds results kept under `state/admin/` and in the versioned files of `config/` |
 
 A binary built with a test tag has **test rows** besides these: methods named
@@ -226,7 +243,9 @@ wrote a request and did not read the answer whole, and the daemon says it
 in flight; either way the request is sent again with the same operation identifier,
 which returns the stored result if it ran and runs it if it did not. A refusal for an
 invalid argument with no detail is `malformed_request`. The text of an error nobody
-expected is logged and never sent.
+expected is logged and never sent. Two words belong to the owner's operations: `not_found/alert_unknown`,
+and `unavailable/identity_retired`, which is what anything that would sign is told
+between the retirement and the end of the daemon.
 
 Who the local owner is: whoever connected to the management listener, which is
 the user's own socket or pipe, checked by `ipc` on every accept. `manageapi.Listen`
@@ -242,7 +261,7 @@ interface: a sandbox must deny the socket to an agent.
 | `TrustSync` | 7 | trust synchronisation |
 | `AgentProbeOnly`, `AgentServe`, `StopInterfaces` | 9, 15, shutdown 2 | the Agent interface |
 | `Adapters`, `StopAdapters` | 10, shutdown 3 | the adapter host |
-| `Periodic` | 6 | any feature with a task on a period (certificate check hourly, archive sweep, disk polling) |
+| `Periodic` | 6 | any feature with a task on a period (archive sweep, disk polling); the daemon's own tasks, the clock state and the hourly certificate check, are not among them |
 | a row of `manageapi`'s method table, and a type of `engine.Operation` | | the owner of an operation |
 
 ## Why

@@ -221,6 +221,28 @@ with which permissions are the caller's. The package writes nothing into `keys/`
 for a retirement; `CheckNotRetired` refuses to run a node whose identity is among
 the loaded revocations, because a retired identity cannot become valid again.
 
+**What the daemon does with them.** The daemon starts with the keys loaded and no
+signature made (step 3); judges the clock (step 4); and renews the certificate when it
+is due (step 5), before anything is signed, and then every hour in the loop, where
+everything that signs runs, so the renewal replaces the certificate the engine signs
+the node's reports under without two goroutines touching it. A node that is paused
+renews nothing and says so; the hour after the owner clears the pause renews. A node
+whose identity is retired is refused at step 3, before the clock is judged.
+
+The owner's commands on the identity are four operations of the management
+interface, all held to the local owner:
+
+| Command | What it does |
+| ------- | ------------ |
+| `identity export-revocation` | Prints the armored statement and its digest. The statement is the one the keys verified at load, and the export is not stored under `state/`. |
+| `identity confirm-backup <digest>` | Records, in `config/revocation-backup.json`, that the owner keeps a copy outside this device. The digest must be that of the statement the node holds; the file names it, so a confirmation made for an earlier identity says nothing about a node made again over the same data directory. |
+| `identity retire --node <id>` | Keeps the statement as a verified revocation in `config/revocations/` and stops the daemon. From the commit nothing is signed in the node's name, even before the daemon is down, and every later start refuses to run. The node is named so that a retirement meant for another data directory is refused. |
+| `clock clear-rollback` | Lifts the pause of a wall clock that was set back: the mark becomes the clock as it reads and the flag is removed, in one replacement of `clock.rec`. |
+
+Until the backup is confirmed `status` reminds, first, on every call. The reminder is
+derived from the confirmation on disk and the statement the node holds, and has no
+record of its own.
+
 **Windows.** The owner-only check is the DACL rule of the file system layer: the
 owner is the user, Administrators or SYSTEM, and only those are granted.
 `TestWindowsDACLWiderThanTheOwnerIsRefusedNamingTheFile` widens the DACL of each
@@ -496,3 +518,14 @@ under the refusal of a serial file behind the certificate below.
   `FuzzDecodeClock`, `FuzzDecodeSerial`, `FuzzDecodeInit` in `codec_internal_test.go`.
   The Windows test is the only one that cannot run on a developer's macOS machine;
   none is skipped.
+- Tests (`internal/node/daemon`) for what the daemon does with the keys:
+  `TestRefusesToRunUnderRetiredIdentity`, `TestNetworkKeyCertificateRenewedBeforeExpiry`,
+  `TestACertificateThatFellDueWhileTheNodeWasDownIsRenewedAtTheStep`,
+  `TestACertificateThatIsDueWhileTheClockIsInDoubtIsLeftAloneAtTheStart`,
+  `TestARollbackPauseIsKeptOnDiskAcrossARestartUntilTheOwnerClearsIt`,
+  `TestStatusRemindsUntilRevocationBackupConfirmed`,
+  `TestAFailureRenewingTheCertificateAtTheStartEndsTheStartAsAnyFailureOfTheDiskDoes`,
+  `TestAFailureRenewingTheCertificateInTheLoopIsRetriedOrEndsTheDaemon`,
+  `TestACrashAnywhereInTheRenewalLeavesKeysTheNextStartAcceptsAndRepairs`; the code is
+  `internal/node/daemon` (`start.go`, `periodic.go`) and the operations are in the
+  [engine](../engine/README.md) reference.

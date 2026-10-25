@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/engine"
@@ -24,6 +25,14 @@ type PeriodicTask struct {
 }
 
 const clockStateTask = "clock-high-water"
+
+// CertificateCheckEvery is how often the certificate is looked at for renewal.
+// The certificate lasts 30 days and is renewed with 10 or fewer left, so an hour
+// is a small part of the margin: a certificate is never found expired for waiting
+// for the next look, and a node that was down is brought up to date by the start.
+const CertificateCheckEvery = time.Hour
+
+const certificateTask = "certificate-renewal"
 
 // pauseClock remembers when the pause of a clock set back began. It is read and
 // written only in the loop (the clock task) and, before the loop exists, by the
@@ -52,4 +61,43 @@ func (p *pauseClock) state(in engine.TaskInput) keys.ClockState {
 // of the pause is the only thing that lifts it.
 func (d *Daemon) clockTask(in engine.TaskInput) error {
 	return d.keys.SaveClock(d.pause.state(in))
+}
+
+// certificateTask is the hourly look at the certificate. It runs in the loop, as
+// does everything that signs, and the clock it judges by is the one of the command.
+func (d *Daemon) certificateTask(in engine.TaskInput) error {
+	return d.renewCertificate(in.Now, in.RollbackPaused)
+}
+
+// renewCertificate renews the certificate when the keys say it is due, and never
+// while the clock is in doubt: a certificate carries the time it was signed at, and
+// one signed on a clock that was set back would start before what the node already
+// issued. A certificate that is due and waits for the owner to clear the pause is
+// said so in the log; the check after the clear signs it. An error is the keys':
+// a fatal one ends the node, any other is tried again by the engine.
+func (d *Daemon) renewCertificate(now time.Time, paused bool) error {
+	verdict, reason := d.keys.RenewalDue(now)
+	if verdict != keys.RenewDue {
+		return nil
+	}
+	if paused {
+		d.log.Warn("the certificate is due and is not signed while the wall clock is in doubt; clear the pause to renew it")
+		return nil
+	}
+	if err := d.keys.Renew(now); err != nil {
+		return fmt.Errorf("renewing the certificate: %w", err)
+	}
+	d.log.Info("the certificate was renewed", "serial", d.keys.SerialSeen().Serial, "reason", renewReasonName(reason))
+	return nil
+}
+
+// renewReasonName says why a renewal was made, for the log.
+func renewReasonName(r keys.RenewReason) string {
+	switch r {
+	case keys.RenewReasonInterrupted:
+		return "an earlier renewal was interrupted"
+	case keys.RenewReasonExpiring:
+		return "ten days or less were left"
+	}
+	return "unknown"
 }

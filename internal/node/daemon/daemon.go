@@ -100,6 +100,9 @@ type Config struct {
 	// Attach is what the features that come after the start steps of this package
 	// attach to it.
 	Attach Attachments
+	// Version is the version of the program, for the status the management
+	// interface shows; empty shows none.
+	Version string
 	// ShutdownGrace is how long the interfaces, the adapters and the engine each
 	// have to stop in an orderly shutdown, on the real clock; zero is
 	// DefaultShutdownGrace. After a fatal failure of the disk nothing more is

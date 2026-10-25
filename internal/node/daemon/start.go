@@ -203,10 +203,12 @@ func (d *Daemon) stepClock(context.Context) error {
 }
 
 // Step 5: the certificate is renewed when it has ten days or less left, and never
-// while the clock is in doubt. It is the owner of the certificate's renewal that
-// fills this step in, and it comes after step 4 because nothing is signed on a
-// clock that was not judged.
-func (d *Daemon) stepCertificate(context.Context) error { return nil }
+// while the clock is in doubt. It comes after step 4 because nothing is signed on
+// a clock that was not judged. This is the one goroutine the node has yet, so the
+// renewal does not meet the loop; the hourly check that follows runs in the loop.
+func (d *Daemon) stepCertificate(context.Context) error {
+	return d.renewCertificate(d.cfg.Clock.Now(), d.clockPaused)
+}
 
 // Step 6: the scan of state/ (the engine's first recovery entry) runs before the
 // loop exists: damaged files are quarantined, the rules of recovery run until none
@@ -215,14 +217,17 @@ func (d *Daemon) stepCertificate(context.Context) error { return nil }
 // at once when it finds the clock set back.
 func (d *Daemon) stepScan(ctx context.Context) error {
 	e, rep, err := engine.Open(ctx, engine.Deps{
-		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused,
-		Writer: d.w, Store: store.New(d.w), Config: d.cfgd, Rand: d.cfg.Rand, Log: d.log,
+		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.pause.since,
+		Writer: d.w, Store: store.New(d.w), Config: d.cfgd, Keys: d.keys, Rand: d.cfg.Rand, Log: d.log,
 	}, d.cfg.Engine)
 	if err != nil {
 		return err
 	}
 	d.engine = e
 	if err := e.AddClockState(clockStateTask, ClockStateEvery, d.clockTask); err != nil {
+		return err
+	}
+	if err := e.AddPeriodic(certificateTask, CertificateCheckEvery, d.certificateTask); err != nil {
 		return err
 	}
 	for _, t := range d.cfg.Attach.Periodic {
@@ -253,7 +258,7 @@ func (d *Daemon) stepManage(context.Context) error {
 		return err
 	}
 	srv, err := manageapi.New(manageapi.Config{
-		Service: d.engine, Node: d.keys.Node(), Clock: d.cfg.Clock, Stop: d.RequestStop, Log: d.log,
+		Service: d.engine, Node: d.keys.Node(), Clock: d.cfg.Clock, Stop: d.RequestStop, Version: d.cfg.Version, Log: d.log,
 	})
 	if err != nil {
 		l.Close()
