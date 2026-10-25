@@ -461,15 +461,20 @@ func TestDialectReplacementCodesAreSent(t *testing.T) {
 			}
 		}
 		go r.toPeer.Write([]byte(strings.Repeat("a", 3*max)))
+		// Lines that may come before the one under test, each with its own code:
+		//   - a second overload refusal, because request 1 may still have been in the
+		//     queue when 2 arrived, so that 2 and 3 were both refused;
+		//   - the cancelled answers of the requests still owed one, which the closing
+		//     connection ends and whose handlers may write before the final line.
 		for {
 			f := r.recv()
-			if f.errCode() == 0 {
-				continue
+			code := f.errCode()
+			if code == dialectLineTooLong {
+				break
 			}
-			if f.errCode() != dialectLineTooLong {
+			if code != 0 && code != peer.CodeOverloaded && code != peer.CodeRequestCancelled {
 				t.Fatalf("got %+v, want code %d", f, dialectLineTooLong)
 			}
-			break
 		}
 	})
 }
