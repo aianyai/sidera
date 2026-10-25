@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
-	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 )
 
@@ -102,5 +101,3 @@ func TestCloseBatchClosesControlRecordsAndDropsTheirBody(t *testing.T) {
 		t.Errorf("released %v, want the body of the signal", batch.Release)
 	}
 }
-
-var _ = ident.EndpointID{}

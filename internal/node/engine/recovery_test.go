@@ -13,11 +13,9 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
-	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
-	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // seedFile writes a file onto the disk durably, outside any transaction: the
@@ -344,9 +342,6 @@ func TestWhileRecoveringSideEffectsAreRefusedReadsAnswerAndAdapterRequestsWait(t
 		t.Errorf("RegisterDirect issued while recovering: %v", err)
 	}
 }
-
-var _ = adapterproto.MaxRecipients
-var _ ident.EndpointID
 
 // The rules that have work run in the order the store's guarantee fixes, each
 // reading what the one before it left: the control record's effect first, the

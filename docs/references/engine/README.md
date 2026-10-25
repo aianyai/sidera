@@ -95,7 +95,7 @@ side (`awaitWaiter`) watches the shutdown signal itself; a page that was woken
 before the shutdown is seen is still handed out, and the registry that is left
 when the loop stops is ended by `finish`.
 
-**Capacity.** `CheckCapacity` is the one judgment of whether the node takes in new
+**Capacity.** `checkCapacity` is the one judgment of whether the node takes in new
 work: a clock set back first (`clock_rollback`), then the queue (`node_queue_full`
 when unfinished deliveries plus the new recipients exceed the node's limit), then
 the disk (`storage_full` when the free space is below the reserve). A bound that is
@@ -225,7 +225,7 @@ reproducible).
 | The result of a close is stored with it, and replayed | `endpoints.go` (`closeEndpoint`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint`, `TestAResendOfAClosingReturnsTheStoredResultAndAReusedIdentifierIsRefused` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `meta.go`, `view.go` | `declare_test.go`, `meta_internal_test.go` (golden vectors, refusals, `FuzzDecodeMeta`), `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
-| Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable`, `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
+| Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |
 | The schedule | `sched.go`, `engine.go` | `sched_test.go`, `sched_internal_test.go` |
 | The pause of a clock set back is persisted at once | `engine.go` (`observe`, `AddClockState`) | `TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash`, `TestAFatalErrorWhilePersistingThePauseStopsTheEngine` |

@@ -330,8 +330,6 @@ func TestARegistrationWaitsAcrossAFailedChunkOfTheDrain(t *testing.T) {
 	}
 }
 
-var _ = engine.Reasons
-
 // An adapter unregisters only its own direct endpoints, and what it unregistered
 // is closed like one the owner closed.
 func TestUnregisterClosesADirectEndpointOfTheInstanceThatOwnsIt(t *testing.T) {

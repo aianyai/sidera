@@ -1,7 +1,6 @@
 package engine_test
 
 import (
-	"bytes"
 	"fmt"
 	"testing"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
-	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/internal/reply"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -84,9 +82,6 @@ func (r *rig) commits(tx string) int {
 	}
 	return -1
 }
-
-var _ = bytes.Equal
-var _ txn.Kind
 
 // sessionCtlRecord is a control record of a session creation whose session was
 // created: the record a crash between the control record and the endpoint's

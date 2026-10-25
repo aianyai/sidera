@@ -2,7 +2,6 @@ package engine_test
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
@@ -262,8 +261,6 @@ func mustEndpoint(t testing.TB, b byte) ident.EndpointID {
 	}
 	return id
 }
-
-var _ = errors.New
 
 // The registration of an adapter's endpoints is for an instance the owner has
 // enabled: an instance that was disabled is not admitted.

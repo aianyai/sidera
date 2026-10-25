@@ -15,7 +15,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/txn"
-	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // crashWalker is an Observer that, before every step of the transaction it
@@ -165,8 +164,6 @@ func startForked(t testing.TB, f *rig, e *engine.Engine) *engine.Engine {
 	}
 	return e
 }
-
-var _ = adapterproto.MaxRecipients
 
 // Closing an endpoint is a head record and chunks of closed deliveries. Wherever
 // the node dies, the next start finds the endpoint open with every delivery still

@@ -9,7 +9,6 @@ import (
 	"math/rand/v2"
 	"path"
 	"runtime"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -424,8 +423,6 @@ func noLeaks(t testing.TB) {
 }
 
 func keyName(i int) string { return fmt.Sprintf("key-%04d", i) }
-
-var _ = strings.Contains
 
 func mustManifest(t testing.TB) manifest.Manifest {
 	t.Helper()

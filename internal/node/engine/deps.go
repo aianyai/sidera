@@ -5,7 +5,6 @@ import (
 	"io"
 	"log/slog"
 
-	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
@@ -108,5 +107,3 @@ type Deps struct {
 	// discards them.
 	Log *slog.Logger
 }
-
-var _ = adapterreg.KindDirect

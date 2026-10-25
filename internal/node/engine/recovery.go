@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"sort"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/store"
@@ -388,7 +387,7 @@ func (e *Engine) RecoverDelivery(ctx context.Context) error {
 
 // admitNewWork is the one place the engine asks whether the node takes in new
 // work: the intake of what a local endpoint sends, replies or controls. It feeds
-// CheckCapacity with what the engine owns and answers with a refusal or nil. It
+// checkCapacity with what the engine owns and answers with a refusal or nil. It
 // records nothing: backpressure leaves no trace, and what the node already holds
 // goes on to its end whatever the answer.
 func (e *Engine) admitNewWork(recipients int) error {
@@ -397,7 +396,7 @@ func (e *Engine) admitNewWork(recipients int) error {
 		avail = ^uint64(0) // judged last: a pause or a full queue says more
 	}
 	s := e.d.Config.Node().Settings
-	v := CheckCapacity(CapacityInput{
+	v := checkCapacity(capacityInput{
 		RollbackPaused: e.paused, Unfinished: e.view.Unfinished(), Recipients: recipients,
 		NodeQueueLimit: s.NodeQueueLimit, Available: avail, DiskReserve: s.DiskReserveBytes,
 	})
@@ -475,5 +474,3 @@ func (e *Engine) Quiesce(ctx context.Context, _ Expect) (Report, error) {
 		}
 	}
 }
-
-var _ = sort.Strings

@@ -30,7 +30,6 @@ commands and add their methods to this list.
 | `AdapterAdmitted`, `RegisterDirect`, `UnregisterDirect` | What the adapter host calls: the admission of an instance, and the registration and unregistration of its direct endpoints. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
 | `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseOperation`, `CloseResult`, `Counts`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and `endpoint close`, the numbers of the status, and the alerts. A close that an administrative operation asks for is one command: replay check, close, and the result built from the outcome, stored in the same transaction in every outcome. |
-| `CheckCapacity`, `CapacityInput`, `CapacityVerdict` | The one capacity check, a pure function. |
 | `PlanRecovery`, `RecoveryPlan` | The work of the recovery rules as a pure function of a scan. |
 | `Reason`, `Refusal`, `ReasonOf` | The closed set of reasons a method refuses for; the interface packages alone map them to the wire. |
 | `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register`. |
@@ -94,7 +93,8 @@ commands and add their methods to this list.
   the interfaces stop; the waiting side watches the shutdown itself, because the
   command that ends the waits is dropped when the inbox is full. The registry is in place; the command that registers a
   waiter and the page that wakes it come with the pull of messages.
-- **The capacity check is in one place.** `CheckCapacity` judges the clock, then
+- **The capacity check is in one place.** `checkCapacity`, which only the engine's
+  own `admitNewWork` calls, judges the clock, then
   the queue, then the disk, and a bound that is not set refuses. The engine feeds
   it with the settings of the node, the free space and its own count of unfinished
   deliveries: target records that still need their body (accepted, queued or

@@ -1,52 +1,52 @@
 package engine
 
-// CapacityReason says why the capacity check refused. The zero value is no
+// capacityReason says why the capacity check refused. The zero value is no
 // refusal.
-type CapacityReason uint8
+type capacityReason uint8
 
 // The reasons, in the order the check judges them.
 const (
-	CapacityOK CapacityReason = iota
-	// CapacityClockRollback: the wall clock was set back and not cleared.
-	CapacityClockRollback
-	// CapacityNodeQueueFull: the node holds as many unfinished deliveries as it
+	capacityOK capacityReason = iota
+	// capacityClockRollback: the wall clock was set back and not cleared.
+	capacityClockRollback
+	// capacityNodeQueueFull: the node holds as many unfinished deliveries as it
 	// may.
-	CapacityNodeQueueFull
-	// CapacityStorageFull: the free space is below the reserve.
-	CapacityStorageFull
+	capacityNodeQueueFull
+	// capacityStorageFull: the free space is below the reserve.
+	capacityStorageFull
 )
 
 // String returns the name of the reason.
-func (r CapacityReason) String() string {
+func (r capacityReason) String() string {
 	switch r {
-	case CapacityOK:
+	case capacityOK:
 		return "ok"
-	case CapacityClockRollback:
+	case capacityClockRollback:
 		return "clock_rollback"
-	case CapacityNodeQueueFull:
+	case capacityNodeQueueFull:
 		return "node_queue_full"
-	case CapacityStorageFull:
+	case capacityStorageFull:
 		return "storage_full"
 	}
 	return "invalid"
 }
 
 // Reason is the reason of the engine that a refusal of the check is reported
-// as. CapacityOK has none.
-func (r CapacityReason) Reason() Reason {
+// as. capacityOK has none.
+func (r capacityReason) Reason() Reason {
 	switch r {
-	case CapacityClockRollback:
+	case capacityClockRollback:
 		return ReasonClockRollback
-	case CapacityNodeQueueFull:
+	case capacityNodeQueueFull:
 		return ReasonNodeQueueFull
-	case CapacityStorageFull:
+	case capacityStorageFull:
 		return ReasonStorageFull
 	}
 	return 0
 }
 
-// CapacityInput is everything the capacity check reads.
-type CapacityInput struct {
+// capacityInput is everything the capacity check reads.
+type capacityInput struct {
 	// RollbackPaused: the wall clock was set back beyond the tolerance and the
 	// owner has not cleared it.
 	RollbackPaused bool
@@ -64,14 +64,14 @@ type CapacityInput struct {
 	DiskReserve int64
 }
 
-// CapacityVerdict is the answer of the check: whether the new work is admitted,
+// capacityVerdict is the answer of the check: whether the new work is admitted,
 // and if not why.
-type CapacityVerdict struct {
+type capacityVerdict struct {
 	Admit  bool
-	Reason CapacityReason
+	Reason capacityReason
 }
 
-// CheckCapacity is the one capacity check, the judgment of whether the node
+// checkCapacity is the one capacity check, the judgment of whether the node
 // takes in new work: a request to send, to reply or to control a session, from
 // an endpoint on this node. It is made where the work enters the store, and
 // nowhere else; what the node already holds is moved to its end whatever the
@@ -84,17 +84,17 @@ type CapacityVerdict struct {
 // are validated to hold both, so a zero here is a defect, and a node that admits
 // work without a bound fills its disk. It panics for new work that adds no
 // delivery.
-func CheckCapacity(in CapacityInput) CapacityVerdict {
+func checkCapacity(in capacityInput) capacityVerdict {
 	if in.Recipients < 1 {
 		panic("engine: the capacity check of work that adds no delivery")
 	}
 	switch {
 	case in.RollbackPaused:
-		return CapacityVerdict{Reason: CapacityClockRollback}
+		return capacityVerdict{Reason: capacityClockRollback}
 	case in.Unfinished+in.Recipients > in.NodeQueueLimit:
-		return CapacityVerdict{Reason: CapacityNodeQueueFull}
+		return capacityVerdict{Reason: capacityNodeQueueFull}
 	case in.DiskReserve < 1 || in.Available < uint64(in.DiskReserve):
-		return CapacityVerdict{Reason: CapacityStorageFull}
+		return capacityVerdict{Reason: capacityStorageFull}
 	}
-	return CapacityVerdict{Admit: true}
+	return capacityVerdict{Admit: true}
 }

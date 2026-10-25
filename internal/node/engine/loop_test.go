@@ -14,7 +14,6 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
-	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -435,5 +434,3 @@ func TestSpawnOutsideTheLoopPanics(t *testing.T) {
 }
 
 func failMatch(tx string, step fsx.Step) matchT { return matchT{Tx: tx, Step: step} }
-
-var _ store.EndpointStatus
