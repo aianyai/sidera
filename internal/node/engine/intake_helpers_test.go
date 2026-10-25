@@ -12,6 +12,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
+	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -158,7 +159,7 @@ var (
 
 // forged is an envelope from a third party that names a message as the one it
 // answers, the way a node that was never sent the message would make it.
-func forged(t testing.TB, h *harness.H, id string, to ident.Address, replyTo adapterproto.MessageID, body string) []byte {
+func forged(t testing.TB, h *harness.H, id string, to ident.Address, replyTo adapterproto.MessageID, body string, evidence ...record.Record) []byte {
 	t.Helper()
 	now := h.Clock().Now().Truncate(time.Second)
 	accept := now.Add(delivery.DefaultAcceptBefore)
@@ -166,7 +167,7 @@ func forged(t testing.TB, h *harness.H, id string, to ident.Address, replyTo ada
 		ID: delivery.MessageID(id), To: []ident.Address{to}, Kind: envelope.KindMessage,
 		ReplyTo: delivery.MessageID(replyTo), Seq: map[ident.EndpointID]uint64{to.Endpoint: 1},
 		SentAt: now, AcceptBefore: accept, ReportBy: delivery.ReportBy(accept),
-		ContentType: "text/plain", Body: []byte(body),
+		ContentType: "text/plain", Body: []byte(body), Evidence: evidence,
 	}
 	b, err := env.Encode(envelope.DefaultLimits())
 	if err != nil {

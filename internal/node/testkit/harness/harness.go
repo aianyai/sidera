@@ -58,6 +58,10 @@ type Options struct {
 	// fixture runs, from the goroutine that is about to run it. A test uses it to
 	// stop the engine in the middle of a command.
 	Observer txn.Observer
+	// Disk starts the node on this in-memory disk instead of a fresh one: a copy
+	// a crash walk took, or a disk a test prepared. It is used as it is, so
+	// Policy and NodeSettings are not applied to it.
+	Disk *fsxtest.Mem
 	// FS says which file system the node runs on: the one in memory, which can be
 	// cloned for a crash, or a directory on the real one, for what only a real file
 	// system answers (a full disk, a failed fsync) and whose faults go through the
@@ -182,11 +186,16 @@ func New(t testing.TB, o Options) *H {
 	if o.FS == RealFS {
 		h.real = realDisk(t, o)
 		base = h.real
+	} else if o.Disk != nil {
+		h.disk = o.Disk
+		base = h.disk
 	} else {
 		h.disk = seededDisk(t, o.Start)
 		base = h.disk
 	}
-	h.prepare(base)
+	if o.Disk == nil {
+		h.prepare(base)
+	}
 	h.proc = h.boot(base, nil)
 	return h
 }
