@@ -68,8 +68,9 @@ func FuzzDecodeRequest(f *testing.F) {
 	})
 }
 
-// methodNames are every method the server has, so that the fuzzer feeds each, and
-// one that does not exist.
+// methodNames are every method of the owner the server has, so that the fuzzer feeds
+// each, and one that does not exist. A test row is answered by its own path in the
+// server and is not read by decode.
 func methodNames(tb testing.TB) []string {
 	tb.Helper()
 	ms, err := defaultMethods()
@@ -77,8 +78,10 @@ func methodNames(tb testing.TB) []string {
 		tb.Fatal(err)
 	}
 	names := []string{"nothing"}
-	for name := range ms {
-		names = append(names, name)
+	for name, m := range ms {
+		if m.test == nil {
+			names = append(names, name)
+		}
 	}
 	sort.Strings(names)
 	return names
