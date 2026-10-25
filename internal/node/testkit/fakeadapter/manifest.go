@@ -18,44 +18,44 @@ import (
 // initialize with. Both come from the same options, so they cannot disagree.
 // Start from DefaultManifestOptions: a zero value declares nothing and is refused.
 type ManifestOptions struct {
-	ID      string
-	Version string
+	ID      string `json:"id"`
+	Version string `json:"version"`
 
 	// Runtime and Direct say which kinds of endpoint the adapter provides.
-	Runtime bool
-	Direct  bool
+	Runtime bool `json:"runtime,omitempty"`
+	Direct  bool `json:"direct,omitempty"`
 
 	// Frontends, Interrupt, AckOnBehalf and ServerRequests are the runtime
 	// capabilities.
-	Frontends      []adapterproto.Frontend
-	Interrupt      bool
-	AckOnBehalf    bool
-	ServerRequests bool
+	Frontends      []adapterproto.Frontend `json:"frontends,omitempty"`
+	Interrupt      bool                    `json:"interrupt,omitempty"`
+	AckOnBehalf    bool                    `json:"ack_on_behalf,omitempty"`
+	ServerRequests bool                    `json:"server_requests,omitempty"`
 
 	// MaxDirectEndpoints is the direct endpoint limit.
-	MaxDirectEndpoints int
+	MaxDirectEndpoints int `json:"max_direct_endpoints,omitempty"`
 
 	// RecvWaitS is the longest, in seconds, an agent's recv may wait through each
 	// front end. The defaults differ from the daemon's default (8) and from the
 	// protocol's cap (120), so a test can tell which of the three it got.
-	RecvWaitS map[adapterproto.Frontend]int
+	RecvWaitS map[adapterproto.Frontend]int `json:"recv_wait_s,omitempty"`
 
 	// Budgets is the output budget of recv per front end.
-	Budgets []manifest.Budget
+	Budgets []manifest.Budget `json:"budgets,omitempty"`
 
 	// RuntimeName and RuntimeVersion are what a probe reports; Tested is the
 	// range of runtime versions the manifest says the adapter was tested with.
-	RuntimeName    string
-	RuntimeVersion string
-	Tested         []manifest.TestedRange
+	RuntimeName    string                 `json:"runtime_name,omitempty"`
+	RuntimeVersion string                 `json:"runtime_version,omitempty"`
+	Tested         []manifest.TestedRange `json:"tested,omitempty"`
 
 	// AckMarkers declares how the runtime shows a replaced or cut tool result. The
 	// observed knob builds its replaced and truncated texts from them.
-	AckMarkers manifest.AckMarkers
+	AckMarkers *manifest.AckMarkers `json:"ack_markers,omitempty"`
 
 	// Program and Args are the entry of the adapter package.
-	Program string
-	Args    []string
+	Program string   `json:"program"`
+	Args    []string `json:"args,omitempty"`
 }
 
 // Texts the default markers match; the observed knob writes them.
@@ -88,7 +88,7 @@ func DefaultManifestOptions() ManifestOptions {
 		},
 		RuntimeName: "fake-runtime", RuntimeVersion: "1.0.0",
 		Tested: []manifest.TestedRange{{Runtime: "fake-runtime", Min: "1.0.0", Max: "1.9.9"}},
-		AckMarkers: manifest.AckMarkers{
+		AckMarkers: &manifest.AckMarkers{
 			Replaced:  []manifest.Marker{{Literal: &lit}},
 			Truncated: []manifest.Marker{{Regexp: &re}},
 		},
@@ -128,8 +128,8 @@ func (o ManifestOptions) Manifest() manifest.Manifest {
 			m.RecvWaitLimits = append(m.RecvWaitLimits, manifest.RecvWaitLimit{Frontend: f, MaxS: s})
 		}
 	}
-	if len(o.AckMarkers.Replaced) > 0 || len(o.AckMarkers.Truncated) > 0 {
-		am := o.AckMarkers
+	if o.AckMarkers != nil {
+		am := *o.AckMarkers
 		m.AckMarkers = &am
 	}
 	return m

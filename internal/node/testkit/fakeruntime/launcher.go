@@ -156,7 +156,7 @@ func (l *ProcessLauncher) connect(ctx context.Context, info ProcessInfo) (Sessio
 	l.mu.Lock()
 	l.clients = append(l.clients, c)
 	l.mu.Unlock()
-	s := &remoteSession{info: info, client: c}
+	s := &remoteSession{info: info, client: c, record: filepath.Join(l.Dir, info.Ref+".jsonl")}
 	c.HandleNotification(NoteTurnStarted, func(_ context.Context, params json.RawMessage) {
 		if v, err := DecodeLink(NoteTurnStarted, params); err == nil {
 			n := v.(TurnStartedNote)
@@ -186,6 +186,7 @@ func (l *ProcessLauncher) connect(ctx context.Context, info ProcessInfo) (Sessio
 type remoteSession struct {
 	info   ProcessInfo
 	client *fakectl.Client
+	record string
 
 	mu      sync.Mutex
 	watcher Watcher
@@ -216,6 +217,9 @@ func (s *remoteSession) dispatch(f func(Watcher)) {
 func remoteError(err error) error {
 	var pe *peer.Error
 	if !errors.As(err, &pe) {
+		if errors.Is(err, peer.ErrClosed) {
+			return ErrNotAlive // the process is gone: its connection ended
+		}
 		return err
 	}
 	switch pe.Code {
@@ -270,6 +274,11 @@ func (s *remoteSession) Reconcile(attempt string) (Reconciliation, error) {
 	defer cancel()
 	var r ReconcileReply
 	if err := s.client.Call(ctx, MethodReconcile, ReconcileParams{Attempt: attempt}, &r); err != nil {
+		if errors.Is(remoteError(err), ErrNotAlive) {
+			// The process ended since the connection was made: its record is
+			// complete, and is what a native runtime leaves behind.
+			return (&deadSession{info: s.info, record: s.record}).Reconcile(attempt)
+		}
 		return Reconciliation{}, remoteError(err)
 	}
 	return Reconciliation{Found: r.Found, Turn: r.Turn, TurnState: r.TurnState, TurnRunning: r.TurnRunning, WriterStopped: r.WriterStopped}, nil
