@@ -106,7 +106,7 @@ func TestEveryEngineReasonMapsToACategoryAndCode(t *testing.T) {
 		engine.ReasonLoopBusy:           {fakeagent.CategoryBackpressure, "loop_busy"},
 		engine.ReasonRecovering:         {fakeagent.CategoryUnavailable, "recovering"},
 		engine.ReasonShuttingDown:       {fakeagent.CategoryUnavailable, "shutting_down"},
-		engine.ReasonStorageFatal:       {fakeagent.CategoryInternal, "storage_fatal"},
+		engine.ReasonStorageFatal:       {fakeagent.CategoryOutcomeUnknown, "storage_fatal"},
 	}
 	for _, r := range engine.Reasons() {
 		w, ok := want[r]
