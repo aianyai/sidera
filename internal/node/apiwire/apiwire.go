@@ -32,6 +32,12 @@ const (
 	CategoryBackpressure    Category = "backpressure"
 	CategoryUnavailable     Category = "unavailable"
 	CategoryInternal        Category = "internal"
+	// CategoryOutcomeUnknown: whether the request took effect is not known. A
+	// client judges it itself when it wrote a request and did not read the answer
+	// whole (OutcomeUnknown); the daemon says it for a failure of the disk after
+	// which memory and disk may disagree (ReasonStorageFatal). Either way the way
+	// out is the same: send the request again with the same operation identifier.
+	CategoryOutcomeUnknown Category = "outcome_unknown"
 )
 
 // Categories lists every category.
@@ -39,11 +45,12 @@ func Categories() []Category {
 	return []Category{
 		CategoryInvalidArgument, CategoryUnauthenticated, CategoryNotFound, CategoryConflict,
 		CategoryRefused, CategoryBackpressure, CategoryUnavailable, CategoryInternal,
+		CategoryOutcomeUnknown,
 	}
 }
 
-// The exit codes of the command line that no category gives: a command that was
-// used wrongly, and a request that was sent without an answer coming back.
+// The exit codes of the command line that no daemon-side category gives: a command
+// that was used wrongly, and a request whose outcome is not known.
 const (
 	ExitUsage          = 2
 	ExitOutcomeUnknown = 10
@@ -69,6 +76,8 @@ func (c Category) HTTPStatus() int {
 	case CategoryUnavailable:
 		return http.StatusServiceUnavailable
 	}
+	// internal, outcome_unknown (the daemon is failing when it says it) and any
+	// category that is none of the known ones.
 	return http.StatusInternalServerError
 }
 
@@ -91,6 +100,8 @@ func (c Category) ExitCode() int {
 		return 8
 	case CategoryUnavailable:
 		return 9
+	case CategoryOutcomeUnknown:
+		return ExitOutcomeUnknown
 	}
 	return 1
 }
@@ -136,7 +147,38 @@ const (
 	CodeMethodUnknown     = "method_unknown"
 	CodeUnexpectedVersion = "unexpected_version"
 	CodeInternal          = "internal"
+	CodeEndpointUnknown   = "endpoint_unknown"
+	CodeOperationUnknown  = "operation_unknown"
+	CodeOutcomeUnknown    = "outcome_unknown"
 )
+
+// EndpointUnknown is the answer for an address that names no endpoint of this
+// node: one that does not exist, and one of another node, which this node cannot
+// know. The engine's refusal for an unknown endpoint is worded the same way.
+func EndpointUnknown() *Error {
+	return New(CategoryNotFound, CodeEndpointUnknown, "there is no such endpoint on this node")
+}
+
+// OperationUnknown is the answer for an operation identifier that has no stored
+// result: it was never used, or its result has been dropped.
+func OperationUnknown() *Error {
+	return New(CategoryNotFound, CodeOperationUnknown, "there is no stored result for this operation identifier")
+}
+
+// OutcomeUnknown is what a client says when it wrote a request and did not read the
+// answer whole, so it cannot tell whether the request took effect. The operation
+// identifier, when the request had one, is in the details: it is the one to send the
+// request again with, which returns the stored result if the request did run and
+// runs it if it did not. This is the one definition the command line, the MCP front
+// end and the test fixture share.
+func OutcomeUnknown(operationID string) *Error {
+	e := New(CategoryOutcomeUnknown, CodeOutcomeUnknown,
+		"the request was sent and no complete answer was read; whether it took effect is not known: send it again with the same operation identifier")
+	if operationID != "" {
+		e.with("operation_id", operationID)
+	}
+	return e
+}
 
 // Malformed is a request that is not what the method takes. path names the value
 // at fault, when the decoder could place it.
@@ -183,7 +225,7 @@ func fromRefusal(r *engine.Refusal) *Error {
 	case engine.ReasonUnauthenticated:
 		return New(CategoryUnauthenticated, "token_unknown", "the token is not one of an open endpoint")
 	case engine.ReasonEndpointUnknown:
-		return New(CategoryNotFound, "endpoint_unknown", "there is no such endpoint on this node")
+		return EndpointUnknown()
 	case engine.ReasonInstanceUnknown:
 		return New(CategoryNotFound, "instance_unknown", "there is no such adapter instance")
 	case engine.ReasonWrongEndpointKind:
@@ -195,7 +237,9 @@ func fromRefusal(r *engine.Refusal) *Error {
 		}
 		return e
 	case engine.ReasonInvalidArgument:
-		code := "invalid_value"
+		// A refusal that says only that a value is not acceptable says the request is
+		// not well formed; the codes of the category are the listed ones.
+		code := CodeMalformedRequest
 		if r.Detail != 0 {
 			code = r.Detail.String()
 		}
@@ -221,7 +265,9 @@ func fromRefusal(r *engine.Refusal) *Error {
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
 	case engine.ReasonStorageFatal:
-		return New(CategoryInternal, "storage_fatal", "a disk failure stopped the node; whether this took effect is not known")
+		// Whether the command took effect is what the engine says it does not know,
+		// which is the outcome a client cannot tell either, with the same way out.
+		return New(CategoryOutcomeUnknown, "storage_fatal", "a disk failure stopped the node; whether this took effect is not known: send it again with the same operation identifier")
 	}
 	return New(CategoryInternal, CodeInternal, "internal error")
 }

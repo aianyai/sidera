@@ -199,8 +199,14 @@ Errors are `{"error":{"category","code","message","details"?}}` in the words of
 decoder say: `invalid_argument` 400, `unauthenticated` 401, `not_found` 404,
 `conflict` 409, `refused` 422, `backpressure` 429, `unavailable` 503, `internal`
 500, and the exit codes of the command line 3 to 9 in that order, 1 for internal, 2
-for a command used wrongly, 10 for a request sent without an answer coming back.
-The text of an error nobody expected is logged and never sent.
+for a command used wrongly. `outcome_unknown` (500, exit code 10) is the outcome of a
+request that may or may not have taken effect: a client judges it itself when it
+wrote a request and did not read the answer whole, and the daemon says it
+(`storage_fatal`) when a failure of the disk stopped the node while the request was
+in flight; either way the request is sent again with the same operation identifier,
+which returns the stored result if it ran and runs it if it did not. A refusal for an
+invalid argument with no detail is `malformed_request`. The text of an error nobody
+expected is logged and never sent.
 
 Who the local owner is: whoever connected to the management listener, which is
 the user's own socket or pipe, checked by `ipc` on every accept. `manageapi.Listen`

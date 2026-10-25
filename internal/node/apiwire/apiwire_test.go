@@ -32,7 +32,7 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonInstanceUnknown:    {"not_found", "instance_unknown"},
 	engine.ReasonWrongEndpointKind:  {"refused", "endpoint_kind"},
 	engine.ReasonEndpointLimit:      {"refused", "endpoint_limit"},
-	engine.ReasonInvalidArgument:    {"invalid_argument", "invalid_value"},
+	engine.ReasonInvalidArgument:    {"invalid_argument", "malformed_request"},
 	engine.ReasonOperationIDReused:  {"conflict", "operation_id_reused"},
 	engine.ReasonNodeQueueFull:      {"backpressure", "node_queue_full"},
 	engine.ReasonStorageFull:        {"backpressure", "storage_full"},
@@ -41,7 +41,7 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonLoopBusy:           {"backpressure", "loop_busy"},
 	engine.ReasonRecovering:         {"unavailable", "recovering"},
 	engine.ReasonShuttingDown:       {"unavailable", "shutting_down"},
-	engine.ReasonStorageFatal:       {"internal", "storage_fatal"},
+	engine.ReasonStorageFatal:       {"outcome_unknown", "storage_fatal"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {
@@ -84,7 +84,7 @@ func TestARefusalCarriesWhatSaysWhichLimitAndWhichValue(t *testing.T) {
 		{"an empty patch", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "settings", Detail: engine.DetailEmptyPatch},
 			want{"invalid_argument", "empty_patch"}, map[string]any{"field": "settings"}},
 		{"a value", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "endpoint"},
-			want{"invalid_argument", "invalid_value"}, map[string]any{"field": "endpoint"}},
+			want{"invalid_argument", "malformed_request"}, map[string]any{"field": "endpoint"}},
 		{"a reason wrapped by the caller", fmt.Errorf("closing: %w", &engine.Refusal{Reason: engine.ReasonRecovering}),
 			want{"unavailable", "recovering"}, nil},
 	} {
@@ -259,6 +259,7 @@ func TestStatusAndExitCodeOfEachCategory(t *testing.T) {
 		{apiwire.CategoryBackpressure, http.StatusTooManyRequests, 8},
 		{apiwire.CategoryUnavailable, http.StatusServiceUnavailable, 9},
 		{apiwire.CategoryInternal, http.StatusInternalServerError, 1},
+		{apiwire.CategoryOutcomeUnknown, http.StatusInternalServerError, 10},
 	} {
 		t.Run(string(tc.c), func(t *testing.T) {
 			if got := tc.c.HTTPStatus(); got != tc.status {
@@ -290,7 +291,118 @@ func TestNoTwoCategoriesShareAnExitCode(t *testing.T) {
 			t.Errorf("%s exits with 0", c)
 		}
 	}
-	if len(seen) != 8 {
-		t.Errorf("%d categories, want 8", len(seen))
+	if len(seen) != 9 {
+		t.Errorf("%d categories, want 9", len(seen))
+	}
+}
+
+// The codes the interface specification lists for the category of a request that
+// is not acceptable, written out here. A refusal of the engine for an invalid
+// argument that carries no detail of its own says the request is not well formed,
+// which is the code of that table that fits; no code that is not in it is made up.
+var listedInvalidArgumentCodes = []string{
+	"malformed_request", "request_too_large", "single_recipient_only", "empty_patch", "cursor_invalid",
+	"probe_frontend_mismatch", "node_mismatch", "digest_mismatch", "unexpected_version", "method_not_allowed",
+	"config_invalid",
+}
+
+func TestAnInvalidArgumentIsAnsweredWithACodeTheCategoryListsAndNeverAMadeUpOne(t *testing.T) {
+	listed := map[string]bool{}
+	for _, c := range listedInvalidArgumentCodes {
+		listed[c] = true
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		code string
+	}{
+		{"a refusal without a detail", &engine.Refusal{Reason: engine.ReasonInvalidArgument}, "malformed_request"},
+		{"a refusal that names its field", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "endpoint"}, "malformed_request"},
+		{"a refusal with the detail of an empty patch", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailEmptyPatch}, "empty_patch"},
+		{"a value of the configuration that is not acceptable", &config.ChangeError{Reason: config.ChangeInvalid, Field: "settings.x"}, "config_invalid"},
+		{"a patch that names nothing", &config.ChangeError{Reason: config.ChangeNothingToChange}, "empty_patch"},
+		{"a fault in the request", &strictjson.Error{Path: "params.x", Msg: "unknown field"}, "malformed_request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := apiwire.FromError(tc.err)
+			if got.Category != apiwire.CategoryInvalidArgument || got.Code != tc.code {
+				t.Errorf("mapped to %s/%s, want invalid_argument/%s", got.Category, got.Code, tc.code)
+			}
+			if !listed[got.Code] {
+				t.Errorf("the code %q is not one the category lists", got.Code)
+			}
+		})
+	}
+	// every detail the engine has maps to a listed code too
+	for _, d := range engine.Details() {
+		got := apiwire.FromError(&engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: d})
+		if !listed[got.Code] {
+			t.Errorf("the detail %s maps to the code %q, which the category does not list", d, got.Code)
+		}
+	}
+}
+
+// What a fatal failure of the disk did to a request is not known: the failure came
+// after the commit point or in an fsync whose outcome is unknown. The engine defines
+// the reason as "whether it took effect is not known", so the client is told the
+// outcome is unknown, and the way to deal with that (send the same request again
+// with the same operation identifier) is the way it deals with a lost answer.
+func TestAFatalFailureOfTheDiskIsAnOutcomeThatIsNotKnown(t *testing.T) {
+	got := apiwire.FromError(&engine.Refusal{Reason: engine.ReasonStorageFatal, Err: errors.New("input/output error")})
+	if got.Category != "outcome_unknown" || got.Code != "storage_fatal" {
+		t.Errorf("mapped to %s/%s, want outcome_unknown/storage_fatal", got.Category, got.Code)
+	}
+	if got.Category.ExitCode() != 10 || apiwire.ExitOutcomeUnknown != 10 {
+		t.Errorf("the exit code of an outcome that is not known is %d, want 10", got.Category.ExitCode())
+	}
+	if strings.Contains(got.Message, "input/output") {
+		t.Errorf("the text of the cause reached the wire: %q", got.Message)
+	}
+	if !strings.Contains(got.Message, "not known") {
+		t.Errorf("the message does not say that the outcome is not known: %q", got.Message)
+	}
+}
+
+// The outcome a client judges itself, when the request was written and the answer
+// was not read whole: one definition, so that the command line, the MCP front end
+// and the test fixture all say it in the same words. The operation identifier it is
+// told is the one to send the request again with.
+func TestAnOutcomeThatIsNotKnownIsOneDefinitionForEveryClient(t *testing.T) {
+	e := apiwire.OutcomeUnknown("00000000000000000000000000000001")
+	if e.Category != "outcome_unknown" || e.Code != "outcome_unknown" {
+		t.Errorf("category/code %s/%s, want outcome_unknown/outcome_unknown", e.Category, e.Code)
+	}
+	if e.Details["operation_id"] != "00000000000000000000000000000001" {
+		t.Errorf("details %v do not carry the operation identifier", e.Details)
+	}
+	if e.Category.ExitCode() != 10 {
+		t.Errorf("exit code %d, want 10", e.Category.ExitCode())
+	}
+	if e.Message == "" {
+		t.Error("no message")
+	}
+	if got := apiwire.FromError(e); got != e {
+		t.Error("an outcome the client judged was mapped again")
+	}
+	if bare := apiwire.OutcomeUnknown(""); len(bare.Details) != 0 {
+		t.Errorf("a request with no operation identifier has details %v", bare.Details)
+	}
+	b, _ := json.Marshal(apiwire.Body{Error: *apiwire.OutcomeUnknown("ab")})
+	want := `{"error":{"category":"outcome_unknown","code":"outcome_unknown","message":"` + apiwire.OutcomeUnknown("ab").Message + `","details":{"operation_id":"ab"}}}`
+	if string(b) != want {
+		t.Errorf("body %s\nwant %s", b, want)
+	}
+}
+
+// The answers an interface gives without an error of the engine behind them are
+// defined here, once: the endpoint that is not on this node says the same as the
+// engine's refusal for an endpoint that does not exist, and an operation identifier
+// with no stored result is the listed not-found code for it.
+func TestTheAnswersAnInterfaceGivesOnItsOwnAreDefinedHere(t *testing.T) {
+	check(t, apiwire.EndpointUnknown(), want{"not_found", "endpoint_unknown"})
+	check(t, apiwire.OperationUnknown(), want{"not_found", "operation_unknown"})
+	engineWords := apiwire.FromError(&engine.Refusal{Reason: engine.ReasonEndpointUnknown})
+	if got := apiwire.EndpointUnknown(); got.Category != engineWords.Category || got.Code != engineWords.Code || got.Message != engineWords.Message {
+		t.Errorf("an endpoint that is not on this node says %+v, the engine's refusal says %+v", got, engineWords)
 	}
 }
