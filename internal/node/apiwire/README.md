@@ -9,14 +9,16 @@ for the reasons.
 
 This is a runtime package of layer 6 of [`internal/node/README.md`](../README.md):
 it imports `engine`, `config`, `ipc`, `admin` and `strictjson` to read their errors,
-and does no I/O. `engine` does not import it: the words of the wire never enter the
-engine.
+and `adapterhost`, `adapterproto` and `peer` to put the engine behind the adapter
+host and word its refusals as the adapter protocol does. It does no I/O. `engine` does
+not import it: the words of the wire never enter the engine.
 
 ## Entry points
 
 | Name | Purpose |
 | ---- | ------- |
 | `FromError(err)` | The one mapping: an error of the wire as it is, an `*engine.Refusal` by its reason, a `*config.ChangeError` by its reason, a `*strictjson.Error`, a failure of the way to the daemon (`ipc`), and any other error as an internal one. |
+| `AdapterEngine(engine)` | The engine behind the interface the adapter host asks of it (`adapterhost.Engine`): the three methods that answer a request of an adapter (`RegisterDirect`, `UnregisterDirect`, `CheckpointPut`) turn an `*engine.Refusal` into the `*peer.Error` the adapter is answered with, by one row per reason; every other error is passed on untouched. What each code means is in [docs/references/adapter-host](../../../docs/references/adapter-host/README.md). |
 | `FromAdmin(reason)` | The refusal of a request by the administrative rules. |
 | `Error`, `Body`, `New`, `Malformed` | An error as the wire carries it, `{"error":{"category","code","message","details?"}}`. |
 | `EndpointUnknown()`, `OperationUnknown()` | The answers an interface gives without an error of the engine behind them: an address that is no endpoint of this node, and an operation identifier with no stored result. |
@@ -28,6 +30,19 @@ engine.
 - **One mapping.** A reason of the engine, a refused change and a failure of the way
   to the daemon each have one pair of words, written here and nowhere else. A test
   walks every reason the engine and `config` have, so one added without a row fails.
+- **The adapter's words are chosen here too, and only for what answers a request of
+  the adapter.** `AdapterEngine` maps a refusal by a table with one row for each reason
+  of the engine; a test fails when a reason has none. The cause a refusal carries is
+  never sent. An error that is no refusal is returned as it is: the host answers it
+  `-32603` and keeps its text off the wire. The value it returns has the host's methods
+  and nothing else of the engine, on purpose: the host finds the optional parts of the
+  engine (`endpoint.send` and its kin) by asking the value, and a method of the engine
+  that was promoted would be answered in the engine's words.
+- **Back pressure has no code of its own on the adapter side yet.** The protocol has no
+  code that fits "not now, nothing was recorded": `1007` is the limit of direct
+  endpoints and `-32001` promises the handler did not run. Until it is decided the five
+  such refusals (node queue full, storage full, storage unavailable, clock rollback,
+  loop busy) are `-32603` with data `{"reason":"<name>"}`.
 - **The text of an unknown error stays off the wire.** Anything that is none of the
   known errors is `internal/internal` with a fixed message; what it said is for the
   log. A client that is not the author of the code should not be handed a path or a
@@ -66,7 +81,11 @@ engine.
 
 ## Where the tests are
 
-`apiwire_test.go`: every reason of the engine and of `config` against a table
+`adapter_internal_test.go`: the table of codes for the requests of an adapter (every
+reason of the engine against rows written out by hand, the limit and the field, the
+cause kept off the wire, errors that are no refusal, and the skipped question about
+back pressure); `adapter_test.go`: the three requests through a real engine, a
+stopping engine, and the absence of the optional parts. `apiwire_test.go`: every reason of the engine and of `config` against a table
 written out by hand, the listed codes of `invalid_argument`, the outcome that is not
 known (from a fatal failure of the disk, and judged by a client), the answers an
 interface gives on its own, the details a refusal carries, the faults
