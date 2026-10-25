@@ -191,6 +191,16 @@ func (sc *scenario) newSimFor(t *testing.T, r *rig) *sim {
 // source: two draws of the distribution of the crash model.
 var seededPowerLosses = []string{"power-loss-a", "power-loss-b"}
 
+// crashesDuringRecovery tells whether the walks crash again at every point of the
+// recovery that follows each crash. It is off under the race detector: every one
+// of these scenarios is single-threaded on a file system of its own, so the
+// detector adds cost and no coverage, and the nested walk is the larger part of
+// the time of a race run. The runs without the detector, in CI and in the local
+// checks, take the whole walk, and the assertions that need it apply only then.
+func crashesDuringRecovery() bool {
+	return !raceEnabled && !testing.Short()
+}
+
 // crashKinds are the disks a crash at one instant can leave. The process crash
 // and the worst power loss draw nothing and are always taken. The seeded power
 // losses are left out under the race detector: a walk is single-threaded on a
@@ -313,7 +323,7 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 	var inner []crashState
 	var rr *rig
 	hook := func(p fsx.Point, k txn.Kind) {
-		if !nested || testing.Short() || cs.name == "power-loss-a" || cs.name == "power-loss-b" || (p.Tag.Tx == "txn-settle" && p.Hit > 1) {
+		if !nested || !crashesDuringRecovery() || cs.name == "power-loss-a" || cs.name == "power-loss-b" || (p.Tag.Tx == "txn-settle" && p.Hit > 1) {
 			return
 		}
 		inner = append(inner, crashState{name: fmt.Sprintf("%s, then a crash %s before %v", where, "process", p), mem: rr.mem.Clone()})
@@ -326,9 +336,6 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 		// is taken at them.
 		inner[len(inner)-2].at, inner[len(inner)-2].model = p, "process-crash"
 		inner[len(inner)-1].at, inner[len(inner)-1].model = p, "worst-power-loss"
-		if raceEnabled {
-			return
-		}
 		for _, m := range seededPowerLosses {
 			inner = append(inner, crashState{name: fmt.Sprintf("%s, then a power loss (%s) before %v", where, m, p), mem: rr.mem.CrashClone(seeded), power: true, at: p, model: m})
 		}

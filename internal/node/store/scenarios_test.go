@@ -680,10 +680,11 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	}
 	// The cleanup and the settle that txn.Recover runs at every start belong to
 	// no workflow: the walks crash at them while they recover, every kind of
-	// crash. A short run does not crash recoveries. The store never discards a
-	// directory, so no disk of its workflows holds a ".trash-" directory and the
-	// removal of one cannot be reached here.
-	if !testing.Short() {
+	// crash. A short run and a run under the race detector do not crash
+	// recoveries. The store never discards a directory, so no disk of its
+	// workflows holds a ".trash-" directory and the removal of one cannot be
+	// reached here.
+	if crashesDuringRecovery() {
 		prog, err := programTable()
 		if err != nil {
 			t.Fatal(err)
@@ -707,7 +708,7 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 			t.Errorf("%d crash points of the transaction layer have no crash state taken at them, for the kind of crash named:\n%s", len(gaps), strings.Join(gaps, "\n"))
 		}
 	}
-	if total.nested == 0 && !testing.Short() {
+	if total.nested == 0 && crashesDuringRecovery() {
 		t.Error("no recovery was crashed in the middle")
 	}
 }

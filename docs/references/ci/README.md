@@ -63,19 +63,22 @@ to the workflow.
   dependency that needs cgo must fail here and not at release time. The `test`
   job's `-race` is the one place cgo is on: the race detector needs it and a C
   compiler, which all three hosted runner images carry.
-- **Race runs take fewer crash states in the store's crash walks**: the walks of
+- **Race runs take less of the store's crash walks**: the walks of
   `internal/node/store` replay every crash point of every transaction, and each
   scenario is single-threaded on an in-memory file system of its own, so the
-  race detector finds nothing there and only multiplies the cost of every crash
-  state. Under `-race` (the `race` build tag, which the test package reads
-  through `raceEnabled`) a walk takes the two kinds of crash that draw nothing,
-  the process crash and the worst power loss, and leaves out the two seeded power
-  losses; the steps without `-race` take all four, so no kind of crash goes
-  unrun. Every other test, the concurrent ones included, runs in both modes. A
-  `-skip` pattern could not express this: the kinds of crash are taken in a loop
-  inside one test, not as subtests. The reason is the per-package limit: `-timeout`
-  covers one test binary, and without the narrowing the store's race run took
-  79% of it on the slowest job (the baseline below), with more store tests due.
+  race detector finds nothing there and only multiplies the cost. Under `-race`
+  (the `race` build tag, which the test package reads through `raceEnabled`) a
+  walk takes the two kinds of crash that draw nothing, the process crash and the
+  worst power loss, and leaves out the two seeded power losses; and it does not
+  crash again at every point of the recovery that follows each crash (the nested
+  walk, the larger part of the time). The steps without `-race` take all four
+  kinds and the whole nested walk, so nothing goes unrun, and the assertions that
+  need the nested walk apply only there. Every other test, the concurrent ones
+  included, runs in both modes. A `-skip` pattern could not express this: the
+  kinds of crash and the nested walk are taken inside one test, not as subtests.
+  The reason is the per-package limit: `-timeout` covers one test binary, and the
+  store's race run, without the narrowing, took 79% of it on the slowest job (the
+  baseline below), with more store tests due.
 - **A verbose run of the platform packages**: `go test` prints `t.Log` output and
   skip reasons only with `-v` or on failure, and the main steps run without it. The
   platform tests of `internal/node/fsx` and `internal/node/ipc` log what they
@@ -167,6 +170,12 @@ from the slowest job, not from a mean. Almost all of the time is the crash walks
 Re-measure after a change to the store's tests with
 `GOMAXPROCS=4 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./internal/node/store`.
 
+On a developer machine (4 processors, 2026-10-25) that command took 1116 s with the
+two kinds of crash and the nested walk, and 139 s once the race run also skipped the
+nested walk (35 762 recoveries after a crash during recovery in the first run, none
+in the second). The plain run of the same tests takes about 180 s and still reports
+43 588 of them. These are local figures, not CI baselines: CI times are in the table.
+
 ## Where
 
 - Workflow: `.github/workflows/ci.yml`.
@@ -180,7 +189,7 @@ From the repository root (zsh and bash alike; on Windows use Git Bash):
 gofmt -l .   # must print nothing
 go vet ./... ./sdk/go/...
 go test -count=1 -timeout 30m ./... ./sdk/go/...
-go test -race -count=1 -timeout 30m ./... ./sdk/go/...   # the store's crash walks take two kinds of crash here
+go test -race -count=1 -timeout 30m ./... ./sdk/go/...   # the store's crash walks take two kinds of crash here and skip the crash during recovery
 
 # the tagged job; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
 go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
