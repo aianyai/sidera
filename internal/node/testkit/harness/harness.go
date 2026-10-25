@@ -530,6 +530,12 @@ func (h *H) DropReceipt(n int) { h.knobs.DropReceipt(n) }
 // doing so.
 func (h *H) Unreachable(on bool) { h.knobs.Unreachable(NodeID(), on) }
 
+// UnreachableNode is Unreachable for a node named by the test: a call to it fails as
+// unreachable and is written to the ledger as a hit. The loopback reaches no node but
+// its own, so a call to any other fails either way; without this knob nothing shows
+// that the call was made.
+func (h *H) UnreachableNode(node ident.NodeID, on bool) { h.knobs.Unreachable(node, on) }
+
 // HoldReports keeps the reports of a message from its sender: its receipt comes
 // back empty and a pull for it is answered empty.
 func (h *H) HoldReports(message string) { h.knobs.HoldReports(delivery.MessageID(message)) }

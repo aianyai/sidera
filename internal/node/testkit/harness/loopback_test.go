@@ -1,6 +1,7 @@
 package harness_test
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 
@@ -37,6 +38,41 @@ func TestAKnobHitIsWrittenToTheLedgerWithTheCallAndTheNode(t *testing.T) {
 	if e.Writer != "fixture" || e.Attrs.Knob != "unreachable" ||
 		!strings.Contains(e.Attrs.Detail, "call=send") || !strings.Contains(e.Attrs.Detail, "node="+harness.NodeID().String()) {
 		t.Errorf("entry %+v", e)
+	}
+}
+
+func TestAKnobForAnotherNodeIsHitByTheCallsMadeToIt(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	h.MustDirect("a")
+	h.MustDirect("b")
+	other, err := ident.NodeIDFromBytes(bytes.Repeat([]byte{7}, ident.NodeIDLen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := ident.ParseAddress(h.Addr("b"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.UnreachableNode(other, true)
+	to := ident.Address{Node: other, Endpoint: b.Endpoint}
+	if _, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{to.String()}, Body: "x"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
+	log, err := h.Ledger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hits int
+	for _, e := range log.Kind(ledger.KindKnobHit) {
+		if e.Attrs.Knob == "unreachable" && strings.Contains(e.Attrs.Detail, "call=send") && strings.Contains(e.Attrs.Detail, "node="+other.String()) {
+			hits++
+		}
+	}
+	if hits == 0 {
+		t.Error("the send to the other node was not written to the ledger as a hit of the knob made for it")
 	}
 }
 

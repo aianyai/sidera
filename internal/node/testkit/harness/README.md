@@ -17,7 +17,7 @@ layer.
 | ---- | ------- |
 | `New(t, Options)` | Makes the node, starts the engine through the startup steps it has (scan, start, admission of the adapter, recovery of deliveries, serve) and stops everything when the test ends. |
 | `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, and a stand-in for the free space (`DiskFree`). |
-| `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport` | The loopback of the running process, its knobs, and the check of a report the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
+| `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport` | The loopback of the running process, its knobs, and the check of a report the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
 | `H.Direct`, `H.MustDirect`, `H.Addr`, `H.Agent` | A direct endpoint registered through the engine's own entry, its address, and its agent: `engineagent` wrapped in `fakeagent.Recording`. |
 | `H.Advance`, `H.Set`, `H.Clock` | The one test clock. `Clock().Now` is the `func() time.Time` a fake takes. |
 | `H.Quiesce(opts...)`, `QuiesceError` | Waits for quiet, fails with a report. |
