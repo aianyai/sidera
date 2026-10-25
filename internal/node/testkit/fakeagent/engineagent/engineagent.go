@@ -84,20 +84,26 @@ const (
 	codeMalformed     = "malformed_request"
 )
 
-// NotSupported is the error of a method the engine does not offer yet: the one
-// the agent interface gives for a method the server does not know.
+// NotSupported is the error of a method the engine does not offer yet. Its category
+// and code are those the agent interface gives a method the server does not know,
+// which is what the ledger records; it is also fakeagent.ErrNotAvailable, which
+// tells it from the answer of a real server that does not know the method.
 func NotSupported(method string) error {
-	return &fakeagent.Error{
+	return &notSupported{answer: &fakeagent.Error{
 		Category: fakeagent.CategoryNotFound, Code: codeMethodUnknown,
 		Message: "the engine does not offer " + method + " yet",
-	}
+	}}
 }
 
+type notSupported struct{ answer *fakeagent.Error }
+
+func (e *notSupported) Error() string { return e.answer.Error() }
+
+// Unwrap gives the answer, for fakeagent.CategoryOf and CodeOf, and the sentinel.
+func (e *notSupported) Unwrap() []error { return []error{e.answer, fakeagent.ErrNotAvailable} }
+
 // IsNotSupported reports whether err is what NotSupported returns.
-func IsNotSupported(err error) bool {
-	var e *fakeagent.Error
-	return errors.As(err, &e) && e.Category == fakeagent.CategoryNotFound && e.Code == codeMethodUnknown
-}
+func IsNotSupported(err error) bool { return errors.Is(err, fakeagent.ErrNotAvailable) }
 
 // ErrProcessEnded is what a call to a process that ended before the call returned
 // carries: the request was taken and no answer could be read, so the client

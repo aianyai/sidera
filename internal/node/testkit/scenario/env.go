@@ -2,7 +2,6 @@ package scenario
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -51,8 +50,9 @@ type Env interface {
 }
 
 // ErrNotAvailable is what an Env method returns for a capability its layer does
-// not have yet.
-var ErrNotAvailable = errors.New("scenario: not available at this layer yet")
+// not have yet. It is the error the fake agent's backends carry for a method
+// their layer lacks (fakeagent.ErrNotAvailable), so that one test works for both.
+var ErrNotAvailable = fakeagent.ErrNotAvailable
 
 // NotAvailable returns an error that is ErrNotAvailable and says what is missing.
 func NotAvailable(what string) error {

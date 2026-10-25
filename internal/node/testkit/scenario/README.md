@@ -17,7 +17,7 @@ because the engine-layer fixture implements `Env` and so will the binary-layer o
 | `Script.Scenario()` | The script as a `crashwalk.Scenario`: name, step names, budget, recovery cases. A method of its own because `Name` and `Steps` are the script's fields. |
 | `Env` | What a step may use: the context, the agents and addresses of endpoints, the clock, `Quiesce`, the step announcement, the adapter's and the runtime's controllers, the ledger. |
 | `Advance(name, d)`, `RecvAndAckAll(name)` | A step that moves the clock, and the body of a step that reads an endpoint until it is empty and acknowledges every page. |
-| `ErrNotAvailable`, `NotAvailable(what)` | What an `Env` method returns for a capability its layer does not have. |
+| `ErrNotAvailable`, `NotAvailable(what)` | What an `Env` method returns for a capability its layer does not have; the same value as `fakeagent.ErrNotAvailable`, which a backend's error carries for a method its layer lacks. |
 | `QuiesceOption`, `WithTimeout`, `ResolveQuiesce` | The options of `Env.Quiesce`, read by every fixture the same way. |
 | `Judgement`, `Judgements`, `Invariants`, `Check` | The rules a finished run is held to, readable from the ledger alone. |
 

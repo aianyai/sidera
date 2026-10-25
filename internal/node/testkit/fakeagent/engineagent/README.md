@@ -15,7 +15,7 @@ over).
 | ---- | ------- |
 | `New(svc, caller)` | The agent of one endpoint. |
 | `MapError(err)` | An engine refusal as the error of the fake agent: its category and code. Anything that is not a refusal is internal. |
-| `NotSupported(method)`, `IsNotSupported(err)` | The error of a method the engine does not offer yet, and its test. |
+| `NotSupported(method)`, `IsNotSupported(err)` | The error of a method the engine does not offer yet: `not_found/method_unknown` that is also `fakeagent.ErrNotAvailable` (the same value as `scenario.ErrNotAvailable`), and its test. |
 | `ErrProcessEnded` | What a call carries when the process it was made to ended before it returned; `MapError` turns it into `outcome_unknown/connection_lost`. |
 
 ## Rules
@@ -23,7 +23,8 @@ over).
 - **All eleven methods exist.** `Declare` calls the engine. The others (`Me`, `Peers`,
   `Directory`, `Probe`, `Send`, `Reply`, `Recv`, `Ack`, `Control`, `Status`) answer
   `not_found/method_unknown`, which is how the agent interface answers a method the
-  server does not know. When the engine learns a method it replaces the line here; the
+  server does not know; the error is also `scenario.ErrNotAvailable`, so that a test
+  written before the method exists cannot pass on an answer the server never gave. When the engine learns a method it replaces the line here; the
   interface and the scripts do not change. There is no category of its own for "not
   yet": the interface's table has none, and a new category would be a change to it.
 - **A refusal is mapped by its reason, one table.** The expectations of
@@ -45,6 +46,6 @@ over).
 `TestEveryEngineReasonMapsToACategoryAndCode`, `TestAnErrorThatIsNotARefusalIsInternal`,
 `TestACallWhoseProcessEndedIsOutcomeUnknown`,
 `TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError`,
-`TestOtherErrorsAreNotTakenForNotSupported`; the skipped
+`TestOtherErrorsAreNotTakenForNotSupported` (a real server's own `not_found/method_unknown` among them); the skipped
 `TestShouldAMethodTheEngineDoesNotOfferYetHaveItsOwnCategory` keeps the question about
 a dedicated category in sight.

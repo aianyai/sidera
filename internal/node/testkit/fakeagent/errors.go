@@ -5,6 +5,13 @@ import (
 	"fmt"
 )
 
+// ErrNotAvailable is what a call returns, as the cause of its error, for a
+// capability the layer it is made in does not have yet. A test that waits for the
+// capability asserts that this error is gone; the category and code of the error
+// are those the interface gives a method or a part it does not know, so that the
+// ledger records an answer the real server would give.
+var ErrNotAvailable = errors.New("not available at this layer yet")
+
 // Category says what kind of failure an agent call came to. The categories are
 // those of the agent interface; the last, OutcomeUnknown, is the one a client
 // decides for itself: the request was written and no answer was read.

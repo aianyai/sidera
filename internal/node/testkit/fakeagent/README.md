@@ -22,6 +22,7 @@ and, for `Recording`, the ledger and the fake runtime of the testkit.
 | `SendInput`, `ReplyInput`, `RecvInput`, `AckInput`, `ControlInput`, `DeclareInput`, `StatusInput`, `DirectoryInput`, `ProbeInput` | The inputs. A `DeclareInput` is a patch: a nil field does not change. |
 | `SendResult`, `RecvResult`, `AckResult`, `StatusResult`, `MeResult`, `PeersResult`, `DirectoryResult`, `ProbeResult` | The results. `RecvResult.Raw` is the page exactly as the backend printed it; `Page` is the same page decoded. |
 | `Error`, `Category`, `CategoryOf`, `CodeOf`, `Categories` | The failure of a call: a category (invalid argument, unauthenticated, not found, conflict, refused, backpressure, unavailable, internal, and the client's own "outcome unknown"), a code, a message. |
+| `ErrNotAvailable` | The cause an error carries when the layer a call is made in lacks the capability (a backend's unimplemented method). `scenario.ErrNotAvailable` is the same value, so a test written before the capability exists asserts it is gone. |
 | `Recording(inner, writer, endpoint, options)` | Wraps any backend so that every call writes its ledger entries. |
 
 ## Rules

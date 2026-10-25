@@ -169,8 +169,11 @@ packages and are not part of them.
   is a disk.
 - **The back end answers a method the engine lacks as an unknown method.** The agent
   interface has no category for "not yet", and adding one would change its table; an
-  unknown method is what the server would say, and the scripts already handle it. A
-  skipped test keeps the question of a dedicated category in sight.
+  unknown method is what the server would say, and the scripts already handle it. The
+  error is also `ErrNotAvailable` (defined in `fakeagent`, which `scenario` re-exports),
+  because the same category and code are a real server's answer to a method it does not
+  know, and a test written before a method exists that asserts only the category would
+  pass without it. A skipped test keeps the question of a dedicated category in sight.
 - **Rejected: a text language for scenarios, an assertion library, a goroutine-leak
   library.** Scenarios are Go code so the reader reads what runs and the compiler checks
   names; the checks are a few lines of the standard library; the leak check is a scan of
