@@ -136,6 +136,14 @@ commands and add their methods to this list.
 
 ## Where the tests are
 
+The tests run the engine on the real store and configuration over the in-memory file
+system. `rig_test.go` is their rig: it makes the node, the process and the engine's
+random source with the building blocks of
+[`testkit/harness`](../testkit/harness/README.md) (`ProgramTable`, `MakeLayout`,
+`Mount`, `SeedNode`, `AdapterAdmission`, `RandReader`), so the way a node is made is
+written once; what is the engine's own (phases, forks of a disk, seeded records) stays
+in the rig.
+
 `endpoints_test.go` has `TestEndpointBeyondNodeCapRefused` and the cap counted over
 other kinds of endpoint; `close_test.go` the
 closing and its chunks; `declare_test.go` the declaration and who may make it;

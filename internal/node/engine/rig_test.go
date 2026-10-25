@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
 	"path"
 	"runtime"
 	"sync"
@@ -23,6 +22,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
@@ -35,68 +35,9 @@ import (
 var setupTag = fsx.Tag{Tx: "setup", Role: "f"}
 
 // t0 is the origin of the test clock.
-var t0 = time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
+var t0 = harness.DefaultStart
 
-const manifestText = `{"manifest_version":1,"id":"chat","version":"1.0.0","protocol":{"min":1,"max":1},` +
-	`"entry":{"program":"bin/sidera-adapter-chat"},"platforms":[{"os":"linux","arch":"amd64"}]}`
-
-// The transactions that the composition root and the install flow own, declared
-// here the way they declare them, so that the table of the program is complete.
-var (
-	testInit = &txn.Decl{Name: "init", Kind: txn.Normal, Writes: append(config.InitWrites(),
-		txn.Write{Role: "marker", Op: txn.OpReplace})}
-	testInstall = &txn.Decl{Name: "adapter-install", Kind: txn.Normal, Writes: append(config.InstallWrites(),
-		txn.Write{Role: store.RoleResult, Op: txn.OpReplace}, config.InstallOldWrite())}
-)
-
-func programTable(t testing.TB) *txn.Table {
-	t.Helper()
-	decls := append(txn.Internal(), store.Transactions()...)
-	decls = append(decls, config.Transactions()...)
-	decls = append(decls, engine.Transactions()...)
-	decls = append(decls, testInit, testInstall)
-	tab, err := txn.NewTable(decls...)
-	if err != nil {
-		t.Fatalf("NewTable: %v", err)
-	}
-	return tab
-}
-
-func mustMkdir(t testing.TB, mem *fsxtest.Mem, dir string) {
-	t.Helper()
-	if dir == "." {
-		return
-	}
-	if _, err := mem.Stat(dir); err == nil {
-		return
-	}
-	mustMkdir(t, mem, path.Dir(dir))
-	if err := fsx.MakeDir(mem, setupTag, dir); err != nil {
-		t.Fatalf("setup MakeDir(%q): %v", dir, err)
-	}
-}
-
-// logCapture keeps the messages the engine logs.
-type logCapture struct {
-	mu   sync.Mutex
-	msgs []string
-}
-
-func (l *logCapture) Enabled(context.Context, slog.Level) bool { return true }
-func (l *logCapture) Handle(_ context.Context, r slog.Record) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.msgs = append(l.msgs, r.Message)
-	return nil
-}
-func (l *logCapture) WithAttrs([]slog.Attr) slog.Handler { return l }
-func (l *logCapture) WithGroup(string) slog.Handler      { return l }
-
-func (l *logCapture) messages() []string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return append([]string(nil), l.msgs...)
-}
+func programTable(t testing.TB) *txn.Table { return harness.ProgramTable(t) }
 
 // rig is one process of the node over a disk.
 type rig struct {
@@ -108,7 +49,7 @@ type rig struct {
 	w      *txn.Writer
 	st     *store.Store
 	cfg    *config.Config
-	log    *logCapture
+	log    *harness.LogCapture
 	node   ident.NodeID
 	hw     clock.HighWater
 	seed   uint64
@@ -130,28 +71,16 @@ func withObserver(o txn.Observer) rigOption { return func(r *rig) { r.obs = o } 
 // adapter declares direct endpoints, at most maxDirect of them.
 func newRig(t testing.TB, maxDirect int, opts ...rigOption) *rig {
 	t.Helper()
-	r := &rig{t: t, mem: fsxtest.NewMem(), clk: clocktest.NewFake(t0), log: &logCapture{}, seed: 1}
-	r.node = mustNode(t, 7)
+	r := &rig{t: t, mem: fsxtest.NewMem(), clk: clocktest.NewFake(t0), log: &harness.LogCapture{}, seed: 1}
+	r.node = harness.NodeID()
 	for _, o := range opts {
 		o(r)
 	}
-	for _, d := range append([]string{"keys"}, store.StateDirs()...) {
-		mustMkdir(t, r.mem, d)
-	}
-	r.tab = programTable(t)
+	harness.MakeLayout(t, r.mem)
+	r.tab = harness.ProgramTable(t)
 	r.mount(r.mem)
-	r.initConfig()
-	r.installChat()
-	r.enableChat()
-	caps := adapterproto.Capabilities{Direct: &adapterproto.DirectCapabilities{MaxEndpoints: maxDirect}}
-	m, err := manifest.Parse([]byte(manifestText))
-	if err != nil {
-		t.Fatalf("manifest: %v", err)
-	}
-	r.admit, err = adapterreg.Admit(caps, m)
-	if err != nil {
-		t.Fatalf("Admit: %v", err)
-	}
+	r.cfg = harness.SeedNode(t, r.w, t0)
+	r.admit = harness.AdapterAdmission(t, maxDirect)
 	return r
 }
 
@@ -168,111 +97,17 @@ func mustNode(t testing.TB, b byte) ident.NodeID {
 // transaction layer and the configuration, as a start does before the engine.
 func (r *rig) mount(disk *fsxtest.Mem) {
 	r.t.Helper()
-	r.mem = disk
-	r.faulty = fsxtest.NewFaulty(r.t, disk)
-	r.w = txn.New(r.faulty, r.tab, r.obs)
-	if err := r.w.Recover(); err != nil {
-		r.t.Fatalf("Recover: %v", err)
-	}
-	r.st = store.New(r.w)
+	m := harness.Mount(r.t, r.tab, disk, r.obs)
+	r.mem, r.faulty, r.w, r.st = m.Mem, m.Faulty, m.Writer, m.Store
 	r.hw = clock.NewHighWater(time.Time{})
-}
-
-func (r *rig) initConfig() {
-	r.t.Helper()
-	plan, err := config.PlanInit(r.w.Reader())
-	if err != nil {
-		r.t.Fatalf("PlanInit: %v", err)
-	}
-	tx := r.w.Begin(testInit)
-	defer tx.Close()
-	if err := plan.MakeDirs(tx); err != nil {
-		r.t.Fatal(err)
-	}
-	if err := plan.WriteFiles(tx); err != nil {
-		r.t.Fatal(err)
-	}
-	if err := tx.Replace("marker", "init-marker", []byte("init"), fsx.ModePrivate); err != nil {
-		r.t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		r.t.Fatal(err)
-	}
-	if r.cfg, err = config.Load(r.w); err != nil {
-		r.t.Fatalf("Load: %v", err)
-	}
-}
-
-func (r *rig) installChat() {
-	r.t.Helper()
-	src := fsxtest.NewMem()
-	for p, c := range map[string]string{"sidera-adapter.json": manifestText, "bin/sidera-adapter-chat": "#!chat\n"} {
-		mustMkdir(r.t, src, path.Dir(p))
-		if err := fsx.Replace(src, setupTag, p, []byte(c), fsx.ModePrivate); err != nil {
-			r.t.Fatal(err)
-		}
-	}
-	staged, err := r.cfg.StageAdapter(src, bytes.NewReader(bytes.Repeat([]byte{9}, 8)))
-	if err != nil {
-		r.t.Fatalf("StageAdapter: %v", err)
-	}
-	plan, err := r.cfg.PlanInstall(staged)
-	if err != nil {
-		r.t.Fatalf("PlanInstall: %v", err)
-	}
-	var op admin.OperationID
-	op[0] = 1
-	res, err := store.PrepareAdminResult(store.AdminRecord{
-		Key: admin.RequestKey{ID: op}, Op: "adapter.install", Result: []byte(`{"installed":true}`),
-		At: t0, RetainUntil: t0.Add(store.AdminResultRetention),
-	})
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	tx := r.w.Begin(testInstall)
-	defer tx.Close()
-	if err := plan.DiscardStale(tx); err != nil {
-		r.t.Fatal(err)
-	}
-	if err := plan.Promote(tx); err != nil {
-		r.t.Fatal(err)
-	}
-	done, err := plan.Point(tx)
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	if err := store.PutAdminResult(tx, store.RoleResult, res); err != nil {
-		r.t.Fatal(err)
-	}
-	if err := plan.DiscardOld(tx); err != nil {
-		r.t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		r.t.Fatal(err)
-	}
-	done()
-}
-
-func (r *rig) enableChat() {
-	r.t.Helper()
-	var op admin.OperationID
-	op[0] = 2
-	req := config.Request{Key: admin.KeyFor(admin.LocalOwner(), op), Expected: r.cfg.Instances().Version}
-	if _, err := r.cfg.EnableAdapter(req, "chat", "chat", nil, nil, func(config.Instances) (json.RawMessage, error) {
-		return json.RawMessage(`{"enabled":true}`), nil
-	}); err != nil {
-		r.t.Fatalf("EnableAdapter: %v", err)
-	}
 }
 
 // deps is what the composition root hands the engine on this rig.
 func (r *rig) deps() engine.Deps {
 	r.seed++
-	var key [32]byte
-	key[0], key[1] = byte(r.seed), byte(r.seed>>8)
 	return engine.Deps{
 		Node: r.node, Clock: r.clk, HighWater: r.hw, RollbackPaused: r.paused,
-		Writer: r.w, Store: r.st, Config: r.cfg, Rand: rand.NewChaCha8(key),
+		Writer: r.w, Store: r.st, Config: r.cfg, Rand: harness.RandReader(r.seed),
 		Log: slog.New(r.log),
 	}
 }
@@ -426,7 +261,7 @@ func keyName(i int) string { return fmt.Sprintf("key-%04d", i) }
 
 func mustManifest(t testing.TB) manifest.Manifest {
 	t.Helper()
-	m, err := manifest.Parse([]byte(manifestText))
+	m, err := manifest.Parse([]byte(harness.ManifestText()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -528,7 +363,7 @@ func engineCaller(id ident.EndpointID) engine.Caller {
 // gives, with its configuration loaded and nothing started.
 func (r *rig) fork(disk *fsxtest.Mem) *rig {
 	r.t.Helper()
-	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &logCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params}
+	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params}
 	f.mount(disk)
 	var err error
 	if f.cfg, err = config.Load(f.w); err != nil {

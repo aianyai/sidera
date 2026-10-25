@@ -278,7 +278,7 @@ func TestRecoverDeliveryRunsItsPhasesInTheOrderOfTheStartupSteps(t *testing.T) {
 		t.Fatalf("RecoverDelivery: %v", err)
 	}
 	var steps []string
-	for _, m := range r.log.messages() {
+	for _, m := range r.log.Messages() {
 		if strings.HasPrefix(m, "startup step ") {
 			steps = append(steps, m)
 		}
