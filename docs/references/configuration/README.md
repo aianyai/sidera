@@ -54,7 +54,9 @@ edit would change the address of an endpoint.
 - **`version`** (versioned files) starts at 1 and counts changes of the whole
   collection: adding, changing or removing any member raises it by one, and the
   new version is written in the same replacement as the change. After a removal
-  the version is still readable.
+  the version is still readable. The largest version has no successor: a
+  change on it is refused (`invalid`, at `version`), because the next version
+  would wrap to 0, which the decoder refuses.
 - **`last_operation`** (versioned files) is the management operation that made
   the current version: `{"id": "<32 hex>", "person": "local" | "<person id>",
   "fingerprint": "<64 hex>", "result": {…}}`. It is written in the same
@@ -62,7 +64,12 @@ edit would change the address of an endpoint.
   by a crash. A file edited by hand has none. It is overwritten by the next
   change; an older operation id is then no longer answered from the file, and a
   request that repeats it meets the changed version and is a conflict, so it is
-  never executed twice.
+  never executed twice. The operation id is never zero: a change whose request
+  carries a zero id is refused (`invalid`, at `id`) before anything is written.
+- **No file is written that its own decoder refuses.** The encoders of the
+  versioned files refuse version 0 and a last operation with a zero id, with
+  the decoder's own check, so a value that no start could read never reaches
+  the disk even if a caller passes one.
 - **Canonical text.** The node writes two-space indentation, fixed field order,
   sorted map keys and a final newline. What the node writes decodes to the value
   it came from and encodes to the same bytes; what an owner wrote in another
@@ -552,6 +559,7 @@ endpoints and not to others for a reason nobody remembers.
 | An invalid file refuses startup, one row per file and failure | `TestInvalidFileRefusesStartupAndNamesTheFile`, `TestMissingDirectoryRefusesStartupAndNamesIt`, `TestFirstInvalidFileInFixedOrderIsNamed`, `TestWrongTypeIsNamedByItsPath` |
 | A preset without the statement is invalid | `TestPresetWithoutLocalSourcesIsInvalid`, `TestAddPresetWithoutLocalSourcesIsRefused`, `TestEveryPresetOnDiskMadeTheStatement` |
 | Expected versions, recording the operation | `TestExpectedVersionConflictPerCollection`, `TestVersionedChangeRecordsTheOperation`, `TestStaleVersionIsReportedBeforeAnInvalidValue` |
+| No file is written that its decoder refuses | `TestChangeWithoutOperationIDWritesNothing`, `TestEncodeRefusesAZeroOperationID`, `TestEncodeRefusesVersionZero`, `TestChangeRefusesToWrapTheVersion` |
 | Settings and their owners | `TestSettingsValidationDelegatesToOwningContract`, `TestEndpointSettingsValidationDelegatesToOwningContract`, `TestDefaultsComeFromTheirOwners`, `TestNodeSettingRanges`, `TestDiskReserveCoversTheQueueAndTheLogs`, `TestNodeSettingsPatch` |
 | Crash states and replay | `TestEveryConfigTransactionSurvivesACrashAtEveryPoint`, `TestCrashDuringAdapterGCReplay`, `TestInitSurvivesACrashAtEveryPoint`, `TestInitCrashNeverReplacesAnOwnersFile`, `TestEveryDeclaredCrashPointIsReached` |
 | Staging does not hold up the loop; modes of staged files; manifests are copies | `TestStagingDoesNotHoldUpTheWriterLoop`, `TestStagedFilesKeepTheirModes`, `TestAdaptersReturnsCopiesOfTheManifests` |

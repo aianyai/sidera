@@ -128,6 +128,9 @@ func DecodePresets(data []byte) (Presets, error) {
 
 // Encode returns the bytes of presets.json.
 func (p Presets) Encode() ([]byte, error) {
+	if err := checkEncodeVersion(uint64(p.Version)); err != nil {
+		return nil, err
+	}
 	w := presetsWire{Format: FormatVersion, Version: uint64(p.Version), Presets: make(map[string]presetWire, len(p.Items))}
 	for name, preset := range p.Items {
 		pw, err := preset.wire()

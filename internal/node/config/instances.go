@@ -89,6 +89,9 @@ func DecodeInstances(data []byte) (Instances, error) {
 
 // Encode returns the bytes of instances.json.
 func (i Instances) Encode() ([]byte, error) {
+	if err := checkEncodeVersion(uint64(i.Version)); err != nil {
+		return nil, err
+	}
 	w := instancesWire{Format: FormatVersion, Version: uint64(i.Version), Instances: make(map[string]instanceWire, len(i.Items))}
 	for name, in := range i.Items {
 		iw := instanceWire{Adapter: in.Adapter, Enabled: in.Enabled}

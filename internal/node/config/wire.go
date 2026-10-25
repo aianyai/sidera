@@ -85,6 +85,12 @@ func fileErrorFor(path string, kind FileKind, err error) error {
 	return &FileError{Path: path, Kind: kind, Reason: FileInvalid, Err: err}
 }
 
+// checkEncodeVersion refuses the version of a value that would be written as a
+// file its own decoder refuses.
+func checkEncodeVersion(version uint64) error {
+	return checkHeader(FormatVersion, version, true)
+}
+
 // checkHeader checks the format of a file and, for a versioned one, its version.
 func checkHeader(format int, version uint64, versioned bool) error {
 	if format != FormatVersion {
@@ -139,6 +145,9 @@ func (w *operationWire) operation() (*Operation, error) {
 func operationWireOf(op *Operation) (*operationWire, error) {
 	if op == nil {
 		return nil, nil
+	}
+	if op.ID.IsZero() {
+		return nil, invalidf("last_operation.id", "an operation id is never zero")
 	}
 	person := localPerson
 	if !op.Person.IsZero() {

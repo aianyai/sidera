@@ -207,6 +207,9 @@ func DecodeNode(data []byte) (Node, error) {
 
 // Encode returns the bytes of node.json.
 func (n Node) Encode() ([]byte, error) {
+	if err := checkEncodeVersion(uint64(n.Version)); err != nil {
+		return nil, err
+	}
 	maxQueue, err := durationSeconds("endpoint_defaults.max_queue_s", n.Settings.EndpointDefaults.MaxQueue)
 	if err != nil {
 		return nil, err

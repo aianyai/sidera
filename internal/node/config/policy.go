@@ -308,6 +308,9 @@ func DecodePolicy(data []byte) (PolicyFile, error) {
 
 // Encode returns the bytes of policy.json.
 func (p PolicyFile) Encode() ([]byte, error) {
+	if err := checkEncodeVersion(uint64(p.Version)); err != nil {
+		return nil, err
+	}
 	rules := p.Policy.Rules()
 	w := policyWire{Format: FormatVersion, Version: uint64(p.Version), Rules: make([]ruleWire, 0, len(rules))}
 	for _, r := range rules {

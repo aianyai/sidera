@@ -49,6 +49,12 @@ declared here or in the package that composes it. It reads no clock.
   decided here: the management layer runs `admin.CheckReplay` first, against the
   operations `LastOperations()` returns, and calls a change only when it says to
   execute.
+- **No file is written that its own decoder refuses.** A versioned encoder
+  refuses version 0 and an operation with a zero id, by the decoder's own
+  check. A change whose request has a zero operation id, or that would raise
+  the largest version past it, is refused with `ChangeInvalid` before anything
+  is written: a file the next start refuses to read would leave the node unable
+  to start.
 - **The operation is recorded in the file it changed.** `last_operation` holds
   the operation id, the person, the fingerprint and the result, written in the
   same replacement as the new version. The management layer builds the result
@@ -166,7 +172,7 @@ The prompt turns and the endpoint defaults are not here: they are
 
 The named tests are in `load_test.go` (an invalid file refuses startup, one row
 per kind of file and failure), `preset_test.go` (the statement about local
-sources), `version_test.go` (expected versions), `settings_test.go` (settings
+sources), `version_test.go` (expected versions), `writable_test.go` (nothing is written that its decoder refuses), `settings_test.go` (settings
 delegate to their owners), `crash_test.go` (every transaction from every crash
 state, a crash during the repair, `init` crashing), `clean_test.go` (a clean run
 leaves no recovery work), `init_test.go` and `golden_test.go`. `fuzz_test.go` has

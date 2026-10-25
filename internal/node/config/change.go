@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"slices"
 	"strings"
 
@@ -39,11 +40,25 @@ func invalidChange(err error) error {
 	return &ChangeError{Reason: ChangeInvalid, Err: err}
 }
 
+// nextVersion is the version a change produces. The largest version has no
+// successor: it would wrap to 0, which no versioned file may hold.
+func nextVersion(current admin.Version) (admin.Version, error) {
+	if current == admin.Version(math.MaxUint64) {
+		return 0, &ChangeError{Reason: ChangeInvalid, Field: "version", Err: errors.New("the version cannot be raised any further")}
+	}
+	return current + 1, nil
+}
+
 // operationOf builds the operation a change records, from the request and the
-// result the management layer built for the state the change produces.
+// result the management layer built for the state the change produces. A request
+// without an operation id is refused: the file would record an operation that
+// its own decoder refuses.
 func operationOf[T any](req Request, build ResultFunc[T], after T) (*Operation, error) {
 	if build == nil {
 		return nil, errors.New("config: a versioned change needs a ResultFunc")
+	}
+	if req.ID.IsZero() {
+		return nil, &ChangeError{Reason: ChangeInvalid, Field: "id", Err: errors.New("a versioned change needs an operation id")}
 	}
 	raw, err := build(after)
 	if err != nil {
@@ -85,7 +100,11 @@ func (c *Config) SetNodeSettings(req Request, patch []byte, result ResultFunc[No
 	if p.isEmpty() {
 		return Node{}, &ChangeError{Reason: ChangeNothingToChange}
 	}
-	next := Node{Version: cur.Version + 1, Settings: p.apply(cur.Settings)}
+	version, err := nextVersion(cur.Version)
+	if err != nil {
+		return Node{}, err
+	}
+	next := Node{Version: version, Settings: p.apply(cur.Settings)}
 	if err := next.Settings.Validate(); err != nil {
 		return Node{}, invalidChange(err)
 	}
@@ -125,7 +144,11 @@ func (c *Config) AddPreset(req Request, name string, preset []byte, result Resul
 		return Presets{}, &ChangeError{Reason: ChangePresetExists, Field: name}
 	}
 	next := clonePresets(cur)
-	next.Version++
+	version, err := nextVersion(next.Version)
+	if err != nil {
+		return Presets{}, err
+	}
+	next.Version = version
 	next.Items[name] = p
 	return c.commitPresets(req, next, result)
 }
@@ -142,7 +165,11 @@ func (c *Config) RemovePreset(req Request, name string, result ResultFunc[Preset
 		return Presets{}, &ChangeError{Reason: ChangePresetUnknown, Field: name}
 	}
 	next := clonePresets(cur)
-	next.Version++
+	version, err := nextVersion(next.Version)
+	if err != nil {
+		return Presets{}, err
+	}
+	next.Version = version
 	delete(next.Items, name)
 	return c.commitPresets(req, next, result)
 }
@@ -230,7 +257,11 @@ func (c *Config) EnableAdapter(req Request, instance, adapter string, instanceCo
 		return Instances{}, &ChangeError{Reason: ChangeAdapterNotInstalled, Field: adapter}
 	}
 	next := cloneInstances(st.instances)
-	next.Version++
+	version, err := nextVersion(next.Version)
+	if err != nil {
+		return Instances{}, err
+	}
+	next.Version = version
 	if exists {
 		in := next.Items[instance]
 		in.Enabled = true
@@ -255,7 +286,11 @@ func (c *Config) DisableAdapter(req Request, instance string, open OpenEndpoints
 		return Instances{}, &ChangeError{Reason: ChangeInstanceUnknown, Field: instance}
 	}
 	next := cloneInstances(st.instances)
-	next.Version++
+	version, err := nextVersion(next.Version)
+	if err != nil {
+		return Instances{}, err
+	}
+	next.Version = version
 	in := next.Items[instance]
 	in.Enabled = false
 	next.Items[instance] = in
@@ -292,7 +327,11 @@ func (c *Config) SetEndpointSettings(req Request, instance string, endpoint iden
 		return Instances{}, &ChangeError{Reason: ChangeEndpointUnknown, Field: endpoint.String()}
 	}
 	next := cloneInstances(st.instances)
-	next.Version++
+	version, err := nextVersion(next.Version)
+	if err != nil {
+		return Instances{}, err
+	}
+	next.Version = version
 	cur := next.Items[instance]
 	if cur.Endpoints == nil {
 		cur.Endpoints = map[ident.EndpointID]EndpointOverride{}
