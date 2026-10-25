@@ -50,6 +50,10 @@ type supervisor struct {
 	// anything is due.
 	busy atomic.Int32
 	asks chan chan bool
+	// moves counts every change of busy, so that a reader that asked whether the
+	// supervisor is working and then read something else can tell whether the
+	// supervisor moved in between.
+	moves atomic.Uint64
 
 	// Used by the supervisor's goroutine only.
 	timers   map[clock.Timer]struct{}
@@ -236,8 +240,8 @@ func (s *supervisor) park(w waits, idle bool) (slot, error) {
 		stop = nil
 	}
 	if idle {
-		s.busy.Add(-1)
-		defer s.busy.Add(1)
+		s.addBusy(-1)
+		defer s.addBusy(1)
 	}
 	for {
 		var start <-chan time.Time
@@ -261,16 +265,22 @@ func (s *supervisor) park(w waits, idle bool) (slot, error) {
 			return slotAbort, nil
 		case <-start:
 			if idle {
-				s.busy.Add(1)
+				s.addBusy(1)
 			}
 			s.startWaitExpired()
 			if idle {
-				s.busy.Add(-1)
+				s.addBusy(-1)
 			}
 		case reply := <-s.asks:
 			reply <- s.due(w)
 		}
 	}
+}
+
+// addBusy changes the number of things the supervisor is doing and notes the move.
+func (s *supervisor) addBusy(d int32) {
+	s.busy.Add(d)
+	s.moves.Add(1)
 }
 
 // due reports whether anything the supervisor would act on is waiting: a timer
@@ -327,29 +337,43 @@ func (s *supervisor) working() bool {
 const askAttempts = 1000
 
 // counts is what the host counts of the connection of the instance. Whether the
-// supervisor is working is asked before the counts are read and again after: a
-// supervisor that was parked and idle at both ends was idle while they were read,
-// and one that went from the start of a request to waiting for its answer between
-// them is reported as working, so a caller never sees "idle" together with counts
-// that were taken before the request the supervisor is waiting for was counted.
+// supervisor is working is asked before the counts are read, and the answer holds
+// only if the supervisor did not move meanwhile: a supervisor that was parked and
+// idle throughout was idle while the counts were read, and one that moved (it
+// started a request and went on to wait for its answer, say) is asked again, and
+// reported as working if it keeps moving. So a caller never sees "idle" together
+// with counts that were taken before the request the supervisor waits for was
+// counted.
 func (s *supervisor) counts() ConnCounts {
-	select {
-	case <-s.done:
-		return ConnCounts{}
-	default:
-	}
-	working := s.working()
-	s.mu.Lock()
-	cur, service := s.cur, s.service
-	s.mu.Unlock()
 	var out ConnCounts
-	if cur != nil {
-		out = cur.counts()
+	for range countsAttempts {
+		select {
+		case <-s.done:
+			return ConnCounts{}
+		default:
+		}
+		before := s.moves.Load()
+		working := s.working()
+		s.mu.Lock()
+		cur, service := s.cur, s.service
+		s.mu.Unlock()
+		out = ConnCounts{}
+		if cur != nil {
+			out = cur.counts()
+		}
+		out.Connected = service != nil
+		out.Working = working
+		if working || s.moves.Load() == before {
+			return out
+		}
 	}
-	out.Connected = service != nil
-	out.Working = working || s.working()
+	out.Working = true
 	return out
 }
+
+// countsAttempts is how many times counts reads again when the supervisor moved
+// while it read.
+const countsAttempts = 100
 
 // rpc sends a request to the adapter and waits for the answer for at most limit
 // on the host's clock. The result is decoded and validated into result.
