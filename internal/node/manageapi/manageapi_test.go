@@ -564,3 +564,20 @@ func TestConcurrentRequestsAreAnsweredEachItsOwn(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// An endpoint is of this node or it is not an endpoint of this node: an address of
+// another node never reaches the engine, whose endpoints are known by the part of
+// the address that is theirs alone.
+func TestAnAddressOfAnotherNodeIsNoEndpointOfThisOne(t *testing.T) {
+	r := newRig(t)
+	other, err := ident.NodeIDFromBytes(bytes.Repeat([]byte{0x2a}, ident.NodeIDLen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreign := ident.Address{Node: other, Endpoint: endpointOf(9)}.String()
+	status, out := r.post("endpoints.close", `{"operation_id":"`+opID(1)+`","params":{"endpoint":"`+foreign+`"}}`)
+	r.wantError(404, "not_found", "endpoint_unknown", status, out)
+	if n := len(r.svc.calls()); n != 0 {
+		t.Errorf("the engine was asked %d times about an endpoint of another node", n)
+	}
+}

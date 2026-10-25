@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,6 +31,24 @@ func TestShutdownRunsInTheOrderOfTheDesign(t *testing.T) {
 	var phaseAtInterfaces, phaseAtAdapters engine.Phase
 	var doneAtAdapters bool
 	var d *daemon.Daemon
+	// the lock is let go at the very end: when it goes, the engine has ended and
+	// the log has been closed
+	osfs, err := fsx.OpenOS(c.Home, seeded(8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var released, engineDoneAtRelease, logClosedAtRelease bool
+	w := &lockWatch{FS: osfs}
+	w.onUnlock = func() {
+		released = true
+		select {
+		case <-d.Engine().Done():
+			engineDoneAtRelease = true
+		default:
+		}
+		logClosedAtRelease = w.openFiles.Load() == 0
+	}
+	c.FS = w
 	c.Attach = p.attachments()
 	// the lock is held until the end: another daemon cannot start while any step runs
 	stillLocked := func(where string) {
@@ -56,7 +75,6 @@ func TestShutdownRunsInTheOrderOfTheDesign(t *testing.T) {
 		}
 		return p.stop("adapters")(ctx)
 	}
-	var err error
 	d, err = daemon.Start(context.Background(), c)
 	if err != nil {
 		t.Fatal(err)
@@ -64,6 +82,9 @@ func TestShutdownRunsInTheOrderOfTheDesign(t *testing.T) {
 	d.RequestStop("test")
 	if err := d.Wait(); err != nil {
 		t.Fatalf("Wait: %v", err)
+	}
+	if !released || !engineDoneAtRelease || !logClosedAtRelease {
+		t.Errorf("the lock was let go: %v, with the engine ended: %v and the log closed: %v; want all three", released, engineDoneAtRelease, logClosedAtRelease)
 	}
 	want := []string{
 		"shutdown 1 begin", "shutdown 1 end", "shutdown 2 begin", "shutdown 2 end", "shutdown 3 begin", "shutdown 3 end",
@@ -89,6 +110,42 @@ func TestShutdownRunsInTheOrderOfTheDesign(t *testing.T) {
 	}
 	// the lock is let go: the same directory starts again
 	started(t, c)
+}
+
+// lockWatch is a file system whose lock tells when it is let go, and that counts
+// the files opened for appending that are not closed yet.
+type lockWatch struct {
+	fsx.FS
+	onUnlock  func()
+	openFiles atomic.Int32
+}
+
+func (l *lockWatch) Lock(p string) (func() error, error) {
+	unlock, err := l.FS.Lock(p)
+	if err != nil {
+		return nil, err
+	}
+	return func() error { l.onUnlock(); return unlock() }, nil
+}
+
+func (l *lockWatch) OpenAppend(tag fsx.Tag, p string) (fsx.File, error) {
+	f, err := l.FS.OpenAppend(tag, p)
+	if err != nil {
+		return nil, err
+	}
+	l.openFiles.Add(1)
+	return &watchedFile{File: f, l: l}, nil
+}
+
+type watchedFile struct {
+	fsx.File
+	l    *lockWatch
+	once sync.Once
+}
+
+func (f *watchedFile) Close() error {
+	f.once.Do(func() { f.l.openFiles.Add(-1) })
+	return f.File.Close()
 }
 
 // initialConfigOf is the configuration of a second daemon over the home of c.
