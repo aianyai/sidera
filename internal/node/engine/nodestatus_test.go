@@ -81,7 +81,7 @@ func TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	storedBefore := len(scanOf(t, h).Admin)
+	storedBefore := adminFiles(t, h)
 	got, err := h.Engine().ExportRevocation(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -103,8 +103,8 @@ func TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere(t *t
 		}
 	}
 	quiet(t, h)
-	if sc := scanOf(t, h); len(sc.Admin) != storedBefore {
-		t.Errorf("%d results stored under state/admin after an export, %d before", len(sc.Admin), storedBefore)
+	if after := adminFiles(t, h); len(after) != len(storedBefore) {
+		t.Errorf("%d results stored under state/admin after an export, %d before", len(after), len(storedBefore))
 	}
 	gone, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -120,4 +120,18 @@ func nodeStatusOf(t testing.TB, e *engine.Engine) engine.NodeStatus {
 		t.Fatalf("Status: %v", err)
 	}
 	return st
+}
+
+// adminFiles are the files under state/admin, read from the disk itself.
+func adminFiles(t testing.TB, h *harness.H) []string {
+	t.Helper()
+	entries, err := h.Disk().ReadDir(store.AdminDir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", store.AdminDir, err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name)
+	}
+	return names
 }

@@ -231,6 +231,9 @@ func TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames(t *testing.T) {
 	e := r.start()
 	ctx := context.Background()
 
+	if got := nodeStatusOf(t, e).AlertsOpen; got != 2 {
+		t.Errorf("%d alerts open before any was acknowledged, want 2", got)
+	}
 	_, err := e.Execute(ctx, ackCommand(85, "ack an alert nobody raised", store.AlertID{0xff}))
 	wantReason(t, err, engine.ReasonAlertUnknown)
 

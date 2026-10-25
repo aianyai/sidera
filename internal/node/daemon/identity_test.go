@@ -336,6 +336,10 @@ func TestARollbackPauseIsKeptOnDiskAcrossARestartUntilTheOwnerClearsIt(t *testin
 	if status != 200 || !strings.Contains(string(body), `"rollback_paused":true`) {
 		t.Fatalf("status after the restart: %d %s; want the pause kept", status, body)
 	}
+	// and it is shown with the time it began, which is the one on disk
+	if want := `"rollback_paused_since":"` + paused.RollbackPausedSince.UTC().Format(time.RFC3339) + `"`; !strings.Contains(string(body), want) {
+		t.Errorf("status after the restart: %s; want it to say %s", body, want)
+	}
 
 	// A certificate that is due is not signed while the pause lasts.
 	serial, _ := certificateOnDisk(t, c.Home)
