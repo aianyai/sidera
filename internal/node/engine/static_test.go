@@ -16,7 +16,7 @@ import (
 func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 	allowed := []string{
 		"AdapterAdmitted", "AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CloseEndpoint", "Counts", "Declare", "Done",
-		"Endpoints", "Err", "Phase", "Quiesce", "RaiseAlert", "RecoverDelivery", "RegisterDirect", "Serve",
+		"Endpoints", "Err", "Execute", "Phase", "Quiesce", "RaiseAlert", "RecoverDelivery", "RegisterDirect", "Serve",
 		"Start", "Stop", "SystemAddress", "UnregisterDirect",
 	}
 	typ := reflect.TypeOf(&engine.Engine{})

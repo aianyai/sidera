@@ -32,8 +32,7 @@ func TestCloseEndpointAnswersForWhatCannotBeClosed(t *testing.T) {
 		{"the system endpoint", ident.SystemEndpoint(), 0, ReasonEndpointUnknown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := e.closeEndpoint(now, tc.id, nil)
-			o := res.Outcome
+			o, _, err := e.closeEndpoint(now, tc.id, nil)
 			if tc.reason != 0 {
 				if r, ok := ReasonOf(err); !ok || r != tc.reason {
 					t.Errorf("error %v, want reason %s", err, tc.reason)

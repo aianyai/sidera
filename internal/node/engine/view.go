@@ -41,7 +41,9 @@ type view struct {
 
 	// results are the stored results of administrative operations by request key,
 	// as far as the loop needs them: the fingerprint that tells a resend of a
-	// request from the reuse of its identifier, and the answer to hand back.
+	// request from the reuse of its identifier, and the answer to hand back. They
+	// come from the two places results are kept, state/admin/ and the operation
+	// each versioned file of config/ records.
 	results map[admin.RequestKey]storedResult
 
 	bodyRefs   bodyCounts
@@ -137,8 +139,11 @@ func (v *view) putEndpoint(rec store.EndpointRecord, decl authz.Declaration) {
 
 // putResult records the stored result of an administrative operation as it is on
 // disk now.
-func (v *view) putResult(a store.AdminRecord) {
-	v.results[a.Key] = storedResult{fingerprint: a.Fingerprint, result: a.Result}
+func (v *view) putResult(a store.AdminRecord) { v.putStored(a.Key, a.Fingerprint, a.Result) }
+
+// putStored records a result that is on disk, wherever its operation kept it.
+func (v *view) putStored(key admin.RequestKey, fp admin.Fingerprint, result []byte) {
+	v.results[key] = storedResult{fingerprint: fp, result: result}
 }
 
 // OpenEndpoints is how many endpoints are open or being created: the ones that

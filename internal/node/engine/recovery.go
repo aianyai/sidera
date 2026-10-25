@@ -216,6 +216,7 @@ func Open(ctx context.Context, d Deps, p Params) (*Engine, ScanReport, error) {
 			if e.view, err = buildView(d.Node, sc); err != nil {
 				return nil, rep, err
 			}
+			e.view.addConfigResults(d.Config.LastOperations())
 			rep.Endpoints, rep.Unfinished = e.view.OpenEndpoints(), e.view.Unfinished()
 			return e, rep, nil
 		}

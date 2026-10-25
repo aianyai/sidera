@@ -17,11 +17,14 @@ type AgentService interface {
 
 // ManageService is what the management interface asks of the engine. The methods
 // are added as the engine learns to do them.
+//
+// Everything that changes state comes through Execute, the one door of the
+// administrative rules (manage.go); the others only read.
 type ManageService interface {
 	Endpoints(ctx context.Context) ([]EndpointView, error)
-	CloseEndpoint(ctx context.Context, r CloseRequest) (CloseResult, error)
 	Counts(ctx context.Context) (Counts, error)
 	Alerts(ctx context.Context) ([]store.AlertRecord, error)
+	Execute(ctx context.Context, c ManagementCommand) (StoredResult, error)
 }
 
 var (

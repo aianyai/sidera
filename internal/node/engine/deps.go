@@ -28,6 +28,7 @@ type Store interface {
 	EndpointClose(ep store.EndpointRecord, result *store.AdminRecord) error
 	EndpointDrain(b store.DrainBatch) ([]store.InRecord, error)
 	AlertRaise(a store.AlertRecord) error
+	DaemonStop(result store.AdminRecord) error
 
 	CtlEffectReplay(eps []store.EndpointRecord) error
 	InstanceDrainReplay(closed []store.EndpointRecord, b store.DrainBatch) ([]store.InRecord, error)
@@ -44,6 +45,7 @@ var _ Store = (*store.Store)(nil)
 type Config interface {
 	Node() config.Node
 	Instances() config.Instances
+	LastOperations() []config.Operation
 	EndpointSettings(instance string, id ident.EndpointID) config.EndpointSettings
 	DirectID(instance, key string, rnd io.Reader) (config.IDChange, error)
 	PutEndpointIDs(tx *txn.Tx, ch config.IDChange) (config.AfterCommit, error)

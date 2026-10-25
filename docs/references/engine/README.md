@@ -72,15 +72,40 @@ after `RetryBackoff`, and the registration waits for that too. `Quiesce` is not
 quiet while one waits. A runtime endpoint cannot be closed: it
 stands for its instance.
 
-When an administrative operation asks for the close, one loop command does what
-the rules for such operations fix: a request whose key and fingerprint were seen
-returns the stored result and executes nothing (`Replayed`), the same key with
-another fingerprint is refused (`operation_id_reused`), and otherwise the loop
-closes the endpoint and builds the result from the outcome it reached
-(`closed`, `closing` for a session endpoint, `already_closed` for one that was
-closed before), then stores it with the fingerprint in the transaction of the head
-record. A close of an endpoint that is closed already writes that record again as
-it is, only to carry the result.
+When the owner asks for the close, the request comes through the door of the
+administrative operations (below), and its operation builds the result from the
+outcome the close reached (`closed`, `closing` for a session endpoint,
+`already_closed` for one that was closed before) and stores it with the
+fingerprint in the transaction of the head record. A close of an endpoint that is
+closed already writes that record again as it is, only to carry the result.
+
+**The door of the administrative operations.** `Execute` takes a management
+request that changes state, after the interface has judged who asks and whether
+the request is well formed, and carries it out as one command of the loop. A
+request whose key and fingerprint were seen returns the stored result and runs
+nothing (`Replayed`), the same key with another fingerprint is refused
+(`operation_id_reused`), and otherwise the operation runs and its result is stored
+with the fingerprint in the transaction of its effect. The rule that one
+identifier has one result has this one home, so that two concurrent resends cannot
+both run: the lookup and the storing are one step of the single writer, and no
+operation and no interface repeats the check. A result is kept in one of two
+places, by the kind of operation: under `state/admin/` for an operation with no
+file of its own to carry it (closing an endpoint, stopping the daemon), and in the
+file that a versioned change writes (the `last_operation` of `node.json`,
+`presets.json`, `instances.json`), in the same replacement as the change. The
+lookup reads both: `Open` loads the results of `state/admin/` with the scan and
+the operations of the versioned files from the configuration, and every command
+that stores a result updates the table, so a resend is answered the same before and
+after a restart. A request that is refused stores nothing and its identifier stays
+free. The expected version of a versioned setting is handed to the operation and is
+checked inside the change that writes the file, by the package that owns it: the
+check and the write are one step, and `admin.CheckVersion` is called there and
+nowhere else. `StoredResult.Stop` says that the daemon is to shut down; it follows
+the operation, not the result, so the resend of a request that stops the daemon
+asks for the stop again. An operation is a value of a type of the engine, because
+its effect needs the view, the store and the configuration that only the loop may
+touch; the owner of another operation adds its type next to `CloseEndpointOp` and
+`StopDaemonOp`.
 
 `Declare` changes the declaration of the endpoint the caller is: `ByToken` is the
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's
@@ -239,7 +264,10 @@ reproducible).
 | The 257th endpoint is refused | `endpoints.go` (`registerDirect`) | `TestEndpointBeyondNodeCapRefused`, `TestTheNodeCapCountsOtherKindsOfEndpointOnTheRegistrationPath`, `TestInstanceLimitRefusesBeforeTheNodeCap` |
 | Same key, same endpoint; a new token on reopening | `endpoints.go`, `tokens.go` | `TestSameKeyGivesTheSameEndpointAcrossARestart`, `TestReopeningAnEndpointKeepsItsIdAndGivesItANewToken` |
 | The registration crashes anywhere | `transactions.go` | `TestDirectRegisterRecoversFromACrashAtEveryPoint` |
-| The result of a close is stored with it, and replayed | `endpoints.go` (`closeEndpoint`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint`, `TestAResendOfAClosingReturnsTheStoredResultAndAReusedIdentifierIsRefused` |
+| The result of a close is stored with it | `endpoints.go` (`closeEndpoint`), `manage.go` (`CloseEndpointOp`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint` |
+| One identifier has one result, for every operation and every place a result is kept | `manage.go` (`Execute`, `execute`, `addConfigResults`), `recovery.go` (`Open`) | `TestAResendReturnsTheStoredResultAndAReusedIdentifierIsRefused`, `TestConcurrentResendsOfOneRequestRunOnce`, `TestARefusedRequestStoresNothingAndTheIdentifierStaysFree`, `TestAVersionedChangeIsAppliedOnceAndAStaleOneNeverIsApplied` |
+| The door is closed while the node starts and while it stops; what is not a change does not come through it | `manage.go`, `engine.go` (`step`) | `TestExecuteIsRefusedWhileRecoveringAndWhileStopping`, `TestExecuteRefusesAnOperationThatChangesNothing` |
+| A request that stops the daemon says so, resent or not | `manage.go` (`StopDaemonOp`, `StoredResult.Stop`) | `TestStopFollowsTheOperationOfTheRequest` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |

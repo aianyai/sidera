@@ -3,8 +3,6 @@ package engine_test
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"reflect"
 	"syscall"
 	"testing"
 	"time"
@@ -87,23 +85,11 @@ func TestClosingAnEndpointThatIsClosedAlreadySaysSo(t *testing.T) {
 		t.Fatalf("first close: %+v, %v", res, err)
 	}
 	res, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a})
-	if err != nil || res.Outcome != engine.CloseOutcomeAlreadyClosed || res.Result != nil {
-		t.Errorf("second close: %+v, %v; want already closed and no stored result", res, err)
+	if err != nil || res.Outcome != engine.CloseOutcomeAlreadyClosed {
+		t.Errorf("second close: %+v, %v; want already closed", res, err)
 	}
 	if got := r.commits("endpoint-close"); got != 1 {
 		t.Errorf("%d transactions closed the endpoint, want the first only", got)
-	}
-}
-
-// closeOp is the operation that closes an endpoint, as the management interface
-// builds it: the identifier of the request, the fingerprint of its content and the
-// shape of its result.
-func closeOp(b byte, content string) *engine.CloseOperation {
-	var op admin.OperationID
-	op[0] = b
-	return &engine.CloseOperation{
-		Key: admin.KeyFor(admin.LocalOwner(), op), Fingerprint: sha256.Sum256([]byte(content)), Name: "endpoints.close",
-		Encode: func(o engine.CloseOutcome) ([]byte, error) { return []byte(`{"outcome":"` + o.String() + `"}`), nil },
 	}
 }
 
@@ -125,8 +111,8 @@ func TestCloseStoresTheResultOfTheOperationWithTheHeadRecord(t *testing.T) {
 	e := r.start()
 	a := register(t, e, "a")
 	before := r.scan().Admin // what the setting up of the node wrote
-	op := closeOp(42, "close a")
-	res, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a, Operation: op})
+	cmd := closeCommand(42, "close a", a)
+	res, err := e.Execute(context.Background(), cmd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,8 +123,8 @@ func TestCloseStoresTheResultOfTheOperationWithTheHeadRecord(t *testing.T) {
 	if len(after) != len(before)+1 {
 		t.Fatalf("%d stored results, want the %d of the setting up and exactly one for the close", len(after), len(before))
 	}
-	found, ok := r.adminResults()[op.Key]
-	if !ok || string(found.Result) != `{"outcome":"closed"}` || found.Op != "endpoints.close" || found.Fingerprint != op.Fingerprint {
+	found, ok := r.adminResults()[cmd.Key]
+	if !ok || string(found.Result) != `{"outcome":"closed"}` || found.Op != "endpoints.close" || found.Fingerprint != cmd.Fingerprint {
 		t.Errorf("the stored result is %+v (found %v)", found, ok)
 	}
 	if got := r.commits("endpoint-close"); got != 1 {
@@ -163,15 +149,15 @@ func TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint(t *testing.T) 
 	for _, tc := range []struct {
 		name string
 		id   ident.EndpointID
-		op   *engine.CloseOperation
+		cmd  engine.ManagementCommand
 		want string
 	}{
-		{"a direct endpoint", direct, closeOp(101, "a"), "closed"},
-		{"a session endpoint", session, closeOp(102, "b"), "closing"},
-		{"an endpoint that is closed already", direct, closeOp(103, "c"), "already_closed"},
+		{"a direct endpoint", direct, closeCommand(101, "a", direct), "closed"},
+		{"a session endpoint", session, closeCommand(102, "b", session), "closing"},
+		{"an endpoint that is closed already", direct, closeCommand(103, "c", direct), "already_closed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: tc.id, Operation: tc.op})
+			res, err := e.Execute(context.Background(), tc.cmd)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -179,44 +165,10 @@ func TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint(t *testing.T) 
 			if string(res.Result) != want {
 				t.Errorf("answered %s, want %s", res.Result, want)
 			}
-			if got := r.adminResults()[tc.op.Key]; string(got.Result) != want {
+			if got := r.adminResults()[tc.cmd.Key]; string(got.Result) != want {
 				t.Errorf("stored %s, want %s", got.Result, want)
 			}
 		})
-	}
-}
-
-// One identifier has one result: a resend of the request returns the stored
-// result without closing or writing anything, and the identifier of another
-// request is refused. Without the replay check the second close would store
-// already_closed over the answer the first one gave.
-func TestAResendOfAClosingReturnsTheStoredResultAndAReusedIdentifierIsRefused(t *testing.T) {
-	noLeaks(t)
-	r := newRig(t, 10)
-	e := r.start()
-	a := register(t, e, "a")
-	ctx := context.Background()
-	first, err := e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: a, Operation: closeOp(7, "close a")})
-	if err != nil || string(first.Result) != `{"outcome":"closed"}` {
-		t.Fatalf("first: %+v, %v", first, err)
-	}
-	before := r.snapshot()
-
-	again, err := e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: a, Operation: closeOp(7, "close a")})
-	if err != nil || !again.Replayed || string(again.Result) != `{"outcome":"closed"}` {
-		t.Errorf("a resend answered %+v, %v; want the stored result, replayed", again, err)
-	}
-	_, err = e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: a, Operation: closeOp(7, "close b")})
-	wantReason(t, err, engine.ReasonOperationIDReused)
-	if !reflect.DeepEqual(before, r.snapshot()) {
-		t.Error("a resend and a reused identifier wrote to the disk")
-	}
-	// The stored result is still what the first close said, after a restart too.
-	r.restart()
-	e = r.start()
-	again, err = e.CloseEndpoint(ctx, engine.CloseRequest{Endpoint: a, Operation: closeOp(7, "close a")})
-	if err != nil || !again.Replayed || string(again.Result) != `{"outcome":"closed"}` {
-		t.Errorf("after a restart a resend answered %+v, %v", again, err)
 	}
 }
 

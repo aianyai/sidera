@@ -29,11 +29,12 @@ commands and add their methods to this list.
 | `Quiesce` | Returns when no command waits, nothing is due and no goroutine of the engine runs. |
 | `AdapterAdmitted`, `RegisterDirect`, `UnregisterDirect` | What the adapter host calls: the admission of an instance, and the registration and unregistration of its direct endpoints. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
-| `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseOperation`, `CloseResult`, `Counts`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and `endpoint close`, the numbers of the status, and the alerts. A close that an administrative operation asks for is one command: replay check, close, and the result built from the outcome, stored in the same transaction in every outcome. |
+| `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseResult`, `Counts`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and of a close the engine's own features ask for, the numbers of the status, and the alerts. |
+| `Execute`, `ManagementCommand`, `StoredResult`, `Operation`, `CloseEndpointOp`, `StopDaemonOp` | The one door of every administrative operation of the owner: the replay check, the operation, and the storing of its result with the fingerprint are one command of the loop. The owner's request to close an endpoint and to stop the daemon are the two operations there are; the package that owns the effect of another adds its type here. |
 | `PlanRecovery`, `RecoveryPlan` | The work of the recovery rules as a pure function of a scan. |
 | `Reason`, `Refusal`, `ReasonOf` | The closed set of reasons a method refuses for; the interface packages alone map them to the wire. |
 | `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register`. |
-| `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. |
+| `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. Everything of `ManageService` that changes state is `Execute`. |
 | `Store`, `Config`, `Beginner`, `Adapters` | What the engine asks of the store, the configuration, the transaction writer and the adapter host. |
 
 ## Rules
@@ -54,6 +55,21 @@ commands and add their methods to this list.
   room in a full inbox and is then refused with `ReasonLoopBusy`. An internal one
   (the adapter host, the engine's workers, the recovery entry) waits, because its
   order must be kept and its back pressure is the buffer behind it.
+- **One door for administrative operations, and the order is the engine's.**
+  `Execute` is a command of the loop: the identifier of the request is looked up
+  in every stored result, a resend of the same request returns the stored result
+  and runs nothing, the identifier of another request is refused with
+  `ReasonOperationIDReused`, and otherwise the operation runs and its result is
+  stored with the fingerprint in the transaction of its effect. The lookup covers
+  both places a result is kept (`state/admin/` and the operation each versioned
+  file of `config/` records), loaded at `Open`; no operation does a replay check of
+  its own and no interface does one before the engine. A refused request stores
+  nothing, so its identifier stays free. The expected version of a versioned
+  setting is handed to the operation, and the check is inside the change that
+  writes the file, by the package that owns it (`admin.CheckVersion` in
+  `config`), because the check and the write are one step; it is not made a second
+  time here. `StoredResult.Stop` follows the operation, so a resend of a request
+  that stops the daemon asks for the stop again.
 - **One reading of the clock per command**, observed against the high water mark
   before anything else. A wall clock set back beyond the tolerance pauses new
   work that depends on a deadline until the owner clears it; moving the clock on
@@ -129,6 +145,10 @@ commands and add their methods to this list.
 - Admit an adapter instance with `AdapterAdmitted` before its endpoints register,
   and only an instance the configuration has enabled.
 - Give `Deps.Rand` a reader the engine alone uses; it is read in the loop.
+- Call `Execute` only for a request that `admin.Authorize` allowed and
+  `admin.ValidateRequest` passed, with the key made by `admin.KeyFor` for the
+  actor that was allowed, and run what `StoredResult.Stop` asks for after the
+  answer was written.
 - Treat `Err() != nil` after `Done` as the order to exit and rescan.
 - Run the long work of a periodic task outside the loop: a task runs in it, and
   the longest stall of the loop is what an adapter's notifications have to
@@ -146,7 +166,7 @@ in the rig.
 
 `endpoints_test.go` has `TestEndpointBeyondNodeCapRefused` and the cap counted over
 other kinds of endpoint; `close_test.go` the
-closing and its chunks; `declare_test.go` the declaration and who may make it;
+closing and its chunks; `execute_test.go` the door of the administrative operations; `declare_test.go` the declaration and who may make it;
 `recovery_test.go` the scan entry and the recovery entry; `loop_test.go` the
 loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
