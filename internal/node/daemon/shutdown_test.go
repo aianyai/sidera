@@ -24,7 +24,7 @@ import (
 // An adapter must never be stopped while a request that depends on it can still
 // come in, and the lock must go last: while it is held no other daemon starts over
 // state that this one is still writing.
-func TestShutdownRunsInTheOrderOfTheDesign(t *testing.T) {
+func TestShutdownRunsInItsFixedOrder(t *testing.T) {
 	noLeaks(t)
 	c, _ := initialized(t)
 	p := newProbe(t, c.Home)

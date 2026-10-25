@@ -82,7 +82,7 @@ func (p *probe) attachments() daemon.Attachments {
 // adapters (10) have started before the recovery of deliveries (11 to 14) goes
 // on, so that a lease is released only after the adapters said which turns run;
 // and the Agent interface serves everything last (15).
-func TestStartupStepsRunInTheOrderOfTheDesign(t *testing.T) {
+func TestStartupStepsRunInTheirFixedOrder(t *testing.T) {
 	noLeaks(t)
 	c, _ := initialized(t)
 	c.Attach = newProbe(t, c.Home).attachments()

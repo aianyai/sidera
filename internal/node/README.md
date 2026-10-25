@@ -95,7 +95,7 @@ that prove the scans themselves detect what they should:
 | `TestRuntimeTouchesFilesOnlyThroughFsx` | The file rule above. |
 | `TestRuntimeTakesRandomnessAsReader` | The randomness rule above. |
 | `TestTheActorOfTheLocalOwnerIsMadeOnlyByTheManagementInterface` | `admin.LocalOwner`, `admin.ActorLocalOwner` and `pairing.LocalAuthor` appear only in `manageapi`, in the runtime tree and in `cmd/`. A connection on the management listener is the local owner, and nothing else may say so. |
-| `TestLocalSourcesAreJudgedOnlyWhereTheLoopbackDelivers` | `authz.EvaluateLocal`, `LocalCreate` and `LocalRequest` appear only in `engine` and `transport`: only what the loopback transport delivers is a request of a local source. |
+| `TestLocalSourcesAreJudgedOnlyWhereTheLoopbackDeliversThem` | `authz.EvaluateLocal`, `LocalCreate` and `LocalRequest` appear only in `engine` and `transport`: only what the loopback transport delivers is a request of a local source. |
 
 The three source scans parse every non-test file below this directory,
 whatever its build constraints, and flag any use of a forbidden function, also

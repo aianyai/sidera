@@ -256,7 +256,7 @@ interface: a sandbox must deny the socket to an agent.
   `internal/node/engine/manage.go`.
 - Tests of the daemon: `TestSecondDaemonOnSameHomeRefused`,
   `TestInitOnTheHomeOfARunningDaemonIsRefused`,
-  `TestStartupStepsRunInTheOrderOfTheDesign`,
+  `TestStartupStepsRunInTheirFixedOrder`,
   `TestEachHookRunsInsideItsStepWithTheEngineInTheStateTheStepNeeds`,
   `TestTheManagementInterfaceReadsAndRefusesChangesWhileTheNodeStarts`,
   `TestAHookThatFailsStopsTheStartAndLeavesNothingRunning`,
@@ -264,7 +264,7 @@ interface: a sandbox must deny the socket to an agent.
   `TestTheDaemonLogsToTheFileUnderLogsWithTheTimeOfItsClock`,
   `TestThePeriodicTasksRunEveryPeriodOnTheInjectedClock`,
   `TestAClockSetBackIsPausedAtStartAndThePauseAndTheMarkAreKept`,
-  `TestShutdownRunsInTheOrderOfTheDesign`, `TestRequestStopRunsTheShutdownOnce`,
+  `TestShutdownRunsInItsFixedOrder`, `TestRequestStopRunsTheShutdownOnce`,
   `TestTheOwnerStopsTheDaemonThroughTheManagementInterface`,
   `TestRunReturnsAfterANormalShutdownWhenItsContextEnds`,
   `TestAFatalStorageErrorEndsTheDaemonWithTheExitCodeOfAnIOError`,

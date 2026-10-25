@@ -95,7 +95,7 @@ Three rules bind every runtime package:
     `internal/node/`. The exception lists are the variables at the top of the
     file.
   - `TestTheActorOfTheLocalOwnerIsMadeOnlyByTheManagementInterface` and
-    `TestLocalSourcesAreJudgedOnlyWhereTheLoopbackDelivers`: the actor of the
+    `TestLocalSourcesAreJudgedOnlyWhereTheLoopbackDeliversThem`: the actor of the
     local owner is made only in `internal/node/manageapi`, and the judgments of a
     local source (`authz.EvaluateLocal`, `LocalCreate`, `LocalRequest`) only in the
     engine and in the transport, over the runtime tree and `cmd/`;
