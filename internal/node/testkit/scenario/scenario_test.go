@@ -410,6 +410,18 @@ func TestCheckRejects(t *testing.T) {
 			must(t, ag.Append(ledger.KindModelSaw, saw("m1", 1, yes())))
 			must(t, ag.Append(ledger.KindModelSaw, saw("m1", 1, nil)))
 		}},
+		{"a part shown without the mark after one shown with it by the same writer", scenario.JudgePossiblyDuplicateMarked, func(t *testing.T, m *ledger.Memory) {
+			ag := writer(t, m, "agent/b")
+			must(t, ag.Append(ledger.KindModelSaw, saw("m1", 1, yes())))
+			must(t, ag.Append(ledger.KindModelSaw, saw("m1", 1, nil)))
+		}},
+		{"a part shown without the mark in a later step than a sighting by another writer", scenario.JudgePossiblyDuplicateMarked, func(t *testing.T, m *ledger.Memory) {
+			fx := writer(t, m, "fixture")
+			announce(t, m, fx, "one")
+			must(t, writer(t, m, "agent/a").Append(ledger.KindModelSaw, saw("m1", 1, yes())))
+			announce(t, m, fx, "two")
+			must(t, writer(t, m, "agent/b").Append(ledger.KindModelSaw, saw("m1", 1, nil)))
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := ledger.NewMemory()
@@ -433,6 +445,55 @@ func TestCheckRejects(t *testing.T) {
 			waive := scenario.Invariants{Waive: map[scenario.Judgement]string{tc.rule: "the scenario makes the case on purpose"}}
 			if err := scenario.Check(log, waive); err != nil {
 				t.Errorf("Check refused a waived judgement: %v", err)
+			}
+		})
+	}
+}
+
+func announce(t *testing.T, m *ledger.Memory, fixture *ledger.Writer, step string) {
+	t.Helper()
+	m.SetStep(step)
+	must(t, fixture.Append(ledger.KindFixtureStep, ledger.Attrs{Name: step}))
+}
+
+// Every sighting after the first carries the mark; the first is the earliest the
+// ledger can prove. Where the ledger cannot say which came first, one sighting
+// without the mark is allowed, because it may be the first.
+func TestACheckOfRepeatSightingsFailsOnlyWhatTheLedgerProvesIsAfterAnotherSighting(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(t *testing.T, m *ledger.Memory)
+	}{
+		{"one writer: the first sighting without the mark, the second with it", func(t *testing.T, m *ledger.Memory) {
+			ag := writer(t, m, "agent/b")
+			must(t, ag.Append(ledger.KindModelSaw, saw("m1", 1, nil)))
+			must(t, ag.Append(ledger.KindModelSaw, saw("m1", 1, yes())))
+		}},
+		{"two writers in one step: only one is without the mark, and nothing says which was first", func(t *testing.T, m *ledger.Memory) {
+			announce(t, m, writer(t, m, "fixture"), "one")
+			must(t, writer(t, m, "agent/a").Append(ledger.KindModelSaw, saw("m1", 1, yes())))
+			must(t, writer(t, m, "agent/b").Append(ledger.KindModelSaw, saw("m1", 1, nil)))
+		}},
+		{"two steps: the one without the mark is the earlier", func(t *testing.T, m *ledger.Memory) {
+			fx := writer(t, m, "fixture")
+			announce(t, m, fx, "one")
+			must(t, writer(t, m, "agent/a").Append(ledger.KindModelSaw, saw("m1", 1, nil)))
+			announce(t, m, fx, "two")
+			must(t, writer(t, m, "agent/b").Append(ledger.KindModelSaw, saw("m1", 1, yes())))
+		}},
+		{"another part of the message is a first sighting of its own", func(t *testing.T, m *ledger.Memory) {
+			ag := writer(t, m, "agent/b")
+			must(t, ag.Append(ledger.KindModelSaw, saw("m1", 1, nil)))
+			must(t, ag.Append(ledger.KindModelSaw, saw("m1", 2, nil)))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := ledger.NewMemory()
+			tc.write(t, m)
+			log, err := m.Log()
+			must(t, err)
+			if err := scenario.Check(log, scenario.Invariants{}); err != nil {
+				t.Errorf("Check refused a ledger in which every sighting after the first is marked: %v", err)
 			}
 		})
 	}
