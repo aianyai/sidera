@@ -189,6 +189,7 @@ later part adds to this package the capability its stream needs:
 `TestACallToTheAdapterHostAfterTheProcessWasAbandonedIsNeverSent`,
 `TestACallToTheAdapterHostThatReturnsAfterTheProcessWasAbandonedIsNeverAConfirmation`,
 `TestTheCountsOfTheAdapterHostPassThroughWhetherOrNotTheProcessWasAbandoned`), the
+launcher (`TestEveryLaunchOfAnInstanceWritesThroughTheSameLedgerWriter`), the
 fixture's own quiet conditions
 (`TestQuiesceWaitsForEveryConditionOfTheFixtureAndNamesTheOneThatDoesNotHold`,
 `TestQuiesceChecksTheFixtureAgainAfterTheEngineWasQuiet`,

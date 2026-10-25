@@ -13,10 +13,12 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
+	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -440,5 +442,32 @@ func TestTheCountsOfTheAdapterHostPassThroughWhetherOrNotTheProcessWasAbandoned(
 	abandoned.Store(true)
 	if got := a.Counts("chat"); got.Handled != want.Handled || got.Buffered != want.Buffered || !got.Connected {
 		t.Errorf("Counts after the process was abandoned = %+v, want %+v", got, want)
+	}
+}
+
+// Opening the same ledger stream twice would fork its sequence, so every launch of
+// an instance, however many are alive at once, writes through the one writer the
+// launcher opened for it.
+func TestEveryLaunchOfAnInstanceWritesThroughTheSameLedgerWriter(t *testing.T) {
+	clk := clocktest.NewFake(DefaultStart)
+	l := NewAdapterLauncher(LauncherConfig{
+		T: t, Ctx: context.Background(), Now: clk.Now, Ledgers: ledger.NewMemory(),
+		Manifest: AdapterManifest(adapterproto.MaxDirectEndpoints),
+	})
+	t.Cleanup(l.Close)
+	inst := adapterhost.Instance{ID: Instance, LockPath: t.TempDir() + "/adapter-chat.lock"}
+	for range 2 {
+		if _, err := l.Launch(context.Background(), inst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(l.Launches(Instance)); n != 2 {
+		t.Fatalf("%d launches, want 2", n)
+	}
+	l.mu.Lock()
+	writers := len(l.writers)
+	l.mu.Unlock()
+	if writers != 1 {
+		t.Errorf("%d ledger writers for one instance, want 1", writers)
 	}
 }
