@@ -7,6 +7,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -38,7 +39,7 @@ func (a *agent) Declare(ctx context.Context, in fakeagent.DeclareInput) error {
 		for _, s := range *in.AcceptFrom {
 			addr, err := ident.ParseAddress(s)
 			if err != nil {
-				return &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: codeMalformed, Message: "accept_from: " + err.Error()}
+				return &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: apiwire.CodeMalformedRequest, Message: "accept_from: " + err.Error()}
 			}
 			list = append(list, addr)
 		}
@@ -67,6 +68,15 @@ func (a *agent) Send(ctx context.Context, in fakeagent.SendInput) (fakeagent.Sen
 	return sendResult(res, err)
 }
 
+// Status is the state of each delivery of a message the caller's endpoint sent.
+func (a *agent) Status(ctx context.Context, in fakeagent.StatusInput) (fakeagent.StatusResult, error) {
+	res, err := a.svc.MessageStatus(ctx, a.caller, in.MessageID)
+	if err != nil {
+		return fakeagent.StatusResult{}, MapError(err)
+	}
+	return res, nil
+}
+
 // Reply answers a message the caller's endpoint received.
 func (a *agent) Reply(ctx context.Context, in fakeagent.ReplyInput) (fakeagent.SendResult, error) {
 	ct := in.ContentType
@@ -84,7 +94,7 @@ func parseAddresses(list []string) ([]ident.Address, error) {
 	for _, s := range list {
 		addr, err := ident.ParseAddress(s)
 		if err != nil {
-			return nil, &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: codeMalformed, Message: "to: " + err.Error()}
+			return nil, &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: apiwire.CodeMalformedRequest, Message: "to: " + err.Error()}
 		}
 		out = append(out, addr)
 	}
@@ -126,14 +136,6 @@ func (a *agent) Ack(context.Context, fakeagent.AckInput) (fakeagent.AckResult, e
 func (a *agent) Control(context.Context, fakeagent.ControlInput) (fakeagent.SendResult, error) {
 	return fakeagent.SendResult{}, NotSupported("control")
 }
-func (a *agent) Status(context.Context, fakeagent.StatusInput) (fakeagent.StatusResult, error) {
-	return fakeagent.StatusResult{}, NotSupported("status")
-}
-
-const (
-	codeMethodUnknown = "method_unknown"
-	codeMalformed     = "malformed_request"
-)
 
 // NotSupported is the error of a method the engine does not offer yet. Its category
 // and code are those the agent interface gives a method the server does not know,
@@ -141,7 +143,7 @@ const (
 // tells it from the answer of a real server that does not know the method.
 func NotSupported(method string) error {
 	return &notSupported{answer: &fakeagent.Error{
-		Category: fakeagent.CategoryNotFound, Code: codeMethodUnknown,
+		Category: fakeagent.CategoryNotFound, Code: apiwire.CodeMethodUnknown,
 		Message: "the engine does not offer " + method + " yet",
 	}}
 }
@@ -167,9 +169,10 @@ var ErrProcessEnded = errors.New("the process the call was made to ended before 
 // the agent interface has for a daemon that is not running.
 var ErrNodeNotRunning = errors.New("the node is not running")
 
-// MapError maps what an engine method returned to the error of the fake agent:
-// a typed refusal to its category and code, a call whose process ended to
-// outcome_unknown, a call to a node that is down to unavailable, anything else to an internal error. It is nil for nil.
+// MapError maps what an engine method returned to the error of the fake agent: a
+// call whose process ended to outcome_unknown, a call to a node that is down to
+// unavailable, and everything else as the interface does (apiwire.FromError), so
+// that the words of an error have one home. It is nil for nil.
 func MapError(err error) error {
 	if err == nil {
 		return nil
@@ -180,50 +183,6 @@ func MapError(err error) error {
 	if errors.Is(err, ErrProcessEnded) {
 		return &fakeagent.Error{Category: fakeagent.CategoryOutcomeUnknown, Code: "connection_lost", Message: err.Error()}
 	}
-	var ref *engine.Refusal
-	if !errors.As(err, &ref) {
-		return &fakeagent.Error{Category: fakeagent.CategoryInternal, Code: "internal", Message: err.Error()}
-	}
-	category, code := classify(ref)
-	return &fakeagent.Error{Category: category, Code: code, Message: ref.Error()}
-}
-
-func classify(r *engine.Refusal) (fakeagent.Category, string) {
-	switch r.Reason {
-	case engine.ReasonUnauthenticated:
-		return fakeagent.CategoryUnauthenticated, "token_unknown"
-	case engine.ReasonEndpointUnknown:
-		return fakeagent.CategoryNotFound, "endpoint_unknown"
-	case engine.ReasonInstanceUnknown:
-		return fakeagent.CategoryNotFound, "instance_unknown"
-	case engine.ReasonWrongEndpointKind:
-		return fakeagent.CategoryRefused, "endpoint_kind"
-	case engine.ReasonEndpointLimit:
-		return fakeagent.CategoryRefused, "endpoint_limit"
-	case engine.ReasonInvalidArgument:
-		if r.Detail == engine.DetailEmptyPatch {
-			return fakeagent.CategoryInvalidArgument, r.Detail.String()
-		}
-		return fakeagent.CategoryInvalidArgument, codeMalformed
-	case engine.ReasonOperationIDReused:
-		return fakeagent.CategoryConflict, "operation_id_reused"
-	case engine.ReasonNodeQueueFull, engine.ReasonStorageFull, engine.ReasonStorageUnavailable,
-		engine.ReasonClockRollback, engine.ReasonLoopBusy:
-		return fakeagent.CategoryBackpressure, r.Reason.String()
-	case engine.ReasonRecovering, engine.ReasonShuttingDown:
-		return fakeagent.CategoryUnavailable, r.Reason.String()
-	case engine.ReasonIdempotencyConflict:
-		return fakeagent.CategoryConflict, "idempotency_conflict"
-	case engine.ReasonMessageConflict:
-		return fakeagent.CategoryConflict, "message_conflict"
-	case engine.ReasonMessageUnknown:
-		return fakeagent.CategoryNotFound, "message_unknown"
-	case engine.ReasonTooLarge:
-		return fakeagent.CategoryRefused, "too_large"
-	case engine.ReasonStorageFatal:
-		// The command met a fatal storage error and the engine has stopped: whether
-		// it took effect is not known, which is what outcome_unknown says.
-		return fakeagent.CategoryOutcomeUnknown, r.Reason.String()
-	}
-	return fakeagent.CategoryInternal, "unclassified_reason"
+	we := apiwire.FromError(err)
+	return &fakeagent.Error{Category: fakeagent.Category(we.Category), Code: we.Code, Message: we.Message}
 }

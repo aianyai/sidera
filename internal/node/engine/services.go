@@ -6,6 +6,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // AgentService is what the Agent interface asks of the engine: one method for
@@ -16,6 +17,7 @@ type AgentService interface {
 	Declare(ctx context.Context, c Caller, p DeclarationPatch) (authz.Declaration, error)
 	Send(ctx context.Context, c Caller, r SendRequest) (SendResult, error)
 	Reply(ctx context.Context, c Caller, r ReplyRequest) (SendResult, error)
+	MessageStatus(ctx context.Context, c Caller, id adapterproto.MessageID) (adapterproto.MessageStatusResult, error)
 }
 
 // ManageService is what the management interface asks of the engine. The methods

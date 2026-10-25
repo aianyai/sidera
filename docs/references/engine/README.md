@@ -176,6 +176,8 @@ that can be answered); the caller names
 neither. The deadlines are whole seconds, because that is what an envelope can say and
 the target's record must agree with it.
 
+**Asking about a message.** `MessageStatus` answers from the sender's record of the message, which the reports of the targets bring up to date: one entry for each recipient in the order the sender gave them, with the state and, for a rejection, the reason, named as the delivery rules name them. A message the caller's endpoint did not send is `message_unknown`, whoever sent it, so no endpoint learns what became of another's. The control reply that a control signal's status carries is not part of the result until control signals are sent.
+
 **Sending.** One worker, outside the loop, makes the calls to the transport in the order
 the work was given: a send of the envelope (made anew from the source record and the
 body, with the evidence of a reply signed at that moment) or a pull of the reports of a
@@ -384,6 +386,7 @@ reproducible).
 | A lost receipt and a resend leave one record; another body under one identifier is a conflict | `inbound.go` (`takeIn`), `outbound.go` | `TestLostReceiptRetryKeepsOneRecord`, `TestSameIDDifferentBodyConflicts` |
 | The backlog of an endpoint, the queue and the disk of the node | `inbound.go`, `send.go`, `capacity.go` | `TestEndpointBacklogFullIsRejectedWithReason`, `TestNodeQueueFullBackpressuresNewSends`, `TestDiskFullGivesNoFalseAcknowledgement`, `TestDiskFullAtTheTargetGivesNoReceipt` |
 | Requests no node takes, sequence numbers, the clock pause, idempotency retention | `send.go` | `TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing`, `TestASendWithAnEmptyBodyIsRefused`, `TestSequenceNumbersCountEachPairOfSenderAndRecipientFromOne`, `TestNothingIsSignedOrAcceptedWhileTheWallClockCannotBeTrusted`, `TestAnIdempotencyKeyIsRememberedUntilItsRetentionEnds` |
+| The state of each delivery of a message is read from the sender's record, for its sender alone | `status.go` | `TestTheStatusOfAMessageIsTheStateOfEachDeliveryAsTheSenderHoldsIt`, `TestOnlyTheSenderOfAMessageIsToldItsStatus`, `TestTheStatusOfAMessageSurvivesARestart`, `TestEveryStateAndRejectReasonHasAWireName`, `TestTheRecipientsOfASourceRecordAreTheOnesOfItsKeyInOrder` |
 | A key used again for other recipients, or in another order, is a conflict | `send.go` (`repeat`) | `TestTheSameIdempotencyKeyForOtherRecipientsIsAConflict` |
 | What no node takes is what the envelope refuses, by the field it names; deadlines are whole seconds | `send.go` (`envelopeOf`) | `TestARequestTheEnvelopeRefusesIsRefusedForTheFieldItNames`, `TestADeadlineOfPartOfASecondIsKeptToTheSecondAnEnvelopeCanSay` |
 | An answer is made only to a message the endpoint took in | `send.go` (`heldBy`) | `TestNoAnswerIsMadeToAMessageTheEndpointRefusedAtIntake` |

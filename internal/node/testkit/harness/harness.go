@@ -494,6 +494,12 @@ func (c currentEngine) Reply(ctx context.Context, caller engine.Caller, r engine
 	return onProcess(c.h, func(e *engine.Engine) (engine.SendResult, error) { return e.Reply(ctx, caller, r) })
 }
 
+func (c currentEngine) MessageStatus(ctx context.Context, caller engine.Caller, id adapterproto.MessageID) (adapterproto.MessageStatusResult, error) {
+	return onProcess(c.h, func(e *engine.Engine) (adapterproto.MessageStatusResult, error) {
+		return e.MessageStatus(ctx, caller, id)
+	})
+}
+
 // onProcess is a call made to the process that is running. When that process is
 // abandoned by a crash before the call returns, nobody could have read what it
 // answers, so the call's result is that its outcome is unknown, whatever the old

@@ -32,6 +32,7 @@ commands and add their methods to this list.
 | `Quiesce` | Returns when no command waits, nothing is due and no goroutine of the engine runs. |
 | `AdapterAdmitted`, `RegisterDirect`, `UnregisterDirect` | What the adapter host calls: the admission of an instance, and the registration and unregistration of its direct endpoints. |
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
+| `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record. Another endpoint's message is unknown to the caller. The reply of a control signal is not part of it yet. |
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
 | `Inbound`, `Pull` | The engine as the `transport.Handler`: an envelope for this node, answered with signed reports, and a pull for the reports of a message. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
@@ -86,45 +87,22 @@ func TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface(t *testing.T
 	}
 }
 
-// The expectations are written out from the table of categories of the agent
-// interface, not computed from the mapping under test.
+// The words of an error have one home, apiwire, which tests them against a table
+// written out from the interface specification; here every reason must come out
+// of the fake agent as that mapping gives it.
 func TestEveryEngineReasonMapsToACategoryAndCode(t *testing.T) {
-	want := map[engine.Reason]struct {
-		category fakeagent.Category
-		code     string
-	}{
-		engine.ReasonUnauthenticated:     {fakeagent.CategoryUnauthenticated, "token_unknown"},
-		engine.ReasonEndpointUnknown:     {fakeagent.CategoryNotFound, "endpoint_unknown"},
-		engine.ReasonInstanceUnknown:     {fakeagent.CategoryNotFound, "instance_unknown"},
-		engine.ReasonWrongEndpointKind:   {fakeagent.CategoryRefused, "endpoint_kind"},
-		engine.ReasonEndpointLimit:       {fakeagent.CategoryRefused, "endpoint_limit"},
-		engine.ReasonInvalidArgument:     {fakeagent.CategoryInvalidArgument, "malformed_request"},
-		engine.ReasonOperationIDReused:   {fakeagent.CategoryConflict, "operation_id_reused"},
-		engine.ReasonNodeQueueFull:       {fakeagent.CategoryBackpressure, "node_queue_full"},
-		engine.ReasonStorageFull:         {fakeagent.CategoryBackpressure, "storage_full"},
-		engine.ReasonStorageUnavailable:  {fakeagent.CategoryBackpressure, "storage_unavailable"},
-		engine.ReasonClockRollback:       {fakeagent.CategoryBackpressure, "clock_rollback"},
-		engine.ReasonLoopBusy:            {fakeagent.CategoryBackpressure, "loop_busy"},
-		engine.ReasonRecovering:          {fakeagent.CategoryUnavailable, "recovering"},
-		engine.ReasonShuttingDown:        {fakeagent.CategoryUnavailable, "shutting_down"},
-		engine.ReasonStorageFatal:        {fakeagent.CategoryOutcomeUnknown, "storage_fatal"},
-		engine.ReasonIdempotencyConflict: {fakeagent.CategoryConflict, "idempotency_conflict"},
-		engine.ReasonMessageConflict:     {fakeagent.CategoryConflict, "message_conflict"},
-		engine.ReasonMessageUnknown:      {fakeagent.CategoryNotFound, "message_unknown"},
-		engine.ReasonTooLarge:            {fakeagent.CategoryRefused, "too_large"},
-	}
 	for _, r := range engine.Reasons() {
-		w, ok := want[r]
-		if !ok {
-			t.Errorf("reason %s has no expectation in this test: a reason was added without its mapping", r)
-			continue
+		refusal := &engine.Refusal{Reason: r}
+		want := apiwire.FromError(refusal)
+		err := engineagent.MapError(refusal)
+		if got := fakeagent.CategoryOf(err); string(got) != string(want.Category) || !got.Valid() {
+			t.Errorf("%s: category %q, want %q", r, got, want.Category)
 		}
-		err := engineagent.MapError(&engine.Refusal{Reason: r})
-		if got := fakeagent.CategoryOf(err); got != w.category {
-			t.Errorf("%s: category %q, want %q", r, got, w.category)
+		if got := fakeagent.CodeOf(err); got != want.Code {
+			t.Errorf("%s: code %q, want %q", r, got, want.Code)
 		}
-		if got := fakeagent.CodeOf(err); got != w.code {
-			t.Errorf("%s: code %q, want %q", r, got, w.code)
+		if want.Category == apiwire.CategoryInternal {
+			t.Errorf("%s has no words of its own on the wire: it would reach an agent as an internal error", r)
 		}
 	}
 }
@@ -172,10 +150,9 @@ func TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError(t *testing.T) {
 		"Recv":      func() error { _, err := a.Recv(ctx, fakeagent.RecvInput{}); return err },
 		"Ack":       func() error { _, err := a.Ack(ctx, fakeagent.AckInput{}); return err },
 		"Control":   func() error { _, err := a.Control(ctx, fakeagent.ControlInput{}); return err },
-		"Status":    func() error { _, err := a.Status(ctx, fakeagent.StatusInput{}); return err },
 	}
-	if len(calls) != 8 {
-		t.Fatalf("%d calls listed: the agent has eleven methods and Declare, Send and Reply are the ones the engine offers", len(calls))
+	if len(calls) != 7 {
+		t.Fatalf("%d calls listed: the agent has eleven methods and Declare, Send, Reply and Status are the ones the engine offers", len(calls))
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {

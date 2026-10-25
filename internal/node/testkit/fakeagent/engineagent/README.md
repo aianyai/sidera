@@ -14,29 +14,25 @@ over).
 | Name | Purpose |
 | ---- | ------- |
 | `New(svc, caller)` | The agent of one endpoint. |
-| `MapError(err)` | An engine refusal as the error of the fake agent: its category and code. Anything that is not a refusal is internal. |
+| `MapError(err)` | An error of the engine as the error of the fake agent: `apiwire.FromError` says its category and code (the one place the words of the wire are written), and the two failures of the fixture's own (`ErrNodeNotRunning`, `ErrProcessEnded`) are mapped here. |
 | `NotSupported(method)`, `IsNotSupported(err)` | The error of a method the engine does not offer yet: `not_found/method_unknown` that is also `fakeagent.ErrNotAvailable` (the same value as `scenario.ErrNotAvailable`), and its test. |
 | `ErrNodeNotRunning` | What a call to a node that is down carries; `MapError` turns it into `unavailable/daemon_not_running`. |
 | `ErrProcessEnded` | What a call carries when the process it was made to ended before it returned; `MapError` turns it into `outcome_unknown/connection_lost`. |
 
 ## Rules
 
-- **All eleven methods exist.** `Declare`, `Send` and `Reply` call the engine (a content type left empty is
+- **All eleven methods exist.** `Declare`, `Send`, `Reply` and `Status` call the engine (a content type left empty is
   `engine.DefaultContentType`, as the front ends of the interface take it). The others (`Me`, `Peers`,
-  `Directory`, `Probe`, `Recv`, `Ack`, `Control`, `Status`) answer
+  `Directory`, `Probe`, `Recv`, `Ack`, `Control`) answer
   `not_found/method_unknown`, which is how the agent interface answers a method the
   server does not know; the error is also `scenario.ErrNotAvailable`, so that a test
   written before the method exists cannot pass on an answer the server never gave. When the engine learns a method it replaces the line here; the
   interface and the scripts do not change. There is no category of its own for "not
   yet": the interface's table has none, and a new category would be a change to it.
-- **A refusal is mapped by its reason, one table.** The expectations of
-  `TestEveryEngineReasonMapsToACategoryAndCode` are written out from the interface's
-  table of categories and fail when a reason is added without its mapping. The codes
-  the table does not list (`endpoint_limit`, `storage_unavailable`, `storage_fatal`,
-  `instance_unknown`) are the reasons' own names, in the category the reason's
-  behaviour gives: back pressure for a write that failed before its commit point,
-  an unknown outcome for the fatal one, which is a command that may or may not have
-  taken effect.
+- **A refusal is mapped by `apiwire`, not here.** `TestEveryEngineReasonMapsToACategoryAndCode`
+  holds every reason the engine has to come out as `apiwire.FromError` gives it, and to
+  have words of its own (never the internal error); the table written out from the
+  interface's categories is `apiwire`'s test.
 - **A patch field that is nil changes nothing;** `AcceptFrom` replaces the whole list,
   and an address that does not parse is `invalid_argument/malformed_request`.
 
