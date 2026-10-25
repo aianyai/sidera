@@ -158,8 +158,9 @@ type IDChange struct {
 	Instance string
 	ID       ident.EndpointID
 	// New is true when the id was minted and has to be written.
-	New bool
-	ids EndpointIDs
+	New  bool
+	ids  EndpointIDs
+	data []byte // the file of ids, encoded where the id was minted
 }
 
 // Backup is the owner's confirmation that the self-revocation was kept offline.

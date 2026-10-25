@@ -299,7 +299,16 @@ error returned to the caller would be read as "nothing happened". The panic ends
 the process and recovery runs, the outcome a fatal state calls for. A `Tx` that
 already panicked on a call of its own adds no second panic, so the first message
 is the one seen. The rule that keeps owners from meeting it is that every read an
-owner needs is done before `Begin`.
+owner needs is done before `Begin`, and so is every validation and encoding. A
+package whose files are written inside a transaction another package opens
+therefore offers two steps: a prepare step that validates and encodes, with no
+transaction, returning a prepared value or an ordinary error (`store.PrepareEndpoint`
+and `PrepareAdminResult`, `config.PrepareBackup`, `PrepareRevocation` and
+`PlanInstall`, `keys.PrepareClockCleared`; `config.RuntimeID` and `DirectID` encode
+the ids they mint), and a put step on that value that can fail only as a write of
+the transaction does. A validation inside the transaction fails after an earlier
+write of it passed the commit point, and the composer, which did what the
+documents say and returned the first error, is met by this panic.
 
 **Removals are synced before the commit.** `Remove` and `RemoveAll` unbind a
 name and make nothing durable; the directory sync that follows a batch does. A

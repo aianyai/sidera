@@ -821,26 +821,55 @@ func (s *Store) AlertAck(a AlertAckInput) error {
 	return tx.Commit()
 }
 
-// PutEndpoint writes an endpoint record in a transaction another package
-// opened, under the role the declaration gives it (RoleEndpoint by
-// convention). The package that opened the transaction does the commit.
-func PutEndpoint(tx *txn.Tx, role string, ep EndpointRecord) error {
+// PreparedEndpoint is an endpoint record encoded for a transaction another
+// package opens. Making it is the validation: PrepareEndpoint runs before that
+// transaction begins, so a record that cannot be written is an error that
+// touches nothing, and PutEndpoint can only fail the way a write of the
+// transaction does.
+type PreparedEndpoint struct{ f file }
+
+// PrepareEndpoint validates and encodes an endpoint record. It does no I/O.
+func PrepareEndpoint(ep EndpointRecord) (PreparedEndpoint, error) {
 	f, err := recordFile(EndpointsDir, ep)
 	if err != nil {
-		return err
+		return PreparedEndpoint{}, err
 	}
-	return tx.Replace(role, f.path, f.data, fsx.ModePrivate)
+	return PreparedEndpoint{f}, nil
 }
 
-// PutAdminResult writes the result of an administrative operation in a
-// transaction another package opened, under the role the declaration gives it
-// (RoleResult by convention).
-func PutAdminResult(tx *txn.Tx, role string, r AdminRecord) error {
+// PutEndpoint writes a prepared endpoint record in a transaction another
+// package opened, under the role the declaration gives it (RoleEndpoint by
+// convention). The package that opened the transaction does the commit. It
+// panics for a PreparedEndpoint that PrepareEndpoint did not return.
+func PutEndpoint(tx *txn.Tx, role string, p PreparedEndpoint) error {
+	if p.f.path == "" {
+		panic("store: PutEndpoint of a value PrepareEndpoint did not return")
+	}
+	return tx.Replace(role, p.f.path, p.f.data, fsx.ModePrivate)
+}
+
+// PreparedAdminResult is the result of an administrative operation encoded for a
+// transaction another package opens, as PreparedEndpoint is.
+type PreparedAdminResult struct{ f file }
+
+// PrepareAdminResult validates and encodes the result of an administrative
+// operation. It does no I/O.
+func PrepareAdminResult(r AdminRecord) (PreparedAdminResult, error) {
 	f, err := recordFile(AdminDir, r)
 	if err != nil {
-		return err
+		return PreparedAdminResult{}, err
 	}
-	return tx.Replace(role, f.path, f.data, fsx.ModePrivate)
+	return PreparedAdminResult{f}, nil
+}
+
+// PutAdminResult writes a prepared result in a transaction another package
+// opened, under the role the declaration gives it (RoleResult by convention).
+// It panics for a PreparedAdminResult that PrepareAdminResult did not return.
+func PutAdminResult(tx *txn.Tx, role string, p PreparedAdminResult) error {
+	if p.f.path == "" {
+		panic("store: PutAdminResult of a value PrepareAdminResult did not return")
+	}
+	return tx.Replace(role, p.f.path, p.f.data, fsx.ModePrivate)
 }
 
 // ArchiveEvent is one diagnostic event of the archive.

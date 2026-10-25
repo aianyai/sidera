@@ -445,9 +445,13 @@ func crashCases(t *testing.T) []crashCase {
 			run: func(t *testing.T, rg *rig, c *config.Config) error {
 				b, _ := c.Backup()
 				b.ConfirmedAt = b.ConfirmedAt.AddDate(0, 0, 1)
+				pb, err := config.PrepareBackup(b)
+				if err != nil {
+					return err
+				}
 				tx := rg.w.Begin(testBackupConfirm)
 				defer tx.Close()
-				done, err := c.PutBackup(tx, b)
+				done, err := c.PutBackup(tx, pb)
 				if err != nil {
 					return err
 				}
@@ -480,9 +484,13 @@ func crashCases(t *testing.T) []crashCase {
 			name: "identity-retire",
 			disk: treeDisk,
 			run: func(t *testing.T, rg *rig, c *config.Config) error {
+				pr, err := config.PrepareRevocation(extraRec)
+				if err != nil {
+					return err
+				}
 				tx := rg.w.Begin(testIdentityRetire)
 				defer tx.Close()
-				done, err := c.PutRevocation(tx, extraRec)
+				done, err := c.PutRevocation(tx, pr)
 				if err != nil {
 					return err
 				}

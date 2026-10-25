@@ -59,9 +59,9 @@ func readClockIfPresent(r fsx.Reader) (ClockState, bool, error) {
 // are refused with ErrClockRegression and write nothing, and so is a mark or a
 // pause start that no record can hold, except that a pause start before
 // 1970-01-01T00:00:01Z is stored as that second; only the owner's clear,
-// PutClockCleared, resets the mark or lifts the pause. Times are cut to whole
-// seconds before they are compared and written, so the persisted mark is never
-// above the reading it came from.
+// PrepareClockCleared with PutClockCleared, resets the mark or lifts the pause.
+// Times are cut to whole seconds before they are compared and written, so the
+// persisted mark is never above the reading it came from.
 func (k *Keys) SaveClock(next ClockState) error {
 	next.HighWater = next.HighWater.UTC().Truncate(time.Second)
 	next.RollbackPausedSince = next.RollbackPausedSince.UTC().Truncate(time.Second)
@@ -97,18 +97,35 @@ func (k *Keys) SaveClock(next ClockState) error {
 	return tx.Commit()
 }
 
-// PutClockCleared is the write of the owner's clear of a rollback pause, a
-// transaction of the engine that adds its own result: the high water mark is set
-// to now, which may be below the mark it replaces because the clock really was
-// set back, and the pause flag is removed, in one replacement. There is no state
-// in between with the flag gone and the mark unchanged. The caller opens and
-// commits the transaction and decides whether there was a pause to clear.
-func PutClockCleared(tx *txn.Tx, now time.Time) error {
+// PreparedClockCleared is the clear of a rollback pause, checked and encoded for
+// a transaction of the engine. PrepareClockCleared runs before that transaction
+// begins, so a time the record cannot hold is an error that touches nothing, and
+// PutClockCleared can only fail the way a write of the transaction does.
+type PreparedClockCleared struct{ data []byte }
+
+// PrepareClockCleared checks and encodes the owner's clear of a rollback pause:
+// the high water mark is set to now, which may be below the mark it replaces
+// because the clock really was set back, and the pause flag is removed. It does
+// no I/O.
+func PrepareClockCleared(now time.Time) (PreparedClockCleared, error) {
 	now = now.UTC().Truncate(time.Second)
 	if err := checkRecordTime(now); err != nil {
-		return fileError(ClockPath, ErrClockRegression, "the record needs a high water mark from 1970-01-01T00:00:01Z on, to the end of year 9999")
+		return PreparedClockCleared{}, fileError(ClockPath, ErrClockRegression, "the record needs a high water mark from 1970-01-01T00:00:01Z on, to the end of year 9999")
 	}
-	return tx.Replace(RoleClock, ClockPath, encodeClock(ClockState{HighWater: now}), fsx.ModePrivate)
+	return PreparedClockCleared{encodeClock(ClockState{HighWater: now})}, nil
+}
+
+// PutClockCleared writes a prepared clear in a transaction of the engine that
+// adds its own result: the mark and the removal of the flag are one replacement,
+// so there is no state in between with the flag gone and the mark unchanged. The
+// caller opens and commits the transaction and decides whether there was a pause
+// to clear. It panics for a PreparedClockCleared that PrepareClockCleared did
+// not return.
+func PutClockCleared(tx *txn.Tx, p PreparedClockCleared) error {
+	if p.data == nil {
+		panic("keys: PutClockCleared of a value PrepareClockCleared did not return")
+	}
+	return tx.Replace(RoleClock, ClockPath, p.data, fsx.ModePrivate)
 }
 
 // initSigningTime is the time at which init signs a certificate again: the later

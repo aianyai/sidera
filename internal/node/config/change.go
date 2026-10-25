@@ -387,11 +387,17 @@ func (c *Config) stableID(instance, key string, rnd io.Reader) (IDChange, error)
 		}
 		ids.Direct[key] = id
 	}
-	return IDChange{Instance: instance, ID: id, New: true, ids: ids}, nil
+	data, err := ids.Encode()
+	if err != nil {
+		return IDChange{}, err
+	}
+	return IDChange{Instance: instance, ID: id, New: true, ids: ids, data: data}, nil
 }
 
 // PutEndpointIDs writes the ids of an instance with the id of ch in them, under
-// RoleEndpointIDs, in a transaction of the composing package. For an id that
+// RoleEndpointIDs, in a transaction of the composing package. The ids were
+// encoded when RuntimeID or DirectID minted the id, before the transaction, so
+// the write can only fail the way a write of the transaction does. For an id that
 // already existed it writes nothing. The returned function makes the
 // configuration in memory take the ids over; it is called after the transaction
 // committed.
@@ -399,11 +405,7 @@ func (c *Config) PutEndpointIDs(tx *txn.Tx, ch IDChange) (AfterCommit, error) {
 	if !ch.New {
 		return func() {}, nil
 	}
-	data, err := ch.ids.Encode()
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Replace(RoleEndpointIDs, EndpointIDsPath(ch.Instance), data, fsx.ModePrivate); err != nil {
+	if err := tx.Replace(RoleEndpointIDs, EndpointIDsPath(ch.Instance), ch.data, fsx.ModePrivate); err != nil {
 		return nil, err
 	}
 	return func() {
@@ -418,17 +420,36 @@ func (c *Config) PutEndpointIDs(tx *txn.Tx, ch IDChange) (AfterCommit, error) {
 	}, nil
 }
 
-// PutBackup writes the owner's confirmation of the offline backup, under
-// RoleBackup, in a transaction of the composing package. The returned function
-// is called after the transaction committed.
-func (c *Config) PutBackup(tx *txn.Tx, b Backup) (AfterCommit, error) {
+// PreparedBackup is the owner's confirmation of the offline backup, checked and
+// encoded for a transaction of the composing package. PrepareBackup runs before
+// that transaction begins, so a confirmation that cannot be written is an error
+// that touches nothing, and PutBackup can only fail the way a write of the
+// transaction does.
+type PreparedBackup struct {
+	b    Backup
+	data []byte
+}
+
+// PrepareBackup checks and encodes a confirmation. It does no I/O.
+func PrepareBackup(b Backup) (PreparedBackup, error) {
 	data, err := b.Encode()
 	if err != nil {
+		return PreparedBackup{}, err
+	}
+	return PreparedBackup{b: b, data: data}, nil
+}
+
+// PutBackup writes a prepared confirmation under RoleBackup, in a transaction of
+// the composing package. The returned function is called after the transaction
+// committed. It panics for a PreparedBackup that PrepareBackup did not return.
+func (c *Config) PutBackup(tx *txn.Tx, p PreparedBackup) (AfterCommit, error) {
+	if p.data == nil {
+		panic("config: PutBackup of a value PrepareBackup did not return")
+	}
+	if err := tx.Replace(RoleBackup, BackupPath, p.data, fsx.ModePrivate); err != nil {
 		return nil, err
 	}
-	if err := tx.Replace(RoleBackup, BackupPath, data, fsx.ModePrivate); err != nil {
-		return nil, err
-	}
+	b := p.b
 	b.ConfirmedAt = b.ConfirmedAt.UTC()
 	return func() {
 		c.mu.Lock()
@@ -437,23 +458,43 @@ func (c *Config) PutBackup(tx *txn.Tx, b Backup) (AfterCommit, error) {
 	}, nil
 }
 
-// PutRevocation verifies a revocation record and writes it under the name its
-// digest gives, under RoleRevocation, in a transaction of the composing
-// package. The file is the record's own wire bytes. A record that does not
-// verify is refused and nothing is written. The returned function is called
-// after the transaction committed.
-func (c *Config) PutRevocation(tx *txn.Tx, rec record.Record) (AfterCommit, error) {
+// PreparedRevocation is a verified revocation record, with its file, for a
+// transaction of the composing package. PrepareRevocation runs before that
+// transaction begins, so a record that does not verify is an error that touches
+// nothing, and PutRevocation can only fail the way a write of the transaction
+// does.
+type PreparedRevocation struct {
+	rev  revocation.Revocation
+	rec  record.Record
+	data []byte
+}
+
+// PrepareRevocation verifies a revocation record and encodes its file, the
+// record's own wire bytes. It does no I/O.
+func PrepareRevocation(rec record.Record) (PreparedRevocation, error) {
 	rev, err := revocation.Verify(rec)
 	if err != nil {
-		return nil, fmt.Errorf("config: the record is not a valid revocation: %w", err)
+		return PreparedRevocation{}, fmt.Errorf("config: the record is not a valid revocation: %w", err)
 	}
 	data, err := rec.Encode()
 	if err != nil {
+		return PreparedRevocation{}, err
+	}
+	return PreparedRevocation{rev: rev, rec: rec, data: data}, nil
+}
+
+// PutRevocation writes a prepared revocation under the name its digest gives,
+// under RoleRevocation, in a transaction of the composing package. The returned
+// function is called after the transaction committed. It panics for a
+// PreparedRevocation that PrepareRevocation did not return.
+func (c *Config) PutRevocation(tx *txn.Tx, p PreparedRevocation) (AfterCommit, error) {
+	if p.data == nil {
+		panic("config: PutRevocation of a value PrepareRevocation did not return")
+	}
+	if err := tx.Replace(RoleRevocation, RevocationPath(p.rec.Digest()), p.data, fsx.ModePrivate); err != nil {
 		return nil, err
 	}
-	if err := tx.Replace(RoleRevocation, RevocationPath(rec.Digest()), data, fsx.ModePrivate); err != nil {
-		return nil, err
-	}
+	rev, rec := p.rev, p.rec
 	return func() {
 		c.mu.Lock()
 		defer c.mu.Unlock()

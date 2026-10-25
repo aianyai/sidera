@@ -269,9 +269,13 @@ func TestClockClearIsPausedOrClearedAfterEveryCrashState(t *testing.T) {
 	}
 	now := t0.Add(10 * time.Minute)
 	clear := func(r *rig) error {
+		cleared, err := keys.PrepareClockCleared(now)
+		if err != nil {
+			return err
+		}
 		tx := r.w.Begin(clearDecl)
 		defer tx.Close()
-		if err := keys.PutClockCleared(tx, now); err != nil {
+		if err := keys.PutClockCleared(tx, cleared); err != nil {
 			return err
 		}
 		if err := tx.Replace("result", "config/result-stand-in", []byte("{}"), fsx.ModePrivate); err != nil {
@@ -329,8 +333,12 @@ func TestEveryDeclaredCrashPointOfKeysIsCovered(t *testing.T) {
 	if err := k.SaveClock(keys.ClockState{HighWater: t0.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
+	cleared, err := keys.PrepareClockCleared(t0.Add(2 * time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
 	tx := r.w.Begin(clearDecl)
-	if err := keys.PutClockCleared(tx, t0.Add(2*time.Hour)); err != nil {
+	if err := keys.PutClockCleared(tx, cleared); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Replace("result", "config/result-stand-in", []byte("{}"), fsx.ModePrivate); err != nil {

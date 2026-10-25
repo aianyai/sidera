@@ -340,7 +340,9 @@ func (c *Config) unstage(s Staged) error {
 // version of its adapter. The composing package runs them in its own
 // transaction, in this order, with its own write between Point and DiscardOld:
 // DiscardStale, Promote, Point, DiscardOld. The commit point is the replacement
-// of the current pointer.
+// of the current pointer. PlanInstall, before the transaction begins, does every
+// check and encoding the writes need, so none of them can fail for a reason of
+// its own.
 type Install struct {
 	// AlreadyCurrent is true when the staged version is the one that is current:
 	// there is nothing to write, and the installation is already done.
@@ -350,6 +352,7 @@ type Install struct {
 	staged   Staged
 	stale    bool   // a directory of this version exists and is not current
 	previous string // the version that is current now, "" for a first installation
+	current  []byte // the pointer file of the staged version, encoded by PlanInstall
 }
 
 var errAlreadyCurrent = errors.New("config: the staged version is already current")
@@ -381,6 +384,9 @@ func (c *Config) PlanInstall(s Staged) (Install, error) {
 		return Install{}, err
 	}
 	plan.stale = stale
+	if plan.current, err = EncodeAdapterCurrent(s.Version); err != nil {
+		return Install{}, err
+	}
 	return plan, nil
 }
 
@@ -412,11 +418,7 @@ func (i Install) Point(tx *txn.Tx) (AfterCommit, error) {
 	if i.AlreadyCurrent {
 		return nil, errAlreadyCurrent
 	}
-	data, err := EncodeAdapterCurrent(i.staged.Version)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Replace(RoleCurrent, AdapterCurrentPath(i.staged.ID), data, fsx.ModePrivate); err != nil {
+	if err := tx.Replace(RoleCurrent, AdapterCurrentPath(i.staged.ID), i.current, fsx.ModePrivate); err != nil {
 		return nil, err
 	}
 	adapter := Adapter{ID: i.staged.ID, Version: i.staged.Version, Manifest: cloneManifest(i.staged.Manifest)}

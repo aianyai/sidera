@@ -21,7 +21,7 @@ transaction of `txn`; nothing here calls an `fsx` write.
 | `Keys.Node`, `NetworkSigner`, `Certificate`, `CertificateWire`, `SerialSeen` | What the node knows of itself. The identity key never leaves the package: it signs certificates and the self-revocation only. |
 | `Keys.RenewalDue`, `RenewalDue`, `Keys.Renew` | The renewal rule (a pure function with a typed verdict and reason) and the renewal itself, which is also the repair of an interrupted one. |
 | `Keys.RenewalInterrupted`, `RenewalInterrupted`, `RecoveryWork` | The recovery predicate: the serial file is ahead of the certificate. Pure functions of the disk, for the load, the startup repair and the clean-scenario test. |
-| `ReadClock`, `Keys.SaveClock`, `PutClockCleared` | The clock record. `SaveClock` is the periodic write and never goes back; `PutClockCleared` is the write of the owner's clear, for the engine's transaction. |
+| `ReadClock`, `Keys.SaveClock`, `PrepareClockCleared`, `PutClockCleared` | The clock record. `SaveClock` is the periodic write and never goes back; the owner's clear is for the engine's transaction: `PrepareClockCleared` checks the time and encodes, before `Begin`, and `PutClockCleared` writes the prepared value and fails only as a write of the transaction does. |
 | `Keys.SelfRevocation`, `ReadSelfRevocation`, `FormatRevocationExport` | The statement `Load` verified as this node's, for a running node; the reader of the file for a caller with no loaded keys; the one formatter of the export, which panics on the zero statement. |
 | `Keys.CheckNotRetired` | The refusal to run a node whose identity is among the loaded revocations. |
 | `PlanInit`, `InitPlan.WriteKeys`, `WriteMarker`, `Initialized` | The key side of `init`, and the marker. |
@@ -89,11 +89,11 @@ transaction of `txn`; nothing here calls an `fsx` write.
   issued, and leaves `clock.rec` alone. The next renewal after the pause is
   cleared replaces that certificate.
 - **The clock record never goes back.** `SaveClock` refuses a lower mark, a lifted
-  or moved pause flag, and a state without a mark. Only `PutClockCleared` resets
+  or moved pause flag, and a state without a mark. Only the owner's clear (`PrepareClockCleared`, `PutClockCleared`) resets
   the mark and lifts the pause, in one replacement.
 - **No file is written that its own decoder refuses.** A time in `keys/` is UTC in
   whole seconds from 1970-01-01T00:00:01Z to the end of year 9999, and every write
-  (`SaveClock` for both of its times, `PutClockCleared`, `PlanInit` for `now`)
+  (`SaveClock` for both of its times, `PrepareClockCleared`, `PlanInit` for `now`)
   applies the rule the decoders apply before it writes anything. A clock that was
   reset to zero by a dead battery is the case it is for: a pause that started at
   that time would otherwise be written and then read as damage, and the owner's
@@ -136,8 +136,11 @@ transaction of `txn`; nothing here calls an `fsx` write.
 - Serialise the transactions of one declaration (the single writer loop does).
 - Treat `txn.IsFatal` on any error of `Renew` or `SaveClock` as the end of the
   process.
+- Call `PrepareClockCleared` before `Begin` and only `PutClockCleared` inside the
+  transaction: a time the record cannot hold must be refused before any write of
+  the transaction, because after its commit point the refusal would be fatal.
 - Read the clock once and pass it: `now` is a parameter of `Renew`, `PlanInit`
-  and `PutClockCleared`. The clock check before any signing (startup step 4) is
+  and `PrepareClockCleared`. The clock check before any signing (startup step 4) is
   the daemon's; `Renew` repeats only the refusal that protects the signature.
 - Make the `init` transaction `Begin`, `PlanInit`'s plan `WriteKeys`, the other
   owners' writes, `WriteMarker`, `Commit`, in that order, and create the `keys`

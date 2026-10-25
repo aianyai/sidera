@@ -56,8 +56,12 @@ func TestRecoveryPredicatesAreEmptyOnCleanScenarios(t *testing.T) {
 	}
 	check("the start of a rollback pause")
 
+	cleared, err := keys.PrepareClockCleared(now.Add(2 * time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
 	tx := r.w.Begin(clearDecl)
-	if err := keys.PutClockCleared(tx, now.Add(2*time.Minute)); err != nil {
+	if err := keys.PutClockCleared(tx, cleared); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {

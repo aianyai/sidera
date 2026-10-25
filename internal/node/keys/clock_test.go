@@ -193,9 +193,13 @@ func TestClearingTheRollbackResetsTheMarkAndTheFlagInOneReplacement(t *testing.T
 
 	now := t0.Add(time.Hour) // earlier than the mark: the clock really was set back
 	r.obs.points = nil
+	cleared, err := keys.PrepareClockCleared(now)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tx := r.w.Begin(clearDecl)
 	defer tx.Close()
-	if err := keys.PutClockCleared(tx, now); err != nil {
+	if err := keys.PutClockCleared(tx, cleared); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Replace("result", "config/result-stand-in", []byte("{}"), fsx.ModePrivate); err != nil {
@@ -223,8 +227,9 @@ func TestClearingTheRollbackResetsTheMarkAndTheFlagInOneReplacement(t *testing.T
 	}
 }
 
-// The owner's clear refuses a time the decoder would refuse, writing nothing
-// into the transaction.
+// The owner's clear refuses a time the decoder would refuse, while it is being
+// prepared: before the transaction of the engine begins, so that the refusal can
+// not come after a write of that transaction.
 func TestClearingTheRollbackRefusesATimeTheDecoderRefuses(t *testing.T) {
 	for name, now := range map[string]time.Time{
 		"zero time":       {},
@@ -235,11 +240,9 @@ func TestClearingTheRollbackRefusesATimeTheDecoderRefuses(t *testing.T) {
 			r := newRig(t)
 			r.mustInit(1, t0)
 			r.obs.points = nil
-			tx := r.w.Begin(clearDecl)
-			defer tx.Close()
-			err := keys.PutClockCleared(tx, now)
+			_, err := keys.PrepareClockCleared(now)
 			if !errors.Is(err, keys.ErrClockRegression) {
-				t.Fatalf("PutClockCleared = %v, want ErrClockRegression", err)
+				t.Fatalf("PrepareClockCleared = %v, want ErrClockRegression", err)
 			}
 			asFileError(t, err, keys.ClockPath)
 			if r.obs.count() != 0 {

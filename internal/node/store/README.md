@@ -26,7 +26,7 @@ engine applies the delivery rules and calls the writes.
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
 | `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. |
-| `PutEndpoint`, `PutAdminResult` | Write functions for a transaction another package opens; roles `RoleEndpoint`, `RoleResult`. |
+| `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |
 | `OrphanBodies`, `OrphanEndpoints`, `UnfinishedQuarantines`, `EffectReplays`, `DrainCandidates`, `PromptReplays`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
 | `Store.Quarantine`, `QuarantineResume`, `QuarantineBody` | Quarantine; the alert is always the last write. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
@@ -127,6 +127,11 @@ engine applies the delivery rules and calls the writes.
   Each rule's predicate is a function of the scan it is given: a rule run on a scan
   taken before the previous rule wrote would act on records that rule has already
   settled.
+- In a transaction that writes the files of another owner as well, call
+  `PrepareEndpoint` and `PrepareAdminResult` before `Begin` and only `PutEndpoint`
+  and `PutAdminResult` inside it: validation that fails after the commit point of
+  the transaction would leave the disk changed with no result to return, and
+  `Tx.Close` panics for it.
 - Acknowledge and update memory only after a method returns nil; on `txn.IsFatal`
   exit and rescan.
 - Call `SeqBook.Note` only after the commit that wrote the number.

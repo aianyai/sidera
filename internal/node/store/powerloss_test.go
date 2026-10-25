@@ -138,12 +138,16 @@ func (w *powerLossWorld) next() *operation {
 		id := fmt.Sprintf("config/ids-%d", w.rng(5))
 		return &operation{name: "cross-owner", writes: map[string][]byte{id: []byte("ids"), path.Join(store.EndpointsDir, e.Name()): w.enc(e)},
 			call: func() error {
+				pe, err := store.PrepareEndpoint(e)
+				if err != nil {
+					return err
+				}
 				tx := r.w.Begin(&declXAdmit)
 				defer tx.Close()
 				if err := tx.Replace("ids", id, []byte("ids"), fsx.ModePrivate); err != nil {
 					return err
 				}
-				if err := store.PutEndpoint(tx, store.RoleEndpoint, e); err != nil {
+				if err := store.PutEndpoint(tx, store.RoleEndpoint, pe); err != nil {
 					return err
 				}
 				return tx.Commit()

@@ -161,10 +161,13 @@ declaration of its own.
 - Serialise the transactions of one declaration (the single writer loop does).
   Use a `Writer` from several goroutines only for different declarations.
 - A transaction that writes the files of two owners belongs to the composing
-  package: it declares the `Decl`, `Begin`s, passes the `*Tx` to each owner's
-  write function, and commits. The owners write only their own directories and
-  use role names they export. Two `Tx` would let the second fail after the first
-  committed.
+  package: it declares the `Decl`, calls each owner's prepare step (which
+  validates and encodes and fails with an ordinary error), `Begin`s, passes the
+  `*Tx` and the prepared value to each owner's write function, and commits. The
+  owners write only their own directories and use role names they export. Two
+  `Tx` would let the second fail after the first committed, and a validation
+  made inside the `Tx` could fail after the commit point, which `Close` treats as
+  a defect of the caller.
 - The bytes appended are the caller's format. The package does not frame them;
   a format must let a reader resynchronise after a damaged record anywhere in the
   file, and a writer that cannot know whether the file ends in a partial record

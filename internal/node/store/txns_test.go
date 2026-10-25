@@ -159,12 +159,14 @@ func TestTransactionTableIsValid(t *testing.T) {
 // are called in, and refuse nothing that the declaration allows.
 func TestCrossOwnerWritesUseTheCallersRoles(t *testing.T) {
 	r := newRig(t)
+	e := directEndpoint(7, "chat")
+	pe, err := store.PrepareEndpoint(e)
+	mustDo(t, err)
 	tx := r.w.Begin(&declXAdmit)
 	if err := tx.Replace("ids", "config/ids", []byte("ids"), 0); err != nil {
 		t.Fatal(err)
 	}
-	e := directEndpoint(7, "chat")
-	if err := store.PutEndpoint(tx, store.RoleEndpoint, e); err != nil {
+	if err := store.PutEndpoint(tx, store.RoleEndpoint, pe); err != nil {
 		t.Fatalf("PutEndpoint: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -175,12 +177,14 @@ func TestCrossOwnerWritesUseTheCallersRoles(t *testing.T) {
 		t.Errorf("scan found %#v", sc.Endpoints)
 	}
 
+	res := adminResult(1)
+	pr, err := store.PrepareAdminResult(res)
+	mustDo(t, err)
 	tx = r.w.Begin(&declXClear)
 	if err := tx.Replace("clock", "keys/clock", []byte("c"), 0); err != nil {
 		t.Fatal(err)
 	}
-	res := adminResult(1)
-	if err := store.PutAdminResult(tx, store.RoleResult, res); err != nil {
+	if err := store.PutAdminResult(tx, store.RoleResult, pr); err != nil {
 		t.Fatalf("PutAdminResult: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

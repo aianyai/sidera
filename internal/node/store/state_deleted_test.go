@@ -63,9 +63,11 @@ func TestDeletingStateIsALossOfInFlightDataAndNothingMore(t *testing.T) {
 	r := newRig(t)
 	mustDo(t, r.st.Intake(bodyBytes(1), withSeq(1, 41, true)))
 	mustDo(t, r.st.ArchiveEvents(base, []store.ArchiveEvent{eventAccepted()}))
+	pe, err := store.PrepareEndpoint(directEndpoint(7, "chat"))
+	mustDo(t, err)
 	tx := r.w.Begin(&declXAdmit)
 	mustDo(t, tx.Replace("ids", "config/ids", []byte("stable ids"), fsx.ModePrivate))
-	mustDo(t, store.PutEndpoint(tx, store.RoleEndpoint, directEndpoint(7, "chat")))
+	mustDo(t, store.PutEndpoint(tx, store.RoleEndpoint, pe))
 	mustDo(t, tx.Commit())
 	mustDo(t, r.mem.RemoveAll(setupTag, "state"))
 
@@ -94,7 +96,7 @@ func TestDeletingStateIsALossOfInFlightDataAndNothingMore(t *testing.T) {
 	// The cross-owner transaction runs again: the record the deleted directory held is
 	// written afresh, the identifiers in config/ are the same.
 	tx = r.w.Begin(&declXAdmit)
-	mustDo(t, store.PutEndpoint(tx, store.RoleEndpoint, directEndpoint(7, "chat")))
+	mustDo(t, store.PutEndpoint(tx, store.RoleEndpoint, pe))
 	mustDo(t, tx.Commit())
 	if len(r.scan().Endpoints) != 1 {
 		t.Errorf("the endpoint record was not written again")

@@ -4,7 +4,8 @@ import "github.com/aianyai/sidera/internal/node/txn"
 
 // Role names a transaction of another package uses for the files of state/ it
 // asks this package to write, with the write functions PutEndpoint and
-// PutAdminResult. A role name is part of the crash point identifiers, so it is
+// PutAdminResult (their values come from PrepareEndpoint and
+// PrepareAdminResult, called before the transaction begins). A role name is part of the crash point identifiers, so it is
 // fixed.
 const (
 	// RoleEndpoint is the role of an endpoint record.
@@ -38,8 +39,8 @@ func prepare(x *txn.Write)  { x.Prepare = true }
 // The declarations of the transactions this package owns. Each is a literal;
 // nothing registers them at run time. A transaction that writes the files of
 // two owners is declared by the package that opens it (the engine, the
-// initialization entry), which calls PutEndpoint and PutAdminResult with the
-// roles above.
+// initialization entry), which prepares before it begins and calls PutEndpoint
+// and PutAdminResult with the roles above.
 var (
 	// intake: a message accepted from a local sender. The body is written first
 	// and is garbage until the record that refers to it is there.

@@ -20,7 +20,7 @@ declared here or in the package that composes it. It reads no clock.
 | `Config` accessors: `Node`, `Policy`, `Presets`, `Instances`, `EndpointIDs`, `EndpointSettings`, `Backup`, `Revocations`, `RevocationSet`, `Adapters`, `LastOperations` | Copies of the loaded state, manifests of `Adapters` included: nothing a caller changes reaches the configuration or another caller. |
 | `NodeSettings.ArchiveRetention()` | The retention of the archive as a duration: the one conversion of `archive_retention_days`. |
 | `SetNodeSettings`, `AddPreset`, `RemovePreset`, `EnableAdapter`, `DisableAdapter`, `SetEndpointSettings` | The versioned changes. A `Request` names the operation by `admin.RequestKey`, which only `admin.KeyFor` should make, so the person and the id cannot be put together wrongly. Each checks the version the request names, validates, records the operation and its result in the file it changes, in the same replacement, and returns the new state. Refusals are `*ChangeError` with a typed `ChangeReason`. |
-| `RuntimeID`, `DirectID`, `PutEndpointIDs`, `PutBackup`, `PutRevocation` | Write functions for transactions of other packages: they take a `*txn.Tx`, write under an exported role, and return an `AfterCommit` that the caller calls once `Commit` returned nil. |
+| `RuntimeID`, `DirectID`, `PrepareBackup`, `PrepareRevocation`, `PlanInstall`, `PutEndpointIDs`, `PutBackup`, `PutRevocation`, `Install.Point` | Write functions for transactions of other packages. The prepare steps (`RuntimeID` and `DirectID` encode the ids they mint, `PrepareBackup`, `PrepareRevocation` and `PlanInstall` check and encode) run before `Begin`; the put steps take a `*txn.Tx` and the prepared value, write under an exported role, can fail only as a write of the transaction does, and return an `AfterCommit` that the caller calls once `Commit` returned nil. |
 | `StageAdapter`, `Unstage`, `PlanInstall`, `Install` | The installation of an adapter package: copy it next to the versions, drop it, plan the writes that make it current. |
 | `AdapterGCWork(r)` | The garbage of the adapter directory as a pure function of the disk: what the repair removes, and what a clean run must leave empty. |
 | `PlanInit(r)`, `InitPlan` | The configuration side of `init`: what is missing, refusing an invalid file that exists. |
@@ -154,6 +154,12 @@ The prompt turns and the endpoint defaults are not here: they are
   (`RoleStale`, `RoleVersion`, `RoleCurrent`, `RoleOld` in this order, the
   current pointer being the commit point), `init` (`RoleDir`, `RoleNode`,
   `RolePolicy`, `RolePresets`, `RoleInstances`).
+- Do every check and encoding a cross-owner transaction needs before `Begin`:
+  `RuntimeID` or `DirectID`, `PrepareBackup`, `PrepareRevocation` and
+  `PlanInstall` return the error of a value that cannot be written, while the
+  put functions inside the transaction fail only as its writes do. An error found
+  after the commit point would be fatal, and `Tx.Close` panics for a transaction
+  closed there with no result.
 - Call the `AfterCommit` of a write function only after `Commit` returned nil.
 - Pass `OpenEndpoints` to every write of `instances.json`, with the set of
   endpoints that are open now.

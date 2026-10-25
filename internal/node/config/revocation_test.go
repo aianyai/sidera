@@ -85,9 +85,13 @@ func TestPutRevocation(t *testing.T) {
 	ensureState(t, rg.mem)
 	data, digest, rec := selfRevocation(t, 9)
 	put := func() {
+		pr, err := config.PrepareRevocation(rec)
+		if err != nil {
+			t.Fatalf("PrepareRevocation: %v", err)
+		}
 		tx := rg.w.Begin(testIdentityRetire)
 		defer tx.Close()
-		done, err := c.PutRevocation(tx, rec)
+		done, err := c.PutRevocation(tx, pr)
 		if err != nil {
 			t.Fatalf("PutRevocation: %v", err)
 		}
@@ -119,16 +123,14 @@ func TestPutRevocation(t *testing.T) {
 	}
 
 	t.Run("a record that does not verify is not written", func(t *testing.T) {
-		rg, c := loaded(t)
+		rg, _ := loaded(t)
 		bad, err := record.Sign("test/other", []byte{1}, signer(t, 7))
 		if err != nil {
 			t.Fatal(err)
 		}
 		before := snapshot(t, rg.mem)
-		tx := rg.w.Begin(testIdentityRetire)
-		defer tx.Close()
-		if _, err := c.PutRevocation(tx, bad); err == nil {
-			t.Error("PutRevocation accepted a record that is not a revocation")
+		if _, err := config.PrepareRevocation(bad); err == nil {
+			t.Error("PrepareRevocation accepted a record that is not a revocation")
 		}
 		if !reflect.DeepEqual(before, snapshot(t, rg.mem)) {
 			t.Error("a refused record changed the disk")
@@ -156,9 +158,13 @@ func TestPutBackup(t *testing.T) {
 	ensureState(t, rg.mem)
 	_, digest, _ := selfRevocation(t, 7)
 	nb := config.Backup{ConfirmedAt: time.Date(2026, 11, 2, 8, 30, 0, 0, time.UTC), Digest: digest}
+	pb, err := config.PrepareBackup(nb)
+	if err != nil {
+		t.Fatal(err)
+	}
 	tx := rg.w.Begin(testBackupConfirm)
 	defer tx.Close()
-	done, err := c.PutBackup(tx, nb)
+	done, err := c.PutBackup(tx, pb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,10 +187,8 @@ func TestPutBackup(t *testing.T) {
 		"no time":   {Digest: digest},
 		"no digest": {ConfirmedAt: nb.ConfirmedAt},
 	} {
-		tx2 := rg.w.Begin(testBackupConfirm)
-		if _, err := c.PutBackup(tx2, bad); err == nil {
-			t.Errorf("%s: PutBackup accepted it", name)
+		if _, err := config.PrepareBackup(bad); err == nil {
+			t.Errorf("%s: PrepareBackup accepted it", name)
 		}
-		tx2.Close()
 	}
 }

@@ -144,9 +144,13 @@ func TestCleanScenariosLeaveNoConfigRecoveryWork(t *testing.T) {
 		}},
 		{"confirming the backup again", func() error {
 			b, _ := c.Backup()
+			pb, err := config.PrepareBackup(b)
+			if err != nil {
+				return err
+			}
 			tx := rg.w.Begin(testBackupConfirm)
 			defer tx.Close()
-			done, err := c.PutBackup(tx, b)
+			done, err := c.PutBackup(tx, pb)
 			if err != nil {
 				return err
 			}
