@@ -64,20 +64,35 @@ func (s *Server) acceptLoop() {
 		// The peer is started before the server can close it, so that Close never
 		// races with Start.
 		c.p.Start()
-		s.mu.Lock()
-		select {
-		case <-s.closing:
-			s.mu.Unlock()
+		if !s.adopt(c) {
 			_ = c.p.Close()
 			return
-		default:
 		}
-		s.conns = append(s.conns, c)
-		s.mu.Unlock()
 		// The hello may have been answered before the connection was listed,
 		// and nobody waiting for it would have seen it.
 		s.announce()
 	}
+}
+
+// adopt lists a connection, unless the server is closing, and gives it every
+// handler registered so far. Listing and installing happen under one lock with
+// Handle's: a handler registered while the connection was being made is on the
+// connection (newConn copied the handlers before it was listed, so Handle could
+// not have reached it), and one registered later reaches it as a listed
+// connection.
+func (s *Server) adopt(c *Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	select {
+	case <-s.closing:
+		return false
+	default:
+	}
+	for m, h := range s.handlers {
+		c.install(m, h)
+	}
+	s.conns = append(s.conns, c)
+	return true
 }
 
 // Handle registers the server's answer to a request method that connected
@@ -86,10 +101,9 @@ func (s *Server) acceptLoop() {
 // said hello.
 func (s *Server) Handle(method string, h Handler) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.handlers[method] = h
-	conns := append([]*Conn(nil), s.conns...)
-	s.mu.Unlock()
-	for _, c := range conns {
+	for _, c := range s.conns {
 		c.install(method, h)
 	}
 }
