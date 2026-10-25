@@ -123,6 +123,26 @@ The mapping is used only at intake. At `recv`, `Handout` takes only the kind
 (`IntakeAuthorization(v).Kind`), and a refusal there is always reported as
 `second_check_failed`, so no specific rule is revealed.
 
+Exempt traffic carries no verdict. The [policy](../policy/README.md) does not
+judge status reports, control replies, system feedback or trust maintenance, and
+its callers do not call `Evaluate` for them, so there is nothing to put in an
+`Authorization`. `authz.TrafficKind.PolicyExempt` is the one place that
+classifies; `Intake` reads it and, for exempt traffic, requires the zero
+`Authorization` and refuses any other (even a deny or an allow) as invalid
+input: a verdict for it would mean the policy was applied to what it does not
+govern, and a denial would silence system feedback. The record of such traffic
+carries the decision as `Record.Exempt`, set only by `NewTargetNoticeRecord`
+(system feedback is the one exempt kind `Intake` judges; a test pins that), so
+the decision is taken once, where the traffic is taken in, and is never
+recomputed from a traffic kind a caller must remember. `Handout` and
+`OccupiesBacklogSlot` read the record: `Handout` makes no second check for an
+exempt record and requires the zero `AuthorizationKind` for it, so no caller
+fabricates an allow, and `OccupiesBacklogSlot` takes no traffic argument. Storage
+keeps the marker, and with it the rule that such a record holds no verdict (see
+[storage](../storage/README.md)). A rejected alternative was to let `Handout`
+accept any verdict and ignore it for notices: the same call would then do two
+things, and a verdict that was not read would look like one that was.
+
 ### Backlog limit
 
 `DefaultEndpointBacklogLimit` is 200 per endpoint, and an endpoint's owner may
@@ -137,13 +157,14 @@ messages as the limit is `rejected` with `backlog_full`, in `Intake`.
 | ordinary message, authorization suspended | suspended, whatever the count |
 | deadline already past, out of range or missing | rejected as `expired`, `deadline_out_of_range`, `malformed`, whatever the count |
 | control signal | accepted: never queued, so no slot is taken and none is needed |
-| system feedback | accepted: exempt traffic, the count is not read |
+| system feedback (zero `Authorization`) | accepted: exempt traffic, the count is not read |
+| system feedback with any verdict | invalid input |
 | limit unset (zero) or negative, negative count, a traffic kind `Intake` does not judge (status report, control reply, trust maintenance, unset or unknown) | invalid input |
 
 Which records are counted is `Record.OccupiesBacklogSlot`: a target record that
-is `accepted` (queued, leased or prompted for) and not a control record. A
-record that was handed over (`delivery_unknown`), delivered or rejected is not
-queued any more. System feedback is not counted.
+is `accepted` (queued, leased or prompted for) and neither a control record nor
+exempt. A record that was handed over (`delivery_unknown`), delivered or rejected
+is not queued any more. System feedback is not counted: its record is exempt.
 
 A hidden endpoint is reported as not existing, so the sender cannot tell it from
 an endpoint that is absent, and all the rules that refuse without a declaration
@@ -239,7 +260,7 @@ endpoint, so the sender keeps pulling until it has the reply (see
 ### Validity of a restored record
 
 Every record that the constructors (`NewSourceRecord`, `NewTargetRecord`,
-`NewTargetControlRecord`) and the transitions (`Apply`, `Tick`, `Handout`,
+`NewTargetNoticeRecord`, `NewTargetControlRecord`) and the transitions (`Apply`, `Tick`, `Handout`,
 `Renew`, `Ack`) produce is accepted by `Record.Valid`, under the caller
 guarantees of the package README, and every invariant listed there is refused;
 the accepted set is not claimed to equal the reachable set, and only for the
@@ -675,7 +696,9 @@ permission still reads it.
   `Authorization`, `IntakeAuthorization`, `Intake`. Tests: `TestIntake`,
   `TestIntakeAuthorization`, `TestIntakeAuthorizationRejectReasons`,
   `TestIntakeAuthorizationMapsEveryReason` (fails when a policy reason has no
-  explicit mapping).
+  explicit mapping). Exempt traffic: `TestIntakeExemptTraffic`,
+  `TestNoticeRecordIsTheRecordOfExemptTraffic`, `TestHandoutExemptRecord`; the
+  marker's shape is `ViolationExemptShape` in the table of invalid records.
   The backlog limit: `Backlog`, `DefaultEndpointBacklogLimit`,
   `ValidateEndpointBacklogLimit`, `Record.OccupiesBacklogSlot`. Tests:
   `TestIntakeBacklogLimit` (the rule table), `TestIntakeBacklogInputs`,

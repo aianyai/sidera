@@ -248,6 +248,7 @@ type recordJSON struct {
 	Unknown         string     `json:"unknown,omitempty"`
 	Lost            bool       `json:"lost,omitempty"`
 	Control         bool       `json:"control,omitempty"`
+	Exempt          bool       `json:"exempt,omitempty"`
 	AcceptBefore    *wtime     `json:"accept_before,omitempty"`
 	ReportBy        *wtime     `json:"report_by,omitempty"`
 	BacklogDeadline *wtime     `json:"backlog_deadline,omitempty"`
@@ -291,7 +292,7 @@ func toRecord(r delivery.Record) (recordJSON, error) {
 			return j, err
 		}
 	}
-	j.Lost, j.Control = r.Lost, r.Control
+	j.Lost, j.Control, j.Exempt = r.Lost, r.Control, r.Exempt
 	j.AcceptBefore, j.ReportBy, j.BacklogDeadline = tptr(r.AcceptBefore), tptr(r.ReportBy), tptr(r.BacklogDeadline)
 	for k := delivery.KindUnreachable; k <= lastFeedbackKind; k++ {
 		if r.Reported.Has(k) {
@@ -364,7 +365,7 @@ func fromRecord(j recordJSON) (delivery.Record, error) {
 			return r, err
 		}
 	}
-	r.Lost, r.Control = j.Lost, j.Control
+	r.Lost, r.Control, r.Exempt = j.Lost, j.Control, j.Exempt
 	r.AcceptBefore, r.ReportBy, r.BacklogDeadline = tval(j.AcceptBefore), tval(j.ReportBy), tval(j.BacklogDeadline)
 	last := delivery.Kind(0)
 	for _, n := range j.Reported {

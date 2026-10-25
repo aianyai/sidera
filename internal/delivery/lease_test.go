@@ -2,6 +2,7 @@ package delivery
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -717,4 +718,48 @@ func TestAckOutOfRangePartWasNeverHandedOut(t *testing.T) {
 			t.Errorf("part %d: state %s acked %v, want the record unchanged", part, after.State, after.Lease.Acked)
 		}
 	}
+}
+
+// TestHandoutExemptRecord: a notice of the system endpoint is not judged by the
+// policy, so recv makes no second check for it and no verdict is supplied or
+// read. A verdict handed in for it is the caller's mistake.
+func TestHandoutExemptRecord(t *testing.T) {
+	t.Run("the zero verdict hands the body out", func(t *testing.T) {
+		after, res, err := noticeRecord(t, t0, 2*time.Hour).Handout(t0, 0, 1, 1, freshLease())
+		if err != nil || res.Action != HandoutGranted || !after.Lease.Active || after.Lease.Handouts != 1 {
+			t.Errorf("result %+v lease %+v err %v", res, after.Lease, err)
+		}
+		if err := after.Valid(); err != nil {
+			t.Errorf("Valid after the hand-out: %v", err)
+		}
+	})
+	t.Run("a handed-out notice is delivered by acknowledgement and stays exempt", func(t *testing.T) {
+		page := freshLease()
+		r, _, err := noticeRecord(t, t0, 2*time.Hour).Handout(t0, 0, 1, 1, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, v, _, err := r.Ack(at(time.Minute), Ack{Part: 1, Lease: page, TokenMatches: true})
+		if err != nil || v != AckCompleted || got.State != StateDelivered || !got.Exempt {
+			t.Errorf("verdict %v state %s exempt %v err %v", v, got.State, got.Exempt, err)
+		}
+		if err := got.Valid(); err != nil {
+			t.Errorf("Valid: %v", err)
+		}
+	})
+	for _, auth := range []AuthorizationKind{AuthorizationAllow, AuthorizationSuspend, AuthorizationDeny, AuthorizationKind(9)} {
+		t.Run(fmt.Sprintf("verdict %d for an exempt record is invalid input and changes nothing", auth), func(t *testing.T) {
+			r := noticeRecord(t, t0, 2*time.Hour)
+			after, res, err := r.Handout(t0, auth, 1, 1, freshLease())
+			if !errors.Is(err, ErrInvalidInput) || res.Action != 0 || !reflect.DeepEqual(after, r) {
+				t.Errorf("result %+v err %v", res, err)
+			}
+		})
+	}
+	t.Run("a record the policy governs still needs a verdict", func(t *testing.T) {
+		r := targetRecord(t, t0, 2*time.Hour)
+		if _, _, err := r.Handout(t0, 0, 1, 1, freshLease()); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("err = %v", err)
+		}
+	})
 }

@@ -443,16 +443,17 @@ func feedbackItem(i int) delivery.Item {
 
 // noticeFor is the notice that covers the pending feedback of out.
 func noticeFor(o store.OutRecord) store.InRecord {
-	k := store.TargetKey{SenderNode: node(local), Sender: ident.SystemEndpoint(), Message: "notice-" + o.Key.Message, Recipient: o.Key.Sender}
-	rec, err := delivery.NewTargetRecord(base, base.Add(10*time.Minute), delivery.ReportBy(base.Add(10*time.Minute)), delivery.DefaultEndpointMaxQueue)
+	n := noticeIn(99)
+	n.Key = store.TargetKey{SenderNode: node(local), Sender: ident.SystemEndpoint(), Message: "notice-" + o.Key.Message, Recipient: o.Key.Sender}
+	rec, err := delivery.NewTargetNoticeRecord(base, base.Add(10*time.Minute), delivery.ReportBy(base.Add(10*time.Minute)), delivery.DefaultEndpointMaxQueue)
 	if err != nil {
 		panic(err)
 	}
-	n := store.InRecord{
-		Key: k, Rev: 1, Record: rec, Dedup: delivery.NewDedupRecord(k.Dedup(), digestOf(99), rec.ReportBy),
-		Auth: delivery.Authorization{Kind: delivery.AuthorizationAllow}, AcceptedAt: base,
-		Handout: store.HandoutFields{ContentType: "text/plain", SentAt: base}, Body: func() *store.BodyRef { b := store.BodyRefOf([]byte("feedback wording")); return &b }(),
-	}
+	n.Rev, n.Record = 1, rec
+	n.Dedup = delivery.NewDedupRecord(n.Key.Dedup(), digestOf(99), rec.ReportBy)
+	n.AcceptedAt = base
+	n.Handout = store.HandoutFields{ContentType: "text/plain", SentAt: base}
+	n.Body = func() *store.BodyRef { b := store.BodyRefOf([]byte("feedback wording")); return &b }()
 	for _, it := range o.Feedback {
 		n.Covers = append(n.Covers, store.CoverRef{Out: o.Name(), Recipient: it.Ref.Recipient, Kind: it.Feedback.Kind})
 	}

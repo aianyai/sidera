@@ -80,6 +80,17 @@ func targetRecord(t *testing.T, acceptedAt time.Time, maxQueue time.Duration) Re
 	return r
 }
 
+// noticeRecord is targetRecord for a notice of the system endpoint: exempt traffic.
+func noticeRecord(t *testing.T, acceptedAt time.Time, maxQueue time.Duration) Record {
+	t.Helper()
+	ab := at(10 * time.Minute)
+	r, err := NewTargetNoticeRecord(acceptedAt, ab, ReportBy(ab), maxQueue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
 // handOut hands out chunk part of a body of chunks chunks and fails the test
 // unless recv would really give the body out.
 func handOut(t *testing.T, r Record, now time.Time, chunks, part int) Record {

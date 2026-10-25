@@ -25,7 +25,7 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 		typ    reflect.Type
 		fields string
 	}{
-		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Unknown Lost Control AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
+		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Unknown Lost Control Exempt AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
 		{"delivery.Lease", reflect.TypeOf(delivery.Lease{}), "Handouts IDs Active IssuedAt ExpiresAt Chunks HandedOut Acked"},
 		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply DigestLost"},
 		{"delivery.Authorization", reflect.TypeOf(delivery.Authorization{}), "Kind Reject"},
@@ -110,7 +110,12 @@ func deliveryRecordsOfEveryShape(t *testing.T) (source, target []delivery.Record
 	h := deliveredRecord(sessionCtl(1, 5).Record)
 	i, _ := lostRecord(delivery.SideTarget, true, base.Add(time.Hour))
 	j, _ := lostRecord(delivery.SideTarget, false, base.Add(time.Hour))
-	return []delivery.Record{a, b, c, d, e}, []delivery.Record{f, g, h, i, j}
+	// A notice of the system endpoint: exempt traffic, handed out without a second check.
+	k, _, err := noticeIn(3).Record.Handout(base.Add(time.Minute), 0, 1, 1, fixedLease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []delivery.Record{a, b, c, d, e}, []delivery.Record{f, g, h, i, j, k}
 }
 
 // Every field of the stored types, set to a value that is not the zero value in
@@ -163,10 +168,19 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 			in = lostInAt(in.Key, base.Add(time.Hour))
 		}
 		in.Auth = delivery.Authorization{Kind: delivery.AuthorizationSuspend}
+		if r.Exempt {
+			in.Key = noticeKey(20 + n)
+			in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(20+n), r.ReportBy)
+			in.Auth = delivery.Authorization{}
+		}
 		if in.Lost {
 			in.Auth = delivery.Authorization{}
 		} else {
-			in.ReplyDecision = reply.Decision{Reason: reply.ReasonArrivalWindow, Until: base.Add(25 * time.Hour)}
+			if !r.Exempt {
+				in.ReplyDecision = reply.Decision{Reason: reply.ReasonArrivalWindow, Until: base.Add(25 * time.Hour)}
+			} else {
+				in.ReplyDecision = reply.Decision{}
+			}
 			in.Handout = store.HandoutFields{ContentType: "text/plain; charset=utf-8", ReplyTo: msgID(8), Thread: "thread", Seq: 3, SentAt: base.Add(time.Second)}
 			in.AcceptedAt = base.Add(2 * time.Second)
 		}

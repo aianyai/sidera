@@ -573,7 +573,32 @@ func outFileHash(name string) (string, error) {
 	return h, nil
 }
 
-var errNoVerdictFromAnotherSender = errors.New("only a notice of the system endpoint omits the verdict of the authorization check or the reply permission")
+// checkVerdictParts is the one statement of which verdicts a regular in record
+// holds, read by encoding and decoding alike. A record of exempt traffic, a
+// notice of the system endpoint, is not judged by the policy and a system
+// endpoint cannot be replied to, so it holds neither the verdict of the
+// authorization check nor the reply permission. Every other record holds both,
+// so that one which lost them in storage cannot pass for one that never had
+// them. The exemption is the record's own (delivery.Record.Exempt); the sender
+// must agree with it, because the system endpoint is the only sender of exempt
+// traffic to an endpoint and is never a sender the policy judges.
+func checkVerdictParts(key TargetKey, exempt, hasAuth, hasReply bool) error {
+	switch {
+	case exempt != key.Sender.IsSystem():
+		return errExemptSender
+	case exempt && (hasAuth || hasReply):
+		return errExemptVerdict
+	case !exempt && !(hasAuth && hasReply):
+		return errMissingVerdict
+	}
+	return nil
+}
+
+var (
+	errExemptSender   = errors.New("a record is exempt from the policy exactly when the system endpoint sent it")
+	errExemptVerdict  = errors.New("a record of exempt traffic holds no verdict of the authorization check and no reply permission")
+	errMissingVerdict = errors.New("a record of traffic the policy judges holds the verdict of the authorization check and the reply permission")
+)
 
 func encodeIn(r InRecord) ([]byte, error) {
 	if _, err := r.Key.Bytes(); err != nil {
@@ -613,12 +638,8 @@ func encodeIn(r InRecord) ([]byte, error) {
 	}
 	rev := r.Rev
 	j.Rev = &rev
-	// A system notice has neither a verdict of the authorization check nor a
-	// reply permission: exempt traffic, and a system endpoint cannot be replied to.
-	// Of any other sender both are stored, so that a record that lost them in
-	// storage cannot pass for one that never had them.
-	if (r.Auth == (delivery.Authorization{}) || r.ReplyDecision == (reply.Decision{})) && !r.Key.Sender.IsSystem() {
-		return nil, errNoVerdictFromAnotherSender
+	if err := checkVerdictParts(r.Key, r.Record.Exempt, r.Auth != (delivery.Authorization{}), r.ReplyDecision != (reply.Decision{})); err != nil {
+		return nil, err
 	}
 	if r.Auth != (delivery.Authorization{}) {
 		if j.Auth, err = toAuth(r.Auth); err != nil {
@@ -706,8 +727,8 @@ func decodeIn(key TargetKey, body []byte) (InRecord, error) {
 	if j.Handout == nil || j.AcceptedAt == nil {
 		return r, errors.New("a regular in record needs its handout fields and acceptance time")
 	}
-	if (j.Auth == nil || j.Reply == nil) && !key.Sender.IsSystem() {
-		return r, errNoVerdictFromAnotherSender
+	if err := checkVerdictParts(key, r.Record.Exempt, j.Auth != nil, j.Reply != nil); err != nil {
+		return r, err
 	}
 	if j.Auth != nil {
 		if r.Auth, err = fromAuth(j.Auth); err != nil {

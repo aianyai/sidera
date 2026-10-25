@@ -118,7 +118,10 @@ func (r Record) HoldsLiveLease(now time.Time) bool {
 //
 // The second authorization check is made here, at the moment the body would be
 // handed out. A suspended check leaves the message untouched. A denied check
-// closes the delivery as closeForcibly does.
+// closes the delivery as closeForcibly does. An exempt record (a notice of the
+// system endpoint, see Record.Exempt) is not judged by the policy and has no
+// second check: auth must be the zero AuthorizationKind, and any verdict for it
+// is invalid input. Every other record needs a valid auth.
 //
 // lease is the identifier of the page this hand-out belongs to. The caller
 // generates it once per recv, because one recv hands out a whole page, possibly
@@ -134,7 +137,11 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int,
 	if r.Control {
 		return r, HandoutResult{}, fmt.Errorf("%w: a control signal is never handed out by recv", ErrWrongSide)
 	}
-	if !auth.valid() || chunks < 1 || part < 1 || part > chunks || lease.IsZero() {
+	authFits := auth.valid()
+	if r.Exempt {
+		authFits = auth == 0
+	}
+	if !authFits || chunks < 1 || part < 1 || part > chunks || lease.IsZero() {
 		return r, HandoutResult{}, fmt.Errorf("%w: authorization %d, part %d of %d chunks, lease %s", ErrInvalidInput, auth, part, chunks, lease)
 	}
 	if r.Lease.Chunks != 0 && r.Lease.Chunks != chunks {

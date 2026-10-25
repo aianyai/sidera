@@ -63,13 +63,14 @@ func validIntakeTraffic(traffic authz.TrafficKind) bool {
 }
 
 // OccupiesBacklogSlot reports whether a record counts toward its endpoint's
-// backlog, given the traffic the record was made for. Only a target record that
-// still waits to be handed out or acknowledged does: a control record is never
-// queued, a delivered, rejected or handed-over record is no longer queued, and
-// system feedback does not count, so that notices the node itself sends can
-// never take room from the messages other senders may queue.
-func (r Record) OccupiesBacklogSlot(traffic authz.TrafficKind) bool {
-	return r.hasQueue() && r.State == StateAccepted && backlogGoverned(traffic)
+// backlog. Only a target record that still waits to be handed out or
+// acknowledged does: a control record is never queued, a delivered, rejected or
+// handed-over record is no longer queued, and an exempt record (a notice of the
+// system endpoint) does not count, so that notices the node itself sends can
+// never take room from the messages other senders may queue. It reads the
+// record alone: what the traffic was is settled when the record is made.
+func (r Record) OccupiesBacklogSlot() bool {
+	return r.hasQueue() && r.State == StateAccepted && !r.Exempt
 }
 
 // IntakeOutcome is the target's answer to a first-time request.
@@ -106,6 +107,12 @@ type IntakeVerdict struct {
 // the deadline, and an expired request has none left. A refusal is reported
 // with the reason the authorization carries.
 //
+// Exempt traffic (authz.TrafficKind.PolicyExempt) is not judged by the policy,
+// so it carries no authorization verdict: auth must be the zero Authorization,
+// and any verdict for it is invalid input, because a caller that made one has
+// applied the policy to what the policy does not govern. Its deadline is still
+// checked. For every other traffic a valid verdict is required.
+//
 // A message that arrives when the endpoint already holds Backlog.Limit queued
 // messages is rejected as RejectBacklogFull. That is judged last: a sender that
 // is not allowed to write to the endpoint is told so and learns nothing of its
@@ -113,11 +120,15 @@ type IntakeVerdict struct {
 // to bound. Other traffic is never refused by the limit (backlogGoverned), and
 // for it the Backlog is not read.
 func Intake(now, acceptBefore time.Time, traffic authz.TrafficKind, auth Authorization, backlog Backlog) (IntakeVerdict, error) {
-	if err := auth.validate(); err != nil {
-		return IntakeVerdict{}, err
-	}
 	if !validIntakeTraffic(traffic) {
 		return IntakeVerdict{}, fmt.Errorf("%w: traffic kind %d is not judged by Intake", ErrInvalidInput, traffic)
+	}
+	if traffic.PolicyExempt() {
+		if auth != (Authorization{}) {
+			return IntakeVerdict{}, fmt.Errorf("%w: traffic kind %d is exempt from the policy and carries no authorization verdict", ErrInvalidInput, traffic)
+		}
+	} else if err := auth.validate(); err != nil {
+		return IntakeVerdict{}, err
 	}
 	if backlogGoverned(traffic) {
 		if err := ValidateEndpointBacklogLimit(backlog.Limit); err != nil {

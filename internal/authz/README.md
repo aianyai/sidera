@@ -192,7 +192,8 @@ maintenance are not subject to endpoint policy, only to resource limits.
 `TrafficKind.PolicyExempt` classifies a kind. The caller still checks each kind's
 own preconditions (a status report must match an outbound record and come from
 the original target node, and so on) and does not call `Evaluate` for exempt
-traffic.
+traffic. `delivery.Intake` reads this classification and takes no authorization
+verdict for exempt traffic: there is none to give.
 
 ## Classifying a change
 

@@ -21,6 +21,9 @@ const (
 	ViolationSide
 	// ViolationControlSide: Control is set on a record that is not the target's.
 	ViolationControlSide
+	// ViolationExemptShape: Exempt is set on a record that is not the target's
+	// record of a message, or on one that replaces a lost record.
+	ViolationExemptShape
 	// ViolationState: the state is not one this kind of record can be in: a
 	// target is never queued or expired_unconfirmed, a control record is never
 	// rejected.
@@ -109,6 +112,7 @@ var violationNames = [...]string{
 	ViolationNone:                     "none",
 	ViolationSide:                     "side",
 	ViolationControlSide:              "control_on_source",
+	ViolationExemptShape:              "exempt_shape",
 	ViolationState:                    "state_for_record",
 	ViolationRejectReason:             "reject_reason",
 	ViolationSubState:                 "sub_state",
@@ -214,6 +218,9 @@ func (r Record) checkKind() Violation {
 	}
 	if r.Control && r.Side != SideTarget {
 		return ViolationControlSide
+	}
+	if r.Exempt && (!r.hasQueue() || r.Lost) {
+		return ViolationExemptShape
 	}
 	if !r.stateAllowed() {
 		return ViolationState

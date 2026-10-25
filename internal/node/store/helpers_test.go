@@ -383,6 +383,27 @@ func tgtIn(i int) store.InRecord {
 	}
 }
 
+// noticeKey is the key of notice i of the system endpoint to local endpoint 2.
+func noticeKey(i int) store.TargetKey {
+	return store.TargetKey{SenderNode: node(2), Sender: ident.SystemEndpoint(), Message: msgID(i), Recipient: ep(2)}
+}
+
+// noticeIn is tgtIn for a notice of the system endpoint: exempt traffic, which
+// holds neither a verdict of the authorization check nor a reply permission.
+func noticeIn(i int) store.InRecord {
+	in := tgtIn(i)
+	in.Key = noticeKey(i)
+	accept := base.Add(time.Duration(i) * time.Minute)
+	rec, err := delivery.NewTargetNoticeRecord(base, accept, delivery.ReportBy(accept), delivery.DefaultEndpointMaxQueue)
+	if err != nil {
+		panic(err)
+	}
+	in.Record = rec
+	in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(i), rec.ReportBy)
+	in.Auth, in.ReplyDecision = delivery.Authorization{}, reply.Decision{}
+	return in
+}
+
 // ctlKey is the key of control signal i from node 2 endpoint 3 to local
 // endpoint 4, the runtime endpoint.
 func ctlKey(i int) store.TargetKey {

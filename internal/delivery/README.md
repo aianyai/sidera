@@ -13,6 +13,7 @@ reasons behind the rules.
 | Entry point | Purpose |
 | ----------- | ------- |
 | `NewSourceRecord`, `NewTargetRecord` | Create the sender's or the recipient node's `Record` of a delivery. |
+| `NewTargetNoticeRecord` | Create the recipient's `Record` of a notice of the system endpoint (system feedback, exempt traffic): marked `Record.Exempt`, so no authorization verdict is made, stored or read for it. |
 | `NewTargetControlRecord(acceptBefore, reportBy)` | Create the target's `Record` of a control signal: never queued for `recv`, no backlog deadline, delivered by `EventReplyCommitted`. |
 | `Record.Valid()` | Says whether a record is one the constructors and transitions can produce, and names the first invariant it breaks (`*InvalidRecordError`, `ErrInvalidRecord`, `Violation`). For a record restored from storage. |
 | `NewLostRecord(side, control, discoveredAt)`, `LostReportBy`, `NewLostDedupRecord(key, discoveredAt)`, `Record.NeedsBody()` | The replacement for a delivery record, and for a deduplication record, lost to storage corruption; the instant a replacement is kept until; whether a record still needs the bytes of its body. |
@@ -22,8 +23,8 @@ reasons behind the rules.
 | `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
 | `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A page's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
 | `Record.StatusReport`, `StatusReport.Validate`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery (with the cause of an unknown result), and the one rule by which the sender applies it. |
-| `Intake(now, acceptBefore, traffic, Authorization, Backlog)` | Target-side validation of the delivery deadline, the authorization verdict (kind and, for a denial, the reason) and the endpoint's backlog limit, for a request deduplication found new. |
-| `Backlog`, `Record.OccupiesBacklogSlot(traffic)`, `DefaultEndpointBacklogLimit`, `ValidateEndpointBacklogLimit` | The endpoint's backlog limit: the count and limit `Intake` takes, the one rule for which records are counted, the default and its validation. |
+| `Intake(now, acceptBefore, traffic, Authorization, Backlog)` | Target-side validation of the delivery deadline, the authorization verdict (kind and, for a denial, the reason) and the endpoint's backlog limit, for a request deduplication found new. Exempt traffic carries no verdict: its `Authorization` is the zero value. |
+| `Backlog`, `Record.OccupiesBacklogSlot()`, `DefaultEndpointBacklogLimit`, `ValidateEndpointBacklogLimit` | The endpoint's backlog limit: the count and limit `Intake` takes, the one rule for which records are counted, the default and its validation. |
 | `IntakeAuthorization(authz.Verdict)` | The one mapping from the policy's verdict to an `Authorization`: allow, suspend, or a denial with the `RejectReason` the sender hears. |
 | `CheckDedup`, `NewDedupRecord`, `DedupRecord.WithReply` | Deduplication, with the stored reply of a control signal. |
 | `TransitionFeedback(from, to, unknown, reported)`, `Kind` | Which feedback a change of state calls for; the fixed wording of each kind. |
@@ -139,9 +140,9 @@ body is kept.
   traffic: refusing a notice because the endpoint is behind would silence the
   anomaly it reports. For these `Intake` does not read the `Backlog`.
 - `Record.OccupiesBacklogSlot` is the one rule for the count: a target record
-  that is `accepted` (queued, leased or prompted for) and is not a control
-  record. System feedback is not counted either, so notices the node sends
-  itself never take room from other senders. The count may therefore exceed the
+  that is `accepted` (queued, leased or prompted for) and is neither a control
+  record nor exempt (`Record.Exempt`). System feedback is not counted either,
+  so notices the node sends itself never take room from other senders. The count may therefore exceed the
   limit by the notices that are exempt from it.
 - The limit is a count, not a deadline: nothing in `Tick` changes with it, so
   it adds no timed rule.
@@ -240,7 +241,8 @@ record, never a clock.
 - Kind and state: a target is never `queued` or `expired_unconfirmed`, a control
   record is never `rejected` and exists only on the target; a rejection reason is
   recorded exactly while the state is `rejected`; `notified` only on an accepted
-  message record of the target.
+  message record of the target. `Exempt` only on a target message record (not a
+  control record, not a replacement for a lost one).
 - Deadlines: `ReportBy` is `ReportBy(AcceptBefore)`; a queued message has a
   backlog deadline no later than `SettleBy`, every other record has none. A
   replacement is judged by its marker instead (below).
@@ -326,6 +328,14 @@ correction and the blocked notice.
   refusal at `recv` is always reported as `second_check_failed`, so no
   specific rule is revealed. The token check of an
   acknowledgement is made by the caller and passed as `Ack.TokenMatches`.
+- Exempt traffic (`authz.TrafficKind.PolicyExempt`, which alone classifies it)
+  is not judged by the policy, so the caller never calls `authz.Evaluate` for it
+  and no verdict exists. `Intake` requires the zero `Authorization` for it and
+  refuses any other as invalid input. The record of such traffic is made with
+  `NewTargetNoticeRecord`, which marks it `Record.Exempt`, and `Handout` reads
+  that marker instead of a verdict: for an exempt record `auth` must be the zero
+  `AuthorizationKind`, for every other record a valid one. The one exempt kind
+  `Intake` judges is system feedback; a test pins that.
 - The caller generates one `LeaseID` per `recv` (`NewLeaseID` with
   `crypto/rand.Reader` in production) and passes it to `Handout` for every
   chunk the page hands out, because one `recv` hands a page out under one lease
@@ -366,8 +376,7 @@ correction and the blocked notice.
 - Whether delivery is blocked is decided by the caller (the prompt logic); this
   package only turns the decision into feedback.
 - `Intake` gets, as `Backlog`, the number of the recipient endpoint's records
-  for which `Record.OccupiesBacklogSlot(traffic)` is true (each with the traffic
-  it was made for) and the endpoint's limit, which is validated with
+  for which `Record.OccupiesBacklogSlot()` is true and the endpoint's limit, which is validated with
   `ValidateEndpointBacklogLimit`; an unset limit (zero) is invalid input, not
   "no limit". `traffic` is what the request is; `Intake` judges only a
   message, a control signal and system feedback, and every other kind (a status

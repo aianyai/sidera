@@ -27,7 +27,7 @@ var requiredPaths = []string{
 	"hand-out skipped", "hand-out denied", "ack recorded", "ack refused: lease",
 	"source expired", "feedback expired_corrected", "feedback unknown_corrected", "feedback blocked_recovered",
 	"delivery_unknown by backlog deadline", "delivery_unknown by denied hand-out", "delivery_unknown by closed endpoint",
-	"rejected by backlog deadline", "delivered",
+	"rejected by backlog deadline", "delivered", "exempt notice handed out",
 }
 
 // TestPropertyEveryDeliveryClosesAndNoFeedbackRepeats drives a source record
@@ -109,6 +109,9 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 	reportBy := src.ReportBy
 	settle := SettleBy(reportBy)
 	chunks := 1 + rng.Intn(3)
+	// Every fourth delivery is a notice of the system endpoint: exempt traffic,
+	// taken in without a verdict and handed out without a second check.
+	notice := seed%4 == 3
 	maxQueues := []time.Duration{5 * time.Minute, 30 * time.Minute, time.Hour, MaxQueueCap}
 	maxQueue := maxQueues[rng.Intn(len(maxQueues))]
 	acceptedAt := t0.Add(time.Duration(rng.Int63n(int64(ab.Sub(t0)))))
@@ -287,10 +290,14 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 	for ops := 0; now.Before(end) && ops < 600; ops++ {
 		now = now.Add(randomStep(rng))
 		if tgt == nil && targetReachable && !now.Before(acceptedAt) && !now.After(ab) {
-			if v, err := Intake(now, ab, authz.TrafficMessage, allow, roomy); err != nil || v.Outcome != IntakeAccept {
+			traffic, verdict, newRecord := authz.TrafficMessage, allow, NewTargetRecord
+			if notice {
+				traffic, verdict, newRecord = authz.TrafficSystemFeedback, Authorization{}, NewTargetNoticeRecord
+			}
+			if v, err := Intake(now, ab, traffic, verdict, roomy); err != nil || v.Outcome != IntakeAccept {
 				fail("intake %+v %v", v, err)
 			}
-			r, err := NewTargetRecord(now, ab, reportBy, maxQueue)
+			r, err := newRecord(now, ab, reportBy, maxQueue)
 			if err != nil {
 				fail("%v", err)
 			}
@@ -306,6 +313,9 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 				if rng.Intn(4) != 0 && auth == AuthorizationDeny {
 					auth = AuthorizationAllow
 				}
+				if tgt.Exempt {
+					auth = 0
+				}
 				// Every hand-out is a page of its own here: one identifier each.
 				page, part := freshLease(), 1+rng.Intn(chunks)
 				wasDup := tgt.PossibleDuplicate(part)
@@ -318,6 +328,9 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 						fail("Handout %+v: page %v, ids %v, was a possible duplicate %v", res, page, n.Lease.IDs, wasDup)
 					}
 					pages = append(pages, page)
+					if tgt.Exempt {
+						paths["exempt notice handed out"]++
+					}
 				}
 				switch res.Action {
 				case HandoutSkipped:

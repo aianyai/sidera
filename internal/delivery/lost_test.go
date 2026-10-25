@@ -439,7 +439,7 @@ func TestTargetLostRecordStaysUnknownUnderForcedClosure(t *testing.T) {
 		}
 	})
 	t.Run("it does not occupy a backlog slot", func(t *testing.T) {
-		if rec.OccupiesBacklogSlot(authz.TrafficMessage) {
+		if rec.OccupiesBacklogSlot() {
 			t.Error("a lost record occupies a slot")
 		}
 	})

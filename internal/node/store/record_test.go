@@ -72,6 +72,10 @@ func goldenWant(t *testing.T, name string) store.Record {
 		r := tgtIn(1)
 		r.Rev = 1
 		return r
+	case "in notice":
+		r := noticeIn(1)
+		r.Rev = 1
+		return r
 	case "out":
 		return srcOut(1, false)
 	case "ctl":
@@ -257,6 +261,10 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"a reply reason that is not one", "in", `"reason":"disabled"`, `"reason":"because"`},
 		{"an in record of another sender than the system without the verdict of the authorization check", "in", `"auth":{"kind":"allow"},`, ``},
 		{"an in record of another sender than the system without the reply permission", "in", `"reply":{"reason":"disabled"},`, ``},
+		{"an in record of the system endpoint that is not exempt", "in notice", `"exempt":true,`, ``},
+		{"an exempt in record of another sender than the system endpoint", "in", `"state":"accepted","accept_before"`, `"state":"accepted","exempt":true,"accept_before"`},
+		{"an exempt in record that holds the verdict of the authorization check", "in notice", `"handout"`, `"auth":{"kind":"allow"},"handout"`},
+		{"an exempt in record that holds the reply permission", "in notice", `"handout"`, `"reply":{"reason":"disabled"},"handout"`},
 		{"a digest of the wrong length", "in", `"digest":"0102`, `"digest":"010`},
 		{"a body reference of the wrong digest length", "in", `"sha256":"ea8c`, `"sha256":"ea8`},
 		{"a body reference of a negative length", "in", `"len":17`, `"len":-1`},
@@ -524,7 +532,7 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	dv.Dedup = delivery.NewDedupRecord(dv.Key.Dedup(), digestOf(4), dv.Record.ReportBy)
 	dv.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{"stage":"intake"}`)}
 	recs["in derived from a session creation"] = dv
-	notice := tgtIn(5)
+	notice := noticeIn(5)
 	notice.Rev = 1
 	notice.Key = store.TargetKey{SenderNode: node(local), Sender: ident.SystemEndpoint(), Message: msgID(5), Recipient: ep(1)}
 	notice.Dedup = delivery.NewDedupRecord(notice.Key.Dedup(), digestOf(5), notice.Record.ReportBy)
@@ -613,16 +621,16 @@ func TestFirstLineFlipsNeverGiveATrustedWrongKey(t *testing.T) {
 	}
 }
 
-// Omitting the verdict of the authorization check and the reply permission is
-// for the notices of the system endpoint, exempt traffic that cannot be replied
-// to. Any other sender's record carries both, in the encoder and in the decoder:
-// a record that lost them in storage must not pass for one that never had them.
-func TestOnlyTheSystemEndpointMayOmitTheVerdictAndTheReplyPermission(t *testing.T) {
-	system := func(mutate func(*store.InRecord)) store.InRecord {
-		in := tgtIn(5)
+// A record of exempt traffic, a notice of the system endpoint, is not judged by
+// the policy and cannot be replied to, so it holds neither the verdict of the
+// authorization check nor the reply permission; the record's own exempt marker
+// says so, and the system endpoint is the sender of exactly those. Every other
+// record holds both, in the encoder and in the decoder: a record that lost them
+// in storage must not pass for one that never had them.
+func TestVerdictPartsFollowTheExemptMarker(t *testing.T) {
+	notice := func(mutate func(*store.InRecord)) store.InRecord {
+		in := noticeIn(5)
 		in.Rev = 1
-		in.Key = store.TargetKey{SenderNode: node(local), Sender: ident.SystemEndpoint(), Message: msgID(5), Recipient: ep(1)}
-		in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(5), in.Record.ReportBy)
 		mutate(&in)
 		return in
 	}
@@ -632,22 +640,45 @@ func TestOnlyTheSystemEndpointMayOmitTheVerdictAndTheReplyPermission(t *testing.
 		mutate(&in)
 		return in
 	}
+	withAuth := func(in *store.InRecord) { in.Auth = delivery.Authorization{Kind: delivery.AuthorizationAllow} }
+	withReply := func(in *store.InRecord) { in.ReplyDecision = reply.Decision{Reason: reply.ReasonDisabled} }
 	noAuth := func(in *store.InRecord) { in.Auth = delivery.Authorization{} }
 	noReply := func(in *store.InRecord) { in.ReplyDecision = reply.Decision{} }
 	neither := func(in *store.InRecord) { noAuth(in); noReply(in) }
+	both := func(in *store.InRecord) { withAuth(in); withReply(in) }
+	notExempt := func(in *store.InRecord) {
+		accept := in.Record.AcceptBefore
+		rec, err := delivery.NewTargetRecord(base, accept, delivery.ReportBy(accept), delivery.DefaultEndpointMaxQueue)
+		if err != nil {
+			panic(err)
+		}
+		in.Record = rec
+	}
+	exempt := func(in *store.InRecord) {
+		accept := in.Record.AcceptBefore
+		rec, err := delivery.NewTargetNoticeRecord(base, accept, delivery.ReportBy(accept), delivery.DefaultEndpointMaxQueue)
+		if err != nil {
+			panic(err)
+		}
+		in.Record = rec
+	}
 	for _, c := range []struct {
 		rule   string
 		rec    store.InRecord
 		wantOK bool
 	}{
-		{"the system endpoint omits both", system(neither), true},
-		{"the system endpoint omits the verdict", system(noAuth), true},
-		{"the system endpoint omits the reply permission", system(noReply), true},
-		{"the system endpoint may carry both", system(func(*store.InRecord) {}), true},
+		{"an exempt notice of the system endpoint holds neither", notice(func(*store.InRecord) {}), true},
+		{"an exempt notice does not hold the verdict", notice(withAuth), false},
+		{"an exempt notice does not hold the reply permission", notice(withReply), false},
+		{"an exempt notice does not hold both", notice(both), false},
+		{"a record of the system endpoint that is not exempt is refused with neither verdict", notice(notExempt), false},
+		{"a record of the system endpoint that is not exempt is refused with both verdicts", notice(func(in *store.InRecord) { notExempt(in); both(in) }), false},
 		{"another sender carries both", other(func(*store.InRecord) {}), true},
 		{"another sender omits the verdict", other(noAuth), false},
 		{"another sender omits the reply permission", other(noReply), false},
 		{"another sender omits both", other(neither), false},
+		{"another sender's exempt record is refused", other(func(in *store.InRecord) { exempt(in); neither(in) }), false},
+		{"another sender's exempt record is refused with both verdicts", other(exempt), false},
 	} {
 		t.Run(c.rule, func(t *testing.T) {
 			data, err := store.EncodeRecord(c.rec)

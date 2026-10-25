@@ -143,6 +143,10 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		{"side is unknown", baseQueued, func(r *Record) { r.Side = 3 }, ViolationSide},
 		// control
 		{"control is set on a source record", baseQueued, func(r *Record) { r.Control = true }, ViolationControlSide},
+		// exempt
+		{"exempt is set on a source record", baseQueued, func(r *Record) { r.Exempt = true }, ViolationExemptShape},
+		{"exempt is set on a control record", baseControlRecord, func(r *Record) { r.Exempt = true }, ViolationExemptShape},
+		{"exempt is set on a replacement of a lost record", baseLostTarget, func(r *Record) { r.Exempt = true }, ViolationExemptShape},
 		// state fits the kind of record
 		{"a target is never queued", baseTgt, func(r *Record) { r.State = StateQueued }, ViolationState},
 		{"a target is never expired_unconfirmed", baseTgt, func(r *Record) { r.State = StateExpiredUnconfirmed }, ViolationState},
@@ -616,6 +620,7 @@ func recordMutators() []recordMutator {
 			}
 			r.Control = !r.Control
 		}, 0},
+		{"exempt set", false, func(rng *rand.Rand, r *Record) { r.Exempt = true }, 0.5},
 		{"lost marker flipped", true, func(rng *rand.Rand, r *Record) { r.Lost = !r.Lost }, 0},
 		{"unknown cause to another", true, func(rng *rand.Rand, r *Record) { r.Unknown = UnknownCause(otherInt(rng, int(r.Unknown), 0, 3)) }, 0},
 		{"state to another", false, func(rng *rand.Rand, r *Record) { r.State = State(otherInt(rng, int(r.State), 0, 8)) }, 0.6},

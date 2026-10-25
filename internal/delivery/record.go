@@ -65,6 +65,15 @@ type Record struct {
 	// by Ack. False for every other record.
 	Control bool
 
+	// Exempt marks the target's record of traffic that endpoint policy leaves
+	// alone (authz.TrafficKind.PolicyExempt): a notice of the system endpoint.
+	// Only NewTargetNoticeRecord sets it, so it is decided once, where the
+	// traffic is taken in, and no transition changes it. Such a record has no
+	// verdict of the authorization check: Handout makes no second check for it,
+	// and it takes no slot of the endpoint's backlog. False for every other
+	// record, and always for a control record or a record that replaces a loss.
+	Exempt bool
+
 	// AcceptBefore is the delivery deadline from the envelope.
 	AcceptBefore time.Time
 	// ReportBy is when the sender stops asking and the delivery closes.
@@ -108,6 +117,22 @@ func NewTargetRecord(acceptedAt, acceptBefore, reportBy time.Time, endpointMaxQu
 		ReportBy:        reportBy,
 		BacklogDeadline: BacklogDeadline(acceptedAt, reportBy, endpointMaxQueue),
 	}, nil
+}
+
+// NewTargetNoticeRecord returns the target's record of a notice from the system
+// endpoint it has just accepted, for the endpoint to receive like a message:
+// system feedback, which is exempt traffic (authz.TrafficSystemFeedback).
+// The arguments are those of NewTargetRecord. The record is marked Exempt, so
+// the authorization check that decides every other message is neither made
+// for it at intake (see Intake) nor repeated at recv (see Record.Handout), and
+// it takes no slot of the endpoint's backlog (see OccupiesBacklogSlot).
+func NewTargetNoticeRecord(acceptedAt, acceptBefore, reportBy time.Time, endpointMaxQueue time.Duration) (Record, error) {
+	r, err := NewTargetRecord(acceptedAt, acceptBefore, reportBy, endpointMaxQueue)
+	if err != nil {
+		return Record{}, err
+	}
+	r.Exempt = true
+	return r, nil
 }
 
 // NewTargetControlRecord returns the target's record of a control signal it has
