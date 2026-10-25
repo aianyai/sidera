@@ -91,8 +91,9 @@ commands and add their methods to this list.
 - **The capacity check is in one place.** `CheckCapacity` judges the clock, then
   the queue, then the disk, and a bound that is not set refuses. The engine feeds
   it with the settings of the node, the free space and its own count of unfinished
-  deliveries: target records and control records that are not final, and source
-  deliveries no receipt answered. System feedback, status reports, control
+  deliveries: target records that still need their body (accepted, queued or
+  leased), accepted control records, and source deliveries no receipt answered;
+  a delivery whose outcome is unknown holds no body and is not counted. System feedback, status reports, control
   replies and the local target side of a delivery do not go through it.
 - **Recovery is a plan, then rules.** `PlanRecovery` is a pure function of a scan.
   `Open` runs the rules in the order the store's README fixes, works the plan out

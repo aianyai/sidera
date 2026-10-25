@@ -149,6 +149,16 @@ func outRec(t testing.TB, i int, states ...delivery.State) store.OutRecord {
 	return o
 }
 
+// ctlRec is a control record for recipient in the given state.
+func ctlRec(t testing.TB, i int, recipient ident.EndpointID, state delivery.State) store.CtlRecord {
+	t.Helper()
+	k := store.TargetKey{SenderNode: nodeOf(t, 2), Sender: idOf(t, 3), Message: delivery.MessageID(fmt.Sprintf("ctl-%04d", i)), Recipient: recipient}
+	accept := time.Date(2026, 10, 24, 9, i, 0, 0, time.UTC)
+	rec := delivery.NewTargetControlRecord(accept, delivery.ReportBy(accept))
+	rec.State = state
+	return store.CtlRecord{Key: k, Record: rec, Kind: envelope.KindSessionClose, AcceptedAt: accept}
+}
+
 // The view is built from a scan and holds what the loop decides with: the
 // endpoints by id and by token, the number of unfinished deliveries, and how
 // many records refer to each body.
@@ -157,29 +167,52 @@ func TestBuildViewCountsWhatTheLoopDecidesWith(t *testing.T) {
 	openSession := endpointRec(t, 2, adapterreg.KindSession, store.EndpointOpen, "claude")
 	creating := endpointRec(t, 3, adapterreg.KindSession, store.EndpointCreating, "claude")
 	closed := endpointRec(t, 4, adapterreg.KindSession, store.EndpointClosed, "claude")
+	leased := inRec(t, 7, direct.ID, delivery.StateAccepted)
+	leased.Record.Lease = delivery.Lease{Active: true, Handouts: 1}
 	sc := &store.Scan{
 		Endpoints: []store.EndpointRecord{direct, openSession, creating, closed},
 		In: []store.InRecord{
-			inRec(t, 1, direct.ID, delivery.StateAccepted),
-			inRec(t, 2, direct.ID, delivery.StateAccepted),
+			inRec(t, 1, direct.ID, delivery.StateAccepted), // queued
+			inRec(t, 2, direct.ID, delivery.StateAccepted), // queued
+			leased, // leased: still accepted
 			inRec(t, 3, direct.ID, delivery.StateDeliveryUnknown),
 			inRec(t, 4, direct.ID, delivery.StateDelivered),
 			inRec(t, 5, direct.ID, delivery.StateRejected),
+			inRec(t, 6, direct.ID, delivery.StateClosedUnconfirmed),
+		},
+		Ctl: []store.CtlRecord{
+			ctlRec(t, 1, direct.ID, delivery.StateAccepted),
+			ctlRec(t, 2, direct.ID, delivery.StateDelivered),
+			ctlRec(t, 3, direct.ID, delivery.StateDeliveryUnknown),
 		},
 		Out: []store.OutRecord{
 			outRec(t, 1, delivery.StateQueued, delivery.StateQueued, delivery.StateAccepted),
 			outRec(t, 2, delivery.StateDelivered),
+			outRec(t, 3, delivery.StateDeliveryUnknown, delivery.StateQueued),
 		},
 	}
 	v, err := buildView(nodeOf(t, 7), sc)
 	if err != nil {
 		t.Fatalf("buildView: %v", err)
 	}
-	// The oracle: an unfinished delivery is a target record that is not final and
-	// a source delivery that no receipt answered yet (state queued).
+	// The oracle is the definition of an unfinished delivery, written out here from
+	// what each kind of record is waiting for, not from how the view counts:
+	//   - a message for an endpoint is unfinished while it is accepted, queued or
+	//     leased, for it still has to be handed out;
+	//   - a control signal is unfinished while it is accepted, for it is pending
+	//     work that entered through a new-work entry;
+	//   - a delivery of a message this node sent is unfinished while no receipt
+	//     answered it (state queued).
+	// A delivery whose outcome is unknown, or that is final, holds nothing to hand
+	// out and is not counted.
 	want := 0
 	for _, in := range sc.In {
-		if !in.Record.State.IsTerminal() {
+		if in.Record.State == delivery.StateAccepted {
+			want++
+		}
+	}
+	for _, c := range sc.Ctl {
+		if c.Record.State == delivery.StateAccepted {
 			want++
 		}
 	}
@@ -190,8 +223,8 @@ func TestBuildViewCountsWhatTheLoopDecidesWith(t *testing.T) {
 			}
 		}
 	}
-	if want != 5 {
-		t.Fatalf("the oracle counts %d, the fixture is meant to hold 5", want)
+	if want != 3+1+3 { // messages 1, 2 and 7; the accepted control record; three queued source deliveries
+		t.Fatalf("the oracle counts %d, the fixture is meant to hold 7", want)
 	}
 	if got := v.Unfinished(); got != want {
 		t.Errorf("Unfinished = %d, want %d", got, want)
@@ -199,13 +232,14 @@ func TestBuildViewCountsWhatTheLoopDecidesWith(t *testing.T) {
 	if got := v.OpenEndpoints(); got != 3 {
 		t.Errorf("OpenEndpoints = %d, want the open and the creating ones, 3", got)
 	}
-	// Bodies: in 1 and 2 and 3 hold three, the source record of two recipients and
-	// the delivered one hold two others; a final target record holds none.
+	// Bodies: the three target records that are waiting hold theirs; the one whose
+	// outcome is unknown is a fixture that keeps its reference; a final one holds
+	// none; each source record holds one.
 	for _, tc := range []struct {
 		body string
 		want int
 	}{
-		{"body 1", 1}, {"body 3", 1}, {"body 4", 0}, {"out body 1", 1}, {"out body 2", 1}, {"unknown", 0},
+		{"body 1", 1}, {"body 3", 1}, {"body 4", 0}, {"body 7", 1}, {"out body 1", 1}, {"out body 2", 1}, {"unknown", 0},
 	} {
 		if got := v.BodyRefs(store.BodyRefOf([]byte(tc.body)).Name()); got != tc.want {
 			t.Errorf("BodyRefs(%q) = %d, want %d", tc.body, got, tc.want)

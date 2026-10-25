@@ -174,7 +174,9 @@ type ScanReport struct {
 	Order []string
 	// Endpoints is how many endpoints the node has that are open or being created.
 	Endpoints int
-	// Unfinished is how many deliveries the node holds that are not final.
+	// Unfinished is how many deliveries the node holds that still have work behind
+	// them: messages waiting to be handed out, accepted control signals and sent
+	// messages that no receipt answered.
 	Unfinished int
 }
 

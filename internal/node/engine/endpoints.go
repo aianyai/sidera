@@ -524,7 +524,9 @@ type Counts struct {
 	// Endpoints is how many endpoints are open or being created, the ones that
 	// count against the cap.
 	Endpoints int
-	// Unfinished is how many deliveries the node holds that are not final.
+	// Unfinished is how many deliveries the node holds that still have work behind
+	// them: messages waiting to be handed out, accepted control signals and sent
+	// messages that no receipt answered.
 	Unfinished int
 	// Alerts is how many alerts the owner has not acknowledged.
 	Alerts int

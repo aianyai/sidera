@@ -38,8 +38,10 @@ func closeBatch(counts bodyCounts, now time.Time, ins []store.InRecord, ctls []s
 			continue
 		}
 		in.Record = rec
-		drop(in.Body)
-		in.Body = nil
+		if !rec.NeedsBody() {
+			drop(in.Body)
+			in.Body = nil
+		}
 		b.In = append(b.In, in)
 	}
 	for _, c := range ctls {
@@ -49,8 +51,10 @@ func closeBatch(counts bodyCounts, now time.Time, ins []store.InRecord, ctls []s
 			continue
 		}
 		c.Record = rec
-		drop(c.Body)
-		c.Body = nil
+		if !rec.NeedsBody() {
+			drop(c.Body)
+			c.Body = nil
+		}
 		b.Ctl = append(b.Ctl, c)
 	}
 	for _, r := range refs {

@@ -82,8 +82,12 @@ empty page. Shutdown ends every wait with an empty page.
 work: a clock set back first (`clock_rollback`), then the queue (`node_queue_full`
 when unfinished deliveries plus the new recipients exceed the node's limit), then
 the disk (`storage_full` when the free space is below the reserve). A bound that is
-not set refuses. The unfinished deliveries are the target and control records that
-are not final plus the source deliveries no receipt answered yet.
+not set refuses. The unfinished deliveries are the target records that still need their body
+(`delivery.Record.NeedsBody`: accepted, queued or leased), the accepted control
+records, and the source deliveries no receipt answered yet. A delivery whose
+outcome is unknown holds no body and is not counted: the bound exists for the
+bodies a node holds, and what a control record carries is pending work that
+entered through a new-work entry all the same.
 
 **The start, as far as the engine is concerned.** The steps of the start are numbered
 in the order the node takes them; the engine takes part in these:

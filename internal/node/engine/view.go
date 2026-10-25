@@ -163,7 +163,8 @@ func (v *view) openDirect(instance string) int {
 	return n
 }
 
-// Unfinished is how many deliveries the node holds that are not final.
+// Unfinished is how many deliveries the node holds that still have work behind
+// them (see inUnfinished).
 func (v *view) Unfinished() int { return v.unfinished }
 
 // BodyRefs is how many records refer to the body of that name.
@@ -218,14 +219,24 @@ func afterWrite(in store.InRecord) store.InRecord {
 	return in
 }
 
-func inUnfinished(in store.InRecord) bool  { return !in.Record.State.IsTerminal() }
-func ctlUnfinished(c store.CtlRecord) bool { return !c.Record.State.IsTerminal() }
+// What counts as an unfinished delivery is what still has work behind it that the
+// node took in through an entry of new work (the capacity check bounds exactly
+// that). A target message is unfinished while the delivery rules say it still
+// needs its body: accepted, queued or leased, waiting to be handed out. A control
+// signal is unfinished while it is accepted: it holds no body, but its effect is
+// still to be made. A delivery of a message this node sent is unfinished while no
+// receipt answered it. A delivery whose outcome is unknown holds nothing to hand
+// out and is not counted.
+
+func inUnfinished(in store.InRecord) bool { return in.Record.NeedsBody() }
+
+func ctlUnfinished(c store.CtlRecord) bool { return c.Record.State == delivery.StateAccepted }
 
 // outUnfinished is how many deliveries of a source record no receipt answered.
 func outUnfinished(o store.OutRecord) int {
 	n := 0
 	for _, r := range o.Outbound.Recipients {
-		if r.Delivery.State == delivery.StateQueued {
+		if r.Delivery.NeedsBody() {
 			n++
 		}
 	}

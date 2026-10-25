@@ -50,7 +50,9 @@ type CapacityInput struct {
 	// RollbackPaused: the wall clock was set back beyond the tolerance and the
 	// owner has not cleared it.
 	RollbackPaused bool
-	// Unfinished is how many deliveries the node holds that are not final.
+	// Unfinished is how many deliveries the node holds that still have work behind
+	// them: messages waiting to be handed out, accepted control signals and sent
+	// messages that no receipt answered.
 	Unfinished int
 	// Recipients is how many deliveries the new work adds; at least one.
 	Recipients int
