@@ -559,7 +559,11 @@ middle of a file, are lines of their own and cannot swallow the first line that
 follows. A reader resumes at every newline, skips empty lines, drops and counts a
 line that is not intact and ignores a last line without a newline. Events are not
 synced; a summary is appended and synced before any record it stands for is
-removed.
+removed. An archive may therefore hold the same summary twice: after a crash
+between the archive sync and the deletes, the sweep that follows archives the
+records again, and so does a sweep that failed after a partial append and was
+retried. A reader that counts summaries must deduplicate them by the record's file
+hash.
 
 **Retention.** A delivery record is a live file until its deliveries are final and
 the latest of the retentions of what it holds has passed: the deduplication record
