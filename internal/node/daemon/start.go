@@ -22,7 +22,9 @@ import (
 // running and the lock is free for the next start.
 //
 // The context is for the start only: when Start has returned the node lives until
-// RequestStop, a fatal failure of the disk, or the end of Run.
+// RequestStop, a fatal failure of the disk, or the end of Run. When it ends during
+// the start, the start stops before the next step and what had begun is shut down,
+// and the error wraps the error of the context.
 func Start(ctx context.Context, cfg Config) (*Daemon, error) {
 	cfg = cfg.withDefaults()
 	home, err := resolveHome(cfg.Home)
@@ -55,6 +57,9 @@ func Start(ctx context.Context, cfg Config) (*Daemon, error) {
 		{0, "", d.stepRecoverDelivery},
 		{15, "serve", d.stepServe},
 	} {
+		if err := ctx.Err(); err != nil {
+			return nil, d.abort(fmt.Errorf("the start was interrupted before step %d: %w", s.n, err))
+		}
 		if s.n == 0 {
 			if err := s.run(ctx); err != nil {
 				return nil, d.abort(err)
@@ -74,17 +79,37 @@ func Start(ctx context.Context, cfg Config) (*Daemon, error) {
 }
 
 // abort shuts down what the start had begun, in the order of the shutdown, and
-// returns the error that stopped the start.
+// returns the error that stopped the start. A start that stopped because of a fatal
+// failure of the disk, in whatever step it met it, ends as a fatal failure does:
+// memory and disk may disagree, so the process exits with ExitFatal and the next
+// start scans the disk again. The failure is known by the error (a fatal storage
+// error, or the engine's refusal that says so) or by the engine having died, which
+// a hook that only saw a refusal of a dead engine cannot say.
 func (d *Daemon) abort(cause error) error {
-	d.shutdown(false)
+	fatal := txn.IsFatal(cause) || storageFatal(cause) || d.engineFailed()
+	d.shutdown(fatal)
+	if fatal || d.engineFailed() {
+		return &FatalError{Err: cause}
+	}
 	return cause
 }
+
+// storageFatal reports whether err carries the engine's refusal for a fatal
+// storage error, which the engine gives a command that came after the failure too,
+// when the error itself is no longer there.
+func storageFatal(err error) bool {
+	r, ok := engine.ReasonOf(err)
+	return ok && r == engine.ReasonStorageFatal
+}
+
+// engineFailed reports whether the engine ended in a failure.
+func (d *Daemon) engineFailed() bool { return d.engine != nil && d.engine.Err() != nil }
 
 // env is what the hooks are given.
 func (d *Daemon) env() *Env {
 	return &Env{
-		Home: d.home, Clock: d.cfg.Clock, Rand: d.cfg.Rand, Log: d.log, Writer: d.w,
-		Config: d.cfgd, Keys: d.keys, Engine: d.engine, Logs: d.logs, RequestStop: d.RequestStop,
+		Home: d.home, Clock: d.cfg.Clock, Rand: d.cfg.Rand, Log: d.log,
+		Keys: d.keys, Config: d.cfgd, Engine: d.engine, Lock: d.lock, Logs: d.logs, RequestStop: d.RequestStop,
 	}
 }
 

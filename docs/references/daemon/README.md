@@ -19,7 +19,11 @@ administrative rules is in [engine](../engine/README.md); the rules themselves i
 and `startup step N end` (with the name of the step) to `logs/daemon.log`, so the
 order is readable from the log; steps 11 to 14 are the engine's and log their own.
 A step that fails stops the start and what had begun is shut down in the order of
-the shutdown below.
+the shutdown below. The context of `Start` is checked before every step: when it
+ends (`Run` cancels it on SIGINT or SIGTERM, which it takes from before the first
+step) the start stops between two steps, unwinds the same way, and the error wraps
+the error of the context. A start that stopped because of a fatal failure of the
+disk, in whichever step it met it, ends as a fatal failure does (see the shutdown).
 
 | Step | Name | What happens | Owner |
 | ---- | ---- | ------------ | ----- |
@@ -38,9 +42,11 @@ the shutdown below.
 
 A hook runs inside its step, in the state of the engine the step needs (before the
 loop exists at step 7, recovering at 9 and 10, running at 15) and is given an `Env`:
-the data directory, the clock, the randomness, the log, the transaction writer, the
-configuration, the keys, the engine, the handle for adapter logs, and
-`RequestStop`.
+the data directory, the clock, the randomness, the log, read-only views of the
+configuration and of the keys, the engine, the assertion that the instance lock is
+held (what `ipc.Listen` asks of whoever listens on an address of this home), the
+handle for adapter logs, and `RequestStop`. It holds no transaction writer: the
+engine is the single writer, and a hook that changes state asks it.
 
 ### The shutdown
 
@@ -53,11 +59,17 @@ of a start that failed; a step with nothing to stop is logged and does nothing.
 | 2 | interfaces | The management interface stops taking connections and waits for the requests being served, within 10 seconds; hook `StopInterfaces` stops the Agent interface. |
 | 3 | adapters | Hook `StopAdapters`. Native sessions are separate processes and are not affected. |
 | 4 | engine | The loop ends after its command, and every goroutine of the engine is waited for. |
-| 5 | release | The last line is logged, the log is closed and the lock is let go: the lock goes last, because while it is held no other daemon starts over state this one is still writing. |
+| 5 | release | The last line is logged, the log is closed and the lock is let go: the lock goes last, because while it is held no other daemon starts over state this one is still writing. If the engine has not ended within the grace, it may still be writing: the lock and the log are kept until the process exits, the line says so, and `Wait` returns `ErrEngineNotStopped`. |
 
-After a fatal storage error the engine has ended and written nothing more; the same
-steps run with 2 seconds instead of 10, and the daemon ends with a `FatalError`:
-exit code 74, so the next start scans the disk again. `RequestStop` is the one entry
+The grace is `Config.ShutdownGrace` (10 seconds when zero). After a fatal storage
+error the engine has ended and written nothing more; the same steps run with 2
+seconds instead, and the daemon ends with a `FatalError`: exit code 74, so the next
+start scans the disk again. The same holds when the failure comes during the start,
+in any step: the layout rule and the recovery of the transaction layer at step 2, the
+saving of the pause at step 4, the scan at step 6, and every step from 8 on, in
+which a hook or the recovery of deliveries sees the engine's refusal for the failure
+or the engine already dead; `Start` then returns a `FatalError` that wraps what the
+step said. `RequestStop` is the one entry
 for every cause (the management interface after its answer, a signal, the program),
 from any goroutine, any number of times; the shutdown runs once.
 
@@ -246,6 +258,22 @@ interface: a sandbox must deny the socket to an agent.
   and each needs only the part of the node that is up at its step. Rejected: the
   composition root knowing each feature's types, which would make every feature a
   change to it.
+- **A hook gets views, not the writer or the stores.** The engine is the single
+  writer of the data directory and one declaration has one open transaction at a
+  time; a hook that held `*txn.Writer`, or `*keys.Keys` or `*config.Config` whole
+  (both write through it), could open a transaction beside the engine's. The views
+  list the reads, and a test fixes the list. The instance lock is given because
+  whoever listens on an address of this home has to state that it is held.
+  Rejected: a helper that listens for the hook, which would make this package know
+  the Agent interface's options.
+- **The lock is not let go under an engine that has not ended.** The lock is what
+  keeps a second daemon from writing beside this one; after the grace the process
+  is the only thing that can end the engine for certain, so the lock is left to the
+  process exit and `Wait` says why. Rejected: releasing it anyway, which turns a
+  stuck task into two writers.
+- **The signal is taken before the start.** A signal during the start would
+  otherwise end the process with the lock held and a socket left behind, and between
+  two steps is the only place the start can stop without leaving a step half done.
 - **The shutdown is one path.** An orderly stop, a fatal failure and a start that
   failed all take the same five steps, so the order is tested once and a step cannot
   be skipped on one road. The lock is the last thing let go.
@@ -280,6 +308,17 @@ interface: a sandbox must deny the socket to an agent.
   `TestTheOwnerStopsTheDaemonThroughTheManagementInterface`,
   `TestRunReturnsAfterANormalShutdownWhenItsContextEnds`,
   `TestAFatalStorageErrorEndsTheDaemonWithTheExitCodeOfAnIOError`,
+  `TestAFatalStorageErrorInTheLayoutRuleEndsTheStartWithTheExitCodeOfAnIOError`,
+  `TestAFatalStorageErrorInTheRecoveryOfTheTransactionLayerEndsTheStartWithTheExitCodeOfAnIOError`,
+  `TestAFatalStorageErrorSavingThePauseOfAClockSetBackEndsTheStartWithTheExitCodeOfAnIOError`,
+  `TestAFatalStorageErrorInTheScanOfStateEndsTheStartWithTheExitCodeOfAnIOError`,
+  `TestAHookThatMeetsTheDeathOfTheEngineEndsTheStartWithTheExitCodeOfAnIOError`,
+  `TestTheLockIsNotLetGoWhileTheEngineHasNotStopped`,
+  `TestARequestToStopThatRacesWithAFailedStartIsReadInOrder`,
+  `TestACancelledContextStopsTheStartBeforeTheNextStep`,
+  `TestASignalDuringTheStartStopsItBetweenTwoSteps`,
+  `TestAHookIsGivenNoWriterAndOnlyReadsOfTheKeysAndTheConfiguration`,
+  `TestAHookCanListenOnAnAddressOfThisHomeWithTheLockItIsGiven`,
   `TestAReplayedManagementOperationReturnsTheStoredResultAndAReusedIdentifierIsRefused`.
 - Tests of init and the layout: `TestInitMakesTheDataDirectoryWithItsLayoutKeysAndConfiguration`,
   `TestInitRefusesAnInitializedHomeAndChangesNothing`,

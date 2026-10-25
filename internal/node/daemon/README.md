@@ -20,8 +20,9 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `Start(ctx, Config)`, `Run(ctx, Config)` | Take the fifteen steps of the start and return a `*Daemon`; `Run` also waits for the end of the context, a signal or a stop, and returns how the daemon ended. |
 | `Daemon.RequestStop`, `Wait`, `Done`, `Engine`, `Home` | The one entry for a shutdown, from any goroutine and any number of times; the end, and what ended it. |
 | `Init(ctx, Config)`, `InitReport` | Make a data directory; never overwrite. |
-| `Config`, `Attachments`, `Env`, `PeriodicTask` | What a daemon needs, the hooks the features that come later attach to, what a hook is given, and a task on a period. |
-| `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk. |
+| `Config`, `Attachments`, `Env`, `KeysView`, `ConfigView`, `PeriodicTask` | What a daemon needs, the hooks the features that come later attach to, what a hook is given (read-only views of the keys and the configuration, the instance lock's assertion, the engine, the logs), and a task on a period. |
+| `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
+| `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
 | `Table`, `Declarations`, `Transactions`, `LayoutWork`, `RepairLayout` | The one table of the program's transactions, the two this package declares (`init` and `layout`), and the layout rule. |
 | `ClockStateEvery` | The period of the clock state. |
 
@@ -41,7 +42,21 @@ touches files only through `fsx`, and reads time only through the injected clock
 - **The actor of the local owner is not made here.** The management interface is
   `manageapi`, and a scan keeps the actor out of this package.
 - **A hook is called inside its step** with an `Env`, in the state of the engine the
-  step needs, and a hook that fails stops the start.
+  step needs, and a hook that fails stops the start. The `Env` holds no transaction
+  writer and only read-only views of the keys and the configuration: the engine is
+  the single writer, and one declaration has one open transaction, so a hook that
+  changes state asks the engine. `Env.Lock` is what `ipc.Listen` asks of a hook that
+  listens on an address of this home.
+- **A fatal failure of the disk ends the start as it ends a running daemon.** The
+  error `Start` returns is a `*FatalError` (exit code 74) when it was a fatal storage
+  error, the engine's refusal for one, or the engine had died, whichever step met it.
+- **The lock is not let go under an engine that has not ended.** `Wait` returns
+  `ErrEngineNotStopped` and the process exit lets the lock go.
+- **The signal is taken before the start.** `Run` cancels the context of `Start` on
+  SIGINT or SIGTERM, and the start stops before its next step and unwinds.
+- **Lines logged before the log opens carry the time it opened.** They are kept and
+  written first, with the attributes of the logger that wrote them; the time on a
+  line is the injected clock's at the moment it is written.
 
 ## What the caller must guarantee
 
@@ -49,7 +64,10 @@ touches files only through `fsx`, and reads time only through the injected clock
   and the keys. `crypto/rand`'s is, and a nil `Config.Rand` is that.
 - Call `Init` before `Start`; a data directory is made by init and nothing else.
 - Pass the context of `Start` for the start only: the node lives until `RequestStop`,
-  a fatal failure, or the end of `Run`.
+  a fatal failure, or the end of `Run`; a context that ends during the start stops it
+  before the next step.
+- End the process after `Wait` returns `ErrEngineNotStopped`: the instance lock is
+  held until it exits.
 - A hook returns when its work for the step is done. The adapters hook returns when
   each enabled instance has answered or been judged offline, because the recovery
   of deliveries that follows depends on it.
@@ -61,7 +79,13 @@ touches files only through `fsx`, and reads time only through the injected clock
 `second_test.go` has `TestSecondDaemonOnSameHomeRefused`; `init_test.go` init, its
 crash states and the declared crash points; `permissions_test.go` and
 `permissions_windows_test.go` the checks of the data directory and of `keys/`;
-`startup_test.go` the order of the start, the hooks, the layout, the log, the
-periodic tasks and the clock; `shutdown_test.go` the order of the shutdown, the stop
-through the management interface, `Run` and a fatal failure; `replay_test.go` a
-management operation resent through the whole daemon.
+`startup_test.go` the order of the start, the hooks, the layout, the log, the share
+of the log budget, the periodic tasks and the clock; `shutdown_test.go` the order of
+the shutdown, the stop through the management interface, `Run` and a fatal failure;
+`fatal_start_test.go` a fatal failure in each step of the start that can be injected
+(the layout rule, the recovery, the pause of the clock, the scan, a hook that meets
+the death of the engine); `interrupt_test.go` the lock kept under an engine that has
+not ended, a stop that races with a failed start, a context or a signal during the
+start; `env_test.go` what a hook is given; `logging_test.go` the deferred log handler;
+`periodic_test.go` the clock state's pause; `replay_test.go` a management operation
+resent through the whole daemon.
