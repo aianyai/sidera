@@ -89,11 +89,18 @@ func leaker(stop chan struct{}) { <-stop }
 // earlier is a goroutine that is already running when a check is set up.
 func earlier(stop chan struct{}) { <-stop }
 
+func waitUntilRunning(marker string) {
+	for len(marked([]string{marker})) == 0 {
+		runtime.Gosched()
+	}
+}
+
 func TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages(t *testing.T) {
 	rec := &recorder{TB: t}
 	checkNoLeaks(rec, []string{"harness.leaker"}, 100*time.Millisecond)
 	stop := make(chan struct{})
 	go leaker(stop)
+	waitUntilRunning("harness.leaker") // a goroutine that has not started yet is not in the stacks
 	rec.finish()
 	if len(rec.errs) == 0 {
 		t.Error("the leak check did not see the goroutine that is still running")
@@ -103,9 +110,7 @@ func TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages(t *testing.T) {
 	// A goroutine that was running before the check was set up is not the test's.
 	stop = make(chan struct{})
 	go earlier(stop)
-	for len(marked([]string{"harness.earlier"})) == 0 {
-		runtime.Gosched()
-	}
+	waitUntilRunning("harness.earlier")
 	rec = &recorder{TB: t}
 	checkNoLeaks(rec, []string{"harness.earlier"}, 100*time.Millisecond)
 	rec.finish()
