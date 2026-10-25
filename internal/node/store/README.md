@@ -28,7 +28,7 @@ engine applies the delivery rules and calls the writes.
 | `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. |
 | `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |
 | `OrphanBodies`, `OrphanEndpoints`, `UnfinishedQuarantines`, `EffectReplays`, `DrainCandidates`, `PromptReplays`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
-| `Store.Quarantine`, `QuarantineResume`, `QuarantineBody` | Quarantine; the alert is always the last write. |
+| `Store.Quarantine`, `QuarantineResume`, `QuarantineBody`, `QuarantineSessions` | Quarantine; the alert is always the last write. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
 | `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves. |
 | `Store.ReadBody`, `Store.Available` | Body reads checked against their names, and free space. |
@@ -52,8 +52,21 @@ engine applies the delivery rules and calls the writes.
   damaged record keeps the endpoint for the quarantine.
 - **The alert is the last write of a quarantine.** A resumed quarantine writes what
   the first pass wrote, in the same order (floors, the replacement under the same
-  name, the closed session, the alert last); nothing is skipped because it seems
+  name, the closed sessions, the alert last); nothing is skipped because it seems
   done.
+- **A quarantine closes every creating endpoint of the damaged control record,
+  and the store decides which.** A control record accepted again after a failed
+  first acceptance has the same name and a new endpoint, so several session
+  endpoints still being created can name one record as their creator.
+  `Quarantine` and `QuarantineResume` take the list from the `Scan` they are given
+  (`QuarantineSessions`: every session endpoint whose creator is the record and
+  that is not open, written closed with its token dropped, in the `session` role
+  declared as many), and a caller cannot pass another: one left behind would hold
+  one of the node's endpoint slots for good, because the rules that remove an
+  endpoint leave a creating one alone while its record is lost, quarantined or
+  damaged, and one wrongly closed (an open endpoint, or another record's) would be
+  a live session whose deliveries a drain then drops. A control record is refused
+  without the scan.
 - **Bodies first, and removed last.** The caller works out which bodies lost their
   last reference (the reference count is in the engine's view) and says so; a body
   already gone is not an error.

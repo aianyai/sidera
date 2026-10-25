@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -88,35 +87,6 @@ func (s *sim) replacement(dir string, key any) store.Record {
 	return nil
 }
 
-// sessionFor is the session endpoint a control record created, whatever its state.
-func (s *sim) sessionFor(sc *store.Scan, ctlFile string) *store.EndpointRecord {
-	h := strings.TrimSuffix(ctlFile, ".rec")
-	for i := range sc.Endpoints {
-		if sc.Endpoints[i].CreatedBy == h {
-			return &sc.Endpoints[i]
-		}
-	}
-	return nil
-}
-
-// sessionToClose is the closed record of the session endpoint of a control
-// record that is being created or was closed already (what an interrupted
-// quarantine did may not be durable, so it is written again); nil for an
-// endpoint that is open. unknown tells that a session may have been created
-// without anyone controlling it.
-func (s *sim) sessionToClose(sc *store.Scan, ctlFile string) (closed *store.EndpointRecord, unknown bool) {
-	e := s.sessionFor(sc, ctlFile)
-	if e == nil {
-		return nil, false
-	}
-	if e.Status == store.EndpointOpen {
-		return nil, false // an endpoint that was opened stays open
-	}
-	c := *e // being created, or closed by an interrupted quarantine: closed, once more
-	c.Status, c.Token = store.EndpointClosed, nil
-	return &c, true
-}
-
 // recover runs the rules of the startup until none has work, as the engine's
 // scan entry does, and returns how many passes it took.
 func (s *sim) recoverAll() int {
@@ -147,9 +117,8 @@ func (s *sim) pass() bool {
 			q.Replacement = s.replacement(d.Dir, d.Key)
 		}
 		if d.Dir == store.CtlDir {
-			c, unknown := s.sessionToClose(sc, d.Name)
-			q.Session = c
-			if unknown {
+			// A session may remain without anyone controlling it.
+			if len(store.QuarantineSessions(sc, d.Name)) > 0 {
 				kindName = "control_unknown"
 			}
 		}
@@ -165,9 +134,7 @@ func (s *sim) pass() bool {
 			q.Replacement = s.replacement(c.Dir, c.Key)
 		}
 		if c.Dir == store.CtlDir {
-			cl, unknown := s.sessionToClose(sc, c.Original)
-			q.Session = cl
-			if unknown {
+			if len(store.QuarantineSessions(sc, c.Original)) > 0 {
 				kindName = "control_unknown"
 			}
 		}

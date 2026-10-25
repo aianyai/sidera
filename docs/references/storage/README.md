@@ -541,12 +541,36 @@ and an alert is deleted only after the file it names. So "a quarantined file wit
 no alert" is exactly an unfinished quarantine. The rule that finishes it writes
 what the first pass wrote, in the same order: the replacement (the same name, built
 by the same rule, so there is one such record and the feedback it owes is not
-formed a second time), the closed session endpoint, and the alert last. The first
+formed a second time), the closed session endpoints, and the alert last. The first
 line of a quarantined file is trusted by the same rule as that of a live one,
 against the name the file had (steps 1 to 4): a first line that parses but does not
 hash to that name is handled like an unreadable one, with no replacement and no
 sequence floor raised for the key it claims. Configuration and key files are never
 quarantined: a damaged one stops the start and is named.
+
+A quarantine of a control record closes every session endpoint still being created
+that names the record as its creator, not only the first. A control record accepted
+again after a failed first acceptance has the same name and a new endpoint, so a
+record can have several; the rules that remove endpoints leave a creating endpoint
+alone while its record is lost, quarantined or damaged, so one left behind would
+hold one of the node's endpoint slots for good. The store decides which endpoints
+close, from the scan the quarantine is given (`QuarantineSessions`: every session
+endpoint whose creator is the record and that is not open, written closed, in the
+`session` role the transaction declares as many): the caller cannot pass a list,
+because it could not be checked, and a missed endpoint leaks a slot silently while
+a wrong one (an open endpoint, another record's) closes a live session and lets a
+drain drop its deliveries, which cannot be undone. A control record is refused
+without the scan. `QuarantineSessions` is exported only so a caller can tell
+whether a session may remain, for the kind of the alert. The crash walk covers
+the quarantine and its resumption with two endpoints
+(`TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`), and
+its coverage assertion requires that one transaction wrote the session role more
+than once (`maxInTx` of the walk's recorder, not the hits of a whole run, which two
+transactions could add up to). The rule itself is pinned by
+`TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen` (an open
+endpoint naming the record and another record's endpoint are not listed) and
+`TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan` (the same on a disk,
+for a quarantine and a resumption, and the refusal without a scan).
 
 **Sequence numbers.** The next number of a (sending endpoint, target address)
 pair is the highest of the floor of the pair and the numbers of the source records
@@ -990,7 +1014,7 @@ so that the double cannot drift from what it stands for.
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
-| recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `resume_scenarios_test.go` (the resumption of each kind of unfinished quarantine, walked from the state a crash leaves), `TestCleanScenariosLeaveNoRecoveryWork` |
+| recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `resume_scenarios_test.go` (the resumption of each kind of unfinished quarantine, walked from the state a crash leaves), `quarantine_session_test.go` (the double fault of a session creation, `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen`, `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan`), `TestCleanScenariosLeaveNoRecoveryWork` |
 | sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` (`TestArchiveSweepWritesTheFloorOfEverySenderAndTargetOfTheRecordsItRemoves`, `TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten`), `sweep_endpoint_test.go` |
 | archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |
 | retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound`, `TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased` among them), `sweep_endpoint_test.go` (`TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone`, the crash walk of a closed session's sweep) |

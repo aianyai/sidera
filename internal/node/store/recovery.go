@@ -112,6 +112,29 @@ func OrphanEndpoints(sc *Scan) []EndpointRecord {
 	return out
 }
 
+// QuarantineSessions is the session endpoints the quarantine of a control record
+// closes, each as it is written: every session endpoint whose creator is the
+// control record of the file name, but one that is open, with its token dropped.
+// Several can name one record: a control record accepted again after a failed
+// first acceptance has the same name and a new endpoint. An endpoint already
+// closed is listed too, because what an interrupted quarantine wrote may not be
+// durable. An open endpoint is a live session and stays open.
+//
+// Quarantine and QuarantineResume write exactly this list for a control record.
+// A caller asks for it only to learn whether a session may remain (the kind of
+// the alert).
+func QuarantineSessions(sc *Scan, ctlName string) []EndpointRecord {
+	var out []EndpointRecord
+	for _, e := range sc.Endpoints {
+		if e.CreatedBy == "" || e.CreatedBy+recordSuffix != ctlName || e.Status == EndpointOpen {
+			continue
+		}
+		e.Status, e.Token = EndpointClosed, nil
+		out = append(out, e)
+	}
+	return out
+}
+
 func alertIDs(sc *Scan) map[AlertID]bool {
 	ids := map[AlertID]bool{}
 	for _, a := range sc.Alerts {
@@ -312,18 +335,18 @@ type Quarantine struct {
 	// Replacement is the record to put under the original name, for a damaged
 	// delivery record whose key can be trusted; nil otherwise.
 	Replacement Record
-	// Session is the closed record of the session endpoint still being created
-	// whose control record this file was; nil otherwise.
-	Session *EndpointRecord
 	// Scan is the scan the quarantine is part of: the other source records of a
-	// pair set the sequence floor.
+	// pair set the sequence floor, and the session endpoints of a control record
+	// are the ones QuarantineSessions finds in it. It is required for a control
+	// record: without it no endpoint could be found, and one left open would hold
+	// its slot for good.
 	Scan *Scan
 }
 
 // QuarantineResume finishes a quarantine whose alert is missing. It writes what
 // the first pass wrote, in the same order and under the same names: the floors
-// raised once more, the replacement, the closed session endpoint, and the alert
-// last. Nothing is skipped because it seems to be there: it may not be durable.
+// raised once more, the replacement, the closed session endpoints of a control
+// record (QuarantineSessions of its scan), and the alert last. Nothing is skipped because it seems to be there: it may not be durable.
 // The replacement has the name the damaged file had, so a resumption rewrites
 // that record and makes no second one; the caller builds it by the same rule as
 // the first pass, and builds none for a file whose first line is not trusted
@@ -332,8 +355,9 @@ type QuarantineResume struct {
 	File        CorruptFile
 	Alert       AlertRecord
 	Replacement Record
-	Session     *EndpointRecord
-	Scan        *Scan
+	// Scan is the scan the resumption is part of; required for a control record,
+	// as in Quarantine.
+	Scan *Scan
 }
 
 // pendingLost lists the keys of the quarantined source records of the disk,
@@ -452,16 +476,17 @@ func dirOfRecord(rec Record) string {
 }
 
 // tail is what follows the rename in a quarantine and in its resumption, all of
-// it encoded: the floors, the replacement, the closed session, the alert.
+// it encoded: the floors, the replacement, the closed sessions, the alert.
 type tail struct {
-	floors, replacement, session *file
-	alert                        file
+	floors, replacement *file
+	sessions            []file
+	alert               file
 }
 
 // prepareTail works out and encodes the tail before anything is written, so that
 // what cannot be written, or read (a damaged floor file, DamagedFileError), is
 // refused before the file is renamed.
-func (s *Store) prepareTail(dir, name string, key any, scanned *Scan, replacement Record, session *EndpointRecord, alert AlertRecord) (*tail, error) {
+func (s *Store) prepareTail(dir, name string, key any, scanned *Scan, replacement Record, alert AlertRecord) (*tail, error) {
 	t := &tail{}
 	if k, isOut := key.(OutKey); isOut && dir == OutDir {
 		f, err := s.raiseFloors(k, scanned, name)
@@ -475,15 +500,17 @@ func (s *Store) prepareTail(dir, name string, key any, scanned *Scan, replacemen
 		return nil, err
 	}
 	t.replacement = rf
-	if session != nil {
-		if session.Status != EndpointClosed {
-			return nil, errors.New("store: the session endpoint of a quarantine is closed")
+	if dir == CtlDir {
+		if scanned == nil {
+			return nil, errors.New("store: the quarantine of a control record is given the scan that lists its session endpoints")
 		}
-		f, err := recordFile(EndpointsDir, *session)
-		if err != nil {
-			return nil, err
+		for _, session := range QuarantineSessions(scanned, name) {
+			f, err := recordFile(EndpointsDir, session)
+			if err != nil {
+				return nil, err
+			}
+			t.sessions = append(t.sessions, f)
 		}
-		t.session = &f
 	}
 	if t.alert, err = recordFile(AlertsDir, alert); err != nil {
 		return nil, err
@@ -506,8 +533,8 @@ func (t *tail) write(s *Store, tx *txn.Tx) error {
 			return err
 		}
 	}
-	if t.session != nil {
-		if err := s.replace(tx, "session", *t.session); err != nil {
+	for _, f := range t.sessions {
+		if err := s.replace(tx, "session", f); err != nil {
 			return err
 		}
 	}
@@ -519,7 +546,8 @@ func (t *tail) write(s *Store, tx *txn.Tx) error {
 
 // Quarantine renames the damaged file, raises the sequence floors of a source
 // record whose numbers are lost, puts the replacement, closes the session
-// endpoint, and writes the alert last.
+// endpoints of a control record (QuarantineSessions of its scan), and writes the
+// alert last.
 func (s *Store) Quarantine(q Quarantine) error {
 	d := q.File
 	if !slices.Contains(recordDirs, d.Dir) || !isRecordName(d.Name) {
@@ -536,7 +564,7 @@ func (s *Store) Quarantine(q Quarantine) error {
 		return err
 	}
 	// Everything is encoded before the file is renamed.
-	t, err := s.prepareTail(d.Dir, d.Name, key, q.Scan, q.Replacement, q.Session, q.Alert)
+	t, err := s.prepareTail(d.Dir, d.Name, key, q.Scan, q.Replacement, q.Alert)
 	if err != nil {
 		return err
 	}
@@ -562,7 +590,7 @@ func (s *Store) QuarantineResume(q QuarantineResume) error {
 	if c.Dir == BodiesDir || c.Alert != q.Alert.ID {
 		return errors.New("store: a quarantine is resumed with the alert its file names")
 	}
-	t, err := s.prepareTail(c.Dir, c.Original, c.Key, q.Scan, q.Replacement, q.Session, q.Alert)
+	t, err := s.prepareTail(c.Dir, c.Original, c.Key, q.Scan, q.Replacement, q.Alert)
 	if err != nil {
 		return err
 	}

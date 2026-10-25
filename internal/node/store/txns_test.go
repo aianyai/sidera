@@ -77,8 +77,8 @@ var designTable = []struct {
 	{"archive-expire", txn.Normal, "file:Remove[M] dir:SyncDir"},
 	{"alert-ack", txn.Normal, "quarantined:Remove[O] quarantined-dir:SyncDir[O] alert:Replace result:Replace"},
 	{"daemon-stop", txn.Normal, "result:Replace"},
-	{"quarantine", txn.Recovery, "record:RenameFile seq-floor:Replace[O] replacement:Replace[O] session:Replace[O] alert:Replace"},
-	{"quarantine-resume", txn.Recovery, "seq-floor:Replace[O] replacement:Replace[O] session:Replace[O] alert:Replace"},
+	{"quarantine", txn.Recovery, "record:RenameFile seq-floor:Replace[O] replacement:Replace[O] session:Replace[MO] alert:Replace"},
+	{"quarantine-resume", txn.Recovery, "seq-floor:Replace[O] replacement:Replace[O] session:Replace[MO] alert:Replace"},
 	// The design lists the body rename and the alert without flags; a body with
 	// more references than one chunk holds is quarantined in chunks, the rename
 	// in the first and the alert in the last.

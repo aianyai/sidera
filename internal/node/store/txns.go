@@ -133,10 +133,10 @@ var (
 	// sign of an unfinished quarantine.
 	declQuarantine = txn.Decl{Name: "quarantine", Kind: txn.Recovery, Writes: []txn.Write{
 		w("record", txn.OpRenameFile), rep("seq-floor", optional), rep("replacement", optional),
-		rep("session", optional), rep("alert"),
+		rep("session", many, optional), rep("alert"),
 	}}
 	declQuarantineResume = txn.Decl{Name: "quarantine-resume", Kind: txn.Recovery, Writes: []txn.Write{
-		rep("seq-floor", optional), rep("replacement", optional), rep("session", optional), rep("alert"),
+		rep("seq-floor", optional), rep("replacement", optional), rep("session", many, optional), rep("alert"),
 	}}
 	// quarantine-body is chunked: the renamed body is the head, the alert is
 	// written by the last chunk only.
