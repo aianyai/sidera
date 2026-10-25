@@ -667,3 +667,32 @@ func TestAKilledNodeIsDownOnTheDiskTheCrashLeftUntilItIsStarted(t *testing.T) {
 		t.Errorf("the new process lists %v, want [%s]", got, a)
 	}
 }
+
+// A crash is an event of the run, and the ledger says what kind: a judgement or a
+// reader of a failed run must not have to guess from the disk.
+func TestACrashIsWrittenToTheLedgerWithItsModeAndSeed(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	h.MustDirect("a")
+	if err := h.BeginStep("the crashes"); err != nil {
+		t.Fatal(err)
+	}
+	h.Crash(harness.ProcessCrash)
+	h.Crash(harness.PowerLoss(7))
+	log, err := h.Ledger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	crashes := log.Kind(ledger.KindFixtureCrash)
+	if len(crashes) != 2 {
+		t.Fatalf("%d fixture.crash entries, want 2: %+v", len(crashes), crashes)
+	}
+	if got := crashes[0].Attrs.CrashPoint; !strings.Contains(got, "process crash") {
+		t.Errorf("the first crash is recorded as %q, want it to say process crash", got)
+	}
+	if got := crashes[1].Attrs.CrashPoint; !strings.Contains(got, "power loss") || !strings.Contains(got, "seed 7") {
+		t.Errorf("the second crash is recorded as %q, want it to say power loss and seed 7", got)
+	}
+	if crashes[0].Step != "the crashes" || crashes[0].Writer != "fixture" {
+		t.Errorf("the entry is %s of step %q, want the fixture's, in the step the crash happened in", crashes[0].Writer, crashes[0].Step)
+	}
+}
