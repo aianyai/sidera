@@ -404,6 +404,28 @@ func (h *H) Runtime() (fakeruntime.Controller, error) {
 type CrashMode struct {
 	power bool
 	seed  uint64
+	point string
+}
+
+// At names the point of the run the crash is made at, for the entry the crash
+// writes to the ledger: a crash walk gives the identifier of the write it killed
+// at. The fixture does not interpret it.
+func (m CrashMode) At(point string) CrashMode {
+	m.point = point
+	return m
+}
+
+// describe is the text of the fixture.crash entry: the point the test named, if
+// any, and the mode with the seed of a power loss.
+func (m CrashMode) describe() string {
+	mode := "process crash"
+	if m.power {
+		mode = fmt.Sprintf("power loss, seed %d", m.seed)
+	}
+	if m.point == "" {
+		return mode
+	}
+	return m.point + " (" + mode + ")"
 }
 
 // ProcessCrash kills the process: every write that completed is on the disk, the
@@ -436,6 +458,9 @@ func (h *H) Crash(mode CrashMode) {
 // pipe and sends no shutdown, as a process that died would. A test must still
 // release anything it held the old loop with (an observer) before it ends.
 //
+// The crash is written to the ledger as a fixture.crash entry that says the mode, the
+// seed of a power loss and the point the test named with CrashMode.At.
+//
 // The second word of the source is fixed, as the crash model's own tests fix it, so
 // that a seed is all a test has to remember.
 func (h *H) Kill(mode CrashMode) {
@@ -457,6 +482,9 @@ func (h *H) Kill(mode CrashMode) {
 	h.mu.Lock()
 	h.proc, h.disk = nil, disk
 	h.mu.Unlock()
+	if err := h.fixture.Append(ledger.KindFixtureCrash, ledger.Attrs{CrashPoint: mode.describe()}); err != nil {
+		h.t.Fatalf("harness: ledger: %v", err)
+	}
 }
 
 // Restart is Stop followed by Start.

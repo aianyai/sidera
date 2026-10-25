@@ -27,6 +27,10 @@ const leakWait = 5 * time.Second
 // the engine, the transaction layer, the store or the fixture that was not
 // running when NoLeaks was called is still running. Register it first in a test,
 // so that it is the last cleanup to run.
+//
+// It looks at every goroutine of the process, by the package names in their
+// stacks, so it cannot tell the goroutines of one test from those of another that
+// runs beside it: the tests that use it must not run in parallel with each other.
 func NoLeaks(t testing.TB) {
 	t.Helper()
 	checkNoLeaks(t, ownFrames, leakWait)

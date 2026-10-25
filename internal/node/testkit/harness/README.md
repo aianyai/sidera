@@ -20,7 +20,7 @@ layer.
 | `H.Direct`, `H.MustDirect`, `H.Addr`, `H.Agent` | A direct endpoint registered through the engine's own entry, its address, and its agent: `engineagent` wrapped in `fakeagent.Recording`. |
 | `H.Advance`, `H.Set`, `H.Clock` | The one test clock. `Clock().Now` is the `func() time.Time` a fake takes. |
 | `H.Quiesce(opts...)`, `QuiesceError` | Waits for quiet, fails with a report. |
-| `H.Crash(ProcessCrash \| PowerLoss(seed))`, `H.Restart()` | A crashed process or power, and a clean stop, each followed by a start on the resulting disk. |
+| `H.Crash(ProcessCrash \| PowerLoss(seed))`, `H.Restart()` | A crashed process or power, and a clean stop, each followed by a start on the resulting disk. A crash writes a `fixture.crash` entry to the ledger with its mode, the seed of a power loss and the point the test names with `CrashMode.At`. |
 | `H.Stop()`, `H.Kill(mode)`, `H.Start()`, `H.StartWith(arm)` | The halves of the two above, for what a test does while the node is down: `Disk()` is then the disk the next start runs on, so a test changes files offline, and `arm` receives the fault wrapper of the new process before its recovery runs, so a rule can target a write only a recovery makes. A call to a node that is down is `unavailable/daemon_not_running`. |
 | `H.BeginStep`, `H.Ledger`, `H.CheckLedger` | The script step the ledger stamps, the ledger, and the judgements that need only the ledger. |
 | `H.Records` | A read-only scan of the records on the disk. |
@@ -132,6 +132,8 @@ Each adds to this package the capability its stream needs:
 `TestAStoppedNodeIsDownAndAFileChangedOfflineIsWhatTheNextStartReads`,
 `TestAFaultArmedForTheNextStartAppliesToThatProcess`,
 `TestAKilledNodeIsDownOnTheDiskTheCrashLeftUntilItIsStarted`,
+`TestACrashIsWrittenToTheLedgerWithItsModeAndSeed`,
+`TestACrashThatNamesItsPointIsWrittenWithThePoint`,
 `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`;
 `harness_internal_test.go`: the fixture's own quiet conditions
 (`TestQuiesceWaitsForEveryConditionOfTheFixtureAndNamesTheOneThatDoesNotHold`,

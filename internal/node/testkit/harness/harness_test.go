@@ -696,3 +696,24 @@ func TestACrashIsWrittenToTheLedgerWithItsModeAndSeed(t *testing.T) {
 		t.Errorf("the entry is %s of step %q, want the fixture's, in the step the crash happened in", crashes[0].Writer, crashes[0].Step)
 	}
 }
+
+// A test that crashes at a point of its own naming says so, and the entry keeps
+// the point and the mode.
+func TestACrashThatNamesItsPointIsWrittenWithThePoint(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	h.Crash(harness.PowerLoss(3).At("direct-register/syncdir#1"))
+	log, err := h.Ledger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	crashes := log.Kind(ledger.KindFixtureCrash)
+	if len(crashes) != 1 {
+		t.Fatalf("%d fixture.crash entries, want 1", len(crashes))
+	}
+	got := crashes[0].Attrs.CrashPoint
+	for _, want := range []string{"direct-register/syncdir#1", "power loss", "seed 3"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the crash is recorded as %q, which lacks %q", got, want)
+		}
+	}
+}
