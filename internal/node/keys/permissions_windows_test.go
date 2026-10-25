@@ -10,9 +10,8 @@ import (
 	"github.com/aianyai/sidera/internal/node/keys"
 )
 
-// These tests state requirements; none of them has run on Windows before the
-// first CI run after they land. They use the real file system and log what they
-// measure.
+// These tests state requirements and pass on the GitHub-hosted Windows runner.
+// They use the real file system.
 func TestWindowsDACLWiderThanTheOwnerIsRefusedNamingTheFile(t *testing.T) {
 	r := newRealRig(t)
 	r.initialize(t)

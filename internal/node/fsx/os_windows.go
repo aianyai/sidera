@@ -14,8 +14,10 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// Platform primitives for Windows. What follows is pending verification by the
-// Windows CI after it lands: nothing here has run on a Windows machine.
+// Platform primitives for Windows. The Windows tests of this package pass on the
+// GitHub-hosted Windows runner. What Windows makes durable at a power loss is not
+// observed by any CI job, and the result of flushing a directory handle is only
+// logged by a test (see TestWindowsDirectoryFlushAttempt), not captured.
 
 // retryable is the error set the Go toolchain's own robustio retries: another
 // process (antivirus, indexer, a reader holding the file open) briefly keeps
