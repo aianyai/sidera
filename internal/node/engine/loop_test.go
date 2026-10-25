@@ -163,8 +163,8 @@ func TestAFailedWriteIsBackpressureAndMemoryKeepsWhatTheDiskHolds(t *testing.T) 
 				t.Error("memory shows a declaration the disk does not hold")
 			}
 			for _, ep := range r.scan().Endpoints {
-				if ep.ID == id && string(ep.Declaration) != `{"display_name":"Name of a"}` {
-					t.Errorf("the record on disk is %s", ep.Declaration)
+				if ep.ID == id && (string(ep.Declaration) != `{}` || ep.DisplayName != "Name of a") {
+					t.Errorf("the record on disk is declaration %s, name %q", ep.Declaration, ep.DisplayName)
 				}
 			}
 			if e.Phase() != engine.PhaseRunning {

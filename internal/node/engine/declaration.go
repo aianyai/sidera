@@ -20,20 +20,12 @@ import (
 // of the declaration and so this bound with it.
 const MaxAcceptFrom = 256
 
-// endpointMeta is what the engine owns about an endpoint and keeps in the
-// declaration field of its record: what the adapter said of it and its
-// declaration. The field is one compact JSON object with a fixed member order;
-// a text that is not exactly what encodeMeta writes for the value it decodes to
-// is not read, so one value has one text.
-type endpointMeta struct {
-	DisplayName string
-	Description string
-	Declaration authz.Declaration
-}
-
-type metaWire struct {
-	DisplayName          string   `json:"display_name,omitempty"`
-	Description          string   `json:"description,omitempty"`
+// The declaration of an endpoint is the field of its record that the engine owns:
+// one compact JSON object with a fixed member order. A text that is not exactly
+// what encodeDeclaration writes for the value it decodes to is not read, so one
+// value has one text. The display name and the description the adapter gave are
+// fields of the record of their own.
+type declarationWire struct {
 	Paused               bool     `json:"paused,omitempty"`
 	RefuseMultiRecipient bool     `json:"refuse_multi_recipient,omitempty"`
 	RestrictSenders      bool     `json:"restrict_senders,omitempty"`
@@ -60,14 +52,13 @@ func checkAcceptFrom(list []ident.Address) error {
 	return nil
 }
 
-// encodeMeta is the text of the value. It refuses what decodeMeta would.
-func encodeMeta(m endpointMeta) ([]byte, error) {
-	d := m.Declaration
+// encodeDeclaration is the text of the value. It refuses what decodeDeclaration
+// would.
+func encodeDeclaration(d authz.Declaration) ([]byte, error) {
 	if err := checkAcceptFrom(d.AcceptFrom); err != nil {
 		return nil, fmt.Errorf("engine: declaration: %w", err)
 	}
-	w := metaWire{
-		DisplayName: m.DisplayName, Description: m.Description,
+	w := declarationWire{
 		Paused: d.Paused, RefuseMultiRecipient: d.RefuseMultiRecipient,
 		RestrictSenders: d.RestrictSenders, HiddenFromDirectory: d.HiddenFromDirectory,
 	}
@@ -83,33 +74,32 @@ func encodeMeta(m endpointMeta) ([]byte, error) {
 	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
-// decodeMeta reads the text of a value. Nothing at all declares nothing.
-func decodeMeta(b []byte) (endpointMeta, error) {
+// decodeDeclaration reads the text of a value. Nothing at all declares nothing.
+func decodeDeclaration(b []byte) (authz.Declaration, error) {
 	if len(b) == 0 {
-		return endpointMeta{}, nil
+		return authz.Declaration{}, nil
 	}
-	var w metaWire
+	var w declarationWire
 	if err := strictjson.Decode(b, &w); err != nil {
-		return endpointMeta{}, fmt.Errorf("engine: declaration: %w", err)
+		return authz.Declaration{}, fmt.Errorf("engine: declaration: %w", err)
 	}
-	m := endpointMeta{DisplayName: w.DisplayName, Description: w.Description}
-	m.Declaration = authz.Declaration{
+	d := authz.Declaration{
 		Paused: w.Paused, RefuseMultiRecipient: w.RefuseMultiRecipient,
 		RestrictSenders: w.RestrictSenders, HiddenFromDirectory: w.HiddenFromDirectory,
 	}
 	for _, s := range w.AcceptFrom {
 		a, err := ident.ParseAddress(s)
 		if err != nil {
-			return endpointMeta{}, fmt.Errorf("engine: declaration: accept_from: %w", err)
+			return authz.Declaration{}, fmt.Errorf("engine: declaration: accept_from: %w", err)
 		}
-		m.Declaration.AcceptFrom = append(m.Declaration.AcceptFrom, a)
+		d.AcceptFrom = append(d.AcceptFrom, a)
 	}
-	again, err := encodeMeta(m)
+	again, err := encodeDeclaration(d)
 	if err != nil {
-		return endpointMeta{}, err
+		return authz.Declaration{}, err
 	}
 	if !bytes.Equal(again, b) {
-		return endpointMeta{}, errors.New("engine: declaration: not the canonical text of its value")
+		return authz.Declaration{}, errors.New("engine: declaration: not the canonical text of its value")
 	}
-	return m, nil
+	return d, nil
 }

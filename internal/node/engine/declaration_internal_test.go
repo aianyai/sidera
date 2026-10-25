@@ -48,38 +48,37 @@ func addrOf(t testing.TB, node, ep string) ident.Address {
 	return a
 }
 
-// The endpoint's record holds what the engine owns about it in one compact JSON
-// object: what the adapter said of the endpoint, and its declaration.
-func TestEndpointMetaGoldenVectors(t *testing.T) {
+// The declaration field of the endpoint's record holds the declaration alone, as
+// one compact JSON object. The display name and the description are fields of
+// the record, so a text that carries them is not a declaration.
+func TestDeclarationGoldenVectors(t *testing.T) {
 	a1, a2 := addrOf(t, nodeText, epText1), addrOf(t, nodeText, epText2)
 	for _, tc := range []struct {
 		name string
-		meta endpointMeta
+		decl authz.Declaration
 		json string
 	}{
-		{"nothing said", endpointMeta{}, `{}`},
-		{"a name only", endpointMeta{DisplayName: "Notes"}, `{"display_name":"Notes"}`},
-		{"name and description", endpointMeta{DisplayName: "Notes", Description: "keeps the notes"},
-			`{"display_name":"Notes","description":"keeps the notes"}`},
-		{"every flag set", endpointMeta{Declaration: authz.Declaration{Paused: true, RefuseMultiRecipient: true, RestrictSenders: true, HiddenFromDirectory: true}},
+		{"nothing declared", authz.Declaration{}, `{}`},
+		{"every flag set", authz.Declaration{Paused: true, RefuseMultiRecipient: true, RestrictSenders: true, HiddenFromDirectory: true},
 			`{"paused":true,"refuse_multi_recipient":true,"restrict_senders":true,"hidden_from_directory":true}`},
-		{"a sender list, kept in order", endpointMeta{DisplayName: "N", Declaration: authz.Declaration{RestrictSenders: true, AcceptFrom: []ident.Address{a2, a1}}},
-			`{"display_name":"N","restrict_senders":true,"accept_from":["` + a2.String() + `","` + a1.String() + `"]}`},
-		{"text that needs escaping", endpointMeta{DisplayName: `a "b" <c> é`}, `{"display_name":"a \"b\" <c> é"}`},
+		{"a sender list, kept in order", authz.Declaration{RestrictSenders: true, AcceptFrom: []ident.Address{a2, a1}},
+			`{"restrict_senders":true,"accept_from":["` + a2.String() + `","` + a1.String() + `"]}`},
+		{"a flag and a sender", authz.Declaration{Paused: true, AcceptFrom: []ident.Address{a1}},
+			`{"paused":true,"accept_from":["` + a1.String() + `"]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := encodeMeta(tc.meta)
+			got, err := encodeDeclaration(tc.decl)
 			if err != nil {
-				t.Fatalf("encodeMeta: %v", err)
+				t.Fatalf("encodeDeclaration: %v", err)
 			}
 			if string(got) != tc.json {
 				t.Errorf("encoded\n%s\nwant\n%s", got, tc.json)
 			}
-			back, err := decodeMeta([]byte(tc.json))
+			back, err := decodeDeclaration([]byte(tc.json))
 			if err != nil {
-				t.Fatalf("decodeMeta: %v", err)
+				t.Fatalf("decodeDeclaration: %v", err)
 			}
-			again, err := encodeMeta(back)
+			again, err := encodeDeclaration(back)
 			if err != nil || !bytes.Equal(again, []byte(tc.json)) {
 				t.Errorf("decoding then encoding gave %s, %v", again, err)
 			}
@@ -87,16 +86,16 @@ func TestEndpointMetaGoldenVectors(t *testing.T) {
 	}
 }
 
-func TestDecodeMetaTakesNothingAsDeclaringNothing(t *testing.T) {
+func TestDecodeDeclarationTakesNothingAsDeclaringNothing(t *testing.T) {
 	for _, in := range [][]byte{nil, {}} {
-		m, err := decodeMeta(in)
-		if err != nil || m.DisplayName != "" || m.Declaration.Paused {
-			t.Errorf("decodeMeta(%q) = %+v, %v", in, m, err)
+		d, err := decodeDeclaration(in)
+		if err != nil || d.Paused || d.RestrictSenders || len(d.AcceptFrom) != 0 {
+			t.Errorf("decodeDeclaration(%q) = %+v, %v", in, d, err)
 		}
 	}
 }
 
-func TestDecodeMetaRefusals(t *testing.T) {
+func TestDecodeDeclarationRefusals(t *testing.T) {
 	a1 := addrOf(t, nodeText, epText1).String()
 	many := make([]string, MaxAcceptFrom+1)
 	for i, a := range distinctAddresses(t, MaxAcceptFrom+1) {
@@ -104,10 +103,11 @@ func TestDecodeMetaRefusals(t *testing.T) {
 	}
 	for _, tc := range []struct{ name, in string }{
 		{"an unknown member", `{"name":"x"}`},
+		{"the display name, which the record holds in a field of its own", `{"display_name":"Notes"}`},
+		{"the description, which the record holds in a field of its own", `{"description":"d"}`},
 		{"a repeated member", `{"paused":true,"paused":true}`},
 		{"a member of the wrong type", `{"paused":"yes"}`},
-		{"null", `{"display_name":null}`},
-		{"an explicit empty name", `{"display_name":""}`},
+		{"null", `{"accept_from":null}`},
 		{"an address that is not one", `{"accept_from":["nope"]}`},
 		{"a zero list stated", `{"accept_from":[]}`},
 		{"the same sender twice", `{"accept_from":["` + a1 + `","` + a1 + `"]}`},
@@ -118,32 +118,32 @@ func TestDecodeMetaRefusals(t *testing.T) {
 		{"data after the object", `{} {}`},
 		{"not an object", `[]`},
 		{"not JSON", `{`},
-		{"invalid UTF-8", "{\"display_name\":\"\xff\"}"},
+		{"invalid UTF-8 in a sender", "{\"accept_from\":[\"\xff\"]}"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if m, err := decodeMeta([]byte(tc.in)); err == nil {
-				t.Errorf("decodeMeta(%s) = %+v, want an error", tc.in, m)
+			if d, err := decodeDeclaration([]byte(tc.in)); err == nil {
+				t.Errorf("decodeDeclaration(%s) = %+v, want an error", tc.in, d)
 			}
 		})
 	}
 }
 
 // What cannot be decoded is not written: the same checks run on the way in.
-func TestEncodeMetaRefusals(t *testing.T) {
+func TestEncodeDeclarationRefusals(t *testing.T) {
 	a1 := addrOf(t, nodeText, epText1)
 	dup := []ident.Address{a1, a1}
 	big := distinctAddresses(t, MaxAcceptFrom+1)
 	for _, tc := range []struct {
 		name string
-		m    endpointMeta
+		d    authz.Declaration
 	}{
-		{"a zero address", endpointMeta{Declaration: authz.Declaration{RestrictSenders: true, AcceptFrom: []ident.Address{{}}}}},
-		{"the same sender twice", endpointMeta{Declaration: authz.Declaration{RestrictSenders: true, AcceptFrom: dup}}},
-		{"too many senders", endpointMeta{Declaration: authz.Declaration{RestrictSenders: true, AcceptFrom: big}}},
+		{"a zero address", authz.Declaration{RestrictSenders: true, AcceptFrom: []ident.Address{{}}}},
+		{"the same sender twice", authz.Declaration{RestrictSenders: true, AcceptFrom: dup}},
+		{"too many senders", authz.Declaration{RestrictSenders: true, AcceptFrom: big}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if b, err := encodeMeta(tc.m); err == nil {
-				t.Errorf("encodeMeta = %s, want an error", b)
+			if b, err := encodeDeclaration(tc.d); err == nil {
+				t.Errorf("encodeDeclaration = %s, want an error", b)
 			}
 		})
 	}
@@ -151,13 +151,14 @@ func TestEncodeMetaRefusals(t *testing.T) {
 
 // Whatever decodes is canonical: it encodes back to the same bytes. Decoding
 // never panics, whatever is on the disk.
-func FuzzDecodeMeta(f *testing.F) {
+func FuzzDecodeDeclaration(f *testing.F) {
 	a1, a2 := addrOf(f, nodeText, epText1), addrOf(f, nodeText, epText2)
-	for _, m := range []endpointMeta{
-		{}, {DisplayName: "Notes", Description: "d"},
-		{Declaration: authz.Declaration{RestrictSenders: true, AcceptFrom: []ident.Address{a1, a2}, Paused: true}},
+	for _, d := range []authz.Declaration{
+		{},
+		{RestrictSenders: true, AcceptFrom: []ident.Address{a1, a2}, Paused: true},
+		{HiddenFromDirectory: true, RefuseMultiRecipient: true},
 	} {
-		b, err := encodeMeta(m)
+		b, err := encodeDeclaration(d)
 		if err != nil {
 			f.Fatal(err)
 		}
@@ -165,13 +166,14 @@ func FuzzDecodeMeta(f *testing.F) {
 	}
 	f.Add([]byte(`{"paused":true,"paused":true}`))
 	f.Add([]byte(`{"accept_from":[]}`))
+	f.Add([]byte(`{"display_name":"Notes"}`))
 	f.Add([]byte{})
 	f.Fuzz(func(t *testing.T, data []byte) {
-		m, err := decodeMeta(data)
+		d, err := decodeDeclaration(data)
 		if err != nil || len(data) == 0 {
 			return
 		}
-		back, err := encodeMeta(m)
+		back, err := encodeDeclaration(d)
 		if err != nil {
 			t.Fatalf("decoded %q but cannot encode it: %v", data, err)
 		}
@@ -185,14 +187,14 @@ func FuzzDecodeMeta(f *testing.F) {
 }
 
 // The most senders the limit allows is allowed: the bound is exact.
-func TestMetaTakesExactlyTheMostSendersItAllows(t *testing.T) {
-	m := endpointMeta{Declaration: authz.Declaration{RestrictSenders: true, AcceptFrom: distinctAddresses(t, MaxAcceptFrom)}}
-	b, err := encodeMeta(m)
+func TestDeclarationTakesExactlyTheMostSendersItAllows(t *testing.T) {
+	d := authz.Declaration{RestrictSenders: true, AcceptFrom: distinctAddresses(t, MaxAcceptFrom)}
+	b, err := encodeDeclaration(d)
 	if err != nil {
-		t.Fatalf("encodeMeta of %d senders: %v", MaxAcceptFrom, err)
+		t.Fatalf("encodeDeclaration of %d senders: %v", MaxAcceptFrom, err)
 	}
-	back, err := decodeMeta(b)
-	if err != nil || len(back.Declaration.AcceptFrom) != MaxAcceptFrom {
-		t.Errorf("decodeMeta = %d senders, %v", len(back.Declaration.AcceptFrom), err)
+	back, err := decodeDeclaration(b)
+	if err != nil || len(back.AcceptFrom) != MaxAcceptFrom {
+		t.Errorf("decodeDeclaration = %d senders, %v", len(back.AcceptFrom), err)
 	}
 }

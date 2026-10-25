@@ -281,6 +281,47 @@ func TestEndpointsListsEveryEndpointWithWhatTheAdapterSaid(t *testing.T) {
 	}
 }
 
+// The record of an endpoint holds the name and the description the adapter gave
+// in fields of their own, and its declaration field holds the declaration alone;
+// the adapter saying the name again changes the first and leaves the second.
+func TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	res, err := e.RegisterDirect(context.Background(), "chat", adapterproto.RegisterParams{Key: "notes", DisplayName: "Notes", Description: "keeps the notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := ident.ParseEndpointID(string(res.Endpoint))
+	if err != nil {
+		t.Fatal(err)
+	}
+	onDisk := func() store.EndpointRecord {
+		for _, ep := range r.scan().Endpoints {
+			if ep.ID == id {
+				return ep
+			}
+		}
+		t.Fatalf("no record of %s", id)
+		return store.EndpointRecord{}
+	}
+	if ep := onDisk(); ep.DisplayName != "Notes" || ep.Description != "keeps the notes" || string(ep.Declaration) != `{}` {
+		t.Errorf("registered: name %q, description %q, declaration %s", ep.DisplayName, ep.Description, ep.Declaration)
+	}
+	if _, err := e.Declare(context.Background(), engine.ByAdapter("chat", res.Endpoint), engine.DeclarationPatch{Paused: ptr(true)}); err != nil {
+		t.Fatal(err)
+	}
+	if ep := onDisk(); ep.DisplayName != "Notes" || ep.Description != "keeps the notes" || string(ep.Declaration) != `{"paused":true}` {
+		t.Errorf("declared: name %q, description %q, declaration %s", ep.DisplayName, ep.Description, ep.Declaration)
+	}
+	if _, err := e.RegisterDirect(context.Background(), "chat", adapterproto.RegisterParams{Key: "notes", DisplayName: "Notebook"}); err != nil {
+		t.Fatal(err)
+	}
+	if ep := onDisk(); ep.DisplayName != "Notebook" || ep.Description != "" || string(ep.Declaration) != `{"paused":true}` {
+		t.Errorf("registered again: name %q, description %q, declaration %s", ep.DisplayName, ep.Description, ep.Declaration)
+	}
+}
+
 // The owner's list says how many messages wait for each endpoint; what is queued
 // for a closed endpoint goes down as the drain closes it.
 func TestEndpointsListsHowManyMessagesWaitForEachEndpoint(t *testing.T) {

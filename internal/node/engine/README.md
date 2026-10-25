@@ -80,11 +80,11 @@ commands and add their methods to this list.
 - **Only the token of an open session endpoint opens the Agent interface.** The
   store keeps a token on every open record; the engine mints one for a direct
   endpoint and never lets it in.
-- **What the engine owns about an endpoint is in the declaration field of its
-  record:** the display name and description the adapter gave, and the
-  declaration. One compact JSON object of a fixed shape; a text that is not the
-  exact encoding of the value it decodes to is not read, and a record whose field
-  cannot be read stops `Open`.
+- **The declaration field of an endpoint's record holds the declaration alone.**
+  One compact JSON object of a fixed shape; a text that is not the exact encoding
+  of the value it decodes to is not read, and a record whose field cannot be read
+  stops `Open`. The display name and description the adapter gave are the
+  record's own `DisplayName` and `Description`.
 - **A recv that waits is a waiter the loop owns.** It is registered in the same
   command that found the queue empty, so no arrival can slip between the check and
   the registration. Any later command that makes a message of the endpoint ready
@@ -144,6 +144,6 @@ loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
 `crash_test.go` the crash walk of `direct-register`; `static_test.go` the lists
 the review holds the engine to; the `_internal_test.go` files the encoding of
-the declaration field, the view and the batches of a drain.
+the declaration field (`declaration_internal_test.go`), the view and the batches of a drain.
 `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord` is a
 requirement kept in sight and skipped until the quarantine is wired.

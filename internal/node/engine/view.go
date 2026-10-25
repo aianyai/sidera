@@ -6,16 +6,17 @@ import (
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 )
 
-// endpointState is an endpoint as the loop holds it: the record and what the
-// engine keeps in its declaration field.
+// endpointState is an endpoint as the loop holds it: the record and its
+// declaration, read once from the record's declaration field.
 type endpointState struct {
 	rec  store.EndpointRecord
-	meta endpointMeta
+	decl authz.Declaration
 }
 
 // view is the engine's picture of the records, built from a scan and kept in
@@ -97,11 +98,11 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		v.putResult(a)
 	}
 	for _, ep := range sc.Endpoints {
-		meta, err := decodeMeta(ep.Declaration)
+		decl, err := decodeDeclaration(ep.Declaration)
 		if err != nil {
 			return nil, fmt.Errorf("engine: endpoint %s: %w", ep.ID, err)
 		}
-		v.putEndpoint(ep, meta)
+		v.putEndpoint(ep, decl)
 	}
 	for _, in := range sc.In {
 		v.setIn(in)
@@ -125,8 +126,8 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 // putEndpoint records an endpoint as it is on disk now. Only a session endpoint
 // that is open holds a token that anyone presents, but the index takes the token
 // of every endpoint that has one, and resolve decides by kind.
-func (v *view) putEndpoint(rec store.EndpointRecord, meta endpointMeta) {
-	v.endpoints[rec.ID] = &endpointState{rec: rec, meta: meta}
+func (v *view) putEndpoint(rec store.EndpointRecord, decl authz.Declaration) {
+	v.endpoints[rec.ID] = &endpointState{rec: rec, decl: decl}
 	if rec.Status == store.EndpointClosed || len(rec.Token) == 0 {
 		v.tokens.remove(rec.ID)
 		return

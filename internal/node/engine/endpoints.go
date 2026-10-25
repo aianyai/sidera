@@ -124,33 +124,30 @@ func (e *Engine) registerDirect(inst string, p adapterproto.RegisterParams) (ada
 		return none, err
 	}
 	ref := adapterproto.RegisterResult{Endpoint: adapterproto.EndpointRef(ch.ID.String())}
-	meta := endpointMeta{DisplayName: p.DisplayName, Description: p.Description}
 
 	st := e.view.endpoints[ch.ID]
 	if st != nil && st.rec.Kind != adapterreg.KindDirect {
 		return none, errors.New("engine: a stable id of a direct endpoint is the id of another kind of endpoint")
 	}
 	if st != nil && st.rec.Status == store.EndpointOpen {
-		meta.Declaration = st.meta.Declaration
-		if meta.DisplayName == st.meta.DisplayName && meta.Description == st.meta.Description {
+		if p.DisplayName == st.rec.DisplayName && p.Description == st.rec.Description {
 			return ref, nil
 		}
 		rec := st.rec
-		if rec.Declaration, err = encodeMeta(meta); err != nil {
-			return none, err
-		}
+		rec.DisplayName, rec.Description = p.DisplayName, p.Description
 		if err := e.d.Store.EndpointUpdate(rec); err != nil {
 			return none, err
 		}
-		e.view.putEndpoint(rec, meta)
+		e.view.putEndpoint(rec, st.decl)
 		return ref, nil
 	}
 
+	var decl authz.Declaration
 	if st != nil {
 		if e.view.Draining(ch.ID) {
 			return none, &drainingError{ch.ID}
 		}
-		meta.Declaration = st.meta.Declaration
+		decl = st.decl
 	}
 	if e.view.openDirect(inst) >= adm.MaxDirectEndpoints() {
 		return none, &Refusal{Reason: ReasonEndpointLimit, Limit: LimitInstance}
@@ -162,14 +159,18 @@ func (e *Engine) registerDirect(inst string, p adapterproto.RegisterParams) (ada
 	if err != nil {
 		return none, err
 	}
-	rec := store.EndpointRecord{ID: ch.ID, Kind: adapterreg.KindDirect, Instance: inst, Status: store.EndpointOpen, Token: token}
-	if rec.Declaration, err = encodeMeta(meta); err != nil {
+	rec := store.EndpointRecord{
+		ID: ch.ID, Kind: adapterreg.KindDirect, Instance: inst,
+		DisplayName: p.DisplayName, Description: p.Description,
+		Status: store.EndpointOpen, Token: token,
+	}
+	if rec.Declaration, err = encodeDeclaration(decl); err != nil {
 		return none, err
 	}
 	if err := e.commitDirectRegister(ch, rec); err != nil {
 		return none, err
 	}
-	e.view.putEndpoint(rec, meta)
+	e.view.putEndpoint(rec, decl)
 	return ref, nil
 }
 
@@ -298,20 +299,19 @@ func (e *Engine) declare(c Caller, p DeclarationPatch) (authz.Declaration, error
 	if p.IsEmpty() {
 		return authz.Declaration{}, &Refusal{Reason: ReasonInvalidArgument, Field: "patch", Detail: DetailEmptyPatch}
 	}
-	meta := st.meta
-	meta.Declaration = p.apply(meta.Declaration)
-	if err := checkAcceptFrom(meta.Declaration.AcceptFrom); err != nil {
+	decl := p.apply(st.decl)
+	if err := checkAcceptFrom(decl.AcceptFrom); err != nil {
 		return authz.Declaration{}, invalidArgument("accept_from", err)
 	}
 	rec := st.rec
-	if rec.Declaration, err = encodeMeta(meta); err != nil {
+	if rec.Declaration, err = encodeDeclaration(decl); err != nil {
 		return authz.Declaration{}, err
 	}
 	if err := e.d.Store.EndpointUpdate(rec); err != nil {
 		return authz.Declaration{}, err
 	}
-	e.view.putEndpoint(rec, meta)
-	return cloneDeclaration(meta.Declaration), nil
+	e.view.putEndpoint(rec, decl)
+	return cloneDeclaration(decl), nil
 }
 
 func cloneDeclaration(d authz.Declaration) authz.Declaration {
@@ -464,7 +464,7 @@ func (e *Engine) closeEndpoint(now time.Time, id ident.EndpointID, op *CloseOper
 		}
 	}
 	if outcome != CloseOutcomeAlreadyClosed {
-		e.view.putEndpoint(rec, st.meta)
+		e.view.putEndpoint(rec, st.decl)
 		if e.view.Draining(id) {
 			e.later(&cmdDrain{endpoint: id})
 		}
@@ -522,8 +522,8 @@ func (c *cmdEndpoints) run(e *Engine, _ time.Time) {
 		out = append(out, EndpointView{
 			ID: id, Address: ident.Address{Node: e.d.Node, Endpoint: id},
 			Kind: st.rec.Kind, Instance: st.rec.Instance, Status: st.rec.Status,
-			DisplayName: st.meta.DisplayName, Description: st.meta.Description,
-			Declaration: cloneDeclaration(st.meta.Declaration), Queued: len(e.view.queued[id]), Draining: e.view.Draining(id),
+			DisplayName: st.rec.DisplayName, Description: st.rec.Description,
+			Declaration: cloneDeclaration(st.decl), Queued: len(e.view.queued[id]), Draining: e.view.Draining(id),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID.String() < out[j].ID.String() })

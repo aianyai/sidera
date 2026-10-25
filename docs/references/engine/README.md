@@ -84,9 +84,9 @@ it is, only to carry the result.
 
 `Declare` changes the declaration of the endpoint the caller is: `ByToken` is the
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's
-own instance. The declaration, with the display name and description the adapter
-gave, is the engine's field of the endpoint record (compact JSON, fixed member
-order, at most 256 senders listed). A patch that names nothing is refused as
+own instance. The declaration is the engine's field of the endpoint record
+(compact JSON, fixed member order, at most 256 senders listed); the display name
+and description the adapter gave are fields of the record of their own. A patch that names nothing is refused as
 `invalid_argument` with the detail `empty_patch`: the detail is a typed value of
 the `Refusal`, as the limit of `endpoint_limit` is, so that the interface maps it
 without reading text. `Endpoints` lists for each endpoint how many messages wait
@@ -202,12 +202,15 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   adapter's start tells the node, for each direct endpoint, only its identifier and
   its key; it does not say the name or the description again. What `Endpoints`
   lists has therefore to come from the disk, and the endpoint that was registered
-  before the restart is listed with what the adapter said last. Where in the
-  endpoint record they are kept is a matter of the record's shape and not of this
-  rule.
+  before the restart is listed with what the adapter said last. They are the
+  record's `DisplayName` and `Description`, not part of the engine's declaration
+  field: the record has a place for them, and the declaration field holds only the
+  declaration. The adapter saying them again rewrites those two fields and leaves
+  the declaration as it was (`TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`).
 - **A text that is not canonical is not read.** The declaration field is written in
   one form, so a re-encoding of what was read is the bytes that were read, and the
-  fuzz target can assert it.
+  fuzz target can assert it. A text that carries a display name or a description is
+  not a declaration and is refused.
 - **Recovery work of an unwired rule stops `Open`.** Opening over a damaged file
   would leave it out of the view as if it were not there, silently. The refusal
   names the rule and happens before any write of that pass.
@@ -238,7 +241,7 @@ reproducible).
 | The registration crashes anywhere | `transactions.go` | `TestDirectRegisterRecoversFromACrashAtEveryPoint` |
 | The result of a close is stored with it, and replayed | `endpoints.go` (`closeEndpoint`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint`, `TestAResendOfAClosingReturnsTheStoredResultAndAReusedIdentifierIsRefused` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
-| Declarations and callers | `endpoints.go`, `meta.go`, `view.go` | `declare_test.go`, `meta_internal_test.go` (golden vectors, refusals, `FuzzDecodeMeta`), `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
+| Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |
 | The schedule | `sched.go`, `engine.go` | `sched_test.go`, `sched_internal_test.go` |
