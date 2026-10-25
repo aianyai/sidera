@@ -64,7 +64,14 @@ func TestWhenTheInboxIsFullAnOutsideCallerIsRefusedAndAnInternalOneWaits(t *test
 	}
 
 	start := time.Now()
-	_, err := e.Endpoints(context.Background())
+	refused := make(chan error, 1)
+	go func() { _, err := e.Endpoints(context.Background()); refused <- err }()
+	var err error
+	select {
+	case err = <-refused:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the outside caller was not refused while the inbox stayed full")
+	}
 	wantReason(t, err, engine.ReasonLoopBusy)
 	if waited := time.Since(start); waited < 40*time.Millisecond {
 		t.Errorf("refused after %v, want it to wait the SubmitWait for room first", waited)

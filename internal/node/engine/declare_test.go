@@ -98,7 +98,13 @@ func TestDeclareRefusesWhatCannotBeStored(t *testing.T) {
 
 	tooMany := make([]ident.Address, engine.MaxAcceptFrom+1)
 	for i := range tooMany {
-		tooMany[i] = ident.Address{Node: r.node, Endpoint: mustEndpoint(t, byte(i%250+1))}
+		b := make([]byte, ident.EndpointIDLen)
+		b[0], b[1], b[15] = byte(i>>8), byte(i), 1
+		id, err := ident.EndpointIDFromBytes(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tooMany[i] = ident.Address{Node: r.node, Endpoint: id}
 	}
 	for _, tc := range []struct {
 		name  string

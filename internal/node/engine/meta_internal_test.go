@@ -18,6 +18,27 @@ const (
 	epText2  = "ep1zyfpx9q4zct3sxg6rvwp68slyqq2dn6x"
 )
 
+// distinctAddresses are n different addresses of the node, none of them zero.
+func distinctAddresses(t testing.TB, n int) []ident.Address {
+	t.Helper()
+	node, err := ident.ParseNodeID(nodeText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := make([]ident.Address, n)
+	for i := range out {
+		b := make([]byte, ident.EndpointIDLen)
+		b[0], b[1] = byte(i>>8), byte(i)
+		b[15] = 1
+		id, err := ident.EndpointIDFromBytes(b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out[i] = ident.Address{Node: node, Endpoint: id}
+	}
+	return out
+}
+
 func addrOf(t testing.TB, node, ep string) ident.Address {
 	t.Helper()
 	a, err := ident.ParseAddress(node + "/" + ep)
@@ -78,8 +99,8 @@ func TestDecodeMetaTakesNothingAsDeclaringNothing(t *testing.T) {
 func TestDecodeMetaRefusals(t *testing.T) {
 	a1 := addrOf(t, nodeText, epText1).String()
 	many := make([]string, MaxAcceptFrom+1)
-	for i := range many {
-		many[i] = `"` + a1 + `"`
+	for i, a := range distinctAddresses(t, MaxAcceptFrom+1) {
+		many[i] = `"` + a.String() + `"`
 	}
 	for _, tc := range []struct{ name, in string }{
 		{"an unknown member", `{"name":"x"}`},
@@ -111,10 +132,7 @@ func TestDecodeMetaRefusals(t *testing.T) {
 func TestEncodeMetaRefusals(t *testing.T) {
 	a1 := addrOf(t, nodeText, epText1)
 	dup := []ident.Address{a1, a1}
-	big := make([]ident.Address, MaxAcceptFrom+1)
-	for i := range big {
-		big[i] = a1
-	}
+	big := distinctAddresses(t, MaxAcceptFrom+1)
 	for _, tc := range []struct {
 		name string
 		m    endpointMeta
@@ -164,4 +182,17 @@ func FuzzDecodeMeta(f *testing.F) {
 			t.Fatalf("encoded %q is not JSON", back)
 		}
 	})
+}
+
+// The most senders the limit allows is allowed: the bound is exact.
+func TestMetaTakesExactlyTheMostSendersItAllows(t *testing.T) {
+	m := endpointMeta{Declaration: authz.Declaration{RestrictSenders: true, AcceptFrom: distinctAddresses(t, MaxAcceptFrom)}}
+	b, err := encodeMeta(m)
+	if err != nil {
+		t.Fatalf("encodeMeta of %d senders: %v", MaxAcceptFrom, err)
+	}
+	back, err := decodeMeta(b)
+	if err != nil || len(back.Declaration.AcceptFrom) != MaxAcceptFrom {
+		t.Errorf("decodeMeta = %d senders, %v", len(back.Declaration.AcceptFrom), err)
+	}
 }
