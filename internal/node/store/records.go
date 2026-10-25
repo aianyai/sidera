@@ -222,7 +222,15 @@ type EndpointRecord struct {
 	ID       ident.EndpointID
 	Kind     adapterreg.EndpointKind
 	Instance string
-	Status   EndpointStatus
+	// DisplayName is the name people see for the endpoint, as its adapter
+	// registered it; empty when it has none. At most adapterproto.MaxDisplayName
+	// characters of valid UTF-8.
+	DisplayName string
+	// Description says what the endpoint is for, as its adapter registered it;
+	// empty when it has none. At most adapterproto.MaxDescription characters of
+	// valid UTF-8.
+	Description string
+	Status      EndpointStatus
 	// Token is the 32-byte token; nil once the endpoint is closed.
 	Token []byte
 	// Declaration is the endpoint's declaration, compact JSON, owned by the

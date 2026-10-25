@@ -68,6 +68,11 @@ func goldenWant(t *testing.T, name string) store.Record {
 		}
 	case "endpoint":
 		return session(5, store.EndpointCreating, strings.TrimSuffix(ctlKey(1).FileName(store.KindCtl), ".rec"))
+	case "endpoint named":
+		r := directEndpoint(6, "chat")
+		r.Declaration = nil
+		r.DisplayName, r.Description = "B\u00fcro phone", "The front desk line, answered 9 to 5."
+		return r
 	case "in":
 		r := tgtIn(1)
 		r.Rev = 1
@@ -250,6 +255,11 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"an endpoint token of the wrong length", "endpoint", `"token":"RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU"`, `"token":"RUVF"`},
 		{"an open endpoint without a token", "endpoint", `"status":"creating","token":"RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU",`, `"status":"open",`},
 		{"a closed endpoint that still has a token", "endpoint", `"status":"creating"`, `"status":"closed"`},
+		{"an endpoint display name written empty", "endpoint named", `"display_name":"Büro phone"`, `"display_name":""`},
+		{"an endpoint description written empty", "endpoint named", `"description":"The front desk line, answered 9 to 5."`, `"description":""`},
+		{"an endpoint display name over the bound of the protocol", "endpoint named", `"display_name":"Büro phone"`, `"display_name":"` + strings.Repeat("n", adapterproto.MaxDisplayName+1) + `"`},
+		{"an endpoint description over the bound of the protocol", "endpoint named", `"description":"The front desk line, answered 9 to 5."`, `"description":"` + strings.Repeat("n", adapterproto.MaxDescription+1) + `"`},
+		{"an endpoint display name that is not UTF-8", "endpoint named", `"display_name":"Büro phone"`, `"display_name":"B` + "\xff" + `ro phone"`},
 		{"a session endpoint with created_by that is not a hash", "endpoint", `"created_by":"`, `"created_by":"x`},
 		{"an in record of revision zero", "in", `"rev":1`, `"rev":0`},
 		{"an in record without a revision", "in", `"rev":1,`, ``},

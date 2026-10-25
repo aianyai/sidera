@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
@@ -29,6 +30,8 @@ type sessionJSON struct {
 type endpointJSON struct {
 	Kind        string          `json:"kind"`
 	Instance    string          `json:"instance"`
+	DisplayName string          `json:"display_name,omitempty"`
+	Description string          `json:"description,omitempty"`
 	Status      string          `json:"status"`
 	Token       string          `json:"token,omitempty"`
 	Declaration json.RawMessage `json:"declaration,omitempty"`
@@ -40,6 +43,34 @@ var errEmptySession = errors.New("an empty session mapping is not written")
 
 // TokenLen is the length of an endpoint token in bytes.
 const TokenLen = 32
+
+// checkEndpointText holds the display name and the description of an endpoint
+// to the bounds of the protocol that registers them. Both are optional: an empty
+// one is not written. Text that is not valid UTF-8 would not come back from the
+// encoder as it went in, so the encoder refuses it rather than altering it. The
+// decoder never sees such text: encoding/json replaces an invalid byte with
+// U+FFFD, and a body that held one is refused by the canonical re-encoding check
+// of DecodeRecord, which is where a body the encoder never writes is caught; the
+// test is kept on that path only so that this function states the whole rule and
+// the encoder and the decoder cannot drift apart. The length bound is checked on
+// both paths.
+func checkEndpointText(displayName, description string) error {
+	for _, f := range []struct {
+		what, text string
+		max        int
+	}{
+		{"display name", displayName, adapterproto.MaxDisplayName},
+		{"description", description, adapterproto.MaxDescription},
+	} {
+		if !utf8.ValidString(f.text) {
+			return fmt.Errorf("an endpoint's %s is not valid UTF-8", f.what)
+		}
+		if n := utf8.RuneCountInString(f.text); n > f.max {
+			return fmt.Errorf("an endpoint's %s is %d characters, at most %d", f.what, n, f.max)
+		}
+	}
+	return nil
+}
 
 func encodeEndpoint(r EndpointRecord) ([]byte, error) {
 	if r.ID.IsZero() {
@@ -54,6 +85,10 @@ func encodeEndpoint(r EndpointRecord) ([]byte, error) {
 		return nil, errors.New("an endpoint's instance name is 1 to 128 bytes")
 	}
 	j.Instance = r.Instance
+	if err := checkEndpointText(r.DisplayName, r.Description); err != nil {
+		return nil, err
+	}
+	j.DisplayName, j.Description = r.DisplayName, r.Description
 	if j.Status, err = statusNames.name(r.Status, "endpoint status"); err != nil {
 		return nil, err
 	}
@@ -106,13 +141,16 @@ func decodeEndpoint(id ident.EndpointID, body []byte) (EndpointRecord, error) {
 	if err := unmarshal(body, &j); err != nil {
 		return EndpointRecord{}, err
 	}
-	r := EndpointRecord{ID: id, Instance: j.Instance}
+	r := EndpointRecord{ID: id, Instance: j.Instance, DisplayName: j.DisplayName, Description: j.Description}
 	var err error
 	if r.Kind, err = enumValue(j.Kind, adapterreg.EndpointKind.String, "endpoint kind"); err != nil {
 		return r, err
 	}
 	if r.Instance == "" || len(r.Instance) > 128 {
 		return r, errors.New("an endpoint's instance name is 1 to 128 bytes")
+	}
+	if err := checkEndpointText(r.DisplayName, r.Description); err != nil {
+		return r, err
 	}
 	if r.Status, err = statusNames.value(j.Status, "endpoint status"); err != nil {
 		return r, err

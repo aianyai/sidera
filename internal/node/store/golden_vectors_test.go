@@ -30,6 +30,11 @@ var goldenRecords = []struct {
 	{name: "endpoint", dir: store.EndpointsDir,
 		file: "sidera-record 1 endpoint 14d0a10f 254 ZXAxejUyMzI5ZzR6NTIzMjlnNHo1MjMyOWc0ejVrOHEyZzQ\n{\"kind\":\"session\",\"instance\":\"claude\",\"status\":\"creating\",\"token\":\"RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU\",\"session\":{\"preset\":\"default\",\"tool_access\":[\"SIDERA_TOKEN\"]},\"created_by\":\"b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d\"}",
 		hash: "c2ccbb5272953d655682b33fc9219b88055463bccb316d5d1750793bbe10e030.rec"},
+	// A direct endpoint with the name and the description its adapter registered
+	// it under (the name holds a character of two bytes: the length counts bytes).
+	{name: "endpoint named", dir: store.EndpointsDir,
+		file: "sidera-record 1 endpoint 1610de94 188 ZXAxemN0cHY5c2t6Y3Rwdjlza3pjdHB2OXNremMwaDk4cGQ\n{\"kind\":\"direct\",\"instance\":\"chat\",\"display_name\":\"B\u00fcro phone\",\"description\":\"The front desk line, answered 9 to 5.\",\"status\":\"open\",\"token\":\"RkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkZGRkY\"}",
+		hash: "d4a4a31d1de4f1e5c78f896f609ab71e5654007723cbd534d6e95f9450f19046.rec"},
 	{name: "in", dir: store.InDir,
 		file: "sidera-record 1 in a55716ae 553 bm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkIGVwMXp2ZjN4eWNuenZmM3h5Y256dmYzeHljbnp2bDV1NGNkIG1zZy0wMDAxIGVwMXpnZnB5eXNqemdmcHl5c2p6Z2ZweXlzanpndGxuNHBj\n{\"rev\":1,\"record\":{\"side\":\"target\",\"state\":\"accepted\",\"accept_before\":\"2026-10-24T09:01:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\",\"backlog_deadline\":\"2026-10-24T09:30:00Z\"},\"dedup\":{\"digest\":\"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\",\"retain_until\":\"2026-10-24T12:03:00Z\"},\"auth\":{\"kind\":\"allow\"},\"reply\":{\"reason\":\"disabled\"},\"handout\":{\"content_type\":\"text/plain\",\"sent_at\":\"2026-10-24T09:00:00Z\"},\"accepted_at\":\"2026-10-24T09:00:00Z\",\"body\":{\"sha256\":\"ea8c004183bd3bd33e27907ed5cb35a24808cb99ab2bb41a727d0c675f5bcdfc\",\"len\":17}}",
 		hash: "9217a562696c0e2029e1e14cca852cea2de0be95435a39f5921d9b797081f128.rec"},

@@ -52,6 +52,14 @@ engine applies the delivery rules and calls the writes.
   are not changed, but the records returned are shallow copies of them: slices,
   maps and pointers inside a record are shared with the one given, so neither is
   modified in place. No other write sets a field of a record it is given.
+- **An endpoint's display name and description are the adapter's, held to its
+  bounds.** `EndpointRecord.DisplayName` and `Description` are optional, omitted
+  when empty, and limited to `adapterproto.MaxDisplayName` and
+  `adapterproto.MaxDescription` characters of valid UTF-8, on write and on read.
+  They are not part of the engine-owned `Declaration`, and the record does not
+  apply the tighter bound of the node's declaration to peers
+  (`publication.MaxNameLen`): whoever builds that declaration decides what happens
+  to a longer name.
 - **A head record lists its followers as it read them.** `PromptEnd` and `Blocked`
   refuse a follower that is not listed with the revision and acceptance time it was
   read with.

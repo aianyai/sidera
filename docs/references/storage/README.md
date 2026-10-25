@@ -445,7 +445,7 @@ state/
   in/<h>.rec           target record: one per message for one endpoint, deduplication included
   ctl/<h>.rec          target control record: deduplication, stored reply, creation intent
   bodies/<sha256>      a body, bare bytes, named by its digest
-  endpoints/<h>.rec    endpoint runtime state: kind, instance, token, session mapping
+  endpoints/<h>.rec    endpoint runtime state: kind, instance, name, description, token, session mapping
   attempts/<h>.rec     prompt attempts, blocked report, the followers a head record owes
   checkpoints/<h>.rec  an adapter's checkpoint
   admin/<h>.rec        result and fingerprint of an administrative operation
@@ -524,6 +524,26 @@ caller that keeps a view takes them from the return value instead of working the
 revision out again. A lost record has no revision and comes back unchanged. The
 return value is `nil` when the write failed. `TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`
 compares each returned record with what a new scan reads back.
+
+**Endpoint record.** One per endpoint, under the hash of its id. Its fields, in
+the order they are written: `kind`, `instance`, `display_name` and `description`
+(both optional, omitted when empty), `status`, `token` (32 bytes, present while the
+endpoint is creating or open, absent once it is closed), `declaration` (compact
+JSON owned by the engine), `session` (the mapping of a session endpoint) and
+`created_by` (the control record that created a session endpoint). The name and the
+description are what the adapter registered the endpoint under and are held to the
+bounds of that protocol (`adapterproto.MaxDisplayName` and
+`adapterproto.MaxDescription`, counted in characters, valid UTF-8): a record the
+protocol could not have registered is refused when it is written and when it is
+read. The node's declaration to peers bounds a name more tightly
+(`publication.MaxNameLen`, in bytes), so a name that is stored may have to be cut
+or refused where the declaration is built; the record does not decide that.
+`TestEndpointTextIsBoundedAsTheRegistrationIs` checks the bounds against the
+protocol's own validation. Text that is not valid UTF-8 never reaches the decoder
+as such (the JSON decoder replaces a bad byte), so a body holding it is refused by
+the check that a body is the canonical encoding of what it decodes
+(`TestEndpointTextThatIsNotUTF8IsRefusedOnRead`)). The bounds on length are checked on read
+in the decoder itself (`TestEndpointTextOverTheBoundIsRefusedOnRead`).
 
 **Bodies** are content-addressed and written before the record that refers to
 them; a body is removed in the transaction that drops its last reference. What a
@@ -1018,7 +1038,7 @@ so that the double cannot drift from what it stands for.
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `TestHeaderDamageNeverEchoesTheFirstLine`, `FuzzDecodeFrame` |
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
-| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
+| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `written_test.go` (`TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`, `TestAFailedWriteReturnsNoRecords`),  `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
