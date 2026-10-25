@@ -485,8 +485,12 @@ func (h *H) expect() engine.Expect { return engine.Expect{} }
 type QuiesceError struct {
 	// Waited is how long the wait lasted, on the real clock.
 	Waited time.Duration
-	// Engine is the last report of the engine; Answered is false when the loop
-	// never answered the probe, which means it was inside a command.
+	// Asked is whether the engine was asked at all: it is not while a condition of
+	// the fixture does not hold.
+	Asked bool
+	// Engine is the last report of the engine, and Answered whether there was one.
+	// An engine that was asked and neither answered nor refused has a loop that is
+	// inside a command.
 	Engine   engine.Report
 	Answered bool
 	// Unmet names the conditions of the fixture that did not hold.
@@ -497,9 +501,14 @@ type QuiesceError struct {
 
 func (e *QuiesceError) Error() string {
 	s := fmt.Sprintf("harness: not quiet after %v", e.Waited.Round(time.Millisecond))
-	if e.Answered {
+	_, refused := engine.ReasonOf(e.Err)
+	switch {
+	case !e.Asked:
+	case e.Answered:
 		s += fmt.Sprintf(": the engine reports %+v", e.Engine)
-	} else {
+	case refused:
+		s += ": the engine refused the probe"
+	default:
 		s += ": the engine's loop did not answer the probe, so a command is still running"
 	}
 	if len(e.Unmet) > 0 {
@@ -531,14 +540,18 @@ func (h *H) Quiesce(opts ...scenario.QuiesceOption) error {
 func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 	sys := clock.System()
 	begin := sys.Now()
-	fail := func(rep engine.Report, unmet []string, err error) error {
+	// fail ends the wait. Whether the loop answered a probe is read from the report:
+	// a satisfied report ends the wait, and an unsatisfied one has a count that is not
+	// zero, so an all-zero report on this path is the absence of one. What an
+	// engine's refusal means is decided from the error and never from the report.
+	fail := func(asked bool, rep engine.Report, unmet []string, err error) error {
 		if ctx.Err() != nil && !errors.Is(err, ctx.Err()) {
 			err = fmt.Errorf("%v: %w", err, ctx.Err())
 		}
-		return &QuiesceError{Waited: sys.Now().Sub(begin), Engine: rep, Answered: rep != engine.Report{}, Unmet: unmet, Err: err}
+		return &QuiesceError{Waited: sys.Now().Sub(begin), Asked: asked, Engine: rep, Answered: rep != engine.Report{}, Unmet: unmet, Err: err}
 	}
 	if err := ctx.Err(); err != nil {
-		return fail(engine.Report{}, nil, err)
+		return fail(false, engine.Report{}, nil, err)
 	}
 	var unmet []string
 	for {
@@ -549,13 +562,13 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 			case <-timer.C():
 			case <-ctx.Done():
 				timer.Stop()
-				return fail(engine.Report{}, unmet, ctx.Err())
+				return fail(false, engine.Report{}, unmet, ctx.Err())
 			}
 			continue
 		}
 		rep, err := h.Engine().Quiesce(ctx, h.expect())
 		if err != nil {
-			return fail(rep, nil, err)
+			return fail(true, rep, nil, err)
 		}
 		after := h.look()
 		if unmet = after.unmet; len(unmet) == 0 && slices.Equal(before.progress, after.progress) {
