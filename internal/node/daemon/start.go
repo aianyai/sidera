@@ -161,13 +161,13 @@ func (d *Daemon) stepClock(context.Context) error {
 	}
 	hw := clock.NewHighWater(st.HighWater)
 	paused := st.Paused()
-	d.pausedSince = st.RollbackPausedSince
+	d.pause.since = st.RollbackPausedSince
 	now := d.cfg.Clock.Now()
 	if v, _ := hw.Observe(now); v == clock.WallRolledBack {
 		d.log.Warn("the wall clock was set back; new work that depends on a deadline is refused until the owner clears it",
 			"now", now, "high_water", hw.Value())
 		if !paused {
-			paused, d.pausedSince = true, now
+			paused, d.pause.since = true, now
 			if err := d.keys.SaveClock(keys.ClockState{HighWater: hw.Value(), RollbackPausedSince: now}); err != nil {
 				return fmt.Errorf("making the pause durable: %w", err)
 			}

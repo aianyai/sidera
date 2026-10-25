@@ -117,7 +117,9 @@ children, and has no work on a data directory that init made or a start repaired
 The tasks are entries of the engine's schedule on the injected clock, registered
 at step 6. The daemon's own is the clock state, every minute (`ClockStateEvery`):
 the high water mark and the pause are made durable, and a crash loses at most a
-minute of a mark, which only makes the next start trust the clock less. The engine
+minute of a mark, which only makes the next start trust the clock less. The pause
+keeps the time it began while it lasts and forgets it when the owner clears it, so
+a later pause begins at its own time. The engine
 also runs it at once when it finds the clock set back. Other features add theirs in
 `Attachments.Periodic`.
 

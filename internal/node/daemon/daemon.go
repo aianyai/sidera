@@ -13,7 +13,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
@@ -168,7 +167,7 @@ type Daemon struct {
 	manage *manageapi.Server
 	served chan error // Serve of the management interface has returned
 
-	pausedSince time.Time // for the clock task, which runs in the loop
+	pause       pauseClock // for the clock task, which runs in the loop
 	clockHW     clock.HighWater
 	clockPaused bool
 
