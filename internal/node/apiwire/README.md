@@ -34,7 +34,7 @@ engine.
   name that an error happened to carry.
 - **Details only where they are needed to act:** the current version of a conflict,
   the path of an invalid value, the limit that was hit, the field of an invalid
-  argument. A message holds no message body, no token and no key.
+  argument or of a body that is too large. A message holds no message body, no token and no key.
 - **Every category has its own exit code**, 0 is never one of them, and a category
   that is none of the known ones is an internal error, never a success.
 - **A failure of the disk after which it is not known whether a request took effect
@@ -43,6 +43,10 @@ engine.
   has to be told to send the request again with the same operation identifier,
   exactly as when an answer is lost. The category is also the one a client judges
   itself (`OutcomeUnknown`), so both come to the same place.
+- **A message identifier taken before with other content is `conflict/message_conflict`.**
+  It is what a target says to the node that sent it, and the interface specification
+  lists no code of the category for it; it is worded as the engine names it until the
+  specification does.
 - **A refusal for an invalid argument that carries no detail is
   `invalid_argument/malformed_request`**, with the field in the details: the codes of
   a category are the ones the interface specification lists for it, and this is the

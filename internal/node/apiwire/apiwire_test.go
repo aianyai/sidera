@@ -42,6 +42,13 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonRecovering:         {"unavailable", "recovering"},
 	engine.ReasonShuttingDown:       {"unavailable", "shutting_down"},
 	engine.ReasonStorageFatal:       {"outcome_unknown", "storage_fatal"},
+	// The conflict of a message identifier is what a target says to another node;
+	// the interface specification lists no code for it, and it is worded as the
+	// engine's own name for it.
+	engine.ReasonIdempotencyConflict: {"conflict", "idempotency_conflict"},
+	engine.ReasonMessageConflict:     {"conflict", "message_conflict"},
+	engine.ReasonMessageUnknown:      {"not_found", "message_unknown"},
+	engine.ReasonTooLarge:            {"refused", "too_large"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {
@@ -85,6 +92,8 @@ func TestARefusalCarriesWhatSaysWhichLimitAndWhichValue(t *testing.T) {
 			want{"invalid_argument", "empty_patch"}, map[string]any{"field": "settings"}},
 		{"a value", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "endpoint"},
 			want{"invalid_argument", "malformed_request"}, map[string]any{"field": "endpoint"}},
+		{"the field a body was too large in", &engine.Refusal{Reason: engine.ReasonTooLarge, Field: "body"},
+			want{"refused", "too_large"}, map[string]any{"field": "body"}},
 		{"a reason wrapped by the caller", fmt.Errorf("closing: %w", &engine.Refusal{Reason: engine.ReasonRecovering}),
 			want{"unavailable", "recovering"}, nil},
 	} {
