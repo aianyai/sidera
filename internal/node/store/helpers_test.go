@@ -59,6 +59,10 @@ type recorder struct {
 	kinds  []txn.Kind
 	on     func(p fsx.Point, k txn.Kind)
 	sink   *coverageSink
+	// inTx counts, for the transaction under way, how often each key was
+	// reached in it: the sink's maxInTx is built from it.
+	inTx   map[fsx.Key]int
+	inTxOf string
 }
 
 // coverageSink counts, across the rigs of a test, how often each crash point
@@ -66,7 +70,11 @@ type recorder struct {
 type coverageSink struct {
 	mu   sync.Mutex
 	hits map[fsx.Key]int
-	kind map[fsx.Key]txn.Kind
+	// maxInTx is the most times one transaction reached a key: a write declared
+	// as many is covered only when a single transaction made it more than once
+	// (the hits of a key over a whole run can come from different transactions).
+	maxInTx map[fsx.Key]int
+	kind    map[fsx.Key]txn.Kind
 	// taken counts, for each crash point and each kind of crash, the crash
 	// states the walk of a workflow took there and judged: reaching a point is
 	// not crashing at it.
@@ -74,7 +82,7 @@ type coverageSink struct {
 }
 
 func newSink() *coverageSink {
-	return &coverageSink{hits: map[fsx.Key]int{}, kind: map[fsx.Key]txn.Kind{}, taken: map[fsx.Key]map[string]int{}}
+	return &coverageSink{hits: map[fsx.Key]int{}, maxInTx: map[fsx.Key]int{}, kind: map[fsx.Key]txn.Kind{}, taken: map[fsx.Key]map[string]int{}}
 }
 
 // took records that the walk took a crash state of the given kind at p.
@@ -87,16 +95,33 @@ func (c *coverageSink) took(p fsx.Point, model string) {
 	c.taken[p.Key][model]++
 }
 
-func (c *coverageSink) add(p fsx.Point, k txn.Kind) {
+func (c *coverageSink) add(p fsx.Point, k txn.Kind, inTx int) {
 	c.mu.Lock()
 	c.hits[p.Key]++
+	c.maxInTx[p.Key] = max(c.maxInTx[p.Key], inTx)
 	c.kind[p.Key] = k
 	c.mu.Unlock()
 }
 
+// countInTx counts the arrival at p in its transaction: the count starts again
+// when another transaction begins, and after a commit.
+func (r *recorder) countInTx(p fsx.Point) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.inTx == nil || r.inTxOf != p.Tag.Tx {
+		r.inTx, r.inTxOf = map[fsx.Key]int{}, p.Tag.Tx
+	}
+	r.inTx[p.Key]++
+	n := r.inTx[p.Key]
+	if p.Step == fsx.StepCommit {
+		r.inTx = nil
+	}
+	return n
+}
+
 func (r *recorder) Reached(p fsx.Point, k txn.Kind) {
 	if r.sink != nil {
-		r.sink.add(p, k)
+		r.sink.add(p, k, r.countInTx(p))
 	}
 	r.mu.Lock()
 	r.points = append(r.points, p)

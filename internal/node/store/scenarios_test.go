@@ -609,7 +609,7 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 // crash point the store declares.
 func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	sink := newSink()
-	all := append(append(scenarios(), recoveryScenarios()...), resumedQuarantines()...)
+	all := append(append(append(scenarios(), recoveryScenarios()...), resumedQuarantines()...), doubleFaultScenarios()...)
 	total := scenarioStats{}
 	var mu sync.Mutex
 	// The walks are independent: they run side by side, and the coverage is
@@ -647,6 +647,17 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	}
 	if len(missing) > 0 {
 		t.Errorf("%d declared crash points were never reached by the walks:\n%s", len(missing), strings.Join(missing, "\n"))
+	}
+	// A write declared as many is covered when one transaction made it more than
+	// once: the quarantine closes every creating endpoint of the damaged control
+	// record, so one quarantine transaction must have written the session role
+	// twice (a count of the hits of a whole run could come from two quarantines).
+	for _, tx := range []string{"quarantine", "quarantine-resume"} {
+		for _, k := range tab {
+			if k.Tag.Tx == tx && k.Tag.Role == "session" && sink.maxInTx[k.Key] < 2 {
+				t.Errorf("%s was reached %d time(s) at most in one transaction: no walk closed two session endpoints in one quarantine", k.Key, sink.maxInTx[k.Key])
+			}
+		}
 	}
 	// Reaching a point is not crashing at it: every declared point must have had
 	// a crash state taken at it, of every kind of crash, by the walk of a
