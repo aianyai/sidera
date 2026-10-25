@@ -27,7 +27,8 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | 3 | `store`, `keys`, `config` | `txn`, `recfile`, layer 0; from `fsx` and `clock` only types, so none of them can obtain a writable file system or read the time |
 | 4 | `transport`, `adapterhost`, `ipc` | layers 0 to 3; `ipc` checks directories only through the read-only part of `fsx` |
 | 5 | `engine` | layers 0 to 4; it reaches `store`, `transport` and `clock` through interfaces |
-| 6 | `agentapi`, `manageapi` | the `engine` service interface, `ipc`, layer 0 |
+| 6 | `agentapi`, `manageapi` | the `engine` service interface, `ipc`, `apiwire`, layer 0 |
+| 6 | `apiwire` | `engine`, `config`, `ipc`, layer 0: the words of the wire (category, code, exit code) for what the engine and the layers below say; the engine never speaks them |
 | 7 | `daemon` | everything above; the composition root that wires the packages together |
 | none | `testkit/ledger`, `testkit/fakectl`, `testkit/fakeruntime`, `testkit/fakeadapter` | the standard library, `sdk/go/...` and each other only, so they use the adapter protocol as a third party would |
 | none | `testkit/fakeagent`, `testkit/fakeagent/engineagent`, `testkit/harness`, `testkit/scenario`, `testkit/crashwalk` | any runtime package and contract package: they drive and judge the daemon; `scenario` imports neither the engine nor a fixture, so that every layer's fixture can implement its environment; `testkit/README.md` says which packages of the testkit are on which side |
