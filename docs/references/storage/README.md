@@ -604,6 +604,27 @@ crash and no damage finds none of them at any quiet point, and a finished recove
 leaves none; tests evaluate the predicates on a copy of the disk after every step
 of such a run.
 
+**The order of the rules.** The order is a guarantee of the caller, not of the
+store: every predicate is a function of one scan, and the store cannot know which
+writes the scan it is given has seen. The order is: quarantine of damaged files,
+then the resumption of unfinished quarantines, then of unfinished body
+quarantines (they write replacement records and closed session endpoints, and
+raise sequence floors, which every later rule and the sequence book read);
+`ctl-effect-replay` and `instance-drain-replay` (they close endpoints);
+`orphan-gc-endpoint`, before `endpoint-drain-replay`, so that a delivery queued
+for an orphan endpoint that a power loss left behind is drained as one for an
+endpoint that does not exist; `endpoint-drain-replay`, after every rule that
+closes or removes an endpoint; `prompt-replay`, `blocked-replay` and
+`feedback-replay`, which skip a record a drain rewrote because its revision no
+longer matches, so their order among themselves and against the drain does not
+change the result; `orphan-gc` after every
+replay, because replays and quarantines add and drop references to bodies; and
+the sequence book last. Each rule runs on a scan taken after the writes of the
+previous one, or on an equivalent view of the committed writes, and the sequence
+repeats until no rule has work. The test simulator (`sim.pass`, `sim.recoverAll`
+in `internal/node/store/sim_test.go`) is that loop, and the crash walk uses it as
+the recovery of every scenario.
+
 **Settle.** The rules above write their followers durably after reading a head
 record that, after a process crash, may be visible and not durable; a power loss
 that followed would leave the followers without their head. The store does not

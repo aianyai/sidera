@@ -99,10 +99,34 @@ engine applies the delivery rules and calls the writes.
 
 - Build the table once with `txn.Internal()` and `Transactions()`; call
   `Writer.Recover`, then the layout rule, then `Scan`, and run the recovery rules
-  in the order of the startup. The rules run only after `Recover` has returned
+  in the order below. The rules run only after `Recover` has returned
   nil: it starts by making every directory durable, so what a rule reads is what a
   power loss cannot take back, and the store has no such barrier of its own.
   `txn.Writer.Begin` panics for the store's transactions until it has.
+- Run the recovery rules in this order, each on a scan taken after the writes of
+  the one before it (or on an equivalent view of what was committed), and repeat
+  the whole sequence until no rule has work:
+  1. Quarantine of the damaged files (`Scan.Damaged`, in the order listed), then
+     the resumption of unfinished quarantines, then the resumption of unfinished
+     body quarantines. A quarantine writes replacement records, raises floors and
+     closes session endpoints, and every later rule reads what it left.
+  2. `ctl-effect-replay`, then `instance-drain-replay`: both close endpoints.
+  3. `orphan-gc-endpoint`, before `endpoint-drain-replay`: a record queued for an
+     endpoint that is removed is then drained as a record for an endpoint that does
+     not exist, which a power loss that reordered the writes can leave.
+  4. `endpoint-drain-replay`, after every rule that closes or removes an endpoint,
+     so it sees the final set of closed endpoints.
+  5. `prompt-replay`, `blocked-replay` and `feedback-replay`, after the drain by
+     convention: they skip a record a drain already rewrote (its revision no longer
+     matches what the head lists), so neither their order among themselves nor
+     their order against the drain changes the result.
+  6. `orphan-gc` last: the replays and the quarantines add and drop references to
+     bodies, so only after all of them is a body without a reference an orphan.
+  7. The sequence book, from a scan taken after all of the above: a quarantine
+     raises floors and replaces records, and the book must see both.
+  Each rule's predicate is a function of the scan it is given: a rule run on a scan
+  taken before the previous rule wrote would act on records that rule has already
+  settled.
 - Acknowledge and update memory only after a method returns nil; on `txn.IsFatal`
   exit and rescan.
 - Call `SeqBook.Note` only after the commit that wrote the number.
