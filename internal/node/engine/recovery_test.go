@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
@@ -414,5 +415,10 @@ func TestShutdownEndsTheWaitOfAnAdapterRequestThatWaitsForTheRunningPhase(t *tes
 	go func() { _, err := e.RegisterDirect(context.Background(), "chat", registerParams("a")); done <- err }()
 	waitUntil(t, func() bool { return engine.WaitingForRunning(e) == 1 })
 	e.BeginShutdown()
-	wantReason(t, <-done, engine.ReasonShuttingDown)
+	select {
+	case err := <-done:
+		wantReason(t, err, engine.ReasonShuttingDown)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request that waits for the running phase was not let go at shutdown")
+	}
 }
