@@ -306,3 +306,56 @@ func TestOperationPersonRoundTrips(t *testing.T) {
 		t.Errorf("Encode = %s, %v", enc, err)
 	}
 }
+
+// The settings as the owner's commands show them are the object the file holds
+// under "settings", with the names `node set` and `endpoint set` take, in compact
+// form. The text is written out here by hand; it is also what the golden file
+// holds, so the shown form and the stored form cannot drift apart.
+func TestSettingsAreShownAsTheFileHoldsThem(t *testing.T) {
+	const nodeSettings = `{"reply_permission":true,"node_queue_limit":10000,"disk_reserve_bytes":268435456,"node_prompt_turns":8,` +
+		`"archive_retention_days":30,"log_total_bytes":157286400,"endpoint_defaults":{"max_queue_s":1800,"backlog_limit":200}}`
+	s := config.NodeSettings{
+		ReplyPermission: true, NodeQueueLimit: 10000, DiskReserveBytes: 268435456, NodePromptTurns: 8,
+		ArchiveRetentionDays: 30, LogTotalBytes: 157286400,
+		EndpointDefaults: config.EndpointSettings{MaxQueue: 1800 * time.Second, BacklogLimit: 200},
+	}
+	got, err := s.WireJSON()
+	if err != nil || string(got) != nodeSettings {
+		t.Errorf("NodeSettings.WireJSON = %s, %v\nwant %s", got, err, nodeSettings)
+	}
+	if !strings.Contains(strings.Join(strings.Fields(goldenNode), ""), strings.ReplaceAll(nodeSettings, " ", "")) {
+		t.Error("the golden node.json does not hold the settings in the form the commands show")
+	}
+	ep, err := s.EndpointDefaults.WireJSON()
+	if want := `{"max_queue_s":1800,"backlog_limit":200}`; err != nil || string(ep) != want {
+		t.Errorf("EndpointSettings.WireJSON = %s, %v; want %s", ep, err, want)
+	}
+	// What the owner gave an endpoint names only what is set.
+	for _, o := range []struct {
+		name string
+		in   config.EndpointOverride
+		want string
+	}{
+		{"both settings", config.EndpointOverride{MaxQueue: 90 * time.Second, BacklogLimit: 7}, `{"max_queue_s":90,"backlog_limit":7}`},
+		{"the queue time only", config.EndpointOverride{MaxQueue: 90 * time.Second}, `{"max_queue_s":90}`},
+		{"the backlog limit only", config.EndpointOverride{BacklogLimit: 7}, `{"backlog_limit":7}`},
+		{"nothing given", config.EndpointOverride{}, `{}`},
+	} {
+		got, err := o.in.WireJSON()
+		if err != nil || string(got) != o.want {
+			t.Errorf("%s: EndpointOverride.WireJSON = %s, %v; want %s", o.name, got, err, o.want)
+		}
+	}
+	if _, err := (config.EndpointOverride{MaxQueue: time.Millisecond}).WireJSON(); err == nil {
+		t.Error("an override with a fraction of a second was shown")
+	}
+	// A value the file cannot hold is an error, not a rounded one.
+	bad := s
+	bad.EndpointDefaults.MaxQueue = 1500 * time.Millisecond
+	if _, err := bad.WireJSON(); err == nil {
+		t.Error("settings with a fraction of a second were shown")
+	}
+	if _, err := bad.EndpointDefaults.WireJSON(); err == nil {
+		t.Error("endpoint settings with a fraction of a second were shown")
+	}
+}

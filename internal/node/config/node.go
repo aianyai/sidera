@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"time"
@@ -59,6 +60,25 @@ func (s EndpointSettings) Validate() error {
 		return invalid("backlog_limit", err)
 	}
 	return nil
+}
+
+// WireJSON is what the owner gave one endpoint, as the owner's commands show it:
+// the compact JSON object that names only the settings that are set, as
+// `endpoint set` takes them, so that a setting left to the node default is not
+// shown as if the owner had chosen its value.
+func (o EndpointOverride) WireJSON() ([]byte, error) {
+	var w endpointPatchWire
+	if o.MaxQueue != 0 {
+		s, err := durationSeconds("max_queue_s", o.MaxQueue)
+		if err != nil {
+			return nil, err
+		}
+		w.MaxQueueS = &s
+	}
+	if o.BacklogLimit != 0 {
+		w.BacklogLimit = &o.BacklogLimit
+	}
+	return json.Marshal(w)
 }
 
 // Validate checks the settings an owner gave one endpoint. A field that is not
@@ -205,12 +225,29 @@ func DecodeNode(data []byte) (Node, error) {
 	return n, nil
 }
 
+// wire is the settings in the form of the file.
+func (s NodeSettings) wire() (nodeSettingsWire, error) {
+	maxQueue, err := durationSeconds("endpoint_defaults.max_queue_s", s.EndpointDefaults.MaxQueue)
+	if err != nil {
+		return nodeSettingsWire{}, err
+	}
+	return nodeSettingsWire{
+		ReplyPermission:      s.ReplyPermission,
+		NodeQueueLimit:       s.NodeQueueLimit,
+		DiskReserveBytes:     s.DiskReserveBytes,
+		NodePromptTurns:      s.NodePromptTurns,
+		ArchiveRetentionDays: s.ArchiveRetentionDays,
+		LogTotalBytes:        s.LogTotalBytes,
+		EndpointDefaults:     endpointDefaultsWire{MaxQueueS: maxQueue, BacklogLimit: s.EndpointDefaults.BacklogLimit},
+	}, nil
+}
+
 // Encode returns the bytes of node.json.
 func (n Node) Encode() ([]byte, error) {
 	if err := checkEncodeVersion(uint64(n.Version)); err != nil {
 		return nil, err
 	}
-	maxQueue, err := durationSeconds("endpoint_defaults.max_queue_s", n.Settings.EndpointDefaults.MaxQueue)
+	settings, err := n.Settings.wire()
 	if err != nil {
 		return nil, err
 	}
@@ -218,21 +255,34 @@ func (n Node) Encode() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := n.Settings
 	return encodeJSON(nodeWire{
-		Format:  FormatVersion,
-		Version: uint64(n.Version),
-		Settings: nodeSettingsWire{
-			ReplyPermission:      s.ReplyPermission,
-			NodeQueueLimit:       s.NodeQueueLimit,
-			DiskReserveBytes:     s.DiskReserveBytes,
-			NodePromptTurns:      s.NodePromptTurns,
-			ArchiveRetentionDays: s.ArchiveRetentionDays,
-			LogTotalBytes:        s.LogTotalBytes,
-			EndpointDefaults:     endpointDefaultsWire{MaxQueueS: maxQueue, BacklogLimit: s.EndpointDefaults.BacklogLimit},
-		},
+		Format:        FormatVersion,
+		Version:       uint64(n.Version),
+		Settings:      settings,
 		LastOperation: op,
 	})
+}
+
+// WireJSON is the settings as the owner's commands show them: the compact JSON
+// object that node.json holds under "settings", whose names `node set` takes
+// patches by. It is the one place the names of the settings are written for
+// anything but the file, so that what a command shows is what the file says.
+func (s NodeSettings) WireJSON() ([]byte, error) {
+	w, err := s.wire()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(w)
+}
+
+// WireJSON is the settings of an endpoint as the owner's commands show them: the
+// compact JSON object of its two settings, named as `endpoint set` takes them.
+func (s EndpointSettings) WireJSON() ([]byte, error) {
+	maxQueue, err := durationSeconds("max_queue_s", s.MaxQueue)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(endpointDefaultsWire{MaxQueueS: maxQueue, BacklogLimit: s.BacklogLimit})
 }
 
 // EndpointPatch names the endpoint settings a request changes; a nil field is

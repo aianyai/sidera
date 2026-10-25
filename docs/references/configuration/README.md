@@ -137,6 +137,13 @@ deliveries instead of adding one each. With the defaults the reserve leaves abou
 A setting that another package limits is validated by that package, and the
 error the owner gets is that package's error: the rule has one home.
 
+The owner's commands show settings in the form the file holds them:
+`NodeSettings.WireJSON()` is the compact object under `"settings"`, and
+`EndpointSettings.WireJSON()` the two settings of an endpoint, and
+`EndpointOverride.WireJSON()` only those the owner gave it, with the names a patch
+takes. The names are written once, for the file and for what a command
+shows, so a command cannot show a setting under a name `node set` does not take.
+
 ### `policy.json`
 
 The node's access rules, as `authz` reads them. Nothing applies them to local
