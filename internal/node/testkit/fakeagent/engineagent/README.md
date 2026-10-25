@@ -32,7 +32,8 @@ over).
   the table does not list (`endpoint_limit`, `storage_unavailable`, `storage_fatal`,
   `instance_unknown`) are the reasons' own names, in the category the reason's
   behaviour gives: back pressure for a write that failed before its commit point,
-  internal for the fatal one.
+  an unknown outcome for the fatal one, which is a command that may or may not have
+  taken effect.
 - **A patch field that is nil changes nothing;** `AcceptFrom` replaces the whole list,
   and an address that does not parse is `invalid_argument/malformed_request`.
 

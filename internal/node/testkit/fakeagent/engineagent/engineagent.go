@@ -148,7 +148,9 @@ func classify(r *engine.Refusal) (fakeagent.Category, string) {
 	case engine.ReasonRecovering, engine.ReasonShuttingDown:
 		return fakeagent.CategoryUnavailable, r.Reason.String()
 	case engine.ReasonStorageFatal:
-		return fakeagent.CategoryInternal, r.Reason.String()
+		// The command met a fatal storage error and the engine has stopped: whether
+		// it took effect is not known, which is what outcome_unknown says.
+		return fakeagent.CategoryOutcomeUnknown, r.Reason.String()
 	}
 	return fakeagent.CategoryInternal, "unclassified_reason"
 }
