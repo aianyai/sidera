@@ -316,7 +316,7 @@ func TestInitReplaysToACompleteHomeFromEveryCrashState(t *testing.T) {
 		inner := s.mem.Clone()
 		complete(s.name, s.mem, 2)
 		// crash the rerun at its steps, for some states
-		if i%21 != 0 {
+		if i%9 != 0 {
 			continue
 		}
 		if done, _ := keys.Initialized(inner); done {
@@ -331,7 +331,7 @@ func TestInitReplaysToACompleteHomeFromEveryCrashState(t *testing.T) {
 			complete(s.name+", then "+is.name, is.mem, 4)
 		}
 	}
-	if nested < 150 {
+	if nested < 5000 {
 		t.Errorf("only %d crashes during a rerun of init were exercised", nested)
 	}
 }
