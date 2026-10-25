@@ -3,11 +3,14 @@ package transport_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/node/transport"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // waitFor polls until cond holds. It exists for the one thing a test cannot
@@ -80,6 +83,8 @@ func TestKnobs(t *testing.T) {
 				if err != nil || !sameIDs(reportIDs(t, rc.Reports), []string{"m1"}) {
 					t.Errorf("third send: reports %v, err %v, want the receipt once the two are spent", rc.Reports, err)
 				}
+				drop := transport.Hit{Knob: transport.KnobDropReceipt, Call: transport.CallSend, Node: r.self}
+				r.wantObserved(t, drop, drop)
 			},
 			hits: map[transport.Knob]int{transport.KnobDropReceipt: 2},
 		},
@@ -98,6 +103,7 @@ func TestKnobs(t *testing.T) {
 				if _, err := r.send(r.message(t, "m1", "hello")); !errors.Is(err, transport.ErrTimeout) {
 					t.Fatalf("second send: error %v, want ErrTimeout from the knob that was kept", err)
 				}
+				r.wantObserved(t, transport.Hit{Knob: transport.KnobDropReceipt, Call: transport.CallSend, Node: r.self})
 			},
 			hits: map[transport.Knob]int{transport.KnobDropReceipt: 1},
 		},
@@ -121,6 +127,9 @@ func TestKnobs(t *testing.T) {
 				if _, err := r.pull("m1"); err != nil {
 					t.Fatalf("pull after the knob was turned off: %v", err)
 				}
+				r.wantObserved(t,
+					transport.Hit{Knob: transport.KnobUnreachable, Call: transport.CallSend, Node: r.self},
+					transport.Hit{Knob: transport.KnobUnreachable, Call: transport.CallPull, Node: r.self})
 			},
 			hits: map[transport.Knob]int{transport.KnobUnreachable: 2},
 		},
@@ -183,6 +192,30 @@ func TestKnobs(t *testing.T) {
 				if err != nil || !sameIDs(reportIDs(t, ans.Reports), []string{"m1"}) {
 					t.Errorf("pull after Release: reports %v, err %v, want the report back", ans.Reports, err)
 				}
+				r.wantObserved(t,
+					transport.Hit{Knob: transport.KnobHoldReports, Call: transport.CallSend, Node: r.self, Message: "m1"},
+					transport.Hit{Knob: transport.KnobHoldReports, Call: transport.CallPull, Node: r.self, Message: "m1"})
+			},
+			hits: map[transport.Knob]int{transport.KnobHoldReports: 2},
+		},
+		{
+			rule: "HoldReports: the control reply is held with the reports, in the receipt of the send and in every pull, and comes back with Release",
+			run: func(t *testing.T, r *rig) {
+				r.target.replyWith(record.Record{Type: "test/control-reply", Payload: []byte("c1")})
+				r.knobs.HoldReports("c1")
+				rc, err := r.send(r.status(t, "c1"))
+				if err != nil || len(rc.Reports) != 0 || rc.ControlReply != nil {
+					t.Errorf("send of the held control signal: %d reports, reply %v, err %v, want an empty receipt", len(rc.Reports), rc.ControlReply, err)
+				}
+				ans, err := r.pull("c1")
+				if err != nil || len(ans.Reports) != 0 || ans.ControlReply != nil {
+					t.Errorf("pull of the held control signal: %d reports, reply %v, err %v, want an empty answer", len(ans.Reports), ans.ControlReply, err)
+				}
+				r.knobs.Release("c1")
+				ans, err = r.pull("c1")
+				if err != nil || ans.ControlReply == nil || ans.ControlReply.Type != "test/control-reply" {
+					t.Errorf("pull after Release: reply %v, err %v, want the control reply back", ans.ControlReply, err)
+				}
 			},
 			hits: map[transport.Knob]int{transport.KnobHoldReports: 2},
 		},
@@ -228,6 +261,7 @@ func TestKnobs(t *testing.T) {
 				if n := len(r.target.inbound()); n != 1 {
 					t.Errorf("the target saw %d envelopes, want 1", n)
 				}
+				r.wantObserved(t, transport.Hit{Knob: transport.KnobDelay, Call: transport.CallSend, Node: r.self})
 			},
 			hits: map[transport.Knob]int{transport.KnobDelay: 1},
 		},
@@ -255,6 +289,7 @@ func TestKnobs(t *testing.T) {
 				if n, w, p := r.clk.Timers(), r.knobs.Waiting(), r.target.pulled(); n != 0 || w != 0 || p != 0 {
 					t.Errorf("after the cancel: %d timers, %d waiting, %d pulls reached the target; want none", n, w, p)
 				}
+				r.wantObserved(t, transport.Hit{Knob: transport.KnobDelay, Call: transport.CallPull, Node: r.self})
 			},
 			hits: map[transport.Knob]int{transport.KnobDelay: 1},
 		},
@@ -291,6 +326,7 @@ func TestKnobs(t *testing.T) {
 				if n := len(r.target.inbound()); n != 3 {
 					t.Errorf("target saw %d envelopes after a second send, want 3 (no second replay)", n)
 				}
+				r.wantObserved(t, transport.Hit{Knob: transport.KnobMutate, Call: transport.CallSend, Node: r.self, Message: "m1"})
 			},
 			hits: map[transport.Knob]int{transport.KnobMutate: 1},
 		},
@@ -308,6 +344,7 @@ func TestKnobs(t *testing.T) {
 				if calls[1].env.Digest() == calls[0].env.Digest() {
 					t.Errorf("the replay of a bodyless envelope has the original's content")
 				}
+				r.wantObserved(t, transport.Hit{Knob: transport.KnobMutate, Call: transport.CallSend, Node: r.self, Message: "s1"})
 			},
 			hits: map[transport.Knob]int{transport.KnobMutate: 1},
 		},
@@ -328,6 +365,7 @@ func TestKnobs(t *testing.T) {
 				if n := len(r.target.inbound()); n != 3 {
 					t.Fatalf("target saw %d envelopes, want the refused one, the retry and the replay", n)
 				}
+				r.wantObserved(t, transport.Hit{Knob: transport.KnobMutate, Call: transport.CallSend, Node: r.self, Message: "m1"})
 			},
 			hits: map[transport.Knob]int{transport.KnobMutate: 1},
 		},
@@ -404,12 +442,133 @@ func TestKnobNamesAreDistinct(t *testing.T) {
 	seen := map[string]transport.Knob{}
 	for _, k := range allKnobs {
 		name := k.String()
-		if name == "" || name == "invalid" {
+		if name == "" || strings.HasPrefix(name, "invalid") {
 			t.Errorf("knob %d has no name", k)
 		}
 		if prev, dup := seen[name]; dup {
 			t.Errorf("knobs %d and %d share the name %q", prev, k, name)
 		}
 		seen[name] = k
+	}
+}
+
+// TestMutateKeepsTheThreadValidAtItsLongestLength pins how the replay of an
+// envelope without a body differs from it: the last character of the thread is
+// replaced, and an envelope with no thread gets one, so the replay is always an
+// envelope the target can decode, at the longest thread too.
+func TestMutateKeepsTheThreadValidAtItsLongestLength(t *testing.T) {
+	longest := strings.Repeat("a", envelope.MaxIDLen)
+	for name, thread := range map[string]string{
+		"no thread":                           "",
+		"a thread of one character":           "t",
+		"a thread of the longest length":      longest,
+		"a long thread that ends in m":        longest[:len(longest)-1] + "m",
+		"a thread of one character that is m": "m",
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t)
+			r.knobs.Mutate("s1")
+			if _, err := r.send(r.statusInThread(t, "s1", thread)); err != nil {
+				t.Fatalf("send: %v", err)
+			}
+			calls := r.target.inbound()
+			if len(calls) != 2 {
+				t.Fatalf("target saw %d envelopes, want the original and its replay", len(calls))
+			}
+			got := calls[1].env.Thread
+			if got == thread || got == "" || len(got) > envelope.MaxIDLen {
+				t.Fatalf("replay thread %q of %d bytes, want a valid one that differs from %q", got, len(got), thread)
+			}
+			if thread != "" && (len(got) != len(thread) || got[:len(got)-1] != thread[:len(thread)-1]) {
+				t.Errorf("replay thread %q differs from %q in more than its last character", got, thread)
+			}
+			if rep, ok := r.knobs.Mutated("s1"); !ok || !errors.Is(rep.Err, errConflict) {
+				t.Errorf("Mutated: ok=%v err=%v, want the target's conflict: the replay was built and judged", ok, rep.Err)
+			}
+			r.wantHits(t, map[transport.Knob]int{transport.KnobMutate: 1})
+		})
+	}
+}
+
+// TestWaitingFailsLoudlyWhenTheClockIsSetBack pins that a count of waiting calls
+// is never read against a clock that has gone below the moment one of them began:
+// the due times mean nothing then, and a count that went on would hide the test's
+// own mistake.
+func TestWaitingFailsLoudlyWhenTheClockIsSetBack(t *testing.T) {
+	r := newRig(t)
+	r.knobs.Delay(time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.loop.Pull(ctx, r.self, transport.PullRequest{Message: "m1"})
+		done <- err
+	}()
+	waitFor(t, "the pull to wait out its delay", func() bool { return r.knobs.Waiting() == 1 })
+	r.clk.Set(t0.Add(-time.Minute))
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("Waiting() returned with the clock set back below the start of a wait")
+			}
+		}()
+		r.knobs.Waiting()
+	}()
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("pull: error %v, want context.Canceled", err)
+	}
+	if n := r.knobs.Waiting(); n != 0 {
+		t.Errorf("Waiting() = %d after the call ended, want 0", n)
+	}
+}
+
+// TestDelayZeroLeavesACallThatIsAlreadyWaiting pins that Delay(0) is for the
+// calls that start afterwards: a call already waiting keeps waiting, and a call
+// that starts after it goes through without a wait.
+func TestDelayZeroLeavesACallThatIsAlreadyWaiting(t *testing.T) {
+	r := newRig(t)
+	r.knobs.Delay(time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.loop.Pull(ctx, r.self, transport.PullRequest{Message: "m1"})
+		done <- err
+	}()
+	waitFor(t, "the pull to wait out its delay", func() bool { return r.knobs.Waiting() == 1 })
+	r.knobs.Delay(0)
+	if _, err := r.send(r.message(t, "m1", "hello")); err != nil {
+		t.Fatalf("send after Delay(0): %v", err)
+	}
+	if n := r.knobs.Waiting(); n != 1 {
+		t.Errorf("Waiting() = %d after Delay(0), want the call that was already waiting", n)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("the waiting call returned after Delay(0): %v", err)
+	default:
+	}
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Errorf("pull: error %v, want context.Canceled", err)
+	}
+	r.wantHits(t, map[transport.Knob]int{transport.KnobDelay: 1})
+}
+
+// TestCallKindNames keeps the call a hit names readable in a ledger and an
+// unknown one visible.
+func TestCallKindNames(t *testing.T) {
+	for kind, want := range map[transport.CallKind]string{
+		transport.CallSend:     "send",
+		transport.CallPull:     "pull",
+		transport.CallKind(0):  "invalid(0)",
+		transport.CallKind(77): "invalid(77)",
+	} {
+		if got := kind.String(); got != want {
+			t.Errorf("CallKind(%d).String() = %q, want %q", uint8(kind), got, want)
+		}
+	}
+	if got := transport.Knob(0).String(); got != "invalid(0)" {
+		t.Errorf("Knob(0).String() = %q, want %q", got, "invalid(0)")
 	}
 }

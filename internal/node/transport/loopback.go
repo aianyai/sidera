@@ -46,10 +46,10 @@ func NewLoopback(self ident.NodeID, h Handler, knobs *Knobs) *Loopback {
 // envelope: send the same bytes again and the target deduplicates. After
 // ErrUnreachable it certainly did not. Any other error is the target's own.
 func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (Receipt, error) {
-	if err := l.knobs.wait(ctx, target); err != nil {
+	if err := l.knobs.wait(ctx, CallSend, target); err != nil {
 		return Receipt{}, err
 	}
-	if err := l.reach(target); err != nil {
+	if err := l.reach(CallSend, target); err != nil {
 		return Receipt{}, err
 	}
 	var msg delivery.MessageID
@@ -68,7 +68,7 @@ func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.E
 	if l.knobs.dropsReceipt(target) {
 		return Receipt{}, fmt.Errorf("%w: the receipt was dropped", ErrTimeout)
 	}
-	if msg != "" && l.knobs.holds(target, msg) {
+	if msg != "" && l.knobs.holds(CallSend, target, msg) {
 		return Receipt{}, nil
 	}
 	return rc, nil
@@ -77,13 +77,13 @@ func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.E
 // Pull asks the handler for the reports of a message and returns its answer,
 // unless a knob says otherwise. The context and the errors are those of Send.
 func (l *Loopback) Pull(ctx context.Context, target ident.NodeID, req PullRequest) (PullAnswer, error) {
-	if err := l.knobs.wait(ctx, target); err != nil {
+	if err := l.knobs.wait(ctx, CallPull, target); err != nil {
 		return PullAnswer{}, err
 	}
-	if err := l.reach(target); err != nil {
+	if err := l.reach(CallPull, target); err != nil {
 		return PullAnswer{}, err
 	}
-	if l.knobs.holds(target, req.Message) {
+	if l.knobs.holds(CallPull, target, req.Message) {
 		return PullAnswer{}, nil
 	}
 	return l.h.Pull(ctx, localOrigin(l.self), req)
@@ -97,8 +97,8 @@ func (l *Loopback) Waiting() int { return l.knobs.Waiting() }
 
 // reach says whether a call to target can go on: not when a knob makes it
 // unreachable, and not when it is another node, which a loopback does not know.
-func (l *Loopback) reach(target ident.NodeID) error {
-	if l.knobs.refuses(target) {
+func (l *Loopback) reach(call CallKind, target ident.NodeID) error {
+	if l.knobs.refuses(call, target) {
 		return fmt.Errorf("%w: a knob refuses it", ErrUnreachable)
 	}
 	if target != l.self {
@@ -132,7 +132,21 @@ func changedContent(data []byte) ([]byte, error) {
 		e.Body = append([]byte(nil), e.Body...)
 		e.Body[0] ^= 1
 	} else {
-		e.Thread += "m"
+		e.Thread = changedThread(e.Thread)
 	}
 	return e.Encode(envelope.DefaultLimits())
+}
+
+// changedThread returns a thread that differs from the given one and is as valid
+// as it: the last character is replaced, never a character added, so a thread at
+// the longest length stays within it. An envelope with no thread gets "m".
+func changedThread(thread string) string {
+	if thread == "" {
+		return "m"
+	}
+	last := byte('m')
+	if thread[len(thread)-1] == 'm' {
+		last = 'n'
+	}
+	return thread[:len(thread)-1] + string(last)
 }

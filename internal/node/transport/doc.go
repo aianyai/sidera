@@ -18,10 +18,15 @@
 // [Loopback] is the single-node path: what leaves the sender's side arrives on
 // the receiving side of the same node, through the same two methods a remote
 // transport would use. It can be made to fail on purpose with [Knobs]: drop a
-// receipt, make a node unreachable, hold the status reports of a message, delay
-// every call, and replay a message with other content. The knobs are part of
-// the package and need no build tag, so tests that run without tags use them.
-// Each knob counts its hits so that a test can show the fault was reached.
+// receipt, make a node unreachable, hold the status reports of a message (the
+// receipt of its send comes back empty, the control reply included), delay every
+// call, and replay a message with other content. The knobs are part of the
+// package and need no build tag, so tests that run without tags use them. Each
+// knob counts its hits, and a hit says which call it was (send or pull), so that
+// a test can show the fault was reached by the call it meant. A knob keyed by a
+// message id must be armed before that message first goes on the wire: the
+// outbound worker runs on its own, so hold it with a delay or by making the node
+// unreachable first.
 //
 // The package starts no goroutine: a call runs in the caller's goroutine and
 // ends with its context. Time comes from the clock the [Knobs] were made with.

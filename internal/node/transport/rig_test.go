@@ -62,6 +62,8 @@ type target struct {
 	pulls   []transport.PullRequest
 	held    map[delivery.MessageID]delivery.BodyDigest
 	failing error // answered, once, in place of the report
+
+	reply *record.Record // given as the control reply of every receipt and answer, when set
 }
 
 func newTarget() *target { return &target{held: map[delivery.MessageID]delivery.BodyDigest{}} }
@@ -87,7 +89,7 @@ func (g *target) Inbound(_ context.Context, from transport.Origin, sender ident.
 		return transport.Receipt{}, errConflict
 	}
 	g.held[e.ID] = e.Digest()
-	return transport.Receipt{Reports: []record.Record{reportOf(e.ID)}}, nil
+	return transport.Receipt{Reports: []record.Record{reportOf(e.ID)}, ControlReply: g.reply}, nil
 }
 
 func (g *target) Pull(_ context.Context, _ transport.Origin, req transport.PullRequest) (transport.PullAnswer, error) {
@@ -97,7 +99,14 @@ func (g *target) Pull(_ context.Context, _ transport.Origin, req transport.PullR
 	if _, ok := g.held[req.Message]; !ok {
 		return transport.PullAnswer{}, nil
 	}
-	return transport.PullAnswer{Reports: []record.Record{reportOf(req.Message)}}, nil
+	return transport.PullAnswer{Reports: []record.Record{reportOf(req.Message)}, ControlReply: g.reply}, nil
+}
+
+// replyWith makes the target give a control reply with every receipt and answer.
+func (g *target) replyWith(rec record.Record) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.reply = &rec
 }
 
 func (g *target) failNext(err error) {
@@ -162,10 +171,17 @@ func (r *rig) message(t testing.TB, id, body string) []byte {
 // status is a control signal without a body.
 func (r *rig) status(t testing.TB, id string) []byte {
 	t.Helper()
+	return r.statusInThread(t, id, "")
+}
+
+// statusInThread is a control signal without a body, in the given thread.
+func (r *rig) statusInThread(t testing.TB, id, thread string) []byte {
+	t.Helper()
 	e := envelope.Envelope{
 		ID: delivery.MessageID(id), To: []ident.Address{{Node: r.self, Endpoint: ep(1)}}, Kind: envelope.KindEndpointStatus,
 		Seq:    map[ident.EndpointID]uint64{ep(1): 1},
 		SentAt: t0, AcceptBefore: t0.Add(time.Hour), ReportBy: delivery.ReportBy(t0.Add(time.Hour)),
+		Thread: thread,
 	}
 	b, err := e.Encode(envelope.DefaultLimits())
 	if err != nil {
@@ -209,6 +225,24 @@ func (r *rig) wantHits(t testing.TB, want map[transport.Knob]int) {
 		}
 		if seen[k] != want[k] {
 			t.Errorf("the observer saw %v hit %d times, want %d", k, seen[k], want[k])
+		}
+	}
+}
+
+// wantObserved asserts the hits the observer was told, in order, with the call,
+// node and message of each. The counts of wantHits say that a knob was reached;
+// this says that it was reached by the call and for the node and message the test
+// meant.
+func (r *rig) wantObserved(t testing.TB, want ...transport.Hit) {
+	t.Helper()
+	r.hitsMu.Lock()
+	defer r.hitsMu.Unlock()
+	if len(r.hits) != len(want) {
+		t.Fatalf("the observer saw %d hits %+v, want %d %+v", len(r.hits), r.hits, len(want), want)
+	}
+	for i := range want {
+		if r.hits[i] != want[i] {
+			t.Errorf("hit %d is %+v, want %+v", i, r.hits[i], want[i])
 		}
 	}
 }

@@ -66,9 +66,22 @@ observer:
 | ---- | ------ |
 | `DropReceipt(n)` | The target processes the envelope; the receipt is thrown away and the send returns `ErrTimeout`. Spent one per hit. A send the target refused has no receipt and is not counted. |
 | `Unreachable(node, on)` | A send or pull to the node returns `ErrUnreachable` and the target is not called. |
-| `HoldReports(msg)`, `Release(msg)` | The reports of the message are kept from the source: the receipt of its send is empty and a pull for it is answered empty without asking the target. The target processes the envelope as usual. |
-| `Delay(d)` | Every call waits `d` on the injected clock before it goes on; a context that ends during the wait ends the call. `Waiting()` counts the calls whose time has not come. |
-| `Mutate(msg)` | After the target took the next send of `msg`, the same envelope from the same sender is delivered once more with a changed body (a changed thread when it has no body). The sender sees only its own send. `Mutated(msg)` returns the target's answer to the replay. |
+| `HoldReports(msg)`, `Release(msg)` | The reports of the message are kept from the source: the receipt of its send is empty, with no report and no control reply, and a pull for it is answered empty without asking the target. The target processes the envelope as usual. |
+| `Delay(d)` | Every call that starts afterwards waits `d` on the injected clock before it goes on; a context that ends during the wait ends the call. `Delay(0)` affects only calls that start afterwards: a call already waiting stays. `Waiting()` counts the calls whose time has not come, and panics when the clock was set back below the start of one of them. |
+| `Mutate(msg)` | After the target took the next send of `msg`, the same envelope from the same sender is delivered once more with a changed body (when it has no body, the last character of its thread is changed, or a thread is given to one that has none, so the replay stays valid at the longest thread). The sender sees only its own send. `Mutated(msg)` returns the target's answer to the replay. |
+
+**Hits.** A `Hit` names the knob, the call it acted on (`CallSend` or
+`CallPull`), the node and, for the knobs about one message, the message. The
+observer sees each hit in the goroutine of the call, so a test can assert that a
+fault was reached by the call and for the message it meant, not only how often.
+
+**Arming a knob keyed by a message id.** `HoldReports` and `Mutate` act on the
+first call that reaches them after they are armed, and the engine's outbound
+worker is asynchronous to the test, so a knob armed after the message was sent is
+late and nothing orders it against the worker. A knob keyed by a message id is
+armed before that message first goes on the wire: hold the worker first, with
+`Delay` or with `Unreachable(self, true)`, arm the knob, then let the worker go.
+The knobs that name no message have no such window.
 
 ## Why
 
@@ -103,6 +116,12 @@ observer:
   ever read by the verifier of the envelope package, which takes `record.Record`;
   decoding it in the transport would be a second reader of a format that has one
   home. A remote transport encodes the records for its wire and decodes them back.
+- **A receipt may lack records.** A transport may answer before the report of
+  every recipient exists, and a remote one cannot wait for it; the loopback leaves
+  records out on purpose when a test holds them. The pull is the one path by which
+  a source gets what it lacks, so a missing record means what an empty pull answer
+  means, and the sender needs one rule for both instead of reading the count of a
+  receipt.
 - **A pull asks for one message.** The sender keeps pulling a message until its
   deliveries are final, and every pull is about one message's recipients on one
   node. A list of messages is a wire optimization for a later transport and can be
@@ -111,19 +130,31 @@ observer:
   plain `go test`, and a knob that needed a tag would make them a second kind of
   build. The price is fault code in the production binary that nothing in the
   daemon turns on: a loopback made without knobs shows no fault.
-- **A delay waits inside the call, on the injected clock.** The outbound worker
-  takes its work in order, so holding the call is holding the queue, which is what
-  postponing a dequeue means, and nothing outside the transport has to know about
-  it. The cost is that a worker waiting for a delay looks busy; `Waiting()` exists
-  so the engine's quiescence check can tell a wait for the clock from work that has
-  only to run, counting a call whose time is due as work. Handing the delay to the
-  engine's schedule instead would need the engine to know a transport's knobs.
-- **`HoldReports` also empties the receipt of the send.** The first report a
-  source gets is normally the one in the receipt of its own send. A knob that held
-  only pulls would leave the source with the report before any pull, and the
-  situation it exists to make (a reply with its evidence arrives before the source
-  has the report) could not be built without also losing the receipt. The evidence
-  a reply carries inside its envelope is outside this seam and not touched.
+- **A delay waits inside the call, on the injected clock.** The delay is for the
+  call itself, so it is applied where the call is made and nothing outside the
+  transport has to know that a knob exists: an engine that scheduled the delay
+  itself would need to know a transport's knobs, and a transport of another kind
+  would have no such knob to tell it about. The outbound worker takes its work in
+  order, so a call that waits holds the queue, which is what postponing a dequeue
+  means. The cost is that a worker waiting for a delay looks busy, so the engine's
+  quiescence reads one count, `Loopback.Waiting()` (the knobs' `Waiting()`), to
+  tell a wait for the clock from work that has only to run: a call whose time is
+  due is counted as work. The loopback exposes the count so that the engine needs
+  only the loopback it holds.
+- **`HoldReports` also empties the receipt of the send, the control reply
+  included.** The first report a source gets is normally the one in the receipt of
+  its own send, and a control reply comes the same way. A knob that held only pulls
+  would leave the source with the report before any pull, and the situation it
+  exists to make (a reply with its evidence arrives before the source has the
+  report) could not be built without also losing the receipt. A receipt may lack
+  records by contract, so the source pulls what it lacks. The evidence a reply
+  carries inside its envelope is outside this seam and not touched.
+- **A knob keyed by a message id is armed beforehand, and the test holds the
+  worker to do it.** Keying by id keeps the knob's meaning the same on every run: a
+  count of "the next send" would act on whichever message the worker took next. It
+  costs a window between the send and the arming, which a test closes with a
+  delay or an unreachable node as described above, rather than the knobs ordering
+  themselves against a worker they do not own.
 - **`Mutate` replays after the send instead of changing the send.** The replay is
   an extra delivery the source did not make, so the source's own state must not
   change; a changed send would be the source's own conflict. It is armed ahead and
@@ -146,8 +177,9 @@ observer:
 | `Handler`, `Receipt`, `PullRequest`, `PullAnswer`, the two errors | `internal/node/transport/transport.go` |
 | `Origin`, `RemoteOrigin`, the unexported constructor of a local origin | `internal/node/transport/origin.go` |
 | `Loopback`, `NewLoopback`, `Waiting`, the replay | `internal/node/transport/loopback.go` |
-| `Knobs` and the hit counts, the observer, `Waiting` | `internal/node/transport/knobs.go` |
-| One row per knob, asserting effect and hit | `TestKnobs` in `knobs_test.go` |
+| `Knobs`, `Hit` and `CallKind`, the hit counts, the observer, `Waiting` | `internal/node/transport/knobs.go` |
+| One row per knob, asserting effect, hit counts and the call, node and message of each hit; the control reply held with the reports | `TestKnobs` in `knobs_test.go` |
+| A replay stays valid at the longest thread; `Waiting` fails when the clock is set back; `Delay(0)` leaves a waiting call; names of calls and knobs | `TestMutateKeepsTheThreadValidAtItsLongestLength`, `TestWaitingFailsLoudlyWhenTheClockIsSetBack`, `TestDelayZeroLeavesACallThatIsAlreadyWaiting`, `TestCallKindNames` in `knobs_test.go` |
 | Knobs are per `Knobs` value, nil means none, safe while calls run, named | `TestKnobsAreNotSharedBetweenLoopbacks`, `TestNilKnobsMeansNoFaults`, `TestKnobsAreSafeToDriveWhileCallsRun`, `TestKnobNamesAreDistinct` |
 | The local origin: the loopback makes it, a remote transport cannot, and the source scan | `TestLoopbackMakesTheLocalOrigin`, `TestRemoteOriginIsNeverLocal`, `TestNoCallerCanClaimTheLocalOrigin` in `origin_test.go` |
 | What the source scan reports, one synthetic source per rule, and that the legitimate shape passes | `originViolations` and `TestOriginScanCatchesWhatItNames` in `originscan_test.go` |

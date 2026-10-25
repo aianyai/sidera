@@ -52,19 +52,33 @@ no clock but the one its knobs were given.
     `ErrTimeout`. A send the target answered with an error is not counted.
   - `Unreachable(node, on)`: every call to the node returns `ErrUnreachable`
     without calling the target.
-  - `HoldReports(msg)` and `Release(msg)`: the receipt of the send of `msg`
-    carries no record, and a pull for `msg` is answered empty without asking the
-    target. The target processes the envelope as usual. The evidence a reply
-    carries inside its own envelope is not touched: it never goes through here.
-  - `Delay(d)`: every call waits `d` on the clock of the knobs first, and a
-    context that ends during the wait ends the call. Calls run one after another
-    on the engine's side, so a delayed call holds up the ones behind it.
+  - `HoldReports(msg)` and `Release(msg)`: the receipt of the send of `msg` is
+    empty, with no report and no control reply, and a pull for `msg` is answered
+    empty without asking the target. The target processes the envelope as usual.
+    The evidence a reply carries inside its own envelope is not touched: it never
+    goes through here.
+  - `Delay(d)`: every call that starts from now on waits `d` on the clock of the
+    knobs first, and a context that ends during the wait ends the call.
+    `Delay(0)` affects only calls that start afterwards; one that is already
+    waiting stays until its time is due. Calls run one after another on the
+    engine's side, so a delayed call holds up the ones behind it.
   - `Mutate(msg)`: after the target has taken the next send of `msg`, the same
     envelope from the same sender is delivered once more with another body (a
     bodyless envelope gets another thread). The sender sees only its own send;
     `Mutated(msg)` gives the target's answer to the replay.
+- **Arm a knob keyed by a message id before the message first goes on the wire.**
+  `HoldReports` and `Mutate` act on the first call that reaches them after they
+  are armed, and the engine's outbound worker runs on its own, so a knob armed
+  after the send may be armed late, and nothing orders it against the worker. Hold
+  the worker first with `Delay` or `Unreachable(self, true)`, arm the knob, then
+  release the worker. The knobs that name no message have no such window.
+- **A hit says which call it was.** `Hit` has the knob, the call (`CallSend` or
+  `CallPull`), the node and, for the knobs about one message, the message, so a
+  test can assert that a fault was reached by the call it meant.
 - **Time is the injected clock's.** A delay is a timer of the clock the knobs were
-  made with; a test advances the clock and never sleeps.
+  made with; a test advances the clock and never sleeps. `Waiting()` panics when
+  the clock was set back below the start of a call that still waits: its due time
+  would mean nothing, and a count that went on would hide the mistake.
 
 ## What the caller must guarantee
 
@@ -85,7 +99,9 @@ no clock but the one its knobs were given.
 ## Where the tests are
 
 `knobs_test.go` has `TestKnobs`, one row per knob and one row for none, each
-asserting its effect and, through the rig, the hit counts of every knob;
+asserting its effect, the hits (knob, call, node and message) and, through the
+rig, the hit counts of every knob; `loopback_test.go` the constructor's panics,
+the caller's context and `Waiting`;
 `origin_test.go` has the rule on the local origin and the scan of the package
 source, `originscan_test.go` the scan itself and the synthetic sources it must
 report; `fuzz_test.go` sends arbitrary bytes through a loopback with the
