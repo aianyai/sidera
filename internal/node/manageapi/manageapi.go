@@ -1,0 +1,367 @@
+// Package manageapi is the management interface of the daemon: HTTP over the
+// local socket (a named pipe on Windows) that the owner's commands talk to. It
+// reads a request strictly, judges it by the administrative rules, hands what
+// changes state to the engine's one door (engine.Execute), answers in the words
+// apiwire gives, and has no rule of its own about who may do what. See README.md.
+package manageapi
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/apiwire"
+	"github.com/aianyai/sidera/internal/node/clock"
+	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/ipc"
+	"github.com/aianyai/sidera/sdk/go/strictjson"
+)
+
+const (
+	// pathPrefix is where the methods are: POST /v1/manage/<method>.
+	pathPrefix = "/v1/manage/"
+	// maxBody is the largest request: params are small, and an adapter package is
+	// named by a path, never uploaded.
+	maxBody = 1 << 20
+	// fingerprintDomain begins every fingerprint, so that one made for another
+	// purpose or another version of the rule is never the same.
+	fingerprintDomain = "sidera-manage-v1"
+)
+
+// Config is what the composition root gives the server.
+type Config struct {
+	// Service is the engine, as far as the management interface may ask of it.
+	Service engine.ManageService
+	// Node is this node's identifier: an address of another node is not one of
+	// this node's endpoints.
+	Node ident.NodeID
+	// Clock is the injected time source, read once per request for the
+	// administrative rules.
+	Clock clock.Clock
+	// Stop asks the daemon to shut down. It is called without waiting, once the
+	// answer to a request whose operation stops the daemon has been written.
+	Stop func(reason string)
+	// Log receives what the server observed; nil discards it. An error that was
+	// not expected is logged whole here and answered as an internal error.
+	Log *slog.Logger
+}
+
+// Server is the management interface. Its methods are a table in this package:
+// the owner of an operation adds a row, and the handling of a request is the same
+// for every row.
+type Server struct {
+	cfg     Config
+	log     *slog.Logger
+	list    admin.List
+	methods map[string]*method
+	http    *http.Server
+}
+
+// New builds the server. It listens on nothing until Serve.
+func New(c Config) (*Server, error) {
+	switch {
+	case c.Service == nil:
+		return nil, errors.New("manageapi: no service")
+	case c.Clock == nil:
+		return nil, errors.New("manageapi: no clock")
+	case c.Node.IsZero():
+		return nil, errors.New("manageapi: no node identifier")
+	}
+	s := &Server{cfg: c, log: c.Log, methods: defaultMethods()}
+	if s.log == nil {
+		s.log = slog.New(slog.DiscardHandler)
+	}
+	// The management interface is the local owner's alone in this stage: the list
+	// of authorized persons is empty, and Authorize still decides by the
+	// catalogue, which denies an operation it does not know to everyone.
+	s.list, _ = admin.NewList(nil)
+	s.http = &http.Server{
+		Handler:           http.HandlerFunc(s.serve),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		// No write timeout: a request may be a wait, and the context of each
+		// request is the client's connection.
+		IdleTimeout:    60 * time.Second,
+		MaxHeaderBytes: 8 << 10,
+	}
+	return s, nil
+}
+
+// Listener is a listener of the management interface. Only Listen makes one, and
+// Listen refuses the address of the Agent interface: a connection that this
+// server accepts is the local owner, so the server may serve no other listener.
+type Listener struct{ l net.Listener }
+
+// Listen listens on the address of the management interface. The caller holds the
+// instance lock, as ipc.Listen asks.
+func Listen(addr ipc.Address, lock ipc.InstanceLock, opts ipc.Options) (*Listener, error) {
+	if addr.Kind() != ipc.KindManage {
+		return nil, fmt.Errorf("manageapi: %q is not the address of the management interface", addr.Kind())
+	}
+	l, err := ipc.Listen(addr, lock, opts)
+	if err != nil {
+		return nil, err
+	}
+	return &Listener{l: l}, nil
+}
+
+// Serve answers the requests of the listener until Shutdown or Close, and returns
+// nil then. It closes the listener.
+func (s *Server) Serve(l *Listener) error {
+	if l == nil || l.l == nil {
+		return errors.New("manageapi: no listener")
+	}
+	if err := s.http.Serve(l.l); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	return nil
+}
+
+// Shutdown stops taking connections and waits for the requests being served to
+// end; when ctx ends first it closes what is left and returns the error of ctx.
+func (s *Server) Shutdown(ctx context.Context) error {
+	err := s.http.Shutdown(ctx)
+	if err != nil {
+		s.http.Close()
+	}
+	return err
+}
+
+// Close ends the serving at once.
+func (s *Server) Close() error { return s.http.Close() }
+
+// actor is the one place the local owner is made. Whoever is served here came in
+// by Listen, which takes only the address of the management interface, so the
+// peer was checked to be the user's own by ipc, and the interface identifies the
+// owner by that alone.
+func (s *Server) actor() admin.Actor { return admin.LocalOwner() }
+
+func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
+	name, ok := strings.CutPrefix(r.URL.Path, pathPrefix)
+	m := s.methods[name]
+	if !ok || m == nil {
+		s.fail(w, apiwire.New(apiwire.CategoryNotFound, apiwire.CodeMethodUnknown, "there is no such method"), 0)
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", http.MethodPost)
+		s.fail(w, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeMethodNotAllowed, "a method is called with POST"), http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Authorize comes first, by the catalogue: the local owner is denied only an
+	// operation the catalogue does not know, which is a defect of the program.
+	actor := s.actor()
+	if v := admin.Authorize(s.list, actor, m.op, s.cfg.Clock.Now()); !v.Allowed {
+		s.fail(w, apiwire.FromAdmin(v.Reason), 0)
+		return
+	}
+
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			s.fail(w, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeRequestTooLarge, "the request is larger than a method takes"), 0)
+		} else {
+			s.fail(w, apiwire.Malformed("the request could not be read", ""), 0)
+		}
+		return
+	}
+	d, err := s.decode(name, body)
+	if err != nil {
+		s.fail(w, err, 0)
+		return
+	}
+
+	if d.plan.read != nil {
+		result, err := d.plan.read(r.Context(), s.cfg.Service)
+		if err != nil {
+			s.fail(w, err, 0)
+			return
+		}
+		s.write(w, struct {
+			Result any `json:"result"`
+		}{result})
+		return
+	}
+
+	// KeyFor only for an actor that Authorize allowed, as the rules ask.
+	res, err := s.cfg.Service.Execute(r.Context(), engine.ManagementCommand{
+		Key: admin.KeyFor(actor, d.id), Fingerprint: d.fingerprint, Expected: d.expected,
+		Name: name, Operation: d.plan.operation,
+	})
+	if err != nil {
+		s.fail(w, err, 0)
+		return
+	}
+	s.write(w, struct {
+		OperationID string          `json:"operation_id"`
+		Replayed    bool            `json:"replayed"`
+		Result      json.RawMessage `json:"result"`
+	}{hex.EncodeToString(d.id[:]), res.Replayed, res.Result})
+	if res.Stop && s.cfg.Stop != nil {
+		// The answer is on its way: flush it, so that the client has it before the
+		// daemon starts to go away.
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		s.cfg.Stop(name)
+	}
+}
+
+// decoded is a request that was read and found well formed.
+type decoded struct {
+	m           *method
+	id          admin.OperationID
+	expected    admin.Version
+	plan        *plan
+	fingerprint admin.Fingerprint
+}
+
+// writeEnvelope and readEnvelope are the two shapes of a request. The identifier
+// and the version are optional to the decoder, so that the administrative rules
+// say which of them a request lacks.
+type writeEnvelope struct {
+	OperationID     string          `json:"operation_id,omitempty"`
+	ExpectedVersion uint64          `json:"expected_version,omitempty"`
+	Params          json.RawMessage `json:"params,omitempty"`
+}
+
+type readEnvelope struct {
+	Params json.RawMessage `json:"params,omitempty"`
+}
+
+// decode reads the request of a method strictly: the envelope, the identifier, the
+// version and the params, and judges its shape by the administrative rules. It is
+// the one entry that reads untrusted bytes of the interface.
+func (s *Server) decode(name string, body []byte) (*decoded, error) {
+	m := s.methods[name]
+	if m == nil {
+		return nil, apiwire.New(apiwire.CategoryNotFound, apiwire.CodeMethodUnknown, "there is no such method")
+	}
+	d := &decoded{m: m}
+	var params json.RawMessage
+	if m.op.SideEffecting() {
+		var env writeEnvelope
+		if err := strictjson.Decode(body, &env); err != nil {
+			return nil, err
+		}
+		id, err := parseOperationID(env.OperationID)
+		if err != nil {
+			return nil, err
+		}
+		d.id, d.expected, params = id, admin.Version(env.ExpectedVersion), env.Params
+		if !m.op.IsConfigChange() && d.expected != 0 {
+			return nil, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeUnexpectedVersion,
+				"this operation changes no versioned setting and takes no expected version")
+		}
+		if reason := admin.ValidateRequest(admin.Request{ID: d.id, Op: m.op, ExpectedVersion: d.expected}); reason != admin.ReasonOK {
+			return nil, apiwire.FromAdmin(reason)
+		}
+	} else {
+		var env readEnvelope
+		if err := strictjson.Decode(body, &env); err != nil {
+			return nil, err
+		}
+		params = env.Params
+	}
+	if len(params) == 0 {
+		params = json.RawMessage(`{}`)
+	}
+	p, err := m.plan(s, params)
+	if err != nil {
+		return nil, err
+	}
+	d.plan = p
+	d.fingerprint = fingerprint(m.name, p.canonical, d.expected)
+	return d, nil
+}
+
+// parseOperationID reads the identifier of a request: 32 lower-case hexadecimal
+// digits that are not all zero. An absent identifier is the zero value, which the
+// administrative rules refuse for a request that changes something.
+func parseOperationID(s string) (admin.OperationID, error) {
+	var id admin.OperationID
+	if s == "" {
+		return id, nil
+	}
+	bad := func(why string) error {
+		return apiwire.Malformed("the operation identifier is "+why, "operation_id")
+	}
+	if len(s) != 2*len(id) || s != strings.ToLower(s) {
+		return id, bad("32 lower-case hexadecimal digits")
+	}
+	raw, err := hex.DecodeString(s)
+	if err != nil {
+		return id, bad("32 lower-case hexadecimal digits")
+	}
+	copy(id[:], raw)
+	if id.IsZero() {
+		return id, bad("all zero")
+	}
+	return id, nil
+}
+
+// fingerprint is the digest of a whole request: a version of the rule, the method,
+// the params in their canonical encoding and the expected version, each followed
+// by a NUL. It is the rule of the interface alone: the engine takes the value, and
+// two requests that mean the same have one fingerprint however they were written.
+func fingerprint(method string, canonicalParams []byte, expected admin.Version) admin.Fingerprint {
+	h := sha256.New()
+	for _, part := range [][]byte{[]byte(fingerprintDomain), []byte(method), canonicalParams} {
+		h.Write(part)
+		h.Write([]byte{0})
+	}
+	h.Write([]byte(strconv.FormatUint(uint64(expected), 10)))
+	var fp admin.Fingerprint
+	copy(fp[:], h.Sum(nil))
+	return fp
+}
+
+// write answers 200 with the value as JSON.
+func (s *Server) write(w http.ResponseWriter, v any) { s.send(w, http.StatusOK, v) }
+
+func (s *Server) send(w http.ResponseWriter, status int, v any) {
+	var b bytes.Buffer
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
+		s.log.Error("management answer could not be encoded", "error", err.Error())
+		status = http.StatusInternalServerError
+		b.Reset()
+		b.WriteString(`{"error":{"category":"internal","code":"internal","message":"internal error"}}` + "\n")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, err := w.Write(b.Bytes()); err != nil {
+		s.log.Debug("management answer was not delivered", "error", err.Error())
+	}
+}
+
+// fail answers an error in the words of the wire. status 0 is the one the
+// category gives.
+func (s *Server) fail(w http.ResponseWriter, err error, status int) {
+	e := apiwire.FromError(err)
+	if e.Category == apiwire.CategoryInternal {
+		// What an unexpected error said is for the log of the daemon, not for the
+		// client.
+		s.log.Error("management request failed", "code", e.Code, "error", err.Error())
+	}
+	if status == 0 {
+		status = e.Category.HTTPStatus()
+	}
+	s.send(w, status, apiwire.Body{Error: *e})
+}

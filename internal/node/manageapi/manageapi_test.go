@@ -1,6 +1,7 @@
 package manageapi
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -22,7 +23,7 @@ import (
 )
 
 func endpointOf(b byte) ident.EndpointID {
-	id, err := ident.ParseEndpointID(strings.Repeat(fmt.Sprintf("%02x", b), 16))
+	id, err := ident.EndpointIDFromBytes(bytes.Repeat([]byte{b}, ident.EndpointIDLen))
 	if err != nil {
 		panic(err)
 	}
@@ -30,7 +31,7 @@ func endpointOf(b byte) ident.EndpointID {
 }
 
 var ownNode = func() ident.NodeID {
-	n, err := ident.NodeIDFromBytes([]byte(strings.Repeat("\x07", ident.NodeIDLen)))
+	n, err := ident.NodeIDFromBytes(bytes.Repeat([]byte{7}, ident.NodeIDLen))
 	if err != nil {
 		panic(err)
 	}
@@ -50,8 +51,8 @@ func TestOnlyAPostToAKnownMethodIsTaken(t *testing.T) {
 		status          int
 		category, code  string
 	}{
-		{"a GET of a method", http.MethodGet, "http://sidera/v1/manage/endpoints.list", 400, "invalid_argument", "method_not_allowed"},
-		{"a PUT of a method", http.MethodPut, "http://sidera/v1/manage/endpoints.list", 400, "invalid_argument", "method_not_allowed"},
+		{"a GET of a method", http.MethodGet, "http://sidera/v1/manage/endpoints.list", 405, "invalid_argument", "method_not_allowed"},
+		{"a PUT of a method", http.MethodPut, "http://sidera/v1/manage/endpoints.list", 405, "invalid_argument", "method_not_allowed"},
 		{"a method nobody has", http.MethodPost, "http://sidera/v1/manage/nothing.here", 404, "not_found", "method_unknown"},
 		{"a method of the other interface", http.MethodPost, "http://sidera/v1/agent/endpoints.list", 404, "not_found", "method_unknown"},
 		{"the version is not v1", http.MethodPost, "http://sidera/v2/manage/endpoints.list", 404, "not_found", "method_unknown"},
@@ -107,8 +108,8 @@ func TestAMalformedRequestIsRefusedNamingThePositionOfTheFault(t *testing.T) {
 		{"a list instead of an object", "endpoints.list", `[]`, ""},
 		{"an unknown member of the request", "endpoints.list", `{"params":{},"extra":1}`, "extra"},
 		{"a member of another case", "endpoints.list", `{"Params":{}}`, "Params"},
-		{"a repeated key", "endpoints.list", `{"params":{},"params":{}}`, ""},
-		{"null for params", "endpoints.list", `{"params":null}`, ""},
+		{"a repeated key", "endpoints.list", `{"params":{},"params":{}}`, "params"},
+		{"null for params", "endpoints.list", `{"params":null}`, "params"},
 		{"an unknown member of the params", "endpoints.list", `{"params":{"nothing":1}}`, "params.nothing"},
 		{"a value of the wrong type", "endpoints.list", `{"params":{"instance":7}}`, "params.instance"},
 		{"an empty instance", "endpoints.list", `{"params":{"instance":""}}`, "params.instance"},
@@ -184,8 +185,8 @@ func testMethods(s *Server) {
 			if err := decodeParams(raw, &p); err != nil {
 				return nil, err
 			}
-			return &plan{canonical: canonical(p), operation: engine.NewTestOperation(
-				admin.Operation{Kind: admin.OpChangeNodeSettings}, false, func(engine.TestRun) ([]byte, error) { return []byte(`{}`), nil })}, nil
+			// the fake service never runs the operation; any value of the type will do
+			return &plan{canonical: canonical(p), operation: engine.CloseEndpointOp(endpointOf(1), nil)}, nil
 		},
 	}
 	s.methods["test.unknown"] = &method{
