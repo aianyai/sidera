@@ -334,7 +334,7 @@ only says the request was not understood or not allowed.
 | `endpoint.pending` | D to A | notification | `endpoint`, `count` | |
 | `endpoint.recv` | A to D | request | `endpoint`, `wait_s?`, `message_id?` with `part?` | `page` |
 | `endpoint.ack` | A to D | request | `endpoint`, `lease`, `items` | `items` with the outcome of each |
-| `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type`, `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
+| `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type?` (present exactly when `body` is not empty), `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
 | `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
 
 **The body of `endpoint.send`.** A message has a body, and the body is not empty:
@@ -347,10 +347,13 @@ wire shape is unchanged. A message that carries a control signal is judged by
 the signal: the body of a `session.create` is its initial message and an empty
 body means none; every other signal carries no body, so its body is empty (the
 envelope refuses a body there: it would have no reader, and a field nobody reads
-is a place to hide data). The schema states this with a `then`/`else` on the
+is a place to hide data). The content type follows the body as in the envelope
+(both present or both absent): `content_type` is required when the body is not
+empty and is omitted when it is, so a `session.create` without an initial
+message and the other control signals carry none. The schema states this with a `then`/`else` on the
 signal, and `SendParams.Validate` the same. `TestEndpointSendRules` (the rows on
 the body) and the golden messages `invalid/endpoint-send--body-empty.json` and
-`invalid/endpoint-send--control-*-with-body.json` hold both sides to the rule.
+`invalid/endpoint-send--control-*-with-body.json`, `invalid/endpoint-send--content-type-missing.json` and `invalid/endpoint-send--control-*-with-content-type.json` hold both sides to the rule.
 
 The `display_name` of `endpoint.register` is 1 to `MaxDisplayName` (128)
 characters and a `description`, when given, 1 to `MaxDescription` (1024); a

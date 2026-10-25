@@ -12,7 +12,6 @@
       "to": [
         "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222"
       ],
-      "content_type": "text/plain",
       "body": "",
       "control": {
         "signal": "endpoint.status",

@@ -173,9 +173,10 @@ func (c Control) Validate() error {
 
 // SendParams sends a message from a direct endpoint.
 type SendParams struct {
-	Endpoint    EndpointRef `json:"endpoint"`
-	To          []Address   `json:"to"`
-	ContentType string      `json:"content_type"`
+	Endpoint EndpointRef `json:"endpoint"`
+	To       []Address   `json:"to"`
+	// ContentType is present exactly when Body is not empty.
+	ContentType string `json:"content_type,omitempty"`
 	// Body is what the message says. A message has a body: it is not empty unless
 	// Control is set, where it is the initial message of a session.create (empty
 	// means none) and is empty for the other signals, which carry none.
@@ -193,8 +194,8 @@ type SendParams struct {
 
 // Validate checks the parameters. A message without a control signal has a
 // non-empty body, and a control signal other than session.create has an empty
-// one, as the envelope the daemon builds from it requires. A control signal has
-// exactly one recipient. Address syntax, the number of recipients that
+// one, as the envelope the daemon builds from it requires; the content type is
+// present exactly when the body is. A control signal has exactly one recipient. Address syntax, the number of recipients that
 // is acceptable and the size of the body are judged by the daemon, which refuses
 // with CodeInvalidAddress or CodeSendRefused.
 func (p SendParams) Validate() error {
@@ -204,8 +205,12 @@ func (p SendParams) Validate() error {
 	for i, a := range p.To {
 		c.field("to"+index(i), a.Validate())
 	}
-	c.field("content_type", strLen(p.ContentType, 1, MaxIdentLen))
 	c.ok(p.Control != nil || p.Body != "", "body: a message has a body")
+	if p.Body != "" {
+		c.field("content_type", strLen(p.ContentType, 1, MaxIdentLen))
+	} else {
+		c.ok(p.ContentType == "", "content_type: a message without a body has no content type")
+	}
 	if p.ReplyTo != "" {
 		c.field("reply_to", p.ReplyTo.Validate())
 	}

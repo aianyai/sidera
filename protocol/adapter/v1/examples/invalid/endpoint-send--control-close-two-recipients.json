@@ -13,7 +13,6 @@
         "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2/22222222222222222222222222222222",
         "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3/22222222222222222222222222222222"
       ],
-      "content_type": "text/plain",
       "body": "",
       "control": {
         "signal": "session.close"

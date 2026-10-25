@@ -203,9 +203,18 @@ func TestEndpointSendRules(t *testing.T) {
 		{"content type required", func(p *adapterproto.SendParams) { p.ContentType = "" }, "content_type", false},
 		{"content type over the limit", func(p *adapterproto.SendParams) { p.ContentType = repeat("c", 129) }, "content_type", false},
 		{"a message has a body", func(p *adapterproto.SendParams) { p.Body = "" }, "body", false},
+		{"a body has a content type", func(p *adapterproto.SendParams) { p.ContentType = "" }, "content_type", false},
+		{"no body has no content type", func(p *adapterproto.SendParams) {
+			p.Body = ""
+			p.Control = &adapterproto.Control{Signal: "session.create", Params: &adapterproto.ControlParams{Preset: "default"}}
+		}, "content_type", false},
+		{"a control signal without a body has no content type", func(p *adapterproto.SendParams) {
+			signal(p, "session.close")
+			p.ContentType = "text/plain"
+		}, "content_type", false},
 		{"a one byte body", func(p *adapterproto.SendParams) { p.Body = "x" }, "", false},
 		{"a session.create without a body has no initial message", func(p *adapterproto.SendParams) {
-			p.Body = ""
+			p.Body, p.ContentType = "", ""
 			p.Control = &adapterproto.Control{Signal: "session.create", Params: &adapterproto.ControlParams{Preset: "default"}}
 		}, "", false},
 		{"reply to optional", func(p *adapterproto.SendParams) { p.ReplyTo = "" }, "", false},
@@ -277,9 +286,9 @@ func TestEndpointSendRules(t *testing.T) {
 }
 
 // signal turns p into a control signal other than session.create, which carries
-// no body.
+// neither a body nor a content type.
 func signal(p *adapterproto.SendParams, name adapterproto.ControlSignal) {
-	p.Body = ""
+	p.Body, p.ContentType = "", ""
 	p.Control = &adapterproto.Control{Signal: name}
 }
 
