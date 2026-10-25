@@ -207,7 +207,8 @@ func (d *Daemon) stepClock(context.Context) error {
 // a clock that was not judged. This is the one goroutine the node has yet, so the
 // renewal does not meet the loop; the hourly check that follows runs in the loop.
 func (d *Daemon) stepCertificate(context.Context) error {
-	return d.renewCertificate(d.cfg.Clock.Now(), d.clockPaused)
+	// Step 3 refused a node whose identity is retired, so none is at this point.
+	return d.renewCertificate(d.cfg.Clock.Now(), engine.SignRefusalOf(false, d.clockPaused))
 }
 
 // Step 6: the scan of state/ (the engine's first recovery entry) runs before the

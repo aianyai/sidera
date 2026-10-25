@@ -39,8 +39,10 @@ touches files only through `fsx`, and reads time only through the injected clock
   start take the same five steps; `RequestStop` runs it once.
 - **The engine is the single writer; this package writes only what is its own:**
   `init` and the layout rule, both declared here and covered by the crash tests.
-- **The certificate is renewed at step 5 and every hour in the loop, never on a clock
-  in doubt.** Step 5 is the one goroutine there is, so it does not meet the loop; the
+- **The certificate is renewed at step 5 and every hour in the loop, never when the
+  engine says the node may not sign.** The hourly check reads `TaskInput.SignRefusal`
+  and nothing else (the clock in doubt, or an identity retired and a daemon not yet
+  down); step 5 asks `engine.SignRefusalOf` the same, with the pause step 4 found. Step 5 is the one goroutine there is, so it does not meet the loop; the
   hourly check runs in the loop, where the engine reads the certificate it signs
   under, so a renewal and a signature are never concurrent. A certificate that is due
   while the node is paused waits for the owner, and the log says so. The keys are not

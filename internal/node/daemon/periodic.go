@@ -65,23 +65,31 @@ func (d *Daemon) clockTask(in engine.TaskInput) error {
 
 // certificateTask is the hourly look at the certificate. It runs in the loop, as
 // does everything that signs, and the clock it judges by is the one of the command.
+// Whether it may sign is the engine's judgement and nothing else.
 func (d *Daemon) certificateTask(in engine.TaskInput) error {
-	return d.renewCertificate(in.Now, in.RollbackPaused)
+	return d.renewCertificate(in.Now, in.SignRefusal)
 }
 
 // renewCertificate renews the certificate when the keys say it is due, and never
-// while the clock is in doubt: a certificate carries the time it was signed at, and
-// one signed on a clock that was set back would start before what the node already
-// issued. A certificate that is due and waits for the owner to clear the pause is
+// while the engine says the node may not sign (refusal, zero when it may). A
+// certificate carries the time it was signed at, so one signed on a clock that was
+// set back would start before what the node already issued; and a node whose
+// identity was retired signs nothing, although the loop runs until the daemon is
+// down. A certificate that is due and waits for the owner to clear the pause is
 // said so in the log; the check after the clear signs it. An error is the keys':
 // a fatal one ends the node, any other is tried again by the engine.
-func (d *Daemon) renewCertificate(now time.Time, paused bool) error {
+func (d *Daemon) renewCertificate(now time.Time, refusal engine.Reason) error {
 	verdict, reason := d.keys.RenewalDue(now)
 	if verdict != keys.RenewDue {
 		return nil
 	}
-	if paused {
+	switch refusal {
+	case 0:
+	case engine.ReasonClockRollback:
 		d.log.Warn("the certificate is due and is not signed while the wall clock is in doubt; clear the pause to renew it")
+		return nil
+	default:
+		d.log.Warn("the certificate is due and is not signed", "reason", refusal.String())
 		return nil
 	}
 	if err := d.keys.Renew(now); err != nil {

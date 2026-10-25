@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -167,6 +168,69 @@ func TestRefusesToRunUnderRetiredIdentity(t *testing.T) {
 	}
 	if string(certBefore) != string(certAfter) {
 		t.Error("the certificate changed although the identity was retired before it could be renewed")
+	}
+}
+
+// The loop runs until the daemon is down, so between the retirement of the identity
+// and the end of the daemon the hourly look at the certificate still comes round.
+// A certificate that is due then is not signed: the node never starts again, and a
+// certificate signed in the name of a retired identity is what the retirement says
+// no longer happens. The shutdown is held in its second step, with the loop running,
+// so that the look is made after the commit of the retirement and before the stop.
+func TestACertificateThatFallsDueAfterTheRetirementIsNotSigned(t *testing.T) {
+	noLeaks(t)
+	c, clk := initialized(t)
+	node := nodeOf(t, c)
+	serial, _ := certificateOnDisk(t, c.Home)
+
+	holding, release := make(chan struct{}), make(chan struct{})
+	var holdOnce, releaseOnce sync.Once
+	c.Attach.AgentServe = func(context.Context, *daemon.Env) error { return nil }
+	c.Attach.StopInterfaces = func(context.Context) error {
+		holdOnce.Do(func() { close(holding) })
+		<-release
+		return nil
+	}
+	// The probe runs after the certificate check that falls due at the same time:
+	// the schedule runs what is due in the order of the due times.
+	probed := make(chan struct{}, 1)
+	c.Attach.Periodic = []daemon.PeriodicTask{{Name: "probe", Every: 90 * time.Minute, Run: func(engine.TaskInput) error {
+		select {
+		case probed <- struct{}{}:
+		default:
+		}
+		return nil
+	}}}
+	started(t, c)
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
+	status, body := manage(t, c.Home, "identity.retire", map[string]any{
+		"operation_id": opID(1), "params": map[string]any{"node": node.String()},
+	})
+	answerOf(t, status, body)
+	select {
+	case <-holding:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the shutdown after the retirement did not begin")
+	}
+
+	clk.Advance(25 * 24 * time.Hour) // the certificate has 5 days left
+	select {
+	case <-probed:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the periodic tasks did not run while the shutdown was held")
+	}
+	if got, _ := certificateOnDisk(t, c.Home); got != serial {
+		t.Errorf("serial %d after the retirement, want %d: nothing is signed in the name of a retired identity", got, serial)
+	}
+	var refused bool
+	for _, l := range logLines(t, c.Home) {
+		if strings.Contains(l, "the certificate is due and is not signed") && strings.Contains(l, "identity_retired") {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Error("the look at the certificate did not say that it was refused for the identity: the check was not made")
 	}
 }
 

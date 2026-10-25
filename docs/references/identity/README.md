@@ -225,9 +225,13 @@ the loaded revocations, because a retired identity cannot become valid again.
 signature made (step 3); judges the clock (step 4); and renews the certificate when it
 is due (step 5), before anything is signed, and then every hour in the loop, where
 everything that signs runs, so the renewal replaces the certificate the engine signs
-the node's reports under without two goroutines touching it. A node that is paused
-renews nothing and says so; the hour after the owner clears the pause renews. A node
-whose identity is retired is refused at step 3, before the clock is judged.
+the node's reports under without two goroutines touching it. A node that may not sign
+renews nothing and says so, by the one judgement of signing the engine hands the
+check: a paused node waits, and the hour after the owner clears the pause renews; an
+identity retired by the owner signs nothing from the commit on, so the check made in
+the time before the daemon is down finds nothing to do
+(`TestACertificateThatFallsDueAfterTheRetirementIsNotSigned`). A node whose identity
+is retired is refused at step 3, before the clock is judged.
 
 The owner's commands on the identity are four operations of the management
 interface, all held to the local owner:

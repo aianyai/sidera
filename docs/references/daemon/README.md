@@ -31,7 +31,7 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 | 2 | config | The transaction layer recovers (settle, then removal of every `.tmp-*`); the layout of `state/`, `run/`, `manage/` and `logs/` is made again where the owner removed it; the log opens; `config/` is loaded strictly and a file that is not valid stops the start and is named. | this package, `txn`, `config` |
 | 3 | keys | Keys, the revocations the owner kept and the serial seen are loaded; a node whose own identity was retired refuses to run. Nothing is signed. | this package, `keys` |
 | 4 | clock | The wall clock is judged against the saved high water mark, before anything is signed. A clock found behind it by more than `timing.ClockTolerance` pauses the node: the pause is made durable at once with the mark that was, which is never lowered. | this package, `clock` |
-| 5 | certificate | The certificate is renewed when it has ten days or less left, when it has expired, or when an earlier renewal was interrupted; never while the clock is in doubt (the pause step 4 found is respected: a certificate that is due waits, and the log says so). | this package, `keys` |
+| 5 | certificate | The certificate is renewed when it has ten days or less left, when it has expired, or when an earlier renewal was interrupted; never while the clock is in doubt (the pause step 4 found is respected: a certificate that is due waits, and the log says so). The judgement is the engine's (`engine.SignRefusalOf`), the same one the hourly check is handed; at this step no identity is retired, because step 3 refused it. | this package, `keys`, `engine` |
 | 6 | scan | The engine's first recovery entry: `state/` is scanned, damaged files are quarantined, the recovery rules run until none has work, the view is built. The periodic tasks are registered. | `engine` |
 | 7 | trust | Hook `TrustSync`: synchronisation of revocations and the trust graph, the gate of vouchers. Empty for a node of one machine. | later stage |
 | 8 | manage | The loop starts in the phase of recovery and the management interface opens: reads answer, anything that changes state is refused as `unavailable/recovering`. | this package |
@@ -141,8 +141,11 @@ at step 6. The daemon has two of its own. The certificate check runs every hour
 the certificate lasts 30 days and is renewed with 10 or fewer left, so an hour is a
 small part of the margin, and a node that was down is brought up to date by the
 start, not by waiting for the next hour. It runs in the loop, as everything that
-signs does. A paused node does not renew; the check after the owner clears the pause
-does. A failure that a retry may cure is tried again after the engine's backoff, a
+signs does. A node that may not sign does not renew, and the check reads only the
+judgement the engine hands the task (`TaskInput.SignRefusal`, the one rule of signing):
+a paused node waits, and the check after the owner clears the pause renews; a node
+whose identity was retired signs nothing in the time before the daemon is down,
+because the loop goes on running its tasks until the engine stops. A failure that a retry may cure is tried again after the engine's backoff, a
 fatal one ends the daemon as any other. The other is the clock state, every minute (`ClockStateEvery`):
 the high water mark and the pause are made durable, and a crash loses at most a
 minute of a mark, which only makes the next start trust the clock less. The pause
