@@ -98,24 +98,40 @@ func (c *conn) counts() ConnCounts {
 	return out
 }
 
-// call sends one request to the adapter and decodes its result strictly. A ping
-// is not listed among the calls without an answer. The parameters are checked
-// first: the host never writes a message the protocol would refuse.
+// track counts a request of the host as sent and not answered until the returned
+// function is called. A ping is not counted: it only asks whether the adapter is
+// there. Whoever sends a request on a goroutine of its own and waits for it
+// elsewhere counts it before it starts waiting, so that a caller that finds the
+// host idle finds the request in the counts.
+func (c *conn) track(method string) (done func()) {
+	if method == adapterproto.MethodPing {
+		return func() {}
+	}
+	c.mu.Lock()
+	c.calls[method]++
+	c.mu.Unlock()
+	return func() {
+		c.mu.Lock()
+		if c.calls[method]--; c.calls[method] == 0 {
+			delete(c.calls, method)
+		}
+		c.mu.Unlock()
+	}
+}
+
+// call sends one request to the adapter, counted while it is out, and decodes its
+// result strictly.
 func (c *conn) call(ctx context.Context, method string, params, result adapterproto.Message) error {
+	defer c.track(method)()
+	return c.send(ctx, method, params, result)
+}
+
+// send writes one request and decodes its result strictly. The parameters are
+// checked first: the host never writes a message the protocol would refuse. The
+// request is not counted: see track.
+func (c *conn) send(ctx context.Context, method string, params, result adapterproto.Message) error {
 	if err := params.Validate(); err != nil {
 		return fmt.Errorf("adapterhost: parameters of %s: %w", method, err)
-	}
-	if method != adapterproto.MethodPing {
-		c.mu.Lock()
-		c.calls[method]++
-		c.mu.Unlock()
-		defer func() {
-			c.mu.Lock()
-			if c.calls[method]--; c.calls[method] == 0 {
-				delete(c.calls, method)
-			}
-			c.mu.Unlock()
-		}()
 	}
 	var raw json.RawMessage
 	if err := c.p.Call(ctx, method, params, &raw); err != nil {

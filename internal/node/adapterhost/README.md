@@ -105,13 +105,16 @@ handle the daemon gives it.
   cancellation of a request in flight. After either, calls return
   `ErrNotConnected` and `Start` fails; both are idempotent.
 - **Counts** are exact. `Calls` lists the requests the host sent that have no
-  answer yet (a ping is not among them). `Working` is true while the supervisor
-  does anything of its own (launching, handshaking, calling the engine, reporting,
+  answer yet (a ping is not among them); a request is counted before the host
+  starts to wait for its answer. `Working` is true while the supervisor does
+  anything of its own (launching, handshaking, calling the engine, reporting,
   ending a process) and while a timer of the instance is due and not yet taken;
-  a supervisor parked on its timers with nothing due is not working. After the
-  test clock moved, a caller that sees `Working` false knows the host has acted on
-  everything the move made due. Only a test clock shows a due timer. After
-  `Shutdown`, `Abort` and for an unknown instance everything is zero.
+  a supervisor parked on its timers with nothing due is not working. `Working` is
+  read before the counts and again after them, so "idle" never comes with counts
+  older than the request the host is waiting for. After the test clock moved, a
+  caller that sees `Working` false knows the host has acted on everything the move
+  made due. Only a test clock shows a due timer. After `Shutdown`, `Abort` and for
+  an unknown instance everything is zero.
 
 ## What the caller must guarantee
 
@@ -135,6 +138,8 @@ handle the daemon gives it.
 `Shutdown`, `Abort`), `admission_test.go` (what is refused, the lock, the order of
 taking an adapter on), `notifications_test.go` (order, the bound, dropped ones),
 `requests_test.go` (the adapter's requests, the engine's calls, the counts),
+`idle_test.go` (a request counted before the host waits for its answer, and the open
+question of waiting for a process that does not end),
 `engineerrors_test.go`, `stderr_test.go`, `exec_test.go` (a helper process: the
 test binary started again), `lockpath_test.go`, `params_internal_test.go`.
 `helpers_test.go` holds the doubles: an engine that records every call in order, a

@@ -170,6 +170,13 @@ Everything about Windows and Linux is pending verification by CI on main.
 
 ## Why
 
+- **A request is counted before it is waited for.** A caller that finds the host
+  idle reads the counts to learn whether the adapter is still working on something:
+  a request is counted by the goroutine that starts it, before the supervisor parks,
+  and `Working` is read before and after the counts, because a request counted by a
+  helper goroutine a moment after the supervisor parked, or counts read before the
+  supervisor reached its wait, both showed an idle host with nothing outstanding
+  while `initialize` was in flight.
 - **One goroutine owns the timers.** The supervisor is the only waiter on the host's
   timers and never blocks outside one wait, with the adapter's answers and the
   engine's calls on helper goroutines. That is what lets `Working` be exact: a
@@ -268,6 +275,7 @@ check on every test):
 | The log of the adapter | `TestTheStderrOfTheAdapterGoesToItsLog` |
 | The lock path and the instance the launcher is given | `TestLockPath`, `TestTheLockPathAndTheInstanceAreWhatTheLauncherAndTheAdapterAreTold` |
 | The exec launcher over a helper process (the test binary started again) | `TestExecLauncherRunsTheProgramOfTheManifestOverStandardStreams` |
+| A request counted before the host waits for its answer | `TestARequestIsCountedAsSentBeforeTheHostIsIdleWaitingForItsAnswer` |
 | Defaults of the tunables | `TestParamsZeroFieldsTakeTheirDefaults` |
 
 The exec launcher's tests run on macOS here; the same tests run on Linux and Windows

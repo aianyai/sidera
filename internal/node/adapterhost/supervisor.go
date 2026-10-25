@@ -326,13 +326,19 @@ func (s *supervisor) working() bool {
 // to waiting before it counts it as working.
 const askAttempts = 1000
 
-// counts is what the host counts of the connection of the instance.
+// counts is what the host counts of the connection of the instance. Whether the
+// supervisor is working is asked before the counts are read and again after: a
+// supervisor that was parked and idle at both ends was idle while they were read,
+// and one that went from the start of a request to waiting for its answer between
+// them is reported as working, so a caller never sees "idle" together with counts
+// that were taken before the request the supervisor is waiting for was counted.
 func (s *supervisor) counts() ConnCounts {
 	select {
 	case <-s.done:
 		return ConnCounts{}
 	default:
 	}
+	working := s.working()
 	s.mu.Lock()
 	cur, service := s.cur, s.service
 	s.mu.Unlock()
@@ -341,7 +347,7 @@ func (s *supervisor) counts() ConnCounts {
 		out = cur.counts()
 	}
 	out.Connected = service != nil
-	out.Working = s.working()
+	out.Working = working || s.working()
 	return out
 }
 
@@ -355,7 +361,14 @@ func (s *supervisor) rpc(c *conn, method string, params, result adapterproto.Mes
 	t := s.newTimer(limit)
 	defer s.stopTimer(t)
 	res := make(chan error, 1)
-	s.spawn(func() { res <- c.call(ctx, method, params, result) })
+	// The request is counted here, before the supervisor parks: a caller that finds
+	// the host idle must find the request in the counts.
+	done := c.track(method)
+	s.spawn(func() {
+		err := c.send(ctx, method, params, result)
+		done()
+		res <- err
+	})
 	sl, err := s.park(waits{res: res, limit: t.C()}, true)
 	switch sl {
 	case slotRes:
