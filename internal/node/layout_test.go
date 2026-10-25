@@ -56,9 +56,11 @@ var (
 	}
 
 	// randomnessExceptions may import math/rand: the crash model draws its
-	// clones from a *rand.Rand that the test injects.
+	// clones from a *rand.Rand that the test injects, and the engine-layer
+	// fixture makes that source and the engine's from the seed a test names.
 	randomnessExceptions = []string{
 		"internal/node/fsx/fsxtest",
+		"internal/node/testkit/harness",
 	}
 
 	// cryptoRandDirs may import crypto/rand: the composition root hands its
