@@ -165,13 +165,12 @@ func TestReportsReachTheServer(t *testing.T) {
 	if err := c.Report(ctx, "paused", "create.after-native"); err != nil {
 		t.Fatalf("Report: %v", err)
 	}
-	select {
-	case r := <-conn.Reports():
-		if r.Name != "paused" || r.Detail != "create.after-native" {
-			t.Fatalf("report %+v", r)
-		}
-	case <-ctx.Done():
-		t.Fatal("the report did not arrive")
+	r, err := conn.NextReport(ctx)
+	if err != nil {
+		t.Fatalf("the report did not arrive: %v", err)
+	}
+	if r.Name != "paused" || r.Detail != "create.after-native" {
+		t.Fatalf("report %+v", r)
 	}
 }
 
