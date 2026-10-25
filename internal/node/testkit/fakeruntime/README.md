@@ -29,7 +29,7 @@ A session is driven through `Session`, and sessions are made and found through a
 | `New(Config)`, `Runtime` | The in-process runtime. `Create`, `Find`, `SetPlan`, `StartTurn`, `EndTurn`, `KillNative`, `Idle`, `Close`. |
 | `Session`, `Launcher`, `Controller`, `Watcher` | The interfaces. A watcher gets `TurnStarted`, `TurnEnded` and `ToolResult` one at a time and in order. |
 | `TurnPlan`, `TurnAction`, `ActionRunner`, `ActionResult`, `SessionInfo` | What the model does inside a turn, and who does it. |
-| `ExecRunner` | An `ActionRunner` that runs a real command with the session's tool access. |
+| `ExecRunner` | An `ActionRunner` that runs a real command with the session's tool access. An `exec` action that names a `frontend` in its arguments is a receive: its output is the page the command printed, and it is recorded like the page of a `recv` action. |
 | `ModelSaw` | The ledger attributes of what a page showed the model, one entry per message. |
 | `Event`, `EncodeEvent`, `DecodeEvent`, `ParseRecord` | The session record. |
 | `ProcessSpec`, `RunProcess`, `ProcessLauncher`, `RemoteController`, `ProcessInfo` | The process shape. |

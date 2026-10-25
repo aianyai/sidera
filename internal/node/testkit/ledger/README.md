@@ -19,7 +19,7 @@ code under test, `fsx` included.
 | `Writer.Append(kind, attrs)` | Numbers, stamps, validates and stores one entry. |
 | `Memory.SetStep`, `Dir.SetStep` | The script step the fixture announces; entries written afterwards carry it. |
 | `Memory.Log`, `ReadDir` | Read everything back, validated, as a `Log`. |
-| `Log.Entries`, `Kind`, `Writer`, `Select`, `Count`, `Steps` | Queries. |
+| `Log.Entries`, `Kind`, `Writer`, `Select`, `Count`, `Steps`, `PIDs` | Queries. `PIDs` lists the processes that wrote, for a fixture that ends what a test left behind. |
 | `Kinds`, the `Kind…` constants | The vocabulary of entry kinds. |
 
 ## The format
@@ -67,9 +67,11 @@ would let two readers of one ledger disagree.
   or `fixture.crash` entry names: a killed process may leave a line without its
   newline. A cut line is dropped, a complete one is kept.
 - **Order.** `Memory` keeps the order in which entries arrived, a total order
-  across writers. A directory ledger has only the time (which stands still on a
-  test clock) and the order inside one writer, so judge it by counts and by the
-  order inside a writer.
+  across writers. A directory ledger is ordered by time, then by the script step
+  the fixture announced (steps in the order it ran them), then by writer, process
+  and sequence. Inside one step across writers only the time is known, which
+  stands still on a test clock, so judge it by counts and by the order inside a
+  writer.
 
 ## What the caller must guarantee
 

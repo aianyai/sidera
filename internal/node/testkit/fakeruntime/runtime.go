@@ -555,7 +555,9 @@ func (s *session) finishAction(turn string, action TurnAction, res ActionResult,
 		ev.Error = runErr.Error()
 	case len(res.Output) > 0:
 		ev.Text = string(res.Output)
-		if action.Kind == ActionRecv {
+		// A receive is a recv action, or a command whose action names the front
+		// end it was received through.
+		if action.Kind == ActionRecv || (action.Kind == ActionExec && action.Args["frontend"] != "") {
 			if err := adapterproto.Decode(res.Output, &page); err == nil {
 				isPage = true
 				ev.Lease = string(page.Lease)

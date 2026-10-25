@@ -15,6 +15,7 @@ three operating systems and both tag sets.
 
 | Name | Purpose |
 | ---- | ------- |
+| `StartPipe(ctx, Config)` → `PipeProcess` | `Serve` on a pair of pipes with the shape of a child process (`Stream`, `PID`, `Kill`, `Wait`), for an engine-layer fixture that hands the adapter host a process to supervise. |
 | `Serve(ctx, r, w, Config)` | The adapter side of the protocol over a reader and a writer: in a test process the two ends of an `io.Pipe`, in a program standard input and output. |
 | `Config`, `ManifestOptions`, `DefaultManifestOptions` | What the adapter is given and what it declares. `ManifestOptions` makes both the manifest (`Manifest`, `Encode`, `WritePackage`) and the capabilities it answers `initialize` with, so they cannot disagree. |
 | `Knobs`, `Outcome`, `NewKnobs` | The test's handles. |
@@ -74,7 +75,7 @@ setting. A kind a request does not take is refused when it is set.
 `PauseAt` stops the next request that reaches a named point (`create.after-native`,
 `prompt.after-forward`, `interrupt.after-forward`, `close.after-forward`,
 `start.before-reply`) until `Release`; a point stops one request and is spent.
-`Hang` stops all answers, ping included, and keeps the process and the lock.
+`Hang` stops all answers, ping included, and keeps the process and the lock; it writes its `knob.hit` when the first request is held. In the program, every stop at a pause point is also reported to the fixture over the control channel (`paused`, with the point), so the fixture need not poll.
 `Disconnect` closes the stream. `SetObserved` makes `recv.observed` report the
 result faithfully, cut short (with the manifest's truncation notice) or replaced
 (with its replacement notice). `Availability`, `Persist`, `NativeRequest`, `Ping`

@@ -103,9 +103,11 @@ them.
 
 ## What starts the fake adapter in process
 
-An engine-layer fixture connects an adapter host to `fakeadapter.Serve` through a
-pair of `io.Pipe`: it makes the two pipes, runs `Serve` on one end in a goroutine of
-its own context, and gives the adapter host the other end as the process's standard
-output and input. "Killing" the adapter is cancelling that context and closing both
-ends; the fake runtime is a separate object and survives it, as a native process
-survives its adapter.
+An engine-layer fixture connects an adapter host to the fake adapter through
+`fakeadapter.StartPipe`: it returns a `PipeProcess` with the shape of a child
+process (its output and input as `Stream`, a `PID` of 0, `Kill`, `Wait`), which runs
+`Serve` over a pair of `io.Pipe` in a goroutine of its own. "Killing" the adapter is
+`Kill`, which ends its context and closes both ends; the fake runtime is a separate
+object and survives it, as a native process survives its adapter. The adapter host
+asks for such a process through its launcher interface; the launcher the fixture
+gives it calls `StartPipe` and returns the `PipeProcess`.

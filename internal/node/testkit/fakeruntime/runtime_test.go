@@ -748,3 +748,39 @@ func leakGuard(t *testing.T) {
 		}
 	})
 }
+
+// TestAnExecActionThatNamesAFrontendIsAReceive: in the binary layer the model reads
+// by running the real client, so the action is a command line; naming the front end
+// says that its output is what a receive printed, and it is recorded as one.
+func TestAnExecActionThatNamesAFrontendIsAReceive(t *testing.T) {
+	page := pageWith(leaseA, adapterproto.PageMessage{ID: "m1", From: "alice/agent", Body: "read by a command"})
+	e := newEnv(t, nil)
+	e.runner.answer = func(fakeruntime.TurnAction) (fakeruntime.ActionResult, error) {
+		return fakeruntime.ActionResult{Output: page}, nil
+	}
+	s, w := e.create(1, "sess-1")
+	_ = e.rt.SetPlan(s.Ref(), fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{
+		{Kind: fakeruntime.ActionExec, Args: map[string]string{"argv": `["sidera","recv"]`, "frontend": "mcp"}},
+		{Kind: fakeruntime.ActionExec, Args: map[string]string{"argv": `["sidera","status"]`}},
+	}})
+	if err := e.deliver(s, 2, "go"); err != nil {
+		t.Fatal(err)
+	}
+	w.waitFor(t, "the tool result", func() bool { return len(w.results) == 1 })
+	if r := w.results[0]; r.Lease != leaseA || r.Frontend != "mcp" {
+		t.Fatalf("tool result %+v", r)
+	}
+	if !waitIdle(e.rt) {
+		t.Fatal("not idle")
+	}
+	// The second command printed a page too, but named no front end: it is not a
+	// receive, so there is one model.saw entry and one tool result.
+	if n := len(e.log().Kind(ledger.KindModelSaw)); n != 1 {
+		t.Fatalf("%d model.saw entries, want 1", n)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.results) != 1 {
+		t.Fatalf("%d tool results, want 1", len(w.results))
+	}
+}
