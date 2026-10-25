@@ -253,11 +253,11 @@ reproducible).
 
 Known gaps, each filled in with the feature it belongs to:
 
-- The quarantine of damaged files, and with it the closing of every creating
-  session endpoint whose control record is quarantined, is not wired:
-  `store.Quarantine` takes one session endpoint, and a control signal that failed
-  and was accepted again leaves two. `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
-  is skipped until the store's transaction takes a list.
+- The quarantine of damaged files is not wired. The store decides which session
+  endpoints a quarantined control record closes (every creating one that names it,
+  `store.QuarantineSessions`), so the engine passes the scan and no list;
+  `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
+  is skipped until the engine wires the quarantine.
 - The prompt, block and feedback replays and the four phases of `RecoverDelivery`
   are empty until the features that own them exist.
 - Closing a session endpoint does not yet send `session.close` to the adapter: the
