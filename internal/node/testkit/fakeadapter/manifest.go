@@ -99,8 +99,10 @@ func DefaultManifestOptions() ManifestOptions {
 	}
 }
 
-func exeSuffix() string {
-	if runtime.GOOS == "windows" {
+func exeSuffix() string { return exeSuffixOn(runtime.GOOS) }
+
+func exeSuffixOn(goos string) string {
+	if goos == "windows" {
 		return ".exe"
 	}
 	return ""

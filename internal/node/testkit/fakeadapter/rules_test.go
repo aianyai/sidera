@@ -347,6 +347,14 @@ func TestTheAdapterProgramStartsFromTheConfigFileOfItsArguments(t *testing.T) {
 	}
 }
 
+func TestTheExtensionOfAnExecutableDependsOnTheOperatingSystem(t *testing.T) {
+	for goos, want := range map[string]string{"windows": ".exe", "linux": "", "darwin": ""} {
+		if got := fakeadapter.ExeSuffixOn(goos); got != want {
+			t.Errorf("ExeSuffixOn(%q) = %q, want %q", goos, got, want)
+		}
+	}
+}
+
 func TestTheDefaultProgramHasTheExtensionOfAnExecutableOfThePlatform(t *testing.T) {
 	// A path that names a program is used as it is, and Windows starts only a file
 	// that has an extension.

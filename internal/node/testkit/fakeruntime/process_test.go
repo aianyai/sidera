@@ -438,11 +438,12 @@ func TestGoldenProcessSpecAndInfo(t *testing.T) {
 		}
 	}
 	for name, bad := range map[string]string{
-		"a spec without directories":                    strings.Replace(spec, `"dir":"/tmp/r"`, `"dir":""`, 1),
-		"an unknown member":                             strings.Replace(spec, `"seed"`, `"extra":1,"seed"`, 1),
-		"a negative clock":                              strings.Replace(spec, `1792832400000`, `-1`, 1),
-		"no control address (a process nobody can end)": strings.Replace(spec, `"control":"127.0.0.1:5555"`, `"control":""`, 1),
-		"an unknown action in the first turn":           strings.Replace(spec, `"first_turn":{"manual_start":true}`, `"first_turn":{"actions":[{"kind":"dance"}]}`, 1),
+		"a spec without directories": strings.Replace(spec, `"dir":"/tmp/r"`, `"dir":""`, 1),
+		"an unknown member":          strings.Replace(spec, `"seed"`, `"extra":1,"seed"`, 1),
+		"a negative clock":           strings.Replace(spec, `1792832400000`, `-1`, 1),
+		"a clock that starts at zero, which is a field left out read as 1970": strings.Replace(spec, `1792832400000`, `0`, 1),
+		"no control address (a process nobody can end)":                       strings.Replace(spec, `"control":"127.0.0.1:5555"`, `"control":""`, 1),
+		"an unknown action in the first turn":                                 strings.Replace(spec, `"first_turn":{"manual_start":true}`, `"first_turn":{"actions":[{"kind":"dance"}]}`, 1),
 	} {
 		if _, err := fakeruntime.DecodeProcessSpec([]byte(bad)); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -748,8 +749,9 @@ func TestSetFirstTurnGoesToTheAdaptersOfTheFixture(t *testing.T) {
 func TestAProcessLauncherNeedsTheControlAddress(t *testing.T) {
 	e := newProcEnv(t)
 	l := &fakeruntime.ProcessLauncher{Binary: e.launcher.Binary, Dir: e.dir, LedgerDir: e.ledgers, Seed: 9, Now: e.clock.Now}
-	if _, err := l.Create(context.Background(), fakeruntime.CreateRequest{Attempt: attempt(1), Endpoint: "s", Preset: "p", FirstAttempt: attempt(1), FirstPrompt: "x"}); err == nil {
-		t.Fatal("a launcher without a control address started a process nobody can end")
+	_, err := l.Create(context.Background(), fakeruntime.CreateRequest{Attempt: attempt(1), Endpoint: "s", Preset: "p", FirstAttempt: attempt(1), FirstPrompt: "x"})
+	if err == nil || !strings.Contains(err.Error(), "control address") {
+		t.Fatalf("Create = %v: a launcher without a control address must refuse before it starts a process nobody can end", err)
 	}
 }
 
