@@ -202,7 +202,24 @@ func TestEndpointSendRules(t *testing.T) {
 		}, "to[0]", false},
 		{"content type required", func(p *adapterproto.SendParams) { p.ContentType = "" }, "content_type", false},
 		{"content type over the limit", func(p *adapterproto.SendParams) { p.ContentType = repeat("c", 129) }, "content_type", false},
-		{"body may be empty", func(p *adapterproto.SendParams) { p.Body = "" }, "", false},
+		{"a message has a body", func(p *adapterproto.SendParams) { p.Body = "" }, "body", false},
+		{"a one byte body", func(p *adapterproto.SendParams) { p.Body = "x" }, "", false},
+		{"a session.create without a body has no initial message", func(p *adapterproto.SendParams) {
+			p.Body = ""
+			p.Control = &adapterproto.Control{Signal: "session.create", Params: &adapterproto.ControlParams{Preset: "default"}}
+		}, "", false},
+		{"a session.close without a body", func(p *adapterproto.SendParams) {
+			p.Body = ""
+			p.Control = &adapterproto.Control{Signal: "session.close"}
+		}, "", false},
+		{"a session.interrupt without a body", func(p *adapterproto.SendParams) {
+			p.Body = ""
+			p.Control = &adapterproto.Control{Signal: "session.interrupt"}
+		}, "", false},
+		{"an endpoint.status without a body", func(p *adapterproto.SendParams) {
+			p.Body = ""
+			p.Control = &adapterproto.Control{Signal: "endpoint.status"}
+		}, "", false},
 		{"reply to optional", func(p *adapterproto.SendParams) { p.ReplyTo = "" }, "", false},
 		{"reply to over the limit", func(p *adapterproto.SendParams) { p.ReplyTo = adapterproto.MessageID(repeat("m", 129)) }, "reply_to", false},
 		{"thread optional", func(p *adapterproto.SendParams) { p.Thread = "" }, "", false},

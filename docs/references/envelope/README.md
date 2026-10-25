@@ -322,6 +322,11 @@ which may still admit it.
   malformed list. The cost is that a local Agent cannot answer a feedback
   message; feedback is a notice, and the Agent acts by sending a new message
   to the endpoint the feedback concerns.
+- **A message has a non-empty body.** The channel carries messages for agents,
+  and an empty message carries nothing, so the envelope refuses one rather than
+  store, sign and deliver it. The adapter protocol states the same rule for
+  `endpoint.send` (schema and `adapterproto` validation), so an adapter learns
+  of it from its own SDK and not from a refusal by the node.
 - **Control signal: one recipient, no body but for create.** A control signal is
   executed by one adapter and produces one reply; several recipients would bundle
   several results under one id. Body and content type on the other signals would

@@ -146,7 +146,7 @@ func (p ControlParams) Validate() error { return at("preset", ValidatePresetName
 
 // Control marks a message as a control signal for the target endpoint instead of
 // text for its agent. The body of a session.create message is its initial
-// message; an empty body means none.
+// message; an empty body means none. The other signals need no body.
 type Control struct {
 	Signal ControlSignal `json:"signal"`
 	// Params is present for session.create and absent for the other signals.
@@ -176,7 +176,9 @@ type SendParams struct {
 	Endpoint    EndpointRef `json:"endpoint"`
 	To          []Address   `json:"to"`
 	ContentType string      `json:"content_type"`
-	// Body may be empty.
+	// Body is what the message says. A message has a body: it is not empty unless
+	// Control is set, where it is the initial message of a session.create (empty
+	// means none) and is not needed for the other signals.
 	Body    string    `json:"body"`
 	ReplyTo MessageID `json:"reply_to,omitempty"`
 	Thread  string    `json:"thread,omitempty"`
@@ -189,7 +191,9 @@ type SendParams struct {
 	IdempotencyKey string   `json:"idempotency_key,omitempty"`
 }
 
-// Validate checks the parameters. A control signal has exactly one recipient. Address syntax, the number of recipients that
+// Validate checks the parameters. A message without a control signal has a
+// non-empty body, as the envelope the daemon builds from it requires. A control
+// signal has exactly one recipient. Address syntax, the number of recipients that
 // is acceptable and the size of the body are judged by the daemon, which refuses
 // with CodeInvalidAddress or CodeSendRefused.
 func (p SendParams) Validate() error {
@@ -200,6 +204,7 @@ func (p SendParams) Validate() error {
 		c.field("to"+index(i), a.Validate())
 	}
 	c.field("content_type", strLen(p.ContentType, 1, MaxIdentLen))
+	c.ok(p.Control != nil || p.Body != "", "body: a message has a body")
 	if p.ReplyTo != "" {
 		c.field("reply_to", p.ReplyTo.Validate())
 	}

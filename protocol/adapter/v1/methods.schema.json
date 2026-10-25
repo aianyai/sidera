@@ -564,12 +564,13 @@
       }
     },
     "endpoint.send.params": {
-      "description": "The body of a session.create control message is its initial message; an empty body means none. A control signal has exactly one recipient: it is executed once by one adapter and has one reply.",
+      "description": "A message has a body, which is not empty. The exception is a message that carries a control signal: the body of a session.create is its initial message and an empty body means none, and the other signals need no body. A control signal has exactly one recipient: it is executed once by one adapter and has one reply.",
       "type": "object",
       "required": ["endpoint", "to", "content_type", "body"],
       "additionalProperties": false,
       "if": { "required": ["control"] },
       "then": { "properties": { "to": { "maxItems": 1 } } },
+      "else": { "properties": { "body": { "minLength": 1 } } },
       "properties": {
         "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
         "to": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "types.schema.json#/$defs/Address" } },

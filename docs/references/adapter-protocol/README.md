@@ -337,6 +337,18 @@ only says the request was not understood or not allowed.
 | `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type`, `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
 | `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
 
+**The body of `endpoint.send`.** A message has a body, and the body is not empty:
+the channel carries messages for agents, and an empty message carries nothing.
+The envelope, the signed wire format, already refuses a message without a body,
+so the protocol must not accept what every node will refuse: the schema gives
+`body` `minLength: 1` unless `control` is present, and `SendParams.Validate`
+refuses an empty body in the same case. The member itself stays required, so the
+wire shape is unchanged. A message that carries a control signal is judged by
+the signal: the body of a `session.create` is its initial message and an empty
+body means none; the other signals need no body (see the control signals
+below). `TestEndpointSendRules` (the rows on the body) and the golden message
+`invalid/endpoint-send--body-empty.json` hold both sides to the rule.
+
 The `display_name` of `endpoint.register` is 1 to `MaxDisplayName` (128)
 characters and a `description`, when given, 1 to `MaxDescription` (1024); a
 character is a Unicode code point, not a byte. The two constants are exported so
