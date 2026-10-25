@@ -29,7 +29,10 @@ no clock but the one its knobs were given.
   loopback, and nothing else in the package exports a way to make or change an
   `Origin`. A transport of another package can make `RemoteOrigin` only, which is
   never local, whatever node it names. A test reads the package source to keep
-  this true.
+  this true: `localOrigin` is mentioned nowhere outside `loopback.go` and there
+  only as a direct argument of the handler's `Inbound` or `Pull`, and no literal
+  of `Origin` with elements, conversion to it or other name for it exists outside
+  `origin.go`. The scan reads syntax; it does not police `unsafe` or reflection.
 - **The loopback reaches only its own node.** A call to another node is
   `ErrUnreachable` without a knob.
 - **A receipt is the target's.** An error from the `Handler` passes through
@@ -74,7 +77,8 @@ no clock but the one its knobs were given.
 
 `knobs_test.go` has `TestKnobs`, one row per knob and one row for none, each
 asserting its effect and, through the rig, the hit counts of every knob;
-`origin_test.go` has the rule on the local origin, including the scan of the
-package source; `fuzz_test.go` sends arbitrary bytes through a loopback with the
+`origin_test.go` has the rule on the local origin and the scan of the package
+source, `originscan_test.go` the scan itself and the synthetic sources it must
+report; `fuzz_test.go` sends arbitrary bytes through a loopback with the
 replay and the hold armed, the one place the package reads untrusted input;
 `leak_test.go` the check that no call is left running after a test.

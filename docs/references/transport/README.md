@@ -66,7 +66,21 @@ observer:
   Making the field unexported and the only constructor unexported, and called from
   the loopback alone, makes the rule structural: a later transport cannot get it
   wrong because it has no way to say it. A test reads the source to keep it so,
-  because the compiler cannot see a second call site inside the package.
+  because the compiler cannot see a second call site inside the package. The scan
+  fails on: any mention of `localOrigin` outside `loopback.go`, called or used as
+  a value; inside `loopback.go`, any use of it but as a direct argument of the
+  handler's `Inbound` or `Pull` call, so it is never kept, returned or handed to
+  another handler; outside `origin.go`, any composite literal of `Origin` with
+  elements (keyed, unkeyed or with its type left out in a slice or map), any
+  conversion to `Origin` and any other name declared for it; any assignment to
+  the `local` field or a literal that sets it to anything but false; and any
+  exported function, method, variable or field that builds, holds or returns an
+  `Origin` other than `RemoteOrigin`. It cannot catch what source text does not
+  show: `unsafe` or reflection writing the unexported field, or an edit that
+  weakens the scan itself. It reads syntax, not types. The review of the
+  package's local interface has to count those limits. Each rule has a synthetic
+  source that the scan must report, and the legitimate shape must pass, so a scan
+  that reports everything or nothing fails its own test.
 - **Receipts are typed records, not bytes.** The envelope is bytes because the
   sender signs and the target judges exactly what was sent. A receipt is only
   ever read by the verifier of the envelope package, which takes `record.Record`;
@@ -114,6 +128,7 @@ observer:
 | One row per knob, asserting effect and hit | `TestKnobs` in `knobs_test.go` |
 | Knobs are per `Knobs` value, nil means none, safe while calls run, named | `TestKnobsAreNotSharedBetweenLoopbacks`, `TestNilKnobsMeansNoFaults`, `TestKnobsAreSafeToDriveWhileCallsRun`, `TestKnobNamesAreDistinct` |
 | The local origin: the loopback makes it, a remote transport cannot, and the source scan | `TestLoopbackMakesTheLocalOrigin`, `TestRemoteOriginIsNeverLocal`, `TestNoCallerCanClaimTheLocalOrigin` in `origin_test.go` |
+| What the source scan reports, one synthetic source per rule, and that the legitimate shape passes | `originViolations` and `TestOriginScanCatchesWhatItNames` in `originscan_test.go` |
 | The loopback's own reading of the bytes it carries, with the replay and the hold armed | `FuzzSendWithKnobsArmed` in `fuzz_test.go` |
 | No call left running after a test | `leak_test.go` |
 
