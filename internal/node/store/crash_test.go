@@ -187,14 +187,26 @@ func (sc *scenario) newSimFor(t *testing.T, r *rig) *sim {
 	return s
 }
 
-// crashKinds are the disks a crash at one instant can leave.
+// seededPowerLosses are the kinds of crash that draw their fate from a random
+// source: two draws of the distribution of the crash model.
+var seededPowerLosses = []string{"power-loss-a", "power-loss-b"}
+
+// crashKinds are the disks a crash at one instant can leave. The process crash
+// and the worst power loss draw nothing and are always taken. The seeded power
+// losses are left out under the race detector: a walk is single-threaded on a
+// file system of its own, so the detector finds nothing there and only
+// multiplies the cost of every crash state; the runs without it take them.
 func crashKinds(m *fsxtest.Mem, rng *rand.Rand) []crashState {
-	return []crashState{
+	kinds := []crashState{
 		{name: "process-crash", mem: m.Clone()},
 		{name: "worst-power-loss", mem: m.CrashCloneWorst(), power: true},
-		{name: "power-loss-a", mem: m.CrashClone(rng), power: true},
-		{name: "power-loss-b", mem: m.CrashClone(rng), power: true},
 	}
+	if !raceEnabled {
+		for _, name := range seededPowerLosses {
+			kinds = append(kinds, crashState{name: name, mem: m.CrashClone(rng), power: true})
+		}
+	}
+	return kinds
 }
 
 type crashState struct {
@@ -314,7 +326,10 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 		// is taken at them.
 		inner[len(inner)-2].at, inner[len(inner)-2].model = p, "process-crash"
 		inner[len(inner)-1].at, inner[len(inner)-1].model = p, "worst-power-loss"
-		for _, m := range []string{"power-loss-a", "power-loss-b"} {
+		if raceEnabled {
+			return
+		}
+		for _, m := range seededPowerLosses {
 			inner = append(inner, crashState{name: fmt.Sprintf("%s, then a power loss (%s) before %v", where, m, p), mem: rr.mem.CrashClone(seeded), power: true, at: p, model: m})
 		}
 	}

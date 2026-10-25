@@ -701,6 +701,13 @@ name order, so a seed fixes the result. `CrashCloneWorst()` draws nothing and
 keeps exactly what was synced: it is the deterministic way to show that a
 missing sync loses data.
 
+The store's crash walks take all four kinds of crash at every point (a process
+crash, the worst power loss and two seeded power losses), except under the race
+detector, where they take the first two. A walk is single-threaded on a private
+in-memory file system, so the detector adds cost there and no coverage, and a
+race run of the store would otherwise approach the limit of a test binary; the
+runs without `-race` still take every kind.
+
 ### Counter-example check
 
 A model that cannot catch the classic bugs proves nothing. The test writes
@@ -977,7 +984,7 @@ so that the double cannot drift from what it stands for.
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
-| the transactions | `internal/node/store/write.go` | `write_test.go`, `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
+| the transactions | `internal/node/store/write.go` | `write_test.go`, `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
 | recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `resume_scenarios_test.go` (the resumption of each kind of unfinished quarantine, walked from the state a crash leaves), `TestCleanScenariosLeaveNoRecoveryWork` |
 | sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` (`TestArchiveSweepWritesTheFloorOfEverySenderAndTargetOfTheRecordsItRemoves`, `TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten`), `sweep_endpoint_test.go` |
 | archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |

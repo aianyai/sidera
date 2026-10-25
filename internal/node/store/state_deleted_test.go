@@ -111,6 +111,7 @@ func TestLayoutRuleConvergesFromEveryCrashState(t *testing.T) {
 	r := openRig(t, mem)
 	rng := newRand(5)
 	var states []crashState
+	perPoint := len(crashKinds(fsxtest.NewMem(), newRand(1)))
 	r.rec.on = func(p fsx.Point, k txn.Kind) {
 		states = append(states, crashKinds(r.mem, rng)...)
 		if k != txn.Recovery {
@@ -118,7 +119,7 @@ func TestLayoutRuleConvergesFromEveryCrashState(t *testing.T) {
 		}
 	}
 	runLayout(t, r)
-	if len(states) < 4*len(store.StateDirs()) {
+	if len(states) < perPoint*len(store.StateDirs()) {
 		t.Fatalf("only %d crash states for %d directories", len(states), len(store.StateDirs()))
 	}
 	for _, cs := range states {

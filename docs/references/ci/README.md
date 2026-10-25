@@ -9,7 +9,9 @@ The workflow is [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml).
 The workflow runs on every push to `main`, on every pull request and on manual
 dispatch. Every step fails its job on any failure; there is no
 `continue-on-error`; the only tests skipped are the power-loss tests on macOS
-and Windows (see below), and the suite runs without `-short`.
+and Windows (see below), and the suite runs without `-short`. The `-race` steps
+run every test, but the crash walks of `internal/node/store` take two kinds of
+crash instead of four there (see below).
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
@@ -61,6 +63,19 @@ to the workflow.
   dependency that needs cgo must fail here and not at release time. The `test`
   job's `-race` is the one place cgo is on: the race detector needs it and a C
   compiler, which all three hosted runner images carry.
+- **Race runs take fewer crash states in the store's crash walks**: the walks of
+  `internal/node/store` replay every crash point of every transaction, and each
+  scenario is single-threaded on an in-memory file system of its own, so the
+  race detector finds nothing there and only multiplies the cost of every crash
+  state. Under `-race` (the `race` build tag, which the test package reads
+  through `raceEnabled`) a walk takes the two kinds of crash that draw nothing,
+  the process crash and the worst power loss, and leaves out the two seeded power
+  losses; the steps without `-race` take all four, so no kind of crash goes
+  unrun. Every other test, the concurrent ones included, runs in both modes. A
+  `-skip` pattern could not express this: the kinds of crash are taken in a loop
+  inside one test, not as subtests. The reason is the per-package limit: `-timeout`
+  covers one test binary, and without the narrowing the store's race run took
+  79% of it on the slowest job (the baseline below), with more store tests due.
 - **Race and plain runs are separate steps**: the race detector changes timing
   and memory use; a failure in one mode must be visible without the other.
 - **Why a second tagged job**: tagged files are not compiled without their tag,
@@ -118,6 +133,22 @@ to the workflow.
   matrix does not use the cache, because its five jobs would try to save the same
   entry.
 
+### Observed baseline
+
+The first run on `main` (commit `2196b29`, 2026-10-25) took this long for the
+package `internal/node/store`, per job, before the race runs were narrowed:
+
+| Runner | plain | with tags | `-race` | `-race` with tags |
+| ------ | ----- | --------- | ------- | ----------------- |
+| ubuntu | 297 s | 497 s | 1342 s | 1414 s |
+| windows | 328 s | 415 s | 1187 s | 1147 s |
+| macos | 235 s | 272 s | 990 s | 1119 s |
+
+The limit is 1800 s per test binary, so the slowest step used 79% of it. Almost
+all of that time is the crash walks. Re-measure after a change to the store's
+tests with
+`GOMAXPROCS=4 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./internal/node/store`.
+
 ## Where
 
 - Workflow: `.github/workflows/ci.yml`.
@@ -131,7 +162,7 @@ From the repository root (zsh and bash alike; on Windows use Git Bash):
 gofmt -l .   # must print nothing
 go vet ./... ./sdk/go/...
 go test -count=1 -timeout 30m ./... ./sdk/go/...
-go test -race -count=1 -timeout 30m ./... ./sdk/go/...
+go test -race -count=1 -timeout 30m ./... ./sdk/go/...   # the store's crash walks take two kinds of crash here
 
 # the tagged job; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
 go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
