@@ -1,9 +1,7 @@
 package keys
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -156,10 +154,12 @@ type Work struct {
 // before any repair, and is the owner's to resume. A set of files that is
 // damaged or inconsistent is an error, not an empty answer.
 func RecoveryWork(r fsx.Reader) ([]Work, error) {
-	if _, err := r.Stat(Dir); errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	} else if err != nil {
+	exists, err := fsx.Exists(r, Dir)
+	if err != nil {
 		return nil, &FileError{Path: Dir, Err: err}
+	}
+	if !exists {
+		return nil, nil
 	}
 	if done, err := Initialized(r); err != nil || !done {
 		return nil, err

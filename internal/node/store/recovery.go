@@ -3,7 +3,6 @@ package store
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"path"
 	"slices"
 	"sort"
@@ -28,10 +27,12 @@ import (
 func MissingStateDirs(r fsx.Reader) ([]string, error) {
 	var out []string
 	for _, d := range StateDirs() {
-		if _, err := r.Stat(d); errors.Is(err, fs.ErrNotExist) {
-			out = append(out, d)
-		} else if err != nil {
+		exists, err := fsx.Exists(r, d)
+		if err != nil {
 			return nil, err
+		}
+		if !exists {
+			out = append(out, d)
 		}
 	}
 	return out, nil
