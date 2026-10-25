@@ -104,6 +104,15 @@ What the owner can do to the directory afterwards, and what follows:
 - Two results are not the same after `state/` is deleted: a close of an endpoint
   that is gone says it is unknown, where the first answer said closed. The rule
   that one identifier has one result holds for every result that is still stored.
+- Two results are not the same after a crash between the effect and its result,
+  either: a close commits with its first write and stores its result last, so a
+  crash after the effect is durable and before the result is written leaves the
+  endpoint closed and no result under that identifier. The request sent again is
+  carried out again and finds the endpoint closed already, so it answers
+  `already_closed` where the first answer, which never arrived, would have said
+  `closed`. The effect is written before the result because that is the only order
+  that cannot leave a result for an effect that did not happen; an operation is
+  written so that doing it again is harmless.
 
 ### The instance lock and the permissions
 
