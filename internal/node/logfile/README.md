@@ -34,7 +34,7 @@ files only through the `fsx.FS` it is handed.
 - **One rotation.** A log and its rotation (`<name>.1`) are all there is. A write
   that would take a file that already holds something past the threshold makes the
   file the rotation, replacing the older one, and starts a new file; a line longer
-  than the threshold goes whole into a file of its own. A line is never cut, and
+  than the threshold goes whole into a file of its own. The rotation never cuts a line, and
   the two files never hold more than twice the threshold plus one line.
 - **The threshold follows the total, and the handle alone applies the rule.**
   `Threshold` shares the total among two files for the daemon and for each enabled
@@ -44,9 +44,13 @@ files only through the `fsx.FS` it is handed.
   write: the daemon and the adapter host open their logs by name and never count
   instances or divide anything, so the rule has one home and two callers cannot
   disagree about the share.
-- **A failed write is the caller's to drop.** `Write` returns the error and keeps
-  nothing of the line; the next write goes on. A failed rotation opens the file
-  again as it was, so a failing disk never leaves the log without a file.
+- **A failed write is the caller's to drop.** `Write` returns the error and the next
+  write goes on. A failed rotation writes nothing of the line and opens the file
+  again as it was, so a failing disk never leaves the log without a file. A write
+  that the disk took in part leaves that part in the file: it is not removed, and
+  the bytes written count towards the size, so the file may end with a part of a
+  line and the next line follows it. That is the one way a line is cut, and the
+  rotation never cuts one.
 
 ## What the caller must guarantee
 
@@ -58,7 +62,7 @@ files only through the `fsx.FS` it is handed.
 ## Where the tests are
 
 `logfile_test.go`: the names the handle accepts, that no step of a log is a crash
-point, the rotation and its bound, that a line is never cut, the threshold read at
+point, the rotation and its bound, that the rotation never cuts a line, the threshold read at
 every write and the size of a reopened log, concurrent writers, the removal, the
 numbers of `Threshold` worked out by hand, the share of the budget that two logs of
 one handle follow as the number of instances changes, the defaults of a `Budget`, a

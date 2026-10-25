@@ -164,8 +164,10 @@ func (l *Log) open() error {
 // Write appends p, one line. When the file already holds something and the line
 // would take it past the threshold, the file becomes the rotation, replacing the
 // older one, and the line starts a new file; a line longer than the threshold is
-// written whole to a file of its own. A failed write is returned and keeps nothing
-// of the line; the next write goes on.
+// written whole to a file of its own. A write that fails after the rotation, or a
+// rotation that fails, is returned and the next write goes on; a rotation that
+// failed wrote nothing of the line, but a write the disk took in part leaves that
+// part in the file, where it counts towards the size.
 func (l *Log) Write(p []byte) (int, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
