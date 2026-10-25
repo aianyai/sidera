@@ -30,8 +30,12 @@ host, the engine's workers, the recovery entry) waits without limit.
 the caller is told `storage_full` when the volume is full and `storage_unavailable`
 otherwise, and memory stays as it was. A failure from the commit point on is fatal:
 the command is answered `storage_fatal`, the loop stops, `Err` returns the error,
-and the process is to exit and rescan. The classification is `txn.IsFatal`; the
-engine adds only the one question whether a failed write was for lack of space.
+and the process is to exit and rescan. The classification is `txn.IsFatal`, and
+whether a failed write was for lack of space is `fsx.IsNoSpace`, which alone knows
+the operating system codes (pending verification by CI on main for Windows). The
+"no space" case of `TestAFailedWriteIsBackpressureAndMemoryKeepsWhatTheDiskHolds`
+injects `fsxtest.DiskFull`, the platform's own full-disk error, so it means the
+same on every platform.
 
 **The schedule.** One min-heap of entries keyed by (kind, id), one timer on the
 injected clock. Entries due together run in the order they were set. A periodic
@@ -253,8 +257,6 @@ Known gaps, each filled in with the feature it belongs to:
   is skipped until the store's transaction takes a list.
 - The prompt, block and feedback replays and the four phases of `RecoverDelivery`
   are empty until the features that own them exist.
-- `isNoSpace` for Windows (`nospace_windows.go`) is pending verification by CI on
-  main.
 - Closing a session endpoint does not yet send `session.close` to the adapter: the
   outcome says `closing`, and the release of the native session comes with the
   creation of sessions, which is the feature that makes one.

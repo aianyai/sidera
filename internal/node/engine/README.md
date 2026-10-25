@@ -64,6 +64,7 @@ commands and add their methods to this list.
   `ReasonStorageUnavailable`, and memory stays as it was. A fatal error stops the
   loop for good (`PhaseFailed`, `Err`), answers the command `ReasonStorageFatal`
   and refuses the rest; the composition root exits and the next start rescans.
+  Whether a volume is full is `fsx.IsNoSpace`'s to say, not the engine's.
 - **The cap of endpoints is the node's.** An endpoint that is open or being
   created, of any kind, takes a place against `publication.MaxEndpointsPerNode`;
   the system endpoint is not registered and takes none. The adapter's own limit
@@ -132,8 +133,6 @@ commands and add their methods to this list.
 - Run the long work of a periodic task outside the loop: a task runs in it, and
   the longest stall of the loop is what an adapter's notifications have to
   outlast.
-- On a platform other than macOS, `isNoSpace` (`nospace_windows.go`) is pending
-  verification by CI on main.
 
 ## Where the tests are
 

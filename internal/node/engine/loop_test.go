@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -145,7 +146,7 @@ func TestAFailedWriteIsBackpressureAndMemoryKeepsWhatTheDiskHolds(t *testing.T) 
 		err  error
 		want engine.Reason
 	}{
-		{"no space", syscall.ENOSPC, engine.ReasonStorageFull},
+		{"no space", fsxtest.DiskFull, engine.ReasonStorageFull},
 		{"an I/O error", syscall.EIO, engine.ReasonStorageUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

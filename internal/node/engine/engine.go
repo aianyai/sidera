@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -726,7 +727,7 @@ func (e *Engine) classify(err error) error {
 			e.fatal = err
 		}
 		return &Refusal{Reason: ReasonStorageFatal, Err: err}
-	case isNoSpace(err):
+	case fsx.IsNoSpace(err):
 		return &Refusal{Reason: ReasonStorageFull, Err: err}
 	case errors.As(err, &te):
 		return &Refusal{Reason: ReasonStorageUnavailable, Err: err}
