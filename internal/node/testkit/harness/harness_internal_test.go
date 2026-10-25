@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -80,19 +81,40 @@ func TestQuiesceRefusesToWaitOnAContextThatIsOver(t *testing.T) {
 // file, which the leak check finds by the marker it is given.
 func leaker(stop chan struct{}) { <-stop }
 
+// earlier is a goroutine that is already running when a check is set up.
+func earlier(stop chan struct{}) { <-stop }
+
 func TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages(t *testing.T) {
-	stop := make(chan struct{})
-	go leaker(stop)
 	rec := &recorder{TB: t}
 	checkNoLeaks(rec, []string{"harness.leaker"}, 100*time.Millisecond)
+	stop := make(chan struct{})
+	go leaker(stop)
 	rec.finish()
 	if len(rec.errs) == 0 {
 		t.Error("the leak check did not see the goroutine that is still running")
 	}
 	close(stop)
 
+	// A goroutine that was running before the check was set up is not the test's.
+	stop = make(chan struct{})
+	go earlier(stop)
+	for len(marked([]string{"harness.earlier"})) == 0 {
+		runtime.Gosched()
+	}
+	rec = &recorder{TB: t}
+	checkNoLeaks(rec, []string{"harness.earlier"}, 100*time.Millisecond)
+	rec.finish()
+	if len(rec.errs) != 0 {
+		t.Errorf("the leak check reported a goroutine that was there before it: %v", rec.errs)
+	}
+	close(stop)
+
+	// A goroutine that ends in time is not reported.
 	rec = &recorder{TB: t}
 	checkNoLeaks(rec, []string{"harness.leaker"}, 2*time.Second)
+	stop = make(chan struct{})
+	go leaker(stop)
+	close(stop)
 	rec.finish()
 	if len(rec.errs) != 0 {
 		t.Errorf("the leak check reported a goroutine that had ended: %v", rec.errs)

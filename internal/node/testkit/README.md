@@ -2,7 +2,8 @@
 
 The test tooling of the runtime packages: stand-ins for what lies outside the daemon
 (an adapter, a native runtime, the record of what happened), the interface of the fake
-agent and the core of the crash-point walk. Read
+agent and its engine backend, the scripts that run in every layer, the engine-layer
+fixture and the core of the crash-point walk. Read
 [`../README.md`](../README.md) for the rules every runtime package follows and
 [`docs/references/testkit/`](../../../docs/references/testkit/README.md) for the
 reasons.
@@ -14,7 +15,7 @@ The packages fall on two sides of one line.
 | Side | Packages | May import |
 | ---- | -------- | ---------- |
 | Third party | [`ledger`](ledger/README.md), [`fakectl`](fakectl/README.md), [`fakeruntime`](fakeruntime/README.md), [`fakeadapter`](fakeadapter/README.md), and the programs `cmd/sidera-fake-adapter`, `cmd/sidera-fake-runtime` | the standard library, `sdk/go/...` and each other |
-| Sidera | [`fakeagent`](fakeagent/README.md), [`crashwalk`](crashwalk/README.md) | anything of the runtime tree and the contract packages |
+| Sidera | [`fakeagent`](fakeagent/README.md), [`fakeagent/engineagent`](fakeagent/engineagent/README.md), [`scenario`](scenario/README.md), [`harness`](harness/README.md), [`crashwalk`](crashwalk/README.md) | anything of the runtime tree and the contract packages, except that `scenario` imports neither the engine nor a fixture |
 
 The third-party side plays programs a stranger would write: an adapter that speaks
 the published protocol, a native runtime that has never heard of Sidera, and the
@@ -22,7 +23,9 @@ ledger that records what they did. They import nothing of the repository but the
 module, so a test against them proves the protocol boundary and not an agreement
 between two internal packages. `imports_test.go` enforces it with `go list -deps`
 for the three operating systems and the tag sets that change the build. The Sidera
-side may know the daemon: it is the part that drives it and judges it.
+side may know the daemon: it is the part that drives it and judges it. `scenario` is
+the exception, kept free of the engine so that one script runs in the engine layer
+(`harness` implements its `Env`) and in the binary layer (whose fixture will).
 
 ## The layers a test can run in
 
@@ -84,6 +87,17 @@ and not sleep. The conditions that are the fakes' to answer:
 
 The conditions that are the daemon's (empty loop, no due timer, empty buffers) are
 checked by the engine.
+
+## Scripts and fixtures
+
+A scenario is a `scenario.Script`: Go code that sets up direct endpoints, runs steps
+(a call, an advance of the clock, a knob) and is judged by the ledger. The driver
+quiesces after every step. A fixture implements `scenario.Env`; the engine-layer
+fixture is [`harness`](harness/README.md), and the agent it hands out is
+[`engineagent`](fakeagent/engineagent/README.md), wrapped so that every call writes
+the ledger entries. What a layer cannot provide yet (an adapter host, a runtime
+that sessions can use) is an error that is `scenario.ErrNotAvailable`, never a
+stand-in.
 
 ## Identifiers of crash points
 

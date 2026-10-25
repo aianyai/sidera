@@ -15,14 +15,20 @@ document gives the reasons and says where the tests are.
 | `fakeruntime` | A stand-in for a native agent runtime: sessions, a session record, turns that start and end only when a script says so, in process or as a program of its own per session. |
 | `fakeadapter` | An adapter that speaks the adapter protocol as a third party would, drives a fake runtime, and does what its knobs say; in process over `io.Pipe` or as a program. |
 | `fakeagent` | The interface of the fake agent (send, reply, receive, acknowledge, control, declare, status), its results and errors, and a wrapper that writes the ledger entries around every call. |
+| `fakeagent/engineagent` | The engine-layer backend of the fake agent: the engine's service interface called in process. The methods the engine does not offer yet answer as an unknown method. |
+| `scenario` | The language of test scripts, the same in every layer: scripts, the driver, the environment interface a fixture implements, and the judgements that read the ledger. |
+| `harness` | The engine-layer fixture: the engine on the real store, configuration and transaction layer over the in-memory file system, one test clock, the ledger, the agents, quiet, process and power-loss crashes and restarts, fault injection. |
 | `crashwalk` | The core of the crash-point walk: which points to kill at in each mode, how a rerun is held to its recording, scenario budgets, coverage of the declared writes, and the crashing of recovery itself. |
 
 The first four, with the two programs, are the **third-party side**: they import the
-standard library, the SDK module and each other and nothing else. `fakeagent` and
-`crashwalk` are the **Sidera side** and may import any runtime or contract package.
+standard library, the SDK module and each other and nothing else. `fakeagent`,
+`engineagent`, `scenario`, `harness` and `crashwalk` are the **Sidera side** and may
+import any runtime or contract package; `scenario` alone imports neither the engine
+nor a fixture.
 
-The engine-layer fixture, the backends of the fake agent and the binary-layer fixture
-build on these packages and are not part of them.
+The backends of the fake agent that run the command-line client and speak to the MCP
+server, the binary-layer fixture and the backends of the crash walk build on these
+packages and are not part of them.
 
 ## Why
 
@@ -128,6 +134,35 @@ build on these packages and are not part of them.
   twice and another never, silently. The order is therefore the scenarios by name and,
   inside one, the points sorted by key and hit number, then the step boundaries, then the
   recovery cases by the write they name.
+- **One script runs in both layers.** The environment a step uses is an interface in a
+  package that imports no engine, and results and errors are the types of `fakeagent`,
+  so the binary-layer fixture can implement the same interface over the built program
+  and a scenario written once is compared across layers. A script's fields are `Name`
+  and `Steps`, so the walk's interface is a view the script returns, not a set of
+  methods on it.
+- **Judgements read the ledger, and live where both layers can reach them.** A judgement
+  that needed the daemon's own state would agree with the daemon's bugs. They are in
+  `scenario`, not in `ledger` (which only records) and not in a fixture (which would tie
+  them to one layer). A script is held to all of them unless it waives one with a reason,
+  so that adding a rule tightens every script. A part shown to the model again is
+  judged by the count of sightings without the possible-duplicate mark, because the
+  order of entries across writers is not known on a test clock.
+- **A layer that lacks a capability says so.** The engine layer has no adapter host and
+  no way to create a session yet; `Env` returns an error that is `ErrNotAvailable`
+  for them. A stand-in would make a script pass for what it did not exercise, and the
+  failure is what tells the stream that adds the capability to remove the error.
+- **The node is made by the program's own code,** through the `init` plan and the install
+  and enable entries, on a disk copied from one made per test binary. A hand-written disk
+  would let the fixture and the program disagree about a format.
+- **A crash takes the disk before it touches the process.** The copy of the disk is the
+  crash; the old process is stopped in the background and writes to a disk nobody reads.
+  Halting the file system instead would need a rule that never fires, which the fault
+  wrapper's own check forbids. Power loss is the seeded model of the file system, with
+  a fixed second word, so a seed is a disk.
+- **The back end answers a method the engine lacks as an unknown method.** The agent
+  interface has no category for "not yet", and adding one would change its table; an
+  unknown method is what the server would say, and the scripts already handle it. A
+  skipped test keeps the question of a dedicated category in sight.
 - **Rejected: a text language for scenarios, an assertion library, a goroutine-leak
   library.** Scenarios are Go code so the reader reads what runs and the compiler checks
   names; the checks are a few lines of the standard library; the leak check is a scan of
@@ -143,6 +178,9 @@ build on these packages and are not part of them.
 | Runtime | `internal/node/testkit/fakeruntime`, `cmd/sidera-fake-runtime` | `TestTurnsEndOnlyWhenTheScriptSaysSoAndTimeNeverEndsOne`, `TestPromptDuringATurnIsRefusedAsBusy`, `TestPromptIsDeliveredAtMostOncePerAttempt`, `TestRecvActionRecordsWhatTheModelSawAndReportsTheToolResult`, `TestKilledNativeStopsReportingAndLeavesTheRecordReadable`, `TestAnExecActionThatNamesAFrontendIsAReceive`, `TestARecvPartActionIsAReceive`, `TestAReceiveThatPrintsNoPageIsAnErrorInTheRecord`, `TestTheFirstPromptStartsTheFirstTurnWhenTheAdapterTakesCharge`, `TestARuntimeProcessIsBusyUntilTheAdapterHasHandedTheEventOn`, `TestARuntimeProcessIsBusyUntilTheAdapterHasHandedTheToolResultOn`, `TestAKilledProcessEndsItsRunningTurnAsFailed`, `TestFindDoesNotTakeAProcessThatIsNotTheSessionItsInfoFileNames`, `TestExecRunnerDerivesASeedForEveryCommand`, `TestReconcileReadsTheRecord`, `TestGoldenRecordLines`, `TestDecodeEventRejects`, `FuzzDecodeEvent`, `TestProcessSessionIsReachableAndDrivenOverTheControlChannel`, `TestARestartedAdapterTakesTheLiveSessionBack`, `TestAKilledNativeProcessIsGoneAndItsRecordIsReadable`, `TestGoldenLinkMessages`, `FuzzDecodeLink` |
 | Adapter | `internal/node/testkit/fakeadapter`, `cmd/sidera-fake-adapter` | the consistency test `TestFakeAdapterOutputMatchesProtocolSchemas` with `TestFakeAdapterDeclarationIsAdmittedByTheDaemonRules` and `TestFakeAdapterAnswersEveryGoldenRequest`; `TestInstanceLockIsTakenBeforeInitializeIsAnswered`, `TestCreateIsIdempotentPerAttemptAndConflictsOnOtherParameters`, `TestCreateOutcomes`, `TestPauseAtCreateAfterNativeStopsBeforeTheAnswer`, `TestPromptOutcomes`, `TestReconcileAnswersFromTheRecord`, `TestStartReattachesWhatItCan`, `TestTimesTheAdapterReportsComeFromTheTestClock`, `TestObservedModes`, `TestHungAdapterAnswersNothingAndKeepsItsLock`, `TestHangLeavesAHit`, `TestPipeProcessIsAProcessTheAdapterHostCanSupervise`, `TestProcessAdapterDrivesARuntimeProcessAndTakesItBackAfterARestart`, `TestProcessAdapterKnobsOverTheControlChannel`, `FuzzDecodeKnobArguments`, `FuzzDecodeProcessConfig`, `TestOneScriptDrivesTheKnobsOfBothLayers`, `TestHeldIsAMultisetOfMethodsWhateverHoldsTheRequest`, `TestTheFirstPromptStartsATurnTheDaemonHearsOf`, `TestAKilledNativeProcessEndsItsRunningTurnAsFailedExactlyOnce`, `TestAConfirmedCreationNamesTheRuntimesEntry`, `TestTheDaemonSideIsToldBeforeTheCallThatCausedTheEventReturns`, `TestTheAdapterProgramStartsFromTheConfigFileOfItsArguments`, `TestAnInitializeThatRunsAfterTheAdapterWasReleasedTakesNoLock` |
 | Fake agent | `internal/node/testkit/fakeagent` | `TestTheInterfaceHasAMethodForEveryAgentCommand`, `TestErrorCategories`, `TestRecordingWritesTheCallBeforeTheActionAndTheResultAfter`, `TestRecordingCanRecordWhatTheModelSawOutsideATurn` |
+| Engine backend | `internal/node/testkit/fakeagent/engineagent` | `TestDeclarePatchReachesTheEngineForTheCallersOwnEndpoint`, `TestDeclareLeavesAFieldThatIsNilAsItWas`, `TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface`, `TestEveryEngineReasonMapsToACategoryAndCode`, `TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError` |
+| Scripts | `internal/node/testkit/scenario`, `internal/node/testkit/scenario_imports_test.go` | `TestRunSetsUpDirectEndpointsThenRunsEachStepAndQuiescesAfterIt`, `TestRunStopsAtTheFirstFailedStepAndNamesIt`, `TestRunRefusesAScriptThatCannotRunBeforeTouchingTheSystem`, `TestRecvAndAckAllAcknowledgesEveryPageAndStopsAtAnEmptyOne`, `TestAScriptIsAScenarioOfTheCrashWalk`, `TestCheckRejects`, `TestScenarioPackageDoesNotImportTheEngineOrAFixtureOfAnyLayer` |
+| Engine fixture | `internal/node/testkit/harness` | `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`, `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`, `TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport`, `TestAProcessCrashThenRestartKeepsExactlyWhatWasDurable`, `TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledged`, `TestFaultsAreInjectedThroughTheFileLayerAndTheirHitsCounted`, `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`, `TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages` |
 | Crash walk | `internal/node/testkit/crashwalk` | `TestPlanFullTakesEveryWindowPointExceptTheSyncSteps`, `TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole`, `TestShardsPartitionTheTargets`, `TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce`, `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`, `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`, `TestAssessCoverage`, `TestCheckRecoveryCasesUnion`, `TestWalkFailsWhenATargetIsNotReached`, `TestWalkFailsWhenARerunDivergesFromTheRecording`, `TestWalkSecondLayerCrashesTheRecoveryAfterTheMainCrash` |
 
 ## The consistency test
@@ -172,8 +210,18 @@ directory and is replaced), is answered with a result the schema accepts.
 - A recv result a fake runtime hands its model and a node's own notice cannot be told
   apart by the fake: the classifier that names a notice is supplied by whoever knows the
   format.
-- The scenario scripts, the fixtures of the two layers and the backends of the fake agent
-  and of the crash walk are not in this tree yet.
+- The binary-layer fixture and the backends of the fake agent that run the command-line
+  client and speak MCP, and the backends of the crash walk, are not in this tree yet.
+- The engine-layer fixture has no adapter host, no loopback knobs, no session creation,
+  no real file system mode and no stand-in for free space yet; `Adapter` and `Runtime`
+  return `scenario.ErrNotAvailable` until the code they stand for exists. Judgements whose
+  subject does not exist yet (no message lost, one feedback per delivery and kind,
+  acknowledgements on behalf, every record closed, the drain) are not in `scenario`.
+- The engine backend maps the engine's refusals itself, with the codes the interface's
+  table does not list taken from the reasons' names; when the interface packages' shared
+  mapping exists it replaces the table here. The fixture declares the transactions of
+  `init` and of the adapter install as the composition root will, and takes them from it
+  when it exists.
 - The program path of a fake adapter has the extension of an executable of the platform
   (`.exe` on Windows, where a path that names a program is used as it is), written for
   Windows and cross-compiled: pending verification by CI on main.

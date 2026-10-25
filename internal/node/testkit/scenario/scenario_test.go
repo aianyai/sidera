@@ -112,8 +112,8 @@ func TestRunStopsAtTheFirstFailedStepAndNamesIt(t *testing.T) {
 			t.Errorf("the driver went on after a failed step: %s", c)
 		}
 	}
-	if e.quiesces != 1 {
-		t.Errorf("%d quiesces, want 1: a failed step is not waited for", e.quiesces)
+	if e.quiesces != 2 { // after the setup and after step one
+		t.Errorf("%d quiesces, want 2: the setup, step one and not the failed step", e.quiesces)
 	}
 }
 

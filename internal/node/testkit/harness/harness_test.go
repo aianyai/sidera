@@ -29,6 +29,7 @@ func bg() context.Context { return context.Background() }
 // middle of a command, which is the state a crash or an unquiet system is in.
 type gate struct {
 	tx      string
+	step    fsx.Step // zero holds the first step of any kind
 	armed   atomic.Bool
 	reached chan struct{}
 	release chan struct{}
@@ -36,14 +37,14 @@ type gate struct {
 	relOnce sync.Once
 }
 
-func newGate(tx string) *gate {
-	return &gate{tx: tx, reached: make(chan struct{}), release: make(chan struct{})}
+func newGate(tx string, step fsx.Step) *gate {
+	return &gate{tx: tx, step: step, reached: make(chan struct{}), release: make(chan struct{})}
 }
 
 func (g *gate) arm() { g.armed.Store(true) }
 
 func (g *gate) Reached(p fsx.Point, _ txn.Kind) {
-	if !g.armed.Load() || p.Tag.Tx != g.tx {
+	if !g.armed.Load() || p.Tag.Tx != g.tx || (g.step != 0 && p.Step != g.step) {
 		return
 	}
 	g.once.Do(func() {
@@ -169,7 +170,7 @@ func key(i int) string {
 }
 
 func TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport(t *testing.T) {
-	g := newGate("direct-register")
+	g := newGate("direct-register", 0)
 	h := harness.New(t, harness.Options{Observer: g})
 	g.arm()
 	done := make(chan error, 1)
@@ -314,7 +315,9 @@ func TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledg
 	for _, seed := range []uint64{1, 2, 3, 4, 5, 6, 7, 8} {
 		var first map[string]string
 		for run := 0; run < 2; run++ {
-			g := newGate("direct-register")
+			// Held after the first rename and before the sync of its directory: the
+			// new name is in the directory but not yet certain to be on the disk.
+			g := newGate("direct-register", fsx.StepSyncDir)
 			h := harness.New(t, harness.Options{Observer: g})
 			a := h.MustDirect("a")
 			g.arm()
