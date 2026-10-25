@@ -68,6 +68,11 @@ const (
 	ReasonMessageUnknown
 	// ReasonTooLarge: the body is longer than the protocol allows.
 	ReasonTooLarge
+	// ReasonAlertUnknown: the node holds no alert with that identifier.
+	ReasonAlertUnknown
+	// ReasonIdentityRetired: the owner retired the identity of this node, so
+	// nothing is signed in its name any more while the node goes down.
+	ReasonIdentityRetired
 
 	reasonEnd
 )
@@ -92,6 +97,8 @@ var reasonNames = [reasonEnd]string{
 	ReasonMessageConflict:     "message_conflict",
 	ReasonMessageUnknown:      "message_unknown",
 	ReasonTooLarge:            "too_large",
+	ReasonAlertUnknown:        "alert_unknown",
+	ReasonIdentityRetired:     "identity_retired",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.
@@ -144,11 +151,20 @@ type Detail uint8
 const (
 	// DetailEmptyPatch: a patch that changes nothing.
 	DetailEmptyPatch Detail = iota + 1
+	// DetailNodeMismatch: the node the owner named is not this node.
+	DetailNodeMismatch
+	// DetailDigestMismatch: the digest the owner named is not the digest of this
+	// node's statement.
+	DetailDigestMismatch
 
 	detailEnd
 )
 
-var detailNames = [detailEnd]string{DetailEmptyPatch: "empty_patch"}
+var detailNames = [detailEnd]string{
+	DetailEmptyPatch:     "empty_patch",
+	DetailNodeMismatch:   "node_mismatch",
+	DetailDigestMismatch: "digest_mismatch",
+}
 
 // String returns the name of the detail; the zero value has none.
 func (d Detail) String() string {

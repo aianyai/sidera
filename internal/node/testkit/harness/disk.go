@@ -78,12 +78,13 @@ var (
 )
 
 // ProgramTable is the table of every transaction of the program: the internal
-// ones, those of the store, the configuration and the engine, and the two that
-// the composition root owns.
+// ones, those of the store, the configuration, the keys and the engine, and the
+// two that the composition root owns.
 func ProgramTable(t testing.TB) *txn.Table {
 	t.Helper()
 	decls := append(txn.Internal(), store.Transactions()...)
 	decls = append(decls, config.Transactions()...)
+	decls = append(decls, keys.Transactions()...)
 	decls = append(decls, engine.Transactions()...)
 	decls = append(decls, initDecl, installDecl)
 	tab, err := txn.NewTable(decls...)

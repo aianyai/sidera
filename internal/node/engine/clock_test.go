@@ -75,7 +75,7 @@ func TestClockRollbackPausesSigningUntilCleared(t *testing.T) {
 
 	// The owner clears the pause.
 	e := h.Engine()
-	res, err := e.Execute(ctx, clearCommand(1, "clear"))
+	res, err := e.Execute(ctx, clearCommand(71, "clear"))
 	if err != nil || res.Replayed || res.Stop {
 		t.Fatalf("the clear: %+v, %v", res, err)
 	}
@@ -100,11 +100,11 @@ func TestClockRollbackPausesSigningUntilCleared(t *testing.T) {
 
 	// The same request again is the stored result; another request, with no pause
 	// to clear, finds nothing to do and says so.
-	again, err := e.Execute(ctx, clearCommand(1, "clear"))
+	again, err := e.Execute(ctx, clearCommand(71, "clear"))
 	if err != nil || !again.Replayed || string(again.Result) != string(res.Result) {
 		t.Errorf("the clear sent again: %+v, %v; want the stored result", again, err)
 	}
-	second, err := e.Execute(ctx, clearCommand(2, "clear, with another identifier"))
+	second, err := e.Execute(ctx, clearCommand(72, "clear, with another identifier"))
 	if err != nil || second.Replayed {
 		t.Fatalf("a second clear: %+v, %v", second, err)
 	}
@@ -129,7 +129,7 @@ func TestARestartedNodeThatWasPausedIsClearedByTheOwnerAlone(t *testing.T) {
 	if _, err := trySend(h, "a", "b", "x", ""); fakeagent.CodeOf(err) != "clock_rollback" {
 		t.Fatalf("send on a restarted paused node: %v", err)
 	}
-	if _, err := h.Engine().Execute(context.Background(), clearCommand(3, "clear")); err != nil {
+	if _, err := h.Engine().Execute(context.Background(), clearCommand(73, "clear")); err != nil {
 		t.Fatal(err)
 	}
 	send(t, h, "a", "b", "after the clear")

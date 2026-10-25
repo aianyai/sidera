@@ -276,6 +276,10 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryUnavailable, "recovering", "the node is starting; it does not take this yet")
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
+	case engine.ReasonAlertUnknown:
+		return New(CategoryNotFound, "alert_unknown", "the node holds no alert with this identifier")
+	case engine.ReasonIdentityRetired:
+		return New(CategoryUnavailable, "identity_retired", "the identity of this node was retired; nothing is signed in its name and the node is stopping")
 	case engine.ReasonStorageFatal:
 		// Whether the command took effect is what the engine says it does not know,
 		// which is the outcome a client cannot tell either, with the same way out.

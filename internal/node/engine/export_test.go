@@ -92,22 +92,6 @@ func SpawnWorker(e *Engine, _ string, fn func(ctx context.Context)) {
 // must refuse.
 func SpawnOffTheLoop(e *Engine) { e.spawn(func(context.Context) {}) }
 
-type cmdClearRollback struct{ call[struct{}] }
-
-func (c *cmdClearRollback) gate() gate { return gateAlways }
-func (c *cmdClearRollback) run(e *Engine, now time.Time) {
-	e.clearRollback(now)
-	c.done(struct{}{}, nil)
-}
-
-// ClearRollback is what clearing the pause of a wall clock set back does inside
-// the loop; the management operation that persists it is added later.
-func ClearRollback(ctx context.Context, e *Engine) error {
-	c := &cmdClearRollback{call: newCall[struct{}]()}
-	_, err := roundTrip(ctx, e, submitExternal, c, c.call)
-	return err
-}
-
 type cmdViewVsDisk struct {
 	call[[]string]
 	sc *store.Scan

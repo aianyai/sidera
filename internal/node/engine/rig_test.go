@@ -21,6 +21,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/txn"
@@ -58,6 +59,10 @@ type rig struct {
 	admit  adapterreg.Admission
 	paused bool
 	obs    txn.Observer
+	// keys are the node's keys, loaded from its disk, for a rig made withKeys; nil
+	// otherwise, as for an engine that is not told to sign.
+	keys     *nodekeys.Keys
+	wantKeys bool
 }
 
 type rigOption func(*rig)
@@ -65,6 +70,23 @@ type rigOption func(*rig)
 func withParams(p engine.Params) rigOption { return func(r *rig) { r.params = p } }
 
 func withObserver(o txn.Observer) rigOption { return func(r *rig) { r.obs = o } }
+
+// withKeys gives the engine the keys of the node, as the composition root does.
+func withKeys() rigOption { return func(r *rig) { r.wantKeys = true } }
+
+// loadKeys loads the keys from the disk the rig is mounted on, when the rig is
+// made with keys.
+func (r *rig) loadKeys() {
+	r.t.Helper()
+	if !r.wantKeys {
+		return
+	}
+	k, err := nodekeys.Load(r.w)
+	if err != nil {
+		r.t.Fatalf("keys.Load: %v", err)
+	}
+	r.keys = k
+}
 
 // newRig builds a node that has been initialised, has the adapter "chat"
 // installed and enabled as the instance "chat", and has not been started. The
@@ -80,6 +102,7 @@ func newRig(t testing.TB, maxDirect int, opts ...rigOption) *rig {
 	r.tab = harness.ProgramTable(t)
 	r.mount(r.mem)
 	r.cfg = harness.SeedNode(t, r.w, t0)
+	r.loadKeys()
 	r.admit = harness.AdapterAdmission(t, maxDirect)
 	return r
 }
@@ -105,11 +128,15 @@ func (r *rig) mount(disk *fsxtest.Mem) {
 // deps is what the composition root hands the engine on this rig.
 func (r *rig) deps() engine.Deps {
 	r.seed++
-	return engine.Deps{
+	d := engine.Deps{
 		Node: r.node, Clock: r.clk, HighWater: r.hw, RollbackPaused: r.paused,
 		Writer: r.w, Store: r.st, Config: r.cfg, Rand: harness.RandReader(r.seed),
 		Log: slog.New(r.log),
 	}
+	if r.keys != nil {
+		d.Keys = r.keys
+	}
+	return d
 }
 
 // open runs the scan entry.
@@ -161,6 +188,7 @@ func (r *rig) restart() {
 	if r.cfg, err = config.Load(r.w); err != nil {
 		r.t.Fatalf("Load: %v", err)
 	}
+	r.loadKeys()
 }
 
 // register registers the direct endpoint key of the instance chat.
@@ -294,6 +322,8 @@ func (r *rig) seedRecord(rec store.Record) {
 		dir = store.CtlDir
 	case store.OutRecord:
 		dir = store.OutDir
+	case store.AlertRecord:
+		dir = store.AlertsDir
 	default:
 		r.t.Fatalf("seedRecord: no directory for %T", rec)
 	}
@@ -363,11 +393,12 @@ func engineCaller(id ident.EndpointID) engine.Caller {
 // gives, with its configuration loaded and nothing started.
 func (r *rig) fork(disk *fsxtest.Mem) *rig {
 	r.t.Helper()
-	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params}
+	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys}
 	f.mount(disk)
 	var err error
 	if f.cfg, err = config.Load(f.w); err != nil {
 		r.t.Fatalf("Load on the copy of the disk: %v", err)
 	}
+	f.loadKeys()
 	return f
 }

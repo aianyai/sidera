@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
@@ -38,6 +39,7 @@ type Store interface {
 	EndpointClose(ep store.EndpointRecord, result *store.AdminRecord) error
 	EndpointDrain(b store.DrainBatch) ([]store.InRecord, error)
 	AlertRaise(a store.AlertRecord) error
+	AlertAck(a store.AlertAckInput) error
 	DaemonStop(result store.AdminRecord) error
 
 	CtlEffectReplay(eps []store.EndpointRecord) error
@@ -61,18 +63,28 @@ type Config interface {
 	EndpointSettings(instance string, id ident.EndpointID) config.EndpointSettings
 	DirectID(instance, key string, rnd io.Reader) (config.IDChange, error)
 	PutEndpointIDs(tx *txn.Tx, ch config.IDChange) (config.AfterCommit, error)
+
+	Backup() (config.Backup, bool)
+	PutBackup(tx *txn.Tx, p config.PreparedBackup) (config.AfterCommit, error)
+	PutRevocation(tx *txn.Tx, p config.PreparedRevocation) (config.AfterCommit, error)
+	SetNodeSettings(req config.Request, patch []byte, result config.ResultFunc[config.Node]) (config.Node, error)
+	SetEndpointSettings(req config.Request, instance string, endpoint ident.EndpointID, patch []byte,
+		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
 }
 
 var _ Config = (*config.Config)(nil)
 
 // Keys is what the engine asks of the node's keys: the node it is, the network
-// key that signs its status reports, and the certificate that says the key is
-// the node's. *keys.Keys is the one implementation.
+// key that signs its status reports, the certificate that says the key is the
+// node's, and the statement that retires the identity, which only the owner's
+// operations use. *keys.Keys is the one implementation. The engine reads the
+// certificate in its loop, which is also where a renewal replaces it.
 type Keys interface {
 	Node() ident.NodeID
 	NetworkSigner() record.Signer
 	Certificate() record.Verified[record.NetworkKeyCertificate]
 	SerialSeen() record.SerialSeen
+	SelfRevocation() nodekeys.SelfRevocation
 }
 
 var _ Keys = (*nodekeys.Keys)(nil)
@@ -135,9 +147,13 @@ type Deps struct {
 	// RollbackPaused is true when the persisted state says the wall clock was
 	// set back and the owner has not cleared it.
 	RollbackPaused bool
-	Writer         Beginner
-	Store          Store
-	Config         Config
+	// RollbackPausedSince is when the persisted pause began, for what the owner is
+	// shown; the zero time is not knowing, and is shown as no start. It is read
+	// only while RollbackPaused.
+	RollbackPausedSince time.Time
+	Writer              Beginner
+	Store               Store
+	Config              Config
 	// Keys signs the node's status reports. It is needed to send and to take in
 	// envelopes; an engine without it refuses them.
 	Keys Keys

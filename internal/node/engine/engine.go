@@ -78,9 +78,17 @@ type Engine struct {
 	err   error
 
 	// Owned by the loop from Start on.
-	view      *view
-	hw        clock.HighWater
-	paused    bool
+	view   *view
+	hw     clock.HighWater
+	paused bool
+	// pausedSince is when the pause began, as far as it is known: the persisted
+	// start, or the time of the command that found the clock set back; zero when
+	// the pause was persisted without one.
+	pausedSince time.Time
+	// retired: the owner retired the identity of the node. Nothing is signed in its
+	// name from then on, and the node is going down.
+	retired   bool
+	startedAt time.Time // the time Start was called
 	adm       map[string]adapterreg.Admission
 	sched     *scheduler
 	timer     clock.Timer
@@ -169,6 +177,9 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		outbox:   newOutbox(),
 		parked:   map[ident.EndpointID][]command{},
 	}
+	if d.RollbackPaused {
+		e.pausedSince = d.RollbackPausedSince
+	}
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.setPhase(PhaseOpened)
 	return e, nil
@@ -237,6 +248,7 @@ func (e *Engine) Start() {
 		panic("engine: Start twice")
 	}
 	now := e.d.Clock.Now()
+	e.startedAt = now
 	for _, name := range e.order {
 		e.sched.set(schedKey{schedPeriodic, name}, now.Add(e.periodic[name].every))
 	}
@@ -629,7 +641,7 @@ func (e *Engine) armTimer() {
 // clock state now.
 func (e *Engine) observe(now time.Time) {
 	if v, _ := e.hw.Observe(now); v == clock.WallRolledBack && !e.paused {
-		e.paused = true
+		e.paused, e.pausedSince = true, now
 		e.log.Warn("the wall clock was set back; new work that depends on a deadline is refused until the owner clears it")
 		if e.clockTask != "" {
 			e.fire(schedKey{schedPeriodic, e.clockTask}, now)
@@ -643,7 +655,7 @@ func (e *Engine) observe(now time.Time) {
 // this is the part that the loop owns.
 func (e *Engine) clearRollback(now time.Time) {
 	e.hw.Reset(now)
-	e.paused = false
+	e.paused, e.pausedSince = false, time.Time{}
 }
 
 // step runs one command: one reading of the clock for all of it, then the phase

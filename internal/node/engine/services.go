@@ -24,11 +24,16 @@ type AgentService interface {
 // are added as the engine learns to do them.
 //
 // Everything that changes state comes through Execute, the one door of the
-// administrative rules (manage.go); the others only read.
+// administrative rules (manage.go); the others only read. ExportRevocation reads
+// the statement that retires the node, and is the one read that is not judged as a
+// read: the interface authorizes it as an operation of the owner's alone, and it
+// stores nothing.
 type ManageService interface {
 	Endpoints(ctx context.Context) ([]EndpointView, error)
 	Counts(ctx context.Context) (Counts, error)
 	Alerts(ctx context.Context) ([]store.AlertRecord, error)
+	Status(ctx context.Context) (NodeStatus, error)
+	ExportRevocation(ctx context.Context) (RevocationExport, error)
 	Execute(ctx context.Context, c ManagementCommand) (StoredResult, error)
 	OperationResult(ctx context.Context, key admin.RequestKey) ([]byte, bool, error)
 }

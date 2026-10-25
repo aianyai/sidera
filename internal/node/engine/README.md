@@ -38,10 +38,13 @@ commands and add their methods to this list.
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
 | `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseResult`, `Counts`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and of a close the engine's own features ask for, the numbers of the status, and the alerts. |
 | `Execute`, `ManagementCommand`, `StoredResult`, `Operation`, `CloseEndpointOp`, `StopDaemonOp` | The one door of every administrative operation of the owner: the replay check, the operation, and the storing of its result with the fingerprint are one command of the loop. The owner's request to close an endpoint and to stop the daemon are the two operations there are; the package that owns the effect of another adds its type here. |
+| `ClearClockRollbackOp`, `ConfirmRevocationBackupOp`, `RetireIdentityOp`, `AcknowledgeAlertOp`, `SetNodeSettingsOp`, `SetEndpointSettingsOp` | The owner's operations on the clock, the identity, the alerts and the settings, each an `Operation` with the effect in the loop and its result made by a function the interface passes in (`ClockClear`, `BackupConfirmed`, `EndpointChange` say what was done). |
+| `Status`, `NodeStatus`, `ReminderKind`, `ReminderKinds` | A read of what the owner is shown of the node, from the loop's state at one command: the phase, the reminders, the clock and its pause, the certificate, the room, the deliveries by state, the endpoints. |
+| `ExportRevocation`, `RevocationExport` | The self-revocation the keys verified as this node's, armored, with its digest. Not in the loop and stored nowhere. |
 | `OperationResult` | A read: the result stored for a request key, from either place a result is kept, and whether there is one. Taken while the node starts; writes nothing. |
 | `PlanRecovery`, `RecoveryPlan` | The work of the recovery rules as a pure function of a scan. |
 | `Reason`, `Refusal`, `ReasonOf` | The closed set of reasons a method refuses for; the interface packages alone map them to the wire. |
-| `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register`. |
+| `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register`, and for the owner's operations `clock-clear`, `backup-confirm` and `identity-retire`, each the effect followed by the result. |
 | `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. Everything of `ManageService` that changes state is `Execute`; the other methods read. |
 | `Store`, `Config`, `Beginner`, `Adapters` | What the engine asks of the store, the configuration, the transaction writer and the adapter host. |
 
@@ -78,6 +81,20 @@ commands and add their methods to this list.
   `config`), because the check and the write are one step; it is not made a second
   time here. `StoredResult.Stop` follows the operation, so a resend of a request
   that stops the daemon asks for the stop again.
+- **The owner's clear of the pause is one replacement.** `ClearClockRollbackOp` sets
+  the mark to the clock as it reads (which may be below the mark it replaces) and
+  removes the pause flag in the one replacement of `keys/clock.rec` that
+  `keys.PutClockCleared` makes, in the transaction that stores the result, and
+  only after the commit does the loop forget the pause. A request that finds no
+  pause writes no clock record and stores its result.
+- **A retired identity signs nothing, from the commit on.** `RetireIdentityOp` keeps the
+  statement the keys verified at load as a verified revocation under `config/`, and
+  `canSign` then refuses with `ReasonIdentityRetired`, before the daemon is down. The
+  operation asks for the stop (`StoredResult.Stop`), also on a resend.
+- **Reminders are derived, never stored.** The reminder that the backup of the
+  self-revocation is not confirmed is true while the confirmation on disk is not
+  of the statement this node holds (`config.Backup.Confirms`); no record stands for it,
+  so none can outlast the fact or be acknowledged away.
 - **One reading of the clock per command**, observed against the high water mark
   before anything else. A wall clock set back beyond the tolerance pauses new
   work that depends on a deadline until the owner clears it; moving the clock on
@@ -242,7 +259,7 @@ closing and its chunks; `execute_test.go` and `execute_crash_test.go` the door o
 `recovery_test.go` the scan entry and the recovery entry; `loop_test.go` the
 loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
-`crash_test.go` the crash walk of `direct-register`; `intake_test.go` the scenarios of
+`crash_test.go` the crash walk of `direct-register`; `clock_test.go` the pause of a wall clock set back until the owner clears it; `operations_test.go`, `operations_effects_test.go` and `operations_crash_test.go` the owner's operations, their effects and their crash points; `nodestatus_test.go` the status and the export; `intake_test.go` the scenarios of
 sending and intake judged from the ledger, the answers of the loopback and the records, and
 `intake_more_test.go` the rules around them; `intake_crash_test.go` the crash walk of the
 transactions that take a message in; `intake_fuzz_test.go` the receiving entry under

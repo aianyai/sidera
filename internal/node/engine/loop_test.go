@@ -278,7 +278,7 @@ func TestAWallClockSetBackPausesNewWorkUntilTheOwnerClearsIt(t *testing.T) {
 	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
 	r.clk.Set(t0.Add(3 * time.Hour))
 	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
-	if err := engine.ClearRollback(ctx, e); err != nil {
+	if _, err := e.Execute(ctx, clearCommand(74, "clear")); err != nil {
 		t.Fatal(err)
 	}
 	if err := engine.AdmitNewWork(ctx, e, 1); err != nil {

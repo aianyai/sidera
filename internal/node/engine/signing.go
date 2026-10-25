@@ -31,16 +31,18 @@ func (e *Engine) acceptedKey(node ident.NodeID) record.AcceptedNetworkKey {
 	return e.d.Config.RevocationSet().NetworkKey(e.d.Keys.Certificate(), e.d.Keys.SerialSeen().Serial)
 }
 
-// canSign says whether this node may sign a report now: it holds keys, and the
-// wall clock can be trusted, because a signature carries the time and the reply
-// window of the other side starts from it. It is the one rule of signing:
-// signReport asks it, and so does an entry that would refuse before it has judged
-// anything.
+// canSign says whether this node may sign a report now: it holds keys, its
+// identity has not been retired, and the wall clock can be trusted, because a
+// signature carries the time and the reply window of the other side starts from
+// it. It is the one rule of signing: signReport asks it, and so does an entry that
+// would refuse before it has judged anything.
 func (e *Engine) canSign() error {
-	if e.d.Keys == nil {
+	switch {
+	case e.d.Keys == nil:
 		return errNoKeys
-	}
-	if e.paused {
+	case e.retired:
+		return refuse(ReasonIdentityRetired)
+	case e.paused:
 		return refuse(ReasonClockRollback)
 	}
 	return nil

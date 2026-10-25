@@ -479,8 +479,12 @@ type EndpointView struct {
 
 type cmdEndpoints struct{ call[[]EndpointView] }
 
-func (c *cmdEndpoints) gate() gate { return gateRead }
-func (c *cmdEndpoints) run(e *Engine, _ time.Time) {
+func (c *cmdEndpoints) gate() gate                 { return gateRead }
+func (c *cmdEndpoints) run(e *Engine, _ time.Time) { c.done(e.endpointViews(), nil) }
+
+// endpointViews are the endpoints of the node as the owner sees them, in the
+// order of their identifiers.
+func (e *Engine) endpointViews() []EndpointView {
 	out := make([]EndpointView, 0, len(e.view.endpoints))
 	for id, st := range e.view.endpoints {
 		out = append(out, EndpointView{
@@ -491,7 +495,7 @@ func (c *cmdEndpoints) run(e *Engine, _ time.Time) {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID.String() < out[j].ID.String() })
-	c.done(out, nil)
+	return out
 }
 
 // Endpoints lists every endpoint of the node that has a record, closed ones

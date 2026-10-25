@@ -73,6 +73,10 @@ type fakeService struct {
 	results   map[admin.RequestKey][]byte // what OperationResult finds
 	lookups   []admin.RequestKey          // every key OperationResult was asked for
 	lookupErr error
+	// alerts, status and export are what the reads of the same names answer.
+	alerts []store.AlertRecord
+	status engine.NodeStatus
+	export engine.RevocationExport
 }
 
 func (f *fakeService) Endpoints(context.Context) ([]engine.EndpointView, error) {
@@ -80,8 +84,22 @@ func (f *fakeService) Endpoints(context.Context) ([]engine.EndpointView, error) 
 	defer f.mu.Unlock()
 	return f.endpoints, nil
 }
-func (f *fakeService) Counts(context.Context) (engine.Counts, error)       { return engine.Counts{}, nil }
-func (f *fakeService) Alerts(context.Context) ([]store.AlertRecord, error) { return nil, nil }
+func (f *fakeService) Counts(context.Context) (engine.Counts, error) { return engine.Counts{}, nil }
+func (f *fakeService) Alerts(context.Context) ([]store.AlertRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]store.AlertRecord(nil), f.alerts...), nil
+}
+func (f *fakeService) Status(context.Context) (engine.NodeStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.status, nil
+}
+func (f *fakeService) ExportRevocation(context.Context) (engine.RevocationExport, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.export, nil
+}
 func (f *fakeService) Execute(ctx context.Context, c engine.ManagementCommand) (engine.StoredResult, error) {
 	f.mu.Lock()
 	f.commands = append(f.commands, c)

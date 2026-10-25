@@ -124,6 +124,42 @@ its effect needs the view, the store and the configuration that only the loop ma
 touch; the owner of another operation adds its type next to `CloseEndpointOp` and
 `StopDaemonOp`.
 
+**The owner's operations on the clock, the identity, the alerts and the settings.**
+Each is a type of the engine behind the door above, whose effect runs in the loop
+and whose result is made by a function the interface passes in, so the words of the
+wire stay with the interface.
+
+| Operation | Effect | Where the result is |
+| --------- | ------ | ------------------- |
+| `ClearClockRollbackOp` | the mark becomes the clock as it reads and the pause flag is removed, in one replacement of `keys/clock.rec`; memory forgets the pause after the commit | `state/admin/`, the last write of `clock-clear` |
+| `ConfirmRevocationBackupOp` | `config/revocation-backup.json` names the digest of the self-revocation the owner keeps outside the device and the time | `state/admin/`, `backup-confirm` |
+| `RetireIdentityOp` | the self-revocation the keys verified is kept as a revocation under `config/revocations/`; nothing is signed from the commit on; the daemon is asked to stop | `state/admin/`, `identity-retire` |
+| `AcknowledgeAlertOp` | the alert is marked, and the quarantined file it names is removed first when it is not one of a delivery | `state/admin/`, `alert-ack` (the store's) |
+| `SetNodeSettingsOp`, `SetEndpointSettingsOp` | a patch merged and judged whole by `config`, which checks the version inside the change | the `last_operation` of `node.json` and of `instances.json` |
+
+Each of the first three is one transaction of two owners that the engine opens,
+because only the composer can declare a transaction of two owners: the effect and
+then the result, which commits with its first write. A crash between them leaves
+the effect without its result and the request sent again finds the effect there:
+a clear that finds no pause says `cleared: false`, a confirmation or a retirement
+or an acknowledgement is harmless to do again and answers as the first did. The
+result is never there without the effect. The owner names what the request is for
+(the node to retire, the digest to confirm), and a request for another is refused
+before anything is written (`invalid_argument`, details `node_mismatch` and
+`digest_mismatch`): a retirement is for good and a confirmation that put the
+reminder out for a copy that cannot retire this node would be a lie.
+
+`Status` reads, at one command, the phase, when the loop started, the reminders,
+the clock (the pause with the time it began, the mark), the certificate and what is
+left of it, the room (the deliveries that still have work, the queue limit, the
+sent messages no receipt answered, the free space and the reserve), the deliveries
+this node holds as a target by state, and the endpoints. The reminders are derived:
+the one there is, that the backup of the self-revocation is not confirmed, is true
+while the confirmation on disk is not of the statement this node holds, and has no
+record of its own. `ExportRevocation` is the one thing of the interface that is
+neither a read of the loop nor stored: the statement does not change while the node
+runs, and its result is not stored because the statement can retire the node.
+
 `Declare` changes the declaration of the endpoint the caller is: `ByToken` is the
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's
 own instance. The declaration is the engine's field of the endpoint record
@@ -367,6 +403,23 @@ storage layer (PostgreSQL's `fsync` PANIC, etcd's WAL failure). Rejected: closur
 as commands (the kinds are not countable), a time budget for chunks (not
 reproducible).
 
+- **The pause is cleared by the owner alone, in one replacement.** The mark and the
+  flag are one file; clearing writes both at once, so no disk state has the flag
+  gone and the mark unchanged, and a clock that really was set back is trusted
+  again from the owner's word. Moving the clock forward does not clear it, because
+  nothing but the owner has looked at the clock.
+- **The statement of the retirement is the one the keys verified.** The engine does
+  not read the file again and compares no node of its own: the retirement is for
+  good, and a statement read again would be one more place to be wrong. Retiring
+  refuses signing from the commit, because the daemon is still up until the stop
+  is carried out and a report signed in that interval would be signed by an
+  identity the owner has just retired.
+- **Reminders are facts, not records.** A record of "the backup is not confirmed"
+  would be a second copy of what `config/revocation-backup.json` says, and a crash
+  between the two would leave a reminder for a fact that changed. Deriving it from
+  the authority means a confirmation of another statement does not count, and the
+  node made again over the same data directory reminds again.
+
 ## Where
 
 | Rule | Code | Tests |
@@ -380,6 +433,13 @@ reproducible).
 | A stored result is read by its request key, from both places, and by no other key | `manage.go` (`OperationResult`) | `TestTheStoredResultOfAnOperationIsReadByItsRequestKey`, `TestAStoredResultIsReadWhileRecoveringAndNotWhileStopping` |
 | The door is closed while the node starts and while it stops; what is not a change does not come through it | `manage.go`, `engine.go` (`step`) | `TestExecuteIsRefusedWhileRecoveringAndWhileStopping`, `TestExecuteRefusesAnOperationThatChangesNothing` |
 | A request that stops the daemon says so, resent or not | `manage.go` (`StopDaemonOp`, `StoredResult.Stop`) | `TestStopFollowsTheOperationOfTheRequest` |
+| The owner's clear of the pause is one replacement and the loop forgets the pause after the commit | `operations_clock.go`, `transactions.go` (`clock-clear`), `engine.go` (`clearRollback`) | `TestClockRollbackPausesSigningUntilCleared`, `TestARestartedNodeThatWasPausedIsClearedByTheOwnerAlone`, `TestAWallClockSetBackPausesNewWorkUntilTheOwnerClearsIt` |
+| The backup is confirmed only for the statement the node holds; the reminder is derived | `operations_identity.go`, `nodestatus.go` | `TestTheBackupIsConfirmedOnlyForTheStatementTheNodeHolds`, `TestAConfirmationOfAnotherStatementDoesNotPutTheReminderOut` |
+| The retirement keeps the statement, asks for the stop, and nothing is signed after it | `operations_identity.go`, `signing.go` (`canSign`) | `TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop`, `TestAfterTheIdentityIsRetiredNothingIsSigned` |
+| An alert is acknowledged and takes the file it names | `operations_alerts.go` | `TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames` |
+| Settings are a versioned change through the door and are in force for the next command | `operations_settings.go` | `TestChangingTheSettingsOfTheNodeIsAVersionedChangeThroughTheDoor`, `TestChangingTheSettingsOfAnEndpointFindsItsInstance`, `TestChangedSettingsAreInForceForTheNextCommand` |
+| The owner's operations recover from a crash at every point | `transactions.go` | `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |
+| The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |

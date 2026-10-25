@@ -49,6 +49,8 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonMessageConflict:     {"conflict", "message_conflict"},
 	engine.ReasonMessageUnknown:      {"not_found", "message_unknown"},
 	engine.ReasonTooLarge:            {"refused", "too_large"},
+	engine.ReasonAlertUnknown:        {"not_found", "alert_unknown"},
+	engine.ReasonIdentityRetired:     {"unavailable", "identity_retired"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {
@@ -90,6 +92,10 @@ func TestARefusalCarriesWhatSaysWhichLimitAndWhichValue(t *testing.T) {
 			want{"refused", "endpoint_limit"}, map[string]any{"limit": "instance"}},
 		{"an empty patch", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "settings", Detail: engine.DetailEmptyPatch},
 			want{"invalid_argument", "empty_patch"}, map[string]any{"field": "settings"}},
+		{"a node that is not this one", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "node", Detail: engine.DetailNodeMismatch},
+			want{"invalid_argument", "node_mismatch"}, map[string]any{"field": "node"}},
+		{"a digest that is not this node's", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "digest", Detail: engine.DetailDigestMismatch},
+			want{"invalid_argument", "digest_mismatch"}, map[string]any{"field": "digest"}},
 		{"a value", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "endpoint"},
 			want{"invalid_argument", "malformed_request"}, map[string]any{"field": "endpoint"}},
 		{"the field a body was too large in", &engine.Refusal{Reason: engine.ReasonTooLarge, Field: "body"},
@@ -328,6 +334,8 @@ func TestAnInvalidArgumentIsAnsweredWithACodeTheCategoryListsAndNeverAMadeUpOne(
 		{"a refusal without a detail", &engine.Refusal{Reason: engine.ReasonInvalidArgument}, "malformed_request"},
 		{"a refusal that names its field", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "endpoint"}, "malformed_request"},
 		{"a refusal with the detail of an empty patch", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailEmptyPatch}, "empty_patch"},
+		{"a refusal with the detail of another node", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailNodeMismatch}, "node_mismatch"},
+		{"a refusal with the detail of another digest", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Detail: engine.DetailDigestMismatch}, "digest_mismatch"},
 		{"a value of the configuration that is not acceptable", &config.ChangeError{Reason: config.ChangeInvalid, Field: "settings.x"}, "config_invalid"},
 		{"a patch that names nothing", &config.ChangeError{Reason: config.ChangeNothingToChange}, "empty_patch"},
 		{"a fault in the request", &strictjson.Error{Path: "params.x", Msg: "unknown field"}, "malformed_request"},
