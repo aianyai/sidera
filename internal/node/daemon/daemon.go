@@ -150,18 +150,17 @@ type Env struct {
 	RequestStop func(reason string)
 }
 
-// KeysView is what a hook may do with the keys: read the identity, the certificate
-// and the serial, and sign with the network key. Saving the clock and renewing the
-// certificate are the daemon's and the engine's.
+// KeysView is what a hook may do with the keys: read the identity and the
+// self-revocation, and sign with the network key. It holds only what no renewal of
+// the certificate changes. The certificate, its wire form, the serial seen and the
+// state of a renewal are changed by the loop every hour and the keys are not safe
+// for concurrent use, so a hook, which runs beside the loop, does not read them
+// here; what a hook needs of them it reads through the engine. Saving the clock
+// and renewing the certificate are the daemon's and the engine's.
 type KeysView interface {
 	Node() ident.NodeID
 	NetworkSigner() record.Signer
-	Certificate() record.Verified[record.NetworkKeyCertificate]
-	CertificateWire() []byte
-	SerialSeen() record.SerialSeen
 	SelfRevocation() keys.SelfRevocation
-	RenewalInterrupted() bool
-	RenewalDue(now time.Time) (keys.RenewVerdict, keys.RenewReason)
 }
 
 // ConfigView is what a hook may do with the configuration: read it. Every change

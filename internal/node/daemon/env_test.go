@@ -37,7 +37,10 @@ func TestAHookIsGivenNoWriterAndOnlyReadsOfTheKeysAndTheConfiguration(t *testing
 		field string
 		want  []string
 	}{
-		{"Keys", []string{"Certificate", "CertificateWire", "NetworkSigner", "Node", "RenewalDue", "RenewalInterrupted", "SelfRevocation", "SerialSeen"}},
+		// Only what no renewal of the certificate changes: the reads that the loop
+		// changes every hour (the certificate, its wire form, the serial seen, the
+		// renewal state) are not here, because a hook runs beside the loop.
+		{"Keys", []string{"NetworkSigner", "Node", "SelfRevocation"}},
 		{"Config", []string{"Adapters", "Backup", "EndpointIDs", "EndpointSettings", "Instances", "LastOperations", "Node", "Policy", "Presets", "RevocationSet", "Revocations"}},
 	} {
 		f, ok := env.FieldByName(tc.field)

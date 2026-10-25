@@ -20,7 +20,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `Start(ctx, Config)`, `Run(ctx, Config)` | Take the fifteen steps of the start and return a `*Daemon`; `Run` also waits for the end of the context, a signal or a stop, and returns how the daemon ended. |
 | `Daemon.RequestStop`, `Wait`, `Done`, `Engine`, `Home` | The one entry for a shutdown, from any goroutine and any number of times; the end, and what ended it. |
 | `Init(ctx, Config)`, `InitReport` | Make a data directory; never overwrite. |
-| `Config`, `Attachments`, `Env`, `KeysView`, `ConfigView`, `PeriodicTask` | What a daemon needs, the hooks the features that come later attach to, what a hook is given (read-only views of the keys and the configuration, the instance lock's assertion, the engine, the logs), and a task on a period. |
+| `Config`, `Attachments`, `Env`, `KeysView`, `ConfigView`, `PeriodicTask` | What a daemon needs, the hooks the features that come later attach to, what a hook is given (read-only views of the configuration and of what of the keys no renewal changes, the instance lock's assertion, the engine, the logs), and a task on a period. |
 | `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
 | `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
 | `Table`, `Declarations`, `Transactions`, `LayoutWork`, `RepairLayout` | The one table of the program's transactions, the two this package declares (`init` and `layout`), and the layout rule. |
@@ -46,8 +46,10 @@ touches files only through `fsx`, and reads time only through the injected clock
   hourly check runs in the loop, where the engine reads the certificate it signs
   under, so a renewal and a signature are never concurrent. A certificate that is due
   while the node is paused waits for the owner, and the log says so. The keys are not
-  safe for concurrent use: a hook reads them through `KeysView` only from the
-  goroutine of its step, and reads that come later go through the engine.
+  safe for concurrent use, and the loop changes the certificate, the serial seen and
+  the state of a renewal every hour, so `KeysView` holds only what no renewal
+  changes (`Node`, `NetworkSigner`, `SelfRevocation`); a hook that needs the
+  certificate or the serial reads it through the engine.
 - **The actor of the local owner is not made here.** The management interface is
   `manageapi`, and a scan keeps the actor out of this package.
 - **A hook is called inside its step** with an `Env`, in the state of the engine the

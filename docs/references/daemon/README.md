@@ -43,7 +43,9 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 A hook runs inside its step, in the state of the engine the step needs (before the
 loop exists at step 7, recovering at 9 and 10, running at 15) and is given an `Env`:
 the data directory, the clock, the randomness, the log, read-only views of the
-configuration and of the keys, the engine, the assertion that the instance lock is
+configuration and of the keys (the identity, the self-revocation and the network
+signer: what no renewal of the certificate changes, because a hook runs beside the
+loop; the certificate and the serial are read through the engine), the engine, the assertion that the instance lock is
 held (what `ipc.Listen` asks of whoever listens on an address of this home), the
 handle for adapter logs, and `RequestStop`. It holds no transaction writer: the
 engine is the single writer, and a hook that changes state asks it.
