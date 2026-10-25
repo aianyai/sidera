@@ -31,6 +31,54 @@ const (
 	RoleOld     = "old"
 )
 
+// The write lists this package contributes to the transactions other packages
+// compose, as keys does for init: the composer declares the transaction, puts
+// these writes in the order documented here, and adds its own writes around
+// them. The writes are the ones the write functions make, so a composer's
+// declaration and the functions cannot drift apart.
+
+// InitWrites are the writes of init that belong to this package, in the order
+// they are made: the directories, then the files that are not already valid.
+// The writes of the other owners and the marker come after.
+func InitWrites() []txn.Write {
+	return []txn.Write{
+		{Role: RoleDir, Op: txn.OpMakeDir, Many: true, Optional: true},
+		{Role: RoleNode, Op: txn.OpReplace, Optional: true},
+		{Role: RolePolicy, Op: txn.OpReplace, Optional: true},
+		{Role: RolePresets, Op: txn.OpReplace, Optional: true},
+		{Role: RoleInstances, Op: txn.OpReplace, Optional: true},
+	}
+}
+
+// EndpointIDsWrite is the write of PutEndpointIDs, in direct-register and
+// runtime-admit. It is optional: an id that already exists is not written.
+func EndpointIDsWrite() txn.Write {
+	return txn.Write{Role: RoleEndpointIDs, Op: txn.OpReplace, Optional: true}
+}
+
+// BackupWrite is the write of PutBackup, in backup-confirm.
+func BackupWrite() txn.Write { return txn.Write{Role: RoleBackup, Op: txn.OpReplace} }
+
+// RevocationWrite is the write of PutRevocation, in identity-retire.
+func RevocationWrite() txn.Write { return txn.Write{Role: RoleRevocation, Op: txn.OpReplace} }
+
+// InstallWrites are the writes of adapter-install up to and including the
+// current pointer, in the order of Install's methods: DiscardStale and Promote
+// are preparation (a crash before the pointer changes leaves a directory
+// adapter-gc discards), and Point is the commit point. The composer's own write
+// follows, then InstallOldWrite.
+func InstallWrites() []txn.Write {
+	return []txn.Write{
+		{Role: RoleStale, Op: txn.OpDiscard, Optional: true, Prepare: true},
+		{Role: RoleVersion, Op: txn.OpRenameDir, Prepare: true},
+		{Role: RoleCurrent, Op: txn.OpReplace},
+	}
+}
+
+// InstallOldWrite is the write of Install.DiscardOld, the last of
+// adapter-install. It is optional: a first installation has no previous version.
+func InstallOldWrite() txn.Write { return txn.Write{Role: RoleOld, Op: txn.OpDiscard, Optional: true} }
+
 // The roles of adapter-stage and adapter-unstage, which only this package
 // uses.
 const (

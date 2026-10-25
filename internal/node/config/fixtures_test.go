@@ -382,37 +382,26 @@ func exists(r fsx.Reader, p string) bool {
 // roles that are not config's stand for the store: endpoint, result and
 // marker.
 var (
-	testInit = &txn.Decl{Name: "init", Kind: txn.Normal, Writes: []txn.Write{
-		{Role: config.RoleDir, Op: txn.OpMakeDir, Many: true, Optional: true},
-		{Role: config.RoleNode, Op: txn.OpReplace, Optional: true},
-		{Role: config.RolePolicy, Op: txn.OpReplace, Optional: true},
-		{Role: config.RolePresets, Op: txn.OpReplace, Optional: true},
-		{Role: config.RoleInstances, Op: txn.OpReplace, Optional: true},
-		{Role: "marker", Op: txn.OpReplace},
-	}}
+	testInit = &txn.Decl{Name: "init", Kind: txn.Normal, Writes: append(config.InitWrites(),
+		txn.Write{Role: "marker", Op: txn.OpReplace})}
 	testDirectRegister = &txn.Decl{Name: "direct-register", Kind: txn.Normal, Writes: []txn.Write{
-		{Role: config.RoleEndpointIDs, Op: txn.OpReplace, Optional: true},
+		config.EndpointIDsWrite(),
 		{Role: "endpoint", Op: txn.OpReplace, Optional: true},
 	}}
 	testRuntimeAdmit = &txn.Decl{Name: "runtime-admit", Kind: txn.Normal, Writes: []txn.Write{
-		{Role: config.RoleEndpointIDs, Op: txn.OpReplace, Optional: true},
+		config.EndpointIDsWrite(),
 		{Role: "endpoint", Op: txn.OpReplace, Optional: true},
 	}}
 	testBackupConfirm = &txn.Decl{Name: "backup-confirm", Kind: txn.Normal, Writes: []txn.Write{
-		{Role: config.RoleBackup, Op: txn.OpReplace},
+		config.BackupWrite(),
 		{Role: "result", Op: txn.OpReplace},
 	}}
 	testIdentityRetire = &txn.Decl{Name: "identity-retire", Kind: txn.Normal, Writes: []txn.Write{
-		{Role: config.RoleRevocation, Op: txn.OpReplace},
+		config.RevocationWrite(),
 		{Role: "result", Op: txn.OpReplace},
 	}}
-	testAdapterInstall = &txn.Decl{Name: "adapter-install", Kind: txn.Normal, Writes: []txn.Write{
-		{Role: config.RoleStale, Op: txn.OpDiscard, Optional: true, Prepare: true},
-		{Role: config.RoleVersion, Op: txn.OpRenameDir, Prepare: true},
-		{Role: config.RoleCurrent, Op: txn.OpReplace},
-		{Role: "result", Op: txn.OpReplace},
-		{Role: config.RoleOld, Op: txn.OpDiscard, Optional: true},
-	}}
+	testAdapterInstall = &txn.Decl{Name: "adapter-install", Kind: txn.Normal, Writes: append(config.InstallWrites(),
+		txn.Write{Role: "result", Op: txn.OpReplace}, config.InstallOldWrite())}
 	composed = []*txn.Decl{testInit, testDirectRegister, testRuntimeAdmit, testBackupConfirm, testIdentityRetire, testAdapterInstall}
 )
 

@@ -25,6 +25,7 @@ declared here or in the package that composes it. It reads no clock.
 | `AdapterGCWork(r)` | The garbage of the adapter directory as a pure function of the disk: what the repair removes, and what a clean run must leave empty. |
 | `PlanInit(r)`, `InitPlan` | The configuration side of `init`: what is missing, refusing an invalid file that exists. |
 | `Decode…`/`Encode` of every file, `DecodePreset`, `DecodeNodePatch`, `DecodeEndpointPatch` | The strict decoders and the canonical encoders; the management layer decodes what it receives with these and with nothing else. |
+| `InitWrites()`, `EndpointIDsWrite()`, `BackupWrite()`, `RevocationWrite()`, `InstallWrites()`, `InstallOldWrite()` | The writes this package contributes to the transactions its composers declare, in the order they are made; a composer builds its `Decl` from them, as from `keys.InitWrites()`, and adds its own writes around them. |
 | `Transactions()`, the `Role…` constants, `LayoutDirs()`, the path helpers | The static declarations, the roles other packages compose, and where things live. |
 | `Default…` constants, `DefaultNodeSettings()` | The values `init` writes. |
 
