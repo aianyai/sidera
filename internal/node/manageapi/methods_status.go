@@ -101,6 +101,9 @@ var status = &method{
 				out.Reminders = append(out.Reminders, reminderJSON{Kind: k.String(), Message: reminderMessage[k]})
 			}
 			out.Alerts.Open = st.AlertsOpen
+			if _, ok := clockPauseAlert(st); ok {
+				out.Alerts.Open++ // the list shows the pause as an alert that is not acknowledged
+			}
 			out.Clock.RollbackPaused = st.Clock.RollbackPaused
 			if !st.Clock.PausedSince.IsZero() {
 				out.Clock.RollbackPausedSince = timeText(st.Clock.PausedSince)
@@ -143,6 +146,24 @@ type alertJSON struct {
 // record, it is the pause, and it goes when the owner clears the pause.
 const kindClockRollback = "clock_rollback"
 
+// clockPauseAlert is the alert the pause of the clock stands for, while the clock is
+// paused. It is the one place the alert is made, so that the list shows it and the
+// status counts it as one that is open, and never acknowledged: its identifier is the
+// name of its kind and no alert of the node has that form.
+func clockPauseAlert(st engine.NodeStatus) (alertJSON, bool) {
+	if !st.Clock.RollbackPaused {
+		return alertJSON{}, false
+	}
+	since := ""
+	if !st.Clock.PausedSince.IsZero() {
+		since = timeText(st.Clock.PausedSince)
+	}
+	return alertJSON{
+		ID: kindClockRollback, Kind: kindClockRollback, Since: since,
+		Detail: "the wall clock was set back; nothing that is signed or depends on a deadline is accepted until `sidera clock clear-rollback`",
+	}, true
+}
+
 // alerts.list: the alerts the owner has not acknowledged, oldest first, and with
 // include_acknowledged the others too. While the clock is paused the list ends with
 // the alert of the pause, which has no identifier to acknowledge: it is lifted by
@@ -176,15 +197,8 @@ var alertsList = &method{
 					ID: a.ID.String(), Kind: a.Kind, Since: timeText(a.At), Subject: a.Subject, Detail: a.Detail, Acknowledged: a.Acked != nil,
 				})
 			}
-			if st.Clock.RollbackPaused {
-				since := ""
-				if !st.Clock.PausedSince.IsZero() {
-					since = timeText(st.Clock.PausedSince)
-				}
-				out.Alerts = append(out.Alerts, alertJSON{
-					ID: kindClockRollback, Kind: kindClockRollback, Since: since,
-					Detail: "the wall clock was set back; nothing that is signed or depends on a deadline is accepted until `sidera clock clear-rollback`",
-				})
+			if a, ok := clockPauseAlert(st); ok {
+				out.Alerts = append(out.Alerts, a)
 			}
 			return out, nil
 		}}, nil
@@ -192,6 +206,9 @@ var alertsList = &method{
 }
 
 // alerts.ack: the owner has seen an alert. The identifier is the one the list shows.
+// The alert of the pause of the clock is shown by its kind and is no record, so it
+// is not acknowledged: the answer says what clears it. No code of the wire is closer
+// than an alert the node does not hold.
 var alertsAck = &method{
 	name: "alerts.ack", op: admin.Operation{Kind: admin.OpAcknowledgeAlert},
 	plan: func(_ *Server, raw json.RawMessage) (*plan, error) {
@@ -200,6 +217,10 @@ var alertsAck = &method{
 		}
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err
+		}
+		if p.Alert == kindClockRollback {
+			return nil, apiwire.New(apiwire.CategoryNotFound, apiwire.CodeAlertUnknown,
+				"this alert is the pause of the wall clock, not a record of the node: it is cleared by `sidera clock clear-rollback`, not acknowledged")
 		}
 		id, err := store.ParseAlertID(p.Alert)
 		if err != nil {

@@ -148,6 +148,7 @@ const (
 	CodeUnexpectedVersion = "unexpected_version"
 	CodeInternal          = "internal"
 	CodeEndpointUnknown   = "endpoint_unknown"
+	CodeAlertUnknown      = "alert_unknown"
 	CodeOperationUnknown  = "operation_unknown"
 	CodeOutcomeUnknown    = "outcome_unknown"
 )
@@ -277,7 +278,7 @@ func fromRefusal(r *engine.Refusal) *Error {
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
 	case engine.ReasonAlertUnknown:
-		return New(CategoryNotFound, "alert_unknown", "the node holds no alert with this identifier")
+		return New(CategoryNotFound, CodeAlertUnknown, "the node holds no alert with this identifier")
 	case engine.ReasonIdentityRetired:
 		return New(CategoryUnavailable, "identity_retired", "the identity of this node was retired; nothing is signed in its name and the node is stopping")
 	case engine.ReasonStorageFatal:

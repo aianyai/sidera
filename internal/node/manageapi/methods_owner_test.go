@@ -3,6 +3,7 @@ package manageapi
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -68,7 +70,7 @@ func TestTheParamsOfTheOwnersMethodsAreReadStrictly(t *testing.T) {
 		name, method, body string
 		path               string
 	}{
-		{"an alert that is not an identifier", "alerts.ack", `{"operation_id":"` + id + `","params":{"alert":"clock_rollback"}}`, "params.alert"},
+		{"an alert that is not an identifier", "alerts.ack", `{"operation_id":"` + id + `","params":{"alert":"disk_low"}}`, "params.alert"},
 		{"an alert of another length", "alerts.ack", `{"operation_id":"` + id + `","params":{"alert":"ab"}}`, "params.alert"},
 		{"a digest of capitals", "identity.confirm_backup", `{"operation_id":"` + id + `","params":{"digest":"` + strings.Repeat("AB", 32) + `"}}`, "params.digest"},
 		{"a digest that is short", "identity.confirm_backup", `{"operation_id":"` + id + `","params":{"digest":"abcd"}}`, "params.digest"},
@@ -209,7 +211,7 @@ func TestStatusAnswersWhatTheEngineKnowsInTheWordsOfTheInterface(t *testing.T) {
 	want := `{"result":{"node":{"id":"` + ownNode.String() + `","version":"1.2.3"},` +
 		`"daemon":{"state":"running","started_at":"2026-10-24T08:00:00Z"},` +
 		`"reminders":[{"kind":"revocation_backup_unconfirmed","message":"` + reminderMessage[engine.ReminderRevocationBackupUnconfirmed] + `"}],` +
-		`"alerts":{"open":2},` +
+		`"alerts":{"open":3},` + // the two records and the standing pause of the clock
 		`"clock":{"rollback_paused":true,"rollback_paused_since":"2026-10-24T08:59:00Z","high_water":"2026-10-24T09:00:00Z"},` +
 		`"certificate":{"not_after":"2026-10-26T09:00:00Z","remaining_s":172800},` +
 		`"capacity":{"open_deliveries":12,"node_queue_limit":10000,"outbound_backlog":3,"disk_free_bytes":1073741824,"disk_reserve_bytes":268435456},` +
@@ -249,6 +251,65 @@ func TestTheListOfAlertsHoldsTheStandingPauseAndHidesWhatWasAcknowledged(t *test
 	status, out = r.post("alerts.list", `{}`)
 	if status != 200 || strings.Contains(string(out), "clock_rollback") {
 		t.Errorf("without a pause: %d %s", status, out)
+	}
+}
+
+// The pause of the clock is an alert the owner sees in the list, so the status counts
+// it among the open ones: the number the status shows is the number of entries the
+// list shows as not acknowledged, with and without the pause.
+func TestTheStatusCountsTheAlertsTheListShowsAsOpen(t *testing.T) {
+	r := newRig(t)
+	r.svc.alerts = []store.AlertRecord{{ID: store.AlertID{1}, Kind: "disk_low", At: t0, Detail: "below the reserve"}}
+	for _, paused := range []bool{false, true} {
+		r.svc.status = engine.NodeStatus{AlertsOpen: 1, Clock: engine.ClockStatus{RollbackPaused: paused, PausedSince: t0}}
+		var st struct {
+			Result struct {
+				Alerts struct {
+					Open int `json:"open"`
+				} `json:"alerts"`
+			} `json:"result"`
+		}
+		var list struct {
+			Result struct {
+				Alerts []struct {
+					Acknowledged bool `json:"acknowledged"`
+				} `json:"alerts"`
+			} `json:"result"`
+		}
+		status, out := r.post("status", `{}`)
+		if err := json.Unmarshal(out, &st); status != 200 || err != nil {
+			t.Fatalf("status: %d %s (%v)", status, out, err)
+		}
+		status, out = r.post("alerts.list", `{}`)
+		if err := json.Unmarshal(out, &list); status != 200 || err != nil {
+			t.Fatalf("alerts.list: %d %s (%v)", status, out, err)
+		}
+		if want := len(list.Result.Alerts); st.Result.Alerts.Open != want {
+			t.Errorf("paused %v: the status counts %d open alerts, the list shows %d", paused, st.Result.Alerts.Open, want)
+		}
+		if want := map[bool]int{false: 1, true: 2}[paused]; st.Result.Alerts.Open != want {
+			t.Errorf("paused %v: %d open alerts, want %d", paused, st.Result.Alerts.Open, want)
+		}
+	}
+}
+
+// The alert of the pause of the clock has no identifier to acknowledge: asked to
+// acknowledge it by the name the list shows, the owner is told in so many words that
+// the pause is cleared by `clock clear-rollback`, as a refusal that names the alert as
+// not held, and nothing reaches the engine.
+func TestAcknowledgingTheAlertOfThePauseSaysHowItIsCleared(t *testing.T) {
+	r := newRig(t)
+	status, out := r.post("alerts.ack", `{"operation_id":"`+opID(1)+`","params":{"alert":"clock_rollback"}}`)
+	var body apiwire.Body
+	if err := json.Unmarshal(out, &body); err != nil {
+		t.Fatalf("%s: %v", out, err)
+	}
+	if status != 404 || body.Error.Category != apiwire.CategoryNotFound || body.Error.Code != "alert_unknown" ||
+		!strings.Contains(body.Error.Message, "sidera clock clear-rollback") {
+		t.Errorf("%d %s; want 404 not_found/alert_unknown whose message names `sidera clock clear-rollback`", status, out)
+	}
+	if got := r.svc.calls(); len(got) != 0 {
+		t.Errorf("the engine was asked %d times to acknowledge an alert that is no record", len(got))
 	}
 }
 

@@ -237,6 +237,10 @@ func TestAlertsAreListedAndAcknowledgedThroughTheManagementInterface(t *testing.
 		t.Errorf("an alert the node does not hold: %d %s; want 404 alert_unknown", status, body)
 	}
 	status, body = ack(3, "clock_rollback")
+	if status != 404 || !strings.Contains(string(body), "alert_unknown") || !strings.Contains(string(body), "sidera clock clear-rollback") {
+		t.Errorf("the alert of the pause: %d %s; want 404 alert_unknown that says the pause is cleared by `sidera clock clear-rollback`", status, body)
+	}
+	status, body = ack(4, "disk_low")
 	if status != 400 || !strings.Contains(string(body), "malformed_request") {
 		t.Errorf("an identifier that is not one: %d %s", status, body)
 	}
