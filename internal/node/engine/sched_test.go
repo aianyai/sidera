@@ -341,3 +341,74 @@ func TestTheClockStateHasOneTask(t *testing.T) {
 	e.Start()
 	t.Cleanup(func() { r.stop2(e) })
 }
+
+// A periodic task is told whether the node may sign, by the one rule the engine
+// signs by: a task that signs reads only that, so it cannot sign after the
+// retirement of the identity (before the daemon is down) or while the clock is in
+// doubt. The retirement is judged before the clock, as everything that signs does.
+func TestAPeriodicTaskIsToldWhetherTheNodeMaySign(t *testing.T) {
+	var mu sync.Mutex
+	var last engine.TaskInput
+	task := func(in engine.TaskInput) error {
+		mu.Lock()
+		defer mu.Unlock()
+		last = in
+		return nil
+	}
+	refusal := func() engine.Reason {
+		mu.Lock()
+		defer mu.Unlock()
+		return last.SignRefusal
+	}
+	setup := func(t *testing.T) (*rig, *engine.Engine) {
+		noLeaks(t)
+		r := newRig(t, 10, withKeys())
+		return r, openWith(t, r, func(e *engine.Engine) {
+			if err := e.AddPeriodic("signs", time.Minute, task); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	retire := func(t *testing.T, r *rig, e *engine.Engine) {
+		t.Helper()
+		if res, err := e.Execute(context.Background(), retireCommand(110, "retire", r.node)); err != nil || !res.Stop {
+			t.Fatalf("the retirement: %+v, %v", res, err)
+		}
+	}
+	t.Run("a node that holds its keys on a clock it trusts may sign", func(t *testing.T) {
+		r, e := setup(t)
+		advance(t, r, e, time.Minute)
+		if got := refusal(); got != 0 {
+			t.Errorf("SignRefusal = %v, want none", got)
+		}
+	})
+	t.Run("a retired identity may not", func(t *testing.T) {
+		r, e := setup(t)
+		retire(t, r, e)
+		advance(t, r, e, time.Minute)
+		if got := refusal(); got != engine.ReasonIdentityRetired {
+			t.Errorf("SignRefusal after the retirement = %v, want %v", got, engine.ReasonIdentityRetired)
+		}
+	})
+	t.Run("a clock that was set back may not", func(t *testing.T) {
+		r, e := setup(t)
+		advance(t, r, e, time.Hour)
+		r.clk.Set(t0.Add(30 * time.Minute))
+		settle(t, e)
+		advance(t, r, e, 40*time.Minute) // past the mark again, and the period: the pause stays
+		if got := refusal(); got != engine.ReasonClockRollback {
+			t.Errorf("SignRefusal on a clock set back = %v, want %v", got, engine.ReasonClockRollback)
+		}
+	})
+	t.Run("the retirement is judged before the clock", func(t *testing.T) {
+		r, e := setup(t)
+		advance(t, r, e, time.Hour)
+		r.clk.Set(t0.Add(30 * time.Minute))
+		settle(t, e)
+		retire(t, r, e)
+		advance(t, r, e, 40*time.Minute)
+		if got := refusal(); got != engine.ReasonIdentityRetired {
+			t.Errorf("SignRefusal of a retired node on a clock set back = %v, want %v", got, engine.ReasonIdentityRetired)
+		}
+	})
+}

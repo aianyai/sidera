@@ -64,3 +64,32 @@ func TestAfterTheIdentityIsRetiredNothingIsSigned(t *testing.T) {
 		t.Errorf("the message taken in before is %s", in.Record.State)
 	}
 }
+
+// Between the retirement and the end of the daemon the node does not take in new
+// work: a send is refused with the reason for the identity, and nothing is
+// recorded. An acknowledgement then would promise the delivery of a message that
+// no start will ever send, because the node never starts again.
+func TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	send(t, h, "a", "b", "before the retirement")
+	quiet(t, h)
+	if res, err := h.Engine().Execute(context.Background(), retireCommand(104, "retire", harness.NodeID())); err != nil || !res.Stop {
+		t.Fatalf("the retirement: %+v, %v", res, err)
+	}
+	before, err := h.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = trySend(h, "a", "b", "after the retirement", "")
+	if fakeagent.CategoryOf(err) != fakeagent.CategoryUnavailable || fakeagent.CodeOf(err) != "identity_retired" {
+		t.Errorf("send after the retirement: %v; want unavailable/identity_retired", err)
+	}
+	after, err := h.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Out) != len(before.Out) || len(after.In) != len(before.In) {
+		t.Errorf("records after a send that was refused: %d sent and %d received, before %d and %d",
+			len(after.Out), len(after.In), len(before.Out), len(before.In))
+	}
+}

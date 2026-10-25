@@ -31,22 +31,38 @@ func (e *Engine) acceptedKey(node ident.NodeID) record.AcceptedNetworkKey {
 	return e.d.Config.RevocationSet().NetworkKey(e.d.Keys.Certificate(), e.d.Keys.SerialSeen().Serial)
 }
 
-// canSign says whether this node may sign a report now: it holds keys, its
-// identity has not been retired, and the wall clock can be trusted, because a
-// signature carries the time and the reply window of the other side starts from
-// it. It is the one rule of signing: signReport asks it, and so does an entry that
-// would refuse before it has judged anything.
-func (e *Engine) canSign() error {
+// SignRefusalOf is why a node whose identity is retired or whose wall clock is in
+// doubt may not sign, and zero when it may. The identity is judged first: a
+// retirement is for good, a pause ends when the owner clears it. A signature
+// carries the time, and the reply window of the other side starts from it, so a
+// clock that cannot be trusted signs nothing. It is the one judgement of signing:
+// canSign, the capacity check and the periodic tasks (TaskInput.SignRefusal) read
+// it, and so does the start of the daemon, before an engine exists.
+func SignRefusalOf(retired, paused bool) Reason {
 	switch {
-	case e.d.Keys == nil:
+	case retired:
+		return ReasonIdentityRetired
+	case paused:
+		return ReasonClockRollback
+	}
+	return 0
+}
+
+// canSign says whether this node may sign a report now: it holds keys and
+// SignRefusalOf finds nothing against it. signReport asks it, and so does an entry
+// that would refuse before it has judged anything.
+func (e *Engine) canSign() error {
+	if e.d.Keys == nil {
 		return errNoKeys
-	case e.retired:
-		return refuse(ReasonIdentityRetired)
-	case e.paused:
-		return refuse(ReasonClockRollback)
+	}
+	if r := e.signRefusal(); r != 0 {
+		return refuse(r)
 	}
 	return nil
 }
+
+// signRefusal is SignRefusalOf for the state of the loop.
+func (e *Engine) signRefusal() Reason { return SignRefusalOf(e.retired, e.paused) }
 
 // signReport signs this node's report of a delivery it holds the target record
 // of, with the node's network key, at now. The report is dated with the moment the

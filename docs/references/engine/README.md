@@ -183,7 +183,9 @@ before the shutdown is seen is still handed out, and the registry that is left
 when the loop stops is ended by `finish`.
 
 **Capacity.** `checkCapacity` is the one judgment of whether the node takes in new
-work: a clock set back first (`clock_rollback`), then the queue (`node_queue_full`
+work: a retired identity first (`identity_retired`: the node never starts again, so an
+acknowledgement would promise a delivery nothing will make), then a clock set back
+(`clock_rollback`), both by the one judgement of signing (`SignRefusalOf`), then the queue (`node_queue_full`
 when unfinished deliveries plus the new recipients exceed the node's limit), then
 the disk (`storage_full` when the free space is below the reserve). A bound that is
 not set refuses. The unfinished deliveries are the target records that still need their body
@@ -437,6 +439,7 @@ reproducible).
 | The owner's clear of the pause is one replacement and the loop forgets the pause after the commit | `operations_clock.go`, `transactions.go` (`clock-clear`), `engine.go` (`clearRollback`) | `TestClockRollbackPausesSigningUntilCleared`, `TestARestartedNodeThatWasPausedIsClearedByTheOwnerAlone`, `TestAWallClockSetBackPausesNewWorkUntilTheOwnerClearsIt` |
 | The backup is confirmed only for the statement the node holds; the reminder is derived | `operations_identity.go`, `nodestatus.go` | `TestTheBackupIsConfirmedOnlyForTheStatementTheNodeHolds`, `TestAConfirmationOfAnotherStatementDoesNotPutTheReminderOut` |
 | The retirement keeps the statement, asks for the stop, and nothing is signed after it | `operations_identity.go`, `signing.go` (`canSign`) | `TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop`, `TestAfterTheIdentityIsRetiredNothingIsSigned` |
+| After the retirement a send is refused and nothing is recorded; a periodic task is told that the node may not sign | `capacity.go`, `signing.go` (`SignRefusalOf`), `engine.go` (`fire`) | `TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded`, `TestCheckCapacityTable`, `TestAPeriodicTaskIsToldWhetherTheNodeMaySign` |
 | An alert is acknowledged and takes the file it names | `operations_alerts.go` | `TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames` |
 | Settings are a versioned change through the door and are in force for the next command | `operations_settings.go` | `TestChangingTheSettingsOfTheNodeIsAVersionedChangeThroughTheDoor`, `TestChangingTheSettingsOfAnEndpointFindsItsInstance`, `TestChangedSettingsAreInForceForTheNextCommand` |
 | The owner's operations recover from a crash at every point | `transactions.go` | `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |

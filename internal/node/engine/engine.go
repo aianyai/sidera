@@ -123,12 +123,19 @@ type periodicTask struct {
 }
 
 // TaskInput is what a periodic task is told: the time of the command that runs
-// it, the high water mark of the wall clock as the loop holds it, and whether the
-// clock is paused. A task that writes the mark to disk writes HighWater.
+// it, the high water mark of the wall clock as the loop holds it, whether the
+// clock is paused, and whether the node may sign. A task that writes the mark and
+// the pause to disk writes HighWater and RollbackPaused; a task that signs reads
+// only SignRefusal.
 type TaskInput struct {
 	Now            time.Time
 	HighWater      time.Time
 	RollbackPaused bool
+	// SignRefusal is why the node may not sign now (SignRefusalOf), zero when it
+	// may. It covers the retirement of the identity, which the pause alone does
+	// not: between the retirement and the end of the daemon the loop goes on
+	// running tasks.
+	SignRefusal Reason
 }
 
 // Task is a periodic task. It runs in the loop, so it may write through the
@@ -721,7 +728,7 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		}
 	case schedPeriodic:
 		p := e.periodic[key.id]
-		err := p.task(TaskInput{Now: now, HighWater: e.hw.Value(), RollbackPaused: e.paused})
+		err := p.task(TaskInput{Now: now, HighWater: e.hw.Value(), RollbackPaused: e.paused, SignRefusal: e.signRefusal()})
 		switch {
 		case err == nil:
 			e.sched.set(key, now.Add(p.every))

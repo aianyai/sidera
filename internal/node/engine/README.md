@@ -28,7 +28,7 @@ commands and add their methods to this list.
 | ---- | ------- |
 | `Open(ctx, Deps, Params)` | The scan entry: scans `state/`, runs the recovery rules until none has work, builds the view. Returns a `ScanReport`. |
 | `Start`, `RecoverDelivery`, `Serve`, `BeginShutdown`, `Stop`, `Done`, `Err`, `Phase` | The life of the loop: opened, recovering, running, stopping, stopped or failed. `RecoverDelivery` is the second recovery entry; the table of the start steps is in the reference. |
-| `AddPeriodic`, `AddClockState`, `Task`, `TaskInput` | A task the composition root has the loop run every period, before `Start`. The clock state's task is also run at once by the command that finds the wall clock set back. |
+| `AddPeriodic`, `AddClockState`, `Task`, `TaskInput`, `SignRefusalOf` | A task the composition root has the loop run every period, before `Start`. The clock state's task is also run at once by the command that finds the wall clock set back. A task is told whether the node may sign (`TaskInput.SignRefusal`, from `SignRefusalOf`, the one judgement of signing). |
 | `Quiesce` | Returns when no command waits, nothing is due and no goroutine of the engine runs. |
 | `AdapterAdmitted`, `RegisterDirect`, `UnregisterDirect` | What the adapter host calls: the admission of an instance, and the registration and unregistration of its direct endpoints. |
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
@@ -91,7 +91,13 @@ commands and add their methods to this list.
 - **A retired identity signs nothing, from the commit on.** `RetireIdentityOp` keeps the
   statement the keys verified at load as a verified revocation under `config/`, and
   `canSign` then refuses with `ReasonIdentityRetired`, before the daemon is down. The
-  operation asks for the stop (`StoredResult.Stop`), also on a resend.
+  operation asks for the stop (`StoredResult.Stop`), also on a resend. The same
+  judgement (`SignRefusalOf`: the identity first, then the clock) is read by the
+  capacity check, which then refuses new work with `ReasonIdentityRetired` so that
+  nothing is acknowledged that no start will ever send, and handed to the periodic
+  tasks as `TaskInput.SignRefusal`, so that a task that signs does not run on a
+  retired node while the loop is still up. Deliveries that are not settled at the
+  retirement are abandoned, as the retirement means.
 - **Reminders are derived, never stored.** The reminder that the backup of the
   self-revocation is not confirmed is true while the confirmation on disk is not
   of the statement this node holds (`config.Backup.Confirms`); no record stands for it,
@@ -137,7 +143,8 @@ commands and add their methods to this list.
   command that ends the waits is dropped when the inbox is full. The registry is in place; the command that registers a
   waiter and the page that wakes it come with the pull of messages.
 - **The capacity check is in one place.** `checkCapacity`, which only the engine's
-  own `admitNewWork` calls, judges the clock, then
+  own `admitNewWork` calls, judges the identity, then the clock (both by
+  `SignRefusalOf`), then
   the queue, then the disk, and a bound that is not set refuses. The engine feeds
   it with the settings of the node, the free space and its own count of unfinished
   deliveries: target records that still need their body (accepted, queued or
@@ -225,6 +232,8 @@ commands and add their methods to this list.
   the task that persists them with `AddClockState`: it writes `TaskInput.HighWater`
   and `TaskInput.RollbackPaused`, and it is the loop that runs it at once when the
   pause begins, so the pause is on disk before the command that found it goes on.
+- A task that signs reads `TaskInput.SignRefusal` and nothing else to decide
+  whether it may; the start, which has no engine yet, asks `SignRefusalOf` the same.
 - Call `AddPeriodic` before `Start`, `RecoverDelivery` between `Start` and
   `Serve`, and `BeginShutdown` before `Stop`.
 - Admit an adapter instance with `AdapterAdmitted` before its endpoints register,

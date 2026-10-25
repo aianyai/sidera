@@ -398,7 +398,7 @@ func (e *Engine) admitNewWork(recipients int) error {
 	}
 	s := e.d.Config.Node().Settings
 	v := checkCapacity(capacityInput{
-		RollbackPaused: e.paused, Unfinished: e.view.Unfinished(), Recipients: recipients,
+		Retired: e.retired, RollbackPaused: e.paused, Unfinished: e.view.Unfinished(), Recipients: recipients,
 		NodeQueueLimit: s.NodeQueueLimit, Available: avail, DiskReserve: s.DiskReserveBytes,
 	})
 	if !v.Admit {
