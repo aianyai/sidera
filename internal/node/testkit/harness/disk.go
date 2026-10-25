@@ -59,8 +59,16 @@ func NodeID() ident.NodeID {
 // fixture uses them, and so does a test of a package that needs the pieces and
 // not the whole fixture, so that the way a node is made is written once.
 
-const manifestText = `{"manifest_version":1,"id":"chat","version":"1.0.0","protocol":{"min":1,"max":1},` +
-	`"entry":{"program":"bin/sidera-adapter-chat"},"platforms":[{"os":"linux","arch":"amd64"}]}`
+// manifestText is the manifest of the adapter the fixture installs. It is made from
+// the same options as what the fake adapter declares (AdapterManifest), so that the
+// installed package and the adapter that runs as it cannot disagree.
+var manifestText = func() string {
+	raw, err := AdapterManifest(adapterproto.MaxDirectEndpoints).Encode()
+	if err != nil {
+		panic("harness: the manifest of the adapter: " + err.Error())
+	}
+	return string(raw)
+}()
 
 // ManifestText is the manifest of the adapter the fixture installs.
 func ManifestText() string { return manifestText }
@@ -278,7 +286,7 @@ func enableAdapter(t testing.TB, cfg *config.Config) {
 // admitted: it declares direct endpoints, at most maxDirect of them.
 func AdapterAdmission(t testing.TB, maxDirect int) adapterreg.Admission {
 	t.Helper()
-	caps := adapterproto.Capabilities{Direct: &adapterproto.DirectCapabilities{MaxEndpoints: maxDirect}}
+	caps := AdapterManifest(maxDirect).Capabilities()
 	m, err := manifest.Parse([]byte(manifestText))
 	if err != nil {
 		t.Fatalf("harness: manifest: %v", err)

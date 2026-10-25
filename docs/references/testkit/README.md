@@ -158,9 +158,10 @@ packages and are not part of them.
   reports a count that never goes down together with whether it holds, and the fixture
   returns only when one whole round (its look, the engine, its look) changed none of
   them. A boolean cannot show that a state was left and reached again in between.
-- **A layer that lacks a capability says so.** The engine layer has no adapter host and
-  no way to create a session yet; `Env` returns an error that is `ErrNotAvailable`
-  for them. A stand-in would make a script pass for what it did not exercise, and the
+- **A layer that lacks a capability says so.** A fixture made without an adapter host,
+  and the engine layer, which cannot create a session yet, have nothing for `Env.Adapter`
+  or `Env.Runtime` to return; `Env` returns an error that is `ErrNotAvailable` for
+  them. A stand-in would make a script pass for what it did not exercise, and the
   failure is what tells the stream that adds the capability to remove the error.
 - **Offline hooks are the halves of a restart, not modes of a crash.** A scenario that
   corrupts a file between two runs, or that crashes the recovery of a crash, needs the node
@@ -201,12 +202,32 @@ packages and are not part of them.
   an unknown outcome (the client of a dead process sees a connection that ended), and
   the name of a registration that was in flight is not remembered. The layer is the
   fixture's and not a rule of the fault wrapper, which fails a test whose rule never
-  fires. With the adapter host attached, a crash cuts the pipe and sends no shutdown. A
-  crash is an event of the run, so it is written to the ledger (mode, the seed of a power
+  fires. With the adapter host attached, a crash aborts it and cuts the pipes and sends
+  no shutdown, and the calls the engine makes on the host go through the same check: a
+  call to an adapter that returns after the crash is an unknown outcome and never a
+  confirmation. A crash is an event of the run, so it is written to the ledger (mode, the seed of a power
   loss, the point a walk names), and a reader of a failed run need not guess it from the
   disk.
   Power loss is the seeded model of the file system, with a fixed second word, so a seed
   is a disk.
+- **The adapter host of the fixture runs on the test clock, over fakes in the process.**
+  Its pings, its backoff and its waits for a process to end are timers of the one test
+  clock, so a test moves them with `Advance` and a step is taken only when the host has
+  armed what it is meant to fire. The fake adapter runs on pipes in the test process and
+  is supervised as a child process is, which gives one process's determinism and the
+  supervision paths of two. Every launch has knobs of its own, because a restarted
+  adapter is a new process; the ledger writer of an instance is one for all its launches,
+  because opening a stream twice would fork its sequence. A launch can be told to
+  survive: neither `Kill` nor the closing of its stream ends it and the host's closing of
+  its end of the pipes does not reach it, so it holds the instance lock as a hung process
+  does, which is the case the lock exists for: the host cannot end it, starts the
+  instance again after its backoff, and every replacement is refused the lock and never
+  controls a session beside it. The launcher is one implementation shared with the
+  tests of the daemon, so that the code that starts fakes is not written twice. The
+  quiet check adds the fakes' own numbers: with a host, the engine is asked against the
+  notifications the latest launch has sent and the requests it holds, made again each
+  round, and the fixture waits for that launch to have no request of its own that is not
+  answered.
 - **The back end answers a method the engine lacks as an unknown method.** The agent
   interface has no category for "not yet", and adding one would change its table; an
   unknown method is what the server would say, and the scripts already handle it. The
@@ -231,7 +252,7 @@ packages and are not part of them.
 | Fake agent | `internal/node/testkit/fakeagent` | `TestTheInterfaceHasAMethodForEveryAgentCommand`, `TestErrorCategories`, `TestRecordingWritesTheCallBeforeTheActionAndTheResultAfter`, `TestRecordingCanRecordWhatTheModelSawOutsideATurn` |
 | Engine backend | `internal/node/testkit/fakeagent/engineagent` | `TestDeclarePatchReachesTheEngineForTheCallersOwnEndpoint`, `TestDeclareLeavesAFieldThatIsNilAsItWas`, `TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface`, `TestEveryEngineReasonMapsToACategoryAndCode`, `TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError` (`Send`, `Reply` and `Status` call the engine; the scenarios of sending and intake are in the engine's tests) |
 | Scripts | `internal/node/testkit/scenario`, `internal/node/testkit/scenario_imports_test.go` | `TestRunSetsUpDirectEndpointsThenRunsEachStepAndQuiescesAfterIt`, `TestRunStopsAtTheFirstFailedStepAndNamesIt`, `TestRunRefusesAScriptThatCannotRunBeforeTouchingTheSystem`, `TestRecvAndAckAllAcknowledgesEveryPageAndStopsAtAnEmptyOne`, `TestAScriptIsAScenarioOfTheCrashWalk`, `TestCheckRejects`, `TestACheckOfRepeatSightingsFailsOnlyWhatTheLedgerProvesIsAfterAnotherSighting`, `TestScenarioPackageDoesNotImportTheEngineOrAFixtureOfAnyLayer` |
-| Engine fixture | `internal/node/testkit/harness` | `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`, `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`, `TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport`, `TestAProcessCrashThenRestartKeepsExactlyWhatWasDurable`, `TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledged`, `TestFaultsAreInjectedThroughTheFileLayerAndTheirHitsCounted`, `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`, `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`, `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`, `TestAProcessCrashKeepsAWriteThatWasNotSyncedYet`, `TestAStoppedNodeIsDownAndAFileChangedOfflineIsWhatTheNextStartReads`, `TestAFaultArmedForTheNextStartAppliesToThatProcess`, `TestAKilledNodeIsDownOnTheDiskTheCrashLeftUntilItIsStarted`, `TestACrashIsWrittenToTheLedgerWithItsModeAndSeed`, `TestACrashThatNamesItsPointIsWrittenWithThePoint`, `TestQuiesceDoesNotReturnWhileAConditionThatKeepsHoldingStillMakesProgress`, `TestQuiesceReturnsAfterOneRoundWhenNoCountMoves`, `TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer`, `TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages` |
+| Engine fixture | `internal/node/testkit/harness` | `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`, `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`, `TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport`, `TestAProcessCrashThenRestartKeepsExactlyWhatWasDurable`, `TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledged`, `TestFaultsAreInjectedThroughTheFileLayerAndTheirHitsCounted`, `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`, `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`, `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`, `TestAProcessCrashKeepsAWriteThatWasNotSyncedYet`, `TestAStoppedNodeIsDownAndAFileChangedOfflineIsWhatTheNextStartReads`, `TestAFaultArmedForTheNextStartAppliesToThatProcess`, `TestAKilledNodeIsDownOnTheDiskTheCrashLeftUntilItIsStarted`, `TestACrashIsWrittenToTheLedgerWithItsModeAndSeed`, `TestACrashThatNamesItsPointIsWrittenWithThePoint`, `TestNoSecondWriterAfterAdapterRestart`, `TestACrashCutsTheAdapterWithoutAShutdownAndACleanRestartShutsItDown`, `TestQuiesceWaitsUntilTheEngineHasHandledEveryNotificationTheAdapterSent`, `TestTheAdapterOfTheFixtureIsTakenOnThroughTheHost`, `TestACallToTheAdapterHostThatReturnsAfterTheProcessWasAbandonedIsNeverAConfirmation`, `TestQuiesceDoesNotReturnWhileAConditionThatKeepsHoldingStillMakesProgress`, `TestQuiesceReturnsAfterOneRoundWhenNoCountMoves`, `TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer`, `TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages` |
 | Crash walk | `internal/node/testkit/crashwalk` | `TestPlanFullTakesEveryWindowPointExceptTheSyncSteps`, `TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole`, `TestShardsPartitionTheTargets`, `TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce`, `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`, `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`, `TestAssessCoverage`, `TestCheckRecoveryCasesUnion`, `TestWalkFailsWhenATargetIsNotReached`, `TestWalkFailsWhenARerunDivergesFromTheRecording`, `TestWalkSecondLayerCrashesTheRecoveryAfterTheMainCrash` |
 
 ## The consistency test
@@ -263,8 +284,9 @@ directory and is replaced), is answered with a result the schema accepts.
   format.
 - The binary-layer fixture and the backends of the fake agent that run the command-line
   client and speak MCP, and the backends of the crash walk, are not in this tree yet.
-- The engine-layer fixture has no adapter host and no session creation yet; `Adapter` and `Runtime`
-  return `scenario.ErrNotAvailable` until the code they stand for exists. Judgements whose
+- The engine-layer fixture has no session creation yet (its fake adapter declares direct
+  endpoints only); `Runtime` returns `scenario.ErrNotAvailable` until the code it stands for
+  exists, and so does `Adapter` for a fixture made without `Options.Adapter`. Judgements whose
   subject does not exist yet (no message lost, one feedback per delivery and kind,
   acknowledgements on behalf, every record closed, the drain) are not in `scenario`.
 - The engine backend maps the engine's refusals itself, with the codes the interface's

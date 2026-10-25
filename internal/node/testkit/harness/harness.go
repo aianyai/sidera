@@ -20,6 +20,8 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/config"
@@ -79,6 +81,12 @@ type Options struct {
 	// clock was set back and not cleared. It applies to every start, restarts
 	// included, because a process has no memory of the last one.
 	RollbackPaused bool
+	// Adapter, when set, gives the node an adapter host that starts a fake adapter
+	// for the instance Instance in the test process, on the fixture's test clock,
+	// and admits the instance through it as the daemon does. Nil keeps the node
+	// without a host: the fixture admits the instance itself through the engine's
+	// entry, and Adapter has nothing to return.
+	Adapter *AdapterOptions
 }
 
 // FSMode is the file system a node runs on.
@@ -115,6 +123,15 @@ type H struct {
 	// dying is the processes that Crash left behind, still being stopped.
 	dying sync.WaitGroup
 
+	// launcher starts the fake adapters of the host, nil without Options.Adapter.
+	// It is the fixture's and not a process's: the launches are kept across
+	// restarts, and the ledger writer of the adapter is one for all of them.
+	launcher *AdapterLauncher
+	// adapterHome is the data directory the host and the engine are told: the real
+	// directory the instance lock files are in. A lock path is not a socket path,
+	// so a temporary directory of the test will do.
+	adapterHome string
+
 	mu sync.Mutex
 	// proc is the running process, nil while the node is down. disk is the disk
 	// the running process writes to, or while the node is down the one the next
@@ -135,6 +152,8 @@ type process struct {
 	log     *LogCapture
 	eng     *engine.Engine
 	lb      *transport.Loopback
+	// host is the adapter host of the process, nil when the fixture has none.
+	host *adapterhost.Host
 
 	// abandoned is set when a crash cuts the process off: a call that was made to
 	// it and returns afterwards has no answer anyone could have read.
@@ -181,6 +200,13 @@ func New(t testing.TB, o Options) *H {
 	}
 	h.knobs.Observe(h.knobHit)
 	h.addQuiet("loopback", h.loopbackQuiet)
+	if o.Adapter != nil {
+		h.adapterHome = t.TempDir() // before the cleanup of the fixture: it is removed after the fixture has stopped
+		h.launcher = NewAdapterLauncher(LauncherConfig{
+			T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect),
+		})
+		h.addAdapterQuiet(Instance)
+	}
 	t.Cleanup(h.close)
 	var base fsx.FS
 	if o.FS == RealFS {
@@ -276,8 +302,9 @@ func (h *H) loopbackQuiet() (bool, uint64) {
 }
 
 // boot runs a process over the disk through the startup steps the engine has: the
-// scan, the start of the loop, the admission of the adapter, the recovery of
-// deliveries and the switch to serving.
+// scan, the start of the loop, the admission of the adapter (through the host when
+// the fixture has one, otherwise by the fixture itself), the recovery of deliveries
+// and the switch to serving.
 //
 // RollbackPaused and the clock's high-water mark are applied from zero at every start,
 // as a daemon that was just launched has no memory of the last run: a restart does not
@@ -308,6 +335,18 @@ func (h *H) boot(base fsx.FS, arm func(*fsxtest.Faulty)) *process {
 		Writer: m.Writer, Store: st, Config: cfg, Keys: k, Rand: RandReader(h.opts.Seed + uint64(h.gen)),
 		Log: slog.New(p.log),
 	}
+	if h.launcher != nil {
+		// The host runs on the test clock: its pings, its backoff and its waits for a
+		// process to end are moved by Advance, and nothing in it waits for real time.
+		p.host, err = adapterhost.New(adapterhost.Config{
+			Launcher: h.launcher, Params: h.opts.Adapter.Host, Clock: h.clk, Log: slog.New(p.log),
+		})
+		if err != nil {
+			h.t.Fatalf("harness: adapterhost.New: %v", err)
+		}
+		deps.Adapters = abandonable(p.host, &p.abandoned)
+		deps.Home = h.adapterHome
+	}
 	p.eng, _, err = engine.Open(h.ctx, deps, h.opts.Params)
 	if err != nil {
 		h.t.Fatalf("harness: engine.Open: %v", err)
@@ -317,13 +356,20 @@ func (h *H) boot(base fsx.FS, arm func(*fsxtest.Faulty)) *process {
 		h.t.Fatalf("harness: SetTransport: %v", err)
 	}
 	p.eng.Start()
-	info := adapterproto.InitializeResult{
-		ProtocolVersion: 1,
-		Adapter:         adapterproto.AdapterInfo{ID: Instance, Version: "1.0.0"}, // the manifest the fixture installs
-		Capabilities:    h.admit.Capabilities(),
-	}
-	if _, err := p.eng.AdapterAdmitted(h.ctx, Instance, h.admit, info); err != nil {
-		h.t.Fatalf("harness: AdapterAdmitted: %v", err)
+	if p.host != nil {
+		env := adapterhost.Env{Home: h.adapterHome, Source: cfg, Logs: newLogs(h.t), Engine: apiwire.AdapterEngine(p.eng)}
+		if err := p.host.Start(h.ctx, env); err != nil {
+			h.t.Fatalf("harness: starting the adapter host: %v", err)
+		}
+	} else {
+		info := adapterproto.InitializeResult{
+			ProtocolVersion: 1,
+			Adapter:         adapterproto.AdapterInfo{ID: Instance, Version: "1.0.0"}, // the manifest the fixture installs
+			Capabilities:    h.admit.Capabilities(),
+		}
+		if _, err := p.eng.AdapterAdmitted(h.ctx, Instance, h.admit, info); err != nil {
+			h.t.Fatalf("harness: AdapterAdmitted: %v", err)
+		}
 	}
 	if err := p.eng.RecoverDelivery(h.ctx); err != nil {
 		h.t.Fatalf("harness: RecoverDelivery: %v", err)
@@ -344,21 +390,36 @@ func (f freeSpace) Available() (uint64, error) { return f.free(), nil }
 // stopLimit is how long a process is given to stop, on the real clock.
 const stopLimit = 20 * time.Second
 
-// stop stops the engine of a process the way the daemon does on a normal exit.
+// stop stops a process the way the daemon does on a normal exit: the engine begins
+// to refuse, the adapter host shuts the adapters down, and the engine ends. The
+// host is stopped on the real clock's limit, as the engine is: a process that will
+// not end (a surviving one) is the test's to end first.
 func stop(p *process) error {
 	ctx, cancel := context.WithTimeout(context.Background(), stopLimit)
 	defer cancel()
 	p.eng.BeginShutdown()
-	return p.eng.Stop(ctx)
+	var hostErr error
+	if p.host != nil {
+		if hostErr = p.host.Shutdown(ctx); hostErr != nil {
+			hostErr = fmt.Errorf("stopping the adapter host: %w", hostErr)
+		}
+	}
+	return errors.Join(hostErr, p.eng.Stop(ctx))
 }
 
 func (h *H) close() {
+	if h.launcher != nil {
+		h.launcher.endSurvivors()
+	}
 	if p := h.current(); p != nil {
 		if err := stop(p); err != nil {
-			h.t.Errorf("harness: stopping the engine: %v", err)
+			h.t.Errorf("harness: stopping the node: %v", err)
 		}
 	}
 	h.dying.Wait()
+	if h.launcher != nil {
+		h.launcher.Close()
+	}
 	h.cancel()
 }
 
@@ -506,22 +567,17 @@ func (c currentEngine) MessageStatus(ctx context.Context, caller engine.Caller, 
 }
 
 // onProcess is a call made to the process that is running. When that process is
-// abandoned by a crash before the call returns, nobody could have read what it
-// answers, so the call's result is that its outcome is unknown, whatever the old
-// engine made of it: a client of a dead process sees a connection that ended, not
-// a success.
+// abandoned by a crash before the call is made or returns, nobody could have read
+// what it answers, so the call's result is that its outcome is unknown, whatever
+// the old engine made of it: a client of a dead process sees a connection that
+// ended, not a success.
 func onProcess[T any](h *H, call func(*engine.Engine) (T, error)) (T, error) {
 	p := h.current()
 	if p == nil {
 		var zero T
 		return zero, engineagent.ErrNodeNotRunning
 	}
-	v, err := call(p.eng)
-	if p.abandoned.Load() {
-		var zero T
-		return zero, fmt.Errorf("%w (the answer was %v)", engineagent.ErrProcessEnded, err)
-	}
-	return v, err
+	return unlessAbandoned(&p.abandoned, func() (T, error) { return call(p.eng) })
 }
 
 // Loopback is the loopback of the running process, for a test that makes a
@@ -626,10 +682,57 @@ func (h *H) CheckLedger() error {
 // engine has not finished is missing.
 func (h *H) Records() (*store.Scan, error) { return h.running().mounted.Store.Scan() }
 
-// Adapter has nothing to return yet: the engine layer has no adapter host, and a
-// stand-in would make a script pass for what it did not exercise.
-func (h *H) Adapter(string) (fakeadapter.Controller, error) {
-	return nil, scenario.NotAvailable("the engine layer has no adapter host")
+// Adapter is the controller of the fake adapter process that was started last for
+// the instance, the one the host is talking to now or the last it talked to. A
+// fixture without an adapter host has none, and neither has one in which no process
+// was started yet: a stand-in would make a script pass for what it did not exercise.
+func (h *H) Adapter(instance string) (fakeadapter.Controller, error) {
+	if h.launcher == nil {
+		return nil, scenario.NotAvailable("the fixture has no adapter host (Options.Adapter)")
+	}
+	ls := h.launcher.Launches(instance)
+	if len(ls) == 0 {
+		return nil, scenario.NotAvailable("no adapter process was started for " + instance)
+	}
+	return ls[len(ls)-1].Controller(), nil
+}
+
+// AdapterLaunches are the adapter processes the host started for the instance, in
+// the order it started them, across the restarts of the node. Nil when the fixture
+// has no adapter host.
+func (h *H) AdapterLaunches(instance string) []*AdapterLaunch {
+	if h.launcher == nil {
+		return nil
+	}
+	return h.launcher.Launches(instance)
+}
+
+// addAdapterQuiet registers what the fixture asks of the latest process of an
+// adapter instance for the system to be quiet: it has no request of its own that
+// the daemon has not answered. Its progress is the notifications it has sent. A
+// process that is hung or that was abandoned is not the latest once the host has
+// started another, so it can make the fixture wait for ever only until then.
+func (h *H) addAdapterQuiet(instance string) {
+	h.addQuiet("the adapter of "+instance+" has requests of its own that are not answered", func() (bool, uint64) {
+		st, ok := h.latestAdapterStats(instance)
+		if !ok {
+			return true, 0
+		}
+		return st.Outstanding == 0, uint64(st.NotificationsSent)
+	})
+}
+
+// latestAdapterStats is what the latest process of the instance reports of itself.
+func (h *H) latestAdapterStats(instance string) (fakeadapter.StatsReply, bool) {
+	ls := h.launcher.Launches(instance)
+	if len(ls) == 0 {
+		return fakeadapter.StatsReply{}, false
+	}
+	st, err := ls[len(ls)-1].Controller().Stats(h.ctx)
+	if err != nil {
+		return fakeadapter.StatsReply{}, false
+	}
+	return st, true
 }
 
 // Runtime has nothing to return yet: native sessions exist only through a session
@@ -692,8 +795,8 @@ func (h *H) Crash(mode CrashMode) {
 // the cut fails, so what it was in the middle of reaches no disk; a call that was
 // made to it and returns later is reported as an outcome that is unknown; and its
 // engine is then stopped in the background, which is the cleanup of the test and
-// not an event of the node. When an adapter host is attached, a crash cuts the
-// pipe and sends no shutdown, as a process that died would. A test must still
+// not an event of the node. When an adapter host is attached, a crash aborts it:
+// the pipes are cut and no shutdown is sent, as a process that died would. A test must still
 // release anything it held the old loop with (an observer) before it ends.
 //
 // The crash is written to the ledger as a fixture.crash entry that says the mode, the
@@ -714,6 +817,13 @@ func (h *H) Kill(mode CrashMode) {
 		disk = old.mounted.Mem.CrashClone(rand.New(rand.NewPCG(mode.seed, 0x5ce)))
 	} else {
 		disk = old.mounted.Mem.Clone()
+	}
+	if old.host != nil {
+		// The host is aborted, not shut down, and the pipes are cut: a process that
+		// died sends its adapters nothing. This is after the disk was taken, so
+		// that what the host does while it ends reaches no disk.
+		old.host.Abort()
+		h.launcher.cutAll()
 	}
 	h.dying.Add(1)
 	go func() {
@@ -821,9 +931,19 @@ func (h *H) look() reading {
 // expect is what the engine is asked to be quiet against: the numbers the fixture's
 // parts know from outside the engine. It is made again for every round, because
 // those numbers grow with what the fakes did while the engine was being asked.
-// The engine's Expect has no field yet; the adapter host adds the notification
-// and hold counts, which this takes from the conditions' counters.
-func (h *H) expect() engine.Expect { return engine.Expect{} }
+// With an adapter host it names the instance's connection and says how many
+// notifications the latest process of the instance has sent and which requests it
+// holds on purpose: the engine is quiet only when it has handled that many.
+func (h *H) expect() engine.Expect {
+	if h.launcher == nil {
+		return engine.Expect{}
+	}
+	var x engine.AdapterExpect
+	if st, ok := h.latestAdapterStats(Instance); ok {
+		x = engine.AdapterExpect{Notifications: st.NotificationsSent, Held: st.Held}
+	}
+	return engine.Expect{Adapters: map[string]engine.AdapterExpect{Instance: x}}
+}
 
 // QuiesceError says why the system did not go quiet in time.
 type QuiesceError struct {
@@ -862,6 +982,11 @@ func (e *QuiesceError) Error() string {
 }
 
 func (e *QuiesceError) Unwrap() error { return e.Err }
+
+// adapterRound is how long, on the real clock, the engine is asked about a quiet
+// system in one round when the fixture has an adapter host, before the numbers it
+// is asked against are made again.
+const adapterRound = 100 * time.Millisecond
 
 // quietPoll is how often the conditions of the fixture are asked again, on the
 // real clock: the fakes are objects with no channel to wait on.
@@ -913,8 +1038,20 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 			}
 			continue
 		}
-		rep, err := h.Engine().Quiesce(ctx, h.expect())
+		round, endRound := ctx, context.CancelFunc(func() {})
+		if h.launcher != nil {
+			// What the adapter has sent grows while the engine is asked, and the
+			// engine holds the numbers it was given: a round that takes long is made
+			// again with the numbers of now.
+			round, endRound = context.WithTimeout(ctx, adapterRound)
+		}
+		rep, err := h.Engine().Quiesce(round, h.expect())
+		roundOver := round.Err() != nil // before endRound, which ends it too
+		endRound()
 		if err != nil {
+			if roundOver && ctx.Err() == nil {
+				continue
+			}
 			return fail(true, rep, nil, err)
 		}
 		after := h.look()

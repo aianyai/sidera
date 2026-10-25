@@ -12,11 +12,14 @@ import (
 )
 
 // ownFrames mark the goroutines the fixture is responsible for: the engine's,
-// the transaction layer's, the store's and its own.
+// the transaction layer's, the store's, the adapter host's, the fake adapter's and
+// its own.
 var ownFrames = []string{
 	"internal/node/engine.",
 	"internal/node/txn.",
 	"internal/node/store.",
+	"internal/node/adapterhost.",
+	"internal/node/testkit/fakeadapter.",
 	"internal/node/testkit/harness.",
 }
 
@@ -24,7 +27,8 @@ var ownFrames = []string{
 const leakWait = 5 * time.Second
 
 // NoLeaks fails the test, when it and its cleanups are over, if a goroutine of
-// the engine, the transaction layer, the store or the fixture that was not
+// the engine, the transaction layer, the store, the adapter host, the fake adapter
+// or the fixture that was not
 // running when NoLeaks was called is still running. Register it first in a test,
 // so that it is the last cleanup to run.
 //
