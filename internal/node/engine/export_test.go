@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 )
@@ -316,4 +317,34 @@ func KeepInboxNonEmpty(t testing.TB, e *Engine, n int) (stop func()) {
 	stop = func() { once.Do(func() { flag.Store(true) }) }
 	t.Cleanup(stop)
 	return stop
+}
+
+// TestRun is what an operation made by NewTestOperation is told of the command
+// that runs it.
+type TestRun struct {
+	Now         time.Time
+	Key         admin.RequestKey
+	Fingerprint admin.Fingerprint
+	Expected    admin.Version
+	Name        string
+}
+
+// NewTestOperation is an operation whose effect is the given function, run in
+// the loop like the engine's own operations. It lets the tests of the door show
+// what the door does for an operation whose result is kept somewhere other than
+// the one place the engine's two operations keep theirs.
+func NewTestOperation(op admin.Operation, stops bool, run func(TestRun) ([]byte, error)) Operation {
+	return &testOperation{op: op, stop: stops, run_: run}
+}
+
+type testOperation struct {
+	op   admin.Operation
+	stop bool
+	run_ func(TestRun) ([]byte, error)
+}
+
+func (o *testOperation) Admin() admin.Operation { return o.op }
+func (o *testOperation) stops() bool            { return o.stop }
+func (o *testOperation) run(_ *Engine, x *opRun) ([]byte, error) {
+	return o.run_(TestRun{Now: x.now, Key: x.key, Fingerprint: x.fingerprint, Expected: x.expected, Name: x.name})
 }
