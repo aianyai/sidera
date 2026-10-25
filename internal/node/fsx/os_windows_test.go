@@ -14,8 +14,8 @@ import (
 )
 
 // These tests state requirements and pass on the GitHub-hosted Windows runner.
-// Each logs the measured values that the next fix would need; CI runs go test
-// without -v, so those values show only when the tests are run with -v.
+// Each logs the measured values that the next fix would need; those values show
+// only with -v, which the CI step "go test -v (platform packages)" passes.
 
 // Go opens files without FILE_SHARE_DELETE, so a handle held by os.Open keeps a
 // rename over the file from succeeding until it is closed. A short-lived
