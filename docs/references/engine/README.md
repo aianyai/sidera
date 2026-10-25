@@ -1,9 +1,10 @@
 # Engine
 
 The single writer of the node's runtime state: the loop, its schedule, the
-registration of endpoints, the capacity check, the two recovery entries, and the
-sending and taking in of messages. What the features still to come add to the same
-loop (pulling, prompts, control signals, feedback) is described with them.
+registration of endpoints, the life of an adapter's connection, the capacity check,
+the two recovery entries, and the sending and taking in of messages. What the
+features still to come add to the same loop (pulling, prompts, control signals,
+feedback) is described with them.
 
 ## What
 
@@ -171,6 +172,53 @@ the `Refusal`, as the limit of `endpoint_limit` is, so that the interface maps i
 without reading text. `Endpoints` lists for each endpoint how many messages wait
 for it (`Queued`).
 
+**The life of an adapter's connection.** The adapter host tells the engine, in
+order, that an instance was admitted (`AdapterAdmitted`), what it answered to
+`adapter.start` (`AdapterStarted`), asks for the probe tokens (`ProbeTokens`),
+tells what `adapter.probe` found (`AdapterProbed`), then the notifications
+(`AdapterNotified`) until the connection ends (`AdapterGone`).
+
+The admission of an adapter that declared a runtime makes its runtime endpoint
+exist, in the transaction `runtime-admit`: the id in `config/endpoint-ids/`, minted
+once and kept for ever, then the record in `state/endpoints/`. An open record is
+not written again; a closed one is opened again with a new token. Either way a new
+or reopened endpoint takes a place in the cap of the node, exactly as a direct
+endpoint does, and an admission refused for the cap (`endpoint_limit`, node) leaves
+the instance not admitted. The token of a runtime endpoint is minted because the
+store requires one and is shown to no one. The admission returns what
+`adapter.start` carries: the node, the runtime endpoint, the instance's values, the
+presets with the values each holds for this adapter, the open direct endpoints by
+key and the sessions (none yet).
+
+An instance is online from `adapter.start` until the engine is told the connection
+ended, and offline otherwise. The time it went offline is the engine's own clock at
+the report, and the earlier time stays when it is reported again; an instance that
+has not been online since the engine started is offline since an unknown time.
+`AdapterSignals` is `adapterreg.Signals` over the last availability snapshot and
+that observation. The snapshot, the busy turns and the requests the runtime saw
+refused are memory: they are rebuilt by the adapter after a restart, and a
+notification about an endpoint the engine does not know is kept by reference and
+writes nothing. The probe result is kept per instance; when its runtime is outside
+the tested ranges of the installed manifest the owner gets one alert of kind
+`version_untested`, once for the same instance and words, across restarts too
+because alerts are persistent. `ProbeTokens` makes a token for each front end of
+each preset, valid for five minutes on the injected clock and kept in memory only;
+the Agent interface will present it.
+
+A checkpoint (`CheckpointPut`) is one replaced file under `state/checkpoints/` in
+the transaction `checkpoint-put`, answered after the commit, stored compact, one
+value for each (scope, id). It is taken while the node recovers as well as after it
+serves, because adapters start before the node serves and a session being taken
+back may put its state at once. The scope `session` needs an open session endpoint
+of the instance, so until sessions can be created every such put is refused.
+
+`Quiesce` judges, in the same loop command as its other conditions, each instance
+named in `Expect.Adapters` against the host's counts: the notifications handled
+equal what the adapter says it sent, none is buffered, no request of the adapter is
+being answered, the host is not working, and the requests the host has sent that
+have no answer are exactly the ones the caller says the adapter holds on purpose
+(as multisets). Instances not named are not judged.
+
 **Waiting.** A recv that finds nothing queued and is asked to wait is registered as
 a waiter in the same command, so no arrival is missed between the check and the
 registration. A command that makes a message of the endpoint ready hands the page
@@ -264,7 +312,7 @@ in the order the node takes them; the engine takes part in these:
 | ---- | ---- | ------ |
 | 6 | Scan `state/`, quarantine and repair, rebuild the view | `Open` (the scan entry) |
 | 8 | Management interface opens; reads answer, changes are refused | `Start` |
-| 10 | Adapter instances start and are admitted | `AdapterAdmitted` |
+| 10 | Adapter instances start and are admitted | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed` |
 | 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery` |
 | 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick` |
 | 13 | Send the feedback that fell due | phase `feedback` |
@@ -366,6 +414,35 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   waits for the closing of the endpoints of its earlier life. Parking the command
   until the drain ends, rather than queueing it again at once, is what keeps it from
   spinning in the loop while a failed chunk waits out its back off.
+- **The runtime endpoint is made at admission, with the id kept in `config/`.** The
+  adapter protocol promises one runtime endpoint per instance that outlives the
+  process, and `adapter.start` names it; making it where the instance is admitted
+  keeps one place that decides the cap, the id and the token. The id is kept before
+  the record, in one transaction, for the reason the direct endpoints' is: a crash
+  between the two leaves an id no record uses, and the next admission builds the
+  endpoint under it. A reopened endpoint gets a new token, as a reopened direct one
+  does.
+- **A runtime endpoint that is still draining is not opened again.** The records
+  queued for it while it was closed would land on the open one. The admission fails
+  loudly instead of waiting in the loop: the host ends the connection and starts
+  the instance after its backoff, which is by when the drain is done.
+- **The offline time is the engine's clock, and an unknown start stays unknown.**
+  An adapter's clock is for reference only. An instance that never came online has
+  no moment to name, and inventing one at the first failed start would hide that.
+- **The state an adapter reports is memory.** The adapter says it again on every
+  connection (a complete availability snapshot, `turn_active` of each session in
+  its start result), so keeping it on disk would only make a restart show state
+  that nobody has confirmed.
+- **Probe tokens are not on disk.** A token that survives a restart proves nothing
+  about the reach of the new process, and a secret that is not written cannot be
+  read back from a backup.
+- **`checkpoint.put` runs in the recovering phase.** The adapters start before the
+  node serves; waiting for `Serve` would hold a session being taken back for the
+  whole of the recovery.
+- **`Quiesce` polls the host's counts on the real clock while an adapter does not
+  hold.** The host's counters move when the adapter or the host does, not when the
+  engine does; the engine's own activity alone would not wake a waiter that looked
+  a moment too early.
 - **The cap counts creating endpoints too.** A session endpoint being created has a
   record, a token and a place in the node's declaration as soon as it is committed;
   leaving it out would let a node pass the cap during a creation.
@@ -430,6 +507,16 @@ reproducible).
 | The 257th endpoint is refused | `endpoints.go` (`registerDirect`) | `TestEndpointBeyondNodeCapRefused`, `TestTheNodeCapCountsOtherKindsOfEndpointOnTheRegistrationPath`, `TestInstanceLimitRefusesBeforeTheNodeCap` |
 | Same key, same endpoint; a new token on reopening | `endpoints.go`, `tokens.go` | `TestSameKeyGivesTheSameEndpointAcrossARestart`, `TestReopeningAnEndpointKeepsItsIdAndGivesItANewToken` |
 | The registration crashes anywhere | `transactions.go` | `TestDirectRegisterRecoversFromACrashAtEveryPoint` |
+| The runtime endpoint is made once, its id is kept, a closed one is reopened with a new token | `adapters.go` (`admitRuntime`), `transactions.go` | `TestAdmissionOfARuntimeAdapterMakesItsRuntimeEndpointOnceAndKeepsItsId` |
+| The runtime endpoint counts against the node's cap; a refused admission leaves the instance not admitted | `adapters.go` (`admitRuntime`) | `TestRuntimeEndpointCountsAgainstTheNodeCap` |
+| The admission crashes anywhere | `transactions.go` | `TestRuntimeAdmitRecoversFromACrashAtEveryPoint` |
+| What `adapter.start` carries | `adapters.go` (`startParams`) | `TestAdmissionReturnsWhatAdapterStartCarries` |
+| Probe tokens | `adapters.go` (`probeTokens`) | `TestProbeTokensAreOnePerPresetAndFrontEndSingleUseAndFiveMinutes` |
+| A runtime outside the tested ranges is one alert | `adapters.go` (`probeResult`) | `TestVersionUntestedAlertIsRaisedOnceForARuntimeOutsideTheTestedRanges` |
+| Availability becomes handoff's signals; online and offline | `adapters.go` (`notified`, `gone`, `AdapterSignals`) | `TestAvailabilitySnapshotsBecomeHandoffSignals`, `TestAnAdapterThatIsGoneKeepsItsEndpointsItsRecordsAndItsAdmission`, `TestAnInstanceTheConfigurationDoesNotEnableIsUnknownToReadsAndToGone` |
+| Notifications about unknown endpoints write nothing; the busy state at start | `adapters.go` (`notified`, `markStarted`) | `TestNotificationsAboutUnknownEndpointsAreAcceptedAndSetNothingOnDisk`, `TestAdapterStartedTakesTheBusyStateOfTheSessionsItKnowsAndIgnoresTheRest` |
+| A checkpoint is on disk before it is answered | `adapters.go` (`checkpointPut`) | `TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt`, `TestCheckpointPutRecoversFromACrashAtEveryPoint` |
+| `Quiesce` judges the host's counts | `recovery.go` | `TestQuiesceJudgesTheAdapterHostsCounts` |
 | The result of a close is stored with it | `endpoints.go` (`closeEndpoint`), `manage.go` (`CloseEndpointOp`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint` |
 | One identifier has one result, for every operation and every place a result is kept | `manage.go` (`Execute`, `execute`, `addConfigResults`), `recovery.go` (`Open`) | `TestAResendReturnsTheStoredResultAndAReusedIdentifierIsRefused`, `TestConcurrentResendsOfOneRequestRunOnce`, `TestARefusedRequestStoresNothingAndTheIdentifierStaysFree`, `TestAVersionedChangeIsAppliedOnceAndAStaleOneNeverIsApplied` |
 | A crash at any point of an operation leaves nothing, the effect alone or both, never the result alone; a resend is carried out again or answered from the result | `manage.go`, `endpoints.go` (`closeWithResult`) | `TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint` |
@@ -488,9 +575,8 @@ Known gaps, each filled in with the feature it belongs to:
 - Closing a session endpoint does not yet send `session.close` to the adapter: the
   outcome says `closing`, and the release of the native session comes with the
   creation of sessions, which is the feature that makes one.
-- `AdapterAdmitted` ignores the runtime capability, and no transaction that opens
-  or reopens the runtime endpoint of an instance (`runtime-admit`) is declared yet:
-  it belongs to the adapter host.
+- `adapter.start` lists no session: the list is filled with the open sessions of
+  the instance when sessions can be created.
 - A write that fails on `endpoint.register` is refused with the engine's own
   reason (`storage_full`, `storage_unavailable`, `storage_fatal`). Which code of the
   adapter protocol each maps to is for the adapter host to decide; if no existing

@@ -131,6 +131,14 @@ func (r *rig) enableInstance(name, doc string) {
 	}
 }
 
+func (r *rig) removePreset(name string) {
+	r.t.Helper()
+	req := configRequest(nextOp(), r.cfg.Presets().Version)
+	if _, err := r.cfg.RemovePreset(req, name, okResult[config.Presets]); err != nil {
+		r.t.Fatalf("RemovePreset(%q): %v", name, err)
+	}
+}
+
 func (r *rig) disableInstance(name string) {
 	r.t.Helper()
 	req := configRequest(nextOp(), r.cfg.Instances().Version)
@@ -334,7 +342,7 @@ func TestAdmissionOfARuntimeAdapterMakesItsRuntimeEndpointOnceAndKeepsItsId(t *t
 		r := newRig(t, 10)
 		r.enableInstance("agent", "")
 		e := r.start()
-		rule := r.faulty.Fail(failMatch("runtime-admit", fsxWrite), errIO)
+		rule := r.faulty.Fail(matchT{Tx: "runtime-admit", Role: "ids", Step: fsxWrite, Hit: 1}, errIO)
 		_, err := admitFull(ctx, e, "agent", rt)
 		wantReason(t, err, engine.ReasonStorageUnavailable)
 		if rule.Hits() == 0 {
@@ -372,15 +380,6 @@ func TestRuntimeEndpointCountsAgainstTheNodeCap(t *testing.T) {
 	r.enableInstance("agent", "")
 	r.enableInstance("agent2", "")
 	e := r.start()
-	if err := admitOn(ctx, e, "chat", rt); err != nil {
-		t.Fatal(err)
-	}
-	// "chat" keeps its runtime endpoint out of this count: it is admitted as a
-	// direct-only adapter below, so that 255 directs plus one runtime endpoint of
-	// "agent" make exactly the cap.
-	if err := admitOn(ctx, e, "chat", r.admit); err != nil {
-		t.Fatal(err)
-	}
 	for i := 0; i < 255; i++ {
 		register(t, e, keyName(i))
 	}
@@ -541,6 +540,7 @@ func TestAdmissionReturnsWhatAdapterStartCarries(t *testing.T) {
 		values map[string]string
 	}{
 		{"deep", map[string]string{"effort": `"high"`}},
+		{"default", map[string]string{}}, // the preset every node starts with
 		{"fast", map[string]string{"model": `"small"`, "retries": `2`}},
 		{"plain", map[string]string{}},
 	}
@@ -605,7 +605,7 @@ func TestProbeTokensAreOnePerPresetAndFrontEndSingleUseAndFiveMinutes(t *testing
 			preset string
 			front  adapterproto.Frontend
 		}
-		want := []pair{{"aa", "mcp"}, {"aa", "cli"}, {"zz", "mcp"}, {"zz", "cli"}}
+		want := []pair{{"aa", "mcp"}, {"aa", "cli"}, {"default", "mcp"}, {"default", "cli"}, {"zz", "mcp"}, {"zz", "cli"}}
 		if len(reqs) != len(want) {
 			t.Fatalf("%d requests, want %d: %+v", len(reqs), len(want), reqs)
 		}
@@ -691,6 +691,7 @@ func TestProbeTokensAreOnePerPresetAndFrontEndSingleUseAndFiveMinutes(t *testing
 
 	t.Run("a runtime with no preset gets an empty list that is not nil", func(t *testing.T) {
 		r := newRig(t, 10)
+		r.removePreset("default")
 		e := r.start()
 		if err := admitOn(ctx, e, "chat", rt); err != nil {
 			t.Fatal(err)
@@ -732,7 +733,7 @@ func TestProbeTokensAreOnePerPresetAndFrontEndSingleUseAndFiveMinutes(t *testing
 
 	t.Run("at most 256 requests", func(t *testing.T) {
 		r := newRig(t, 10)
-		for i := 0; i < 128; i++ {
+		for i := 0; i < 127; i++ { // with the preset every node starts with, 128
 			r.addPreset(fmt.Sprintf("p%03d", i), `{"local_sources":"allow"}`)
 		}
 		e := r.start()

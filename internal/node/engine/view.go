@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // endpointState is an endpoint as the loop holds it: the record and its
@@ -38,6 +39,10 @@ type view struct {
 	// queued lists, for each recipient, the target and control records that are
 	// still accepted and whole: the ones a closed endpoint has to close.
 	queued map[ident.EndpointID]map[store.TargetKey]bool
+
+	// checkpoints are the states the adapters asked the node to keep, by scope
+	// and id.
+	checkpoints map[store.CheckpointKey][]byte
 
 	// results are the stored results of administrative operations by request key,
 	// as far as the loop needs them: the fingerprint that tells a resend of a
@@ -161,7 +166,9 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		arrived:   map[arrivalKey][]store.TargetKey{},
 		backlog:   map[ident.EndpointID]int{},
 		bodyRefs:  bodyCounts{},
-		seq:       store.NewSeqBook(sc),
+
+		checkpoints: map[store.CheckpointKey][]byte{},
+		seq:         store.NewSeqBook(sc),
 	}
 	for _, a := range sc.Admin {
 		v.putResult(a)
@@ -172,6 +179,9 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 			return nil, fmt.Errorf("engine: endpoint %s: %w", ep.ID, err)
 		}
 		v.putEndpoint(ep, decl)
+	}
+	for _, c := range sc.Checkpoints {
+		v.checkpoints[c.Key] = c.State
 	}
 	for _, in := range sc.In {
 		v.setIn(in)
@@ -279,6 +289,21 @@ func (v *view) resolve(c Caller) (*endpointState, error) {
 		return e, nil
 	}
 	return nil, refuse(ReasonUnauthenticated)
+}
+
+// resolveSession finds the session endpoint of an adapter instance that is open,
+// by the reference the adapter uses. A direct endpoint is not one, nor is a
+// session of another instance: an adapter keeps state only for what it owns.
+func (v *view) resolveSession(instance string, ref adapterproto.EndpointRef) (*endpointState, error) {
+	id, err := ident.ParseEndpointID(string(ref))
+	if err != nil {
+		return nil, refuse(ReasonEndpointUnknown)
+	}
+	e := v.endpoints[id]
+	if e == nil || e.rec.Kind != adapterreg.KindSession || e.rec.Instance != instance || e.rec.Status != store.EndpointOpen {
+		return nil, refuse(ReasonEndpointUnknown)
+	}
+	return e, nil
 }
 
 // What counts as an unfinished delivery is what still has work behind it that the

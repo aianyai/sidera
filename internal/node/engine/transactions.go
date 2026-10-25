@@ -51,10 +51,21 @@ var (
 	}}
 )
 
+// declRuntimeAdmit makes the runtime endpoint of an adapter instance exist when
+// the adapter declares a runtime: the id in config/ first, when it is new, and
+// the endpoint record in state/ second, in one transaction opened by the engine
+// for the same reason as direct-register's. A crash between the two writes leaves
+// an id that no record uses, and the next admission of the instance builds the
+// endpoint under it.
+var declRuntimeAdmit = txn.Decl{Name: "runtime-admit", Kind: txn.Normal, Writes: []txn.Write{
+	config.EndpointIDsWrite(),
+	{Role: store.RoleEndpoint, Op: txn.OpReplace},
+}}
+
 // Transactions returns the declarations of the transactions of the engine that
 // write the files of more than one owner, for the composition root to put in
 // the table of the program. The transactions of one owner are declared by the
 // owner.
 func Transactions() []*txn.Decl {
-	return []*txn.Decl{&declDirectRegister, &declClockClear, &declBackupConfirm, &declIdentityRetire}
+	return []*txn.Decl{&declDirectRegister, &declRuntimeAdmit, &declClockClear, &declBackupConfirm, &declIdentityRetire}
 }

@@ -317,7 +317,12 @@ func (h *H) boot(base fsx.FS, arm func(*fsxtest.Faulty)) *process {
 		h.t.Fatalf("harness: SetTransport: %v", err)
 	}
 	p.eng.Start()
-	if err := p.eng.AdapterAdmitted(h.ctx, Instance, h.admit); err != nil {
+	info := adapterproto.InitializeResult{
+		ProtocolVersion: 1,
+		Adapter:         adapterproto.AdapterInfo{ID: Instance, Version: "1.0.0"}, // the manifest the fixture installs
+		Capabilities:    h.admit.Capabilities(),
+	}
+	if _, err := p.eng.AdapterAdmitted(h.ctx, Instance, h.admit, info); err != nil {
 		h.t.Fatalf("harness: AdapterAdmitted: %v", err)
 	}
 	if err := p.eng.RecoverDelivery(h.ctx); err != nil {

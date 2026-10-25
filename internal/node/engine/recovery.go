@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/store"
 )
 
@@ -414,10 +417,49 @@ func (e *Engine) admitNewWork(recipients int) error {
 // Quiet
 
 // Expect is what the caller of Quiesce knows from outside the engine: what the
-// engine side of being quiet is measured against. It grows with the adapter
-// host, whose connections are counted by the notifications the adapters say they
-// sent.
-type Expect struct{}
+// engine side of being quiet is measured against.
+type Expect struct {
+	// Adapters names the adapter instances whose connections must be quiet, by
+	// instance. An instance that is not named is not judged. Naming one needs an
+	// adapter host in Deps.
+	Adapters map[string]AdapterExpect
+}
+
+// AdapterExpect is what the caller knows of one adapter's connection.
+type AdapterExpect struct {
+	// Notifications is how many notifications the adapter says it sent: the
+	// connection is quiet only when the engine has finished with that many.
+	Notifications int
+	// Held lists the methods of the requests that the host has sent the adapter and
+	// that the adapter holds on purpose, one entry per request. The order does not
+	// matter and a method held twice is listed twice.
+	Held []string
+}
+
+// holds says whether the counts of a connection are those of a quiet one, and
+// when they are not, what differs.
+func (x AdapterExpect) holds(c adapterhost.ConnCounts) (bool, string) {
+	var why []string
+	if c.Handled != x.Notifications {
+		why = append(why, fmt.Sprintf("%d notifications handled, the adapter sent %d", c.Handled, x.Notifications))
+	}
+	if c.Buffered != 0 {
+		why = append(why, fmt.Sprintf("%d notifications buffered", c.Buffered))
+	}
+	if c.Requests != 0 {
+		why = append(why, fmt.Sprintf("%d requests of the adapter being answered", c.Requests))
+	}
+	if c.Working {
+		why = append(why, "the host is working")
+	}
+	calls, held := slices.Clone(c.Calls), slices.Clone(x.Held)
+	slices.Sort(calls)
+	slices.Sort(held)
+	if !slices.Equal(calls, held) {
+		why = append(why, fmt.Sprintf("requests held by the adapter %v, expected %v", calls, held))
+	}
+	return len(why) == 0, strings.Join(why, "; ")
+}
 
 // Report says what Quiesce found.
 type Report struct {
@@ -432,11 +474,24 @@ type Report struct {
 	Parked int
 	// Workers is how many goroutines the engine owns that have not returned.
 	Workers int
+	// AdaptersPending is how many of the instances named in Expect.Adapters are not
+	// quiet. The error Quiesce returns when it gives up says which and why.
+	AdaptersPending int
 	// Satisfied is true when none of them holds anything.
 	Satisfied bool
 }
 
-type cmdQuiesce struct{ call[Report] }
+// quiesceAnswer is a Report and, for the error of a Quiesce that gives up, what
+// each pending adapter lacks.
+type quiesceAnswer struct {
+	report  Report
+	pending []string
+}
+
+type cmdQuiesce struct {
+	call[quiesceAnswer]
+	expect Expect
+}
 
 func (c *cmdQuiesce) gate() gate { return gateAlways }
 func (c *cmdQuiesce) run(e *Engine, now time.Time) {
@@ -448,33 +503,72 @@ func (c *cmdQuiesce) run(e *Engine, now time.Time) {
 	if e.outboundParked() && r.Workers > 0 {
 		r.Workers-- // the worker waits out a delay; that is not work
 	}
-	r.Satisfied = r.InboxLen == 0 && r.Continuations == 0 && r.DueEntries == 0 && r.Parked == 0 && r.Workers == 0
-	c.done(r, nil)
+	// The counts of the host are read in this command, after the others, so that
+	// what the loop was doing and what the host counts are of one moment.
+	var pending []string
+	for _, inst := range sortedKeys(c.expect.Adapters) {
+		if ok, why := c.expect.Adapters[inst].holds(e.d.Adapters.Counts(inst)); !ok {
+			pending = append(pending, fmt.Sprintf("adapter %q: %s", inst, why))
+		}
+	}
+	r.AdaptersPending = len(pending)
+	r.Satisfied = r.InboxLen == 0 && r.Continuations == 0 && r.DueEntries == 0 && r.Parked == 0 && r.Workers == 0 && r.AdaptersPending == 0
+	c.done(quiesceAnswer{report: r, pending: pending}, nil)
 }
+
+// adapterPoll is how often, on the real clock, Quiesce looks again while an adapter
+// does not hold: the host's counts move without the engine being told, and nothing
+// else would wake the loop to look at them.
+const adapterPoll = 2 * time.Millisecond
 
 // Quiesce returns when the engine has nothing left to do at the time of its
 // clock: no command waits, the loop has none queued for itself or held for the
-// drain of an endpoint, nothing in the schedule is due and no goroutine of the
-// engine is running. It fails when ctx
-// ends first, with the report of what did not hold. A test moves the clock, calls
-// Quiesce and then looks at the records; nothing in the engine is slept on.
-func (e *Engine) Quiesce(ctx context.Context, _ Expect) (Report, error) {
-	var last Report
+// drain of an endpoint, nothing in the schedule is due, no goroutine of the
+// engine is running, and the connection of every adapter named in x is quiet by
+// the host's own counts (see AdapterExpect). It fails when ctx ends first, with
+// the report of what did not hold and, in the error, what each adapter lacks. A
+// test moves the clock, calls Quiesce and then looks at the records; nothing in
+// the engine is slept on.
+func (e *Engine) Quiesce(ctx context.Context, x Expect) (Report, error) {
+	if len(x.Adapters) > 0 && e.d.Adapters == nil {
+		return Report{}, errors.New("engine: Quiesce is asked about adapters, and the engine has no adapter host")
+	}
+	var last quiesceAnswer
 	for {
-		c := &cmdQuiesce{call: newCall[Report]()}
-		r, err := roundTrip(ctx, e, submitInternal, c, c.call)
+		c := &cmdQuiesce{call: newCall[quiesceAnswer](), expect: x}
+		a, err := roundTrip(ctx, e, submitInternal, c, c.call)
+		if err == nil {
+			if last = a; a.report.Satisfied {
+				return a.report, nil
+			}
+			err = e.awaitChange(ctx, a.report.AdaptersPending > 0)
+		}
 		if err != nil {
-			return last, err
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				err = fmt.Errorf("engine: not quiet: %+v %s: %w", last.report, strings.Join(last.pending, "; "), err)
+			}
+			return last.report, err
 		}
-		if last = r; r.Satisfied {
-			return r, nil
-		}
-		select {
-		case <-e.activity:
-		case <-ctx.Done():
-			return last, fmt.Errorf("engine: not quiet: %+v: %w", last, ctx.Err())
-		case <-e.done:
-			return last, refuse(ReasonShuttingDown)
-		}
+	}
+}
+
+// awaitChange waits for something that may have changed what Quiesce found: the
+// engine's own activity, and with poll also a short time on the real clock.
+func (e *Engine) awaitChange(ctx context.Context, poll bool) error {
+	var tick <-chan time.Time
+	if poll {
+		t := clock.System().NewTimer(adapterPoll)
+		defer t.Stop()
+		tick = t.C()
+	}
+	select {
+	case <-e.activity:
+		return nil
+	case <-tick:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-e.done:
+		return refuse(ReasonShuttingDown)
 	}
 }

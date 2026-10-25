@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	nodekeys "github.com/aianyai/sidera/internal/node/keys"
@@ -40,6 +41,7 @@ type Store interface {
 	EndpointDrain(b store.DrainBatch) ([]store.InRecord, error)
 	AlertRaise(a store.AlertRecord) error
 	AlertAck(a store.AlertAckInput) error
+	CheckpointPut(c store.CheckpointRecord) error
 	DaemonStop(result store.AdminRecord) error
 
 	CtlEffectReplay(eps []store.EndpointRecord) error
@@ -61,6 +63,10 @@ type Config interface {
 	Policy() config.PolicyFile
 	RevocationSet() *revocation.Set
 	EndpointSettings(instance string, id ident.EndpointID) config.EndpointSettings
+	Presets() config.Presets
+	Adapters() []config.Adapter
+	EndpointIDs(instance string) config.EndpointIDs
+	RuntimeID(instance string, rnd io.Reader) (config.IDChange, error)
 	DirectID(instance, key string, rnd io.Reader) (config.IDChange, error)
 	PutEndpointIDs(tx *txn.Tx, ch config.IDChange) (config.AfterCommit, error)
 
@@ -129,6 +135,10 @@ type Adapters interface {
 	// NotifyPending tells a direct endpoint's adapter that messages wait; it is
 	// best effort and does not block.
 	NotifyPending(instance string, p adapterproto.PendingParams)
+
+	// Counts is what the host counts of the connection of the instance, for
+	// Quiesce. It reads counters and never waits.
+	Counts(instance string) adapterhost.ConnCounts
 }
 
 // Deps is what the composition root hands the engine. Every field except
@@ -163,6 +173,11 @@ type Deps struct {
 	Rand io.Reader
 	// Adapters is the adapter host; nil before there is one.
 	Adapters Adapters
+	// Home is the data directory, as an absolute path: the probe tokens carry it to
+	// the adapters, which hand it to the agents they start so that the agents'
+	// tools find the node. It is not required: a rig that probes no adapter does
+	// not set it, and ProbeTokens then fails.
+	Home string
 	// Log receives diagnostics, never a message body, a token or a key; nil
 	// discards them.
 	Log *slog.Logger

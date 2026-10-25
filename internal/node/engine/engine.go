@@ -10,7 +10,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -88,8 +87,8 @@ type Engine struct {
 	// retired: the owner retired the identity of the node. Nothing is signed in its
 	// name from then on, and the node is going down.
 	retired   bool
-	startedAt time.Time // the time Start was called
-	adm       map[string]adapterreg.Admission
+	startedAt time.Time                // the time Start was called
+	adapters  map[string]*adapterState // by instance; see adapters.go
 	sched     *scheduler
 	timer     clock.Timer
 	periodic  map[string]*periodicTask
@@ -177,7 +176,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		activity: make(chan struct{}, 1),
 		hw:       d.HighWater,
 		paused:   d.RollbackPaused,
-		adm:      map[string]adapterreg.Admission{},
+		adapters: map[string]*adapterState{},
 		sched:    newScheduler(),
 		periodic: map[string]*periodicTask{},
 		waits:    map[ident.EndpointID]*waiter{},

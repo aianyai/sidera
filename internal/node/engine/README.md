@@ -15,7 +15,7 @@ clock but the injected one (the waits that are about real time name
 `clock.System()`), and draws randomness only from `Deps.Rand`.
 
 This package holds the loop, the scheduler, the registration of endpoints, the
-capacity check, the storage of alerts, the two recovery entries, and the sending
+life of an adapter's connection, the capacity check, the storage of alerts, the two recovery entries, and the sending
 and taking in of messages: the acceptance of a message from a local endpoint, the
 outbound worker that carries it through the transport and applies what comes
 back, and the receiving side that judges an envelope and signs the reports.
@@ -29,8 +29,11 @@ commands and add their methods to this list.
 | `Open(ctx, Deps, Params)` | The scan entry: scans `state/`, runs the recovery rules until none has work, builds the view. Returns a `ScanReport`. |
 | `Start`, `RecoverDelivery`, `Serve`, `BeginShutdown`, `Stop`, `Done`, `Err`, `Phase` | The life of the loop: opened, recovering, running, stopping, stopped or failed. `RecoverDelivery` is the second recovery entry; the table of the start steps is in the reference. |
 | `AddPeriodic`, `AddClockState`, `Task`, `TaskInput`, `SignRefusalOf` | A task the composition root has the loop run every period, before `Start`. The clock state's task is also run at once by the command that finds the wall clock set back. A task is told whether the node may sign (`TaskInput.SignRefusal`, from `SignRefusalOf`, the one judgement of signing). |
-| `Quiesce` | Returns when no command waits, nothing is due and no goroutine of the engine runs. |
-| `AdapterAdmitted`, `RegisterDirect`, `UnregisterDirect` | What the adapter host calls: the admission of an instance, and the registration and unregistration of its direct endpoints. |
+| `Quiesce`, `Expect`, `AdapterExpect`, `Report` | Returns when no command waits, nothing is due, no goroutine of the engine runs and every adapter named in `Expect.Adapters` is quiet by the host's own counts. |
+| `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed`, `AdapterGone`, `AdapterNotified` | What the adapter host calls for the life of a connection, in that order: the admission of an instance (which makes its runtime endpoint and returns what `adapter.start` carries), what the adapter answered to `adapter.start` and `adapter.probe`, the probe tokens, the end of the connection, and the notifications. `*Engine` satisfies `adapterhost.Engine`. |
+| `RegisterDirect`, `UnregisterDirect`, `CheckpointPut` | What the adapter host calls to answer the requests of an adapter: the registration and unregistration of its direct endpoints, and the state it asks the node to keep. |
+| `Adapter`, `AdapterView`, `AdapterSignals`, `ProbeTokenView` | Reads of what the engine knows of an instance (admission, online or offline since when, probe result, availability, busy turns), and the availability as `handoff.Signals` for one endpoint. |
+| `ProbeTokenEnv`, `HomeEnv`, `ProbeTokenLifetime` | The names and the lifetime of the probe tokens; the Agent interface refers to them. |
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
 | `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record. Another endpoint's message is unknown to the caller. The reply of a control signal is not part of it yet. |
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
@@ -45,9 +48,9 @@ commands and add their methods to this list.
 | `OperationResult` | A read: the result stored for a request key, from either place a result is kept, and whether there is one. Taken while the node starts; writes nothing. |
 | `PlanRecovery`, `RecoveryPlan` | The work of the recovery rules as a pure function of a scan. |
 | `Reason`, `Refusal`, `ReasonOf` | The closed set of reasons a method refuses for; the interface packages alone map them to the wire. |
-| `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register`, and for the owner's operations `clock-clear`, `backup-confirm` and `identity-retire`, each the effect followed by the result. |
+| `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register` and `runtime-admit`, and for the owner's operations `clock-clear`, `backup-confirm` and `identity-retire`, each the effect followed by the result. |
 | `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. Everything of `ManageService` that changes state is `Execute`; the other methods read. |
-| `Store`, `Config`, `Beginner`, `Adapters` | What the engine asks of the store, the configuration, the transaction writer and the adapter host. |
+| `Store`, `Config`, `Beginner`, `Adapters` | What the engine asks of the store, the configuration, the transaction writer and the adapter host (its calls to an adapter, and `Counts`, which only reads). |
 
 ## Rules
 
@@ -117,6 +120,43 @@ commands and add their methods to this list.
   created, of any kind, takes a place against `publication.MaxEndpointsPerNode`;
   the system endpoint is not registered and takes none. The adapter's own limit
   is judged first and says which limit was hit.
+- **The runtime endpoint of an instance is made by its admission, once.** An
+  adapter that declared a runtime gets one runtime endpoint, whose id is minted the
+  first time and kept in `config/` for ever, in the same transaction
+  (`runtime-admit`) as the record. An open endpoint is not written again; a closed
+  one is opened again with a new token, which is a new place in the cap; both count
+  against `publication.MaxEndpointsPerNode` like a direct endpoint, and a refusal
+  leaves the instance not admitted. Its token is never shown to anyone: a runtime
+  endpoint is no caller. A closed runtime endpoint whose queued records are still
+  being closed is not opened again: the admission fails, the host ends the
+  connection and starts the instance again after its backoff.
+- **What `adapter.start` carries is built from the engine's view and the
+  configuration, and is valid.** The node, the runtime endpoint (only for a runtime),
+  the instance's configuration values, the presets (only for a runtime) each with
+  the values it holds for the adapter, the open direct endpoints by key, and the
+  sessions, empty until sessions can be created. Every list is present and sorted.
+- **An instance is online from `adapter.start` to the end of the connection, and
+  offline otherwise.** Gone sets the time to the engine's clock unless the instance
+  was not online, in which case the earlier time stays (zero for an instance that
+  has not been online since the engine started). Going away keeps the endpoints,
+  records and admission, and makes the busy states unknown.
+- **Availability, busy and rejected states are memory.** A snapshot replaces the
+  last one and is stamped with the engine's time of receiving it; a turn started or
+  ended and a refused native request are kept by endpoint reference, whether or not
+  the endpoint is known (a session may report a turn before its creation has
+  returned), and write nothing. A notification whose parameters are of another type
+  is an error.
+- **A probe token is made for each preset and front end, kept in memory, valid
+  for `ProbeTokenLifetime`.** A new call replaces the earlier tokens of the
+  instance. A token is never written, logged or returned by a read.
+- **A runtime outside the tested ranges is one alert, once.** `RuntimeVersionUntested`
+  judges it against the installed manifest; the alert of kind `version_untested`
+  is not raised again for the same instance and words, which alerts being on disk
+  makes true across restarts.
+- **A checkpoint is on disk before it is answered.** `CheckpointPut` is taken in
+  every phase the loop runs in, stores the state compact, one value for each
+  (scope, id), and refuses a session scope that is not an open session endpoint of
+  the instance.
 - **The same key is the same endpoint.** The id is kept in `config/` before the
   record is written, in one transaction; a crash between the two leaves an id that
   no record uses, which takes no place and is given back for the same key.
@@ -242,7 +282,16 @@ commands and add their methods to this list.
   through that list, so a file that is not in it stays behind as a `.corrupt` file
   after its alert is acknowledged.
 - Admit an adapter instance with `AdapterAdmitted` before its endpoints register,
-  and only an instance the configuration has enabled.
+  and only an instance the configuration has enabled; call the methods of one
+  connection in the order the table gives, and notifications in the order the
+  adapter sent them. `AdapterGone` may be called for any enabled instance, admitted
+  or not.
+- Set `Deps.Home` to the absolute data directory when adapters are probed:
+  `ProbeTokens` fails without it. Set `Deps.Adapters` when `Quiesce` is asked about
+  adapters; `Counts` must read counters and never wait, because it is called in the
+  loop.
+- Give `Deps.Config` the methods of the `Config` interface: the engine reads the
+  presets, the installed adapters and the stable endpoint ids from it.
 - Give `Deps.Rand` a reader the engine alone uses; it is read in the loop.
 - Call `Execute` only for a request that `admin.Authorize` allowed and
   `admin.ValidateRequest` passed, with the key made by `admin.KeyFor` for the
@@ -274,7 +323,10 @@ closing and its chunks; `execute_test.go` and `execute_crash_test.go` the door o
 `recovery_test.go` the scan entry and the recovery entry; `loop_test.go` the
 loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
-`crash_test.go` the crash walk of `direct-register` and `crashDisks`, the two crashes every walk of the engine takes at each point (the process crash and the worst power loss; random power losses are drawn only by `TestPowerLossKeepsWhatTheEngineAcknowledged`); `clock_test.go` the pause of a wall clock set back until the owner clears it; `operations_test.go`, `operations_effects_test.go` and `operations_crash_test.go` the owner's operations, their effects and their crash points; `nodestatus_test.go` the status and the export; `intake_test.go` the scenarios of
+`adapters_test.go` the life of a connection (admission and the runtime endpoint, what
+`adapter.start` carries, probe tokens, availability and signals, notifications,
+checkpoints, and `Quiesce` against a test double of the host);
+`crash_test.go` the crash walks of `direct-register`, `runtime-admit` and `checkpoint-put` and `crashDisks`, the two crashes every walk of the engine takes at each point (the process crash and the worst power loss; random power losses are drawn only by `TestPowerLossKeepsWhatTheEngineAcknowledged`); `clock_test.go` the pause of a wall clock set back until the owner clears it; `operations_test.go`, `operations_effects_test.go` and `operations_crash_test.go` the owner's operations, their effects and their crash points; `nodestatus_test.go` the status and the export; `intake_test.go` the scenarios of
 sending and intake judged from the ledger, the answers of the loopback and the records, and
 `intake_more_test.go` the rules around them; `intake_crash_test.go` the crash walk of the
 transactions that take a message in; `intake_fuzz_test.go` the receiving entry under

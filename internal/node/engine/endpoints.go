@@ -12,39 +12,10 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/internal/publication"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
-
-// ---------------------------------------------------------------------------
-// Admission of an adapter instance
-
-type cmdAdmit struct {
-	call[struct{}]
-	instance string
-	adm      adapterreg.Admission
-}
-
-func (c *cmdAdmit) gate() gate { return gateAlways }
-func (c *cmdAdmit) run(e *Engine, _ time.Time) {
-	if in, ok := e.d.Config.Instances().Items[c.instance]; !ok || !in.Enabled {
-		c.done(struct{}{}, refuse(ReasonInstanceUnknown))
-		return
-	}
-	e.adm[c.instance] = c.adm
-	c.done(struct{}{}, nil)
-}
-
-// AdapterAdmitted tells the engine that an adapter instance was admitted on a
-// connection, with what it is allowed to do. The registration of its direct
-// endpoints is judged by that. The instance must be enabled in the
-// configuration. It is the entry the adapter host calls, and the one a test
-// calls to give an instance, as the host does.
-func (e *Engine) AdapterAdmitted(ctx context.Context, instance string, a adapterreg.Admission) error {
-	c := &cmdAdmit{call: newCall[struct{}](), instance: instance, adm: a}
-	_, err := roundTrip(ctx, e, submitInternal, c, c.call)
-	return err
-}
 
 // ---------------------------------------------------------------------------
 // Registration of a direct endpoint
@@ -97,9 +68,20 @@ func invalidArgument(field string, err error) *Refusal {
 	return &Refusal{Reason: ReasonInvalidArgument, Field: field, Err: err}
 }
 
+// invalidParams is the refusal for parameters that failed their own Validate: the
+// field is the one the protocol's validation names.
+func invalidParams(err error) *Refusal {
+	field := ""
+	var ve *adapterproto.ValidationError
+	if errors.As(err, &ve) {
+		field = ve.Field
+	}
+	return invalidArgument(field, err)
+}
+
 func (e *Engine) registerDirect(inst string, p adapterproto.RegisterParams) (adapterproto.RegisterResult, error) {
 	var none adapterproto.RegisterResult
-	adm, ok := e.adm[inst]
+	adm, ok := e.admission(inst)
 	switch {
 	case !ok:
 		return none, refuse(ReasonInstanceUnknown)
@@ -107,12 +89,7 @@ func (e *Engine) registerDirect(inst string, p adapterproto.RegisterParams) (ada
 		return none, refuse(ReasonWrongEndpointKind)
 	}
 	if err := p.Validate(); err != nil {
-		field := ""
-		var ve *adapterproto.ValidationError
-		if errors.As(err, &ve) {
-			field = ve.Field
-		}
-		return none, invalidArgument(field, err)
+		return none, invalidParams(err)
 	}
 	ch, err := e.d.Config.DirectID(inst, p.Key, e.randomReader())
 	var ce *config.ChangeError
@@ -166,23 +143,24 @@ func (e *Engine) registerDirect(inst string, p adapterproto.RegisterParams) (ada
 	if rec.Declaration, err = encodeDeclaration(decl); err != nil {
 		return none, err
 	}
-	if err := e.commitDirectRegister(ch, rec); err != nil {
+	if err := e.commitEndpointAndID(&declDirectRegister, ch, rec); err != nil {
 		return none, err
 	}
 	e.view.putEndpoint(rec, decl)
 	return ref, nil
 }
 
-// commitDirectRegister is the transaction of the registration: the id in
-// config/, when it is new, and the record in state/, in one transaction, which
-// the engine opens because it writes the files of two owners. Everything that can
-// be refused is checked before Begin.
-func (e *Engine) commitDirectRegister(ch config.IDChange, rec store.EndpointRecord) error {
+// commitEndpointAndID is the transaction that makes an endpoint of an adapter
+// instance exist (direct-register, runtime-admit): the id in config/, when it is
+// new, and the record in state/, in one transaction, which the engine opens
+// because it writes the files of two owners. Everything that can be refused is
+// checked before Begin.
+func (e *Engine) commitEndpointAndID(decl *txn.Decl, ch config.IDChange, rec store.EndpointRecord) error {
 	pe, err := store.PrepareEndpoint(rec)
 	if err != nil {
 		return err
 	}
-	tx := e.d.Writer.Begin(&declDirectRegister)
+	tx := e.d.Writer.Begin(decl)
 	defer tx.Close()
 	after, err := e.d.Config.PutEndpointIDs(tx, ch)
 	if err != nil {
@@ -219,7 +197,7 @@ func (e *Engine) UnregisterDirect(ctx context.Context, instance string, p adapte
 }
 
 func (e *Engine) unregisterDirect(now time.Time, inst string, p adapterproto.UnregisterParams) error {
-	if _, ok := e.adm[inst]; !ok {
+	if _, ok := e.admission(inst); !ok {
 		return refuse(ReasonInstanceUnknown)
 	}
 	st, err := e.view.resolve(ByAdapter(inst, p.Endpoint))

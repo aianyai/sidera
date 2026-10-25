@@ -219,7 +219,7 @@ func (d *Daemon) stepCertificate(context.Context) error {
 func (d *Daemon) stepScan(ctx context.Context) error {
 	e, rep, err := engine.Open(ctx, engine.Deps{
 		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.pause.since,
-		Writer: d.w, Store: store.New(d.w), Config: d.cfgd, Keys: d.keys, Rand: d.cfg.Rand, Log: d.log,
+		Writer: d.w, Store: store.New(d.w), Config: d.cfgd, Keys: d.keys, Rand: d.cfg.Rand, Home: d.home, Log: d.log,
 	}, d.cfg.Engine)
 	if err != nil {
 		return err
