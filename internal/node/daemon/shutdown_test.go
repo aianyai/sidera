@@ -265,13 +265,16 @@ func TestRunReturnsAfterANormalShutdownWhenItsContextEnds(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- daemon.Run(ctx, c) }()
+	// The management interface answers from step 8, while the start goes on, and a
+	// context that ends before the last step interrupts the start, which is another
+	// result: wait for the start to have ended.
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		if tryManage(c.Home, "endpoints.list") == 200 {
+		if tryManage(c.Home, "endpoints.list") == 200 && indexOf(steps(logLines(t, c.Home)), "startup 15 end") >= 0 {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the daemon never answered")
+			t.Fatal("the daemon never finished starting")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
