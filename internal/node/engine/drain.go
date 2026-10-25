@@ -85,8 +85,9 @@ func (v *view) queuedFor(id ident.EndpointID, limit int) (ins []store.InRecord, 
 // cmdDrain closes the next chunk of the records queued for a closed endpoint. The
 // closing of an endpoint is its head record, written at once, and these
 // continuations: each takes at most Params.ChunkReplaces records, and the next
-// is queued behind whatever the inbox already holds, so that a long queue never
-// holds the loop for long. A crash between two chunks leaves a closed endpoint
+// is queued behind whatever the inbox holds at that moment and ahead of what
+// arrives later, so that a long queue never holds the loop for long and a busy
+// inbox never starves it. A crash between two chunks leaves a closed endpoint
 // with records still queued, which the scan entry closes the same way.
 type cmdDrain struct{ endpoint ident.EndpointID }
 
@@ -122,7 +123,7 @@ func (e *Engine) drainChunk(now time.Time, id ident.EndpointID) error {
 		}
 	}
 	if e.view.Draining(id) {
-		e.cont = append(e.cont, &cmdDrain{endpoint: id})
+		e.later(&cmdDrain{endpoint: id})
 	}
 	return nil
 }

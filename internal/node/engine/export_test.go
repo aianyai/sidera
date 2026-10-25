@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -219,4 +220,81 @@ func PutBack(t *TestWait, end string, page []byte) {
 		}
 	}
 	t.w.out <- waitOutcome{End: how, Page: page}
+}
+
+// cmdFn is a command that runs a function in the loop. It is answered to no one:
+// a test that needs the end of it waits with Quiesce.
+type cmdFn struct{ fn func() }
+
+func (c cmdFn) gate() gate             { return gateAlways }
+func (c cmdFn) fail(error)             {}
+func (c cmdFn) run(*Engine, time.Time) { c.fn() }
+
+// LoopSide is what a hook that runs in the loop may do besides what it is for.
+type LoopSide struct{ e *Engine }
+
+// Later queues fn as a continuation of the loop, as the chunks of a long batch
+// are queued.
+func (l LoopSide) Later(fn func()) { l.e.later(cmdFn{fn}) }
+
+// Submit puts fn in the inbox behind what it holds, without waiting; it reports
+// whether there was room.
+func (l LoopSide) Submit(fn func()) bool {
+	select {
+	case l.e.inbox <- cmdFn{fn}:
+		return true
+	default:
+		return false
+	}
+}
+
+type cmdHook struct {
+	call[struct{}]
+	fn func(LoopSide)
+}
+
+func (c *cmdHook) gate() gate { return gateAlways }
+func (c *cmdHook) run(e *Engine, _ time.Time) {
+	c.fn(LoopSide{e})
+	c.done(struct{}{}, nil)
+}
+
+// InLoop runs fn as a command of the loop and returns when it has run.
+func InLoop(ctx context.Context, e *Engine, fn func(LoopSide)) error {
+	c := &cmdHook{call: newCall[struct{}](), fn: fn}
+	_, err := roundTrip(ctx, e, submitInternal, c, c.call)
+	return err
+}
+
+// cmdRefill puts itself back in the inbox every time it runs, until it is told to
+// stop: with a few of them the inbox is never empty.
+type cmdRefill struct{ stop *atomic.Bool }
+
+func (c cmdRefill) gate() gate { return gateAlways }
+func (c cmdRefill) fail(error) {}
+func (c cmdRefill) run(e *Engine, _ time.Time) {
+	if c.stop.Load() {
+		return
+	}
+	select {
+	case e.inbox <- c:
+	default:
+	}
+}
+
+// KeepInboxNonEmpty fills the inbox with n commands that put themselves back each
+// time the loop runs one, so that it never holds fewer than n, until stop is
+// called.
+func KeepInboxNonEmpty(t testing.TB, e *Engine, n int) (stop func()) {
+	t.Helper()
+	var flag atomic.Bool
+	for i := 0; i < n; i++ {
+		if err := e.enqueue(context.Background(), submitInternal, cmdRefill{&flag}); err != nil {
+			t.Fatalf("KeepInboxNonEmpty: %v", err)
+		}
+	}
+	var once sync.Once
+	stop = func() { once.Do(func() { flag.Store(true) }) }
+	t.Cleanup(stop)
+	return stop
 }

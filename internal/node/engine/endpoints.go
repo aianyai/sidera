@@ -392,7 +392,7 @@ func (e *Engine) closeEndpoint(now time.Time, id ident.EndpointID, result *store
 	}
 	e.view.putEndpoint(rec, st.meta)
 	if e.view.Draining(id) {
-		e.cont = append(e.cont, &cmdDrain{endpoint: id})
+		e.later(&cmdDrain{endpoint: id})
 	}
 	return closeOutcomeOf(rec.Kind), nil
 }

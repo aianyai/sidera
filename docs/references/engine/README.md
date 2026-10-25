@@ -122,6 +122,12 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   notifications, and its own buffer behind the inbox is its back pressure; the
   longest stall of the loop that the buffer outlasts is therefore the host's to
   state, and long batches are cut into chunks so the stall stays short.
+- **A continuation waits for the commands ahead of it, not for an empty inbox.**
+  When it is queued the loop records how many commands the inbox holds and runs
+  exactly those first; waiting for an empty inbox would starve a continuation under
+  a load that never lets the inbox empty, and running it at once would put it ahead
+  of commands that were already waiting. `TestAContinuationRunsAfterTheCommandsAheadOfItAndBeforeTheOnesThatCameLater`
+  and `TestAContinuationIsNotStarvedByAnInboxThatIsNeverEmpty` pin both ends.
 - **Chunks by count, not time.** A time budget would move the boundary of a chunk,
   and so the crash point that a write is, with the speed of the machine.
 - **The head record first.** Whatever a chunk would do is derived from the head

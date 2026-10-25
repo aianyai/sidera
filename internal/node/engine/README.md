@@ -41,8 +41,9 @@ commands and add their methods to this list.
 
 - **One loop, typed commands, the order of the inbox.** Every command is a type
   with a `run`; commands run in the order they entered the inbox. Commands a
-  command queues for itself (the chunks of a long batch) go behind what the
-  inbox holds. A command is answered exactly once, on a channel of capacity one,
+  command queues for itself (the chunks of a long batch) run after the commands
+  the inbox holds at that moment and before those that arrive later, so a busy
+  inbox neither starves them nor is held up by more than one chunk. A command is answered exactly once, on a channel of capacity one,
   so the loop never waits for a caller that has gone.
 - **A command that entered the inbox is run, whoever waits for it.** A caller
   whose context ends first learns only that it did not hear.

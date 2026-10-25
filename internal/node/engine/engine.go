@@ -86,9 +86,21 @@ type Engine struct {
 	periodic map[string]*periodicTask
 	order    []string // names of the periodic tasks, in the order they were added
 	waits    map[ident.EndpointID]*waiter
-	cont     []command
-	fatal    error // set by classify; the loop stops after the command that set it
-	probed   bool  // the command that just ran was a probe of Quiesce
+	cont     []continuation
+	ran      uint64 // how many commands the loop has taken from the inbox
+	fatal    error  // set by classify; the loop stops after the command that set it
+	probed   bool   // the command that just ran was a probe of Quiesce
+}
+
+// continuation is a command the loop queued for itself: the next chunk of a long
+// batch. It runs after the commands that were in the inbox when it was queued and
+// before those that arrived later, so a steady stream of new commands neither
+// starves it nor is held up by it for longer than one chunk.
+type continuation struct {
+	c command
+	// due is the count of inbox commands taken (Engine.ran) at which it runs: the
+	// count at the time it was queued plus the commands the inbox held then.
+	due uint64
 }
 
 type periodicTask struct {
@@ -268,8 +280,8 @@ func (e *Engine) finish() {
 	e.wg.Wait()
 	e.endWaits()
 	refuse := refuse(ReasonShuttingDown)
-	for _, c := range e.cont {
-		c.fail(refuse)
+	for _, k := range e.cont {
+		k.c.fail(refuse)
 	}
 	e.cont = nil
 	close(e.done)
@@ -472,22 +484,24 @@ func (e *Engine) loop() {
 	defer e.finish()
 	for {
 		e.armTimer()
-		if len(e.cont) > 0 {
+		if len(e.cont) > 0 && e.cont[0].due <= e.ran {
+			// The commands that were ahead of the first continuation have run. The
+			// timer and the stop signal still come first, so a chain of
+			// continuations does not hold the loop.
 			select {
-			case c := <-e.inbox:
-				e.step(c)
 			case <-e.timer.C():
 				e.fireDue()
 			case <-e.stopCh:
 				return
 			default:
-				c := e.cont[0]
+				k := e.cont[0]
 				e.cont = e.cont[1:]
-				e.step(c)
+				e.step(k.c)
 			}
 		} else {
 			select {
 			case c := <-e.inbox:
+				e.ran++
 				e.step(c)
 			case <-e.timer.C():
 				e.fireDue()
@@ -505,6 +519,13 @@ func (e *Engine) loop() {
 			e.poke()
 		}
 	}
+}
+
+// later queues a command for the loop itself, behind the commands the inbox holds
+// now and ahead of those that arrive afterwards. It is for the loop's own
+// goroutine.
+func (e *Engine) later(c command) {
+	e.cont = append(e.cont, continuation{c: c, due: e.ran + uint64(len(e.inbox))})
 }
 
 // armTimer points the one timer of the loop at the earliest entry of the
@@ -588,7 +609,7 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		}
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
-			e.cont = append(e.cont, &cmdDrain{endpoint: id})
+			e.later(&cmdDrain{endpoint: id})
 		}
 	case schedPeriodic:
 		p := e.periodic[key.id]

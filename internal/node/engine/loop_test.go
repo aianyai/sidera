@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -333,6 +336,86 @@ func TestStopEndsTheWorkersTheEngineOwns(t *testing.T) {
 	r.stop(e)
 	if !finished.Load() {
 		t.Error("Stop returned while a worker of the engine was still running")
+	}
+}
+
+// A continuation, the next chunk of a long batch, runs after the commands that
+// were in the inbox when it was queued and before those that came later: neither
+// ahead of the ones waiting nor behind the ones still to come.
+func TestAContinuationRunsAfterTheCommandsAheadOfItAndBeforeTheOnesThatCameLater(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	var mu sync.Mutex
+	var order []string
+	note := func(s string) func() {
+		return func() { mu.Lock(); order = append(order, s); mu.Unlock() }
+	}
+	ctx := context.Background()
+	release := engine.StallLoop(t, e)
+	done := make(chan error, 3)
+	submit := func(n int, fn func(engine.LoopSide)) {
+		go func() { done <- engine.InLoop(ctx, e, fn) }()
+		engine.WaitInbox(t, e, n)
+	}
+	submit(1, func(l engine.LoopSide) {
+		note("first")()
+		l.Later(note("continuation"))
+		if !l.Submit(note("came later")) {
+			t.Error("no room in the inbox for the command that comes later")
+		}
+	})
+	submit(2, func(engine.LoopSide) { note("second")() })
+	submit(3, func(engine.LoopSide) { note("third")() })
+	release()
+	for i := 0; i < 3; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	settle(t, e)
+	want := []string{"first", "second", "third", "continuation", "came later"}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(order, want) {
+		t.Errorf("the commands ran in the order %v, want %v", order, want)
+	}
+}
+
+// Closing an endpoint continues in chunks. A node whose inbox is never empty is a
+// busy node, and the chunks must not wait for a quiet moment that does not come.
+func TestAContinuationIsNotStarvedByAnInboxThatIsNeverEmpty(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 1}))
+	e := r.start()
+	a := register(t, e, "a")
+	r.restart()
+	r.queue(1, 6, a)
+	e = r.start()
+
+	stop := engine.KeepInboxNonEmpty(t, e, 3)
+	defer stop()
+	if _, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a}); err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, func() bool {
+		eps, err := e.Endpoints(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ep := range eps {
+			if ep.ID == a {
+				return !ep.Draining
+			}
+		}
+		return false
+	})
+	stop()
+	settle(t, e)
+	for _, in := range r.scan().In {
+		if in.Record.State != delivery.StateRejected {
+			t.Errorf("record %s is %v after the drain, want rejected", in.Key.Message, in.Record.State)
+		}
 	}
 }
 
