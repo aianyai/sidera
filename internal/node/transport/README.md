@@ -14,13 +14,12 @@ no clock but the one its knobs were given.
 
 | Name | Purpose |
 | ---- | ------- |
-| `Sender` | What the engine calls: `Send` an encoded envelope to a node and get its receipt, `Pull` the current reports of one message. |
-| `Handler` | What a transport calls on the engine: `Inbound` for an envelope, `Pull` for a pull. Both are told the `Origin`. |
+| `Handler` | What a transport calls on the engine: `Inbound` for an envelope, `Pull` for a pull. Both are told the `Origin`. The package defines it because it consumes it; the engine defines the interface it calls (`Send`, `Pull`) and every transport has those two methods. |
 | `Origin`, `RemoteOrigin(node)` | Where a request came from. `Local()` is true only for a request the loopback handed over. |
-| `Receipt`, `PullRequest`, `PullAnswer` | The signed records a target answers with, and what a pull asks for. The transport carries them and never reads them. |
-| `ErrUnreachable`, `ErrTimeout` | The two ways a call gets no answer: the target did not see it, or it may have. |
-| `NewLoopback(self, handler, knobs)` | The single-node transport; implements `Sender`. A nil `knobs` means no faults. |
-| `NewKnobs(clock)`, `Knobs` | The fault knobs: `DropReceipt`, `Unreachable`, `HoldReports` and `Release`, `Delay`, `Mutate` and `Mutated`; `Hits`, `Observe`, `Waiting`. |
+| `Receipt`, `PullRequest`, `PullAnswer` | The signed records a target answers with, and what a pull asks for. The transport carries them and never reads them. A receipt may lack the reports of some or all recipients and the control reply; they are pulled later. |
+| `ErrUnreachable`, `ErrTimeout` | The two ways a call gets no answer: the target did not see it, or it may have. Every transport implementation returns them with this meaning. |
+| `NewLoopback(self, handler, knobs)` | The single-node transport, with `Send`, `Pull` and `Waiting`. A nil `knobs` means no faults; a zero `self` or a nil `handler` panics. |
+| `NewKnobs(clock)`, `Knobs` | The fault knobs: `DropReceipt`, `Unreachable`, `HoldReports` and `Release`, `Delay`, `Mutate` and `Mutated`; `Hits`, `Observe`, `Waiting`. Use `NewKnobs`: the zero `Knobs` is not usable. |
 
 ## Rules
 
@@ -39,7 +38,13 @@ no clock but the one its knobs were given.
   unchanged and means no receipt exists. `ErrTimeout` and `ErrUnreachable` are the
   transport's own: after a timeout the target may have processed the envelope, so
   the same bytes are sent again and the target deduplicates; after
-  `ErrUnreachable` it did not see it.
+  `ErrUnreachable` it did not see it. The caller's own context error is returned
+  as it is, neither of the two: the target may or may not have seen the call. The
+  handler runs under the caller's context, and so does a replay.
+- **A receipt may be partial.** It may lack the reports of some or all recipients
+  and the control reply, and the missing ones are pulled later: the same meaning
+  as an empty `PullAnswer`, nothing yet. A sender never reads the number of
+  records of a receipt as a statement about the recipients.
 - **Knobs are faults, not features.** They are all off in a new `Knobs`, are safe
   to set while calls run, count every hit and tell the observer, and exist in
   every build, tagged or not. A test that sets a knob asserts its hit count.
@@ -68,8 +73,12 @@ no clock but the one its knobs were given.
   caller's goroutine and may submit a command to the loop and wait for it.
 - Treat `ErrUnreachable` and `ErrTimeout` as "no answer" and `errors.Is` them;
   verify every record of a receipt or pull answer before applying it.
-- Ask `Knobs.Waiting()` when judging whether the transport is quiet: a call that
-  waits out a delay not yet due is not work, and one whose delay is due is.
+- Ask `Loopback.Waiting()` when judging whether the transport is quiet: a call
+  that waits out a delay not yet due is not work, and one whose delay is due is.
+  The engine's quiescence condition reads this one number from the loopback it
+  holds, and it needs no knowledge of the knobs.
+- Define, on the engine's side, the narrow interface it calls (`Send` and `Pull`
+  with the signatures of the loopback); this package does not name it.
 - Give a `Knobs` a clock before any test sets a delay (`NewKnobs(nil)` panics on
   `Delay`).
 

@@ -11,7 +11,13 @@ import (
 
 // Handler is the engine's side of every transport: what an implementation calls
 // when something arrives for this node. Both methods are told where the request
-// came from; whether it is a local source is that origin's to say.
+// came from; whether it is a local source is that origin's to say. The context
+// is the one of the call that brought the request, so ending it ends the
+// handler's work too.
+//
+// The transport defines this interface because it is the consumer of it. The
+// other direction, what the engine calls to reach a node, is defined by the
+// engine, the consumer there: each side of a seam names what it needs.
 type Handler interface {
 	// Inbound takes one envelope for this node, sent from the endpoint sender of
 	// the node the origin names, and returns the signed status reports (and the
@@ -25,29 +31,24 @@ type Handler interface {
 	Pull(ctx context.Context, from Origin, req PullRequest) (PullAnswer, error)
 }
 
-// Sender is what the engine calls to reach a node, outside its loop. An error
-// that wraps [ErrUnreachable] or [ErrTimeout] says the sender got no answer; any
-// other error is the target's own and passes unchanged.
-type Sender interface {
-	// Send delivers one encoded envelope from the endpoint sender to the target
-	// node and returns its receipt. After ErrTimeout the target may have
-	// processed the envelope: send the same bytes again and the target
-	// deduplicates. After ErrUnreachable it certainly did not.
-	Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, envelope []byte) (Receipt, error)
-	// Pull asks the target node for the current signed reports of the
-	// deliveries of one message that the caller sent it.
-	Pull(ctx context.Context, target ident.NodeID, req PullRequest) (PullAnswer, error)
-}
-
 // Receipt is a target's answer to one envelope: the signed records, as the
 // target made them. The transport does not read them; the sender verifies them
 // with the envelope package before it applies one.
+//
+// A receipt may carry fewer records than the envelope has recipients, or none,
+// and may lack the control reply: what the sender does not get in the receipt it
+// pulls later, as it would for a send whose answer never came. A missing record
+// therefore has the meaning of an empty [PullAnswer]: nothing yet, not that it
+// does not exist. A transport may leave records out (the loopback does when a
+// test holds the reports of a message); a sender must not read the number of
+// records of a receipt as a statement about the recipients.
 type Receipt struct {
-	// Reports are the signed status reports, one for each recipient of the
-	// envelope on the target node.
+	// Reports are the signed status reports for the recipients of the envelope
+	// on the target node, those the target had to give with the receipt.
 	Reports []record.Record
 	// ControlReply is the signed control reply, nil unless the envelope was a
-	// control signal that already has one.
+	// control signal that already has one, and nil when the receipt leaves it to
+	// a later pull.
 	ControlReply *record.Record
 }
 
@@ -64,11 +65,19 @@ type PullRequest struct {
 // that the deliveries do not exist.
 type PullAnswer Receipt
 
+// The two errors below are the vocabulary of every transport, not of the
+// loopback alone: an implementation of another package returns them, wrapped as
+// it likes, with exactly this meaning, so that the engine's retry rules do not
+// depend on which transport carried the call. Any other error a call returns is
+// the target's own and passes unchanged; it means no receipt exists. The error
+// of the caller's own context is returned as it is, neither of these two: the
+// target may or may not have seen the call.
 var (
 	// ErrUnreachable means the call did not reach the target node and the
-	// target did not see it.
+	// target did not see it: it is safe to send again, by the sender's schedule.
 	ErrUnreachable = errors.New("transport: node unreachable")
 	// ErrTimeout means the call went out and no answer came back; the target may
-	// have processed it.
+	// have processed it. The sender sends the same bytes again and the target
+	// deduplicates by message id.
 	ErrTimeout = errors.New("transport: no answer in time")
 )

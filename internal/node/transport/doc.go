@@ -2,10 +2,13 @@
 // envelope to the node it is for, and the loopback that carries it when that
 // node is this one.
 //
-// The seam has two sides, each defined here so that neither the engine nor an
-// implementation imports the other: a [Sender], which the engine calls to put an
-// envelope on its way or to pull the signed reports of a delivery, and a
-// [Handler], which an implementation calls to hand what arrived to the engine.
+// The seam has two sides, and each is defined by the side that consumes it, so
+// that neither the engine nor an implementation imports the other. This package
+// defines [Handler], which an implementation calls to hand what arrived to the
+// engine; the engine defines the narrow interface it needs to put an envelope on
+// its way or to pull the signed reports of a delivery, and every transport has
+// the two calls it names: Send and Pull. What every implementation returns when
+// a call gets no answer is defined here, as [ErrUnreachable] and [ErrTimeout].
 // A [Handler] is told where a request came from as an [Origin]. Only the
 // loopback in this package can make a local origin; a transport of another
 // package can make a remote one only. That is how a request is known to come

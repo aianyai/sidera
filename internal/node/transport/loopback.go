@@ -20,11 +20,17 @@ type Loopback struct {
 	knobs *Knobs
 }
 
-var _ Sender = (*Loopback)(nil)
-
 // NewLoopback returns the loopback of node self, handing what it carries to h.
-// A nil knobs means no faults.
+// A nil knobs means no faults. It panics when self is the zero node id or h is
+// nil: a loopback of no node would make local origins that name nobody, and one
+// with no handler could only fail on its first call.
 func NewLoopback(self ident.NodeID, h Handler, knobs *Knobs) *Loopback {
+	if self == (ident.NodeID{}) {
+		panic("transport: NewLoopback needs a non-zero node id")
+	}
+	if h == nil {
+		panic("transport: NewLoopback needs a handler")
+	}
 	if knobs == nil {
 		knobs = NewKnobs(nil)
 	}
@@ -32,7 +38,13 @@ func NewLoopback(self ident.NodeID, h Handler, knobs *Knobs) *Loopback {
 }
 
 // Send hands the envelope to the handler as a request from the local endpoint
-// sender and returns the handler's receipt, unless a knob says otherwise.
+// sender and returns the handler's receipt, unless a knob says otherwise. The
+// handler gets the caller's context. When that context ends, the error it
+// returns is returned as it is, from the wait of a delay or from the handler: it
+// is neither [ErrTimeout] nor [ErrUnreachable], and the target may or may not
+// have seen the envelope. After ErrTimeout the target may have processed the
+// envelope: send the same bytes again and the target deduplicates. After
+// ErrUnreachable it certainly did not. Any other error is the target's own.
 func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (Receipt, error) {
 	if err := l.knobs.wait(ctx, target); err != nil {
 		return Receipt{}, err
@@ -63,7 +75,7 @@ func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.E
 }
 
 // Pull asks the handler for the reports of a message and returns its answer,
-// unless a knob says otherwise.
+// unless a knob says otherwise. The context and the errors are those of Send.
 func (l *Loopback) Pull(ctx context.Context, target ident.NodeID, req PullRequest) (PullAnswer, error) {
 	if err := l.knobs.wait(ctx, target); err != nil {
 		return PullAnswer{}, err
@@ -76,6 +88,12 @@ func (l *Loopback) Pull(ctx context.Context, target ident.NodeID, req PullReques
 	}
 	return l.h.Pull(ctx, localOrigin(l.self), req)
 }
+
+// Waiting returns how many calls are waiting out a delay whose time has not
+// come, as [Knobs.Waiting] counts them for the knobs the loopback was made with;
+// zero when it was made with none. A caller that asks whether the transport is
+// quiet reads this one number from the loopback it holds.
+func (l *Loopback) Waiting() int { return l.knobs.Waiting() }
 
 // reach says whether a call to target can go on: not when a knob makes it
 // unreachable, and not when it is another node, which a loopback does not know.

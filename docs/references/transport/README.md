@@ -6,28 +6,41 @@ a test break the loopback on purpose.
 
 ## What
 
-**The seam has two sides.** The engine calls a `Sender`: `Send` takes the node,
-the sending endpoint and the envelope as the bytes the engine encoded, and returns
-a `Receipt`; `Pull` takes a `PullRequest` (one message) and returns a `PullAnswer`.
-A transport calls the engine through a `Handler`: `Inbound` for an envelope and
-`Pull` for a pull, each told the `Origin` of the request. Both interfaces are
-defined in `internal/node/transport`, so neither the engine nor an implementation
-imports the other (the layering is in
-[`internal/node/README.md`](../../../internal/node/README.md)).
+**The seam has two sides, and each is defined by the side that consumes it.** A
+transport calls the engine through a `Handler`: `Inbound` for an envelope and
+`Pull` for a pull, each told the `Origin` of the request, and each running under
+the context of the call that brought the request. `Handler` is defined in
+`internal/node/transport`, which consumes it. The engine calls a transport
+through the interface the engine defines for itself, with two methods: `Send`
+takes the node, the sending endpoint and the envelope as the bytes the engine
+encoded, and returns a `Receipt`; `Pull` takes a `PullRequest` (one message) and
+returns a `PullAnswer`. `*Loopback` has both, so it satisfies that interface
+without importing the engine, and the engine imports no transport package for
+it; `daemon` hands the one to the other. This is the convention of
+[`internal/node/README.md`](../../../internal/node/README.md): each side of a seam
+defines the interface it needs, and the graph stays acyclic because of it.
 
 **A receipt is the target's signed records.** `Receipt` holds the signed status
 reports, one for each recipient of the envelope on the target node, and the signed
 control reply when the envelope was a control signal that already has one; a
 `PullAnswer` has the same shape. They are `record.Record` values the transport
 does not read: the sender verifies them with the `envelope` package and applies
-them with its own rules. An empty answer to a pull means the target has nothing to
-report yet.
+them with its own rules. A receipt may lack the reports of some or all recipients
+and the control reply: what is not in the receipt is pulled later, exactly as for
+a send whose answer never came. A missing record has the meaning of an empty
+answer to a pull: the target has nothing to report yet, not that the delivery does
+not exist. A sender therefore never reads the number of records of a receipt as a
+statement about the recipients.
 
 **Two ways to get no answer.** `ErrUnreachable`: the target did not see the call.
 `ErrTimeout`: the call went out, no answer came back, and the target may have
 processed it, so the same bytes are sent again and the target deduplicates by
-message id. Any other error comes from the target and passes unchanged; it means
-no receipt exists.
+message id. Every transport implementation returns these two with this meaning,
+wrapped as it likes, so that the engine's retry rules do not depend on the
+transport; they live in this package because they are shared by all of them. Any
+other error comes from the target and passes unchanged; it means no receipt
+exists. The error of the caller's own context is returned as it is, neither of the
+two: the target may or may not have seen the call.
 
 **The origin.** `Origin` says where a request came from. `Local()` is true only for
 a request the loopback handed to the `Handler`; a transport of any other package
@@ -39,10 +52,14 @@ limits alone) rest on this value and on nothing the request says about itself.
 sender's side to the receiving side of the same node through the same two calls a
 remote transport would use. It starts no goroutine: a call runs in the caller's
 goroutine, which for the engine is its one outbound worker. A call to another node
-is `ErrUnreachable`.
+is `ErrUnreachable`. `Waiting()` is the knobs' count of calls waiting out a delay
+that is not yet due, zero with no knobs. `NewLoopback` panics on a zero node id or
+a nil handler: it would make local origins that name nobody, or fail on its first
+call.
 
-**The knobs.** A `Knobs` value is made with the clock a delay is waited on and is
-off until a test sets something. Each knob counts its hits and tells an optional
+**The knobs.** A `Knobs` value is made with `NewKnobs` and the clock a delay is
+waited on, and is off until a test sets something; the zero `Knobs` has no maps and
+is not usable. Each knob counts its hits and tells an optional
 observer:
 
 | Knob | Effect |
@@ -113,30 +130,37 @@ observer:
   runs inside the call, in the outbound worker's order, so a scene's sequence of
   commands stays the same on every run and nothing has to keep message bodies
   after they were sent.
-- **Rejected: faults as an engine-side wrapper.** A wrapper around `Sender` in the
-  engine tests would have to be built again for every fixture and could not replay
-  a message, which needs the loopback's `Handler`.
+- **Rejected: faults as an engine-side wrapper.** A wrapper around the engine's
+  send interface in the engine tests would have to be built again for every
+  fixture and could not replay a message, which needs the loopback's `Handler`.
+- **Rejected: an exported `Sender` interface in this package.** The engine is the
+  consumer of it, and a package that defines the interface for its caller makes
+  the caller import it for the shape of its own dependency. The convention is that
+  the consumer defines what it needs; the loopback and any later transport have
+  the two methods, and the engine's fixtures can pass a `*Loopback` directly.
 
 ## Where
 
 | What | Where |
 | ---- | ----- |
-| The interfaces, `Receipt`, `PullRequest`, `PullAnswer`, the two errors | `internal/node/transport/transport.go` |
+| `Handler`, `Receipt`, `PullRequest`, `PullAnswer`, the two errors | `internal/node/transport/transport.go` |
 | `Origin`, `RemoteOrigin`, the unexported constructor of a local origin | `internal/node/transport/origin.go` |
-| `Loopback`, `NewLoopback`, the replay | `internal/node/transport/loopback.go` |
+| `Loopback`, `NewLoopback`, `Waiting`, the replay | `internal/node/transport/loopback.go` |
 | `Knobs` and the hit counts, the observer, `Waiting` | `internal/node/transport/knobs.go` |
 | One row per knob, asserting effect and hit | `TestKnobs` in `knobs_test.go` |
 | Knobs are per `Knobs` value, nil means none, safe while calls run, named | `TestKnobsAreNotSharedBetweenLoopbacks`, `TestNilKnobsMeansNoFaults`, `TestKnobsAreSafeToDriveWhileCallsRun`, `TestKnobNamesAreDistinct` |
 | The local origin: the loopback makes it, a remote transport cannot, and the source scan | `TestLoopbackMakesTheLocalOrigin`, `TestRemoteOriginIsNeverLocal`, `TestNoCallerCanClaimTheLocalOrigin` in `origin_test.go` |
 | What the source scan reports, one synthetic source per rule, and that the legitimate shape passes | `originViolations` and `TestOriginScanCatchesWhatItNames` in `originscan_test.go` |
 | The loopback's own reading of the bytes it carries, with the replay and the hold armed | `FuzzSendWithKnobsArmed` in `fuzz_test.go` |
+| The constructor's panics, the caller's context reaching the handler and coming back as it is, `Loopback.Waiting` | `TestNewLoopbackRejectsWhatItCannotWorkWith`, `TestLoopbackPassesTheCallersContext`, `TestLoopbackWaitingIsTheKnobsOwn` in `loopback_test.go` |
 | No call left running after a test | `leak_test.go` |
 
 ## Known gaps
 
-- The engine does not call the seam yet: the send and receive features wire it,
-  and the engine-layer fixture attaches the knobs. Until then the tests use a fake
-  `Handler`.
+- The engine does not call the seam yet: the send and receive features define the
+  interface the engine calls, wire `Loopback.Waiting()` into its quiescence
+  condition, and the engine-layer fixture attaches the knobs. Until then the tests
+  use a fake `Handler`.
 - A second node, and with it a remote transport and a choice of transport per
   target node, is not built. The seam is shaped so that a remote implementation
   adds a package and changes nothing here.
