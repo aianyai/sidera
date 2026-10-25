@@ -166,7 +166,7 @@ in the rig.
 
 `endpoints_test.go` has `TestEndpointBeyondNodeCapRefused` and the cap counted over
 other kinds of endpoint; `close_test.go` the
-closing and its chunks; `execute_test.go` the door of the administrative operations; `declare_test.go` the declaration and who may make it;
+closing and its chunks; `execute_test.go` and `execute_crash_test.go` the door of the administrative operations and its crash points; `declare_test.go` the declaration and who may make it;
 `recovery_test.go` the scan entry and the recovery entry; `loop_test.go` the
 loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;

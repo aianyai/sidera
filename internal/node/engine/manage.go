@@ -27,9 +27,16 @@ import (
 // is the same for all.
 
 // Operation is what a management request asks the node to do. Its effect and the
-// storing of its result are one transaction, whichever place keeps the result:
-// the record under state/admin/ for an operation that has no file of its own to
-// carry it, the versioned file that the operation changes for one that has.
+// storing of its result are one transaction of the transaction layer, whichever
+// place keeps the result: the record under state/admin/, the last write of the
+// transaction, for an operation that has no file of its own to carry it, and the
+// same replacement as the change for an operation that changes a versioned file.
+// The two are not equal in a crash: a replacement is whole, but the transaction
+// commits with its first write, so a crash after the effect is durable and before
+// the record is written leaves the effect without its result. The resend then
+// carries the operation out again and gets the answer of an operation that finds
+// its effect there (closing an endpoint that is closed says already_closed); an
+// operation is written so that doing it again is harmless.
 type Operation interface {
 	// Admin is the catalogue entry the operation is authorized as. It is
 	// side-effecting: what only reads, and the export of the revocation, which

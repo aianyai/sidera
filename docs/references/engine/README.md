@@ -76,8 +76,9 @@ When the owner asks for the close, the request comes through the door of the
 administrative operations (below), and its operation builds the result from the
 outcome the close reached (`closed`, `closing` for a session endpoint,
 `already_closed` for one that was closed before) and stores it with the
-fingerprint in the transaction of the head record. A close of an endpoint that is
-closed already writes that record again as it is, only to carry the result.
+fingerprint as the last write of the transaction of the head record. A close of an
+endpoint that is closed already writes that record again as it is, only to carry
+the result.
 
 **The door of the administrative operations.** `Execute` takes a management
 request that changes state, after the interface has judged who asks and whether
@@ -92,11 +93,17 @@ operation and no interface repeats the check. A result is kept in one of two
 places, by the kind of operation: under `state/admin/` for an operation with no
 file of its own to carry it (closing an endpoint, stopping the daemon), and in the
 file that a versioned change writes (the `last_operation` of `node.json`,
-`presets.json`, `instances.json`), in the same replacement as the change. The
-lookup reads both: `Open` loads the results of `state/admin/` with the scan and
-the operations of the versioned files from the configuration, and every command
-that stores a result updates the table, so a resend is answered the same before and
-after a restart. A request that is refused stores nothing and its identifier stays
+`presets.json`, `instances.json`), in the same replacement as the change. A
+replacement of a versioned file is whole, but a transaction
+commits with its first write and the result under `state/admin/` is its last, so a
+crash after the effect is durable and before the result is written leaves the
+effect without its result: the request sent again is carried out again and gets the
+answer of an operation that finds its effect there (closing an endpoint that is
+closed says `already_closed`), where the first answer would have said `closed`. The
+result is never there without the effect. The lookup reads both places: `Open`
+loads the results of `state/admin/` with the scan and the operations of the
+versioned files from the configuration, and every command that stores a result
+updates the table, so a resend is answered the same before and after a restart. A request that is refused stores nothing and its identifier stays
 free. The expected version of a versioned setting is handed to the operation and is
 checked inside the change that writes the file, by the package that owns it: the
 check and the write are one step, and `admin.CheckVersion` is called there and
@@ -266,6 +273,7 @@ reproducible).
 | The registration crashes anywhere | `transactions.go` | `TestDirectRegisterRecoversFromACrashAtEveryPoint` |
 | The result of a close is stored with it | `endpoints.go` (`closeEndpoint`), `manage.go` (`CloseEndpointOp`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint` |
 | One identifier has one result, for every operation and every place a result is kept | `manage.go` (`Execute`, `execute`, `addConfigResults`), `recovery.go` (`Open`) | `TestAResendReturnsTheStoredResultAndAReusedIdentifierIsRefused`, `TestConcurrentResendsOfOneRequestRunOnce`, `TestARefusedRequestStoresNothingAndTheIdentifierStaysFree`, `TestAVersionedChangeIsAppliedOnceAndAStaleOneNeverIsApplied` |
+| A crash at any point of an operation leaves nothing, the effect alone or both, never the result alone; a resend is carried out again or answered from the result | `manage.go`, `endpoints.go` (`closeWithResult`) | `TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint` |
 | The door is closed while the node starts and while it stops; what is not a change does not come through it | `manage.go`, `engine.go` (`step`) | `TestExecuteIsRefusedWhileRecoveringAndWhileStopping`, `TestExecuteRefusesAnOperationThatChangesNothing` |
 | A request that stops the daemon says so, resent or not | `manage.go` (`StopDaemonOp`, `StoredResult.Stop`) | `TestStopFollowsTheOperationOfTheRequest` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |

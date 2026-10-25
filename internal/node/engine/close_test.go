@@ -104,7 +104,7 @@ func (r *rig) adminResults() map[admin.RequestKey]store.AdminRecord {
 
 // The result of the operation that asked for the close goes in the same
 // transaction as the head record, and it is the result of what the close did: a
-// crash cannot leave one without the other.
+// crash cannot leave the result without the closing.
 func TestCloseStoresTheResultOfTheOperationWithTheHeadRecord(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)

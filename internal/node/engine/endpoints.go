@@ -401,8 +401,10 @@ type closeVia struct {
 }
 
 // closeEndpoint closes the endpoint and says what it did. With via, the result of
-// the operation is stored in the transaction of the head record whatever the
-// outcome, so that a crash leaves both or neither; the result is returned too.
+// the operation is stored in the transaction of the head record, as its last
+// write, whatever the outcome; the result is returned too. A crash between the
+// two leaves the endpoint closed without the result, and the resend then says it
+// was closed already.
 func (e *Engine) closeEndpoint(now time.Time, id ident.EndpointID, via *closeVia) (CloseOutcome, []byte, error) {
 	st := e.view.endpoints[id]
 	switch {
