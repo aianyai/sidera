@@ -60,6 +60,10 @@ the same rules in JSON Schema.
   (`adapterreg.DefaultRecvWait`). A direct endpoint's `endpoint.recv` has its own
   cap, `adapterproto.MaxWaitSeconds`, which the adapter uses in `wait_s`; this
   field does not govern it.
+  Compatibility: the member was added to manifest version 1 in place, while no
+  implementation exists outside this repository, so an older daemon, which
+  decodes a manifest strictly, refuses a manifest that has it; a member added
+  after that needs a new `manifest_version`.
 - `ack_markers` has two lists, `replaced` and `truncated`, of markers. A marker
   is `{literal}` or `{regexp}`, exactly one. **Only that shape is checked here.**
   Whether the text is usable is decided in one place, when the daemon compiles the

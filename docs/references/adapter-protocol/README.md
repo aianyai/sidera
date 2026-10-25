@@ -342,8 +342,9 @@ the rule.
 **Version negotiation.** A version is a positive integer and each side announces a
 closed range. The adapter picks the highest version in both. With no overlap it
 answers `-32022` with `data` `{requested, supported}`, each a range. Inside a
-negotiated version nothing is added that an older reader would misread. A
-protocol addition is made in one of three ways, and only these:
+negotiated version nothing is added that an older reader would misread, except
+by the in-place extension described below. A protocol addition is made in one of
+three ways, and only these:
 
 1. a new **capability**, declared before it is used: the adapter in the
    `capabilities` of the `initialize` result, the daemon in the `capabilities` of
@@ -356,6 +357,22 @@ protocol addition is made in one of three ways, and only these:
    use it;
 3. everything else that would change a message, a new member of any other
    object included, needs a **new protocol version**.
+
+**Extending a version in place.** While no implementation exists outside this
+repository, protocol version 1 may still be extended in place, because no
+reader of an earlier shape is deployed that the change could break. Two
+additions were made this way, and each is a change that rule 3 would otherwise
+have sent to a new version:
+
+- the rejection reason `backlog_full`. An older SDK adapter decodes strictly and
+  does not know the name, so it refuses the whole result that carries it;
+- the manifest member `recv_wait_limits`, a new member of the manifest object.
+  An older daemon decodes the manifest strictly and refuses a manifest that has
+  the member.
+
+This permission ends when the first implementation outside this repository
+exists. From then on an addition of this kind needs a new protocol version, or,
+for the manifest, a new `manifest_version`.
 
 **Strict decoding.** Within a version an unknown field is `-32602`, except in the
 capability objects, which ignore unknown keys (see version negotiation). The same
@@ -527,7 +544,8 @@ is authoritative.
   once sent is never renamed, removed or reused. Within a released protocol
   version the set of reasons is closed: strict decoding refuses an unknown
   reason, so a reason added after a version is released follows the version rule
-  above and needs a new protocol version. `backlog_full` is its own reason
+  above and needs a new protocol version (`backlog_full` was added in place, under
+  the exception for a version nobody outside this repository implements yet). `backlog_full` is its own reason
   because the sender can act on it, by retrying later or sending elsewhere,
   where `backlog_expired` means a message that was accepted and then waited too
   long, and `endpoint_declined` means the endpoint refused this sender or
