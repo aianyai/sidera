@@ -36,6 +36,26 @@ func (s *scripted) note(method string) {
 	s.during = append(s.during, len(l.Kind(ledger.KindClientCall)))
 }
 
+func (s *scripted) Me(context.Context) (fakeagent.MeResult, error) {
+	s.note("me")
+	return fakeagent.MeResult{}, s.err
+}
+
+func (s *scripted) Peers(context.Context) (fakeagent.PeersResult, error) {
+	s.note("peers")
+	return fakeagent.PeersResult{}, s.err
+}
+
+func (s *scripted) Directory(context.Context, fakeagent.DirectoryInput) (fakeagent.DirectoryResult, error) {
+	s.note("directory")
+	return fakeagent.DirectoryResult{}, s.err
+}
+
+func (s *scripted) Probe(context.Context, fakeagent.ProbeInput) (fakeagent.ProbeResult, error) {
+	s.note("probe")
+	return fakeagent.ProbeResult{}, s.err
+}
+
 func (s *scripted) Send(_ context.Context, in fakeagent.SendInput) (fakeagent.SendResult, error) {
 	s.note("send")
 	if s.send != nil {
@@ -201,6 +221,16 @@ func TestRecordingRecordsEveryMethodAndItsFailure(t *testing.T) {
 			_, err := a.Status(context.Background(), fakeagent.StatusInput{})
 			return err
 		}},
+		{"me", func(a fakeagent.Agent) error { _, err := a.Me(context.Background()); return err }},
+		{"peers", func(a fakeagent.Agent) error { _, err := a.Peers(context.Background()); return err }},
+		{"directory", func(a fakeagent.Agent) error {
+			_, err := a.Directory(context.Background(), fakeagent.DirectoryInput{})
+			return err
+		}},
+		{"probe", func(a fakeagent.Agent) error {
+			_, err := a.Probe(context.Background(), fakeagent.ProbeInput{})
+			return err
+		}},
 	}
 	for _, c := range cases {
 		t.Run(c.action, func(t *testing.T) {
@@ -317,5 +347,34 @@ func TestStatusInputNamesTheMessage(t *testing.T) {
 	in := fakeagent.StatusInput{MessageID: "m1"}
 	if in.MessageID != "m1" {
 		t.Fatal()
+	}
+}
+
+// TestTheInterfaceHasAMethodForEveryAgentCommand: the agent interface has eleven
+// methods, and a scenario can call each of them through Agent. The names are those of
+// the commands and of the tools of the MCP front end, written out here and not read
+// from the code under test.
+func TestTheInterfaceHasAMethodForEveryAgentCommand(t *testing.T) {
+	want := []string{"me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe"}
+	var a fakeagent.Agent = &scripted{mem: ledger.NewMemory()}
+	ctx := context.Background()
+	calls := map[string]func(){
+		"me":        func() { _, _ = a.Me(ctx) },
+		"declare":   func() { _ = a.Declare(ctx, fakeagent.DeclareInput{}) },
+		"peers":     func() { _, _ = a.Peers(ctx) },
+		"directory": func() { _, _ = a.Directory(ctx, fakeagent.DirectoryInput{}) },
+		"send":      func() { _, _ = a.Send(ctx, fakeagent.SendInput{}) },
+		"reply":     func() { _, _ = a.Reply(ctx, fakeagent.ReplyInput{}) },
+		"recv":      func() { _, _ = a.Recv(ctx, fakeagent.RecvInput{}) },
+		"ack":       func() { _, _ = a.Ack(ctx, fakeagent.AckInput{}) },
+		"status":    func() { _, _ = a.Status(ctx, fakeagent.StatusInput{}) },
+		"control":   func() { _, _ = a.Control(ctx, fakeagent.ControlInput{}) },
+		"probe":     func() { _, _ = a.Probe(ctx, fakeagent.ProbeInput{}) },
+	}
+	for _, name := range want {
+		calls[name]()
+	}
+	if got := a.(*scripted).asked; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("calls reached %v, want %v", got, want)
 	}
 }

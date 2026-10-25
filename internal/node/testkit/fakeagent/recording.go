@@ -53,6 +53,38 @@ func must(err error) {
 	}
 }
 
+func (r *recording) Me(ctx context.Context) (res MeResult, err error) {
+	r.run("me", "", func() (string, error) {
+		res, err = r.inner.Me(ctx)
+		return "", err
+	})
+	return res, err
+}
+
+func (r *recording) Peers(ctx context.Context) (res PeersResult, err error) {
+	r.run("peers", "", func() (string, error) {
+		res, err = r.inner.Peers(ctx)
+		return "", err
+	})
+	return res, err
+}
+
+func (r *recording) Directory(ctx context.Context, in DirectoryInput) (res DirectoryResult, err error) {
+	r.run("directory", "", func() (string, error) {
+		res, err = r.inner.Directory(ctx, in)
+		return "", err
+	})
+	return res, err
+}
+
+func (r *recording) Probe(ctx context.Context, in ProbeInput) (res ProbeResult, err error) {
+	r.run("probe", "", func() (string, error) {
+		res, err = r.inner.Probe(ctx, in)
+		return "", err
+	})
+	return res, err
+}
+
 func (r *recording) Send(ctx context.Context, in SendInput) (res SendResult, err error) {
 	r.run("send", in.IdemKey, func() (string, error) {
 		res, err = r.inner.Send(ctx, in)

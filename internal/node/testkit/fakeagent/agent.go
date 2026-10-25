@@ -6,8 +6,19 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// Agent is what a test does as the agent of one endpoint.
+// Agent is what a test does as the agent of one endpoint: the eleven methods of
+// the agent interface, each with the input and the result its definition gives.
 type Agent interface {
+	// Me asks for the endpoint's own record and the limits of its front ends.
+	Me(ctx context.Context) (MeResult, error)
+	// Peers lists the nodes the endpoint can see.
+	Peers(ctx context.Context) (PeersResult, error)
+	// Directory lists the endpoints the endpoint can see.
+	Directory(ctx context.Context, in DirectoryInput) (DirectoryResult, error)
+	// Probe checks that the tools reach the daemon. It is the one method that
+	// authenticates with the probe token and not the endpoint's own.
+	Probe(ctx context.Context, in ProbeInput) (ProbeResult, error)
+
 	// Send sends a message.
 	Send(ctx context.Context, in SendInput) (SendResult, error)
 	// Reply answers a message the endpoint received.
@@ -118,3 +129,86 @@ type StatusInput struct {
 // StatusResult is the state of each recipient's delivery and, for a control signal,
 // the reply once there is one.
 type StatusResult = adapterproto.MessageStatusResult
+
+// MeResult is the endpoint's own record. Frontends lists only the front ends of the
+// adapter the endpoint belongs to.
+type MeResult struct {
+	Address     string
+	Node        string
+	Kind        string
+	DisplayName string
+	Declaration Declaration
+	Frontends   map[adapterproto.Frontend]FrontendLimits
+}
+
+// Declaration is what an endpoint says about itself, as Declare patches it.
+type Declaration struct {
+	Paused               bool
+	RefuseMultiRecipient bool
+	RestrictSenders      bool
+	AcceptFrom           []string
+	HiddenFromDirectory  bool
+}
+
+// FrontendLimits are what a front end allows: the longest a recv may wait, and the
+// output budget of a page.
+type FrontendLimits struct {
+	RecvWaitMaxS int
+	Budget       Budget
+}
+
+// Budget is a size limit and its unit (chars or tokens).
+type Budget struct {
+	Unit  string
+	Limit int
+}
+
+// PeersResult lists the nodes the endpoint can see.
+type PeersResult struct {
+	Nodes []PeerNode
+}
+
+// PeerNode is a node; Self marks the endpoint's own.
+type PeerNode struct {
+	Node string
+	Self bool
+}
+
+// DirectoryInput asks for a page of the directory. A zero Limit takes the default.
+type DirectoryInput struct {
+	// Node narrows the listing to one node.
+	Node string
+	// Cursor continues an earlier listing; it is opaque.
+	Cursor string
+	Limit  int
+}
+
+// DirectoryResult is a page of endpoints and where the next one starts, empty at the
+// end.
+type DirectoryResult struct {
+	Endpoints  []DirectoryEndpoint
+	NextCursor string
+}
+
+// DirectoryEndpoint is an endpoint the directory shows.
+type DirectoryEndpoint struct {
+	Address     string
+	Kind        string
+	DisplayName string
+	Description string
+	// Accepts are the control signals and messages the endpoint's declaration accepts.
+	Accepts []string
+}
+
+// ProbeInput names the front end whose tools are probed; it must be the one the
+// probe token is bound to.
+type ProbeInput struct {
+	Frontend adapterproto.Frontend
+}
+
+// ProbeResult says which preset and front end the daemon now knows are connected.
+type ProbeResult struct {
+	OK       bool
+	Preset   string
+	Frontend adapterproto.Frontend
+}

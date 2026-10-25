@@ -18,9 +18,9 @@ and, for `Recording`, the ledger and the fake runtime of the testkit.
 
 | Name | Purpose |
 | ---- | ------- |
-| `Agent` | `Send`, `Reply`, `Recv`, `Ack`, `Control`, `Declare`, `Status`. |
-| `SendInput`, `ReplyInput`, `RecvInput`, `AckInput`, `ControlInput`, `DeclareInput`, `StatusInput` | The inputs. A `DeclareInput` is a patch: a nil field does not change. |
-| `SendResult`, `RecvResult`, `AckResult`, `StatusResult` | The results. `RecvResult.Raw` is the page exactly as the backend printed it; `Page` is the same page decoded. |
+| `Agent` | The eleven methods of the agent interface: `Me`, `Declare`, `Peers`, `Directory`, `Send`, `Reply`, `Recv`, `Ack`, `Status`, `Control`, `Probe`. |
+| `SendInput`, `ReplyInput`, `RecvInput`, `AckInput`, `ControlInput`, `DeclareInput`, `StatusInput`, `DirectoryInput`, `ProbeInput` | The inputs. A `DeclareInput` is a patch: a nil field does not change. |
+| `SendResult`, `RecvResult`, `AckResult`, `StatusResult`, `MeResult`, `PeersResult`, `DirectoryResult`, `ProbeResult` | The results. `RecvResult.Raw` is the page exactly as the backend printed it; `Page` is the same page decoded. |
 | `Error`, `Category`, `CategoryOf`, `CodeOf`, `Categories` | The failure of a call: a category (invalid argument, unauthenticated, not found, conflict, refused, backpressure, unavailable, internal, and the client's own "outcome unknown"), a code, a message. |
 | `Recording(inner, writer, endpoint, options)` | Wraps any backend so that every call writes its ledger entries. |
 
@@ -55,7 +55,7 @@ and, for `Recording`, the ledger and the fake runtime of the testkit.
 
 ## Tests
 
-`TestErrorCategories`, `TestErrorAccessors`,
+`TestErrorCategories`, `TestErrorAccessors`, `TestTheInterfaceHasAMethodForEveryAgentCommand`,
 `TestRecordingWritesTheCallBeforeTheActionAndTheResultAfter`,
 `TestRecordingRecordsEveryMethodAndItsFailure`,
 `TestRecordingCanRecordWhatTheModelSawOutsideATurn`,
