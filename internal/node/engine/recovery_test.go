@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -345,3 +346,73 @@ func TestWhileRecoveringSideEffectsAreRefusedReadsAnswerAndAdapterRequestsWait(t
 
 var _ = adapterproto.MaxRecipients
 var _ ident.EndpointID
+
+// The rules that have work run in the order the store's guarantee fixes, each
+// reading what the one before it left: the control record's effect first, the
+// removal of endpoints no record creates before the closing of what is queued for
+// closed endpoints, the removal of bodies last.
+func TestOpenRunsTheRulesInTheOrderTheStoreFixes(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	closed := register(t, e, "closed")
+	r.restart()
+
+	var closedRec store.EndpointRecord
+	for _, ep := range r.scan().Endpoints {
+		if ep.ID == closed {
+			closedRec = ep
+		}
+	}
+	closedRec.Status, closedRec.Token = store.EndpointClosed, nil
+	if err := r.st.EndpointClose(closedRec, nil); err != nil {
+		t.Fatal(err)
+	}
+	r.queue(1, 2, closed)
+	r.seedBody([]byte("orphan"))
+	token := func(b byte) []byte { return bytes.Repeat([]byte{b}, 32) }
+	// A creating endpoint with no record that creates it: garbage.
+	r.seedRecord(store.EndpointRecord{ID: mustEndpoint(t, 60), Kind: sessionKind, Instance: "chat", Status: store.EndpointCreating,
+		Token: token(1), Session: &store.SessionInfo{Preset: "default"}, CreatedBy: strings.Repeat("ab", 32)})
+	// A creating endpoint whose control record says the session was created: it opens.
+	ctl := sessionCtlRecord(t, 5, mustEndpoint(t, 61))
+	r.seedRecord(store.EndpointRecord{ID: mustEndpoint(t, 61), Kind: sessionKind, Instance: "chat", Status: store.EndpointCreating,
+		Token: token(2), Session: &store.SessionInfo{Preset: "default"}, CreatedBy: strings.TrimSuffix(ctl.Name(), ".rec")})
+	r.seedRecord(ctl)
+
+	e2, rep, err := r.open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer r.stop2(e2)
+	want := []string{"ctl-effect-replay", "orphan-gc-endpoint", "endpoint-drain-replay", "orphan-gc"}
+	if fmt.Sprint(rep.Order) != fmt.Sprint(want) {
+		t.Errorf("the rules ran in the order %v, want %v", rep.Order, want)
+	}
+	for _, ep := range r.scan().Endpoints {
+		if ep.ID == mustEndpoint(t, 61) && ep.Status != store.EndpointOpen {
+			t.Errorf("the endpoint whose session was created is %v, want open", ep.Status)
+		}
+	}
+}
+
+// An adapter request that waits for the running phase is let go when the node
+// shuts down, and is told so.
+func TestShutdownEndsTheWaitOfAnAdapterRequestThatWaitsForTheRunningPhase(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e, _, err := r.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Start()
+	t.Cleanup(func() { r.stop2(e) })
+	if err := e.AdapterAdmitted(context.Background(), "chat", r.admit); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { _, err := e.RegisterDirect(context.Background(), "chat", registerParams("a")); done <- err }()
+	waitUntil(t, func() bool { return engine.WaitingForRunning(e) == 1 })
+	e.BeginShutdown()
+	wantReason(t, <-done, engine.ReasonShuttingDown)
+}

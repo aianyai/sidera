@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -307,17 +308,25 @@ func TestQuiesceWaitsForTheWorkersTheEngineOwns(t *testing.T) {
 	settle(t, e)
 }
 
-// A worker the engine owns ends when the engine stops, whatever it waits for.
+// A worker the engine owns ends when the engine stops, whatever it waits for, and
+// Stop does not return before it has.
 func TestStopEndsTheWorkersTheEngineOwns(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)
 	e := r.start()
 	started := make(chan struct{})
+	var finished atomic.Bool
 	engine.SpawnWorker(e, "test", func(ctx context.Context) {
 		close(started)
 		<-ctx.Done()
+		time.Sleep(50 * time.Millisecond) // a worker that takes its time to end
+		finished.Store(true)
 	})
 	<-started
+	r.stop(e)
+	if !finished.Load() {
+		t.Error("Stop returned while a worker of the engine was still running")
+	}
 }
 
 func failMatch(tx string, step fsx.Step) matchT { return matchT{Tx: tx, Step: step} }

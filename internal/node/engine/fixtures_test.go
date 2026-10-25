@@ -7,11 +7,13 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/internal/reply"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // A delivery queued for a local endpoint, as the intake of a message from a node
@@ -85,3 +87,23 @@ func (r *rig) commits(tx string) int {
 
 var _ = bytes.Equal
 var _ txn.Kind
+
+// sessionCtlRecord is a control record of a session creation whose session was
+// created: the record a crash between the control record and the endpoint's
+// opening leaves.
+func sessionCtlRecord(t testing.TB, i int, session ident.EndpointID) store.CtlRecord {
+	t.Helper()
+	k := store.TargetKey{SenderNode: mustNode(t, 2), Sender: mustEndpoint(t, 3), Message: msgID(i), Recipient: mustEndpoint(t, 4)}
+	accept := t0.Add(time.Duration(i) * time.Second)
+	reportBy := delivery.ReportBy(accept)
+	return store.CtlRecord{
+		Key: k, Record: delivery.NewTargetControlRecord(accept, reportBy),
+		Dedup: delivery.NewDedupRecord(k.Dedup(), digestOf(i), reportBy),
+		Kind:  envelope.KindSessionCreate, Preset: "default", SessionEndpoint: session,
+		AcceptedAt: t0, SentAt: t0,
+		Intent: &store.CreateIntent{
+			Attempt: adapterproto.AttemptID("0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6"), Endpoint: session,
+			State: store.IntentCreated, NativeRef: "native-1",
+		},
+	}
+}

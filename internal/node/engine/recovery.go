@@ -170,6 +170,8 @@ type ScanReport struct {
 	Passes int
 	// Rules is how many times each rule that had work was run.
 	Rules map[string]int
+	// Order is the rules in the order they ran, one entry for each run.
+	Order []string
 	// Endpoints is how many endpoints the node has that are open or being created.
 	Endpoints int
 	// Unfinished is how many deliveries the node holds that are not final.
@@ -265,6 +267,7 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 			return fmt.Errorf("engine: recovery rule %s: %w", s.rule, err)
 		}
 		rep.Rules[s.rule]++
+		rep.Order = append(rep.Order, s.rule)
 		var err error
 		if sc, err = e.d.Store.Scan(); err != nil {
 			return err
