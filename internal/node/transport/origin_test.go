@@ -161,12 +161,11 @@ func TestNoCallerCanClaimTheLocalOrigin(t *testing.T) {
 							for _, n := range fld.Names {
 								exported = exported || n.IsExported()
 							}
-							if !exported || !mentionsOrigin(fld.Type) {
-								continue
-							}
-							if s.Name.Name == "Origin" {
+							switch {
+							case !exported:
+							case s.Name.Name == "Origin":
 								t.Errorf("%s: Origin has an exported field", name)
-							} else {
+							case mentionsOrigin(fld.Type):
 								t.Errorf("%s: exported type %s has an exported field of type Origin that a caller could set", name, s.Name.Name)
 							}
 						}
