@@ -38,10 +38,8 @@ func closeBatch(counts bodyCounts, now time.Time, ins []store.InRecord, ctls []s
 			continue
 		}
 		in.Record = rec
-		if !rec.NeedsBody() {
-			drop(in.Body)
-			in.Body = nil
-		}
+		in, ref := settledIn(in)
+		drop(ref)
 		b.In = append(b.In, in)
 	}
 	for _, c := range ctls {
@@ -63,6 +61,21 @@ func closeBatch(counts bodyCounts, now time.Time, ins []store.InRecord, ctls []s
 		}
 	}
 	return b, unchanged
+}
+
+// settledIn is the target record with its reference to the body dropped once the
+// delivery rules say the record no longer needs the bytes (it is not accepted any
+// more), and the reference that was dropped, nil when none was. It is the one rule
+// for when a target record lets go of its body: whoever moves a record to a final
+// state writes the record this returns and releases the body when nothing else
+// refers to it.
+func settledIn(in store.InRecord) (store.InRecord, *store.BodyRef) {
+	if in.Record.NeedsBody() || in.Body == nil {
+		return in, nil
+	}
+	ref := in.Body
+	in.Body = nil
+	return in, ref
 }
 
 // queuedFor lists the records queued for an endpoint, in a fixed order, at most

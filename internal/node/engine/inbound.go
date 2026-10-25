@@ -286,7 +286,8 @@ func rejected(now time.Time, in store.InRecord, reason delivery.RejectReason) (s
 	if err != nil || o.Result != delivery.ResultApplied {
 		return in, fmt.Errorf("engine: rejecting %s as %s: %v (%v)", in.Key.Message, reason, err, o.Ignored)
 	}
-	in.Record, in.Body = rec, nil
+	in.Record = rec
+	in, _ = settledIn(in) // a rejected record holds no body; none was given to it
 	return in, nil
 }
 

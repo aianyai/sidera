@@ -112,3 +112,32 @@ func TestTheIndexesOfTheViewFollowTheRecordsTheyAreMadeOf(t *testing.T) {
 		t.Errorf("idem %v: the key is gone with the record's claim to it", v.idem)
 	}
 }
+
+func TestATargetRecordLetsGoOfItsBodyExactlyWhenItNoLongerNeedsIt(t *testing.T) {
+	b := idOf(t, 41)
+	for _, c := range []struct {
+		name string
+		in   store.InRecord
+		drop bool
+	}{
+		{"accepted", inRec(t, 1, b, delivery.StateAccepted), false},
+		{"delivered", inRec(t, 2, b, delivery.StateDelivered), true},
+		{"rejected", inRec(t, 3, b, delivery.StateRejected), true},
+		{"delivery_unknown", inRec(t, 4, b, delivery.StateDeliveryUnknown), true},
+	} {
+		body := store.BodyRefOf([]byte("kept?"))
+		c.in.Body = &body
+		got, ref := settledIn(c.in)
+		switch {
+		case c.drop && (got.Body != nil || ref == nil || *ref != body):
+			t.Errorf("%s: body %v, released %v; want the reference dropped and returned", c.name, got.Body, ref)
+		case !c.drop && (got.Body == nil || ref != nil):
+			t.Errorf("%s: body %v, released %v; want the reference kept", c.name, got.Body, ref)
+		}
+	}
+	none, ref := settledIn(inRec(t, 5, b, delivery.StateRejected))
+	none.Body = nil
+	if _, ref = settledIn(none); ref != nil {
+		t.Error("a record without a body released one")
+	}
+}
