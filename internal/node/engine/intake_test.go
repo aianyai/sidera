@@ -1,0 +1,423 @@
+package engine_test
+
+import (
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/aianyai/sidera/internal/authz"
+	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/internal/reply"
+	"github.com/aianyai/sidera/internal/trust"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+)
+
+func boolp(b bool) *bool { return &b }
+
+// wouldRefuseARemoteSender is the premise of the tests about node rules: the
+// policy, applied the way it is to a node elsewhere that is trusted directly,
+// refuses a message to the endpoint. What the tests then show is that a local
+// sender is not judged by it.
+func wouldRefuseARemoteSender(t *testing.T, p authz.Policy, now time.Time, from, to ident.Address) {
+	t.Helper()
+	v := authz.Evaluate(p, authz.Request{
+		Now: now, Trust: trust.AllowedDirect, Stage: authz.StageIntake,
+		Sender: authz.Sender{Node: from.Node, Endpoint: from.Endpoint},
+		Action: authz.ActionMessageSend, Target: authz.Target{Kind: authz.TargetEndpoint, Endpoint: to.Endpoint},
+	})
+	if v.Outcome != authz.OutcomeReject {
+		t.Fatalf("the policy does not refuse a remote sender (%v): the test would prove nothing", v)
+	}
+}
+
+func TestLocalSourcesIgnoreNodeRules(t *testing.T) {
+	empty, err := authz.NewPolicy(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied, err := authz.NewPolicy(append(authz.DefaultPolicy().Rules(),
+		authz.Deny(authz.Members(), authz.AllLocalEndpoints(), authz.ActionMessageSend, authz.Conditions{})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name   string
+		policy authz.Policy
+	}{
+		{"a policy that allows nothing", empty},
+		{"a policy that denies every message to every local endpoint", denied},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := nodeWith(t, harness.Options{Policy: &config.PolicyFile{Version: 1, Policy: c.policy}}, "a", "b")
+			wouldRefuseARemoteSender(t, h.Config().Policy().Policy, h.Clock().Now(), addrOf(t, h, "a"), addrOf(t, h, "b"))
+
+			msg := send(t, h, "a", "b", "under rules that would stop a stranger")
+			quiet(t, h)
+
+			in := inOf(t, h, msg)
+			if in.Record.State != delivery.StateAccepted {
+				t.Errorf("the target record is %s (%s), want accepted: the node rules were applied to a local sender", in.Record.State, in.Record.Reject)
+			}
+			if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
+				t.Errorf("the sender's record is %s (%s), want accepted: the receipt did not come back", d.State, d.Reject)
+			}
+		})
+	}
+}
+
+func TestEndpointDeclarationRestrictsLocalSenders(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		declare func(h *harness.H) fakeagent.DeclareInput
+		want    delivery.State
+		reject  delivery.RejectReason
+	}{
+		{"a paused endpoint declines", func(*harness.H) fakeagent.DeclareInput { return fakeagent.DeclareInput{Paused: boolp(true)} }, delivery.StateRejected, delivery.RejectEndpointDeclined},
+		{"a sender that is not listed is declined", func(*harness.H) fakeagent.DeclareInput {
+			return fakeagent.DeclareInput{RestrictSenders: boolp(true), AcceptFrom: &[]string{}}
+		}, delivery.StateRejected, delivery.RejectEndpointDeclined},
+		{"a sender that is listed is accepted", func(h *harness.H) fakeagent.DeclareInput {
+			return fakeagent.DeclareInput{RestrictSenders: boolp(true), AcceptFrom: &[]string{h.Addr("a")}}
+		}, delivery.StateAccepted, delivery.RejectNone},
+		{"an endpoint that declares nothing accepts", func(*harness.H) fakeagent.DeclareInput {
+			return fakeagent.DeclareInput{HiddenFromDirectory: boolp(true)}
+		}, delivery.StateAccepted, delivery.RejectNone},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := nodeWith(t, harness.Options{}, "a", "b")
+			if err := h.Agent("b").Declare(h.Ctx(), c.declare(h)); err != nil {
+				t.Fatalf("declare: %v", err)
+			}
+			msg := send(t, h, "a", "b", "does the endpoint take me")
+			quiet(t, h)
+
+			got := inOf(t, h, msg)
+			if got.Record.State != c.want || got.Record.Reject != c.reject {
+				t.Errorf("target record: %s (%s), want %s (%s)", got.Record.State, got.Record.Reject, c.want, c.reject)
+			}
+			// The sender hears the same thing, from the signed report of the receipt.
+			if d := sourceDelivery(t, h, msg); d.State != c.want || d.Reject != c.reject {
+				t.Errorf("sender's record: %s (%s), want %s (%s)", d.State, d.Reject, c.want, c.reject)
+			}
+		})
+	}
+}
+
+func TestReplyWithEvidenceAdmittedBeforeReportPulled(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	// a takes nobody's messages: only an answer to one of its own can reach it.
+	if err := h.Agent("a").Declare(h.Ctx(), fakeagent.DeclareInput{RestrictSenders: boolp(true), AcceptFrom: &[]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	// Control: a plain message from b to a is declined.
+	plain := send(t, h, "b", "a", "an unprompted message")
+
+	// Hold the sender's calls, learn the message id, arm the knob that keeps the
+	// reports from a, and let the message go.
+	h.Unreachable(true)
+	msg := send(t, h, "a", "b", "a question")
+	quiet(t, h)
+	h.HoldReports(string(msg))
+	h.Unreachable(false)
+	h.Advance(resendBackoff)
+	quiet(t, h)
+
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
+		t.Fatalf("a's record of the question is %s, want queued: the report was not held", d.State)
+	}
+	// a asks for the report and is not given it.
+	h.Advance(pullInterval)
+	quiet(t, h)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
+		t.Fatalf("a's record of the question is %s after a pull, want queued", d.State)
+	}
+	if got := knobHits(t, h)["hold-reports"]; got < 2 {
+		t.Fatalf("the held reports were reached %d times, want the receipt and the pull", got)
+	}
+
+	// b answers. The answer carries b's own report of the question.
+	res, err := h.Agent("b").Reply(h.Ctx(), fakeagent.ReplyInput{MessageID: msg, Body: "an answer"})
+	if err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	quiet(t, h)
+
+	in := inOf(t, h, res.MessageID)
+	if in.Record.State != delivery.StateAccepted {
+		t.Errorf("the answer is %s (%s) at a, want accepted", in.Record.State, in.Record.Reject)
+	}
+	if !in.ReplyDecision.Granted() || in.ReplyDecision.Reason != reply.ReasonArrivalWindow {
+		t.Errorf("the reply permission is %v, want one that starts at the arrival the evidence proved", in.ReplyDecision.Reason)
+	}
+	// The evidence taught a the state of its question, which no pull had.
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
+		t.Errorf("a's record of the question is %s after the answer, want accepted from the evidence", d.State)
+	}
+	if p := inOf(t, h, plain); p.Record.State != delivery.StateRejected || p.Record.Reject != delivery.RejectEndpointDeclined {
+		t.Errorf("the unprompted message is %s (%s), want rejected (endpoint_declined)", p.Record.State, p.Record.Reject)
+	}
+}
+
+func TestForgedReplyToGetsNoPermission(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b", "c")
+	// a takes nobody's messages: only a reply with permission can reach it.
+	if err := h.Agent("a").Declare(h.Ctx(), fakeagent.DeclareInput{RestrictSenders: boolp(true), AcceptFrom: &[]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	msg := send(t, h, "a", "b", "a question for b")
+	quiet(t, h)
+
+	// c was never sent the question and says it answers it.
+	aAddr, cAddr := addrOf(t, h, "a"), addrOf(t, h, "c")
+	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), cAddr.Endpoint, forged(t, h, "forged-1", aAddr, msg, "I answer what I never received"))
+	if err != nil {
+		t.Fatalf("the forged envelope was refused outright: %v", err)
+	}
+	if len(rc.Reports) != 1 {
+		t.Fatalf("the receipt has %d reports, want 1", len(rc.Reports))
+	}
+	rep, err := h.VerifyReport(rc.Reports[0])
+	if err != nil {
+		t.Fatalf("the report of the forged envelope: %v", err)
+	}
+	if rep.Message != "forged-1" || rep.Recipient != aAddr.Endpoint {
+		t.Errorf("the report is about %s for %s", rep.Message, rep.Recipient)
+	}
+	if rep.Status.State != delivery.StateRejected || rep.Status.Reject != delivery.RejectEndpointDeclined {
+		t.Errorf("the forged answer got %s (%s), want rejected (endpoint_declined): the declaration must stop it", rep.Status.State, rep.Status.Reject)
+	}
+	in := inOf(t, h, "forged-1")
+	if in.ReplyDecision.Granted() {
+		t.Errorf("the forged reply_to gave permission: %v", in.ReplyDecision.Reason)
+	}
+
+	// Control: b, who was sent the question, is let in by the same declaration.
+	res, err := h.Agent("b").Reply(h.Ctx(), fakeagent.ReplyInput{MessageID: msg, Body: "the real answer"})
+	if err != nil {
+		t.Fatalf("reply: %v", err)
+	}
+	quiet(t, h)
+	real := inOf(t, h, res.MessageID)
+	if real.Record.State != delivery.StateAccepted || !real.ReplyDecision.Granted() {
+		t.Errorf("the real answer is %s (%s) with permission %v, want accepted with permission", real.Record.State, real.Record.Reject, real.ReplyDecision.Reason)
+	}
+}
+
+func TestLostReceiptRetryKeepsOneRecord(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	h.DropReceipt(1)
+	msg := send(t, h, "a", "b", "once")
+	quiet(t, h)
+
+	// The target processed it; the sender heard nothing and still waits.
+	first := inOf(t, h, msg)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
+		t.Fatalf("the sender's record is %s, want queued: it has no receipt", d.State)
+	}
+
+	h.Advance(resendBackoff)
+	quiet(t, h)
+
+	if got := knobHits(t, h)["drop-receipt"]; got != 1 {
+		t.Errorf("the dropped receipt was hit %d times, want 1", got)
+	}
+	ins := inRecords(t, h, msg)
+	if len(ins) != 1 {
+		t.Fatalf("the target holds %d records of the message, want 1", len(ins))
+	}
+	if ins[0].Rev != first.Rev {
+		t.Errorf("the target record was written again (revision %d, was %d): a resend must find the record and leave it", ins[0].Rev, first.Rev)
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
+		t.Errorf("the sender's record is %s after the resend, want accepted", d.State)
+	}
+}
+
+func TestSameIDDifferentBodyConflicts(t *testing.T) {
+	t.Run("the same idempotency key with other content is refused at the source", func(t *testing.T) {
+		h := nodeWith(t, harness.Options{}, "a", "b")
+		first, err := trySend(h, "a", "b", "one body", "key-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		again, err := trySend(h, "a", "b", "one body", "key-1")
+		if err != nil || again.MessageID != first.MessageID || !again.Replayed {
+			t.Fatalf("the same content again: %+v, %v; want the first message, replayed", again, err)
+		}
+		_, err = trySend(h, "a", "b", "another body", "key-1")
+		if fakeagent.CategoryOf(err) != fakeagent.CategoryConflict || fakeagent.CodeOf(err) != "idempotency_conflict" {
+			t.Fatalf("other content under the key: %v, want conflict/idempotency_conflict", err)
+		}
+		quiet(t, h)
+		if n := len(scanOf(t, h).Out); n != 1 {
+			t.Errorf("%d source records, want the one the first send made", n)
+		}
+	})
+
+	t.Run("the same message id with another body is refused at the target", func(t *testing.T) {
+		h := nodeWith(t, harness.Options{}, "a", "b")
+		original := "the body the sender wrote"
+		// Keep the sender's first call off the wire, arm the replay for the id it
+		// chose, then let the call go: the replay is made when the target has taken
+		// the next send of that id.
+		h.Unreachable(true)
+		msg := send(t, h, "a", "b", original)
+		quiet(t, h)
+		h.Mutate(string(msg))
+		h.Unreachable(false)
+		h.Advance(resendBackoff)
+		quiet(t, h)
+
+		replay, ok := h.Mutated(string(msg))
+		if !ok {
+			t.Fatal("the replay with another body was not made")
+		}
+		if reason, isRefusal := engine.ReasonOf(replay.Err); !isRefusal || reason != engine.ReasonMessageConflict {
+			t.Fatalf("the replay got %v, want a refusal for a conflict", replay.Err)
+		}
+		in := inOf(t, h, msg)
+		want := store.BodyRefOf([]byte(original))
+		if in.Body == nil || in.Body.Digest != want.Digest || in.Record.State != delivery.StateAccepted {
+			t.Errorf("the target record changed: body %v, state %s; want the original body, accepted", in.Body, in.Record.State)
+		}
+		if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
+			t.Errorf("the sender's record is %s: the replay was not the sender's and must not touch it", d.State)
+		}
+		if sum := sha256.Sum256([]byte(original)); in.Body.Digest != sum {
+			t.Errorf("the stored body is not the original")
+		}
+	})
+}
+
+func TestEndpointBacklogFullIsRejectedWithReason(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	var ids []adapterproto.MessageID
+	for i := 0; i <= delivery.DefaultEndpointBacklogLimit; i++ {
+		ids = append(ids, send(t, h, "a", "b", fmt.Sprintf("message %d", i)))
+	}
+	quiet(t, h)
+
+	accepted, full := 0, 0
+	for _, in := range scanOf(t, h).In {
+		switch {
+		case in.Record.State == delivery.StateAccepted:
+			accepted++
+		case in.Record.State == delivery.StateRejected && in.Record.Reject == delivery.RejectBacklogFull:
+			full++
+		default:
+			t.Errorf("a record of %s is %s (%s)", in.Key.Message, in.Record.State, in.Record.Reject)
+		}
+	}
+	if accepted != delivery.DefaultEndpointBacklogLimit || full != 1 {
+		t.Fatalf("%d accepted and %d rejected, want %d and 1", accepted, full, delivery.DefaultEndpointBacklogLimit)
+	}
+	last := ids[len(ids)-1]
+	if in := inOf(t, h, last); in.Record.Reject != delivery.RejectBacklogFull || in.Body != nil {
+		t.Errorf("the last message: %s (%s), body kept %v; want rejected (backlog_full) with no body", in.Record.State, in.Record.Reject, in.Body != nil)
+	}
+	// The sender learns it at once, with the reason, from the signed report.
+	d := sourceDelivery(t, h, last)
+	if d.State != delivery.StateRejected || d.Reject != delivery.RejectBacklogFull {
+		t.Errorf("the sender's record of the last message is %s (%s), want rejected (backlog_full)", d.State, d.Reject)
+	}
+}
+
+func TestNodeQueueFullBackpressuresNewSends(t *testing.T) {
+	h := nodeWith(t, harness.Options{NodeSettings: `{"node_queue_limit": 3}`}, "a", "b")
+	for i := 0; i < 3; i++ {
+		send(t, h, "a", "b", fmt.Sprintf("message %d", i))
+		quiet(t, h)
+	}
+	before := scanOf(t, h)
+
+	_, err := trySend(h, "a", "b", "one too many", "")
+	if fakeagent.CategoryOf(err) != fakeagent.CategoryBackpressure || fakeagent.CodeOf(err) != "node_queue_full" {
+		t.Fatalf("the fourth send: %v, want backpressure/node_queue_full", err)
+	}
+	quiet(t, h)
+	after := scanOf(t, h)
+	if len(after.Out) != len(before.Out) || len(after.In) != len(before.In) || len(after.Bodies) != len(before.Bodies) {
+		t.Errorf("a refused send left a trace: %d/%d/%d source, target records and bodies, were %d/%d/%d",
+			len(after.Out), len(after.In), len(after.Bodies), len(before.Out), len(before.In), len(before.Bodies))
+	}
+	results := clientResults(t, h, "a")
+	if last := results[len(results)-1]; last.Attrs.Category != "backpressure" || last.Attrs.Code != "node_queue_full" {
+		t.Errorf("the ledger holds %s/%s for the refused send", last.Attrs.Category, last.Attrs.Code)
+	}
+}
+
+func TestDiskFullGivesNoFalseAcknowledgement(t *testing.T) {
+	enospc := fsxtest.DiskFull
+	eio := errors.New("fsync: input/output error")
+	for _, c := range []struct {
+		name     string
+		arm      func(h *harness.H) *fsxtest.Rule
+		diskFree func() uint64
+		code     string
+	}{
+		{"a write that finds the disk full", func(h *harness.H) *fsxtest.Rule {
+			return h.Faults().Fail(fsxtest.Match{Tx: "intake", Step: fsx.StepWrite}, enospc)
+		}, nil, "storage_full"},
+		{"an fsync of the new file that fails", func(h *harness.H) *fsxtest.Rule {
+			return h.Faults().Fail(fsxtest.Match{Tx: "intake", Step: fsx.StepSync}, eio)
+		}, nil, "storage_unavailable"},
+		{"a volume with less free space than the reserve", nil, func() uint64 { return 1 }, "storage_full"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := nodeWith(t, harness.Options{FS: harness.RealFS, DiskFree: c.diskFree}, "a", "b")
+			var rule *fsxtest.Rule
+			if c.arm != nil {
+				rule = c.arm(h)
+			}
+			_, err := trySend(h, "a", "b", "does this reach the disk", "")
+			if fakeagent.CategoryOf(err) != fakeagent.CategoryBackpressure || fakeagent.CodeOf(err) != c.code {
+				t.Fatalf("the send: %v, want backpressure/%s", err, c.code)
+			}
+			if rule != nil && rule.Hits() == 0 {
+				t.Error("the fault was never injected")
+			}
+			quiet(t, h)
+			sc := scanOf(t, h)
+			if len(sc.Out) != 0 || len(sc.In) != 0 {
+				t.Errorf("%d source and %d target records after a send that was refused", len(sc.Out), len(sc.In))
+			}
+			for _, e := range clientResults(t, h, "a") {
+				if e.Attrs.Category == "ok" {
+					t.Errorf("the ledger holds an acknowledged call (%s)", e.Attrs.Action)
+				}
+			}
+			if n := knobHits(t, h); len(n) != 0 {
+				t.Errorf("the loopback was reached for a message that was never accepted: %v", n)
+			}
+		})
+	}
+}
+
+// The questions below are rules that the contract packages or the store do not
+// answer, kept in sight until they are settled where they belong.
+
+func TestAStateAfterAcceptedHasNoStoredTimeToReportItWith(t *testing.T) {
+	t.Skip("question: a status report carries the moment the target recorded the state, and a delivered one the moment of delivery; " +
+		"store.InRecord keeps only AcceptedAt, so a report of delivered, delivery_unknown or a rejection after intake cannot be dated. " +
+		"The record needs a stored time for its last change of state, written by whatever changes it.")
+}
+
+func TestShouldASendWithAnEmptyBodyBeAccepted(t *testing.T) {
+	t.Skip("question: the Agent interface says a body may be empty, and envelope.Decode refuses a message without a body " +
+		"(content type and body are given together, and a message has a body); the engine refuses the empty body until one of them changes.")
+}
+
+func TestShouldTheSourceRecordKeepWhetherRecipientsAreDisclosed(t *testing.T) {
+	t.Skip("question: store.OutEnvelope has no field for disclose_recipients, so a resend of a message to several recipients cannot " +
+		"reproduce the request digest the target stored; the engine refuses a disclosed list of several recipients until the record keeps the flag.")
+}
