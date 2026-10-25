@@ -148,17 +148,23 @@ to the workflow.
 ### Observed baseline
 
 The first run on `main` (commit `2196b29`, 2026-10-25) took this long for the
-package `internal/node/store`, per job, before the race runs were narrowed:
+package `internal/node/store`, per job, before the race runs were narrowed. The
+second run (commit `fecfee2`, the same day) is the first with the race-only
+narrowing of the crash walks; its value follows the first run's in each cell:
 
 | Runner | plain | with tags | `-race` | `-race` with tags |
 | ------ | ----- | --------- | ------- | ----------------- |
-| ubuntu | 297 s | 497 s | 1342 s | 1414 s |
-| windows | 328 s | 415 s | 1187 s | 1147 s |
-| macos | 235 s | 272 s | 990 s | 1119 s |
+| ubuntu | 297 s, then 352 s | 497 s, then 329 s | 1342 s, then 867 s | 1414 s, then 1194 s |
+| windows | 328 s, then 320 s | 415 s, then 234 s | 1187 s, then 956 s | 1147 s, then 770 s |
+| macos | 235 s, then 247 s | 272 s, then 342 s | 990 s, then 1140 s | 1119 s, then 1043 s |
 
-The limit is 1800 s per test binary, so the slowest step used 79% of it. Almost
-all of that time is the crash walks. Re-measure after a change to the store's
-tests with
+The limit is 1800 s per test binary. In the first run the slowest step used 79% of
+it; in the second the slowest, 1194 s (ubuntu, `-race` with tags), used 66%. Runner
+times vary by roughly 20% between runs, and by more in single cells: macOS `-race`
+without tags took 990 s and then 1140 s with no change to that path, and the
+ubuntu plain tagged run took 497 s and then 329 s. The margin is therefore read
+from the slowest job, not from a mean. Almost all of the time is the crash walks.
+Re-measure after a change to the store's tests with
 `GOMAXPROCS=4 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./internal/node/store`.
 
 ## Where

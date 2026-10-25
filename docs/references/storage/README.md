@@ -13,12 +13,10 @@ layer every persistent write goes through),
 of a record file) and [`internal/node/store`](../../../internal/node/store/README.md)
 (the records of `state/`).
 
-Platform paragraphs carry one of two markers. "Pending verification by CI on
-main" means a CI job can observe the behaviour and does not yet: the code and its
-tests are written from the platform documentation, and the CI log does not show
-the outcome. "Not exercised by CI" means no CI job can observe it, for the reason
-given where it appears (for example, no job loses power, so what a platform makes
-durable at a power loss is never observed).
+Platform paragraphs that say "not exercised by CI" describe behaviour that no CI
+job can observe, for the reason given where they say it (for example, no job loses
+power, so what a platform makes durable at a power loss is never observed). What a
+CI job does observe is stated as what the GitHub-hosted runner showed.
 
 ## What
 
@@ -65,8 +63,11 @@ never owner-only. Without this a link made 0600 pointing at a world-readable cop
 of a private key would pass the check and be read. The tests are
 `TestOSUnixOwnerOnlyIsFalseForASymbolicLink`,
 `TestDarwinOwnerOnlyIsFalseForASymbolicLinkWithOwnerOnlyBits` and
-`TestWindowsOwnerOnlyIsFalseForASymbolicLink`; the Windows effect (what
-`Lstat` reports for a link there) is pending verification by CI on main.
+`TestWindowsOwnerOnlyIsFalseForASymbolicLink`. On the GitHub-hosted
+`windows-latest` runner (Windows Server 2025) the last one created a link, did not
+skip, and `Stat` of the link returned `OwnerOnly` false and no error. Creating a
+link needs a privilege that the runner's administrator account has; an account
+without it skips that test.
 
 There is no overwrite in place, no truncate, no rename across directories, no
 replacing a directory, no chmod, and no long-held read handle. Each is left out
@@ -181,10 +182,14 @@ Specifically, for Windows:
   requires write access; other storage engines (Pebble, RocksDB, NATS) skip the
   flush on Windows and PostgreSQL ignores the error. A Windows test opens the
   directory with write access and with backup semantics, calls
-  `FlushFileBuffers`, and logs the result. If it succeeds, making `SyncDir` a
-  real flush is a change inside the Windows file only. The measured result is
-  pending verification by CI on main. Until then `SyncDir` persists nothing on
-  Windows: it only checks that the directory exists. So the directory barriers of
+  `FlushFileBuffers`, and logs the result. On the GitHub-hosted `windows-latest`
+  runner (Windows Server 2025) `FlushFileBuffers` on a directory handle returned
+  no error with `GENERIC_WRITE` and with `GENERIC_READ|GENERIC_WRITE`, and
+  `Access is denied` with `GENERIC_READ`. That is the return value of the call
+  and nothing more: the test cannot show that anything becomes durable, and no job
+  loses power. Making `SyncDir` a real flush is a change inside the Windows file
+  only. Today `SyncDir` persists nothing on Windows: it only checks that the
+  directory exists. So the directory barriers of
   the layers above (the `SyncDir` after a group of `ReplaceDefer`, after a batch
   of removals and after a rename of a directory, and the settle of every start)
   make nothing durable there by themselves. The durability of directory entries
@@ -998,12 +1003,18 @@ All are ordinary tests in `_windows_test.go` files, with no build tag and no
 manual step; the Windows CI jobs run them and report no failure: replacing a file while a read
 handle is held (succeeds once the handle is released within the retry budget,
 and fails as an ordinary failure with the target intact when it is not), the
-retried error set, the directory flush attempt (logs the measured result), `Sync`
+retried error set, the directory flush attempt (logs the result of the call), `Sync`
 on an append handle, `RenameDir` refusing an existing target, a second `Lock`
 getting `ErrLocked`, the owner-only descriptor of a created data directory (and that Everyone, an untrusted owner, a callback allow entry or a symbolic link make it false), and that reading a missing file returns `fs.ErrNotExist` at once.
 
-The CI log comes from `go test` without `-v`, so two things in it stay
-invisible: the result that the directory flush attempt logs, and whether the
-tests of an untrusted owner and of a symbolic link ran or skipped for want of the
-privilege to assign that owner or to create a link. Both are pending verification
-by CI on main.
+The `test` job runs these two packages once more with `-v`, so its log shows what
+the tests log and which of them skip. On the `windows-latest` runner (Windows
+Server 2025) the directory flush attempt logged the results given under
+Directory flush above, and no test of this package skipped: the tests of an
+untrusted owner (Everyone, and `BUILTIN\Users`) assigned that owner, and the
+symbolic-link test created its link. The tests run as the built-in local
+Administrator account (the owner in the logged security descriptors is `LA`, and
+the `TokenUser` of the pipe tests ends in `-500`). That account has the privileges
+both tests need, and the paths they exercise, assigning another owner and
+creating a link, are the ones an unprivileged account skips; the log does not
+print whether the token is elevated.

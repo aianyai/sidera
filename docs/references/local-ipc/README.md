@@ -258,13 +258,17 @@ taken by someone else, and sending the user to start a daemon would hide that.
 
 ## Known untested items
 
-"Pending verification by CI on main" marks what a CI job can observe and does not
-yet; "not exercised by CI" marks what no CI job can observe, with the reason.
+"Not exercised by CI" marks what no CI job can observe, with the reason.
 
-- **Windows measurements:** the Windows tests print what they measure (process
-  id, `TokenUser`, security descriptor), but CI runs `go test` without `-v`, so
-  those values are not in its log; pending verification by CI on main. Running the
-  tests with `-v` on a Windows machine shows them.
+- **Windows measurements:** the Windows tests print what they measure, and the
+  `test` job runs this package once more with `-v` so the log has it. On the
+  GitHub-hosted `windows-latest` runner (Windows Server 2025) the server process
+  id read from the client handle was this process's own, the `TokenUser` of the
+  server process was the built-in local Administrator account (a SID ending in
+  `-500`), and the descriptor of the pipe was `O:LAD:P(A;;FA;;;LA)`: the user as
+  owner and as the only entry. A client dialling a pipe that denies the user got a
+  failed peer check with reason `access_denied`, and a second listener on the name
+  failed with `Access is denied`.
 - **Remote pipe clients and junction spellings on Windows:** that the listener
   rejects remote clients, and that two spellings of one directory through a
   junction give two pipe names, follow from go-winio's behavior and from the
@@ -278,8 +282,12 @@ yet; "not exercised by CI" marks what no CI job can observe, with the reason.
   `GetSecurityInfo` reads the owner from a client handle, and whether the owner
   under elevation is the user: asserted by Windows tests that pass on the
   `windows-latest` runner (`TestClientCanReadTheServerProcessAndItsTokenUser`,
-  `TestPipeIsOwnedByAndGrantedToTheUserOnly`); whether that runner's process is
-  elevated is not recorded, so the elevated case is not established by them. The
+  `TestPipeIsOwnedByAndGrantedToTheUserOnly`). They run as the built-in
+  Administrator account, and the log does not print whether its token is elevated;
+  files that the same tests created without naming an owner were owned by that
+  user (`O:LA`) and not by the Administrators group, so the case the explicit
+  owner exists for, a default owner of Administrators, did not arise there and the
+  elevated case is not established by them. The
   owner is the first line of the client check and the server token the second; if
   the token step is refused in common elevated and unelevated combinations, that
   is a fix to make then, because the owner check already holds on its own.

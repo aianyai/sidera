@@ -119,5 +119,4 @@ the management socket `<home>/manage/manage.sock`, and on Windows the pipes are
 ## Follow-ups
 
 - The Windows and Linux tests pass in the CI jobs of each platform; the reference
-  lists the items that stay untested, pending verification by CI on main or not
-  exercised by CI.
+  lists the items that stay untested or are not exercised by CI.
