@@ -15,8 +15,11 @@ clock but the injected one (the waits that are about real time name
 `clock.System()`), and draws randomness only from `Deps.Rand`.
 
 This package holds the loop, the scheduler, the registration of endpoints, the
-capacity check, the storage of alerts and the two recovery entries. Sending,
-receiving, prompts, control signals and feedback join the same loop as further
+capacity check, the storage of alerts, the two recovery entries, and the sending
+and taking in of messages: the acceptance of a message from a local endpoint, the
+outbound worker that carries it through the transport and applies what comes
+back, and the receiving side that judges an envelope and signs the reports.
+Prompts, pulling, control signals and feedback join the same loop as further
 commands and add their methods to this list.
 
 ## Entry points
@@ -28,6 +31,9 @@ commands and add their methods to this list.
 | `AddPeriodic`, `AddClockState`, `Task`, `TaskInput` | A task the composition root has the loop run every period, before `Start`. The clock state's task is also run at once by the command that finds the wall clock set back. |
 | `Quiesce` | Returns when no command waits, nothing is due and no goroutine of the engine runs. |
 | `AdapterAdmitted`, `RegisterDirect`, `UnregisterDirect` | What the adapter host calls: the admission of an instance, and the registration and unregistration of its direct endpoints. |
+| `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
+| `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
+| `Inbound`, `Pull` | The engine as the `transport.Handler`: an envelope for this node, answered with signed reports, and a pull for the reports of a message. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
 | `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseResult`, `Counts`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and of a close the engine's own features ask for, the numbers of the status, and the alerts. |
 | `Execute`, `ManagementCommand`, `StoredResult`, `Operation`, `CloseEndpointOp`, `StopDaemonOp` | The one door of every administrative operation of the owner: the replay check, the operation, and the storing of its result with the fingerprint are one command of the loop. The owner's request to close an endpoint and to stop the daemon are the two operations there are; the package that owns the effect of another adds its type here. |
@@ -128,6 +134,53 @@ commands and add their methods to this list.
 - **The recovery of deliveries is four phases in the order of the startup
   steps,** each a command of the loop that logs `startup step N begin` and
   `startup step N end`; each is empty until the feature it belongs to is added.
+- **A message is accepted once, in one place.** `accept` checks the request, answers a
+  repeat of an idempotency key with the first message (the same content) or a
+  conflict, asks the one capacity check, takes the next sequence number of the pair
+  from the store's book, and writes the body and the source record in one
+  transaction; memory and the book follow the disk, and only then is the message given
+  to the outbound worker. A message is refused with nothing recorded when the queue is
+  full, the disk has no room, the wall clock cannot be trusted, or the request is not
+  one a node takes (no body, a body over the protocol's limit, a deadline beyond the
+  longest, no recipient or the system endpoint as one, a disclosed list of several
+  recipients).
+- **One worker sends, in order, outside the loop.** The loop schedules and applies;
+  the worker calls the transport in the order the work was given and waits until the
+  loop has applied each result before the next call. A send that got no answer is made
+  again with the same bytes after `ResendBackoff`, until the delivery deadline; a
+  delivery that is not settled is asked about every `PullInterval` until its report
+  deadline, and after the delivery deadline a node that never answered is asked, not
+  sent to. Nothing about the sending is persisted: after a restart every unsettled
+  source record is looked at again (the start's last step), and the target answers a
+  send it already took in from its record. A worker waiting out a delay that the
+  transport was asked to make is not work for `Quiesce`.
+- **The target judges in a fixed order and writes nothing before it has signed.** A
+  repeat of a request is answered from its record and another body under the same
+  identifier is a conflict that changes nothing; for a new one the reply permission
+  and its evidence are decided first (the evidence is applied even when the endpoint
+  then declines the reply), then whether the endpoint exists, is open and takes
+  messages, then the authorization check, then the deadline and the backlog. A
+  recipient that is closed or not there, and a runtime endpoint, are answered as an
+  endpoint that is missing. The reports are signed before the records are written, so a
+  receipt that exists describes records that do. A rejection is made by the delivery
+  rules from the record the constructor makes, and holds no body.
+- **A local source is never judged by the node's rules.** Which requests are local is
+  the transport's to say (`Origin.Local`); a local request is judged by the endpoint's
+  declarations alone, and a remote one by the rules with no trust, which is denied
+  until trust exists.
+- **A report is only made of a state the record dates.** The target record keeps one
+  time, when it was accepted, which dates the state accepted and a rejection made at
+  intake; a report of any other state would need a time the record does not have, so
+  none is made and a pull is answered as if the target had nothing to report yet.
+- **The body is held by what still needs it.** The source record drops its reference
+  when no delivery of it needs the body, in the write of the receipt that settled it; a
+  rejected delivery holds no body at all. A body that the evidence of a reply frees is
+  collected by the next start's rule for bodies that no record refers to, because that
+  transaction has no step that removes one.
+- **Evidence that does not verify is discarded and alerted.** The reply is judged as if
+  it carried none, and an alert of the kind `evidence_error` names the message.
+- **A control signal is none of this worker's.** The source records of control signals
+  are sent by the creation of sessions.
 - **No method makes a session endpoint.** The engine has no method that takes or
   gives the record of one; a session endpoint exists only through a session
   creation, which is added with it.
@@ -150,6 +203,10 @@ commands and add their methods to this list.
   `admin.ValidateRequest` passed, with the key made by `admin.KeyFor` for the
   actor that was allowed, and run what `StoredResult.Stop` asks for after the
   answer was written.
+- Make the transport with the engine as its handler, after `Open`, and give it to the
+  engine with `SetTransport` before `Start`; give `Deps.Keys` the keys loaded after the
+  transaction layer recovered.
+- Call the loopback from the outbound worker only, which `SetTransport` makes true.
 - Treat `Err() != nil` after `Done` as the order to exit and rescan.
 - Run the long work of a periodic task outside the loop: a task runs in it, and
   the longest stall of the loop is what an adapter's notifications have to
@@ -171,7 +228,11 @@ closing and its chunks; `execute_test.go` and `execute_crash_test.go` the door o
 `recovery_test.go` the scan entry and the recovery entry; `loop_test.go` the
 loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
-`crash_test.go` the crash walk of `direct-register`; `static_test.go` the lists
+`crash_test.go` the crash walk of `direct-register`; `intake_test.go` the scenarios of
+sending and intake judged from the ledger, the answers of the loopback and the records, and
+`intake_more_test.go` the rules around them; `intake_crash_test.go` the crash walk of the
+transactions that take a message in; `intake_fuzz_test.go` the receiving entry under
+arbitrary bytes; `intake_internal_test.go` the decision of what to send and the indexes of the view; `static_test.go` the lists
 the review holds the engine to; the `_internal_test.go` files the encoding of
 the declaration field (`declaration_internal_test.go`), the view and the batches of a drain.
 `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord` is a

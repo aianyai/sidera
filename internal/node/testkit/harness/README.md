@@ -16,7 +16,8 @@ layer.
 | Name | Purpose |
 | ---- | ------- |
 | `New(t, Options)` | Makes the node, starts the engine through the startup steps it has (scan, start, admission of the adapter, recovery of deliveries, serve) and stops everything when the test ends. |
-| `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, and whether the engine starts with the clock-rollback pause. |
+| `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, and a stand-in for the free space (`DiskFree`). |
+| `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport` | The loopback of the running process, its knobs, and the check of a report the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
 | `H.Direct`, `H.MustDirect`, `H.Addr`, `H.Agent` | A direct endpoint registered through the engine's own entry, its address, and its agent: `engineagent` wrapped in `fakeagent.Recording`. |
 | `H.Advance`, `H.Set`, `H.Clock` | The one test clock. `Clock().Now` is the `func() time.Time` a fake takes. |
 | `H.Quiesce(opts...)`, `QuiesceError` | Waits for quiet, fails with a report. |
@@ -30,8 +31,9 @@ layer.
 
 ## Rules
 
-- **The node is made by the program's own code.** The configuration is written by
-  the `init` plan, the adapter installed and enabled through the install and enable
+- **The node is made by the program's own code.** The keys and the configuration are
+  written by the `init` plan (the keys are real, from a seeded source, so the node
+  identifier is the same in every fixture), the adapter installed and enabled through the install and enable
   entries; no file is written by hand, so the fixture and the program cannot
   disagree about a format. The two transactions the composition root will own
   (`init`, `adapter-install`) are declared here the way it declares them. Each
@@ -101,16 +103,14 @@ layer.
 
 ## What later parts add, and where they attach
 
-Each adds to this package the capability its stream needs:
+The loopback with its knobs, the real file system and the free-space stand-in are in. Each
+later part adds to this package the capability its stream needs:
 
-- the loopback transport's fault knobs: fields of `Options` and methods of `H`, and
-  the conditions the loopback registers with `addQuiet`;
 - the adapter host and the fake adapter: the launcher on `fakeadapter.StartPipe`, the
   `Adapter` method, the notification and hold counts in the engine's `Expect`, and
   quiet conditions from `fakeadapter.Controller.Stats`;
 - session creation: a fake runtime owned by the fixture, the `Runtime` method, the
   presets and node settings in `Options`, and its idle condition in `addQuiet`;
-- the real file system and the free-space stand-in: a mode of `Options`.
 
 ## Tests
 
@@ -135,6 +135,10 @@ Each adds to this package the capability its stream needs:
 `TestACrashIsWrittenToTheLedgerWithItsModeAndSeed`,
 `TestACrashThatNamesItsPointIsWrittenWithThePoint`,
 `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`;
+`loopback_test.go`: `TestAKnobHitIsWrittenToTheLedgerWithTheCallAndTheNode`,
+`TestTheNodeHasRealKeysAndOnlyItsOwnReportsVerify`,
+`TestOptionsReplaceTheRulesAndTheSettingsBeforeTheFirstStart`,
+`TestANodeOnTheRealFileSystemRunsAndCannotBeCrashed`;
 `harness_internal_test.go`: the fixture's own quiet conditions
 (`TestQuiesceWaitsForEveryConditionOfTheFixtureAndNamesTheOneThatDoesNotHold`,
 `TestQuiesceChecksTheFixtureAgainAfterTheEngineWasQuiet`,

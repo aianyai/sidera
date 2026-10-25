@@ -235,8 +235,9 @@ func TestLostReceiptRetryKeepsOneRecord(t *testing.T) {
 	if len(ins) != 1 {
 		t.Fatalf("the target holds %d records of the message, want 1", len(ins))
 	}
-	if ins[0].Rev != first.Rev {
-		t.Errorf("the target record was written again (revision %d, was %d): a resend must find the record and leave it", ins[0].Rev, first.Rev)
+	if ins[0].Rev != first.Rev || !ins[0].AcceptedAt.Equal(first.AcceptedAt) {
+		t.Errorf("the target record was written again (revision %d at %v, was %d at %v): a resend must find the record and leave it",
+			ins[0].Rev, ins[0].AcceptedAt, first.Rev, first.AcceptedAt)
 	}
 	if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
 		t.Errorf("the sender's record is %s after the resend, want accepted", d.State)

@@ -142,7 +142,9 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 // its result schedules the next look.
 func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	o, ok := e.view.out[name]
-	if !ok || o.Lost != nil || e.tr == nil || e.d.Keys == nil {
+	// A control signal is sent by the creation of a session, which is not this
+	// worker's work; a record that was lost holds nothing to send.
+	if !ok || o.Lost != nil || o.Key.Control || e.tr == nil || e.d.Keys == nil {
 		delete(e.outbox.state, name)
 		return
 	}

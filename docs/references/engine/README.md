@@ -1,9 +1,9 @@
 # Engine
 
 The single writer of the node's runtime state: the loop, its schedule, the
-registration of endpoints, the capacity check and the two recovery entries. What
-the features still to come add to the same loop (sending, receiving, prompts, control signals,
-feedback) is described with them.
+registration of endpoints, the capacity check, the two recovery entries, and the
+sending and taking in of messages. What the features still to come add to the same
+loop (pulling, prompts, control signals, feedback) is described with them.
 
 ## What
 
@@ -156,6 +156,48 @@ outcome is unknown holds no body and is not counted: the bound exists for the
 bodies a node holds, and what a control record carries is pending work that
 entered through a new-work entry all the same.
 
+**Accepting a message.** `Send` and `Reply` are the one place new work from a local
+endpoint enters the store. A request that no node would take is refused first: no
+body, a body over 64 KiB, no content type, a deadline beyond one hour, no recipient or
+the system endpoint as one, a disclosed list of several recipients. A repeat of an
+idempotency key returns the first message when the content is the same and is a
+conflict when it is not; content is compared by the request digest the target compares
+with, made with the first request's deadlines, because the deadline a repeat gets is its
+own and says nothing of the content. Then the capacity check, then the next sequence
+number of the pair (sender endpoint, recipient address) from the store's book, and the
+body and the source record in one transaction. A reply finds its recipient and its
+reply-to in the node's own record of the message the endpoint received; the caller names
+neither. The deadlines are whole seconds, because that is what an envelope can say and
+the target's record must agree with it.
+
+**Sending.** One worker, outside the loop, makes the calls to the transport in the order
+the work was given: a send of the envelope (made anew from the source record and the
+body, with the evidence of a reply signed at that moment) or a pull of the reports of a
+message. The loop schedules the next call and applies each result. A send that got no
+answer is made again with the same bytes every `ResendBackoff` (30 s) until the delivery
+deadline; a delivery that is not settled is asked about every `PullInterval` (1 min) until
+its report deadline plus the clock tolerance; after the delivery deadline a node that
+never answered is asked and not sent to. The reports in a receipt or an answer are
+verified with the target's certificate and applied to the source record by the envelope
+package's one rule; the record is written with the feedback the change calls for and with
+the body reference dropped once no delivery needs the body. A report that does not verify
+or that no state can follow is logged and left out. Nothing of the sending is persisted:
+the last step of the start looks at every unsettled source record again.
+
+**Taking in an envelope.** `Inbound` is the handler of the transport. For each recipient
+on this node it finds the record of the request or judges it: a repeat gets the record's
+report, another body under the same message identifier is refused as a conflict and
+nothing changes; for a new request the reply permission and its evidence are decided,
+then the endpoint (a closed or missing endpoint, and a runtime endpoint, answer as one
+that is missing), then the authorization check, then the deadline and the endpoint's
+backlog. A request from the loopback is judged by the endpoint's declarations alone; one
+that came any other way is judged by the node's rules with no trust, which is denied until
+trust exists. The accepted record holds the body, the rejected one does not. The reports
+of the receipt are signed before anything is written and the records, with the source
+record the evidence of a reply changed, are written in one transaction. While the wall
+clock cannot be trusted nothing is signed, so an envelope and a pull are refused and the
+sender tries again.
+
 **The start, as far as the engine is concerned.** The steps of the start are numbered
 in the order the node takes them; the engine takes part in these:
 
@@ -167,7 +209,7 @@ in the order the node takes them; the engine takes part in these:
 | 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery` |
 | 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick` |
 | 13 | Send the feedback that fell due | phase `feedback` |
-| 14 | Go on with the loopback of outgoing messages | phase `outbound` |
+| 14 | Go on with the loopback of outgoing messages | phase `outbound`: every unsettled source record is sent or asked about again |
 | 15 | The Agent interface serves in full | `Serve` |
 
 **Recovery.** `PlanRecovery` is a pure function of a scan: what each recovery rule
@@ -179,6 +221,37 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
 11 to 14 as four commands and logs `startup step N begin` and `startup step N end`.
 
 ## Why
+
+- **The source accepts, the target judges, and they are two transactions.** The call
+  returns when the message is on disk; what the recipient's node makes of it comes back
+  as a report. A message to another node could not be answered at once, and the agent's
+  way of using the interface must not depend on whether the target is on this node. The
+  fault knobs of the loopback also act between the two.
+- **A single worker, in order.** A step of a scenario then has one order of commands, and
+  a crash point is the same in two runs. The loop never waits for the transport: a
+  receiving command runs in the loop while the worker waits for it, which would be a
+  deadlock the other way round.
+- **A repeat is answered from the record, a conflict changes nothing.** A receipt that
+  was lost is the common failure of a send; the sender sends the same bytes again and the
+  target must not take the message in twice. Another body under the same identifier is a
+  sender that is broken or hostile, and the record it would overwrite is the evidence.
+- **Reports are signed before the write.** A receipt that exists then describes records
+  that exist; a signing failure leaves nothing on disk, and a write that fails leaves no
+  receipt, so the sender sends again.
+- **No report of a state the record cannot date.** A report carries the moment the target
+  recorded the state, and it is what the reply window starts from; a made-up time would
+  move the window. The target record keeps the acceptance time only, so the states after
+  acceptance wait for a stored time (the skipped test names the question).
+- **A local source is judged by declarations, never by node rules,** and which source is
+  local is the transport's word, never the request's: a request that claims this node's
+  identifier but came another way is a remote one.
+- **A repeat of an idempotency key is compared by the digest the target uses,** with the
+  first request's deadlines, so the content comparison is the one rule the target also
+  applies and a repeat is not a conflict merely for being made later.
+- **Pulling at a fixed interval, not on a signal.** The sender asks again because a
+  transport to another node has no way to tell it a state changed; the loopback is the
+  same seam. At the scale of a node (a few thousand live messages) a pull a minute is a
+  cheap command that writes nothing when nothing changed.
 
 - **One writer, not locks.** Every operation that changes state is serialised, so
   the crash points of each transaction can be enumerated and a run can be replayed.
@@ -297,6 +370,15 @@ reproducible).
 | Waiting | `waiters.go` | `waiters_test.go` (`TestShutdownEndsEveryWaitEvenWhenTheInboxIsFull`, `TestAPageThatIsReadyWinsOverTheShutdown`) |
 | The view takes what the store returned and agrees with the disk | `drain.go`, `view.go` | `TestViewMatchesAFreshScanAfterWrites` |
 | No method makes a session endpoint | — | `TestEngineHasNoMethodThatMakesASessionEndpoint` |
+| Node rules do not apply to a local sender, declarations do | `inbound.go` (`judgeAuthz`) | `TestLocalSourcesIgnoreNodeRules`, `TestEndpointDeclarationRestrictsLocalSenders`, `TestARemoteSenderIsJudgedByTheNodeRulesAndALocalOneIsNot` |
+| A reply with evidence is admitted before the report was pulled, a forged reply-to gets nothing | `inbound.go` (`admitReply`) | `TestReplyWithEvidenceAdmittedBeforeReportPulled`, `TestForgedReplyToGetsNoPermission`, `TestEvidenceThatDoesNotVerifyIsDiscardedAndTheOwnerIsToldOfIt` |
+| A lost receipt and a resend leave one record; another body under one identifier is a conflict | `inbound.go` (`takeIn`), `outbound.go` | `TestLostReceiptRetryKeepsOneRecord`, `TestSameIDDifferentBodyConflicts` |
+| The backlog of an endpoint, the queue and the disk of the node | `inbound.go`, `send.go`, `capacity.go` | `TestEndpointBacklogFullIsRejectedWithReason`, `TestNodeQueueFullBackpressuresNewSends`, `TestDiskFullGivesNoFalseAcknowledgement` |
+| Requests no node takes, sequence numbers, the clock pause, idempotency retention | `send.go` | `TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing`, `TestSequenceNumbersCountEachPairOfSenderAndRecipientFromOne`, `TestNothingIsSignedOrAcceptedWhileTheWallClockCannotBeTrusted`, `TestAnIdempotencyKeyIsRememberedUntilItsRetentionEnds` |
+| What is sent and asked, and when | `outbound.go` | `TestOutboundNeedByState`, `TestAnUnreachableNodeIsSentToUntilTheDeadlineAndAskedAfterIt`, `TestHeldReportsAreAskedForUntilTheyCome`, `TestARestartGoesOnWithAMessageThatWasNotSettled` |
+| The body is held by what needs it | `inbound.go` (`settledSource`), `outbound.go` | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt` |
+| Every write of taking a message in survives a crash | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint` |
+| The receiving entry under arbitrary bytes | `inbound.go` | `FuzzInbound` |
 
 Known gaps, each filled in with the feature it belongs to:
 
@@ -305,8 +387,24 @@ Known gaps, each filled in with the feature it belongs to:
   `store.QuarantineSessions`), so the engine passes the scan and no list;
   `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
   is skipped until the engine wires the quarantine.
-- The prompt, block and feedback replays and the four phases of `RecoverDelivery`
-  are empty until the features that own them exist.
+- The prompt, block and feedback replays and phases 11 to 13 of `RecoverDelivery`
+  are empty until the features that own them exist; phase 14 goes on with the outgoing
+  messages.
+- A report of the target can only be made for the state accepted and for a rejection made
+  at intake: the target record keeps one time, when it was accepted
+  (`TestAStateAfterAcceptedHasNoStoredTimeToReportItWith`, skipped, holds the question).
+  A pull is answered without a report for any other state, and a reply's evidence is made
+  only while the record is in one of them.
+- An empty body is refused: the Agent interface says a body may be empty and an envelope
+  of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
+- A disclosed list of several recipients is refused: the source record does not keep the
+  flag, so a send again could not repeat the request digest the target stored
+  (`TestShouldTheSourceRecordKeepWhetherRecipientsAreDisclosed`, skipped).
+- The evidence of a reply that frees the last reference to a body leaves the body for the
+  next start's rule for bodies nobody refers to: the transaction that writes the reply has
+  no step that removes one.
+- The unreachable hint and the expiry of a delivery nobody answered are not applied by the
+  sender yet; they come with the feedback.
 - Closing a session endpoint does not yet send `session.close` to the adapter: the
   outcome says `closing`, and the release of the native session comes with the
   creation of sessions, which is the feature that makes one.
