@@ -165,10 +165,10 @@ func TestOpenClosesTheEndpointsOfADisabledInstance(t *testing.T) {
 	}
 }
 
-// The scan entry never opens over work that a rule no stream has wired would
+// The scan entry never opens over work that a rule that is not wired yet would
 // have to do: it says which rule, and it has changed nothing on the way. A
 // damaged file is not quietly kept out of the view.
-func TestOpenRefusesToOpenOverWorkOfARuleNoStreamHasWired(t *testing.T) {
+func TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet(t *testing.T) {
 	noLeaks(t)
 	hash := strings.Repeat("a1", 32)
 	for _, tc := range []struct {
@@ -264,7 +264,7 @@ func TestOpenBuildsTheViewOfWhatSurvived(t *testing.T) {
 }
 
 // The recovery-delivery entry is four phases in the order of the startup steps,
-// each a step the streams that own it fill in; until then each begins and ends.
+// each a step that is filled in with the feature it belongs to; until then each begins and ends.
 func TestRecoverDeliveryRunsItsPhasesInTheOrderOfTheStartupSteps(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)

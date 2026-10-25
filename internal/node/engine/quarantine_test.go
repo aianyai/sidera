@@ -9,11 +9,10 @@ import "testing"
 // the endpoints of the quarantined record, and both are closed by the same
 // transaction, not only the first in the order of the scan.
 //
-// The quarantine of damaged files is the work of the stream that forms the
-// replacement records of lost deliveries (the scan entry refuses to open over a
-// damaged file until then), and the transaction of the store takes one session
-// endpoint. This test is the requirement kept in sight until that stream wires
-// the path; it is skipped until then and must not be removed.
+// The quarantine of damaged files comes with the formation of the replacement
+// records of lost deliveries (the scan entry refuses to open over a damaged
+// file until then), and the transaction of the store takes one session
+// endpoint. This test is the requirement kept in sight until the path is wired; it is skipped until then and must not be removed.
 func TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord(t *testing.T) {
 	t.Skip("pending: the quarantine of damaged files is wired with the replacement records of lost deliveries; " +
 		"store.Quarantine and store.QuarantineResume take a single *EndpointRecord, so closing every creating " +

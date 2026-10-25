@@ -71,3 +71,18 @@ func TestTheEnginesTransactionsAreInTheTableOfTheProgram(t *testing.T) {
 		}
 	}
 }
+
+// The engine asks the adapter host for these things and no others; a new call is
+// added to the list by a change that says what it is for.
+func TestAdaptersListsWhatTheEngineAsksOfTheAdapterHost(t *testing.T) {
+	want := []string{"Close", "CreateSession", "DeliverPrompt", "EnsureRunning", "Interrupt", "NotifyPending", "Reconcile", "Stop"}
+	typ := reflect.TypeOf((*engine.Adapters)(nil)).Elem()
+	var got []string
+	for i := 0; i < typ.NumMethod(); i++ {
+		got = append(got, typ.Method(i).Name)
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("the methods are %v, want %v", got, want)
+	}
+}

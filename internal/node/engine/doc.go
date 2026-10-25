@@ -5,7 +5,7 @@
 //
 // This package holds the loop, the scheduler, the registration of endpoints
 // with their cap and tokens, the one capacity check, the storage of alerts and
-// the two recovery entries. The behaviour that later streams add (sending,
+// the two recovery entries. The behaviour still to come (sending,
 // receiving, prompting, control signals, feedback) joins the same loop as
 // further commands. See README.md for the rules and docs/references/engine for
 // the reasons.

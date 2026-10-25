@@ -18,7 +18,7 @@ import (
 // builds its view, the writes of the transactions it runs, and the writes of the
 // recovery rules. *store.Store is the one implementation; the interface is the
 // seam that keeps the engine from reaching the store's other methods before a
-// stream needs them, and the list grows with the streams.
+// engine needs them, and the list grows with what the engine does.
 type Store interface {
 	Scan() (*store.Scan, error)
 	Available() (uint64, error)

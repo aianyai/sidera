@@ -50,6 +50,9 @@ func TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies(t *testin
 	if rejected != 5 {
 		t.Errorf("%d deliveries of the closed endpoint rejected, want 5", rejected)
 	}
+	if diff, err := engine.ViewDiffersFromDisk(context.Background(), e, sc); err != nil || len(diff) != 0 {
+		t.Errorf("the view of the engine differs from the disk after the drain: %v, %v", diff, err)
+	}
 	if got := r.commits("endpoint-drain"); got != 3 {
 		t.Errorf("the drain took %d transactions, want 3 chunks of at most 2 for 5 records", got)
 	}
@@ -96,9 +99,15 @@ func TestCloseStoresTheResultOfTheOperationWithTheHeadRecord(t *testing.T) {
 	if _, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a, Result: &res}); err != nil {
 		t.Fatal(err)
 	}
-	sc := r.scan()
-	if len(sc.Admin) != 1 || sc.Admin[0].Key != res.Key || string(sc.Admin[0].Result) != string(res.Result) {
-		t.Errorf("stored results %+v, want the one given", sc.Admin)
+	var found *store.AdminRecord
+	for _, a := range r.scan().Admin {
+		if a.Key == res.Key {
+			a := a
+			found = &a
+		}
+	}
+	if found == nil || string(found.Result) != string(res.Result) || found.Op != res.Op {
+		t.Errorf("the stored result is %+v, want the one given", found)
 	}
 }
 
@@ -208,5 +217,35 @@ func TestReopeningAnEndpointKeepsItsIdAndGivesItANewToken(t *testing.T) {
 	second := tokenOf()
 	if len(second) != store.TokenLen || string(second) == string(first) {
 		t.Errorf("reopened with token %x after %x, want a new one", second, first)
+	}
+}
+
+// The view is kept by what the engine knows it wrote, and the store bumps the
+// revision of every target record it writes without handing the record back. If
+// the store's rule changed, the view would carry a revision the disk does not and
+// the replay of a later head record would skip a follower it owes.
+func TestViewAgreesWithTheDiskAfterAWrite(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 2}))
+	e := r.start()
+	a := register(t, e, "a")
+	r.restart()
+	r.queue(1, 5, a)
+	e = r.start()
+	if diff, err := engine.ViewDiffersFromDisk(context.Background(), e, r.scan()); err != nil || len(diff) != 0 {
+		t.Fatalf("before any write: %v, %v", diff, err)
+	}
+	if _, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a}); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, e)
+	diff, err := engine.ViewDiffersFromDisk(context.Background(), e, r.scan())
+	if err != nil || len(diff) != 0 {
+		t.Errorf("after closing the endpoint: %v, %v", diff, err)
+	}
+	for _, in := range r.scan().In {
+		if in.Rev != 2 { // the write that queued it, and the write that closed it
+			t.Errorf("record %s has revision %d on disk, want 2", in.Key.Message, in.Rev)
+		}
 	}
 }

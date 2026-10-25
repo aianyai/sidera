@@ -28,5 +28,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [configuration](configuration/README.md) | What the owner of a node decides and where it is kept: node settings, the access policy, presets with their statement about local sources, adapter instances and endpoint settings, stable endpoint ids, kept revocations, adapter package layout; strict decoding, expected versions, the transactions that change them and their crash states |
 | [ci](ci/README.md) | What the GitHub Actions workflow checks on which platform, what is deferred until the first release and why, and how to run the same checks locally |
 | [local-ipc](local-ipc/README.md) | How the Agent and management interfaces are reached on one machine: Unix sockets and Windows named pipes, directory and socket permissions, peer checks on both sides, socket path limits, stale socket removal |
+| [engine](engine/README.md) | The single writer of the node's runtime state: the loop and its commands, phases and submitters, failures and back pressure, the schedule, the registration and closing of endpoints with the cap and the tokens, the capacity check, and the two recovery entries |
 
 Language: everything in this directory is English.
