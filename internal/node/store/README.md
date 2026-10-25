@@ -90,7 +90,10 @@ engine applies the delivery rules and calls the writes.
 - **Bodies first, and removed last.** The caller works out which bodies lost their
   last reference (the reference count is in the engine's view) and says so; a body
   already gone is not an error. `DeliverReply` takes the release like the other writes that can drop a body:
-  the evidence in a reply can finish a delivery.
+  the evidence in a reply can finish a delivery. The caller counts the records the
+  transaction writes as well as the ones it replaces, because records that say the
+  same bytes share one body file; a write refuses (`ErrReleasedBodyInUse`, before
+  anything is written) a release that names a body one of its own records refers to.
 - **A quarantined file's first line is trusted by the rule of a live file, once.**
   The scan and `DecodeRecord` share one function for it (kind held by the
   directory, name equal to the hash of kind and key, key parses); a first line

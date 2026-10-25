@@ -600,7 +600,14 @@ a delivery and so drops the source record's body (`deliver-reply` removes it wit
 `body` and `body-dir`; the body of the reply itself is the role `reply-body`, since
 a role names one write of a transaction). Tests:
 `TestDeliverReplyRemovesTheBodiesItReleases` and the `deliver-reply` walks of
-`TestEveryTransactionConvergesFromEveryCrashState`. What a
+`TestEveryTransactionConvergesFromEveryCrashState`. Bodies are addressed by
+content, so a record the same transaction writes can refer to the file it was asked to
+remove (a reply whose bytes equal the message it answers refers to that very body); every
+write that takes a release refuses such a release with `ErrReleasedBodyInUse` before it
+opens a transaction, because the removal would be silent and irreversible: the record
+would point at bytes that are gone until someone reads it
+(`TestAWriteRefusesToReleaseABodyARecordItWritesRefersTo`, one case for every write that
+takes a release). What a
 crash leaves between the two is an orphan, removed by the first rule of the next
 start. A body is checked against its name when it is read (a start does not read
 them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch quarantines the body and

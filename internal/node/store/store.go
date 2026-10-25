@@ -21,6 +21,10 @@ var (
 	ErrBodyMismatch = errors.New("store: body file does not match its name")
 )
 
+// ErrReleasedBodyInUse: a write was asked to remove a body that a record the same
+// write stores refers to. Nothing was written.
+var ErrReleasedBodyInUse = errors.New("store: a released body is referred to by a record written with it")
+
 // Store writes and reads state/. It keeps no state of its own besides the
 // writer: the engine's view of the records is built from a Scan.
 type Store struct {

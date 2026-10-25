@@ -201,6 +201,54 @@ func dedupe(refs []BodyRef) []BodyRef {
 	return out
 }
 
+// outBodies, inBodies and ctlBodies are the references to bodies of the records a
+// transaction writes.
+func outBodies(outs ...OutRecord) []*BodyRef {
+	var refs []*BodyRef
+	for _, o := range outs {
+		refs = append(refs, o.Body)
+	}
+	return refs
+}
+
+func inBodies(ins []InRecord) []*BodyRef {
+	var refs []*BodyRef
+	for _, in := range ins {
+		refs = append(refs, in.Body)
+	}
+	return refs
+}
+
+func ctlBodies(ctls []CtlRecord) []*BodyRef {
+	var refs []*BodyRef
+	for _, c := range ctls {
+		refs = append(refs, c.Body)
+	}
+	return refs
+}
+
+// checkRelease refuses a release that names a body a record the same transaction
+// writes refers to. Bodies are addressed by content, so records that say the same
+// bytes share one file, and the caller's reference counts are only as good as its
+// own bookkeeping; removing that file would leave the written record pointing at a
+// body that is gone, which nothing reports until the record is read, and the bytes
+// cannot be brought back. Every write that takes a release calls it before it opens
+// a transaction, so a refused call has changed nothing.
+func checkRelease(release []BodyRef, written ...[]*BodyRef) error {
+	released := make(map[string]bool, len(release))
+	for _, r := range release {
+		released[r.Name()] = true
+	}
+	for _, group := range written {
+		for _, r := range group {
+			if r != nil && released[r.Name()] {
+				return fmt.Errorf("%w: %s", ErrReleasedBodyInUse, r.Name())
+			}
+		}
+	}
+	return nil
+}
+
 // Intake records a message accepted from a local sender: the body, if any, and
 // the source record.
 func (s *Store) Intake(body []byte, out OutRecord) error {
@@ -269,6 +317,13 @@ func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord, releas
 	if len(ins) == 0 {
 		return nil, errors.New("store: DeliverReply needs a record")
 	}
+	refs := inBodies(ins)
+	if out != nil {
+		refs = append(refs, out.Body)
+	}
+	if err := checkRelease(release, refs); err != nil {
+		return nil, err
+	}
 	written, files, err := inFiles(ins)
 	if err != nil {
 		return nil, err
@@ -315,6 +370,9 @@ func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord, releas
 // SourceUpdate replaces one source record and removes the bodies whose last
 // reference it dropped.
 func (s *Store) SourceUpdate(out OutRecord, release []BodyRef) error {
+	if err := checkRelease(release, outBodies(out)); err != nil {
+		return err
+	}
 	of, err := recordFile(OutDir, out)
 	if err != nil {
 		return err
@@ -383,6 +441,9 @@ func trimRec(name string) string { return name[:len(name)-len(recordSuffix)] }
 // ControlResult records the result of a control signal, then the session
 // endpoint it moves, then removes the bodies it released.
 func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord, release []BodyRef) error {
+	if err := checkRelease(release, ctlBodies([]CtlRecord{ctl})); err != nil {
+		return err
+	}
 	cf, err := recordFile(CtlDir, ctl)
 	if err != nil {
 		return err
@@ -523,6 +584,9 @@ func (s *Store) Ack(ins []InRecord, release []BodyRef) ([]InRecord, error) {
 	if len(ins) == 0 {
 		return nil, errors.New("store: Ack needs a record")
 	}
+	if err := checkRelease(release, inBodies(ins)); err != nil {
+		return nil, err
+	}
 	written, files, err := inFiles(ins)
 	if err != nil {
 		return nil, err
@@ -553,6 +617,9 @@ type TickBatch struct {
 // Tick records records moved by the passing of time.
 // It returns the target records as written (the revision one on).
 func (s *Store) Tick(b TickBatch) ([]InRecord, error) {
+	if err := checkRelease(b.Release, outBodies(b.Out...), inBodies(b.In), ctlBodies(b.Ctl)); err != nil {
+		return nil, err
+	}
 	of, err := outFiles(b.Out)
 	if err != nil {
 		return nil, err
@@ -644,6 +711,9 @@ type DrainBatch struct {
 // drain writes the endpoint records that close an instance's endpoints, when
 // there are any, and a chunk of closed deliveries.
 func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, withHead bool) ([]InRecord, error) {
+	if err := checkRelease(b.Release, inBodies(b.In), ctlBodies(b.Ctl)); err != nil {
+		return nil, err
+	}
 	var ep []file
 	for _, e := range closed {
 		if e.Status != EndpointClosed {
