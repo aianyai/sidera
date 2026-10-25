@@ -131,6 +131,9 @@ func (c *cmdViewVsDisk) run(e *Engine, _ time.Time) {
 			same("ctl "+k.String(), mine, ctl)
 		}
 	}
+	if !reflect.DeepEqual(e.view.checkpoints, fresh.checkpoints) {
+		diff = append(diff, fmt.Sprintf("checkpoints %v, from the disk %v", e.view.checkpoints, fresh.checkpoints))
+	}
 	if e.view.unfinished != fresh.unfinished {
 		diff = append(diff, fmt.Sprintf("unfinished %d, from the disk %d", e.view.unfinished, fresh.unfinished))
 	}

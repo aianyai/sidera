@@ -5,6 +5,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
 )
@@ -15,8 +16,9 @@ import (
 // of review: a new method is added to it by a change that says what it is for.
 func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 	allowed := []string{
-		"AdapterAdmitted", "AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CloseEndpoint", "Declare", "Done",
-		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "MessageStatus", "NodeSettings", "OperationResult", "Phase", "Pull", "Quiesce", "RaiseAlert", "RecoverDelivery",
+		"Adapter", "AdapterAdmitted", "AdapterGone", "AdapterNotified", "AdapterProbed", "AdapterSignals", "AdapterStarted",
+		"AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CheckpointPut", "CloseEndpoint", "Declare", "Done",
+		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "MessageStatus", "NodeSettings", "OperationResult", "Phase", "ProbeTokens", "Pull", "Quiesce", "RaiseAlert", "RecoverDelivery",
 		"RegisterDirect", "Reply", "Send", "Serve", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "UnregisterDirect",
 	}
 	typ := reflect.TypeOf(&engine.Engine{})
@@ -59,6 +61,24 @@ func TestTransactionsOfTheLoopAndOfTheInstallWorkerAreDisjoint(t *testing.T) {
 	}
 }
 
+// The transactions of two owners that the engine opens are these and no others.
+func TestTheEngineDeclaresTheTransactionsOfTwoOwnersItOpens(t *testing.T) {
+	var got []string
+	for _, d := range engine.Transactions() {
+		got = append(got, d.Name)
+	}
+	sort.Strings(got)
+	if want := []string{"backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("engine.Transactions = %v, want %v", got, want)
+	}
+}
+
+// The engine is what the adapter host asks its questions of: the interface is the
+// host's, and the engine satisfies it.
+func TestTheEngineIsTheEngineTheAdapterHostAsksOf(t *testing.T) {
+	var _ adapterhost.Engine = (*engine.Engine)(nil)
+}
+
 func TestTheEnginesTransactionsAreInTheTableOfTheProgram(t *testing.T) {
 	tab := programTable(t)
 	names := map[string]bool{}
@@ -75,7 +95,7 @@ func TestTheEnginesTransactionsAreInTheTableOfTheProgram(t *testing.T) {
 // The engine asks the adapter host for these things and no others; a new call is
 // added to the list by a change that says what it is for.
 func TestAdaptersListsWhatTheEngineAsksOfTheAdapterHost(t *testing.T) {
-	want := []string{"Close", "CreateSession", "DeliverPrompt", "EnsureRunning", "Interrupt", "NotifyPending", "Reconcile", "Stop"}
+	want := []string{"Close", "Counts", "CreateSession", "DeliverPrompt", "EnsureRunning", "Interrupt", "NotifyPending", "Reconcile", "Stop"}
 	typ := reflect.TypeOf((*engine.Adapters)(nil)).Elem()
 	var got []string
 	for i := 0; i < typ.NumMethod(); i++ {

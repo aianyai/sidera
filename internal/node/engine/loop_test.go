@@ -81,7 +81,7 @@ func TestWhenTheInboxIsFullAnOutsideCallerIsRefusedAndAnInternalOneWaits(t *test
 	}
 
 	internal := make(chan error, 1)
-	go func() { internal <- e.AdapterAdmitted(context.Background(), "chat", r.admit) }()
+	go func() { internal <- admitOn(context.Background(), e, "chat", r.admit) }()
 	select {
 	case err := <-internal:
 		t.Fatalf("the internal submitter returned %v while the inbox was full", err)

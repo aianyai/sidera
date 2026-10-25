@@ -313,7 +313,7 @@ func TestWhileRecoveringSideEffectsAreRefusedReadsAnswerAndAdapterRequestsWait(t
 	t.Cleanup(func() { r.stop2(e) })
 	ctx := context.Background()
 
-	if err := e.AdapterAdmitted(ctx, "chat", r.admit); err != nil {
+	if err := admitOn(ctx, e, "chat", r.admit); err != nil {
 		t.Fatalf("AdapterAdmitted while recovering: %v", err)
 	}
 	if _, err := e.Endpoints(ctx); err != nil {
@@ -404,7 +404,7 @@ func TestShutdownEndsTheWaitOfAnAdapterRequestThatWaitsForTheRunningPhase(t *tes
 	}
 	e.Start()
 	t.Cleanup(func() { r.stop2(e) })
-	if err := e.AdapterAdmitted(context.Background(), "chat", r.admit); err != nil {
+	if err := admitOn(context.Background(), e, "chat", r.admit); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)

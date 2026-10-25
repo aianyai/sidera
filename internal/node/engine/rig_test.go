@@ -63,7 +63,17 @@ type rig struct {
 	// otherwise, as for an engine that is not told to sign.
 	keys     *nodekeys.Keys
 	wantKeys bool
+	// home is the data directory the engine is told; empty when a test says so.
+	home string
+	// adapters is the adapter host the engine is given, nil when a test has none.
+	adapters engine.Adapters
+	// installed, when set, changes the installed adapter packages the engine
+	// reads from the configuration (a test that needs tested runtime ranges).
+	installed func([]config.Adapter) []config.Adapter
 }
+
+// testHome is the data directory of a rig, unless a test says it has none.
+const testHome = "/var/lib/sidera-test"
 
 type rigOption func(*rig)
 
@@ -88,12 +98,20 @@ func (r *rig) loadKeys() {
 	r.keys = k
 }
 
+func withoutHome() rigOption { return func(r *rig) { r.home = "" } }
+
+func withAdapters(a engine.Adapters) rigOption { return func(r *rig) { r.adapters = a } }
+
+func withInstalled(f func([]config.Adapter) []config.Adapter) rigOption {
+	return func(r *rig) { r.installed = f }
+}
+
 // newRig builds a node that has been initialised, has the adapter "chat"
 // installed and enabled as the instance "chat", and has not been started. The
 // adapter declares direct endpoints, at most maxDirect of them.
 func newRig(t testing.TB, maxDirect int, opts ...rigOption) *rig {
 	t.Helper()
-	r := &rig{t: t, mem: fsxtest.NewMem(), clk: clocktest.NewFake(t0), log: &harness.LogCapture{}, seed: 1}
+	r := &rig{t: t, mem: fsxtest.NewMem(), clk: clocktest.NewFake(t0), log: &harness.LogCapture{}, seed: 1, home: testHome}
 	r.node = harness.NodeID()
 	for _, o := range opts {
 		o(r)
@@ -130,13 +148,50 @@ func (r *rig) deps() engine.Deps {
 	r.seed++
 	d := engine.Deps{
 		Node: r.node, Clock: r.clk, HighWater: r.hw, RollbackPaused: r.paused,
-		Writer: r.w, Store: r.st, Config: r.cfg, Rand: harness.RandReader(r.seed),
-		Log: slog.New(r.log),
+		Writer: r.w, Store: r.st, Config: r.engineConfig(), Rand: harness.RandReader(r.seed),
+		Adapters: r.adapters, Home: r.home, Log: slog.New(r.log),
 	}
 	if r.keys != nil {
 		d.Keys = r.keys
 	}
 	return d
+}
+
+// installedConfig is the configuration with the installed packages a test chose.
+type installedConfig struct {
+	engine.Config
+	pick func([]config.Adapter) []config.Adapter
+}
+
+func (c installedConfig) Adapters() []config.Adapter { return c.pick(c.Config.Adapters()) }
+
+func (r *rig) engineConfig() engine.Config {
+	if r.installed == nil {
+		return r.cfg
+	}
+	return installedConfig{Config: r.cfg, pick: r.installed}
+}
+
+// initInfo is what an adapter with the admission's capabilities answers to
+// initialize: the adapter of the manifest every rig installs.
+func initInfo(adm adapterreg.Admission) adapterproto.InitializeResult {
+	return adapterproto.InitializeResult{
+		ProtocolVersion: 1,
+		Adapter:         adapterproto.AdapterInfo{ID: "chat", Version: "1.0.0"},
+		Capabilities:    adm.Capabilities(),
+	}
+}
+
+// admitFull admits the instance as the adapter host does and returns what
+// adapter.start carries.
+func admitFull(ctx context.Context, e *engine.Engine, instance string, adm adapterreg.Admission) (adapterproto.StartParams, error) {
+	return e.AdapterAdmitted(ctx, instance, adm, initInfo(adm))
+}
+
+// admitOn is admitFull for a caller that only wants to know whether it worked.
+func admitOn(ctx context.Context, e *engine.Engine, instance string, adm adapterreg.Admission) error {
+	_, err := admitFull(ctx, e, instance, adm)
+	return err
 }
 
 // open runs the scan entry.
@@ -158,7 +213,7 @@ func (r *rig) start() *engine.Engine {
 		r.t.Fatalf("RecoverDelivery: %v", err)
 	}
 	e.Serve()
-	if err := e.AdapterAdmitted(context.Background(), "chat", r.admit); err != nil {
+	if err := admitOn(context.Background(), e, "chat", r.admit); err != nil {
 		r.t.Fatalf("AdapterAdmitted: %v", err)
 	}
 	r.eng = e
@@ -393,7 +448,7 @@ func engineCaller(id ident.EndpointID) engine.Caller {
 // gives, with its configuration loaded and nothing started.
 func (r *rig) fork(disk *fsxtest.Mem) *rig {
 	r.t.Helper()
-	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys}
+	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys, home: r.home, adapters: r.adapters, installed: r.installed}
 	f.mount(disk)
 	var err error
 	if f.cfg, err = config.Load(f.w); err != nil {

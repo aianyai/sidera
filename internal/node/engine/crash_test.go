@@ -178,7 +178,7 @@ func startForked(t testing.TB, f *rig, e *engine.Engine) *engine.Engine {
 		t.Errorf("RecoverDelivery: %v", err)
 	}
 	e.Serve()
-	if err := e.AdapterAdmitted(context.Background(), "chat", f.admit); err != nil {
+	if err := admitOn(context.Background(), e, "chat", f.admit); err != nil {
 		t.Errorf("AdapterAdmitted: %v", err)
 	}
 	return e
@@ -342,4 +342,147 @@ func TestPowerLossKeepsWhatTheEngineAcknowledged(t *testing.T) {
 		}
 		f.stop2(e2)
 	}
+}
+
+// assertEveryStepCrashedAt fails for every key of the declared transaction that
+// the walk did not crash at under every kind of crash: the keys are the table's,
+// not a list the run produced.
+func assertEveryStepCrashedAt(t *testing.T, r *rig, walker *crashWalker, tx string) {
+	t.Helper()
+	var want []fsx.Key
+	for _, k := range r.tab.Keys() {
+		if k.Tag.Tx == tx {
+			want = append(want, k.Key)
+		}
+	}
+	if len(want) == 0 {
+		t.Fatalf("the table holds no key of %s", tx)
+	}
+	var missing []string
+	for _, k := range want {
+		for _, model := range crashKindNames {
+			if walker.taken[k][model] == 0 {
+				missing = append(missing, fmt.Sprintf("%v under %s", k, model))
+			}
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) != 0 {
+		t.Errorf("crash points of %s never crashed at: %v", tx, missing)
+	}
+}
+
+// The admission of a runtime adapter writes the id of its runtime endpoint in
+// config/ and the record in state/. Wherever the node dies, the next start opens
+// with no recovery work, finds at most the one runtime endpoint and never one
+// without its id, and the admission done again gives the id that was kept, if
+// one was, and an open runtime endpoint in any case.
+func TestRuntimeAdmitRecoversFromACrashAtEveryPoint(t *testing.T) {
+	noLeaks(t)
+	rt := runtimeAdmission(t, 0, "cli")
+	var r *rig
+	checked, withRecord, withoutRecord := 0, 0, 0
+	walker := newCrashWalker(func(where string, disk *fsxtest.Mem) {
+		checked++
+		f := r.fork(disk)
+		e, rep, err := f.open()
+		if err != nil {
+			t.Errorf("%s: Open: %v", where, err)
+			return
+		}
+		startForked(t, f, e)
+		defer f.stop2(e)
+		if len(rep.Rules) != 0 {
+			t.Errorf("%s: the scan entry had recovery work %v: a crash of an admission leaves none", where, rep.Rules)
+		}
+		kept := f.cfg.EndpointIDs("chat").Runtime
+		recs := f.runtimeRecords()
+		switch len(recs) {
+		case 0:
+			withoutRecord++
+		case 1:
+			withRecord++
+			rec := recs[0]
+			if kept.IsZero() || kept != rec.ID {
+				t.Errorf("%s: runtime endpoint %s on disk without its id in config/ (kept: %s)", where, rec.ID, kept)
+			}
+			if rec.Status != store.EndpointOpen || len(rec.Token) != store.TokenLen {
+				t.Errorf("%s: the record is %+v", where, rec)
+			}
+		default:
+			t.Errorf("%s: %d runtime records", where, len(recs))
+		}
+		got, err := admitFull(context.Background(), e, "chat", rt)
+		if err != nil {
+			t.Errorf("%s: admitting again: %v", where, err)
+			return
+		}
+		if !kept.IsZero() && string(got.RuntimeEndpoint) != kept.String() {
+			t.Errorf("%s: the admission gave %s, want the id kept, %s", where, got.RuntimeEndpoint, kept)
+		}
+		if n := len(f.runtimeRecords()); n != 1 {
+			t.Errorf("%s: %d runtime records after admitting again, want 1", where, n)
+		}
+		if got := openEndpoints(t, e); got != 1 {
+			t.Errorf("%s: %d endpoints open after admitting again, want 1", where, got)
+		}
+	}, "runtime-admit")
+	r = newRig(t, 10, withObserver(walker))
+	walker.rig = r
+	e := r.start()
+	if err := admitOn(context.Background(), e, "chat", rt); err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 || withRecord == 0 || withoutRecord == 0 {
+		t.Fatalf("%d crash states judged, %d with the record and %d without: the walk must reach both sides of the commit", checked, withRecord, withoutRecord)
+	}
+	assertEveryStepCrashedAt(t, r, walker, "runtime-admit")
+}
+
+// A checkpoint is one replaced file. Wherever the node dies, the next start opens
+// with no recovery work and the checkpoint is the old state or the new one, whole,
+// never a partial one and never absent once an earlier put was answered.
+func TestCheckpointPutRecoversFromACrashAtEveryPoint(t *testing.T) {
+	noLeaks(t)
+	const old, next = `{"state":"old"}`, `{"state":"new","more":[1,2,3]}`
+	key := store.CheckpointKey{Scope: "attempt", ID: attemptA}
+	var r *rig
+	checked, sawOld, sawNew := 0, 0, 0
+	walker := newCrashWalker(func(where string, disk *fsxtest.Mem) {
+		checked++
+		f := r.fork(disk)
+		e, rep, err := f.open()
+		if err != nil {
+			t.Errorf("%s: Open: %v", where, err)
+			return
+		}
+		defer f.stop2(e)
+		if len(rep.Rules) != 0 {
+			t.Errorf("%s: the scan entry had recovery work %v: a crash of a checkpoint leaves none", where, rep.Rules)
+		}
+		got := checkpoints(t, f)
+		switch {
+		case len(got) != 1:
+			t.Errorf("%s: checkpoints %v, want exactly the one", where, got)
+		case got[key] == old:
+			sawOld++
+		case got[key] == next:
+			sawNew++
+		default:
+			t.Errorf("%s: the checkpoint is %q, want the old state or the new one whole", where, got[key])
+		}
+	}, "checkpoint-put")
+	r = newRig(t, 10, withObserver(walker))
+	e := r.start()
+	if err := e.CheckpointPut(context.Background(), "chat", attemptPut(attemptA, old)); err != nil {
+		t.Fatal(err)
+	}
+	walker.rig = r
+	if err := e.CheckpointPut(context.Background(), "chat", attemptPut(attemptA, next)); err != nil {
+		t.Fatal(err)
+	}
+	if checked == 0 || sawOld == 0 || sawNew == 0 {
+		t.Fatalf("%d crash states judged, %d old and %d new: the walk must reach both sides of the commit", checked, sawOld, sawNew)
+	}
+	assertEveryStepCrashedAt(t, r, walker, "checkpoint-put")
 }

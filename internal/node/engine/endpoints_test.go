@@ -182,7 +182,7 @@ func TestRegisterNeedsAnAdmittedInstanceThatDeclaresDirectEndpoints(t *testing.T
 	if aerr != nil {
 		t.Skipf("a runtime-only admission cannot be built here: %v", aerr)
 	}
-	if err := e.AdapterAdmitted(context.Background(), "chat", adm); err != nil {
+	if err := admitOn(context.Background(), e, "chat", adm); err != nil {
 		t.Fatal(err)
 	}
 	_, err = e.RegisterDirect(context.Background(), "chat", adapterproto.RegisterParams{Key: "k", DisplayName: "k"})
@@ -393,6 +393,6 @@ func TestAnInstanceTheOwnerDisabledIsNotAdmitted(t *testing.T) {
 	}
 	e.Start()
 	t.Cleanup(func() { r.stop2(e) })
-	wantReason(t, e.AdapterAdmitted(context.Background(), "chat", r.admit), engine.ReasonInstanceUnknown)
-	wantReason(t, e.AdapterAdmitted(context.Background(), "nobody", r.admit), engine.ReasonInstanceUnknown)
+	wantReason(t, admitOn(context.Background(), e, "chat", r.admit), engine.ReasonInstanceUnknown)
+	wantReason(t, admitOn(context.Background(), e, "nobody", r.admit), engine.ReasonInstanceUnknown)
 }
