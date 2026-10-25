@@ -92,6 +92,9 @@ func (p *Peer) acceptNotification(msg message) {
 // answered, exactly once, by its worker.
 func (p *Peer) cancelRequest(params json.RawMessage) {
 	id, ok := p.dialect.CancelTarget(params)
+	// CancelTarget is the dialect's own function and a custom one may not
+	// validate the id it returns, so the id is checked here before it is used as
+	// a key.
 	if !ok || id.Validate() != nil {
 		p.log.Warn("cancel request names no usable request id")
 		return
