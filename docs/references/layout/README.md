@@ -9,8 +9,11 @@ of nondeterminism in the daemon behind a seam that tests replace.
 Three locations of Go code matter for the daemon. The rest of the repository
 is bound by none of these rules: `protocol/` holds the schema conformance tests,
 `cmd/sidera-adapter-claude/` is an adapter that imports only
-`sdk/go/adapterproto`, and `sdk/go` is a separate Go module that the daemon and
-third-party adapters share.
+`sdk/go/adapterproto`, `cmd/sidera-fake-adapter/` and `cmd/sidera-fake-runtime/`
+are the two test programs that stand in for an adapter and for a native runtime
+(built from `internal/node/testkit`, see [testkit](../testkit/README.md), never
+installed), and `sdk/go` is a separate Go module that the daemon and third-party
+adapters share.
 
 | Location | Kind | Does I/O, goroutines, clock reads |
 | -------- | ---- | --------------------------------- |
