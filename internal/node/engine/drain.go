@@ -120,11 +120,12 @@ func (e *Engine) drainChunk(now time.Time, id ident.EndpointID) error {
 		e.view.queue(k.Recipient, k, false)
 	}
 	if len(b.In)+len(b.Ctl) > 0 {
-		if _, err := e.d.Store.EndpointDrain(b); err != nil {
+		written, err := e.d.Store.EndpointDrain(b)
+		if err != nil {
 			return err
 		}
-		for _, in := range b.In {
-			e.view.setIn(afterWrite(in))
+		for _, in := range written {
+			e.view.setIn(in)
 		}
 		for _, c := range b.Ctl {
 			e.view.setCtl(c)

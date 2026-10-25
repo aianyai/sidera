@@ -207,18 +207,6 @@ func (v *view) resolve(c Caller) (*endpointState, error) {
 	return nil, refuse(ReasonUnauthenticated)
 }
 
-// afterWrite is a target record as the store left it on disk: one revision on,
-// a lost record having none. The store writes the next revision of every target
-// record it is given and does not hand the record back, so the view takes it
-// from here; TestViewAgreesWithTheDiskAfterAWrite holds this to what the store
-// does.
-func afterWrite(in store.InRecord) store.InRecord {
-	if !in.Lost {
-		in.Rev++
-	}
-	return in
-}
-
 // What counts as an unfinished delivery is what still has work behind it that the
 // node took in through an entry of new work (the capacity check bounds exactly
 // that). A target message is unfinished while the delivery rules say it still

@@ -230,7 +230,9 @@ func Open(ctx context.Context, d Deps, p Params) (*Engine, ScanReport, error) {
 
 // runRules runs the rules that have work, in the order of the store's
 // guarantee. After a rule has written, the plan is worked out again from a fresh
-// scan, because each rule reads what the one before it left.
+// scan, because each rule reads what the one before it left. There is no view
+// yet to keep in step (it is built from the last scan), so the records a write
+// returns are not used here.
 func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan, enabled func(string) bool, rep *ScanReport) error {
 	steps := []struct {
 		rule string

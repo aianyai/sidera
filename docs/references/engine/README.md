@@ -207,10 +207,13 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
 - **Recovery work of an unwired rule stops `Open`.** Opening over a damaged file
   would leave it out of the view as if it were not there, silently. The refusal
   names the rule and happens before any write of that pass.
-- **The view takes the record as the store wrote it.** The store writes the next
-  revision of a target record and does not hand it back; the engine adds the one
-  to its copy, and `TestViewAgreesWithTheDiskAfterAWrite` compares the view with a
-  fresh scan, so a change of the store's rule fails there.
+- **The view takes the records the store hands back.** A write of target records
+  returns them as written, the revision included, and the engine stores what comes
+  back instead of working the revision out: the rule has one home, the store.
+  `TestViewMatchesAFreshScanAfterWrites` compares the view with a fresh scan after
+  writes made in several chunks, so a view that kept the records it gave fails
+  there. The recovery rules keep no view (it is built from the last scan), so they
+  do not use what a write returns.
 - **An accepted control signal is never rejected.** Closing a control record of a
   closed endpoint is what the delivery rules say: `delivery_unknown`.
 
@@ -238,7 +241,7 @@ reproducible).
 | The pause of a clock set back is persisted at once | `engine.go` (`observe`, `AddClockState`) | `TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash`, `TestAFatalErrorWhilePersistingThePauseStopsTheEngine` |
 | Recovery | `recovery.go` | `recovery_test.go` |
 | Waiting | `waiters.go` | `waiters_test.go` (`TestShutdownEndsEveryWaitEvenWhenTheInboxIsFull`, `TestAPageThatIsReadyWinsOverTheShutdown`) |
-| The view agrees with the disk | `view.go` | `TestViewAgreesWithTheDiskAfterAWrite` |
+| The view takes what the store returned and agrees with the disk | `drain.go`, `view.go` | `TestViewMatchesAFreshScanAfterWrites` |
 | No method makes a session endpoint | — | `TestEngineHasNoMethodThatMakesASessionEndpoint` |
 
 Known gaps, each filled in with the feature it belongs to:

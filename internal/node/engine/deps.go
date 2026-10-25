@@ -15,9 +15,11 @@ import (
 
 // Store is what the engine asks of the durable records of state/: the scan that
 // builds its view, the writes of the transactions it runs, and the writes of the
-// recovery rules. *store.Store is the one implementation; the interface is the
-// seam that keeps the engine from reaching the store's other methods before a
-// engine needs them, and the list grows with what the engine does.
+// recovery rules. A write of target records returns them as written: a caller that
+// keeps a view stores what comes back and never works the revision out itself.
+// *store.Store is the one implementation; the interface is the seam that keeps
+// the engine from reaching the store's other methods before an engine needs them,
+// and the list grows with what the engine does.
 type Store interface {
 	Scan() (*store.Scan, error)
 	Available() (uint64, error)

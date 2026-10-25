@@ -394,11 +394,13 @@ func TestReopeningAnEndpointKeepsItsIdAndGivesItANewToken(t *testing.T) {
 	}
 }
 
-// The view is kept by what the engine knows it wrote, and the store bumps the
-// revision of every target record it writes without handing the record back. If
-// the store's rule changed, the view would carry a revision the disk does not and
-// the replay of a later head record would skip a follower it owes.
-func TestViewAgreesWithTheDiskAfterAWrite(t *testing.T) {
+// The view is kept in step with what the store hands back from each write, and
+// must show what a fresh scan of the disk shows: records by their encoding (the
+// revision included), the count of unfinished deliveries and the references to
+// bodies. The expectation is the scan, never the engine's own computation, and
+// the closing is run in chunks so that several writes have been applied to the
+// view by the time it is compared.
+func TestViewMatchesAFreshScanAfterWrites(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 2}))
 	e := r.start()
