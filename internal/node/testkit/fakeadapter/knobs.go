@@ -110,7 +110,8 @@ type Knobs struct {
 	mu       sync.Mutex
 	adapter  *adapter
 	rules    map[string]*outcomeRule
-	pauses   map[string]*pausePoint
+	pauses   map[string]*pausePoint // armed, nobody has stopped here yet
+	stopped  map[string]*pausePoint // a request is stopped here, waiting for Release
 	holds    []string
 	holdOpen chan struct{} // closed by ReleaseHeld, replaced afterwards
 	hang     bool
@@ -120,11 +121,14 @@ type Knobs struct {
 type pausePoint struct {
 	reached chan struct{} // closed when an adapter has stopped here
 	release chan struct{} // closed to let it go
+	once    sync.Once
 }
+
+func (p *pausePoint) let() { p.once.Do(func() { close(p.release) }) }
 
 // NewKnobs returns knobs that change nothing.
 func NewKnobs() *Knobs {
-	return &Knobs{rules: map[string]*outcomeRule{}, pauses: map[string]*pausePoint{}, holdOpen: make(chan struct{})}
+	return &Knobs{rules: map[string]*outcomeRule{}, pauses: map[string]*pausePoint{}, stopped: map[string]*pausePoint{}, holdOpen: make(chan struct{})}
 }
 
 func (k *Knobs) rule(request string) *outcomeRule {
@@ -235,8 +239,10 @@ const (
 
 var pauseNames = []string{PauseCreateAfterNative, PausePromptAfterForward, PauseInterruptAfterForward, PauseCloseAfterForward, PauseStartBeforeReply}
 
-// PauseAt arms the pause points: the next adapter to reach one stops there until
-// Release. A pause point stays armed until it has stopped one adapter.
+// PauseAt arms the pause points: the next request to reach one stops there until
+// Release. A pause point stops one request: it is spent once it has, and a
+// request that reaches it again, a retry on a restarted adapter for instance, goes
+// through unless the test arms it again.
 func (k *Knobs) PauseAt(points ...string) error {
 	for _, p := range points {
 		if !slices.Contains(pauseNames, p) {
@@ -258,6 +264,9 @@ func (k *Knobs) PauseAt(points ...string) error {
 func (k *Knobs) WaitPaused(ctx context.Context, point string) error {
 	k.mu.Lock()
 	pp := k.pauses[point]
+	if pp == nil {
+		pp = k.stopped[point]
+	}
 	k.mu.Unlock()
 	if pp == nil {
 		return fmt.Errorf("fakeadapter: %q is not armed", point)
@@ -270,14 +279,19 @@ func (k *Knobs) WaitPaused(ctx context.Context, point string) error {
 	}
 }
 
-// Release lets the adapter that stopped at the pause point go on, and disarms it.
+// Release lets the request that stopped at the pause point go on, and disarms the
+// point if nothing has stopped there yet.
 func (k *Knobs) Release(point string) {
 	k.mu.Lock()
-	pp := k.pauses[point]
+	pp := k.stopped[point]
+	if pp == nil {
+		pp = k.pauses[point]
+	}
+	delete(k.stopped, point)
 	delete(k.pauses, point)
 	k.mu.Unlock()
 	if pp != nil {
-		close(pp.release)
+		pp.let()
 	}
 }
 
@@ -285,6 +299,10 @@ func (k *Knobs) Release(point string) {
 func (k *Knobs) pause(ctx context.Context, a *adapter, point string) error {
 	k.mu.Lock()
 	pp := k.pauses[point]
+	if pp != nil {
+		delete(k.pauses, point)
+		k.stopped[point] = pp
+	}
 	k.mu.Unlock()
 	if pp == nil {
 		return nil
@@ -295,11 +313,7 @@ func (k *Knobs) pause(ctx context.Context, a *adapter, point string) error {
 	label := point
 	k.addHeld(label)
 	defer k.removeHeld(label)
-	select {
-	case <-pp.reached:
-	default:
-		close(pp.reached)
-	}
+	close(pp.reached)
 	select {
 	case <-pp.release:
 		return nil

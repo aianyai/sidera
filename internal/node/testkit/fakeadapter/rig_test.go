@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -113,18 +114,20 @@ func (r *pageRunner) RunAction(_ context.Context, _ fakeruntime.SessionInfo, a f
 // rig runs one fake adapter in process against a scripted daemon side: a peer
 // that answers what an adapter calls with valid results.
 type rig struct {
-	t       *testing.T
-	ctx     context.Context
-	cancel  context.CancelFunc
-	clock   *clocktest.Fake
-	mem     *ledger.Memory
-	knobs   *fakeadapter.Knobs
-	runtime *fakeruntime.Runtime
-	runner  *pageRunner
-	opts    fakeadapter.ManifestOptions
-	log     *frameLog
-	daemon  *peer.Peer
-	served  chan error
+	t         *testing.T
+	ctx       context.Context
+	cancel    context.CancelFunc
+	clock     *clocktest.Fake
+	mem       *ledger.Memory
+	knobs     *fakeadapter.Knobs
+	runtime   *fakeruntime.Runtime
+	runner    *pageRunner
+	opts      fakeadapter.ManifestOptions
+	log       *frameLog
+	daemon    *peer.Peer
+	served    chan error
+	ro        rigOptions
+	closeConn func()
 
 	mu       sync.Mutex
 	notified []notification
@@ -146,18 +149,18 @@ type rigOptions struct {
 
 func newRig(t *testing.T, ro rigOptions) *rig {
 	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
+	leakGuard(t)
 	r := &rig{
-		t: t, ctx: ctx, cancel: cancel,
+		t:        t,
 		clock:    clocktest.NewFake(testStart),
 		mem:      ledger.NewMemory(),
 		knobs:    fakeadapter.NewKnobs(),
 		runner:   &pageRunner{},
 		opts:     fakeadapter.DefaultManifestOptions(),
 		log:      &frameLog{},
-		served:   make(chan error, 1),
 		requests: map[string]int{},
 		changed:  make(chan struct{}, 1),
+		ro:       ro,
 	}
 	if ro.manifest != nil {
 		ro.manifest(&r.opts)
@@ -173,45 +176,71 @@ func newRig(t *testing.T, ro rigOptions) *rig {
 		t.Fatalf("fakeruntime.New: %v", err)
 	}
 	r.runtime = rt
+	r.connect()
+	t.Cleanup(func() {
+		r.disconnect()
+		_ = rt.Close()
+	})
+	return r
+}
 
+// connect starts an adapter on a new pair of pipes with a daemon side to talk to
+// it. The runtime, the knobs and the ledger are the rig's, so an adapter started
+// again after disconnect is the same adapter restarted.
+func (r *rig) connect() {
+	r.t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	r.ctx, r.cancel = ctx, cancel
+	r.served = make(chan error, 1)
 	adapterWriter, err := r.mem.Open("adapter/fake", 0, r.clock.Now)
 	if err != nil {
-		t.Fatal(err)
+		r.t.Fatal(err)
 	}
 	toAdapterR, toAdapterW := io.Pipe()
 	fromAdapterR, fromAdapterW := io.Pipe()
+	served := r.served
 	go func() {
-		r.served <- fakeadapter.Serve(ctx, toAdapterR, &tap{dst: fromAdapterW, log: r.log}, fakeadapter.Config{
+		served <- fakeadapter.Serve(ctx, toAdapterR, &tap{dst: fromAdapterW, log: r.log}, fakeadapter.Config{
 			InstanceID: "fake",
 			Now:        r.clock.Now,
 			Ledger:     adapterWriter,
-			Runtime:    rt,
+			Runtime:    r.runtime,
 			Manifest:   r.opts,
 			Knobs:      r.knobs,
-			Logger:     slog.New(slog.NewTextHandler(testWriter{t}, &slog.HandlerOptions{Level: slog.LevelDebug})),
+			Logger:     slog.New(slog.NewTextHandler(testWriter{r.t}, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		})
 	}()
-
 	d, err := peer.New(fromAdapterR, &tap{dst: toAdapterW, log: r.log, toAdapter: true}, peer.Config{})
 	if err != nil {
-		t.Fatal(err)
+		r.t.Fatal(err)
 	}
 	r.daemon = d
-	r.installDaemonHandlers(ro)
+	r.installDaemonHandlers(r.ro)
 	d.Start()
-	t.Cleanup(func() {
+	r.closeConn = func() {
 		r.cancel()
 		_ = d.Close()
 		_ = toAdapterW.Close()
 		_ = fromAdapterW.Close()
-		select {
-		case <-r.served:
-		case <-time.After(waitLimit):
-			t.Errorf("fakeadapter.Serve did not return after its context ended")
-		}
-		_ = rt.Close()
-	})
-	return r
+	}
+}
+
+// disconnect ends the connection and waits for Serve to return, returning what it
+// returned.
+func (r *rig) disconnect() error {
+	r.t.Helper()
+	if r.closeConn == nil {
+		return nil
+	}
+	r.closeConn()
+	r.closeConn = nil
+	select {
+	case err := <-r.served:
+		return err
+	case <-time.After(waitLimit):
+		r.t.Errorf("fakeadapter.Serve did not return after its context ended")
+		return nil
+	}
 }
 
 func (r *rig) bump() {
@@ -438,3 +467,83 @@ func (w testWriter) Write(p []byte) (int, error) {
 	w.t.Log(strings.TrimRight(string(p), "\n"))
 	return len(p), nil
 }
+
+// ledgerLog reads the ledger of the rig.
+func (r *rig) ledgerLog() *ledger.Log {
+	r.t.Helper()
+	l, err := r.mem.Log()
+	if err != nil {
+		r.t.Fatalf("the ledger is damaged: %v", err)
+	}
+	return l
+}
+
+// codeOf returns the code of the error response a call failed with, or 0.
+func codeOf(err error) int {
+	var pe *peer.Error
+	if errors.As(err, &pe) {
+		return pe.Code
+	}
+	return 0
+}
+
+// initializeAt runs the handshake with the instance lock at path.
+func (r *rig) initializeAt(path string) error {
+	r.t.Helper()
+	_, err := r.call(adapterproto.MethodInitialize, adapterproto.InitializeParams{
+		Protocol:     adapterproto.SupportedRange(),
+		Daemon:       adapterproto.DaemonInfo{Version: "0.1.0"},
+		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: path},
+		Capabilities: adapterproto.DaemonCapabilities{},
+	})
+	return err
+}
+
+// callDecoded calls a method and decodes the result strictly into a fresh value.
+func callDecoded[T any, P interface {
+	*T
+	adapterproto.Message
+}](r *rig, method string, params any) (T, error) {
+	r.t.Helper()
+	var out T
+	raw, err := r.call(method, params)
+	if err != nil {
+		return out, err
+	}
+	if err := adapterproto.Decode(raw, P(&out)); err != nil {
+		r.t.Fatalf("%s result: %v", method, err)
+	}
+	return out, nil
+}
+
+func (r *rig) prompt(endpoint string, attempt int, text string) (adapterproto.PromptDeliverResult, error) {
+	r.t.Helper()
+	return callDecoded[adapterproto.PromptDeliverResult](r, adapterproto.MethodPromptDeliver,
+		adapterproto.PromptDeliverParams{Endpoint: adapterproto.EndpointRef(endpoint), Attempt: attemptID(attempt), Text: text})
+}
+
+func (r *rig) reconcile(endpoint string, attempt int) (adapterproto.ReconcileResult, error) {
+	r.t.Helper()
+	return callDecoded[adapterproto.ReconcileResult](r, adapterproto.MethodPromptReconcile,
+		adapterproto.ReconcileParams{Endpoint: adapterproto.EndpointRef(endpoint), Attempt: attemptID(attempt)})
+}
+
+func (r *rig) interrupt(endpoint string) (adapterproto.InterruptResult, error) {
+	r.t.Helper()
+	return callDecoded[adapterproto.InterruptResult](r, adapterproto.MethodSessionInterrupt, adapterproto.InterruptParams{Endpoint: adapterproto.EndpointRef(endpoint)})
+}
+
+func (r *rig) closeSession(endpoint string) (adapterproto.CloseResult, error) {
+	r.t.Helper()
+	return callDecoded[adapterproto.CloseResult](r, adapterproto.MethodSessionClose, adapterproto.CloseParams{Endpoint: adapterproto.EndpointRef(endpoint)})
+}
+
+// ready initializes the adapter and creates session sess-1 through attempt 1,
+// returning its native reference.
+func (r *rig) ready() string {
+	r.t.Helper()
+	r.initialize()
+	return string(r.createSession(1, "sess-1").NativeRef)
+}
+
+func newPipe() (*io.PipeReader, *io.PipeWriter) { return io.Pipe() }

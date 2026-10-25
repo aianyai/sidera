@@ -458,6 +458,9 @@ func (s *session) Close(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if !s.Alive() {
+		return nil // already closed, or killed: there is nothing left to release
+	}
 	if err := s.endTurn(FinalInterrupted, true); err != nil && !errors.Is(err, ErrNoTurn) {
 		return err
 	}

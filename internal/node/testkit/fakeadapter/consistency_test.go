@@ -460,6 +460,7 @@ type rawLine struct {
 
 func startRaw(t *testing.T) *rawAdapter {
 	t.Helper()
+	leakGuard(t)
 	clk := clocktest.NewFake(testStart)
 	mem := ledger.NewMemory()
 	rt, err := fakeruntime.New(fakeruntime.Config{Now: clk.Now, Ledgers: mem, Dir: t.TempDir(), Seed: 3})
