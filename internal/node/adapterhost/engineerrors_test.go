@@ -46,6 +46,8 @@ func TestAnErrorOfTheEngineEndsTheConnection(t *testing.T) {
 				t.Fatalf("reported %v, want %v", got[0], tc.want)
 			}
 			r.waitDisconnected("chat")
+			// The backoff timer exists once the host is idle again.
+			r.settle()
 			r.advance(testParams().RestartBackoffMin)
 			r.waitLaunches(2)
 		})

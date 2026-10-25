@@ -340,7 +340,10 @@ func TestCallsToTheAdapterAreForwardedValidatedAndRefusedWhenItIsNotInService(t 
 		if after := r.tl.written(); !slices.Equal(before, after) {
 			t.Errorf("a call after the connection ended wrote %v", after[len(before):])
 		}
-		// A new connection, then Shutdown.
+		// A new connection, then Shutdown. The backoff timer exists once the host is
+		// idle again.
+		r.waitEvents("gone", 1)
+		r.settle()
 		r.advance(time.Second)
 		r.waitLaunches(2)
 		r.ready("chat", 2)
@@ -461,6 +464,58 @@ func TestCountsFollowNotificationsRequestsCallsAndTheTimersOfTheHost(t *testing.
 		if c := r.host.Counts("chat"); len(c.Calls) != 0 {
 			t.Fatalf("Calls = %v while only a ping is out, want none", c.Calls)
 		}
+	})
+
+	// A timer of the host that is due and that the host has not taken keeps it
+	// working even while it waits for the adapter on something else: here the
+	// answer to adapter.probe, with StableAfter coming due in the meantime.
+	t.Run("Working is true while a timer is due that the host cannot take yet", func(t *testing.T) {
+		params := testParams()
+		params.StableAfter = 20 * time.Second
+		params.HandshakeTimeout = 2 * time.Hour // the probe is not given up while the clock moves
+		r := newRig(t, rigOptions{params: params})
+		hold := make(chan struct{})
+		var a *scripted
+		r.lau.launch = func(n int, inst adapterhost.Instance) (adapterhost.Process, error) {
+			pp, ad := r.scriptedProcess(func(ad *scripted) {
+				ad.handlers[adapterproto.MethodAdapterProbe] = func(ctx context.Context, _ json.RawMessage) (any, error) {
+					select {
+					case <-hold:
+					case <-ctx.Done():
+					}
+					return adapterproto.ProbeResult{Auth: adapterproto.AuthValid, Dependencies: []adapterproto.Dependency{}, Presets: []adapterproto.PresetStatus{}, ToolProbes: []adapterproto.ToolProbeResult{}}, nil
+				}
+			}, false)
+			a = ad
+			return pp, nil
+		}
+		r.start()
+		eventually(t, "adapter.probe to reach the adapter", func() bool { return a != nil && a.count(adapterproto.MethodAdapterProbe) == 1 })
+		// The host is parked waiting for the probe, with nothing due.
+		eventually(t, "the host to be idle", func() bool { return !r.host.Counts("chat").Working })
+		r.clk.Advance(params.StableAfter)
+		for range 200 {
+			if !r.host.Counts("chat").Working {
+				t.Fatal("Working is false while a timer is due and the host has not acted on it")
+			}
+		}
+		close(hold)
+		r.settle()
+	})
+
+	// While the host waits for the engine it is working, though it is parked.
+	t.Run("Working is true while the host waits for the engine", func(t *testing.T) {
+		r := newRig(t, rigOptions{})
+		r.eng.admitGate = make(chan struct{})
+		go func() { _ = r.host.Start(timeoutCtx(t), r.env(false)) }()
+		r.waitEvents("admitted", 1)
+		for range 200 {
+			if !r.host.Counts("chat").Working {
+				t.Fatal("Working is false while the engine is taking the adapter on")
+			}
+		}
+		close(r.eng.admitGate)
+		r.ready("chat", 1)
 	})
 
 	// After the clock moved, a caller that sees Working false knows the host acted on

@@ -236,7 +236,7 @@ func TestAnInstanceLockedAnswerAdmitsNobodyAndTheNextPassWaitsForTheBackoff(t *t
 		t.Fatalf("the engine was told %v, want [start_failed]", got)
 	}
 	// It is logged as what it is.
-	if !r.records.contains("holds the instance lock") {
+	if !r.records.contains("nobody is admitted") {
 		t.Fatalf("the refusal was not logged as another process holding the lock: %v", r.records.msgs)
 	}
 	p := testParams()

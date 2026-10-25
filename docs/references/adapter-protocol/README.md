@@ -13,7 +13,9 @@ depends on the standard library only and is imported by the daemon and by
 third-party adapters alike. The frames are handled by `sdk/go/peer`; the
 messages, enums, application error codes and manifest are defined in the packages
 `adapterproto` and `manifest` and, for other languages, by the JSON Schema under
-`protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`.
+`protocol/adapter/v1`. The daemon-side decisions are in `internal/adapterreg`, and the way the daemon
+supervises adapters and carries this protocol between them and the engine is in
+[adapter-host](../adapter-host/README.md).
 This document has one part per layer: the peer layer, then the messages and
 methods, the control signals and the native process identity. How each method relates to the Agent Client Protocol is in
 [acp-mapping.md](acp-mapping.md).

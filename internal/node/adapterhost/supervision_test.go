@@ -246,8 +246,7 @@ func TestEnsureRunningAndStopOfAnInstance(t *testing.T) {
 		}
 		r.host.EnsureRunning("chat")
 		r.host.EnsureRunning("chat")
-		r.waitConnected("chat")
-		r.settle()
+		r.ready("chat", 1)
 		if n := r.lau.launches(); n != 1 {
 			t.Fatalf("%d launches after two EnsureRunning, want 1", n)
 		}
@@ -256,9 +255,7 @@ func TestEnsureRunningAndStopOfAnInstance(t *testing.T) {
 		r.host.Stop("chat")
 		r.waitDisconnected("chat")
 		eventually(t, "the supervision to end", func() bool { return zeroCounts(r.host.Counts("chat")) })
-		if got := r.tl.written(); !slices.Contains(got, adapterproto.MethodShutdown) {
-			t.Fatalf("Stop did not send shutdown: %v", got)
-		}
+		eventually(t, "Stop to send shutdown", func() bool { return slices.Contains(r.tl.written(), adapterproto.MethodShutdown) })
 		if got := r.eng.of("gone"); len(got) != 0 {
 			t.Fatalf("Stop reported %d times to the engine", len(got))
 		}
@@ -470,9 +467,10 @@ func TestAbortKillsAtOnceAndSendsNoShutdown(t *testing.T) {
 		if err := k.WaitPaused(timeoutCtx(t), fakeadapter.PauseStartBeforeReply); err != nil {
 			t.Fatal(err)
 		}
+		before := r.tl.written()
 		r.host.Abort()
-		if got := r.tl.written(); countOf(got, adapterproto.MethodShutdown) != 0 {
-			t.Fatalf("Abort sent shutdown: %v", got)
+		if after := r.tl.written(); !slices.Equal(before, after) {
+			t.Fatalf("Abort wrote %v to an adapter whose adapter.start was still out", after[len(before):])
 		}
 		if k := r.lau.proc(0).(*tapProcess).killed.Load(); k < 1 {
 			t.Fatalf("the process was not killed")

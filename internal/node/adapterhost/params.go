@@ -1,6 +1,7 @@
 package adapterhost
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -63,4 +64,57 @@ func DefaultParams() Params {
 		StartWait:          30 * time.Second,
 		ShutdownWait:       5 * time.Second,
 	}
+}
+
+// withDefaults returns p with every zero field replaced by its default.
+func (p Params) withDefaults() Params {
+	d := DefaultParams()
+	if p.NotificationBuffer == 0 {
+		p.NotificationBuffer = d.NotificationBuffer
+	}
+	for _, f := range []struct {
+		v   *time.Duration
+		def time.Duration
+	}{
+		{&p.PingInterval, d.PingInterval},
+		{&p.PingTimeout, d.PingTimeout},
+		{&p.RestartBackoffMin, d.RestartBackoffMin},
+		{&p.RestartBackoffMax, d.RestartBackoffMax},
+		{&p.StableAfter, d.StableAfter},
+		{&p.HandshakeTimeout, d.HandshakeTimeout},
+		{&p.StartWait, d.StartWait},
+		{&p.ShutdownWait, d.ShutdownWait},
+	} {
+		if *f.v == 0 {
+			*f.v = f.def
+		}
+	}
+	// A cap below the first wait would make the wait shrink after a failure.
+	p.RestartBackoffMax = max(p.RestartBackoffMax, p.RestartBackoffMin)
+	return p
+}
+
+// validate refuses a negative field: zero means the default, and a negative
+// number is a mistake that would otherwise become an instant timer or an empty
+// buffer. The peer's own limits are checked by the peer when a connection is made.
+func (p Params) validate() error {
+	for _, f := range []struct {
+		name string
+		neg  bool
+	}{
+		{"NotificationBuffer", p.NotificationBuffer < 0},
+		{"PingInterval", p.PingInterval < 0},
+		{"PingTimeout", p.PingTimeout < 0},
+		{"RestartBackoffMin", p.RestartBackoffMin < 0},
+		{"RestartBackoffMax", p.RestartBackoffMax < 0},
+		{"StableAfter", p.StableAfter < 0},
+		{"HandshakeTimeout", p.HandshakeTimeout < 0},
+		{"StartWait", p.StartWait < 0},
+		{"ShutdownWait", p.ShutdownWait < 0},
+	} {
+		if f.neg {
+			return fmt.Errorf("adapterhost: %s is negative", f.name)
+		}
+	}
+	return nil
 }

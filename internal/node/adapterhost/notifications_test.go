@@ -1,6 +1,7 @@
 package adapterhost_test
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"testing"
@@ -128,6 +129,22 @@ func TestAnInvalidOrUndeclaredNotificationIsDroppedAndTheOthersAreDelivered(t *t
 	}
 }
 
+// sendPaced sends n turn.started notifications, the first buffer+2 of them one at a
+// time: the engine holds one, the buffer fills, and the host's handler holds one,
+// each counted as buffered. What follows is the burst the peer's queue must hold.
+// Without the pacing a burst could fill the peer's queue before the host's handler
+// had taken anything out of it, which says nothing about the bound.
+func sendPaced(t *testing.T, r *rig, a *scripted, n, buffer int) {
+	t.Helper()
+	for i := range n {
+		// A send that finds the connection closed is the end the caller may be after.
+		_ = a.p.Notify(context.Background(), adapterproto.MethodTurnStarted, turnStarted("s-1", i))
+		if i < buffer+2 {
+			eventually(t, "the host to take the notification", func() bool { return r.host.Counts("chat").Buffered == i+1 })
+		}
+	}
+}
+
 // A stalled engine loses no notification while the stall is shorter than the buffer
 // and the queue of the peer together hold, and beyond that the connection ends and
 // the instance starts again.
@@ -154,12 +171,7 @@ func TestAStalledEngineLosesNoNotificationAndBeyondItsBoundTheConnectionEnds(t *
 	t.Run("just under the bound: all delivered in order, on the same connection", func(t *testing.T) {
 		r, a := setup(t)
 		const n = buffer + queue
-		for i := range n {
-			a.notify(adapterproto.MethodTurnStarted, turnStarted("s-1", i))
-		}
-		// The engine holds one, the buffer fills; the rest wait in the host's handler
-		// and in the peer's queue.
-		eventually(t, "the buffer to fill", func() bool { return r.host.Counts("chat").Buffered >= buffer+1 })
+		sendPaced(t, r, a, n, buffer)
 		close(r.eng.notifyGate)
 		r.waitEvents("notified", n)
 		var want []string
@@ -184,9 +196,13 @@ func TestAStalledEngineLosesNoNotificationAndBeyondItsBoundTheConnectionEnds(t *
 	t.Run("beyond the bound: the connection ends, what is buffered is delivered first, and a new pass follows", func(t *testing.T) {
 		r, a := setup(t)
 		const n = buffer + queue + 6
-		for i := range n {
-			a.notify(adapterproto.MethodTurnStarted, turnStarted("s-1", i))
+		var heldAtReport = -1
+		r.eng.onEvent = func(kind string) {
+			if kind == "gone" {
+				heldAtReport = r.host.Counts("chat").Buffered
+			}
 		}
+		sendPaced(t, r, a, n, buffer)
 		r.waitDisconnected("chat")
 		// The end is reported after the forwarder has delivered what was buffered,
 		// and the forwarder waits for the engine.
@@ -197,6 +213,9 @@ func TestAStalledEngineLosesNoNotificationAndBeyondItsBoundTheConnectionEnds(t *
 		r.waitEvents("gone", 1)
 		if got := r.goneCauses("chat"); !slices.Equal(got, []adapterhost.GoneCause{adapterhost.GoneConnectionEnded}) {
 			t.Fatalf("the engine was told %v, want [connection_ended]", got)
+		}
+		if heldAtReport != 0 {
+			t.Fatalf("%d notifications were still held for the engine when the end was reported", heldAtReport)
 		}
 		// Everything before the report is a prefix of what was sent, in order, and
 		// at least what the engine and the buffer held.
@@ -217,7 +236,8 @@ func TestAStalledEngineLosesNoNotificationAndBeyondItsBoundTheConnectionEnds(t *
 				t.Fatalf("delivered[%d] = %q, want %q: not a prefix in order", i, got, want)
 			}
 		}
-		// A new pass after the backoff.
+		// A new pass after the backoff, whose timer exists once the host is idle.
+		r.settle()
 		r.advance(params.RestartBackoffMin)
 		r.waitLaunches(2)
 		r.ready("chat", 2)
