@@ -95,9 +95,9 @@ A scenario is a `scenario.Script`: Go code that sets up direct endpoints, runs s
 quiesces after every step. A fixture implements `scenario.Env`; the engine-layer
 fixture is [`harness`](harness/README.md), and the agent it hands out is
 [`engineagent`](fakeagent/engineagent/README.md), wrapped so that every call writes
-the ledger entries. What a layer cannot provide yet (an adapter host, a runtime
-that sessions can use) is an error that is `scenario.ErrNotAvailable`, never a
-stand-in.
+the ledger entries. What a layer cannot provide (a runtime that sessions can use, an
+adapter host in a fixture made without one) is an error that is
+`scenario.ErrNotAvailable`, never a stand-in.
 
 ## Identifiers of crash points
 
@@ -132,4 +132,6 @@ process (its output and input as `Stream`, a `PID` of 0, `Kill`, `Wait`), which 
 `Kill`, which ends its context and closes both ends; the fake runtime is a separate
 object and survives it, as a native process survives its adapter. The adapter host
 asks for such a process through its launcher interface; the launcher the fixture
-gives it calls `StartPipe` and returns the `PipeProcess`.
+gives it (`harness.AdapterLauncher`, which the daemon's tests use too) calls
+`StartPipe`, keeps every launch, and returns a process that notes what the daemon
+writes to it and that a test can tell to survive `Kill`, as a hung process does.
