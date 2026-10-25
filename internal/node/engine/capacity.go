@@ -77,9 +77,11 @@ type CapacityVerdict struct {
 //
 // The clock comes first because nothing that depends on a deadline can be
 // accepted at all, then the queue, then the disk. A bound that is not set (the
-// zero value) refuses: the settings of the node are validated to hold both, so a
-// zero here is a defect, and a node that admits work without a bound fills its
-// disk. It panics for new work that adds no delivery.
+// zero value) refuses: with no room in the queue every delivery is over it, and
+// a reserve that is not set is refused by name, because the settings of the node
+// are validated to hold both, so a zero here is a defect, and a node that admits
+// work without a bound fills its disk. It panics for new work that adds no
+// delivery.
 func CheckCapacity(in CapacityInput) CapacityVerdict {
 	if in.Recipients < 1 {
 		panic("engine: the capacity check of work that adds no delivery")
@@ -87,7 +89,7 @@ func CheckCapacity(in CapacityInput) CapacityVerdict {
 	switch {
 	case in.RollbackPaused:
 		return CapacityVerdict{Reason: CapacityClockRollback}
-	case in.NodeQueueLimit < 1 || in.Unfinished+in.Recipients > in.NodeQueueLimit:
+	case in.Unfinished+in.Recipients > in.NodeQueueLimit:
 		return CapacityVerdict{Reason: CapacityNodeQueueFull}
 	case in.DiskReserve < 1 || in.Available < uint64(in.DiskReserve):
 		return CapacityVerdict{Reason: CapacityStorageFull}

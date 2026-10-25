@@ -116,8 +116,6 @@ func (e *Engine) setPhase(p Phase) { e.phase.Store(uint32(p)) }
 // Phase is where the engine is. It may be called from any goroutine.
 func (e *Engine) Phase() Phase { return Phase(e.phase.Load()) }
 
-func (e *Engine) logger() *slog.Logger { return e.log }
-
 // newEngine builds an engine over validated dependencies, before its scan.
 func newEngine(d Deps, p Params) (*Engine, error) {
 	switch {
