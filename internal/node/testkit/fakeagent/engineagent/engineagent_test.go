@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -179,6 +180,13 @@ func TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError(t *testing.T) {
 			if got := fakeagent.CodeOf(err); got != "method_unknown" {
 				t.Errorf("code %q, want method_unknown", got)
 			}
+			// The ledger records the category and code, which a real server's answer
+			// to an unknown method has too; what tells the two apart is the sentinel,
+			// so that a test written before the method exists cannot pass on an
+			// answer the server never gave.
+			if !errors.Is(err, scenario.ErrNotAvailable) {
+				t.Errorf("%s: %v is not scenario.ErrNotAvailable, so it reads as the server's own answer", name, err)
+			}
 		})
 	}
 }
@@ -188,6 +196,9 @@ func TestOtherErrorsAreNotTakenForNotSupported(t *testing.T) {
 		nil, errors.New("x"),
 		&fakeagent.Error{Category: fakeagent.CategoryNotFound, Code: "message_unknown"},
 		&fakeagent.Error{Category: fakeagent.CategoryInternal, Code: "method_unknown"},
+		// The answer of a server that does not know the method is not a method the
+		// engine layer lacks.
+		&fakeagent.Error{Category: fakeagent.CategoryNotFound, Code: "method_unknown"},
 	} {
 		if engineagent.IsNotSupported(err) {
 			t.Errorf("%v is taken for not supported", err)
