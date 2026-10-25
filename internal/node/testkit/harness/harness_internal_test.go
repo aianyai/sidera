@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
+	"github.com/aianyai/sidera/internal/node/txn"
 )
 
 // recorder is a testing.TB that records what the checks under test report
@@ -132,5 +137,46 @@ func TestQuiesceDoesNotReturnOnAConditionThatStoppedHoldingWhileTheEngineSettled
 	}
 	if got := checks.Load(); got < 3 {
 		t.Errorf("the condition was asked %d times: the answer of the second look was not used", got)
+	}
+}
+
+// holdFirst holds the first step of one transaction until it is released.
+type holdFirst struct {
+	tx      string
+	reached chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (o *holdFirst) Reached(p fsx.Point, _ txn.Kind) {
+	if p.Tag.Tx != o.tx {
+		return
+	}
+	o.once.Do(func() {
+		close(o.reached)
+		<-o.release
+	})
+}
+
+// A registration that a crash interrupted has no answer: the name is not taken
+// from a process that was abandoned, since nothing says the endpoint exists in
+// the one that runs now.
+func TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName(t *testing.T) {
+	o := &holdFirst{tx: "direct-register", reached: make(chan struct{}), release: make(chan struct{})}
+	h := New(t, Options{Observer: o})
+	done := make(chan error, 1)
+	go func() { _, err := h.Direct("a"); done <- err }()
+	<-o.reached
+	h.Crash(ProcessCrash)
+	close(o.release)
+	err := <-done
+	if got := fakeagent.CategoryOf(engineagent.MapError(err)); got != fakeagent.CategoryOutcomeUnknown {
+		t.Errorf("Direct returned %v, which an agent would see as %q, want outcome_unknown", err, got)
+	}
+	h.mu.Lock()
+	_, recorded := h.names["a"]
+	h.mu.Unlock()
+	if recorded {
+		t.Error("the name of a registration that a crash interrupted was recorded")
 	}
 }

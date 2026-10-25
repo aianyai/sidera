@@ -277,12 +277,15 @@ func TestACleanRestartKeepsTheEndpointsAndTheClock(t *testing.T) {
 }
 
 // snapshot is every file of the disk with its content, as a power loss left it.
-func snapshot(t *testing.T, h *harness.H) map[string]string {
+func snapshot(t *testing.T, h *harness.H) map[string]string { return snapshotOf(t, h.Disk()) }
+
+// snapshotOf is snapshot of any disk, such as one an abandoned process had.
+func snapshotOf(t *testing.T, disk *fsxtest.Mem) map[string]string {
 	t.Helper()
 	got := map[string]string{}
 	var walk func(d string)
 	walk = func(d string) {
-		entries, err := h.Disk().ReadDir(d)
+		entries, err := disk.ReadDir(d)
 		if err != nil {
 			return
 		}
@@ -295,7 +298,7 @@ func snapshot(t *testing.T, h *harness.H) map[string]string {
 				walk(p)
 				continue
 			}
-			b, err := h.Disk().ReadFile(p)
+			b, err := disk.ReadFile(p)
 			if err != nil {
 				t.Fatalf("ReadFile(%q): %v", p, err)
 			}
@@ -544,4 +547,46 @@ func keysOf(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A process that crashed is gone: a call it was still working on is answered by
+// no one, so the caller learns nothing of its outcome, and whatever the old
+// process would have done after the crash reaches neither the disk the next
+// process reads nor the one it left.
+func TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess(t *testing.T) {
+	g := newGate("endpoint-update", 0)
+	h := harness.New(t, harness.Options{Observer: g})
+	h.MustDirect("a")
+	abandoned := h.Disk()
+	g.arm()
+	done := make(chan error, 1)
+	go func() { done <- h.Agent("a").Declare(bg(), fakeagent.DeclareInput{Paused: ptrBool(true)}) }()
+	<-g.reached // the loop is inside the declaration, before its first write
+	left := snapshotOf(t, abandoned)
+
+	h.Crash(harness.ProcessCrash)
+	g.open() // the old process goes on with the command it was in
+	err := <-done
+
+	if got := fakeagent.CategoryOf(err); got != fakeagent.CategoryOutcomeUnknown {
+		t.Errorf("the call that was in flight at the crash returned %v (category %q), want outcome_unknown", err, got)
+	}
+	eps, listErr := h.Engine().Endpoints(bg())
+	if listErr != nil || len(eps) != 1 {
+		t.Fatalf("the new process lists %v, %v", eps, listErr)
+	}
+	if eps[0].Declaration.Paused {
+		t.Error("the declaration the crash interrupted is in the new process")
+	}
+	if got := snapshotOf(t, abandoned); !reflect.DeepEqual(got, left) {
+		t.Error("the abandoned process wrote to the disk it left after the crash")
+	}
+	log, ledgerErr := h.Ledger()
+	if ledgerErr != nil {
+		t.Fatal(ledgerErr)
+	}
+	results := log.Kind(ledger.KindClientResult)
+	if len(results) != 1 || results[0].Attrs.Category != string(fakeagent.CategoryOutcomeUnknown) {
+		t.Errorf("the ledger records the result %+v, want one outcome_unknown", results)
+	}
 }
