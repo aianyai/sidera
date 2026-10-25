@@ -30,5 +30,6 @@ The commit that lands a subsystem's first code adds its directory and a row to t
 | [testkit](testkit/README.md) | The test tooling: the stand-ins for an adapter and a native runtime that use the adapter protocol as a third party would, the ledger that is the oracle of integration tests, the control channel to fake processes, the shared test clock, the fake agent interface and the core of the crash-point walk |
 | [local-ipc](local-ipc/README.md) | How the Agent and management interfaces are reached on one machine: Unix sockets and Windows named pipes, directory and socket permissions, peer checks on both sides, socket path limits, stale socket removal |
 | [engine](engine/README.md) | The single writer of the node's runtime state: the loop and its commands, phases and submitters, failures and back pressure, the schedule, the registration and closing of endpoints with the cap and the tokens, the capacity check, and the two recovery entries |
+| [transport](transport/README.md) | The seam between the engine and whatever carries an envelope to another node: the two sides, receipts and pulls, the two ways to get no answer, the origin of a request and why only the loopback can make a local one, the loopback and the fault knobs that tests use on it |
 
 Language: everything in this directory is English.

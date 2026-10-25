@@ -131,6 +131,7 @@ type rig struct {
 
 func newRig(t testing.TB) *rig {
 	t.Helper()
+	guardLeaks(t)
 	r := &rig{self: nodeOf(t, 1), other: nodeOf(t, 2), clk: clocktest.NewFake(t0), target: newTarget()}
 	r.knobs = transport.NewKnobs(r.clk)
 	r.knobs.Observe(func(h transport.Hit) {
