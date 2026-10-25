@@ -114,6 +114,7 @@ observer:
 | One row per knob, asserting effect and hit | `TestKnobs` in `knobs_test.go` |
 | Knobs are per `Knobs` value, nil means none, safe while calls run, named | `TestKnobsAreNotSharedBetweenLoopbacks`, `TestNilKnobsMeansNoFaults`, `TestKnobsAreSafeToDriveWhileCallsRun`, `TestKnobNamesAreDistinct` |
 | The local origin: the loopback makes it, a remote transport cannot, and the source scan | `TestLoopbackMakesTheLocalOrigin`, `TestRemoteOriginIsNeverLocal`, `TestNoCallerCanClaimTheLocalOrigin` in `origin_test.go` |
+| The loopback's own reading of the bytes it carries, with the replay and the hold armed | `FuzzSendWithKnobsArmed` in `fuzz_test.go` |
 | No call left running after a test | `leak_test.go` |
 
 ## Known gaps

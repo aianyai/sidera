@@ -75,5 +75,6 @@ no clock but the one its knobs were given.
 `knobs_test.go` has `TestKnobs`, one row per knob and one row for none, each
 asserting its effect and, through the rig, the hit counts of every knob;
 `origin_test.go` has the rule on the local origin, including the scan of the
-package source; `leak_test.go` the check that no call is left running after a
-test.
+package source; `fuzz_test.go` sends arbitrary bytes through a loopback with the
+replay and the hold armed, the one place the package reads untrusted input;
+`leak_test.go` the check that no call is left running after a test.
