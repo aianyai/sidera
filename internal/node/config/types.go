@@ -36,8 +36,11 @@ func (o Operation) Key() admin.RequestKey { return admin.RequestKey{Person: o.Pe
 // Request is what a versioned change takes from the management layer: which
 // request it is, and the version it was based on.
 type Request struct {
-	ID          admin.OperationID
-	Person      ident.PersonID
+	// Key is the key the request's results are filed under, as admin.KeyFor
+	// makes it from the actor and the operation id. The change records its
+	// person and id in last_operation, so the replay lookup finds them under the
+	// same key.
+	Key         admin.RequestKey
 	Fingerprint admin.Fingerprint
 	// Expected is the version of the collection the sender last saw.
 	Expected admin.Version

@@ -57,7 +57,7 @@ func operationOf[T any](req Request, build ResultFunc[T], after T) (*Operation, 
 	if build == nil {
 		return nil, errors.New("config: a versioned change needs a ResultFunc")
 	}
-	if req.ID.IsZero() {
+	if req.Key.ID.IsZero() {
 		return nil, &ChangeError{Reason: ChangeInvalid, Field: "id", Err: errors.New("a versioned change needs an operation id")}
 	}
 	raw, err := build(after)
@@ -68,7 +68,7 @@ func operationOf[T any](req Request, build ResultFunc[T], after T) (*Operation, 
 	if err != nil {
 		return nil, fmt.Errorf("config: the result of a change %w", err)
 	}
-	return &Operation{ID: req.ID, Person: req.Person, Fingerprint: req.Fingerprint, Result: result}, nil
+	return &Operation{ID: req.Key.ID, Person: req.Key.Person, Fingerprint: req.Fingerprint, Result: result}, nil
 }
 
 // replaceFile is the transaction of a change of one file.

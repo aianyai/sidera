@@ -503,7 +503,7 @@ func request(n byte, expected admin.Version) config.Request {
 	id[0], id[15] = n, n
 	var fp admin.Fingerprint
 	fp[0], fp[31] = n, n
-	return config.Request{ID: id, Fingerprint: fp, Expected: expected}
+	return config.Request{Key: admin.KeyFor(admin.LocalOwner(), id), Fingerprint: fp, Expected: expected}
 }
 
 // result returns a ResultFunc that records the state it was handed.

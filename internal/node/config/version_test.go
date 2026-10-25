@@ -102,14 +102,14 @@ func TestVersionedChangeRecordsTheOperation(t *testing.T) {
 			if version != ch.current+1 {
 				t.Errorf("version = %d, want %d", version, ch.current+1)
 			}
-			if op == nil || op.ID != req.ID || op.Fingerprint != req.Fingerprint || !op.Person.IsZero() || len(op.Result) == 0 {
+			if op == nil || op.ID != req.Key.ID || op.Fingerprint != req.Fingerprint || !op.Person.IsZero() || len(op.Result) == 0 {
 				t.Fatalf("last operation = %+v, want the request's", op)
 			}
 			var res map[string]string
 			if err := json.Unmarshal(op.Result, &res); err != nil || len(res["changed"]) == 0 {
 				t.Errorf("result = %s, want the one the result function built", op.Result)
 			}
-			if op.Key() != (admin.RequestKey{ID: req.ID}) {
+			if op.Key() != (req.Key) {
 				t.Errorf("key = %+v", op.Key())
 			}
 
@@ -129,7 +129,7 @@ func TestVersionedChangeRecordsTheOperation(t *testing.T) {
 			if err := json.Unmarshal(data, &doc); err != nil {
 				t.Fatal(err)
 			}
-			if doc.Version != uint64(ch.current+1) || doc.LastOperation.ID != hexOfID(req.ID) {
+			if doc.Version != uint64(ch.current+1) || doc.LastOperation.ID != hexOfID(req.Key.ID) {
 				t.Errorf("the file holds version %d and operation %q", doc.Version, doc.LastOperation.ID)
 			}
 			again := rg.load()
@@ -224,4 +224,25 @@ func TestReadsDuringChangesAreSafe(t *testing.T) {
 	}
 	close(stop)
 	<-done
+}
+
+// The operation a change records is filed under the key of the request, so the
+// replay lookup of the same remote person finds it and nobody else's lookup
+// does.
+func TestChangeRecordsTheKeyOfTheRequest(t *testing.T) {
+	person, err := ident.ParsePersonID(personText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, c := loaded(t)
+	req := request(7, 3)
+	req.Key = admin.KeyFor(admin.RemotePerson(person, admin.DeviceCert{}), req.Key.ID)
+	var seen []config.Node
+	n, err := c.SetNodeSettings(req, []byte(`{"reply_permission": false}`), result(&seen, `{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := n.LastOperation.Key(); got != req.Key || got.Person != person {
+		t.Errorf("recorded key = %+v, want %+v", got, req.Key)
+	}
 }
