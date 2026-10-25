@@ -168,8 +168,8 @@ HTTP/1.1 over `manage/manage.sock` (a named pipe on Windows), `POST
    "params"?: {...}}`; a read is `{"params"?: {...}}`.
 4. `admin.ValidateRequest`: a request that changes state carries an identifier
    (`missing_operation_id`), a change of a versioned setting carries its expected
-   version (`missing_expected_version`), and any other request carries none
-   (`unexpected_version`).
+   version, zero being none (`missing_expected_version`), and any other request
+   carries no such member at all, whatever its value (`unexpected_version`).
 5. A read is answered from the engine. A request that changes state is one
    `engine.Execute` command: the key `admin.KeyFor(owner, id)`, the fingerprint, the
    expected version, the name of the method and the operation. The replay check, the
@@ -193,6 +193,17 @@ The methods the daemon has:
 | `endpoints.list` | `OpRead`; params `{"instance"?}` | `{"endpoints":[{address, kind, instance, state, queued, draining}]}`, never a token |
 | `endpoints.close` | `OpManageEndpointSession`; params `{"endpoint": "<node>/<endpoint>"}` | `{"endpoint","outcome"}`, outcome `closed`, `closing` or `already_closed`; a runtime endpoint is refused `endpoint_kind`, an address of another node is `endpoint_unknown` |
 | `daemon.stop` | `OpStopDaemon`; no params | `{"stopping":true}`; the daemon then shuts down; a resend, even to a daemon that was started again, asks for the stop again |
+| `operation.result` | `OpQueryOperationResult`; params `{"operation_id"}` | the result stored for that identifier of the owner, as the request that ran it was answered; `not_found/operation_unknown` when there is none (never used, or refused, which stores nothing). A read of the table the replay check uses, so it finds results kept under `state/admin/` and in the versioned files of `config/` |
+
+A binary built with a test tag has **test rows** besides these: methods named
+`test.<something>` that are the test harness's door to the node (the test clock,
+quiescence, the crash points). They are outside the catalogue of administrative
+operations and not judged by `admin.Authorize`: they have no catalogue entry, carry
+no operation identifier and store no result, and they exist only in a binary built
+with the `testclock` or `crashtest` tag, which is never shipped; without the tag the
+request is `method_unknown`, which is how a test asserts that the way in is missing.
+The rows themselves belong to the streams that own the harness; the table has the
+shape and one row that proves it.
 
 Errors are `{"error":{"category","code","message","details"?}}` in the words of
 `apiwire`, which is the one mapping from what the engine, `config`, `ipc` and the
@@ -357,7 +368,14 @@ interface: a sandbox must deny the socket to an agent.
   `TestAClientThatGoesAwayCancelsTheRequest`,
   `TestListenRefusesTheAddressOfTheAgentInterface`,
   `TestShutdownWaitsForARequestAndLeavesNoGoroutine`, `TestTheServerTimeouts`,
-  `TestConcurrentRequestsAreAnsweredEachItsOwn`, `FuzzDecodeRequest`.
+  `TestConcurrentRequestsAreAnsweredEachItsOwn`, `FuzzDecodeRequest`,
+  `TestAnExplicitZeroVersionOfAVersionedChangeIsMissing`,
+  `TestOperationResultAnswersTheResultStoredForTheOwnersIdentifier`,
+  `TestOperationResultNeedsAnIdentifierThatIsWellFormed`,
+  `TestOperationResultAnswersAnEngineThatCannotAnswer`,
+  `TestATestRowIsOutsideTheCatalogueAndIsNotAuthorized`,
+  `TestARowIsAnOperationOrATestRowAndItsNameSaysWhich`,
+  `TestATaggedBuildHasItsTestRows`, `TestAnUntaggedBuildHasNoTestRow`.
 - Tests of the words of the wire (`internal/node/apiwire`) and of the log
   (`internal/node/logfile`): see their READMEs. The scans that keep the local owner
   and the local source where they belong: `internal/node/layout_test.go`.

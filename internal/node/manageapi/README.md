@@ -22,7 +22,18 @@ connection, and `Shutdown` ends them.
 The methods are a table in `methods.go`, one row each: the name on the wire, the
 catalogue entry of the operation, and how the params are read. The owner of an
 operation adds a row (and its type in the engine); the handling of a request does
-not change.
+not change. `operation.result` is one of the rows: a read of the result stored for an
+operation identifier of the requester.
+
+A row may instead be a **test row** (`method.test`): the door of the test harness to
+the node it runs in. Test rows are named `test.<something>`, come only from
+`testMethods`, which has rows in a binary built with the `testclock` or `crashtest`
+tag (`testmethods.go`) and none otherwise (`testmethods_off.go`), so a shipped binary
+answers `method_unknown` for them. A test row is outside the catalogue of
+administrative operations and is not judged by `admin.Authorize`: it is no operation
+of the owner's, has no catalogue entry (the shipped catalogue must have none),
+carries no operation identifier and stores no result. The rows of the harness (the
+test clock, quiescence, the crash points) are added by the streams that own them.
 
 ## Rules
 
@@ -43,8 +54,10 @@ not change.
   case and a value of another type are `malformed_request`, with the path of the
   fault when the decoder can place it. The operation identifier is 32 lower-case
   hexadecimal digits that are not all zero; one that is absent is refused by the
-  administrative rules, and an expected version where the operation carries none
-  is `unexpected_version`.
+  administrative rules. An expected version where the operation carries none is
+  `unexpected_version` whatever its value, zero included: the member's presence is
+  what is refused, since a sender that wrote it believes a check is made. Where the
+  operation carries one, zero is the same as absent (`missing_expected_version`).
 - **One fingerprint per meaning.** `SHA-256("sidera-manage-v1" NUL method NUL
   canonical params NUL decimal expected version)`; the canonical params are the
   decoded params encoded again with the fields of their type in declared order. The
@@ -70,10 +83,13 @@ not change.
 ## Where the tests are
 
 `manageapi_test.go`: routing and verbs, the size limit, malformed requests with
-their paths, the operation identifier, the expected version, the catalogue, what
+their paths, the operation identifier, the expected version (present or not), the
+catalogue, `operation.result`, test rows and the rule for a row's name, what
 the engine is asked (key, fingerprint worked out by hand, name, kind), the
 fingerprint of equal and different requests, the shape of the answers, the stop
 after the answer, the mapping of refusals, the client that goes away, the listener
 that takes only the management address, shutdown with a request in flight, the
-timeouts, and concurrent requests. `fuzz_test.go` fuzzes the one entry that reads
+timeouts, and concurrent requests. `testmethods_test.go` and
+`testmethods_off_test.go` (build-constrained) say that a tagged build has its test
+rows and an untagged one has none. `fuzz_test.go` fuzzes the one entry that reads
 a request: it never panics, and what it accepts is canonical.

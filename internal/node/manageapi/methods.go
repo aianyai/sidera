@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
@@ -24,7 +26,24 @@ type method struct {
 	op admin.Operation
 	// plan reads the params, a JSON object, and says what the request asks for.
 	plan func(s *Server, params json.RawMessage) (*plan, error)
+
+	// test, when set, makes the row a test row instead (plan and op are then
+	// unset): the door of the test harness to the node it runs in, answered as a
+	// read whose result is what test returns. A test row is outside the catalogue
+	// of administrative operations and is not judged by admin.Authorize, because
+	// it is no operation of the owner's: it has no catalogue entry (the shipped
+	// catalogue must have none), carries no operation identifier and stores no
+	// result. It is safe to leave out of Authorize because the rows exist only in a
+	// binary built with a test tag (testMethods), which is never shipped, and the
+	// socket it is on is the user's own, as for every method. Its name begins with
+	// "test.".
+	test func(ctx context.Context, params json.RawMessage) (any, error)
 }
+
+// testPrefix begins the name of every test row, so that a test row is never
+// mistaken for a method of the owner's and a method of the owner's never takes a
+// name of the harness.
+const testPrefix = "test."
 
 // plan is a request's params read. canonical is their encoding in the one form
 // that equal requests share, which the fingerprint is made of.
@@ -64,13 +83,37 @@ func canonical(p any) []byte {
 }
 
 // defaultMethods is the table: the methods of the operations the daemon has, and
-// the place where the owner of another operation adds a row.
-func defaultMethods() map[string]*method {
+// the place where the owner of another operation adds a row. The test rows are
+// added from testMethods, which has none in a binary built without a test tag.
+func defaultMethods() (map[string]*method, error) {
 	ms := map[string]*method{}
-	for _, m := range []*method{endpointsList, endpointsClose, daemonStop} {
+	for _, m := range append([]*method{endpointsList, endpointsClose, daemonStop, operationResult}, testMethods()...) {
+		if err := checkRow(m); err != nil {
+			return nil, err
+		}
+		if ms[m.name] != nil {
+			return nil, fmt.Errorf("manageapi: two methods named %q", m.name)
+		}
 		ms[m.name] = m
 	}
-	return ms
+	return ms, nil
+}
+
+// checkRow refuses a row that is neither an operation of the owner's nor a test
+// row, or is both, or whose name does not say which it is.
+func checkRow(m *method) error {
+	isTest := m.test != nil
+	switch {
+	case m.name == "":
+		return errors.New("manageapi: a method without a name")
+	case isTest && (m.plan != nil || m.op.Kind != admin.OpUnknown):
+		return fmt.Errorf("manageapi: %q is a test row and an operation of the owner's", m.name)
+	case !isTest && m.plan == nil:
+		return fmt.Errorf("manageapi: %q does nothing", m.name)
+	case isTest != strings.HasPrefix(m.name, testPrefix):
+		return fmt.Errorf("manageapi: %q: only test rows are named %s...", m.name, testPrefix)
+	}
+	return nil
 }
 
 // endpoints.list: the endpoints of the node, closed ones included, in the order of
@@ -144,7 +187,7 @@ var endpointsClose = &method{
 			return nil, apiwire.Malformed("the value is not the address of an endpoint", "params.endpoint")
 		}
 		if addr.Node != s.cfg.Node {
-			return nil, &engine.Refusal{Reason: engine.ReasonEndpointUnknown}
+			return nil, apiwire.EndpointUnknown()
 		}
 		p.Endpoint = addr.String()
 		op := engine.CloseEndpointOp(addr.Endpoint, func(o engine.CloseOutcome) ([]byte, error) {
@@ -167,5 +210,42 @@ var daemonStop = &method{
 		}
 		op := engine.StopDaemonOp(func() ([]byte, error) { return []byte(`{"stopping":true}`), nil })
 		return &plan{canonical: canonical(p), operation: op}, nil
+	},
+}
+
+// operation.result: the result stored for an operation identifier of the requester,
+// as the request that ran it was answered. It reads one place for every result,
+// whether the operation kept it under state/admin/ or in a versioned file of
+// config/, and only under the requester's own key: an identifier of another person
+// is another key. An identifier with no result is operation_unknown; the same
+// answer is given for one that never ran and for one whose request was refused,
+// which stored nothing.
+var operationResult = &method{
+	name: "operation.result", op: admin.Operation{Kind: admin.OpQueryOperationResult},
+	plan: func(s *Server, raw json.RawMessage) (*plan, error) {
+		var p struct {
+			OperationID string `json:"operation_id,omitempty"`
+		}
+		if err := decodeParams(raw, &p); err != nil {
+			return nil, err
+		}
+		id, err := parseOperationID(p.OperationID)
+		if err != nil {
+			return nil, err
+		}
+		if id.IsZero() {
+			return nil, apiwire.FromAdmin(admin.ReasonMissingOperationID)
+		}
+		key := admin.KeyFor(s.actor(), id)
+		return &plan{canonical: canonical(p), read: func(ctx context.Context, svc engine.ManageService) (any, error) {
+			result, ok, err := svc.OperationResult(ctx, key)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, apiwire.OperationUnknown()
+			}
+			return json.RawMessage(result), nil
+		}}, nil
 	},
 }

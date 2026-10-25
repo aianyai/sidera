@@ -164,18 +164,20 @@ func TestAnExpectedVersionIsRefusedWhereNoneIsCarried(t *testing.T) {
 	r := newRig(t)
 	status, out := r.post("daemon.stop", `{"operation_id":"`+opID(2)+`","expected_version":3}`)
 	r.wantError(400, "invalid_argument", "unexpected_version", status, out)
+	// the member is refused for being there, whatever its value: zero is no
+	// exception, or a sender that wrote it would believe a check was made
 	status, out = r.post("daemon.stop", `{"operation_id":"`+opID(2)+`","expected_version":0}`)
-	r.wantError(400, "invalid_argument", "malformed_request", status, out) // zero means unset, never a value
+	r.wantError(400, "invalid_argument", "unexpected_version", status, out)
 	if n := len(r.svc.calls()); n != 0 {
 		t.Errorf("a refused request reached the service %d times", n)
 	}
 }
 
-// testMethods are two methods that the daemon does not have yet, put into the
+// extraMethods are two methods that the daemon does not have yet, put into the
 // table of a server: a change of a versioned setting, and an operation that the
 // catalogue does not know. The owners of such methods add theirs the same way,
 // and the generic handling is the same for all.
-func testMethods(s *Server) {
+func extraMethods(s *Server) {
 	s.methods["test.set"] = &method{
 		name: "test.set", op: admin.Operation{Kind: admin.OpChangeNodeSettings},
 		plan: func(_ *Server, raw json.RawMessage) (*plan, error) {
@@ -201,7 +203,7 @@ func testMethods(s *Server) {
 // the administrative rules refuse the request, and with it the version goes to the
 // engine, which hands it to the owner of the setting.
 func TestAChangeOfASettingNeedsItsExpectedVersion(t *testing.T) {
-	r := newRig(t, testMethods)
+	r := newRig(t, extraMethods)
 	status, out := r.post("test.set", `{"operation_id":"`+opID(3)+`","params":{"value":1}}`)
 	r.wantError(400, "invalid_argument", "missing_expected_version", status, out)
 	if n := len(r.svc.calls()); n != 0 {
@@ -220,7 +222,7 @@ func TestAChangeOfASettingNeedsItsExpectedVersion(t *testing.T) {
 // it is denied to everyone, the local owner included, which is a defect of the
 // program and not of the request, and the engine is never asked.
 func TestAnOperationOutsideTheCatalogueIsNeverRun(t *testing.T) {
-	r := newRig(t, testMethods)
+	r := newRig(t, extraMethods)
 	status, out := r.post("test.unknown", `{"operation_id":"`+opID(4)+`"}`)
 	r.wantError(500, "internal", "unknown_operation", status, out)
 	if n := len(r.svc.calls()); n != 0 {
@@ -264,7 +266,7 @@ func TestTheCommandTheEngineIsAsked(t *testing.T) {
 // requests that differ in what they ask, or in the version they are based on, do
 // not.
 func TestEqualRequestsHaveOneFingerprintAndDifferentOnesDoNot(t *testing.T) {
-	r := newRig(t, testMethods)
+	r := newRig(t, extraMethods)
 	send := func(body string) admin.Fingerprint {
 		t.Helper()
 		before := len(r.svc.calls())
@@ -400,7 +402,7 @@ func TestRefusalsAreAnsweredInTheWordsOfTheWireAndUnknownErrorsStayInTheLog(t *t
 		{"an unknown endpoint", &engine.Refusal{Reason: engine.ReasonEndpointUnknown}, 404, "not_found", "endpoint_unknown"},
 		{"a runtime endpoint", &engine.Refusal{Reason: engine.ReasonWrongEndpointKind}, 422, "refused", "endpoint_kind"},
 		{"the disk is full", &engine.Refusal{Reason: engine.ReasonStorageFull}, 429, "backpressure", "storage_full"},
-		{"a fatal failure", &engine.Refusal{Reason: engine.ReasonStorageFatal}, 500, "internal", "storage_fatal"},
+		{"a fatal failure", &engine.Refusal{Reason: engine.ReasonStorageFatal}, 500, "outcome_unknown", "storage_fatal"},
 		{"an unexpected error", errors.New("open /h/.sidera/keys/x: secret-token-abc"), 500, "internal", "internal"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -579,5 +581,140 @@ func TestAnAddressOfAnotherNodeIsNoEndpointOfThisOne(t *testing.T) {
 	r.wantError(404, "not_found", "endpoint_unknown", status, out)
 	if n := len(r.svc.calls()); n != 0 {
 		t.Errorf("the engine was asked %d times about an endpoint of another node", n)
+	}
+}
+
+// A change of a versioned setting that carries the member with the value zero has
+// no version: zero is "not supplied", so it is the same as leaving it out.
+func TestAnExplicitZeroVersionOfAVersionedChangeIsMissing(t *testing.T) {
+	r := newRig(t, extraMethods)
+	status, out := r.post("test.set", `{"operation_id":"`+opID(5)+`","expected_version":0,"params":{"value":1}}`)
+	r.wantError(400, "invalid_argument", "missing_expected_version", status, out)
+	if n := len(r.svc.calls()); n != 0 {
+		t.Errorf("a refused request reached the service %d times", n)
+	}
+}
+
+// operation.result answers the result stored under the key of the requester: the
+// owner's own identifiers, as the engine files them. The answer is a read's, a
+// request for an identifier that has no result says so with the listed code, and
+// the interface looks nothing up itself.
+func TestOperationResultAnswersTheResultStoredForTheOwnersIdentifier(t *testing.T) {
+	r := newRig(t)
+	var id admin.OperationID
+	id[15] = 9
+	r.svc.results = map[admin.RequestKey][]byte{
+		admin.KeyFor(admin.LocalOwner(), id): []byte(`{"outcome":"closed"}`),
+	}
+	status, out := r.post("operation.result", `{"params":{"operation_id":"`+opID(9)+`"}}`)
+	if status != 200 || strings.TrimSpace(string(out)) != `{"result":{"outcome":"closed"}}` {
+		t.Fatalf("answered %d %s; want the stored result as the result of a read", status, out)
+	}
+	if asked := r.svc.asked(); len(asked) != 1 || asked[0] != admin.KeyFor(admin.LocalOwner(), id) {
+		t.Errorf("the engine was asked for %v; want the key of the local owner and the identifier", asked)
+	}
+	status, out = r.post("operation.result", `{"params":{"operation_id":"`+opID(10)+`"}}`)
+	r.wantError(404, "not_found", "operation_unknown", status, out)
+	if n := len(r.svc.calls()); n != 0 {
+		t.Errorf("a read went through the door of operations %d times", n)
+	}
+}
+
+func TestOperationResultNeedsAnIdentifierThatIsWellFormed(t *testing.T) {
+	r := newRig(t)
+	for _, tc := range []struct{ name, body, code string }{
+		{"absent", `{"params":{}}`, "missing_operation_id"},
+		{"no params", `{}`, "missing_operation_id"},
+		{"all zero", `{"params":{"operation_id":"00000000000000000000000000000000"}}`, "malformed_request"},
+		{"upper case", `{"params":{"operation_id":"` + strings.ToUpper(strings.Repeat("ab", 16)) + `"}}`, "malformed_request"},
+		{"too short", `{"params":{"operation_id":"abcd"}}`, "malformed_request"},
+		{"another member", `{"params":{"operation_id":"` + opID(1) + `","extra":1}}`, "malformed_request"},
+		{"a member of a request that changes something", `{"operation_id":"` + opID(1) + `","params":{"operation_id":"` + opID(1) + `"}}`, "malformed_request"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status, out := r.post("operation.result", tc.body)
+			r.wantError(400, "invalid_argument", tc.code, status, out)
+		})
+	}
+	if n := len(r.svc.asked()); n != 0 {
+		t.Errorf("a refused request reached the engine %d times", n)
+	}
+}
+
+// What the engine says when it cannot answer is said in the words of the wire.
+func TestOperationResultAnswersAnEngineThatCannotAnswer(t *testing.T) {
+	r := newRig(t)
+	r.svc.lookupErr = &engine.Refusal{Reason: engine.ReasonShuttingDown}
+	status, out := r.post("operation.result", `{"params":{"operation_id":"`+opID(1)+`"}}`)
+	r.wantError(503, "unavailable", "shutting_down", status, out)
+}
+
+// A test row is a row of the table that is no operation of the owner's: it is not
+// judged by the catalogue, so it needs no catalogue entry, carries no operation
+// identifier and takes no expected version, and the engine's door is never used.
+// The row below is put into the table the way the streams that own the harness's
+// methods put theirs (without a test tag, only this test can); an operation with
+// no catalogue entry, in the same table, is denied.
+func TestATestRowIsOutsideTheCatalogueAndIsNotAuthorized(t *testing.T) {
+	r := newRig(t, extraMethods, func(s *Server) {
+		s.methods["test.echo"] = &method{name: "test.echo", test: func(_ context.Context, raw json.RawMessage) (any, error) {
+			var p struct {
+				Say string `json:"say"`
+			}
+			if err := decodeParams(raw, &p); err != nil {
+				return nil, err
+			}
+			return map[string]string{"said": p.Say}, nil
+		}}
+	})
+	status, out := r.post("test.echo", `{"params":{"say":"hello"}}`)
+	if status != 200 || strings.TrimSpace(string(out)) != `{"result":{"said":"hello"}}` {
+		t.Fatalf("answered %d %s", status, out)
+	}
+	status, out = r.post("test.echo", `{}`)
+	r.wantError(400, "invalid_argument", "malformed_request", status, out) // the row's params are decoded strictly
+	status, out = r.post("test.echo", `{"operation_id":"`+opID(1)+`","params":{"say":"x"}}`)
+	r.wantError(400, "invalid_argument", "malformed_request", status, out) // it carries no operation identifier
+	status, out = r.post("test.unknown", `{"operation_id":"`+opID(4)+`"}`)
+	r.wantError(500, "internal", "unknown_operation", status, out) // an operation with no entry is denied
+	if n := len(r.svc.calls()) + len(r.svc.asked()); n != 0 {
+		t.Errorf("the engine was asked %d times", n)
+	}
+	// a GET is refused for a test row as for every method
+	resp, err := r.client().Get("http://sidera/v1/manage/test.echo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != 405 {
+		t.Errorf("GET answered %d, want 405", resp.StatusCode)
+	}
+}
+
+// A row of the table is an operation of the owner's or a test row, never both and
+// never neither, and the name says which: a test row is called test.something and
+// nothing else is.
+func TestARowIsAnOperationOrATestRowAndItsNameSaysWhich(t *testing.T) {
+	test := func(context.Context, json.RawMessage) (any, error) { return nil, nil }
+	plan := func(*Server, json.RawMessage) (*plan, error) { return nil, nil }
+	for _, tc := range []struct {
+		name string
+		m    *method
+		ok   bool
+	}{
+		{"an operation", &method{name: "things.list", op: admin.Operation{Kind: admin.OpRead}, plan: plan}, true},
+		{"a test row", &method{name: "test.thing", test: test}, true},
+		{"a test row with a catalogue entry", &method{name: "test.thing", test: test, op: admin.Operation{Kind: admin.OpRead}}, false},
+		{"a test row with a plan", &method{name: "test.thing", test: test, plan: plan}, false},
+		{"neither", &method{name: "things.list"}, false},
+		{"a test row that is not called test.", &method{name: "things.list", test: test}, false},
+		{"an operation called test.", &method{name: "test.thing", plan: plan, op: admin.Operation{Kind: admin.OpRead}}, false},
+		{"no name", &method{test: test}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := checkRow(tc.m); (err == nil) != tc.ok {
+				t.Errorf("checkRow = %v, want ok = %v", err, tc.ok)
+			}
+		})
 	}
 }

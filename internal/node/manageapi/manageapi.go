@@ -80,7 +80,11 @@ func New(c Config) (*Server, error) {
 	case c.Node.IsZero():
 		return nil, errors.New("manageapi: no node identifier")
 	}
-	s := &Server{cfg: c, log: c.Log, methods: defaultMethods()}
+	methods, err := defaultMethods()
+	if err != nil {
+		return nil, err
+	}
+	s := &Server{cfg: c, log: c.Log, methods: methods}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
 	}
@@ -166,11 +170,15 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Authorize comes first, by the catalogue: the local owner is denied only an
-	// operation the catalogue does not know, which is a defect of the program.
+	// operation the catalogue does not know, which is a defect of the program. A
+	// test row is no operation of the catalogue and is not authorized by it (see
+	// method.test).
 	actor := s.actor()
-	if v := admin.Authorize(s.list, actor, m.op, s.cfg.Clock.Now()); !v.Allowed {
-		s.fail(w, apiwire.FromAdmin(v.Reason), 0)
-		return
+	if m.test == nil {
+		if v := admin.Authorize(s.list, actor, m.op, s.cfg.Clock.Now()); !v.Allowed {
+			s.fail(w, apiwire.FromAdmin(v.Reason), 0)
+			return
+		}
 	}
 
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
@@ -181,6 +189,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.fail(w, apiwire.Malformed("the request could not be read", ""), 0)
 		}
+		return
+	}
+	if m.test != nil {
+		s.serveTest(w, r, m, body)
 		return
 	}
 	d, err := s.decode(name, body)
@@ -225,6 +237,29 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// serveTest answers a request for a test row: the envelope of a read, the params
+// handed to the row, and its result as the result of a read. No operation
+// identifier, no expected version, no stored result.
+func (s *Server) serveTest(w http.ResponseWriter, r *http.Request, m *method, body []byte) {
+	var env readEnvelope
+	if err := strictjson.Decode(body, &env); err != nil {
+		s.fail(w, err, 0)
+		return
+	}
+	params := env.Params
+	if len(params) == 0 {
+		params = json.RawMessage(`{}`)
+	}
+	result, err := m.test(r.Context(), params)
+	if err != nil {
+		s.fail(w, err, 0)
+		return
+	}
+	s.write(w, struct {
+		Result any `json:"result"`
+	}{result})
+}
+
 // decoded is a request that was read and found well formed.
 type decoded struct {
 	m           *method
@@ -238,8 +273,11 @@ type decoded struct {
 // and the version are optional to the decoder, so that the administrative rules
 // say which of them a request lacks.
 type writeEnvelope struct {
-	OperationID     string          `json:"operation_id,omitempty"`
-	ExpectedVersion uint64          `json:"expected_version,omitempty"`
+	OperationID string `json:"operation_id,omitempty"`
+	// ExpectedVersion is a pointer so that its presence can be told from its value:
+	// a request that carries the member at all, zero included, is refused where the
+	// operation takes none, because the sender meant it to do something.
+	ExpectedVersion *uint64         `json:"expected_version,omitempty"`
 	Params          json.RawMessage `json:"params,omitempty"`
 }
 
@@ -266,10 +304,13 @@ func (s *Server) decode(name string, body []byte) (*decoded, error) {
 		if err != nil {
 			return nil, err
 		}
-		d.id, d.expected, params = id, admin.Version(env.ExpectedVersion), env.Params
-		if !m.op.IsConfigChange() && d.expected != 0 {
-			return nil, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeUnexpectedVersion,
-				"this operation changes no versioned setting and takes no expected version")
+		d.id, params = id, env.Params
+		if env.ExpectedVersion != nil {
+			if !m.op.IsConfigChange() {
+				return nil, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeUnexpectedVersion,
+					"this operation changes no versioned setting and takes no expected version")
+			}
+			d.expected = admin.Version(*env.ExpectedVersion)
 		}
 		if reason := admin.ValidateRequest(admin.Request{ID: d.id, Op: m.op, ExpectedVersion: d.expected}); reason != admin.ReasonOK {
 			return nil, apiwire.FromAdmin(reason)
