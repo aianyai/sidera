@@ -418,3 +418,29 @@ func TestCheckRecoveryCasesUnion(t *testing.T) {
 		}
 	})
 }
+
+// FuzzParseShardAndMode: the settings come from the environment of a CI job, so a
+// malformed value must be an error and never a panic, and a shard that parses is
+// one that picks its residue class.
+func FuzzParseShardAndMode(f *testing.F) {
+	for _, s := range []string{"", "1/1", "2/3", "0/3", "a/b", "1/3/5", "smoke", "full"} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, s string) {
+		if sh, err := crashwalk.ParseShard(s); err == nil {
+			if sh.Count < 1 || sh.Index < 1 || sh.Index > sh.Count {
+				t.Fatalf("ParseShard(%q) = %+v", s, sh)
+			}
+			kept := 0
+			for k := 0; k < sh.Count; k++ {
+				if sh.Keep(k) {
+					kept++
+				}
+			}
+			if kept != 1 {
+				t.Fatalf("shard %+v keeps %d of %d consecutive runs, want exactly one", sh, kept, sh.Count)
+			}
+		}
+		_, _ = crashwalk.ParseMode(s)
+	})
+}
