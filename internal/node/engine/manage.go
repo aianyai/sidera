@@ -156,6 +156,33 @@ func (e *Engine) execute(now time.Time, c ManagementCommand) (StoredResult, erro
 	return StoredResult{Result: result, Stop: c.Operation.stops()}, nil
 }
 
+type cmdOperationResult struct {
+	call[operationResult]
+	key admin.RequestKey
+}
+
+type operationResult struct {
+	result []byte
+	found  bool
+}
+
+func (c *cmdOperationResult) gate() gate { return gateRead }
+func (c *cmdOperationResult) run(e *Engine, _ time.Time) {
+	stored, ok := e.view.results[c.key]
+	c.done(operationResult{result: stored.result, found: ok}, nil)
+}
+
+// OperationResult is the result stored for the request key, wherever it is kept
+// (state/admin/ or a versioned file of config/), and whether there is one. The
+// key is the one the request was filed under, admin.KeyFor of the requester: a
+// result of another requester is under another key and is never found. It reads
+// and writes nothing, and is taken while the node starts.
+func (e *Engine) OperationResult(ctx context.Context, key admin.RequestKey) ([]byte, bool, error) {
+	c := &cmdOperationResult{call: newCall[operationResult](), key: key}
+	r, err := roundTrip(ctx, e, submitExternal, c, c.call)
+	return r.result, r.found, err
+}
+
 // addConfigResults puts the results that the versioned files of config/ record
 // into the table the lookup reads, beside those of state/admin/.
 func (v *view) addConfigResults(ops []config.Operation) {

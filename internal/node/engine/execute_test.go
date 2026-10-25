@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -334,4 +335,84 @@ func TestAVersionedChangeIsAppliedOnceAndAStaleOneNeverIsApplied(t *testing.T) {
 	}
 	_, err = e.Execute(ctx, nodeSetCommand(r, 50, "set c", v1+1, `{"node_queue_limit":40000}`))
 	wantReason(t, err, engine.ReasonOperationIDReused)
+}
+
+// The stored result of an operation is read by the key it was filed under, and
+// only by that key: the same identifier of another person is another key, and an
+// identifier that never ran, or whose request was refused, has no result. Results
+// are kept in two places, state/admin/ and the versioned files of config/, and a
+// read finds both, before and after a restart.
+func TestTheStoredResultOfAnOperationIsReadByItsRequestKey(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	a := register(t, e, "a")
+	ctx := context.Background()
+	v1 := r.cfg.Node().Version
+	if _, err := e.Execute(ctx, closeCommand(60, "close a", a)); err != nil { // kept under state/admin/
+		t.Fatal(err)
+	}
+	if _, err := e.Execute(ctx, nodeSetCommand(r, 61, "set a", v1, `{"node_queue_limit":20000}`)); err != nil { // kept in node.json
+		t.Fatal(err)
+	}
+	if _, err := e.Execute(ctx, closeCommand(62, "close the unknown", mustEndpoint(t, 99))); err == nil {
+		t.Fatal("closing an endpoint that does not exist was taken")
+	}
+	person, err := ident.PersonIDFromBytes(bytes.Repeat([]byte{0x33}, ident.PersonIDLen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(where string, e *engine.Engine) {
+		t.Helper()
+		for _, tc := range []struct {
+			name   string
+			key    admin.RequestKey
+			result string // empty: no result
+		}{
+			{"kept under state/admin/", requestKey(60), `{"outcome":"closed"}`},
+			{"kept in node.json", requestKey(61), `{"changed":true}`},
+			{"never used", requestKey(63), ""},
+			{"refused, so nothing was stored", requestKey(62), ""},
+			{"the same identifier of another person", admin.RequestKey{Person: person, ID: requestKey(60).ID}, ""},
+		} {
+			got, ok, err := e.OperationResult(ctx, tc.key)
+			if err != nil {
+				t.Errorf("%s, %s: %v", where, tc.name, err)
+				continue
+			}
+			if ok != (tc.result != "") || string(got) != tc.result {
+				t.Errorf("%s, %s: %q, found %v; want %q", where, tc.name, got, ok, tc.result)
+			}
+		}
+	}
+	before := r.snapshot()
+	check("running", e)
+	if !reflect.DeepEqual(before, r.snapshot()) {
+		t.Error("reading a result wrote to the disk")
+	}
+	r.restart()
+	e = r.start()
+	check("after a restart", e)
+}
+
+// A read of a stored result is a read: it is taken while the node starts, like the
+// other reads, and refused once it stops.
+func TestAStoredResultIsReadWhileRecoveringAndNotWhileStopping(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e, _, err := r.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Start()
+	t.Cleanup(func() { r.stop(e) })
+	ctx := context.Background()
+	if _, ok, err := e.OperationResult(ctx, requestKey(70)); err != nil || ok {
+		t.Errorf("while recovering: found %v, %v; want a read that finds nothing", ok, err)
+	}
+	if err := e.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = e.OperationResult(ctx, requestKey(70))
+	wantReason(t, err, engine.ReasonShuttingDown)
 }

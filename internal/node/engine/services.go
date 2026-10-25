@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/node/store"
 )
@@ -25,6 +26,7 @@ type ManageService interface {
 	Counts(ctx context.Context) (Counts, error)
 	Alerts(ctx context.Context) ([]store.AlertRecord, error)
 	Execute(ctx context.Context, c ManagementCommand) (StoredResult, error)
+	OperationResult(ctx context.Context, key admin.RequestKey) ([]byte, bool, error)
 }
 
 var (

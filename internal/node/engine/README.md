@@ -31,10 +31,11 @@ commands and add their methods to this list.
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
 | `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseResult`, `Counts`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and of a close the engine's own features ask for, the numbers of the status, and the alerts. |
 | `Execute`, `ManagementCommand`, `StoredResult`, `Operation`, `CloseEndpointOp`, `StopDaemonOp` | The one door of every administrative operation of the owner: the replay check, the operation, and the storing of its result with the fingerprint are one command of the loop. The owner's request to close an endpoint and to stop the daemon are the two operations there are; the package that owns the effect of another adds its type here. |
+| `OperationResult` | A read: the result stored for a request key, from either place a result is kept, and whether there is one. Taken while the node starts; writes nothing. |
 | `PlanRecovery`, `RecoveryPlan` | The work of the recovery rules as a pure function of a scan. |
 | `Reason`, `Refusal`, `ReasonOf` | The closed set of reasons a method refuses for; the interface packages alone map them to the wire. |
 | `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register`. |
-| `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. Everything of `ManageService` that changes state is `Execute`. |
+| `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. Everything of `ManageService` that changes state is `Execute`; the other methods read. |
 | `Store`, `Config`, `Beginner`, `Adapters` | What the engine asks of the store, the configuration, the transaction writer and the adapter host. |
 
 ## Rules

@@ -80,6 +80,16 @@ fingerprint as the last write of the transaction of the head record. A close of 
 endpoint that is closed already writes that record again as it is, only to carry
 the result.
 
+**Reading a stored result.** `OperationResult` answers the result stored for a
+request key and whether there is one, from the table the replay check reads, so a
+result kept under `state/admin/` and one kept in a versioned file of `config/` are
+found the same way, before and after a restart. The key is the one the request was
+filed under (`admin.KeyFor` of the requester), so an identifier of another person is
+another key and is never found. It is a read: it writes nothing, and it is taken
+while the node starts, like the other reads. It exists so that a client that did not
+read the answer, or the remote management that comes later, can ask what became of an
+identifier without sending the request again.
+
 **The door of the administrative operations.** `Execute` takes a management
 request that changes state, after the interface has judged who asks and whether
 the request is well formed, and carries it out as one command of the loop. A
@@ -274,6 +284,7 @@ reproducible).
 | The result of a close is stored with it | `endpoints.go` (`closeEndpoint`), `manage.go` (`CloseEndpointOp`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint` |
 | One identifier has one result, for every operation and every place a result is kept | `manage.go` (`Execute`, `execute`, `addConfigResults`), `recovery.go` (`Open`) | `TestAResendReturnsTheStoredResultAndAReusedIdentifierIsRefused`, `TestConcurrentResendsOfOneRequestRunOnce`, `TestARefusedRequestStoresNothingAndTheIdentifierStaysFree`, `TestAVersionedChangeIsAppliedOnceAndAStaleOneNeverIsApplied` |
 | A crash at any point of an operation leaves nothing, the effect alone or both, never the result alone; a resend is carried out again or answered from the result | `manage.go`, `endpoints.go` (`closeWithResult`) | `TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint` |
+| A stored result is read by its request key, from both places, and by no other key | `manage.go` (`OperationResult`) | `TestTheStoredResultOfAnOperationIsReadByItsRequestKey`, `TestAStoredResultIsReadWhileRecoveringAndNotWhileStopping` |
 | The door is closed while the node starts and while it stops; what is not a change does not come through it | `manage.go`, `engine.go` (`step`) | `TestExecuteIsRefusedWhileRecoveringAndWhileStopping`, `TestExecuteRefusesAnOperationThatChangesNothing` |
 | A request that stops the daemon says so, resent or not | `manage.go` (`StopDaemonOp`, `StoredResult.Stop`) | `TestStopFollowsTheOperationOfTheRequest` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |

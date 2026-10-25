@@ -70,6 +70,9 @@ type fakeService struct {
 	commands  []engine.ManagementCommand
 	endpoints []engine.EndpointView
 	execute   func(ctx context.Context, c engine.ManagementCommand) (engine.StoredResult, error)
+	results   map[admin.RequestKey][]byte // what OperationResult finds
+	lookups   []admin.RequestKey          // every key OperationResult was asked for
+	lookupErr error
 }
 
 func (f *fakeService) Endpoints(context.Context) ([]engine.EndpointView, error) {
@@ -88,6 +91,20 @@ func (f *fakeService) Execute(ctx context.Context, c engine.ManagementCommand) (
 		return engine.StoredResult{Result: []byte(`{}`)}, nil
 	}
 	return run(ctx, c)
+}
+
+func (f *fakeService) OperationResult(_ context.Context, key admin.RequestKey) ([]byte, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lookups = append(f.lookups, key)
+	r, ok := f.results[key]
+	return r, ok, f.lookupErr
+}
+
+func (f *fakeService) asked() []admin.RequestKey {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]admin.RequestKey(nil), f.lookups...)
 }
 
 func (f *fakeService) calls() []engine.ManagementCommand {
