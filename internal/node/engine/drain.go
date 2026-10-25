@@ -21,16 +21,7 @@ import (
 // ever.
 func closeBatch(counts bodyCounts, now time.Time, ins []store.InRecord, ctls []store.CtlRecord) (b store.DrainBatch, unchanged []store.TargetKey) {
 	event := delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectEndpointClosed}
-	dropped := map[string]int{}
-	var refs []store.BodyRef
-	drop := func(r *store.BodyRef) {
-		if r != nil {
-			if dropped[r.Name()] == 0 {
-				refs = append(refs, *r)
-			}
-			dropped[r.Name()]++
-		}
-	}
+	var dropped []*store.BodyRef
 	for _, in := range ins {
 		rec, o, err := in.Record.Apply(now, event)
 		if err != nil || o.Result != delivery.ResultApplied {
@@ -39,7 +30,7 @@ func closeBatch(counts bodyCounts, now time.Time, ins []store.InRecord, ctls []s
 		}
 		in.Record = rec
 		in, ref := settledIn(in)
-		drop(ref)
+		dropped = append(dropped, ref)
 		b.In = append(b.In, in)
 	}
 	for _, c := range ctls {
@@ -50,16 +41,12 @@ func closeBatch(counts bodyCounts, now time.Time, ins []store.InRecord, ctls []s
 		}
 		c.Record = rec
 		if !rec.NeedsBody() {
-			drop(c.Body)
+			dropped = append(dropped, c.Body)
 			c.Body = nil
 		}
 		b.Ctl = append(b.Ctl, c)
 	}
-	for _, r := range refs {
-		if counts[r.Name()]-dropped[r.Name()] <= 0 {
-			b.Release = append(b.Release, r)
-		}
-	}
+	b.Release = counts.unreferencedAfter(dropped, nil)
 	return b, unchanged
 }
 

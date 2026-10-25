@@ -622,3 +622,82 @@ func TestAnEngineWithTheKeysOfAnotherNodeDoesNotStart(t *testing.T) {
 	e.Start()
 	r.stop(e)
 }
+
+// bodyHeldBySourceAlone makes a message from a that b rejected and a never heard
+// of, the way a lost report leaves it: the source record of a is the one record
+// that refers to the body, and the report of b about its rejection is signed and
+// in the hands of the test. It returns the message and that report.
+func bodyHeldBySourceAlone(t *testing.T, h *harness.H, body string) (adapterproto.MessageID, record.Record) {
+	t.Helper()
+	if err := h.Agent("b").Declare(h.Ctx(), fakeagent.DeclareInput{Paused: boolp(true)}); err != nil {
+		t.Fatal(err)
+	}
+	h.Unreachable(true)
+	msg := send(t, h, "a", "b", body)
+	quiet(t, h)
+	h.HoldReports(string(msg))
+	h.Unreachable(false)
+	h.Advance(resendBackoff)
+	quiet(t, h)
+	if o := outOf(t, h, msg); o.Body == nil {
+		t.Fatal("the source record does not refer to its body while no report has come")
+	}
+	if in := inOf(t, h, msg); in.Body != nil {
+		t.Fatal("the target record of a rejected message refers to a body")
+	}
+	h.Release(string(msg))
+	ans, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: delivery.MessageID(msg)})
+	if err != nil || len(ans.Reports) != 1 {
+		t.Fatalf("the report of the rejection: %+v, %v", ans, err)
+	}
+	return msg, ans.Reports[0]
+}
+
+// A reply carries the evidence that finishes the delivery it answers, which
+// drops the last reference of the source record to the body of the message. A body
+// is addressed by its content, so a reply that says the same bytes refers to the
+// very body the source let go of, and the body stays.
+func TestAReplyWhoseBodyEqualsTheOriginalKeepsTheBodyTheEvidenceReleased(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	msg, report := bodyHeldBySourceAlone(t, h, "the same bytes")
+	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
+		forged(t, h, "the-reply", addrOf(t, h, "a"), msg, "the same bytes", report)); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	if o := outOf(t, h, msg); o.Body != nil || sourceDelivery(t, h, msg).State != delivery.StateRejected {
+		t.Fatalf("the evidence did not finish the delivery: body %v, state %s", o.Body, sourceDelivery(t, h, msg).State)
+	}
+	in := inOf(t, h, "the-reply")
+	if in.Record.State != delivery.StateAccepted || in.Body == nil {
+		t.Fatalf("the reply is %s with body %v, want accepted and holding its body", in.Record.State, in.Body)
+	}
+	sc := scanOf(t, h)
+	if len(sc.Bodies) != 1 || sc.Bodies[0] != in.Body.Name() {
+		t.Errorf("bodies %v: the body the reply refers to must be on the disk", sc.Bodies)
+	}
+}
+
+// Evidence that drops the last reference to the body of the message it answers
+// removes the body in the transaction that writes the reply, as every other write
+// that drops a last reference does; it does not wait for the sweep at the next start.
+func TestEvidenceThatReleasesTheLastReferenceToABodyRemovesIt(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	msg, report := bodyHeldBySourceAlone(t, h, "a question nobody holds after the evidence")
+	if got := len(scanOf(t, h).Bodies); got != 1 {
+		t.Fatalf("%d bodies before the reply, want the one of the question", got)
+	}
+	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
+		forged(t, h, "the-reply", addrOf(t, h, "a"), msg, "another body", report)); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	in := inOf(t, h, "the-reply")
+	sc := scanOf(t, h)
+	if in.Body == nil || len(sc.Bodies) != 1 || sc.Bodies[0] != in.Body.Name() {
+		t.Errorf("bodies %v, the reply's reference %v: only the body of the reply may remain", sc.Bodies, in.Body)
+	}
+	if o := outOf(t, h, msg); o.Body != nil {
+		t.Error("the source record still refers to the body of the question")
+	}
+}

@@ -52,9 +52,13 @@ var (
 		rep("body", prepare, optional), repDefer("in", many), syncDir("in-dir"),
 	}}
 	// deliver-reply: a reply that carries evidence. The source record is
-	// updated before the target record that depends on it.
+	// updated before the target record that depends on it, and a body whose last
+	// reference the evidence dropped is removed at the end. The reply's own body
+	// has a role of its own: a role names one write of a transaction, and the
+	// removal of released bodies is the "body" of the other transactions.
 	declDeliverReply = txn.Decl{Name: "deliver-reply", Kind: txn.Normal, Writes: []txn.Write{
-		rep("body", prepare, optional), rep("out", optional), repDefer("in", many), syncDir("in-dir"),
+		rep("reply-body", prepare, optional), rep("out", optional), repDefer("in", many), syncDir("in-dir"),
+		rm("body", many, optional), syncDir("body-dir", optional),
 	}}
 	// source-update: one source record changes; the body is removed when the
 	// last reference went.

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -171,6 +172,41 @@ func TestTheRefusalOfAMessageForAnEndpointItCannotBeGiven(t *testing.T) {
 	} {
 		if got := messageRefusal(c.st); got != c.want {
 			t.Errorf("%s: %s, want %s", c.name, got, c.want)
+		}
+	}
+}
+
+func TestUnreferencedAfterCountsTheReferencesATransactionAddsAsWellAsTheOnesItDrops(t *testing.T) {
+	ref := func(s string) *store.BodyRef { r := store.BodyRefOf([]byte(s)); return &r }
+	x, y := ref("x"), ref("y")
+	names := func(rs []store.BodyRef) []string {
+		var out []string
+		for _, r := range rs {
+			out = append(out, r.Name())
+		}
+		return out
+	}
+	for _, c := range []struct {
+		name           string
+		counts         bodyCounts
+		dropped, added []*store.BodyRef
+		want           []*store.BodyRef
+	}{
+		{"the last reference dropped is released", bodyCounts{x.Name(): 1}, []*store.BodyRef{x}, nil, []*store.BodyRef{x}},
+		{"another record still refers to it", bodyCounts{x.Name(): 2}, []*store.BodyRef{x}, nil, nil},
+		{"a record the transaction writes refers to it", bodyCounts{x.Name(): 1}, []*store.BodyRef{x}, []*store.BodyRef{x}, nil},
+		{"one of two records written refers to it", bodyCounts{x.Name(): 1, y.Name(): 1}, []*store.BodyRef{x, y}, []*store.BodyRef{y}, []*store.BodyRef{x}},
+		{"several drops of the last references", bodyCounts{x.Name(): 2}, []*store.BodyRef{x, x}, nil, []*store.BodyRef{x}},
+		{"a body is listed once", bodyCounts{x.Name(): 1}, []*store.BodyRef{x, x}, nil, []*store.BodyRef{x}},
+		{"a reference that is not there changes nothing", bodyCounts{}, []*store.BodyRef{nil}, []*store.BodyRef{nil}, nil},
+	} {
+		got := names(c.counts.unreferencedAfter(c.dropped, c.added))
+		var want []string
+		for _, r := range c.want {
+			want = append(want, r.Name())
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: %v, want %v", c.name, got, want)
 		}
 	}
 }

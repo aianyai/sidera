@@ -181,9 +181,11 @@ commands and add their methods to this list.
   none is made and a pull is answered as if the target had nothing to report yet.
 - **The body is held by what still needs it.** The source record drops its reference
   when no delivery of it needs the body, in the write of the receipt that settled it; a
-  rejected delivery holds no body at all. A body that the evidence of a reply frees is
-  collected by the next start's rule for bodies that no record refers to, because that
-  transaction has no step that removes one.
+  rejected delivery holds no body at all. Every write that drops a reference removes,
+  in its own transaction, the bodies no record refers to afterwards, and counts the
+  records it writes itself (`bodyCounts.unreferencedAfter`): a body is addressed by its
+  content, so a reply that says the same bytes as the message it answers refers to the
+  very body the evidence just released, and that body stays.
 - **Evidence that does not verify is discarded and alerted.** The reply is judged as if
   it carried none, and an alert of the kind `evidence_error` names the message.
 - **A control signal is none of this worker's.** The source records of control signals

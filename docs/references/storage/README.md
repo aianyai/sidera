@@ -592,7 +592,15 @@ the check that a body is the canonical encoding of what it decodes
 in the decoder itself (`TestEndpointTextOverTheBoundIsRefusedOnRead`).
 
 **Bodies** are content-addressed and written before the record that refers to
-them; a body is removed in the transaction that drops its last reference. What a
+them; a body is removed in the transaction that drops its last reference, at
+its end, after the records are durable. Every write that can drop one takes the
+bodies to release as an argument: `SourceUpdate`, `ControlResult`, `Ack`, `Tick`,
+the drains, and `DeliverReply`, whose reply can carry the evidence that finishes
+a delivery and so drops the source record's body (`deliver-reply` removes it with
+`body` and `body-dir`; the body of the reply itself is the role `reply-body`, since
+a role names one write of a transaction). Tests:
+`TestDeliverReplyRemovesTheBodiesItReleases` and the `deliver-reply` walks of
+`TestEveryTransactionConvergesFromEveryCrashState`. What a
 crash leaves between the two is an orphan, removed by the first rule of the next
 start. A body is checked against its name when it is read (a start does not read
 them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch quarantines the body and

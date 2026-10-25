@@ -131,7 +131,7 @@ func scenarios() []scenario {
 			bodiesResolve: true,
 		},
 		{
-			name: "deliver-reply",
+			name: "deliver-reply without a release",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				seedBodies(t, mem, bodyBytes(1))
 				seed(t, mem, srcOut(1, true))
@@ -144,7 +144,40 @@ func scenarios() []scenario {
 					Ref:      delivery.DeliveryRef{Sender: addr(local, 1), Message: msgID(1), Recipient: addr(local, 2)},
 					Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: base,
 				}}
-				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}))
+				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}, nil))
+			},
+			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
+				if _, ok := fin[path.Join(store.BodiesDir, bodyRef(1).Name())]; !ok {
+					t.Errorf("%s: the body of the source record, which still refers to it, was removed", where)
+				}
+			},
+		},
+		{
+			// The evidence in the reply finishes the delivery, so the source record
+			// drops its body and the transaction that removes the last reference
+			// deletes the body at its end, after the records are durable.
+			name: "deliver-reply",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seedBodies(t, mem, bodyBytes(1))
+				seed(t, mem, srcOut(1, true))
+			},
+			durable: "deliver-reply/in-dir.sync-dir#1",
+			mode:    batch,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				out := finishedOut(1, true)
+				out.Feedback = []delivery.Item{{
+					Ref:      delivery.DeliveryRef{Sender: addr(local, 1), Message: msgID(1), Recipient: addr(local, 2)},
+					Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: base,
+				}}
+				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}, []store.BodyRef{*bodyRef(1)}))
+			},
+			verify: func(t *testing.T, r *rig) {
+				if _, err := r.mem.Stat(path.Join(store.BodiesDir, bodyRef(1).Name())); err == nil {
+					t.Error("the released body is still there")
+				}
+				if _, err := r.mem.Stat(path.Join(store.BodiesDir, bodyRef(9).Name())); err != nil {
+					t.Errorf("the body of the reply: %v", err)
+				}
 			},
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
 				// The source record is updated before the target record that depends on it.

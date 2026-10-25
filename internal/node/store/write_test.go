@@ -115,6 +115,50 @@ func TestTargetRecordsAreWrittenWithTheNextRevision(t *testing.T) {
 	}
 }
 
+// DeliverReply releases a body the way the other writes that drop the last
+// reference do: the file is removed in the same transaction, after the records,
+// and a body that is not released stays.
+func TestDeliverReplyRemovesTheBodiesItReleases(t *testing.T) {
+	for _, c := range []struct {
+		rule    string
+		release []store.BodyRef
+		want    bool // body 1 is still there
+	}{
+		{"a body the evidence released is removed", []store.BodyRef{*bodyRef(1)}, false},
+		{"a body nobody released stays", nil, true},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			r := newRig(t)
+			seedBodies(t, r.mem, bodyBytes(1))
+			seed(t, r.mem, srcOut(1, true))
+			out := finishedOut(1, true)
+			if err := dropWritten(r.st.DeliverReply(nil, &out, []store.InRecord{inRev(9, 1)}, c.release)); err != nil {
+				t.Fatal(err)
+			}
+			_, err := r.mem.Stat(path.Join(store.BodiesDir, bodyRef(1).Name()))
+			if (err == nil) != c.want {
+				t.Errorf("body 1 present = %v, want %v", err == nil, c.want)
+			}
+			if got := r.scan().In; len(got) != 1 || got[0].Rev != 2 {
+				t.Errorf("target records after the call: %+v", got)
+			}
+			// The body went in the transaction of the reply: its points are the
+			// removal and the directory sync of that transaction, after the records.
+			var steps []string
+			for _, p := range r.rec.points {
+				steps = append(steps, p.Tag.Tx+"/"+p.Tag.Role)
+			}
+			released := false
+			for _, s := range steps {
+				released = released || s == "deliver-reply/body-dir"
+			}
+			if released != (len(c.release) > 0) {
+				t.Errorf("the directory of the bodies was synced = %v for %d released bodies (points %v)", released, len(c.release), steps)
+			}
+		})
+	}
+}
+
 func TestReleaseOfABodyThatIsAlreadyGoneIsQuiet(t *testing.T) {
 	r := newRig(t)
 	seed(t, r.mem, srcOut(1, false))

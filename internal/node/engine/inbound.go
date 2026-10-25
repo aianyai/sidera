@@ -183,7 +183,7 @@ func (e *Engine) writeArrivals(env envelope.Envelope, ref store.BodyRef, arrival
 	var written []store.InRecord
 	var err error
 	if out != nil {
-		written, err = e.d.Store.DeliverReply(body, out, ins)
+		written, err = e.d.Store.DeliverReply(body, out, ins, e.releasedByReply(*out, ins))
 	} else {
 		written, err = e.d.Store.Deliver(body, ins)
 	}
@@ -197,6 +197,18 @@ func (e *Engine) writeArrivals(env envelope.Envelope, ref store.BodyRef, arrival
 		e.view.setIn(in)
 	}
 	return nil
+}
+
+// releasedByReply lists the bodies that no record refers to once the reply is
+// written: the body the source record let go of, unless the reply or another
+// record this transaction writes refers to the same bytes.
+func (e *Engine) releasedByReply(out store.OutRecord, ins []store.InRecord) []store.BodyRef {
+	dropped := []*store.BodyRef{e.view.out[out.Name()].Body}
+	added := []*store.BodyRef{out.Body}
+	for _, in := range ins {
+		added = append(added, in.Body)
+	}
+	return e.view.bodyRefs.unreferencedAfter(dropped, added)
 }
 
 // judgement is what the target decided about one recipient of an envelope.

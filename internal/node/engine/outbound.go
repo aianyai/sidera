@@ -325,10 +325,7 @@ func (e *Engine) applyReports(now time.Time, name string, node ident.NodeID, rec
 		return nil
 	}
 	o = settledSource(o)
-	var release []store.BodyRef
-	if old.Body != nil && o.Body == nil && e.view.bodyRefs[old.Body.Name()] <= 1 {
-		release = append(release, *old.Body)
-	}
+	release := e.view.bodyRefs.unreferencedAfter([]*store.BodyRef{old.Body}, []*store.BodyRef{o.Body})
 	if err := e.d.Store.SourceUpdate(o, release); err != nil {
 		return err
 	}

@@ -48,7 +48,7 @@ func writtenCases() []writtenCase {
 			return r.st.Deliver(nil, ins)
 		}},
 		{name: "DeliverReply", ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-			return r.st.DeliverReply(nil, nil, ins)
+			return r.st.DeliverReply(nil, nil, ins, nil)
 		}},
 		{name: "PromptEnd", ins: func() []store.InRecord { return []store.InRecord{inRev(1, 2), inRev(2, 5)} },
 			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {

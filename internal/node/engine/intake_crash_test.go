@@ -267,6 +267,19 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 			checkSettled(t, r, res.MessageID, answer)
 		})
 	})
+	t.Run("an answer whose evidence releases the last reference to a body", func(t *testing.T) {
+		// The question's body is the source's alone, and the transaction that writes
+		// the answer removes it.
+		taker := newDiskTaker(26, cov, "deliver-reply")
+		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
+		taker.h = h
+		msg, report := bodyHeldBySourceAlone(t, h, "a question only the source holds")
+		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
+			forged(t, h, "answer-that-frees-a-body", addrOf(t, h, "a"), msg, "an answer", report)); err != nil {
+			t.Fatal(err)
+		}
+		walkDisks(t, taker, func(t *testing.T, r *harness.H) { checkTakenOnce(t, r, "answer-that-frees-a-body") })
+	})
 	t.Run("an answer with no source record on this node", func(t *testing.T) {
 		taker := newDiskTaker(25, cov, "deliver-reply")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")

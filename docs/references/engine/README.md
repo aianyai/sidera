@@ -394,8 +394,8 @@ reproducible).
 | What is sent and asked, and when | `outbound.go` | `TestOutboundNeedByState`, `TestAnUnreachableNodeIsSentToUntilTheDeadlineAndAskedAfterIt`, `TestHeldReportsAreAskedForUntilTheyCome`, `TestARestartGoesOnWithAMessageThatWasNotSettled`, `TestANodeThatHasNotAnsweredIsSentToAfterAnotherNodeDid`, `TestTheReportsAreAskedForUntilTheReportDeadlineAndNoLonger` |
 | No evidence is signed while the wall clock cannot be trusted | `signing.go` (`canSign`) | `TestNoEvidenceIsSignedWhileTheWallClockCannotBeTrusted` |
 | An engine does not open with the keys of another node | `engine.go` (`newEngine`) | `TestAnEngineWithTheKeysOfAnotherNodeDoesNotStart` |
-| The body is held by what needs it | `inbound.go` (`settledSource`), `outbound.go` | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt` |
-| Every write of taking a message in survives a crash, and every declared step is crashed at | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint`: a message, a message the target refuses (the body is released), an envelope and an answer that no source record of this node sent (the target writes the body), and an answer with evidence; a message or an answer that has a source ends handled once, and the test fails when a declared step is reached by no scenario |
+| The body is held by what needs it | `inbound.go` (`settledSource`, `releasedByReply`), `outbound.go`, `drain.go`; the one rule of what a transaction releases is `bodyCounts.unreferencedAfter`: the references it drops, less the ones it writes | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt`, `TestUnreferencedAfterCountsTheReferencesATransactionAddsAsWellAsTheOnesItDrops`, `TestEvidenceThatReleasesTheLastReferenceToABodyRemovesIt`, `TestAReplyWhoseBodyEqualsTheOriginalKeepsTheBodyTheEvidenceReleased` |
+| Every write of taking a message in survives a crash, and every declared step is crashed at | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint`: a message, a message the target refuses (the body is released), an envelope and an answer that no source record of this node sent (the target writes the body), an answer with evidence, and an answer whose evidence releases the last reference to the question's body (the transaction removes it); a message or an answer that has a source ends handled once, and the test fails when a declared step is reached by no scenario |
 | The receiving entry under arbitrary bytes | `inbound.go` | `FuzzInbound` |
 
 Known gaps, each filled in with the feature it belongs to:
@@ -418,9 +418,6 @@ Known gaps, each filled in with the feature it belongs to:
 - A disclosed list of several recipients is refused: the source record does not keep the
   flag, so a send again could not repeat the request digest the target stored
   (`TestShouldTheSourceRecordKeepWhetherRecipientsAreDisclosed`, skipped).
-- The evidence of a reply that frees the last reference to a body leaves the body for the
-  next start's rule for bodies nobody refers to: the transaction that writes the reply has
-  no step that removes one.
 - The unreachable hint and the expiry of a delivery nobody answered are not applied by the
   sender yet; they come with the feedback.
 - Closing a session endpoint does not yet send `session.close` to the adapter: the

@@ -102,6 +102,35 @@ func (c bodyCounts) add(r *store.BodyRef, n int) {
 	c[r.Name()] += n
 }
 
+// unreferencedAfter lists the bodies that no record refers to once a transaction
+// has dropped one reference for each entry of dropped and added one for each entry
+// of added, each once and in the order dropped names them. A transaction releases
+// exactly these: a body is addressed by its content, so a record the transaction
+// writes may refer to the bytes another record let go of, and that body must stay.
+// c is how many records refer to each body now; it is not changed.
+func (c bodyCounts) unreferencedAfter(dropped, added []*store.BodyRef) []store.BodyRef {
+	net := map[string]int{}
+	for _, r := range dropped {
+		if r != nil {
+			net[r.Name()]--
+		}
+	}
+	for _, r := range added {
+		if r != nil {
+			net[r.Name()]++
+		}
+	}
+	var out []store.BodyRef
+	listed := map[string]bool{}
+	for _, r := range dropped {
+		if r != nil && !listed[r.Name()] && c[r.Name()]+net[r.Name()] <= 0 {
+			listed[r.Name()] = true
+			out = append(out, *r)
+		}
+	}
+	return out
+}
+
 func (c bodyCounts) clone() bodyCounts {
 	out := make(bodyCounts, len(c))
 	for k, v := range c {

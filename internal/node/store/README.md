@@ -89,7 +89,8 @@ engine applies the delivery rules and calls the writes.
   without the scan.
 - **Bodies first, and removed last.** The caller works out which bodies lost their
   last reference (the reference count is in the engine's view) and says so; a body
-  already gone is not an error.
+  already gone is not an error. `DeliverReply` takes the release like the other writes that can drop a body:
+  the evidence in a reply can finish a delivery.
 - **A quarantined file's first line is trusted by the rule of a live file, once.**
   The scan and `DecodeRecord` share one function for it (kind held by the
   directory, name equal to the hash of kind and key, key parses); a first line

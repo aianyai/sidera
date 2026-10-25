@@ -260,9 +260,12 @@ func (s *Store) Deliver(body []byte, ins []InRecord) ([]InRecord, error) {
 
 // DeliverReply records a reply that carries evidence: the updated source
 // record of the message it answers, if the evidence changed it, before the
-// target records of the reply.
+// target records of the reply, then removes the bodies whose last reference
+// this transaction drops; the caller computes them from its reference counts,
+// counting the records this transaction writes (a reply may say the same bytes
+// as the message it answers, and then refers to that very body).
 // It returns the target records as written (the revision one on).
-func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord) ([]InRecord, error) {
+func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord, release []BodyRef) ([]InRecord, error) {
 	if len(ins) == 0 {
 		return nil, errors.New("store: DeliverReply needs a record")
 	}
@@ -284,10 +287,14 @@ func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord) ([]InR
 			return nil, err
 		}
 	}
+	ex, err := s.exist(bodyFiles(release))
+	if err != nil {
+		return nil, err
+	}
 	tx := s.w.Begin(&declDeliverReply)
 	defer tx.Close()
 	if bf != nil {
-		if err := s.replace(tx, "body", *bf); err != nil {
+		if err := s.replace(tx, "reply-body", *bf); err != nil {
 			return nil, err
 		}
 	}
@@ -297,6 +304,9 @@ func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord) ([]InR
 		}
 	}
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
+		return nil, err
+	}
+	if err := s.release(tx, release, ex); err != nil {
 		return nil, err
 	}
 	return committed(tx, written)
