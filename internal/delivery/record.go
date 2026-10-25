@@ -116,8 +116,12 @@ func NewSourceRecord(queuedAt, acceptBefore time.Time) Record {
 // NewTargetRecord returns the target's record of a delivery it has just
 // accepted. acceptBefore and reportBy are the envelope's values, already
 // validated by the caller; endpointMaxQueue is the recipient endpoint's longest
-// queue time.
+// queue time. A zero acceptedAt is ErrInvalidInput, as a transition at the zero
+// time is: the record would enter its state at no time at all.
 func NewTargetRecord(acceptedAt, acceptBefore, reportBy time.Time, endpointMaxQueue time.Duration) (Record, error) {
+	if acceptedAt.IsZero() {
+		return Record{}, fmt.Errorf("%w: a target record needs the time it was accepted", ErrInvalidInput)
+	}
 	if err := ValidateEndpointMaxQueue(endpointMaxQueue); err != nil {
 		return Record{}, err
 	}

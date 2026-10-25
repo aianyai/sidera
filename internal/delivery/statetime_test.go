@@ -403,3 +403,24 @@ func TestTransitionsRefuseAZeroClock(t *testing.T) {
 		t.Errorf("a record started at the zero time: %v, want %s", err, ViolationStateAt)
 	}
 }
+
+// A constructor that can refuse refuses a zero time on the spot, as a transition at
+// the zero time is refused: the record would otherwise be made and fail only when it
+// is written.
+func TestConstructorsThatCanRefuseRefuseTheZeroTime(t *testing.T) {
+	ab := at(10 * time.Minute)
+	_, targetErr := NewTargetRecord(time.Time{}, ab, ReportBy(ab), time.Hour)
+	_, noticeErr := NewTargetNoticeRecord(time.Time{}, ab, ReportBy(ab), time.Hour)
+	_, _, sourceLostErr := NewLostRecord(SideSource, false, time.Time{})
+	_, _, targetLostErr := NewLostRecord(SideTarget, false, time.Time{})
+	for rule, err := range map[string]error{
+		"a target message record at the zero time":    targetErr,
+		"a target notice record at the zero time":     noticeErr,
+		"a lost source record found at the zero time": sourceLostErr,
+		"a lost target record found at the zero time": targetLostErr,
+	} {
+		if !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("%s: err = %v, want ErrInvalidInput", rule, err)
+		}
+	}
+}

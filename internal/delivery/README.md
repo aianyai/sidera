@@ -144,8 +144,9 @@ A delivered record is final, so the time it was delivered is the time it entered
 its state: `DeliveredAt()` returns `StateAt` for a delivered record and the zero
 time otherwise, and no second time is kept that could disagree. A status report
 needs exactly these two (`reported_at` and `delivered_at`, the latter present
-exactly when delivered). A transition at the zero time is `ErrInvalidInput`, and
-`Valid` refuses a record without `StateAt` (`ViolationStateAt`); it compares
+exactly when delivered). A transition at the zero time is `ErrInvalidInput`, and so is a
+constructor that returns an error (`NewTargetRecord`, `NewTargetNoticeRecord`,
+`NewLostRecord`); `Valid` refuses a record without `StateAt` (`ViolationStateAt`); it compares
 `StateAt` with no other instant, because the wall clock may step back.
 
 ## Backlog limit

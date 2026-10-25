@@ -330,10 +330,13 @@ fresh signature; one that settles a delivery late (a `Tick` after `report_by`)
 records and reports the moment it woke, which is what the sender expects of a
 late report.
 
-A transition at the zero time is `ErrInvalidInput`; `Valid` refuses a record
+A transition at the zero time is `ErrInvalidInput`, and so is a constructor that
+returns an error (`NewTargetRecord`, `NewTargetNoticeRecord`, `NewLostRecord`): a record
+made at no time would fail only when it is written. `Valid` refuses a record
 without it (`ViolationStateAt`) and compares it with no other instant, since the
 wall clock may step back. Tests in `internal/delivery/statetime_test.go`:
 `TestConstructorsStartTheStateAtTheGivenTime`,
+`TestConstructorsThatCanRefuseRefuseTheZeroTime`,
 `TestEveryTransitionIntoAStateSetsTheStateAtToItsClock` (every way into a state,
 expected instants from the test's own clock), `TestTickStampsEveryStepOfOneCallWithItsClock`,
 `TestFactsThatLeaveTheStateAloneLeaveTheStateAtAlone`,
