@@ -56,13 +56,21 @@ func readClockIfPresent(r fsx.Reader) (ClockState, bool, error) {
 // SaveClock writes the clock record: the periodic persistence of the high water
 // mark, and the start of a rollback pause. It never goes back. A mark below the
 // persisted one, a pause flag that is lifted or moved, and a state with no mark
-// are refused with ErrClockRegression and write nothing; only the owner's clear,
+// are refused with ErrClockRegression and write nothing, and so is a mark or a
+// pause start that no record can hold, except that a pause start before
+// 1970-01-01T00:00:01Z is stored as that second; only the owner's clear,
 // PutClockCleared, resets the mark or lifts the pause. Times are cut to whole
 // seconds before they are compared and written, so the persisted mark is never
 // above the reading it came from.
 func (k *Keys) SaveClock(next ClockState) error {
 	next.HighWater = next.HighWater.UTC().Truncate(time.Second)
 	next.RollbackPausedSince = next.RollbackPausedSince.UTC().Truncate(time.Second)
+	// A pause that started before the first second a record holds (a dead
+	// battery sets the clock to the epoch) is the case the pause exists for, so
+	// it is stored with its start at that second rather than refused.
+	if next.Paused() && next.RollbackPausedSince.Before(earliestRecordTime) {
+		next.RollbackPausedSince = earliestRecordTime
+	}
 	if err := checkRecordTime(next.HighWater); err != nil {
 		return fileError(ClockPath, ErrClockRegression, "the record needs a high water mark from 1970-01-01T00:00:01Z on, to the end of year 9999")
 	}

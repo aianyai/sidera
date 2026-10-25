@@ -139,10 +139,9 @@ func TestSaveClockNeverGoesBack(t *testing.T) {
 		{"lower the mark of a paused clock", keys.ClockState{HighWater: hw, RollbackPausedSince: since}, keys.ClockState{HighWater: hw.Add(-time.Minute), RollbackPausedSince: since}, true},
 		{"first write with no record", keys.ClockState{}, keys.ClockState{HighWater: hw}, false},
 		// a time the decoder refuses is never written: the next start would read
-		// the file as damaged, and the way out would be to delete the mark
-		{"pause that started before 1970", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC)}, true},
-		{"pause that started at the epoch itself", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Unix(0, 0)}, true},
-		{"pause that started within the first second", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Unix(0, 999_000_000)}, true},
+		// the file as damaged, and the way out would be to delete the mark. A pause
+		// that started before 1970 is the exception, kept with a clamped start
+		// (TestSaveClockClampsAPauseThatStartedBeforeTheEarliestSecond).
 		{"pause that starts after year 9999", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: hw, RollbackPausedSince: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}, true},
 		{"mark that is before 1970", keys.ClockState{}, keys.ClockState{HighWater: time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC)}, true},
 		{"mark after year 9999", keys.ClockState{HighWater: hw}, keys.ClockState{HighWater: time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)}, true},
@@ -245,6 +244,39 @@ func TestClearingTheRollbackRefusesATimeTheDecoderRefuses(t *testing.T) {
 			asFileError(t, err, keys.ClockPath)
 			if r.obs.count() != 0 {
 				t.Errorf("a refused clear wrote: %v", r.obs.names())
+			}
+		})
+	}
+}
+
+// A pause that started before the earliest second a record holds (a dead battery
+// resets the clock to the epoch) is stored, with its start at that second: the
+// pause must be persisted exactly when the clock is wrong, and refusing it would
+// leave the node without the flag. The mark keeps its rule, and the same state
+// saved again is not a moved pause.
+func TestSaveClockClampsAPauseThatStartedBeforeTheEarliestSecond(t *testing.T) {
+	earliest := time.Unix(1, 0).UTC()
+	for name, since := range map[string]time.Time{
+		"before 1970":              time.Date(1969, 12, 31, 23, 59, 59, 0, time.UTC),
+		"the epoch itself":         time.Unix(0, 0),
+		"within the first second":  time.Unix(0, 999_000_000),
+		"the year 1, not the zero": time.Date(1, 1, 2, 0, 0, 0, 0, time.UTC),
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := newRig(t)
+			r.mustInit(1, t0)
+			k := r.mustLoad()
+			paused := keys.ClockState{HighWater: t0, RollbackPausedSince: since}
+			if err := k.SaveClock(paused); err != nil {
+				t.Fatalf("SaveClock = %v", err)
+			}
+			got, err := keys.ReadClock(r.mem)
+			if err != nil || !got.Paused() || !got.RollbackPausedSince.Equal(earliest) || !got.HighWater.Equal(t0) {
+				t.Fatalf("ReadClock = %+v, %v; want a pause since %s and the mark %s", got, err, earliest, t0)
+			}
+			paused.HighWater = t0.Add(time.Minute)
+			if err := k.SaveClock(paused); err != nil {
+				t.Errorf("saving the same pause again with a raised mark: %v", err)
 			}
 		})
 	}

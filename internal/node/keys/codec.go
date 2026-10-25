@@ -30,6 +30,9 @@ const timeLayout = "2006-01-02T15:04:05Z"
 
 func formatTime(t time.Time) string { return t.UTC().Truncate(time.Second).Format(timeLayout) }
 
+// earliestRecordTime is the first second these files can hold.
+var earliestRecordTime = time.Unix(1, 0).UTC()
+
 // checkRecordTime refuses a time that these files cannot hold, as it would be
 // written (whole seconds, UTC): before 1970-01-01T00:00:01Z, which includes the
 // zero time, or after year 9999. It is the one rule of what a time of these files

@@ -97,7 +97,11 @@ transaction of `txn`; nothing here calls an `fsx` write.
   applies the rule the decoders apply before it writes anything. A clock that was
   reset to zero by a dead battery is the case it is for: a pause that started at
   that time would otherwise be written and then read as damage, and the owner's
-  only way out would be to delete the file and lose the pause and the mark.
+  only way out would be to delete the file and lose the pause and the mark. So
+  `SaveClock` stores a pause that started before 1970-01-01T00:00:01Z with its
+  start at that second instead of refusing it, because the pause must be
+  persisted exactly when the clock is wrong; the mark follows the rule above
+  unchanged.
 - **`init` looks before it writes and never overwrites.** A key file that exists
   and parses is reused; one that does not parse is refused, naming it. The
   self-revocation is reused only if it verifies under the identity key that is
@@ -168,6 +172,7 @@ The named tests of the row: `TestPermissionsTooBroadAreRefusedNamingTheFile`
 (and the Unix and Windows files), `TestSerialNeverGoesBackAcrossRestartsAndCrashes`,
 `TestInterruptedRenewalIsRecognisedAndRepaired`, `TestInitRerunNeverOverwritesAKey`,
 `TestInitReusesAValidSelfRevocation`, `TestInitSignsNoEarlierThanTheHighWaterMark`,
+`TestSaveClockClampsAPauseThatStartedBeforeTheEarliestSecond`,
 `TestInitRefusesASelfRevocationThatDoesNotVerifyUnderTheCurrentKey`,
 `TestExportFormatGolden`, the crash-state tests
 (`TestRenewalReplaysToAConsistentStateFromEveryCrashState`,

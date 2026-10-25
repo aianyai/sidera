@@ -177,7 +177,8 @@ persisted mark by more than the clock tolerance.
 **The clock record.** The periodic write never lowers the mark, never lifts or
 moves the pause, never writes without a mark, and refuses a time the decoder
 would refuse (before 1970-01-01T00:00:01Z, after year 9999), in either of its two
-times. Only the owner's clear sets
+times, except that a pause that started before 1970-01-01T00:00:01Z is stored with
+its start at that second. Only the owner's clear sets
 the mark to the current time, which may be lower, and removes the pause, in one
 replacement of the file. A missing `clock.rec` is a first start; a damaged one
 refuses the start.
@@ -393,7 +394,12 @@ certificate below.
   owner's way out would be to delete the file, which loses the pause and the mark
   together. One rule of what a time may be serves the decoder and every write
   (`SaveClock`, the owner's clear, the marker and first clock record of `init`), and
-  a write that cannot be read back fails before it writes.
+  a write that cannot be read back fails before it writes. The one value that is
+  clamped instead of refused is the start of a rollback pause before
+  1970-01-01T00:00:01Z: refusing it would leave no pause persisted exactly when the
+  clock is wrong, and the start is only the alert's "since", so the earliest
+  second stands for it. The mark is never clamped
+  (`TestSaveClockClampsAPauseThatStartedBeforeTheEarliestSecond`).
 - **The clock record never goes back through the periodic write.** If it could,
   the in-memory mark's rule (raise only) would be enforced by every caller instead
   of by the file; and lifting the pause by an ordinary write would skip the owner's
