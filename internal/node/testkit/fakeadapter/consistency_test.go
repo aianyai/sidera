@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -167,6 +168,14 @@ func runFullScenario(t *testing.T, serverRequests bool) *rig {
 // by direction, together with the number of lines checked.
 func validateLog(t *testing.T, r *rig) (toAdapter, fromAdapter map[string]int, lines int) {
 	t.Helper()
+	return validateFrames(t, r, false)
+}
+
+// validateFrames is validateLog; with adapterOnly it checks only what the adapter
+// wrote, which is what the fake is answerable for: a test may send the adapter a
+// request that is wrong on purpose.
+func validateFrames(t *testing.T, r *rig, adapterOnly bool) (toAdapter, fromAdapter map[string]int, lines int) {
+	t.Helper()
 	toAdapter, fromAdapter = map[string]int{}, map[string]int{}
 	pending := map[bool]map[string]string{true: {}, false: {}} // by direction of the request, id -> method
 	for _, ll := range r.log.snapshot() {
@@ -189,6 +198,9 @@ func validateLog(t *testing.T, r *rig) (toAdapter, fromAdapter map[string]int, l
 			// A response travels the opposite way to its request.
 			method = pending[!ll.toAdapter][string(f.ID)]
 		}
+		if adapterOnly && ll.toAdapter {
+			continue
+		}
 		if err := checkFrame(t, ll.line, method); err != nil {
 			t.Errorf("%s line %s is not valid protocol: %v\n%s", direction(ll.toAdapter), f.Method, err, ll.line)
 		}
@@ -204,6 +216,45 @@ func direction(toAdapter bool) string {
 	return "adapter to daemon"
 }
 
+// expectedExchange is what runFullScenario puts on the wire, counted from its
+// script, line by line, and not from what the adapter happened to write: the
+// requests and notifications each way, by method. Responses carry no method.
+func expectedExchange(serverRequests bool) (toAdapter, fromAdapter map[string]int) {
+	toAdapter = map[string]int{
+		adapterproto.MethodInitialize:       1, // the handshake
+		adapterproto.MethodPing:             1, // the daemon's ping
+		adapterproto.MethodAdapterStart:     1,
+		adapterproto.MethodAdapterProbe:     1,
+		adapterproto.MethodSessionCreate:    2, // the one that is cancelled while held, and sess-1
+		adapterproto.MethodCancelRequest:    1, // the cancel of the held create
+		adapterproto.MethodPromptDeliver:    2, // attempt 2 starts a turn, attempt 3 is only accepted
+		adapterproto.MethodPromptReconcile:  2, // an attempt in the record and one that never was
+		adapterproto.MethodSessionInterrupt: 2, // a running turn, then none
+		adapterproto.MethodSessionClose:     1,
+		adapterproto.MethodEndpointPending:  1,
+		adapterproto.MethodShutdown:         1,
+	}
+	fromAdapter = map[string]int{
+		adapterproto.MethodPing:                  1, // the Ping knob
+		adapterproto.MethodAdapterAvailability:   2, // a condition, then the empty snapshot
+		adapterproto.MethodCheckpointPut:         2, // the attempt's and the session's, both of sess-1
+		adapterproto.MethodTurnStarted:           2, // the prompt's turn and the scripted one
+		adapterproto.MethodTurnEnded:             2, // ended by the script, ended by the interrupt
+		adapterproto.MethodRecvObserved:          1, // the page the first turn read
+		adapterproto.MethodPromptPersisted:       1,
+		adapterproto.MethodEndpointRegister:      1,
+		adapterproto.MethodEndpointRecv:          1,
+		adapterproto.MethodEndpointAck:           1,
+		adapterproto.MethodEndpointSend:          1,
+		adapterproto.MethodEndpointMessageStatus: 1,
+		adapterproto.MethodEndpointUnregister:    1,
+	}
+	if serverRequests {
+		fromAdapter[adapterproto.MethodNativeRequestHandled] = 1
+	}
+	return toAdapter, fromAdapter
+}
+
 // TestFakeAdapterOutputMatchesProtocolSchemas is the consistency test of the
 // fake adapter: every line it writes, answer or request or notification, is
 // accepted by the JSON Schema and by the Go types of the protocol, and across
@@ -216,9 +267,13 @@ func TestFakeAdapterOutputMatchesProtocolSchemas(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			r := runFullScenario(t, serverRequests)
-			toAdapter, fromAdapter, lines := validateLog(t, r)
-			if lines < 50 {
-				t.Fatalf("only %d lines were exchanged: the scenario did not run", lines)
+			toAdapter, fromAdapter, _ := validateLog(t, r)
+			wantTo, wantFrom := expectedExchange(serverRequests)
+			if !reflect.DeepEqual(toAdapter, wantTo) {
+				t.Errorf("requests and notifications to the adapter, by method:\n got %v\nwant %v", toAdapter, wantTo)
+			}
+			if !reflect.DeepEqual(fromAdapter, wantFrom) {
+				t.Errorf("requests and notifications from the adapter, by method:\n got %v\nwant %v", fromAdapter, wantFrom)
 			}
 
 			// Every method the daemon may call, the daemon called, and the fake

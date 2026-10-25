@@ -14,11 +14,10 @@ import (
 
 // RunProcess is the body of a runtime process: it hosts one session, makes it
 // reachable on a loopback address that it writes to the info file beside the
-// record, serves the adapter that drives the session and, when the spec names a
-// control server, the fixture that scripts its turns, with the test clock the
-// fixture sets. It returns when ctx ends, when the control connection ends, or
-// when the native process is killed. ready is called once the session exists and
-// the address is on disk.
+// record, serves the adapter that drives the session and the fixture that scripts
+// its turns, with the test clock the fixture sets. It returns when ctx ends, when
+// the control connection ends, or when the native process is killed. ready is
+// called once the session exists and the address is on disk.
 func RunProcess(ctx context.Context, spec ProcessSpec, runner ActionRunner, ready func(ProcessInfo)) error {
 	if err := spec.validate(); err != nil {
 		return err
@@ -28,7 +27,7 @@ func RunProcess(ctx context.Context, spec ProcessSpec, runner ActionRunner, read
 
 	clock := fakectl.NewClock(spec.ClockStartMS)
 	files := ledger.NewDir(spec.LedgerDir)
-	rt, err := New(Config{Now: clock.Now, Ledgers: files, Dir: spec.Dir, Seed: spec.Seed, Runner: runner, PID: os.Getpid()})
+	rt, err := New(Config{Now: clock.Now, Ledgers: files, Dir: spec.Dir, Seed: spec.Seed, Runner: runner, PID: os.Getpid(), FirstTurn: spec.FirstTurn.Plan()})
 	if err != nil {
 		return err
 	}
@@ -44,39 +43,34 @@ func RunProcess(ctx context.Context, spec ProcessSpec, runner ActionRunner, read
 		return err
 	}
 	defer srv.Close()
-	p := &processHost{rt: rt, sess: sess, srv: srv, ctx: ctx, stop: stop}
-	sess.Watch(p)
+	info := ProcessInfo{Ref: sess.ref, Endpoint: sess.endpoint, Addr: srv.Addr(), PID: int64(os.Getpid()), StartKey: sess.startKey, CreatedSeq: sess.createdSeq}
+	p := &processHost{rt: rt, sess: sess, srv: srv, ctx: ctx, stop: stop, info: info}
+	// The session is not watched yet: its first turn starts when the adapter that
+	// made it says it is in charge (MethodWatch), so that the turn's events have an
+	// adapter to go to.
 	p.serve()
 
-	var control *fakectl.Client
-	if spec.Control != "" {
-		control, err = fakectl.Dial(ctx, spec.Control)
-		if err != nil {
-			return err
-		}
-		defer control.Close()
-		control.HandleClock(clock.SetMS)
-		control.HandleStep(files.SetStep)
-		control.HandleKnob(p.knob)
-		if err := control.Start(ctx, fakectl.HelloParams{Role: fakectl.RoleRuntime, ID: sess.ref, PID: int64(os.Getpid())}); err != nil {
-			return err
-		}
+	control, err := fakectl.Dial(ctx, spec.Control)
+	if err != nil {
+		return err
+	}
+	defer control.Close()
+	control.HandleClock(clock.SetMS)
+	control.HandleStep(files.SetStep)
+	control.HandleKnob(p.knob)
+	if err := control.Start(ctx, fakectl.HelloParams{Role: fakectl.RoleRuntime, ID: sess.ref, PID: int64(os.Getpid())}); err != nil {
+		return err
 	}
 
-	info := ProcessInfo{Ref: sess.ref, Endpoint: sess.endpoint, Addr: srv.Addr(), PID: int64(os.Getpid()), StartKey: sess.startKey}
 	if err := writeInfo(spec.Dir, info); err != nil {
 		return err
 	}
 	if ready != nil {
 		ready(info)
 	}
-	var controlDone <-chan struct{}
-	if control != nil {
-		controlDone = control.Done()
-	}
 	select {
 	case <-ctx.Done():
-	case <-controlDone:
+	case <-control.Done():
 	}
 	return nil
 }
@@ -102,6 +96,7 @@ type processHost struct {
 	srv  *fakectl.Server
 	ctx  context.Context
 	stop context.CancelFunc
+	info ProcessInfo
 }
 
 func linkError(err error) error {
@@ -155,7 +150,11 @@ func (h *processHost) serve() {
 	})
 	handle(MethodState, func(context.Context, json.RawMessage) (any, error) {
 		turn, active := h.sess.TurnActive()
-		return StateReply{Alive: h.sess.Alive(), Active: active, Turn: turn}, nil
+		return StateReply{Ref: h.info.Ref, PID: h.info.PID, StartKey: h.info.StartKey, Alive: h.sess.Alive(), Active: active, Turn: turn}, nil
+	})
+	handle(MethodWatch, func(context.Context, json.RawMessage) (any, error) {
+		h.sess.Watch(h) // the first call starts the first turn; later ones change nothing
+		return struct{}{}, nil
 	})
 }
 
@@ -164,11 +163,11 @@ func (h *processHost) knob(_ context.Context, name string, args json.RawMessage)
 	invalid := func(err error) error { return peer.NewError(peer.CodeInvalidParams, err.Error()) }
 	switch name {
 	case KnobPlan:
-		v, err := DecodeLink("knob."+KnobPlan, args)
+		k, err := DecodePlanKnob(KnobPlan, args)
 		if err != nil {
 			return nil, invalid(err)
 		}
-		return nil, linkError(h.rt.SetPlan(h.sess.ref, v.(PlanKnob).Plan()))
+		return nil, linkError(h.rt.SetPlan(h.sess.ref, k.Plan()))
 	case KnobTurnStart:
 		return nil, linkError(h.rt.StartTurn(h.sess.ref))
 	case KnobTurnEnd:
@@ -191,15 +190,28 @@ func (h *processHost) knob(_ context.Context, name string, args json.RawMessage)
 	return nil, peer.NewError(peer.CodeMethodNotFound, "no such knob")
 }
 
-// The watcher of the session sends its events to every adapter connected.
+// The watcher of the session makes each event a request of every adapter
+// connected, one adapter and one event at a time, and returns when the adapter has
+// answered: it answers once it has handed the event to the daemon. The runtime is
+// busy until then, so a fixture that asks whether it is idle does not see a gap
+// between the runtime having finished and the daemon having been told. An adapter
+// that is gone cannot answer, and there is nobody to tell.
+func (h *processHost) emit(method string, params any) {
+	for _, c := range h.srv.Conns() {
+		if c.Hello().Role == fakectl.RoleAdapter {
+			_ = c.Call(h.ctx, method, params, nil)
+		}
+	}
+}
+
 func (h *processHost) TurnStarted(e TurnStartedEvent) {
-	_ = h.srv.Broadcast(h.ctx, fakectl.RoleAdapter, NoteTurnStarted, TurnStartedNote{Turn: e.Turn, Attempt: e.Attempt, AtMS: e.AtMS})
+	h.emit(MethodTurnStarted, TurnStartedParams{Turn: e.Turn, Attempt: e.Attempt, AtMS: e.AtMS})
 }
 
 func (h *processHost) TurnEnded(e TurnEndedEvent) {
-	_ = h.srv.Broadcast(h.ctx, fakectl.RoleAdapter, NoteTurnEnded, TurnEndedNote{Turn: e.Turn, Final: e.Final, AtMS: e.AtMS})
+	h.emit(MethodTurnEnded, TurnEndedParams{Turn: e.Turn, Final: e.Final, AtMS: e.AtMS})
 }
 
 func (h *processHost) ToolResult(e ToolResultEvent) {
-	_ = h.srv.Broadcast(h.ctx, fakectl.RoleAdapter, NoteToolResult, ToolResultNote{Lease: e.Lease, Text: e.Text, Frontend: e.Frontend})
+	h.emit(MethodToolResult, ToolResultParams{Lease: e.Lease, Text: e.Text, Frontend: e.Frontend})
 }

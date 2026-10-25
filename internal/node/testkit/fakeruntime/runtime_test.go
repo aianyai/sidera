@@ -138,13 +138,18 @@ type env struct {
 	dir    string
 	rt     *fakeruntime.Runtime
 	runner *scriptedRunner
+	// holdFirst leaves the plan of the first turn as the Config gave it.
+	holdFirst bool
 }
 
 func newEnv(t *testing.T, mutate func(*fakeruntime.Config)) *env {
 	t.Helper()
 	leakGuard(t)
 	e := &env{t: t, clock: clocktest.NewFake(start), mem: ledger.NewMemory(), dir: t.TempDir(), runner: &scriptedRunner{}}
-	cfg := fakeruntime.Config{Now: e.clock.Now, Ledgers: e.mem, Dir: e.dir, Seed: 9, Runner: e.runner}
+	// Most tests drive the turns of a session by hand, so by default the first
+	// prompt waits for the script; create hands the session the plan of an ordinary
+	// turn once it has a watcher. A test of the first turn itself sets FirstTurn.
+	cfg := fakeruntime.Config{Now: e.clock.Now, Ledgers: e.mem, Dir: e.dir, Seed: 9, Runner: e.runner, FirstTurn: fakeruntime.TurnPlan{ManualStart: true}}
 	if mutate != nil {
 		mutate(&cfg)
 	}
@@ -167,6 +172,12 @@ func (e *env) create(n int, endpoint string) (fakeruntime.Session, *watcher) {
 	}
 	w := newWatcher()
 	s.Watch(w)
+	if e.holdFirst {
+		return s, w
+	}
+	if err := e.rt.SetPlan(s.Ref(), fakeruntime.TurnPlan{}); err != nil {
+		e.t.Fatal(err)
+	}
 	return s, w
 }
 
@@ -581,11 +592,13 @@ func TestKilledNativeStopsReportingAndLeavesTheRecordReadable(t *testing.T) {
 	if got := e.log().Kind(ledger.KindRuntimeKilled); len(got) != 1 {
 		t.Fatalf("%d runtime.killed entries", len(got))
 	}
+	// The process cannot end its turn, but the adapter that is online sees it die,
+	// and every turn has exactly one end: it is reported once, as failed.
 	w.mu.Lock()
-	ended := len(w.ended)
+	ended := append([]fakeruntime.TurnEndedEvent(nil), w.ended...)
 	w.mu.Unlock()
-	if ended != 0 {
-		t.Fatal("a killed native process reported the end of its turn")
+	if len(ended) != 1 || ended[0].Final != fakeruntime.FinalFailed || ended[0].Turn != w.started[0].Turn {
+		t.Fatalf("turn ends after the kill: %+v, want the running turn %s ended once as failed", ended, w.started[0].Turn)
 	}
 	if err := e.deliver(s, 3, "late"); !errors.Is(err, fakeruntime.ErrNotAlive) {
 		t.Fatalf("Deliver to a killed session = %v", err)
@@ -594,8 +607,21 @@ func TestKilledNativeStopsReportingAndLeavesTheRecordReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !rec.Found || !rec.WriterStopped {
-		t.Fatalf("Reconcile of a delivered attempt on a dead session = %+v", rec)
+	if !rec.Found || !rec.WriterStopped || rec.TurnState != fakeruntime.FinalFailed {
+		t.Fatalf("Reconcile of a delivered attempt on a dead session = %+v, want its turn failed", rec)
+	}
+	raw, err := os.ReadFile(filepath.Join(e.dir, s.Ref()+".jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := fakeruntime.ParseRecord(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ev := range events {
+		if ev.Kind == fakeruntime.EventTurnEnded {
+			t.Fatalf("the record of a killed process holds a turn end: %+v; a dead writer writes nothing", ev)
+		}
 	}
 	rec, err = s.Reconcile(attempt(7))
 	if err != nil {
@@ -782,5 +808,203 @@ func TestAnExecActionThatNamesAFrontendIsAReceive(t *testing.T) {
 	defer w.mu.Unlock()
 	if len(w.results) != 1 {
 		t.Fatalf("%d tool results, want 1", len(w.results))
+	}
+}
+
+// --- the first turn ---
+
+// createUnwatched creates the session of attempt n and does not set a watcher.
+func (e *env) createUnwatched(n int) fakeruntime.Session {
+	e.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	s, err := e.rt.Create(ctx, fakeruntime.CreateRequest{Attempt: attempt(n), Endpoint: "sess-" + string(rune('0'+n)), Preset: "default", FirstAttempt: attempt(n), FirstPrompt: "hello", Env: map[string]string{"SIDERA_TOKEN": "t"}})
+	if err != nil {
+		e.t.Fatalf("Create: %v", err)
+	}
+	return s
+}
+
+// TestTheFirstPromptStartsTheFirstTurnWhenTheAdapterTakesCharge: a real runtime
+// starts working on its first prompt at once. The fake does the same, at the
+// moment the adapter that made the session takes charge of it, so that the turn's
+// events have somewhere to go; the plan of that turn is the one the runtime was
+// given for first turns, and the zero plan starts it automatically.
+func TestTheFirstPromptStartsTheFirstTurnWhenTheAdapterTakesCharge(t *testing.T) {
+	e := newEnv(t, func(c *fakeruntime.Config) { c.FirstTurn = fakeruntime.TurnPlan{} })
+	s := e.createUnwatched(1)
+	if _, active := s.TurnActive(); active {
+		t.Fatal("a turn started before anyone watched the session: its events would reach nobody")
+	}
+	w := newWatcher()
+	s.Watch(w)
+	w.waitFor(t, "the first turn.started", func() bool { return len(w.started) == 1 })
+	if got := w.started[0]; got.Attempt != attempt(1) {
+		t.Fatalf("the first turn belongs to attempt %q, want the first prompt %s", got.Attempt, attempt(1))
+	}
+	// Watching again (an adapter that came back) does not start another turn.
+	s.Watch(newWatcher())
+	if turn, active := s.TurnActive(); !active || turn != w.started[0].Turn {
+		t.Fatalf("TurnActive() = %q, %v after a second Watch", turn, active)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.started) != 1 {
+		t.Fatalf("%d turn starts", len(w.started))
+	}
+}
+
+func TestTheFirstTurnTakesItsPlanFromTheConfigAndAManualPlanHoldsItBack(t *testing.T) {
+	page := pageWith(leaseA, adapterproto.PageMessage{ID: "m1", From: "alice/agent", Body: "b"})
+	e := newEnv(t, func(c *fakeruntime.Config) {
+		c.FirstTurn = fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{{Kind: fakeruntime.ActionRecv}}, EndAfter: true}
+	})
+	e.runner.answer = func(fakeruntime.TurnAction) (fakeruntime.ActionResult, error) {
+		return fakeruntime.ActionResult{Output: page}, nil
+	}
+	s := e.createUnwatched(1)
+	w := newWatcher()
+	s.Watch(w)
+	w.waitFor(t, "the first turn to end", func() bool { return len(w.ended) == 1 })
+	if got := e.runner.kinds(); len(got) != 1 || got[0] != "recv" {
+		t.Fatalf("actions of the first turn: %v", got)
+	}
+
+	// A plan for the sessions created from now on; the session that exists is not
+	// affected, and a manual plan leaves the start to the script.
+	if err := e.rt.SetFirstTurn(fakeruntime.TurnPlan{ManualStart: true}); err != nil {
+		t.Fatal(err)
+	}
+	s2 := e.createUnwatched(2)
+	w2 := newWatcher()
+	s2.Watch(w2)
+	time.Sleep(50 * time.Millisecond)
+	if _, active := s2.TurnActive(); active {
+		t.Fatal("a manual first plan did not hold the first turn back")
+	}
+	if err := e.rt.StartTurn(s2.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	w2.waitFor(t, "the scripted first turn", func() bool { return len(w2.started) == 1 })
+	if err := e.rt.SetFirstTurn(fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{{Kind: "dance"}}}); err == nil {
+		t.Fatal("a plan with an unknown action was accepted")
+	}
+}
+
+// --- what the model saw ---
+
+// TestARecvPartActionIsAReceive: a part of a page the model asked for is a page
+// like any other: what it saw is recorded and the adapter may observe it.
+func TestARecvPartActionIsAReceive(t *testing.T) {
+	page := pageWith(leaseA, adapterproto.PageMessage{ID: "m1", From: "alice/agent", Body: "second part", Part: &adapterproto.PagePart{Index: 2, Total: 2, Label: "part 2/2"}})
+	e := newEnv(t, nil)
+	e.runner.answer = func(fakeruntime.TurnAction) (fakeruntime.ActionResult, error) {
+		return fakeruntime.ActionResult{Output: page}, nil
+	}
+	s, w := e.create(1, "sess-1")
+	_ = e.rt.SetPlan(s.Ref(), fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{{Kind: fakeruntime.ActionRecvPart, Args: map[string]string{"frontend": "mcp"}}}})
+	if err := e.deliver(s, 2, "go"); err != nil {
+		t.Fatal(err)
+	}
+	w.waitFor(t, "the tool result", func() bool { return len(w.results) == 1 })
+	if r := w.results[0]; r.Lease != leaseA || r.Frontend != "mcp" {
+		t.Fatalf("tool result %+v", r)
+	}
+	saw := e.log().Kind(ledger.KindModelSaw)
+	if len(saw) != 1 || saw[0].Attrs.MessageID != "m1" || saw[0].Attrs.Part != 2 || saw[0].Attrs.Parts != 2 {
+		t.Fatalf("model.saw entries %+v, want the one message, part 2 of 2", saw)
+	}
+}
+
+// TestAReceiveThatPrintsNoPageIsAnErrorInTheRecord: the model was shown some text
+// in answer to a receive; if it cannot be read as a page nothing is recorded as
+// seen and nothing is reported to the adapter, and the record says why, instead of
+// the receive leaving no trace at all.
+func TestAReceiveThatPrintsNoPageIsAnErrorInTheRecord(t *testing.T) {
+	rows := []struct {
+		name   string
+		action fakeruntime.TurnAction
+	}{
+		{"a recv", fakeruntime.TurnAction{Kind: fakeruntime.ActionRecv}},
+		{"a recv_part", fakeruntime.TurnAction{Kind: fakeruntime.ActionRecvPart}},
+		{"an exec that names a front end", fakeruntime.TurnAction{Kind: fakeruntime.ActionExec, Args: map[string]string{"argv": `["sidera","recv"]`, "frontend": "cli"}}},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			e := newEnv(t, nil)
+			e.runner.answer = func(fakeruntime.TurnAction) (fakeruntime.ActionResult, error) {
+				return fakeruntime.ActionResult{Output: []byte("error: the daemon is not running\n")}, nil
+			}
+			s, w := e.create(1, "sess-1")
+			_ = e.rt.SetPlan(s.Ref(), fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{r.action}})
+			if err := e.deliver(s, 2, "go"); err != nil {
+				t.Fatal(err)
+			}
+			if !waitIdle(e.rt) {
+				t.Fatal("not idle")
+			}
+			raw, err := os.ReadFile(filepath.Join(e.dir, s.Ref()+".jsonl"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			events, err := fakeruntime.ParseRecord(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var results []fakeruntime.Event
+			for _, ev := range events {
+				if ev.Kind == fakeruntime.EventToolResult {
+					results = append(results, ev)
+				}
+			}
+			if len(results) != 1 || results[0].Error == "" || !strings.Contains(results[0].Text, "daemon is not running") {
+				t.Fatalf("tool results in the record: %+v, want one with an error and the text the model saw", results)
+			}
+			if n := len(e.log().Kind(ledger.KindModelSaw)); n != 0 {
+				t.Fatalf("%d model.saw entries for output that is not a page", n)
+			}
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			if len(w.results) != 0 {
+				t.Fatalf("%d tool results reported to the adapter for output that is not a page", len(w.results))
+			}
+		})
+	}
+}
+
+// --- a killed process ---
+
+// TestAKilledRuntimeWithNobodyWatchingReconcilesItsTurnAsFailed: no adapter is
+// there to end the turn, and the turn is not left running.
+func TestAKilledRuntimeWithNobodyWatchingReconcilesItsTurnAsFailed(t *testing.T) {
+	e := newEnv(t, func(c *fakeruntime.Config) { c.FirstTurn = fakeruntime.TurnPlan{} })
+	s := e.createUnwatched(1)
+	if err := e.rt.StartTurn(s.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.rt.KillNative(s.Ref()); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := s.Reconcile(attempt(1))
+	if err != nil || rec.TurnState != fakeruntime.FinalFailed || !rec.WriterStopped {
+		t.Fatalf("Reconcile = %+v, %v; want the turn failed", rec, err)
+	}
+}
+
+func TestCreatedNamesTheEntryTheRuntimeWroteForTheSession(t *testing.T) {
+	e := newEnv(t, nil)
+	s, _ := e.create(1, "sess-1")
+	ref := s.Created()
+	if ref.Writer != "runtime/"+s.Ref() {
+		t.Fatalf("Created().Writer = %q", ref.Writer)
+	}
+	var named *ledger.Entry
+	for _, en := range e.log().Writer(ref.Writer) {
+		if en.Seq == ref.Seq {
+			named = &en
+		}
+	}
+	if named == nil || named.Kind != ledger.KindRuntimeSessionCreated || named.Attrs.NativeRef != s.Ref() {
+		t.Fatalf("entry %d of %s is %+v, want runtime.session.created for the session", ref.Seq, ref.Writer, named)
 	}
 }

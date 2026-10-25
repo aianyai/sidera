@@ -56,7 +56,10 @@ Tests judge what happened from the ledger the fakes wrote, never from the daemon
 own state. An entry for every effect is written before the effect is confirmed:
 the runtime writes `runtime.session.created` before the adapter writes
 `native.create.returned` and before it answers `created`, so an effect that took
-place is always on record, even if the process dies in the next instant. Bodies
+place is always on record, even if the process dies in the next instant. The two are
+separate processes and a test clock stands still, so the adapter's entry names the
+runtime's (writer and sequence number, carried back in the runtime's answer) and the
+ledger can check that it exists. Bodies
 never reach the ledger; a SHA-256 digest (`ledger.Digest`) stands for one. A
 directory ledger is written by several processes, one file each, every entry
 synced; it reads back whole except for the cut last line of a process the fixture
@@ -67,12 +70,17 @@ recorded as killed.
 A fixture that advances the clock must wait until the system has stopped reacting,
 and not sleep. The conditions that are the fakes' to answer:
 
-- the fake runtime has no turn action running or waiting (`Controller.Idle`);
+- the fake runtime has no turn action running or waiting (`Controller.Idle`); its
+  events (a turn's start and end, what the model read) are requests that the adapter
+  answers only after it has handed them to the daemon, so the runtime is busy until
+  the daemon's side of each is on its way;
 - the fake adapter has no unexpected request of the daemon in flight
   (`Knobs.Outstanding`), and the notifications it has sent
   (`Knobs.NotificationsSent`) are all handled by the daemon, which matters because
   the protocol peer handles notifications in order after the answer of a ping;
-- the requests a knob holds on purpose (`Knobs.Held`) are expected, not in flight.
+- the requests a knob holds on purpose are expected, not in flight: `Knobs.Held` is
+  a multiset of methods, compared with the multiset of methods the daemon has in
+  flight to the adapter.
 
 The conditions that are the daemon's (empty loop, no due timer, empty buffers) are
 checked by the engine.

@@ -175,7 +175,7 @@ func TestCreateOutcomes(t *testing.T) {
 		{"control_unknown fails the attempt but a native session remains", fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: "control_unknown"}, adapterproto.CreateFailed, adapterproto.CreateFailControlUnknown, "", 0, 1},
 		{"an unknown outcome has a native session and its grounds", fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate, Reason: "turn_running"}, adapterproto.CreateIndeterminate, "", adapterproto.GroundsTurnRunning, 0, 1},
 		{"an unknown outcome without grounds says the native side is unreachable", fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate}, adapterproto.CreateIndeterminate, "", adapterproto.GroundsNativeUnreachable, 0, 1},
-		{"an error before the effect leaves no session", fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: 1042}, "", "", "", 1042, 0},
+		{"an error before the effect leaves no session", fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: adapterproto.CodeEndpointLimit}, "", "", "", adapterproto.CodeEndpointLimit, 0},
 		{"an error after the effect leaves the session", fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: -32603, AfterEffect: true}, "", "", "", -32603, 1},
 	}
 	for _, row := range rows {
@@ -244,6 +244,15 @@ func TestOutcomeKindsAreCheckedPerRequest(t *testing.T) {
 	if err := k.SetCreate(fakeadapter.Outcome{Kind: fakeadapter.OutcomeError}); err == nil {
 		t.Error("an error outcome without a code was accepted")
 	}
+	if err := k.SetCreate(fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: 1042}); err == nil {
+		t.Error("an error outcome with a code the protocol does not define was accepted: the adapter would write a message the protocol refuses")
+	}
+	if err := k.SetCreate(fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: adapterproto.CodeSendRefused}); err == nil {
+		t.Error("an error outcome with a code that must carry data was accepted")
+	}
+	if err := k.SetCreate(fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: -32603}); err != nil {
+		t.Errorf("a code of the protocol was refused: %v", err)
+	}
 	if err := k.PauseAt("no.such.point"); err == nil {
 		t.Error("an unknown pause point was accepted")
 	}
@@ -295,8 +304,13 @@ func TestPauseAtCreateAfterNativeStopsBeforeTheAnswer(t *testing.T) {
 		t.Fatalf("the adapter answered while paused: %+v %v", o.res, o.err)
 	case <-time.After(50 * time.Millisecond):
 	}
-	if held := r.knobs.Held(); len(held) != 1 || held[0] != fakeadapter.PauseCreateAfterNative {
-		t.Fatalf("Held() = %v", held)
+	// Held names the method of the request, whether an outcome or a pause point holds
+	// it; the point is reported apart.
+	if held := r.knobs.Held(); len(held) != 1 || held[0] != adapterproto.MethodSessionCreate {
+		t.Fatalf("Held() = %v, want [%s]", held, adapterproto.MethodSessionCreate)
+	}
+	if points := r.knobs.HeldPoints(); len(points) != 1 || points[0] != fakeadapter.PauseCreateAfterNative {
+		t.Fatalf("HeldPoints() = %v", points)
 	}
 	l := r.ledgerLog()
 	if countKind(l, ledger.KindRuntimeSessionCreated) != 1 || countKind(l, ledger.KindNativeCreateReturned) != 1 {
@@ -399,7 +413,7 @@ func TestPromptOutcomes(t *testing.T) {
 		{"a killed native process is a lost session", nil, func(r *rig, ref string) {
 			_ = r.runtime.KillNative(ref)
 		}, adapterproto.PromptRefused, adapterproto.RefusalSessionLost, 0, 0},
-		{"an error before the effect reaches no runtime", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: 1042}, nil, "", "", 1042, 0},
+		{"an error before the effect reaches no runtime", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: adapterproto.CodeEndpointLimit}, nil, "", "", adapterproto.CodeEndpointLimit, 0},
 		{"an error after the effect: the prompt is delivered and the answer is lost", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: -32603, AfterEffect: true}, nil, "", "", -32603, 1},
 	}
 	for _, row := range rows {

@@ -32,8 +32,14 @@ var goldenEntries = []struct {
 	{
 		"a session creation that reached the native runtime",
 		ledger.Entry{V: 1, Writer: "adapter/fake", PID: 0, Seq: 3, AtMS: 1792832460000, Step: "create", Kind: ledger.KindNativeCreateReturned,
-			Attrs: ledger.Attrs{Attempt: "00000000-0000-4000-8000-000000000001", NativeRef: "n-0123", Outcome: "created"}},
-		`{"v":1,"writer":"adapter/fake","pid":0,"seq":3,"at_ms":1792832460000,"step":"create","kind":"native.create.returned","attrs":{"attempt":"00000000-0000-4000-8000-000000000001","native_ref":"n-0123","outcome":"created"}}`,
+			Attrs: ledger.Attrs{Attempt: "00000000-0000-4000-8000-000000000001", NativeRef: "n-0123", RuntimeWriter: "runtime/n-0123", RuntimeSeq: 1, Outcome: "created"}},
+		`{"v":1,"writer":"adapter/fake","pid":0,"seq":3,"at_ms":1792832460000,"step":"create","kind":"native.create.returned","attrs":{"attempt":"00000000-0000-4000-8000-000000000001","native_ref":"n-0123","runtime_writer":"runtime/n-0123","runtime_seq":1,"outcome":"created"}}`,
+	},
+	{
+		"a session creation that failed before any native session existed names no runtime entry",
+		ledger.Entry{V: 1, Writer: "adapter/fake", PID: 0, Seq: 4, AtMS: 1792832460000, Step: "create", Kind: ledger.KindNativeCreateReturned,
+			Attrs: ledger.Attrs{Attempt: "00000000-0000-4000-8000-000000000002", Outcome: "failed"}},
+		`{"v":1,"writer":"adapter/fake","pid":0,"seq":4,"at_ms":1792832460000,"step":"create","kind":"native.create.returned","attrs":{"attempt":"00000000-0000-4000-8000-000000000002","outcome":"failed"}}`,
 	},
 	{
 		"a message the model saw a second time",
@@ -140,6 +146,12 @@ func TestDecodeRejects(t *testing.T) {
 		{"invalid UTF-8 is an error", strings.Replace(base, `"step":""`, "\"step\":\"\xff\"", 1)},
 		{"an empty attribute value is an error: omit it", strings.Replace(base, `"instance":"fake"`, `"instance":""`, 1)},
 		{"an empty line is an error", ``},
+		{"a creation that names a native session must name the runtime's entry", `{"v":1,"writer":"adapter/fake","pid":0,"seq":1,"at_ms":1,"step":"","kind":"native.create.returned","attrs":{"attempt":"a","native_ref":"n-0123","outcome":"created"}}`},
+		{"a runtime entry without a native session has nothing to point at", `{"v":1,"writer":"adapter/fake","pid":0,"seq":1,"at_ms":1,"step":"","kind":"native.create.returned","attrs":{"attempt":"a","runtime_writer":"runtime/n-0123","runtime_seq":1,"outcome":"failed"}}`},
+		{"the runtime's writer and sequence number go together", `{"v":1,"writer":"adapter/fake","pid":0,"seq":1,"at_ms":1,"step":"","kind":"native.create.returned","attrs":{"attempt":"a","native_ref":"n-0123","runtime_writer":"runtime/n-0123","outcome":"created"}}`},
+		{"the named writer is a runtime", `{"v":1,"writer":"adapter/fake","pid":0,"seq":1,"at_ms":1,"step":"","kind":"native.create.returned","attrs":{"attempt":"a","native_ref":"n-0123","runtime_writer":"adapter/fake","runtime_seq":1,"outcome":"created"}}`},
+		{"the runtime's sequence number starts at 1", `{"v":1,"writer":"adapter/fake","pid":0,"seq":1,"at_ms":1,"step":"","kind":"native.create.returned","attrs":{"attempt":"a","native_ref":"n-0123","runtime_writer":"runtime/n-0123","runtime_seq":0,"outcome":"created"}}`},
+		{"another kind does not take the runtime's entry", `{"v":1,"writer":"fixture","pid":0,"seq":1,"at_ms":1,"step":"","kind":"fixture.step","attrs":{"name":"s","runtime_seq":1}}`},
 		{"a model.saw without its digest is an error", `{"v":1,"writer":"runtime/n","pid":0,"seq":1,"at_ms":1,"step":"","kind":"model.saw","attrs":{"endpoint":"e","message_id":"m","from":"a/b"}}`},
 		{"an empty list of killed processes is an error: omit it", `{"v":1,"writer":"fixture","pid":0,"seq":1,"at_ms":1,"step":"","kind":"fixture.kill","attrs":{"pids":[]}}`},
 	}

@@ -236,12 +236,16 @@ func ReadDir(dir string) (*Log, error) {
 	}
 	// The fixture announces its steps in order; an entry of an earlier step comes
 	// before one of a later step even when the test clock stood still between them.
+	// An entry carries the name of its step and nothing else, so a name that two
+	// announcements share would put the entries of the second among those of the
+	// first: step names are unique, and a ledger that repeats one is refused.
 	stepIndex := map[string]int{}
 	for _, e := range all {
 		if e.Kind == KindFixtureStep {
-			if _, ok := stepIndex[e.Attrs.Name]; !ok {
-				stepIndex[e.Attrs.Name] = len(stepIndex) + 1
+			if _, repeated := stepIndex[e.Attrs.Name]; repeated {
+				return nil, fmt.Errorf("ledger: the fixture announced the step %q twice: step names are unique, because an entry names its step and nothing else", e.Attrs.Name)
 			}
+			stepIndex[e.Attrs.Name] = len(stepIndex) + 1
 		}
 	}
 	sort.SliceStable(all, func(i, j int) bool {
@@ -259,4 +263,40 @@ func ReadDir(dir string) (*Log, error) {
 		return a.Seq < b.Seq
 	})
 	return &Log{entries: all}, nil
+}
+
+// CheckConfirmations is the invariant that an effect is on record before it is
+// confirmed: every native.create.returned that names a native session names the
+// runtime's own entry for it (writer and sequence number, which the adapter had
+// only once the runtime's answer carried them back), and that entry exists, is
+// the creation of that session for that attempt. The two writers are separate
+// processes whose clocks stand still on a test clock, so this reference, and not
+// the order of the lines, is what proves the runtime wrote first.
+func (l *Log) CheckConfirmations() error {
+	var problems []string
+	for _, e := range l.Kind(KindNativeCreateReturned) {
+		if e.Attrs.NativeRef == "" {
+			continue
+		}
+		who := fmt.Sprintf("%s seq %d (attempt %s)", e.Writer, e.Seq, e.Attrs.Attempt)
+		var named *Entry
+		for _, r := range l.Writer(e.Attrs.RuntimeWriter) {
+			if r.Seq == e.Attrs.RuntimeSeq {
+				named = &r
+				break
+			}
+		}
+		switch {
+		case named == nil:
+			problems = append(problems, fmt.Sprintf("%s confirmed %s, but %s has no entry %d", who, e.Attrs.NativeRef, e.Attrs.RuntimeWriter, e.Attrs.RuntimeSeq))
+		case named.Kind != KindRuntimeSessionCreated:
+			problems = append(problems, fmt.Sprintf("%s names %s entry %d, which is %s and not %s", who, e.Attrs.RuntimeWriter, e.Attrs.RuntimeSeq, named.Kind, KindRuntimeSessionCreated))
+		case named.Attrs.Attempt != e.Attrs.Attempt || named.Attrs.NativeRef != e.Attrs.NativeRef:
+			problems = append(problems, fmt.Sprintf("%s names %s entry %d, which is the creation of another attempt or session", who, e.Attrs.RuntimeWriter, e.Attrs.RuntimeSeq))
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return fmt.Errorf("ledger: effects confirmed before they were recorded: %s", strings.Join(problems, "; "))
 }

@@ -65,10 +65,13 @@ const (
 	truncatedMarkerSay = "... 5 more lines"
 )
 
-// DefaultManifestOptions returns the declaration the plan gives the fake adapter:
-// a runtime with command-line and MCP front ends that can interrupt and
-// acknowledge on behalf, direct endpoints, and receive wait limits of 20 seconds
-// for the command line and 45 for MCP.
+// DefaultManifestOptions returns the declaration of the fake adapter: a runtime
+// with command-line and MCP front ends that can interrupt and acknowledge on
+// behalf, direct endpoints, and receive wait limits of 20 seconds for the command
+// line and 45 for MCP, so that a test can tell them from both the daemon's default
+// and the protocol's cap. The program has the extension of an executable of the
+// platform: a path that names a program is used as it is, and Windows starts only
+// a file that has one.
 func DefaultManifestOptions() ManifestOptions {
 	lit := replacedMarker
 	re := truncatedMarkerRE
@@ -92,9 +95,23 @@ func DefaultManifestOptions() ManifestOptions {
 			Replaced:  []manifest.Marker{{Literal: &lit}},
 			Truncated: []manifest.Marker{{Regexp: &re}},
 		},
-		Program: "bin/sidera-fake-adapter",
+		Program: "bin/sidera-fake-adapter" + exeSuffix(),
 	}
 }
+
+func exeSuffix() string {
+	if runtime.GOOS == "windows" {
+		return ".exe"
+	}
+	return ""
+}
+
+// ConfigArgs are the arguments of the adapter package's entry that point the
+// program at the file holding its ProcessConfig. Several fake adapters under one
+// daemon each get their own configuration this way; without the arguments the
+// program reads the environment variable ConfigEnv, which every instance would
+// share.
+func ConfigArgs(path string) []string { return []string{ConfigFlag, path} }
 
 // Capabilities returns the declaration the adapter answers initialize with.
 func (o ManifestOptions) Capabilities() adapterproto.Capabilities {

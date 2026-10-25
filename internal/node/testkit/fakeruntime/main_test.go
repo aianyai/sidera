@@ -1,6 +1,7 @@
 package fakeruntime_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,11 +9,13 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // helperEnv switches the test binary into a helper program: the command an
 // ExecRunner test starts. It prints one line made of its arguments and of the
-// session variable it was given.
+// session variable and, when it was given one, the test seed.
 const helperEnv = "FAKERUNTIME_TEST_HELPER"
 
 var (
@@ -23,7 +26,17 @@ var (
 
 func TestMain(m *testing.M) {
 	if os.Getenv(helperEnv) == "1" {
-		fmt.Printf("helper %s token=%s\n", os.Args[len(os.Args)-1], os.Getenv("SIDERA_TOKEN"))
+		if os.Args[len(os.Args)-1] == "page" {
+			// What the client prints for a receive: one page with one message.
+			b, _ := json.Marshal(adapterproto.RecvPage{Lease: leaseA, Messages: []adapterproto.PageMessage{{ID: "m1", From: "alice/agent", Body: "hello"}}})
+			fmt.Println(string(b))
+			os.Exit(0)
+		}
+		out := fmt.Sprintf("helper %s token=%s", os.Args[len(os.Args)-1], os.Getenv("SIDERA_TOKEN"))
+		if seed := os.Getenv("SIDERA_TEST_SEED"); seed != "" {
+			out += " seed=" + seed
+		}
+		fmt.Println(out)
 		os.Exit(0)
 	}
 	code := m.Run()

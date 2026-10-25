@@ -100,6 +100,7 @@ type adapter struct {
 	hangLogged   bool
 	shuttingDown bool
 	release      func()
+	closed       bool // the adapter has been released: nothing may take the lock any more
 	sessions     map[adapterproto.EndpointRef]*nativeSession
 	attempts     map[adapterproto.AttemptID]adapterproto.SessionCreateParams
 	prompts      map[adapterproto.AttemptID]promptRecord
@@ -119,7 +120,17 @@ func (a *adapter) outstanding() int {
 	return a.calls
 }
 
+// releaseLock ends the adapter's claim on the instance: the lock is released, and
+// no handler that is still running may take it afterwards.
 func (a *adapter) releaseLock() {
+	a.mu.Lock()
+	a.closed = true
+	a.mu.Unlock()
+	a.dropLock()
+}
+
+// dropLock releases the instance lock if the adapter holds it.
+func (a *adapter) dropLock() {
 	a.mu.Lock()
 	rel := a.release
 	a.release = nil
@@ -280,8 +291,20 @@ func (a *adapter) initialize(_ context.Context, raw json.RawMessage) (any, error
 		return nil, peer.NewError(peer.CodeInvalidParams, err.Error())
 	}
 	// The lock comes before the answer: an adapter that has answered controls
-	// sessions, and two of them must never at once.
+	// sessions, and two of them must never at once. Taking it and handing it to the
+	// adapter, which releases it when Serve returns, is one step under the adapter's
+	// lock: the handler of a connection that has just ended may still be running,
+	// and a lock taken after the release would be held until the process ends.
+	a.mu.Lock()
+	if a.closed {
+		a.mu.Unlock()
+		return nil, peer.NewError(peer.CodeShuttingDown, "the connection has ended")
+	}
 	release, err := lockInstance(p.Instance.LockPath)
+	if err == nil {
+		a.release = release
+	}
+	a.mu.Unlock()
 	switch {
 	case errors.Is(err, errLocked):
 		if lerr := a.log(ledger.KindAdapterLockRefused, ledger.Attrs{Instance: a.cfg.InstanceID, LockPath: p.Instance.LockPath}); lerr != nil {
@@ -292,11 +315,10 @@ func (a *adapter) initialize(_ context.Context, raw json.RawMessage) (any, error
 		return nil, fmt.Errorf("fakeadapter: lock: %w", err)
 	}
 	if err := a.log(ledger.KindAdapterLockAcquired, ledger.Attrs{Instance: a.cfg.InstanceID, LockPath: p.Instance.LockPath}); err != nil {
-		release()
+		a.dropLock()
 		return nil, err
 	}
 	a.mu.Lock()
-	a.release = release
 	a.initialized = true
 	a.mu.Unlock()
 	return answer(adapterproto.InitializeResult{
@@ -338,7 +360,7 @@ func (a *adapter) outcome(ctx context.Context, request, method string) (Outcome,
 		}
 		return Outcome{}, false, nil
 	case o.Kind == OutcomeError && !o.AfterEffect:
-		return o, true, peer.NewError(o.Code, "injected by a knob")
+		return o, true, peer.NewError(o.Code, injectedMessage)
 	}
 	return o, true, nil
 }
@@ -532,7 +554,13 @@ func (a *adapter) sessionCreate(ctx context.Context, raw json.RawMessage) (any, 
 	case has && o.Kind == OutcomeIndeterminate:
 		outcome = adapterproto.CreateIndeterminate
 	}
-	if err := a.log(ledger.KindNativeCreateReturned, ledger.Attrs{Attempt: string(p.Attempt), NativeRef: sess.Ref(), Outcome: string(outcome)}); err != nil {
+	// The entry names the runtime's own entry for the session, which the runtime
+	// wrote before it answered: that is how the ledger shows the effect was recorded
+	// before it was confirmed.
+	created := sess.Created()
+	if err := a.log(ledger.KindNativeCreateReturned, ledger.Attrs{
+		Attempt: string(p.Attempt), NativeRef: sess.Ref(), RuntimeWriter: created.Writer, RuntimeSeq: created.Seq, Outcome: string(outcome),
+	}); err != nil {
 		return nil, err
 	}
 	if err := a.knobs.pause(ctx, a, PauseCreateAfterNative); err != nil {
@@ -540,7 +568,7 @@ func (a *adapter) sessionCreate(ctx context.Context, raw json.RawMessage) (any, 
 	}
 	switch {
 	case has && o.Kind == OutcomeError:
-		return nil, peer.NewError(o.Code, "injected by a knob")
+		return nil, peer.NewError(o.Code, injectedMessage)
 	case outcome == adapterproto.CreateFailed:
 		return answer(adapterproto.SessionCreateResult{Outcome: outcome, Reason: adapterproto.CreateFailControlUnknown})
 	case outcome == adapterproto.CreateIndeterminate:
@@ -625,7 +653,7 @@ func (a *adapter) promptDeliver(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, err
 	}
 	if has && o.Kind == OutcomeError {
-		return nil, peer.NewError(o.Code, "injected by a knob")
+		return nil, peer.NewError(o.Code, injectedMessage)
 	}
 	stage := adapterproto.PromptPersisted
 	if has && o.Kind == OutcomeAccepted {
@@ -728,7 +756,7 @@ func (a *adapter) sessionInterrupt(ctx context.Context, raw json.RawMessage) (an
 		return nil, err
 	}
 	if has && o.Kind == OutcomeError {
-		return nil, peer.NewError(o.Code, "injected by a knob")
+		return nil, peer.NewError(o.Code, injectedMessage)
 	}
 	return answer(adapterproto.InterruptResult{Stage: stage})
 }
@@ -762,7 +790,7 @@ func (a *adapter) sessionClose(ctx context.Context, raw json.RawMessage) (any, e
 	}
 	switch {
 	case has && o.Kind == OutcomeError:
-		return nil, peer.NewError(o.Code, "injected by a knob")
+		return nil, peer.NewError(o.Code, injectedMessage)
 	case has && o.Kind == OutcomeUnconfirmed:
 		reason := adapterproto.CloseReason(o.Reason)
 		if o.Reason == "" {

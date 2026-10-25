@@ -145,6 +145,13 @@ type rigOptions struct {
 	manifest func(*fakeadapter.ManifestOptions)
 	// refuseObserved makes the daemon side refuse every recv.observed.
 	refuseObserved bool
+	// autoFirstTurn leaves the runtime's first turn as a real runtime has it: the
+	// first prompt starts a turn as soon as the adapter has the session. Without it
+	// the first prompt waits for the script, and createSession gives the session
+	// the plan of an ordinary turn, so that most tests drive turns by hand.
+	autoFirstTurn bool
+	// firstTurn is the plan of the first turn when autoFirstTurn is set.
+	firstTurn fakeruntime.TurnPlan
 }
 
 func newRig(t *testing.T, ro rigOptions) *rig {
@@ -165,12 +172,17 @@ func newRig(t *testing.T, ro rigOptions) *rig {
 	if ro.manifest != nil {
 		ro.manifest(&r.opts)
 	}
+	first := fakeruntime.TurnPlan{ManualStart: true}
+	if ro.autoFirstTurn {
+		first = ro.firstTurn
+	}
 	rt, err := fakeruntime.New(fakeruntime.Config{
-		Now:     r.clock.Now,
-		Ledgers: r.mem,
-		Dir:     t.TempDir(),
-		Seed:    7,
-		Runner:  r.runner,
+		Now:       r.clock.Now,
+		Ledgers:   r.mem,
+		Dir:       t.TempDir(),
+		Seed:      7,
+		Runner:    r.runner,
+		FirstTurn: first,
 	})
 	if err != nil {
 		t.Fatalf("fakeruntime.New: %v", err)
@@ -180,6 +192,8 @@ func newRig(t *testing.T, ro rigOptions) *rig {
 	t.Cleanup(func() {
 		r.disconnect()
 		_ = rt.Close()
+		// Whatever a knob made the adapter write, every line it wrote is protocol.
+		validateFrames(t, r, true)
 	})
 	return r
 }
@@ -439,6 +453,11 @@ func (r *rig) createSession(n int, ep string) adapterproto.SessionCreateResult {
 	r.t.Helper()
 	var res adapterproto.SessionCreateResult
 	r.mustCall(adapterproto.MethodSessionCreate, r.createParams(n, ep), &res)
+	if res.NativeRef != "" && !r.ro.autoFirstTurn {
+		if err := r.runtime.SetPlan(string(res.NativeRef), fakeruntime.TurnPlan{}); err != nil {
+			r.t.Fatal(err)
+		}
+	}
 	return res
 }
 

@@ -40,12 +40,21 @@ func (c RemoteController) knob(ref, name string, args, result any) error {
 	return remoteError(conn.Knob(ctx, name, args, result))
 }
 
+// planArgs are the arguments of a knob that carries a plan: none for the zero
+// plan, because the control channel refuses an empty object.
+func planArgs(plan TurnPlan) any {
+	if plan.ManualStart || len(plan.Actions) > 0 || plan.EndAfter {
+		return KnobOf(plan)
+	}
+	return nil
+}
+
 // SetPlan sets the plan of the session's next turn.
 func (c RemoteController) SetPlan(ref string, plan TurnPlan) error {
 	if err := plan.validate(); err != nil {
 		return err
 	}
-	return c.knob(ref, KnobPlan, PlanKnob{ManualStart: plan.ManualStart, Actions: plan.Actions, EndAfter: plan.EndAfter}, nil)
+	return c.knob(ref, KnobPlan, planArgs(plan), nil)
 }
 
 // StartTurn starts a turn.
@@ -73,6 +82,32 @@ func (c RemoteController) KillNative(ref string) error {
 	default:
 	}
 	return err
+}
+
+// SetFirstTurn sets the plan of the first turn of the sessions that the adapters
+// of the fixture create from now on. A runtime process is made by an adapter, and
+// the first prompt starts its first turn as soon as it exists, so the plan goes to
+// the adapters, which hand it to every runtime process they start. It is an error
+// when no adapter is connected: the plan would reach nobody.
+func (c RemoteController) SetFirstTurn(plan TurnPlan) error {
+	if err := plan.validate(); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), reach)
+	defer cancel()
+	var errs []error
+	n := 0
+	for _, conn := range c.Server.Conns() {
+		if conn.Hello().Role != fakectl.RoleAdapter {
+			continue
+		}
+		n++
+		errs = append(errs, remoteError(conn.Knob(ctx, KnobFirstTurn, planArgs(plan), nil)))
+	}
+	if n == 0 {
+		return errors.New("fakeruntime: no adapter is connected to take the first turn's plan")
+	}
+	return errors.Join(errs...)
 }
 
 // Idle is true when every runtime process that is connected has no turn action

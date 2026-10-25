@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakectl"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeruntime"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
+	"github.com/aianyai/sidera/sdk/go/peer"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
@@ -27,12 +29,20 @@ type ProcessConfig struct {
 	// is the program of a runtime process.
 	RuntimeDir    string `json:"runtime_dir"`
 	RuntimeBinary string `json:"runtime_binary"`
-	// RuntimeSeed is the seed of native references.
-	RuntimeSeed uint64 `json:"runtime_seed"`
-	// ClockStartMS is the test time the process starts at, in Unix milliseconds.
+	// RuntimeSeed is the seed of native references; RuntimeTestSeed is the base of
+	// the seeds the runtime processes derive for the commands their models run
+	// (empty derives none).
+	RuntimeSeed     uint64 `json:"runtime_seed"`
+	RuntimeTestSeed string `json:"runtime_test_seed,omitempty"`
+	// RuntimeFirstTurn is the plan of the first turn of the sessions the adapter
+	// creates; the fixture can change it later with the first-turn knob.
+	RuntimeFirstTurn fakeruntime.PlanKnob `json:"runtime_first_turn"`
+	// ClockStartMS is the test time the process starts at, in Unix milliseconds. It
+	// is required: a field that was left out must not read as 1970.
 	ClockStartMS int64 `json:"clock_start_ms"`
-	// Control is the address of the fixture's control server; absent when none.
-	Control string `json:"control,omitempty"`
+	// Control is the address of the fixture's control server. It is required: a
+	// process that nobody can end is left behind when its test ends.
+	Control string `json:"control"`
 }
 
 func (c ProcessConfig) validate() error {
@@ -43,8 +53,13 @@ func (c ProcessConfig) validate() error {
 		return errors.New("fakeadapter: a process config needs its directories")
 	case c.Manifest.Runtime && c.RuntimeBinary == "":
 		return errors.New("fakeadapter: an adapter that declares a runtime needs the runtime program")
-	case c.ClockStartMS < 0:
-		return errors.New("fakeadapter: the clock cannot start before 1970")
+	case c.ClockStartMS <= 0:
+		return errors.New("fakeadapter: a process config needs the time the clock starts at, after 1970: zero would be a missing field read as 1970")
+	case c.Control == "":
+		return errors.New("fakeadapter: a process config needs the address of the control server: a process nobody can end is left behind")
+	}
+	if err := c.RuntimeFirstTurn.Validate(); err != nil {
+		return err
 	}
 	return c.Manifest.Validate()
 }
@@ -58,8 +73,39 @@ func DecodeProcessConfig(data []byte) (ProcessConfig, error) {
 	return c, c.validate()
 }
 
-// ConfigEnv is the environment variable that carries the ProcessConfig.
-const ConfigEnv = "SIDERA_FAKE_ADAPTER_CONFIG"
+// ConfigEnv is the environment variable that carries the ProcessConfig, and
+// ConfigFlag the argument that names a file holding it instead. The file wins:
+// several fake adapters of one daemon share an environment but not their entry
+// arguments.
+const (
+	ConfigEnv  = "SIDERA_FAKE_ADAPTER_CONFIG"
+	ConfigFlag = "--config"
+)
+
+// ReadProcessConfig finds the ProcessConfig of a program started with args (without
+// the program name): the file named by ConfigFlag if the arguments have it, else
+// the value of ConfigEnv. Any other argument is refused.
+func ReadProcessConfig(args []string, getenv func(string) string) (ProcessConfig, error) {
+	switch {
+	case len(args) == 0:
+		cfg, err := DecodeProcessConfig([]byte(getenv(ConfigEnv)))
+		if err != nil {
+			return ProcessConfig{}, fmt.Errorf("%s: %w", ConfigEnv, err)
+		}
+		return cfg, nil
+	case len(args) == 2 && args[0] == ConfigFlag:
+		raw, err := os.ReadFile(args[1])
+		if err != nil {
+			return ProcessConfig{}, err
+		}
+		cfg, err := DecodeProcessConfig(raw)
+		if err != nil {
+			return ProcessConfig{}, fmt.Errorf("%s: %w", args[1], err)
+		}
+		return cfg, nil
+	}
+	return ProcessConfig{}, fmt.Errorf("fakeadapter: the arguments are %v: want none, or %s <file>", args, ConfigFlag)
+}
 
 // RunProcess is the body of a fake adapter program: Serve over stdin and stdout,
 // with a file ledger, native sessions that are runtime processes, and the test
@@ -82,36 +128,37 @@ func RunProcess(ctx context.Context, cfg ProcessConfig, stdin io.Reader, stdout 
 	defer led.Close()
 	launcher := &fakeruntime.ProcessLauncher{
 		Binary: cfg.RuntimeBinary, Dir: cfg.RuntimeDir, LedgerDir: cfg.LedgerDir, Control: cfg.Control,
-		Seed: cfg.RuntimeSeed, Now: clock.Now,
+		Seed: cfg.RuntimeSeed, TestSeed: cfg.RuntimeTestSeed, Now: clock.Now,
+	}
+	if err := launcher.SetFirstTurn(cfg.RuntimeFirstTurn.Plan()); err != nil {
+		return err
 	}
 	defer launcher.Close()
 	knobs := NewKnobs()
 
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	if cfg.Control != "" {
-		client, err := fakectl.Dial(ctx, cfg.Control)
-		if err != nil {
-			return err
-		}
-		defer client.Close()
-		client.HandleClock(clock.SetMS)
-		client.HandleStep(files.SetStep)
-		client.HandleKnob(knobsHandler(knobs))
-		knobs.OnPause(func(point string) { _ = client.Report(ctx, "paused", point) })
-		if err := client.Start(ctx, fakectl.HelloParams{Role: fakectl.RoleAdapter, ID: cfg.InstanceID, PID: int64(os.Getpid())}); err != nil {
-			return err
-		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			select {
-			case <-client.Done():
-				cancel()
-			case <-ctx.Done():
-			}
-		}()
+	client, err := fakectl.Dial(ctx, cfg.Control)
+	if err != nil {
+		return err
 	}
+	defer client.Close()
+	client.HandleClock(clock.SetMS)
+	client.HandleStep(files.SetStep)
+	client.HandleKnob(knobsHandler(knobs, launcher))
+	knobs.OnPause(func(point string) { _ = client.Report(ctx, "paused", point) })
+	if err := client.Start(ctx, fakectl.HelloParams{Role: fakectl.RoleAdapter, ID: cfg.InstanceID, PID: int64(os.Getpid())}); err != nil {
+		return err
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		select {
+		case <-client.Done():
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	err = Serve(ctx, stdin, stdout, Config{
 		InstanceID: cfg.InstanceID, Now: clock.Now, Ledger: led, Runtime: launcher,
 		Manifest: cfg.Manifest, Knobs: knobs, Logger: logger,
@@ -122,6 +169,17 @@ func RunProcess(ctx context.Context, cfg ProcessConfig, stdin io.Reader, stdout 
 	return err
 }
 
-func knobsHandler(k *Knobs) func(context.Context, string, json.RawMessage) (any, error) {
-	return k.Dispatch
+// knobsHandler serves the knobs of the fixture: the adapter's own, and the one that
+// belongs to the runtime processes it starts, which only the adapter can reach.
+func knobsHandler(k *Knobs, launcher *fakeruntime.ProcessLauncher) func(context.Context, string, json.RawMessage) (any, error) {
+	return func(ctx context.Context, name string, args json.RawMessage) (any, error) {
+		if name != fakeruntime.KnobFirstTurn {
+			return k.Dispatch(ctx, name, args)
+		}
+		plan, err := fakeruntime.DecodePlanKnob(name, args)
+		if err != nil {
+			return nil, peer.NewError(peer.CodeInvalidParams, err.Error())
+		}
+		return nil, launcher.SetFirstTurn(plan.Plan())
+	}
 }

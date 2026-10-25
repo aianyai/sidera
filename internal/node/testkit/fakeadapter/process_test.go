@@ -51,6 +51,9 @@ func newProcFixture(t *testing.T) *procFixture {
 		InstanceID: "fake", Manifest: fakeadapter.DefaultManifestOptions(),
 		LedgerDir: filepath.Join(t.TempDir(), "ledger"), RuntimeDir: t.TempDir(), RuntimeBinary: runtimeBin, RuntimeSeed: 9,
 		ClockStartMS: testStart.UnixMilli(), Control: srv.Addr(),
+		// As in the in-process rig, the first prompt waits for the script; see
+		// procFixture.settle.
+		RuntimeFirstTurn: fakeruntime.KnobOf(fakeruntime.TurnPlan{ManualStart: true}),
 	}
 	f.ctrl = fakeruntime.RemoteController{Server: srv}
 	t.Cleanup(func() {
@@ -73,6 +76,15 @@ func newProcFixture(t *testing.T) *procFixture {
 		}
 	})
 	return f
+}
+
+// settle gives the session an ordinary plan once it exists, so that the tests that
+// drive turns by hand see a prompt start a turn.
+func (f *procFixture) settle(ref string) {
+	f.t.Helper()
+	if err := f.ctrl.SetPlan(ref, fakeruntime.TurnPlan{}); err != nil {
+		f.t.Fatal(err)
+	}
 }
 
 // procAdapter is one run of the adapter program with the daemon side attached.
@@ -245,6 +257,7 @@ func TestProcessAdapterDrivesARuntimeProcessAndTakesItBackAfterARestart(t *testi
 		t.Fatalf("create: %+v", created)
 	}
 	ref := string(created.NativeRef)
+	f.settle(ref)
 	if created.Process == nil || created.Process.PID == int64(os.Getpid()) || created.Process.PID == int64(a1.cmd.Process.Pid) {
 		t.Fatalf("the native process must be a process of its own: %+v (adapter %d, test %d)", created.Process, a1.cmd.Process.Pid, os.Getpid())
 	}
@@ -450,8 +463,8 @@ func TestProcessAdapterKnobsOverTheControlChannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := k.Stats(ctx)
-	if err != nil || !reflect.DeepEqual(st.Held, []string{fakeadapter.PauseCreateAfterNative}) {
-		t.Fatalf("Stats while paused: %+v, %v", st, err)
+	if err != nil || !reflect.DeepEqual(st.Held, []string{adapterproto.MethodSessionCreate}) || !reflect.DeepEqual(st.HeldPoints, []string{fakeadapter.PauseCreateAfterNative}) {
+		t.Fatalf("Stats while paused: %+v, %v; want the method held, and the point it stopped at", st, err)
 	}
 	// The process also says that it stopped, over the control channel.
 	rep, err := a.conn.NextReport(ctx)
@@ -499,7 +512,7 @@ var goldenArgs = []struct {
 	{"availability", fakeadapter.KnobAvailability, `{"conditions":[{"condition":"runtime_auth","since_ms":5}]}`, fakeadapter.AvailabilityArgs{Conditions: []adapterproto.Availability{{Condition: adapterproto.ConditionRuntimeAuth, SinceMS: 5}}}},
 	{"persist", fakeadapter.KnobPersist, `{"endpoint":"sess-1","attempt":"00000000-0000-4000-8000-000000000003"}`, fakeadapter.PersistArgs{Endpoint: "sess-1", Attempt: "00000000-0000-4000-8000-000000000003"}},
 	{"native request", fakeadapter.KnobNativeReq, `{"endpoint":"sess-1","method":"item/tool/call","disposition":"preset"}`, fakeadapter.NativeRequestArgs{Endpoint: "sess-1", Method: "item/tool/call", Disposition: adapterproto.DispositionPreset}},
-	{"stats reply", fakeadapter.KnobStats + ".reply", `{"notifications_sent":3,"outstanding":1,"held":["create.after-native"]}`, fakeadapter.StatsReply{NotificationsSent: 3, Outstanding: 1, Held: []string{"create.after-native"}}},
+	{"stats reply", fakeadapter.KnobStats + ".reply", `{"notifications_sent":3,"outstanding":1,"held":["session.create"],"held_points":["create.after-native"]}`, fakeadapter.StatsReply{NotificationsSent: 3, Outstanding: 1, Held: []string{"session.create"}, HeldPoints: []string{"create.after-native"}}},
 }
 
 func TestGoldenKnobArguments(t *testing.T) {
@@ -572,12 +585,14 @@ func TestGoldenProcessConfig(t *testing.T) {
 	cfg := fakeadapter.ProcessConfig{
 		InstanceID: "fake", Manifest: fakeadapter.DefaultManifestOptions(), LedgerDir: "/tmp/l", RuntimeDir: "/tmp/r",
 		RuntimeBinary: "/tmp/sidera-fake-runtime", RuntimeSeed: 9, ClockStartMS: 1792832400000, Control: "127.0.0.1:5555",
+		RuntimeTestSeed: "base", RuntimeFirstTurn: fakeruntime.PlanKnob{ManualStart: true},
 	}
+	cfg.Manifest.Program = "bin/sidera-fake-adapter" // the default has the extension of the platform
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const want = `{"instance_id":"fake","manifest":{"id":"fake","version":"0.1.0","runtime":true,"direct":true,"frontends":["cli","mcp"],"interrupt":true,"ack_on_behalf":true,"max_direct_endpoints":10,"recv_wait_s":{"cli":20,"mcp":45},"budgets":[{"frontend":"cli","unit":"chars","limit":27000},{"frontend":"mcp","unit":"tokens","limit":22500},{"frontend":"direct","unit":"chars","limit":9000}],"runtime_name":"fake-runtime","runtime_version":"1.0.0","tested":[{"runtime":"fake-runtime","min":"1.0.0","max":"1.9.9"}],"ack_markers":{"replaced":[{"literal":"[result saved to file]"}],"truncated":[{"regexp":"\\.\\.\\. \\d+ more lines"}]},"program":"bin/sidera-fake-adapter"},"ledger_dir":"/tmp/l","runtime_dir":"/tmp/r","runtime_binary":"/tmp/sidera-fake-runtime","runtime_seed":9,"clock_start_ms":1792832400000,"control":"127.0.0.1:5555"}`
+	const want = `{"instance_id":"fake","manifest":{"id":"fake","version":"0.1.0","runtime":true,"direct":true,"frontends":["cli","mcp"],"interrupt":true,"ack_on_behalf":true,"max_direct_endpoints":10,"recv_wait_s":{"cli":20,"mcp":45},"budgets":[{"frontend":"cli","unit":"chars","limit":27000},{"frontend":"mcp","unit":"tokens","limit":22500},{"frontend":"direct","unit":"chars","limit":9000}],"runtime_name":"fake-runtime","runtime_version":"1.0.0","tested":[{"runtime":"fake-runtime","min":"1.0.0","max":"1.9.9"}],"ack_markers":{"replaced":[{"literal":"[result saved to file]"}],"truncated":[{"regexp":"\\.\\.\\. \\d+ more lines"}]},"program":"bin/sidera-fake-adapter"},"ledger_dir":"/tmp/l","runtime_dir":"/tmp/r","runtime_binary":"/tmp/sidera-fake-runtime","runtime_seed":9,"runtime_test_seed":"base","runtime_first_turn":{"manual_start":true},"clock_start_ms":1792832400000,"control":"127.0.0.1:5555"}`
 	if string(raw) != want {
 		t.Fatalf("encoded\n %s\nwant\n %s", raw, want)
 	}
@@ -593,6 +608,9 @@ func TestGoldenProcessConfig(t *testing.T) {
 		"no instance id":                    strings.Replace(want, `"instance_id":"fake"`, `"instance_id":""`, 1),
 		"a runtime declared and no program": strings.Replace(want, `"runtime_binary":"/tmp/sidera-fake-runtime"`, `"runtime_binary":""`, 1),
 		"a negative clock":                  strings.Replace(want, `1792832400000`, `-5`, 1),
+		"a clock that starts at zero, which is a field left out read as 1970": strings.Replace(want, `1792832400000`, `0`, 1),
+		"no control address (a process nobody can end)":                       strings.Replace(want, `"control":"127.0.0.1:5555"`, `"control":""`, 1),
+		"a first turn with an unknown action":                                 strings.Replace(want, `"runtime_first_turn":{"manual_start":true}`, `"runtime_first_turn":{"actions":[{"kind":"dance"}]}`, 1),
 	} {
 		if _, err := fakeadapter.DecodeProcessConfig([]byte(bad)); err == nil {
 			t.Errorf("%s was accepted", name)
@@ -601,6 +619,6 @@ func TestGoldenProcessConfig(t *testing.T) {
 }
 
 func FuzzDecodeProcessConfig(f *testing.F) {
-	f.Add([]byte(`{"instance_id":"x","manifest":{"id":"x","version":"1.0.0","runtime":true,"frontends":["cli"],"program":"p"},"ledger_dir":"l","runtime_dir":"r","runtime_binary":"b","runtime_seed":0,"clock_start_ms":0}`))
+	f.Add([]byte(`{"instance_id":"x","manifest":{"id":"x","version":"1.0.0","runtime":true,"frontends":["cli"],"program":"p"},"ledger_dir":"l","runtime_dir":"r","runtime_binary":"b","runtime_seed":0,"runtime_first_turn":{},"clock_start_ms":1,"control":"127.0.0.1:1"}`))
 	f.Fuzz(func(t *testing.T, data []byte) { _, _ = fakeadapter.DecodeProcessConfig(data) })
 }

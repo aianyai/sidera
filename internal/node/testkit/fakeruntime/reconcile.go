@@ -26,6 +26,13 @@ func reconcileFromRecord(events []Event, attempt string) Reconciliation {
 			state[e.Turn] = e.Final
 		}
 	}
+	// The writer has stopped: a turn that was running when it did will never end,
+	// and the adapter that watched it die ended it as failed.
+	for turn, st := range state {
+		if st == "running" {
+			state[turn] = FinalFailed
+		}
+	}
 	if !found {
 		return rec
 	}

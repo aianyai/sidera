@@ -19,8 +19,9 @@ three operating systems and both tag sets.
 | `Serve(ctx, r, w, Config)` | The adapter side of the protocol over a reader and a writer: in a test process the two ends of an `io.Pipe`, in a program standard input and output. |
 | `Config`, `ManifestOptions`, `DefaultManifestOptions` | What the adapter is given and what it declares. `ManifestOptions` makes both the manifest (`Manifest`, `Encode`, `WritePackage`) and the capabilities it answers `initialize` with, so they cannot disagree. |
 | `Knobs`, `Outcome`, `NewKnobs` | The test's handles. |
-| `RunProcess`, `ProcessConfig`, `DecodeProcessConfig` | The body of the adapter program; the program is `cmd/sidera-fake-adapter`. |
-| `Knobs.Dispatch`, `RemoteKnobs`, `DecodeKnobArgs` | The knobs by name over the control channel, and the fixture's side of them. |
+| `Controller`, `Knobs.Controller`, `RemoteKnobs` | One interface, with a context, over the knobs of both layers: a script written against it turns the same knobs of an adapter in the test process and of the program, as one written against `fakeruntime.Controller` does for the turns. |
+| `RunProcess`, `ProcessConfig`, `DecodeProcessConfig`, `ReadProcessConfig`, `ConfigArgs` | The body of the adapter program; the program is `cmd/sidera-fake-adapter`. |
+| `Knobs.Dispatch`, `DecodeKnobArgs` | The knobs by name over the control channel; `RemoteKnobs` is the fixture's side of them. |
 
 ## What it does
 
@@ -52,10 +53,20 @@ a `ProcessLauncher` in the program.
   it is `1005`. A checkpoint the daemon sent back with a retry does not make a retry
   another attempt.
 - **Effect first, then ledger, then answer.** The native session exists, the ledger
-  says so (`native.create.returned`), and only then is `created` answered; the pause
-  point `create.after-native` sits exactly there.
+  says so (`native.create.returned`, which names the runtime's own entry for the
+  session), and only then is `created` answered; the pause point
+  `create.after-native` sits exactly there.
+- **A session starts working on its first prompt.** The first turn starts when the
+  adapter adopts the session, so `turn.started` (with the first prompt's attempt)
+  can reach the daemon before the answer to `session.create`; the plan of that turn
+  is the runtime's (`ProcessConfig.RuntimeFirstTurn`, the `first-turn` knob).
+- **A killed native process ends its turn.** The adapter reports `turn.ended` with
+  `failed` for the turn the process was running, so every turn has one end.
 - **It never writes a message the protocol would refuse.** Every request,
-  notification and result is validated before it is sent.
+  notification and result is validated before it is sent, and a knob that would make
+  it answer with an error code the protocol does not define, or one that must carry
+  data, is refused when it is set. The behaviour-test rig checks every line the
+  adapter wrote against the schemas when its test ends.
 - **Time is the shared clock.** `at_ms` of every notification comes from the clock
   it was given; the adapter reads no other.
 - **Bodies never reach the ledger or the log**, only digests.
@@ -83,15 +94,23 @@ and the direct methods (`Register`, `Recv`, `Ack`, `Send`, `MessageStatus`,
 `Unregister`) send what the name says and return the daemon's answer. `Held`,
 `NotificationsSent` and `Outstanding` tell a fixture which unanswered requests are
 expected and how many notifications the daemon must have handled before the system
-counts as quiet.
+counts as quiet. `Held` is a multiset of methods (`session.create`, …), one per held
+request, whether an outcome or a pause point holds it: the fixture compares it with
+the multiset of methods the daemon has in flight to the adapter. `HeldPoints` names
+the pause points some of them stopped at.
 
 Every use of a knob that changes behaviour writes a `knob.hit` entry, so a test can
 assert that its injection point was reached.
 
 ## The program
 
-`cmd/sidera-fake-adapter` reads a `ProcessConfig` (JSON in
-`SIDERA_FAKE_ADAPTER_CONFIG`), serves the protocol on standard input and output,
+`cmd/sidera-fake-adapter` reads a `ProcessConfig` from the file named by its
+argument `--config` (`ConfigArgs` makes the arguments for the manifest's `Args`,
+which is what tells several fake adapters under one daemon apart), or else from the
+JSON in the environment variable `SIDERA_FAKE_ADAPTER_CONFIG`, which they would
+share. `ProcessConfig` requires the control address and a clock start after 1970:
+a field that was left out must not read as an adapter nobody can end or as 1970. The
+program serves the protocol on standard input and output,
 writes a file ledger, starts its native sessions as runtime processes, and takes the
 test clock, the running script step and its knobs from the fixture over the control
 channel. It ends when the daemon closes its input or when the control connection
@@ -115,4 +134,8 @@ schema accepts. `behavior_test.go` pins the rules above, one row per rule.
 `process_test.go` runs the two programs together: creation in a runtime process, the
 clock and the step reaching both, an adapter killed and a second one taking the
 session back, a native process killed, the knobs over the control channel, and the
-decoders (`FuzzDecodeKnobArguments`, `FuzzDecodeProcessConfig`).
+decoders (`FuzzDecodeKnobArguments`, `FuzzDecodeProcessConfig`). `rules_test.go`
+holds the rest of the rules above: one knob script run in both layers, `Held` as a
+multiset of methods, the first turn and the end of a killed one, what the ledger
+names, how the program finds its configuration, and that the daemon side has been
+told before the call that caused an event returns.

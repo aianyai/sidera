@@ -406,3 +406,78 @@ func TestDirLedgerOrdersEntriesByTimeThenScriptStep(t *testing.T) {
 		t.Fatalf("order\n got %v\nwant %v", got, want)
 	}
 }
+
+// TestReadDirRejectsARepeatedStepName: an entry names its step and nothing else,
+// so two announcements of one name would put the entries of the second among the
+// entries of the first.
+func TestReadDirRejectsARepeatedStepName(t *testing.T) {
+	dir := t.TempDir()
+	fx := mustOpen(t, ledger.NewDir(dir), "fixture", 0, fixedNow)
+	mustAppend(t, fx, ledger.KindFixtureStep, ledger.Attrs{Name: "advance"})
+	mustAppend(t, fx, ledger.KindFixtureStep, ledger.Attrs{Name: "recv"})
+	mustAppend(t, fx, ledger.KindFixtureStep, ledger.Attrs{Name: "advance"})
+	_, err := ledger.ReadDir(dir)
+	if err == nil || !strings.Contains(err.Error(), `"advance" twice`) {
+		t.Fatalf("ReadDir = %v, want a refusal that names the repeated step", err)
+	}
+}
+
+func TestAppendSeqReturnsTheSequenceNumberOfTheEntry(t *testing.T) {
+	w := mustOpen(t, ledger.NewMemory(), "runtime/n-0123", 0, fixedNow)
+	for want := int64(1); want <= 3; want++ {
+		seq, err := w.AppendSeq(ledger.KindRuntimeClosed, ledger.Attrs{})
+		if err != nil || seq != want {
+			t.Fatalf("AppendSeq = %d, %v; want %d", seq, err, want)
+		}
+	}
+	if seq, err := w.AppendSeq("no.such.kind", ledger.Attrs{}); err == nil || seq != 0 {
+		t.Fatalf("a refused entry returned (%d, %v)", seq, err)
+	}
+}
+
+// TestCheckConfirmations: a creation is confirmed only by an entry of the
+// runtime's that exists, and is that creation.
+func TestCheckConfirmations(t *testing.T) {
+	const attempt = "00000000-0000-4000-8000-000000000001"
+	build := func(returned ledger.Attrs, runtime func(w *ledger.Writer)) *ledger.Log {
+		mem := ledger.NewMemory()
+		rt := mustOpen(t, mem, "runtime/n-0123", 0, fixedNow)
+		runtime(rt)
+		ad := mustOpen(t, mem, "adapter/fake", 0, fixedNow)
+		mustAppend(t, ad, ledger.KindNativeCreateReturned, returned)
+		log, err := mem.Log()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return log
+	}
+	created := func(w *ledger.Writer) {
+		mustAppend(t, w, ledger.KindRuntimePromptReceived, ledger.Attrs{Attempt: "p", TextDigest: "ab"})
+		mustAppend(t, w, ledger.KindRuntimeSessionCreated, ledger.Attrs{Attempt: attempt, NativeRef: "n-0123"})
+	}
+	returned := func(seq int64) ledger.Attrs {
+		return ledger.Attrs{Attempt: attempt, NativeRef: "n-0123", RuntimeWriter: "runtime/n-0123", RuntimeSeq: seq, Outcome: "created"}
+	}
+	rows := []struct {
+		rule     string
+		log      *ledger.Log
+		wantFail string
+	}{
+		{"a confirmation that names the runtime's creation entry", build(returned(2), created), ""},
+		{"a confirmation that names an entry the runtime never wrote", build(returned(3), created), "has no entry 3"},
+		{"a confirmation that names an entry of another kind", build(returned(1), created), "runtime.prompt.received"},
+		{"a confirmation that names the creation of another attempt", build(ledger.Attrs{Attempt: "00000000-0000-4000-8000-000000000002", NativeRef: "n-0123", RuntimeWriter: "runtime/n-0123", RuntimeSeq: 2, Outcome: "created"}, created), "another attempt"},
+		{"a creation that made no native session needs no runtime entry", build(ledger.Attrs{Attempt: attempt, Outcome: "failed"}, func(*ledger.Writer) {}), ""},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			err := r.log.CheckConfirmations()
+			switch {
+			case r.wantFail == "" && err != nil:
+				t.Fatalf("CheckConfirmations: %v", err)
+			case r.wantFail != "" && (err == nil || !strings.Contains(err.Error(), r.wantFail)):
+				t.Fatalf("CheckConfirmations = %v, want a failure that says %q", err, r.wantFail)
+			}
+		})
+	}
+}

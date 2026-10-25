@@ -27,6 +27,7 @@ type Runtime struct {
 	byAttempt map[string]*session
 	nextPID   int64
 	busy      int // turns with actions that are not finished
+	firstTurn TurnPlan
 }
 
 var (
@@ -44,11 +45,14 @@ func New(cfg Config) (*Runtime, error) {
 	case cfg.Dir == "":
 		return nil, errors.New("fakeruntime: a runtime needs a record directory")
 	}
+	if err := cfg.FirstTurn.validate(); err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(cfg.Dir, 0o700); err != nil {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	return &Runtime{cfg: cfg, ctx: ctx, cancel: cancel, sessions: map[string]*session{}, byAttempt: map[string]*session{}, nextPID: 100000}, nil
+	return &Runtime{cfg: cfg, ctx: ctx, cancel: cancel, sessions: map[string]*session{}, byAttempt: map[string]*session{}, nextPID: 100000, firstTurn: cfg.FirstTurn}, nil
 }
 
 // Close stops every running action and waits for them. Sessions keep their
@@ -106,17 +110,19 @@ func (r *Runtime) Create(ctx context.Context, req CreateRequest) (Session, error
 	s := &session{
 		rt: r, ref: ref, endpoint: req.Endpoint, preset: req.Preset, env: req.Env,
 		pid: r.nextPID, startKey: "k-" + hex.EncodeToString(sum[:6]),
-		ledger: w, file: f, alive: true,
+		ledger: w, file: f, alive: true, plan: r.firstTurn, firstPending: true,
 		seen: map[string]bool{}, attemptTurn: map[string]string{}, turnState: map[string]string{},
 	}
 	if err := s.record(Event{Kind: EventSession, Endpoint: req.Endpoint, Attempt: req.Attempt}); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
-	if err := s.ledger.Append(ledger.KindRuntimeSessionCreated, ledger.Attrs{Attempt: req.Attempt, NativeRef: ref, PID: s.pid}); err != nil {
+	seq, err := s.ledger.AppendSeq(ledger.KindRuntimeSessionCreated, ledger.Attrs{Attempt: req.Attempt, NativeRef: ref, PID: s.pid})
+	if err != nil {
 		_ = f.Close()
 		return nil, err
 	}
+	s.createdSeq = seq
 	if err := s.acceptPromptLocked(req.FirstAttempt, req.FirstPrompt); err != nil {
 		_ = f.Close()
 		return nil, err
@@ -146,6 +152,17 @@ func (r *Runtime) session(ref string) (*session, error) {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownSession, ref)
 	}
 	return s, nil
+}
+
+// SetFirstTurn sets the plan of the first turn of the sessions created from now on.
+func (r *Runtime) SetFirstTurn(plan TurnPlan) error {
+	if err := plan.validate(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	r.firstTurn = plan
+	r.mu.Unlock()
+	return nil
 }
 
 // SetPlan sets the plan of the session's next turn.
@@ -223,16 +240,18 @@ type session struct {
 	file *os.File
 	seq  int
 
-	alive       bool
-	watcher     Watcher
-	plan        TurnPlan
-	seen        map[string]bool   // prompt attempts in the record
-	pending     []string          // prompt attempts that wait for a turn
-	attemptTurn map[string]string // attempt -> turn
-	turnState   map[string]string // turn -> running, completed, ...
-	turn        string            // the running turn, or empty
-	turnN       int
-	turnCancel  context.CancelFunc
+	alive        bool
+	watcher      Watcher
+	createdSeq   int64
+	firstPending bool // no watcher has taken charge yet, and no turn has started
+	plan         TurnPlan
+	seen         map[string]bool   // prompt attempts in the record
+	pending      []string          // prompt attempts that wait for a turn
+	attemptTurn  map[string]string // attempt -> turn
+	turnState    map[string]string // turn -> running, completed, ...
+	turn         string            // the running turn, or empty
+	turnN        int
+	turnCancel   context.CancelFunc
 }
 
 func (s *session) Ref() string      { return s.ref }
@@ -255,10 +274,28 @@ func (s *session) TurnActive() (string, bool) {
 	return s.turn, true
 }
 
+func (s *session) Created() LedgerRef {
+	return LedgerRef{Writer: s.ledger.Name(), Seq: s.createdSeq}
+}
+
+// Watch sets the watcher. The first prompt of a session starts a turn as a real
+// runtime does at once; here that happens when the first watcher is set, which
+// is when the adapter that made the session takes charge of it and can hear the
+// turn start. A plan that holds the start back leaves it to the script.
 func (s *session) Watch(w Watcher) {
 	s.evMu.Lock()
 	s.watcher = w
 	s.evMu.Unlock()
+	if w == nil {
+		return
+	}
+	s.mu.Lock()
+	start := s.firstPending && s.alive && !s.plan.ManualStart
+	s.firstPending = false // only the first watcher takes charge; a manual plan leaves the start to the script
+	s.mu.Unlock()
+	if start {
+		_ = s.startTurn() // ErrBusy: the script started a turn first, which is the first
+	}
 }
 
 // record appends an event to the session's record file, stamping it. The caller
@@ -348,6 +385,7 @@ func (s *session) startTurn() error {
 	}
 	plan := s.plan
 	s.plan = TurnPlan{}
+	s.firstPending = false
 	s.turnN++
 	turn := fmt.Sprintf("t%d", s.turnN)
 	attempt := ""
@@ -479,21 +517,38 @@ func (s *session) Close(ctx context.Context) error {
 	return nil
 }
 
+// kill ends the native process. A turn it was running is over: the process cannot
+// write its end into the record (a record whose writer stopped with a turn not
+// ended reads as failed), but the adapter that is online sees the process die and
+// ends the turn as failed, because every turn has exactly one start and one end.
 func (s *session) kill() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if !s.alive {
+		s.mu.Unlock()
 		return ErrNotAlive
 	}
 	if err := s.ledger.Append(ledger.KindRuntimeKilled, ledger.Attrs{}); err != nil {
+		s.mu.Unlock()
 		return err
 	}
 	if err := s.record(Event{Kind: EventKilled}); err != nil {
+		s.mu.Unlock()
 		return err
 	}
 	s.alive = false
+	turn := s.turn
+	if turn != "" {
+		s.turnState[turn] = FinalFailed
+		s.turn = ""
+	}
 	if s.turnCancel != nil {
 		s.turnCancel()
+		s.turnCancel = nil
+	}
+	atMS := s.rt.cfg.Now().UnixMilli()
+	s.mu.Unlock()
+	if turn != "" {
+		s.notify(func(w Watcher) { w.TurnEnded(TurnEndedEvent{Turn: turn, Final: FinalFailed, AtMS: atMS}) })
 	}
 	return nil
 }
@@ -544,8 +599,16 @@ func (s *session) runActions(ctx context.Context, turn string, plan TurnPlan) {
 	}
 }
 
-// finishAction records the result of an action and, for a recv, what the model
-// saw and what the adapter may observe.
+// isReceive says whether an action is a receive: a recv or a recv_part action, or
+// a command whose action names the front end it was received through.
+func isReceive(a TurnAction) bool {
+	return a.Kind == ActionRecv || a.Kind == ActionRecvPart || (a.Kind == ActionExec && a.Args["frontend"] != "")
+}
+
+// finishAction records the result of an action and, for a receive, what the model
+// saw and what the adapter may observe. The output of a receive that is not a page
+// is written to the record as an error: the model was shown it, and a receive that
+// leaves no trace would be a hole in what the tests judge from.
 func (s *session) finishAction(turn string, action TurnAction, res ActionResult, runErr error) {
 	ev := Event{Kind: EventToolResult, Turn: turn, Action: action.Kind}
 	var page adapterproto.RecvPage
@@ -555,10 +618,10 @@ func (s *session) finishAction(turn string, action TurnAction, res ActionResult,
 		ev.Error = runErr.Error()
 	case len(res.Output) > 0:
 		ev.Text = string(res.Output)
-		// A receive is a recv action, or a command whose action names the front
-		// end it was received through.
-		if action.Kind == ActionRecv || (action.Kind == ActionExec && action.Args["frontend"] != "") {
-			if err := adapterproto.Decode(res.Output, &page); err == nil {
+		if isReceive(action) {
+			if err := adapterproto.Decode(res.Output, &page); err != nil {
+				ev.Error = "the output of a receive is not a page: " + err.Error()
+			} else {
 				isPage = true
 				ev.Lease = string(page.Lease)
 				ev.Frontend = action.Args["frontend"]

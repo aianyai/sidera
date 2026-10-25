@@ -81,11 +81,22 @@ func (o Outcome) check(request string) error {
 	if !slices.Contains(validKinds[request], o.Kind) {
 		return fmt.Errorf("fakeadapter: outcome kind %d is not one a %s request takes", o.Kind, request)
 	}
-	if o.Kind == OutcomeError && o.Code == 0 {
-		return errors.New("fakeadapter: OutcomeError needs a code")
+	if o.Kind == OutcomeError {
+		if o.Code == 0 {
+			return errors.New("fakeadapter: OutcomeError needs a code")
+		}
+		// The adapter never writes a message the protocol would refuse: a code the
+		// protocol does not define, or one that must carry data, is refused here and
+		// not discovered on the wire.
+		if err := (adapterproto.ErrorObject{Code: o.Code, Message: injectedMessage}).Validate(); err != nil {
+			return fmt.Errorf("fakeadapter: OutcomeError code %d is not one the adapter can answer with: %w", o.Code, err)
+		}
 	}
 	return nil
 }
+
+// injectedMessage is the text of every error a knob makes the adapter answer with.
+const injectedMessage = "injected by a knob"
 
 var (
 	// ErrNotServing: the knob acts on a running adapter and none is serving.
@@ -112,11 +123,18 @@ type Knobs struct {
 	rules    map[string]*outcomeRule
 	pauses   map[string]*pausePoint // armed, nobody has stopped here yet
 	stopped  map[string]*pausePoint // a request is stopped here, waiting for Release
-	holds    []string
+	holds    []heldRequest
 	holdOpen chan struct{} // closed by ReleaseHeld, replaced afterwards
 	hang     bool
 	observed ObservedMode
 	onPause  func(point string)
+}
+
+// heldRequest is a request of the daemon that the adapter is holding on purpose:
+// the method it came with, and the pause point it stopped at, empty when an
+// outcome holds it.
+type heldRequest struct {
+	method, point string
 }
 
 type pausePoint struct {
@@ -240,6 +258,15 @@ const (
 
 var pauseNames = []string{PauseCreateAfterNative, PausePromptAfterForward, PauseInterruptAfterForward, PauseCloseAfterForward, PauseStartBeforeReply}
 
+// pauseMethods is the method of the request that stops at each pause point.
+var pauseMethods = map[string]string{
+	PauseCreateAfterNative:     adapterproto.MethodSessionCreate,
+	PausePromptAfterForward:    adapterproto.MethodPromptDeliver,
+	PauseInterruptAfterForward: adapterproto.MethodSessionInterrupt,
+	PauseCloseAfterForward:     adapterproto.MethodSessionClose,
+	PauseStartBeforeReply:      adapterproto.MethodAdapterStart,
+}
+
 // OnPause sets a function that is called, outside any lock, each time a request
 // stops at a pause point, with the name of the point. The adapter program uses it to
 // tell the fixture over the control channel.
@@ -320,9 +347,9 @@ func (k *Knobs) pause(ctx context.Context, a *adapter, point string) error {
 	if err := a.hit("pause."+point, ""); err != nil {
 		return err
 	}
-	label := point
-	k.addHeld(label)
-	defer k.removeHeld(label)
+	held := heldRequest{method: pauseMethods[point], point: point}
+	k.addHeld(held)
+	defer k.removeHeld(held)
 	close(pp.reached)
 	k.mu.Lock()
 	hook := k.onPause
@@ -338,28 +365,48 @@ func (k *Knobs) pause(ctx context.Context, a *adapter, point string) error {
 	}
 }
 
-func (k *Knobs) addHeld(label string) {
+func (k *Knobs) addHeld(h heldRequest) {
 	k.mu.Lock()
-	k.holds = append(k.holds, label)
+	k.holds = append(k.holds, h)
 	k.mu.Unlock()
 }
 
-func (k *Knobs) removeHeld(label string) {
+func (k *Knobs) removeHeld(h heldRequest) {
 	k.mu.Lock()
-	if i := slices.Index(k.holds, label); i >= 0 {
+	if i := slices.Index(k.holds, h); i >= 0 {
 		k.holds = slices.Delete(k.holds, i, i+1)
 	}
 	k.mu.Unlock()
 }
 
-// Held lists the requests the adapter is holding, by method or pause point, for
-// a fixture that must know which unanswered requests are expected when it asks
-// whether the system is quiet. A request is held at a pause point or by
-// OutcomeHold.
+// Held lists the methods of the requests the adapter is holding on purpose, one
+// entry per request, in the order they were stopped: a multiset of methods, which
+// a fixture compares with the multiset of methods of the requests the daemon has
+// in flight to this adapter when it asks whether the system is quiet. A request is
+// held at a pause point or by OutcomeHold; either way it appears here under its
+// method (session.create, prompt.deliver, …) and never under the name of a point.
 func (k *Knobs) Held() []string {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	return append([]string(nil), k.holds...)
+	out := make([]string, len(k.holds))
+	for i, h := range k.holds {
+		out[i] = h.method
+	}
+	return out
+}
+
+// HeldPoints lists the pause points at which a request is stopped now: the
+// requests of Held that stopped at a point and not by an outcome.
+func (k *Knobs) HeldPoints() []string {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	var out []string
+	for _, h := range k.holds {
+		if h.point != "" {
+			out = append(out, h.point)
+		}
+	}
+	return out
 }
 
 // hold waits for ReleaseHeld or the end of ctx; method labels the request.
@@ -367,8 +414,9 @@ func (k *Knobs) hold(ctx context.Context, method string) error {
 	k.mu.Lock()
 	open := k.holdOpen
 	k.mu.Unlock()
-	k.addHeld(method)
-	defer k.removeHeld(method)
+	held := heldRequest{method: method}
+	k.addHeld(held)
+	defer k.removeHeld(held)
 	select {
 	case <-open:
 		return nil
@@ -450,6 +498,11 @@ func (k *Knobs) Outstanding() int {
 		return a.outstanding()
 	}
 	return 0
+}
+
+// stats is what the stats knob answers.
+func (k *Knobs) stats() StatsReply {
+	return StatsReply{NotificationsSent: k.NotificationsSent(), Outstanding: k.Outstanding(), Held: k.Held(), HeldPoints: k.HeldPoints()}
 }
 
 // Ping pings the daemon, as an adapter checks that it is still there.

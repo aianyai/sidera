@@ -172,9 +172,12 @@ func (a NativeRequestArgs) validate() error {
 
 // StatsReply is what the stats knob answers.
 type StatsReply struct {
-	NotificationsSent int      `json:"notifications_sent"`
-	Outstanding       int      `json:"outstanding"`
-	Held              []string `json:"held,omitempty"`
+	NotificationsSent int `json:"notifications_sent"`
+	Outstanding       int `json:"outstanding"`
+	// Held are the methods of the requests held on purpose (see Knobs.Held), and
+	// HeldPoints the pause points some of them stopped at.
+	Held       []string `json:"held,omitempty"`
+	HeldPoints []string `json:"held_points,omitempty"`
 }
 
 type validated interface{ validate() error }
@@ -305,7 +308,7 @@ func (k *Knobs) Dispatch(ctx context.Context, name string, args json.RawMessage)
 	case KnobPing:
 		return failed(k.Ping(ctx))
 	case KnobStats:
-		return StatsReply{NotificationsSent: k.NotificationsSent(), Outstanding: k.Outstanding(), Held: k.Held()}, nil
+		return k.stats(), nil
 	case KnobDirectRegister:
 		var p adapterproto.RegisterParams
 		if err := adapterproto.Decode(args, &p); err != nil {
@@ -354,11 +357,14 @@ func answerOf[T any](res T, err error) (any, error) {
 }
 
 // RemoteKnobs turns the knobs of a fake adapter that runs as a process of its own,
-// over the connection it made to the fixture's control server. The methods are
-// those of Knobs with a context; Do reaches any knob by name.
+// over the connection it made to the fixture's control server. It is a Controller,
+// as the knobs of an adapter in process are through Knobs.Controller; Do reaches any
+// knob by name.
 type RemoteKnobs struct {
 	Conn *fakectl.Conn
 }
+
+var _ Controller = RemoteKnobs{}
 
 // Do turns the named knob; args is marshalled to a JSON object (nil for none) and
 // the answer decoded into result (nil to discard it).
@@ -436,4 +442,53 @@ func (r RemoteKnobs) Stats(ctx context.Context) (StatsReply, error) {
 	var s StatsReply
 	err := r.Do(ctx, KnobStats, nil, &s)
 	return s, err
+}
+
+// NativeRequest reports a request of the native runtime that the adapter answered
+// itself.
+func (r RemoteKnobs) NativeRequest(ctx context.Context, endpoint adapterproto.EndpointRef, method string, d adapterproto.Disposition) error {
+	return r.Do(ctx, KnobNativeReq, NativeRequestArgs{Endpoint: endpoint, Method: method, Disposition: d}, nil)
+}
+
+// Ping pings the daemon.
+func (r RemoteKnobs) Ping(ctx context.Context) error { return r.Do(ctx, KnobPing, nil, nil) }
+
+// Register registers a direct endpoint under a key.
+func (r RemoteKnobs) Register(ctx context.Context, p adapterproto.RegisterParams) (adapterproto.RegisterResult, error) {
+	var res adapterproto.RegisterResult
+	err := r.Do(ctx, KnobDirectRegister, p, &res)
+	return res, err
+}
+
+// Recv reads the messages waiting for a direct endpoint.
+func (r RemoteKnobs) Recv(ctx context.Context, p adapterproto.RecvParams) (adapterproto.RecvResult, error) {
+	var res adapterproto.RecvResult
+	err := r.Do(ctx, KnobDirectRecv, p, &res)
+	return res, err
+}
+
+// Ack acknowledges parts of a page.
+func (r RemoteKnobs) Ack(ctx context.Context, p adapterproto.AckParams) (adapterproto.AckResult, error) {
+	var res adapterproto.AckResult
+	err := r.Do(ctx, KnobDirectAck, p, &res)
+	return res, err
+}
+
+// Send sends a message from a direct endpoint.
+func (r RemoteKnobs) Send(ctx context.Context, p adapterproto.SendParams) (adapterproto.SendResult, error) {
+	var res adapterproto.SendResult
+	err := r.Do(ctx, KnobDirectSend, p, &res)
+	return res, err
+}
+
+// MessageStatus asks for the delivery state of a message a direct endpoint sent.
+func (r RemoteKnobs) MessageStatus(ctx context.Context, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error) {
+	var res adapterproto.MessageStatusResult
+	err := r.Do(ctx, KnobDirectMessageStatus, p, &res)
+	return res, err
+}
+
+// Unregister closes a direct endpoint.
+func (r RemoteKnobs) Unregister(ctx context.Context, p adapterproto.UnregisterParams) error {
+	return r.Do(ctx, KnobDirectUnregister, p, nil)
 }

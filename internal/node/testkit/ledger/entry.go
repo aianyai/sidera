@@ -47,6 +47,8 @@ type Attrs struct {
 	Preset            string  `json:"preset,omitempty"`
 	Endpoint          string  `json:"endpoint,omitempty"`
 	NativeRef         string  `json:"native_ref,omitempty"`
+	RuntimeWriter     string  `json:"runtime_writer,omitempty"`
+	RuntimeSeq        int64   `json:"runtime_seq,omitempty"`
 	Outcome           string  `json:"outcome,omitempty"`
 	TextDigest        string  `json:"text_digest,omitempty"`
 	Lease             string  `json:"lease,omitempty"`
@@ -166,6 +168,24 @@ func (e Entry) Validate() error {
 		if !spec.allows(name) {
 			return fmt.Errorf("kind %s does not take the attribute %s", e.Kind, name)
 		}
+	}
+	return e.validateRuntimeEntry(present)
+}
+
+// validateRuntimeEntry checks the one cross-writer reference the format has: a
+// native.create.returned names the entry of the runtime that made the native
+// session, by its writer and sequence number, exactly when it names a native
+// session. A runtime entry that is never named could not be told from one that
+// was lost, and a name without a session has nothing to point at.
+func (e Entry) validateRuntimeEntry(present map[string]bool) error {
+	if e.Kind != KindNativeCreateReturned {
+		return nil
+	}
+	if present["native_ref"] != present["runtime_writer"] || present["native_ref"] != present["runtime_seq"] {
+		return errors.New("kind native.create.returned carries native_ref, runtime_writer and runtime_seq together or none of them")
+	}
+	if present["runtime_writer"] && !strings.HasPrefix(e.Attrs.RuntimeWriter, "runtime/") {
+		return fmt.Errorf("runtime_writer %q is not a runtime writer", e.Attrs.RuntimeWriter)
 	}
 	return nil
 }

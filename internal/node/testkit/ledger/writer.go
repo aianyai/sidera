@@ -76,6 +76,14 @@ func newWriter(writer string, pid int, now func() time.Time, step *stepCell, s s
 // and the current step, validates it and hands it to the backend; a refused or
 // failed entry consumes no sequence number.
 func (w *Writer) Append(kind string, attrs Attrs) error {
+	_, err := w.AppendSeq(kind, attrs)
+	return err
+}
+
+// AppendSeq is Append and returns the sequence number the entry got, so that a
+// writer in another process can be told which entry of this one proves an effect
+// (see Attrs.RuntimeSeq).
+func (w *Writer) AppendSeq(kind string, attrs Attrs) (int64, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	e := Entry{
@@ -84,13 +92,13 @@ func (w *Writer) Append(kind string, attrs Attrs) error {
 	}
 	line, err := Encode(e)
 	if err != nil {
-		return fmt.Errorf("ledger: %s: %w", w.writer, err)
+		return 0, fmt.Errorf("ledger: %s: %w", w.writer, err)
 	}
 	if err := w.sink.write(line); err != nil {
-		return fmt.Errorf("ledger: %s: %w", w.writer, err)
+		return 0, fmt.Errorf("ledger: %s: %w", w.writer, err)
 	}
 	w.seq++
-	return nil
+	return w.seq, nil
 }
 
 // Name returns the writer name.

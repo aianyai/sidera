@@ -40,7 +40,12 @@ build on these packages and are not part of them.
   what the model was shown) in a record of their own, and write the entry before they
   tell the other side, so an effect that took place is on record even if the process dies
   in the next instant. Every entry of the file backend is synced because the writers are
-  killed on purpose.
+  killed on purpose. The writers are separate processes and a test clock stands still, so
+  "written first" cannot be read from the order of lines; the adapter's confirmation of a
+  native session therefore names the runtime's own entry by writer and sequence number,
+  which the runtime's answer carried back, and the ledger can check that the entry exists
+  (`Log.CheckConfirmations`). Step names are unique for the same reason: an entry names
+  its step and nothing else.
 - **Entries are canonical lines.** A line that decodes re-encodes to the same bytes, so
   equal entries are equal text and two readers cannot read one line two ways. The same
   is true of the other formats that cross between processes: the session record, the
@@ -59,6 +64,41 @@ build on these packages and are not part of them.
   The quiet conditions that the fakes are responsible for (no unfinished action, no
   unexpected request in flight, all notifications handled, held requests expected) are
   queries, because a sleep is both slow and wrong.
+- **A session starts working on its first prompt.** A real runtime does, and the
+  protocol counts that prompt as an attempt, so the fake runtime starts a turn for it
+  when the adapter that made the session takes charge of it (its first watcher), not
+  after the script says so: tests then see what the daemon will see, including a
+  `turn.started` that can reach it before the answer to `session.create`. The plan of
+  that turn is set before creation, per runtime (a default plan), because the session
+  and its attempt do not exist yet for a test to name; the zero plan starts
+  automatically and a manual plan leaves the start to the script.
+- **Turns have exactly one start and one end, even when the process dies.** A killed
+  native process cannot write the end of its turn into its record, but the adapter
+  that is online sees it die and ends the turn as failed; a record whose writer
+  stopped with a turn not ended reads as failed. A run that left a turn open would
+  make every test of a crash during a turn depend on a case the protocol forbids.
+- **A runtime's events are requests, and quiet includes them.** The runtime process
+  tells its adapter of a turn's start and end and of what the model read with
+  requests the adapter answers after it has passed the event on, so a fixture that
+  waits for the runtime to be idle cannot advance the clock in the gap between the
+  runtime having finished and the daemon having been told. A notification would leave
+  that gap, and a ping does not close it.
+- **A launcher checks whom it reached.** A runtime process is found again by a file
+  and an address; a released port can be taken by the next process that asks for one,
+  so after connecting the launcher asks the process for its reference, process id and
+  start key and takes it only if they are the file's.
+- **One interface over the knobs of both layers.** The knobs of an adapter in the
+  test process and of the adapter program are used through one interface
+  (`fakeadapter.Controller`), as the turns of both runtimes are through
+  `fakeruntime.Controller`, so a scenario is written once. `Held` reports methods and
+  never pause points, because the daemon's in-flight requests are compared with it by
+  method.
+- **Configuration reaches an adapter program by its arguments first.** Several fake
+  adapters under one daemon share the environment the daemon gives them but not the
+  arguments of their manifests, so the file named in the arguments wins and the
+  environment variable is the fallback. A configuration field that was left out must
+  not turn into a process nobody can end (the control address is required) or into
+  1970 (the clock start must be positive).
 - **A runtime process outlives its adapter.** A native session does not die when its
   adapter does; what the daemon must survive is an adapter that restarts and finds the
   session still there, or gone. So each session is a detached process, found again by a
@@ -98,11 +138,11 @@ build on these packages and are not part of them.
 | Part | Code | Tests |
 | ---- | ---- | ----- |
 | Import rule | `internal/node/testkit/imports_test.go` | `TestThirdPartySideImportsOnlyStandardLibraryAndSDK`, `TestImportRuleDetectsViolations` |
-| Ledger | `internal/node/testkit/ledger` | `TestGoldenEntryVectors`, `TestDecodeRejects`, `TestEncodeRefusesInvalidEntries`, `TestKindTableCoversEveryKind`, `TestWriterStampsEveryEntry`, `TestConcurrentWritersKeepEachSequence`, `TestDirWritesEachEntryBeforeAppendReturns`, `TestReadDirRejects`, `TestReadDirToleratesTheLastLineOfAKilledProcess`, `TestDigestIsSHA256InHex`, `TestLogPIDsListsEveryProcessThatWrote`, `TestDirLedgerOrdersEntriesByTimeThenScriptStep`, `FuzzDecode`, `FuzzParseStream` |
-| Control channel | `internal/node/testkit/fakectl` | `TestGoldenParams`, `TestDecodeParamsRejects`, `FuzzDecodeParams`, `TestClockAndStepReachTheClientBeforeTheCallReturns`, `TestKnobCallsTheClientsHandler`, `TestRequestsBeforeHelloAreRefused`, `TestClientEndsWhenTheControlConnectionDrops`, `TestCloseEndsEveryGoroutine` |
-| Runtime | `internal/node/testkit/fakeruntime`, `cmd/sidera-fake-runtime` | `TestTurnsEndOnlyWhenTheScriptSaysSoAndTimeNeverEndsOne`, `TestPromptDuringATurnIsRefusedAsBusy`, `TestPromptIsDeliveredAtMostOncePerAttempt`, `TestRecvActionRecordsWhatTheModelSawAndReportsTheToolResult`, `TestKilledNativeStopsReportingAndLeavesTheRecordReadable`, `TestAnExecActionThatNamesAFrontendIsAReceive`, `TestReconcileReadsTheRecord`, `TestGoldenRecordLines`, `TestDecodeEventRejects`, `FuzzDecodeEvent`, `TestProcessSessionIsReachableAndDrivenOverTheControlChannel`, `TestARestartedAdapterTakesTheLiveSessionBack`, `TestAKilledNativeProcessIsGoneAndItsRecordIsReadable`, `TestGoldenLinkMessages`, `FuzzDecodeLink` |
-| Adapter | `internal/node/testkit/fakeadapter`, `cmd/sidera-fake-adapter` | the consistency test `TestFakeAdapterOutputMatchesProtocolSchemas` with `TestFakeAdapterDeclarationIsAdmittedByTheDaemonRules` and `TestFakeAdapterAnswersEveryGoldenRequest`; `TestInstanceLockIsTakenBeforeInitializeIsAnswered`, `TestCreateIsIdempotentPerAttemptAndConflictsOnOtherParameters`, `TestCreateOutcomes`, `TestPauseAtCreateAfterNativeStopsBeforeTheAnswer`, `TestPromptOutcomes`, `TestReconcileAnswersFromTheRecord`, `TestStartReattachesWhatItCan`, `TestTimesTheAdapterReportsComeFromTheTestClock`, `TestObservedModes`, `TestHungAdapterAnswersNothingAndKeepsItsLock`, `TestHangLeavesAHit`, `TestPipeProcessIsAProcessTheAdapterHostCanSupervise`, `TestProcessAdapterDrivesARuntimeProcessAndTakesItBackAfterARestart`, `TestProcessAdapterKnobsOverTheControlChannel`, `FuzzDecodeKnobArguments`, `FuzzDecodeProcessConfig` |
-| Fake agent | `internal/node/testkit/fakeagent` | `TestErrorCategories`, `TestRecordingWritesTheCallBeforeTheActionAndTheResultAfter`, `TestRecordingCanRecordWhatTheModelSawOutsideATurn` |
+| Ledger | `internal/node/testkit/ledger` | `TestGoldenEntryVectors`, `TestDecodeRejects`, `TestEncodeRefusesInvalidEntries`, `TestKindTableCoversEveryKind`, `TestWriterStampsEveryEntry`, `TestConcurrentWritersKeepEachSequence`, `TestDirWritesEachEntryBeforeAppendReturns`, `TestReadDirRejects`, `TestReadDirToleratesTheLastLineOfAKilledProcess`, `TestReadDirRejectsARepeatedStepName`, `TestCheckConfirmations`, `TestDigestIsSHA256InHex`, `TestLogPIDsListsEveryProcessThatWrote`, `TestDirLedgerOrdersEntriesByTimeThenScriptStep`, `FuzzDecode`, `FuzzParseStream` |
+| Control channel | `internal/node/testkit/fakectl` | `TestGoldenParams`, `TestDecodeParamsRejects`, `FuzzDecodeParams`, `TestClockAndStepReachTheClientBeforeTheCallReturns`, `TestKnobCallsTheClientsHandler`, `TestRequestsBeforeHelloAreRefused`, `TestClientEndsWhenTheControlConnectionDrops`, `TestCloseEndsEveryGoroutine`, `TestAHandlerRegisteredWhileAConnectionIsBeingMadeReachesIt` |
+| Runtime | `internal/node/testkit/fakeruntime`, `cmd/sidera-fake-runtime` | `TestTurnsEndOnlyWhenTheScriptSaysSoAndTimeNeverEndsOne`, `TestPromptDuringATurnIsRefusedAsBusy`, `TestPromptIsDeliveredAtMostOncePerAttempt`, `TestRecvActionRecordsWhatTheModelSawAndReportsTheToolResult`, `TestKilledNativeStopsReportingAndLeavesTheRecordReadable`, `TestAnExecActionThatNamesAFrontendIsAReceive`, `TestARecvPartActionIsAReceive`, `TestAReceiveThatPrintsNoPageIsAnErrorInTheRecord`, `TestTheFirstPromptStartsTheFirstTurnWhenTheAdapterTakesCharge`, `TestARuntimeProcessIsBusyUntilTheAdapterHasHandedTheEventOn`, `TestARuntimeProcessIsBusyUntilTheAdapterHasHandedTheToolResultOn`, `TestAKilledProcessEndsItsRunningTurnAsFailed`, `TestFindDoesNotTakeAProcessThatIsNotTheSessionItsInfoFileNames`, `TestExecRunnerDerivesASeedForEveryCommand`, `TestReconcileReadsTheRecord`, `TestGoldenRecordLines`, `TestDecodeEventRejects`, `FuzzDecodeEvent`, `TestProcessSessionIsReachableAndDrivenOverTheControlChannel`, `TestARestartedAdapterTakesTheLiveSessionBack`, `TestAKilledNativeProcessIsGoneAndItsRecordIsReadable`, `TestGoldenLinkMessages`, `FuzzDecodeLink` |
+| Adapter | `internal/node/testkit/fakeadapter`, `cmd/sidera-fake-adapter` | the consistency test `TestFakeAdapterOutputMatchesProtocolSchemas` with `TestFakeAdapterDeclarationIsAdmittedByTheDaemonRules` and `TestFakeAdapterAnswersEveryGoldenRequest`; `TestInstanceLockIsTakenBeforeInitializeIsAnswered`, `TestCreateIsIdempotentPerAttemptAndConflictsOnOtherParameters`, `TestCreateOutcomes`, `TestPauseAtCreateAfterNativeStopsBeforeTheAnswer`, `TestPromptOutcomes`, `TestReconcileAnswersFromTheRecord`, `TestStartReattachesWhatItCan`, `TestTimesTheAdapterReportsComeFromTheTestClock`, `TestObservedModes`, `TestHungAdapterAnswersNothingAndKeepsItsLock`, `TestHangLeavesAHit`, `TestPipeProcessIsAProcessTheAdapterHostCanSupervise`, `TestProcessAdapterDrivesARuntimeProcessAndTakesItBackAfterARestart`, `TestProcessAdapterKnobsOverTheControlChannel`, `FuzzDecodeKnobArguments`, `FuzzDecodeProcessConfig`, `TestOneScriptDrivesTheKnobsOfBothLayers`, `TestHeldIsAMultisetOfMethodsWhateverHoldsTheRequest`, `TestTheFirstPromptStartsATurnTheDaemonHearsOf`, `TestAKilledNativeProcessEndsItsRunningTurnAsFailedExactlyOnce`, `TestAConfirmedCreationNamesTheRuntimesEntry`, `TestTheDaemonSideIsToldBeforeTheCallThatCausedTheEventReturns`, `TestTheAdapterProgramStartsFromTheConfigFileOfItsArguments`, `TestAnInitializeThatRunsAfterTheAdapterWasReleasedTakesNoLock` |
+| Fake agent | `internal/node/testkit/fakeagent` | `TestTheInterfaceHasAMethodForEveryAgentCommand`, `TestErrorCategories`, `TestRecordingWritesTheCallBeforeTheActionAndTheResultAfter`, `TestRecordingCanRecordWhatTheModelSawOutsideATurn` |
 | Crash walk | `internal/node/testkit/crashwalk` | `TestPlanFullTakesEveryWindowPointExceptTheSyncSteps`, `TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole`, `TestShardsPartitionTheTargets`, `TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce`, `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`, `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`, `TestAssessCoverage`, `TestCheckRecoveryCasesUnion`, `TestWalkFailsWhenATargetIsNotReached`, `TestWalkFailsWhenARerunDivergesFromTheRecording`, `TestWalkSecondLayerCrashesTheRecoveryAfterTheMainCrash` |
 
 ## The consistency test
@@ -134,3 +174,6 @@ directory and is replaced), is answered with a result the schema accepts.
   format.
 - The scenario scripts, the fixtures of the two layers and the backends of the fake agent
   and of the crash walk are not in this tree yet.
+- The program path of a fake adapter has the extension of an executable of the platform
+  (`.exe` on Windows, where a path that names a program is used as it is), written for
+  Windows and cross-compiled: pending verification by CI on main.

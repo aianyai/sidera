@@ -4,9 +4,11 @@
 // its knobs under the control of the test fixture that started it. It is a test
 // tool and is never installed.
 //
-// It reads a fakeadapter.ProcessConfig, as JSON, from the environment variable
-// SIDERA_FAKE_ADAPTER_CONFIG. Standard error carries its log, which never holds
-// message bodies. It ends when the daemon closes its input, or when the control
+// It reads a fakeadapter.ProcessConfig, as JSON, from the file named by the
+// argument --config, or else from the environment variable
+// SIDERA_FAKE_ADAPTER_CONFIG: several fake adapters under one daemon share an
+// environment, and the entry arguments of their packages tell them apart. Standard
+// error carries its log, which never holds message bodies. It ends when the daemon closes its input, or when the control
 // connection to the fixture ends.
 package main
 
@@ -28,9 +30,9 @@ func main() {
 }
 
 func run() error {
-	cfg, err := fakeadapter.DecodeProcessConfig([]byte(os.Getenv(fakeadapter.ConfigEnv)))
+	cfg, err := fakeadapter.ReadProcessConfig(os.Args[1:], os.Getenv)
 	if err != nil {
-		return fmt.Errorf("%s: %w", fakeadapter.ConfigEnv, err)
+		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()

@@ -34,7 +34,7 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	return fakeruntime.RunProcess(ctx, spec, fakeruntime.ExecRunner{}, func(info fakeruntime.ProcessInfo) {
+	return fakeruntime.RunProcess(ctx, spec, &fakeruntime.ExecRunner{Seed: spec.TestSeed}, func(info fakeruntime.ProcessInfo) {
 		line, _ := json.Marshal(info)
 		fmt.Fprintf(os.Stdout, "%s\n", line)
 	})

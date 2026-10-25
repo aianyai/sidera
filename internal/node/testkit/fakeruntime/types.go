@@ -53,7 +53,9 @@ type TurnAction struct {
 type TurnPlan struct {
 	// ManualStart holds back the start of a turn that a prompt would start by
 	// itself: the turn then starts when the script calls StartTurn. The zero
-	// value starts a turn as soon as a prompt arrives.
+	// value starts a turn as soon as a prompt arrives; for the first prompt of a
+	// session that is when the adapter that made the session takes charge of it
+	// (Session.Watch).
 	ManualStart bool `json:"manual_start,omitempty"`
 	// Actions are what the model does in the turn, in order.
 	Actions []TurnAction `json:"actions,omitempty"`
@@ -190,8 +192,21 @@ type Session interface {
 	Close(ctx context.Context) error
 	// Reconcile reads the record for an attempt.
 	Reconcile(attempt string) (Reconciliation, error)
-	// Watch sets the one watcher of the session's events.
+	// Watch sets the one watcher of the session's events: the adapter that took
+	// charge of the session. The first prompt of a session starts the first turn,
+	// as it does in a real runtime, unless the first plan holds it back; the turn
+	// starts when the first watcher is set, so that its events have somewhere to go.
 	Watch(Watcher)
+	// Created is the runtime's own ledger entry that says the session exists. An
+	// adapter names it in its own entry for the creation, which is how the ledger
+	// shows the runtime wrote first.
+	Created() LedgerRef
+}
+
+// LedgerRef names one entry of a runtime's ledger.
+type LedgerRef struct {
+	Writer string
+	Seq    int64
 }
 
 // Launcher starts or finds native sessions. A Runtime is one, in process; a
@@ -209,6 +224,11 @@ type Controller interface {
 	StartTurn(ref string) error
 	EndTurn(ref string, final string) error
 	KillNative(ref string) error
+	// SetFirstTurn sets the plan of the first turn of the sessions that are
+	// created from now on; a session that exists has its own plan (SetPlan). The
+	// first prompt of a session starts a turn at once, so its plan cannot be set
+	// after the session exists.
+	SetFirstTurn(plan TurnPlan) error
 	// Idle is true when no turn action is running or waiting to start.
 	Idle() bool
 }
@@ -223,6 +243,10 @@ type Config struct {
 	Dir string
 	// Seed makes native references and process identities deterministic.
 	Seed uint64
+	// FirstTurn is the plan of the first turn of every session, which the first
+	// prompt starts. The zero value is a turn with no actions that starts at once
+	// and is ended by the script.
+	FirstTurn TurnPlan
 	// Runner carries out the actions of turns. Without one an action fails.
 	Runner ActionRunner
 	// Feedback classifies a message of a page as feedback from the node itself and

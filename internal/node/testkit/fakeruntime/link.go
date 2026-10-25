@@ -18,16 +18,28 @@ const (
 	MethodClose     = "runtime.close"
 	MethodReconcile = "runtime.reconcile"
 	MethodState     = "runtime.state"
+	// MethodWatch makes the caller the adapter that is in charge of the session: its
+	// first turn starts, and every adapter connected hears the turn events.
+	MethodWatch = "runtime.watch"
 
-	NoteTurnStarted = "runtime.turn.started"
-	NoteTurnEnded   = "runtime.turn.ended"
-	NoteToolResult  = "runtime.tool.result"
+	// The three requests the runtime makes of the adapter. They are requests and
+	// not notifications: the adapter answers only after it has handed the event to
+	// the daemon, so that the runtime counts as busy until the daemon's side of it
+	// is on its way. A notification would let the runtime turn idle while the event
+	// was still unhandled, and a fixture that waits for quiet would advance the clock
+	// before the daemon had heard of the turn.
+	MethodTurnStarted = "runtime.turn.started"
+	MethodTurnEnded   = "runtime.turn.ended"
+	MethodToolResult  = "runtime.tool.result"
 
 	KnobPlan      = "plan"
 	KnobTurnStart = "turn.start"
 	KnobTurnEnd   = "turn.end"
 	KnobKill      = "kill"
 	KnobIdle      = "idle"
+	// KnobFirstTurn is sent to an adapter, not to a runtime process: it sets the
+	// plan of the first turn of the sessions the adapter creates from then on.
+	KnobFirstTurn = "first-turn"
 )
 
 // Error codes of the link: a refusal a session made, so the other side can answer
@@ -59,11 +71,17 @@ type InterruptReply struct {
 	Result string `json:"result"`
 }
 
-// StateReply is the state of a session.
+// StateReply is the state of a session, with the identity of the process that
+// answers: a caller that connected to an address checks that it reached the
+// session it meant, because a port that was released can be taken by the next
+// process that asks for one.
 type StateReply struct {
-	Alive  bool   `json:"alive"`
-	Active bool   `json:"active"`
-	Turn   string `json:"turn,omitempty"`
+	Ref      string `json:"ref"`
+	PID      int64  `json:"pid"`
+	StartKey string `json:"start_key"`
+	Alive    bool   `json:"alive"`
+	Active   bool   `json:"active"`
+	Turn     string `json:"turn,omitempty"`
 }
 
 // ReconcileReply is a Reconciliation on the wire.
@@ -92,6 +110,24 @@ type PlanKnob struct {
 	EndAfter    bool         `json:"end_after,omitempty"`
 }
 
+// DecodePlanKnob reads the arguments of a knob that carries a plan: absent for the
+// zero plan.
+func DecodePlanKnob(name string, args []byte) (PlanKnob, error) {
+	if args == nil {
+		return PlanKnob{}, nil
+	}
+	v, err := DecodeLink("knob."+name, args)
+	if err != nil {
+		return PlanKnob{}, err
+	}
+	return v.(PlanKnob), nil
+}
+
+// KnobOf is the knob that carries a plan.
+func KnobOf(p TurnPlan) PlanKnob {
+	return PlanKnob{ManualStart: p.ManualStart, Actions: p.Actions, EndAfter: p.EndAfter}
+}
+
 // Plan returns the plan the knob carries.
 func (k PlanKnob) Plan() TurnPlan {
 	return TurnPlan{ManualStart: k.ManualStart, Actions: k.Actions, EndAfter: k.EndAfter}
@@ -106,6 +142,9 @@ type ProcessInfo struct {
 	Addr     string `json:"addr"`
 	PID      int64  `json:"pid"`
 	StartKey string `json:"start_key"`
+	// CreatedSeq is the sequence number of the runtime's ledger entry that says the
+	// session exists (writer "runtime/<ref>"), for the adapter to name in its own.
+	CreatedSeq int64 `json:"created_seq"`
 }
 
 func (p ProcessInfo) validate() error {
@@ -116,6 +155,8 @@ func (p ProcessInfo) validate() error {
 		return fmt.Errorf("endpoint, addr and start_key are required")
 	case p.PID < 1:
 		return fmt.Errorf("pid %d is not a process id", p.PID)
+	case p.CreatedSeq < 1:
+		return fmt.Errorf("created_seq %d is not a sequence number", p.CreatedSeq)
 	}
 	return nil
 }
@@ -154,6 +195,9 @@ func (r InterruptReply) validate() error {
 }
 
 func (s StateReply) validate() error {
+	if !refPattern.MatchString(s.Ref) || s.PID < 1 || s.StartKey == "" {
+		return fmt.Errorf("a state needs the identity of the session: ref, pid and start_key")
+	}
 	if s.Active != (s.Turn != "") {
 		return fmt.Errorf("active and turn disagree")
 	}
@@ -184,43 +228,46 @@ func (IdleReply) validate() error { return nil }
 
 func (k PlanKnob) validate() error { return k.Plan().validate() }
 
-// TurnStartedNote, TurnEndedNote and ToolResultNote are the notifications a
-// runtime process sends the adapter that watches its session.
-type TurnStartedNote struct {
+// Validate checks that every action of the plan is one a turn can take.
+func (k PlanKnob) Validate() error { return k.validate() }
+
+// TurnStartedParams, TurnEndedParams and ToolResultParams are the requests a
+// runtime process makes of the adapters that watch its session.
+type TurnStartedParams struct {
 	Turn    string `json:"turn"`
 	Attempt string `json:"attempt,omitempty"`
 	AtMS    int64  `json:"at_ms"`
 }
 
-// TurnEndedNote reports the end of a turn.
-type TurnEndedNote struct {
+// TurnEndedParams reports the end of a turn.
+type TurnEndedParams struct {
 	Turn  string `json:"turn"`
 	Final string `json:"final"`
 	AtMS  int64  `json:"at_ms"`
 }
 
-// ToolResultNote reports the result of a recv the model received.
-type ToolResultNote struct {
+// ToolResultParams reports the result of a recv the model received.
+type ToolResultParams struct {
 	Lease    string `json:"lease"`
 	Text     string `json:"text"`
 	Frontend string `json:"frontend"`
 }
 
-func (n TurnStartedNote) validate() error {
+func (n TurnStartedParams) validate() error {
 	if n.Turn == "" || n.AtMS < 0 {
 		return fmt.Errorf("a turn start needs a turn and a time")
 	}
 	return nil
 }
 
-func (n TurnEndedNote) validate() error {
+func (n TurnEndedParams) validate() error {
 	if n.Turn == "" || n.AtMS < 0 {
 		return fmt.Errorf("a turn end needs a turn and a time")
 	}
 	return TurnEndKnob{Final: n.Final}.validate()
 }
 
-func (n ToolResultNote) validate() error {
+func (n ToolResultParams) validate() error {
 	if n.Lease == "" || n.Frontend == "" {
 		return fmt.Errorf("a tool result needs a lease and a front end")
 	}
@@ -240,8 +287,8 @@ func decode[T validated](data []byte) (any, error) {
 	return v, nil
 }
 
-// DecodeLink strictly decodes the params, the result or the notification of a
-// method of the link: for a request, the params of the request; the answers of
+// DecodeLink strictly decodes the params or the result of a method of the link:
+// for a request, the params of the request; the answers of
 // the requests have the names of their method followed by ".reply", and the
 // knob arguments are the names of the knobs prefixed "knob.". The value is the
 // type itself, not a pointer.
@@ -263,12 +310,14 @@ func DecodeLink(name string, data []byte) (any, error) {
 		return decode[TurnEndKnob](data)
 	case "knob." + KnobIdle + ".reply":
 		return decode[IdleReply](data)
-	case NoteTurnStarted:
-		return decode[TurnStartedNote](data)
-	case NoteTurnEnded:
-		return decode[TurnEndedNote](data)
-	case NoteToolResult:
-		return decode[ToolResultNote](data)
+	case "knob." + KnobFirstTurn:
+		return decode[PlanKnob](data)
+	case MethodTurnStarted:
+		return decode[TurnStartedParams](data)
+	case MethodTurnEnded:
+		return decode[TurnEndedParams](data)
+	case MethodToolResult:
+		return decode[ToolResultParams](data)
 	}
 	return nil, fmt.Errorf("fakeruntime: unknown link message %q", name)
 }

@@ -17,6 +17,8 @@ func FuzzDecode(f *testing.F) {
 		f.Add([]byte(g.line))
 	}
 	f.Add([]byte(`{"v":1}`))
+	f.Add([]byte(`{"v":1,"writer":"adapter/fake","pid":0,"seq":1,"at_ms":1,"step":"","kind":"native.create.returned","attrs":{"attempt":"a","native_ref":"n-0123","runtime_writer":"runtime/n-0123","runtime_seq":9223372036854775807,"outcome":"created"}}`))
+	f.Add([]byte(`{"v":1,"writer":"adapter/fake","pid":0,"seq":1,"at_ms":1,"step":"","kind":"native.create.returned","attrs":{"attempt":"a","native_ref":"n-0123","runtime_writer":"runtime/n-0123","outcome":"created"}}`))
 	f.Add([]byte(`{"v":1,"writer":"fixture","pid":0,"seq":1,"at_ms":1,"step":"","kind":"fixture.step","attrs":{"name":"é"}}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		e, err := ledger.Decode(data)

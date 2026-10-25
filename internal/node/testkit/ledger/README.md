@@ -16,10 +16,11 @@ code under test, `fsx` included.
 | `Entry`, `Attrs` | One line of a ledger and its attributes. |
 | `Encode`, `Decode` | The canonical line of an entry, and strict reading of a line. |
 | `Factory`, `NewMemory`, `NewDir` | The two backends. `Open(writer, pid, now)` returns the `Writer` of one process. |
-| `Writer.Append(kind, attrs)` | Numbers, stamps, validates and stores one entry. |
+| `Writer.Append(kind, attrs)`, `Writer.AppendSeq` | Numbers, stamps, validates and stores one entry. `AppendSeq` also returns the sequence number the entry got, for a writer that must name it to another process. |
 | `Memory.SetStep`, `Dir.SetStep` | The script step the fixture announces; entries written afterwards carry it. |
 | `Memory.Log`, `ReadDir` | Read everything back, validated, as a `Log`. |
 | `Log.Entries`, `Kind`, `Writer`, `Select`, `Count`, `Steps`, `PIDs` | Queries. `PIDs` lists the processes that wrote, for a fixture that ends what a test left behind. |
+| `Log.CheckConfirmations` | The invariant that an effect is on record before it is confirmed (below). |
 | `Kinds`, the `Kind…` constants | The vocabulary of entry kinds. |
 
 ## The format
@@ -54,6 +55,19 @@ would let two readers of one ledger disagree.
   happened, so an effect that took place is always in the ledger. The file
   backend syncs every entry before `Append` returns, so this holds across the
   death of the writing process.
+- **A confirmation names the entry it confirms.** The adapter's
+  `native.create.returned` carries, with the `native_ref`, the `runtime_writer` and
+  `runtime_seq` of the runtime's `runtime.session.created` entry for that session:
+  the runtime's answer to the adapter carries its sequence number back, so the
+  adapter can only have it once the entry is written and synced. The two writers
+  are separate processes, and on a test clock that stands still the order of lines
+  across files says nothing, so this reference is what proves "written first".
+  The three attributes appear together or not at all (a creation that failed before
+  any native session names none), and `CheckConfirmations` fails when the named entry
+  does not exist or is not the creation of that session for that attempt.
+- **Step names are unique.** An entry names its step and nothing else, so a name
+  announced twice would put the entries of its second run among those of its first;
+  `ReadDir` refuses such a ledger.
 - **A refused or failed entry consumes no sequence number,** so a gap in a
   stream always means a lost entry.
 - **One file per writer and process** (`<writer>-<pid>.jsonl`, the slash of the
@@ -87,6 +101,8 @@ would let two readers of one ledger disagree.
 `TestEncodeRefusesInvalidEntries` (one row per rule), `TestKindTableCoversEveryKind`,
 `TestWriterStampsEveryEntry`, `TestWriterRefusesAnInvalidEntryWithoutConsumingASequenceNumber`,
 `TestConcurrentWritersKeepEachSequence`, `TestDirWritesEachEntryBeforeAppendReturns`,
-`TestReadDirRejects`, `TestReadDirToleratesTheLastLineOfAKilledProcess`;
+`TestReadDirRejects`, `TestReadDirToleratesTheLastLineOfAKilledProcess`,
+`TestReadDirRejectsARepeatedStepName`, `TestAppendSeqReturnsTheSequenceNumberOfTheEntry`,
+`TestCheckConfirmations`;
 `FuzzDecode` (an accepted line re-encodes to identical bytes) and
 `FuzzParseStream`.
