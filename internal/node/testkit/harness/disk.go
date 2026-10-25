@@ -121,8 +121,19 @@ func (m *Mounted) cutOff() { m.cut.cutOff() }
 // nil, is told about every write step of the process.
 func Mount(t testing.TB, tab *txn.Table, disk *fsxtest.Mem, obs txn.Observer) *Mounted {
 	t.Helper()
+	return MountWithFaults(t, tab, disk, obs, nil)
+}
+
+// MountWithFaults is Mount with a chance to arm the fault wrapper before the
+// recovery runs, so that a rule can fail a write of the recovery itself. arm may
+// be nil.
+func MountWithFaults(t testing.TB, tab *txn.Table, disk *fsxtest.Mem, obs txn.Observer, arm func(*fsxtest.Faulty)) *Mounted {
+	t.Helper()
 	cut := newCutoff(disk)
 	faulty := fsxtest.NewFaulty(t, cut)
+	if arm != nil {
+		arm(faulty)
+	}
 	w := txn.New(faulty, tab, obs)
 	if err := w.Recover(); err != nil {
 		t.Fatalf("harness: Recover: %v", err)

@@ -111,12 +111,20 @@ func IsNotSupported(err error) bool { return errors.Is(err, fakeagent.ErrNotAvai
 // decides for itself.
 var ErrProcessEnded = errors.New("the process the call was made to ended before the call returned")
 
+// ErrNodeNotRunning is what a call to a node that is down carries: nothing is
+// listening, as for a client that finds no socket. MapError gives it the category
+// the agent interface has for a daemon that is not running.
+var ErrNodeNotRunning = errors.New("the node is not running")
+
 // MapError maps what an engine method returned to the error of the fake agent:
 // a typed refusal to its category and code, a call whose process ended to
-// outcome_unknown, anything else to an internal error. It is nil for nil.
+// outcome_unknown, a call to a node that is down to unavailable, anything else to an internal error. It is nil for nil.
 func MapError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, ErrNodeNotRunning) {
+		return &fakeagent.Error{Category: fakeagent.CategoryUnavailable, Code: "daemon_not_running", Message: err.Error()}
 	}
 	if errors.Is(err, ErrProcessEnded) {
 		return &fakeagent.Error{Category: fakeagent.CategoryOutcomeUnknown, Code: "connection_lost", Message: err.Error()}

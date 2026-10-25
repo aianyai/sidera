@@ -16,6 +16,7 @@ over).
 | `New(svc, caller)` | The agent of one endpoint. |
 | `MapError(err)` | An engine refusal as the error of the fake agent: its category and code. Anything that is not a refusal is internal. |
 | `NotSupported(method)`, `IsNotSupported(err)` | The error of a method the engine does not offer yet: `not_found/method_unknown` that is also `fakeagent.ErrNotAvailable` (the same value as `scenario.ErrNotAvailable`), and its test. |
+| `ErrNodeNotRunning` | What a call to a node that is down carries; `MapError` turns it into `unavailable/daemon_not_running`. |
 | `ErrProcessEnded` | What a call carries when the process it was made to ended before it returned; `MapError` turns it into `outcome_unknown/connection_lost`. |
 
 ## Rules
@@ -44,7 +45,7 @@ over).
 `TestDeclareLeavesAFieldThatIsNilAsItWas`,
 `TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface`,
 `TestEveryEngineReasonMapsToACategoryAndCode`, `TestAnErrorThatIsNotARefusalIsInternal`,
-`TestACallWhoseProcessEndedIsOutcomeUnknown`,
+`TestACallWhoseProcessEndedIsOutcomeUnknown`, `TestACallToANodeThatIsDownIsUnavailable`,
 `TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError`,
 `TestOtherErrorsAreNotTakenForNotSupported` (a real server's own `not_found/method_unknown` among them); the skipped
 `TestShouldAMethodTheEngineDoesNotOfferYetHaveItsOwnCategory` keeps the question about

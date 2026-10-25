@@ -151,10 +151,25 @@ packages and are not part of them.
   because the order of entries across writers is not known on a test clock and that
   sighting may be the first. Counting unmarked sightings alone would pass a marked
   sighting followed by an unmarked one.
+- **Quiet is a round in which no count moved.** The engine's own conditions and those of
+  the fakes are asked in turn, and a fake that takes work while the engine is asked,
+  finishes it, sends a notification and goes idle again is idle on every look, yet the
+  engine has not processed that notification. Each condition of the fixture therefore
+  reports a count that never goes down together with whether it holds, and the fixture
+  returns only when one whole round (its look, the engine, its look) changed none of
+  them. A boolean cannot show that a state was left and reached again in between.
 - **A layer that lacks a capability says so.** The engine layer has no adapter host and
   no way to create a session yet; `Env` returns an error that is `ErrNotAvailable`
   for them. A stand-in would make a script pass for what it did not exercise, and the
   failure is what tells the stream that adds the capability to remove the error.
+- **Offline hooks are the halves of a restart, not modes of a crash.** A scenario that
+  corrupts a file between two runs, or that crashes the recovery of a crash, needs the node
+  down on a disk the test can change and a start whose fault wrapper is armed before its
+  recovery runs. `Stop` and `Kill` leave the node down (calls to it are unavailable, as to
+  a daemon that is not running), `Start` and `StartWith` run a process on the disk; a
+  restart and a crash are those two in a row. The in-memory state a process starts with
+  (the clock's high-water mark, the rollback pause an option asks for) is applied from
+  zero at each start, because a process has no memory of the last one.
 - **The node is made by the program's own code,** through the `init` plan and the install
   and enable entries, on a disk copied from one made per test binary. A hand-written disk
   would let the fixture and the program disagree about a format.
@@ -195,7 +210,7 @@ packages and are not part of them.
 | Fake agent | `internal/node/testkit/fakeagent` | `TestTheInterfaceHasAMethodForEveryAgentCommand`, `TestErrorCategories`, `TestRecordingWritesTheCallBeforeTheActionAndTheResultAfter`, `TestRecordingCanRecordWhatTheModelSawOutsideATurn` |
 | Engine backend | `internal/node/testkit/fakeagent/engineagent` | `TestDeclarePatchReachesTheEngineForTheCallersOwnEndpoint`, `TestDeclareLeavesAFieldThatIsNilAsItWas`, `TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface`, `TestEveryEngineReasonMapsToACategoryAndCode`, `TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError` |
 | Scripts | `internal/node/testkit/scenario`, `internal/node/testkit/scenario_imports_test.go` | `TestRunSetsUpDirectEndpointsThenRunsEachStepAndQuiescesAfterIt`, `TestRunStopsAtTheFirstFailedStepAndNamesIt`, `TestRunRefusesAScriptThatCannotRunBeforeTouchingTheSystem`, `TestRecvAndAckAllAcknowledgesEveryPageAndStopsAtAnEmptyOne`, `TestAScriptIsAScenarioOfTheCrashWalk`, `TestCheckRejects`, `TestACheckOfRepeatSightingsFailsOnlyWhatTheLedgerProvesIsAfterAnotherSighting`, `TestScenarioPackageDoesNotImportTheEngineOrAFixtureOfAnyLayer` |
-| Engine fixture | `internal/node/testkit/harness` | `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`, `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`, `TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport`, `TestAProcessCrashThenRestartKeepsExactlyWhatWasDurable`, `TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledged`, `TestFaultsAreInjectedThroughTheFileLayerAndTheirHitsCounted`, `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`, `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`, `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`, `TestAProcessCrashKeepsAWriteThatWasNotSyncedYet`, `TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages` |
+| Engine fixture | `internal/node/testkit/harness` | `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`, `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`, `TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport`, `TestAProcessCrashThenRestartKeepsExactlyWhatWasDurable`, `TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledged`, `TestFaultsAreInjectedThroughTheFileLayerAndTheirHitsCounted`, `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`, `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`, `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`, `TestAProcessCrashKeepsAWriteThatWasNotSyncedYet`, `TestAStoppedNodeIsDownAndAFileChangedOfflineIsWhatTheNextStartReads`, `TestAFaultArmedForTheNextStartAppliesToThatProcess`, `TestAKilledNodeIsDownOnTheDiskTheCrashLeftUntilItIsStarted`, `TestQuiesceDoesNotReturnWhileAConditionThatKeepsHoldingStillMakesProgress`, `TestQuiesceReturnsAfterOneRoundWhenNoCountMoves`, `TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer`, `TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages` |
 | Crash walk | `internal/node/testkit/crashwalk` | `TestPlanFullTakesEveryWindowPointExceptTheSyncSteps`, `TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole`, `TestShardsPartitionTheTargets`, `TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce`, `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`, `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`, `TestAssessCoverage`, `TestCheckRecoveryCasesUnion`, `TestWalkFailsWhenATargetIsNotReached`, `TestWalkFailsWhenARerunDivergesFromTheRecording`, `TestWalkSecondLayerCrashesTheRecoveryAfterTheMainCrash` |
 
 ## The consistency test

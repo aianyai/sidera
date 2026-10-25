@@ -15,6 +15,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
@@ -588,5 +589,81 @@ func TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandoned
 	results := log.Kind(ledger.KindClientResult)
 	if len(results) != 1 || results[0].Attrs.Category != string(fakeagent.CategoryOutcomeUnknown) {
 		t.Errorf("the ledger records the result %+v, want one outcome_unknown", results)
+	}
+}
+
+// While the node is down a client finds no one listening, and the disk is the
+// test's: what it changes there is what the next process reads.
+func TestAStoppedNodeIsDownAndAFileChangedOfflineIsWhatTheNextStartReads(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	h.MustDirect("a")
+	h.Stop()
+
+	err := h.Agent("a").Declare(bg(), fakeagent.DeclareInput{Paused: ptrBool(true)})
+	if fakeagent.CategoryOf(err) != fakeagent.CategoryUnavailable || fakeagent.CodeOf(err) != "daemon_not_running" {
+		t.Errorf("a call to a node that is down returned %v, want unavailable/daemon_not_running", err)
+	}
+	if err := h.Quiesce(); !errors.Is(err, engineagent.ErrNodeNotRunning) {
+		t.Errorf("Quiesce of a node that is down returned %v, want ErrNodeNotRunning", err)
+	}
+
+	removed := 0
+	for p := range snapshot(t, h) {
+		if strings.HasPrefix(p, "state/endpoints/") {
+			if err := h.Disk().Remove(fsx.Tag{Tx: "offline", Role: "f"}, p); err != nil {
+				t.Fatalf("removing %s offline: %v", p, err)
+			}
+			removed++
+		}
+	}
+	if removed != 1 {
+		t.Fatalf("removed %d endpoint records, want the one of a", removed)
+	}
+	h.Start()
+	if got := openAddresses(t, h); len(got) != 0 {
+		t.Errorf("the new process lists %v, but the record of a was removed while the node was down", got)
+	}
+}
+
+// A rule armed for the next start belongs to that process and is counted like
+// any other.
+func TestAFaultArmedForTheNextStartAppliesToThatProcess(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	h.Stop()
+	var rule *fsxtest.Rule
+	h.StartWith(func(f *fsxtest.Faulty) {
+		rule = f.Fail(fsxtest.Match{Tx: "direct-register", Step: fsx.StepWrite}, fsxtest.DiskFull)
+	})
+	_, err := h.Direct("a")
+	if r, ok := engine.ReasonOf(err); !ok || r != engine.ReasonStorageFull {
+		t.Fatalf("the registration got %v, want storage_full", err)
+	}
+	if rule.Hits() == 0 {
+		t.Error("the rule armed before the start was not hit")
+	}
+}
+
+// A crash is a kill and a start; between them the node is down on the disk the
+// crash left.
+func TestAKilledNodeIsDownOnTheDiskTheCrashLeftUntilItIsStarted(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	a := h.MustDirect("a")
+	h.Kill(harness.ProcessCrash)
+
+	if err := h.Agent("a").Declare(bg(), fakeagent.DeclareInput{Paused: ptrBool(true)}); fakeagent.CategoryOf(err) != fakeagent.CategoryUnavailable {
+		t.Errorf("a call to a killed node returned %v, want unavailable", err)
+	}
+	records := 0
+	for p := range snapshot(t, h) {
+		if strings.HasPrefix(p, "state/endpoints/") {
+			records++
+		}
+	}
+	if records != 1 {
+		t.Errorf("the disk the crash left has %d endpoint records, want the one of a", records)
+	}
+	h.Start()
+	if got := openAddresses(t, h); !reflect.DeepEqual(got, []string{a}) {
+		t.Errorf("the new process lists %v, want [%s]", got, a)
 	}
 }

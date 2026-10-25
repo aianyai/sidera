@@ -21,6 +21,7 @@ layer.
 | `H.Advance`, `H.Set`, `H.Clock` | The one test clock. `Clock().Now` is the `func() time.Time` a fake takes. |
 | `H.Quiesce(opts...)`, `QuiesceError` | Waits for quiet, fails with a report. |
 | `H.Crash(ProcessCrash \| PowerLoss(seed))`, `H.Restart()` | A crashed process or power, and a clean stop, each followed by a start on the resulting disk. |
+| `H.Stop()`, `H.Kill(mode)`, `H.Start()`, `H.StartWith(arm)` | The halves of the two above, for what a test does while the node is down: `Disk()` is then the disk the next start runs on, so a test changes files offline, and `arm` receives the fault wrapper of the new process before its recovery runs, so a rule can target a write only a recovery makes. A call to a node that is down is `unavailable/daemon_not_running`. |
 | `H.BeginStep`, `H.Ledger`, `H.CheckLedger` | The script step the ledger stamps, the ledger, and the judgements that need only the ledger. |
 | `H.Records` | A read-only scan of the records on the disk. |
 | `H.Faults`, `H.Disk`, `H.Config`, `H.Engine`, `H.Log`, `H.Ctx` | The fault wrapper the running process writes through, its disk, configuration, engine, log and the test's context. |
@@ -37,11 +38,16 @@ layer.
   fixture starts from a copy of one initialised disk per test binary.
 - **There is one clock.** The engine reads it, the ledger and the agents stamp with
   it, and a fake takes its `Now` method value. A crash does not move it.
-- **Quiet is the engine's conditions and the fixture's.** `Quiesce` asks the engine
-  (`engine.Quiesce`) and the conditions the fixture's own parts register, repeats
-  until a round finds both holding, and fails on the real clock's limit (60 s unless
-  `WithTimeout`) with the engine's last report and the names of the conditions that
-  did not hold. A loop that does not answer is reported as inside a command.
+- **Quiet is a round in which no count moved.** A condition of the fixture's parts
+  answers whether it holds and a count that never goes down (notifications sent, turns
+  ended). `Quiesce` looks at the conditions, asks the engine (`engine.Quiesce`, with an
+  expectation made again each round) and looks again, and returns only when every
+  condition held on both looks and no count differs between them: a fake that took work
+  while the engine was asked, finished it and went idle again holds on both looks and
+  still has something the engine has not seen. It fails on the real clock's limit (60 s
+  unless `WithTimeout`) with the engine's last report, whether the engine was asked at
+  all, and the names of the conditions that did not hold. A loop that was asked and
+  answered neither with a report nor with a refusal is reported as inside a command.
 - **A crash cuts the process off, and what it was doing has no visible effect.** `Crash`
   closes a layer of the fixture's own between the process's fault wrapper and its disk
   (every later file-system call of the old process fails, and the close waits for the
@@ -56,6 +62,14 @@ layer.
   would; only a clean `Restart` shuts the adapter down. The test releases anything it
   held the old loop with (an observer) before the test ends; the observer still sees
   the steps the old process takes after the crash.
+- **Offline hooks are the halves of a restart.** `Stop` and `Kill` leave the node down on
+  a disk the test may change (`Disk()`); `Start` and `StartWith` run a process on it. A
+  scenario that corrupts a file between two runs, or that crashes the recovery of a
+  crash, is built from these and not from a mode of `Crash`.
+- **A start forgets the last run's in-memory state.** `Options.RollbackPaused` and the
+  clock's high-water mark are applied from zero at every start, as a daemon that was
+  just launched has no memory of the last run: a restart does not carry the high-water
+  mark over, and a node made to start paused starts paused every time.
 - **A seed is a disk.** The power-loss source is `rand.NewPCG(seed, 0x5ce)`: the same
   seed on the same history leaves the same disk.
 - **Faults go through the file layer.** `Faults()` is the `fsxtest.Faulty` the running
@@ -67,7 +81,8 @@ layer.
   is `scenario.ErrNotAvailable`; a script that needs them fails with that and says
   what is missing.
 - **Records are read, not written.** `Records` is the store's scan, for the scenarios
-  whose judgement is the records; everything else is judged from the ledger.
+  whose judgement is the records; everything else is judged from the ledger. It reads
+  what the engine has written by now, so read it after `Quiesce`.
 - **Goroutines are checked.** `New` registers `NoLeaks`: a goroutine of the engine,
   the transaction layer, the store or the fixture that was not running before the
   test is a failure.
@@ -79,6 +94,10 @@ layer.
 - Release an observer's hold before the test ends, or `Stop` of the abandoned process
   waits for its limit.
 - Announce each step name once.
+- Do not run tests that use the fixture in parallel with each other in one binary:
+  `NoLeaks` finds goroutines by the package names in their stacks, across the whole
+  process, so a goroutine of a test that runs beside it is taken for a leak. (The tests
+  of this package call neither `t.Parallel` nor share a process with one that does.)
 
 ## What later parts add, and where they attach
 
@@ -110,6 +129,16 @@ Each adds to this package the capability its stream needs:
 `TestRecordsAreReadOnlyAndShowTheDisk`,
 `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`,
 `TestAProcessCrashKeepsAWriteThatWasNotSyncedYet`,
+`TestAStoppedNodeIsDownAndAFileChangedOfflineIsWhatTheNextStartReads`,
+`TestAFaultArmedForTheNextStartAppliesToThatProcess`,
+`TestAKilledNodeIsDownOnTheDiskTheCrashLeftUntilItIsStarted`,
 `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`;
-`harness_internal_test.go`: the fixture's own quiet conditions, the leak check and
+`harness_internal_test.go`: the fixture's own quiet conditions
+(`TestQuiesceWaitsForEveryConditionOfTheFixtureAndNamesTheOneThatDoesNotHold`,
+`TestQuiesceChecksTheFixtureAgainAfterTheEngineWasQuiet`,
+`TestQuiesceDoesNotReturnOnAConditionThatStoppedHoldingWhileTheEngineSettled`,
+`TestQuiesceDoesNotReturnWhileAConditionThatKeepsHoldingStillMakesProgress`,
+`TestQuiesceReturnsAfterOneRoundWhenNoCountMoves`,
+`TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer`), the leak check
+(`TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages`) and
 `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`.

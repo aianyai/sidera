@@ -50,7 +50,8 @@ type Options struct {
 	// stop the engine in the middle of a command.
 	Observer txn.Observer
 	// RollbackPaused starts the engine as if the persisted state said the wall
-	// clock was set back and not cleared.
+	// clock was set back and not cleared. It applies to every start, restarts
+	// included, because a process has no memory of the last one.
 	RollbackPaused bool
 }
 
@@ -74,8 +75,12 @@ type H struct {
 	// dying is the processes that Crash left behind, still being stopped.
 	dying sync.WaitGroup
 
-	mu    sync.Mutex
+	mu sync.Mutex
+	// proc is the running process, nil while the node is down. disk is the disk
+	// the running process writes to, or while the node is down the one the next
+	// Start runs on.
 	proc  *process
+	disk  *fsxtest.Mem
 	gen   int
 	names map[string]endpoint
 	agent map[string]fakeagent.Agent
@@ -133,16 +138,22 @@ func New(t testing.TB, o Options) *H {
 		t.Fatalf("harness: ledger: %v", err)
 	}
 	t.Cleanup(h.close)
-	h.proc = h.boot(seededDisk(t, o.Start))
+	h.disk = seededDisk(t, o.Start)
+	h.proc = h.boot(h.disk, nil)
 	return h
 }
 
 // boot runs a process over the disk through the startup steps the engine has: the
 // scan, the start of the loop, the admission of the adapter, the recovery of
 // deliveries and the switch to serving.
-func (h *H) boot(disk *fsxtest.Mem) *process {
+//
+// RollbackPaused and the clock's high-water mark are applied from zero at every start,
+// as a daemon that was just launched has no memory of the last run: a restart does not
+// carry the high-water mark over, and a node that Options made start paused starts
+// paused every time.
+func (h *H) boot(disk *fsxtest.Mem, arm func(*fsxtest.Faulty)) *process {
 	h.t.Helper()
-	m := Mount(h.t, h.tab, disk, h.opts.Observer)
+	m := MountWithFaults(h.t, h.tab, disk, h.opts.Observer, arm)
 	cfg, err := config.Load(m.Writer)
 	if err != nil {
 		h.t.Fatalf("harness: Load: %v", err)
@@ -181,24 +192,35 @@ func stop(p *process) error {
 }
 
 func (h *H) close() {
-	h.mu.Lock()
-	p := h.proc
-	h.mu.Unlock()
-	if err := stop(p); err != nil {
-		h.t.Errorf("harness: stopping the engine: %v", err)
+	if p := h.current(); p != nil {
+		if err := stop(p); err != nil {
+			h.t.Errorf("harness: stopping the engine: %v", err)
+		}
 	}
 	h.dying.Wait()
 	h.cancel()
 }
 
+// current is the running process, nil while the node is down.
 func (h *H) current() *process {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.proc
 }
 
+// running is the running process; it fails the test when the node is down, for the
+// accessors that have nothing to return then.
+func (h *H) running() *process {
+	h.t.Helper()
+	p := h.current()
+	if p == nil {
+		h.t.Fatal("harness: the node is not running: Start it first")
+	}
+	return p
+}
+
 // Engine is the engine of the running process.
-func (h *H) Engine() *engine.Engine { return h.current().eng }
+func (h *H) Engine() *engine.Engine { return h.running().eng }
 
 // Clock is the one test clock: the engine reads it, the ledger stamps with it,
 // and a fake takes its Now method value as the func() time.Time it cannot do
@@ -207,16 +229,23 @@ func (h *H) Clock() *clocktest.Fake { return h.clk }
 
 // Faults is the fault wrapper the running process writes through. A rule added to
 // it applies to this process only, and the test fails if a rule never fires.
-func (h *H) Faults() *fsxtest.Faulty { return h.current().mounted.Faulty }
+func (h *H) Faults() *fsxtest.Faulty { return h.running().mounted.Faulty }
 
-// Disk is the in-memory file system of the running process, for reading.
-func (h *H) Disk() *fsxtest.Mem { return h.current().mounted.Mem }
+// Disk is the in-memory file system the running process writes to; while the node
+// is down, the one the next Start runs on, which is where a test changes files
+// offline (see Stop and Kill). A test that writes to it while a process runs
+// writes behind the process's back.
+func (h *H) Disk() *fsxtest.Mem {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.disk
+}
 
 // Config is the configuration the running process loaded.
-func (h *H) Config() *config.Config { return h.current().cfg }
+func (h *H) Config() *config.Config { return h.running().cfg }
 
 // Log is what the running process's engine logged.
-func (h *H) Log() *LogCapture { return h.current().log }
+func (h *H) Log() *LogCapture { return h.running().log }
 
 // Ctx is the context of the test; it ends when the test does.
 func (h *H) Ctx() context.Context { return h.ctx }
@@ -305,6 +334,10 @@ func (c currentEngine) Declare(ctx context.Context, caller engine.Caller, p engi
 // a success.
 func onProcess[T any](h *H, call func(*engine.Engine) (T, error)) (T, error) {
 	p := h.current()
+	if p == nil {
+		var zero T
+		return zero, engineagent.ErrNodeNotRunning
+	}
 	v, err := call(p.eng)
 	if p.abandoned.Load() {
 		var zero T
@@ -350,8 +383,10 @@ func (h *H) CheckLedger() error {
 
 // Records is a read of the records on the disk of the running process, through the
 // store's scan. It is the one place a test may look at the node's own records, and
-// only where the scenario it belongs to is judged by them.
-func (h *H) Records() (*store.Scan, error) { return h.current().mounted.Store.Scan() }
+// only where the scenario it belongs to is judged by them. The records are what
+// the engine has written by now, so read them after Quiesce: before it, work the
+// engine has not finished is missing.
+func (h *H) Records() (*store.Scan, error) { return h.running().mounted.Store.Scan() }
 
 // Adapter has nothing to return yet: the engine layer has no adapter host, and a
 // stand-in would make a script pass for what it did not exercise.
@@ -379,9 +414,19 @@ var ProcessCrash = CrashMode{}
 // disk decides the rest from the seed, so that a seed is a reproducible disk.
 func PowerLoss(seed uint64) CrashMode { return CrashMode{power: true, seed: seed} }
 
-// Crash cuts the running process off from its disk, takes the disk a crash of the
-// mode leaves at that instant and starts a new process on it. The test clock, the
-// ledger and the endpoints registered through the fixture stay.
+// Crash is Kill followed by Start: the process is cut off, the disk a crash of the
+// mode leaves is taken, and a new process starts on it. The test clock, the ledger
+// and the endpoints registered through the fixture stay.
+func (h *H) Crash(mode CrashMode) {
+	h.t.Helper()
+	h.Kill(mode)
+	h.Start()
+}
+
+// Kill cuts the running process off from its disk, takes the disk a crash of the
+// mode leaves at that instant and leaves the node down on it; Start runs a new
+// process on that disk, and until then Disk is where a test makes files wrong
+// offline.
 //
 // The old process is abandoned, not stopped: every call it makes to its disk after
 // the cut fails, so what it was in the middle of reaches no disk; a call that was
@@ -393,11 +438,9 @@ func PowerLoss(seed uint64) CrashMode { return CrashMode{power: true, seed: seed
 //
 // The second word of the source is fixed, as the crash model's own tests fix it, so
 // that a seed is all a test has to remember.
-func (h *H) Crash(mode CrashMode) {
+func (h *H) Kill(mode CrashMode) {
 	h.t.Helper()
-	h.mu.Lock()
-	old := h.proc
-	h.mu.Unlock()
+	old := h.running()
 	old.abandoned.Store(true)
 	old.mounted.cutOff() // the disk below is now what the crash leaves
 	var disk *fsxtest.Mem
@@ -411,21 +454,49 @@ func (h *H) Crash(mode CrashMode) {
 		defer h.dying.Done()
 		_ = stop(old) // a dying process: how it ends is no one's business
 	}()
-	p := h.boot(disk)
 	h.mu.Lock()
-	h.proc = p
+	h.proc, h.disk = nil, disk
 	h.mu.Unlock()
 }
 
-// Restart stops the process the way the daemon does on a normal exit and starts a
-// new one on the same disk.
+// Restart is Stop followed by Start.
 func (h *H) Restart() {
 	h.t.Helper()
-	old := h.current()
+	h.Stop()
+	h.Start()
+}
+
+// Stop stops the running process the way the daemon does on a normal exit and
+// leaves the node down on the same disk, which a test may change before Start.
+// Calls to a node that is down fail as a refused connection does: unavailable.
+func (h *H) Stop() {
+	h.t.Helper()
+	old := h.running()
 	if err := stop(old); err != nil {
 		h.t.Fatalf("harness: stopping the engine: %v", err)
 	}
-	p := h.boot(old.mounted.Mem)
+	h.mu.Lock()
+	h.proc = nil
+	h.mu.Unlock()
+}
+
+// Start starts a process on the disk of the node that is down, through the startup
+// steps the engine has, and returns when it is serving.
+func (h *H) Start() {
+	h.t.Helper()
+	h.StartWith(nil)
+}
+
+// StartWith is Start with a chance to arm the fault wrapper the new process will
+// write through: arm is called with it before the process's recovery runs, so a
+// rule can target a write that only a recovery makes. A rule that never fires
+// fails the test, as always.
+func (h *H) StartWith(arm func(*fsxtest.Faulty)) {
+	h.t.Helper()
+	if h.current() != nil {
+		h.t.Fatal("harness: the node is already running")
+	}
+	p := h.boot(h.Disk(), arm)
 	h.mu.Lock()
 	h.proc = p
 	h.mu.Unlock()
@@ -552,6 +623,9 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 	}
 	if err := ctx.Err(); err != nil {
 		return fail(false, engine.Report{}, nil, err)
+	}
+	if h.current() == nil {
+		return fail(false, engine.Report{}, nil, engineagent.ErrNodeNotRunning)
 	}
 	var unmet []string
 	for {

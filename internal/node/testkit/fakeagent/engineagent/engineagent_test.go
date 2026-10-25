@@ -145,6 +145,16 @@ func TestACallWhoseProcessEndedIsOutcomeUnknown(t *testing.T) {
 	}
 }
 
+func TestACallToANodeThatIsDownIsUnavailable(t *testing.T) {
+	err := engineagent.MapError(fmt.Errorf("declare: %w", engineagent.ErrNodeNotRunning))
+	if got := fakeagent.CategoryOf(err); got != fakeagent.CategoryUnavailable {
+		t.Errorf("category %q, want unavailable: the interface has no socket to talk to", got)
+	}
+	if got := fakeagent.CodeOf(err); got != "daemon_not_running" {
+		t.Errorf("code %q, want daemon_not_running", got)
+	}
+}
+
 func TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError(t *testing.T) {
 	h := harness.New(t, harness.Options{})
 	h.MustDirect("a")
