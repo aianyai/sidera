@@ -384,9 +384,15 @@ reproducible).
 | A lost receipt and a resend leave one record; another body under one identifier is a conflict | `inbound.go` (`takeIn`), `outbound.go` | `TestLostReceiptRetryKeepsOneRecord`, `TestSameIDDifferentBodyConflicts` |
 | The backlog of an endpoint, the queue and the disk of the node | `inbound.go`, `send.go`, `capacity.go` | `TestEndpointBacklogFullIsRejectedWithReason`, `TestNodeQueueFullBackpressuresNewSends`, `TestDiskFullGivesNoFalseAcknowledgement` |
 | Requests no node takes, sequence numbers, the clock pause, idempotency retention | `send.go` | `TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing`, `TestSequenceNumbersCountEachPairOfSenderAndRecipientFromOne`, `TestNothingIsSignedOrAcceptedWhileTheWallClockCannotBeTrusted`, `TestAnIdempotencyKeyIsRememberedUntilItsRetentionEnds` |
-| What is sent and asked, and when | `outbound.go` | `TestOutboundNeedByState`, `TestAnUnreachableNodeIsSentToUntilTheDeadlineAndAskedAfterIt`, `TestHeldReportsAreAskedForUntilTheyCome`, `TestARestartGoesOnWithAMessageThatWasNotSettled` |
+| A key used again for other recipients, or in another order, is a conflict | `send.go` (`repeat`) | `TestTheSameIdempotencyKeyForOtherRecipientsIsAConflict` |
+| What no node takes is what the envelope refuses, by the field it names; deadlines are whole seconds | `send.go` (`envelopeOf`) | `TestARequestTheEnvelopeRefusesIsRefusedForTheFieldItNames`, `TestADeadlineOfPartOfASecondIsKeptToTheSecondAnEnvelopeCanSay` |
+| An answer is made only to a message the endpoint took in | `send.go` (`heldBy`) | `TestNoAnswerIsMadeToAMessageTheEndpointRefusedAtIntake` |
+| A closed endpoint rejects as closed, a missing or runtime one as missing | `inbound.go` (`messageRefusal`) | `TestAMessageToAClosedEndpointIsRejectedAsClosed`, `TestAMessageToAnEndpointThatIsNotThereIsRejectedAsMissing`, `TestTheRefusalOfAMessageForAnEndpointItCannotBeGiven` |
+| What is sent and asked, and when | `outbound.go` | `TestOutboundNeedByState`, `TestAnUnreachableNodeIsSentToUntilTheDeadlineAndAskedAfterIt`, `TestHeldReportsAreAskedForUntilTheyCome`, `TestARestartGoesOnWithAMessageThatWasNotSettled`, `TestANodeThatHasNotAnsweredIsSentToAfterAnotherNodeDid`, `TestTheReportsAreAskedForUntilTheReportDeadlineAndNoLonger` |
+| No evidence is signed while the wall clock cannot be trusted | `signing.go` (`canSign`) | `TestNoEvidenceIsSignedWhileTheWallClockCannotBeTrusted` |
+| An engine does not open with the keys of another node | `engine.go` (`newEngine`) | `TestAnEngineWithTheKeysOfAnotherNodeDoesNotStart` |
 | The body is held by what needs it | `inbound.go` (`settledSource`), `outbound.go` | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt` |
-| Every write of taking a message in survives a crash | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint` |
+| Every write of taking a message in survives a crash, and every declared step is crashed at | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint`: a message, a message the target refuses (the body is released), an envelope and an answer that no source record of this node sent (the target writes the body), and an answer with evidence; a message or an answer that has a source ends handled once, and the test fails when a declared step is reached by no scenario |
 | The receiving entry under arbitrary bytes | `inbound.go` | `FuzzInbound` |
 
 Known gaps, each filled in with the feature it belongs to:
