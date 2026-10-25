@@ -555,3 +555,99 @@ func TestRuntimeScanWalksTree(t *testing.T) {
 		t.Fatalf("reports per file %v (all reports %q), want %v", reported, got, want)
 	}
 }
+
+// --- who may make the local owner, and who may judge a local source ---
+
+// The actor of the local owner may be made only by the management interface, which
+// takes it from the one fact that makes someone the local owner: the connection
+// came in on the management listener, whose peer ipc checked to be the user's own.
+// Anywhere else it would be a way to act as the owner on the strength of nothing.
+// cmd/ is scanned too: a client of the interface has no business making it.
+var localOwnerAllowed = []string{"internal/node/manageapi"}
+
+// A request is of a local source, and judged as one, only when the loopback
+// transport delivers it: the engine takes what the loopback hands it and judges it,
+// and no interface and no composition root makes a request of a local origin. A
+// remote connection that presents this node's identifier is never one.
+var localSourceAllowed = []string{"internal/node/engine", "internal/node/transport"}
+
+func localOwnerNames(module string) map[string]map[string]bool {
+	return map[string]map[string]bool{
+		module + "/internal/admin":   setOf("LocalOwner", "ActorLocalOwner"),
+		module + "/internal/pairing": setOf("LocalAuthor"),
+	}
+}
+
+func localSourceNames(module string) map[string]map[string]bool {
+	return map[string]map[string]bool{
+		module + "/internal/authz": setOf("EvaluateLocal", "LocalCreate", "LocalRequest"),
+	}
+}
+
+// scanRuntimeAndCmd runs check over the runtime tree and over cmd/.
+func scanRuntimeAndCmd(t *testing.T, check dirCheck) {
+	t.Helper()
+	root := moduleRoot(t)
+	for _, base := range []string{runtimeDir, "cmd"} {
+		violations, err := scanTree(root, filepath.Join(root, filepath.FromSlash(base)), check)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, v := range violations {
+			t.Error(v)
+		}
+	}
+}
+
+func TestTheActorOfTheLocalOwnerIsMadeOnlyByTheManagementInterface(t *testing.T) {
+	module := modulePath(t, moduleRoot(t))
+	scanRuntimeAndCmd(t, exemptDirs(localOwnerAllowed, func(fset *token.FileSet, f *ast.File) []string {
+		return bannedSelectors(fset, f, localOwnerNames(module))
+	}))
+}
+
+func TestLocalSourcesAreJudgedOnlyWhereTheLoopbackDeliversThem(t *testing.T) {
+	module := modulePath(t, moduleRoot(t))
+	scanRuntimeAndCmd(t, exemptDirs(localSourceAllowed, func(fset *token.FileSet, f *ast.File) []string {
+		return bannedSelectors(fset, f, localSourceNames(module))
+	}))
+}
+
+// The two scans report what they forbid, under any spelling, and nothing else of
+// the packages they look at.
+func TestTheLocalOwnerAndLocalSourceScansDetectViolations(t *testing.T) {
+	const m = "example.com/m"
+	owner := func(fset *token.FileSet, f *ast.File) []string { return bannedSelectors(fset, f, localOwnerNames(m)) }
+	source := func(fset *token.FileSet, f *ast.File) []string { return bannedSelectors(fset, f, localSourceNames(m)) }
+	for _, r := range []struct {
+		name string
+		scan func(*token.FileSet, *ast.File) []string
+		src  string
+		want int
+	}{
+		{"LocalOwner call", owner, `package p; import "example.com/m/internal/admin"; var _ = admin.LocalOwner()`, 1},
+		{"LocalOwner under an alias", owner, `package p; import a "example.com/m/internal/admin"; var _ = a.LocalOwner()`, 1},
+		{"LocalOwner as a function value", owner, `package p; import "example.com/m/internal/admin"; var f = admin.LocalOwner`, 1},
+		{"the actor kind written out", owner, `package p; import "example.com/m/internal/admin"; var _ = admin.Actor{Kind: admin.ActorLocalOwner}`, 1},
+		{"the author of the pairing", owner, `package p; import "example.com/m/internal/pairing"; var _ = pairing.LocalAuthor()`, 1},
+		{"a dot import of admin", owner, `package p; import . "example.com/m/internal/admin"; var _ = LocalOwner()`, 1},
+		{"authorizing is fine", owner, `package p; import "example.com/m/internal/admin"; var _ = admin.Authorize; var _ admin.Actor`, 0},
+		{"a remote person is fine", owner, `package p; import "example.com/m/internal/admin"; var _ = admin.RemotePerson`, 0},
+		{"another package of that name", owner, `package p; import "example.org/admin"; var _ = admin.LocalOwner()`, 0},
+		{"EvaluateLocal call", source, `package p; import "example.com/m/internal/authz"; var _ = authz.EvaluateLocal`, 1},
+		{"LocalCreate call", source, `package p; import "example.com/m/internal/authz"; var _ = authz.LocalCreate`, 1},
+		{"a local request", source, `package p; import "example.com/m/internal/authz"; var _ = authz.LocalRequest{}`, 1},
+		{"Evaluate for remote sources is fine", source, `package p; import "example.com/m/internal/authz"; var _ = authz.Evaluate; var _ authz.Verdict`, 0},
+	} {
+		t.Run(r.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "p.go", r.src, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := r.scan(fset, f); len(got) != r.want {
+				t.Fatalf("got %d reports %q, want %d", len(got), got, r.want)
+			}
+		})
+	}
+}

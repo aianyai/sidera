@@ -126,6 +126,13 @@ same security descriptor, so only the sandbox can tell them apart, by name; on
 Unix the two sockets are in different directories, so the sandbox grants one
 directory and not the other (see Sandboxes and the socket directory above).
 
+In the code the actor of the local owner is made in one place,
+`internal/node/manageapi`, which serves only a listener that its own `Listen`
+made, and `Listen` takes only the address of the management interface; a scan in
+`internal/node/layout_test.go` fails when any other file of the runtime tree or of
+`cmd/` makes the actor (`admin.LocalOwner`, `admin.ActorLocalOwner`,
+`pairing.LocalAuthor`). A client of the interface therefore cannot make one either.
+
 ## Why
 
 - **Directory check on the client, not only 0600 on the socket.** The socket's
