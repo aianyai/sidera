@@ -423,7 +423,8 @@ func TestCheckRecoveryCasesUnion(t *testing.T) {
 // malformed value must be an error and never a panic, and a shard that parses is
 // one that picks its residue class.
 func FuzzParseShardAndMode(f *testing.F) {
-	for _, s := range []string{"", "1/1", "2/3", "0/3", "a/b", "1/3/5", "smoke", "full"} {
+	// The last is an input the fuzzer found: a valid shard of eight billion parts.
+	for _, s := range []string{"", "1/1", "2/3", "0/3", "a/b", "1/3/5", "smoke", "full", "010/00008000000000"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, s string) {
@@ -431,14 +432,18 @@ func FuzzParseShardAndMode(f *testing.F) {
 			if sh.Count < 1 || sh.Index < 1 || sh.Index > sh.Count {
 				t.Fatalf("ParseShard(%q) = %+v", s, sh)
 			}
-			kept := 0
-			for k := 0; k < sh.Count; k++ {
-				if sh.Keep(k) {
-					kept++
+			// Count consecutive runs hold exactly one of the shard's, checked for
+			// counts a test can afford to walk.
+			if sh.Count <= 1000 {
+				kept := 0
+				for k := 0; k < sh.Count; k++ {
+					if sh.Keep(k) {
+						kept++
+					}
 				}
-			}
-			if kept != 1 {
-				t.Fatalf("shard %+v keeps %d of %d consecutive runs, want exactly one", sh, kept, sh.Count)
+				if kept != 1 {
+					t.Fatalf("shard %+v keeps %d of %d consecutive runs, want exactly one", sh, kept, sh.Count)
+				}
 			}
 		}
 		_, _ = crashwalk.ParseMode(s)
