@@ -176,7 +176,7 @@ func TestRotationKeepsOneRotatedFileAndBoundsTheSize(t *testing.T) {
 	if got != want {
 		t.Errorf("the files hold\n%s\nwant the newest lines in order\n%s", got, want)
 	}
-	if strings.Count(got, "\n") < 6 {
+	if strings.Count(got, "\n") < 4 { // a full file of three lines and the start of the next
 		t.Errorf("only %d lines are kept", strings.Count(got, "\n"))
 	}
 }
@@ -397,5 +397,37 @@ func TestAFailedWriteIsAnErrorAndTheNextWriteWorks(t *testing.T) {
 	}
 	if got := d.read(t, "logs/daemon.log"); got != "before\nafter\n" {
 		t.Errorf("the log holds %q, want the lines that were written", got)
+	}
+}
+
+// A rotation that cannot be made leaves the log with the file it had: the line is
+// refused, nothing is lost from the file, and once the threshold allows, writing
+// goes on to the same file.
+func TestAFailedRotationLeavesTheLogWritable(t *testing.T) {
+	d := newDisk(t)
+	faulty := fsxtest.NewFaulty(t, d.mem)
+	rule := faulty.Fail(fsxtest.Match{Tx: fsx.TxLog, Step: fsx.StepRename}, fs.ErrPermission)
+	h := logfile.New(faulty)
+	limit := int64(30)
+	f, err := h.Open("daemon.log", func() int64 { return limit })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.Write([]byte("first line of it\n")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write([]byte("second line of it\n")); err == nil {
+		t.Fatal("a line was reported written when the rotation it needed failed")
+	}
+	if rule.Hits() == 0 {
+		t.Fatal("the injected fault was never hit")
+	}
+	limit = 1 << 20
+	if _, err := f.Write([]byte("third\n")); err != nil {
+		t.Fatalf("writing after the failed rotation: %v", err)
+	}
+	if got := d.read(t, "logs/daemon.log"); got != "first line of it\nthird\n" {
+		t.Errorf("the log holds %q", got)
 	}
 }
