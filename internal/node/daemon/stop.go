@@ -73,7 +73,13 @@ func (d *Daemon) shutdown(fatal bool) {
 		}
 	})
 	step(3, "adapters", func(ctx context.Context) {
-		if d.adaptersBegan && d.cfg.Attach.StopAdapters != nil {
+		if !d.adaptersBegan {
+			return
+		}
+		if h := d.cfg.AdapterHost; h != nil {
+			warn("the adapter host did not stop in time", h.Shutdown(ctx))
+		}
+		if d.cfg.Attach.StopAdapters != nil {
 			warn("the adapters", d.cfg.Attach.StopAdapters(ctx))
 		}
 	})

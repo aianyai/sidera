@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
@@ -97,6 +98,11 @@ type Config struct {
 	Observer txn.Observer
 	// Engine are the parameters of the engine; zero fields take its defaults.
 	Engine engine.Params
+	// AdapterHost is the host that runs the adapter instances the owner enabled.
+	// Nil is a node that starts none. The daemon starts it at step 10, hands it to
+	// the engine, and shuts it down at step 3 of the shutdown. A host is used for
+	// one run of one daemon: it cannot be started again after it ended.
+	AdapterHost *adapterhost.Host
 	// Attach is what the features that come after the start steps of this package
 	// attach to it.
 	Attach Attachments
@@ -193,18 +199,20 @@ type Attachments struct {
 	// AgentProbeOnly is step 9: open the Agent interface so that it takes only the
 	// one-use probe token and answers anything else as unavailable.
 	AgentProbeOnly func(context.Context, *Env) error
-	// Adapters is step 10: start the adapter instances the owner enabled. It
-	// returns when each has answered adapter.start or been judged offline, because
+	// Adapters is step 10, after Config.AdapterHost has started the adapter
+	// instances the owner enabled: what else starts at that step. The host returns
+	// when each instance has answered adapter.start or been judged offline, because
 	// the recovery of deliveries that follows releases a lease only when no turn is
-	// running and has to be told which turns run first.
+	// running and has to be told which turns run first; this hook runs after it.
 	Adapters func(context.Context, *Env) error
 	// AgentServe is step 15: the Agent interface serves everything.
 	AgentServe func(context.Context, *Env) error
 	// StopInterfaces is shutdown step 2, beside the management interface: stop
 	// taking requests of the Agent interface, within the context's deadline.
 	StopInterfaces func(context.Context) error
-	// StopAdapters is shutdown step 3: stop the adapters, within the deadline.
-	// Native sessions are separate processes and are not affected.
+	// StopAdapters is shutdown step 3, after Config.AdapterHost has shut the
+	// adapters down: stop what else the step stops, within the deadline. Native
+	// sessions are separate processes and are not affected.
 	StopAdapters func(context.Context) error
 	// Periodic are tasks the engine runs on a period, besides the daemon's own.
 	Periodic []PeriodicTask

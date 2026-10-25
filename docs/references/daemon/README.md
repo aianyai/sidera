@@ -36,7 +36,7 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 | 7 | trust | Hook `TrustSync`: synchronisation of revocations and the trust graph, the gate of vouchers. Empty for a node of one machine. | later stage |
 | 8 | manage | The loop starts in the phase of recovery and the management interface opens: reads answer, anything that changes state is refused as `unavailable/recovering`. | this package |
 | 9 | agent-probe | Hook `AgentProbeOnly`: the Agent interface opens so that it takes only the one-use probe token. | the Agent interface |
-| 10 | adapters | Hook `Adapters`: the enabled adapter instances are started; it returns when each has answered `adapter.start` or been judged offline. | the adapter host |
+| 10 | adapters | The adapter host (`Config.AdapterHost`, when set) starts the enabled adapter instances and the step waits until each has answered `adapter.start` or been judged offline; then hook `Adapters` runs, for what else starts here. | `adapterhost`, `apiwire` |
 | 11 to 14 | | The engine's second recovery entry: creation intents and prompt attempts are checked, every record is ticked, feedback that fell due goes out, the loopback goes on. After step 10 on purpose: a lease is released only when no turn runs. | `engine` |
 | 15 | serve | The engine serves; hook `AgentServe`: the Agent interface switches to full service. | the Agent interface |
 
@@ -50,6 +50,38 @@ held (what `ipc.Listen` asks of whoever listens on an address of this home), the
 handle for adapter logs, and `RequestStop`. It holds no transaction writer: the
 engine is the single writer, and a hook that changes state asks it.
 
+### The adapter host
+
+`Config.AdapterHost` is the host that runs the adapter instances the owner enabled
+(`adapterhost.Host`); nil is a node that starts none. The daemon wires it in three
+places and nowhere else:
+
+- **Step 6** gives it to the engine as `Deps.Adapters`, only when it is not nil (a nil
+  host inside the interface would not be seen as absent). `daemon` is where the two
+  layers meet: `var _ engine.Adapters = (*adapterhost.Host)(nil)` is here.
+- **Step 10** starts it with the data directory (`Env.Home`, the absolute path of the
+  real directory, which the instance lock files `adapter-<instance>.lock` are in, at
+  its root), the read-only view of the configuration the hooks get (`Env.Source`),
+  the handle of the logs (`Env.Logs`: each instance's `adapter-<instance>.log`) and
+  the engine behind `apiwire.AdapterEngine`, which words the engine's refusals as the
+  adapter protocol does. The step waits for `Start`: it returns when each enabled
+  instance has answered `adapter.start`, has failed its first attempt (judged
+  offline, reported, and tried again after a backoff) or the host's start wait has
+  passed. An instance that cannot be taken on does not stop the start. Only a host
+  that cannot be started at all does (a bad `Env`, a host that was started or ended
+  before). The `Adapters` hook runs after it, in the same step.
+- **Shutdown step 3** shuts the host down with the step's context, which carries the
+  grace: each adapter in service is sent `shutdown`, its stream is closed, and a
+  process that stays is killed. A failure (the grace passed) is logged as a warning,
+  as every step's is, and the hook `StopAdapters` runs after it. The step runs after
+  the engine began to refuse (step 1) and before the engine ends (step 4): the
+  requests an adapter makes meanwhile are answered `-32002` (shutting down). On a
+  fatal failure of the disk the same step runs with the short grace, and nothing new
+  is written: the host reports nothing to the engine at shutdown.
+
+A host is for one run of one daemon: it cannot start again after it ended, so a
+caller that starts the daemon again makes another.
+
 ### The shutdown
 
 One path for an orderly stop, for a fatal failure of the disk and for the unwinding
@@ -59,7 +91,7 @@ of a start that failed; a step with nothing to stop is logged and does nothing.
 | ---- | ---- | ------------ |
 | 1 | refuse | The engine refuses what comes from outside (`unavailable/shutting_down`). |
 | 2 | interfaces | The management interface stops taking connections and waits for the requests being served, within 10 seconds; hook `StopInterfaces` stops the Agent interface. |
-| 3 | adapters | Hook `StopAdapters`. Native sessions are separate processes and are not affected. |
+| 3 | adapters | The adapter host shuts the adapters down (`Config.AdapterHost`, when set), within the grace; then hook `StopAdapters`. Native sessions are separate processes and are not affected. |
 | 4 | engine | The loop ends after its command, and every goroutine of the engine is waited for. |
 | 5 | release | The last line is logged, the log is closed and the lock is let go: the lock goes last, because while it is held no other daemon starts over state this one is still writing. If the engine has not ended within the grace, it may still be writing: the lock and the log are kept until the process exits, the line says so, and `Wait` returns `ErrEngineNotStopped`. |
 
@@ -265,7 +297,7 @@ interface: a sandbox must deny the socket to an agent.
 | ---- | ---- | ----------- |
 | `TrustSync` | 7 | trust synchronisation |
 | `AgentProbeOnly`, `AgentServe`, `StopInterfaces` | 9, 15, shutdown 2 | the Agent interface |
-| `Adapters`, `StopAdapters` | 10, shutdown 3 | the adapter host |
+| `Adapters`, `StopAdapters` | 10, shutdown 3 | what else starts and stops with the adapters; the adapter host itself is `Config.AdapterHost`, wired by this package, and is not a hook |
 | `Periodic` | 6 | any feature with a task on a period (archive sweep, disk polling); the daemon's own tasks, the clock state and the hourly certificate check, are not among them |
 | a row of `manageapi`'s method table, and a type of `engine.Operation` | | the owner of an operation |
 
@@ -344,6 +376,12 @@ interface: a sandbox must deny the socket to an agent.
   `home.go`, `table.go`, `logging.go`, `periodic.go`), `internal/node/manageapi`
   (`manageapi.go`, `methods.go`), `internal/node/apiwire`, `internal/node/logfile`,
   `internal/node/engine/manage.go`.
+- Tests of the adapter host's wiring (`adapters_test.go`):
+  `TestEnabledAdapterInstancesAreStartedAtStepTenAndTheStepWaitsForThem`,
+  `TestAnInstanceThatCannotBeStartedIsJudgedOfflineAndTheStartGoesOn`,
+  `TestShutdownStopsTheAdaptersAtStepThree`, `TestAFatalFailureStillStopsTheAdapters`,
+  `TestANodeWithoutAnAdapterHostStartsNoAdapter`: fake adapters in the test process,
+  started by the one launcher the engine-layer fixture also uses (`harness`).
 - Tests of the daemon: `TestSecondDaemonOnSameHomeRefused`,
   `TestInitOnTheHomeOfARunningDaemonIsRefused`,
   `TestStartupStepsRunInTheirFixedOrder`,

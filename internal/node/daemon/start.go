@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
@@ -211,16 +213,24 @@ func (d *Daemon) stepCertificate(context.Context) error {
 	return d.renewCertificate(d.cfg.Clock.Now(), engine.SignRefusalOf(false, d.clockPaused))
 }
 
+// The adapter host is what the engine calls to reach an adapter: this is where the
+// two layers meet, and neither imports the other.
+var _ engine.Adapters = (*adapterhost.Host)(nil)
+
 // Step 6: the scan of state/ (the engine's first recovery entry) runs before the
 // loop exists: damaged files are quarantined, the rules of recovery run until none
 // has work, and the engine builds its view. The periodic tasks are registered
 // here, before the loop starts, and the clock state is the one the loop also runs
 // at once when it finds the clock set back.
 func (d *Daemon) stepScan(ctx context.Context) error {
-	e, rep, err := engine.Open(ctx, engine.Deps{
+	deps := engine.Deps{
 		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.pause.since,
 		Writer: d.w, Store: store.New(d.w), Config: d.cfgd, Keys: d.keys, Rand: d.cfg.Rand, Home: d.home, Log: d.log,
-	}, d.cfg.Engine)
+	}
+	if d.cfg.AdapterHost != nil { // never a nil host inside the interface: the engine tests it for nil
+		deps.Adapters = d.cfg.AdapterHost
+	}
+	e, rep, err := engine.Open(ctx, deps, d.cfg.Engine)
 	if err != nil {
 		return err
 	}
@@ -277,9 +287,21 @@ func (d *Daemon) stepAgentProbe(ctx context.Context) error {
 }
 
 // Step 10: the adapter instances the owner enabled are started, and the step ends
-// when each has said which turns run or has been judged offline.
+// when each has said which turns run or has been judged offline. The host does that
+// and answers the requests of the adapters through the engine, whose refusals
+// apiwire words as the adapter protocol does; what else starts at this step is the
+// hook's, which runs after the host.
 func (d *Daemon) stepAdapters(ctx context.Context) error {
 	d.adaptersBegan = true
+	if h := d.cfg.AdapterHost; h != nil {
+		env := d.env()
+		err := h.Start(ctx, adapterhost.Env{
+			Home: d.home, Source: env.Config, Logs: env.Logs, Engine: apiwire.AdapterEngine(d.engine),
+		})
+		if err != nil {
+			return err
+		}
+	}
 	return run(ctx, d.cfg.Attach.Adapters, d)
 }
 

@@ -143,15 +143,6 @@ func (a *adapters) launches(t testing.TB, n int) []*harness.AdapterLaunch {
 	}
 }
 
-func (a *adapters) ledgerCount(t testing.TB, kind string) int {
-	t.Helper()
-	log, err := a.ledgers.Log()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return len(log.Kind(kind))
-}
-
 type startResult struct {
 	d   *daemon.Daemon
 	err error
@@ -178,14 +169,14 @@ func TestEnabledAdapterInstancesAreStartedAtStepTenAndTheStepWaitsForThem(t *tes
 	var seen struct {
 		ran     bool
 		steps   []string
-		started int
+		methods []string
 		online  bool
 	}
 	c.Attach.Adapters = func(ctx context.Context, env *daemon.Env) error {
 		v, err := env.Engine.Adapter(ctx, chat)
 		mu.Lock()
 		defer mu.Unlock()
-		seen.ran, seen.steps, seen.started, seen.online = true, steps(logLines(t, c.Home)), a.ledgerCount(t, ledger.KindAdapterStarted), err == nil && v.Online
+		seen.ran, seen.steps, seen.methods, seen.online = true, steps(logLines(t, c.Home)), a.launcher.Launches(chat)[0].Methods(), err == nil && v.Online
 		return nil
 	}
 
@@ -232,8 +223,8 @@ func TestEnabledAdapterInstancesAreStartedAtStepTenAndTheStepWaitsForThem(t *tes
 	if !seen.ran || len(seen.steps) == 0 || seen.steps[len(seen.steps)-1] != "startup 10 begin" {
 		t.Errorf("the hook ran at %v, want inside step 10", seen.steps)
 	}
-	if seen.started != 1 || !seen.online {
-		t.Errorf("when the hook ran the adapter had answered adapter.start %d times and the engine had it online: %v; want once and online", seen.started, seen.online)
+	if !slices.Contains(seen.methods, adapterproto.MethodAdapterStart) || !seen.online {
+		t.Errorf("when the hook ran the daemon had written %v to the adapter and the engine had it online: %v; want adapter.start written and the instance online", seen.methods, seen.online)
 	}
 	all := steps(logLines(t, c.Home))
 	if i, j := indexOf(all, "startup 10 end"), indexOf(all, "startup 11 begin"); i < 0 || j < i {
@@ -293,9 +284,6 @@ func TestAnInstanceThatCannotBeStartedIsJudgedOfflineAndTheStartGoesOn(t *testin
 	l := a.launches(t, 1)[0]
 	if m := l.Methods(); len(m) == 0 || m[0] != adapterproto.MethodInitialize || slices.Contains(m, adapterproto.MethodAdapterStart) {
 		t.Errorf("the daemon wrote %v to the adapter that was refused, want initialize and no adapter.start", m)
-	}
-	if n := a.ledgerCount(t, ledger.KindAdapterStarted); n != 0 {
-		t.Errorf("the adapter that was refused answered adapter.start %d times", n)
 	}
 }
 

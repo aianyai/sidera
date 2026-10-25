@@ -21,6 +21,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `Daemon.RequestStop`, `Wait`, `Done`, `Engine`, `Home` | The one entry for a shutdown, from any goroutine and any number of times; the end, and what ended it. |
 | `Init(ctx, Config)`, `InitReport` | Make a data directory; never overwrite. |
 | `Config`, `Attachments`, `Env`, `KeysView`, `ConfigView`, `PeriodicTask` | What a daemon needs, the hooks the features that come later attach to, what a hook is given (read-only views of the configuration and of what of the keys no renewal changes, the instance lock's assertion, the engine, the logs), and a task on a period. |
+| `Config.AdapterHost` | The adapter host (`*adapterhost.Host`), or nil for a node that starts no adapter. Given to the engine at step 6, started at step 10 and shut down at step 3 of the shutdown. |
 | `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
 | `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
 | `Table`, `Declarations`, `Transactions`, `LayoutWork`, `RepairLayout` | The one table of the program's transactions, the two this package declares (`init` and `layout`), and the layout rule. |
@@ -37,6 +38,16 @@ touches files only through `fsx`, and reads time only through the injected clock
   refuses. A symbolic link as the data directory is refused.
 - **One shutdown path, lock last.** An orderly stop, a fatal failure and a failed
   start take the same five steps; `RequestStop` runs it once.
+- **The adapter host is wired by field, not by hook.** `Config.AdapterHost` is given to
+  the engine (only when not nil), started at step 10 with `Env.Home` the absolute data
+  directory (the instance lock files `adapter-<instance>.lock` are at its root),
+  `Env.Source` the configuration view the hooks get, `Env.Logs` the daemon's log handle
+  and the engine behind `apiwire.AdapterEngine`; step 10 ends when each instance has
+  answered `adapter.start` or been judged offline, and the `Adapters` hook runs after
+  it. Shutdown step 3 shuts the host down within the grace (the short one after a fatal
+  failure of the disk), then runs `StopAdapters`. The host reports nothing to the engine
+  at shutdown, so the fatal path writes nothing. The hooks stay for what else starts
+  and stops with the adapters.
 - **The engine is the single writer; this package writes only what is its own:**
   `init` and the layout rule, both declared here and covered by the crash tests.
 - **The certificate is renewed at step 5 and every hour in the loop, never when the
@@ -97,6 +108,7 @@ the shutdown, the stop through the management interface, `Run` and a fatal failu
 (the layout rule, the recovery, the pause of the clock, the scan, a hook that meets
 the death of the engine); `interrupt_test.go` the lock kept under an engine that has
 not ended, a stop that races with a failed start, a context or a signal during the
-start; `env_test.go` what a hook is given; `logging_test.go` the deferred log handler;
+start; `adapters_test.go` the adapter host at step 10 and step 3, over fake adapters in the test
+process (the launcher is `harness.AdapterLauncher`); `env_test.go` what a hook is given; `logging_test.go` the deferred log handler;
 `periodic_test.go` the clock state's pause; `replay_test.go` a management operation
 resent through the whole daemon.
