@@ -76,6 +76,13 @@ jobs:
         run: go test -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
       - name: go test -race
         run: go test -race -count=1 -timeout 30m -skip "$SKIP_TESTS" ./... ./sdk/go/...
+      # go test prints t.Log output and skip reasons only with -v or on failure.
+      # The platform tests of these two packages log what they measure on the
+      # runner and skip what the runner cannot do, so they run once more, verbosely,
+      # to put those values and reasons in the log. A new package with platform
+      # tests that log or skip must be added here.
+      - name: go test -v (platform packages)
+        run: go test -count=1 -v -timeout 30m -skip "$SKIP_TESTS" ./internal/node/fsx ./internal/node/ipc
 
   # The same checks again with the build tags that select binary-level crash
   # points and the test clock, which the untagged job never compiles. vet also

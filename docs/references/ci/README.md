@@ -16,7 +16,7 @@ crash instead of four there (see below).
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
 | `format` | Linux | `gofmt -l .` must print nothing |
-| `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...` |
+| `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
 | `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
 | `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64 |
@@ -76,6 +76,18 @@ to the workflow.
   inside one test, not as subtests. The reason is the per-package limit: `-timeout`
   covers one test binary, and without the narrowing the store's race run took
   79% of it on the slowest job (the baseline below), with more store tests due.
+- **A verbose run of the platform packages**: `go test` prints `t.Log` output and
+  skip reasons only with `-v` or on failure, and the main steps run without it. The
+  platform tests of `internal/node/fsx` and `internal/node/ipc` log what they
+  measure on the runner (how long a replace or a lock takes, what a directory
+  flush or a security descriptor returns) and skip what a runner cannot do (a
+  symbolic link or a second user on Windows, a socket path that is too long on
+  Unix). The extra step runs those two packages once more with `-v`, so one CI log
+  carries the platform values and skip reasons the next fix needs. It runs whole
+  packages and not a name pattern: the platform tests share no name prefix, and a
+  package-wide run also covers a platform test added later. It adds no check of its
+  own, since the same tests ran in the steps before it. The package list must grow
+  with any package that gets platform tests which log or skip.
 - **Race and plain runs are separate steps**: the race detector changes timing
   and memory use; a failure in one mode must be visible without the other.
 - **Why a second tagged job**: tagged files are not compiled without their tag,
