@@ -347,9 +347,10 @@ func modeOf(err error) mode {
 	return modeKill
 }
 
-// finishConn ends a connection and everything of it. A process that cannot be
-// ended is waited for at most Params.ShutdownWait and then left: the instance
-// lock keeps a second writer out whatever it does.
+// finishConn ends a connection and everything of it. A process that Kill
+// reports it cannot end is left at once, and one that was asked to end and does
+// not is waited for at most Params.ShutdownWait and then left: the instance lock
+// keeps a second writer out whatever either does.
 func (s *supervisor) finishConn(c *conn, m mode) {
 	s.leaveService(c)
 	c.closing.Store(true)
@@ -378,8 +379,14 @@ func (s *supervisor) finishConn(c *conn, m mode) {
 			_ = s.waitExit(c)
 		}
 	default:
-		_ = c.proc.Kill()
+		killErr := c.proc.Kill()
 		c.close()
+		if killErr != nil {
+			// A process that cannot be told to end is not waited for: there is nothing
+			// the wait could see. The instance lock keeps a second writer out.
+			s.log.Warn("the adapter process cannot be ended; it is left", "pid", c.proc.PID(), "err", killErr)
+			return
+		}
 		_ = s.waitExit(c)
 	}
 }

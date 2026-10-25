@@ -218,7 +218,8 @@ packages and are not part of them.
   supervision paths of two. Every launch has knobs of its own, because a restarted
   adapter is a new process; the ledger writer of an instance is one for all its launches,
   because opening a stream twice would fork its sequence. A launch can be told to
-  survive: neither `Kill` nor the closing of its stream ends it and the host's closing of
+  survive: `Kill` returns an error (the host then does not wait for it), the closing of
+  its stream does not end it, and the host's closing of
   its end of the pipes does not reach it, so it holds the instance lock as a hung process
   does, which is the case the lock exists for: the host cannot end it, starts the
   instance again after its backoff, and every replacement is refused the lock and never

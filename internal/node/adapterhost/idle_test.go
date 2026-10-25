@@ -2,29 +2,62 @@ package adapterhost_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// While the host waits for a process to end after it asked it to (Kill, or the end of
-// its stream), it counts as working: the wait is "ending a process", and a caller
-// that moved the clock and finds the host idle takes it that the host has gone on
-// to arm its next timer. That holds for a process that ends within moments. A
-// process that cannot be ended is waited for until the clock ends the wait, so a
-// caller that steps the clock and waits for the host to be idle before each step
-// waits for ever at the step that would end the wait.
-func TestShouldTheHostBeIdleWhileItWaitsForAProcessItCannotEnd(t *testing.T) {
-	t.Skip("open question, no change of the host's counts is made without a decision: how Counts.Working " +
-		"treats the wait for a process that was asked to end and has not. Idle for the whole wait breaks " +
-		"every caller that reads idle as 'the host went on' for a process that ends in moments (the host's own " +
-		"requests_test.go loses launches that way); working for the whole wait leaves a stuck process " +
-		"(an unkillable hung adapter holding the instance lock) to be waited for by a caller that cannot step " +
-		"the clock until the host is idle. Options: working for a short wait on the real clock and idle after it; " +
-		"a separate count of processes being ended that a quiet check can tell apart; or leave it and let the " +
-		"fixture of a hung process end the wait itself")
+// unendable is a process that Kill reports it cannot end, and that does not end: the
+// operating system refusing to signal it, or one stuck beyond a signal's reach.
+type unendable struct{ *pipeProcess }
+
+func (p unendable) Kill() error { _ = p.pipeProcess.Kill(); return errors.New("not permitted") }
+
+// A process that Kill reports it cannot end is not waited for: there is nothing the
+// wait could see, and a caller that steps the clock and waits for the host to be
+// idle before each step must find it idle once the host has armed its backoff. A
+// process that was asked to end and does not is a different case: it is waited for
+// at most ShutdownWait, and the host counts as working while it ends, so that a
+// process which ends in moments is not taken for one that was left.
+func TestAProcessThatCannotBeEndedIsNotWaitedFor(t *testing.T) {
+	p := testParams()
+	r := newRig(t, rigOptions{})
+	var adapters []*scripted
+	r.lau.launch = func(n int, inst adapterhost.Instance) (adapterhost.Process, error) {
+		pp, a := r.scriptedProcess(func(a *scripted) {
+			if n == 1 {
+				a.ping = func(ctx context.Context, _ int) error { <-ctx.Done(); return ctx.Err() }
+			}
+		}, n == 1)
+		adapters = append(adapters, a)
+		if n == 1 {
+			return unendable{pp}, nil
+		}
+		return pp, nil
+	}
+	r.start()
+	r.ready("chat", 1)
+	for ping := 1; ping <= adapterhost.OfflineAfterPingFailures; ping++ {
+		r.advance(p.PingInterval)
+		waitPings(t, adapters[0], ping)
+		r.advance(p.PingTimeout)
+	}
+	if got := r.goneCauses("chat"); !slices.Equal(got, []adapterhost.GoneCause{adapterhost.GonePingsFailed}) {
+		t.Fatalf("the engine was told %v, want [pings_failed]", got)
+	}
+	// Idle with the backoff armed, and no wait for the process in front of it.
+	r.settle()
+	r.advance(p.RestartBackoffMin - time.Nanosecond)
+	if n := r.lau.launches(); n != 1 {
+		t.Fatalf("%d launches a nanosecond before the backoff ended, want 1", n)
+	}
+	r.advance(time.Nanosecond)
+	r.waitLaunches(2)
 }
 
 // A request the host has sent and not had answered is in Calls from the moment the

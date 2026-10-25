@@ -94,8 +94,8 @@ layer.
   stream twice would fork its sequence, so the writer `adapter/<instance>` is made
   once and shared by every launch. A launch that was not told to survive ends on
   `Kill` and when its stream closes, as `fakeadapter.PipeProcess` does. `Survive`
-  makes it a hung process the host cannot end: the host's `Kill` and the closing of
-  its stream leave it running, its connection is not ended by the host closing its
+  makes it a hung process the host cannot end: the host's `Kill` returns an error and
+  the closing of its stream leaves it running, its connection is not ended by the host closing its
   end of the pipes, it holds the instance lock, and `Wait` does not return until
   `End`, which really ends it whatever `Survive` said. The test ends a survivor before
   it ends, or the host's shutdown waits for it. `Methods` is read from what the

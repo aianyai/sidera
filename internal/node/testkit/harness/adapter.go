@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -281,11 +282,16 @@ func (p *launchedProcess) Stream() (io.Reader, io.WriteCloser) {
 	return l.in, l.out
 }
 
+// errCannotEnd is what Kill says of a process that was told to survive: the host
+// is told that the process cannot be ended, as an operating system tells a process
+// it may not signal.
+var errCannotEnd = errors.New("harness: the process cannot be ended")
+
 func (p *launchedProcess) PID() int { return p.l.proc.PID() }
 
 func (p *launchedProcess) Kill() error {
 	if p.l.survive.Load() {
-		return nil
+		return errCannotEnd
 	}
 	return p.l.proc.Kill()
 }

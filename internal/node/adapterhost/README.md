@@ -58,8 +58,9 @@ handle the daemon gives it.
 - **Pings.** In service, every `PingInterval` the host sends `ping`, limited by
   `PingTimeout`. Any error is a failure. `OfflineAfterPingFailures` failures in a
   row (an answer starts the count again) report `GonePingsFailed`, kill the
-  process and wait for it at most `ShutdownWait`; a process that cannot be ended is
-  left, because the instance lock keeps a second writer out whatever it does. A
+  process and wait for it at most `ShutdownWait`; a process that `Kill` reports it
+  cannot end is left at once and one that does not end is left after `ShutdownWait`,
+  because the instance lock keeps a second writer out whatever it does. A
   connection that ends by itself is reported as `GoneConnectionEnded`, after the
   forwarder has handed the engine what was already buffered. Reports are made with
   the host's context, and not at all for an instance being stopped or a host that
@@ -139,8 +140,8 @@ handle the daemon gives it.
 `Shutdown`, `Abort`), `admission_test.go` (what is refused, the lock, the order of
 taking an adapter on), `notifications_test.go` (order, the bound, dropped ones),
 `requests_test.go` (the adapter's requests, the engine's calls, the counts),
-`idle_test.go` (a request counted before the host waits for its answer, and the open
-question of waiting for a process that does not end),
+`idle_test.go` (a request counted before the host waits for its answer, and a process
+that cannot be ended is not waited for),
 `engineerrors_test.go`, `stderr_test.go`, `exec_test.go` (a helper process: the
 test binary started again), `lockpath_test.go`, `params_internal_test.go`.
 `helpers_test.go` holds the doubles: an engine that records every call in order, a
