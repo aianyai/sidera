@@ -54,6 +54,9 @@ type Config struct {
 	// Stop asks the daemon to shut down. It is called without waiting, once the
 	// answer to a request whose operation stops the daemon has been written.
 	Stop func(reason string)
+	// Version is the version of the program, for the status to show; empty shows
+	// none.
+	Version string
 	// Log receives what the server observed; nil discards it. An error that was
 	// not expected is logged whole here and answered as an internal error.
 	Log *slog.Logger

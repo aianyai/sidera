@@ -3,6 +3,8 @@ package manageapi
 import (
 	"bytes"
 	"fmt"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
@@ -23,8 +25,17 @@ func FuzzDecodeRequest(f *testing.F) {
 		`{"operation_id":"00000000000000000000000000000001"}`,
 		`{"params":null}`, `{"params":{"a":1,"a":2}}`, `[]`, `null`, ``, `{`, `{"operation_id":""}`,
 		`{"params":{"endpoint":"` + "\xff" + `"}}`,
+		// the owner's methods: identifiers, digests, nodes, addresses and patches
+		`{"operation_id":"00000000000000000000000000000001","params":{"alert":"00000000000000000000000000000001"}}`,
+		`{"operation_id":"00000000000000000000000000000001","params":{"digest":"` + strings.Repeat("ab", 32) + `"}}`,
+		`{"operation_id":"00000000000000000000000000000001","params":{"node":"` + ownNode.String() + `"}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"settings":{"node_queue_limit":20000,"endpoint_defaults":{"max_queue_s":60,"backlog_limit":9}}}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"endpoint":"` + ownNode.String() + `/` + strings.Repeat("a", 26) + `","settings":{"backlog_limit":3}}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"settings":{"disk_reserve_bytes":9223372036854775807,"reply_permission":true}}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"settings":{"a":null,"b":[1,{"c":1e2}],"d":"\u00e9"}}}`,
+		`{"params":{"include_acknowledged":true}}`,
 	} {
-		for _, m := range []string{"endpoints.list", "endpoints.close", "daemon.stop", "nothing"} {
+		for _, m := range methodNames(f) {
 			f.Add(m, []byte(s))
 		}
 	}
@@ -55,6 +66,22 @@ func FuzzDecodeRequest(f *testing.F) {
 			t.Fatalf("canonical params %s then %s; fingerprints %x then %x", d.plan.canonical, again.plan.canonical, d.fingerprint, again.fingerprint)
 		}
 	})
+}
+
+// methodNames are every method the server has, so that the fuzzer feeds each, and
+// one that does not exist.
+func methodNames(tb testing.TB) []string {
+	tb.Helper()
+	ms, err := defaultMethods()
+	if err != nil {
+		tb.Fatal(err)
+	}
+	names := []string{"nothing"}
+	for name := range ms {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // canonicalRequest writes an accepted request again in its canonical form.

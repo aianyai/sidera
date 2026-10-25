@@ -17,13 +17,25 @@ connection, and `Shutdown` ends them.
 | ---- | ------- |
 | `Listen(addr, lock, opts)`, `Listener` | Listens on the address of the management interface and on no other: it refuses the address of the Agent interface. Only it makes a `Listener`. |
 | `New(Config)`, `Server.Serve`, `Shutdown`, `Close` | The server over a `Listener`. `Shutdown` waits for the requests being served and then closes what is left. |
-| `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop entry of the composition root and the log. |
+| `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop entry of the composition root, the version of the program for the status, and the log. |
 
 The methods are a table in `methods.go`, one row each: the name on the wire, the
 catalogue entry of the operation, and how the params are read. The owner of an
 operation adds a row (and its type in the engine); the handling of a request does
 not change. `operation.result` is one of the rows: a read of the result stored for an
 operation identifier of the requester.
+
+The rows are in `methods.go` (`endpoints.list`, `endpoints.close`, `endpoints.set`,
+`daemon.stop`, `operation.result`), `methods_status.go` (`status`, `alerts.list`,
+`alerts.ack`), `methods_identity.go` (`identity.export_revocation`,
+`identity.confirm_backup`, `identity.retire`, `clock.clear_rollback`) and
+`methods_settings.go` (`node.show`, `node.set`, `endpoints.set`). The words of each
+result, and of the reminders, are the interface's: the engine says which reminder
+stands and what an operation did, and a function the row passes to the operation
+words it. A patch of settings is passed to the engine as it was written, in a
+canonical form (members in order, no spaces, numbers as written) that only the
+fingerprint is made of; the names, the values and the rules of the settings are
+`config`'s, and this package does not know one.
 
 A row may instead be a **test row** (`method.test`): the door of the test harness to
 the node it runs in. Test rows are named `test.<something>`, come only from
@@ -91,5 +103,9 @@ after the answer, the mapping of refusals, the client that goes away, the listen
 that takes only the management address, shutdown with a request in flight, the
 timeouts, and concurrent requests. `testmethods_test.go` and
 `testmethods_off_test.go` (build-constrained) say that a tagged build has its test
-rows and an untagged one has none. `fuzz_test.go` fuzzes the one entry that reads
-a request: it never panics, and what it accepts is canonical.
+rows and an untagged one has none. `methods_owner_test.go` the rows of the owner (the
+operation each is authorized as, the strict reading of their params, the commands and
+the fingerprint of a patch, the stop after a retirement, and the golden answers of
+`status`, `alerts.list`, `node.show` and the export); `fuzz_test.go` fuzzes the one
+entry that reads a request, for every method the table has: it never panics, and
+what it accepts is canonical.

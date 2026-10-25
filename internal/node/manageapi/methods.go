@@ -87,7 +87,13 @@ func canonical(p any) []byte {
 // added from testMethods, which has none in a binary built without a test tag.
 func defaultMethods() (map[string]*method, error) {
 	ms := map[string]*method{}
-	for _, m := range append([]*method{endpointsList, endpointsClose, daemonStop, operationResult}, testMethods()...) {
+	rows := []*method{
+		status, alertsList, alertsAck,
+		identityExportRevocation, identityConfirmBackup, identityRetire, clockClearRollback,
+		nodeShow, nodeSet,
+		endpointsList, endpointsClose, endpointsSet, daemonStop, operationResult,
+	}
+	for _, m := range append(rows, testMethods()...) {
 		if err := checkRow(m); err != nil {
 			return nil, err
 		}
