@@ -117,6 +117,22 @@ look in) is Failed. `fsx.IsFatal` finds a Fatal error through any wrapping. The
 process exit itself is not in `fsx`: it returns the class and the composition
 root exits.
 
+**A full volume.** `fsx.IsNoSpace` is the one place that says whether an error
+means the volume or the quota is full, so that a caller that tells "storage full"
+from "storage unavailable" does not test operating system error codes itself: the
+codes differ by platform, and on Windows `syscall.ENOSPC` is a value Go invents
+that `Errno.Is` does not map from `ERROR_DISK_FULL` or `ERROR_HANDLE_DISK_FULL`, so
+`errors.Is(err, syscall.ENOSPC)` is wrong there. It is true for `ENOSPC` and
+`EDQUOT` on Unix and for `ERROR_DISK_FULL`, `ERROR_HANDLE_DISK_FULL` and
+`ERROR_DISK_QUOTA_EXCEEDED` (1295, documented as "the requested file operation
+failed because the storage quota was exceeded") on Windows, through any wrapping,
+and for nothing else: the production code recognises only what the platform
+returns. The fault a test hands to `fsxtest.Faulty` for a full disk is
+`fsxtest.DiskFull`, `ENOSPC` on Unix and `ERROR_DISK_FULL` on Windows, so such a
+test means the same on both. It does not change the class of the failure: a write
+that failed for want of space is an ordinary `Failed`
+operation. The Windows codes are pending verification by CI on main.
+
 A multi-file transaction fails Fatal for any failure after the commit step of
 its first non-preparatory write has completed; that rule belongs to the
 transaction layer, not to `fsx` (see The transaction layer).
@@ -1018,6 +1034,7 @@ so that the double cannot drift from what it stands for.
 | steps, keys, points, counter, `ParsePoint` | `internal/node/fsx/point.go` | `point_test.go` (golden points, rejection table, `FuzzParsePoint`, `FuzzPointRoundTrip`) |
 | classes and the classification table | `internal/node/fsx/error.go`, `classify.go` | `TestFsyncFailureBeforeRenameFailsOperation`, `TestDirSyncFailureAfterRenameIsFatal`, `TestFailureClassOfEveryStep` |
 | composite operations | `internal/node/fsx/ops.go` | `TestCompositeOperationsRunTheirFixedSteps`, `TestReplaceLeavesNoTemporaryAndKeepsTheTargetWhenAnyStepBeforeTheRenameFails`, `TestCleanupAfterAFailureIsNotAStep`, `TestAppendShortWriteIsAFailureThatLeavesAPartialTail`, `TestSyncFileStepsCarryTheTagTheFileWasOpenedWith`, `TestEachCompositeOperationIsDurableWhenItReturns`, `TestDiscardRenamesToAGarbageNameBeforeDeleting` and the `RenameDir`, path and root tests in `ops_test.go` |
+| a full volume | `internal/node/fsx/nospace.go`, `nospace_unix.go`, `nospace_windows.go`; the injected fault `internal/node/fsx/fsxtest/diskfull_unix.go`, `diskfull_windows.go` | `nospace_test.go` (`TestIsNoSpaceRecognisesTheInjectedFullDisk`, `TestIsNoSpaceSeesThroughTheErrorOfAFailedOperation`), `nospace_unix_test.go`, `nospace_windows_test.go` (pending verification by CI on main) |
 | `Observe`, `PointOf` | `internal/node/fsx/observe.go`, `error.go` | `observe_test.go` |
 | leftovers | `internal/node/fsx/leftovers.go` | `leftovers_test.go` |
 | `Exists` | `internal/node/fsx/fsx.go` | `exists_test.go` |

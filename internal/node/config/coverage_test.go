@@ -181,7 +181,7 @@ func TestFailedStageIsAnOrdinaryFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			faulty.Fail(m, syscall.ENOSPC)
+			faulty.Fail(m, fsxtest.DiskFull)
 			_, err = c.StageAdapter(srcPackage(t, "fresh", "0.1.0", nil), suffixReader())
 			if err == nil {
 				t.Fatal("the injected failure did not surface")

@@ -59,7 +59,7 @@ func TestFailedAppendDropsTheHandle(t *testing.T) {
 		log = &closeLog{FS: faulty}
 		return log
 	}, eventsOnly)
-	faulty.FailShortWrite(fsxtest.Match{Tx: "events", Step: fsx.StepWrite, Hit: 2}, 3, syscall.ENOSPC)
+	faulty.FailShortWrite(fsxtest.Match{Tx: "events", Step: fsx.StepWrite, Hit: 2}, 3, fsxtest.DiskFull)
 
 	tx := r.w.Begin(eventsOnly)
 	defer tx.Close()

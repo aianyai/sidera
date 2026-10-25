@@ -328,7 +328,7 @@ func TestSingleReplaceKeepsTheFileSystemClasses(t *testing.T) {
 func TestFailedAppendOfAnUnsyncedBatchIsAnOrdinaryFailure(t *testing.T) {
 	var faulty *fsxtest.Faulty
 	r := newRig(t, faultyOver(t, &faulty), eventsOnly)
-	faulty.Fail(fsxtest.Match{Tx: "events", Step: fsx.StepWrite, Hit: 3}, syscall.ENOSPC)
+	faulty.Fail(fsxtest.Match{Tx: "events", Step: fsx.StepWrite, Hit: 3}, fsxtest.DiskFull)
 	tx := r.w.Begin(eventsOnly)
 	defer tx.Close()
 	for i := 0; i < 2; i++ {
@@ -341,7 +341,7 @@ func TestFailedAppendOfAnUnsyncedBatchIsAnOrdinaryFailure(t *testing.T) {
 	if te.Class != fsx.Failed || txn.IsFatal(err) {
 		t.Errorf("class = %v, IsFatal = %v; want an ordinary failure", te.Class, txn.IsFatal(err))
 	}
-	if !errors.Is(err, syscall.ENOSPC) {
+	if !errors.Is(err, fsxtest.DiskFull) {
 		t.Errorf("error %v does not wrap ENOSPC", err)
 	}
 }

@@ -22,6 +22,7 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 | `Observe(fs, counter, hook)` | Numbers every write step and calls the hook before it runs. |
 | `Tag`, `Step`, `Key`, `Point`, `Counter`, `ParseKey`, `ParsePoint` | Crash point identity: `intake/out.rename#2`. |
 | `Error`, `Class` (`Failed`, `Fatal`), `IsFatal`, `PointOf` | What a failed operation returns and what the caller must do. |
+| `IsNoSpace` | Whether an error means the volume or the quota is full (`ENOSPC`, `EDQUOT`; `ERROR_DISK_FULL`, `ERROR_HANDLE_DISK_FULL`, `ERROR_DISK_QUOTA_EXCEEDED`), and nothing a platform does not return: a test injects `fsxtest.DiskFull`. The Windows codes are pending verification by CI on main. The one place that knows the codes. |
 | `Exists(r, path)` | Whether a path is there: `fs.ErrNotExist` is false, any other failure of `Stat` is returned, never read as "absent". |
 | `Leftovers`, `IsLeftover`, `TempPrefix`, `TrashPrefix` | Finding the debris of interrupted operations. |
 | `ErrLocked` | Returned by `FS.Lock` when the lock is held elsewhere. |

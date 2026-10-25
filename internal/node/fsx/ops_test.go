@@ -287,7 +287,7 @@ func TestReplaceLeavesNoTemporaryAndKeepsTheTargetWhenAnyStepBeforeTheRenameFail
 			mem := fsxtest.NewMem()
 			mustWrite(t, mem, "rec", "old")
 			faulty := fsxtest.NewFaulty(t, mem)
-			faulty.Fail(fsxtest.Match{Tx: tx.Tx, Step: step}, syscall.ENOSPC)
+			faulty.Fail(fsxtest.Match{Tx: tx.Tx, Step: step}, fsxtest.DiskFull)
 
 			err := fsx.Replace(faulty, tx, "rec", []byte("new"), fsx.ModePrivate)
 
@@ -305,9 +305,9 @@ func TestReplaceLeavesNoTemporaryAndKeepsTheTargetWhenAnyStepBeforeTheRenameFail
 	t.Run("short-write", func(t *testing.T) {
 		mem := fsxtest.NewMem()
 		faulty := fsxtest.NewFaulty(t, mem)
-		faulty.FailShortWrite(fsxtest.Match{Tx: tx.Tx, Step: fsx.StepWrite}, 3, syscall.ENOSPC)
+		faulty.FailShortWrite(fsxtest.Match{Tx: tx.Tx, Step: fsx.StepWrite}, 3, fsxtest.DiskFull)
 		err := fsx.Replace(faulty, tx, "rec", []byte("0123456789"), fsx.ModePrivate)
-		if err == nil || fsx.IsFatal(err) || !errors.Is(err, syscall.ENOSPC) {
+		if err == nil || fsx.IsFatal(err) || !errors.Is(err, fsxtest.DiskFull) {
 			t.Fatalf("error = %v, want a non-fatal ENOSPC failure", err)
 		}
 		if _, err := mem.Stat("rec"); !errors.Is(err, fs.ErrNotExist) {
@@ -361,12 +361,12 @@ func TestAppendShortWriteIsAFailureThatLeavesAPartialTail(t *testing.T) {
 	if err := fsx.Append(f, tx, []byte("whole\n")); err != nil {
 		t.Fatal(err)
 	}
-	faulty.FailShortWrite(fsxtest.Match{Tx: tx.Tx, Step: fsx.StepWrite, Hit: 2}, 4, syscall.ENOSPC)
+	faulty.FailShortWrite(fsxtest.Match{Tx: tx.Tx, Step: fsx.StepWrite, Hit: 2}, 4, fsxtest.DiskFull)
 
 	err = fsx.Append(f, tx, []byte("second record\n"))
 
 	var fe *fsx.Error
-	if !errors.As(err, &fe) || fe.Class != fsx.Failed || !errors.Is(err, syscall.ENOSPC) {
+	if !errors.As(err, &fe) || fe.Class != fsx.Failed || !errors.Is(err, fsxtest.DiskFull) {
 		t.Fatalf("error = %v, want a non-fatal ENOSPC failure", err)
 	}
 	if got, _ := mem.ReadFile("log"); string(got) != "whole\nseco" {

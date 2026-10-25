@@ -19,6 +19,7 @@ for the crash model, its sources and what it can and cannot prove.
 | `NewFaulty(t, base)`, `Faulty.Fail`, `Faulty.FailShortWrite`, `Rule.Hits` | Fails chosen calls of any `FS`; the test fails if a rule never fired. |
 | `Match` | Selects calls by transaction, role, step, ordinal of the key and path. |
 | `RunConformance(t, newFS)` | The behaviour `Mem` and the real file system must share. |
+| `DiskFull` | The fault a test injects for a full disk: `ENOSPC` on Unix, `ERROR_DISK_FULL` on Windows (pending verification by CI on main). `fsx.IsNoSpace` recognises it, so such a test means the same on both. |
 
 ## Rules of the model
 
