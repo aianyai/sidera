@@ -96,8 +96,10 @@ func (p *InitPlan) WriteMarker(tx *txn.Tx) error {
 //     issued again. It is kept if it is valid, names the network key and is the
 //     one the serial file names. Otherwise a new one is signed at a serial above
 //     every serial known (the serial file's, and a valid certificate's of this
-//     node), and the serial file is written first. A missing serial file next to
-//     a valid certificate is written from the certificate.
+//     node), and the serial file is written first. It is signed at the later of
+//     now and the clock record's mark, so it never starts before what the node
+//     already issued, even while a rollback pause is in force. A missing serial
+//     file next to a valid certificate is written from the certificate.
 //
 // A time that the files cannot hold (the zero time, one before
 // 1970-01-01T00:00:01Z or after year 9999) is a plain error of the caller, before
@@ -127,14 +129,18 @@ func PlanInit(r fsx.Reader, rd io.Reader, now time.Time) (*InitPlan, error) {
 	}
 	p.node = identity.node
 
-	if err := planCertificate(r, p, identity, network, now); err != nil {
+	clk, haveClock, err := readClockIfPresent(r)
+	if err != nil {
+		return nil, err
+	}
+	if err := planCertificate(r, p, identity, network, initSigningTime(now, clk)); err != nil {
 		return nil, err
 	}
 	if err := planSelfRevocation(r, p, identity); err != nil {
 		return nil, err
 	}
-	if err := planClock(r, p, now); err != nil {
-		return nil, err
+	if !haveClock {
+		p.add(RoleClock, ClockPath, encodeClock(ClockState{HighWater: now}))
 	}
 	p.marker = encodeInit(now)
 	return &InitPlan{p: p}, nil
@@ -243,21 +249,5 @@ func planSelfRevocation(r fsx.Reader, p *initPlan, identity *privateKey) error {
 	}
 	p.add(RoleSelfRevocation, SelfRevocationPath, wire)
 	p.selfRev = sr
-	return nil
-}
-
-// planClock keeps a clock record that is there and starts one at now otherwise.
-func planClock(r fsx.Reader, p *initPlan, now time.Time) error {
-	data, err := readOwnerOnly(r, ClockPath)
-	switch {
-	case err == nil:
-		if _, err := decodeClock(data); err != nil {
-			return corrupt(ClockPath, err)
-		}
-		return nil
-	case !errors.Is(err, ErrMissing):
-		return err
-	}
-	p.add(RoleClock, ClockPath, encodeClock(ClockState{HighWater: now}))
 	return nil
 }

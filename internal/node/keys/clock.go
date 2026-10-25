@@ -33,18 +33,24 @@ func (c ClockState) Paused() bool { return !c.RollbackPausedSince.IsZero() }
 // owner gets who deletes the file while the node is stopped. A file that is
 // damaged or that anyone but the owner can reach is refused, naming it.
 func ReadClock(r fsx.Reader) (ClockState, error) {
+	c, _, err := readClockIfPresent(r)
+	return c, err
+}
+
+// readClockIfPresent is ReadClock that also says whether the file was there.
+func readClockIfPresent(r fsx.Reader) (ClockState, bool, error) {
 	data, err := readOwnerOnly(r, ClockPath)
 	if errors.Is(err, ErrMissing) {
-		return ClockState{}, nil
+		return ClockState{}, false, nil
 	}
 	if err != nil {
-		return ClockState{}, err
+		return ClockState{}, false, err
 	}
 	c, err := decodeClock(data)
 	if err != nil {
-		return ClockState{}, corrupt(ClockPath, err)
+		return ClockState{}, false, corrupt(ClockPath, err)
 	}
-	return c, nil
+	return c, true, nil
 }
 
 // SaveClock writes the clock record: the periodic persistence of the high water
@@ -95,6 +101,21 @@ func PutClockCleared(tx *txn.Tx, now time.Time) error {
 		return fileError(ClockPath, ErrClockRegression, "the record needs a high water mark from 1970-01-01T00:00:01Z on, to the end of year 9999")
 	}
 	return tx.Replace(RoleClock, ClockPath, encodeClock(ClockState{HighWater: now}), fsx.ModePrivate)
+}
+
+// initSigningTime is the time at which init signs a certificate again: the later
+// of now and the persisted mark. Renew refuses to sign while the clock is in
+// doubt (rolledBack, or a pause in force); init cannot refuse, because only a
+// running daemon clears a pause and the daemon cannot start before init has
+// finished, so refusing would leave the owner no way out but deleting
+// clock.rec, which loses the pause. Signing no earlier than the mark keeps the
+// certificate from starting before what the node already issued, and the next
+// renewal after the pause is cleared replaces it.
+func initSigningTime(now time.Time, c ClockState) time.Time {
+	if c.HighWater.After(now) {
+		return c.HighWater
+	}
+	return now
 }
 
 // rolledBack reports whether now is behind the persisted mark by more than the

@@ -80,7 +80,14 @@ transaction of `txn`; nothing here calls an `fsx` write.
   has committed.
 - **No signing while the clock is in doubt.** `Renew` refuses during a rollback
   pause and when the clock is behind the persisted mark by more than the clock
-  tolerance, and writes nothing.
+  tolerance, and writes nothing. The one signing allowed then is the one a
+  re-run `init` makes when it replaces a certificate: `init` cannot refuse,
+  because only a running daemon clears a pause and the daemon cannot start before
+  `init` has finished, so the owner's only way out would be to delete
+  `clock.rec` and lose the pause. It signs at the later of `now` and the
+  persisted mark, so the certificate never starts before what the node already
+  issued, and leaves `clock.rec` alone. The next renewal after the pause is
+  cleared replaces that certificate.
 - **The clock record never goes back.** `SaveClock` refuses a lower mark, a lifted
   or moved pause flag, and a state without a mark. Only `PutClockCleared` resets
   the mark and lifts the pause, in one replacement.
@@ -96,7 +103,8 @@ transaction of `txn`; nothing here calls an `fsx` write.
   self-revocation is reused only if it verifies under the identity key that is
   current now, otherwise refused. The clock record is reused whatever it says. The
   certificate is the one file that may be replaced, because it can be issued
-  again: at a serial above every serial known, the serial file written first.
+  again: at a serial above every serial known, the serial file written first, and
+  signed at the later of `now` and the clock record's mark.
   `init` that finished is refused. `PlanInit` writes nothing; the plan's writes
   are made by the composer's transaction.
 - **Randomness is the reader that is passed.** A key is 32 bytes read from it
@@ -159,7 +167,7 @@ transaction of `txn`; nothing here calls an `fsx` write.
 The named tests of the row: `TestPermissionsTooBroadAreRefusedNamingTheFile`
 (and the Unix and Windows files), `TestSerialNeverGoesBackAcrossRestartsAndCrashes`,
 `TestInterruptedRenewalIsRecognisedAndRepaired`, `TestInitRerunNeverOverwritesAKey`,
-`TestInitReusesAValidSelfRevocation`,
+`TestInitReusesAValidSelfRevocation`, `TestInitSignsNoEarlierThanTheHighWaterMark`,
 `TestInitRefusesASelfRevocationThatDoesNotVerifyUnderTheCurrentKey`,
 `TestExportFormatGolden`, the crash-state tests
 (`TestRenewalReplaysToAConsistentStateFromEveryCrashState`,

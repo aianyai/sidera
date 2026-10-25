@@ -189,7 +189,9 @@ current; one that does not is refused, never replaced. The clock record is kept
 whatever it says, so that deleting `init.rec` is no way around a rollback pause.
 The certificate is the one file that may be replaced, because it can be issued
 again: when it does not match the keys and the serial file, a new one is signed
-at a serial above every serial known, and the serial file is written first; a
+at a serial above every serial known, and the serial file is written first, at
+the later of the current time and the persisted high water mark (see the clock
+rules below); a
 serial file missing next to a valid certificate is written from the certificate.
 `init` that finished is refused. Deleting `keys/` and running `init` again makes
 a new identity, certificate and self-revocation.
@@ -376,7 +378,15 @@ certificate below.
 - **No signing while the clock is in doubt.** A certificate signed with a clock
   that was set back starts before certificates the node already issued. The check
   is repeated in the renewal, next to the signature it protects, because the
-  persisted mark and the pause flag are this package's.
+  persisted mark and the pause flag are this package's. The one signing allowed
+  during a pause is the re-signing of a re-run `init`, and it does not refuse:
+  only a running daemon clears a pause and the daemon cannot start before `init`
+  has finished, so a refusal would leave the owner no way out but deleting
+  `clock.rec`, which loses the pause. `init` signs at the later of the current
+  time and the persisted mark, so the certificate does not start before what the
+  node already issued, and it leaves `clock.rec` as it is. The next renewal after
+  the pause is cleared replaces that certificate
+  (`TestInitSignsNoEarlierThanTheHighWaterMark`).
 - **A write refuses what its own decoder would refuse.** A clock reset to zero by
   a dead battery is exactly when the rollback pause must be written, and a pause
   that started at the epoch would be written and then read as a damaged file; the

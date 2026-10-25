@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/revocation"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // What init writes, file by file, checked against the formats rather than
@@ -512,6 +513,60 @@ func TestPlanInitRefusesATimeTheDecodersRefuse(t *testing.T) {
 			}
 			if rd.n != 0 || !reflect.DeepEqual(snapshot(t, r.mem), before) {
 				t.Errorf("a refused plan drew %d bytes or changed the disk", rd.n)
+			}
+		})
+	}
+}
+
+// A re-run init that signs a certificate again never signs one that starts
+// before what the node already issued: the signing time (the certificate is
+// valid from the clock tolerance before it) is the later of now and
+// the persisted high water mark, while a rollback pause is in force or the
+// clock was set back. It does not refuse then, because only a running daemon
+// clears a pause and it cannot start before init has finished, and it leaves
+// clock.rec as it is.
+func TestInitSignsNoEarlierThanTheHighWaterMark(t *testing.T) {
+	base := newRig(t)
+	if _, err := base.runInitKeysOnly(newSeeded(1), t0); err != nil {
+		t.Fatal(err)
+	}
+	future := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)
+	rows := []struct {
+		name string
+		clk  string // the body of clock.rec; empty: the record is missing
+		want time.Time
+	}{
+		{"rollback pause in force and the mark far ahead", `{"high_water":"2099-01-01T00:00:00Z","rollback_paused_since":"2026-10-24T05:50:00Z"}`, future},
+		{"mark far ahead, no pause", `{"high_water":"2099-01-01T00:00:00Z"}`, future},
+		{"mark within the clock tolerance ahead", `{"high_water":"2026-10-24T06:01:00Z"}`, t0.Add(time.Minute)},
+		{"rollback pause in force, mark behind now", `{"high_water":"2026-10-24T05:56:00Z","rollback_paused_since":"2026-10-24T05:50:00Z"}`, t0},
+		{"mark behind now", `{"high_water":"2026-10-24T05:00:00Z"}`, t0},
+		{"no clock record", "", t0},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			mem := base.mem.Clone()
+			if row.clk != "" {
+				put(t, mem, keys.ClockPath, oracleRecordFile("clock", []byte(row.clk)))
+			} else {
+				remove(t, mem, keys.ClockPath)
+			}
+			remove(t, mem, keys.CertificatePath)
+			r := open(t, mem)
+			var clockBefore []byte
+			if row.clk != "" {
+				clockBefore = r.read(keys.ClockPath)
+			}
+			if _, err := r.runInit(newSeeded(2), t0); err != nil {
+				t.Fatalf("init refused: %v", err)
+			}
+			// A certificate is valid from the clock tolerance before the time it is
+			// signed at, so the signing time is NotBefore plus the tolerance.
+			if got := r.mustLoad().Certificate().Payload().NotBefore.Add(timing.ClockTolerance); !got.Equal(row.want) {
+				t.Errorf("signed at %s, want %s", got, row.want)
+			}
+			if row.clk != "" && !bytes.Equal(r.read(keys.ClockPath), clockBefore) {
+				t.Error("clock.rec was rewritten")
 			}
 		})
 	}
