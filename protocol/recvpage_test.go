@@ -56,7 +56,6 @@ func TestRecvPageFromHandoff(t *testing.T) {
 		"plain":        {ID: "m-1", From: from, Body: "Please run the migration."},
 		"duplicate":    {ID: "m-2", From: from, Body: "again", PossiblyDuplicate: true},
 		"markup":       {ID: "m-3", From: from, Body: "a < b && \"c\" > d\nsecond line\ttab   and   and é 変更 \U0001F600"},
-		"empty body":   {ID: "m-4", From: from, Body: ""},
 		"long":         {ID: "m-long", From: from, Body: long},
 		"long resumed": {ID: "m-long2", From: from, Body: strings.Repeat(long, 8), NextPart: 2},
 		"long dup":     {ID: "m-long3", From: from, Body: long, PossiblyDuplicate: true},
@@ -142,7 +141,7 @@ func TestRecvPageFromHandoff(t *testing.T) {
 				check("Part "+label, p)
 			}
 		}
-		queue := []handoff.Message{msgs["plain"], msgs["duplicate"], msgs["markup"], msgs["empty body"]}
+		queue := []handoff.Message{msgs["plain"], msgs["duplicate"], msgs["markup"]}
 		check("queue", must(handoff.Pack(queue, newLease(), b)))
 		check("queue with a long message", must(handoff.Pack([]handoff.Message{msgs["plain"], msgs["long"]}, newLease(), b)))
 		check("long message first", must(handoff.Pack([]handoff.Message{msgs["long"], msgs["plain"]}, newLease(), b)))

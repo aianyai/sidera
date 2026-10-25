@@ -62,7 +62,8 @@ func (p PagePart) Validate() error {
 }
 
 // PageMessage is one message, or one part of a message, on a page. The channel
-// vouches for ID and From; Body is what the sender wrote.
+// vouches for ID and From; Body is what the sender wrote, or a part of it, and is
+// never empty: a message has a body.
 type PageMessage struct {
 	ID   MessageID `json:"id"`
 	From Address   `json:"from"`
@@ -78,6 +79,7 @@ func (m PageMessage) Validate() error {
 	var c checker
 	c.field("id", m.ID.Validate())
 	c.field("from", m.From.Validate())
+	c.ok(m.Body != "", "body: a message has a body")
 	if m.Part != nil {
 		c.field("part", m.Part.Validate())
 		if c.err == nil && m.Part.Next != nil {

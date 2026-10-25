@@ -9,7 +9,7 @@ import (
 func page() adapterproto.RecvPage {
 	return adapterproto.RecvPage{Lease: lease1, More: 2, Messages: []adapterproto.PageMessage{
 		{ID: "m-1", From: addr1, Body: "hello"},
-		{ID: "m-2", From: addr1, PossiblyDuplicate: true, Body: ""},
+		{ID: "m-2", From: addr1, PossiblyDuplicate: true, Body: "again"},
 		{ID: "m-big", From: addr1, Body: "part", Part: &adapterproto.PagePart{Index: 1, Total: 3, Label: "part 1/3", Next: &adapterproto.PageNext{Msg: "m-big", Part: 2}}},
 	}}
 }
@@ -31,7 +31,9 @@ func TestRecvPageRules(t *testing.T) {
 		{"message id required", func(p *adapterproto.RecvPage) { p.Messages[0].ID = "" }, "messages[0].id", false},
 		{"message sender required", func(p *adapterproto.RecvPage) { p.Messages[0].From = "" }, "messages[0].from", false},
 		{"message sender over the limit", func(p *adapterproto.RecvPage) { p.Messages[0].From = adapterproto.Address(repeat("a", 129)) }, "messages[0].from", false},
-		{"message body may be empty", func(p *adapterproto.RecvPage) { p.Messages[0].Body = "" }, "", false},
+		{"a message has a body", func(p *adapterproto.RecvPage) { p.Messages[0].Body = "" }, "messages[0].body", false},
+		{"a duplicate has a body", func(p *adapterproto.RecvPage) { p.Messages[1].Body = "" }, "messages[1].body", false},
+		{"a part has a body", func(p *adapterproto.RecvPage) { p.Messages[2].Body = "" }, "messages[2].body", false},
 		{"part index zero", func(p *adapterproto.RecvPage) { p.Messages[2].Part.Index = 0 }, "messages[2].part.index", false},
 		{"part total zero", func(p *adapterproto.RecvPage) { p.Messages[2].Part.Total = 0 }, "messages[2].part.total", false},
 		{"part label not of the form part i/n", func(p *adapterproto.RecvPage) { p.Messages[2].Part.Label = "first" }, "messages[2].part.label", false},

@@ -259,7 +259,7 @@
     },
     "PartNumber": { "type": "integer", "minimum": 1, "maximum": 1000000 },
     "RecvPage": {
-      "description": "What one recv hands out, in the JSON shape the recv command prints. Go only: a part's label reads 'part index/total', index is not beyond total, next is present exactly on every part but the last, names this message and points at part index+1.",
+      "description": "What one recv hands out, in the JSON shape the recv command prints. A message, or a part of one, has a body that is not empty. Go only: a part's label reads 'part index/total', index is not beyond total, next is present exactly on every part but the last, names this message and points at part index+1.",
       "type": "object",
       "required": ["lease", "messages", "more"],
       "additionalProperties": false,
@@ -294,7 +294,7 @@
                   }
                 }
               },
-              "body": { "type": "string" }
+              "body": { "type": "string", "minLength": 1 }
             }
           }
         },

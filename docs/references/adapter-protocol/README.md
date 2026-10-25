@@ -480,6 +480,10 @@ refused. Each one is reported with `native_request.handled`; `disposition` is
 registers endpoints with `endpoint.register`, identified by a key it chooses; the
 same key always gets the same endpoint. It reads with `endpoint.recv`, which
 returns the `RecvPage` that `handoff` prints, and settles with `endpoint.ack`.
+A message on a page, or a part of one, has a body that is not empty, as the
+envelope requires of every message: no node can hand out an empty one, so the
+schema (`minLength: 1`) and `PageMessage.Validate` refuse a page that holds it
+(`TestRecvPageRules`, `invalid/endpoint-recv--result-page-message-with-empty-body.json`).
 
 **Errors.** Codes `-32700` to `-32600` and `-32603` are JSON-RPC's; `-32001`
 to `-32004`, `-32022` and `-32800` are the implementation-defined range; both
