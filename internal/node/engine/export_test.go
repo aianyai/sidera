@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 )
 
@@ -152,4 +153,70 @@ func (c *cmdViewVsDisk) run(e *Engine, _ time.Time) {
 func ViewDiffersFromDisk(ctx context.Context, e *Engine, sc *store.Scan) ([]string, error) {
 	c := &cmdViewVsDisk{call: newCall[[]string](), sc: sc}
 	return roundTrip(ctx, e, submitExternal, c, c.call)
+}
+
+// TestWait is a waiter registered through the hooks below.
+type TestWait struct{ w *waiter }
+
+type cmdTestWait struct {
+	call[struct{}]
+	w *waiter
+}
+
+func (c *cmdTestWait) gate() gate { return gateAlways }
+func (c *cmdTestWait) run(e *Engine, _ time.Time) {
+	e.waitFor(c.w)
+	c.done(struct{}{}, nil)
+}
+
+// WaitFor registers a waiter for the endpoint, in a command of the loop.
+func WaitFor(ctx context.Context, e *Engine, endpoint ident.EndpointID, deadline time.Time) (*TestWait, error) {
+	c := &cmdTestWait{call: newCall[struct{}](), w: newWaiter(endpoint, deadline)}
+	if _, err := roundTrip(ctx, e, submitInternal, c, c.call); err != nil {
+		return nil, err
+	}
+	return &TestWait{w: c.w}, nil
+}
+
+// Outcome says how the wait ended, if it has: the name of the end and the page.
+func (t *TestWait) Outcome() (end string, page []byte, ended bool) {
+	select {
+	case o := <-t.w.out:
+		return o.End.String(), o.Page, true
+	default:
+		return "", nil, false
+	}
+}
+
+type cmdTestWake struct {
+	call[bool]
+	endpoint ident.EndpointID
+	page     []byte
+}
+
+func (c *cmdTestWake) gate() gate { return gateAlways }
+func (c *cmdTestWake) run(e *Engine, _ time.Time) {
+	c.done(e.wake(c.endpoint, c.page), nil)
+}
+
+// Wake hands a page to the waiter of the endpoint, in a command of the loop.
+func Wake(ctx context.Context, e *Engine, endpoint ident.EndpointID, page []byte) (bool, error) {
+	c := &cmdTestWake{call: newCall[bool](), endpoint: endpoint, page: page}
+	return roundTrip(ctx, e, submitInternal, c, c.call)
+}
+
+// Unwait drops the wait, as the caller that gave up does.
+func Unwait(ctx context.Context, e *Engine, t *TestWait) error {
+	return e.enqueue(ctx, submitInternal, cmdUnwait{w: t.w})
+}
+
+// PutBack makes the outcome a poll read available again.
+func PutBack(t *TestWait, end string, page []byte) {
+	var how waitEnd
+	for h := waitWoken; h <= waitShutdown; h++ {
+		if h.String() == end {
+			how = h
+		}
+	}
+	t.w.out <- waitOutcome{End: how, Page: page}
 }

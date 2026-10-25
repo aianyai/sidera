@@ -62,6 +62,13 @@ own instance. The declaration, with the display name and description the adapter
 gave, is the engine's field of the endpoint record (compact JSON, fixed member
 order, at most 256 senders listed).
 
+**Waiting.** A recv that finds nothing queued and is asked to wait is registered as
+a waiter in the same command, so no arrival is missed between the check and the
+registration. A command that makes a message of the endpoint ready hands the page
+to the waiter in its own command. The deadline is a schedule entry on the injected
+clock. At most one recv of an endpoint waits: a newer one ends the older with an
+empty page. Shutdown ends every wait with an empty page.
+
 **Capacity.** `CheckCapacity` is the one judgment of whether the node takes in new
 work: a clock set back first (`clock_rollback`), then the queue (`node_queue_full`
 when unfinished deliveries plus the new recipients exceed the node's limit), then
@@ -85,6 +92,14 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   scale of a node the throughput is set by `fsync`, not by the loop.
 - **Typed commands, not closures.** The kinds of command are what a crash walk and
   `Quiesce` observe; a list of types can be read, a pile of closures cannot.
+- **The waiter is registered where the queue was found empty, and woken by the
+  command that fills it.** A waiter that fetches its page itself after waking is
+  one window in which another reader takes the message; handing the page over in
+  the waking command closes it. The deadline is on the schedule and not on a timer
+  of the waiting goroutine, so the injected clock moves it and a test sees it.
+  The newer recv wins and the older gets an empty page, not an error: a client
+  that was killed and retried did nothing wrong, and a page given to two waiters
+  would show an agent a message twice.
 - **An answer channel of capacity one**, as in etcd's raft node, so that the loop
   never blocks on a caller that left.
 - **Two kinds of submitter.** An outside caller that waits for ever would hold a
@@ -143,6 +158,7 @@ reproducible).
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |
 | The schedule | `sched.go`, `engine.go` | `sched_test.go`, `sched_internal_test.go` |
 | Recovery | `recovery.go` | `recovery_test.go` |
+| Waiting |  `waiters.go` | `waiters_test.go` |
 | The view agrees with the disk | `view.go` | `TestViewAgreesWithTheDiskAfterAWrite` |
 | No method makes a session endpoint | — | `TestEngineHasNoMethodThatMakesASessionEndpoint` |
 

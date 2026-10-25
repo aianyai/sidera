@@ -85,6 +85,7 @@ type Engine struct {
 	timer    clock.Timer
 	periodic map[string]*periodicTask
 	order    []string // names of the periodic tasks, in the order they were added
+	waits    map[ident.EndpointID]*waiter
 	cont     []command
 	fatal    error // set by classify; the loop stops after the command that set it
 	probed   bool  // the command that just ran was a probe of Quiesce
@@ -146,6 +147,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		adm:      map[string]adapterreg.Admission{},
 		sched:    newScheduler(),
 		periodic: map[string]*periodicTask{},
+		waits:    map[ident.EndpointID]*waiter{},
 	}
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.setPhase(PhaseOpened)
@@ -217,7 +219,15 @@ func (e *Engine) BeginShutdown() {
 			break
 		}
 	}
-	e.shutOnce.Do(func() { close(e.shutdown) })
+	e.shutOnce.Do(func() {
+		close(e.shutdown)
+		if e.started.Load() {
+			select {
+			case e.inbox <- cmdEndWaits{}:
+			default: // the loop is far behind; finish ends the waits when it stops
+			}
+		}
+	})
 }
 
 // Stop ends the loop after the command it is running and waits for it and for
@@ -258,6 +268,7 @@ func (e *Engine) finish() {
 	}
 	e.cancel()
 	e.wg.Wait()
+	e.endWaits()
 	refuse := refuse(ReasonShuttingDown)
 	for _, c := range e.cont {
 		c.fail(refuse)
@@ -573,6 +584,10 @@ func (e *Engine) fireDue() {
 
 func (e *Engine) fire(key schedKey, now time.Time) {
 	switch key.kind {
+	case schedWait:
+		if id, err := ident.ParseEndpointID(key.id); err == nil {
+			e.expireWait(id)
+		}
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.cont = append(e.cont, &cmdDrain{endpoint: id})

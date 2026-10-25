@@ -18,6 +18,8 @@ const (
 	// schedDrain is the retry of closing the records of a closed endpoint after a
 	// write failed.
 	schedDrain
+	// schedWait is the deadline of a recv that waits.
+	schedWait
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

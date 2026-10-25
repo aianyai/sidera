@@ -34,6 +34,7 @@ commands and add their methods to this list.
 | `PlanRecovery`, `RecoveryPlan` | The work of the recovery rules as a pure function of a scan. |
 | `Reason`, `Refusal`, `ReasonOf` | The closed set of reasons a method refuses for; the interface packages alone map them to the wire. |
 | `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register`. |
+| `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. |
 | `Store`, `Config`, `Beginner`, `Adapters` | What the engine asks of the store, the configuration, the transaction writer and the adapter host. |
 
 ## Rules
@@ -78,6 +79,14 @@ commands and add their methods to this list.
   declaration. One compact JSON object of a fixed shape; a text that is not the
   exact encoding of the value it decodes to is not read, and a record whose field
   cannot be read stops `Open`.
+- **A recv that waits is a waiter the loop owns.** It is registered in the same
+  command that found the queue empty, so no arrival can slip between the check and
+  the registration. Any later command that makes a message of the endpoint ready
+  hands the page to the waiter itself. The deadline is an entry of the schedule on
+  the injected clock. An endpoint has at most one waiter: a newer one ends the
+  older with an empty page. Shutdown ends every wait with an empty page, before
+  the interfaces stop. The registry is in place; the command that registers a
+  waiter and the page that wakes it come with the pull of messages.
 - **The capacity check is in one place.** `CheckCapacity` judges the clock, then
   the queue, then the disk, and a bound that is not set refuses. The engine feeds
   it with the settings of the node, the free space and its own count of unfinished
@@ -122,7 +131,7 @@ commands and add their methods to this list.
 closing and its chunks; `declare_test.go` the declaration and who may make it;
 `recovery_test.go` the scan entry and the recovery entry; `loop_test.go` the
 loop, back pressure and the fatal path; `sched_test.go` and
-`sched_internal_test.go` the schedule; `capacity_test.go` the capacity check;
+`sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
 `crash_test.go` the crash walk of `direct-register`; `static_test.go` the lists
 the review holds the engine to; the `_internal_test.go` files the encoding of
 the declaration field, the view and the batches of a drain.
