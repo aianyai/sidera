@@ -2,7 +2,9 @@ package engine_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -37,6 +39,8 @@ func TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing(t *testing.T) {
 		{"a body of exactly the limit", func(in *fakeagent.SendInput) { in.Body = strings.Repeat("x", envelope.MaxBody) }, "", ""},
 		{"a deadline beyond the longest", func(in *fakeagent.SendInput) { in.AcceptBeforeS = int64(delivery.MaxAcceptBefore/time.Second) + 1 }, fakeagent.CategoryInvalidArgument, "malformed_request"},
 		{"a deadline of the longest", func(in *fakeagent.SendInput) { in.AcceptBeforeS = int64(delivery.MaxAcceptBefore / time.Second) }, "", ""},
+		{"a thread that is not an identifier", func(in *fakeagent.SendInput) { in.Thread = "two words" }, fakeagent.CategoryInvalidArgument, "malformed_request"},
+		{"a content type of control characters", func(in *fakeagent.SendInput) { in.ContentType = "text/\x01" }, fakeagent.CategoryInvalidArgument, "malformed_request"},
 		{"no recipient", func(in *fakeagent.SendInput) { in.To = nil }, fakeagent.CategoryInvalidArgument, "malformed_request"},
 		{"a recipient that is not an address", func(in *fakeagent.SendInput) { in.To = []string{"nobody"} }, fakeagent.CategoryInvalidArgument, "malformed_request"},
 		{"the system endpoint as a recipient", func(in *fakeagent.SendInput) {
@@ -64,6 +68,45 @@ func TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing(t *testing.T) {
 			}
 			if after := len(scanOf(t, h).Out); after != before {
 				t.Errorf("a refused send left %d new source records", after-before)
+			}
+		})
+	}
+}
+
+// The envelope is what refuses a request that no node would take, and the refusal
+// names what it was refused for.
+func TestARequestTheEnvelopeRefusesIsRefusedForTheFieldItNames(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	ref := adapterproto.EndpointRef(addrOf(t, h, "a").Endpoint.String())
+	good := engine.SendRequest{To: []ident.Address{addrOf(t, h, "b")}, Body: []byte("x"), ContentType: "text/plain"}
+	for _, c := range []struct {
+		name   string
+		mutate func(r *engine.SendRequest)
+		reason engine.Reason
+		field  string
+	}{
+		{"no recipient", func(r *engine.SendRequest) { r.To = nil }, engine.ReasonInvalidArgument, "to"},
+		{"the system endpoint as a recipient", func(r *engine.SendRequest) {
+			r.To = []ident.Address{{Node: harness.NodeID(), Endpoint: ident.SystemEndpoint()}}
+		}, engine.ReasonInvalidArgument, "to"},
+		{"no address at all as a recipient", func(r *engine.SendRequest) { r.To = []ident.Address{{}} }, engine.ReasonInvalidArgument, "to"},
+		{"a recipient twice", func(r *engine.SendRequest) { r.To = []ident.Address{good.To[0], good.To[0]} }, engine.ReasonInvalidArgument, "to"},
+		{"no body", func(r *engine.SendRequest) { r.Body = nil }, engine.ReasonInvalidArgument, "body"},
+		{"no content type", func(r *engine.SendRequest) { r.ContentType = "" }, engine.ReasonInvalidArgument, "body"},
+		{"a body over the limit", func(r *engine.SendRequest) { r.Body = make([]byte, envelope.MaxBody+1) }, engine.ReasonTooLarge, "body"},
+		{"a thread that is not an identifier", func(r *engine.SendRequest) { r.Thread = "two words" }, engine.ReasonInvalidArgument, "thread"},
+		{"a negative deadline", func(r *engine.SendRequest) { r.AcceptBefore = -time.Second }, engine.ReasonInvalidArgument, "accept_before"},
+		{"a disclosed list of several recipients", func(r *engine.SendRequest) {
+			r.To, r.DiscloseRecipients = []ident.Address{good.To[0], addrOf(t, h, "a")}, true
+		}, engine.ReasonInvalidArgument, "disclose_recipients"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := good
+			c.mutate(&r)
+			_, err := h.Engine().Send(h.Ctx(), engine.ByAdapter(harness.Instance, ref), r)
+			var refusal *engine.Refusal
+			if !errors.As(err, &refusal) || refusal.Reason != c.reason || refusal.Field != c.field {
+				t.Fatalf("got %v, want a refusal for %s naming %q", err, c.reason, c.field)
 			}
 		})
 	}
@@ -118,7 +161,48 @@ func TestAnswersOnlyToMessagesTheEndpointReceived(t *testing.T) {
 	}
 }
 
-func TestAMessageToAClosedEndpointIsRejectedAsMissing(t *testing.T) {
+func TestNoAnswerIsMadeToAMessageTheEndpointRefusedAtIntake(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	if err := h.Agent("b").Declare(h.Ctx(), fakeagent.DeclareInput{Paused: boolp(true)}); err != nil {
+		t.Fatal(err)
+	}
+	refused := send(t, h, "a", "b", "to an endpoint that takes nothing")
+	quiet(t, h)
+	if in := inOf(t, h, refused); in.Record.State != delivery.StateRejected {
+		t.Fatalf("the message is %s, want rejected: the premise of the test", in.Record.State)
+	}
+	_, err := h.Agent("b").Reply(h.Ctx(), fakeagent.ReplyInput{MessageID: refused, Body: "an answer to what I never had"})
+	if fakeagent.CategoryOf(err) != fakeagent.CategoryNotFound || fakeagent.CodeOf(err) != "message_unknown" {
+		t.Errorf("the answer: %v, want not_found/message_unknown", err)
+	}
+	// Control: once the endpoint takes messages, the next one can be answered.
+	if err := h.Agent("b").Declare(h.Ctx(), fakeagent.DeclareInput{Paused: boolp(false)}); err != nil {
+		t.Fatal(err)
+	}
+	taken := send(t, h, "a", "b", "to an endpoint that takes it")
+	quiet(t, h)
+	if _, err := h.Agent("b").Reply(h.Ctx(), fakeagent.ReplyInput{MessageID: taken, Body: "an answer"}); err != nil {
+		t.Errorf("the answer to a message the endpoint has: %v", err)
+	}
+}
+
+func TestADeadlineOfPartOfASecondIsKeptToTheSecondAnEnvelopeCanSay(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	ref := adapterproto.EndpointRef(addrOf(t, h, "a").Endpoint.String())
+	res, err := h.Engine().Send(h.Ctx(), engine.ByAdapter(harness.Instance, ref), engine.SendRequest{
+		To: []ident.Address{addrOf(t, h, "b")}, Body: []byte("x"), ContentType: "text/plain", AcceptBefore: 90*time.Second + 700*time.Millisecond,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	src, tgt := sourceDelivery(t, h, adapterproto.MessageID(res.Message)), inOf(t, h, adapterproto.MessageID(res.Message))
+	if src.AcceptBefore.Nanosecond() != 0 || !src.AcceptBefore.Equal(tgt.Record.AcceptBefore) {
+		t.Errorf("the deadline is %v at the source and %v at the target: the source must keep what the envelope says", src.AcceptBefore, tgt.Record.AcceptBefore)
+	}
+}
+
+func TestAMessageToAClosedEndpointIsRejectedAsClosed(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	id, _ := ident.ParseAddress(h.Addr("b"))
 	if _, err := h.Engine().CloseEndpoint(h.Ctx(), engine.CloseRequest{Endpoint: id.Endpoint}); err != nil {
@@ -126,11 +210,32 @@ func TestAMessageToAClosedEndpointIsRejectedAsMissing(t *testing.T) {
 	}
 	msg := send(t, h, "a", "b", "anyone there")
 	quiet(t, h)
-	if d := sourceDelivery(t, h, msg); d.State != delivery.StateRejected || d.Reject != delivery.RejectEndpointMissing {
-		t.Errorf("the sender's record is %s (%s), want rejected (endpoint_missing): it cannot tell a closed endpoint from none", d.State, d.Reject)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateRejected || d.Reject != delivery.RejectEndpointClosed {
+		t.Errorf("the sender's record is %s (%s), want rejected (endpoint_closed)", d.State, d.Reject)
+	}
+	if in := inOf(t, h, msg); in.Record.State != delivery.StateRejected || in.Record.Reject != delivery.RejectEndpointClosed {
+		t.Errorf("the target record is %s (%s), want rejected (endpoint_closed)", in.Record.State, in.Record.Reject)
 	}
 	if sc := scanOf(t, h); len(sc.Bodies) != 0 {
 		t.Errorf("%d bodies kept for a message nobody holds", len(sc.Bodies))
+	}
+}
+
+func TestAMessageToAnEndpointThatIsNotThereIsRejectedAsMissing(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	a := addrOf(t, h, "a")
+	// An endpoint identifier nobody registered, on this node.
+	stranger := ident.Address{Node: harness.NodeID(), Endpoint: mustEndpoint(t, 200)}
+	rc, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), a.Endpoint, forged(t, h, "to-nobody", stranger, "", "x"))
+	if err != nil || len(rc.Reports) != 1 {
+		t.Fatalf("receipt: %+v, %v", rc, err)
+	}
+	rep, err := h.VerifyReport(rc.Reports[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Status.State != delivery.StateRejected || rep.Status.Reject != delivery.RejectEndpointMissing {
+		t.Errorf("the answer is %s (%s), want rejected (endpoint_missing)", rep.Status.State, rep.Status.Reject)
 	}
 }
 
@@ -386,4 +491,134 @@ func TestReportsOfASendAreSignedByTheNodeAndNameTheMessage(t *testing.T) {
 	if rep.ReportedAt.IsZero() || !rep.DeliveredAt.IsZero() {
 		t.Errorf("report times: %v, %v", rep.ReportedAt, rep.DeliveredAt)
 	}
+}
+
+func TestNoEvidenceIsSignedWhileTheWallClockCannotBeTrusted(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	// a takes nobody's messages: only an answer to one of its own can reach it, so the
+	// answer has to carry evidence that the question arrived.
+	if err := h.Agent("a").Declare(h.Ctx(), fakeagent.DeclareInput{RestrictSenders: boolp(true), AcceptFrom: &[]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	question := send(t, h, "a", "b", "a question")
+	quiet(t, h)
+
+	// The answer cannot be delivered, and is sent again with evidence signed anew each
+	// time.
+	h.Unreachable(true)
+	if _, err := h.Agent("b").Reply(h.Ctx(), fakeagent.ReplyInput{MessageID: question, Body: "an answer"}); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	h.Advance(resendBackoff)
+	quiet(t, h)
+	node := harness.NodeID()
+	if n := callHits(t, h, "send", node); n < 2 {
+		t.Fatalf("the answer was sent %d times while the clock was trusted, want it tried again: the test would prove nothing", n)
+	}
+
+	// The wall clock is set back beyond the tolerance, and then runs on past the
+	// time the answer is due again.
+	h.Set(h.Clock().Now().Add(-10 * time.Minute))
+	if _, err := h.Engine().Counts(h.Ctx()); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	before := callHits(t, h, "send", node)
+	h.Advance(10 * time.Minute)
+	quiet(t, h)
+	for i := 0; i < 4; i++ {
+		h.Advance(2 * resendBackoff)
+		quiet(t, h)
+	}
+	if after := callHits(t, h, "send", node); after != before {
+		t.Errorf("the answer was sent %d more times while the wall clock could not be trusted: its evidence was signed", after-before)
+	}
+}
+
+func TestANodeThatHasNotAnsweredIsSentToAfterAnotherNodeDid(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	other, err := ident.NodeIDFromBytes(bytes.Repeat([]byte{7}, ident.NodeIDLen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.UnreachableNode(other, true)
+	far := ident.Address{Node: other, Endpoint: addrOf(t, h, "a").Endpoint}
+	msg, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b"), far.String()}, Body: "to two nodes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	// The node of b answered at once; the other has not, and is still owed the message.
+	if d := sourceDelivery(t, h, msg.MessageID); d.State != delivery.StateAccepted {
+		t.Fatalf("the record of the delivery to b is %s, want accepted: the premise of the test", d.State)
+	}
+	for i := 0; i < 4; i++ {
+		h.Advance(resendBackoff)
+		quiet(t, h)
+	}
+	if sends := callHits(t, h, "send", other); sends < 4 {
+		t.Errorf("%d sends to the node that did not answer, want one after each wait: it was asked, not sent to, once another node had answered", sends)
+	}
+	if pulls := callHits(t, h, "pull", other); pulls != 0 {
+		t.Errorf("%d pulls of a node that was never sent the message", pulls)
+	}
+}
+
+func TestTheReportsAreAskedForUntilTheReportDeadlineAndNoLonger(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	h.Unreachable(true)
+	msg, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b")}, Body: "x", AcceptBeforeS: 120})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	reportBy := outOf(t, h, msg.MessageID).Envelope.ReportBy
+	// The deadline for sending passes, and the node is asked from then on.
+	h.Advance(reportBy.Add(-3 * time.Minute).Sub(h.Clock().Now()))
+	quiet(t, h)
+	node := harness.NodeID()
+	for !h.Clock().Now().After(reportBy) {
+		h.Advance(10 * time.Second)
+		quiet(t, h)
+	}
+	asked := callHits(t, h, "pull", node)
+	if asked == 0 {
+		t.Fatal("the node was not asked before the report deadline: the test would prove nothing")
+	}
+	// The delivery rules end the sender's interest at the report deadline, and the
+	// tolerance of the clock is part of it already.
+	for i := 0; i < 8; i++ {
+		h.Advance(30 * time.Second)
+		quiet(t, h)
+	}
+	if now := callHits(t, h, "pull", node); now != asked {
+		t.Errorf("%d pulls after the report deadline", now-asked)
+	}
+}
+
+// foreignKeys are the keys of a node that is not the one the engine is built for.
+type foreignKeys struct {
+	engine.Keys
+	node ident.NodeID
+}
+
+func (k foreignKeys) Node() ident.NodeID { return k.node }
+
+func TestAnEngineWithTheKeysOfAnotherNodeDoesNotStart(t *testing.T) {
+	r := newRig(t, 1)
+	d := r.deps()
+	d.Keys = foreignKeys{node: mustNode(t, 9)}
+	if _, _, err := engine.Open(context.Background(), d, r.params); err == nil {
+		t.Fatal("an engine was opened to sign as one node with the keys of another")
+	}
+	// The same dependencies with the keys of this node do open it, so that the
+	// refusal above is about the keys.
+	d.Keys = foreignKeys{node: d.Node}
+	e, _, err := engine.Open(context.Background(), d, r.params)
+	if err != nil {
+		t.Fatalf("Open with the keys of the node: %v", err)
+	}
+	e.Start()
+	r.stop(e)
 }

@@ -145,6 +145,8 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		return nil, errors.New("engine: no source of randomness")
 	case d.Node.IsZero():
 		return nil, errors.New("engine: no node identifier")
+	case d.Keys != nil && d.Keys.Node() != d.Node:
+		return nil, errors.New("engine: the keys are those of another node")
 	}
 	log := d.Log
 	if log == nil {

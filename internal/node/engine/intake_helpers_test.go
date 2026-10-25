@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -136,6 +137,24 @@ func knobHits(t testing.TB, h *harness.H) map[string]int {
 		hits[e.Attrs.Knob]++
 	}
 	return hits
+}
+
+// callHits counts the calls of the kind ("send" or "pull") that the loopback made
+// unreachable for the node, as the knob hits of the ledger tell. Make the node
+// unreachable before the call is made, or it is not counted.
+func callHits(t testing.TB, h *harness.H, call string, node ident.NodeID) int {
+	t.Helper()
+	log, err := h.Ledger()
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	n := 0
+	for _, e := range log.Kind(ledger.KindKnobHit) {
+		if e.Attrs.Knob == "unreachable" && strings.Contains(e.Attrs.Detail, "call="+call+" ") && strings.Contains(e.Attrs.Detail, "node="+node.String()) {
+			n++
+		}
+	}
+	return n
 }
 
 // clientResults are the results of the calls an endpoint's agent made, in order.

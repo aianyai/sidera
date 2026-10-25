@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/timing"
@@ -34,8 +35,9 @@ func TestOutboundNeedByState(t *testing.T) {
 		{"a delivered one is settled", rec(delivery.StateDelivered), t0, true, 0},
 		{"a rejected one is settled", rec(delivery.StateRejected), t0, true, 0},
 		{"a closed one is settled", rec(delivery.StateClosedUnconfirmed), t0, true, 0},
-		{"the report deadline and the tolerance end the asking", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(timing.ClockTolerance + time.Second), true, 0},
-		{"the tolerance after the report deadline is still asked", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(timing.ClockTolerance), true, workPull},
+		{"the report deadline ends the asking", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(time.Second), true, 0},
+		{"the instant of the report deadline is still asked", rec(delivery.StateAccepted), delivery.ReportBy(accept), true, workPull},
+		{"the tolerance is already in the report deadline", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(-timing.ClockTolerance), true, workPull},
 	} {
 		if got := outboundNeed(c.d, accept, c.now, c.sent); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
@@ -48,6 +50,11 @@ func TestOnlyTheStatesTheRecordDatesAreReported(t *testing.T) {
 	mk := func(state delivery.State, reject delivery.RejectReason) store.InRecord {
 		return store.InRecord{AcceptedAt: at, Record: delivery.Record{State: state, Reject: reject}}
 	}
+	// A record is written once when it is taken in, and again each time it changes;
+	// its report is signed before the first write, when it has no revision yet.
+	writtenAgain := func(in store.InRecord) store.InRecord { in.Rev = 2; return in }
+	atIntake := func(in store.InRecord) store.InRecord { in.Rev = 1; return in }
+	aboutToBeWritten := func(in store.InRecord) store.InRecord { in.Rev = 0; return in }
 	for _, c := range []struct {
 		name string
 		in   store.InRecord
@@ -56,7 +63,9 @@ func TestOnlyTheStatesTheRecordDatesAreReported(t *testing.T) {
 		{"accepted", mk(delivery.StateAccepted, 0), true},
 		{"rejected at intake as declined", mk(delivery.StateRejected, delivery.RejectEndpointDeclined), true},
 		{"rejected at intake as backlog_full", mk(delivery.StateRejected, delivery.RejectBacklogFull), true},
-		{"rejected later, when the endpoint closed", mk(delivery.StateRejected, delivery.RejectEndpointClosed), false},
+		{"rejected at intake because the endpoint was closed", atIntake(mk(delivery.StateRejected, delivery.RejectEndpointClosed)), true},
+		{"about to be rejected at intake because the endpoint was closed", aboutToBeWritten(mk(delivery.StateRejected, delivery.RejectEndpointClosed)), true},
+		{"rejected later, when the endpoint closed", writtenAgain(mk(delivery.StateRejected, delivery.RejectEndpointClosed)), false},
 		{"rejected later, when the backlog deadline passed", mk(delivery.StateRejected, delivery.RejectBacklogExpired), false},
 		{"rejected later, by the second check", mk(delivery.StateRejected, delivery.RejectSecondCheckFailed), false},
 		{"delivered", mk(delivery.StateDelivered, 0), false},
@@ -139,5 +148,29 @@ func TestATargetRecordLetsGoOfItsBodyExactlyWhenItNoLongerNeedsIt(t *testing.T) 
 	none.Body = nil
 	if _, ref = settledIn(none); ref != nil {
 		t.Error("a record without a body released one")
+	}
+}
+
+func TestTheRefusalOfAMessageForAnEndpointItCannotBeGiven(t *testing.T) {
+	ep := func(kind adapterreg.EndpointKind, status store.EndpointStatus) *endpointState {
+		return &endpointState{rec: store.EndpointRecord{Kind: kind, Status: status}}
+	}
+	for _, c := range []struct {
+		name string
+		st   *endpointState
+		want delivery.RejectReason
+	}{
+		{"an endpoint that is not there", nil, delivery.RejectEndpointMissing},
+		{"a closed session endpoint", ep(adapterreg.KindSession, store.EndpointClosed), delivery.RejectEndpointClosed},
+		{"a closed direct endpoint", ep(adapterreg.KindDirect, store.EndpointClosed), delivery.RejectEndpointClosed},
+		{"a session endpoint whose creation has not ended", ep(adapterreg.KindSession, store.EndpointCreating), delivery.RejectEndpointMissing},
+		{"a runtime endpoint takes control signals only", ep(adapterreg.KindRuntime, store.EndpointOpen), delivery.RejectEndpointMissing},
+		{"a closed runtime endpoint is none either", ep(adapterreg.KindRuntime, store.EndpointClosed), delivery.RejectEndpointMissing},
+		{"an open session endpoint takes messages", ep(adapterreg.KindSession, store.EndpointOpen), delivery.RejectNone},
+		{"an open direct endpoint takes messages", ep(adapterreg.KindDirect, store.EndpointOpen), delivery.RejectNone},
+	} {
+		if got := messageRefusal(c.st); got != c.want {
+			t.Errorf("%s: %s, want %s", c.name, got, c.want)
+		}
 	}
 }

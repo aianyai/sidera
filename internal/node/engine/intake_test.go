@@ -300,6 +300,50 @@ func TestSameIDDifferentBodyConflicts(t *testing.T) {
 	})
 }
 
+// The request digest leaves the recipients out when they are not disclosed, so the
+// digest alone cannot tell a send again from the same key to someone else.
+func TestTheSameIdempotencyKeyForOtherRecipientsIsAConflict(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b", "c")
+	first, err := trySend(h, "a", "b", "the same words", "key-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name string
+		to   []string
+	}{
+		{"another recipient", []string{h.Addr("c")}},
+		{"more recipients", []string{h.Addr("b"), h.Addr("c")}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			before := len(scanOf(t, h).Out)
+			res, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: c.to, Body: "the same words", IdemKey: "key-1"})
+			if fakeagent.CategoryOf(err) != fakeagent.CategoryConflict || fakeagent.CodeOf(err) != "idempotency_conflict" {
+				t.Fatalf("the key again for %s: %+v, %v; want conflict/idempotency_conflict, not the first message replayed", c.name, res, err)
+			}
+			quiet(t, h)
+			if after := len(scanOf(t, h).Out); after != before {
+				t.Errorf("a refused send left %d new source records", after-before)
+			}
+		})
+	}
+	again, err := trySend(h, "a", "b", "the same words", "key-1")
+	if err != nil || !again.Replayed || again.MessageID != first.MessageID {
+		t.Errorf("the same request again: %+v, %v; want the first message, replayed", again, err)
+	}
+	// Two recipients are one request in the order they were given.
+	pair, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b"), h.Addr("c")}, Body: "to two", IdemKey: "key-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("c"), h.Addr("b")}, Body: "to two", IdemKey: "key-2"}); fakeagent.CodeOf(err) != "idempotency_conflict" {
+		t.Errorf("the recipients in another order: %v, want idempotency_conflict", err)
+	}
+	if got, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b"), h.Addr("c")}, Body: "to two", IdemKey: "key-2"}); err != nil || got.MessageID != pair.MessageID || !got.Replayed {
+		t.Errorf("the same two recipients again: %+v, %v; want the first message, replayed", got, err)
+	}
+}
+
 func TestEndpointBacklogFullIsRejectedWithReason(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	var ids []adapterproto.MessageID

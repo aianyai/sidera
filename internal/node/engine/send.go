@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
@@ -125,7 +126,7 @@ func (e *Engine) reply(now time.Time, c Caller, r ReplyRequest) (SendResult, err
 	if err != nil {
 		return SendResult{}, err
 	}
-	keys := e.view.received[msgKey{st.rec.ID, r.Message}]
+	keys := e.heldBy(st.rec.ID, r.Message)
 	if len(keys) != 1 {
 		// Nothing was received under that id, or two senders used it: it is not one
 		// message that can be answered.
@@ -140,11 +141,26 @@ func (e *Engine) reply(now time.Time, c Caller, r ReplyRequest) (SendResult, err
 	})
 }
 
+// heldBy are the target records of the messages the endpoint has under the id: the
+// ones that were taken in. A message refused at intake has a record, so that the
+// sender can be told, but the endpoint never had it, and an answer to it could not
+// earn the permission to reply that the delivery of the message gives.
+func (e *Engine) heldBy(endpoint ident.EndpointID, message delivery.MessageID) []store.TargetKey {
+	var keys []store.TargetKey
+	for _, k := range e.view.received[msgKey{endpoint, message}] {
+		if e.view.in[k].Record.State != delivery.StateRejected {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
 // accept is the intake of a message: the one place new work from a local endpoint
-// enters the store. The request is checked, a repeat of one the idempotency key
-// knows is answered with the first, the capacity of the node is judged, and then
-// the body and the record are written in one transaction. Memory follows the disk,
-// and only then is the message given to the outbound worker.
+// enters the store. The request is made into the envelope it will be sent as, which
+// is what refuses a request no node would take; a repeat of one the idempotency key
+// knows is answered with the first; the capacity of the node is judged, and then the
+// body and the record are written in one transaction. Memory follows the disk, and
+// only then is the message given to the outbound worker.
 func (e *Engine) accept(now time.Time, st *endpointState, m outgoing) (SendResult, error) {
 	if e.d.Keys == nil {
 		return SendResult{}, errNoKeys
@@ -157,27 +173,19 @@ func (e *Engine) accept(now time.Time, st *endpointState, m outgoing) (SendResul
 		return SendResult{}, err
 	}
 	sender := st.rec.ID
-	if prior, ok := e.view.idem[idemKey{sender, m.idemKey}]; ok && now.Before(e.view.out[prior].Idempotency.RetainUntil) {
-		return e.repeat(e.view.out[prior], m)
-	}
-	if err := e.admitNewWork(len(m.to)); err != nil {
-		return SendResult{}, err
-	}
 	id, err := e.newMessageID()
 	if err != nil {
 		return SendResult{}, err
 	}
-	acceptBefore := now.Add(m.accept)
-	env := envelope.Envelope{
-		ID: id, To: m.to, MultiRecipient: len(m.to) > 1, DiscloseRecipients: m.disclose && len(m.to) > 1,
-		Kind: envelope.KindMessage, ReplyTo: m.replyTo, Thread: m.thread, Seq: map[ident.EndpointID]uint64{},
-		SentAt: now, AcceptBefore: acceptBefore, ReportBy: delivery.ReportBy(acceptBefore), ContentType: m.ctype, Body: m.body,
+	env, err := e.envelopeOf(now, sender, id, m)
+	if err != nil {
+		return SendResult{}, err
 	}
-	for _, to := range m.to {
-		env.Seq[to.Endpoint] = e.view.seq.Next(sender, to)
+	if prior, ok := e.view.idem[idemKey{sender, m.idemKey}]; ok && now.Before(e.view.out[prior].Idempotency.RetainUntil) {
+		return e.repeat(e.view.out[prior], env)
 	}
-	if _, err := env.Encode(envelope.DefaultLimits()); err != nil {
-		return SendResult{}, invalidArgument("message", err)
+	if err := e.admitNewWork(len(m.to)); err != nil {
+		return SendResult{}, err
 	}
 	o := e.sourceRecord(now, sender, env, m)
 	if err := e.d.Store.Intake(m.body, o); err != nil {
@@ -191,20 +199,14 @@ func (e *Engine) accept(now time.Time, st *endpointState, m outgoing) (SendResul
 	return SendResult{Message: id, To: m.to}, nil
 }
 
-// checkOutgoing refuses what no node would take, before anything is judged against
-// the node's state. The disclosure of a list of recipients is refused for several:
-// the record of a message does not keep the flag, and a send again that
-// disclosed differently would be another request to the target.
+// checkOutgoing refuses what the envelope does not and no node would take. What
+// the envelope refuses (the recipients, the body and its content type, the
+// identifiers) it refuses itself, in envelopeOf. The disclosure of a list of
+// recipients is refused for several: the record of a message does not keep the
+// flag, and a send again that disclosed differently would be another request to
+// the target.
 func checkOutgoing(m *outgoing) error {
 	switch {
-	case len(m.to) < 1 || len(m.to) > envelope.MaxRecipients:
-		return invalidArgument("to", fmt.Errorf("%d recipients, want 1 to %d", len(m.to), envelope.MaxRecipients))
-	case len(m.body) == 0:
-		return invalidArgument("body", errors.New("a message has a body"))
-	case len(m.body) > envelope.MaxBody:
-		return &Refusal{Reason: ReasonTooLarge, Field: "body"}
-	case m.ctype == "":
-		return invalidArgument("content_type", errors.New("a body has a content type"))
 	case m.accept < 0 || m.accept > delivery.MaxAcceptBefore:
 		return invalidArgument("accept_before", fmt.Errorf("%v, want up to %v", m.accept, delivery.MaxAcceptBefore))
 	case m.disclose && len(m.to) > 1:
@@ -213,26 +215,49 @@ func checkOutgoing(m *outgoing) error {
 	if m.accept == 0 {
 		m.accept = delivery.DefaultAcceptBefore
 	}
-	for i, to := range m.to {
-		if to.IsZero() || to.Endpoint.IsSystem() {
-			return invalidArgument("to", fmt.Errorf("recipient %d is not an address a message can be sent to", i))
-		}
-	}
 	return nil
 }
 
-// repeat answers a request whose idempotency key the node knows: the same content
-// is the same message, other content is a conflict. Content is compared as the
-// target compares it, by the request digest of the envelope made with the
-// deadlines the first request had, since the deadline a repeat gets is its own
-// and says nothing about the content.
-func (e *Engine) repeat(prior store.OutRecord, m outgoing) (SendResult, error) {
+// envelopeOf is the envelope of a message as the sender makes it, encoded to see
+// that every node would take it. Its deadlines are whole seconds, because that is
+// what an envelope can say and the record of the target must agree with it. A
+// request the envelope refuses is refused for the field it names; one it refuses
+// for another reason is a defect of the engine's own.
+func (e *Engine) envelopeOf(now time.Time, sender ident.EndpointID, id delivery.MessageID, m outgoing) (envelope.Envelope, error) {
+	acceptBefore := now.Add(m.accept).Truncate(time.Second)
 	env := envelope.Envelope{
-		ID: prior.Outbound.Message, To: m.to, MultiRecipient: len(m.to) > 1, Kind: envelope.KindMessage,
-		ReplyTo: m.replyTo, Thread: m.thread, AcceptBefore: prior.Outbound.AcceptBefore, ReportBy: prior.Envelope.ReportBy,
-		ContentType: m.ctype, Body: m.body,
+		ID: id, To: slices.Clone(m.to), MultiRecipient: len(m.to) > 1, DiscloseRecipients: m.disclose && len(m.to) > 1,
+		Kind: envelope.KindMessage, ReplyTo: m.replyTo, Thread: m.thread, Seq: map[ident.EndpointID]uint64{},
+		SentAt: now, AcceptBefore: acceptBefore, ReportBy: delivery.ReportBy(acceptBefore), ContentType: m.ctype, Body: m.body,
 	}
-	if env.Digest() != prior.BodyDigest {
+	for _, to := range m.to {
+		env.Seq[to.Endpoint] = e.view.seq.Next(sender, to)
+	}
+	_, err := env.Encode(envelope.DefaultLimits())
+	switch {
+	case err == nil:
+		return env, nil
+	case errors.Is(err, envelope.ErrBodyTooLarge):
+		return env, &Refusal{Reason: ReasonTooLarge, Field: "body", Err: err}
+	case errors.Is(err, envelope.ErrRecipients):
+		return env, invalidArgument("to", err)
+	case errors.Is(err, envelope.ErrBody):
+		return env, invalidArgument("body", err)
+	case errors.Is(err, envelope.ErrID):
+		return env, invalidArgument("thread", err)
+	}
+	return env, fmt.Errorf("engine: the envelope of %s: %w", id, err)
+}
+
+// repeat answers a request whose idempotency key the node knows: the same request
+// is the same message, any other is a conflict. The request is the same when its
+// content is, as the target compares it by the request digest of the envelope made
+// with the deadlines the first request had (the deadline a repeat gets is its own
+// and says nothing about the content), and when it is for the same recipients in
+// the same order, which the digest does not cover unless they are disclosed.
+func (e *Engine) repeat(prior store.OutRecord, env envelope.Envelope) (SendResult, error) {
+	env.AcceptBefore, env.ReportBy = prior.Outbound.AcceptBefore, prior.Envelope.ReportBy
+	if env.Digest() != prior.BodyDigest || !slices.Equal(env.To, prior.Key.Recipients) {
 		return SendResult{}, refuse(ReasonIdempotencyConflict)
 	}
 	return SendResult{Message: prior.Outbound.Message, To: prior.Key.Recipients, Replayed: true}, nil

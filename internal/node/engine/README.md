@@ -134,9 +134,10 @@ commands and add their methods to this list.
 - **The recovery of deliveries is four phases in the order of the startup
   steps,** each a command of the loop that logs `startup step N begin` and
   `startup step N end`; each is empty until the feature it belongs to is added.
-- **A message is accepted once, in one place.** `accept` checks the request, answers a
-  repeat of an idempotency key with the first message (the same content) or a
-  conflict, asks the one capacity check, takes the next sequence number of the pair
+- **A message is accepted once, in one place.** `accept` makes the request into its
+  envelope, whose errors are what refuses a request no node would take, answers a
+  repeat of an idempotency key with the first message (the same content for the same
+  recipients) or a conflict, asks the one capacity check, takes the next sequence number of the pair
   from the store's book, and writes the body and the source record in one
   transaction; memory and the book follow the disk, and only then is the message given
   to the outbound worker. A message is refused with nothing recorded when the queue is
@@ -147,10 +148,14 @@ commands and add their methods to this list.
 - **One worker sends, in order, outside the loop.** The loop schedules and applies;
   the worker calls the transport in the order the work was given and waits until the
   loop has applied each result before the next call. A send that got no answer is made
-  again with the same bytes after `ResendBackoff`, until the delivery deadline; a
-  delivery that is not settled is asked about every `PullInterval` until its report
-  deadline, and after the delivery deadline a node that never answered is asked, not
-  sent to. Nothing about the sending is persisted: after a restart every unsettled
+  again after `ResendBackoff`, until the delivery deadline, to each node that has not
+  answered (a node that answered does not make the others' sends unnecessary); a send
+  again is made anew from the record, so its evidence is signed anew while the request
+  digest, and so the request, is the same. A delivery that is not settled is asked
+  about every `PullInterval` until its report deadline, which already holds the
+  tolerance of the clock, and after the delivery deadline a node that never answered is
+  asked, not sent to. The evidence of a reply is a signature: while the wall clock
+  cannot be trusted the send is put off. Nothing about the sending is persisted: after a restart every unsettled
   source record is looked at again (the start's last step), and the target answers a
   send it already took in from its record. A worker waiting out a delay that the
   transport was asked to make is not work for `Quiesce`.
@@ -160,8 +165,9 @@ commands and add their methods to this list.
   and its evidence are decided first (the evidence is applied even when the endpoint
   then declines the reply), then whether the endpoint exists, is open and takes
   messages, then the authorization check, then the deadline and the backlog. A
-  recipient that is closed or not there, and a runtime endpoint, are answered as an
-  endpoint that is missing. The reports are signed before the records are written, so a
+  recipient that is closed is rejected as `endpoint_closed`; one that is not there, one
+  whose creation has not ended and a runtime endpoint, which takes control signals only
+  and so is no endpoint for a message, as `endpoint_missing`. The reports are signed before the records are written, so a
   receipt that exists describes records that do. A rejection is made by the delivery
   rules from the record the constructor makes, and holds no body.
 - **A local source is never judged by the node's rules.** Which requests are local is
@@ -204,8 +210,9 @@ commands and add their methods to this list.
   actor that was allowed, and run what `StoredResult.Stop` asks for after the
   answer was written.
 - Make the transport with the engine as its handler, after `Open`, and give it to the
-  engine with `SetTransport` before `Start`; give `Deps.Keys` the keys loaded after the
-  transaction layer recovered.
+  engine with `SetTransport` before `Start`; give `Deps.Keys` the keys of this node, loaded
+  after the transaction layer recovered; an engine given the keys of another node does
+  not open.
 - Call the loopback from the outbound worker only, which `SetTransport` makes true.
 - Treat `Err() != nil` after `Done` as the order to exit and rescan.
 - Run the long work of a periodic task outside the loop: a task runs in it, and

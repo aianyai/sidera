@@ -161,12 +161,18 @@ endpoint enters the store. A request that no node would take is refused first: n
 body, a body over 64 KiB, no content type, a deadline beyond one hour, no recipient or
 the system endpoint as one, a disclosed list of several recipients. A repeat of an
 idempotency key returns the first message when the content is the same and is a
-conflict when it is not; content is compared by the request digest the target compares
-with, made with the first request's deadlines, because the deadline a repeat gets is its
-own and says nothing of the content. Then the capacity check, then the next sequence
+conflict when it is not; the same content is the request digest the target compares
+with, made with the first request's deadlines because the deadline a repeat gets is its
+own and says nothing of the content, and the same request is also for the same
+recipients in the same order, which that digest does not cover unless they are disclosed.
+What no node would take is what the envelope refuses: the request is made into its
+envelope and encoded before anything else is judged, and the envelope's own errors name
+the field (a body over the limit is `too_large`, the others `invalid_argument`). Then the capacity check, then the next sequence
 number of the pair (sender endpoint, recipient address) from the store's book, and the
 body and the source record in one transaction. A reply finds its recipient and its
-reply-to in the node's own record of the message the endpoint received; the caller names
+reply-to in the node's own record of the message the endpoint received (a message the
+endpoint refused at intake has a record, but the endpoint never had it, so it is not one
+that can be answered); the caller names
 neither. The deadlines are whole seconds, because that is what an envelope can say and
 the target's record must agree with it.
 
@@ -174,10 +180,12 @@ the target's record must agree with it.
 the work was given: a send of the envelope (made anew from the source record and the
 body, with the evidence of a reply signed at that moment) or a pull of the reports of a
 message. The loop schedules the next call and applies each result. A send that got no
-answer is made again with the same bytes every `ResendBackoff` (30 s) until the delivery
-deadline; a delivery that is not settled is asked about every `PullInterval` (1 min) until
-its report deadline plus the clock tolerance; after the delivery deadline a node that
-never answered is asked and not sent to. The reports in a receipt or an answer are
+answer is made again every `ResendBackoff` (30 s) until the delivery deadline, to each
+node that has not answered (the envelope is made anew, so a reply's evidence is signed
+anew, and the request digest is the same); a delivery that is not settled is asked about
+every `PullInterval` (1 min) until its report deadline, which already holds the clock
+tolerance; after the delivery deadline a node that never answered is asked and not sent
+to. A send that carries evidence is put off while the wall clock cannot be trusted. The reports in a receipt or an answer are
 verified with the target's certificate and applied to the source record by the envelope
 package's one rule; the record is written with the feedback the change calls for and with
 the body reference dropped once no delivery needs the body. A report that does not verify
@@ -188,8 +196,9 @@ the last step of the start looks at every unsettled source record again.
 on this node it finds the record of the request or judges it: a repeat gets the record's
 report, another body under the same message identifier is refused as a conflict and
 nothing changes; for a new request the reply permission and its evidence are decided,
-then the endpoint (a closed or missing endpoint, and a runtime endpoint, answer as one
-that is missing), then the authorization check, then the deadline and the endpoint's
+then the endpoint (a closed endpoint is rejected as `endpoint_closed`; one that is not
+there, one whose creation has not ended and a runtime endpoint, which takes control
+signals only, as `endpoint_missing`), then the authorization check, then the deadline and the endpoint's
 backlog. A request from the loopback is judged by the endpoint's declarations alone; one
 that came any other way is judged by the node's rules with no trust, which is denied until
 trust exists. The accepted record holds the body, the rejected one does not. The reports
@@ -232,7 +241,7 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   receiving command runs in the loop while the worker waits for it, which would be a
   deadlock the other way round.
 - **A repeat is answered from the record, a conflict changes nothing.** A receipt that
-  was lost is the common failure of a send; the sender sends the same bytes again and the
+  was lost is the common failure of a send; the sender sends it again and the
   target must not take the message in twice. Another body under the same identifier is a
   sender that is broken or hostile, and the record it would overwrite is the evidence.
 - **Reports are signed before the write.** A receipt that exists then describes records

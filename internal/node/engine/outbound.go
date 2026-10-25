@@ -14,7 +14,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/record"
-	"github.com/aianyai/sidera/internal/timing"
 )
 
 // The outbound side: what the node does after it accepted a message, until every
@@ -64,9 +63,10 @@ type outbox struct {
 // persisted: after a restart every unsettled record is sent again, which the
 // target answers from the record it kept.
 type outState struct {
-	// sent: a send of the envelope got an answer, so the target has it, and what
-	// is missing is its reports.
-	sent bool
+	// sent are the nodes a send of the envelope got an answer from: they have it,
+	// and what is missing is their reports. A node that has not answered is still
+	// sent to, whatever the others did.
+	sent map[ident.NodeID]bool
 	// inflight is how many pieces of work for the record are with the worker.
 	inflight int
 }
@@ -150,7 +150,7 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	}
 	st := e.outbox.state[name]
 	if st == nil {
-		st = &outState{}
+		st = &outState{sent: map[ident.NodeID]bool{}}
 		e.outbox.state[name] = st
 	}
 	if st.inflight > 0 {
@@ -158,7 +158,7 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	}
 	need := map[ident.NodeID]workKind{}
 	for _, t := range o.Outbound.Recipients {
-		kind := outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent)
+		kind := outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node])
 		if kind != 0 && (need[t.Address.Node] == 0 || kind == workSend) {
 			need[t.Address.Node] = kind
 		}
@@ -177,7 +177,11 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 		if w.kind == workSend {
 			data, err := e.encodeFor(now, o, n)
 			if err != nil {
-				e.log.Error("a message cannot be encoded to be sent; it is tried again", "message", string(o.Outbound.Message), "error", err.Error())
+				if reason, ok := ReasonOf(err); ok && reason == ReasonClockRollback {
+					e.log.Debug("the wall clock cannot be trusted, so the evidence of a reply is not signed; the message is tried again", "message", string(o.Outbound.Message))
+				} else {
+					e.log.Error("a message cannot be encoded to be sent; it is tried again", "message", string(o.Outbound.Message), "error", err.Error())
+				}
 				e.sched.set(schedKey{schedOutbound, name}, now.Add(e.p.RetryBackoff))
 				continue
 			}
@@ -189,13 +193,14 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 }
 
 // outboundNeed says what a delivery of a source record needs next: a send while
-// no node has answered and the delivery deadline has not passed, a pull while it
-// is not settled and the report deadline has not passed, nothing otherwise. After
+// its node has not answered and the delivery deadline has not passed, a pull
+// while it is not settled and the report deadline has not passed, nothing
+// otherwise. The report deadline already holds the tolerance of the clock. After
 // the delivery deadline a target that was never reached is asked, not sent to:
 // whatever it would do with the message, it would refuse it as late.
 func outboundNeed(d delivery.Record, acceptBefore, now time.Time, sent bool) workKind {
 	switch {
-	case d.State.IsTerminal() || now.After(d.ReportBy.Add(timing.ClockTolerance)):
+	case d.State.IsTerminal() || now.After(d.ReportBy):
 		return 0
 	case d.State == delivery.StateQueued && !sent && !now.After(acceptBefore):
 		return workSend
@@ -217,8 +222,9 @@ func (c *cmdOutResult) run(e *Engine, now time.Time) {
 }
 
 // outResult takes in what a call of the worker brought. A call that got no answer
-// is made again after ResendBackoff (the same bytes: the target deduplicates by
-// message id, so a send it already processed is answered from its record). A call
+// is made again after ResendBackoff (the envelope is made anew, with evidence
+// signed at that moment, but the request digest is the same, so the target
+// answers a send it already processed from its record). A call
 // that did is applied: the reports are verified and applied to the source record,
 // which is written with the body released when no delivery needs it any more.
 func (e *Engine) outResult(now time.Time, w outWork, rc transport.Receipt, callErr error) {
@@ -243,7 +249,7 @@ func (e *Engine) outResult(now time.Time, w outWork, rc transport.Receipt, callE
 		return
 	}
 	if w.kind == workSend {
-		st.sent = true
+		st.sent[w.node] = true
 	}
 	if err := e.applyReports(now, w.name, w.node, rc.Reports); err != nil {
 		e.classify(err) // a fatal error stops the loop after this command
@@ -259,21 +265,34 @@ func (e *Engine) outResult(now time.Time, w outWork, rc transport.Receipt, callE
 }
 
 // afterOutbound schedules the next look at a record whose work is all back: a
-// pull one interval from now while a delivery is not settled, nothing when none
-// is.
+// send again after ResendBackoff while a node has not answered, else a pull one
+// interval from now while a delivery is not settled, nothing when none is.
 func (e *Engine) afterOutbound(name string, now time.Time) {
 	o, ok := e.view.out[name]
-	if !ok || o.Lost != nil {
+	st := e.outbox.state[name]
+	if !ok || o.Lost != nil || st == nil {
 		delete(e.outbox.state, name)
 		return
 	}
+	var next time.Duration
 	for _, t := range o.Outbound.Recipients {
-		if outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, true) != 0 {
-			e.sched.set(schedKey{schedOutbound, name}, now.Add(e.p.PullInterval))
-			return
+		switch outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node]) {
+		case workSend:
+			next = e.p.ResendBackoff
+		case workPull:
+			if next == 0 {
+				next = e.p.PullInterval
+			}
+		}
+		if next == e.p.ResendBackoff {
+			break
 		}
 	}
-	delete(e.outbox.state, name)
+	if next == 0 {
+		delete(e.outbox.state, name)
+		return
+	}
+	e.sched.set(schedKey{schedOutbound, name}, now.Add(next))
 }
 
 // applyReports verifies the reports of a node about a message this node sent and
@@ -317,10 +336,12 @@ func (e *Engine) applyReports(now time.Time, name string, node ident.NodeID, rec
 	return nil
 }
 
-// encodeFor is the envelope of a source record as it is sent to one node, the
-// bytes that are sent again unchanged on a retry. The evidence of a reply is made
-// anew each time: it is signed at the moment it is sent and is no part of what the
-// target compares a repeat with.
+// encodeFor is the envelope of a source record as it is sent to one node. It is
+// made anew from the record and the body each time a send is made, so that the
+// bytes of a send again differ from the first only in the evidence of a reply,
+// which is signed at the moment it is sent. The evidence is no part of the request
+// digest the target compares a repeat with, so a send again is the same request.
+// It refuses while the node may not sign, because the evidence is a signature.
 func (e *Engine) encodeFor(now time.Time, o store.OutRecord, node ident.NodeID) ([]byte, error) {
 	var body []byte
 	if o.Body != nil {

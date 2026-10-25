@@ -70,11 +70,8 @@ func (e *Engine) Pull(ctx context.Context, from transport.Origin, req transport.
 }
 
 func (e *Engine) answerPull(now time.Time, from transport.Origin, req transport.PullRequest) (transport.PullAnswer, error) {
-	if e.d.Keys == nil {
-		return transport.PullAnswer{}, errNoKeys
-	}
-	if e.paused {
-		return transport.PullAnswer{}, refuse(ReasonClockRollback) // no signing while the clock cannot be trusted
+	if err := e.canSign(); err != nil {
+		return transport.PullAnswer{}, err
 	}
 	var ans transport.PullAnswer
 	for _, k := range e.view.arrived[arrivalKey{from.Node(), req.Message}] {
@@ -97,11 +94,8 @@ type arrival struct {
 }
 
 func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.EndpointID, data []byte) (transport.Receipt, error) {
-	if e.d.Keys == nil {
-		return transport.Receipt{}, errNoKeys
-	}
-	if e.paused {
-		return transport.Receipt{}, refuse(ReasonClockRollback) // no signing while the clock cannot be trusted
+	if err := e.canSign(); err != nil {
+		return transport.Receipt{}, err
 	}
 	env, err := envelope.Decode(data, envelope.DefaultLimits())
 	if err == nil {
@@ -247,11 +241,9 @@ func (e *Engine) judge(now time.Time, env envelope.Envelope, from transport.Orig
 		ReplyDecision: decision, AcceptedAt: now,
 		Handout: store.HandoutFields{ContentType: env.ContentType, ReplyTo: env.ReplyTo, Thread: env.Thread, Seq: env.Seq[recipient], SentAt: env.SentAt},
 	}
-	// An endpoint that is not there, or has been closed, or takes no messages (a
-	// runtime endpoint), is one the sender cannot tell from none.
-	if st == nil || st.rec.Status != store.EndpointOpen || !takesMessages(st) {
-		in.Auth = delivery.Authorization{Kind: delivery.AuthorizationDeny, Reject: delivery.RejectEndpointMissing}
-		j.in, err = rejected(now, in, delivery.RejectEndpointMissing)
+	if reason := messageRefusal(st); reason != delivery.RejectNone {
+		in.Auth = delivery.Authorization{Kind: delivery.AuthorizationDeny, Reject: reason}
+		j.in, err = rejected(now, in, reason)
 		return j, err
 	}
 	in.Auth = delivery.IntakeAuthorization(e.judgeAuthz(now, env, from, sender, recipient, st, decision.Granted()))
@@ -274,9 +266,22 @@ func (e *Engine) judge(now time.Time, env envelope.Envelope, from transport.Orig
 	return j, err
 }
 
-// takesMessages says whether the endpoint is one a message is delivered to. A
-// runtime endpoint stands for an adapter instance and takes control signals only.
-func takesMessages(st *endpointState) bool { return st.rec.Kind != adapterreg.KindRuntime }
+// messageRefusal says why an endpoint cannot be given an ordinary message, or
+// RejectNone when it can. An endpoint that was closed says so: it was there. One
+// that is not there, one whose creation has not ended and a runtime endpoint are
+// answered as missing: a runtime endpoint stands for an adapter instance and
+// takes control signals only, so for a message it is no endpoint.
+func messageRefusal(st *endpointState) delivery.RejectReason {
+	switch {
+	case st == nil || st.rec.Kind == adapterreg.KindRuntime:
+		return delivery.RejectEndpointMissing
+	case st.rec.Status == store.EndpointClosed:
+		return delivery.RejectEndpointClosed
+	case st.rec.Status != store.EndpointOpen:
+		return delivery.RejectEndpointMissing
+	}
+	return delivery.RejectNone
+}
 
 // rejected is the record of a delivery the target refused for a reason: accepted
 // by the constructor and then closed by the delivery rules, so that the state is
