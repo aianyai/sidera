@@ -102,6 +102,10 @@ func (c *cmdDrain) run(e *Engine, now time.Time) {
 	if err = e.classify(err); err != nil && e.fatal == nil {
 		e.log.Warn("closing the records of a closed endpoint failed; it is tried again", "endpoint", c.endpoint.String(), "error", err.Error())
 		e.sched.set(schedKey{schedDrain, c.endpoint.String()}, now.Add(e.p.RetryBackoff))
+		return
+	}
+	if !e.view.Draining(c.endpoint) {
+		e.releaseParked(c.endpoint)
 	}
 }
 

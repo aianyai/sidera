@@ -27,9 +27,6 @@ const (
 	// ReasonEndpointLimit: registering the endpoint would exceed a limit; the
 	// Limit of the Refusal says which.
 	ReasonEndpointLimit
-	// ReasonEndpointDraining: the endpoint was closed and the deliveries queued
-	// for it are not all closed yet. A retry after they are succeeds.
-	ReasonEndpointDraining
 	// ReasonInvalidArgument: a request value is not acceptable; the Field of
 	// the Refusal names it.
 	ReasonInvalidArgument
@@ -69,7 +66,6 @@ var reasonNames = [reasonEnd]string{
 	ReasonInstanceUnknown:    "instance_unknown",
 	ReasonWrongEndpointKind:  "wrong_endpoint_kind",
 	ReasonEndpointLimit:      "endpoint_limit",
-	ReasonEndpointDraining:   "endpoint_draining",
 	ReasonInvalidArgument:    "invalid_argument",
 	ReasonOperationIDReused:  "operation_id_reused",
 	ReasonNodeQueueFull:      "node_queue_full",

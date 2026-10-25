@@ -70,8 +70,9 @@ commands and add their methods to this list.
   no record uses, which takes no place and is given back for the same key.
 - **A closed endpoint is not opened again while records are queued for it.** The
   closing is a head record, then chunks of at most `Params.ChunkReplaces`
-  records, then nothing. A registration of the key meanwhile is refused with
-  `ReasonEndpointDraining`, which a retry cures.
+  records, then nothing. A registration of the key meanwhile is not refused: it
+  waits, parked in the loop, until the drain is done and is then run, so the
+  adapter's request is answered late and no new answer exists for it.
 - **Only the token of an open session endpoint opens the Agent interface.** The
   store keeps a token on every open record; the engine mints one for a direct
   endpoint and never lets it in.

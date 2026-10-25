@@ -61,7 +61,11 @@ Closing an endpoint is a head record (closed, token gone), then chunks of at mos
 `ChunkReplaces` (16) records queued for it, each closed by the delivery rules and
 stripped of its body reference, the bodies nothing refers to any more released.
 While queued records remain the endpoint is draining and its key is not
-registered again (`endpoint_draining`). A runtime endpoint cannot be closed: it
+registered again: a registration of the key waits, parked in the loop, until the
+last chunk is done, and is then queued behind the commands the inbox holds. It is
+neither refused nor tried over and over: when a chunk fails, the drain is retried
+after `RetryBackoff`, and the registration waits for that too. `Quiesce` is not
+quiet while one waits. A runtime endpoint cannot be closed: it
 stands for its instance.
 
 When an administrative operation asks for the close, one loop command does what
@@ -163,8 +167,14 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   request would overwrite `closed` with `already_closed`.
 - **The head record first.** Whatever a chunk would do is derived from the head
   record, so a crash between chunks is repaired by the same rule at the next start.
-- **No registration over a draining endpoint.** The records still queued would land
-  on an endpoint that is open again and be handed to someone they were not for.
+- **No registration over a draining endpoint, and no refusal for it either.** The
+  records still queued would land on an endpoint that is open again and be handed
+  to someone they were not for. A refusal would need an answer the adapter protocol
+  does not have, and the adapter could do nothing with it but ask again; the
+  registration waits for the drain instead, as the enabling of an adapter instance
+  waits for the closing of the endpoints of its earlier life. Parking the command
+  until the drain ends, rather than queueing it again at once, is what keeps it from
+  spinning in the loop while a failed chunk waits out its back off.
 - **The cap counts creating endpoints too.** A session endpoint being created has a
   record, a token and a place in the node's declaration as soon as it is committed;
   leaving it out would let a node pass the cap during a creation.
@@ -204,7 +214,7 @@ reproducible).
 | Same key, same endpoint; a new token on reopening | `endpoints.go`, `tokens.go` | `TestSameKeyGivesTheSameEndpointAcrossARestart`, `TestReopeningAnEndpointKeepsItsIdAndGivesItANewToken` |
 | The registration crashes anywhere | `transactions.go` | `TestDirectRegisterRecoversFromACrashAtEveryPoint` |
 | The result of a close is stored with it, and replayed | `endpoints.go` (`closeEndpoint`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint`, `TestAResendOfAClosingReturnsTheStoredResultAndAReusedIdentifierIsRefused` |
-| Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingIsRefused` |
+| Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `meta.go`, `view.go` | `declare_test.go`, `meta_internal_test.go` (golden vectors, refusals, `FuzzDecodeMeta`), `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable`, `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |

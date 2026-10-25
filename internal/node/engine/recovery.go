@@ -428,6 +428,8 @@ type Report struct {
 	// DueEntries is how many entries of the schedule are due at the time of the
 	// clock now.
 	DueEntries int
+	// Parked is how many commands wait for an endpoint to be drained.
+	Parked int
 	// Workers is how many goroutines the engine owns that have not returned.
 	Workers int
 	// Satisfied is true when none of them holds anything.
@@ -441,15 +443,16 @@ func (c *cmdQuiesce) run(e *Engine, now time.Time) {
 	e.probed = true // a probe is not activity: it must not wake the next probe
 	r := Report{
 		InboxLen: len(e.inbox), Continuations: len(e.cont), DueEntries: e.sched.dueCount(now),
-		Workers: int(e.workers.Load()),
+		Parked: len(e.parked), Workers: int(e.workers.Load()),
 	}
-	r.Satisfied = r.InboxLen == 0 && r.Continuations == 0 && r.DueEntries == 0 && r.Workers == 0
+	r.Satisfied = r.InboxLen == 0 && r.Continuations == 0 && r.DueEntries == 0 && r.Parked == 0 && r.Workers == 0
 	c.done(r, nil)
 }
 
 // Quiesce returns when the engine has nothing left to do at the time of its
-// clock: no command waits, the loop has none queued for itself, nothing in the
-// schedule is due and no goroutine of the engine is running. It fails when ctx
+// clock: no command waits, the loop has none queued for itself or held for the
+// drain of an endpoint, nothing in the schedule is due and no goroutine of the
+// engine is running. It fails when ctx
 // ends first, with the report of what did not hold. A test moves the clock, calls
 // Quiesce and then looks at the records; nothing in the engine is slept on.
 func (e *Engine) Quiesce(ctx context.Context, _ Expect) (Report, error) {

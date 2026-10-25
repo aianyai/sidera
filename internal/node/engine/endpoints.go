@@ -59,7 +59,21 @@ type cmdRegister struct {
 func (c *cmdRegister) gate() gate { return gateAdapter }
 func (c *cmdRegister) run(e *Engine, _ time.Time) {
 	res, err := e.registerDirect(c.instance, c.params)
+	var d *drainingError
+	if errors.As(err, &d) {
+		e.parkUntilDrained(d.endpoint, c)
+		return
+	}
 	c.done(res, e.classify(err))
+}
+
+// drainingError says that the key of a registration is the endpoint of a closed
+// endpoint whose queued records are not all closed yet. The registration is not
+// refused: it waits for the drain and then runs.
+type drainingError struct{ endpoint ident.EndpointID }
+
+func (d *drainingError) Error() string {
+	return "engine: endpoint " + d.endpoint.String() + " is draining"
 }
 
 // RegisterDirect registers a direct endpoint of an adapter instance under the
@@ -71,8 +85,10 @@ func (c *cmdRegister) run(e *Engine, _ time.Time) {
 // A key that gives an endpoint that is open is not registered again: its display
 // name and description are what the adapter says now, and nothing else changes.
 // A new endpoint, and one that was closed and is opened again with a new token,
-// counts against the limit of the instance and the cap of the node, and a closed
-// endpoint is not opened again while the records queued for it are being closed.
+// counts against the limit of the instance and the cap of the node. A closed
+// endpoint is not opened again while the records queued for it are being closed:
+// the registration waits until they are, and then runs, so the adapter's request
+// is answered late and never refused for it.
 func (e *Engine) RegisterDirect(ctx context.Context, instance string, p adapterproto.RegisterParams) (adapterproto.RegisterResult, error) {
 	c := &cmdRegister{call: newCall[adapterproto.RegisterResult](), instance: instance, params: p}
 	return roundTrip(ctx, e, submitInternal, c, c.call)
@@ -132,7 +148,7 @@ func (e *Engine) registerDirect(inst string, p adapterproto.RegisterParams) (ada
 
 	if st != nil {
 		if e.view.Draining(ch.ID) {
-			return none, refuse(ReasonEndpointDraining)
+			return none, &drainingError{ch.ID}
 		}
 		meta.Declaration = st.meta.Declaration
 	}

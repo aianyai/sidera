@@ -88,9 +88,10 @@ type Engine struct {
 	clockTask string   // the periodic task that persists the clock state, if one was added
 	waits     map[ident.EndpointID]*waiter
 	cont      []continuation
-	ran       uint64 // how many commands the loop has taken from the inbox
-	fatal     error  // set by classify; the loop stops after the command that set it
-	probed    bool   // the command that just ran was a probe of Quiesce
+	parked    map[ident.EndpointID][]command // commands that wait for the drain of an endpoint
+	ran       uint64                         // how many commands the loop has taken from the inbox
+	fatal     error                          // set by classify; the loop stops after the command that set it
+	probed    bool                           // the command that just ran was a probe of Quiesce
 }
 
 // continuation is a command the loop queued for itself: the next chunk of a long
@@ -159,6 +160,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		sched:    newScheduler(),
 		periodic: map[string]*periodicTask{},
 		waits:    map[ident.EndpointID]*waiter{},
+		parked:   map[ident.EndpointID][]command{},
 	}
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.setPhase(PhaseOpened)
@@ -302,6 +304,12 @@ func (e *Engine) finish() {
 		k.c.fail(refuse)
 	}
 	e.cont = nil
+	for _, cs := range e.parked {
+		for _, c := range cs {
+			c.fail(refuse)
+		}
+	}
+	e.parked = nil
 	close(e.done)
 	for {
 		select {
@@ -537,6 +545,24 @@ func (e *Engine) loop() {
 			e.poke()
 		}
 	}
+}
+
+// parkUntilDrained holds a command until the records queued for a closed endpoint
+// are all closed, and then queues it behind the commands the inbox holds. It is
+// not queued again at once and tried until it passes: when a chunk fails, the
+// drain is retried after RetryBackoff, and a command that spun in the meantime
+// would hold the loop for nothing.
+func (e *Engine) parkUntilDrained(id ident.EndpointID, c command) {
+	e.parked[id] = append(e.parked[id], c)
+}
+
+// releaseParked queues what waited for the drain of the endpoint, in the order it
+// came.
+func (e *Engine) releaseParked(id ident.EndpointID) {
+	for _, c := range e.parked[id] {
+		e.later(c)
+	}
+	delete(e.parked, id)
 }
 
 // later queues a command for the loop itself, behind the commands the inbox holds

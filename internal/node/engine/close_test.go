@@ -5,12 +5,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"reflect"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -219,8 +222,9 @@ func TestAResendOfAClosingReturnsTheStoredResultAndAReusedIdentifierIsRefused(t 
 
 // A closed endpoint is not opened again by the registration of its key until
 // the deliveries queued for it are closed: they would land on an endpoint that
-// is open again and be handed to an agent that never was their addressee.
-func TestRegisteringTheKeyOfAnEndpointStillDrainingIsRefused(t *testing.T) {
+// is open again and be handed to an agent that never was their addressee. The
+// registration is not refused for it: it waits for the drain, and then runs.
+func TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 1}))
 	e := r.start()
@@ -239,10 +243,14 @@ func TestRegisteringTheKeyOfAnEndpointStillDrainingIsRefused(t *testing.T) {
 		closed <- err
 	}()
 	engine.WaitInbox(t, e, 1)
-	registered := make(chan error, 1)
+	type answer struct {
+		res adapterproto.RegisterResult
+		err error
+	}
+	registered := make(chan answer, 1)
 	go func() {
-		_, err := e.RegisterDirect(context.Background(), "chat", registerParams("a"))
-		registered <- err
+		res, err := e.RegisterDirect(context.Background(), "chat", registerParams("a"))
+		registered <- answer{res, err}
 	}()
 	engine.WaitInbox(t, e, 2)
 	release()
@@ -250,13 +258,75 @@ func TestRegisteringTheKeyOfAnEndpointStillDrainingIsRefused(t *testing.T) {
 	if err := <-closed; err != nil {
 		t.Fatalf("CloseEndpoint: %v", err)
 	}
-	wantReason(t, <-registered, engine.ReasonEndpointDraining)
-	settle(t, e)
-	if id := register(t, e, "a"); id != a {
-		t.Errorf("after the drain the key gave %s, want the same endpoint %s again", id, a)
+	got := <-registered
+	if got.err != nil || got.res.Endpoint != adapterproto.EndpointRef(a.String()) {
+		t.Fatalf("the registration answered %+v, %v; want the same endpoint again", got.res, got.err)
 	}
+	// It was answered after the drain, not before: nothing is queued for the
+	// endpoint that is open again, and no delivery of the old one was left
+	// accepted.
+	for _, in := range r.scan().In {
+		if in.Record.State != delivery.StateRejected {
+			t.Errorf("when the registration was answered, record %s was %v; the drain had not finished", in.Key.Message, in.Record.State)
+		}
+	}
+	settle(t, e)
 	if got := openEndpoints(t, e); got != 1 {
 		t.Errorf("%d endpoints open, want the one that was opened again", got)
+	}
+}
+
+// A drain whose chunk cannot be written is tried again after the back off. The
+// registration that waits for it waits too, and does not spin in the loop.
+func TestARegistrationWaitsAcrossAFailedChunkOfTheDrain(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 1, RetryBackoff: 10 * time.Second}))
+	e := r.start()
+	a := register(t, e, "a")
+	r.restart()
+	r.queue(1, 3, a)
+	e = r.start()
+
+	rule := r.faulty.Fail(matchT{Tx: "endpoint-drain", Step: fsx.StepWrite, Hit: 1}, syscall.EIO) // the first write of a chunk, once
+	release := engine.StallLoop(t, e)
+	closed := make(chan error, 1)
+	go func() {
+		_, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a})
+		closed <- err
+	}()
+	engine.WaitInbox(t, e, 1)
+	registered := make(chan error, 1)
+	go func() {
+		_, err := e.RegisterDirect(context.Background(), "chat", registerParams("a"))
+		registered <- err
+	}()
+	engine.WaitInbox(t, e, 2)
+	release()
+	if err := <-closed; err != nil {
+		t.Fatal(err)
+	}
+	waitUntil(t, func() bool { return rule.Hits() > 0 })
+	// Everything the engine can do now is done: the retry is not due, and the
+	// registration waits for it.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if rep, err := e.Quiesce(ctx, engine.Expect{}); err == nil || rep.Parked != 1 || rep.Continuations != 0 {
+		t.Fatalf("Quiesce = %+v, %v; want the registration parked, nothing queued, not quiet", rep, err)
+	}
+	select {
+	case err := <-registered:
+		t.Fatalf("the registration was answered (%v) before the drain was done", err)
+	default:
+	}
+	r.clk.Advance(10 * time.Second)
+	settle(t, e)
+	if err := <-registered; err != nil {
+		t.Errorf("the registration after the retry: %v", err)
+	}
+	for _, in := range r.scan().In {
+		if in.Record.State != delivery.StateRejected {
+			t.Errorf("record %s is %v after the drain", in.Key.Message, in.Record.State)
+		}
 	}
 }
 
