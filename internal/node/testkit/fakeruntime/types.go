@@ -150,16 +150,16 @@ type Reconciliation struct {
 // CreateRequest asks for a native session.
 type CreateRequest struct {
 	// Attempt is the creation attempt. The same attempt gets the same session.
-	Attempt string
+	Attempt string `json:"attempt"`
 	// Endpoint is the session endpoint the daemon allocated.
-	Endpoint string
-	Preset   string
+	Endpoint string `json:"endpoint"`
+	Preset   string `json:"preset"`
 	// FirstAttempt and FirstPrompt are the first prompt, which is in the record
 	// when the session is ready.
-	FirstAttempt string
-	FirstPrompt  string
+	FirstAttempt string `json:"first_attempt"`
+	FirstPrompt  string `json:"first_prompt"`
 	// Env is the tool access of the session.
-	Env map[string]string
+	Env map[string]string `json:"env,omitempty"`
 }
 
 func (r CreateRequest) validate() error {
