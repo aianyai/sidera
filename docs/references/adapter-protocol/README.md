@@ -345,9 +345,12 @@ so the protocol must not accept what every node will refuse: the schema gives
 refuses an empty body in the same case. The member itself stays required, so the
 wire shape is unchanged. A message that carries a control signal is judged by
 the signal: the body of a `session.create` is its initial message and an empty
-body means none; the other signals need no body (see the control signals
-below). `TestEndpointSendRules` (the rows on the body) and the golden message
-`invalid/endpoint-send--body-empty.json` hold both sides to the rule.
+body means none; every other signal carries no body, so its body is empty (the
+envelope refuses a body there: it would have no reader, and a field nobody reads
+is a place to hide data). The schema states this with a `then`/`else` on the
+signal, and `SendParams.Validate` the same. `TestEndpointSendRules` (the rows on
+the body) and the golden messages `invalid/endpoint-send--body-empty.json` and
+`invalid/endpoint-send--control-*-with-body.json` hold both sides to the rule.
 
 The `display_name` of `endpoint.register` is 1 to `MaxDisplayName` (128)
 characters and a `description`, when given, 1 to `MaxDescription` (1024); a

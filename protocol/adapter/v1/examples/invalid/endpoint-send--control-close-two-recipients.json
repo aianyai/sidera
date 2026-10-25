@@ -14,7 +14,7 @@
         "b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3b3/22222222222222222222222222222222"
       ],
       "content_type": "text/plain",
-      "body": "x",
+      "body": "",
       "control": {
         "signal": "session.close"
       }

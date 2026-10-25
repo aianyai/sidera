@@ -208,18 +208,6 @@ func TestEndpointSendRules(t *testing.T) {
 			p.Body = ""
 			p.Control = &adapterproto.Control{Signal: "session.create", Params: &adapterproto.ControlParams{Preset: "default"}}
 		}, "", false},
-		{"a session.close without a body", func(p *adapterproto.SendParams) {
-			p.Body = ""
-			p.Control = &adapterproto.Control{Signal: "session.close"}
-		}, "", false},
-		{"a session.interrupt without a body", func(p *adapterproto.SendParams) {
-			p.Body = ""
-			p.Control = &adapterproto.Control{Signal: "session.interrupt"}
-		}, "", false},
-		{"an endpoint.status without a body", func(p *adapterproto.SendParams) {
-			p.Body = ""
-			p.Control = &adapterproto.Control{Signal: "endpoint.status"}
-		}, "", false},
 		{"reply to optional", func(p *adapterproto.SendParams) { p.ReplyTo = "" }, "", false},
 		{"reply to over the limit", func(p *adapterproto.SendParams) { p.ReplyTo = adapterproto.MessageID(repeat("m", 129)) }, "reply_to", false},
 		{"thread optional", func(p *adapterproto.SendParams) { p.Thread = "" }, "", false},
@@ -239,27 +227,41 @@ func TestEndpointSendRules(t *testing.T) {
 		{"control session.create with a bad preset", func(p *adapterproto.SendParams) {
 			p.Control = &adapterproto.Control{Signal: "session.create", Params: &adapterproto.ControlParams{Preset: "Bad Preset"}}
 		}, "control.params.preset", false},
-		{"control session.close", func(p *adapterproto.SendParams) { p.Control = &adapterproto.Control{Signal: "session.close"} }, "", false},
-		{"control session.interrupt", func(p *adapterproto.SendParams) { p.Control = &adapterproto.Control{Signal: "session.interrupt"} }, "", false},
-		{"control endpoint.status", func(p *adapterproto.SendParams) { p.Control = &adapterproto.Control{Signal: "endpoint.status"} }, "", false},
+		{"control session.close", func(p *adapterproto.SendParams) { signal(p, "session.close") }, "", false},
+		{"control session.interrupt", func(p *adapterproto.SendParams) { signal(p, "session.interrupt") }, "", false},
+		{"control endpoint.status", func(p *adapterproto.SendParams) { signal(p, "endpoint.status") }, "", false},
 		{"control session.close with params", func(p *adapterproto.SendParams) {
-			p.Control = &adapterproto.Control{Signal: "session.close", Params: &adapterproto.ControlParams{Preset: "default"}}
+			signal(p, "session.close")
+			p.Control.Params = &adapterproto.ControlParams{Preset: "default"}
 		}, "control.params", false},
 		{"control endpoint.status with params", func(p *adapterproto.SendParams) {
-			p.Control = &adapterproto.Control{Signal: "endpoint.status", Params: &adapterproto.ControlParams{Preset: "default"}}
+			signal(p, "endpoint.status")
+			p.Control.Params = &adapterproto.ControlParams{Preset: "default"}
 		}, "control.params", false},
 		{"control signal with two recipients", func(p *adapterproto.SendParams) {
+			signal(p, "session.close")
 			p.To = manyAddrs(2)
-			p.Control = &adapterproto.Control{Signal: "session.close"}
 		}, "to", false},
 		{"control create with two recipients", func(p *adapterproto.SendParams) {
 			p.To = manyAddrs(2)
 			p.Control = &adapterproto.Control{Signal: "session.create", Params: &adapterproto.ControlParams{Preset: "default"}}
 		}, "to", false},
 		{"control signal with fifty recipients", func(p *adapterproto.SendParams) {
+			signal(p, "endpoint.status")
 			p.To = manyAddrs(50)
-			p.Control = &adapterproto.Control{Signal: "endpoint.status"}
 		}, "to", false},
+		{"session.close carries no body", func(p *adapterproto.SendParams) {
+			p.Control = &adapterproto.Control{Signal: "session.close"}
+		}, "body", false},
+		{"session.interrupt carries no body", func(p *adapterproto.SendParams) {
+			p.Control = &adapterproto.Control{Signal: "session.interrupt"}
+		}, "body", false},
+		{"endpoint.status carries no body", func(p *adapterproto.SendParams) {
+			p.Control = &adapterproto.Control{Signal: "endpoint.status"}
+		}, "body", false},
+		{"session.create carries an initial message", func(p *adapterproto.SendParams) {
+			p.Control = &adapterproto.Control{Signal: "session.create", Params: &adapterproto.ControlParams{Preset: "default"}}
+		}, "", false},
 		{"control signal unknown", func(p *adapterproto.SendParams) { p.Control = &adapterproto.Control{Signal: "message.send"} }, "control.signal", false},
 		{"control signal required", func(p *adapterproto.SendParams) { p.Control = &adapterproto.Control{} }, "control.signal", false},
 	})
@@ -272,6 +274,13 @@ func TestEndpointSendRules(t *testing.T) {
 			{"endpoint required", func(p *adapterproto.MessageStatusParams) { p.Endpoint = "" }, "endpoint", false},
 			{"message id required", func(p *adapterproto.MessageStatusParams) { p.MessageID = "" }, "message_id", false},
 		})
+}
+
+// signal turns p into a control signal other than session.create, which carries
+// no body.
+func signal(p *adapterproto.SendParams, name adapterproto.ControlSignal) {
+	p.Body = ""
+	p.Control = &adapterproto.Control{Signal: name}
 }
 
 func manyAddrs(n int) []adapterproto.Address {

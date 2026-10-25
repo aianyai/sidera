@@ -146,7 +146,7 @@ func (p ControlParams) Validate() error { return at("preset", ValidatePresetName
 
 // Control marks a message as a control signal for the target endpoint instead of
 // text for its agent. The body of a session.create message is its initial
-// message; an empty body means none. The other signals need no body.
+// message; an empty body means none. The other signals carry no body.
 type Control struct {
 	Signal ControlSignal `json:"signal"`
 	// Params is present for session.create and absent for the other signals.
@@ -178,7 +178,7 @@ type SendParams struct {
 	ContentType string      `json:"content_type"`
 	// Body is what the message says. A message has a body: it is not empty unless
 	// Control is set, where it is the initial message of a session.create (empty
-	// means none) and is not needed for the other signals.
+	// means none) and is empty for the other signals, which carry none.
 	Body    string    `json:"body"`
 	ReplyTo MessageID `json:"reply_to,omitempty"`
 	Thread  string    `json:"thread,omitempty"`
@@ -192,8 +192,9 @@ type SendParams struct {
 }
 
 // Validate checks the parameters. A message without a control signal has a
-// non-empty body, as the envelope the daemon builds from it requires. A control
-// signal has exactly one recipient. Address syntax, the number of recipients that
+// non-empty body, and a control signal other than session.create has an empty
+// one, as the envelope the daemon builds from it requires. A control signal has
+// exactly one recipient. Address syntax, the number of recipients that
 // is acceptable and the size of the body are judged by the daemon, which refuses
 // with CodeInvalidAddress or CodeSendRefused.
 func (p SendParams) Validate() error {
@@ -217,6 +218,7 @@ func (p SendParams) Validate() error {
 	if p.Control != nil {
 		c.ok(len(p.To) == 1, "to: a control signal has exactly one recipient, got %d", len(p.To))
 		c.field("control", p.Control.Validate())
+		c.ok(p.Control.Signal == SignalSessionCreate || p.Body == "", "body: %s carries no body", p.Control.Signal)
 	}
 	if p.IdempotencyKey != "" {
 		c.field("idempotency_key", strLen(p.IdempotencyKey, 1, MaxIdentLen))
