@@ -44,7 +44,13 @@ func targetRetention(r delivery.Record, createdAt time.Time, dedup delivery.Dedu
 
 // RetainUntil is the instant until which the records of a delivery are kept as
 // live files, and whether they are finished: every delivery in a final state, or
-// the record lost, which nothing changes any more. It is the latest of the
+// a replacement for a record lost to storage corruption. A replacement is not
+// final in the delivery rules: Tick still closes it at its ReportBy and a lost
+// control record on the target can still become delivered. Treating it as
+// finished is safe because neither change moves what the retention is computed
+// from (ReportBy is fixed for a replacement) and the sweep waits until the
+// returned instant, which is not earlier than the retention that follows from
+// that ReportBy. It is the latest of the
 // retentions the delivery and reply packages define for the facts the record
 // holds. A record that is not finished is never swept.
 func RetainUntil(rec Record) (until time.Time, finished bool) {
