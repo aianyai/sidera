@@ -31,7 +31,7 @@ func Start(ctx context.Context, cfg Config) (*Daemon, error) {
 	}
 	d := &Daemon{
 		cfg: cfg, home: home, stopCh: make(chan struct{}), done: make(chan struct{}),
-		defer_: &deferredHandler{}, served: make(chan error, 1),
+		defer_: newDeferredHandler(), served: make(chan error, 1),
 	}
 	d.log = slog.New(d.defer_)
 

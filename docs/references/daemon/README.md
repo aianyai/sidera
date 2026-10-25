@@ -131,8 +131,11 @@ daemon and for each enabled instance, never below 1 MiB. The handle owns that ru
 it is given the total and the source of the number of enabled instances once
 (`logfile.Budget`) and reads both at every write, so the daemon and the adapter host
 open their logs by name and neither counts instances or divides the total. Lines
-logged before the log can be opened (steps 1 and 2) are kept and written first.
-Lines carry the time of the injected clock. Never a message body, a token or a key.
+logged before the log can be opened (steps 1 and 2) are kept and written first, with
+the attributes and groups of the logger that wrote them and only if the log is at
+the level that takes them. Lines carry the time of the injected clock when they are
+written, so the lines kept from before the log opened carry the time it opened, not
+the moment they were logged. Never a message body, a token or a key.
 
 ### The management interface
 

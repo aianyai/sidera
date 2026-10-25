@@ -244,6 +244,36 @@ func TestTheDaemonLogsToTheFileUnderLogsWithTheTimeOfItsClock(t *testing.T) {
 	}
 }
 
+// A hook logs through the logger it is given, which it may extend with attributes
+// and groups: the attributes are on its lines in the file, and a debug line is not
+// written by a log at info.
+func TestTheLoggerOfAHookKeepsItsAttributesAndWritesNoDebugLines(t *testing.T) {
+	noLeaks(t)
+	c, _ := initialized(t)
+	c.Attach.AgentServe = func(_ context.Context, env *daemon.Env) error {
+		l := env.Log.With("instance", "chat").WithGroup("turn")
+		l.Info("a hook line", "n", 3)
+		l.Debug("a debug line")
+		return nil
+	}
+	started(t, c)
+	var found bool
+	for _, line := range logLines(t, c.Home) {
+		if strings.Contains(line, "a debug line") {
+			t.Errorf("a debug line was written: %s", line)
+		}
+		if strings.Contains(line, `msg="a hook line"`) {
+			found = true
+			if !strings.Contains(line, "instance=chat") || !strings.Contains(line, "turn.n=3") {
+				t.Errorf("the attributes of the logger are not on its line: %s", line)
+			}
+		}
+	}
+	if !found {
+		t.Error("the line of the hook is not in the log")
+	}
+}
+
 // The logs share the total of the configuration among the daemon's and the enabled
 // instances' (two files each): the daemon rotates its log at the share the
 // configuration gives when it writes, the number of enabled instances read from the
