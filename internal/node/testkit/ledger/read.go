@@ -13,10 +13,12 @@ import (
 // Log is a ledger read back: every entry of every writer.
 //
 // For a Memory the entries are in the order they arrived, a total order across
-// writers. For a directory they are ordered by time, then writer, process and
-// sequence, which is a partial order: across writers only the time is known, and
-// on a test clock that stands still it says nothing. Judge a directory ledger by
-// counts and by the order inside one writer.
+// writers. For a directory they are ordered by time, then by the script step the
+// fixture announced (steps in the order the fixture ran them, an entry of an
+// unknown step before every known one), then writer, process and sequence. That is
+// a partial order: across writers inside one step only the time is known, and on a
+// test clock that stands still it says nothing. Judge a directory ledger by counts
+// and by the order inside one writer.
 type Log struct {
 	entries []Entry
 }
@@ -60,6 +62,23 @@ func (l *Log) Select(keep func(Entry) bool) []Entry {
 
 // Count returns how many entries satisfy keep.
 func (l *Log) Count(keep func(Entry) bool) int { return len(l.Select(keep)) }
+
+// PIDs returns the ids of the processes that wrote entries, ascending, without 0,
+// which stands for the test process: what a fixture ends when it cleans up.
+func (l *Log) PIDs() []int64 {
+	seen := map[int64]bool{}
+	for _, e := range l.entries {
+		if e.PID > 0 {
+			seen[e.PID] = true
+		}
+	}
+	out := make([]int64, 0, len(seen))
+	for p := range seen {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
+	return out
+}
 
 // Steps returns the names of the steps the fixture announced, in order.
 func (l *Log) Steps() []string {
@@ -215,11 +234,23 @@ func ReadDir(dir string) (*Log, error) {
 		}
 		all = append(all, entries...)
 	}
+	// The fixture announces its steps in order; an entry of an earlier step comes
+	// before one of a later step even when the test clock stood still between them.
+	stepIndex := map[string]int{}
+	for _, e := range all {
+		if e.Kind == KindFixtureStep {
+			if _, ok := stepIndex[e.Attrs.Name]; !ok {
+				stepIndex[e.Attrs.Name] = len(stepIndex) + 1
+			}
+		}
+	}
 	sort.SliceStable(all, func(i, j int) bool {
 		a, b := all[i], all[j]
 		switch {
 		case a.AtMS != b.AtMS:
 			return a.AtMS < b.AtMS
+		case stepIndex[a.Step] != stepIndex[b.Step]:
+			return stepIndex[a.Step] < stepIndex[b.Step]
 		case a.Writer != b.Writer:
 			return a.Writer < b.Writer
 		case a.PID != b.PID:

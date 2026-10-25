@@ -347,3 +347,62 @@ func TestLogSelectors(t *testing.T) {
 		t.Errorf("Count = %d, want 1", n)
 	}
 }
+
+// TestLogPIDsListsEveryProcessThatWrote: a fixture ends the processes a test left
+// behind by the ids the ledger records, so it needs them without scanning entries.
+func TestLogPIDsListsEveryProcessThatWrote(t *testing.T) {
+	dir := t.TempDir()
+	d := ledger.NewDir(dir)
+	for _, w := range []struct {
+		name string
+		pid  int
+	}{{"adapter/fake", 300}, {"adapter/fake", 100}, {"runtime/n1", 200}, {"fixture", 0}} {
+		lw := mustOpen(t, d, w.name, w.pid, fixedNow)
+		mustAppend(t, lw, ledger.KindKnobHit, ledger.Attrs{Knob: "k"})
+	}
+	log, err := ledger.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := log.PIDs(); !reflect.DeepEqual(got, []int64{100, 200, 300}) {
+		t.Fatalf("PIDs() = %v, want the real processes, ascending, without the test process (0)", got)
+	}
+}
+
+// TestDirLedgerOrdersEntriesByTimeThenScriptStep: on a test clock that stands
+// still the time says nothing, so the step the fixture announced orders entries
+// of different writers: an entry of an earlier step comes first.
+func TestDirLedgerOrdersEntriesByTimeThenScriptStep(t *testing.T) {
+	dir := t.TempDir()
+	d := ledger.NewDir(dir)
+	fx := mustOpen(t, d, "fixture", 0, fixedNow)
+	a := mustOpen(t, d, "adapter/fake", 1, fixedNow)
+	r := mustOpen(t, d, "runtime/n1", 2, fixedNow)
+	step := func(name string) {
+		mustAppend(t, fx, ledger.KindFixtureStep, ledger.Attrs{Name: name})
+		d.SetStep(name)
+	}
+	step("first")
+	mustAppend(t, r, ledger.KindKnobHit, ledger.Attrs{Knob: "from the runtime in step one"})
+	step("second")
+	mustAppend(t, a, ledger.KindKnobHit, ledger.Attrs{Knob: "from the adapter in step two"})
+	step("third")
+	mustAppend(t, a, ledger.KindKnobHit, ledger.Attrs{Knob: "from the adapter in step three"})
+	mustAppend(t, r, ledger.KindKnobHit, ledger.Attrs{Knob: "from the runtime in step three"})
+
+	log, err := ledger.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, e := range log.Kind(ledger.KindKnobHit) {
+		got = append(got, e.Attrs.Knob)
+	}
+	want := []string{
+		"from the runtime in step one", "from the adapter in step two",
+		"from the adapter in step three", "from the runtime in step three",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("order\n got %v\nwant %v", got, want)
+	}
+}
