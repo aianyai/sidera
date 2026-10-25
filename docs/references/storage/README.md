@@ -98,6 +98,10 @@ same state as a crash before the failed step, so it needs no crash point. The
 two names are not valid transaction or role names (`ValidName` refuses them, so
 `ParseKey`, `ParsePoint`, `Key.Validate` and the transaction table do too): a
 transaction that took one would have its steps silently skipped by observers.
+The one writer under the `log` tag is `internal/node/logfile`, a handle that can
+open, rotate and remove a log under `logs/` and has no other operation, so no state
+file can be written under a tag that the crash tests skip; the daemon's own log and
+those of the adapter instances go through it (see [daemon](../daemon/README.md)).
 `Faulty` follows `Observe`: it does not number steps of reserved transactions.
 
 ### Failure classes

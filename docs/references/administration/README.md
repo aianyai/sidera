@@ -166,6 +166,16 @@ executed after validation; it is never checked for replay and its result is
 never stored. The key is built only for a sender that was authorized, so a
 denied caller can neither file nor probe results.
 
+In the node the first two steps are the management interface's and the rest is one
+command of the engine's single writer: `internal/node/manageapi` authorizes against
+the catalogue and validates the shape, then asks the engine's one door,
+`engine.Execute`, which looks the key up in all stored results, runs the operation
+and stores the result with the fingerprint in the transaction of its effect. The
+version is checked by `config` inside the change that writes the versioned file,
+because the check and the write are one step; it is made nowhere else. No
+operation and no interface repeats the replay check. See
+[daemon](../daemon/README.md) and [engine](../engine/README.md).
+
 ## Why
 
 - **One criterion for levels.** Anything that lets more nodes in or back

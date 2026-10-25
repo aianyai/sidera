@@ -13,12 +13,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
-	"github.com/aianyai/sidera/internal/node/config"
+	nodeconfig "github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/ipc"
@@ -62,7 +63,20 @@ func newHome(t testing.TB) string {
 func seeded(seed byte) io.Reader {
 	var s [32]byte
 	s[0] = seed
-	return rand.NewChaCha8(s)
+	return &lockedReader{r: rand.NewChaCha8(s)}
+}
+
+// lockedReader makes a reader safe for the several goroutines that read the
+// randomness of a node.
+type lockedReader struct {
+	mu sync.Mutex
+	r  io.Reader
+}
+
+func (l *lockedReader) Read(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.r.Read(p)
 }
 
 // config is the configuration of a daemon over home with a test clock.
@@ -229,7 +243,7 @@ func requireUnix(t testing.TB) {
 // so the start does not close them as the endpoints of a disabled one.
 func seedHome(t testing.TB, home string, recs ...store.EndpointRecord) {
 	t.Helper()
-	ins, err := config.Instances{Version: 1, Items: map[string]config.Instance{
+	ins, err := nodeconfig.Instances{Version: 1, Items: map[string]nodeconfig.Instance{
 		"chat": {Adapter: "chat", Enabled: true},
 	}}.Encode()
 	if err != nil {

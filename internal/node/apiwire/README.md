@@ -3,7 +3,9 @@
 The words of the wire: how what the engine and the packages below it say becomes
 the category and code of an error on the Agent and management interfaces, the body
 that carries them, the status of the HTTP answer and the exit code of the command
-line.
+line. Read
+[../../../docs/references/daemon/README.md](../../../docs/references/daemon/README.md)
+for the reasons.
 
 This is a runtime package of layer 6 of [`internal/node/README.md`](../README.md):
 it imports `engine`, `config`, `ipc`, `admin` and `strictjson` to read their errors,

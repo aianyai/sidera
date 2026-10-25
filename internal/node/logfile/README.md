@@ -1,6 +1,8 @@
 # logfile
 
-How the daemon and its adapter hosts write their logs.
+How the daemon and its adapter hosts write their logs. Read
+[../../../docs/references/daemon/README.md](../../../docs/references/daemon/README.md)
+for the reasons and for where the logs are used.
 
 This is a runtime package of layer 2 of [`internal/node/README.md`](../README.md):
 it imports `fsx` and nothing else of this module, and reads no clock. It touches

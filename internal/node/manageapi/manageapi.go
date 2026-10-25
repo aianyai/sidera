@@ -118,6 +118,9 @@ func Listen(addr ipc.Address, lock ipc.InstanceLock, opts ipc.Options) (*Listene
 	return &Listener{l: l}, nil
 }
 
+// Close closes a listener that no server took.
+func (l *Listener) Close() error { return l.l.Close() }
+
 // Serve answers the requests of the listener until Shutdown or Close, and returns
 // nil then. It closes the listener.
 func (s *Server) Serve(l *Listener) error {

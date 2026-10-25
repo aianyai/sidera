@@ -1,7 +1,10 @@
 # manageapi
 
 The management interface of the daemon: HTTP/1.1 over the local socket (a named
-pipe on Windows) that the owner's commands talk to.
+pipe on Windows) that the owner's commands talk to. Read
+[../../../docs/references/daemon/README.md](../../../docs/references/daemon/README.md)
+for the wire, the reasons, and how the interface relates to the engine and to the
+administrative rules.
 
 This is a runtime package of layer 6 of [`internal/node/README.md`](../README.md):
 it imports `engine` (through the service interface), `ipc`, `apiwire` and the

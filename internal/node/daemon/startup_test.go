@@ -153,27 +153,49 @@ func TestTheManagementInterfaceReadsAndRefusesChangesWhileTheNodeStarts(t *testi
 
 // A hook that fails stops the start, and what the start had begun is stopped in the
 // order of the shutdown: nothing is left running, the management interface does not
-// answer, and the lock is free for the next start.
+// answer, and the lock is free for the next start. The stops are those of what had
+// begun: a hook of step 7 fails before the loop runs and stops nothing, the Agent
+// interface of step 9 is stopped by the failure of any later step, and the adapters
+// of step 10 by the failure of that step and of the next.
 func TestAHookThatFailsStopsTheStartAndLeavesNothingRunning(t *testing.T) {
-	noLeaks(t)
-	c, _ := initialized(t)
-	p := newProbe(t, c.Home)
-	p.failAt = "adapters"
-	c.Attach = p.attachments()
-	_, err := daemon.Start(context.Background(), c)
-	if err == nil || !strings.Contains(err.Error(), "the adapters hook failed") || !strings.Contains(err.Error(), "step 10") {
-		t.Fatalf("Start = %v; want the failure of the hook, naming the step", err)
+	for _, tc := range []struct {
+		failAt string
+		step   string
+		stops  []string // the stops that run, in order
+	}{
+		{"trust", "step 7", nil},
+		{"agent-probe", "step 9", []string{"interfaces"}},
+		{"adapters", "step 10", []string{"interfaces", "adapters"}},
+		{"agent-serve", "step 15", []string{"interfaces", "adapters"}},
+	} {
+		t.Run(tc.failAt, func(t *testing.T) {
+			noLeaks(t)
+			c, _ := initialized(t)
+			p := newProbe(t, c.Home)
+			p.failAt = tc.failAt
+			c.Attach = p.attachments()
+			_, err := daemon.Start(context.Background(), c)
+			if err == nil || !strings.Contains(err.Error(), "the "+tc.failAt+" hook failed") || !strings.Contains(err.Error(), tc.step) {
+				t.Fatalf("Start = %v; want the failure of the hook, naming the step", err)
+			}
+			var got []string
+			for _, s := range p.stopped {
+				got = append(got, strings.SplitN(s, " ", 2)[0])
+			}
+			if !reflect.DeepEqual(got, tc.stops) {
+				t.Errorf("stops %v; want %v", got, tc.stops)
+			}
+			if _, err := os.Stat(filepath.Join(c.Home, "manage", "manage.sock")); err == nil && runtime.GOOS != "windows" {
+				t.Error("the management socket is left")
+			}
+			if tryManage(c.Home, "endpoints.list") == 200 {
+				t.Error("the management interface answers after the start failed")
+			}
+			// the lock is free and the node starts
+			c.Attach = daemon.Attachments{}
+			started(t, c)
+		})
 	}
-	// the stops of what had begun, interfaces before adapters
-	if len(p.stopped) != 2 || !strings.HasPrefix(p.stopped[0], "interfaces") || !strings.HasPrefix(p.stopped[1], "adapters") {
-		t.Errorf("stops %v; want the interfaces and then the adapters", p.stopped)
-	}
-	if _, err := os.Stat(filepath.Join(c.Home, "manage", "manage.sock")); err == nil && runtime.GOOS != "windows" {
-		t.Error("the management socket is left")
-	}
-	// the lock is free and the node starts
-	c.Attach = daemon.Attachments{}
-	started(t, c)
 }
 
 // A directory of the layout that the owner removed is made again by the start, and

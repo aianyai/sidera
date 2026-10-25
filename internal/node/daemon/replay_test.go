@@ -13,9 +13,9 @@ import (
 // endpointRecord is an endpoint of the enabled instance on the disk of a home.
 func endpointRecord(t testing.TB, b byte, kind adapterreg.EndpointKind) store.EndpointRecord {
 	t.Helper()
-	r := store.EndpointRecord{ID: endpointID(t, b), Kind: kind, Instance: "chat", Status: store.EndpointOpen}
+	r := store.EndpointRecord{ID: endpointID(t, b), Kind: kind, Instance: "chat", Status: store.EndpointOpen,
+		Token: []byte(strings.Repeat("\x5a", store.TokenLen))}
 	if kind == adapterreg.KindSession {
-		r.Token = []byte(strings.Repeat("\x5a", store.TokenLen))
 		r.Session = &store.SessionInfo{Preset: "default"}
 	}
 	return r

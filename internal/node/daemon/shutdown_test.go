@@ -3,6 +3,8 @@ package daemon_test
 import (
 	"context"
 	"errors"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
 	"testing"
@@ -184,6 +186,10 @@ func waitDone(t testing.TB, d *daemon.Daemon) {
 // Run is the daemon as a process runs it: it starts, and returns when the context
 // ends (the signal handler of the program cancels it), after a normal shutdown.
 func TestRunReturnsAfterANormalShutdownWhenItsContextEnds(t *testing.T) {
+	// the signal package starts one goroutine for the process, the first time it is
+	// used and for good; it is not the daemon's
+	_, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt)
+	stopSignals()
 	noLeaks(t)
 	c, _ := initialized(t)
 	ctx, cancel := context.WithCancel(context.Background())

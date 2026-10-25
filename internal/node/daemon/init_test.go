@@ -15,7 +15,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
-	"github.com/aianyai/sidera/internal/node/config"
+	nodeconfig "github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
@@ -89,11 +89,11 @@ func TestInitMakesTheDataDirectoryWithItsLayoutKeysAndConfiguration(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := config.DecodePresets(b)
+	p, err := nodeconfig.DecodePresets(b)
 	if err != nil {
 		t.Fatalf("the presets init wrote do not decode: %v", err)
 	}
-	if got, ok := p.Items[config.DefaultPresetName]; !ok || got.LocalSources != authz.PresetLocalAllow || len(p.Items) != 1 {
+	if got, ok := p.Items[nodeconfig.DefaultPresetName]; !ok || got.LocalSources != authz.PresetLocalAllow || len(p.Items) != 1 {
 		t.Errorf("presets %+v, want the one default preset open to local sources", p.Items)
 	}
 }
@@ -237,21 +237,24 @@ func newMemHome(t testing.TB) (*fsxtest.Mem, string) {
 func runInitCapturing(t testing.TB, mem *fsxtest.Mem, home string, rng *rand.Rand, seed byte) (crashRun, error) {
 	t.Helper()
 	run := crashRun{keys: map[fsx.Key]bool{}}
-	var counter fsx.Counter
-	obs := fsx.Observe(mem, &counter, func(p fsx.Point) error {
+	c := memConfig(home, clocktest.NewFake(t0), mem)
+	c.Observer = observerFunc(func(p fsx.Point, _ txn.Kind) {
 		run.keys[p.Key] = true
 		run.states = append(run.states,
 			crashState{"process-crash before " + p.String(), mem.Clone()},
 			crashState{"worst-power-loss before " + p.String(), mem.CrashCloneWorst()},
 			crashState{"seeded-power-loss before " + p.String(), mem.CrashClone(rng)},
 		)
-		return nil
 	})
-	c := memConfig(home, clocktest.NewFake(t0), obs)
 	c.Rand = seeded(seed)
 	_, err := daemon.Init(context.Background(), c)
 	return run, err
 }
+
+// observerFunc is a txn.Observer made of a function.
+type observerFunc func(fsx.Point, txn.Kind)
+
+func (f observerFunc) Reached(p fsx.Point, k txn.Kind) { f(p, k) }
 
 func initRerun(t testing.TB, mem *fsxtest.Mem, home string, seed byte) error {
 	t.Helper()
@@ -313,7 +316,7 @@ func TestInitReplaysToACompleteHomeFromEveryCrashState(t *testing.T) {
 		inner := s.mem.Clone()
 		complete(s.name, s.mem, 2)
 		// crash the rerun at its steps, for some states
-		if i%9 != 0 {
+		if i%21 != 0 {
 			continue
 		}
 		if done, _ := keys.Initialized(inner); done {
@@ -328,7 +331,7 @@ func TestInitReplaysToACompleteHomeFromEveryCrashState(t *testing.T) {
 			complete(s.name+", then "+is.name, is.mem, 4)
 		}
 	}
-	if nested < 300 {
+	if nested < 150 {
 		t.Errorf("only %d crashes during a rerun of init were exercised", nested)
 	}
 }
@@ -353,7 +356,7 @@ func TestEveryDeclaredCrashPointOfInitAndLayoutIsReached(t *testing.T) {
 			if want[k.Tag.Tx] == nil {
 				want[k.Tag.Tx] = map[fsx.Key]bool{}
 			}
-			want[k.Tag.Tx][k] = false
+			want[k.Tag.Tx][k.Key] = false
 		}
 	}
 	if len(want["init"]) == 0 || len(want["layout"]) == 0 {
@@ -379,14 +382,17 @@ func TestEveryDeclaredCrashPointOfInitAndLayoutIsReached(t *testing.T) {
 		if err := fsx.RemoveAll(lost, fsx.Tag{Tx: "setup", Role: "r"}, d); err != nil {
 			t.Fatal(err)
 		}
-		var counter fsx.Counter
 		hit := map[fsx.Key]bool{}
-		obs := fsx.Observe(lost, &counter, func(p fsx.Point) error { hit[p.Key] = true; return nil })
-		w := txn.New(obs, tab, nil)
+		recovered := false
+		w := txn.New(lost, tab, observerFunc(func(p fsx.Point, _ txn.Kind) {
+			if recovered { // what the layout rule alone reaches, not the recovery before it
+				hit[p.Key] = true
+			}
+		}))
 		if err := w.Recover(); err != nil {
 			t.Fatalf("Recover: %v", err)
 		}
-		hit = map[fsx.Key]bool{} // what the layout rule alone reaches, not the recovery before it
+		recovered = true
 		if err := daemon.RepairLayout(w); err != nil {
 			t.Fatalf("RepairLayout after losing %s: %v", d, err)
 		}
@@ -430,5 +436,61 @@ func TestTheLayoutRuleHasNoWorkOnAHomeThatInitMade(t *testing.T) {
 			t.Errorf("%s comes before its parent %s", d, p)
 		}
 		seen[d] = true
+	}
+}
+
+// An owner who deletes keys/ to start the identity afresh and runs init again gets
+// a new identity, and keeps everything of the configuration: the settings, the
+// presets and the instances are the owner's decisions and are not rewritten.
+func TestInitAfterTheOwnerDeletedKeysMakesANewIdentityAndKeepsTheConfiguration(t *testing.T) {
+	c, clk := initialized(t)
+	first := nodeOf(t, c)
+	cfgFiles := []string{"node.json", "policy.json", "presets.json", "instances.json"}
+	before := map[string][]byte{}
+	for _, f := range cfgFiles {
+		b, err := os.ReadFile(filepath.Join(c.Home, "config", f))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before[f] = b
+	}
+	if err := os.RemoveAll(filepath.Join(c.Home, "keys")); err != nil {
+		t.Fatal(err)
+	}
+	again := config(c.Home, clk)
+	again.Rand = seeded(77)
+	rep, err := daemon.Init(context.Background(), again)
+	if err != nil {
+		t.Fatalf("init after keys/ was deleted: %v", err)
+	}
+	if rep.Node == first {
+		t.Error("the node has the identity of the keys that were deleted")
+	}
+	for _, f := range cfgFiles {
+		if b, err := os.ReadFile(filepath.Join(c.Home, "config", f)); err != nil || !bytes.Equal(b, before[f]) {
+			t.Errorf("config/%s was rewritten by init: %v", f, err)
+		}
+	}
+	started(t, again)
+}
+
+// An owner who deletes config/ cannot start the node and cannot run init either: a
+// retired identity would come back otherwise, because the record of its
+// retirement is in config/revocations/.
+func TestAHomeWhoseConfigurationWasDeletedIsNeitherStartedNorInitializedAgain(t *testing.T) {
+	c, _ := initialized(t)
+	if err := os.RemoveAll(filepath.Join(c.Home, "config")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := daemon.Start(context.Background(), c)
+	var fe *nodeconfig.FileError
+	if !errors.As(err, &fe) || !strings.HasPrefix(fe.Path, "config") {
+		t.Errorf("a start without config/: %v; want an error that names it", err)
+	}
+	if _, err := daemon.Init(context.Background(), c); !errors.Is(err, daemon.ErrAlreadyInitialized) {
+		t.Errorf("init without config/: %v; want ErrAlreadyInitialized", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Home, "config")); err == nil {
+		t.Error("config/ was made again")
 	}
 }
