@@ -110,8 +110,9 @@ handle the daemon gives it.
   anything of its own (launching, handshaking, calling the engine, reporting,
   ending a process) and while a timer of the instance is due and not yet taken;
   a supervisor parked on its timers with nothing due is not working. `Working` is
-  read before the counts and again after them, so "idle" never comes with counts
-  older than the request the host is waiting for. After the test clock moved, a
+  asked before the counts are read and they are read again if the supervisor moved
+  meanwhile, so "idle" never comes with counts older than the request the host is
+  waiting for. After the test clock moved, a
   caller that sees `Working` false knows the host has acted on everything the move
   made due. Only a test clock shows a due timer. After `Shutdown`, `Abort` and for
   an unknown instance everything is zero.
