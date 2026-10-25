@@ -40,21 +40,56 @@ var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}\.log$`)
 // instances take a little more than the total: that only happens beyond the
 // number of endpoints a node is sized for, and the status reports the real size.
 func Threshold(total int64, instances int) int64 {
+	return threshold(total, instances, MinThreshold)
+}
+
+func threshold(total int64, instances int, floor int64) int64 {
 	if instances < 0 {
 		instances = 0
 	}
-	t := total / (2 * int64(1+instances))
-	return max(t, MinThreshold)
+	return max(total/(2*int64(1+instances)), floor)
+}
+
+// Budget is how much the logs of a node may take together, and the number of
+// enabled adapter instances that share it with the daemon. Both are asked at every
+// write, so a change of the configuration takes effect at the next rotation
+// without reopening any log; the handle alone applies Threshold to them, so no
+// caller counts instances or divides the total.
+type Budget struct {
+	// Total is the number of bytes all logs may take. It is required.
+	Total func() int64
+	// Instances is the number of enabled instances, each of which has a log of its
+	// own beside the daemon's. Nil is none.
+	Instances func() int
+	// Floor is the smallest threshold; zero is MinThreshold. A test that rotates
+	// after a few lines sets a smaller one; nothing else has a reason to.
+	Floor int64
+}
+
+// threshold is the size at which each log is rotated now.
+func (b Budget) threshold() int64 {
+	instances := 0
+	if b.Instances != nil {
+		instances = b.Instances()
+	}
+	floor := b.Floor
+	if floor == 0 {
+		floor = MinThreshold
+	}
+	return threshold(b.Total(), instances, floor)
 }
 
 // Handle writes logs through a file system. It is built from the writable file
 // system and offers no operation but the opening, rotation and removal of logs,
 // so what goes through it cannot touch state, configuration or keys.
-type Handle struct{ fs fsx.FS }
+type Handle struct {
+	fs     fsx.FS
+	budget Budget
+}
 
-// New returns the handle over fs. logs/ exists: init makes it, and the start
-// makes it again if the owner removed it.
-func New(fs fsx.FS) *Handle { return &Handle{fs: fs} }
+// New returns the handle over fs, whose logs are rotated by budget. logs/ exists:
+// init makes it, and the start makes it again if the owner removed it.
+func New(fs fsx.FS, budget Budget) *Handle { return &Handle{fs: fs, budget: budget} }
 
 // ErrBadName is returned for a name that is not the name of a log.
 var ErrBadName = errors.New("logfile: not the name of a log")
@@ -67,17 +102,15 @@ func checkName(name string) error {
 }
 
 // Open opens the log called name for appending, creating it when it is not there.
-// limit is the size at which the log is rotated; it is asked at every write, so a
-// change of the number of instances takes effect at the next rotation without
-// reopening the log.
-func (h *Handle) Open(name string, limit func() int64) (*Log, error) {
+// The log is rotated at the threshold the handle's budget gives at each write.
+func (h *Handle) Open(name string) (*Log, error) {
 	if err := checkName(name); err != nil {
 		return nil, err
 	}
-	if limit == nil {
-		return nil, errors.New("logfile: a log needs a threshold")
+	if h.budget.Total == nil {
+		return nil, errors.New("logfile: the handle has no total to share among the logs")
 	}
-	l := &Log{h: h, p: path.Join(Dir, name), limit: limit}
+	l := &Log{h: h, p: path.Join(Dir, name)}
 	if err := l.open(); err != nil {
 		return nil, err
 	}
@@ -102,9 +135,8 @@ func (h *Handle) Remove(name string) error {
 // Log is an open log. It is safe for concurrent use; every Write is one line, and
 // a line goes whole to one file.
 type Log struct {
-	h     *Handle
-	p     string
-	limit func() int64
+	h *Handle
+	p string
 
 	mu   sync.Mutex
 	f    fsx.File
@@ -140,7 +172,7 @@ func (l *Log) Write(p []byte) (int, error) {
 	if l.f == nil {
 		return 0, errors.New("logfile: the log is closed")
 	}
-	if l.size > 0 && l.size+int64(len(p)) > l.limit() {
+	if l.size > 0 && l.size+int64(len(p)) > l.h.budget.threshold() {
 		if err := l.rotate(); err != nil {
 			return 0, err
 		}

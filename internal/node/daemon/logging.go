@@ -68,12 +68,13 @@ func textHandler(w io.Writer, clk clock.Clock) slog.Handler {
 }
 
 // openLog opens the daemon's own log through the restricted handle and attaches it
-// to the logger, which gives it the lines kept so far. The threshold at which the
-// log is rotated follows the configuration once it is loaded, and the node's
-// default before.
+// to the logger, which gives it the lines kept so far. The logs share the total of
+// the configuration once it is loaded, and the node's default before; the handle
+// applies the rule, and the daemon says only where the total and the number of
+// enabled instances are read from.
 func (d *Daemon) openLog() error {
-	d.logs = logfile.New(d.fsys)
-	out, err := d.logs.Open(daemonLog, d.logThreshold)
+	d.logs = logfile.New(d.fsys, logfile.Budget{Total: d.logTotal, Instances: d.enabledInstances})
+	out, err := d.logs.Open(daemonLog)
 	if err != nil {
 		return err
 	}
@@ -82,18 +83,25 @@ func (d *Daemon) openLog() error {
 	return nil
 }
 
-// logThreshold is the size at which a log is rotated: the total the logs may take
-// shared among the daemon's and the enabled instances'.
-func (d *Daemon) logThreshold() int64 {
-	total := config.DefaultNodeSettings().LogTotalBytes
-	instances := 0
+// logTotal is the number of bytes the logs may take together.
+func (d *Daemon) logTotal() int64 {
 	if c := d.loaded.Load(); c != nil {
-		total = c.Node().Settings.LogTotalBytes
-		for _, in := range c.Instances().Items {
-			if in.Enabled {
-				instances++
-			}
+		return c.Node().Settings.LogTotalBytes
+	}
+	return config.DefaultNodeSettings().LogTotalBytes
+}
+
+// enabledInstances is the number of enabled adapter instances: each has a log.
+func (d *Daemon) enabledInstances() int {
+	c := d.loaded.Load()
+	if c == nil {
+		return 0
+	}
+	n := 0
+	for _, in := range c.Instances().Items {
+		if in.Enabled {
+			n++
 		}
 	}
-	return logfile.Threshold(total, instances)
+	return n
 }

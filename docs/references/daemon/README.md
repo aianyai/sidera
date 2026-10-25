@@ -127,9 +127,12 @@ The daemon's log is `logs/daemon.log`, written through `logfile`, a handle that
 can open, rotate and remove logs under `logs/` and nothing else, under the reserved
 `log` tag, so a log write is never a crash point. Each log is rotated to one file,
 `.1`, at a size that shares the node's `log_total_bytes` among two files for the
-daemon and for each enabled instance, never below 1 MiB. Lines logged before the
-log can be opened (steps 1 and 2) are kept and written first. Lines carry the time of
-the injected clock. Never a message body, a token or a key.
+daemon and for each enabled instance, never below 1 MiB. The handle owns that rule:
+it is given the total and the source of the number of enabled instances once
+(`logfile.Budget`) and reads both at every write, so the daemon and the adapter host
+open their logs by name and neither counts instances or divides the total. Lines
+logged before the log can be opened (steps 1 and 2) are kept and written first.
+Lines carry the time of the injected clock. Never a message body, a token or a key.
 
 ### The management interface
 
@@ -224,6 +227,10 @@ interface: a sandbox must deny the socket to an agent.
 - **The clock is judged at step 4, before the step that signs.** A node that signed on
   a clock set back would issue what peers refuse, or worse, what they accept in the
   past. The pause is made durable before the loop runs, with the mark that was.
+- **The budget lives in the handle.** The share of each log depends on the number of
+  enabled instances at the moment of the write. Had the daemon passed a threshold,
+  the adapter host would have had to count instances too, and two counts drift.
+  Rejected: a threshold given to `Open`, which is what that was.
 - **Logs through a restricted handle, not through a transaction.** Logs are written
   by many goroutines and lost harmlessly; as crash points they would make the
   numbering of the real writes depend on how much was logged. The handle has no

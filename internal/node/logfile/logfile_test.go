@@ -50,14 +50,20 @@ func (d *disk) exists(p string) bool {
 	return err == nil
 }
 
-func fixed(n int64) func() int64 { return func() int64 { return n } }
+// threshold is a budget under which every log is rotated at the size limit() says,
+// whenever it is asked: one daemon log (no instance), no floor.
+func threshold(limit func() int64) logfile.Budget {
+	return logfile.Budget{Total: func() int64 { return 2 * limit() }, Floor: 1}
+}
+
+func fixed(n int64) logfile.Budget { return threshold(func() int64 { return n }) }
 
 // The handle can write a log and nothing else: a name that would lead out of
 // logs/, or is not the name of a log, is refused before any step runs, and what a
 // valid name creates is under logs/.
 func TestTheHandleWritesOnlyLogsUnderTheLogsDirectory(t *testing.T) {
 	d := newDisk(t)
-	h := logfile.New(d.fs)
+	h := logfile.New(d.fs, fixed(1<<20))
 	for _, tc := range []struct {
 		name  string
 		valid bool
@@ -79,7 +85,7 @@ func TestTheHandleWritesOnlyLogsUnderTheLogsDirectory(t *testing.T) {
 		{"daemon.log\x00", false},
 	} {
 		t.Run(fmt.Sprintf("%q", tc.name), func(t *testing.T) {
-			f, err := h.Open(tc.name, fixed(1<<20))
+			f, err := h.Open(tc.name)
 			if tc.valid != (err == nil) {
 				t.Fatalf("Open(%q) = %v, valid %v", tc.name, err, tc.valid)
 			}
@@ -112,8 +118,8 @@ func TestTheHandleWritesOnlyLogsUnderTheLogsDirectory(t *testing.T) {
 // on how many lines were logged.
 func TestLogWritesAreNeverCrashPoints(t *testing.T) {
 	d := newDisk(t)
-	h := logfile.New(d.fs)
-	f, err := h.Open("daemon.log", fixed(64))
+	h := logfile.New(d.fs, fixed(64))
+	f, err := h.Open("daemon.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,9 +145,9 @@ func TestLogWritesAreNeverCrashPoints(t *testing.T) {
 // the newest lines and never more than twice the threshold.
 func TestRotationKeepsOneRotatedFileAndBoundsTheSize(t *testing.T) {
 	d := newDisk(t)
-	h := logfile.New(d.fs)
 	const limit = 100
-	f, err := h.Open("daemon.log", fixed(limit))
+	h := logfile.New(d.fs, fixed(limit))
+	f, err := h.Open("daemon.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,8 +192,8 @@ func TestRotationKeepsOneRotatedFileAndBoundsTheSize(t *testing.T) {
 // file of its own rather than cut.
 func TestALineIsNeverCutByTheRotation(t *testing.T) {
 	d := newDisk(t)
-	h := logfile.New(d.fs)
-	f, err := h.Open("daemon.log", fixed(30))
+	h := logfile.New(d.fs, fixed(30))
+	f, err := h.Open("daemon.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,9 +215,9 @@ func TestALineIsNeverCutByTheRotation(t *testing.T) {
 // had is not lost by closing and opening it again.
 func TestAChangedThresholdAndAReopenedLogAreHonoured(t *testing.T) {
 	d := newDisk(t)
-	h := logfile.New(d.fs)
 	limit := int64(1000)
-	f, err := h.Open("daemon.log", func() int64 { return limit })
+	h := logfile.New(d.fs, threshold(func() int64 { return limit }))
+	f, err := h.Open("daemon.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +234,7 @@ func TestAChangedThresholdAndAReopenedLogAreHonoured(t *testing.T) {
 		t.Errorf("the lowered threshold did not rotate: %q", d.read(t, "logs/daemon.log.1"))
 	}
 	f.Close()
-	f, err = h.Open("daemon.log", func() int64 { return limit })
+	f, err = h.Open("daemon.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,8 +253,8 @@ func TestAChangedThresholdAndAReopenedLogAreHonoured(t *testing.T) {
 // them all.
 func TestConcurrentWritersKeepEveryLineWhole(t *testing.T) {
 	d := newDisk(t)
-	h := logfile.New(d.fs)
-	f, err := h.Open("daemon.log", fixed(1<<20))
+	h := logfile.New(d.fs, fixed(1<<20))
+	f, err := h.Open("daemon.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,8 +292,8 @@ func TestConcurrentWritersKeepEveryLineWhole(t *testing.T) {
 // and a log that is not there is no error.
 func TestRemoveDeletesALogAndItsRotation(t *testing.T) {
 	d := newDisk(t)
-	h := logfile.New(d.fs)
-	f, err := h.Open("adapter-chat.log", fixed(20))
+	h := logfile.New(d.fs, fixed(20))
+	f, err := h.Open("adapter-chat.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,8 +381,8 @@ func (f *flakyFile) Write(p []byte) (int, error) {
 func TestAFailedWriteIsAnErrorAndTheNextWriteWorks(t *testing.T) {
 	d := newDisk(t)
 	bad := &flaky{FS: d.mem}
-	h := logfile.New(bad)
-	f, err := h.Open("daemon.log", fixed(1<<20))
+	h := logfile.New(bad, fixed(1<<20))
+	f, err := h.Open("daemon.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -407,9 +413,9 @@ func TestAFailedRotationLeavesTheLogWritable(t *testing.T) {
 	d := newDisk(t)
 	faulty := fsxtest.NewFaulty(t, d.mem)
 	rule := faulty.Fail(fsxtest.Match{Tx: fsx.TxLog, Step: fsx.StepRename}, fs.ErrPermission)
-	h := logfile.New(faulty)
 	limit := int64(30)
-	f, err := h.Open("daemon.log", func() int64 { return limit })
+	h := logfile.New(faulty, threshold(func() int64 { return limit }))
+	f, err := h.Open("daemon.log")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,5 +435,103 @@ func TestAFailedRotationLeavesTheLogWritable(t *testing.T) {
 	}
 	if got := d.read(t, "logs/daemon.log"); got != "first line of it\nthird\n" {
 		t.Errorf("the log holds %q", got)
+	}
+}
+
+// The rule that shares the budget among the logs lives in the handle: a log opened
+// by name is rotated at the size the budget gives for the instances there are when
+// it is written, and every log of the handle follows the same budget, so whoever
+// opens a log (the daemon, an adapter host) never counts instances itself. The
+// budget here is 1200 bytes and no floor: the daemon alone has 600 bytes for each of
+// two files, one instance 300, five instances 100.
+func TestALogIsRotatedAtTheShareOfTheBudgetForTheInstancesThereAre(t *testing.T) {
+	d := newDisk(t)
+	instances := 0
+	h := logfile.New(d.fs, logfile.Budget{
+		Total:     func() int64 { return 1200 },
+		Instances: func() int { return instances },
+		Floor:     1,
+	})
+	daemon, err := h.Open("daemon.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer daemon.Close()
+	adapter, err := h.Open("adapter-chat.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer adapter.Close()
+	logs := []*logfile.Log{daemon, adapter}
+	rotations := []string{"logs/daemon.log.1", "logs/adapter-chat.log.1"}
+	line := []byte(strings.Repeat("x", 59) + "\n")
+	write := func(n int) {
+		t.Helper()
+		for _, l := range logs {
+			for i := 0; i < n; i++ {
+				if _, err := l.Write(line); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	// No instance: 600 bytes a file, so 120 bytes are far from it.
+	write(2)
+	for _, p := range rotations {
+		if d.exists(p) {
+			t.Errorf("%s exists after 120 bytes under a threshold of 600", p)
+		}
+	}
+	// Five instances: 100 bytes a file. The next line takes the file past it.
+	instances = 5
+	write(1)
+	for _, p := range rotations {
+		if !d.exists(p) {
+			t.Errorf("%s is missing: with 5 instances the threshold is 100 bytes", p)
+		}
+	}
+	// No instance again: the new file takes 600 bytes before it rotates.
+	instances = 0
+	before := d.read(t, rotations[0])
+	write(5)
+	if got := d.read(t, rotations[0]); got != before {
+		t.Errorf("the log rotated at the old share after the instances were gone: %q", got)
+	}
+}
+
+// A budget with no instance source counts none, and one with no floor never goes
+// below MinThreshold, so a small total does not rotate a log at every line.
+func TestTheBudgetDefaultsToNoInstancesAndToTheMinimumThreshold(t *testing.T) {
+	d := newDisk(t)
+	h := logfile.New(d.fs, logfile.Budget{Total: func() int64 { return 10 }})
+	f, err := h.Open("daemon.log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	for i := 0; i < 4; i++ {
+		if _, err := f.Write([]byte(strings.Repeat("x", 1000) + "\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if d.exists("logs/daemon.log.1") {
+		t.Error("a log was rotated below MinThreshold")
+	}
+	if logfile.MinThreshold != 1<<20 {
+		t.Errorf("MinThreshold = %d, want 1 MiB", logfile.MinThreshold)
+	}
+}
+
+// A log with no total to share has no threshold, which is a mistake of the caller
+// that shows at once and not at the first rotation.
+func TestAHandleWithoutATotalOpensNoLog(t *testing.T) {
+	d := newDisk(t)
+	h := logfile.New(d.fs, logfile.Budget{})
+	if f, err := h.Open("daemon.log"); err == nil {
+		f.Close()
+		t.Fatal("a log was opened by a handle that has no budget")
+	}
+	if d.exists("logs/daemon.log") {
+		t.Error("a refused log left a file behind")
 	}
 }

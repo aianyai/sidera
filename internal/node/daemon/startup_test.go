@@ -3,6 +3,7 @@ package daemon_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	nodeconfig "github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -239,6 +241,58 @@ func TestTheDaemonLogsToTheFileUnderLogsWithTheTimeOfItsClock(t *testing.T) {
 		if info, err := os.Stat(p); err != nil || info.Mode().Perm() != 0o600 {
 			t.Errorf("the log: %v, %v; want mode 0600", info, err)
 		}
+	}
+}
+
+// The logs share the total of the configuration among the daemon's and the enabled
+// instances' (two files each): the daemon rotates its log at the share the
+// configuration gives when it writes, the number of enabled instances read from the
+// configuration it loaded. With a total of 12 MiB and two enabled instances that is
+// 2 MiB a file; with none, 6 MiB.
+func TestTheDaemonRotatesItsLogAtTheShareOfTheConfiguredTotal(t *testing.T) {
+	const mib = 1 << 20
+	for _, tc := range []struct {
+		name      string
+		instances []string
+		rotates   bool
+	}{
+		{"two enabled instances share it", []string{"chat", "mail"}, true},
+		{"the daemon alone has it", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noLeaks(t)
+			c, _ := initialized(t)
+			settings := nodeconfig.DefaultNodeSettings()
+			settings.LogTotalBytes = 12 * mib
+			node, err := nodeconfig.Node{Version: 1, Settings: settings}.Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(c.Home, "config", "node.json"), node, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			items := map[string]nodeconfig.Instance{}
+			for _, in := range tc.instances {
+				items[in] = nodeconfig.Instance{Adapter: in, Enabled: true}
+			}
+			ins, err := nodeconfig.Instances{Version: 1, Items: items}.Encode()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(c.Home, "config", "instances.json"), ins, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			var log *slog.Logger
+			c.Attach.AgentServe = func(_ context.Context, env *daemon.Env) error { log = env.Log; return nil }
+			started(t, c)
+			for i := 0; i < 4; i++ {
+				log.Info("filling the log", "padding", strings.Repeat("x", mib/2))
+			}
+			_, err = os.Stat(filepath.Join(c.Home, "logs", "daemon.log.1"))
+			if rotated := err == nil; rotated != tc.rotates {
+				t.Errorf("after 2 MiB of lines the log was rotated: %v, want %v (stat: %v)", rotated, tc.rotates, err)
+			}
+		})
 	}
 }
 

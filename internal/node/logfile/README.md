@@ -12,10 +12,11 @@ files only through the `fsx.FS` it is handed.
 
 | Name | Purpose |
 | ---- | ------- |
-| `New(fs)`, `Handle` | The restricted handle: it can open, rotate and remove logs under `logs/`, and nothing else. |
-| `Handle.Open(name, limit)`, `Log.Write`, `Log.Close` | An open log. A write is one line; the threshold is asked at every write. |
+| `New(fs, Budget)`, `Handle` | The restricted handle: it can open, rotate and remove logs under `logs/`, and nothing else. It knows the budget the logs share. |
+| `Budget` | The total the logs may take and the source of the number of enabled instances (nil is none), both asked at every write, and a floor (zero is `MinThreshold`; only a test that rotates after a few lines sets another). |
+| `Handle.Open(name)`, `Log.Write`, `Log.Close` | An open log. A write is one line; the threshold is the budget's share, asked at every write. |
 | `Handle.Remove(name)` | Deletes a log and its rotation, as when its instance is disabled. |
-| `Threshold(total, instances)` | The size at which each log is rotated. |
+| `Threshold(total, instances)` | The size at which each log is rotated: the rule `Budget` applies. |
 | `Dir`, `MinThreshold`, `ErrBadName` | `logs`, 1 MiB, and the refusal of a name that is not a log's. |
 
 ## Rules
@@ -35,9 +36,14 @@ files only through the `fsx.FS` it is handed.
   file the rotation, replacing the older one, and starts a new file; a line longer
   than the threshold goes whole into a file of its own. A line is never cut, and
   the two files never hold more than twice the threshold plus one line.
-- **The threshold follows the total.** `Threshold` shares the total among two files
-  for the daemon and for each enabled instance, with a floor of 1 MiB, which an
-  extreme number of instances can push the real total past by a little.
+- **The threshold follows the total, and the handle alone applies the rule.**
+  `Threshold` shares the total among two files for the daemon and for each enabled
+  instance, with a floor of 1 MiB, which an extreme number of instances can push the
+  real total past by a little. The handle is given the total and the source of the
+  instance count once, in its `Budget`, and every log it opens reads them at each
+  write: the daemon and the adapter host open their logs by name and never count
+  instances or divide anything, so the rule has one home and two callers cannot
+  disagree about the share.
 - **A failed write is the caller's to drop.** `Write` returns the error and keeps
   nothing of the line; the next write goes on. A failed rotation opens the file
   again as it was, so a failing disk never leaves the log without a file.
@@ -54,4 +60,6 @@ files only through the `fsx.FS` it is handed.
 `logfile_test.go`: the names the handle accepts, that no step of a log is a crash
 point, the rotation and its bound, that a line is never cut, the threshold read at
 every write and the size of a reopened log, concurrent writers, the removal, the
-numbers of `Threshold` worked out by hand, a failed write and a failed rotation.
+numbers of `Threshold` worked out by hand, the share of the budget that two logs of
+one handle follow as the number of instances changes, the defaults of a `Budget`, a
+handle without a total, a failed write and a failed rotation.
