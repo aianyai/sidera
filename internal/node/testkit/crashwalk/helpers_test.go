@@ -165,10 +165,11 @@ func (b *fakeBackend) Run(_ context.Context, s crashwalk.Scenario, p crashwalk.R
 		var gen2 []crashwalk.Hit
 		for _, tg := range p.Targets {
 			item := tg.Point.Key
-			counts := 0
+			counts := map[fsx.Key]int{}
 			for _, h := range b.recovery[item.String()] {
-				counts++
-				gen2 = append(gen2, crashwalk.Hit{Gen: 2, Point: fsx.Point{Key: key(b.t, h.key), Hit: counts}, Path: h.path})
+				k := key(b.t, h.key)
+				counts[k]++
+				gen2 = append(gen2, crashwalk.Hit{Gen: 2, Point: fsx.Point{Key: k, Hit: counts[k]}, Path: h.path})
 			}
 			reached := false
 			for _, h := range gen2 {

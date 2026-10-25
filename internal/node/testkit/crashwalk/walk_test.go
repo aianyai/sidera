@@ -15,7 +15,7 @@ func system(t *testing.T) (*fakeBackend, scenario) {
 	p := program{steps: []programStep{
 		{"setup", cat(replaced("status", "file", "state/status.rec"), []rawHit{commit("status")})},
 		{"send", cat(replaced("intake", "body", "state/body/m1.tmp"), replaced("intake", "out", "state/out/m1.rec"), []rawHit{commit("intake")})},
-		{"log", []rawHit{{"journal/events.open", "archive/a.jsonl"}, {"journal/events.write", "archive/a.jsonl"}, {"journal/events.sync", "archive/a.jsonl"}, {"journal/events.sync-dir", "archive"}}},
+		{"log", []rawHit{{"journal/events.open", "archive/a.jsonl"}, {"journal/events.write", "archive/a.jsonl"}, {"journal/events.sync", "archive/a.jsonl"}, {"journal/events.sync-dir", "archive"}, commit("journal")}},
 	}}
 	// A real run of the recovery transactions: what the restart after a crash writes.
 	recoveryRuns := map[string][]rawHit{}

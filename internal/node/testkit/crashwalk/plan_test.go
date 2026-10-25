@@ -8,6 +8,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
+	"github.com/aianyai/sidera/internal/node/txn"
 )
 
 func TestNormalizePath(t *testing.T) {
@@ -105,7 +106,7 @@ func recordingHits(t *testing.T) []crashwalk.Hit {
 		{"setup", cat(replaced("status", "file", "state/status.rec"), []rawHit{commit("status")})},
 		{"send", cat(replaced("intake", "body", "state/body/m1.tmp"), replaced("intake", "out", "state/out/m1.rec"), []rawHit{commit("intake")})},
 		{"deliver", cat(replaced("status", "file", "state/status.rec"), []rawHit{commit("status")})},
-		{"log", []rawHit{{"journal/events.open", "archive/a.jsonl"}, {"journal/events.write", "archive/a.jsonl"}, {"journal/events.sync", "archive/a.jsonl"}, {"journal/events.sync-dir", "archive"}}},
+		{"log", []rawHit{{"journal/events.open", "archive/a.jsonl"}, {"journal/events.write", "archive/a.jsonl"}, {"journal/events.sync", "archive/a.jsonl"}, {"journal/events.sync-dir", "archive"}, commit("journal")}},
 	}}
 	hits, _ := p.run(t, 1, fsx.Point{}, "")
 	return hits
@@ -137,7 +138,7 @@ func TestPlanFullTakesEveryWindowPointExceptTheSyncSteps(t *testing.T) {
 		// status in the deliver step is the second use of the keys: ordinal 2
 		"status/file.create#2", "status/file.write#2", "status/file.rename#2", "status/commit#2",
 		// the journal: the open and the write, no sync
-		"journal/events.open#1", "journal/events.write#1",
+		"journal/events.open#1", "journal/events.write#1", "journal/commit#1",
 		// step boundaries
 		"after:send", "after:deliver",
 	}
@@ -293,9 +294,10 @@ func TestCompareRuns(t *testing.T) {
 			return h
 		}, true},
 		{"the other keys interleave differently but each key's own order holds", func(h []crashwalk.Hit) []crashwalk.Hit {
-			// Swap two adjacent hits of different keys: the global order changes,
-			// no key's own order does.
-			h[0], h[1] = h[1], h[0]
+			// Swap two adjacent hits of different pairs (the commit of the setup
+			// and the first write of the next transaction): the global order
+			// changes, no pair's own order does.
+			h[5], h[6] = h[6], h[5]
 			return h
 		}, false},
 	}
@@ -370,7 +372,7 @@ func TestCheckRecoveryCasesUnion(t *testing.T) {
 	all := func() []crashwalk.RecoveryCase {
 		var cases []crashwalk.RecoveryCase
 		for _, k := range tb.Keys() {
-			if k.Kind.String() != "recovery" || crashwalk.IsSync(k.Step) {
+			if k.Kind != txn.Recovery || crashwalk.IsSync(k.Step) {
 				continue
 			}
 			cases = append(cases, crashwalk.RecoveryCase{Item: k.Key, After: crashwalk.CrashAt(point(t, "intake/out.rename#1"))})
