@@ -322,6 +322,9 @@ func (s *Store) ControlIntake(body []byte, endpoint *EndpointRecord, ctl CtlReco
 		if endpoint.Status != EndpointCreating || endpoint.CreatedBy != trimRec(ctl.Name()) {
 			return errors.New("store: a session endpoint made with a control record is being created and names the record as its creator")
 		}
+		if ctl.Intent == nil || ctl.Intent.Endpoint != endpoint.ID {
+			return errors.New("store: a session endpoint made with a control record is the one the record's intent creates")
+		}
 		f, err := recordFile(EndpointsDir, *endpoint)
 		if err != nil {
 			return err

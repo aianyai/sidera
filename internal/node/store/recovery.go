@@ -68,12 +68,23 @@ func OrphanBodies(sc *Scan) []string {
 }
 
 // OrphanEndpoints is the work of orphan-gc-endpoint: the session endpoints
-// still being created whose control record is neither there nor quarantined. The
-// endpoint is preparation that never became part of a committed control record.
+// still being created that no control record creates. The endpoint is
+// preparation that never became part of a committed control record: its record
+// is not there, or it is there and holds no creation of this endpoint (none at
+// all, or the creation of another endpoint, which is what a signal accepted again
+// after a failed intake has: the same record name and a new endpoint).
+//
+// A record that is lost, quarantined or damaged keeps the endpoint: the
+// quarantine of the record settles it, as it needs to know it is there.
 func OrphanEndpoints(sc *Scan) []EndpointRecord {
+	regular := map[string]*CtlRecord{}
 	exists := map[string]bool{}
-	for _, c := range sc.Ctl {
+	for i := range sc.Ctl {
+		c := &sc.Ctl[i]
 		exists[c.Name()] = true
+		if !c.Lost {
+			regular[c.Name()] = c
+		}
 	}
 	for _, c := range sc.Corrupt {
 		if c.Dir == CtlDir {
@@ -87,7 +98,14 @@ func OrphanEndpoints(sc *Scan) []EndpointRecord {
 	}
 	var out []EndpointRecord
 	for _, e := range sc.Endpoints {
-		if e.Status == EndpointCreating && (e.CreatedBy == "" || !exists[e.CreatedBy+recordSuffix]) {
+		if e.Status != EndpointCreating {
+			continue
+		}
+		name := e.CreatedBy + recordSuffix
+		switch c := regular[name]; {
+		case e.CreatedBy == "" || !exists[name]:
+			out = append(out, e)
+		case c != nil && (c.Intent == nil || c.Intent.Endpoint != e.ID):
 			out = append(out, e)
 		}
 	}

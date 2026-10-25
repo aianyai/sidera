@@ -590,7 +590,11 @@ Linux numbers, and a cold page cache, are pending verification by CI on main.
 
 **The rules of recovery.** Each rule has a predicate, a pure function of a scan,
 and the store offers the write that carries it out. The predicates the store owns:
-orphan bodies; session endpoints being created with no control record; quarantined
+orphan bodies; session endpoints being created that no control record creates (the
+record is not there, or it is a regular record whose intent holds no creation of that
+endpoint, as after an intake that failed and a signal accepted again with a new
+endpoint; a lost, quarantined or damaged record keeps the endpoint for its
+quarantine); quarantined
 files with no alert (records, and bodies, which continue in chunks); a session
 endpoint whose control record holds the end of its creation or its close; the
 followers a prompt or a block owes; feedback a notice already covers; the endpoints

@@ -43,6 +43,13 @@ engine applies the delivery rules and calls the writes.
 - **A head record lists its followers as it read them.** `PromptEnd` and `Blocked`
   refuse a follower that is not listed with the revision and acceptance time it was
   read with.
+- **A session endpoint is prepared for the creation its control record holds.**
+  `ControlIntake` refuses an endpoint that the record's intent does not name, and
+  `OrphanEndpoints` names a creating endpoint whose regular control record holds no
+  creation of it: an intake that failed before its commit point leaves its endpoint,
+  and the signal accepted again has the same record name and a new endpoint, so the
+  record alone does not say which endpoint is the live one. A lost, quarantined or
+  damaged record keeps the endpoint for the quarantine.
 - **The alert is the last write of a quarantine.** A resumed quarantine writes what
   the first pass wrote, in the same order (floors, the replacement under the same
   name, the closed session, the alert last); nothing is skipped because it seems
