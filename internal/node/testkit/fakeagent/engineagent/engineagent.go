@@ -99,12 +99,21 @@ func IsNotSupported(err error) bool {
 	return errors.As(err, &e) && e.Category == fakeagent.CategoryNotFound && e.Code == codeMethodUnknown
 }
 
+// ErrProcessEnded is what a call to a process that ended before the call returned
+// carries: the request was taken and no answer could be read, so the client
+// cannot know whether it took effect. MapError gives it the category a client
+// decides for itself.
+var ErrProcessEnded = errors.New("the process the call was made to ended before the call returned")
+
 // MapError maps what an engine method returned to the error of the fake agent:
-// a typed refusal to its category and code, anything else to an internal error.
-// It is nil for nil.
+// a typed refusal to its category and code, a call whose process ended to
+// outcome_unknown, anything else to an internal error. It is nil for nil.
 func MapError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, ErrProcessEnded) {
+		return &fakeagent.Error{Category: fakeagent.CategoryOutcomeUnknown, Code: "connection_lost", Message: err.Error()}
 	}
 	var ref *engine.Refusal
 	if !errors.As(err, &ref) {

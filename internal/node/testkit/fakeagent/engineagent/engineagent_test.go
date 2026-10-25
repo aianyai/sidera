@@ -3,6 +3,7 @@ package engineagent_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/engine"
@@ -130,6 +131,16 @@ func TestAnErrorThatIsNotARefusalIsInternal(t *testing.T) {
 	}
 	if engineagent.MapError(nil) != nil {
 		t.Error("MapError(nil) is not nil")
+	}
+}
+
+func TestACallWhoseProcessEndedIsOutcomeUnknown(t *testing.T) {
+	err := engineagent.MapError(fmt.Errorf("declare: %w", engineagent.ErrProcessEnded))
+	if got := fakeagent.CategoryOf(err); got != fakeagent.CategoryOutcomeUnknown {
+		t.Errorf("category %q, want outcome_unknown: the request was taken and no answer could be read", got)
+	}
+	if got := fakeagent.CodeOf(err); got != "connection_lost" {
+		t.Errorf("code %q, want connection_lost", got)
 	}
 }
 

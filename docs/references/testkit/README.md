@@ -154,11 +154,19 @@ packages and are not part of them.
 - **The node is made by the program's own code,** through the `init` plan and the install
   and enable entries, on a disk copied from one made per test binary. A hand-written disk
   would let the fixture and the program disagree about a format.
-- **A crash takes the disk before it touches the process.** The copy of the disk is the
-  crash; the old process is stopped in the background and writes to a disk nobody reads.
-  Halting the file system instead would need a rule that never fires, which the fault
-  wrapper's own check forbids. Power loss is the seeded model of the file system, with
-  a fixed second word, so a seed is a disk.
+- **A crash cuts the process off before it copies the disk.** The fixture closes a layer
+  of its own between the process's fault wrapper and its disk, so that every file-system
+  call the old process makes afterwards fails, then copies the disk; the copy is the
+  crash. Stopping the old engine in the background and letting it write to a disk nobody
+  reads would not be enough: a call that was inside the engine would finish, be
+  acknowledged to the client as a success and be recorded as the node's answer, for a
+  node that no longer exists. So a call that returns after its process was abandoned is
+  an unknown outcome (the client of a dead process sees a connection that ended), and
+  the name of a registration that was in flight is not remembered. The layer is the
+  fixture's and not a rule of the fault wrapper, which fails a test whose rule never
+  fires. With the adapter host attached, a crash cuts the pipe and sends no shutdown.
+  Power loss is the seeded model of the file system, with a fixed second word, so a seed
+  is a disk.
 - **The back end answers a method the engine lacks as an unknown method.** The agent
   interface has no category for "not yet", and adding one would change its table; an
   unknown method is what the server would say, and the scripts already handle it. A
@@ -180,7 +188,7 @@ packages and are not part of them.
 | Fake agent | `internal/node/testkit/fakeagent` | `TestTheInterfaceHasAMethodForEveryAgentCommand`, `TestErrorCategories`, `TestRecordingWritesTheCallBeforeTheActionAndTheResultAfter`, `TestRecordingCanRecordWhatTheModelSawOutsideATurn` |
 | Engine backend | `internal/node/testkit/fakeagent/engineagent` | `TestDeclarePatchReachesTheEngineForTheCallersOwnEndpoint`, `TestDeclareLeavesAFieldThatIsNilAsItWas`, `TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface`, `TestEveryEngineReasonMapsToACategoryAndCode`, `TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError` |
 | Scripts | `internal/node/testkit/scenario`, `internal/node/testkit/scenario_imports_test.go` | `TestRunSetsUpDirectEndpointsThenRunsEachStepAndQuiescesAfterIt`, `TestRunStopsAtTheFirstFailedStepAndNamesIt`, `TestRunRefusesAScriptThatCannotRunBeforeTouchingTheSystem`, `TestRecvAndAckAllAcknowledgesEveryPageAndStopsAtAnEmptyOne`, `TestAScriptIsAScenarioOfTheCrashWalk`, `TestCheckRejects`, `TestScenarioPackageDoesNotImportTheEngineOrAFixtureOfAnyLayer` |
-| Engine fixture | `internal/node/testkit/harness` | `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`, `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`, `TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport`, `TestAProcessCrashThenRestartKeepsExactlyWhatWasDurable`, `TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledged`, `TestFaultsAreInjectedThroughTheFileLayerAndTheirHitsCounted`, `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`, `TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages` |
+| Engine fixture | `internal/node/testkit/harness` | `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`, `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`, `TestQuiesceReturnsOnlyWhenTheEnginesConditionsHoldAndOtherwiseFailsWithAReport`, `TestAProcessCrashThenRestartKeepsExactlyWhatWasDurable`, `TestAPowerLossRestartIsReproducibleUnderAFixedSeedAndKeepsWhatWasAcknowledged`, `TestFaultsAreInjectedThroughTheFileLayerAndTheirHitsCounted`, `TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`, `TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`, `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`, `TestAProcessCrashKeepsAWriteThatWasNotSyncedYet`, `TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages` |
 | Crash walk | `internal/node/testkit/crashwalk` | `TestPlanFullTakesEveryWindowPointExceptTheSyncSteps`, `TestPlanSmokeTakesOnePointPerTransactionBeforeItsLastFileRole`, `TestShardsPartitionTheTargets`, `TestWalkShardsWhoseRecordingsInterleaveDifferentlyRunEveryTargetOnce`, `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`, `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`, `TestAssessCoverage`, `TestCheckRecoveryCasesUnion`, `TestWalkFailsWhenATargetIsNotReached`, `TestWalkFailsWhenARerunDivergesFromTheRecording`, `TestWalkSecondLayerCrashesTheRecoveryAfterTheMainCrash` |
 
 ## The consistency test

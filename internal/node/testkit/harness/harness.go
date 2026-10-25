@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -87,6 +88,10 @@ type process struct {
 	cfg     *config.Config
 	log     *LogCapture
 	eng     *engine.Engine
+
+	// abandoned is set when a crash cuts the process off: a call that was made to
+	// it and returns afterwards has no answer anyone could have read.
+	abandoned atomic.Bool
 }
 
 // endpoint is a direct endpoint registered through the fixture.
@@ -220,7 +225,9 @@ func (h *H) Ctx() context.Context { return h.ctx }
 // name is the same endpoint, before and after a restart. A refusal is returned as
 // the engine gave it.
 func (h *H) Direct(name string) (string, error) {
-	res, err := h.Engine().RegisterDirect(h.ctx, Instance, adapterproto.RegisterParams{Key: name, DisplayName: "Name of " + name})
+	res, err := onProcess(h, func(e *engine.Engine) (adapterproto.RegisterResult, error) {
+		return e.RegisterDirect(h.ctx, Instance, adapterproto.RegisterParams{Key: name, DisplayName: "Name of " + name})
+	})
 	if err != nil {
 		return "", err
 	}
@@ -287,7 +294,22 @@ func (h *H) Agent(name string) fakeagent.Agent {
 type currentEngine struct{ h *H }
 
 func (c currentEngine) Declare(ctx context.Context, caller engine.Caller, p engine.DeclarationPatch) (authz.Declaration, error) {
-	return c.h.Engine().Declare(ctx, caller, p)
+	return onProcess(c.h, func(e *engine.Engine) (authz.Declaration, error) { return e.Declare(ctx, caller, p) })
+}
+
+// onProcess is a call made to the process that is running. When that process is
+// abandoned by a crash before the call returns, nobody could have read what it
+// answers, so the call's result is that its outcome is unknown, whatever the old
+// engine made of it: a client of a dead process sees a connection that ended, not
+// a success.
+func onProcess[T any](h *H, call func(*engine.Engine) (T, error)) (T, error) {
+	p := h.current()
+	v, err := call(p.eng)
+	if p.abandoned.Load() {
+		var zero T
+		return zero, fmt.Errorf("%w (the answer was %v)", engineagent.ErrProcessEnded, err)
+	}
+	return v, err
 }
 
 // Advance moves the clock forward by d. The engine reacts asynchronously: call
@@ -356,10 +378,18 @@ var ProcessCrash = CrashMode{}
 // disk decides the rest from the seed, so that a seed is a reproducible disk.
 func PowerLoss(seed uint64) CrashMode { return CrashMode{power: true, seed: seed} }
 
-// Crash takes the disk a crash of the mode leaves at this instant, abandons the
-// running process (it is stopped in the background and never writes to the disk
-// the next process uses) and starts a new process on the disk. The test clock,
-// the ledger and the endpoints registered through the fixture stay.
+// Crash cuts the running process off from its disk, takes the disk a crash of the
+// mode leaves at that instant and starts a new process on it. The test clock, the
+// ledger and the endpoints registered through the fixture stay.
+//
+// The old process is abandoned, not stopped: every call it makes to its disk after
+// the cut fails, so what it was in the middle of reaches no disk; a call that was
+// made to it and returns later is reported as an outcome that is unknown; and its
+// engine is then stopped in the background, which is the cleanup of the test and
+// not an event of the node. When an adapter host is attached, a crash cuts the
+// pipe and sends no shutdown, as a process that died would. A test must still
+// release anything it held the old loop with (an observer) before it ends.
+//
 // The second word of the source is fixed, as the crash model's own tests fix it, so
 // that a seed is all a test has to remember.
 func (h *H) Crash(mode CrashMode) {
@@ -367,6 +397,8 @@ func (h *H) Crash(mode CrashMode) {
 	h.mu.Lock()
 	old := h.proc
 	h.mu.Unlock()
+	old.abandoned.Store(true)
+	old.mounted.cutOff() // the disk below is now what the crash leaves
 	var disk *fsxtest.Mem
 	if mode.power {
 		disk = old.mounted.Mem.CrashClone(rand.New(rand.NewPCG(mode.seed, 0x5ce)))

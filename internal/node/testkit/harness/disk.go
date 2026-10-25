@@ -102,25 +102,32 @@ func MakeLayout(t testing.TB, mem *fsxtest.Mem) {
 }
 
 // Mounted is a process over a disk, before the engine: a writer on the fault
-// wrapper, its recovery done, and a store.
+// wrapper, its recovery done, and a store. The process's calls reach the disk
+// through the fault wrapper and, below it, a cut-off layer that a crash closes.
 type Mounted struct {
 	Mem    *fsxtest.Mem
 	Faulty *fsxtest.Faulty
 	Writer *txn.Writer
 	Store  *store.Store
+	cut    *cutoff
 }
+
+// cutOff ends the process's access to its disk: every call after it fails, and
+// it returns when the calls in flight have ended.
+func (m *Mounted) cutOff() { m.cut.cutOff() }
 
 // Mount starts a process over the disk as a start does before the engine: the
 // recovery of the transaction layer, then a store. The observer, which may be
 // nil, is told about every write step of the process.
 func Mount(t testing.TB, tab *txn.Table, disk *fsxtest.Mem, obs txn.Observer) *Mounted {
 	t.Helper()
-	faulty := fsxtest.NewFaulty(t, disk)
+	cut := newCutoff(disk)
+	faulty := fsxtest.NewFaulty(t, cut)
 	w := txn.New(faulty, tab, obs)
 	if err := w.Recover(); err != nil {
 		t.Fatalf("harness: Recover: %v", err)
 	}
-	return &Mounted{Mem: disk, Faulty: faulty, Writer: w, Store: store.New(w)}
+	return &Mounted{Mem: disk, Faulty: faulty, Writer: w, Store: store.New(w), cut: cut}
 }
 
 // SeedNode makes the node on the writer's disk through the code the program

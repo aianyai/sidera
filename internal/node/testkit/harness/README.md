@@ -42,11 +42,20 @@ layer.
   until a round finds both holding, and fails on the real clock's limit (60 s unless
   `WithTimeout`) with the engine's last report and the names of the conditions that
   did not hold. A loop that does not answer is reported as inside a command.
-- **A process crash takes the disk first and abandons the process.** `Crash` copies
-  the disk at that instant (`Clone`, or `CrashClone` seeded by `PowerLoss`), starts a
-  new process on the copy, and stops the old one in the background; whatever the
-  old one does afterwards reaches a disk nobody reads. The test releases anything it
-  held the old loop with (an observer) before the test ends.
+- **A crash cuts the process off, and what it was doing has no visible effect.** `Crash`
+  closes a layer of the fixture's own between the process's fault wrapper and its disk
+  (every later file-system call of the old process fails, and the close waits for the
+  calls in flight), then copies the disk (`Clone`, or `CrashClone` seeded by
+  `PowerLoss`), starts a new process on the copy and stops the old engine in the
+  background, which is the test's cleanup and not an event of the node. Three things
+  follow. What the old process was in the middle of reaches neither disk. A call made
+  to it (an agent's, or `Direct`) that returns after the crash has an unknown outcome:
+  an agent sees `outcome_unknown/connection_lost`, and `Direct` returns an error that
+  is `engineagent.ErrProcessEnded` and does not remember the name. And when the adapter
+  host is attached, a crash cuts the pipe and sends no shutdown, as a process that died
+  would; only a clean `Restart` shuts the adapter down. The test releases anything it
+  held the old loop with (an observer) before the test ends; the observer still sees
+  the steps the old process takes after the crash.
 - **A seed is a disk.** The power-loss source is `rand.NewPCG(seed, 0x5ce)`: the same
   seed on the same history leaves the same disk.
 - **Faults go through the file layer.** `Faults()` is the `fsxtest.Faulty` the running
@@ -99,5 +108,8 @@ Each adds to this package the capability its stream needs:
 `TestTheLedgerCarriesTheScriptStepTheFixtureAnnounced`,
 `TestWhatTheEngineLayerCannotProvideYetIsAnErrorAndNotAFake`,
 `TestRecordsAreReadOnlyAndShowTheDisk`,
-`TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`;
-`harness_internal_test.go`: the fixture's own quiet conditions and the leak check.
+`TestAScenarioScriptRunsThroughEnvOnTheEngineLayer`,
+`TestAProcessCrashKeepsAWriteThatWasNotSyncedYet`,
+`TestACallInFlightAtACrashHasAnUnknownOutcomeAndLeavesNoEffectOfTheAbandonedProcess`;
+`harness_internal_test.go`: the fixture's own quiet conditions, the leak check and
+`TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`.
