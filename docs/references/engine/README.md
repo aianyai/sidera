@@ -82,7 +82,11 @@ it is, only to carry the result.
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's
 own instance. The declaration, with the display name and description the adapter
 gave, is the engine's field of the endpoint record (compact JSON, fixed member
-order, at most 256 senders listed).
+order, at most 256 senders listed). A patch that names nothing is refused as
+`invalid_argument` with the detail `empty_patch`: the detail is a typed value of
+the `Refusal`, as the limit of `endpoint_limit` is, so that the interface maps it
+without reading text. `Endpoints` lists for each endpoint how many messages wait
+for it (`Queued`).
 
 **Waiting.** A recv that finds nothing queued and is asked to wait is registered as
 a waiter in the same command, so no arrival is missed between the check and the
@@ -190,10 +194,13 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
 - **A direct endpoint has a token the store requires and nobody can present.** The
   token table resolves a token only to an open session endpoint, so a token read
   from a direct record opens nothing.
-- **The display name and the declaration share a field.** The field the store keeps
-  for the engine is the only persistent place for what an adapter said of an
-  endpoint; a new field in the store was rejected as a contract change for a value
-  that the adapter says again at each start.
+- **The node keeps the display name and the description the adapter gave.** The
+  adapter's start tells the node, for each direct endpoint, only its identifier and
+  its key; it does not say the name or the description again. What `Endpoints`
+  lists has therefore to come from the disk, and the endpoint that was registered
+  before the restart is listed with what the adapter said last. Where in the
+  endpoint record they are kept is a matter of the record's shape and not of this
+  rule.
 - **A text that is not canonical is not read.** The declaration field is written in
   one form, so a re-encoding of what was read is the bytes that were read, and the
   fuzz target can assert it.
@@ -245,3 +252,17 @@ Known gaps, each filled in with the feature it belongs to:
   are empty until the features that own them exist.
 - `isNoSpace` for Windows (`nospace_windows.go`) is pending verification by CI on
   main.
+- Closing a session endpoint does not yet send `session.close` to the adapter: the
+  outcome says `closing`, and the release of the native session comes with the
+  creation of sessions, which is the feature that makes one.
+- `AdapterAdmitted` ignores the runtime capability, and no transaction that opens
+  or reopens the runtime endpoint of an instance (`runtime-admit`) is declared yet:
+  it belongs to the adapter host.
+- A write that fails on `endpoint.register` is refused with the engine's own
+  reason (`storage_full`, `storage_unavailable`, `storage_fatal`). Which code of the
+  adapter protocol each maps to is for the adapter host to decide; if no existing
+  code fits, it stops and says so, and the protocol is changed for it, not worked
+  around in the host. The cap of the node maps to the protocol's `endpoint_limit`.
+- A stored administrative result is dropped from the engine's table only by a
+  restart. The sweep that deletes results after their retention will have to take
+  them out of the view too, in the same step.

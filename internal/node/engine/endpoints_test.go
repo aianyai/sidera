@@ -239,6 +239,40 @@ func TestEndpointsListsEveryEndpointWithWhatTheAdapterSaid(t *testing.T) {
 	}
 }
 
+// The owner's list says how many messages wait for each endpoint; what is queued
+// for a closed endpoint goes down as the drain closes it.
+func TestEndpointsListsHowManyMessagesWaitForEachEndpoint(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 2}))
+	e := r.start()
+	a, b := register(t, e, "a"), register(t, e, "b")
+	r.restart()
+	r.queue(1, 5, a)
+	r.queue(10, 2, b)
+	e = r.start()
+	queued := func() map[ident.EndpointID]int {
+		eps, err := e.Endpoints(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[ident.EndpointID]int{}
+		for _, ep := range eps {
+			out[ep.ID] = ep.Queued
+		}
+		return out
+	}
+	if got := queued(); got[a] != 5 || got[b] != 2 {
+		t.Errorf("queued %v, want 5 for a and 2 for b", got)
+	}
+	if _, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a}); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, e)
+	if got := queued(); got[a] != 0 || got[b] != 2 {
+		t.Errorf("after the close and the drain: queued %v, want 0 for a and 2 for b", got)
+	}
+}
+
 func TestCloseIsRefusedForWhatIsNotAnEndpointOfTheNode(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)

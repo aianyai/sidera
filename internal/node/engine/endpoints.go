@@ -296,7 +296,7 @@ func (e *Engine) declare(c Caller, p DeclarationPatch) (authz.Declaration, error
 		return authz.Declaration{}, err
 	}
 	if p.IsEmpty() {
-		return authz.Declaration{}, invalidArgument("patch", errors.New("the patch changes nothing"))
+		return authz.Declaration{}, &Refusal{Reason: ReasonInvalidArgument, Field: "patch", Detail: DetailEmptyPatch}
 	}
 	meta := st.meta
 	meta.Declaration = p.apply(meta.Declaration)
@@ -505,6 +505,9 @@ type EndpointView struct {
 	DisplayName string
 	Description string
 	Declaration authz.Declaration
+	// Queued is how many messages and control signals wait for the endpoint:
+	// accepted, and not yet closed or taken.
+	Queued int
 	// Draining: the endpoint is closed and the records queued for it are not all
 	// closed yet.
 	Draining bool
@@ -520,7 +523,7 @@ func (c *cmdEndpoints) run(e *Engine, _ time.Time) {
 			ID: id, Address: ident.Address{Node: e.d.Node, Endpoint: id},
 			Kind: st.rec.Kind, Instance: st.rec.Instance, Status: st.rec.Status,
 			DisplayName: st.meta.DisplayName, Description: st.meta.Description,
-			Declaration: cloneDeclaration(st.meta.Declaration), Draining: e.view.Draining(id),
+			Declaration: cloneDeclaration(st.meta.Declaration), Queued: len(e.view.queued[id]), Draining: e.view.Draining(id),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID.String() < out[j].ID.String() })

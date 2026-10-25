@@ -28,6 +28,29 @@ func TestEveryReasonHasItsOwnName(t *testing.T) {
 	}
 }
 
+func TestEveryDetailHasItsOwnName(t *testing.T) {
+	seen := map[string]Detail{}
+	for _, d := range Details() {
+		n := d.String()
+		if n == "" || strings.HasPrefix(n, "invalid(") {
+			t.Errorf("detail %d has no name", d)
+		}
+		if other, dup := seen[n]; dup {
+			t.Errorf("details %d and %d are both %q", other, d, n)
+		}
+		seen[n] = d
+	}
+	if len(Details()) != int(detailEnd)-1 {
+		t.Errorf("Details lists %d of %d", len(Details()), detailEnd-1)
+	}
+	if Detail(0).String() != "" || detailEnd.String() == "" {
+		t.Error("the zero detail says nothing, and a value that is not a detail must not read as one")
+	}
+	if got := (&Refusal{Reason: ReasonInvalidArgument, Field: "patch", Detail: DetailEmptyPatch}).Error(); !strings.Contains(got, "patch") || !strings.Contains(got, "empty_patch") {
+		t.Errorf("Error = %q", got)
+	}
+}
+
 func TestARefusalSaysWhyAndKeepsItsCause(t *testing.T) {
 	cause := errors.New("disk")
 	err := fmt.Errorf("wrapped: %w", &Refusal{Reason: ReasonEndpointLimit, Limit: LimitNode, Err: cause})

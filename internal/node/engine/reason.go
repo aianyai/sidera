@@ -119,6 +119,41 @@ func (l Limit) String() string {
 	return fmt.Sprintf("invalid(%d)", uint8(l))
 }
 
+// Detail says in which way a request value is not acceptable, for the refusals
+// of ReasonInvalidArgument that a caller tells apart without reading the Field.
+// The zero value says nothing beyond the reason: the Field names the value.
+type Detail uint8
+
+// The details of ReasonInvalidArgument.
+const (
+	// DetailEmptyPatch: a patch that changes nothing.
+	DetailEmptyPatch Detail = iota + 1
+
+	detailEnd
+)
+
+var detailNames = [detailEnd]string{DetailEmptyPatch: "empty_patch"}
+
+// String returns the name of the detail; the zero value has none.
+func (d Detail) String() string {
+	if d > 0 && d < detailEnd {
+		return detailNames[d]
+	}
+	if d == 0 {
+		return ""
+	}
+	return fmt.Sprintf("invalid(%d)", uint8(d))
+}
+
+// Details lists every detail, in order.
+func Details() []Detail {
+	out := make([]Detail, 0, detailEnd-1)
+	for d := Detail(1); d < detailEnd; d++ {
+		out = append(out, d)
+	}
+	return out
+}
+
 // Refusal is the error of an engine method that did not do what it was asked
 // for an expected reason. Anything that is not a Refusal is an unexpected
 // failure of the engine itself.
@@ -129,6 +164,9 @@ type Refusal struct {
 	// Field names the request value that was not acceptable; set for
 	// ReasonInvalidArgument only.
 	Field string
+	// Detail says in which way it was not acceptable, when one of the details
+	// applies; set for ReasonInvalidArgument only.
+	Detail Detail
 	// Err is the cause, when there is one beyond the reason (a storage error).
 	Err error
 }
@@ -138,8 +176,12 @@ func (r *Refusal) Error() string {
 	switch {
 	case r.Limit != 0:
 		s += " (" + r.Limit.String() + ")"
+	case r.Field != "" && r.Detail != 0:
+		s += " (" + r.Field + ": " + r.Detail.String() + ")"
 	case r.Field != "":
 		s += " (" + r.Field + ")"
+	case r.Detail != 0:
+		s += " (" + r.Detail.String() + ")"
 	}
 	if r.Err != nil {
 		s += ": " + r.Err.Error()

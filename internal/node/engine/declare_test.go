@@ -129,6 +129,26 @@ func TestDeclareRefusesWhatCannotBeStored(t *testing.T) {
 	}
 }
 
+// A patch that names nothing is refused as such: the interface answers it with the
+// detail the management interface defines, which a caller must not have to read
+// out of a free string.
+func TestAnEmptyPatchIsRefusedWithItsOwnDetail(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	id := register(t, e, "a")
+	_, err := e.Declare(context.Background(), engineCaller(id), engine.DeclarationPatch{})
+	ref := wantReason(t, err, engine.ReasonInvalidArgument)
+	if ref.Detail != engine.DetailEmptyPatch || ref.Field != "patch" {
+		t.Errorf("refused with detail %q on %q, want %q on %q", ref.Detail, ref.Field, engine.DetailEmptyPatch, "patch")
+	}
+	// The other refusals of an invalid argument carry no detail.
+	_, err = e.Declare(context.Background(), engineCaller(id), engine.DeclarationPatch{AcceptFrom: &[]ident.Address{{}}})
+	if ref := wantReason(t, err, engine.ReasonInvalidArgument); ref.Detail != 0 {
+		t.Errorf("a zero address was refused with detail %q, want none", ref.Detail)
+	}
+}
+
 // Who is calling is resolved in the command that does the work, and anything
 // that is not the owner of an endpoint of the node fails closed.
 func TestDeclareResolvesTheCallerAndRefusesEveryoneElse(t *testing.T) {
