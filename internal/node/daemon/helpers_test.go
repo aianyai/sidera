@@ -16,10 +16,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
+	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/ipc"
+	"github.com/aianyai/sidera/internal/node/keys"
+	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/txn"
 )
 
 // t0 is the origin of the test clock.
@@ -97,9 +102,27 @@ func started(t testing.TB, c daemon.Config) *daemon.Daemon {
 // and the process behind it.
 func manage(t testing.TB, home, method string, body any) (int, []byte) {
 	t.Helper()
+	status, out, err := doManage(home, method, body)
+	if err != nil {
+		t.Fatalf("POST %s: %v", method, err)
+	}
+	return status, out
+}
+
+// tryManage says what the interface answered to a read, and 0 when it did not
+// answer: for a test that waits for the daemon, or that expects it to be gone.
+func tryManage(home, method string) int {
+	status, _, err := doManage(home, method, map[string]any{})
+	if err != nil {
+		return 0
+	}
+	return status
+}
+
+func doManage(home, method string, body any) (int, []byte, error) {
 	addr, err := ipc.Locate(home, ipc.KindManage)
 	if err != nil {
-		t.Fatalf("Locate: %v", err)
+		return 0, nil, err
 	}
 	client := &http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) { return ipc.Dial(ctx, addr, ipc.Options{}) },
@@ -107,18 +130,15 @@ func manage(t testing.TB, home, method string, body any) (int, []byte) {
 	defer client.CloseIdleConnections()
 	raw, err := json.Marshal(body)
 	if err != nil {
-		t.Fatal(err)
+		return 0, nil, err
 	}
 	resp, err := client.Post("http://sidera/v1/manage/"+method, "application/json", bytes.NewReader(raw))
 	if err != nil {
-		t.Fatalf("POST %s: %v", method, err)
+		return 0, nil, err
 	}
 	defer resp.Body.Close()
 	out, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("reading the answer to %s: %v", method, err)
-	}
-	return resp.StatusCode, out
+	return resp.StatusCode, out, err
 }
 
 // memConfig is a configuration over a file system in memory: the disk of a test
@@ -201,4 +221,117 @@ func requireUnix(t testing.TB) {
 	if runtime.GOOS == "windows" {
 		t.Skip("permission bits and symbolic links of Unix; the Windows checks are in the files of that platform")
 	}
+}
+
+// seedHome puts an adapter instance in the configuration and endpoint records on
+// the disk of an initialized home, the way a node that has run has them, while no
+// daemon runs over it. The endpoints belong to an instance the owner has enabled,
+// so the start does not close them as the endpoints of a disabled one.
+func seedHome(t testing.TB, home string, recs ...store.EndpointRecord) {
+	t.Helper()
+	ins, err := config.Instances{Version: 1, Items: map[string]config.Instance{
+		"chat": {Adapter: "chat", Enabled: true},
+	}}.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "config", "instances.json"), ins, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fsys, err := fsx.OpenOS(home, seeded(9))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock, err := fsys.Lock("daemon.lock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unlock()
+	tab, err := daemon.Table()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := txn.New(fsys, tab, nil)
+	if err := w.Recover(); err != nil {
+		t.Fatal(err)
+	}
+	st := store.New(w)
+	for _, r := range recs {
+		if err := st.EndpointUpdate(r); err != nil {
+			t.Fatalf("seeding %s: %v", r.ID, err)
+		}
+	}
+}
+
+func endpointID(t testing.TB, b byte) ident.EndpointID {
+	t.Helper()
+	id, err := ident.EndpointIDFromBytes(bytes.Repeat([]byte{b}, ident.EndpointIDLen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// mkSocketDirs makes the directories of the sockets on the real disk, for a test
+// whose state lives in memory.
+func mkSocketDirs(t testing.TB, home string) {
+	t.Helper()
+	for _, d := range []string{"", "manage", "run"} {
+		p := filepath.Join(home, d)
+		if err := os.MkdirAll(p, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if runtime.GOOS != "windows" {
+			if err := os.Chmod(p, 0o700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// noLeaks fails the test when goroutines that it started are still running at its
+// end: the daemon owns every goroutine it starts and stops it on shutdown.
+func noLeaks(t testing.TB) {
+	t.Helper()
+	before := runtime.NumGoroutine()
+	t.Cleanup(func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			n := runtime.NumGoroutine()
+			if n <= before {
+				return
+			}
+			if time.Now().After(deadline) {
+				buf := make([]byte, 1<<16)
+				buf = buf[:runtime.Stack(buf, true)]
+				t.Errorf("%d goroutines running, %d before the test:\n%s", n, before, buf)
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
+}
+
+// nodeOf is the identifier of the node of an initialized home, as init said it.
+func nodeOf(t testing.TB, c daemon.Config) ident.NodeID {
+	t.Helper()
+	fsys, err := fsx.OpenOS(c.Home, seeded(3))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sr, err := keys.ReadSelfRevocation(fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sr.Node()
+}
+
+// nodeOfOther is some other node.
+func nodeOfOther(t testing.TB) ident.NodeID {
+	t.Helper()
+	n, err := ident.NodeIDFromBytes(bytes.Repeat([]byte{0x2a}, ident.NodeIDLen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
 }
