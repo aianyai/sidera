@@ -20,3 +20,5 @@ given, and every goroutine it starts ends with its context.
 | `Launcher`, `Process`, `Instance` | How an adapter instance is started and what the host holds of it. |
 | `Params`, `DefaultParams`, `OfflineAfterPingFailures` | The tunables, and the one decided rule: two pings in a row unanswered make an adapter offline. |
 | `ErrNotConnected` | What a call to an adapter that is not in service returns without sending anything. |
+| `Env`, `Source`, `LogOpener` | What the host needs of the node when it starts: the data directory, a read-only view of the configuration, the opener of the adapters' logs, and the engine. |
+| `ConnCounts` | What the host counts of one connection, for the question whether the system is quiet. |
