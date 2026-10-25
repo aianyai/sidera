@@ -268,8 +268,9 @@ the first time the code runs. The first failed write is sticky: every later call
 `Commit` included, returns it before any check and runs no step.
 
 **The commit point.** Writes that are `Prepare` leave only garbage until the
-first write that is not. The commit point is the completion of that write's
-commit step, its first step that readers can see:
+first write that is not. The commit point is the completion of the commit step of
+the first non-`Prepare` write that has one, the first step of it that readers can
+see (`Tx.run` sets it at the first such completion, whatever the writes before it):
 
 | Operation | Commit step |
 | --------- | ----------- |
@@ -281,6 +282,13 @@ commit step, its first step that readers can see:
 | `SyncFile` | `sync` |
 | `SyncDir` (a write of its own) | `sync-dir` |
 | `Append` | none |
+
+A write without a commit step does not commit. The summaries of `archive-sweep`
+are appended and then synced, so its commit point is the `SyncFile` of the
+archive, and a failed append before it has the class `fsx` gave it (the sweep
+deletes nothing and is done again). `archive-events` only appends, with no sync
+that follows, so it has no commit point and a failure of it never becomes fatal
+by this rule.
 
 Before it, a failure has the class `fsx` gave it. From it on, every failure, in
 the same operation or in a later write, is `Fatal`: the disk is in one of the
