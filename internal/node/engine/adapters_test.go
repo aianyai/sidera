@@ -1117,6 +1117,11 @@ func TestAnAdapterThatIsGoneKeepsItsEndpointsItsRecordsAndItsAdmission(t *testin
 	if !v.Admitted || v.Online || !v.OfflineSince.Equal(t0.Add(time.Minute)) {
 		t.Errorf("view %+v: want admitted, not online, offline since %v", v, t0.Add(time.Minute))
 	}
+	started(t, e, "chat")
+	if v, _ = e.Adapter(ctx, "chat"); !v.Online || !v.OfflineSince.IsZero() {
+		t.Errorf("view %+v after the adapter started again: want online and no offline time", v)
+	}
+	gone(t, e, "chat")
 	if len(v.Busy) != 0 {
 		t.Errorf("busy %v after the adapter is gone, want the busy states unknown (cleared)", v.Busy)
 	}
@@ -1140,9 +1145,10 @@ func TestNotificationsAboutUnknownEndpointsAreAcceptedAndSetNothingOnDisk(t *tes
 	turnStarted := adapterproto.TurnStartedParams{Endpoint: ghost, Turn: "t1", AtMS: 1}
 	turnEnded := adapterproto.TurnEndedParams{Endpoint: ghost, Turn: "t1", Final: adapterproto.TurnCompleted, AtMS: 2}
 	persisted := adapterproto.PromptPersistedParams{Endpoint: ghost, Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6"}
-	handled := func(d adapterproto.Disposition) adapterproto.NativeRequestHandledParams {
-		return adapterproto.NativeRequestHandledParams{Endpoint: ghost, Method: "item/approve", Disposition: d, AtMS: 3}
+	handledAt := func(ep adapterproto.EndpointRef, d adapterproto.Disposition) adapterproto.NativeRequestHandledParams {
+		return adapterproto.NativeRequestHandledParams{Endpoint: ep, Method: "item/approve", Disposition: d, AtMS: 3}
 	}
+	handled := func(d adapterproto.Disposition) adapterproto.NativeRequestHandledParams { return handledAt(ghost, d) }
 	note := func(method string, p adapterproto.Message) adapterhost.Notification {
 		return adapterhost.Notification{Method: method, Params: p}
 	}
@@ -1176,7 +1182,7 @@ func TestNotificationsAboutUnknownEndpointsAreAcceptedAndSetNothingOnDisk(t *tes
 		{"a request answered by the preset changes nothing", note(adapterproto.MethodNativeRequestHandled, handled(adapterproto.DispositionPreset)), nil, nil},
 		{"a request answered late changes nothing", note(adapterproto.MethodNativeRequestHandled, handled(adapterproto.DispositionLate)), nil, nil},
 		{"a request the preset rejects is remembered", note(adapterproto.MethodNativeRequestHandled, handled(adapterproto.DispositionRejectedByPreset)), nil, refs(ghost)},
-		{"a request of an unknown method that was refused is remembered, once", note(adapterproto.MethodNativeRequestHandled, handled(adapterproto.DispositionRejectedUnknown)), nil, refs(ghost)},
+		{"a request of an unknown method that was refused is remembered for its endpoint", note(adapterproto.MethodNativeRequestHandled, handledAt("ghost-2", adapterproto.DispositionRejectedUnknown)), nil, refs("ghost-2", ghost)},
 	} {
 		if err := e.AdapterNotified(ctx, "chat", step.n); err != nil {
 			t.Fatalf("%s: %v", step.name, err)
@@ -1462,7 +1468,9 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 		if e.Phase() != engine.PhaseRecovering {
 			t.Fatalf("phase %v, want recovering", e.Phase())
 		}
-		if err := e.CheckpointPut(ctx, "chat", attemptPut(attemptA, `{"during":"recovery"}`)); err != nil {
+		wait, cancel := context.WithTimeout(ctx, 5*time.Second) // a put that waits for the running phase would never return
+		defer cancel()
+		if err := e.CheckpointPut(wait, "chat", attemptPut(attemptA, `{"during":"recovery"}`)); err != nil {
 			t.Fatalf("while recovering: %v", err)
 		}
 		if got := checkpoints(t, r)[key]; got != `{"during":"recovery"}` {
