@@ -2,6 +2,8 @@ package ledger_test
 
 import (
 	"bytes"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
@@ -31,16 +33,23 @@ func FuzzDecode(f *testing.F) {
 	})
 }
 
-// FuzzParseStream: reading a whole file never panics, and every line of a file
-// that parses is canonical.
+// FuzzParseStream: reading a whole file never panics, and every entry of a file
+// that parses is a line of the input. The file name is taken from the first line
+// of the input when that decodes, so the name checks pass often enough to reach
+// the sequence rules behind them.
 func FuzzParseStream(f *testing.F) {
 	for _, g := range goldenEntries {
 		f.Add([]byte(g.line+"\n"), false)
 	}
-	f.Add([]byte(`{"v":1,"writer":"fixture","pid":0,"seq":1,"at_ms":1,"step":"","kind":"fixture.step","attrs":{"name":"a"}}`), true)
+	f.Add([]byte(goldenEntries[0].line+"\n"+goldenEntries[0].line), true)
 	f.Add([]byte("\n\n"), false)
 	f.Fuzz(func(t *testing.T, data []byte, killed bool) {
-		entries, err := ledger.ParseStream("x-0.jsonl", data, killed)
+		name := "fixture-0.jsonl"
+		first, _, _ := bytes.Cut(data, []byte("\n"))
+		if e, err := ledger.Decode(first); err == nil {
+			name = strings.ReplaceAll(e.Writer, "/", "_") + "-" + strconv.FormatInt(e.PID, 10) + ".jsonl"
+		}
+		entries, err := ledger.ParseStream(name, data, killed)
 		if err != nil {
 			return
 		}
