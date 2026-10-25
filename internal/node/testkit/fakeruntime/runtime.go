@@ -567,21 +567,7 @@ func (s *session) finishAction(turn string, action TurnAction, res ActionResult,
 		}
 	}
 	if isPage {
-		for _, m := range page.Messages {
-			attrs := ledger.Attrs{
-				Endpoint: s.endpoint, MessageID: string(m.ID), From: string(m.From),
-				BodyDigest: ledger.Digest([]byte(m.Body)),
-			}
-			dup := m.PossiblyDuplicate
-			attrs.PossiblyDuplicate = &dup
-			if m.Part != nil {
-				attrs.Part, attrs.Parts = m.Part.Index, m.Part.Total
-			}
-			if s.rt.cfg.Feedback != nil {
-				if kind, ok := s.rt.cfg.Feedback(string(m.From), m.Body); ok {
-					attrs.Feedback = kind
-				}
-			}
+		for _, attrs := range ModelSaw(s.endpoint, page, s.rt.cfg.Feedback) {
 			if err := s.ledger.Append(ledger.KindModelSaw, attrs); err != nil {
 				return
 			}
@@ -596,4 +582,31 @@ func (s *session) finishAction(turn string, action TurnAction, res ActionResult,
 	if isPage {
 		s.notify(func(w Watcher) { w.ToolResult(ToolResultEvent{Lease: ev.Lease, Text: ev.Text, Frontend: ev.Frontend}) })
 	}
+}
+
+// ModelSaw returns the ledger attributes of what the model saw on a page, one
+// entry per message or part: where it came from, a digest of its body (never the
+// body), which part of how many, whether the page marked it as a possible
+// duplicate, and, when feedback classifies the message as one of the node's own
+// notices, which kind. Whoever hands a page to a model records it with this one
+// function, so that the oracle reads the same entries however the page arrived.
+func ModelSaw(endpoint string, page adapterproto.RecvPage, feedback func(from, body string) (string, bool)) []ledger.Attrs {
+	out := make([]ledger.Attrs, 0, len(page.Messages))
+	for _, m := range page.Messages {
+		dup := m.PossiblyDuplicate
+		attrs := ledger.Attrs{
+			Endpoint: endpoint, MessageID: string(m.ID), From: string(m.From),
+			BodyDigest: ledger.Digest([]byte(m.Body)), PossiblyDuplicate: &dup,
+		}
+		if m.Part != nil {
+			attrs.Part, attrs.Parts = m.Part.Index, m.Part.Total
+		}
+		if feedback != nil {
+			if kind, ok := feedback(string(m.From), m.Body); ok {
+				attrs.Feedback = kind
+			}
+		}
+		out = append(out, attrs)
+	}
+	return out
 }
