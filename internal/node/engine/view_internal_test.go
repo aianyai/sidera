@@ -96,6 +96,10 @@ func TestTokenIndexFindsOnlyWhatWasAddedAndNotWhatWasRemoved(t *testing.T) {
 		t.Errorf("the new token of an endpoint finds %s, %v", got, ok)
 	}
 	x.remove(idOf(t, 9)) // an endpoint without a token: nothing happens
+	// Nothing is kept for a token that no endpoint holds any more.
+	if len(x.byHash) != 1 || len(x.byEndpoint) != 1 {
+		t.Errorf("the index holds %d hashes for %d tokens, want 1 and 1", len(x.byHash), len(x.byEndpoint))
+	}
 }
 
 // scanOf is a scan of the given endpoints and records, as the store returns it.
