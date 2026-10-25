@@ -242,6 +242,12 @@ type SessionInfo struct {
 	ToolAccess []string
 }
 
+// empty reports whether the mapping says nothing. Such a mapping is neither
+// written nor read: an endpoint without one has a nil Session.
+func (s SessionInfo) empty() bool {
+	return s.Preset == "" && s.NativeRef == "" && s.Process == nil && len(s.ToolAccess) == 0
+}
+
 // Name is the file name of the record.
 func (r EndpointRecord) Name() string {
 	return recfile.FileName(string(KindEndpoint), EndpointKeyBytes(r.ID))

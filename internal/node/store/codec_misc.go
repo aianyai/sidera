@@ -36,6 +36,8 @@ type endpointJSON struct {
 	CreatedBy   string          `json:"created_by,omitempty"`
 }
 
+var errEmptySession = errors.New("an empty session mapping is not written")
+
 // TokenLen is the length of an endpoint token in bytes.
 const TokenLen = 32
 
@@ -77,15 +79,15 @@ func encodeEndpoint(r EndpointRecord) ([]byte, error) {
 			return nil, errors.New("a session mapping belongs to a session endpoint")
 		}
 		s := r.Session
+		if s.empty() {
+			return nil, errEmptySession
+		}
 		if s.Process != nil {
 			if err := s.Process.Validate(); err != nil {
 				return nil, fmt.Errorf("session process: %w", err)
 			}
 		}
 		j.Session = &sessionJSON{Preset: s.Preset, NativeRef: s.NativeRef, Process: s.Process, ToolAccess: s.ToolAccess}
-		if j.Session.Preset == "" && j.Session.NativeRef == "" && j.Session.Process == nil && len(j.Session.ToolAccess) == 0 {
-			return nil, errors.New("an empty session mapping is not written")
-		}
 	}
 	if r.CreatedBy != "" {
 		if r.Kind != adapterreg.KindSession {
@@ -135,6 +137,9 @@ func decodeEndpoint(id ident.EndpointID, body []byte) (EndpointRecord, error) {
 			return r, errors.New("a session mapping belongs to a session endpoint")
 		}
 		s := &SessionInfo{Preset: j.Session.Preset, NativeRef: j.Session.NativeRef, Process: j.Session.Process, ToolAccess: j.Session.ToolAccess}
+		if s.empty() {
+			return r, errEmptySession
+		}
 		if s.Process != nil {
 			if err := s.Process.Validate(); err != nil {
 				return r, fmt.Errorf("session process: %w", err)
