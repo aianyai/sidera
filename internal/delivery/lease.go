@@ -157,7 +157,7 @@ func (r Record) Handout(now time.Time, auth AuthorizationKind, chunks, part int,
 	case AuthorizationSuspend:
 		return r, HandoutResult{Action: HandoutSkipped}, nil
 	case AuthorizationDeny:
-		n, out, err := r.closeForcibly(RejectSecondCheckFailed)
+		n, out, err := r.closeForcibly(now, RejectSecondCheckFailed)
 		return n, HandoutResult{Action: HandoutDenied, Outcome: out}, err
 	}
 	live := r.HoldsLiveLease(now)
@@ -360,6 +360,6 @@ func (r Record) Ack(now time.Time, a Ack) (Record, AckVerdict, Outcome, error) {
 			return r, AckRecorded, Outcome{}, nil
 		}
 	}
-	n, out, err := r.moveTo(StateDelivered, RejectNone)
+	n, out, err := r.moveTo(now, StateDelivered, RejectNone)
 	return n, AckCompleted, out, err
 }

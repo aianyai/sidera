@@ -280,7 +280,7 @@ func (e *Engine) sourceRecord(now time.Time, sender ident.EndpointID, env envelo
 		Body: &ref, BodyDigest: env.Digest(),
 	}
 	for _, to := range env.To {
-		o.Outbound.Recipients = append(o.Outbound.Recipients, envelope.Tracked{Address: to, Delivery: delivery.NewSourceRecord(env.AcceptBefore)})
+		o.Outbound.Recipients = append(o.Outbound.Recipients, envelope.Tracked{Address: to, Delivery: delivery.NewSourceRecord(now, env.AcceptBefore)})
 	}
 	if m.idemKey != "" {
 		o.Idempotency = &store.Idempotency{Key: m.idemKey, RetainUntil: delivery.IdempotencyKeyRetainUntil(env.ReportBy)}

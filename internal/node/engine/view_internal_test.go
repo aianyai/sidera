@@ -138,10 +138,11 @@ func outRec(t testing.TB, i int, states ...delivery.State) store.OutRecord {
 	o := store.OutRecord{Key: k, Outbound: envelope.Outbound{Message: k.Message, From: k.Sender}}
 	body := store.BodyRefOf([]byte(fmt.Sprintf("out body %d", i)))
 	o.Body = &body
+	queued := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
 	for j, st := range states {
 		to := ident.Address{Node: nodeOf(t, 2), Endpoint: idOf(t, byte(10+j))}
 		k.Recipients = append(k.Recipients, to)
-		rec := delivery.NewSourceRecord(time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC))
+		rec := delivery.NewSourceRecord(queued, queued)
 		rec.State = st
 		o.Outbound.Recipients = append(o.Outbound.Recipients, envelope.Tracked{Address: to, Delivery: rec})
 	}
@@ -154,7 +155,7 @@ func ctlRec(t testing.TB, i int, recipient ident.EndpointID, state delivery.Stat
 	t.Helper()
 	k := store.TargetKey{SenderNode: nodeOf(t, 2), Sender: idOf(t, 3), Message: delivery.MessageID(fmt.Sprintf("ctl-%04d", i)), Recipient: recipient}
 	accept := time.Date(2026, 10, 24, 9, i, 0, 0, time.UTC)
-	rec := delivery.NewTargetControlRecord(accept, delivery.ReportBy(accept))
+	rec := delivery.NewTargetControlRecord(accept, accept, delivery.ReportBy(accept))
 	rec.State = state
 	return store.CtlRecord{Key: k, Record: rec, Kind: envelope.KindSessionClose, AcceptedAt: accept}
 }

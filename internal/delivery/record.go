@@ -50,6 +50,16 @@ type Record struct {
 	Reject  RejectReason // set while State is StateRejected
 	Unknown UnknownCause // set while State is StateDeliveryUnknown
 
+	// StateAt is the moment this node's record entered State: the time the
+	// constructor was given, or the now of the transition that last changed the
+	// state. It is the one home of that time, written only there and never by a
+	// caller. A fact that leaves the state alone (a block, a prompt, a hand-out, a
+	// lease that runs out and goes back to the queue, a duplicate) leaves it
+	// alone, so a report sent again for an unchanged state repeats it. A target
+	// puts it in a signed status report as the moment it recorded the state. It is
+	// set on every record; the zero value is not a valid one.
+	StateAt time.Time
+
 	// Lost marks a record that replaces one lost to storage corruption. Only
 	// NewLostRecord sets it and no transition clears it, so it still says what the
 	// record is after the record has closed, when Unknown no longer does: a record
@@ -91,12 +101,13 @@ type Record struct {
 	Lease Lease
 }
 
-// NewSourceRecord returns the sender's record of a delivery that its node has
-// just accepted from the caller. ReportBy follows from the deadline.
-func NewSourceRecord(acceptBefore time.Time) Record {
+// NewSourceRecord returns the sender's record of a delivery that its node
+// accepted from the caller at queuedAt. ReportBy follows from the deadline.
+func NewSourceRecord(queuedAt, acceptBefore time.Time) Record {
 	return Record{
 		Side:         SideSource,
 		State:        StateQueued,
+		StateAt:      queuedAt,
 		AcceptBefore: acceptBefore,
 		ReportBy:     ReportBy(acceptBefore),
 	}
@@ -113,6 +124,7 @@ func NewTargetRecord(acceptedAt, acceptBefore, reportBy time.Time, endpointMaxQu
 	return Record{
 		Side:            SideTarget,
 		State:           StateAccepted,
+		StateAt:         acceptedAt,
 		AcceptBefore:    acceptBefore,
 		ReportBy:        reportBy,
 		BacklogDeadline: BacklogDeadline(acceptedAt, reportBy, endpointMaxQueue),
@@ -135,16 +147,17 @@ func NewTargetNoticeRecord(acceptedAt, acceptBefore, reportBy time.Time, endpoin
 	return r, nil
 }
 
-// NewTargetControlRecord returns the target's record of a control signal it has
-// just accepted. acceptBefore and reportBy are the envelope's values, already
-// validated by the caller. The record is never queued for recv and has no
+// NewTargetControlRecord returns the target's record of a control signal it
+// accepted at acceptedAt. acceptBefore and reportBy are the envelope's values,
+// already validated by the caller. The record is never queued for recv and has no
 // backlog deadline: the signal is executed, not handed to an agent, and the
 // delivery ends when the control reply is committed (EventReplyCommitted) or,
 // failing that, is settled by Tick.
-func NewTargetControlRecord(acceptBefore, reportBy time.Time) Record {
+func NewTargetControlRecord(acceptedAt, acceptBefore, reportBy time.Time) Record {
 	return Record{
 		Side:         SideTarget,
 		State:        StateAccepted,
+		StateAt:      acceptedAt,
 		Control:      true,
 		AcceptBefore: acceptBefore,
 		ReportBy:     reportBy,
@@ -161,7 +174,8 @@ func NewTargetControlRecord(acceptBefore, reportBy time.Time) Record {
 // get (KindLostAtSender), already marked as reported; a target record produces
 // none and reports lost_at_target when the sender pulls.
 //
-// The record carries the Lost marker for the rest of its life. ReportBy is
+// The record enters its state at discoveredAt, which is the moment a target
+// reports for the loss. The record carries the Lost marker for the rest of its life. ReportBy is
 // LostReportBy(discoveredAt), an upper bound of the lost record's own report_by. AcceptBefore and BacklogDeadline stay zero because they are
 // unknown, so Tick closes the record at ReportBy and at no other time.
 //
@@ -185,7 +199,7 @@ func NewLostRecord(side Side, control bool, discoveredAt time.Time) (Record, Out
 	default:
 		return Record{}, Outcome{}, fmt.Errorf("%w: side %d", ErrInvalidInput, side)
 	}
-	r := Record{Side: side, State: StateDeliveryUnknown, Unknown: cause, Lost: true, Control: control, ReportBy: LostReportBy(discoveredAt)}
+	r := Record{Side: side, State: StateDeliveryUnknown, StateAt: discoveredAt, Unknown: cause, Lost: true, Control: control, ReportBy: LostReportBy(discoveredAt)}
 	n, feedback := r.withFeedback(StateInvalid, StateDeliveryUnknown, RejectNone)
 	return n, Outcome{Result: ResultApplied, From: StateInvalid, To: StateDeliveryUnknown, Feedback: feedback}, nil
 }
@@ -301,29 +315,29 @@ func ignored(from State, why IgnoreReason) Outcome {
 func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 	switch ev.Type {
 	case EventReceipt:
-		return r.moveTo(StateAccepted, RejectNone)
+		return r.moveTo(now, StateAccepted, RejectNone)
 	case EventDelivered:
 		if r.Side == SideTarget {
 			return r, Outcome{}, fmt.Errorf("%w: on the target a delivery becomes delivered only through Ack, or through EventReplyCommitted for a control signal", ErrWrongSide)
 		}
-		return r.moveTo(StateDelivered, RejectNone)
+		return r.moveTo(now, StateDelivered, RejectNone)
 	case EventReplyCommitted:
 		if r.Side != SideTarget || !r.Control {
 			return r, Outcome{}, fmt.Errorf("%w: a reply is committed only for a control signal on the target", ErrWrongSide)
 		}
-		return r.moveTo(StateDelivered, RejectNone)
+		return r.moveTo(now, StateDelivered, RejectNone)
 	case EventRejected:
 		if ev.Reject == RejectNone || !ev.Reject.known() {
 			return r, Outcome{}, fmt.Errorf("%w: rejection without a known reason", ErrInvalidEvent)
 		}
 		if r.Side == SideTarget {
-			return r.closeForcibly(ev.Reject)
+			return r.closeForcibly(now, ev.Reject)
 		}
-		return r.moveTo(StateRejected, ev.Reject)
+		return r.moveTo(now, StateRejected, ev.Reject)
 	case EventDeliveryUnknown:
-		return r.applyUnknown(ev.Unknown)
+		return r.applyUnknown(now, ev.Unknown)
 	case EventExpiryQueried:
-		return r.judgeExpiry(ev)
+		return r.judgeExpiry(now, ev)
 	case EventReportByPassed:
 		return r.closeIfDue(now)
 	case EventNotified:
@@ -342,7 +356,7 @@ func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 // given cause. Only a handed-over delivery or a loss the target reports to the
 // sender is such a fact: a loss at the sender is never reported, and a loss at
 // the target is made by NewLostRecord on the target, never by an event on it.
-func (r Record) applyUnknown(cause UnknownCause) (Record, Outcome, error) {
+func (r Record) applyUnknown(now time.Time, cause UnknownCause) (Record, Outcome, error) {
 	switch cause {
 	case UnknownHandedOver:
 	case UnknownLostAtTarget:
@@ -352,26 +366,27 @@ func (r Record) applyUnknown(cause UnknownCause) (Record, Outcome, error) {
 	default:
 		return r, Outcome{}, fmt.Errorf("%w: delivery_unknown for cause %s", ErrInvalidEvent, cause)
 	}
-	return r.moveToUnknown(cause)
+	return r.moveToUnknown(now, cause)
 }
 
 // moveTo changes the state to any state but delivery_unknown, which moveToUnknown
 // reaches.
-func (r Record) moveTo(to State, reason RejectReason) (Record, Outcome, error) {
-	return r.change(to, reason, UnknownCauseNone)
+func (r Record) moveTo(now time.Time, to State, reason RejectReason) (Record, Outcome, error) {
+	return r.change(now, to, reason, UnknownCauseNone)
 }
 
 // moveToUnknown changes the state to delivery_unknown for the given cause.
-func (r Record) moveToUnknown(cause UnknownCause) (Record, Outcome, error) {
-	return r.change(StateDeliveryUnknown, RejectNone, cause)
+func (r Record) moveToUnknown(now time.Time, cause UnknownCause) (Record, Outcome, error) {
+	return r.change(now, StateDeliveryUnknown, RejectNone, cause)
 }
 
-// change is the only place that changes State. The reason and the cause are set
+// change is the only place that changes State, and so the only place that
+// writes StateAt: the state is entered at now. The reason and the cause are set
 // with the states they belong to and cleared when the state moves on. The
 // callers pass a cause exactly when to is delivery_unknown, and one of the three
 // causes then; anything else is a programming error, refused before it can leave
 // a record whose cause and state disagree.
-func (r Record) change(to State, reason RejectReason, unknown UnknownCause) (Record, Outcome, error) {
+func (r Record) change(now time.Time, to State, reason RejectReason, unknown UnknownCause) (Record, Outcome, error) {
 	from := r.State
 	switch {
 	case !causeFitsState(to, unknown):
@@ -389,8 +404,12 @@ func (r Record) change(to State, reason RejectReason, unknown UnknownCause) (Rec
 	case to == StateDeliveryUnknown && r.Side == SideTarget && !r.handedOver():
 		return r, Outcome{}, fmt.Errorf("%w: delivery_unknown needs a body that was handed out", ErrIllegalTransition)
 	}
+	if now.IsZero() {
+		return r, Outcome{}, fmt.Errorf("%w: entering %s at the zero time", ErrInvalidInput, to)
+	}
 	n := r
 	n.State = to
+	n.StateAt = now
 	n.Sub = SubNone
 	n.Unknown = unknown
 	if to == StateRejected {
@@ -564,21 +583,21 @@ func (r Record) NeedsBody() bool {
 // reply can still correct. A delivery whose result is already unknown stays so,
 // whatever the cause: a record that replaces a loss was never handed out, yet it
 // may have been, and "rejected" would be as untrue for it.
-func (r Record) closeForcibly(reason RejectReason) (Record, Outcome, error) {
+func (r Record) closeForcibly(now time.Time, reason RejectReason) (Record, Outcome, error) {
 	if r.State == StateDeliveryUnknown {
 		return r, ignored(r.State, IgnoreDuplicate), nil
 	}
 	if r.handedOver() {
-		return r.moveToUnknown(UnknownHandedOver)
+		return r.moveToUnknown(now, UnknownHandedOver)
 	}
-	return r.moveTo(StateRejected, reason)
+	return r.moveTo(now, StateRejected, reason)
 }
 
 // judgeExpiry moves a queued delivery to expired_unconfirmed once the deadline
 // plus the clock tolerance has passed and a query made after that found no
 // receipt. The tolerance keeps a target whose clock runs behind from being
 // judged expired while it can still legitimately accept the message.
-func (r Record) judgeExpiry(ev Event) (Record, Outcome, error) {
+func (r Record) judgeExpiry(now time.Time, ev Event) (Record, Outcome, error) {
 	if r.Side != SideSource {
 		return r, Outcome{}, fmt.Errorf("%w: expiry is judged by the sender", ErrWrongSide)
 	}
@@ -588,7 +607,7 @@ func (r Record) judgeExpiry(ev Event) (Record, Outcome, error) {
 	if !ev.QueriedAt.After(ExpiryJudgeableAfter(r.AcceptBefore)) {
 		return r, ignored(r.State, IgnoreNotDueYet), nil
 	}
-	return r.moveTo(StateExpiredUnconfirmed, RejectNone)
+	return r.moveTo(now, StateExpiredUnconfirmed, RejectNone)
 }
 
 // closeIfDue closes a delivery that is still not final after ReportBy.
@@ -599,7 +618,7 @@ func (r Record) closeIfDue(now time.Time) (Record, Outcome, error) {
 	if !r.closeDeadline().reachedBy(now) {
 		return r, ignored(r.State, IgnoreNotDueYet), nil
 	}
-	return r.moveTo(StateClosedUnconfirmed, RejectNone)
+	return r.moveTo(now, StateClosedUnconfirmed, RejectNone)
 }
 
 func (r Record) markNotified() (Record, Outcome, error) {
@@ -691,6 +710,18 @@ func (r Record) noteUnblocked() (Record, Outcome, error) {
 		out.Feedback = []Feedback{{Kind: KindBlockedRecovered, Cause: r.BlockedCause, State: r.State}}
 	}
 	return r, out, nil
+}
+
+// DeliveredAt returns when this node recorded the delivery: StateAt of a
+// delivered record, and the zero time for a record in any other state. Delivered
+// is final, so the delivery time is the moment the state was entered and no
+// second time is kept. On the target it is the delivery time of a signed status
+// report, which carries it exactly when the state is delivered.
+func (r Record) DeliveredAt() time.Time {
+	if r.State != StateDelivered {
+		return time.Time{}
+	}
+	return r.StateAt
 }
 
 // StatusReport is what a target tells the sender's node about one delivery
@@ -804,18 +835,18 @@ func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 		return nil
 	}
 	if r.controlSettleDeadline().reachedBy(now) {
-		if err := step(r.moveToUnknown(UnknownHandedOver)); err != nil {
+		if err := step(r.moveToUnknown(now, UnknownHandedOver)); err != nil {
 			return r, outs, err
 		}
 	}
 	switch {
 	case r.leaseSettleDeadline().reachedBy(now):
-		if err := step(r.moveToUnknown(UnknownHandedOver)); err != nil {
+		if err := step(r.moveToUnknown(now, UnknownHandedOver)); err != nil {
 			return r, outs, err
 		}
 	case r.leaseExpiryDeadline().reachedBy(now):
 		if r.Lease.Handouts >= MaxLeases {
-			if err := step(r.moveToUnknown(UnknownHandedOver)); err != nil {
+			if err := step(r.moveToUnknown(now, UnknownHandedOver)); err != nil {
 				return r, outs, err
 			}
 		} else {
@@ -824,12 +855,12 @@ func (r Record) Tick(now time.Time) (Record, []Outcome, error) {
 		}
 	}
 	if r.backlogDeadline().reachedBy(now) {
-		if err := step(r.closeForcibly(RejectBacklogExpired)); err != nil {
+		if err := step(r.closeForcibly(now, RejectBacklogExpired)); err != nil {
 			return r, outs, err
 		}
 	}
 	if r.closeDeadline().reachedBy(now) {
-		if err := step(r.moveTo(StateClosedUnconfirmed, RejectNone)); err != nil {
+		if err := step(r.moveTo(now, StateClosedUnconfirmed, RejectNone)); err != nil {
 			return r, outs, err
 		}
 	}

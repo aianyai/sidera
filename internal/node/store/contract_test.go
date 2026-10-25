@@ -25,7 +25,7 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 		typ    reflect.Type
 		fields string
 	}{
-		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Unknown Lost Control Exempt AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
+		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Unknown StateAt Lost Control Exempt AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
 		{"delivery.Lease", reflect.TypeOf(delivery.Lease{}), "Handouts IDs Active IssuedAt ExpiresAt Chunks HandedOut Acked"},
 		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply DigestLost"},
 		{"delivery.Authorization", reflect.TypeOf(delivery.Authorization{}), "Kind Reject"},
@@ -64,7 +64,7 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 func deliveryRecordsOfEveryShape(t *testing.T) (source, target []delivery.Record) {
 	t.Helper()
 	accept := base.Add(time.Minute)
-	src := func() delivery.Record { return delivery.NewSourceRecord(accept) }
+	src := func() delivery.Record { return delivery.NewSourceRecord(base, accept) }
 
 	// Contact fails, the result becomes unknown, then it is delivered: the notice
 	// of the failure, of the unknown result and its correction.
@@ -229,14 +229,14 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 	var got store.Record
 	var dmg *store.Damage
 	out := srcOut(1, false)
-	out.Outbound.Recipients[0].Delivery = applied(t, delivery.NewSourceRecord(out.Outbound.AcceptBefore),
+	out.Outbound.Recipients[0].Delivery = applied(t, delivery.NewSourceRecord(base, out.Outbound.AcceptBefore),
 		delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectBacklogFull})
 	out.Outbound.Recipients[0].Arrival = envelope.Arrival{DeliveredAt: base.Add(time.Hour), ArrivedAt: base.Add(time.Minute)}
 	out.Outbound.ControlReplyDigest = [32]byte{1, 2, 3}
 	out.Outbound.Kind = envelope.KindSessionCreate
 	out.Key.Control = true
 	out.Envelope.Preset = "p"
-	derived := envelope.Tracked{Address: addr(2, 6), Delivery: delivery.NewSourceRecord(out.Outbound.AcceptBefore), Arrival: envelope.Arrival{ArrivedAt: base}}
+	derived := envelope.Tracked{Address: addr(2, 6), Delivery: delivery.NewSourceRecord(base, out.Outbound.AcceptBefore), Arrival: envelope.Arrival{ArrivedAt: base}}
 	out.Outbound.Derived = &derived
 	out.ControlReply = []byte{0, 1, 2, 255}
 	out.Idempotency = &store.Idempotency{Key: "k-1", RetainUntil: base.Add(48 * time.Hour)}

@@ -189,7 +189,7 @@ func TestOccupiesBacklogSlot(t *testing.T) {
 	if unknown.State != StateDeliveryUnknown {
 		t.Fatalf("setup: state %s", unknown.State)
 	}
-	control := NewTargetControlRecord(ab, ReportBy(ab))
+	control := NewTargetControlRecord(t0, ab, ReportBy(ab))
 	notice := noticeRecord(t, t0, DefaultEndpointMaxQueue)
 	rows := []struct {
 		rule string
@@ -204,7 +204,7 @@ func TestOccupiesBacklogSlot(t *testing.T) {
 		{"a delivered message occupies no slot", delivered, false},
 		{"a rejected message occupies no slot", rejected, false},
 		{"a message of unknown result occupies no slot: it is no longer queued", unknown, false},
-		{"the sender's record occupies no slot of the recipient", NewSourceRecord(ab), false},
+		{"the sender's record occupies no slot of the recipient", NewSourceRecord(t0, ab), false},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
@@ -281,7 +281,7 @@ func TestNoticeRecordIsTheRecordOfExemptTraffic(t *testing.T) {
 	if m := targetRecord(t, t0, DefaultEndpointMaxQueue); m.Exempt {
 		t.Error("a message record is exempt")
 	}
-	if c := NewTargetControlRecord(at(10*time.Minute), ReportBy(at(10*time.Minute))); c.Exempt {
+	if c := NewTargetControlRecord(t0, at(10*time.Minute), ReportBy(at(10*time.Minute))); c.Exempt {
 		t.Error("a control record is exempt")
 	}
 	if _, err := NewTargetNoticeRecord(t0, at(10*time.Minute), ReportBy(at(10*time.Minute)), -time.Minute); !errors.Is(err, ErrMaxQueue) {

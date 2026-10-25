@@ -14,7 +14,7 @@ func TestOutboundNeedByState(t *testing.T) {
 	t0 := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
 	accept := t0.Add(10 * time.Minute)
 	rec := func(state delivery.State) delivery.Record {
-		r := delivery.NewSourceRecord(accept)
+		r := delivery.NewSourceRecord(accept, accept)
 		r.State = state
 		return r
 	}

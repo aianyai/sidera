@@ -64,7 +64,7 @@ func mustReject(t *testing.T, r Record, now time.Time) Record {
 // pending. Each row also checks the instant against Tick itself: nothing
 // changes a nanosecond earlier, something changes at the instant.
 func TestNextTickNamesEachDeadline(t *testing.T) {
-	sourceQueued := NewSourceRecord(schedAcceptBefore)
+	sourceQueued := NewSourceRecord(t0, schedAcceptBefore)
 	sourceExpired, _ := mustApply(t, sourceQueued, at(13*time.Minute), Event{Type: EventExpiryQueried, QueriedAt: at(13 * time.Minute)})
 	sourceUnknown, _ := mustApply(t, sourceQueued, at(13*time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
 	sourceDelivered, _ := mustApply(t, sourceQueued, at(time.Minute), Event{Type: EventDelivered})
@@ -107,7 +107,7 @@ func TestNextTickNamesEachDeadline(t *testing.T) {
 	targetClosed := mustTick(t, targetRecord(t, at(0), 30*time.Minute), afterReportBy)
 	targetRejectedByHand := mustReject(t, targetRecord(t, at(0), 30*time.Minute), at(time.Minute))
 
-	control := NewTargetControlRecord(schedAcceptBefore, schedReportBy)
+	control := NewTargetControlRecord(t0, schedAcceptBefore, schedReportBy)
 	controlUnknown := mustTick(t, control, schedSettleBy)
 	controlDelivered, _ := mustApply(t, control, at(time.Minute), Event{Type: EventReplyCommitted})
 
@@ -202,7 +202,7 @@ func scheduleRecord(rng *rand.Rand) Record {
 	case 3:
 		return lateTargetRecord(rng, ab)
 	case 0:
-		r = NewSourceRecord(ab)
+		r = NewSourceRecord(t0, ab)
 		ops = []scheduleOp{
 			tick, tick,
 			apply(func(now time.Time) Event { return Event{Type: EventExpiryQueried, QueriedAt: now} }),
@@ -249,7 +249,7 @@ func scheduleRecord(rng *rand.Rand) Record {
 			apply(event(Event{Type: EventUnblocked})),
 		}
 	default:
-		r = NewTargetControlRecord(ab, rb)
+		r = NewTargetControlRecord(t0, ab, rb)
 		ops = []scheduleOp{
 			tick, tick,
 			apply(event(Event{Type: EventReplyCommitted})),

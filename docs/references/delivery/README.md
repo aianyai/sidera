@@ -230,7 +230,7 @@ was never handed out, `delivery_unknown` if it was.
 
 A control signal is executed by the runtime's adapter, not handed to an agent by
 `recv`, and its reply is committed together with the execution result. Its
-target record is built by `NewTargetControlRecord(acceptBefore, reportBy)` and
+target record is built by `NewTargetControlRecord(acceptedAt, acceptBefore, reportBy)` and
 differs from a message record in four ways:
 
 - It is never queued for `recv`: `Handout` and `Ack` refuse it (`ErrWrongSide`),
@@ -269,7 +269,7 @@ feedback bookkeeping of a source record is it equal, which
 transitions. An invalid record yields an `*InvalidRecordError`; its `Violation`
 is a typed reason naming the
 first invariant broken, in a fixed order of checks (kind and state, unknown cause,
-replacement shape, deadlines, block flags, produced feedback, lease, outcome
+replacement shape, deadlines, state time, block flags, produced feedback, lease, outcome
 against lease). The invariants
 are listed in the package README; each is a property the transitions keep:
 
@@ -306,6 +306,40 @@ first, then, if the record is accepted, the block or its end. So a block
 reported before the receipt was pulled is still reported, and an expired
 delivery that turns out accepted and blocked gives both the correction and the
 blocked notice.
+
+### When a record entered its state
+
+`Record.StateAt` is the moment the record entered its current state: the time the
+constructor was given (`NewSourceRecord(queuedAt, ...)`,
+`NewTargetRecord`, `NewTargetNoticeRecord` and `NewTargetControlRecord` take the
+acceptance time, `NewLostRecord` the discovery time), then the `now` of the
+transition that last changed `State`. `change` is the only writer, so `Apply`,
+`Tick`, a second-check denial in `Handout`, `Ack` and the forcible close all stamp
+the state they enter with their own clock, and a fact that leaves the state alone
+(prompt, block, hand-out, a lease that goes back to the queue, a duplicate or
+stale fact) does not touch it. `DeliveredAt()` is `StateAt` for a delivered
+record and zero for any other.
+
+The envelope's signed status report carries two times: `reported_at`, the moment
+the target recorded the state the report states, and `delivered_at`, present
+exactly when the state is delivered. A record provides exactly these. A
+delivered record is final, so its delivery time is the moment it entered the
+state, and keeping it in a second field could only let the two disagree. A
+target that signs a report again for an unchanged state repeats `StateAt` under a
+fresh signature; one that settles a delivery late (a `Tick` after `report_by`)
+records and reports the moment it woke, which is what the sender expects of a
+late report.
+
+A transition at the zero time is `ErrInvalidInput`; `Valid` refuses a record
+without it (`ViolationStateAt`) and compares it with no other instant, since the
+wall clock may step back. Tests in `internal/delivery/statetime_test.go`:
+`TestConstructorsStartTheStateAtTheGivenTime`,
+`TestEveryTransitionIntoAStateSetsTheStateAtToItsClock` (every way into a state,
+expected instants from the test's own clock), `TestTickStampsEveryStepOfOneCallWithItsClock`,
+`TestFactsThatLeaveTheStateAloneLeaveTheStateAtAlone`,
+`TestDeliveredAtIsTheStateAtOfADeliveredRecord`,
+`TestPropertyStateAtOnlyMovesWithTheState` (the random deliveries),
+`TestTransitionsRefuseAZeroClock`.
 
 ### Records lost to storage corruption
 

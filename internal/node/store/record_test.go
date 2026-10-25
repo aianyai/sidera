@@ -263,8 +263,17 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"a session endpoint with created_by that is not a hash", "endpoint", `"created_by":"`, `"created_by":"x`},
 		{"an in record of revision zero", "in", `"rev":1`, `"rev":0`},
 		{"an in record without a revision", "in", `"rev":1,`, ``},
-		{"an in record without its record", "in", `"record":{"side":"target","state":"accepted","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z","backlog_deadline":"2026-10-24T09:30:00Z"},`, ``},
+		{"an in record without its record", "in", `"record":{"side":"target","state":"accepted","state_at":"2026-10-24T09:00:00Z","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z","backlog_deadline":"2026-10-24T09:30:00Z"},`, ``},
 		{"a delivery on the source side in an in record", "in", `"side":"target"`, `"side":"source"`},
+		{"an in record without the time it entered its state", "in", `"state_at":"2026-10-24T09:00:00Z",`, ``},
+		{"an in record whose state time is null", "in", `"state_at":"2026-10-24T09:00:00Z"`, `"state_at":null`},
+		{"an in record whose state time is the zero time", "in", `"state_at":"2026-10-24T09:00:00Z"`, `"state_at":"0001-01-01T00:00:00Z"`},
+		{"an in record that gives a delivery time next to the state time", "in", `"state_at":"2026-10-24T09:00:00Z",`, `"state_at":"2026-10-24T09:00:00Z","delivered_at":"2026-10-24T09:00:00Z",`},
+		{"a state time with trailing zeros in the fraction", "in", `"state_at":"2026-10-24T09:00:00Z"`, `"state_at":"2026-10-24T09:00:00.000Z"`},
+		{"a source delivery without the time it entered its state", "out", `"state_at":"2026-10-24T09:00:00Z",`, ``},
+		{"a control record without the time it entered its state", "ctl", `"state_at":"2026-10-24T09:00:00Z",`, ``},
+		{"a replacement of a lost record without the time it entered its state", "in lost at the target", `"state_at":"2026-10-24T10:00:00Z",`, ``},
+		{"a lost source replacement without the time it entered its state", "out lost at the sender", `"state_at":"2026-10-24T10:00:00Z",`, ``},
 		{"a state that is not a state", "in", `"state":"accepted"`, `"state":"accepted2"`},
 		{"the invalid state", "in", `"state":"accepted"`, `"state":"invalid"`},
 		{"an authorization kind that is not one", "in", `"kind":"allow"`, `"kind":"maybe"`},
@@ -272,7 +281,7 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"an in record of another sender than the system without the verdict of the authorization check", "in", `"auth":{"kind":"allow"},`, ``},
 		{"an in record of another sender than the system without the reply permission", "in", `"reply":{"reason":"disabled"},`, ``},
 		{"an in record of the system endpoint that is not exempt", "in notice", `"exempt":true,`, ``},
-		{"an exempt in record of another sender than the system endpoint", "in", `"state":"accepted","accept_before"`, `"state":"accepted","exempt":true,"accept_before"`},
+		{"an exempt in record of another sender than the system endpoint", "in", `"state_at":"2026-10-24T09:00:00Z","accept_before"`, `"state_at":"2026-10-24T09:00:00Z","exempt":true,"accept_before"`},
 		{"an exempt in record that holds the verdict of the authorization check", "in notice", `"handout"`, `"auth":{"kind":"allow"},"handout"`},
 		{"an exempt in record that holds the reply permission", "in notice", `"handout"`, `"reply":{"reason":"disabled"},"handout"`},
 		{"a digest of the wrong length", "in", `"digest":"0102`, `"digest":"010`},
@@ -282,7 +291,7 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"a dedup record with no digest", "in", `"digest":"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",`, ``},
 		{"an out kind that is not an envelope kind", "out", `"kind":"message"`, `"kind":"shout"`},
 		{"an out kind that is a control signal in a message file", "out", `"kind":"message"`, `"kind":"control.session.close"`},
-		{"an out record without recipients", "out", `"recipients":[{"address":"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","delivery":{"side":"source","state":"queued","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z"}}],`, ``},
+		{"an out record without recipients", "out", `"recipients":[{"address":"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","delivery":{"side":"source","state":"queued","state_at":"2026-10-24T09:00:00Z","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z"}}],`, ``},
 		{"an out recipient that is not an address", "out", `"address":"node1`, `"address":"nodeX`},
 		{"a sequence number of zero", "out", `"seq":1}`, `"seq":0}`},
 		{"sequence numbers twice for one endpoint", "out", `"seq":[{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":1}]`, `"seq":[{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":1},{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":2}]`},
@@ -327,7 +336,7 @@ func frameHead(t *testing.T, vector string) []byte {
 // The shapes: a record is regular or lost, never a mixture.
 func TestLostShapesAreExclusive(t *testing.T) {
 	_, key, body := golden(t, "in")
-	lost := `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":{"side":"target","state":"delivery_unknown","unknown":"lost_at_target","lost":true,"report_by":"2026-10-24T14:04:00Z"},"dedup":{"digest":"0000000000000000000000000000000000000000000000000000000000000000","retain_until":"2026-10-24T14:04:00Z","digest_lost":true}}`
+	lost := `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":{"side":"target","state":"delivery_unknown","state_at":"2026-10-24T10:00:00Z","unknown":"lost_at_target","lost":true,"report_by":"2026-10-24T14:04:00Z"},"dedup":{"digest":"0000000000000000000000000000000000000000000000000000000000000000","retain_until":"2026-10-24T14:04:00Z","digest_lost":true}}`
 	if _, dmg := store.DecodeRecord(store.InDir, nameOf("in", key), frameOf("in", key, lost)); dmg != nil {
 		t.Fatalf("a lost in record: %+v", dmg)
 	}
@@ -367,7 +376,7 @@ func TestStoreRefusesAnInvalidDecodedRecord(t *testing.T) {
 			}, "an unknown result without a cause"},
 		{"a control record is never rejected", "ctl", store.CtlDir,
 			func(b string) string {
-				return strings.Replace(b, `"state":"accepted","control":true`, `"state":"rejected","reject":"unauthorized","control":true`, 1)
+				return strings.Replace(b, `"state":"accepted","state_at":"2026-10-24T09:00:00Z","control":true`, `"state":"rejected","state_at":"2026-10-24T09:00:00Z","reject":"unauthorized","control":true`, 1)
 			}, "a rejected control record"},
 		{"a source delivery has no backlog deadline", "out", store.OutDir,
 			func(b string) string {
@@ -375,7 +384,7 @@ func TestStoreRefusesAnInvalidDecodedRecord(t *testing.T) {
 			}, "a backlog deadline on a source record"},
 		{"a lost marker needs the shape of a replacement", "in", store.InDir,
 			func(b string) string {
-				return strings.Replace(b, `"state":"accepted","accept_before"`, `"state":"accepted","lost":true,"accept_before"`, 1)
+				return strings.Replace(b, `"state":"accepted","state_at":"2026-10-24T09:00:00Z","accept_before"`, `"state":"accepted","state_at":"2026-10-24T09:00:00Z","lost":true,"accept_before"`, 1)
 			}, "a lost marker on a delivery with deadlines"},
 	} {
 		t.Run(c.rule, func(t *testing.T) {
@@ -489,7 +498,7 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	recs["out with pending feedback and an arrival"] = fb
 	two := srcOut(5, false)
 	two.Key.Recipients = []ident.Address{addr(2, 2), addr(3, 4)}
-	two.Outbound.Recipients = append(two.Outbound.Recipients, envelope.Tracked{Address: addr(3, 4), Delivery: delivery.NewSourceRecord(two.Outbound.AcceptBefore)})
+	two.Outbound.Recipients = append(two.Outbound.Recipients, envelope.Tracked{Address: addr(3, 4), Delivery: delivery.NewSourceRecord(base, two.Outbound.AcceptBefore)})
 	two.Envelope.To = two.Key.Recipients
 	two.Envelope.Seq[ep(4)] = 9
 	recs["out with two recipients"] = two
@@ -499,7 +508,7 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	ctl.Envelope.Preset = "default"
 	ctl.ControlReply = []byte("a control reply record, kept as it was received")
 	ctl.Outbound.ControlReplyDigest = [32]byte{7}
-	derived := envelope.Tracked{Address: addr(2, 6), Delivery: delivery.NewSourceRecord(ctl.Outbound.AcceptBefore)}
+	derived := envelope.Tracked{Address: addr(2, 6), Delivery: delivery.NewSourceRecord(base, ctl.Outbound.AcceptBefore)}
 	ctl.Outbound.Derived = &derived
 	recs["out of a session creation with a derived delivery"] = ctl
 	recs["out lost"] = lostOutAt(outKey(7, false), base.Add(time.Hour))

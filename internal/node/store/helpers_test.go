@@ -366,7 +366,7 @@ func srcOut(i int, toLocal bool) store.OutRecord {
 			AcceptBefore: accept,
 			Recipients: []envelope.Tracked{{
 				Address:  k.Recipients[0],
-				Delivery: delivery.NewSourceRecord(accept),
+				Delivery: delivery.NewSourceRecord(base, accept),
 			}},
 		},
 		Envelope: store.OutEnvelope{
@@ -442,7 +442,7 @@ func sessionCtl(i int, session int) store.CtlRecord {
 	reportBy := delivery.ReportBy(accept)
 	return store.CtlRecord{
 		Key:             k,
-		Record:          delivery.NewTargetControlRecord(accept, reportBy),
+		Record:          delivery.NewTargetControlRecord(base, accept, reportBy),
 		Dedup:           delivery.NewDedupRecord(k.Dedup(), digestOf(i), reportBy),
 		Kind:            envelope.KindSessionCreate,
 		Preset:          "default",

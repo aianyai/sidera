@@ -243,6 +243,7 @@ type leaseJSON struct {
 type recordJSON struct {
 	Side            string     `json:"side"`
 	State           string     `json:"state"`
+	StateAt         *wtime     `json:"state_at"`
 	Sub             string     `json:"sub,omitempty"`
 	Reject          string     `json:"reject,omitempty"`
 	Unknown         string     `json:"unknown,omitempty"`
@@ -275,6 +276,7 @@ func toRecord(r delivery.Record) (recordJSON, error) {
 	if j.State, err = enumName(r.State, delivery.State.String, "state"); err != nil {
 		return j, err
 	}
+	j.StateAt = tptr(r.StateAt) // checkDelivery refused a record without one
 	switch r.Sub {
 	case delivery.SubNone:
 	case delivery.SubNotified:
@@ -346,6 +348,9 @@ func fromRecord(j recordJSON) (delivery.Record, error) {
 		return r, err
 	}
 	if r.State, err = enumValue(j.State, delivery.State.String, "state"); err != nil {
+		return r, err
+	}
+	if r.StateAt, err = tmust(j.StateAt, "state_at"); err != nil {
 		return r, err
 	}
 	switch j.Sub {

@@ -36,9 +36,9 @@ func TestEveryStateAndRejectReasonHasAWireName(t *testing.T) {
 
 func TestTheRecipientsOfASourceRecordAreTheOnesOfItsKeyInOrder(t *testing.T) {
 	to := []ident.Address{{Node: nodeOf(t, 1), Endpoint: idOf(t, 50)}, {Node: nodeOf(t, 2), Endpoint: idOf(t, 51)}}
-	rejected := delivery.NewSourceRecord(time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC))
+	rejected := delivery.NewSourceRecord(time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC), time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC))
 	rejected.State, rejected.Reject = delivery.StateRejected, delivery.RejectBacklogFull
-	closed := delivery.NewSourceRecord(rejected.AcceptBefore)
+	closed := delivery.NewSourceRecord(rejected.AcceptBefore, rejected.AcceptBefore)
 	closed.State = delivery.StateClosedUnconfirmed
 
 	normal := outRec(t, 1, delivery.StateQueued)

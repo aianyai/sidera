@@ -20,7 +20,7 @@ var (
 )
 
 func controlRecord() Record {
-	return NewTargetControlRecord(controlAcceptBefore, controlReportBy)
+	return NewTargetControlRecord(t0, controlAcceptBefore, controlReportBy)
 }
 
 func replyCommitted() Event { return Event{Type: EventReplyCommitted} }
@@ -31,6 +31,7 @@ func TestNewTargetControlRecord(t *testing.T) {
 		Side:         SideTarget,
 		State:        StateAccepted,
 		Control:      true,
+		StateAt:      t0,
 		AcceptBefore: controlAcceptBefore,
 		ReportBy:     controlReportBy,
 	}
@@ -41,7 +42,7 @@ func TestNewTargetControlRecord(t *testing.T) {
 		t.Errorf("a control record has no backlog deadline, got %v", rec.BacklogDeadline)
 	}
 	msg := targetRecord(t, t0, time.Hour)
-	if msg.Control || NewSourceRecord(controlAcceptBefore).Control {
+	if msg.Control || NewSourceRecord(t0, controlAcceptBefore).Control {
 		t.Error("message records are not control records")
 	}
 }
@@ -151,14 +152,14 @@ func TestReplyCommittedAppliesToControlRecordsOnly(t *testing.T) {
 		rule string
 		rec  func(*testing.T) Record
 	}{
-		{"a source record refuses a committed reply", func(*testing.T) Record { return NewSourceRecord(controlAcceptBefore) }},
+		{"a source record refuses a committed reply", func(*testing.T) Record { return NewSourceRecord(t0, controlAcceptBefore) }},
 		{"a source record flagged as control still refuses a committed reply", func(*testing.T) Record {
-			rec := NewSourceRecord(controlAcceptBefore)
+			rec := NewSourceRecord(t0, controlAcceptBefore)
 			rec.Control = true
 			return rec
 		}},
 		{"an accepted source record refuses a committed reply", func(t *testing.T) Record {
-			rec, _ := mustApply(t, NewSourceRecord(controlAcceptBefore), at(time.Second), Event{Type: EventReceipt})
+			rec, _ := mustApply(t, NewSourceRecord(t0, controlAcceptBefore), at(time.Second), Event{Type: EventReceipt})
 			return rec
 		}},
 		{"a queued target message record refuses a committed reply", func(t *testing.T) Record { return targetRecord(t, t0, time.Hour) }},
@@ -280,7 +281,7 @@ func TestControlStatusReport(t *testing.T) {
 // the source applies the target's reports with the events it already has.
 func TestScenarioControlSignalLifecycle(t *testing.T) {
 	t.Run("a committed reply reaches the sender as a silent delivery", func(t *testing.T) {
-		src := NewSourceRecord(controlAcceptBefore)
+		src := NewSourceRecord(t0, controlAcceptBefore)
 		tgt := controlRecord()
 		src, _, err := src.ApplyStatusReport(at(time.Minute), tgt.StatusReport())
 		if err != nil || src.State != StateAccepted {
@@ -298,14 +299,14 @@ func TestScenarioControlSignalLifecycle(t *testing.T) {
 		}
 	})
 	t.Run("the sender applies the reply itself with the delivered event", func(t *testing.T) {
-		src, _ := mustApply(t, NewSourceRecord(controlAcceptBefore), at(time.Second), Event{Type: EventReceipt})
+		src, _ := mustApply(t, NewSourceRecord(t0, controlAcceptBefore), at(time.Second), Event{Type: EventReceipt})
 		src, out := mustApply(t, src, at(time.Minute), Event{Type: EventDelivered})
 		if src.State != StateDelivered || len(out.Feedback) != 0 {
 			t.Errorf("state %s feedback %+v", src.State, out.Feedback)
 		}
 	})
 	t.Run("an unsettled control signal is told as unknown and corrected by a late reply", func(t *testing.T) {
-		src := NewSourceRecord(controlAcceptBefore)
+		src := NewSourceRecord(t0, controlAcceptBefore)
 		tgt := controlRecord()
 		src, _, _ = src.ApplyStatusReport(at(time.Minute), tgt.StatusReport())
 		tgt, _, err := tgt.Tick(controlSettleBy)
@@ -380,8 +381,8 @@ func runRandomControl(t *testing.T, seed int64, paths map[string]int, observe fu
 	ab := t0.Add(time.Duration(1+rng.Intn(60)) * time.Minute)
 	reportBy := ab.Add(2*time.Hour + 4*15*time.Minute + 2*time.Minute) // the decided report_by offset, spelled out
 	settle := reportBy.Add(-5 * time.Minute)
-	tgt := NewTargetControlRecord(ab, reportBy)
-	src := NewSourceRecord(ab)
+	tgt := NewTargetControlRecord(t0, ab, reportBy)
+	src := NewSourceRecord(t0, ab)
 
 	// The model: the externally visible state the rules in words call for.
 	model := StateAccepted

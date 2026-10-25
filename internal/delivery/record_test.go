@@ -82,7 +82,7 @@ func TestSourceTransitions(t *testing.T) {
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
-			rec := NewSourceRecord(at(10 * time.Minute))
+			rec := NewSourceRecord(t0, at(10*time.Minute))
 			var all []Kind
 			var last Outcome
 			var err error
@@ -117,7 +117,7 @@ func TestRejectionReasonIsCarried(t *testing.T) {
 	}
 	for _, why := range reasons {
 		t.Run(why.String(), func(t *testing.T) {
-			rec := NewSourceRecord(at(10 * time.Minute))
+			rec := NewSourceRecord(t0, at(10*time.Minute))
 			rec, out := mustApply(t, rec, at(time.Minute), Event{Type: EventRejected, Reject: why})
 			if rec.Reject != why || len(out.Feedback) != 1 || out.Feedback[0].Reject != why {
 				t.Errorf("record reason %v, feedback %+v", rec.Reject, out.Feedback)
@@ -147,7 +147,7 @@ func TestUnreachableHint(t *testing.T) {
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
-			rec := NewSourceRecord(at(10 * time.Minute))
+			rec := NewSourceRecord(t0, at(10*time.Minute))
 			var all []Feedback
 			var last Outcome
 			var err error
@@ -198,7 +198,7 @@ func TestDeliveryBlocked(t *testing.T) {
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
-			rec := NewSourceRecord(at(10 * time.Minute))
+			rec := NewSourceRecord(t0, at(10*time.Minute))
 			var all []Feedback
 			var last Outcome
 			var err error
@@ -294,7 +294,7 @@ func TestSideRules(t *testing.T) {
 	}{
 		{"expiry is judged by the sender only", func(t *testing.T) Record { return targetRecord(t, t0, time.Hour) }, Event{Type: EventExpiryQueried, QueriedAt: at(time.Hour)}},
 		{"unreachability is seen by the sender only", func(t *testing.T) Record { return targetRecord(t, t0, time.Hour) }, Event{Type: EventContactFailing, Cause: CauseNetwork, Since: t0}},
-		{"prompts are handed out by the target only", func(t *testing.T) Record { return NewSourceRecord(at(10 * time.Minute)) }, Event{Type: EventNotified}},
+		{"prompts are handed out by the target only", func(t *testing.T) Record { return NewSourceRecord(t0, at(10*time.Minute)) }, Event{Type: EventNotified}},
 		{"a target record cannot be marked delivered except by acknowledging every chunk", func(t *testing.T) Record { return targetRecord(t, t0, time.Hour) }, Event{Type: EventDelivered}},
 		{"a handed-out target record cannot be marked delivered either", func(t *testing.T) Record {
 			return handOut(t, targetRecord(t, t0, time.Hour), at(time.Minute), 1, 1)
@@ -310,7 +310,7 @@ func TestSideRules(t *testing.T) {
 	}
 	t.Run("an accepted source record has no queue: time alone does not reject it before report_by minus the margin", func(t *testing.T) {
 		acceptBefore := at(10 * time.Minute)
-		rec, _ := mustApply(t, NewSourceRecord(acceptBefore), at(time.Second), Event{Type: EventReceipt})
+		rec, _ := mustApply(t, NewSourceRecord(t0, acceptBefore), at(time.Second), Event{Type: EventReceipt})
 		// Far past where a target's backlog deadline (at most MaxQueueCap after
 		// acceptance) would fall, yet before the settle deadline.
 		now := at(10*time.Minute + MaxQueueCap + 30*time.Minute)

@@ -105,7 +105,7 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 	}
 
 	ab := t0.Add(time.Duration(1+rng.Intn(60)) * time.Minute)
-	src := NewSourceRecord(ab)
+	src := NewSourceRecord(t0, ab)
 	reportBy := src.ReportBy
 	settle := SettleBy(reportBy)
 	chunks := 1 + rng.Intn(3)

@@ -86,7 +86,7 @@ func TestCloseBatchClosesControlRecordsAndDropsTheirBody(t *testing.T) {
 	body := store.BodyRefOf([]byte("initial message"))
 	accept := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
 	k := store.TargetKey{SenderNode: nodeOf(t, 2), Sender: idOf(t, 3), Message: "ctl-0001", Recipient: ep}
-	ctl := store.CtlRecord{Key: k, Record: delivery.NewTargetControlRecord(accept, delivery.ReportBy(accept)), Body: &body}
+	ctl := store.CtlRecord{Key: k, Record: delivery.NewTargetControlRecord(accept, accept, delivery.ReportBy(accept)), Body: &body}
 	batch, unchanged := closeBatch(bodyCounts{body.Name(): 1}, accept, nil, []store.CtlRecord{ctl})
 	if len(unchanged) != 0 || len(batch.Ctl) != 1 {
 		t.Fatalf("batch %+v unchanged %v", batch, unchanged)

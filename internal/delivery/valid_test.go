@@ -76,27 +76,27 @@ var (
 )
 
 var (
-	baseQueued      = validBase{"source queued", func(t *testing.T) Record { return NewSourceRecord(validAcceptBefore) }}
+	baseQueued      = validBase{"source queued", func(t *testing.T) Record { return NewSourceRecord(t0, validAcceptBefore) }}
 	baseSrcAccepted = validBase{"source accepted", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventReceipt})
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventReceipt})
 	}}
 	baseSrcRejected = validBase{"source rejected", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventRejected, Reject: RejectTooLarge})
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventRejected, Reject: RejectTooLarge})
 	}}
 	baseSrcDelivered = validBase{"source delivered", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventDelivered})
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventDelivered})
 	}}
 	baseSrcUnknownDelivered = validBase{"source delivered after delivery_unknown", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver}, Event{Type: EventDelivered})
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver}, Event{Type: EventDelivered})
 	}}
 	baseSrcExpired = validBase{"source expired_unconfirmed", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(validAcceptBefore), farFuture, Event{Type: EventExpiryQueried, QueriedAt: farFuture})
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), farFuture, Event{Type: EventExpiryQueried, QueriedAt: farFuture})
 	}}
 	baseSrcBlocked = validBase{"source accepted and blocked", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventReceipt}, Event{Type: EventBlocked, Cause: CauseAdapterOffline})
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventReceipt}, Event{Type: EventBlocked, Cause: CauseAdapterOffline})
 	}}
 	baseSrcUnblocked = validBase{"source accepted, blocked and unblocked", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(validAcceptBefore), at(time.Minute), Event{Type: EventReceipt}, Event{Type: EventBlocked, Cause: CauseAdapterOffline}, Event{Type: EventUnblocked})
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventReceipt}, Event{Type: EventBlocked, Cause: CauseAdapterOffline}, Event{Type: EventUnblocked})
 	}}
 	baseTgt       = validBase{"target accepted", func(t *testing.T) Record { return targetRecord(t, t0, 30*time.Minute) }}
 	baseTgtLeased = validBase{"target leased, 2 chunks, one handed out", func(t *testing.T) Record {
@@ -178,6 +178,10 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		{"a target report_by follows from accept_before", baseTgt, func(r *Record) { r.ReportBy = r.AcceptBefore }, ViolationReportBy},
 		{"a queued message has a backlog deadline", baseTgt, func(r *Record) { r.BacklogDeadline = time.Time{} }, ViolationBacklogDeadline},
 		{"the backlog deadline is not past the settle deadline", baseTgt, func(r *Record) { r.BacklogDeadline = SettleBy(r.ReportBy).Add(time.Nanosecond) }, ViolationBacklogDeadline},
+		// the time the state was entered
+		{"a record that never entered its state", baseQueued, func(r *Record) { r.StateAt = time.Time{} }, ViolationStateAt},
+		{"a target record that never entered its state", baseTgtDelivered, func(r *Record) { r.StateAt = time.Time{} }, ViolationStateAt},
+		{"a replacement of a lost record that never entered its state", baseLostTarget, func(r *Record) { r.StateAt = time.Time{} }, ViolationStateAt},
 		{"a source record has no backlog deadline", baseQueued, func(r *Record) { r.BacklogDeadline = t0 }, ViolationBacklogDeadline},
 		{"a control record has no backlog deadline", baseControlRecord, func(r *Record) { r.BacklogDeadline = t0 }, ViolationBacklogDeadline},
 		// produced feedback
@@ -346,7 +350,7 @@ func keyOfSource(r Record) reachedSource {
 // expected set comes from running the transitions here, not from the rules in
 // Valid.
 func TestRecordValidSourceFeedbackBookkeepingIsExact(t *testing.T) {
-	start := NewSourceRecord(validAcceptBefore)
+	start := NewSourceRecord(t0, validAcceptBefore)
 	var events []Event
 	for _, ty := range []EventType{EventReceipt, EventDelivered, EventReportByPassed, EventUnblocked} {
 		events = append(events, Event{Type: ty})
@@ -536,7 +540,7 @@ func runSourceLearnsLoss(t *testing.T, runs int, observe func(*testing.T, Record
 	rng := rand.New(rand.NewSource(5))
 	lost := StatusReport{State: StateDeliveryUnknown, Unknown: UnknownLostAtTarget}
 	for i := 0; i < runs; i++ {
-		r := NewSourceRecord(validAcceptBefore)
+		r := NewSourceRecord(t0, validAcceptBefore)
 		observe(t, r)
 		switch rng.Intn(3) {
 		case 1:
@@ -653,6 +657,7 @@ func recordMutators() []recordMutator {
 				r.ReportBy = time.Time{}
 			}
 		}, 0},
+		{"state time unset", true, func(rng *rand.Rand, r *Record) { r.StateAt = time.Time{} }, 0},
 		{"backlog deadline unset", true, func(rng *rand.Rand, r *Record) { r.BacklogDeadline = time.Time{} }, 0},
 		{"backlog deadline shifted", false, func(rng *rand.Rand, r *Record) { r.BacklogDeadline = r.BacklogDeadline.Add(randomShift(rng)) }, 0.8},
 		{"backlog deadline set past the settle deadline", false, func(rng *rand.Rand, r *Record) {

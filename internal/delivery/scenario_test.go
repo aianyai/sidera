@@ -44,7 +44,7 @@ func TestScenarioLostReceiptThenRetry(t *testing.T) {
 
 func TestScenarioNormalDeliveryIsSilent(t *testing.T) {
 	ab := at(10 * time.Minute)
-	src := NewSourceRecord(ab)
+	src := NewSourceRecord(t0, ab)
 	tgt, err := NewTargetRecord(at(time.Second), ab, src.ReportBy, DefaultEndpointMaxQueue)
 	if err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestScenarioEachAnomalyOnce(t *testing.T) {
 	}
 	for _, s := range scripts {
 		t.Run(s.rule+" is reported exactly once however often the facts repeat", func(t *testing.T) {
-			rec := NewSourceRecord(at(10 * time.Minute))
+			rec := NewSourceRecord(t0, at(10*time.Minute))
 			var q FeedbackQueue
 			count := 0
 			for round := 0; round < 3; round++ {
@@ -111,7 +111,7 @@ func TestScenarioEachAnomalyOnce(t *testing.T) {
 
 func TestScenarioExpiredThenCorrectedOnce(t *testing.T) {
 	ab := at(10 * time.Minute)
-	src := NewSourceRecord(ab)
+	src := NewSourceRecord(t0, ab)
 	var all []Kind
 	src, out := mustApply(t, src, at(5*time.Minute), Event{Type: EventContactFailing, Cause: CauseNetwork, Since: t0})
 	all = append(all, kindsOf(out.Feedback)...)
@@ -134,7 +134,7 @@ func TestScenarioExpiredThenCorrectedOnce(t *testing.T) {
 
 func TestScenarioBacklogRejectionReachesASourceBehindNAT(t *testing.T) {
 	ab := at(10 * time.Minute)
-	src := NewSourceRecord(ab)
+	src := NewSourceRecord(t0, ab)
 	tgt, _ := NewTargetRecord(at(time.Minute), ab, src.ReportBy, DefaultEndpointMaxQueue)
 
 	tgt, outs, _ := tgt.Tick(at(time.Minute + DefaultEndpointMaxQueue))
@@ -173,7 +173,7 @@ func TestScenarioLongerEndpointQueueTimeIsCutBeforeReportBy(t *testing.T) {
 	if tgt.State != StateRejected || tgt.Reject != RejectBacklogExpired {
 		t.Fatalf("at the settle deadline: %s/%s", tgt.State, tgt.Reject)
 	}
-	src := NewSourceRecord(ab)
+	src := NewSourceRecord(t0, ab)
 	src.ReportBy = reportBy
 	src, fbs := pull(t, src, tgt, settle.Add(time.Minute))
 	if src.State != StateRejected || !sameKinds(kindsOf(fbs), []Kind{KindRejected}) || !settle.Add(time.Minute).Before(reportBy) {
@@ -183,7 +183,7 @@ func TestScenarioLongerEndpointQueueTimeIsCutBeforeReportBy(t *testing.T) {
 
 func TestScenarioLeaseRenewalBeyondCapEndsUnknownOnce(t *testing.T) {
 	ab := at(10 * time.Minute)
-	src := NewSourceRecord(ab)
+	src := NewSourceRecord(t0, ab)
 	tgt, _ := NewTargetRecord(at(time.Minute), ab, src.ReportBy, 2*time.Hour)
 	now := at(time.Minute)
 	for lease := 0; lease < MaxLeases; lease++ {
@@ -217,7 +217,7 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 		if v.Outcome != IntakeSuspended {
 			t.Fatalf("verdict %+v", v)
 		}
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		src, out := mustApply(t, src, at(3*time.Minute), Event{Type: EventContactFailing, Cause: CauseTrustSuspended, Since: at(time.Minute)})
 		if len(out.Feedback) != 1 || out.Feedback[0].Cause != CauseTrustSuspended || src.State != StateQueued {
 			t.Errorf("outcome %+v state %s", out, src.State)
@@ -228,7 +228,7 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 		}
 	})
 	t.Run("at recv the message is skipped, then delivered after recovery, and the sender hears nothing", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		tgt, _ := NewTargetRecord(at(time.Minute), ab, src.ReportBy, DefaultEndpointMaxQueue)
 		var all []Feedback
 		for i := 2; i < 6; i++ {
@@ -250,7 +250,7 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 		}
 	})
 	t.Run("a suspension lasting to the queue time ends as backlog expiry", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		tgt, _ := NewTargetRecord(at(time.Minute), ab, src.ReportBy, DefaultEndpointMaxQueue)
 		tgt, _, _ = tgt.Handout(at(10*time.Minute), AuthorizationSuspend, 1, 1, freshLease())
 		tgt, _, _ = tgt.Tick(at(time.Minute + DefaultEndpointMaxQueue))
@@ -259,7 +259,7 @@ func TestScenarioAuthorizationSuspended(t *testing.T) {
 		}
 	})
 	t.Run("revocation, local revoke or tightening reject at recv and the sender is told", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		tgt, _ := NewTargetRecord(at(time.Minute), ab, src.ReportBy, DefaultEndpointMaxQueue)
 		tgt, res, _ := tgt.Handout(at(2*time.Minute), AuthorizationDeny, 1, 1, freshLease())
 		src, fbs := pull(t, src, tgt, at(3*time.Minute))
@@ -280,7 +280,7 @@ func TestScenarioPull(t *testing.T) {
 		}
 	})
 	t.Run("a model that never acknowledges stops being redelivered after the third redelivery, with one notice", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		tgt, _ := NewTargetRecord(t0, ab, src.ReportBy, 2*time.Hour)
 		now := t0
 		redeliveries := 0
@@ -334,7 +334,7 @@ func TestScenarioOfflineNodeGetsOneMergedNotice(t *testing.T) {
 	for i := range srcs {
 		when := 3*time.Minute + time.Duration(i)*time.Second
 		var out Outcome
-		srcs[i], out = mustApply(t, NewSourceRecord(at(10*time.Minute)), at(when), Event{Type: EventContactFailing, Cause: CauseNetwork, Since: t0})
+		srcs[i], out = mustApply(t, NewSourceRecord(t0, at(10*time.Minute)), at(when), Event{Type: EventContactFailing, Cause: CauseNetwork, Since: t0})
 		add(i, out.Feedback, when)
 	}
 	got, err := q.Flush(at(5*time.Minute), testParams)
@@ -428,7 +428,7 @@ func TestScenarioForcedClosure(t *testing.T) {
 				t.Fatalf("target %s/%s, want %s/%s", tgt.State, tgt.Reject, r.wantState, r.wantReject)
 			}
 			// The sender learns the closure from its pulls, however often it asks.
-			src := NewSourceRecord(ab)
+			src := NewSourceRecord(t0, ab)
 			var all []Feedback
 			for i := 0; i < 3; i++ {
 				var fbs []Feedback
@@ -469,7 +469,7 @@ func TestScenarioStatusReportApplication(t *testing.T) {
 		return r
 	}
 	t.Run("a blocked report pulled before any receipt is still reported once", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		var all []Kind
 		for i := 0; i < 3; i++ {
 			var fbs []Feedback
@@ -481,7 +481,7 @@ func TestScenarioStatusReportApplication(t *testing.T) {
 		}
 	})
 	t.Run("from expired, pulling accepted and blocked yields the correction and the blocked notice", func(t *testing.T) {
-		src, _ := mustApply(t, NewSourceRecord(ab), at(afterExpiry), Event{Type: EventExpiryQueried, QueriedAt: at(afterExpiry)})
+		src, _ := mustApply(t, NewSourceRecord(t0, ab), at(afterExpiry), Event{Type: EventExpiryQueried, QueriedAt: at(afterExpiry)})
 		if src.State != StateExpiredUnconfirmed {
 			t.Fatalf("state %s", src.State)
 		}
@@ -492,7 +492,7 @@ func TestScenarioStatusReportApplication(t *testing.T) {
 	})
 	t.Run("a block that ended is recovered by the next pull", func(t *testing.T) {
 		tgt := blockedTarget(t)
-		src, _ := pull(t, NewSourceRecord(ab), tgt, at(3*time.Minute))
+		src, _ := pull(t, NewSourceRecord(t0, ab), tgt, at(3*time.Minute))
 		tgt, _ = mustApply(t, tgt, at(4*time.Minute), Event{Type: EventUnblocked})
 		src, fbs := pull(t, src, tgt, at(5*time.Minute))
 		if !sameKinds(kindsOf(fbs), []Kind{KindBlockedRecovered}) || src.Blocked {
@@ -500,7 +500,7 @@ func TestScenarioStatusReportApplication(t *testing.T) {
 		}
 	})
 	t.Run("a block reported for a state that is not accepted is not applied", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		src, outs, err := src.ApplyStatusReport(at(time.Minute), StatusReport{State: StateDeliveryUnknown, Unknown: UnknownHandedOver, Blocked: true, BlockedCause: CauseRuntimeAuth})
 		if err != nil || len(outs) != 1 || src.Blocked || src.Reported.Has(KindDeliveryBlocked) {
 			t.Errorf("outs %+v blocked %v reported %b err %v", outs, src.Blocked, src.Reported, err)
@@ -513,7 +513,7 @@ func TestScenarioStatusReportApplication(t *testing.T) {
 		}
 	})
 	t.Run("a report of a state a target does not have is invalid and changes nothing", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		for _, st := range []State{StateInvalid, StateQueued, StateExpiredUnconfirmed} {
 			n, outs, err := src.ApplyStatusReport(at(time.Minute), StatusReport{State: st})
 			if !errors.Is(err, ErrInvalidInput) || len(outs) != 0 || n.State != StateQueued {
@@ -522,14 +522,14 @@ func TestScenarioStatusReportApplication(t *testing.T) {
 		}
 	})
 	t.Run("a report with a block cause that is not a block cause is invalid and changes nothing", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		n, outs, err := src.ApplyStatusReport(at(time.Minute), StatusReport{State: StateAccepted, Blocked: true, BlockedCause: CauseNetwork})
 		if !errors.Is(err, ErrInvalidEvent) || len(outs) != 0 || n.State != StateQueued {
 			t.Errorf("state %s outs %+v err %v", n.State, outs, err)
 		}
 	})
 	t.Run("a report of closed_unconfirmed gives the sender nothing to apply", func(t *testing.T) {
-		src := NewSourceRecord(ab)
+		src := NewSourceRecord(t0, ab)
 		n, outs, err := src.ApplyStatusReport(at(time.Minute), StatusReport{State: StateClosedUnconfirmed})
 		if err != nil || len(outs) != 0 || n.State != StateQueued {
 			t.Errorf("state %s outs %+v err %v", n.State, outs, err)

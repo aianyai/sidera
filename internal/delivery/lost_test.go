@@ -102,7 +102,7 @@ func TestNewLostRecordStartsDeliveryUnknownWithTheSidesLossCause(t *testing.T) {
 // state the replacement can reach keeps it and no other record has it.
 func TestLostMarkerIsSetByNewLostRecordAndNeverCleared(t *testing.T) {
 	for _, r := range []Record{
-		NewSourceRecord(at(10 * time.Minute)),
+		NewSourceRecord(t0, at(10*time.Minute)),
 		targetRecord(t, t0, 30*time.Minute),
 		controlRecord(),
 	} {
@@ -255,12 +255,12 @@ func TestApplyRefusesEveryOtherWayIntoStorageLoss(t *testing.T) {
 		ev   Event
 		want error
 	}{
-		{"a source record: delivery_unknown without a cause", func(*testing.T) Record { return NewSourceRecord(at(10 * time.Minute)) }, unknownWith(UnknownCauseNone), ErrInvalidEvent},
+		{"a source record: delivery_unknown without a cause", func(*testing.T) Record { return NewSourceRecord(t0, at(10*time.Minute)) }, unknownWith(UnknownCauseNone), ErrInvalidEvent},
 		{"a target record: delivery_unknown without a cause", handedOutTarget, unknownWith(UnknownCauseNone), ErrInvalidEvent},
 		{"a control record: delivery_unknown without a cause", func(*testing.T) Record { return controlRecord() }, unknownWith(UnknownCauseNone), ErrInvalidEvent},
-		{"a source record: lost_at_sender is never a reported fact", func(*testing.T) Record { return NewSourceRecord(at(10 * time.Minute)) }, unknownWith(UnknownLostAtSender), ErrInvalidEvent},
+		{"a source record: lost_at_sender is never a reported fact", func(*testing.T) Record { return NewSourceRecord(t0, at(10*time.Minute)) }, unknownWith(UnknownLostAtSender), ErrInvalidEvent},
 		{"a target record: lost_at_sender is never a reported fact", handedOutTarget, unknownWith(UnknownLostAtSender), ErrInvalidEvent},
-		{"an out-of-range cause is no cause", func(*testing.T) Record { return NewSourceRecord(at(10 * time.Minute)) }, unknownWith(UnknownCause(200)), ErrInvalidEvent},
+		{"an out-of-range cause is no cause", func(*testing.T) Record { return NewSourceRecord(t0, at(10*time.Minute)) }, unknownWith(UnknownCause(200)), ErrInvalidEvent},
 		{"a target message record without a hand-out cannot become lost_at_target", func(t *testing.T) Record { return targetRecord(t, t0, time.Hour) }, unknownWith(UnknownLostAtTarget), ErrIllegalTransition},
 		{"a handed-out target record cannot become lost_at_target", handedOutTarget, unknownWith(UnknownLostAtTarget), ErrIllegalTransition},
 		{"a target control record cannot become lost_at_target", func(*testing.T) Record { return controlRecord() }, unknownWith(UnknownLostAtTarget), ErrIllegalTransition},
@@ -280,7 +280,7 @@ func TestApplyRefusesEveryOtherWayIntoStorageLoss(t *testing.T) {
 		})
 	}
 	t.Run("a refused event is also refused through a status report", func(t *testing.T) {
-		src := NewSourceRecord(at(10 * time.Minute))
+		src := NewSourceRecord(t0, at(10*time.Minute))
 		if _, _, err := src.ApplyStatusReport(at(time.Minute), StatusReport{State: StateDeliveryUnknown, Unknown: UnknownLostAtSender}); !errors.Is(err, ErrInvalidEvent) {
 			t.Errorf("err = %v, want ErrInvalidEvent", err)
 		}
@@ -290,13 +290,13 @@ func TestApplyRefusesEveryOtherWayIntoStorageLoss(t *testing.T) {
 func TestSourceAppliesTargetLossOnceWithTargetWording(t *testing.T) {
 	lost := StatusReport{State: StateDeliveryUnknown, Unknown: UnknownLostAtTarget}
 	prepare := map[string]func(*testing.T) Record{
-		"queued": func(*testing.T) Record { return NewSourceRecord(at(10 * time.Minute)) },
+		"queued": func(*testing.T) Record { return NewSourceRecord(t0, at(10*time.Minute)) },
 		"accepted": func(t *testing.T) Record {
-			r, _ := mustApply(t, NewSourceRecord(at(10*time.Minute)), at(time.Second), Event{Type: EventReceipt})
+			r, _ := mustApply(t, NewSourceRecord(t0, at(10*time.Minute)), at(time.Second), Event{Type: EventReceipt})
 			return r
 		},
 		"expired_unconfirmed": func(t *testing.T) Record {
-			r, _ := mustApply(t, NewSourceRecord(at(10*time.Minute)), at(afterExpiry), Event{Type: EventExpiryQueried, QueriedAt: at(afterExpiry)})
+			r, _ := mustApply(t, NewSourceRecord(t0, at(10*time.Minute)), at(afterExpiry), Event{Type: EventExpiryQueried, QueriedAt: at(afterExpiry)})
 			return r
 		},
 	}
@@ -331,21 +331,21 @@ func TestSourceAppliesTargetLossOnceWithTargetWording(t *testing.T) {
 		}
 	})
 	t.Run("from delivery_unknown (handed over) the report is a duplicate", func(t *testing.T) {
-		rec, _ := mustApply(t, NewSourceRecord(at(10*time.Minute)), at(time.Minute), unknownWith(UnknownHandedOver))
+		rec, _ := mustApply(t, NewSourceRecord(t0, at(10*time.Minute)), at(time.Minute), unknownWith(UnknownHandedOver))
 		after, outs, err := rec.ApplyStatusReport(at(20*time.Minute), lost)
 		if err != nil || outs[0].Ignored != IgnoreDuplicate || len(outs[0].Feedback) != 0 || !reflect.DeepEqual(after, rec) {
 			t.Errorf("%+v %v", outs, err)
 		}
 	})
 	t.Run("from delivered the report is stale", func(t *testing.T) {
-		rec, _ := mustApply(t, NewSourceRecord(at(10*time.Minute)), at(time.Minute), Event{Type: EventDelivered})
+		rec, _ := mustApply(t, NewSourceRecord(t0, at(10*time.Minute)), at(time.Minute), Event{Type: EventDelivered})
 		after, outs, err := rec.ApplyStatusReport(at(20*time.Minute), lost)
 		if err != nil || outs[0].Ignored != IgnoreStale || len(outs[0].Feedback) != 0 || !reflect.DeepEqual(after, rec) {
 			t.Errorf("%+v %v", outs, err)
 		}
 	})
 	t.Run("from closed_unconfirmed the report is already final", func(t *testing.T) {
-		rec := NewSourceRecord(at(10 * time.Minute))
+		rec := NewSourceRecord(t0, at(10*time.Minute))
 		rec, _ = mustApply(t, rec, at(reportAt+time.Second), Event{Type: EventReportByPassed})
 		_, outs, err := rec.ApplyStatusReport(at(reportAt+time.Minute), lost)
 		if err != nil || outs[0].Ignored != IgnoreAlreadyFinal {
@@ -353,7 +353,7 @@ func TestSourceAppliesTargetLossOnceWithTargetWording(t *testing.T) {
 		}
 	})
 	t.Run("a later delivery corrects the loss", func(t *testing.T) {
-		rec := NewSourceRecord(at(10 * time.Minute))
+		rec := NewSourceRecord(t0, at(10*time.Minute))
 		rec, _, _ = rec.ApplyStatusReport(at(time.Minute), lost)
 		rec, o := mustApply(t, rec, at(2*time.Minute), Event{Type: EventDelivered})
 		if got := kindsOf(o.Feedback); !sameKinds(got, []Kind{KindUnknownCorrected}) || rec.Unknown != UnknownCauseNone {
@@ -571,14 +571,14 @@ func TestStatusReportCarriesUnknownCause(t *testing.T) {
 	})
 	t.Run("applying a report passes the cause into the event", func(t *testing.T) {
 		for cause, want := range map[UnknownCause]Kind{UnknownHandedOver: KindDeliveryUnknown, UnknownLostAtTarget: KindLostAtTarget} {
-			rec, outs, err := NewSourceRecord(at(10*time.Minute)).ApplyStatusReport(at(time.Minute), StatusReport{State: StateDeliveryUnknown, Unknown: cause})
+			rec, outs, err := NewSourceRecord(t0, at(10*time.Minute)).ApplyStatusReport(at(time.Minute), StatusReport{State: StateDeliveryUnknown, Unknown: cause})
 			if err != nil || rec.Unknown != cause || !sameKinds(kindsOf(outs[0].Feedback), []Kind{want}) {
 				t.Errorf("cause %s: record cause %s, feedback %+v, err %v", cause, rec.Unknown, outs, err)
 			}
 		}
 	})
 	t.Run("a cause comes only with delivery_unknown", func(t *testing.T) {
-		src := NewSourceRecord(at(10 * time.Minute))
+		src := NewSourceRecord(t0, at(10*time.Minute))
 		bad := []StatusReport{
 			{State: StateAccepted, Unknown: UnknownHandedOver},
 			{State: StateDelivered, Unknown: UnknownLostAtTarget},
@@ -625,7 +625,7 @@ func TestLostDedupRecordAnswersEveryRetryAsReplay(t *testing.T) {
 
 func TestNeedsBodyByStateAndSide(t *testing.T) {
 	src := func(steps ...step) Record {
-		r := NewSourceRecord(at(10 * time.Minute))
+		r := NewSourceRecord(t0, at(10*time.Minute))
 		for _, s := range steps {
 			r, _ = mustApply(t, r, t0.Add(s.at), s.ev)
 		}
@@ -726,8 +726,8 @@ func TestUnknownCauseAndLostShapeInvariants(t *testing.T) {
 	handed := handOut(t, targetRecord(t, t0, time.Hour), at(30*time.Second), 1, 1)
 	handed, _ = mustApply(t, handed, at(time.Minute), unknownWith(UnknownHandedOver))
 	ctlHanded, _ := mustApply(t, controlRecord(), at(time.Minute), unknownWith(UnknownHandedOver))
-	srcHanded, _ := mustApply(t, NewSourceRecord(at(10*time.Minute)), at(time.Minute), unknownWith(UnknownHandedOver))
-	srcTargetLoss, _ := mustApply(t, NewSourceRecord(at(10*time.Minute)), at(time.Minute), unknownWith(UnknownLostAtTarget))
+	srcHanded, _ := mustApply(t, NewSourceRecord(t0, at(10*time.Minute)), at(time.Minute), unknownWith(UnknownHandedOver))
+	srcTargetLoss, _ := mustApply(t, NewSourceRecord(t0, at(10*time.Minute)), at(time.Minute), unknownWith(UnknownLostAtTarget))
 	srcTargetLossDelivered, _ := mustApply(t, srcTargetLoss, at(2*time.Minute), Event{Type: EventDelivered})
 	srcTargetLossClosed, _ := mustApply(t, srcTargetLoss, at(reportAt+time.Second), Event{Type: EventReportByPassed})
 	srcLostClosed := closeAt(t, srcLost)
@@ -740,7 +740,7 @@ func TestUnknownCauseAndLostShapeInvariants(t *testing.T) {
 		rec  Record
 		want Violation // ViolationNone: the record is valid
 	}{
-		{"a record outside delivery_unknown has no cause", NewSourceRecord(at(10 * time.Minute)), ViolationNone},
+		{"a record outside delivery_unknown has no cause", NewSourceRecord(t0, at(10*time.Minute)), ViolationNone},
 		{"a source record that is handed over", srcHanded, ViolationNone},
 		{"a source record that learned of a loss at the target", srcTargetLoss, ViolationNone},
 		{"a source record that learned of a loss at the target, then was delivered", srcTargetLossDelivered, ViolationNone},
@@ -755,7 +755,7 @@ func TestUnknownCauseAndLostShapeInvariants(t *testing.T) {
 		{"a lost target control record after it closed", ctlLostClosed, ViolationNone},
 		{"a lost target control record after its reply was committed", ctlLostDelivered, ViolationNone},
 
-		{"a cause outside delivery_unknown", mutate(NewSourceRecord(at(10*time.Minute)), func(r *Record) { r.Unknown = UnknownHandedOver }), ViolationUnknownCause},
+		{"a cause outside delivery_unknown", mutate(NewSourceRecord(t0, at(10*time.Minute)), func(r *Record) { r.Unknown = UnknownHandedOver }), ViolationUnknownCause},
 		{"delivery_unknown without a cause", mutate(srcHanded, func(r *Record) { r.Unknown = UnknownCauseNone }), ViolationUnknownCause},
 		{"an unknown cause value", mutate(srcHanded, func(r *Record) { r.Unknown = 200 }), ViolationUnknownCause},
 		{"a replacement is never handed over", mutate(tgtLost, func(r *Record) { r.Unknown = UnknownHandedOver }), ViolationUnknownCause},
@@ -767,7 +767,7 @@ func TestUnknownCauseAndLostShapeInvariants(t *testing.T) {
 		{"the marker on a record handed over at the source", mutate(srcHanded, func(r *Record) { r.Lost = true }), ViolationUnknownCause},
 		{"the marker on a target handed over", mutate(handed, func(r *Record) { r.Lost = true }), ViolationUnknownCause},
 
-		{"the marker on a queued record", mutate(NewSourceRecord(at(10*time.Minute)), func(r *Record) { r.Lost = true }), ViolationLostShape},
+		{"the marker on a queued record", mutate(NewSourceRecord(t0, at(10*time.Minute)), func(r *Record) { r.Lost = true }), ViolationLostShape},
 		{"the marker on a delivered source record", mutate(srcTargetLossDelivered, func(r *Record) { r.Lost = true }), ViolationLostShape},
 		{"a lost target message record is never delivered", mutate(tgtLost, func(r *Record) { r.State, r.Unknown = StateDelivered, UnknownCauseNone }), ViolationLostShape},
 		{"a lost record is never accepted again", mutate(tgtLost, func(r *Record) { r.State, r.Unknown = StateAccepted, UnknownCauseNone }), ViolationLostShape},
@@ -848,8 +848,8 @@ func TestChangeRefusesACauseThatDoesNotFitTheState(t *testing.T) {
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
-			for _, rec := range []Record{NewSourceRecord(at(10 * time.Minute)), controlRecord()} {
-				after, out, err := rec.change(r.to, RejectNone, r.unknown)
+			for _, rec := range []Record{NewSourceRecord(t0, at(10*time.Minute)), controlRecord()} {
+				after, out, err := rec.change(at(time.Minute), r.to, RejectNone, r.unknown)
 				if !errors.Is(err, ErrInvalidInput) || out.Result != 0 || !reflect.DeepEqual(after, rec) {
 					t.Errorf("%v: result %v, record changed %v, err %v, want ErrInvalidInput", rec.Side, out.Result, !reflect.DeepEqual(after, rec), err)
 				}

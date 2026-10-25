@@ -112,7 +112,7 @@ func HandleControlReply(now time.Time, o Outbound, reply SignedControlReply, rep
 	h.Control = out
 
 	if endpoint, binds := r.Binds(); binds && o.BodyNonEmpty && n.Derived == nil {
-		rec, _, err := delivery.NewSourceRecord(o.AcceptBefore).Apply(now, delivery.Event{Type: delivery.EventReceipt})
+		rec, _, err := delivery.NewSourceRecord(now, o.AcceptBefore).Apply(now, delivery.Event{Type: delivery.EventReceipt})
 		if err != nil {
 			return Handling{}, fmt.Errorf("creating the delivery of the initial message: %w", err)
 		}

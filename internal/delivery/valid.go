@@ -49,6 +49,8 @@ const (
 	// ViolationBacklogDeadline: a queued message has no backlog deadline or one
 	// past the settle deadline, or a record that is not queued has one.
 	ViolationBacklogDeadline
+	// ViolationStateAt: the time the record entered its state is not set.
+	ViolationStateAt
 	// ViolationBlockedState: Blocked is set outside an accepted record that can
 	// be blocked (a control record never can).
 	ViolationBlockedState
@@ -121,6 +123,7 @@ var violationNames = [...]string{
 	ViolationDeadlinesUnset:           "deadlines_unset",
 	ViolationReportBy:                 "report_by",
 	ViolationBacklogDeadline:          "backlog_deadline",
+	ViolationStateAt:                  "state_at",
 	ViolationBlockedState:             "blocked_state",
 	ViolationBlockedCause:             "blocked_cause",
 	ViolationReportedOnTarget:         "reported_on_target",
@@ -185,7 +188,7 @@ func (e *InvalidRecordError) Unwrap() error { return ErrInvalidRecord }
 // not depend on how many there are.
 func (r Record) Valid() error {
 	for _, check := range []func() Violation{
-		r.checkKind, r.checkUnknownCause, r.checkLostShape, r.checkDeadlines, r.checkBlocked, r.checkReported, r.checkLease, r.checkOutcome,
+		r.checkKind, r.checkUnknownCause, r.checkLostShape, r.checkDeadlines, r.checkStateAt, r.checkBlocked, r.checkReported, r.checkLease, r.checkOutcome,
 	} {
 		if v := check(); v != ViolationNone {
 			return &InvalidRecordError{Violation: v}
@@ -262,6 +265,17 @@ func (r Record) checkDeadlines() Violation {
 	}
 	if !r.hasQueue() && !r.BacklogDeadline.IsZero() {
 		return ViolationBacklogDeadline
+	}
+	return ViolationNone
+}
+
+// checkStateAt covers StateAt. Every constructor and every transition sets it, so
+// a record without it was not made by either. It is not compared with any other
+// instant: the wall clock may step back, and the instants of one record come
+// from the clock of the moment each fact happened.
+func (r Record) checkStateAt() Violation {
+	if r.StateAt.IsZero() {
+		return ViolationStateAt
 	}
 	return ViolationNone
 }

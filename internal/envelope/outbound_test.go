@@ -23,7 +23,7 @@ func outboundTo(t testing.TB, kind Kind, body bool) Outbound {
 	t.Helper()
 	return Outbound{
 		Message: "ctl-0001", From: ep(0x0a), Kind: kind, BodyNonEmpty: body, AcceptBefore: acceptBefore,
-		Recipients: []Tracked{{Address: addr(nodeOf(t, keyIdentityA), 2), Delivery: delivery.NewSourceRecord(acceptBefore)}},
+		Recipients: []Tracked{{Address: addr(nodeOf(t, keyIdentityA), 2), Delivery: delivery.NewSourceRecord(t0, acceptBefore)}},
 	}
 }
 
@@ -72,7 +72,7 @@ func TestOutboundValidate(t *testing.T) {
 	good := createOutbound(t)
 	requireNoErr(t, good.Validate())
 	withDerived := good
-	withDerived.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(acceptBefore)}
+	withDerived.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(t0, acceptBefore)}
 	withDerived.ControlReplyDigest = record.Digest{1}
 	requireNoErr(t, withDerived.Validate())
 	failedReplyAccepted := good
@@ -86,7 +86,7 @@ func TestOutboundValidate(t *testing.T) {
 		"no deadline":        func(o *Outbound) { o.AcceptBefore = time.Time{} },
 		"no recipients":      func(o *Outbound) { o.Recipients = nil },
 		"a control signal, two recipients": func(o *Outbound) {
-			o.Recipients = append(o.Recipients, Tracked{Address: addr(nodeOf(t, keyIdentityA), 9), Delivery: delivery.NewSourceRecord(acceptBefore)})
+			o.Recipients = append(o.Recipients, Tracked{Address: addr(nodeOf(t, keyIdentityA), 9), Delivery: delivery.NewSourceRecord(t0, acceptBefore)})
 		},
 		"derived without a body": func(o *Outbound) { o.BodyNonEmpty = false; o.Derived = withDerived.Derived },
 		"derived on a message":   func(o *Outbound) { o.Kind = KindMessage; o.Derived = withDerived.Derived },
@@ -96,18 +96,18 @@ func TestOutboundValidate(t *testing.T) {
 		},
 		"a control reply digest on a message": func(o *Outbound) { o.Kind = KindMessage; o.ControlReplyDigest = record.Digest{1} },
 		"derived on another node": func(o *Outbound) {
-			o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityB), 3), Delivery: delivery.NewSourceRecord(acceptBefore)}
+			o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityB), 3), Delivery: delivery.NewSourceRecord(t0, acceptBefore)}
 			o.ControlReplyDigest = record.Digest{1}
 		},
 		"derived endpoint tracked twice": func(o *Outbound) {
-			o.Derived = &Tracked{Address: o.Recipients[0].Address, Delivery: delivery.NewSourceRecord(acceptBefore)}
+			o.Derived = &Tracked{Address: o.Recipients[0].Address, Delivery: delivery.NewSourceRecord(t0, acceptBefore)}
 			o.ControlReplyDigest = record.Digest{1}
 		},
 		"a target-side record": func(o *Outbound) {
-			o.Recipients = []Tracked{{Address: o.Recipients[0].Address, Delivery: delivery.NewTargetControlRecord(acceptBefore, delivery.ReportBy(acceptBefore))}}
+			o.Recipients = []Tracked{{Address: o.Recipients[0].Address, Delivery: delivery.NewTargetControlRecord(t0, acceptBefore, delivery.ReportBy(acceptBefore))}}
 		},
 		"a zero record":  func(o *Outbound) { o.Recipients = []Tracked{{Address: o.Recipients[0].Address}} },
-		"a zero address": func(o *Outbound) { o.Recipients = []Tracked{{Delivery: delivery.NewSourceRecord(acceptBefore)}} },
+		"a zero address": func(o *Outbound) { o.Recipients = []Tracked{{Delivery: delivery.NewSourceRecord(t0, acceptBefore)}} },
 	}
 	for name, mut := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -118,7 +118,7 @@ func TestOutboundValidate(t *testing.T) {
 	}
 	t.Run("a message may have several recipients", func(t *testing.T) {
 		o := outboundTo(t, KindMessage, true)
-		o.Recipients = append(o.Recipients, Tracked{Address: addr(nodeOf(t, keyIdentityB), 9), Delivery: delivery.NewSourceRecord(acceptBefore)})
+		o.Recipients = append(o.Recipients, Tracked{Address: addr(nodeOf(t, keyIdentityB), 9), Delivery: delivery.NewSourceRecord(t0, acceptBefore)})
 		requireNoErr(t, o.Validate())
 	})
 }
@@ -286,7 +286,7 @@ func TestApplyReport(t *testing.T) {
 	})
 	t.Run("a report applies to the derived delivery", func(t *testing.T) {
 		o := createOutbound(t)
-		o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(acceptBefore)}
+		o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(t0, acceptBefore)}
 		o.ControlReplyDigest = record.Digest{1}
 		n, eff, _, err := o.ApplyReport(now, signedReport(t, reportFor("ctl-0001", 3, delivered(), 760*time.Second, 700*time.Second)))
 		requireNoErr(t, err)
@@ -625,7 +625,7 @@ func TestHandleControlReply(t *testing.T) {
 		}
 	})
 	t.Run("the target's own view: the delivered report of the committed reply does not end the signal, the reply does", func(t *testing.T) {
-		target := delivery.NewTargetControlRecord(acceptBefore, delivery.ReportBy(acceptBefore))
+		target := delivery.NewTargetControlRecord(t0, acceptBefore, delivery.ReportBy(acceptBefore))
 		target, _, err := target.Apply(now, delivery.Event{Type: delivery.EventReplyCommitted})
 		requireNoErr(t, err)
 		rep := reportFor("ctl-0001", 2, target.StatusReport(), 700*time.Second, 690*time.Second)
@@ -736,7 +736,7 @@ func TestAReportDatedAfterTheDeliverysReportByIsIgnored(t *testing.T) {
 		"a control": outboundTo(t, KindSessionClose, false),
 		"a derived": func() Outbound {
 			o := createOutbound(t)
-			o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(acceptBefore)}
+			o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(t0, acceptBefore)}
 			o.ControlReplyDigest = record.Digest{1}
 			return o
 		}(),

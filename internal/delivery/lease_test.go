@@ -98,7 +98,7 @@ func TestHandoutInputs(t *testing.T) {
 		n    int
 		part int
 	}{
-		{"the source cannot hand out bodies", func(t *testing.T) Record { return NewSourceRecord(at(10 * time.Minute)) }, AuthorizationAllow, 1, 1},
+		{"the source cannot hand out bodies", func(t *testing.T) Record { return NewSourceRecord(t0, at(10*time.Minute)) }, AuthorizationAllow, 1, 1},
 		{"zero chunks is invalid", func(t *testing.T) Record { return targetRecord(t, t0, time.Hour) }, AuthorizationAllow, 0, 1},
 		{"an unset authorization is invalid", func(t *testing.T) Record { return targetRecord(t, t0, time.Hour) }, 0, 1, 1},
 		{"part zero is invalid", func(t *testing.T) Record { return targetRecord(t, t0, time.Hour) }, AuthorizationAllow, 2, 0},
@@ -353,7 +353,7 @@ func TestAck(t *testing.T) {
 		}
 	})
 	t.Run("the source cannot settle leases", func(t *testing.T) {
-		_, _, _, err := ackUnder(NewSourceRecord(at(10*time.Minute)), at(time.Minute), good(1))
+		_, _, _, err := ackUnder(NewSourceRecord(t0, at(10*time.Minute)), at(time.Minute), good(1))
 		if !errors.Is(err, ErrWrongSide) {
 			t.Errorf("err %v", err)
 		}

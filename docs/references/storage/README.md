@@ -525,6 +525,19 @@ a replacement keeps after it closes, so that it is not judged by the shape of a
 delivery accepted normally), and the deduplication record carries the flag that
 says its digest was lost.
 
+**The time of the state.** Every stored delivery record, whatever its side, kind
+or shape, carries `state_at`, the moment the record entered its current state
+(`delivery.Record.StateAt`), right after `state`. It is required and always
+written: a body without it, with it `null` or with it at the zero time is a
+damaged body (the key is absent from no valid record, and `Record.Valid` refuses
+a record that has none), and there is no second key for the delivery time, which
+the delivery package derives from `state_at` of a delivered record (an unknown
+`delivered_at` key is refused like any unknown field). A signed status report
+takes both times from here. Nothing shipped before the field existed, so there is
+no reader for a record without it and no migration. Tests: the vectors of
+`TestRecordGoldenVectors`, the `state_at` rows of `TestDecodeRecordBodyRules`
+and `TestEveryStoredFieldSurvivesTheDisk`.
+
 **Two shapes.** A source, target or control record is regular or lost. A lost
 record is what replaces a delivery record that was damaged: it has the key of the
 damaged one, the delivery records the delivery package builds for that case, the

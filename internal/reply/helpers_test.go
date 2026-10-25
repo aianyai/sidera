@@ -107,7 +107,7 @@ var (
 	sessionD = ep(3)
 )
 
-func queued() delivery.Record { return delivery.NewSourceRecord(accept) }
+func queued() delivery.Record { return delivery.NewSourceRecord(t0, accept) }
 
 // messageOutbound is the sender's record of a plain message "m-1" to endpoint
 // 2 of node A, nothing reported yet.

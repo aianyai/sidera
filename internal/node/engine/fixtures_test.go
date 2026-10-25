@@ -92,7 +92,7 @@ func sessionCtlRecord(t testing.TB, i int, session ident.EndpointID) store.CtlRe
 	accept := t0.Add(time.Duration(i) * time.Second)
 	reportBy := delivery.ReportBy(accept)
 	return store.CtlRecord{
-		Key: k, Record: delivery.NewTargetControlRecord(accept, reportBy),
+		Key: k, Record: delivery.NewTargetControlRecord(accept, accept, reportBy),
 		Dedup: delivery.NewDedupRecord(k.Dedup(), digestOf(i), reportBy),
 		Kind:  envelope.KindSessionCreate, Preset: "default", SessionEndpoint: session,
 		AcceptedAt: t0, SentAt: t0,

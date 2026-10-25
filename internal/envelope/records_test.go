@@ -279,7 +279,7 @@ func targetRecords(t testing.TB) map[string]delivery.Record {
 	}
 	msg, err := delivery.NewTargetRecord(t0, accept, reportBy, delivery.DefaultEndpointMaxQueue)
 	requireNoErr(t, err)
-	ctl := delivery.NewTargetControlRecord(accept, reportBy)
+	ctl := delivery.NewTargetControlRecord(t0, accept, reportBy)
 	closed, _, err := msg.Tick(reportBy.Add(time.Second))
 	requireNoErr(t, err)
 	return map[string]delivery.Record{
@@ -312,7 +312,7 @@ func TestStatusReportCarriesTheDeliveryReport(t *testing.T) {
 				t.Errorf("status = %+v, want %+v", got, rec.StatusReport())
 			}
 			// the sender can apply what it read
-			src := delivery.NewSourceRecord(t0.Add(10 * time.Minute))
+			src := delivery.NewSourceRecord(t0, t0.Add(10*time.Minute))
 			if _, _, err := src.ApplyStatusReport(t0.Add(time.Hour), v.Payload().Status); err != nil {
 				t.Errorf("sender cannot apply the report: %v", err)
 			}

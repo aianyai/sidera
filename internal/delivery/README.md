@@ -12,11 +12,12 @@ reasons behind the rules.
 
 | Entry point | Purpose |
 | ----------- | ------- |
-| `NewSourceRecord`, `NewTargetRecord` | Create the sender's or the recipient node's `Record` of a delivery. |
+| `NewSourceRecord(queuedAt, acceptBefore)`, `NewTargetRecord(acceptedAt, ...)` | Create the sender's or the recipient node's `Record` of a delivery, entered into its first state at the given time (`Record.StateAt`). |
 | `NewTargetNoticeRecord` | Create the recipient's `Record` of a notice of the system endpoint (system feedback, exempt traffic): marked `Record.Exempt`, so no authorization verdict is made, stored or read for it. |
-| `NewTargetControlRecord(acceptBefore, reportBy)` | Create the target's `Record` of a control signal: never queued for `recv`, no backlog deadline, delivered by `EventReplyCommitted`. |
+| `NewTargetControlRecord(acceptedAt, acceptBefore, reportBy)` | Create the target's `Record` of a control signal: never queued for `recv`, no backlog deadline, delivered by `EventReplyCommitted`. |
 | `Record.Valid()` | Says whether a record is one the constructors and transitions can produce, and names the first invariant it breaks (`*InvalidRecordError`, `ErrInvalidRecord`, `Violation`). For a record restored from storage. |
 | `NewLostRecord(side, control, discoveredAt)`, `LostReportBy`, `NewLostDedupRecord(key, discoveredAt)`, `Record.NeedsBody()` | The replacement for a delivery record, and for a deduplication record, lost to storage corruption; the instant a replacement is kept until; whether a record still needs the bytes of its body. |
+| `Record.StateAt`, `Record.DeliveredAt()` | When this node's record entered its current state, and, for a delivered record, when it was delivered. The two times a target puts in a signed status report (`reported_at`, `delivered_at`). |
 | `Record.Apply(now, Event)` | Applies one fact or occurrence. Returns the new record and an `Outcome` (applied or ignored with a reason, the transition, and the feedback to give). |
 | `Record.Tick(now)` | Everything due by time alone: lease expiry, backlog expiry, the settle deadline, closing after `report_by`. |
 | `Record.NextTick()` | The earliest instant at which `Tick` could change the record; the zero time for a final record. |
@@ -123,6 +124,29 @@ with the trust and admin packages.
 redelivery period (4 leases, each at most 15 min, which is the only thing it
 depends on), and the tolerance. The target settles every delivery by
 `report_by - 5 min`; the sender closes whatever is still open after `report_by`.
+
+## When a record entered its state
+
+`Record.StateAt` is the moment the record entered `Record.State`: the time the
+constructor was given (the acceptance time, the queuing time, or the discovery
+time of a loss), then the `now` of the transition that last changed the state.
+`change` is the only writer, so every way into a state (`Apply`, `Tick`,
+`Handout` denied by the second check, `Ack`, the forcible close) stamps it with
+its own `now` and no caller sets it. A fact that leaves the state alone (a
+prompt, a block, a hand-out, a lease that runs out and goes back to the queue, a
+duplicate or stale fact) leaves it alone, so a report sent again for an
+unchanged state repeats the same time. A `Tick` that settles several states in
+one call (a target that slept past `report_by`) stamps the last one with the
+moment it woke, not with the deadline each step was due: the record shows when
+the node recorded the state.
+
+A delivered record is final, so the time it was delivered is the time it entered
+its state: `DeliveredAt()` returns `StateAt` for a delivered record and the zero
+time otherwise, and no second time is kept that could disagree. A status report
+needs exactly these two (`reported_at` and `delivered_at`, the latter present
+exactly when delivered). A transition at the zero time is `ErrInvalidInput`, and
+`Valid` refuses a record without `StateAt` (`ViolationStateAt`); it compares
+`StateAt` with no other instant, because the wall clock may step back.
 
 ## Backlog limit
 
@@ -243,6 +267,7 @@ record, never a clock.
   recorded exactly while the state is `rejected`; `notified` only on an accepted
   message record of the target. `Exempt` only on a target message record (not a
   control record, not a replacement for a lost one).
+- State time (`ViolationStateAt`): `StateAt` is set on every record.
 - Deadlines: `ReportBy` is `ReportBy(AcceptBefore)`; a queued message has a
   backlog deadline no later than `SettleBy`, every other record has none. A
   replacement is judged by its marker instead (below).

@@ -155,6 +155,12 @@ on a reply, or in answer to another pull) repeats the same `reported_at` under a
 fresh signature, so the earliest report that proves arrival, which starts the
 reply window, cannot be moved by resending.
 
+The two times come from the target's delivery record: `reported_at` is
+`delivery.Record.StateAt`, the moment the record entered the state, and
+`delivered_at` is `Record.DeliveredAt()`, which is `StateAt` of a delivered
+record (delivered is final, so the two are the same instant). The record writes
+them in its transitions, so every state a report can state has its time.
+
 ### Control reply
 
 A record of type `sidera/control-reply/1`, signed by the target node's network
