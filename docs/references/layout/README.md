@@ -69,10 +69,11 @@ Three rules bind every runtime package:
   testkit packages that stand in for the outside world (`testkit/ledger`,
   `testkit/fakeadapter`, `testkit/fakeruntime`) touch files, the composition root reads `crypto/rand`, and the
   crash model's seeded `math/rand` source is injected by the test. Writing the
-  lists in the test file means widening one is a visible change. The testkit
-  packages import only the standard library and `sdk/go`, as a real third party
-  would, so they cannot reach `fsx`; their files are not daemon state; and the
-  ledger is a test oracle that must stay independent of the `fsx` under test.
+  lists in the test file means widening one is a visible change. The third-party
+  packages of the testkit import only the standard library, `sdk/go` and each
+  other, as a real third party would, so they cannot reach `fsx`; their files are
+  not daemon state; and the ledger is a test oracle that must stay independent of
+  the `fsx` under test (see [testkit](../testkit/README.md)).
 - **Pure scans, not a linter dependency.** `go/parser` and `go list` are in the
   standard toolchain; a linter would add a dependency for rules this small.
 

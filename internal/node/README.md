@@ -29,6 +29,7 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | 6 | `agentapi`, `manageapi` | the `engine` service interface, `ipc`, layer 0 |
 | 7 | `daemon` | everything above; the composition root that wires the packages together |
 | none | `testkit/ledger`, `testkit/fakectl`, `testkit/fakeruntime`, `testkit/fakeadapter` | the standard library, `sdk/go/...` and each other only, so they use the adapter protocol as a third party would |
+| none | `testkit/fakeagent`, `testkit/crashwalk` | any runtime package and contract package: they drive and judge the daemon; `testkit/README.md` says which packages of the testkit are on which side |
 | none | `cmd/sidera/...` | any package of this tree |
 
 Each side of a seam defines the interface it needs, and the graph stays acyclic
@@ -70,12 +71,14 @@ touches the real thing: `clock` and `clock/clocktest` read the time, `fsx`,
 `testkit/fakeruntime` touch files, `daemon` reads `crypto/rand`, and the
 crash model in `fsx/fsxtest` takes a seeded `math/rand` source injected by the
 test. The exception lists are written in `layout_test.go`; extending one is a
-change to that file and gets reviewed as such. The testkit packages stand in
-for the outside world in tests (a third-party adapter, a native runtime, the
-ledger of what happened). They import only the standard library and `sdk/go`,
-as a real third party would, so they cannot reach `fsx`; the files they touch
-are not daemon state; and the ledger is a test oracle that must stay
-independent of the `fsx` under test.
+change to that file and gets reviewed as such. The third-party packages of the
+testkit (`ledger`, `fakectl`, `fakeruntime`, `fakeadapter`) stand in for the
+outside world in tests: a third-party adapter, a native runtime, the ledger of
+what happened. They import only the standard library, `sdk/go` and each other, as
+a real third party would, so they cannot reach `fsx`; the files they touch are
+not daemon state; and the ledger is a test oracle that must stay independent of
+the `fsx` under test. A test in `testkit` enforces the import rule. No testkit
+package is an exception to the time rule.
 
 ## Enforcement
 
