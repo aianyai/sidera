@@ -264,11 +264,19 @@ func recoveryScenarios() []scenario {
 			name: "orphan session endpoints",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				quarantined := sessionCtl(3, 7)
+				noIntent := sessionCtl(6, 11)
+				noIntent.Intent = nil
 				seed(t, mem,
 					session(5, store.EndpointCreating, ctlName(1)),                   // no control record: garbage
 					session(6, store.EndpointCreating, ctlName(2)), sessionCtl(2, 6), // a control record: kept
 					session(7, store.EndpointCreating, ctlName(3)), // its control record is quarantined: kept
 					session(8, store.EndpointOpen, ctlName(9)),     // open: never an orphan
+					// a control record that holds the creation of another endpoint, or none
+					// (the intake that prepared these failed, and the signal was accepted again)
+					session(9, store.EndpointCreating, ctlName(5)), sessionCtl(5, 10), session(10, store.EndpointCreating, ctlName(5)),
+					session(11, store.EndpointCreating, ctlName(6)), noIntent,
+					// a lost replacement: the quarantine of its record settles the endpoint
+					session(12, store.EndpointCreating, ctlName(7)), lostCtlAt(ctlKey(7), base),
 					store.AlertRecord{ID: store.AlertID{3}, Kind: "corrupt_record", At: base, Detail: "d"})
 				seedRaw(t, mem, store.CtlDir, corruptName(quarantined, store.AlertID{3}), []byte("x"))
 			},
@@ -279,7 +287,7 @@ func recoveryScenarios() []scenario {
 				for _, e := range sc.Endpoints {
 					ids = append(ids, e.ID.String())
 				}
-				want := []string{ep(1).String(), ep(2).String(), ep(4).String(), ep(6).String(), ep(7).String(), ep(8).String()}
+				want := []string{ep(1).String(), ep(2).String(), ep(4).String(), ep(6).String(), ep(7).String(), ep(8).String(), ep(10).String(), ep(12).String()}
 				if strings.Join(sortedStrings(ids), ",") != strings.Join(sortedStrings(want), ",") {
 					t.Errorf("endpoints = %v, want only the orphan removed (%v)", ids, want)
 				}
