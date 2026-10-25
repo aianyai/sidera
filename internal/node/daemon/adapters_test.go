@@ -174,9 +174,13 @@ func TestEnabledAdapterInstancesAreStartedAtStepTenAndTheStepWaitsForThem(t *tes
 	}
 	c.Attach.Adapters = func(ctx context.Context, env *daemon.Env) error {
 		v, err := env.Engine.Adapter(ctx, chat)
+		var methods []string
+		if ls := a.launcher.Launches(chat); len(ls) > 0 {
+			methods = ls[0].Methods()
+		}
 		mu.Lock()
 		defer mu.Unlock()
-		seen.ran, seen.steps, seen.methods, seen.online = true, steps(logLines(t, c.Home)), a.launcher.Launches(chat)[0].Methods(), err == nil && v.Online
+		seen.ran, seen.steps, seen.methods, seen.online = true, steps(logLines(t, c.Home)), methods, err == nil && v.Online
 		return nil
 	}
 
@@ -302,8 +306,9 @@ func TestShutdownStopsTheAdaptersAtStepThree(t *testing.T) {
 	var engineDoneAtHook, endedAtHook bool
 	c.Attach.StopAdapters = func(context.Context) error {
 		hookSteps = steps(logLines(t, c.Home))
-		l := a.launcher.Launches(chat)[0]
-		methodsAtHook, endedAtHook = l.Methods(), l.Ended()
+		if ls := a.launcher.Launches(chat); len(ls) > 0 {
+			methodsAtHook, endedAtHook = ls[0].Methods(), ls[0].Ended()
+		}
 		select {
 		case <-d.Engine().Done():
 			engineDoneAtHook = true
