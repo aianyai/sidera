@@ -18,7 +18,9 @@ administer a node does not change whom it trusts, and the reverse.
 every entry has a non-zero person, a level of view, manage or full-control, and
 no person appears twice. Validation reports every problem with its position.
 Only the local owner changes the list; no remote person can, full control
-included.
+included. The local owner is the OS user acting on the management interface; a
+connection on the agent interface is never the local owner (see
+[local IPC](../local-ipc/README.md)).
 
 **Levels.**
 

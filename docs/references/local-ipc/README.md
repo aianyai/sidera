@@ -110,6 +110,20 @@ name, and it has to be read-only for the agent (connect only).
   can create the pipe under the daemon's name and collect the tokens that
   clients send; the sandbox must not let an agent create pipes under that name.
 
+### The management interface and the local owner
+
+A connection accepted on the management interface is the local owner
+(`admin.LocalOwner()`), and a connection accepted on the agent interface never
+is. The management interface identifies the owner by the user's uid (the user's
+SID on Windows) alone: it uses no token, so any process of the same user outside
+a sandbox is the local owner, and so is any process inside a sandbox that is
+allowed to reach the management endpoint. A sandbox therefore must deny
+connecting to `<home>/manage/manage.sock` on Unix and opening the management
+pipe `\\.\pipe\sidera-<h>-manage` on Windows. On Windows both pipes carry the
+same security descriptor, so only the sandbox can tell them apart, by name; on
+Unix the two sockets are in different directories, so the sandbox grants one
+directory and not the other (see Sandboxes and the socket directory above).
+
 ## Why
 
 - **Directory check on the client, not only 0600 on the socket.** The socket's

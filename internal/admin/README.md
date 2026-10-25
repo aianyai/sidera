@@ -20,7 +20,10 @@ for the reasoning behind the rules.
 | `KeyFor(actor, id) RequestKey`                                          | The key under which an actor's results are filed; the operation ID is scoped to the person.               |
 | `ValidateRequest`, `CheckReplay`, `CheckVersion`                        | Shape of a management request, same-ID-same-result rule, version-conflict check.                          |
 
-Actors are `LocalOwner()` or `RemotePerson(personID, DeviceCert)`.
+Actors are `LocalOwner()` or `RemotePerson(personID, DeviceCert)`. `LocalOwner()`
+is the OS user acting on the management interface: only a connection accepted
+there may be mapped to it, never one on the agent interface (see
+[local IPC](../../docs/references/local-ipc/README.md)).
 
 ## Operation levels
 

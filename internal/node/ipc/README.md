@@ -96,6 +96,10 @@ the management socket `<home>/manage/manage.sock`, and on Windows the pipes are
   whose `Held` reports it. `Listen` cannot verify this: the value is the
   caller's assertion, and it only catches ordering mistakes in the composition
   root.
+- Only a connection accepted by the `KindManage` listener may be mapped to
+  `admin.LocalOwner()`; a connection accepted by the agent listener never may.
+  The management interface identifies the owner by the user's uid alone, so
+  keeping an agent off it is the sandbox's job (see the reference).
 - `Dial` callers pass a context with a deadline: a busy Windows pipe is retried
   until the context ends.
 - A caller maps `ErrDaemonNotRunning` to `unavailable`/`daemon_not_running` and

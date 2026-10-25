@@ -12,7 +12,7 @@ type ActorKind int
 const (
 	// ActorUnknown is the zero value. It has no rights.
 	ActorUnknown ActorKind = iota
-	// ActorLocalOwner is the OS user of this machine acting on the local
+	// ActorLocalOwner is the OS user of this machine acting on the management
 	// interface.
 	ActorLocalOwner
 	// ActorRemotePerson is a person who presented a device certificate.
