@@ -2,8 +2,13 @@ package adapterproto
 
 // Limits of the direct-endpoint methods.
 const (
-	maxDisplayName = 128
-	maxDescription = 1024
+	// MaxDisplayName is the most characters (Unicode code points) of the display
+	// name an adapter registers a direct endpoint under. A name is at least one
+	// character.
+	MaxDisplayName = 128
+	// MaxDescription is the most characters of the description of a registered
+	// endpoint. A description that is present is at least one character.
+	MaxDescription = 1024
 	// MaxWaitSeconds bounds how long endpoint.recv may wait for a message.
 	MaxWaitSeconds = 30
 	// MaxRecipients bounds the recipients of one message.
@@ -23,9 +28,9 @@ type RegisterParams struct {
 func (p RegisterParams) Validate() error {
 	var c checker
 	c.field("key", strLen(p.Key, 1, MaxIdentLen))
-	c.field("display_name", strLen(p.DisplayName, 1, maxDisplayName))
+	c.field("display_name", strLen(p.DisplayName, 1, MaxDisplayName))
 	if p.Description != "" {
-		c.field("description", strLen(p.Description, 1, maxDescription))
+		c.field("description", strLen(p.Description, 1, MaxDescription))
 	}
 	return c.err
 }

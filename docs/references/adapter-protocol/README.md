@@ -337,6 +337,12 @@ only says the request was not understood or not allowed.
 | `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type`, `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
 | `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
 
+The `display_name` of `endpoint.register` is 1 to `MaxDisplayName` (128)
+characters and a `description`, when given, 1 to `MaxDescription` (1024); a
+character is a Unicode code point, not a byte. The two constants are exported so
+that whoever stores or shows a name applies the bound the protocol states instead
+of copying the number.
+
 Identifiers: `EndpointRef` and `Address` are opaque strings of 1 to 128
 characters, handed out by the daemon and returned unchanged; the SDK never parses
 them. `AttemptID` is a lowercase UUID version 4. `LeaseRef` is 32 lowercase hex
