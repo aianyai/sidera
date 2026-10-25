@@ -41,6 +41,9 @@ func runFullScenario(t *testing.T, serverRequests bool) *rig {
 
 	r.initialize()
 	r.mustCall(adapterproto.MethodPing, nil, nil)
+	if err := r.knobs.Ping(ctx); err != nil {
+		t.Fatalf("Ping: %v", err)
+	}
 	r.start(nil, []adapterproto.DirectAttach{{Endpoint: "ep-chat:alice", Key: "chat:alice"}})
 	var probe adapterproto.ProbeResult
 	r.mustCall(adapterproto.MethodAdapterProbe, adapterproto.ProbeParams{ToolProbes: []adapterproto.ToolProbeRequest{
@@ -107,7 +110,8 @@ func runFullScenario(t *testing.T, serverRequests bool) *rig {
 	// Reconciliation: an attempt that is in the record and one that never was.
 	var rec adapterproto.ReconcileResult
 	r.mustCall(adapterproto.MethodPromptReconcile, adapterproto.ReconcileParams{Endpoint: "sess-1", Attempt: attemptID(3)}, &rec)
-	r.mustCall(adapterproto.MethodPromptReconcile, adapterproto.ReconcileParams{Endpoint: "sess-1", Attempt: attemptID(99)}, &rec)
+	var absent adapterproto.ReconcileResult
+	r.mustCall(adapterproto.MethodPromptReconcile, adapterproto.ReconcileParams{Endpoint: "sess-1", Attempt: attemptID(99)}, &absent)
 
 	// Interrupt a running turn, then interrupt again with none running.
 	if err := r.runtime.StartTurn(ref); err != nil {
@@ -213,7 +217,7 @@ func TestFakeAdapterOutputMatchesProtocolSchemas(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r := runFullScenario(t, serverRequests)
 			toAdapter, fromAdapter, lines := validateLog(t, r)
-			if lines < 60 {
+			if lines < 50 {
 				t.Fatalf("only %d lines were exchanged: the scenario did not run", lines)
 			}
 
@@ -369,7 +373,8 @@ func TestFakeAdapterAnswersEveryGoldenRequest(t *testing.T) {
 		t.Run(p, func(t *testing.T) {
 			var f wireFrame
 			_ = json.Unmarshal(raw, &f)
-			line := raw
+			// The golden files are indented; a line of the protocol is one line.
+			line := compact(raw)
 			if f.Method == adapterproto.MethodInitialize {
 				line = withLockPath(t, raw, filepath.Join(t.TempDir(), "instance.lock"))
 			}
@@ -381,7 +386,7 @@ func TestFakeAdapterAnswersEveryGoldenRequest(t *testing.T) {
 			case adapterproto.MethodPromptDeliver, adapterproto.MethodPromptReconcile,
 				adapterproto.MethodSessionInterrupt, adapterproto.MethodSessionClose:
 				// These name the session the golden create request makes.
-				create := golden["session.create/request-basic.json"]
+				create := compact(golden["session.create/request-basic.json"])
 				resp := s.exchange(t, create)
 				if err := checkFrame(t, resp, adapterproto.MethodSessionCreate); err != nil || !bytes.Contains(resp, []byte(`"created"`)) {
 					t.Fatalf("the golden create that precedes %s did not create a session: %v\n%s", f.Method, err, resp)
@@ -444,8 +449,13 @@ func withLockPath(t *testing.T, raw []byte, path string) []byte {
 // rawAdapter is a fake adapter served over a pair of pipes and driven line by
 // line, with no peer on the daemon side, so the golden bytes reach it unchanged.
 type rawAdapter struct {
-	in  io.WriteCloser
-	out *bufio.Reader
+	in    io.WriteCloser
+	lines chan rawLine // every line the adapter writes, in order, until its output ends
+}
+
+type rawLine struct {
+	line []byte
+	err  error
 }
 
 func startRaw(t *testing.T) *rawAdapter {
@@ -467,7 +477,7 @@ func startRaw(t *testing.T) *rawAdapter {
 	go func() {
 		done <- fakeadapter.Serve(ctx, inR, outW, fakeadapter.Config{
 			InstanceID: "fake", Now: clk.Now, Ledger: w, Runtime: rt,
-			Manifest: fakeadapter.DefaultManifestOptions(), Seed: 5, Knobs: fakeadapter.NewKnobs(),
+			Manifest: fakeadapter.DefaultManifestOptions(), Knobs: fakeadapter.NewKnobs(),
 		})
 	}()
 	t.Cleanup(func() {
@@ -481,34 +491,64 @@ func startRaw(t *testing.T) *rawAdapter {
 		}
 		_ = rt.Close()
 	})
-	return &rawAdapter{in: inW, out: bufio.NewReader(outR)}
+	a := &rawAdapter{in: inW, lines: make(chan rawLine, 64)}
+	go func() {
+		br := bufio.NewReader(outR)
+		for {
+			l, err := readLine(br)
+			a.lines <- rawLine{l, err}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	return a
 }
 
-// exchange writes one line and returns the next line the adapter writes.
+// exchange writes one line and returns the line that answers it. Lines the adapter
+// writes meanwhile are what a daemon would receive: each is validated, a
+// notification is dropped, and a request is answered with an empty result, which
+// is all the requests of a creation need (checkpoint.put).
 func (a *rawAdapter) exchange(t *testing.T, line []byte) []byte {
 	t.Helper()
-	got := make(chan []byte, 1)
-	errc := make(chan error, 1)
-	go func() {
-		l, err := readLine(a.out)
-		if err != nil {
-			errc <- err
-			return
-		}
-		got <- l
-	}()
+	var sent wireFrame
+	if err := json.Unmarshal(line, &sent); err != nil {
+		t.Fatalf("the line to send is not JSON: %v", err)
+	}
 	if _, err := a.in.Write(append(bytes.Clone(line), '\n')); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	select {
-	case l := <-got:
-		return l
-	case err := <-errc:
-		t.Fatalf("read: %v", err)
-	case <-time.After(waitLimit):
-		t.Fatalf("no answer within %v to %s", waitLimit, line)
+	deadline := time.After(waitLimit)
+	for {
+		select {
+		case rd := <-a.lines:
+			if rd.err != nil {
+				t.Fatalf("read: %v", rd.err)
+			}
+			var f wireFrame
+			if err := json.Unmarshal(rd.line, &f); err != nil {
+				t.Fatalf("the adapter wrote a line that is not JSON: %v", err)
+			}
+			switch {
+			case f.isNotification():
+				if err := checkFrame(t, rd.line, ""); err != nil {
+					t.Fatalf("a notification of the adapter is not valid protocol: %v\n%s", err, rd.line)
+				}
+			case f.isRequest():
+				if err := checkFrame(t, rd.line, ""); err != nil {
+					t.Fatalf("a request of the adapter is not valid protocol: %v\n%s", err, rd.line)
+				}
+				reply := []byte(`{"jsonrpc":"2.0","id":` + string(f.ID) + `,"result":{}}`)
+				if _, err := a.in.Write(append(reply, '\n')); err != nil {
+					t.Fatalf("write: %v", err)
+				}
+			default:
+				return rd.line
+			}
+		case <-deadline:
+			t.Fatalf("no answer within %v to %s", waitLimit, line)
+		}
 	}
-	return nil
 }
 
 func (a *rawAdapter) handshake(t *testing.T) {

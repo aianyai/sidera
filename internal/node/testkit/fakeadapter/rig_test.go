@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -186,8 +187,8 @@ func newRig(t *testing.T, ro rigOptions) *rig {
 			Ledger:     adapterWriter,
 			Runtime:    rt,
 			Manifest:   r.opts,
-			Seed:       11,
 			Knobs:      r.knobs,
+			Logger:     slog.New(slog.NewTextHandler(testWriter{t}, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		})
 	}()
 
@@ -233,6 +234,7 @@ func (r *rig) installDaemonHandlers(ro rigOptions) {
 			return h(params)
 		})
 	}
+	handle(adapterproto.MethodPing, func(json.RawMessage) (any, error) { return adapterproto.Empty{}, nil })
 	handle(adapterproto.MethodCheckpointPut, func(json.RawMessage) (any, error) { return adapterproto.Empty{}, nil })
 	handle(adapterproto.MethodRecvObserved, func(params json.RawMessage) (any, error) {
 		var p adapterproto.RecvObservedParams
@@ -426,4 +428,13 @@ func (r *rig) createParams(n int, ep string) adapterproto.SessionCreateParams {
 func readLine(br *bufio.Reader) ([]byte, error) {
 	line, err := br.ReadBytes('\n')
 	return bytes.TrimSuffix(line, []byte("\n")), err
+}
+
+// testWriter sends log output to the test log.
+type testWriter struct{ t *testing.T }
+
+func (w testWriter) Write(p []byte) (int, error) {
+	w.t.Helper()
+	w.t.Log(strings.TrimRight(string(p), "\n"))
+	return len(p), nil
 }
