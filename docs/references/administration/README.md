@@ -154,7 +154,12 @@ The only order of handling a request is: authorize; validate its shape; then,
 for a side-effecting request only, check replay under the sender-scoped key (a
 stored result is returned as it is, with no version check, because the request
 already ran), and only when it is to execute, check the version, execute, and
-store the result with its fingerprint. A request that is not side-effecting is
+store the result with its fingerprint. From the replay check to saving the
+result is one serial step with no other change in between: two concurrent
+retries of one request would otherwise both find no stored result and both run.
+The replay lookup covers all stored results, under the key `KeyFor(actor, id)`:
+the `last_operation` of each versioned configuration file and the results kept
+under `state/admin/`, whose key spaces do not overlap. A request that is not side-effecting is
 executed after validation; it is never checked for replay and its result is
 never stored. The key is built only for a sender that was authorized, so a
 denied caller can neither file nor probe results.

@@ -479,7 +479,11 @@ The management layer does not repeat the check.
 it changed makes a replayed request answerable without a second file, and a crash
 cannot separate an effect from its result. The price is that only the most recent
 result of a collection is kept; a request repeated after another change is a
-conflict, not a second execution.
+conflict, not a second execution. The replay lookup of the management layer
+runs against all stored results, the `last_operation` of each versioned file
+and the results kept under `state/admin/`, whose key spaces do not overlap,
+under `admin.KeyFor(actor, id)`, and in the same loop command as the change, so
+that two retries of one request cannot both pass it.
 
 **The endpoint ids are not in `instances.json`.** An adapter registers a direct
 endpoint at any time. Were its id in the versioned file, the adapter's action

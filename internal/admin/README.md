@@ -98,8 +98,10 @@ The only order is: `Authorize`, then `ValidateRequest`, then `CheckReplay` with
 the stored result filed under `KeyFor(actor, id)` (a stored result is returned
 as it is, with no version check), and only when `CheckReplay` says execute:
 `CheckVersion`, the execution, and storing the result together with the
-request's fingerprint. `KeyFor` is called only for an actor that `Authorize`
-allowed. `OpQueryOperationResult` reads a stored result under the requester's
+request's fingerprint. From `CheckReplay` to saving the result is one serial
+step with no other change in between: two concurrent retries of one request
+would otherwise both find no stored result and both run. `KeyFor` is called
+only for an actor that `Authorize` allowed. `OpQueryOperationResult` reads a stored result under the requester's
 own `KeyFor`, so nobody sees another person's results.
 
 ## What the caller must guarantee

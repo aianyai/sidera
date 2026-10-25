@@ -46,9 +46,11 @@ declared here or in the package that composes it. It reads no clock.
   before the content is looked at: a stale and invalid request is a conflict.
   The management layer does not check it separately, because the check and the
   write have to be one step. Whether the request was already answered is not
-  decided here: the management layer runs `admin.CheckReplay` first, against the
-  operations `LastOperations()` returns, and calls a change only when it says to
-  execute.
+  decided here: the management layer runs `admin.CheckReplay` first, and calls a
+  change only when it says to execute. The lookup runs against all stored
+  results: each versioned file's `last_operation` (what `LastOperations()`
+  returns) and the results kept under `state/admin/`, whose key spaces do not
+  overlap, by `admin.KeyFor(actor, id)`, in the same loop command as the change.
 - **No file is written that its own decoder refuses.** A versioned encoder
   refuses version 0 and an operation with a zero id, by the decoder's own
   check. A change whose request has a zero operation id, or that would raise
@@ -139,9 +141,12 @@ The prompt turns and the endpoint defaults are not here: they are
 - Serialise the writes of one declaration (the single writer loop does).
   `Config` also serialises its versioned changes and `PlanInstall`, but a second
   writer would only wait.
-- Call a versioned change only after `admin.CheckReplay`, run against the
-  operations `LastOperations()` returns, has said to execute: the version check
-  is inside `config`, the replay check is not.
+- Call a versioned change only after `admin.CheckReplay` has said to execute,
+  run against all stored results (the operations `LastOperations()` returns and
+  the results under `state/admin/`, by `admin.KeyFor(actor, id)`), in the same
+  loop command as the change: the version check is inside `config`, the replay
+  check is not, and a retry that came between the lookup and the change would
+  run twice.
 - A transaction that spans owners is declared by the composing package, with the
   roles exported here, and writes config's files only through the functions here:
   `direct-register` and `runtime-admit` (`RoleEndpointIDs`), `backup-confirm`
