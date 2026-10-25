@@ -448,6 +448,52 @@ func TestDiskFullGivesNoFalseAcknowledgement(t *testing.T) {
 	}
 }
 
+// The disk of the target is full as the target writes the record of a message: the
+// target answers with an error and no receipt, so the sender does not take the
+// message for delivered, keeps it queued, and a send again, once the disk has room,
+// is taken in.
+func TestDiskFullAtTheTargetGivesNoReceipt(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	// The first write of the target record fails; the next one finds room.
+	rule := h.Faults().Fail(fsxtest.Match{Tx: "deliver", Role: "in", Step: fsx.StepWrite, Hit: 1}, fsxtest.DiskFull)
+	msg := send(t, h, "a", "b", "does it reach the target's disk")
+	quiet(t, h)
+	if rule.Hits() == 0 {
+		t.Fatal("the fault was never injected")
+	}
+	if got := len(inRecords(t, h, msg)); got != 0 {
+		t.Errorf("%d target records written on a disk that was full", got)
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
+		t.Errorf("the sender's record is %s, want queued: no receipt came", d.State)
+	}
+
+	h.Advance(resendBackoff)
+	quiet(t, h)
+	if in := inOf(t, h, msg); in.Record.State != delivery.StateAccepted {
+		t.Errorf("the target record is %s after the disk had room, want accepted", in.Record.State)
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
+		t.Errorf("the sender's record is %s after the resend, want accepted", d.State)
+	}
+}
+
+// A message has a body, as the envelope has it: a send without one is refused as a
+// request that is not well formed, and nothing is recorded.
+func TestASendWithAnEmptyBodyIsRefused(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	for _, body := range []string{"", string([]byte{})} {
+		_, err := trySend(h, "a", "b", body, "")
+		if fakeagent.CategoryOf(err) != fakeagent.CategoryInvalidArgument || fakeagent.CodeOf(err) != "malformed_request" {
+			t.Errorf("a send with the body %q: %v, want invalid_argument/malformed_request", body, err)
+		}
+	}
+	quiet(t, h)
+	if sc := scanOf(t, h); len(sc.Out) != 0 || len(sc.Bodies) != 0 {
+		t.Errorf("%d source records and %d bodies after sends that were refused", len(sc.Out), len(sc.Bodies))
+	}
+}
+
 // The questions below are rules that the contract packages or the store do not
 // answer, kept in sight until they are settled where they belong.
 
@@ -455,11 +501,6 @@ func TestAStateAfterAcceptedHasNoStoredTimeToReportItWith(t *testing.T) {
 	t.Skip("question: a status report carries the moment the target recorded the state, and a delivered one the moment of delivery; " +
 		"store.InRecord keeps only AcceptedAt, so a report of delivered, delivery_unknown or a rejection after intake cannot be dated. " +
 		"The record needs a stored time for its last change of state, written by whatever changes it.")
-}
-
-func TestShouldASendWithAnEmptyBodyBeAccepted(t *testing.T) {
-	t.Skip("question: the Agent interface says a body may be empty, and envelope.Decode refuses a message without a body " +
-		"(content type and body are given together, and a message has a body); the engine refuses the empty body until one of them changes.")
 }
 
 func TestShouldTheSourceRecordKeepWhetherRecipientsAreDisclosed(t *testing.T) {
