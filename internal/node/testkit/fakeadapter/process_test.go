@@ -453,6 +453,11 @@ func TestProcessAdapterKnobsOverTheControlChannel(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(st.Held, []string{fakeadapter.PauseCreateAfterNative}) {
 		t.Fatalf("Stats while paused: %+v, %v", st, err)
 	}
+	// The process also says that it stopped, over the control channel.
+	rep, err := a.conn.NextReport(ctx)
+	if err != nil || rep.Name != "paused" || rep.Detail != fakeadapter.PauseCreateAfterNative {
+		t.Fatalf("report %+v, %v: want paused at create.after-native", rep, err)
+	}
 	if err := k.Release(ctx, fakeadapter.PauseCreateAfterNative); err != nil {
 		t.Fatal(err)
 	}

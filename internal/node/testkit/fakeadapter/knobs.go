@@ -116,6 +116,7 @@ type Knobs struct {
 	holdOpen chan struct{} // closed by ReleaseHeld, replaced afterwards
 	hang     bool
 	observed ObservedMode
+	onPause  func(point string)
 }
 
 type pausePoint struct {
@@ -239,6 +240,15 @@ const (
 
 var pauseNames = []string{PauseCreateAfterNative, PausePromptAfterForward, PauseInterruptAfterForward, PauseCloseAfterForward, PauseStartBeforeReply}
 
+// OnPause sets a function that is called, outside any lock, each time a request
+// stops at a pause point, with the name of the point. The adapter program uses it to
+// tell the fixture over the control channel.
+func (k *Knobs) OnPause(f func(point string)) {
+	k.mu.Lock()
+	k.onPause = f
+	k.mu.Unlock()
+}
+
 // PauseAt arms the pause points: the next request to reach one stops there until
 // Release. A pause point stops one request: it is spent once it has, and a
 // request that reaches it again, a retry on a restarted adapter for instance, goes
@@ -314,6 +324,12 @@ func (k *Knobs) pause(ctx context.Context, a *adapter, point string) error {
 	k.addHeld(label)
 	defer k.removeHeld(label)
 	close(pp.reached)
+	k.mu.Lock()
+	hook := k.onPause
+	k.mu.Unlock()
+	if hook != nil {
+		hook(point)
+	}
 	select {
 	case <-pp.release:
 		return nil

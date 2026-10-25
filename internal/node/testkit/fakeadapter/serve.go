@@ -97,6 +97,7 @@ type adapter struct {
 	mu           sync.Mutex
 	failErr      error
 	initialized  bool
+	hangLogged   bool
 	shuttingDown bool
 	release      func()
 	sessions     map[adapterproto.EndpointRef]*nativeSession
@@ -211,6 +212,15 @@ func (a *adapter) register() {
 func (a *adapter) handle(method string, h func(context.Context, json.RawMessage) (any, error)) {
 	a.p.Handle(method, func(ctx context.Context, raw json.RawMessage) (any, error) {
 		if a.knobs.hanging() {
+			a.mu.Lock()
+			first := !a.hangLogged
+			a.hangLogged = true
+			a.mu.Unlock()
+			if first {
+				if err := a.hit("hang", method); err != nil {
+					return nil, err
+				}
+			}
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}

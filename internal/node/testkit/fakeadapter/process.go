@@ -98,6 +98,7 @@ func RunProcess(ctx context.Context, cfg ProcessConfig, stdin io.Reader, stdout 
 		client.HandleClock(clock.SetMS)
 		client.HandleStep(files.SetStep)
 		client.HandleKnob(knobsHandler(knobs))
+		knobs.OnPause(func(point string) { _ = client.Report(ctx, "paused", point) })
 		if err := client.Start(ctx, fakectl.HelloParams{Role: fakectl.RoleAdapter, ID: cfg.InstanceID, PID: int64(os.Getpid())}); err != nil {
 			return err
 		}

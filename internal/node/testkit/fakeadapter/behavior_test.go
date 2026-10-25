@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeruntime"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
@@ -1058,5 +1059,90 @@ func TestWritePackageWritesAManifestTheDaemonParsesAndTheProgram(t *testing.T) {
 	}
 	if err := o.WritePackage(filepath.Join(dir, "x"), filepath.Join(dir, "missing")); err == nil {
 		t.Fatal("WritePackage accepted a program that does not exist")
+	}
+}
+
+// TestHangLeavesAHit: a hung adapter says nothing on the wire, so the ledger is
+// where a test sees that its injection point was reached.
+func TestHangLeavesAHit(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	r.initialize()
+	r.knobs.Hang()
+	ctx, cancel := context.WithTimeout(r.ctx, 100*time.Millisecond)
+	defer cancel()
+	_ = r.daemon.Call(ctx, adapterproto.MethodPing, nil, nil)
+	r.waitFor("the hang to be recorded", func() bool {
+		for _, e := range r.ledgerLog().Kind(ledger.KindKnobHit) {
+			if e.Attrs.Knob == "hang" {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+// TestPipeProcessIsAProcessTheAdapterHostCanSupervise: the engine's fixture runs the
+// adapter in its own process through a pair of pipes; the shape is that of a child
+// process: its output and input, a pid, a kill and a wait.
+func TestPipeProcessIsAProcessTheAdapterHostCanSupervise(t *testing.T) {
+	leakGuard(t)
+	clk := clocktest.NewFake(testStart)
+	mem := ledger.NewMemory()
+	rt, err := fakeruntime.New(fakeruntime.Config{Now: clk.Now, Ledgers: mem, Dir: t.TempDir(), Seed: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	w, err := mem.Open("adapter/fake", 0, clk.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proc := fakeadapter.StartPipe(context.Background(), fakeadapter.Config{
+		InstanceID: "fake", Now: clk.Now, Ledger: w, Runtime: rt, Manifest: fakeadapter.DefaultManifestOptions(),
+	})
+	out, in := proc.Stream()
+	if proc.PID() != 0 {
+		t.Fatalf("PID() = %d: an adapter in the test process has no pid of its own", proc.PID())
+	}
+	d, err := peer.New(out, in, peer.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Start()
+	defer d.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), waitLimit)
+	defer cancel()
+	var res adapterproto.InitializeResult
+	var raw json.RawMessage
+	if err := d.Call(ctx, adapterproto.MethodInitialize, adapterproto.InitializeParams{
+		Protocol: adapterproto.SupportedRange(), Daemon: adapterproto.DaemonInfo{Version: "0.1.0"},
+		Instance:     adapterproto.InstanceInfo{ID: "fake", LockPath: filepath.Join(t.TempDir(), "i.lock")},
+		Capabilities: adapterproto.DaemonCapabilities{},
+	}, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapterproto.Decode(raw, &res); err != nil {
+		t.Fatal(err)
+	}
+	if err := proc.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := proc.Kill(); err != nil {
+		t.Fatalf("a second Kill: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- proc.Wait() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Wait returned nil for an adapter that was killed")
+		}
+	case <-time.After(waitLimit):
+		t.Fatal("Wait did not return after Kill")
+	}
+	select {
+	case <-d.Done():
+	case <-time.After(waitLimit):
+		t.Fatal("the daemon's end of the stream did not end after the adapter was killed")
 	}
 }
