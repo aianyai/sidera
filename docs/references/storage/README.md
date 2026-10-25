@@ -538,6 +538,19 @@ no reader for a record without it and no migration. Tests: the vectors of
 `TestRecordGoldenVectors`, the `state_at` rows of `TestDecodeRecordBodyRules`
 and `TestEveryStoredFieldSurvivesTheDisk`.
 
+**What a source record keeps to send again.** The envelope parts the sender needs
+to rebuild the message are the recipients (`to`, every recipient, in the order of
+the key), the sequence numbers, the send time, `report_by`, the content type, the
+thread, the message it answers, the preset and `disclose_recipients`. The flag is
+written only when true, right after `to`: the digest of an envelope covers it, so
+a message sent again must carry the flag it was first sent with, or the target
+would see a different digest for the same message and refuse it as a conflict. That
+the message has several recipients is not stored; it is `len(to) > 1`, because
+`to` holds all of them. Tests: the `out disclosed` vector of `TestRecordGoldenVectors`,
+the disclosure rows of `TestDecodeRecordBodyRules`, the two disclosed records of
+`TestRecordsRoundTrip` and the `store.OutEnvelope` row of
+`TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`.
+
 **Two shapes.** A source, target or control record is regular or lost. A lost
 record is what replaces a delivery record that was damaged: it has the key of the
 damaged one, the delivery records the delivery package builds for that case, the

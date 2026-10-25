@@ -192,6 +192,7 @@ type outJSON struct {
 	ControlReplyDigest string         `json:"control_reply_digest,omitempty"`
 	Derived            *trackedJSON   `json:"derived,omitempty"`
 	To                 []string       `json:"to,omitempty"`
+	DiscloseRecipients bool           `json:"disclose_recipients,omitempty"`
 	ReplyTo            string         `json:"reply_to,omitempty"`
 	Thread             string         `json:"thread,omitempty"`
 	Seq                []seqEntryJSON `json:"seq,omitempty"`
@@ -295,6 +296,7 @@ func encodeOut(r OutRecord) ([]byte, error) {
 			return nil, err
 		}
 	}
+	j.DiscloseRecipients = e.DiscloseRecipients
 	j.ReplyTo, j.Thread = string(e.ReplyTo), e.Thread
 	for ep, n := range e.Seq {
 		if n == 0 {
@@ -342,7 +344,7 @@ func encodeOut(r OutRecord) ([]byte, error) {
 func zeroRegularOut(r OutRecord) bool {
 	o := r.Outbound
 	return o.Message == "" && o.From.IsZero() && o.Kind == 0 && !o.BodyNonEmpty && o.AcceptBefore.IsZero() && len(o.Recipients) == 0 &&
-		o.ControlReplyDigest.IsZero() && o.Derived == nil && len(r.Envelope.To) == 0 && r.Envelope.ReplyTo == "" && r.Envelope.Thread == "" &&
+		o.ControlReplyDigest.IsZero() && o.Derived == nil && len(r.Envelope.To) == 0 && !r.Envelope.DiscloseRecipients && r.Envelope.ReplyTo == "" && r.Envelope.Thread == "" &&
 		len(r.Envelope.Seq) == 0 && r.Envelope.SentAt.IsZero() && r.Envelope.ReportBy.IsZero() && r.Envelope.ContentType == "" && r.Envelope.Preset == "" &&
 		r.Body == nil && r.BodyDigest == delivery.BodyDigest{} && r.Idempotency == nil && len(r.ControlReply) == 0
 }
@@ -361,7 +363,7 @@ func decodeOut(key OutKey, body []byte) (OutRecord, error) {
 		rest := j
 		rest.Lost, rest.Feedback = nil, nil
 		if rest.Kind != "" || rest.BodyNonEmpty || rest.AcceptBefore != nil || rest.Recipients != nil || rest.ControlReplyDigest != "" || rest.Derived != nil ||
-			rest.To != nil || rest.ReplyTo != "" || rest.Thread != "" || rest.Seq != nil || rest.SentAt != nil || rest.ReportBy != nil || rest.ContentType != "" ||
+			rest.To != nil || rest.DiscloseRecipients || rest.ReplyTo != "" || rest.Thread != "" || rest.Seq != nil || rest.SentAt != nil || rest.ReportBy != nil || rest.ContentType != "" ||
 			rest.Preset != "" || rest.Body != nil || rest.BodyDigest != "" || rest.Idempotency != nil || rest.ControlReply != "" {
 			return r, errors.New("a lost out record holds the parts of a regular one")
 		}
@@ -436,6 +438,7 @@ func decodeOut(key OutKey, body []byte) (OutRecord, error) {
 		}
 		r.Envelope.To = append(r.Envelope.To, a)
 	}
+	r.Envelope.DiscloseRecipients = j.DiscloseRecipients
 	r.Envelope.ReplyTo, r.Envelope.Thread = delivery.MessageID(j.ReplyTo), j.Thread
 	if j.ReplyTo != "" {
 		if err := envelope.ValidMessageID(r.Envelope.ReplyTo); err != nil {

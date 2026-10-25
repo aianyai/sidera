@@ -83,6 +83,10 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return r
 	case "out":
 		return srcOut(1, false)
+	case "out disclosed":
+		r := srcOut(1, false)
+		r.Envelope.DiscloseRecipients = true
+		return r
 	case "ctl":
 		return sessionCtl(1, 5)
 	case "out lost at the sender":
@@ -293,6 +297,10 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"an out kind that is a control signal in a message file", "out", `"kind":"message"`, `"kind":"control.session.close"`},
 		{"an out record without recipients", "out", `"recipients":[{"address":"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","delivery":{"side":"source","state":"queued","state_at":"2026-10-24T09:00:00Z","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z"}}],`, ``},
 		{"an out recipient that is not an address", "out", `"address":"node1`, `"address":"nodeX`},
+		{"the disclosure written as false", "out", `"to":["node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc"],`, `"to":["node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc"],"disclose_recipients":false,`},
+		{"the disclosure before the recipients", "out disclosed", `"to":["node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc"],"disclose_recipients":true,`, `"disclose_recipients":true,"to":["node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc"],`},
+		{"a disclosure that is not a boolean", "out disclosed", `"disclose_recipients":true`, `"disclose_recipients":"yes"`},
+		{"a lost out record that holds a disclosure", "out lost at the sender", `"feedback"`, `"disclose_recipients":true,"feedback"`},
 		{"a sequence number of zero", "out", `"seq":1}`, `"seq":0}`},
 		{"sequence numbers twice for one endpoint", "out", `"seq":[{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":1}]`, `"seq":[{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":1},{"endpoint":"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","seq":2}]`},
 		{"a source delivery on the target side in an out record", "out", `"side":"source"`, `"side":"target"`},
@@ -502,6 +510,12 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	two.Envelope.To = two.Key.Recipients
 	two.Envelope.Seq[ep(4)] = 9
 	recs["out with two recipients"] = two
+	disclosed := two
+	disclosed.Envelope.DiscloseRecipients = true
+	recs["out with two recipients, disclosed to each"] = disclosed
+	alone := srcOut(8, false)
+	alone.Envelope.DiscloseRecipients = true
+	recs["out to one recipient, disclosed"] = alone
 	ctl := srcOut(6, false)
 	ctl.Key.Control = true
 	ctl.Outbound.Kind = envelope.KindSessionCreate

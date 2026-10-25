@@ -26,6 +26,7 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 		fields string
 	}{
 		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Unknown StateAt Lost Control Exempt AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
+		{"store.OutEnvelope", reflect.TypeOf(store.OutEnvelope{}), "To ReplyTo Thread Seq SentAt ReportBy ContentType Preset DiscloseRecipients"},
 		{"delivery.Lease", reflect.TypeOf(delivery.Lease{}), "Handouts IDs Active IssuedAt ExpiresAt Chunks HandedOut Acked"},
 		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply DigestLost"},
 		{"delivery.Authorization", reflect.TypeOf(delivery.Authorization{}), "Kind Reject"},

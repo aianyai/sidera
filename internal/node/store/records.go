@@ -70,13 +70,19 @@ type LostOut struct {
 
 // OutEnvelope is what the source keeps of the envelope to send it again.
 type OutEnvelope struct {
-	To          []ident.Address
-	ReplyTo     delivery.MessageID
-	Thread      string
-	Seq         map[ident.EndpointID]uint64
-	SentAt      time.Time
-	ReportBy    time.Time
-	ContentType string
+	// To lists every recipient of the message, whatever node each is on.
+	To []ident.Address
+	// DiscloseRecipients is the sender's choice to let each recipient see the
+	// whole list. The digest of the envelope covers it, so a message sent again
+	// carries the flag it was first sent with. Whether the message has several
+	// recipients is len(To) > 1.
+	DiscloseRecipients bool
+	ReplyTo            delivery.MessageID
+	Thread             string
+	Seq                map[ident.EndpointID]uint64
+	SentAt             time.Time
+	ReportBy           time.Time
+	ContentType        string
 	// Preset is the parameter of a session creation.
 	Preset string
 }
