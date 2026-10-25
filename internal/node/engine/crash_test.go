@@ -17,24 +17,48 @@ import (
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
+// crashDisks are the disks a crash at one instant can leave that the walks judge.
+// The reliability floor needs two: the process crash, where every completed call
+// survives, and the worst power loss, where only what was synced survives. The
+// worst one shows that what the engine acknowledged was synced; the process one
+// shows that a restart copes with everything that was written. Under the
+// transaction discipline a random power loss only keeps a subset of the one group
+// of writes that is not synced yet, between those two, so the walks take no
+// seeded one: the property test that follows the walks draws them.
+func crashDisks(mem *fsxtest.Mem) []crashDisk {
+	return []crashDisk{{processCrash, mem.Clone()}, {worstPowerLoss, mem.CrashCloneWorst()}}
+}
+
+// The kinds of crash crashDisks takes at every point.
+const (
+	processCrash   = "process crash"
+	worstPowerLoss = "worst power loss"
+)
+
+var crashKindNames = []string{processCrash, worstPowerLoss}
+
+type crashDisk struct {
+	kind string
+	disk *fsxtest.Mem
+}
+
 // crashWalker is an Observer that, before every step of the transaction it
 // watches, takes the disks a crash at that instant can leave, and hands each to
-// check: the process dying, the worst power loss, and some seeded ones.
+// check.
 type crashWalker struct {
 	rig   *rig
 	txs   map[string]bool
-	rng   *rand.Rand
 	check func(where string, disk *fsxtest.Mem)
 	mu    sync.Mutex
 	taken map[fsx.Key]map[string]int
 }
 
-func newCrashWalker(seed uint64, check func(where string, disk *fsxtest.Mem), txs ...string) *crashWalker {
+func newCrashWalker(check func(where string, disk *fsxtest.Mem), txs ...string) *crashWalker {
 	set := map[string]bool{}
 	for _, tx := range txs {
 		set[tx] = true
 	}
-	return &crashWalker{txs: set, rng: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)), check: check, taken: map[fsx.Key]map[string]int{}}
+	return &crashWalker{txs: set, check: check, taken: map[fsx.Key]map[string]int{}}
 }
 
 func (w *crashWalker) note(p fsx.Point, model string) {
@@ -50,15 +74,10 @@ func (w *crashWalker) Reached(p fsx.Point, _ txn.Kind) {
 	if w.rig == nil || !w.txs[p.Tag.Tx] {
 		return
 	}
-	mem := w.rig.mem
 	where := "before " + p.String()
-	w.check(where+" (process crash)", mem.Clone())
-	w.note(p, "process crash")
-	w.check(where+" (worst power loss)", mem.CrashCloneWorst())
-	w.note(p, "worst power loss")
-	for i := 0; i < 3; i++ {
-		w.check(fmt.Sprintf("%s (power loss %d)", where, i), mem.CrashClone(w.rng))
-		w.note(p, "power loss")
+	for _, cd := range crashDisks(w.rig.mem) {
+		w.check(fmt.Sprintf("%s (%s)", where, cd.kind), cd.disk)
+		w.note(p, cd.kind)
 	}
 }
 
@@ -71,7 +90,7 @@ func TestDirectRegisterRecoversFromACrashAtEveryPoint(t *testing.T) {
 	noLeaks(t)
 	var r *rig
 	checked := 0
-	walker := newCrashWalker(11, func(where string, disk *fsxtest.Mem) {
+	walker := newCrashWalker(func(where string, disk *fsxtest.Mem) {
 		checked++
 		f := r.fork(disk)
 		e, rep, err := f.open()
@@ -125,8 +144,8 @@ func TestDirectRegisterRecoversFromACrashAtEveryPoint(t *testing.T) {
 		t.Fatal("no crash state was judged")
 	}
 
-	// Coverage: every step of the transaction was crashed at, under every kind of
-	// crash, and the keys are the table's, not a list the run produced.
+	// Coverage: every step of the transaction was crashed at, under each kind of
+	// crash the walks take, and the keys are the table's, not a list the run produced.
 	var want []fsx.Key
 	for _, k := range r.tab.Keys() {
 		if k.Tag.Tx == "direct-register" {
@@ -138,7 +157,7 @@ func TestDirectRegisterRecoversFromACrashAtEveryPoint(t *testing.T) {
 	}
 	var missing []string
 	for _, k := range want {
-		for _, model := range []string{"process crash", "worst power loss", "power loss"} {
+		for _, model := range crashKindNames {
 			if walker.taken[k][model] == 0 {
 				missing = append(missing, fmt.Sprintf("%v under %s", k, model))
 			}
@@ -174,7 +193,7 @@ func TestClosingAnEndpointRecoversFromACrashAtEveryPoint(t *testing.T) {
 	var r *rig
 	checked, closedStates, openStates := 0, 0, 0
 	var a ident.EndpointID
-	walker := newCrashWalker(23, func(where string, disk *fsxtest.Mem) {
+	walker := newCrashWalker(func(where string, disk *fsxtest.Mem) {
 		checked++
 		f := r.fork(disk)
 		e, _, err := f.open()
@@ -241,7 +260,7 @@ func TestClosingAnEndpointRecoversFromACrashAtEveryPoint(t *testing.T) {
 			continue
 		}
 		hit := false
-		for _, model := range []string{"process crash", "worst power loss", "power loss"} {
+		for _, model := range crashKindNames {
 			if walker.taken[k.Key][model] > 0 {
 				hit = true
 			}

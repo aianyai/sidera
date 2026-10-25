@@ -819,15 +819,34 @@ name order, so a seed fixes the result. `CrashCloneWorst()` draws nothing and
 keeps exactly what was synced: it is the deterministic way to show that a
 missing sync loses data.
 
-The store's crash walks take all four kinds of crash at every point (a process
-crash, the worst power loss and two seeded power losses) and, after each, crash
-again at every point of the recovery (the nested walk), except under the race
-detector, where they take the first two kinds and skip the nested walk. A walk is
-single-threaded on a private in-memory file system, as is every nested scenario,
-so the detector adds cost there and no coverage, and a race run of the store would
-otherwise approach the limit of a test binary; the runs without `-race` still take
-every kind and the whole nested walk, and the assertions that every crash point of
-the transaction layer was crashed at during a recovery apply only to them.
+The crash walks of the store and of the engine prove three things, the reliability
+floor: an acknowledged write survives a power loss that keeps only synced content;
+after any crash, recovery terminates and leaves every record valid, closable and
+able to give feedback; a crash during recovery is redone. They take two kinds of
+crash at every point of every transaction: the process crash and the worst power
+loss. The worst one is the one that shows an acknowledged write was synced, and the
+process crash is the one that shows recovery copes with everything that was written.
+Under the transaction discipline a random power loss only keeps some subset of the
+one group of writes that is not synced yet, a state between those two, so the seeded
+power losses stay in the property tests, which draw them over random operations
+(`TestPowerLossCloneKeepsAcknowledgedWrites`,
+`TestRandomOperationsLeaveExactlyTheDiskAModelPredicts`, and the engine's
+`TestPowerLossKeepsWhatTheEngineAcknowledged`), and in the walks of the store's
+`batch` transactions, whose files are independent single-file transitions, where any
+subset of the written files is a state of its own (not under the race detector, which
+adds cost and no coverage to a single-threaded walk).
+
+The store does not crash again at every point of the recovery that follows each
+crash state (the nested walk). Each point of a recovery rule, which is every point of
+a recovery transaction and of the cleanup and settle of `txn.Recover`, is reached by
+the recovery of some crash state; the first such state in the order of the walks is
+crashed again at every point of its recovery, in both kinds. That redoes every rule
+after a crash in the middle of it, which is what the third property needs, from
+a state where the rule finds half-written work. The assertions are derived from the
+same selection: every declared point is crashed at in both kinds by a walk, and
+every point of a recovery rule is crashed at during a recovery in both kinds. The
+nested walk is cheap enough to run under the race detector as well, so its
+assertions apply in every mode.
 
 ### Counter-example check
 

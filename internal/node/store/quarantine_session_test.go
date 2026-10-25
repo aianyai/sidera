@@ -86,6 +86,7 @@ func TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord(t
 			t.Logf("%d points, %d crash states, %d recoveries", st.points, st.clones, st.recoveries)
 		})
 	}
+	t.Logf("%d recoveries after a crash during recovery", runNestedWalks(t, sink))
 }
 
 // The session endpoints a quarantine closes are decided by the store from the

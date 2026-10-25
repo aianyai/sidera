@@ -102,7 +102,7 @@ func TestTheOwnersOperationsRecoverFromACrashAtEveryPoint(t *testing.T) {
 			noLeaks(t)
 			var r *rig
 			checked, stored, apart, none := 0, 0, 0, 0
-			walker := newCrashWalker(37, func(where string, disk *fsxtest.Mem) {
+			walker := newCrashWalker(func(where string, disk *fsxtest.Mem) {
 				checked++
 				f := r.fork(disk)
 				if st, err := nodekeys.ReadClock(disk); err == nil && st.Paused() {
@@ -192,7 +192,7 @@ func TestTheOwnersOperationsRecoverFromACrashAtEveryPoint(t *testing.T) {
 				if !reached {
 					continue
 				}
-				for _, model := range []string{"process crash", "worst power loss", "power loss"} {
+				for _, model := range crashKindNames {
 					if walker.taken[k.Key][model] == 0 {
 						missing = append(missing, fmt.Sprintf("%v under %s", k.Key, model))
 					}

@@ -2,11 +2,11 @@ package store_test
 
 import (
 	"fmt"
-	"hash/fnv"
 	"math/rand/v2"
 	"path"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -191,32 +191,40 @@ func (sc *scenario) newSimFor(t *testing.T, r *rig) *sim {
 // source: two draws of the distribution of the crash model.
 var seededPowerLosses = []string{"power-loss-a", "power-loss-b"}
 
-// crashesDuringRecovery tells whether the walks crash again at every point of the
-// recovery that follows each crash. It is off under the race detector: every one
-// of these scenarios is single-threaded on a file system of its own, so the
-// detector adds cost and no coverage, and the nested walk is the larger part of
-// the time of a race run. The runs without the detector, in CI and in the local
-// checks, take the whole walk, and the assertions that need it apply only then.
-func crashesDuringRecovery() bool {
-	return !raceEnabled && !testing.Short()
-}
-
-// crashKinds are the disks a crash at one instant can leave. The process crash
-// and the worst power loss draw nothing and are always taken. The seeded power
-// losses are left out under the race detector: a walk is single-threaded on a
-// file system of its own, so the detector finds nothing there and only
-// multiplies the cost of every crash state; the runs without it take them.
-func crashKinds(m *fsxtest.Mem, rng *rand.Rand) []crashState {
+// crashKinds are the disks a crash at one instant can leave that the walks judge.
+// The reliability floor needs two: the process crash, where every completed call
+// survives, and the worst power loss, where only what was synced survives. The
+// worst one shows that an acknowledged write was synced; the process one shows
+// that recovery copes with everything that was written. Under the transaction
+// discipline a random power loss only keeps a subset of the one group of writes
+// that is not synced yet, between those two, so an atomic transaction takes no
+// seeded one: the property tests of the package draw them. A batch is a set of
+// independent single-file transitions, where any subset of its written files is
+// a state of its own, so a batch also takes the two seeded power losses, except
+// under the race detector: a walk is single-threaded on a file system of its own,
+// so the detector finds nothing there and only multiplies the cost of the seeded
+// states, which the runs without it take.
+func crashKinds(m *fsxtest.Mem, rng *rand.Rand, md mode) []crashState {
 	kinds := []crashState{
 		{name: "process-crash", mem: m.Clone()},
 		{name: "worst-power-loss", mem: m.CrashCloneWorst(), power: true},
 	}
-	if !raceEnabled {
+	if md == batch && !raceEnabled {
 		for _, name := range seededPowerLosses {
-			kinds = append(kinds, crashState{name: name, mem: m.CrashClone(rng), power: true})
+			kinds = append(kinds, crashState{name: name, mem: m.CrashClone(rng), power: true, seeded: true})
 		}
 	}
 	return kinds
+}
+
+// floorKindNames are the kinds every walk takes at every point, whatever the mode
+// of the transaction.
+func floorKindNames() []string {
+	var names []string
+	for _, cs := range crashKinds(fsxtest.NewMem(), nil, atomic) {
+		names = append(names, cs.name)
+	}
+	return names
 }
 
 type crashState struct {
@@ -224,11 +232,8 @@ type crashState struct {
 	mem  *fsxtest.Mem
 	// power: the state is what a power loss left, everything in it is durable.
 	power bool
-	// at and model tell, for a state taken at a point of the transaction layer
-	// during a recovery, where it was taken and of which kind of crash it is, so
-	// that the walk can show that those points were crashed at as well.
-	at    fsx.Point
-	model string
+	// seeded: the state is a random power loss, not one of the two every walk takes.
+	seeded bool
 }
 
 // stats of a run of a scenario.
@@ -238,8 +243,11 @@ type scenarioStats struct {
 
 // runScenario walks every crash point of the workflow, takes the crash states
 // there, and checks that restarting converges to an acceptable state, that
-// recovery is idempotent, that a crash during recovery converges to the same
-// state, and that the invariants of the scenario hold in the crash state.
+// recovery is idempotent and that the invariants of the scenario hold in the
+// crash state. The crash states whose recovery is the first to reach a point of
+// a recovery rule are offered to the sink, which crashes those recoveries again
+// (runNestedWalks); seed orders the scenarios, so that the choice does not
+// depend on which walk finishes first.
 func runScenario(t *testing.T, sc *scenario, sink *coverageSink, seed uint64) scenarioStats {
 	t.Helper()
 	var st scenarioStats
@@ -279,9 +287,9 @@ func runScenario(t *testing.T, sc *scenario, sink *coverageSink, seed uint64) sc
 		if sc.durable != "" && !durableSeen && p.String() == sc.durable {
 			durableSeen, stepAfter = true, true
 		}
-		for _, cs := range crashKinds(r.mem, rng) {
+		for _, cs := range crashKinds(r.mem, rng, sc.mode) {
 			st.clones++
-			sc.exercise(t, fmt.Sprintf("%s before %v", cs.name, p), cs, before, after, durable, sink, &st, !strings.HasPrefix(cs.name, "power-loss"))
+			sc.exercise(t, fmt.Sprintf("%s before %v", cs.name, p), cs, before, after, durable, sink, &st, nestedOrder{seed, st.clones}, !cs.seeded)
 			sink.took(p, cs.name)
 		}
 	}
@@ -293,22 +301,17 @@ func runScenario(t *testing.T, sc *scenario, sink *coverageSink, seed uint64) sc
 		t.Errorf("the durable point %q was never reached: the scenario names a point that does not exist", sc.durable)
 	}
 	// After the workflow ended, every kind of crash is the state after.
-	for _, cs := range crashKinds(r.mem, rng) {
+	for _, cs := range crashKinds(r.mem, rng, sc.mode) {
 		st.clones++
-		sc.exercise(t, cs.name+" after the run", cs, before, after, true, sink, &st, true)
+		sc.exercise(t, cs.name+" after the run", cs, before, after, true, sink, &st, nestedOrder{seed, st.clones}, !cs.seeded)
 	}
 	return st
 }
 
-// fnvSeed is a seed that depends on nothing but the text.
-func fnvSeed(s string) uint64 {
-	h := fnv.New64a()
-	h.Write([]byte(s))
-	return h.Sum64()
-}
-
-// exercise recovers from one crash state and checks everything.
-func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, after map[string]string, durable bool, sink *coverageSink, st *scenarioStats, nested bool) {
+// exercise recovers from one crash state and checks everything but the crash
+// during that recovery: when offerNested is set, the state goes to the sink as a
+// candidate for it.
+func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, after map[string]string, durable bool, sink *coverageSink, st *scenarioStats, order nestedOrder, offerNested bool) {
 	t.Helper()
 	crashedSnap := snapshot(t, cs.mem, ".")
 	if sc.crashed != nil {
@@ -318,32 +321,19 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 		checkBodiesResolve(t, where, crashedSnap)
 	}
 
-	// Recovery, watched: every point of it gives crash states of its own.
-	seeded := newRand(fnvSeed(where))
-	var inner []crashState
-	var rr *rig
+	// Recovery, watched: the crash during it is the walk of nestedCase.
+	domain := recoveryDomain()
+	reached := map[fsx.Key]bool{}
 	hook := func(p fsx.Point, k txn.Kind) {
-		if !nested || !crashesDuringRecovery() || cs.name == "power-loss-a" || cs.name == "power-loss-b" || (p.Tag.Tx == "txn-settle" && p.Hit > 1) {
-			return
-		}
-		inner = append(inner, crashState{name: fmt.Sprintf("%s, then a crash %s before %v", where, "process", p), mem: rr.mem.Clone()})
-		inner = append(inner, crashState{name: fmt.Sprintf("%s, then a power loss before %v", where, p), mem: rr.mem.CrashCloneWorst(), power: true})
-		if !strings.HasPrefix(p.Tag.Tx, "txn-") {
-			return
-		}
-		// The cleanup and the settle of txn.Recover belong to no workflow, so
-		// the walk of a workflow reaches them only here, and every kind of crash
-		// is taken at them.
-		inner[len(inner)-2].at, inner[len(inner)-2].model = p, "process-crash"
-		inner[len(inner)-1].at, inner[len(inner)-1].model = p, "worst-power-loss"
-		for _, m := range seededPowerLosses {
-			inner = append(inner, crashState{name: fmt.Sprintf("%s, then a power loss (%s) before %v", where, m, p), mem: rr.mem.CrashClone(seeded), power: true, at: p, model: m})
+		if domain[p.Key] {
+			reached[p.Key] = true
 		}
 	}
-	// The rig does not exist until the hook may run; recoverMem creates it, so
-	// give the hook a way to reach it.
+	var pristine *fsxtest.Mem
+	if offerNested {
+		pristine = cs.mem.Clone()
+	}
 	r2 := openRigRaw(t, cs.mem, sink)
-	rr = r2
 	r2.rec.on = hook
 	r2.restart()
 	s := sc.newSimFor(t, r2)
@@ -365,7 +355,6 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 
 	// Idempotent: a second restart and a second run of the rules write nothing.
 	r2.rec.on = nil
-	n := r2.rec.count()
 	r3 := openRigRaw(t, cs.mem, sink)
 	r3.restart()
 	s3 := sc.newSimFor(t, r3)
@@ -373,7 +362,6 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 	if sc.retry != nil {
 		sc.retry(t, r3, s3)
 	}
-	_ = n
 	if r3.rec.working() != 0 {
 		t.Errorf("%s: a second recovery reached %d crash points: recovery is not idempotent", where, r3.rec.working())
 	}
@@ -381,27 +369,141 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 		t.Errorf("%s: a second recovery changed the disk: %s", where, equalMaps(again, fin, nil))
 	}
 
-	// A crash during recovery converges to the same state.
-	for _, in := range inner {
-		st.nested++
-		if in.model != "" {
-			sink.took(in.at, in.model)
+	if offerNested {
+		sink.offerNested(&nestedCase{sc: sc, where: where, order: order, disk: pristine, reached: reached, power: cs.power, durable: durable, before: before, after: after, fin: fin})
+	}
+}
+
+// nestedOrder places a crash state in the walks: the seed of its scenario and its
+// number in the walk of it.
+type nestedOrder struct {
+	seed uint64
+	n    int
+}
+
+func (a nestedOrder) before(b nestedOrder) bool {
+	return a.seed < b.seed || (a.seed == b.seed && a.n < b.n)
+}
+
+// nestedCase is a crash state whose recovery is crashed again, with what the
+// walk that took it knows about the state: the disk as the crash left it, and the
+// states before, after and recovery ended in.
+type nestedCase struct {
+	sc            *scenario
+	where         string
+	order         nestedOrder
+	disk          *fsxtest.Mem
+	reached       map[fsx.Key]bool // the points of the recovery rules its recovery reaches
+	power         bool
+	durable       bool
+	before, after map[string]string
+	fin           map[string]string
+}
+
+// recoveryDomain is every crash point of the recovery rules the nested walk has to
+// crash at: the points of the recovery transactions of the store, and of the
+// cleanup and the settle that txn.Recover runs at every start. Two kinds of point
+// are left out because no recovery reaches them: the removal of a discarded
+// directory (the store never discards one, so no disk of its workflows holds one)
+// and the renaming of a damaged body into quarantine, which the read that finds
+// the body damaged does, so that a recovery only continues the chunks after it.
+var recoveryDomain = sync.OnceValue(func() map[fsx.Key]bool {
+	prog, err := programTable()
+	if err != nil {
+		panic(err)
+	}
+	internal, mine := map[string]bool{}, map[string]bool{}
+	for _, d := range txn.Internal() {
+		internal[d.Name] = true
+	}
+	for _, d := range store.Transactions() {
+		mine[d.Name] = true
+	}
+	domain := map[fsx.Key]bool{}
+	for _, k := range prog.Keys() {
+		switch {
+		case internal[k.Tag.Tx] && k.Tag.Role != "trash":
+			domain[k.Key] = true
+		case mine[k.Tag.Tx] && k.Kind == txn.Recovery && !(k.Tag.Tx == "quarantine-body" && k.Tag.Role == "body"):
+			domain[k.Key] = true
 		}
+	}
+	return domain
+})
+
+// walk crashes the recovery of the case at every point of it, in the two
+// kinds of crash that draw nothing, and checks that recovering again ends in the
+// state the recovery without the crash ended in. It returns the number of
+// recoveries it crashed.
+func (nc *nestedCase) walk(t *testing.T, sink *coverageSink) int {
+	t.Helper()
+	sc := nc.sc
+	type inner struct {
+		name  string
+		at    fsx.Point
+		model string
+		mem   *fsxtest.Mem
+		power bool
+	}
+	var states []inner
+	var rr *rig
+	hook := func(p fsx.Point, k txn.Kind) {
+		if p.Tag.Tx == "txn-settle" && p.Hit > 1 {
+			return // one directory sync of the barrier stands for all
+		}
+		states = append(states,
+			inner{nc.where + ", then a crash before " + p.String(), p, "process-crash", rr.mem.Clone(), false},
+			inner{nc.where + ", then a power loss before " + p.String(), p, "worst-power-loss", rr.mem.CrashCloneWorst(), true})
+	}
+	rr = openRigRaw(t, nc.disk, sink)
+	rr.rec.on = hook
+	rr.restart()
+	s := sc.newSimFor(t, rr)
+	s.recoverAll()
+	if sc.retry != nil {
+		sc.retry(t, rr, s)
+		s.recoverAll()
+	}
+
+	for _, in := range states {
+		sink.tookNested(in.at, in.model)
 		r4 := sc.recoverMem(t, in.mem, sink, nil)
 		got := snapshot(t, r4.mem, ".")
 		// A power loss on top of a process crash takes what the process had not
 		// made durable, the head of the workflow included: it is an earlier
 		// crash, and the state before is acceptable again.
-		stillDurable := durable && (cs.power || !in.power)
-		if why := sc.accept(got, before, after, stillDurable); why != "" {
-			t.Errorf("%s: recovery after a crash during recovery ends in a state that is not acceptable: %s\n  got: %s\n  fin: %s", in.name, why, short(sc.filter(got)), short(sc.filter(fin)))
+		stillDurable := nc.durable && (nc.power || !in.power)
+		if why := sc.accept(got, nc.before, nc.after, stillDurable); why != "" {
+			t.Errorf("%s: recovery after a crash during recovery ends in a state that is not acceptable: %s\n  got: %s\n  fin: %s", in.name, why, short(sc.filter(got)), short(sc.filter(nc.fin)))
 		}
 		if stillDurable || sc.mustComplete {
-			if why := equalMaps(sc.filter(got), sc.filter(fin), sc.optional); why != "" {
+			if why := equalMaps(sc.filter(got), sc.filter(nc.fin), sc.optional); why != "" {
 				t.Errorf("%s: recovery after a crash during recovery differs from recovery without one: %s", in.name, why)
 			}
 		}
 	}
+	return len(states)
+}
+
+// runNestedWalks crashes again, at every point, the recovery of each crash state
+// the walks offered, and returns the number of recoveries after a crash during
+// recovery. It runs after the walks it follows, in the test that ran them.
+func runNestedWalks(t *testing.T, sink *coverageSink) int {
+	t.Helper()
+	var mu sync.Mutex
+	total := 0
+	t.Run("nested", func(t *testing.T) {
+		for _, nc := range sink.nestedCases() {
+			t.Run(nc.where, func(t *testing.T) {
+				t.Parallel()
+				n := nc.walk(t, sink)
+				mu.Lock()
+				defer mu.Unlock()
+				total += n
+			})
+		}
+	})
+	return total
 }
 
 // checkBodiesResolve fails when a live record refers to a body that is not on

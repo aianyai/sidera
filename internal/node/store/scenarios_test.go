@@ -3,6 +3,7 @@ package store_test
 import (
 	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +15,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
-	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -636,10 +636,12 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 }
 
 // TestEveryTransactionConvergesFromEveryCrashState walks every crash point of
-// every workflow of the store, in every kind of crash, and checks the state
-// recovery ends in, that recovery is idempotent and that a crash during recovery
-// ends in the same state. It then checks that the walks together reached every
-// crash point the store declares.
+// every workflow of the store, in the kinds of crash that crashKinds takes, and
+// checks the state recovery ends in and that recovery is idempotent. It crashes
+// again the recovery of the first crash state that reaches each point of a
+// recovery rule, at every point of it, and checks that a crash during recovery
+// ends in the same state. It then checks that the walks together reached and
+// crashed at every crash point the store declares.
 func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	sink := newSink()
 	all := append(append(append(scenarios(), recoveryScenarios()...), resumedQuarantines()...), doubleFaultScenarios()...)
@@ -653,17 +655,17 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 			t.Run(sc.name, func(t *testing.T) {
 				t.Parallel()
 				st := runScenario(t, &sc, sink, uint64(100+i))
-				t.Logf("%d points, %d crash states, %d recoveries, %d recoveries after a crash during recovery", st.points, st.clones, st.recoveries, st.nested)
+				t.Logf("%d points, %d crash states, %d recoveries", st.points, st.clones, st.recoveries)
 				mu.Lock()
 				defer mu.Unlock()
 				total.points += st.points
 				total.clones += st.clones
 				total.recoveries += st.recoveries
-				total.nested += st.nested
 			})
 		}
 	})
-	t.Logf("in all: %d points, %d crash states, %d recoveries, %d nested", total.points, total.clones, total.recoveries, total.nested)
+	total.nested = runNestedWalks(t, sink)
+	t.Logf("in all: %d points, %d crash states, %d recoveries, %d recoveries after a crash during recovery", total.points, total.clones, total.recoveries, total.nested)
 
 	// The coverage assertion: the walks reached every declared point, and the
 	// table the keys come from is the one the store declares, not one the walks
@@ -693,13 +695,11 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 		}
 	}
 	// Reaching a point is not crashing at it: every declared point must have had
-	// a crash state taken at it, of every kind of crash, by the walk of a
-	// workflow (a point only a recovery after another workflow's crash reaches
-	// needs a workflow of its own that starts from that state).
-	var models []string
-	for _, cs := range crashKinds(fsxtest.NewMem(), newRand(1)) {
-		models = append(models, cs.name)
-	}
+	// a crash state taken at it, of each kind every walk takes (the process crash
+	// and the worst power loss), by the walk of a workflow (a point only a
+	// recovery after another workflow's crash reaches needs a workflow of its own
+	// that starts from that state).
+	models := floorKindNames()
 	var uncrashed []string
 	for _, k := range tab {
 		for _, m := range models {
@@ -711,37 +711,25 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	if len(uncrashed) > 0 {
 		t.Errorf("%d declared crash points have no crash state taken at them by a walk, for the kind of crash named:\n%s", len(uncrashed), strings.Join(uncrashed, "\n"))
 	}
-	// The cleanup and the settle that txn.Recover runs at every start belong to
-	// no workflow: the walks crash at them while they recover, every kind of
-	// crash. A short run and a run under the race detector do not crash
-	// recoveries. The store never discards a directory, so no disk of its
-	// workflows holds a ".trash-" directory and the removal of one cannot be
-	// reached here.
-	if crashesDuringRecovery() {
-		prog, err := programTable()
-		if err != nil {
-			t.Fatal(err)
-		}
-		internal := map[string]bool{}
-		for _, d := range txn.Internal() {
-			internal[d.Name] = true
-		}
-		var gaps []string
-		for _, k := range prog.Keys() {
-			if !internal[k.Tag.Tx] || k.Tag.Role == "trash" {
-				continue
+	// The points of the recovery rules must have been crashed at during a
+	// recovery too, in the same kinds: the walks above crash them while a
+	// workflow recovers, and the cleanup and the settle that txn.Recover runs at
+	// every start belong to no workflow, so only a recovery reaches them. The
+	// store never discards a directory, so no disk of its workflows holds a
+	// ".trash-" directory and the removal of one cannot be reached here.
+	var gaps []string
+	for k := range recoveryDomain() {
+		for _, m := range models {
+			if sink.nestedTaken[k][m] == 0 {
+				gaps = append(gaps, fmt.Sprintf("%s under %s", k, m))
 			}
-			for _, m := range models {
-				if sink.taken[k.Key][m] == 0 {
-					gaps = append(gaps, fmt.Sprintf("%s (%v) under %s", k.Key, kindName(k.Kind), m))
-				}
-			}
-		}
-		if len(gaps) > 0 {
-			t.Errorf("%d crash points of the transaction layer have no crash state taken at them, for the kind of crash named:\n%s", len(gaps), strings.Join(gaps, "\n"))
 		}
 	}
-	if total.nested == 0 && crashesDuringRecovery() {
+	sort.Strings(gaps)
+	if len(gaps) > 0 {
+		t.Errorf("%d crash points of the recovery rules have no crash during a recovery taken at them, for the kind of crash named:\n%s", len(gaps), strings.Join(gaps, "\n"))
+	}
+	if total.nested == 0 {
 		t.Error("no recovery was crashed in the middle")
 	}
 }

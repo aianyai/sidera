@@ -2,7 +2,6 @@ package engine_test
 
 import (
 	"fmt"
-	"math/rand/v2"
 	"sync"
 	"testing"
 
@@ -32,7 +31,6 @@ import (
 type diskTaker struct {
 	h   *harness.H
 	txs map[string]bool
-	rng *rand.Rand
 	cov *coverage
 
 	mu    sync.Mutex
@@ -56,12 +54,12 @@ func (c *coverage) note(k fsx.Key) {
 	c.hit[k]++
 }
 
-func newDiskTaker(seed uint64, cov *coverage, txs ...string) *diskTaker {
+func newDiskTaker(cov *coverage, txs ...string) *diskTaker {
 	set := map[string]bool{}
 	for _, tx := range txs {
 		set[tx] = true
 	}
-	return &diskTaker{txs: set, cov: cov, rng: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15))}
+	return &diskTaker{txs: set, cov: cov}
 }
 
 func (d *diskTaker) Reached(p fsx.Point, _ txn.Kind) {
@@ -73,11 +71,8 @@ func (d *diskTaker) Reached(p fsx.Point, _ txn.Kind) {
 	d.cov.note(p.Key)
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.disks = append(d.disks,
-		takenDisk{where + " (process crash)", mem.Clone()},
-		takenDisk{where + " (worst power loss)", mem.CrashCloneWorst()})
-	for i := 0; i < 2; i++ {
-		d.disks = append(d.disks, takenDisk{fmt.Sprintf("%s (power loss %d)", where, i), mem.CrashClone(d.rng)})
+	for _, cd := range crashDisks(mem) {
+		d.disks = append(d.disks, takenDisk{fmt.Sprintf("%s (%s)", where, cd.kind), cd.disk})
 	}
 }
 
@@ -224,7 +219,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 	cov := &coverage{hit: map[fsx.Key]int{}}
 
 	t.Run("a message from a to b", func(t *testing.T) {
-		taker := newDiskTaker(21, cov, "intake", "deliver", "source-update")
+		taker := newDiskTaker(cov, "intake", "deliver", "source-update")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
 		taker.h = h
 		msg := send(t, h, "a", "b", "does it survive")
@@ -233,7 +228,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 	})
 	t.Run("a message the target refuses", func(t *testing.T) {
 		// The body is the source's alone, and goes when the refusal is known.
-		taker := newDiskTaker(23, cov, "intake", "deliver", "source-update")
+		taker := newDiskTaker(cov, "intake", "deliver", "source-update")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
 		taker.h = h
 		if err := h.Agent("b").Declare(h.Ctx(), fakeagent.DeclareInput{Paused: boolp(true)}); err != nil {
@@ -245,7 +240,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 	})
 	t.Run("an envelope with no source record on this node", func(t *testing.T) {
 		// Nothing of this node sent it, so the target alone writes the body.
-		taker := newDiskTaker(24, cov, "deliver")
+		taker := newDiskTaker(cov, "deliver")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
 		taker.h = h
 		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint, forged(t, h, "from-nowhere", addrOf(t, h, "a"), "", "a body only the target holds")); err != nil {
@@ -254,7 +249,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 		walkDisks(t, taker, func(t *testing.T, r *harness.H) { checkTakenOnce(t, r, "from-nowhere") })
 	})
 	t.Run("an answer that carries evidence", func(t *testing.T) {
-		taker := newDiskTaker(22, cov, "intake", "deliver", "source-update", "deliver-reply")
+		taker := newDiskTaker(cov, "intake", "deliver", "source-update", "deliver-reply")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
 		taker.h = h
 		msg := questionHeld(t, h)
@@ -270,7 +265,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 	t.Run("an answer whose evidence releases the last reference to a body", func(t *testing.T) {
 		// The question's body is the source's alone, and the transaction that writes
 		// the answer removes it.
-		taker := newDiskTaker(26, cov, "deliver-reply")
+		taker := newDiskTaker(cov, "deliver-reply")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
 		taker.h = h
 		msg, report := bodyHeldBySourceAlone(t, h, "a question only the source holds")
@@ -281,7 +276,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 		walkDisks(t, taker, func(t *testing.T, r *harness.H) { checkTakenOnce(t, r, "answer-that-frees-a-body") })
 	})
 	t.Run("an answer with no source record on this node", func(t *testing.T) {
-		taker := newDiskTaker(25, cov, "deliver-reply")
+		taker := newDiskTaker(cov, "deliver-reply")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
 		taker.h = h
 		msg := questionHeld(t, h)

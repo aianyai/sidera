@@ -20,7 +20,7 @@ import (
 // (closing an endpoint that is closed says so) and answered from the result in
 // the third; it is never an error, and the identifier is never found to be reused
 // by its own request. Each operation of the door is walked through every crash
-// point of its transaction, under every kind of crash.
+// point of its transaction, in the process crash and the worst power loss.
 func TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint(t *testing.T) {
 	type op struct {
 		name string
@@ -59,7 +59,7 @@ func TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint(t *testing.T) {
 			var r *rig
 			var a ident.EndpointID
 			checked, stored, apart, none := 0, 0, 0, 0
-			walker := newCrashWalker(31, func(where string, disk *fsxtest.Mem) {
+			walker := newCrashWalker(func(where string, disk *fsxtest.Mem) {
 				checked++
 				f := r.fork(disk)
 				e, _, err := f.open()
@@ -114,7 +114,7 @@ func TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint(t *testing.T) {
 				t.Fatalf("%d states judged: %d with the result, %d with the effect alone, %d with neither; the walk must reach every side of the commit", checked, stored, apart, none)
 			}
 			// every key of the transaction's declaration that the run reached was
-			// crashed at under every kind of crash
+			// crashed at under each kind of crash the walks take
 			var missing []string
 			for _, k := range r.tab.Keys() {
 				if k.Tag.Tx != tc.txs[0] {
@@ -129,7 +129,7 @@ func TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint(t *testing.T) {
 				if !reached {
 					continue
 				}
-				for _, model := range []string{"process crash", "worst power loss", "power loss"} {
+				for _, model := range crashKindNames {
 					if walker.taken[k.Key][model] == 0 {
 						missing = append(missing, fmt.Sprintf("%v under %s", k.Key, model))
 					}

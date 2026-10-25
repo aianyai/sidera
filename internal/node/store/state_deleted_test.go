@@ -111,9 +111,9 @@ func TestLayoutRuleConvergesFromEveryCrashState(t *testing.T) {
 	r := openRig(t, mem)
 	rng := newRand(5)
 	var states []crashState
-	perPoint := len(crashKinds(fsxtest.NewMem(), newRand(1)))
+	perPoint := len(crashKinds(fsxtest.NewMem(), newRand(1), batch))
 	r.rec.on = func(p fsx.Point, k txn.Kind) {
-		states = append(states, crashKinds(r.mem, rng)...)
+		states = append(states, crashKinds(r.mem, rng, batch)...)
 		if k != txn.Recovery {
 			t.Errorf("the layout rule is a recovery transaction, the point %v says it is not", p)
 		}

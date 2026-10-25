@@ -274,7 +274,7 @@ closing and its chunks; `execute_test.go` and `execute_crash_test.go` the door o
 `recovery_test.go` the scan entry and the recovery entry; `loop_test.go` the
 loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
-`crash_test.go` the crash walk of `direct-register`; `clock_test.go` the pause of a wall clock set back until the owner clears it; `operations_test.go`, `operations_effects_test.go` and `operations_crash_test.go` the owner's operations, their effects and their crash points; `nodestatus_test.go` the status and the export; `intake_test.go` the scenarios of
+`crash_test.go` the crash walk of `direct-register` and `crashDisks`, the two crashes every walk of the engine takes at each point (the process crash and the worst power loss; random power losses are drawn only by `TestPowerLossKeepsWhatTheEngineAcknowledged`); `clock_test.go` the pause of a wall clock set back until the owner clears it; `operations_test.go`, `operations_effects_test.go` and `operations_crash_test.go` the owner's operations, their effects and their crash points; `nodestatus_test.go` the status and the export; `intake_test.go` the scenarios of
 sending and intake judged from the ledger, the answers of the loopback and the records, and
 `intake_more_test.go` the rules around them; `intake_crash_test.go` the crash walk of the
 transactions that take a message in; `intake_fuzz_test.go` the receiving entry under

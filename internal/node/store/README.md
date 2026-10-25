@@ -186,3 +186,33 @@ engine applies the delivery rules and calls the writes.
   replacement comes from `delivery.NewLostRecord`, and on the target side
   `delivery.NewLostDedupRecord`); any other record keeps its state and only drops
   the reference to the body.
+
+## Crash tests
+
+`crash_test.go` and `scenarios_test.go` walk every crash point of every workflow of
+the store. They prove what the reliability floor needs, and nothing more: an
+acknowledged write survives a power loss that keeps only synced content; after any
+crash, recovery ends and leaves every record valid; a crash during recovery is
+redone.
+
+- At each point a walk takes two crashes: the process crash and the worst power
+  loss (`crashKinds`). A random power loss only keeps a subset of the one group of
+  writes that is not synced yet, between those two, so a transaction of `atomic`
+  mode takes none; a `batch` is a set of independent single-file transitions,
+  where any subset of the written files is a state of its own, and also takes the
+  two seeded power losses (not under the race detector, which adds cost and no
+  coverage to a single-threaded walk). The seeded power losses of the property tests
+  (`powerloss_test.go`, `property_test.go`) are the other place they remain.
+- The crash during recovery is not walked from every crash state. Each point of a
+  recovery rule (the recovery transactions of the store, and the cleanup and settle
+  that `txn.Recover` runs at every start) is reached by the recovery of some crash
+  state; the first such state in the order of the walks is crashed again at every
+  point of its recovery, in both kinds of crash (`runNestedWalks`). The order is
+  fixed by the seed of the scenario, so the choice does not depend on which walk
+  finishes first.
+- The coverage assertions derive from the same selection: every declared point is
+  crashed at in both kinds by the walk of a workflow, and every point of a
+  recovery rule is crashed at during a recovery in both kinds. The head of a body
+  quarantine (the rename of the damaged body) is not in the second set: the read
+  that finds the body damaged writes it, and a recovery only continues the chunks
+  after it.

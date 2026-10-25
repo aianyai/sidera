@@ -79,10 +79,57 @@ type coverageSink struct {
 	// states the walk of a workflow took there and judged: reaching a point is
 	// not crashing at it.
 	taken map[fsx.Key]map[string]int
+	// first holds, for each crash point of a recovery rule, the crash state whose
+	// recovery reached it first, in the order of the walks (nestedOrder): the
+	// states the nested walk crashes again. nestedTaken counts, for each such
+	// point and kind of crash, the crashes during a recovery that were judged.
+	first       map[fsx.Key]*nestedCase
+	nestedTaken map[fsx.Key]map[string]int
 }
 
 func newSink() *coverageSink {
-	return &coverageSink{hits: map[fsx.Key]int{}, maxInTx: map[fsx.Key]int{}, kind: map[fsx.Key]txn.Kind{}, taken: map[fsx.Key]map[string]int{}}
+	return &coverageSink{hits: map[fsx.Key]int{}, maxInTx: map[fsx.Key]int{}, kind: map[fsx.Key]txn.Kind{}, taken: map[fsx.Key]map[string]int{},
+		first: map[fsx.Key]*nestedCase{}, nestedTaken: map[fsx.Key]map[string]int{}}
+}
+
+// offerNested keeps the case for every point of reached that no earlier case of
+// the walks reached in its recovery. The choice is the earliest in the order of
+// the walks, whichever walk finishes first, so a run is always the same.
+func (c *coverageSink) offerNested(nc *nestedCase) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for k := range nc.reached {
+		if old := c.first[k]; old == nil || nc.order.before(old.order) {
+			c.first[k] = nc
+		}
+	}
+}
+
+// nestedCases are the distinct cases offerNested kept, in the order of the walks.
+func (c *coverageSink) nestedCases() []*nestedCase {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	seen := map[*nestedCase]bool{}
+	var out []*nestedCase
+	for _, nc := range c.first {
+		if !seen[nc] {
+			seen[nc] = true
+			out = append(out, nc)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].order.before(out[j].order) })
+	return out
+}
+
+// tookNested records that a crash during a recovery, of the given kind, was taken
+// at p and judged.
+func (c *coverageSink) tookNested(p fsx.Point, model string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.nestedTaken[p.Key] == nil {
+		c.nestedTaken[p.Key] = map[string]int{}
+	}
+	c.nestedTaken[p.Key][model]++
 }
 
 // took records that the walk took a crash state of the given kind at p.

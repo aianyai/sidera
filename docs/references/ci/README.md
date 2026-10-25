@@ -10,8 +10,7 @@ The workflow runs on every push to `main`, on every pull request and on manual
 dispatch. Every step fails its job on any failure; there is no
 `continue-on-error`; the only tests skipped are the power-loss tests on macOS
 and Windows (see below), and the suite runs without `-short`. The `-race` steps
-run every test, but the crash walks of `internal/node/store` take two kinds of
-crash instead of four there (see below).
+run every test, the crash walks of `internal/node/store` included.
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
@@ -63,22 +62,28 @@ to the workflow.
   dependency that needs cgo must fail here and not at release time. The `test`
   job's `-race` is the one place cgo is on: the race detector needs it and a C
   compiler, which all three hosted runner images carry.
-- **Race runs take less of the store's crash walks**: the walks of
-  `internal/node/store` replay every crash point of every transaction, and each
-  scenario is single-threaded on an in-memory file system of its own, so the
-  race detector finds nothing there and only multiplies the cost. Under `-race`
-  (the `race` build tag, which the test package reads through `raceEnabled`) a
-  walk takes the two kinds of crash that draw nothing, the process crash and the
-  worst power loss, and leaves out the two seeded power losses; and it does not
-  crash again at every point of the recovery that follows each crash (the nested
-  walk, the larger part of the time). The steps without `-race` take all four
-  kinds and the whole nested walk, so nothing goes unrun, and the assertions that
-  need the nested walk apply only there. Every other test, the concurrent ones
-  included, runs in both modes. A `-skip` pattern could not express this: the
-  kinds of crash and the nested walk are taken inside one test, not as subtests.
-  The reason is the per-package limit: `-timeout` covers one test binary, and the
-  store's race run, without the narrowing, took 79% of it on the slowest job (the
-  baseline below), with more store tests due.
+- **The crash walks take what the reliability floor needs**: the walks of
+  `internal/node/store` and `internal/node/engine` replay every crash point of
+  every transaction, and each scenario is single-threaded on an in-memory file
+  system of its own, so the race detector finds nothing there and only multiplies
+  the cost. The walks prove three things and take only the crashes those need: an
+  acknowledged write survives a power loss that keeps only synced content (the
+  worst power loss), recovery after any crash ends with every record valid (the
+  process crash and the worst power loss), and a crash during recovery is redone
+  (the nested walk). Two seeded random power losses per point used to be taken as
+  well; under the transaction discipline they only keep a subset of the one group
+  of writes that is not synced yet, between those two crashes, so they remain in
+  the property tests and in the walks of the store's batch transactions, which are
+  sets of independent single-file transitions. Under `-race` (the `race` build tag,
+  read by the store's tests through `raceEnabled`) those batch walks leave the
+  seeded power losses out, as the detector adds cost and no coverage there. The
+  nested walk crashes again, at every point of its recovery, only the first crash
+  state that reaches each point of a recovery rule, not every crash state; being
+  cheap, it runs under `-race` too, and the assertions that need it apply in every
+  mode. A `-skip` pattern could not express any of this: the kinds of crash are
+  taken inside one test, not as subtests. The reason is the per-package limit:
+  `-timeout` covers one test binary, and the store's race run, without any
+  narrowing, took 79% of it on the slowest job (the baseline below).
 - **A verbose run of the platform packages**: `go test` prints `t.Log` output and
   skip reasons only with `-v` or on failure, and the main steps run without it. The
   platform tests of `internal/node/fsx` and `internal/node/ipc` log what they
@@ -176,6 +181,24 @@ nested walk (35 762 recoveries after a crash during recovery in the first run, n
 in the second). The plain run of the same tests takes about 180 s and still reports
 43 588 of them. These are local figures, not CI baselines: CI times are in the table.
 
+The walk of the store alone (`TestEveryTransactionConvergesFromEveryCrashState`, 4
+processors, `-tags crashtest,testclock`, on a machine shared with other work, so the
+CPU time is the steadier figure) measured as follows before and after the walks were
+cut to the crashes the reliability floor needs:
+
+| Run | crash states | recoveries after a crash during recovery | CPU time | wall time |
+| --- | ------------ | ---------------------------------------- | -------- | --------- |
+| plain, before | 2932 | 43 588 | 754 s | 365 s |
+| plain, after | 1792 | 476 | 27 s | 12 to 19 s |
+| `-race`, before | 1466 | none (skipped) | 112 s | 34 s |
+| `-race`, after | 1466 | 476 | 156 to 163 s | 59 to 115 s |
+
+The `-race` run takes more than before because it now takes the nested walk, which
+costs about 50 CPU seconds there and about 25 s of wall time on the shared machine;
+the plain run takes less than a twentieth of the CPU time. The walks of the
+engine took 3.4 s before and 1.9 s after, with two crash states per point instead of
+four or five.
+
 ## Where
 
 - Workflow: `.github/workflows/ci.yml`.
@@ -189,7 +212,7 @@ From the repository root (zsh and bash alike; on Windows use Git Bash):
 gofmt -l .   # must print nothing
 go vet ./... ./sdk/go/...
 go test -count=1 -timeout 30m ./... ./sdk/go/...
-go test -race -count=1 -timeout 30m ./... ./sdk/go/...   # the store's crash walks take two kinds of crash here and skip the crash during recovery
+go test -race -count=1 -timeout 30m ./... ./sdk/go/...
 
 # the tagged job; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
 go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
