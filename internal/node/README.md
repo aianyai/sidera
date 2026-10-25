@@ -31,10 +31,14 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | none | `testkit/ledger`, `testkit/fakectl`, `testkit/fakeruntime`, `testkit/fakeadapter` | the standard library, `sdk/go/...` and each other only, so they use the adapter protocol as a third party would |
 | none | `cmd/sidera/...` | any package of this tree |
 
-Which of `engine`, `adapterhost`, `agentapi` and `manageapi` defines the
-interface the others implement is decided when `engine` is built; the
-requirement here is only that the graph stays acyclic and nothing but `daemon`
-connects across layers.
+Each side of a seam defines the interface it needs, and the graph stays acyclic
+because of it. `engine` defines `AgentService` and `ManageService`, which
+`agentapi` and `manageapi` call, and `Adapters`, which it calls on the adapter
+host; `adapterhost` defines `Engine`, which it calls on the engine. `*engine.Engine`
+implements the first two and `adapterhost`'s `Engine`, and the adapter host
+implements `engine.Adapters`, without either package importing the other: `daemon`
+hands each the other's implementation, and nothing but `daemon` connects across
+layers.
 
 ## Rules for every runtime package
 

@@ -12,10 +12,12 @@ import (
 )
 
 // MaxAcceptFrom is the most senders an endpoint can list in its declaration. The
-// declaration is part of the endpoint's record, which is rewritten whole by every
-// change, so it has to stay small: a node holds at most as many local endpoints
-// as publication.MaxEndpointsPerNode, and a list of that length is already one
-// that no agent writes by hand.
+// declaration is part of the endpoint's record, and every change to the endpoint
+// rewrites and syncs that record whole, so the size of one record is what bounds
+// the list: an address is about eighty characters, and a list at this bound is
+// some twenty kilobytes, already longer than anyone writes by hand. It is one
+// constant so that the number changes in one place; the engine owns the encoding
+// of the declaration and so this bound with it.
 const MaxAcceptFrom = 256
 
 // endpointMeta is what the engine owns about an endpoint and keeps in the
