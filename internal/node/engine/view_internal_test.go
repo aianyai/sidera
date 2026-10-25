@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +41,16 @@ func tokenText(b byte) adapterproto.Token {
 	return adapterproto.Token(base64.RawURLEncoding.EncodeToString(tokenBytes(b)))
 }
 
+// loose is a text that a lenient decoder reads as the bytes of t: the last
+// character of 32 bytes in base64url carries four bits, and its other two bits are
+// spare.
+func loose(t adapterproto.Token) adapterproto.Token {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	s := string(t)
+	i := strings.IndexByte(alphabet, s[len(s)-1])
+	return adapterproto.Token(s[:len(s)-1] + string(alphabet[i+1]))
+}
+
 func TestTokenIndexFindsOnlyWhatWasAddedAndNotWhatWasRemoved(t *testing.T) {
 	x := newTokenIndex()
 	a, b := idOf(t, 1), idOf(t, 2)
@@ -59,6 +70,7 @@ func TestTokenIndexFindsOnlyWhatWasAddedAndNotWhatWasRemoved(t *testing.T) {
 		{"text that is not base64url", "!!!", ident.EndpointID{}, false},
 		{"too short", tokenText(0x41)[:20], ident.EndpointID{}, false},
 		{"padded", adapterproto.Token(base64.StdEncoding.EncodeToString(tokenBytes(0x41))), ident.EndpointID{}, false},
+		{"a spelling of the same bytes with the spare bits of the last character set", loose(tokenText(0x41)), ident.EndpointID{}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, ok := x.lookup(tc.token)

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -263,3 +264,23 @@ func mustEndpoint(t testing.TB, b byte) ident.EndpointID {
 }
 
 var _ = errors.New
+
+// The registration of an adapter's endpoints is for an instance the owner has
+// enabled: an instance that was disabled is not admitted.
+func TestAnInstanceTheOwnerDisabledIsNotAdmitted(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	var op admin.OperationID
+	op[0] = 9
+	if _, err := r.cfg.DisableAdapter(configRequest(op, r.cfg.Instances().Version), "chat", nil, jsonResult); err != nil {
+		t.Fatalf("DisableAdapter: %v", err)
+	}
+	e, _, err := r.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Start()
+	t.Cleanup(func() { r.stop2(e) })
+	wantReason(t, e.AdapterAdmitted(context.Background(), "chat", r.admit), engine.ReasonInstanceUnknown)
+	wantReason(t, e.AdapterAdmitted(context.Background(), "nobody", r.admit), engine.ReasonInstanceUnknown)
+}
