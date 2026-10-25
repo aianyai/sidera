@@ -25,7 +25,7 @@ operation adds a row (and its type in the engine); the handling of a request doe
 not change. `operation.result` is one of the rows: a read of the result stored for an
 operation identifier of the requester.
 
-The rows are in `methods.go` (`endpoints.list`, `endpoints.close`, `endpoints.set`,
+The rows are in `methods.go` (`endpoints.list`, `endpoints.close`,
 `daemon.stop`, `operation.result`), `methods_status.go` (`status`, `alerts.list`,
 `alerts.ack`), `methods_identity.go` (`identity.export_revocation`,
 `identity.confirm_backup`, `identity.retire`, `clock.clear_rollback`) and

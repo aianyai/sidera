@@ -24,7 +24,9 @@ var reminderMessage = map[engine.ReminderKind]string{
 
 // states is the order the deliveries are listed in: every state is there, with zero
 // where the node holds none, so that a reader that counts the ones with work behind
-// them does not have to know which states exist.
+// them does not have to know which states exist. It restates the list of states of
+// `delivery`; an enumeration there would make it one home, which is a proposal to
+// the contract package of its own.
 var states = []delivery.State{
 	delivery.StateQueued, delivery.StateAccepted, delivery.StateDelivered, delivery.StateRejected,
 	delivery.StateExpiredUnconfirmed, delivery.StateDeliveryUnknown, delivery.StateClosedUnconfirmed,

@@ -243,6 +243,20 @@ interface, all held to the local owner:
 | `identity retire --node <id>` | Keeps the statement as a verified revocation in `config/revocations/` and stops the daemon. From the commit nothing is signed in the node's name, even before the daemon is down, and every later start refuses to run. The node is named so that a retirement meant for another data directory is refused. |
 | `clock clear-rollback` | Lifts the pause of a wall clock that was set back: the mark becomes the clock as it reads and the flag is removed, in one replacement of `clock.rec`. |
 
+A retirement is for good, so the deliveries the node has not settled when it is
+retired are abandoned, without feedback to their senders: the node never starts
+again, and nothing is left to send a report, close a delivery or answer a pull.
+That is what retiring an identity means, not a loss the channel owes feedback for.
+From the commit until the daemon is down everything that would take in work or sign
+refuses with `identity_retired`, so no new acknowledgement is given for work that
+will be abandoned: a send or a reply is refused by the capacity check, an envelope
+that arrives is refused before it is judged, and a pull is not answered. The one
+answer that is not refused is a repeat of a request the node had already
+acknowledged, which is answered with the first answer, a statement that was true
+when it was made; the state of the message stays readable. Nothing acknowledged
+after the commit is lost, because nothing is acknowledged after it
+(`TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded`).
+
 Until the backup is confirmed `status` reminds, first, on every call. The reminder is
 derived from the confirmation on disk and the statement the node holds, and has no
 record of its own.

@@ -236,6 +236,11 @@ commands and add their methods to this list.
   whether it may; the start, which has no engine yet, asks `SignRefusalOf` the same.
 - Call `AddPeriodic` before `Start`, `RecoverDelivery` between `Start` and
   `Serve`, and `BeginShutdown` before `Stop`.
+- Code that quarantines a file while the node runs adds the `store.CorruptFile`
+  it made to the engine's view (`view.corrupt`, which the scan fills at the start),
+  with the alert that names it. The acknowledgement of the alert removes the file
+  through that list, so a file that is not in it stays behind as a `.corrupt` file
+  after its alert is acknowledged.
 - Admit an adapter instance with `AdapterAdmitted` before its endpoints register,
   and only an instance the configuration has enabled.
 - Give `Deps.Rand` a reader the engine alone uses; it is read in the loop.
