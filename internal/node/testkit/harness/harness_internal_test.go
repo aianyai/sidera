@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -11,12 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // recorder is a testing.TB that records what the checks under test report
@@ -250,5 +253,192 @@ func TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer(t *testin
 	err = h.Quiesce(scenario.WithTimeout(50 * time.Millisecond))
 	if strings.Contains(err.Error(), running) {
 		t.Errorf("error %q blames a running command although the engine was never asked", err)
+	}
+}
+
+// adaptersDouble is an engine.Adapters that records the calls that reach it and,
+// when told to, holds each one until it is released, so that a test can abandon the
+// process while a call is in flight.
+type adaptersDouble struct {
+	mu      sync.Mutex
+	reached []string
+	hold    bool
+	entered chan string
+	release chan struct{}
+}
+
+func newAdaptersDouble(hold bool) *adaptersDouble {
+	return &adaptersDouble{hold: hold, entered: make(chan string, 16), release: make(chan struct{})}
+}
+
+func (d *adaptersDouble) note(method string) {
+	d.mu.Lock()
+	d.reached = append(d.reached, method)
+	d.mu.Unlock()
+	if d.hold {
+		d.entered <- method
+		<-d.release
+	}
+}
+
+func (d *adaptersDouble) calls() []string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]string(nil), d.reached...)
+}
+
+var errDouble = errors.New("the double's own answer")
+
+func (d *adaptersDouble) EnsureRunning(string) { d.note("EnsureRunning") }
+func (d *adaptersDouble) Stop(string)          { d.note("Stop") }
+func (d *adaptersDouble) NotifyPending(string, adapterproto.PendingParams) {
+	d.note("NotifyPending")
+}
+func (d *adaptersDouble) CreateSession(context.Context, string, adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {
+	d.note("CreateSession")
+	return adapterproto.SessionCreateResult{Outcome: adapterproto.CreateCreated}, errDouble
+}
+func (d *adaptersDouble) DeliverPrompt(context.Context, string, adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error) {
+	d.note("DeliverPrompt")
+	return adapterproto.PromptDeliverResult{Stage: adapterproto.PromptAccepted}, errDouble
+}
+func (d *adaptersDouble) Reconcile(context.Context, string, adapterproto.ReconcileParams) (adapterproto.ReconcileResult, error) {
+	d.note("Reconcile")
+	return adapterproto.ReconcileResult{Verdict: adapterproto.VerdictFound}, errDouble
+}
+func (d *adaptersDouble) Interrupt(context.Context, string, adapterproto.InterruptParams) (adapterproto.InterruptResult, error) {
+	d.note("Interrupt")
+	return adapterproto.InterruptResult{Stage: adapterproto.InterruptRequested}, errDouble
+}
+func (d *adaptersDouble) Close(context.Context, string, adapterproto.CloseParams) (adapterproto.CloseResult, error) {
+	d.note("Close")
+	return adapterproto.CloseResult{Outcome: adapterproto.CloseClosed}, errDouble
+}
+func (d *adaptersDouble) Counts(string) adapterhost.ConnCounts {
+	return adapterhost.ConnCounts{Connected: true, Handled: 3, Buffered: 1}
+}
+
+// call is one method of engine.Adapters made through a wrapper; a method that has a
+// result returns the error and whether the result came back as the double made it.
+type adapterCall struct {
+	name string
+	// result is true for a method that answers the engine with a result and an error.
+	result bool
+	run    func(a engine.Adapters) (zero bool, err error)
+}
+
+var adapterCalls = []adapterCall{
+	{"EnsureRunning", false, func(a engine.Adapters) (bool, error) { a.EnsureRunning("chat"); return true, nil }},
+	{"Stop", false, func(a engine.Adapters) (bool, error) { a.Stop("chat"); return true, nil }},
+	{"NotifyPending", false, func(a engine.Adapters) (bool, error) {
+		a.NotifyPending("chat", adapterproto.PendingParams{})
+		return true, nil
+	}},
+	{"CreateSession", true, func(a engine.Adapters) (bool, error) {
+		r, err := a.CreateSession(context.Background(), "chat", adapterproto.SessionCreateParams{})
+		return reflect.ValueOf(r).IsZero(), err
+	}},
+	{"DeliverPrompt", true, func(a engine.Adapters) (bool, error) {
+		r, err := a.DeliverPrompt(context.Background(), "chat", adapterproto.PromptDeliverParams{})
+		return reflect.ValueOf(r).IsZero(), err
+	}},
+	{"Reconcile", true, func(a engine.Adapters) (bool, error) {
+		r, err := a.Reconcile(context.Background(), "chat", adapterproto.ReconcileParams{})
+		return reflect.ValueOf(r).IsZero(), err
+	}},
+	{"Interrupt", true, func(a engine.Adapters) (bool, error) {
+		r, err := a.Interrupt(context.Background(), "chat", adapterproto.InterruptParams{})
+		return reflect.ValueOf(r).IsZero(), err
+	}},
+	{"Close", true, func(a engine.Adapters) (bool, error) {
+		r, err := a.Close(context.Background(), "chat", adapterproto.CloseParams{})
+		return reflect.ValueOf(r).IsZero(), err
+	}},
+}
+
+// While the process lives, a call goes through and comes back as the host made it.
+func TestACallToTheAdapterHostOfALiveProcessIsPassedOn(t *testing.T) {
+	for _, c := range adapterCalls {
+		t.Run(c.name, func(t *testing.T) {
+			d := newAdaptersDouble(false)
+			var abandoned atomic.Bool
+			zero, err := c.run(abandonable(d, &abandoned))
+			if got := d.calls(); len(got) != 1 || got[0] != c.name {
+				t.Fatalf("the host was called %v, want %s once", got, c.name)
+			}
+			if c.result && (zero || !errors.Is(err, errDouble)) {
+				t.Errorf("the result came back as zero=%v err=%v, want the double's own", zero, err)
+			}
+		})
+	}
+}
+
+// A call made after the process was abandoned is never sent: a stale engine must
+// not act on an adapter, and nobody could read what it would answer.
+func TestACallToTheAdapterHostAfterTheProcessWasAbandonedIsNeverSent(t *testing.T) {
+	for _, c := range adapterCalls {
+		t.Run(c.name, func(t *testing.T) {
+			d := newAdaptersDouble(false)
+			var abandoned atomic.Bool
+			a := abandonable(d, &abandoned)
+			abandoned.Store(true)
+			zero, err := c.run(a)
+			if got := d.calls(); len(got) != 0 {
+				t.Errorf("the host was called %v after the process was abandoned", got)
+			}
+			if c.result && (!zero || !errors.Is(err, engineagent.ErrProcessEnded)) {
+				t.Errorf("the call returned zero=%v err=%v, want a zero result and ErrProcessEnded", zero, err)
+			}
+		})
+	}
+}
+
+// A call that was in flight when the process was abandoned returns after it: the
+// engine of that process is gone, so whatever the host answered is not an answer
+// anyone read, and the call must never be a confirmation.
+func TestACallToTheAdapterHostThatReturnsAfterTheProcessWasAbandonedIsNeverAConfirmation(t *testing.T) {
+	for _, c := range adapterCalls {
+		if !c.result {
+			continue
+		}
+		t.Run(c.name, func(t *testing.T) {
+			d := newAdaptersDouble(true)
+			var abandoned atomic.Bool
+			a := abandonable(d, &abandoned)
+			type outcome struct {
+				zero bool
+				err  error
+			}
+			done := make(chan outcome, 1)
+			go func() { zero, err := c.run(a); done <- outcome{zero, err} }()
+			if got := <-d.entered; got != c.name {
+				t.Fatalf("the call that reached the host is %s", got)
+			}
+			abandoned.Store(true)
+			close(d.release)
+			o := <-done
+			if !o.zero || !errors.Is(o.err, engineagent.ErrProcessEnded) {
+				t.Errorf("the call returned zero=%v err=%v, want a zero result and ErrProcessEnded", o.zero, o.err)
+			}
+			if !strings.Contains(o.err.Error(), errDouble.Error()) {
+				t.Errorf("the error %q does not say what the host answered", o.err)
+			}
+		})
+	}
+}
+
+// What the host counts is not a call that can be confirmed: the quiet check reads
+// it for the process that runs, and it is the same before and after.
+func TestTheCountsOfTheAdapterHostPassThroughWhetherOrNotTheProcessWasAbandoned(t *testing.T) {
+	d := newAdaptersDouble(false)
+	var abandoned atomic.Bool
+	a := abandonable(d, &abandoned)
+	want := adapterhost.ConnCounts{Connected: true, Handled: 3, Buffered: 1}
+	if got := a.Counts("chat"); got.Handled != want.Handled || got.Buffered != want.Buffered || !got.Connected {
+		t.Errorf("Counts = %+v, want %+v", got, want)
+	}
+	abandoned.Store(true)
+	if got := a.Counts("chat"); got.Handled != want.Handled || got.Buffered != want.Buffered || !got.Connected {
+		t.Errorf("Counts after the process was abandoned = %+v, want %+v", got, want)
 	}
 }
