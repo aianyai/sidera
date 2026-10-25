@@ -166,6 +166,67 @@ func TestShutdownEndsEveryWait(t *testing.T) {
 	}
 }
 
+// The command that ends the waits is posted without waiting, so it is dropped when
+// the inbox is full. The waiting side watches the shutdown itself: a shutdown with a
+// full inbox and a loop that is far behind still ends the wait, at once and with an
+// empty page.
+func TestShutdownEndsEveryWaitEvenWhenTheInboxIsFull(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10, withParams(engine.Params{InboxLen: 2}))
+	e := r.start()
+	ep := mustEndpoint(t, 1)
+	w, err := engine.WaitFor(context.Background(), e, ep, t0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := engine.StallLoop(t, e)
+	pending := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { _, err := e.Endpoints(context.Background()); pending <- err }()
+		engine.WaitInbox(t, e, i+1)
+	}
+
+	ended := make(chan string, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		end, page, err := engine.AwaitWait(ctx, e, w)
+		if err != nil || len(page) != 0 {
+			end = "error: " + err.Error()
+		}
+		ended <- end
+	}()
+	e.BeginShutdown()
+	if got := <-ended; got != "shutdown" {
+		t.Errorf("the wait ended as %q while the loop was stalled with a full inbox, want shutdown", got)
+	}
+	release()
+	for i := 0; i < 2; i++ {
+		<-pending // answered, with a refusal: the engine is stopping
+	}
+}
+
+// A page that is ready when the shutdown is seen is still handed out: the shutdown
+// ends a wait that would otherwise go on, it does not take back what was woken.
+func TestAPageThatIsReadyWinsOverTheShutdown(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	ep := mustEndpoint(t, 1)
+	w, err := engine.WaitFor(context.Background(), e, ep, t0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if woke, err := engine.Wake(context.Background(), e, ep, []byte("page")); err != nil || !woke {
+		t.Fatalf("Wake = %v, %v", woke, err)
+	}
+	e.BeginShutdown()
+	end, page, err := engine.AwaitWait(context.Background(), e, w)
+	if err != nil || end != "woken" || string(page) != "page" {
+		t.Errorf("AwaitWait = %q, %q, %v; want the page that was woken", end, page, err)
+	}
+}
+
 // peek is Outcome that puts back what it took, for a poll.
 func peek(w *engine.TestWait) (string, []byte, bool) {
 	end, page, ok := w.Outcome()

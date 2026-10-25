@@ -39,6 +39,10 @@ commands and add their methods to this list.
 
 ## Rules
 
+- **Workers start only in the loop.** `spawn` is called from a command or a due
+  entry, never from another goroutine: `finish` waits for the workers on the loop's
+  goroutine, and a worker started concurrently with that wait could be missed. It
+  panics when the loop is not running a command.
 - **One loop, typed commands, the order of the inbox.** Every command is a type
   with a `run`; commands run in the order they entered the inbox. Commands a
   command queues for itself (the chunks of a long batch) run after the commands
@@ -87,7 +91,8 @@ commands and add their methods to this list.
   hands the page to the waiter itself. The deadline is an entry of the schedule on
   the injected clock. An endpoint has at most one waiter: a newer one ends the
   older with an empty page. Shutdown ends every wait with an empty page, before
-  the interfaces stop. The registry is in place; the command that registers a
+  the interfaces stop; the waiting side watches the shutdown itself, because the
+  command that ends the waits is dropped when the inbox is full. The registry is in place; the command that registers a
   waiter and the page that wakes it come with the pull of messages.
 - **The capacity check is in one place.** `CheckCapacity` judges the clock, then
   the queue, then the disk, and a bound that is not set refuses. The engine feeds

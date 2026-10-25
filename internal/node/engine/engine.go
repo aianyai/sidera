@@ -92,6 +92,7 @@ type Engine struct {
 	ran       uint64                         // how many commands the loop has taken from the inbox
 	fatal     error                          // set by classify; the loop stops after the command that set it
 	probed    bool                           // the command that just ran was a probe of Quiesce
+	inLoop    atomic.Bool                    // the loop is running a command or the due entries of the schedule: what spawn asserts
 }
 
 // continuation is a command the loop queued for itself: the next chunk of a long
@@ -254,7 +255,7 @@ func (e *Engine) BeginShutdown() {
 		if e.started.Load() {
 			select {
 			case e.inbox <- cmdEndWaits{}:
-			default: // the loop is far behind; finish ends the waits when it stops
+			default: // the inbox is full: the waiting side watches the shutdown itself
 			}
 		}
 	})
@@ -333,7 +334,18 @@ func (e *Engine) poke() {
 // which ends when the engine does, and the engine counts it as work in flight
 // until it returns. It returns false, without starting it, once the engine has
 // ended.
+//
+// It runs only on the loop's goroutine, inside a command or a due entry of the
+// schedule. finish waits for the goroutines with WaitGroup.Wait on the same
+// goroutine, and a WaitGroup may not be added to concurrently with a Wait that
+// starts from a zero count; the loop is also what makes "ended" and "starting a
+// worker" exclude each other. It panics when it is called while the loop is not
+// running a command, which is what a call from another goroutine is in all but the
+// rare moment the loop is busy; the flag is a guard against misuse, not a proof.
 func (e *Engine) spawn(fn func(ctx context.Context)) bool {
+	if !e.inLoop.Load() {
+		panic("engine: spawn is called only from the loop")
+	}
 	select {
 	case <-e.done:
 		return false
@@ -615,6 +627,8 @@ func (e *Engine) clearRollback(now time.Time) {
 // step runs one command: one reading of the clock for all of it, then the phase
 // gate, then the command.
 func (e *Engine) step(c command) {
+	e.inLoop.Store(true)
+	defer e.inLoop.Store(false)
 	now := e.d.Clock.Now()
 	e.observe(now)
 	if e.fatal != nil { // making the pause durable failed for good
@@ -644,6 +658,8 @@ func (e *Engine) step(c command) {
 // fireDue runs every entry of the schedule that is due, as one command: one
 // reading of the clock, the entries in the order of their due times.
 func (e *Engine) fireDue() {
+	e.inLoop.Store(true)
+	defer e.inLoop.Store(false)
 	now := e.d.Clock.Now()
 	e.observe(now)
 	if e.fatal != nil {

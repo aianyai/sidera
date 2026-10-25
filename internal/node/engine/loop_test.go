@@ -419,6 +419,21 @@ func TestAContinuationIsNotStarvedByAnInboxThatIsNeverEmpty(t *testing.T) {
 	}
 }
 
+// The engine counts its workers with a WaitGroup that Stop waits for on the loop's
+// goroutine, so a worker may be started only from there; a call from anywhere else
+// would race the wait and is refused loudly.
+func TestSpawnOutsideTheLoopPanics(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	defer func() {
+		if recover() == nil {
+			t.Error("spawn from a goroutine that is not the loop's did not panic")
+		}
+	}()
+	engine.SpawnOffTheLoop(e)
+}
+
 func failMatch(tx string, step fsx.Step) matchT { return matchT{Tx: tx, Step: step} }
 
 var _ store.EndpointStatus

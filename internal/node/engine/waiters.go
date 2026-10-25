@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
@@ -125,8 +126,33 @@ func (e *Engine) endWaits() {
 	}
 }
 
-// cmdEndWaits ends every wait, as the first thing that BeginShutdown makes the
-// loop do.
+// awaitWaiter is what the caller of a recv that waits does with its waiter: it
+// waits for the outcome the loop sends, and it watches the shutdown itself. The
+// loop ends every wait when the node begins to stop, but it learns of it through
+// a command that may find the inbox full and be dropped; the waiting side does not
+// depend on that, so a shutdown ends a wait whatever the inbox holds. A page that
+// is ready when the shutdown is seen is still handed out. A context that ends
+// first gives its error and leaves the waiter to unwait.
+func (e *Engine) awaitWaiter(ctx context.Context, w *waiter) (waitOutcome, error) {
+	select {
+	case o := <-w.out:
+		return o, nil
+	case <-e.shutdown:
+		select {
+		case o := <-w.out:
+			return o, nil
+		default:
+			return waitOutcome{End: waitShutdown}, nil
+		}
+	case <-ctx.Done():
+		return waitOutcome{}, ctx.Err()
+	}
+}
+
+// cmdEndWaits ends every wait. BeginShutdown posts it when the inbox has room, so
+// that the waits end before the loop has done anything else; when it has none,
+// awaitWaiter's own watch of the shutdown ends them, and finish ends what is left
+// in the registry.
 type cmdEndWaits struct{}
 
 func (cmdEndWaits) gate() gate                 { return gateAlways }

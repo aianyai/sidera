@@ -78,8 +78,17 @@ func AdmitNewWork(ctx context.Context, e *Engine, recipients int) error {
 }
 
 // SpawnWorker starts a goroutine the engine owns and counts, as the workers of
-// the workers added later are.
-func SpawnWorker(e *Engine, _ string, fn func(ctx context.Context)) { e.spawn(fn) }
+// the workers added later are: from a command of the loop, the only place the
+// engine starts one.
+func SpawnWorker(e *Engine, _ string, fn func(ctx context.Context)) {
+	if err := InLoop(context.Background(), e, func(l LoopSide) { l.e.spawn(fn) }); err != nil {
+		panic("SpawnWorker: " + err.Error())
+	}
+}
+
+// SpawnOffTheLoop calls spawn from the goroutine of the caller, which the engine
+// must refuse.
+func SpawnOffTheLoop(e *Engine) { e.spawn(func(context.Context) {}) }
 
 type cmdClearRollback struct{ call[struct{}] }
 
@@ -177,6 +186,16 @@ func WaitFor(ctx context.Context, e *Engine, endpoint ident.EndpointID, deadline
 		return nil, err
 	}
 	return &TestWait{w: c.w}, nil
+}
+
+// AwaitWait waits the way the caller of a recv does, and says how the wait
+// ended.
+func AwaitWait(ctx context.Context, e *Engine, t *TestWait) (end string, page []byte, err error) {
+	o, err := e.awaitWaiter(ctx, t.w)
+	if err != nil {
+		return "", nil, err
+	}
+	return o.End.String(), o.Page, nil
 }
 
 // Outcome says how the wait ended, if it has: the name of the end and the page.
