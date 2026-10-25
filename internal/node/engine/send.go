@@ -1,0 +1,274 @@
+package engine
+
+import (
+	"context"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"time"
+
+	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
+	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/store"
+)
+
+// DefaultContentType is the type of a body whose sender names none, which is what
+// the front ends of the Agent interface say a message without one is.
+const DefaultContentType = "text/plain"
+
+// SendRequest is a message a local endpoint asks the node to send.
+type SendRequest struct {
+	// To are the recipients; at least one and at most envelope.MaxRecipients.
+	To []ident.Address
+	// Body is the content, not empty and at most envelope.MaxBody bytes.
+	Body []byte
+	// ContentType says what the body is; it is not empty.
+	ContentType string
+	// Thread is the sender's own grouping; empty for none.
+	Thread string
+	// DiscloseRecipients lets each recipient see the others. With one recipient it
+	// shows nothing and is ignored.
+	DiscloseRecipients bool
+	// AcceptBefore is how long the message may wait to be delivered; zero is
+	// delivery.DefaultAcceptBefore.
+	AcceptBefore time.Duration
+	// IdempotencyKey, when set, makes a repeat of the same request return the
+	// message the first one made instead of making another.
+	IdempotencyKey string
+}
+
+// ReplyRequest answers a message the caller's endpoint received. The recipient is
+// the one the node's record of that message names, never one the caller gives.
+type ReplyRequest struct {
+	Message        delivery.MessageID
+	Body           []byte
+	ContentType    string
+	Thread         string
+	IdempotencyKey string
+}
+
+// SendResult names the message that was accepted. It is returned once the node
+// has the message on disk; what the recipients' nodes make of it is learned from
+// the state of its deliveries and from the feedback.
+type SendResult struct {
+	Message delivery.MessageID
+	To      []ident.Address
+	// Replayed is true when the idempotency key found the message it names.
+	Replayed bool
+}
+
+// outgoing is a message to accept, as the caller's request and the node's own
+// record of what it answers have made it.
+type outgoing struct {
+	to       []ident.Address
+	replyTo  delivery.MessageID
+	body     []byte
+	ctype    string
+	thread   string
+	accept   time.Duration
+	idemKey  string
+	disclose bool
+}
+
+type cmdSend struct {
+	call[SendResult]
+	caller Caller
+	req    SendRequest
+	// reply is the request when the command answers a message.
+	reply   ReplyRequest
+	isReply bool
+}
+
+func (c *cmdSend) gate() gate { return gateWrite }
+func (c *cmdSend) run(e *Engine, now time.Time) {
+	var res SendResult
+	var err error
+	if c.isReply {
+		res, err = e.reply(now, c.caller, c.reply)
+	} else {
+		res, err = e.send(now, c.caller, c.req)
+	}
+	c.done(res, e.classify(err))
+}
+
+// Send accepts a message from the endpoint the caller is and returns when it is on
+// disk: the body, then the record of the message with one delivery for each
+// recipient. Sending it and learning what became of it go on after this returns.
+// A request the node cannot take in now (the queue is full, the disk has no room,
+// the wall clock cannot be trusted) is refused, and nothing is recorded.
+func (e *Engine) Send(ctx context.Context, c Caller, r SendRequest) (SendResult, error) {
+	cmd := &cmdSend{call: newCall[SendResult](), caller: c, req: r}
+	return roundTrip(ctx, e, submitExternal, cmd, cmd.call)
+}
+
+// Reply accepts an answer to a message the caller's endpoint received.
+func (e *Engine) Reply(ctx context.Context, c Caller, r ReplyRequest) (SendResult, error) {
+	cmd := &cmdSend{call: newCall[SendResult](), caller: c, reply: r, isReply: true}
+	return roundTrip(ctx, e, submitExternal, cmd, cmd.call)
+}
+
+func (e *Engine) send(now time.Time, c Caller, r SendRequest) (SendResult, error) {
+	st, err := e.view.resolve(c)
+	if err != nil {
+		return SendResult{}, err
+	}
+	return e.accept(now, st, outgoing{
+		to: r.To, body: r.Body, ctype: r.ContentType, thread: r.Thread, accept: r.AcceptBefore,
+		idemKey: r.IdempotencyKey, disclose: r.DiscloseRecipients,
+	})
+}
+
+func (e *Engine) reply(now time.Time, c Caller, r ReplyRequest) (SendResult, error) {
+	st, err := e.view.resolve(c)
+	if err != nil {
+		return SendResult{}, err
+	}
+	keys := e.view.received[msgKey{st.rec.ID, r.Message}]
+	if len(keys) != 1 {
+		// Nothing was received under that id, or two senders used it: it is not one
+		// message that can be answered.
+		return SendResult{}, refuse(ReasonMessageUnknown)
+	}
+	if keys[0].Sender.IsSystem() {
+		return SendResult{}, invalidArgument("message_id", errors.New("a notice of the node itself is not answered"))
+	}
+	return e.accept(now, st, outgoing{
+		to: []ident.Address{{Node: keys[0].SenderNode, Endpoint: keys[0].Sender}}, replyTo: r.Message,
+		body: r.Body, ctype: r.ContentType, thread: r.Thread, idemKey: r.IdempotencyKey,
+	})
+}
+
+// accept is the intake of a message: the one place new work from a local endpoint
+// enters the store. The request is checked, a repeat of one the idempotency key
+// knows is answered with the first, the capacity of the node is judged, and then
+// the body and the record are written in one transaction. Memory follows the disk,
+// and only then is the message given to the outbound worker.
+func (e *Engine) accept(now time.Time, st *endpointState, m outgoing) (SendResult, error) {
+	if e.d.Keys == nil {
+		return SendResult{}, errNoKeys
+	}
+	if e.tr == nil {
+		return SendResult{}, errNoTransport
+	}
+	now = now.UTC().Truncate(time.Second) // what an envelope can say
+	if err := checkOutgoing(&m); err != nil {
+		return SendResult{}, err
+	}
+	sender := st.rec.ID
+	if prior, ok := e.view.idem[idemKey{sender, m.idemKey}]; ok && now.Before(e.view.out[prior].Idempotency.RetainUntil) {
+		return e.repeat(e.view.out[prior], m)
+	}
+	if err := e.admitNewWork(len(m.to)); err != nil {
+		return SendResult{}, err
+	}
+	id, err := e.newMessageID()
+	if err != nil {
+		return SendResult{}, err
+	}
+	acceptBefore := now.Add(m.accept)
+	env := envelope.Envelope{
+		ID: id, To: m.to, MultiRecipient: len(m.to) > 1, DiscloseRecipients: m.disclose && len(m.to) > 1,
+		Kind: envelope.KindMessage, ReplyTo: m.replyTo, Thread: m.thread, Seq: map[ident.EndpointID]uint64{},
+		SentAt: now, AcceptBefore: acceptBefore, ReportBy: delivery.ReportBy(acceptBefore), ContentType: m.ctype, Body: m.body,
+	}
+	for _, to := range m.to {
+		env.Seq[to.Endpoint] = e.view.seq.Next(sender, to)
+	}
+	if _, err := env.Encode(envelope.DefaultLimits()); err != nil {
+		return SendResult{}, invalidArgument("message", err)
+	}
+	o := e.sourceRecord(now, sender, env, m)
+	if err := e.d.Store.Intake(m.body, o); err != nil {
+		return SendResult{}, err
+	}
+	for _, to := range m.to {
+		e.view.seq.Note(sender, to, env.Seq[to.Endpoint])
+	}
+	e.view.setOut(o)
+	e.dispatchOutbound(o.Name(), now)
+	return SendResult{Message: id, To: m.to}, nil
+}
+
+// checkOutgoing refuses what no node would take, before anything is judged against
+// the node's state. The disclosure of a list of recipients is refused for several:
+// the record of a message does not keep the flag, and a send again that
+// disclosed differently would be another request to the target.
+func checkOutgoing(m *outgoing) error {
+	switch {
+	case len(m.to) < 1 || len(m.to) > envelope.MaxRecipients:
+		return invalidArgument("to", fmt.Errorf("%d recipients, want 1 to %d", len(m.to), envelope.MaxRecipients))
+	case len(m.body) == 0:
+		return invalidArgument("body", errors.New("a message has a body"))
+	case len(m.body) > envelope.MaxBody:
+		return &Refusal{Reason: ReasonTooLarge, Field: "body"}
+	case m.ctype == "":
+		return invalidArgument("content_type", errors.New("a body has a content type"))
+	case m.accept < 0 || m.accept > delivery.MaxAcceptBefore:
+		return invalidArgument("accept_before", fmt.Errorf("%v, want up to %v", m.accept, delivery.MaxAcceptBefore))
+	case m.disclose && len(m.to) > 1:
+		return invalidArgument("disclose_recipients", errors.New("a list of several recipients cannot be disclosed yet"))
+	}
+	if m.accept == 0 {
+		m.accept = delivery.DefaultAcceptBefore
+	}
+	for i, to := range m.to {
+		if to.IsZero() || to.Endpoint.IsSystem() {
+			return invalidArgument("to", fmt.Errorf("recipient %d is not an address a message can be sent to", i))
+		}
+	}
+	return nil
+}
+
+// repeat answers a request whose idempotency key the node knows: the same content
+// is the same message, other content is a conflict. Content is compared as the
+// target compares it, by the request digest of the envelope made with the
+// deadlines the first request had, since the deadline a repeat gets is its own
+// and says nothing about the content.
+func (e *Engine) repeat(prior store.OutRecord, m outgoing) (SendResult, error) {
+	env := envelope.Envelope{
+		ID: prior.Outbound.Message, To: m.to, MultiRecipient: len(m.to) > 1, Kind: envelope.KindMessage,
+		ReplyTo: m.replyTo, Thread: m.thread, AcceptBefore: prior.Outbound.AcceptBefore, ReportBy: prior.Envelope.ReportBy,
+		ContentType: m.ctype, Body: m.body,
+	}
+	if env.Digest() != prior.BodyDigest {
+		return SendResult{}, refuse(ReasonIdempotencyConflict)
+	}
+	return SendResult{Message: prior.Outbound.Message, To: prior.Key.Recipients, Replayed: true}, nil
+}
+
+// sourceRecord is the node's record of a message it accepted: the envelope's
+// fields it needs to send it again, one delivery for each recipient, the body
+// reference and the digest of the request.
+func (e *Engine) sourceRecord(now time.Time, sender ident.EndpointID, env envelope.Envelope, m outgoing) store.OutRecord {
+	ref := store.BodyRefOf(env.Body)
+	o := store.OutRecord{
+		Key: store.OutKey{Sender: sender, Message: env.ID, Recipients: env.To},
+		Outbound: envelope.Outbound{
+			Message: env.ID, From: sender, Kind: envelope.KindMessage, BodyNonEmpty: true, AcceptBefore: env.AcceptBefore,
+		},
+		Envelope: store.OutEnvelope{
+			To: env.To, ReplyTo: env.ReplyTo, Thread: env.Thread, Seq: env.Seq, SentAt: env.SentAt,
+			ReportBy: env.ReportBy, ContentType: env.ContentType,
+		},
+		Body: &ref, BodyDigest: env.Digest(),
+	}
+	for _, to := range env.To {
+		o.Outbound.Recipients = append(o.Outbound.Recipients, envelope.Tracked{Address: to, Delivery: delivery.NewSourceRecord(env.AcceptBefore)})
+	}
+	if m.idemKey != "" {
+		o.Idempotency = &store.Idempotency{Key: m.idemKey, RetainUntil: delivery.IdempotencyKeyRetainUntil(env.ReportBy)}
+	}
+	return o
+}
+
+// newMessageID draws a message identifier: sixteen random bytes as lower case
+// hex, from the engine's own source.
+func (e *Engine) newMessageID() (delivery.MessageID, error) {
+	var b [16]byte
+	if _, err := io.ReadFull(e.randomReader(), b[:]); err != nil {
+		return "", err
+	}
+	return delivery.MessageID(hex.EncodeToString(b[:])), nil
+}

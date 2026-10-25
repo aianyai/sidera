@@ -2,10 +2,12 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"path/filepath"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -13,13 +15,18 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/authz"
+	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
@@ -27,7 +34,9 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakeruntime"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
+	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -49,11 +58,35 @@ type Options struct {
 	// fixture runs, from the goroutine that is about to run it. A test uses it to
 	// stop the engine in the middle of a command.
 	Observer txn.Observer
+	// FS says which file system the node runs on: the one in memory, which can be
+	// cloned for a crash, or a directory on the real one, for what only a real file
+	// system answers (a full disk, a failed fsync) and whose faults go through the
+	// same wrapper. A node on the real file system cannot Crash or be cloned.
+	FS FSMode
+	// Policy replaces the node's rules (policy.json) before the first start.
+	Policy *config.PolicyFile
+	// NodeSettings is a patch of the node's settings, the JSON object `node set`
+	// takes, applied through the configuration's own change before the first start.
+	NodeSettings string
+	// DiskFree stands in for the query of the free space of the volume; nil asks
+	// the file system. The engine's check of the disk reserve reads it.
+	DiskFree func() uint64
 	// RollbackPaused starts the engine as if the persisted state said the wall
 	// clock was set back and not cleared. It applies to every start, restarts
 	// included, because a process has no memory of the last one.
 	RollbackPaused bool
 }
+
+// FSMode is the file system a node runs on.
+type FSMode uint8
+
+// The file systems a node can run on.
+const (
+	// MemFS is the in-memory file system with its crash model (the default).
+	MemFS FSMode = iota
+	// RealFS is a directory of the machine's own file system.
+	RealFS
+)
 
 // H is a node in one process of the test: the engine and what it runs on, the
 // shared clock, the ledger and the agents of the endpoints registered through it.
@@ -71,6 +104,9 @@ type H struct {
 	fixture *ledger.Writer
 	tab     *txn.Table
 	admit   adapterreg.Admission
+	knobs   *transport.Knobs
+	// real is the file system of a node that runs on the real one, nil otherwise.
+	real fsx.FS
 
 	// dying is the processes that Crash left behind, still being stopped.
 	dying sync.WaitGroup
@@ -94,6 +130,7 @@ type process struct {
 	cfg     *config.Config
 	log     *LogCapture
 	eng     *engine.Engine
+	lb      *transport.Loopback
 
 	// abandoned is set when a crash cuts the process off: a call that was made to
 	// it and returns afterwards has no answer anyone could have read.
@@ -132,15 +169,101 @@ func New(t testing.TB, o Options) *H {
 		admit: AdapterAdmission(t, o.MaxDirect),
 		names: map[string]endpoint{}, agent: map[string]fakeagent.Agent{}, steps: map[string]bool{},
 	}
+	h.knobs = transport.NewKnobs(h.clk)
 	h.ctx, h.cancel = context.WithCancel(context.Background())
 	var err error
 	if h.fixture, err = h.led.Open("fixture", 0, h.clk.Now); err != nil {
 		t.Fatalf("harness: ledger: %v", err)
 	}
+	h.knobs.Observe(h.knobHit)
+	h.addQuiet("loopback", h.loopbackQuiet)
 	t.Cleanup(h.close)
-	h.disk = seededDisk(t, o.Start)
-	h.proc = h.boot(h.disk, nil)
+	var base fsx.FS
+	if o.FS == RealFS {
+		h.real = realDisk(t, o)
+		base = h.real
+	} else {
+		h.disk = seededDisk(t, o.Start)
+		base = h.disk
+	}
+	h.prepare(base)
+	h.proc = h.boot(base, nil)
 	return h
+}
+
+// realDisk makes an initialised node in a directory of the real file system. It
+// is made for the test, since nothing of it is shared the way the in-memory
+// snapshot is.
+func realDisk(t testing.TB, o Options) fsx.FS {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "home")
+	if err := fsx.MakeRoot(root); err != nil {
+		t.Fatalf("harness: the data directory: %v", err)
+	}
+	base, err := fsx.OpenOS(root, RandReader(o.Seed+100))
+	if err != nil {
+		t.Fatalf("harness: OpenOS: %v", err)
+	}
+	MakeLayout(t, base)
+	m := MountOn(t, ProgramTable(t), base, nil, nil)
+	SeedNode(t, m.Writer, o.Start)
+	return base
+}
+
+// prepare applies the node-level options to the disk before the first start:
+// the rules the test replaced and the patch of the settings, the latter through
+// the configuration's own change, so that what the node reads is what `node set`
+// would have left.
+func (h *H) prepare(base fsx.FS) {
+	h.t.Helper()
+	if h.opts.Policy != nil {
+		data, err := h.opts.Policy.Encode()
+		if err != nil {
+			h.t.Fatalf("harness: the policy: %v", err)
+		}
+		if err := fsx.Replace(base, setupTag, config.PolicyPath, data, fsx.ModePrivate); err != nil {
+			h.t.Fatalf("harness: writing the policy: %v", err)
+		}
+	}
+	if h.opts.NodeSettings != "" {
+		m := MountOn(h.t, h.tab, base, nil, nil)
+		cfg, err := config.Load(m.Writer)
+		if err != nil {
+			h.t.Fatalf("harness: Load: %v", err)
+		}
+		var op admin.OperationID
+		op[0] = 3
+		req := config.Request{Key: admin.KeyFor(admin.LocalOwner(), op), Expected: cfg.Node().Version}
+		if _, err := cfg.SetNodeSettings(req, []byte(h.opts.NodeSettings), func(config.Node) (json.RawMessage, error) {
+			return json.RawMessage(`{"set":true}`), nil
+		}); err != nil {
+			h.t.Fatalf("harness: the node settings %s: %v", h.opts.NodeSettings, err)
+		}
+	}
+}
+
+// knobHit writes a hit of a knob of the loopback to the ledger, from the goroutine
+// of the call that was hit.
+func (h *H) knobHit(hit transport.Hit) {
+	detail := fmt.Sprintf("call=%s node=%s", hit.Call, hit.Node)
+	if hit.Message != "" {
+		detail += " message=" + string(hit.Message)
+	}
+	if err := h.fixture.Append(ledger.KindKnobHit, ledger.Attrs{Knob: hit.Knob.String(), Detail: detail}); err != nil {
+		h.t.Errorf("harness: ledger: %v", err)
+	}
+}
+
+// loopbackQuiet is the loopback's condition of quiet. It always holds: a call
+// that waits out a delay is not work, and one whose delay is due is a worker of
+// the engine, which the engine's own condition counts. Its count is how many
+// hits the knobs have had, so that a hit between two looks is not missed.
+func (h *H) loopbackQuiet() (bool, uint64) {
+	var n int
+	for k := transport.KnobDropReceipt; k <= transport.KnobMutate; k++ {
+		n += h.knobs.Hits(k)
+	}
+	return true, uint64(n)
 }
 
 // boot runs a process over the disk through the startup steps the engine has: the
@@ -151,23 +274,38 @@ func New(t testing.TB, o Options) *H {
 // as a daemon that was just launched has no memory of the last run: a restart does not
 // carry the high-water mark over, and a node that Options made start paused starts
 // paused every time.
-func (h *H) boot(disk *fsxtest.Mem, arm func(*fsxtest.Faulty)) *process {
+func (h *H) boot(base fsx.FS, arm func(*fsxtest.Faulty)) *process {
 	h.t.Helper()
-	m := MountWithFaults(h.t, h.tab, disk, h.opts.Observer, arm)
+	m := MountOn(h.t, h.tab, base, h.opts.Observer, arm)
+	if mem, ok := base.(*fsxtest.Mem); ok {
+		m.Mem = mem
+	}
 	cfg, err := config.Load(m.Writer)
 	if err != nil {
 		h.t.Fatalf("harness: Load: %v", err)
 	}
+	k, err := keys.Load(m.Writer)
+	if err != nil {
+		h.t.Fatalf("harness: keys.Load: %v", err)
+	}
 	h.gen++
 	p := &process{mounted: m, cfg: cfg, log: &LogCapture{}}
+	var st engine.Store = m.Store
+	if h.opts.DiskFree != nil {
+		st = freeSpace{Store: m.Store, free: h.opts.DiskFree}
+	}
 	deps := engine.Deps{
 		Node: NodeID(), Clock: h.clk, HighWater: clock.NewHighWater(time.Time{}), RollbackPaused: h.opts.RollbackPaused,
-		Writer: m.Writer, Store: m.Store, Config: cfg, Rand: RandReader(h.opts.Seed + uint64(h.gen)),
+		Writer: m.Writer, Store: st, Config: cfg, Keys: k, Rand: RandReader(h.opts.Seed + uint64(h.gen)),
 		Log: slog.New(p.log),
 	}
 	p.eng, _, err = engine.Open(h.ctx, deps, h.opts.Params)
 	if err != nil {
 		h.t.Fatalf("harness: engine.Open: %v", err)
+	}
+	p.lb = transport.NewLoopback(NodeID(), p.eng, h.knobs)
+	if err := p.eng.SetTransport(p.lb); err != nil {
+		h.t.Fatalf("harness: SetTransport: %v", err)
 	}
 	p.eng.Start()
 	if err := p.eng.AdapterAdmitted(h.ctx, Instance, h.admit); err != nil {
@@ -179,6 +317,15 @@ func (h *H) boot(disk *fsxtest.Mem, arm func(*fsxtest.Faulty)) *process {
 	p.eng.Serve()
 	return p
 }
+
+// freeSpace is the store with the free space the test says: the stand-in for the
+// query of the volume.
+type freeSpace struct {
+	engine.Store
+	free func() uint64
+}
+
+func (f freeSpace) Available() (uint64, error) { return f.free(), nil }
 
 // stopLimit is how long a process is given to stop, on the real clock.
 const stopLimit = 20 * time.Second
@@ -238,6 +385,9 @@ func (h *H) Faults() *fsxtest.Faulty { return h.running().mounted.Faulty }
 func (h *H) Disk() *fsxtest.Mem {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.disk == nil {
+		h.t.Fatal("harness: the node runs on the real file system, which has no in-memory disk")
+	}
 	return h.disk
 }
 
@@ -327,6 +477,14 @@ func (c currentEngine) Declare(ctx context.Context, caller engine.Caller, p engi
 	return onProcess(c.h, func(e *engine.Engine) (authz.Declaration, error) { return e.Declare(ctx, caller, p) })
 }
 
+func (c currentEngine) Send(ctx context.Context, caller engine.Caller, r engine.SendRequest) (engine.SendResult, error) {
+	return onProcess(c.h, func(e *engine.Engine) (engine.SendResult, error) { return e.Send(ctx, caller, r) })
+}
+
+func (c currentEngine) Reply(ctx context.Context, caller engine.Caller, r engine.ReplyRequest) (engine.SendResult, error) {
+	return onProcess(c.h, func(e *engine.Engine) (engine.SendResult, error) { return e.Reply(ctx, caller, r) })
+}
+
 // onProcess is a call made to the process that is running. When that process is
 // abandoned by a crash before the call returns, nobody could have read what it
 // answers, so the call's result is that its outcome is unknown, whatever the old
@@ -344,6 +502,60 @@ func onProcess[T any](h *H, call func(*engine.Engine) (T, error)) (T, error) {
 		return zero, fmt.Errorf("%w (the answer was %v)", engineagent.ErrProcessEnded, err)
 	}
 	return v, err
+}
+
+// Loopback is the loopback of the running process, for a test that makes a
+// request no agent can: an envelope another node's endpoint would send.
+func (h *H) Loopback() *transport.Loopback { return h.running().lb }
+
+// The knobs of the loopback. They are the faults of the transport, are off until a
+// test sets one, and each hit is written to the ledger as a knob.hit entry. A knob
+// keyed by a message is armed before the message first goes on the wire: hold the
+// sender's calls with Unreachable first, learn the message's identifier, arm, then
+// let the calls go.
+
+// DropReceipt makes the next n sends the target processed come back as a timeout.
+func (h *H) DropReceipt(n int) { h.knobs.DropReceipt(n) }
+
+// Unreachable makes every call to the node itself fail as unreachable, or stops
+// doing so.
+func (h *H) Unreachable(on bool) { h.knobs.Unreachable(NodeID(), on) }
+
+// HoldReports keeps the reports of a message from its sender: its receipt comes
+// back empty and a pull for it is answered empty.
+func (h *H) HoldReports(message string) { h.knobs.HoldReports(delivery.MessageID(message)) }
+
+// Release lets the reports of a held message through again.
+func (h *H) Release(message string) { h.knobs.Release(delivery.MessageID(message)) }
+
+// Delay makes every call that starts from now on wait d on the test clock first.
+func (h *H) Delay(d time.Duration) { h.knobs.Delay(d) }
+
+// Mutate makes the target take the next send of the message once more, with
+// another body, as if another request had used its identifier.
+func (h *H) Mutate(message string) { h.knobs.Mutate(delivery.MessageID(message)) }
+
+// Mutated is what the target answered to the replay Mutate made, and whether one
+// was made.
+func (h *H) Mutated(message string) (transport.Replay, bool) {
+	return h.knobs.Mutated(delivery.MessageID(message))
+}
+
+// VerifyReport verifies a status report the node signed about a message the node
+// itself sent, as a sender verifies what a receipt carries, with the keys on the
+// disk.
+func (h *H) VerifyReport(rec record.Record) (envelope.StatusReport, error) {
+	p := h.running()
+	k, err := keys.Load(p.mounted.Writer)
+	if err != nil {
+		return envelope.StatusReport{}, err
+	}
+	accepted := p.cfg.RevocationSet().NetworkKey(k.Certificate(), k.SerialSeen().Serial)
+	sr, err := envelope.VerifyStatusReport(rec, NodeID(), NodeID(), accepted, h.clk.Now())
+	if err != nil {
+		return envelope.StatusReport{}, err
+	}
+	return sr.Report(), nil
 }
 
 // Advance moves the clock forward by d. The engine reacts asynchronously: call
@@ -465,6 +677,9 @@ func (h *H) Crash(mode CrashMode) {
 // that a seed is all a test has to remember.
 func (h *H) Kill(mode CrashMode) {
 	h.t.Helper()
+	if h.real != nil {
+		h.t.Fatal("harness: a node on the real file system cannot be crashed: its disk cannot be cloned")
+	}
 	old := h.running()
 	old.abandoned.Store(true)
 	old.mounted.cutOff() // the disk below is now what the crash leaves
@@ -524,7 +739,11 @@ func (h *H) StartWith(arm func(*fsxtest.Faulty)) {
 	if h.current() != nil {
 		h.t.Fatal("harness: the node is already running")
 	}
-	p := h.boot(h.Disk(), arm)
+	var base fsx.FS = h.real
+	if base == nil {
+		base = h.Disk()
+	}
+	p := h.boot(base, arm)
 	h.mu.Lock()
 	h.proc = p
 	h.mu.Unlock()

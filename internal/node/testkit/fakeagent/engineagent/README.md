@@ -21,8 +21,9 @@ over).
 
 ## Rules
 
-- **All eleven methods exist.** `Declare` calls the engine. The others (`Me`, `Peers`,
-  `Directory`, `Probe`, `Send`, `Reply`, `Recv`, `Ack`, `Control`, `Status`) answer
+- **All eleven methods exist.** `Declare`, `Send` and `Reply` call the engine (a content type left empty is
+  `engine.DefaultContentType`, as the front ends of the interface take it). The others (`Me`, `Peers`,
+  `Directory`, `Probe`, `Recv`, `Ack`, `Control`, `Status`) answer
   `not_found/method_unknown`, which is how the agent interface answers a method the
   server does not know; the error is also `scenario.ErrNotAvailable`, so that a test
   written before the method exists cannot pass on an answer the server never gave. When the engine learns a method it replaces the line here; the

@@ -46,10 +46,40 @@ type view struct {
 	// each versioned file of config/ records.
 	results map[admin.RequestKey]storedResult
 
+	// idem finds a source record by the idempotency key its sender gave, for the
+	// records that have one; byMessage finds one by its sender and message id; the
+	// target records of a message are found by their recipient and message id;
+	// backlog is how many records occupy a slot of an endpoint's backlog.
+	idem      map[idemKey]string
+	byMessage map[msgKey]string
+	received  map[msgKey][]store.TargetKey
+	arrived   map[arrivalKey][]store.TargetKey
+	backlog   map[ident.EndpointID]int
+
 	bodyRefs   bodyCounts
 	unfinished int
 	alerts     []store.AlertRecord
 	seq        *store.SeqBook
+}
+
+// idemKey names an idempotency key: the key is the sender's own.
+type idemKey struct {
+	sender ident.EndpointID
+	key    string
+}
+
+// msgKey names a message from the point of view of one local endpoint: the one
+// that sent it, or the one it was sent to.
+type msgKey struct {
+	endpoint ident.EndpointID
+	message  delivery.MessageID
+}
+
+// arrivalKey names a message as the node it came from sent it: what a pull of its
+// reports asks for.
+type arrivalKey struct {
+	node    ident.NodeID
+	message delivery.MessageID
 }
 
 // storedResult is the part of a stored administrative result the loop reads.
@@ -93,6 +123,11 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		out:       map[string]store.OutRecord{},
 		queued:    map[ident.EndpointID]map[store.TargetKey]bool{},
 		results:   map[admin.RequestKey]storedResult{},
+		idem:      map[idemKey]string{},
+		byMessage: map[msgKey]string{},
+		received:  map[msgKey][]store.TargetKey{},
+		arrived:   map[arrivalKey][]store.TargetKey{},
+		backlog:   map[ident.EndpointID]int{},
 		bodyRefs:  bodyCounts{},
 		seq:       store.NewSeqBook(sc),
 	}
@@ -261,6 +296,17 @@ func (v *view) setIn(in store.InRecord) {
 		if inUnfinished(old) {
 			v.unfinished--
 		}
+		if old.Record.OccupiesBacklogSlot() {
+			v.backlog[in.Key.Recipient]--
+		}
+	} else {
+		k := msgKey{in.Key.Recipient, in.Key.Message}
+		v.received[k] = append(v.received[k], in.Key)
+		a := arrivalKey{in.Key.SenderNode, in.Key.Message}
+		v.arrived[a] = append(v.arrived[a], in.Key)
+	}
+	if in.Record.OccupiesBacklogSlot() {
+		v.backlog[in.Key.Recipient]++
 	}
 	v.in[in.Key] = in
 	v.bodyRefs.add(in.Body, 1)
@@ -291,6 +337,13 @@ func (v *view) setOut(o store.OutRecord) {
 	if old, ok := v.out[o.Name()]; ok {
 		v.bodyRefs.add(old.Body, -1)
 		v.unfinished -= outUnfinished(old)
+		if old.Idempotency != nil && v.idem[idemKey{old.Key.Sender, old.Idempotency.Key}] == o.Name() {
+			delete(v.idem, idemKey{old.Key.Sender, old.Idempotency.Key})
+		}
+	}
+	v.byMessage[msgKey{o.Key.Sender, o.Key.Message}] = o.Name()
+	if o.Idempotency != nil {
+		v.idem[idemKey{o.Key.Sender, o.Idempotency.Key}] = o.Name()
 	}
 	v.out[o.Name()] = o
 	v.bodyRefs.add(o.Body, 1)

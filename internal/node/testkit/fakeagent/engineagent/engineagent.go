@@ -3,10 +3,13 @@ package engineagent
 import (
 	"context"
 	"errors"
+	"time"
 
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // New returns the agent of the endpoint the caller names, calling svc. The engine
@@ -45,6 +48,60 @@ func (a *agent) Declare(ctx context.Context, in fakeagent.DeclareInput) error {
 	return MapError(err)
 }
 
+// Send sends a message as the caller's endpoint. A content type left empty is
+// engine.DefaultContentType, as the front ends of the interface take it; the
+// engine requires one.
+func (a *agent) Send(ctx context.Context, in fakeagent.SendInput) (fakeagent.SendResult, error) {
+	to, err := parseAddresses(in.To)
+	if err != nil {
+		return fakeagent.SendResult{}, err
+	}
+	ct := in.ContentType
+	if ct == "" {
+		ct = engine.DefaultContentType
+	}
+	res, err := a.svc.Send(ctx, a.caller, engine.SendRequest{
+		To: to, Body: []byte(in.Body), ContentType: ct, Thread: in.Thread, DiscloseRecipients: in.DiscloseRecipients,
+		AcceptBefore: time.Duration(in.AcceptBeforeS) * time.Second, IdempotencyKey: in.IdemKey,
+	})
+	return sendResult(res, err)
+}
+
+// Reply answers a message the caller's endpoint received.
+func (a *agent) Reply(ctx context.Context, in fakeagent.ReplyInput) (fakeagent.SendResult, error) {
+	ct := in.ContentType
+	if ct == "" {
+		ct = engine.DefaultContentType
+	}
+	res, err := a.svc.Reply(ctx, a.caller, engine.ReplyRequest{
+		Message: delivery.MessageID(in.MessageID), Body: []byte(in.Body), ContentType: ct, Thread: in.Thread, IdempotencyKey: in.IdemKey,
+	})
+	return sendResult(res, err)
+}
+
+func parseAddresses(list []string) ([]ident.Address, error) {
+	out := make([]ident.Address, 0, len(list))
+	for _, s := range list {
+		addr, err := ident.ParseAddress(s)
+		if err != nil {
+			return nil, &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: codeMalformed, Message: "to: " + err.Error()}
+		}
+		out = append(out, addr)
+	}
+	return out, nil
+}
+
+func sendResult(res engine.SendResult, err error) (fakeagent.SendResult, error) {
+	if err != nil {
+		return fakeagent.SendResult{}, MapError(err)
+	}
+	out := fakeagent.SendResult{MessageID: adapterproto.MessageID(res.Message), Replayed: res.Replayed}
+	for _, a := range res.To {
+		out.To = append(out.To, a.String())
+	}
+	return out, nil
+}
+
 // The methods below are not offered by the engine yet. Each answers as the agent
 // interface answers a method the server does not know.
 
@@ -59,12 +116,6 @@ func (a *agent) Directory(context.Context, fakeagent.DirectoryInput) (fakeagent.
 }
 func (a *agent) Probe(context.Context, fakeagent.ProbeInput) (fakeagent.ProbeResult, error) {
 	return fakeagent.ProbeResult{}, NotSupported("probe")
-}
-func (a *agent) Send(context.Context, fakeagent.SendInput) (fakeagent.SendResult, error) {
-	return fakeagent.SendResult{}, NotSupported("send")
-}
-func (a *agent) Reply(context.Context, fakeagent.ReplyInput) (fakeagent.SendResult, error) {
-	return fakeagent.SendResult{}, NotSupported("reply")
 }
 func (a *agent) Recv(context.Context, fakeagent.RecvInput) (fakeagent.RecvResult, error) {
 	return fakeagent.RecvResult{}, NotSupported("recv")
@@ -161,6 +212,14 @@ func classify(r *engine.Refusal) (fakeagent.Category, string) {
 		return fakeagent.CategoryBackpressure, r.Reason.String()
 	case engine.ReasonRecovering, engine.ReasonShuttingDown:
 		return fakeagent.CategoryUnavailable, r.Reason.String()
+	case engine.ReasonIdempotencyConflict:
+		return fakeagent.CategoryConflict, "idempotency_conflict"
+	case engine.ReasonMessageConflict:
+		return fakeagent.CategoryConflict, "message_conflict"
+	case engine.ReasonMessageUnknown:
+		return fakeagent.CategoryNotFound, "message_unknown"
+	case engine.ReasonTooLarge:
+		return fakeagent.CategoryRefused, "too_large"
 	case engine.ReasonStorageFatal:
 		// The command met a fatal storage error and the engine has stopped: whether
 		// it took effect is not known, which is what outcome_unknown says.

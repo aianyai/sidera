@@ -76,11 +76,11 @@ func TestParamsTakeTheDefaultsForWhatIsNotSet(t *testing.T) {
 	if got := (Params{}).withDefaults(); got != d {
 		t.Errorf("zero Params = %+v, want %+v", got, d)
 	}
-	set := Params{InboxLen: 3, SubmitWait: time.Second, ChunkReplaces: 2, ChunkRemoves: 5, ChunkTickRecords: 7, RetryBackoff: time.Hour}
+	set := Params{InboxLen: 3, SubmitWait: time.Second, ChunkReplaces: 2, ChunkRemoves: 5, ChunkTickRecords: 7, RetryBackoff: time.Hour, ResendBackoff: time.Minute, PullInterval: time.Hour}
 	if got := set.withDefaults(); got != set {
 		t.Errorf("Params that are set changed: %+v", got)
 	}
-	if d.InboxLen < 1 || d.ChunkReplaces < 1 || d.ChunkRemoves < 1 || d.ChunkTickRecords < 1 || d.SubmitWait <= 0 || d.RetryBackoff <= 0 {
+	if d.InboxLen < 1 || d.ChunkReplaces < 1 || d.ChunkRemoves < 1 || d.ChunkTickRecords < 1 || d.SubmitWait <= 0 || d.RetryBackoff <= 0 || d.ResendBackoff <= 0 || d.PullInterval <= 0 {
 		t.Errorf("a default is not usable: %+v", d)
 	}
 }

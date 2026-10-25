@@ -8,8 +8,12 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
+	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/internal/revocation"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -23,6 +27,12 @@ import (
 type Store interface {
 	Scan() (*store.Scan, error)
 	Available() (uint64, error)
+	ReadBody(ref store.BodyRef) ([]byte, error)
+
+	Intake(body []byte, out store.OutRecord) error
+	Deliver(body []byte, ins []store.InRecord) ([]store.InRecord, error)
+	DeliverReply(body []byte, out *store.OutRecord, ins []store.InRecord) ([]store.InRecord, error)
+	SourceUpdate(out store.OutRecord, release []store.BodyRef) error
 
 	EndpointUpdate(ep store.EndpointRecord) error
 	EndpointClose(ep store.EndpointRecord, result *store.AdminRecord) error
@@ -46,12 +56,39 @@ type Config interface {
 	Node() config.Node
 	Instances() config.Instances
 	LastOperations() []config.Operation
+	Policy() config.PolicyFile
+	RevocationSet() *revocation.Set
 	EndpointSettings(instance string, id ident.EndpointID) config.EndpointSettings
 	DirectID(instance, key string, rnd io.Reader) (config.IDChange, error)
 	PutEndpointIDs(tx *txn.Tx, ch config.IDChange) (config.AfterCommit, error)
 }
 
 var _ Config = (*config.Config)(nil)
+
+// Keys is what the engine asks of the node's keys: the node it is, the network
+// key that signs its status reports, and the certificate that says the key is
+// the node's. *keys.Keys is the one implementation.
+type Keys interface {
+	Node() ident.NodeID
+	NetworkSigner() record.Signer
+	Certificate() record.Verified[record.NetworkKeyCertificate]
+	SerialSeen() record.SerialSeen
+}
+
+var _ Keys = (*nodekeys.Keys)(nil)
+
+// Transport is what the engine calls to reach the node an envelope is for: it
+// has the signatures of *transport.Loopback, and every transport has them. The
+// engine calls it from its outbound worker only, never from the loop, and in the
+// order the work was given. Waiting is how many of its calls wait out a delay
+// that is not due, which the engine does not count as work.
+type Transport interface {
+	Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, envelope []byte) (transport.Receipt, error)
+	Pull(ctx context.Context, target ident.NodeID, req transport.PullRequest) (transport.PullAnswer, error)
+	Waiting() int
+}
+
+var _ Transport = (*transport.Loopback)(nil)
 
 // Beginner opens the transactions that write the files of more than one owner.
 // *txn.Writer is the one implementation. A transaction of one owner is run by
@@ -101,6 +138,9 @@ type Deps struct {
 	Writer         Beginner
 	Store          Store
 	Config         Config
+	// Keys signs the node's status reports. It is needed to send and to take in
+	// envelopes; an engine without it refuses them.
+	Keys Keys
 	// Rand is the randomness of tokens and alert identifiers; the composition
 	// root passes crypto/rand's reader, a test a seeded one. Only the loop reads
 	// it.

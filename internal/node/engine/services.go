@@ -14,6 +14,8 @@ import (
 // and not on Engine. The methods are added as the engine learns to do them.
 type AgentService interface {
 	Declare(ctx context.Context, c Caller, p DeclarationPatch) (authz.Declaration, error)
+	Send(ctx context.Context, c Caller, r SendRequest) (SendResult, error)
+	Reply(ctx context.Context, c Caller, r ReplyRequest) (SendResult, error)
 }
 
 // ManageService is what the management interface asks of the engine. The methods

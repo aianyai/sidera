@@ -25,6 +25,14 @@ type Params struct {
 	// RetryBackoff is how long internal work that failed with an error a retry
 	// may cure waits before it is tried again, on the injected clock.
 	RetryBackoff time.Duration
+	// ResendBackoff is how long a sender waits after a send that got no receipt
+	// before it sends the same bytes again, on the injected clock. A message is
+	// sent again until its delivery deadline; the target deduplicates by message
+	// id, so a send that was processed and whose receipt was lost is harmless.
+	ResendBackoff time.Duration
+	// PullInterval is how long a sender waits between two pulls of the reports of
+	// a delivery that is not final, until its report deadline.
+	PullInterval time.Duration
 }
 
 // DefaultParams returns the defaults. The chunk sizes keep the longest
@@ -39,6 +47,8 @@ func DefaultParams() Params {
 		ChunkRemoves:     256,
 		ChunkTickRecords: 512,
 		RetryBackoff:     time.Minute,
+		ResendBackoff:    30 * time.Second,
+		PullInterval:     time.Minute,
 	}
 }
 
@@ -61,6 +71,12 @@ func (p Params) withDefaults() Params {
 	}
 	if p.RetryBackoff <= 0 {
 		p.RetryBackoff = d.RetryBackoff
+	}
+	if p.ResendBackoff <= 0 {
+		p.ResendBackoff = d.ResendBackoff
+	}
+	if p.PullInterval <= 0 {
+		p.PullInterval = d.PullInterval
 	}
 	return p
 }

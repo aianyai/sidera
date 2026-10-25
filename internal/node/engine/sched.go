@@ -20,6 +20,9 @@ const (
 	schedDrain
 	// schedWait is the deadline of a recv that waits.
 	schedWait
+	// schedOutbound is the next time to send a message again or to ask for the
+	// reports of its deliveries; the id is the name of the source record.
+	schedOutbound
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

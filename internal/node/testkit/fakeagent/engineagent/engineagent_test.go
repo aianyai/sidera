@@ -93,21 +93,25 @@ func TestEveryEngineReasonMapsToACategoryAndCode(t *testing.T) {
 		category fakeagent.Category
 		code     string
 	}{
-		engine.ReasonUnauthenticated:    {fakeagent.CategoryUnauthenticated, "token_unknown"},
-		engine.ReasonEndpointUnknown:    {fakeagent.CategoryNotFound, "endpoint_unknown"},
-		engine.ReasonInstanceUnknown:    {fakeagent.CategoryNotFound, "instance_unknown"},
-		engine.ReasonWrongEndpointKind:  {fakeagent.CategoryRefused, "endpoint_kind"},
-		engine.ReasonEndpointLimit:      {fakeagent.CategoryRefused, "endpoint_limit"},
-		engine.ReasonInvalidArgument:    {fakeagent.CategoryInvalidArgument, "malformed_request"},
-		engine.ReasonOperationIDReused:  {fakeagent.CategoryConflict, "operation_id_reused"},
-		engine.ReasonNodeQueueFull:      {fakeagent.CategoryBackpressure, "node_queue_full"},
-		engine.ReasonStorageFull:        {fakeagent.CategoryBackpressure, "storage_full"},
-		engine.ReasonStorageUnavailable: {fakeagent.CategoryBackpressure, "storage_unavailable"},
-		engine.ReasonClockRollback:      {fakeagent.CategoryBackpressure, "clock_rollback"},
-		engine.ReasonLoopBusy:           {fakeagent.CategoryBackpressure, "loop_busy"},
-		engine.ReasonRecovering:         {fakeagent.CategoryUnavailable, "recovering"},
-		engine.ReasonShuttingDown:       {fakeagent.CategoryUnavailable, "shutting_down"},
-		engine.ReasonStorageFatal:       {fakeagent.CategoryOutcomeUnknown, "storage_fatal"},
+		engine.ReasonUnauthenticated:     {fakeagent.CategoryUnauthenticated, "token_unknown"},
+		engine.ReasonEndpointUnknown:     {fakeagent.CategoryNotFound, "endpoint_unknown"},
+		engine.ReasonInstanceUnknown:     {fakeagent.CategoryNotFound, "instance_unknown"},
+		engine.ReasonWrongEndpointKind:   {fakeagent.CategoryRefused, "endpoint_kind"},
+		engine.ReasonEndpointLimit:       {fakeagent.CategoryRefused, "endpoint_limit"},
+		engine.ReasonInvalidArgument:     {fakeagent.CategoryInvalidArgument, "malformed_request"},
+		engine.ReasonOperationIDReused:   {fakeagent.CategoryConflict, "operation_id_reused"},
+		engine.ReasonNodeQueueFull:       {fakeagent.CategoryBackpressure, "node_queue_full"},
+		engine.ReasonStorageFull:         {fakeagent.CategoryBackpressure, "storage_full"},
+		engine.ReasonStorageUnavailable:  {fakeagent.CategoryBackpressure, "storage_unavailable"},
+		engine.ReasonClockRollback:       {fakeagent.CategoryBackpressure, "clock_rollback"},
+		engine.ReasonLoopBusy:            {fakeagent.CategoryBackpressure, "loop_busy"},
+		engine.ReasonRecovering:          {fakeagent.CategoryUnavailable, "recovering"},
+		engine.ReasonShuttingDown:        {fakeagent.CategoryUnavailable, "shutting_down"},
+		engine.ReasonStorageFatal:        {fakeagent.CategoryOutcomeUnknown, "storage_fatal"},
+		engine.ReasonIdempotencyConflict: {fakeagent.CategoryConflict, "idempotency_conflict"},
+		engine.ReasonMessageConflict:     {fakeagent.CategoryConflict, "message_conflict"},
+		engine.ReasonMessageUnknown:      {fakeagent.CategoryNotFound, "message_unknown"},
+		engine.ReasonTooLarge:            {fakeagent.CategoryRefused, "too_large"},
 	}
 	for _, r := range engine.Reasons() {
 		w, ok := want[r]
@@ -165,18 +169,13 @@ func TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError(t *testing.T) {
 		"Peers":     func() error { _, err := a.Peers(ctx); return err },
 		"Directory": func() error { _, err := a.Directory(ctx, fakeagent.DirectoryInput{}); return err },
 		"Probe":     func() error { _, err := a.Probe(ctx, fakeagent.ProbeInput{}); return err },
-		"Send": func() error {
-			_, err := a.Send(ctx, fakeagent.SendInput{To: []string{h.Addr("a")}, Body: "x"})
-			return err
-		},
-		"Reply":   func() error { _, err := a.Reply(ctx, fakeagent.ReplyInput{}); return err },
-		"Recv":    func() error { _, err := a.Recv(ctx, fakeagent.RecvInput{}); return err },
-		"Ack":     func() error { _, err := a.Ack(ctx, fakeagent.AckInput{}); return err },
-		"Control": func() error { _, err := a.Control(ctx, fakeagent.ControlInput{}); return err },
-		"Status":  func() error { _, err := a.Status(ctx, fakeagent.StatusInput{}); return err },
+		"Recv":      func() error { _, err := a.Recv(ctx, fakeagent.RecvInput{}); return err },
+		"Ack":       func() error { _, err := a.Ack(ctx, fakeagent.AckInput{}); return err },
+		"Control":   func() error { _, err := a.Control(ctx, fakeagent.ControlInput{}); return err },
+		"Status":    func() error { _, err := a.Status(ctx, fakeagent.StatusInput{}); return err },
 	}
-	if len(calls) != 10 {
-		t.Fatalf("%d calls listed: the agent has eleven methods and Declare is the one the engine offers", len(calls))
+	if len(calls) != 8 {
+		t.Fatalf("%d calls listed: the agent has eleven methods and Declare, Send and Reply are the ones the engine offers", len(calls))
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {

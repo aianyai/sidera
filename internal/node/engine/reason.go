@@ -56,26 +56,42 @@ const (
 	// ReasonStorageFatal: the command met a fatal storage error; whether it took
 	// effect is not known, and the engine has stopped.
 	ReasonStorageFatal
+	// ReasonIdempotencyConflict: the idempotency key was used before for other
+	// content. Nothing was accepted.
+	ReasonIdempotencyConflict
+	// ReasonMessageConflict: a message with this identifier, from this sender, to
+	// this recipient, was taken in before with other content. The record the node
+	// holds is as it was; the envelope is refused.
+	ReasonMessageConflict
+	// ReasonMessageUnknown: the endpoint has no message with that identifier to
+	// answer.
+	ReasonMessageUnknown
+	// ReasonTooLarge: the body is longer than the protocol allows.
+	ReasonTooLarge
 
 	reasonEnd
 )
 
 var reasonNames = [reasonEnd]string{
-	ReasonUnauthenticated:    "unauthenticated",
-	ReasonEndpointUnknown:    "endpoint_unknown",
-	ReasonInstanceUnknown:    "instance_unknown",
-	ReasonWrongEndpointKind:  "wrong_endpoint_kind",
-	ReasonEndpointLimit:      "endpoint_limit",
-	ReasonInvalidArgument:    "invalid_argument",
-	ReasonOperationIDReused:  "operation_id_reused",
-	ReasonNodeQueueFull:      "node_queue_full",
-	ReasonStorageFull:        "storage_full",
-	ReasonStorageUnavailable: "storage_unavailable",
-	ReasonClockRollback:      "clock_rollback",
-	ReasonLoopBusy:           "loop_busy",
-	ReasonRecovering:         "recovering",
-	ReasonShuttingDown:       "shutting_down",
-	ReasonStorageFatal:       "storage_fatal",
+	ReasonUnauthenticated:     "unauthenticated",
+	ReasonEndpointUnknown:     "endpoint_unknown",
+	ReasonInstanceUnknown:     "instance_unknown",
+	ReasonWrongEndpointKind:   "wrong_endpoint_kind",
+	ReasonEndpointLimit:       "endpoint_limit",
+	ReasonInvalidArgument:     "invalid_argument",
+	ReasonOperationIDReused:   "operation_id_reused",
+	ReasonNodeQueueFull:       "node_queue_full",
+	ReasonStorageFull:         "storage_full",
+	ReasonStorageUnavailable:  "storage_unavailable",
+	ReasonClockRollback:       "clock_rollback",
+	ReasonLoopBusy:            "loop_busy",
+	ReasonRecovering:          "recovering",
+	ReasonShuttingDown:        "shutting_down",
+	ReasonStorageFatal:        "storage_fatal",
+	ReasonIdempotencyConflict: "idempotency_conflict",
+	ReasonMessageConflict:     "message_conflict",
+	ReasonMessageUnknown:      "message_unknown",
+	ReasonTooLarge:            "too_large",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

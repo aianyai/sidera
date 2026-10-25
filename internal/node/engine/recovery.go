@@ -351,10 +351,6 @@ func (e *Engine) recoverTick(time.Time) error { return nil }
 // replaced after a storage loss included (step 13). Filled in with the feedback.
 func (e *Engine) recoverFeedback(time.Time) error { return nil }
 
-// recoverOutbound goes on with the loopback of outgoing messages and the
-// applying of status reports (step 14). Filled in with sending and intake.
-func (e *Engine) recoverOutbound(time.Time) error { return nil }
-
 type cmdRecoveryPhase struct {
 	call[struct{}]
 	phase recoveryPhase
@@ -448,6 +444,9 @@ func (c *cmdQuiesce) run(e *Engine, now time.Time) {
 	r := Report{
 		InboxLen: len(e.inbox), Continuations: len(e.cont), DueEntries: e.sched.dueCount(now),
 		Parked: len(e.parked), Workers: int(e.workers.Load()),
+	}
+	if e.outboundParked() && r.Workers > 0 {
+		r.Workers-- // the worker waits out a delay; that is not work
 	}
 	r.Satisfied = r.InboxLen == 0 && r.Continuations == 0 && r.DueEntries == 0 && r.Parked == 0 && r.Workers == 0
 	c.done(r, nil)

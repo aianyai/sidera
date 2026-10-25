@@ -85,8 +85,10 @@ type Engine struct {
 	sched     *scheduler
 	timer     clock.Timer
 	periodic  map[string]*periodicTask
-	order     []string // names of the periodic tasks, in the order they were added
-	clockTask string   // the periodic task that persists the clock state, if one was added
+	order     []string  // names of the periodic tasks, in the order they were added
+	clockTask string    // the periodic task that persists the clock state, if one was added
+	tr        Transport // set by SetTransport before Start
+	outbox    *outbox
 	waits     map[ident.EndpointID]*waiter
 	cont      []continuation
 	parked    map[ident.EndpointID][]command // commands that wait for the drain of an endpoint
@@ -162,6 +164,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		sched:    newScheduler(),
 		periodic: map[string]*periodicTask{},
 		waits:    map[ident.EndpointID]*waiter{},
+		outbox:   newOutbox(),
 		parked:   map[ident.EndpointID][]command{},
 	}
 	e.ctx, e.cancel = context.WithCancel(context.Background())
@@ -211,6 +214,17 @@ func (e *Engine) AddClockState(name string, every time.Duration, t Task) error {
 		return err
 	}
 	e.clockTask = name
+	return nil
+}
+
+// SetTransport gives the engine the transport its outbound worker calls. It is
+// for the composition root, before Start: the transport is made with the engine
+// as its handler, so it cannot exist before the engine does.
+func (e *Engine) SetTransport(t Transport) error {
+	if e.Phase() != PhaseOpened || e.started.Load() {
+		return errors.New("engine: the transport is set before Start")
+	}
+	e.tr = t
 	return nil
 }
 
@@ -391,6 +405,11 @@ const (
 	// gateWrite: a command from outside that changes state; refused while the
 	// engine recovers and when it stops.
 	gateWrite
+	// gateLoopback: what the node's own transport brings or asks of the engine,
+	// and the results of what the engine sent: taken while the node recovers, as
+	// the going on of the outgoing messages is a step of the start, and refused
+	// when the engine stops.
+	gateLoopback
 	// gateAdapter: what an adapter asks of its endpoints. Its caller waits for
 	// the running phase before it submits; the loop refuses it as a write.
 	gateAdapter
@@ -638,7 +657,7 @@ func (e *Engine) step(c command) {
 	}
 	ph := e.Phase()
 	switch c.gate() {
-	case gateRead:
+	case gateRead, gateLoopback:
 		if ph >= PhaseStopping {
 			c.fail(refuse(ReasonShuttingDown))
 			return
@@ -680,6 +699,8 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.expireWait(id)
 		}
+	case schedOutbound:
+		e.dispatchOutbound(key.id, now)
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.later(&cmdDrain{endpoint: id})

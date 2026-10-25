@@ -18,6 +18,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -31,13 +32,27 @@ var DefaultStart = time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
 // It is installed and enabled when the node is made.
 const Instance = "chat"
 
-// NodeID is the identifier of the fixture's node.
+// keySeed is the seed of the random source the fixture's keys are drawn from, so
+// that the node, whose identifier is derived from its identity key, is the same
+// in every fixture.
+const keySeed = 7
+
+var (
+	nodeOnce sync.Once
+	nodeID   ident.NodeID
+)
+
+// NodeID is the identifier of the fixture's node: the one its identity key
+// derives, as `init` makes it from the seeded random source.
 func NodeID() ident.NodeID {
-	n, err := ident.NodeIDFromBytes(bytes.Repeat([]byte{7}, ident.NodeIDLen))
-	if err != nil {
-		panic("harness: " + err.Error())
-	}
-	return n
+	nodeOnce.Do(func() {
+		plan, err := keys.PlanInit(fsxtest.NewMem(), RandReader(keySeed), DefaultStart)
+		if err != nil {
+			panic("harness: the key plan of the fixture: " + err.Error())
+		}
+		nodeID = plan.Node()
+	})
+	return nodeID
 }
 
 // The building blocks below make the disk of a node and a process over it. The
@@ -56,8 +71,8 @@ var setupTag = fsx.Tag{Tx: "setup", Role: "f"}
 // The transactions that the composition root and the install flow own, declared
 // here the way they declare them, so that the table of the program is complete.
 var (
-	initDecl = &txn.Decl{Name: "init", Kind: txn.Normal, Writes: append(config.InitWrites(),
-		txn.Write{Role: "marker", Op: txn.OpReplace})}
+	initDecl = &txn.Decl{Name: "init", Kind: txn.Normal, Writes: append(append(keys.InitWrites(), config.InitWrites()...),
+		keys.InitMarkerWrite())}
 	installDecl = &txn.Decl{Name: "adapter-install", Kind: txn.Normal, Writes: append(config.InstallWrites(),
 		txn.Write{Role: store.RoleResult, Op: txn.OpReplace}, config.InstallOldWrite())}
 )
@@ -78,7 +93,7 @@ func ProgramTable(t testing.TB) *txn.Table {
 	return tab
 }
 
-func mustMkdir(t testing.TB, mem *fsxtest.Mem, dir string) {
+func mustMkdir(t testing.TB, mem fsx.FS, dir string) {
 	t.Helper()
 	if dir == "." {
 		return
@@ -94,7 +109,7 @@ func mustMkdir(t testing.TB, mem *fsxtest.Mem, dir string) {
 
 // MakeLayout creates the directories the daemon makes before anything is written:
 // the keys directory and the directories of state/.
-func MakeLayout(t testing.TB, mem *fsxtest.Mem) {
+func MakeLayout(t testing.TB, mem fsx.FS) {
 	t.Helper()
 	for _, d := range append([]string{"keys"}, store.StateDirs()...) {
 		mustMkdir(t, mem, d)
@@ -129,7 +144,16 @@ func Mount(t testing.TB, tab *txn.Table, disk *fsxtest.Mem, obs txn.Observer) *M
 // be nil.
 func MountWithFaults(t testing.TB, tab *txn.Table, disk *fsxtest.Mem, obs txn.Observer, arm func(*fsxtest.Faulty)) *Mounted {
 	t.Helper()
-	cut := newCutoff(disk)
+	m := MountOn(t, tab, disk, obs, arm)
+	m.Mem = disk
+	return m
+}
+
+// MountOn is MountWithFaults over any file system, the real one among them. Its
+// Mounted has no Mem: a disk that is not in memory cannot be cloned for a crash.
+func MountOn(t testing.TB, tab *txn.Table, base fsx.FS, obs txn.Observer, arm func(*fsxtest.Faulty)) *Mounted {
+	t.Helper()
+	cut := newCutoff(base)
 	faulty := fsxtest.NewFaulty(t, cut)
 	if arm != nil {
 		arm(faulty)
@@ -138,36 +162,43 @@ func MountWithFaults(t testing.TB, tab *txn.Table, disk *fsxtest.Mem, obs txn.Ob
 	if err := w.Recover(); err != nil {
 		t.Fatalf("harness: Recover: %v", err)
 	}
-	return &Mounted{Mem: disk, Faulty: faulty, Writer: w, Store: store.New(w), cut: cut}
+	return &Mounted{Faulty: faulty, Writer: w, Store: store.New(w), cut: cut}
 }
 
 // SeedNode makes the node on the writer's disk through the code the program
-// uses, writing no file by hand: the configuration `init` writes, then the
+// uses, writing no file by hand: the keys and the configuration `init` writes, then the
 // adapter Instance installed and enabled. It returns the configuration loaded
 // from what it wrote. The disk's layout must exist (MakeLayout).
 func SeedNode(t testing.TB, w *txn.Writer, at time.Time) *config.Config {
 	t.Helper()
-	cfg := initConfig(t, w)
+	cfg := initConfig(t, w, at)
 	installAdapter(t, w, cfg, at)
 	enableAdapter(t, cfg)
 	return cfg
 }
 
-func initConfig(t testing.TB, w *txn.Writer) *config.Config {
+func initConfig(t testing.TB, w *txn.Writer, at time.Time) *config.Config {
 	t.Helper()
+	kp, err := keys.PlanInit(w.Reader(), RandReader(keySeed), at)
+	if err != nil {
+		t.Fatalf("harness: keys.PlanInit: %v", err)
+	}
 	plan, err := config.PlanInit(w.Reader())
 	if err != nil {
 		t.Fatalf("harness: PlanInit: %v", err)
 	}
 	tx := w.Begin(initDecl)
 	defer tx.Close()
+	if err := kp.WriteKeys(tx); err != nil {
+		t.Fatal(err)
+	}
 	if err := plan.MakeDirs(tx); err != nil {
 		t.Fatal(err)
 	}
 	if err := plan.WriteFiles(tx); err != nil {
 		t.Fatal(err)
 	}
-	if err := tx.Replace("marker", "init-marker", []byte("init"), fsx.ModePrivate); err != nil {
+	if err := kp.WriteMarker(tx); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
