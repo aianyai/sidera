@@ -120,3 +120,17 @@ func TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages(t *testing.T) {
 		t.Errorf("the leak check reported a goroutine that had ended: %v", rec.errs)
 	}
 }
+
+// A condition of the fixture that holds, stops holding while the engine settles
+// and holds again is the case the second look is for: quiet is both at once.
+func TestQuiesceDoesNotReturnOnAConditionThatStoppedHoldingWhileTheEngineSettled(t *testing.T) {
+	h := New(t, Options{})
+	var checks atomic.Int32
+	h.addQuiet("busy once, in the middle", func() bool { return checks.Add(1) != 2 })
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
+	if got := checks.Load(); got < 3 {
+		t.Errorf("the condition was asked %d times: the answer of the second look was not used", got)
+	}
+}

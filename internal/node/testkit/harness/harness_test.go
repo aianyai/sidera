@@ -512,3 +512,36 @@ func contains(s []string, v string) bool {
 	}
 	return false
 }
+
+// A process crash leaves the page cache: a rename that completed and whose
+// directory was not yet synced is on the disk the next process reads, which is
+// what separates it from a power loss.
+func TestAProcessCrashKeepsAWriteThatWasNotSyncedYet(t *testing.T) {
+	g := newGate("direct-register", fsx.StepSyncDir)
+	h := harness.New(t, harness.Options{Observer: g})
+	before := snapshot(t, h)
+	g.arm()
+	go func() { _, _ = h.Direct("a") }()
+	<-g.reached
+	h.Crash(harness.ProcessCrash)
+	g.open()
+	after := snapshot(t, h)
+	added := 0
+	for p := range after {
+		if _, ok := before[p]; !ok && strings.Contains(p, "endpoint-ids") {
+			added++
+		}
+	}
+	if added == 0 {
+		t.Errorf("the disk after a process crash has no id file of the registration that was in its rename: %v", keysOf(after))
+	}
+}
+
+func keysOf(m map[string]string) []string {
+	var out []string
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
