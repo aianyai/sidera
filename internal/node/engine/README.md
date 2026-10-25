@@ -23,8 +23,8 @@ commands and add their methods to this list.
 
 | Name | Purpose |
 | ---- | ------- |
-| `Open(ctx, Deps, Params)` | The scan entry (startup step 6): scans `state/`, runs the recovery rules until none has work, builds the view. Returns a `ScanReport`. |
-| `Start`, `RecoverDelivery`, `Serve`, `BeginShutdown`, `Stop`, `Done`, `Err`, `Phase` | The life of the loop: opened, recovering, running, stopping, stopped or failed. `RecoverDelivery` is the second recovery entry (steps 11 to 14). |
+| `Open(ctx, Deps, Params)` | The scan entry: scans `state/`, runs the recovery rules until none has work, builds the view. Returns a `ScanReport`. |
+| `Start`, `RecoverDelivery`, `Serve`, `BeginShutdown`, `Stop`, `Done`, `Err`, `Phase` | The life of the loop: opened, recovering, running, stopping, stopped or failed. `RecoverDelivery` is the second recovery entry; the table of the start steps is in the reference. |
 | `AddPeriodic`, `Task`, `TaskInput` | A task the composition root has the loop run every period, before `Start`. |
 | `Quiesce` | Returns when no command waits, nothing is due and no goroutine of the engine runs. |
 | `AdapterAdmitted`, `RegisterDirect`, `UnregisterDirect` | What the adapter host calls: the admission of an instance, and the registration and unregistration of its direct endpoints. |

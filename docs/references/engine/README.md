@@ -76,6 +76,20 @@ the disk (`storage_full` when the free space is below the reserve). A bound that
 not set refuses. The unfinished deliveries are the target and control records that
 are not final plus the source deliveries no receipt answered yet.
 
+**The start, as far as the engine is concerned.** The steps of the start are numbered
+in the order the node takes them; the engine takes part in these:
+
+| Step | What | Engine |
+| ---- | ---- | ------ |
+| 6 | Scan `state/`, quarantine and repair, rebuild the view | `Open` (the scan entry) |
+| 8 | Management interface opens; reads answer, changes are refused | `Start` |
+| 10 | Adapter instances start and are admitted | `AdapterAdmitted` |
+| 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery` |
+| 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick` |
+| 13 | Send the feedback that fell due | phase `feedback` |
+| 14 | Go on with the loopback of outgoing messages | phase `outbound` |
+| 15 | The Agent interface serves in full | `Serve` |
+
 **Recovery.** `PlanRecovery` is a pure function of a scan: what each recovery rule
 has to do. `Open` runs the rules that have work in the order the store fixes
 (`ctl-effect-replay`, `instance-drain-replay`, `orphan-gc-endpoint`,
