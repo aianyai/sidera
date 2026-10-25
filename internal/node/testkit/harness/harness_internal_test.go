@@ -180,3 +180,38 @@ func TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName(t *testing.
 		t.Error("the name of a registration that a crash interrupted was recorded")
 	}
 }
+
+// A fake that takes work while the engine is asked, finishes it, emits a
+// notification and is idle again holds on both looks, but the engine has not seen
+// that notification: only the count shows it. Quiet is a round in which no count
+// moved.
+func TestQuiesceDoesNotReturnWhileAConditionThatKeepsHoldingStillMakesProgress(t *testing.T) {
+	h := New(t, Options{})
+	var asks atomic.Int32
+	const settles = 5 // the count moves with each of the first asks, then stays
+	h.addQuiet("a fake that is always idle and keeps sending", func() (bool, uint64) {
+		return true, uint64(min(asks.Add(1), settles))
+	})
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
+	if got := asks.Load(); got < settles+1 {
+		t.Errorf("the condition was asked %d times: Quiesce returned before it saw the count stand still across a round", got)
+	}
+}
+
+// The count of a condition that stands still is what lets a round be the last.
+func TestQuiesceReturnsAfterOneRoundWhenNoCountMoves(t *testing.T) {
+	h := New(t, Options{})
+	var asks atomic.Int32
+	h.addQuiet("a fake that is idle and silent", func() (bool, uint64) {
+		asks.Add(1)
+		return true, 7
+	})
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
+	if got := asks.Load(); got != 2 {
+		t.Errorf("the condition was asked %d times, want once before the engine and once after it", got)
+	}
+}
