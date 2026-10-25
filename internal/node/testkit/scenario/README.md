@@ -40,9 +40,11 @@ because the engine-layer fixture implements `Env` and so will the binary-layer o
 - **Judgements are read from the ledger,** never from the daemon's state: the effect
   of a confirmation is on record before it is confirmed; a creation attempt made at
   most one native session; a prompt attempt reached a runtime at most once; a
-  message part the model saw again is marked possibly duplicate on every sighting but
-  one (the count of unmarked sightings, which does not depend on the order across
-  writers). The rules whose subject does not exist yet (no message lost, one
+  message part the model saw again is marked possibly duplicate on every sighting after
+  the first (an unmarked sighting that the ledger proves came after another one fails,
+  by the order inside one writer and between steps; two unmarked sightings fail
+  whatever their order; where nothing proves an order, one unmarked sighting may be
+  the first). The rules whose subject does not exist yet (no message lost, one
   feedback per delivery and kind, acknowledgements on behalf matching what the model
   saw, every record closed, the drain) are added with the code that makes that
   subject.
@@ -65,5 +67,6 @@ because the engine-layer fixture implements `Env` and so will the binary-layer o
 `TestAScriptIsAScenarioOfTheCrashWalk`, `TestNotAvailableNamesWhatIsMissingAndIsTheSentinel`,
 `TestQuiesceOptionsDefaultToTheLimitOfSixtySeconds`,
 `TestCheckHoldsEveryRuleOfAnEmptyLedgerAndOfACorrectOne`, `TestCheckRejects` (one row
-per judgement), `TestCheckIsTheSameForEveryOrderOfTheJudgementsAndNamesEveryOneThatFails`,
+per judgement, and more for the mark),
+`TestACheckOfRepeatSightingsFailsOnlyWhatTheLedgerProvesIsAfterAnotherSighting`, `TestCheckIsTheSameForEveryOrderOfTheJudgementsAndNamesEveryOneThatFails`,
 `TestJudgementsListsEachOnceAndEachCanBeWaived`, `TestRunJudgesTheLedgerAfterTheLastStep`.

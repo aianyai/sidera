@@ -30,7 +30,7 @@ const (
 	// JudgePromptOncePerAttempt: a prompt attempt had its effect at most once.
 	JudgePromptOncePerAttempt Judgement = "prompt-effect-once-per-attempt"
 	// JudgePossiblyDuplicateMarked: a message part the model saw more than once
-	// carries the possible-duplicate mark on every sighting but one.
+	// carries the possible-duplicate mark on every sighting after the first.
 	JudgePossiblyDuplicateMarked Judgement = "repeat-sightings-marked-possibly-duplicate"
 )
 
@@ -52,27 +52,61 @@ var judgements = []judgement{
 	{JudgePromptOncePerAttempt, func(l *ledger.Log) []string {
 		return overOne(l, ledger.KindRuntimePromptReceived, func(e ledger.Entry) string { return e.Attrs.Attempt }, "prompt attempt %s reached a runtime %d times")
 	}},
-	{JudgePossiblyDuplicateMarked, func(l *ledger.Log) []string {
-		type sighting struct {
-			endpoint, message string
-			part              int
+	{JudgePossiblyDuplicateMarked, possiblyDuplicateMarked},
+}
+
+// possiblyDuplicateMarked holds every sighting of a message part after the first to
+// the mark. Two sightings without it cannot both be the first, whatever their
+// order; one without it must be the first, so it fails when the ledger proves
+// another sighting came before it. What the ledger proves is the order inside one
+// writer (sequence numbers) and between steps (the order the fixture announced
+// them); across writers inside one step it proves nothing, since a test clock may
+// stand still, so such sightings are judged by the count alone.
+func possiblyDuplicateMarked(l *ledger.Log) []string {
+	type part struct {
+		endpoint, message string
+		part              int
+	}
+	stepIndex := map[string]int{}
+	for i, name := range l.Steps() {
+		stepIndex[name] = i + 1
+	}
+	// before reports whether the ledger proves that a was written before b.
+	before := func(a, b ledger.Entry) bool {
+		if a.Writer == b.Writer && a.PID == b.PID {
+			return a.Seq < b.Seq
 		}
-		unmarked := map[sighting]int{}
-		for _, e := range l.Kind(ledger.KindModelSaw) {
-			if e.Attrs.PossiblyDuplicate != nil && *e.Attrs.PossiblyDuplicate {
-				continue
+		return stepIndex[a.Step] < stepIndex[b.Step] // an unknown step comes first
+	}
+	sightings := map[part][]ledger.Entry{}
+	for _, e := range l.Kind(ledger.KindModelSaw) {
+		k := part{e.Attrs.Endpoint, e.Attrs.MessageID, e.Attrs.Part}
+		sightings[k] = append(sightings[k], e)
+	}
+	var out []string
+	for k, all := range sightings {
+		var unmarked []ledger.Entry
+		for _, e := range all {
+			if e.Attrs.PossiblyDuplicate == nil || !*e.Attrs.PossiblyDuplicate {
+				unmarked = append(unmarked, e)
 			}
-			unmarked[sighting{e.Attrs.Endpoint, e.Attrs.MessageID, e.Attrs.Part}]++
 		}
-		var out []string
-		for k, n := range unmarked {
-			if n > 1 {
-				out = append(out, fmt.Sprintf("endpoint %s saw message %s part %d %d times without the mark", k.endpoint, k.message, k.part, n))
+		what := fmt.Sprintf("endpoint %s saw message %s part %d", k.endpoint, k.message, k.part)
+		switch {
+		case len(unmarked) > 1:
+			out = append(out, fmt.Sprintf("%s %d times without the mark: only the first sighting may lack it", what, len(unmarked)))
+		case len(unmarked) == 1:
+			for _, e := range all {
+				if before(e, unmarked[0]) {
+					out = append(out, fmt.Sprintf("%s without the mark (%s seq %d) after the sighting of %s seq %d", what,
+						unmarked[0].Writer, unmarked[0].Seq, e.Writer, e.Seq))
+					break
+				}
 			}
 		}
-		sort.Strings(out)
-		return out
-	}},
+	}
+	sort.Strings(out)
+	return out
 }
 
 // overOne reports every key that more than one entry of the kind has.
