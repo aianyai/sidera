@@ -1,7 +1,9 @@
 package engine_test
 
 import (
+	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
@@ -78,6 +80,46 @@ func TestEndpointBeyondNodeCapRefused(t *testing.T) {
 	settle(t, e)
 	if _, err := e.RegisterDirect(context.Background(), "chat", adapterproto.RegisterParams{Key: keyName(publication.MaxEndpointsPerNode), DisplayName: "fits now"}); err != nil {
 		t.Errorf("registering after one endpoint closed: %v", err)
+	}
+}
+
+// The cap counts the endpoints of every kind that are open or being created, and
+// the registration path judges it: a node whose places are taken by a runtime
+// endpoint and a session being created has room for two fewer direct ones. The
+// two are placed through the store, as a start finds them; no entry of the engine
+// makes either.
+func TestTheNodeCapCountsOtherKindsOfEndpointOnTheRegistrationPath(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, adapterproto.MaxDirectEndpoints)
+	runtime, session := mustEndpoint(t, 70), mustEndpoint(t, 71)
+	token := func(b byte) []byte { return bytes.Repeat([]byte{b}, store.TokenLen) }
+	r.seedRecord(store.EndpointRecord{ID: runtime, Kind: adapterreg.KindRuntime, Instance: "chat", Status: store.EndpointOpen, Token: token(1)})
+	ctl := sessionCtlRecord(t, 5, session)
+	ctl.Intent.State, ctl.Intent.NativeRef = store.IntentCreating, "" // the session is still being created
+	r.seedRecord(store.EndpointRecord{
+		ID: session, Kind: adapterreg.KindSession, Instance: "chat", Status: store.EndpointCreating, Token: token(2),
+		Session: &store.SessionInfo{Preset: "default"}, CreatedBy: strings.TrimSuffix(ctl.Name(), ".rec"),
+	})
+	r.seedRecord(ctl)
+	e := r.start()
+
+	const others = 2
+	if got := openEndpoints(t, e); got != others {
+		t.Fatalf("%d endpoints open or being created at the start, want the %d that were placed", got, others)
+	}
+	for i := 0; i < publication.MaxEndpointsPerNode-others; i++ {
+		register(t, e, keyName(i))
+	}
+	cnt, err := e.Counts(context.Background())
+	if err != nil || cnt.Endpoints != publication.MaxEndpointsPerNode {
+		t.Fatalf("Counts = %+v, %v; want %d endpoints", cnt, err, publication.MaxEndpointsPerNode)
+	}
+	_, err = e.RegisterDirect(context.Background(), "chat", registerParams(keyName(publication.MaxEndpointsPerNode)))
+	if ref := wantReason(t, err, engine.ReasonEndpointLimit); ref.Limit != engine.LimitNode {
+		t.Errorf("refusal limit %s, want node", ref.Limit)
+	}
+	if got := len(r.cfg.EndpointIDs("chat").Direct); got != publication.MaxEndpointsPerNode-others {
+		t.Errorf("%d stable ids kept, want %d: a refused registration keeps nothing", got, publication.MaxEndpointsPerNode-others)
 	}
 }
 
