@@ -201,16 +201,11 @@ func (e *Engine) accept(now time.Time, st *endpointState, m outgoing) (SendResul
 
 // checkOutgoing refuses what the envelope does not and no node would take. What
 // the envelope refuses (the recipients, the body and its content type, the
-// identifiers) it refuses itself, in envelopeOf. The disclosure of a list of
-// recipients is refused for several: the record of a message does not keep the
-// flag, and a send again that disclosed differently would be another request to
-// the target.
+// identifiers) it refuses itself, in envelopeOf.
 func checkOutgoing(m *outgoing) error {
 	switch {
 	case m.accept < 0 || m.accept > delivery.MaxAcceptBefore:
 		return invalidArgument("accept_before", fmt.Errorf("%v, want up to %v", m.accept, delivery.MaxAcceptBefore))
-	case m.disclose && len(m.to) > 1:
-		return invalidArgument("disclose_recipients", errors.New("a list of several recipients cannot be disclosed yet"))
 	}
 	if m.accept == 0 {
 		m.accept = delivery.DefaultAcceptBefore
@@ -274,7 +269,7 @@ func (e *Engine) sourceRecord(now time.Time, sender ident.EndpointID, env envelo
 			Message: env.ID, From: sender, Kind: envelope.KindMessage, BodyNonEmpty: true, AcceptBefore: env.AcceptBefore,
 		},
 		Envelope: store.OutEnvelope{
-			To: env.To, ReplyTo: env.ReplyTo, Thread: env.Thread, Seq: env.Seq, SentAt: env.SentAt,
+			To: env.To, DiscloseRecipients: env.DiscloseRecipients, ReplyTo: env.ReplyTo, Thread: env.Thread, Seq: env.Seq, SentAt: env.SentAt,
 			ReportBy: env.ReportBy, ContentType: env.ContentType,
 		},
 		Body: &ref, BodyDigest: env.Digest(),

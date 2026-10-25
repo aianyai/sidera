@@ -46,40 +46,6 @@ func TestOutboundNeedByState(t *testing.T) {
 	}
 }
 
-func TestOnlyTheStatesTheRecordDatesAreReported(t *testing.T) {
-	at := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
-	mk := func(state delivery.State, reject delivery.RejectReason) store.InRecord {
-		return store.InRecord{AcceptedAt: at, Record: delivery.Record{State: state, Reject: reject}}
-	}
-	// A record is written once when it is taken in, and again each time it changes;
-	// its report is signed before the first write, when it has no revision yet.
-	writtenAgain := func(in store.InRecord) store.InRecord { in.Rev = 2; return in }
-	atIntake := func(in store.InRecord) store.InRecord { in.Rev = 1; return in }
-	aboutToBeWritten := func(in store.InRecord) store.InRecord { in.Rev = 0; return in }
-	for _, c := range []struct {
-		name string
-		in   store.InRecord
-		ok   bool
-	}{
-		{"accepted", mk(delivery.StateAccepted, 0), true},
-		{"rejected at intake as declined", mk(delivery.StateRejected, delivery.RejectEndpointDeclined), true},
-		{"rejected at intake as backlog_full", mk(delivery.StateRejected, delivery.RejectBacklogFull), true},
-		{"rejected at intake because the endpoint was closed", atIntake(mk(delivery.StateRejected, delivery.RejectEndpointClosed)), true},
-		{"about to be rejected at intake because the endpoint was closed", aboutToBeWritten(mk(delivery.StateRejected, delivery.RejectEndpointClosed)), true},
-		{"rejected later, when the endpoint closed", writtenAgain(mk(delivery.StateRejected, delivery.RejectEndpointClosed)), false},
-		{"rejected later, when the backlog deadline passed", mk(delivery.StateRejected, delivery.RejectBacklogExpired), false},
-		{"rejected later, by the second check", mk(delivery.StateRejected, delivery.RejectSecondCheckFailed), false},
-		{"delivered", mk(delivery.StateDelivered, 0), false},
-		{"delivery_unknown", mk(delivery.StateDeliveryUnknown, 0), false},
-		{"closed_unconfirmed", mk(delivery.StateClosedUnconfirmed, 0), false},
-	} {
-		got, ok := reportedAt(c.in)
-		if ok != c.ok || (ok && !got.Equal(at)) {
-			t.Errorf("%s: %v, %v; want ok=%v at the acceptance time", c.name, got, ok, c.ok)
-		}
-	}
-}
-
 // The indexes of the view that sending and intake read are kept as the records
 // they are made of change: a record that is replaced moves, and never counts
 // twice.

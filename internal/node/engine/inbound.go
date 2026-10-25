@@ -63,7 +63,7 @@ func (c *cmdPull) run(e *Engine, now time.Time) {
 }
 
 // Pull answers a source's pull for the current reports of its deliveries of one
-// message: one signed report for each recipient whose state the target can date.
+// message: one signed report for each recipient the target holds a record for.
 func (e *Engine) Pull(ctx context.Context, from transport.Origin, req transport.PullRequest) (transport.PullAnswer, error) {
 	c := &cmdPull{call: newCall[transport.PullAnswer](), from: from, req: req}
 	return roundTrip(ctx, e, submitInternal, c, c.call)
@@ -75,13 +75,11 @@ func (e *Engine) answerPull(now time.Time, from transport.Origin, req transport.
 	}
 	var ans transport.PullAnswer
 	for _, k := range e.view.arrived[arrivalKey{from.Node(), req.Message}] {
-		rec, ok, err := e.signReport(now, e.view.in[k])
+		rec, err := e.signReport(now, e.view.in[k])
 		if err != nil {
 			return transport.PullAnswer{}, err
 		}
-		if ok {
-			ans.Reports = append(ans.Reports, rec)
-		}
+		ans.Reports = append(ans.Reports, rec)
 	}
 	return ans, nil
 }
@@ -134,13 +132,11 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 	}
 	var rc transport.Receipt
 	for _, a := range arrivals {
-		rec, ok, err := e.signReport(now, a.in)
+		rec, err := e.signReport(now, a.in)
 		if err != nil {
 			return transport.Receipt{}, err
 		}
-		if ok {
-			rc.Reports = append(rc.Reports, rec)
-		}
+		rc.Reports = append(rc.Reports, rec)
 	}
 	if err := e.writeArrivals(env, ref, arrivals, updatedOut); err != nil {
 		return transport.Receipt{}, err

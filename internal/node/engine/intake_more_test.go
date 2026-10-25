@@ -49,7 +49,7 @@ func TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing(t *testing.T) {
 		{"a disclosed list of several recipients", func(in *fakeagent.SendInput) {
 			in.To = []string{h.Addr("b"), h.Addr("c")}
 			in.DiscloseRecipients = true
-		}, fakeagent.CategoryInvalidArgument, "malformed_request"},
+		}, "", ""},
 		{"several recipients that are not disclosed", func(in *fakeagent.SendInput) { in.To = []string{h.Addr("b"), h.Addr("c")} }, "", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -96,9 +96,6 @@ func TestARequestTheEnvelopeRefusesIsRefusedForTheFieldItNames(t *testing.T) {
 		{"a body over the limit", func(r *engine.SendRequest) { r.Body = make([]byte, envelope.MaxBody+1) }, engine.ReasonTooLarge, "body"},
 		{"a thread that is not an identifier", func(r *engine.SendRequest) { r.Thread = "two words" }, engine.ReasonInvalidArgument, "thread"},
 		{"a negative deadline", func(r *engine.SendRequest) { r.AcceptBefore = -time.Second }, engine.ReasonInvalidArgument, "accept_before"},
-		{"a disclosed list of several recipients", func(r *engine.SendRequest) {
-			r.To, r.DiscloseRecipients = []ident.Address{good.To[0], addrOf(t, h, "a")}, true
-		}, engine.ReasonInvalidArgument, "disclose_recipients"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := good

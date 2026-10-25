@@ -144,8 +144,7 @@ commands and add their methods to this list.
   to the outbound worker. A message is refused with nothing recorded when the queue is
   full, the disk has no room, the wall clock cannot be trusted, or the request is not
   one a node takes (no body, a body over the protocol's limit, a deadline beyond the
-  longest, no recipient or the system endpoint as one, a disclosed list of several
-  recipients).
+  longest, no recipient or the system endpoint as one).
 - **One worker sends, in order, outside the loop.** The loop schedules and applies;
   the worker calls the transport in the order the work was given and waits until the
   loop has applied each result before the next call. A send that got no answer is made
@@ -175,10 +174,15 @@ commands and add their methods to this list.
   the transport's to say (`Origin.Local`); a local request is judged by the endpoint's
   declarations alone, and a remote one by the rules with no trust, which is denied
   until trust exists.
-- **A report is only made of a state the record dates.** The target record keeps one
-  time, when it was accepted, which dates the state accepted and a rejection made at
-  intake; a report of any other state would need a time the record does not have, so
-  none is made and a pull is answered as if the target had nothing to report yet.
+- **A report is dated by the record.** The target record keeps the moment it entered
+  its state (`Record.StateAt`), and a report is signed with it as `reported_at` and,
+  for a delivered record, as `delivered_at` (`Record.DeliveredAt`); the engine keeps no
+  time of its own for any state, so every state has a report and a pull for an
+  unchanged state repeats the same time.
+- **The source record keeps whether the recipients are disclosed.** A send again
+  rebuilds the envelope from the record, and the request digest the target compares
+  covers the choice, so the flag is stored (`OutEnvelope.DiscloseRecipients`); whether
+  the message has several recipients is `len(To) > 1`.
 - **The body is held by what still needs it.** The source record drops its reference
   when no delivery of it needs the body, in the write of the receipt that settled it; a
   rejected delivery holds no body at all. Every write that drops a reference removes,

@@ -159,12 +159,16 @@ entered through a new-work entry all the same.
 **Accepting a message.** `Send` and `Reply` are the one place new work from a local
 endpoint enters the store. A request that no node would take is refused first: no
 body, a body over 64 KiB, no content type, a deadline beyond one hour, no recipient or
-the system endpoint as one, a disclosed list of several recipients. A repeat of an
+the system endpoint as one. A repeat of an
 idempotency key returns the first message when the content is the same and is a
 conflict when it is not; the same content is the request digest the target compares
 with, made with the first request's deadlines because the deadline a repeat gets is its
 own and says nothing of the content, and the same request is also for the same
-recipients in the same order, which that digest does not cover unless they are disclosed.
+recipients in the same order, which that digest does not cover unless they are disclosed;
+whether they are disclosed is part of the request, so the source record keeps the flag and a
+message sent again rebuilds its envelope from it, with several recipients being `len(To) > 1`
+(`TestAMessageToSeveralRecipientsSentAgainIsTheSameRequestWhetherOrNotTheyAreDisclosed`,
+`TestTheSameIdempotencyKeyDisclosingTheRecipientsDifferentlyIsAConflict`).
 What no node would take is what the envelope refuses: the request is made into its
 envelope and encoded before anything else is judged, and the envelope's own errors name
 the field (a body over the limit is `too_large`, the others `invalid_argument`). Then the capacity check, then the next sequence
@@ -208,6 +212,11 @@ of the receipt are signed before anything is written and the records, with the s
 record the evidence of a reply changed, are written in one transaction. While the wall
 clock cannot be trusted nothing is signed, so an envelope and a pull are refused and the
 sender tries again.
+A report is dated with the moment the record entered the state it reports
+(`Record.StateAt`, so a rejection made later by an endpoint's closing carries the time of the
+closing, not of the acceptance) and, for a delivered record, with that moment as the delivery
+time (`TestAReportIsDatedWithTheMomentTheTargetRecordedTheStateItReports`); every state has a
+report, and a pull for an unchanged state repeats the same time.
 
 **The start, as far as the engine is concerned.** The steps of the start are numbered
 in the order the node takes them; the engine takes part in these:
@@ -408,16 +417,8 @@ Known gaps, each filled in with the feature it belongs to:
 - The prompt, block and feedback replays and phases 11 to 13 of `RecoverDelivery`
   are empty until the features that own them exist; phase 14 goes on with the outgoing
   messages.
-- A report of the target can only be made for the state accepted and for a rejection made
-  at intake: the target record keeps one time, when it was accepted
-  (`TestAStateAfterAcceptedHasNoStoredTimeToReportItWith`, skipped, holds the question).
-  A pull is answered without a report for any other state, and a reply's evidence is made
-  only while the record is in one of them.
 - An empty body is refused: the Agent interface says a body may be empty and an envelope
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
-- A disclosed list of several recipients is refused: the source record does not keep the
-  flag, so a send again could not repeat the request digest the target stored
-  (`TestShouldTheSourceRecordKeepWhetherRecipientsAreDisclosed`, skipped).
 - The unreachable hint and the expiry of a delivery nobody answered are not applied by the
   sender yet; they come with the feedback.
 - Closing a session endpoint does not yet send `session.close` to the adapter: the

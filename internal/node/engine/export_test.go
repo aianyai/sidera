@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // The hooks the tests of the engine use to reach what only the loop may touch.
@@ -347,4 +348,22 @@ func (o *testOperation) Admin() admin.Operation { return o.op }
 func (o *testOperation) stops() bool            { return o.stop }
 func (o *testOperation) run(_ *Engine, x *opRun) ([]byte, error) {
 	return o.run_(TestRun{Now: x.now, Key: x.key, Fingerprint: x.fingerprint, Expected: x.expected, Name: x.name})
+}
+
+type cmdSign struct {
+	call[record.Record]
+	in store.InRecord
+}
+
+func (c *cmdSign) gate() gate { return gateAlways }
+func (c *cmdSign) run(e *Engine, now time.Time) {
+	rec, err := e.signReport(now, c.in)
+	c.done(rec, e.classify(err))
+}
+
+// SignReport runs the signing of a report of the target record as a command of the
+// loop, the way a pull and an intake sign.
+func SignReport(ctx context.Context, e *Engine, in store.InRecord) (record.Record, error) {
+	c := &cmdSign{call: newCall[record.Record](), in: in}
+	return roundTrip(ctx, e, submitExternal, c, c.call)
 }

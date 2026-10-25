@@ -349,7 +349,7 @@ func (e *Engine) encodeFor(now time.Time, o store.OutRecord, node ident.NodeID) 
 	}
 	env := envelope.Envelope{
 		ID: o.Outbound.Message, To: slices.Clone(o.Key.Recipients), MultiRecipient: len(o.Key.Recipients) > 1,
-		Kind: envelope.KindMessage, ReplyTo: o.Envelope.ReplyTo, Thread: o.Envelope.Thread,
+		DiscloseRecipients: o.Envelope.DiscloseRecipients, Kind: envelope.KindMessage, ReplyTo: o.Envelope.ReplyTo, Thread: o.Envelope.Thread,
 		Seq: o.Envelope.Seq, SentAt: o.Envelope.SentAt, AcceptBefore: o.Outbound.AcceptBefore, ReportBy: o.Envelope.ReportBy,
 		ContentType: o.Envelope.ContentType, Body: body,
 	}
@@ -365,13 +365,17 @@ func (e *Engine) encodeFor(now time.Time, o store.OutRecord, node ident.NodeID) 
 
 // evidenceFor is this node's signed report of its delivery of a message to the
 // endpoint, which a reply carries to prove that the message arrived. It is not
-// there when the node holds no record of the message or cannot date its state.
+// there when the node holds no record of the message, or more than one.
 func (e *Engine) evidenceFor(now time.Time, recipient ident.EndpointID, message delivery.MessageID) (record.Record, bool, error) {
 	keys := e.view.received[msgKey{recipient, message}]
 	if len(keys) != 1 {
 		return record.Record{}, false, nil
 	}
-	return e.signReport(now, e.view.in[keys[0]])
+	rec, err := e.signReport(now, e.view.in[keys[0]])
+	if err != nil {
+		return record.Record{}, false, err
+	}
+	return rec, true, nil
 }
 
 // recoverOutbound goes on with the outgoing messages after a start: every source

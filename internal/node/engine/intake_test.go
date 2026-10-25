@@ -9,6 +9,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
@@ -17,6 +18,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/reply"
 	"github.com/aianyai/sidera/internal/trust"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -344,6 +346,24 @@ func TestTheSameIdempotencyKeyForOtherRecipientsIsAConflict(t *testing.T) {
 	}
 }
 
+// Whether the recipients are disclosed to each other is part of the request.
+func TestTheSameIdempotencyKeyDisclosingTheRecipientsDifferentlyIsAConflict(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b", "c")
+	send := func(disclose bool) (fakeagent.SendResult, error) {
+		return h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b"), h.Addr("c")}, Body: "to two", IdemKey: "key-1", DiscloseRecipients: disclose})
+	}
+	first, err := send(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := send(false); fakeagent.CodeOf(err) != "idempotency_conflict" {
+		t.Errorf("the key again without the disclosure: %v, want idempotency_conflict", err)
+	}
+	if again, err := send(true); err != nil || !again.Replayed || again.MessageID != first.MessageID {
+		t.Errorf("the same request again: %+v, %v; want the first message, replayed", again, err)
+	}
+}
+
 func TestEndpointBacklogFullIsRejectedWithReason(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	var ids []adapterproto.MessageID
@@ -497,13 +517,140 @@ func TestASendWithAnEmptyBodyIsRefused(t *testing.T) {
 // The questions below are rules that the contract packages or the store do not
 // answer, kept in sight until they are settled where they belong.
 
-func TestAStateAfterAcceptedHasNoStoredTimeToReportItWith(t *testing.T) {
-	t.Skip("question: a status report carries the moment the target recorded the state, and a delivered one the moment of delivery; " +
-		"store.InRecord keeps only AcceptedAt, so a report of delivered, delivery_unknown or a rejection after intake cannot be dated. " +
-		"The record needs a stored time for its last change of state, written by whatever changes it.")
+// A status report carries the moment the target recorded the state it reports,
+// and a delivered one the moment of delivery: both are what the record kept when
+// it entered the state, never the time it was accepted or the time of the report.
+func TestAReportIsDatedWithTheMomentTheTargetRecordedTheStateItReports(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	b := addrOf(t, h, "b")
+	accepted := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
+	entered := accepted.Add(7 * time.Minute)
+	key := store.TargetKey{SenderNode: harness.NodeID(), Sender: addrOf(t, h, "a").Endpoint, Message: "dated", Recipient: b.Endpoint}
+	for _, c := range []struct {
+		name      string
+		state     delivery.State
+		reject    delivery.RejectReason
+		unknown   delivery.UnknownCause
+		delivered bool
+	}{
+		{"accepted", delivery.StateAccepted, 0, 0, false},
+		{"rejected at intake", delivery.StateRejected, delivery.RejectEndpointDeclined, 0, false},
+		{"rejected later, when the endpoint closed", delivery.StateRejected, delivery.RejectEndpointClosed, 0, false},
+		{"rejected later, when the backlog deadline passed", delivery.StateRejected, delivery.RejectBacklogExpired, 0, false},
+		{"rejected later, by the second check", delivery.StateRejected, delivery.RejectSecondCheckFailed, 0, false},
+		{"delivered", delivery.StateDelivered, 0, 0, true},
+		{"delivery_unknown", delivery.StateDeliveryUnknown, 0, delivery.UnknownHandedOver, false},
+		{"closed_unconfirmed", delivery.StateClosedUnconfirmed, 0, 0, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec, err := delivery.NewTargetRecord(accepted, accepted.Add(time.Hour), delivery.ReportBy(accepted.Add(time.Hour)), delivery.DefaultEndpointMaxQueue)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec.State, rec.Reject, rec.Unknown, rec.StateAt = c.state, c.reject, c.unknown, entered
+			signed, err := engine.SignReport(h.Ctx(), h.Engine(), store.InRecord{Key: key, Record: rec, AcceptedAt: accepted})
+			if err != nil {
+				t.Fatal(err)
+			}
+			rep, err := h.VerifyReport(signed)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !rep.ReportedAt.Equal(entered) {
+				t.Errorf("reported at %v, want the moment the state was entered, %v", rep.ReportedAt, entered)
+			}
+			if c.delivered != !rep.DeliveredAt.IsZero() || (c.delivered && !rep.DeliveredAt.Equal(entered)) {
+				t.Errorf("delivered at %v, want %v exactly when the state is delivered", rep.DeliveredAt, entered)
+			}
+		})
+	}
+
+	t.Run("a pull after the endpoint closed reports the rejection with the time of the closing", func(t *testing.T) {
+		msg := "taken-then-closed"
+		accepted := h.Clock().Now().Truncate(time.Second)
+		if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "a").Endpoint, forged(t, h, msg, b, "", "x")); err != nil {
+			t.Fatal(err)
+		}
+		pull := func() envelope.StatusReport {
+			t.Helper()
+			ans, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: delivery.MessageID(msg)})
+			if err != nil || len(ans.Reports) != 1 {
+				t.Fatalf("the answer to a pull: %+v, %v", ans, err)
+			}
+			rep, err := h.VerifyReport(ans.Reports[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			return rep
+		}
+		if rep := pull(); rep.Status.State != delivery.StateAccepted || !rep.ReportedAt.Equal(accepted) {
+			t.Fatalf("before the closing: %s at %v, want accepted at %v", rep.Status.State, rep.ReportedAt, accepted)
+		}
+		h.Advance(5 * time.Minute)
+		closedAt := h.Clock().Now().Truncate(time.Second)
+		if _, err := h.Engine().CloseEndpoint(h.Ctx(), engine.CloseRequest{Endpoint: b.Endpoint}); err != nil {
+			t.Fatal(err)
+		}
+		quiet(t, h)
+		h.Advance(time.Minute)
+		rep := pull()
+		if rep.Status.State != delivery.StateRejected || rep.Status.Reject != delivery.RejectEndpointClosed || !rep.ReportedAt.Equal(closedAt) {
+			t.Errorf("after the closing: %s (%s) at %v, want rejected (endpoint_closed) at %v", rep.Status.State, rep.Status.Reject, rep.ReportedAt, closedAt)
+		}
+		h.Advance(time.Minute)
+		if again := pull(); !again.ReportedAt.Equal(closedAt) {
+			t.Errorf("a pull again for an unchanged state is dated %v, want the same %v", again.ReportedAt, closedAt)
+		}
+	})
 }
 
-func TestShouldTheSourceRecordKeepWhetherRecipientsAreDisclosed(t *testing.T) {
-	t.Skip("question: store.OutEnvelope has no field for disclose_recipients, so a resend of a message to several recipients cannot " +
-		"reproduce the request digest the target stored; the engine refuses a disclosed list of several recipients until the record keeps the flag.")
+// The target compares a message sent again by the digest of its request, which
+// covers the sender's choice to disclose the recipients to each other. The source
+// record keeps the choice, so the message sent again is the same request, and a
+// disclosed list of several recipients is taken like any other.
+func TestAMessageToSeveralRecipientsSentAgainIsTheSameRequestWhetherOrNotTheyAreDisclosed(t *testing.T) {
+	for _, disclose := range []bool{true, false} {
+		t.Run(fmt.Sprintf("disclosed %v", disclose), func(t *testing.T) {
+			h := nodeWith(t, harness.Options{}, "a", "b", "c")
+			to := []string{h.Addr("b"), h.Addr("c")}
+			// The target takes the message in, the sender hears nothing and sends again.
+			h.DropReceipt(1)
+			res, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: to, Body: "to two", DiscloseRecipients: disclose})
+			if err != nil {
+				t.Fatal(err)
+			}
+			quiet(t, h)
+			if d := sourceDelivery(t, h, res.MessageID); d.State != delivery.StateQueued {
+				t.Fatalf("the sender's record is %s, want queued: it has no receipt", d.State)
+			}
+			h.Advance(resendBackoff)
+			quiet(t, h)
+
+			o := outOf(t, h, res.MessageID)
+			if o.Envelope.DiscloseRecipients != disclose {
+				t.Errorf("the source record keeps disclose_recipients %v, want %v", o.Envelope.DiscloseRecipients, disclose)
+			}
+			for _, r := range o.Outbound.Recipients {
+				if r.Delivery.State != delivery.StateAccepted {
+					t.Errorf("the delivery to %s is %s after the resend, want accepted: the target must have taken it for the same request", r.Address, r.Delivery.State)
+				}
+			}
+			// The digest the target stored is the one of the request as the sender
+			// made it, worked out here from the request alone.
+			want := envelope.Envelope{
+				ID: o.Outbound.Message, To: []ident.Address{addrOf(t, h, "b"), addrOf(t, h, "c")}, MultiRecipient: true, DiscloseRecipients: disclose,
+				Kind: envelope.KindMessage, ContentType: "text/plain", Body: []byte("to two"),
+				AcceptBefore: o.Outbound.AcceptBefore, ReportBy: o.Envelope.ReportBy,
+			}.Digest()
+			ins := inRecords(t, h, res.MessageID)
+			if len(ins) != 2 {
+				t.Fatalf("%d target records, want 2", len(ins))
+			}
+			for _, in := range ins {
+				if in.Dedup.Digest != want {
+					t.Errorf("the target of %s stored another request digest than the sender's request has", in.Key.Recipient)
+				}
+			}
+		})
+	}
 }
