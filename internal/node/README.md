@@ -94,7 +94,8 @@ that prove the scans themselves detect what they should:
 | `TestRuntimeReadsTimeOnlyThroughClock` | The clock rule above. |
 | `TestRuntimeTouchesFilesOnlyThroughFsx` | The file rule above. |
 | `TestRuntimeTakesRandomnessAsReader` | The randomness rule above. |
-| `TestTheActorOfTheLocalOwnerIsMadeOnlyByTheManagementInterface` | `admin.LocalOwner`, `admin.ActorLocalOwner` and `pairing.LocalAuthor` appear only in `manageapi`, in the runtime tree and in `cmd/`. A connection on the management listener is the local owner, and nothing else may say so. |
+| `TestTheActorOfTheLocalOwnerIsMadeOnlyByTheManagementInterface` | `admin.LocalOwner`, `admin.ActorLocalOwner` and `pairing.LocalAuthor` appear only in `manageapi`, in the runtime tree and in `cmd/`. A connection on the management listener is the local owner, and nothing else may say so. The packages below `testkit/` are exempt: they stand in for the owner when they build a test home, because the `config` write functions they seed it through take the owner's request key, and the next rule keeps them out of every production binary. |
+| `TestTestToolingReachesNoProductionBinary` | No non-test Go file of the module outside `internal/node/testkit/...` and the fake programs `cmd/sidera-fake-adapter` and `cmd/sidera-fake-runtime` imports a package below `internal/node/testkit/`. Test tooling builds test homes and plays the owner and the outside world; it never ships in the daemon or the command line. |
 | `TestLocalSourcesAreJudgedOnlyWhereTheLoopbackDeliversThem` | `authz.EvaluateLocal`, `LocalCreate` and `LocalRequest` appear only in `engine` and `transport`: only what the loopback transport delivers is a request of a local source. |
 
 The three source scans parse every non-test file below this directory,

@@ -77,6 +77,13 @@ Three rules bind every runtime package:
   other, as a real third party would, so they cannot reach `fsx`; their files are
   not daemon state; and the ledger is a test oracle that must stay independent of
   the `fsx` under test (see [testkit](../testkit/README.md)).
+- **Test tooling never reaches a production binary.** `internal/node/testkit/...`
+  seeds test homes through the real `config` write functions, which take the
+  owner's request key, so it makes the actor of the local owner; the local-owner
+  scan exempts it for that reason. The exemption is safe only because no non-test
+  file outside the testkit and the two fake programs (`cmd/sidera-fake-adapter`,
+  `cmd/sidera-fake-runtime`) imports a package below it, which a separate scan
+  enforces.
 - **Pure scans, not a linter dependency.** `go/parser` and `go list` are in the
   standard toolchain; a linter would add a dependency for rules this small.
 
@@ -98,9 +105,15 @@ Three rules bind every runtime package:
     `TestLocalSourcesAreJudgedOnlyWhereTheLoopbackDeliversThem`: the actor of the
     local owner is made only in `internal/node/manageapi`, and the judgments of a
     local source (`authz.EvaluateLocal`, `LocalCreate`, `LocalRequest`) only in the
-    engine and in the transport, over the runtime tree and `cmd/`;
+    engine and in the transport, over the runtime tree and `cmd/`; the packages
+    below `internal/node/testkit/` are exempt from the first, which stands in for
+    the owner when it builds a test home;
     `TestTheLocalOwnerAndLocalSourceScansDetectViolations` checks both scans on
     inline sources.
+  - `TestTestToolingReachesNoProductionBinary`: no non-test file of the module
+    outside `internal/node/testkit/...` and the two fake programs imports a package
+    below `internal/node/testkit/`; `TestTestToolingImportCheckDetectsViolations`
+    checks the scan on inline sources.
   - `TestRuntimeImportersDetectViolations` and
     `TestRuntimeScansDetectViolations`: check, on inline sources, that each
     check reports what its rule forbids and passes what it allows, so a clean

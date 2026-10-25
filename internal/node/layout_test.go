@@ -29,6 +29,9 @@ import (
 
 const runtimeDir = "internal/node"
 
+// testkitDir is the test tooling of the runtime packages.
+const testkitDir = "internal/node/testkit"
+
 // Exceptions are exact directories, relative to the module root. A package
 // that sits below an exempt directory is not exempt: it is added by name.
 var (
@@ -556,6 +559,84 @@ func TestRuntimeScanWalksTree(t *testing.T) {
 	}
 }
 
+// --- test tooling stays out of production ---
+
+// testkitImporters lists the fake programs that are built from the test tooling and
+// never installed.
+var testkitImporters = []string{
+	"cmd/sidera-fake-adapter",
+	"cmd/sidera-fake-runtime",
+}
+
+// isUnder reports whether dir is base or below it.
+func isUnder(dir, base string) bool {
+	return dir == base || strings.HasPrefix(dir, base+"/")
+}
+
+// TestTestToolingReachesNoProductionBinary fails when a non-test file outside the test
+// tooling and the two fake programs imports a package below internal/node/testkit. The
+// tooling builds test homes and plays the owner and the outside world; were a production
+// package to import it, that would be shipped in the daemon or the command line.
+func TestTestToolingReachesNoProductionBinary(t *testing.T) {
+	root := moduleRoot(t)
+	module := modulePath(t, root)
+	violations, err := scanTree(root, root, testkitImportCheck(module))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range violations {
+		t.Error(v)
+	}
+}
+
+// testkitImportCheck reports every import of a package below the test tooling in a
+// directory that is neither the tooling nor one of the fake programs.
+func testkitImportCheck(module string) dirCheck {
+	return func(dir string, fset *token.FileSet, f *ast.File) []string {
+		if isUnder(dir, testkitDir) || slices.Contains(testkitImporters, dir) {
+			return nil
+		}
+		var out []string
+		for _, spec := range f.Imports {
+			importPath, err := strconv.Unquote(spec.Path.Value)
+			if err == nil && isUnder(importPath, module+"/"+testkitDir) {
+				out = append(out, fmt.Sprintf("%s: import of %s is not allowed here: test tooling never reaches a production binary", fset.Position(spec.Pos()), importPath))
+			}
+		}
+		return out
+	}
+}
+
+func TestTestToolingImportCheckDetectsViolations(t *testing.T) {
+	const m = "example.com/m"
+	check := testkitImportCheck(m)
+	for _, r := range []struct {
+		name string
+		dir  string
+		src  string
+		want int
+	}{
+		{"a daemon package importing the harness", "internal/node/daemon", `package p; import _ "example.com/m/internal/node/testkit/harness"`, 1},
+		{"the command line importing a fake", "cmd/sidera", `package p; import _ "example.com/m/internal/node/testkit/fakeadapter"`, 1},
+		{"a contract package importing the ledger", "internal/admin", `package p; import "example.com/m/internal/node/testkit/ledger"; var _ = ledger.X`, 1},
+		{"the test tooling importing itself", "internal/node/testkit/harness", `package p; import _ "example.com/m/internal/node/testkit/ledger"`, 0},
+		{"a fake program", "cmd/sidera-fake-adapter", `package p; import _ "example.com/m/internal/node/testkit/fakeadapter"`, 0},
+		{"another runtime package", "internal/node/daemon", `package p; import _ "example.com/m/internal/node/engine"`, 0},
+		{"a package whose name only starts like the tooling", "internal/node/daemon", `package p; import _ "example.com/m/internal/node/testkitchen"`, 0},
+	} {
+		t.Run(r.name, func(t *testing.T) {
+			fset := token.NewFileSet()
+			f, err := parser.ParseFile(fset, "p.go", r.src, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := check(r.dir, fset, f); len(got) != r.want {
+				t.Fatalf("got %d reports %q, want %d", len(got), got, r.want)
+			}
+		})
+	}
+}
+
 // --- who may make the local owner, and who may judge a local source ---
 
 // The actor of the local owner may be made only by the management interface, which
@@ -563,6 +644,10 @@ func TestRuntimeScanWalksTree(t *testing.T) {
 // came in on the management listener, whose peer ipc checked to be the user's own.
 // Anywhere else it would be a way to act as the owner on the strength of nothing.
 // cmd/ is scanned too: a client of the interface has no business making it.
+// Test tooling below internal/node/testkit is the one exemption: it stands in for the
+// owner when it builds a test home, because the write functions of config that it seeds
+// the home through take the owner's request key, and TestTestToolingReachesNoProductionBinary
+// keeps it out of every production binary, so no runtime path can reach what it makes.
 var localOwnerAllowed = []string{"internal/node/manageapi"}
 
 // A request is of a local source, and judged as one, only when the loopback
@@ -601,9 +686,12 @@ func scanRuntimeAndCmd(t *testing.T, check dirCheck) {
 
 func TestTheActorOfTheLocalOwnerIsMadeOnlyByTheManagementInterface(t *testing.T) {
 	module := modulePath(t, moduleRoot(t))
-	scanRuntimeAndCmd(t, exemptDirs(localOwnerAllowed, func(fset *token.FileSet, f *ast.File) []string {
+	scanRuntimeAndCmd(t, func(dir string, fset *token.FileSet, f *ast.File) []string {
+		if slices.Contains(localOwnerAllowed, dir) || isUnder(dir, testkitDir) {
+			return nil
+		}
 		return bannedSelectors(fset, f, localOwnerNames(module))
-	}))
+	})
 }
 
 func TestLocalSourcesAreJudgedOnlyWhereTheLoopbackDeliversThem(t *testing.T) {
