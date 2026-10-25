@@ -86,18 +86,18 @@ func (w *powerLossWorld) next() *operation {
 				after:  func() { w.stage[i] = 1 }}
 		case 1:
 			in := tgtIn(i)
-			return &operation{name: "deliver", call: func() error { return r.st.Deliver(nil, []store.InRecord{in}) },
+			return &operation{name: "deliver", call: func() error { return dropWritten(r.st.Deliver(nil, []store.InRecord{in})) },
 				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, 1))},
 				after:  func() { w.stage[i], w.rev[i] = 2, 1 }}
 		case 2:
 			in := w.leased(i)
-			return &operation{name: "lease", call: func() error { return r.st.Lease([]store.InRecord{in}) },
+			return &operation{name: "lease", call: func() error { return dropWritten(r.st.Lease([]store.InRecord{in})) },
 				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, in.Rev+1))},
 				after:  func() { w.stage[i] = 3; w.rev[i]++ }}
 		case 3:
 			in := w.leased(i)
 			in.Record, in.Body = deliveredRecord(in.Record), nil
-			return &operation{name: "ack", call: func() error { return r.st.Ack([]store.InRecord{in}, nil) },
+			return &operation{name: "ack", call: func() error { return dropWritten(r.st.Ack([]store.InRecord{in}, nil)) },
 				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, in.Rev+1))},
 				after:  func() { w.stage[i] = 4; w.rev[i]++ }}
 		case 4:

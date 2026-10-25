@@ -617,59 +617,60 @@ type BodyQuarantine struct {
 }
 
 // QuarantineBody writes a chunk of the quarantine of a body.
-func (s *Store) QuarantineBody(q BodyQuarantine) error {
+// It returns the target records as written (the revision one on).
+func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
 	if !isHashName(q.Name) || q.AlertID == (AlertID{}) {
-		return errors.New("store: a body quarantine names a body and an alert")
+		return nil, errors.New("store: a body quarantine names a body and an alert")
 	}
 	of, err := outFiles(q.Out)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	inf, err := inFiles(q.In)
+	written, inf, err := inFiles(q.In)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	cf, err := ctlFiles(q.Ctl)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var af *file
 	if q.Alert != nil {
 		if q.Alert.ID != q.AlertID {
-			return errors.New("store: the alert of a body quarantine is the one its file names")
+			return nil, errors.New("store: the alert of a body quarantine is the one its file names")
 		}
 		f, err := recordFile(AlertsDir, *q.Alert)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		af = &f
 	}
 	if !q.Rename && len(of)+len(inf)+len(cf) == 0 && af == nil {
-		return nil
+		return nil, nil
 	}
 	tx := s.w.Begin(&declQuarantineBody)
 	defer tx.Close()
 	if q.Rename {
 		from := path.Join(BodiesDir, q.Name)
 		if err := tx.RenameFile("body", from, path.Join(BodiesDir, corruptName(q.Name, q.AlertID))); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if err := writeGroup(tx, "out", "out-dir", OutDir, of); err != nil {
-		return err
+		return nil, err
 	}
 	if err := writeGroup(tx, "in", "in-dir", InDir, inf); err != nil {
-		return err
+		return nil, err
 	}
 	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
-		return err
+		return nil, err
 	}
 	if af != nil {
 		if err := s.replace(tx, "alert", *af); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return tx.Commit()
+	return committed(tx, written)
 }
 
 // OrphanGC removes the bodies, then syncs the directory.
@@ -752,37 +753,43 @@ func (s *Store) CtlEffectReplay(eps []EndpointRecord) error {
 
 // EndpointDrainReplay writes a chunk of the closed deliveries of closed
 // endpoints.
-func (s *Store) EndpointDrainReplay(b DrainBatch) error {
+// It returns the target records as written (the revision one on).
+func (s *Store) EndpointDrainReplay(b DrainBatch) ([]InRecord, error) {
 	return s.drain(&declEndpointDrainReplay, nil, b, false)
 }
 
 // InstanceDrainReplay closes the endpoints of disabled instances and writes a
 // chunk of their deliveries.
-func (s *Store) InstanceDrainReplay(closed []EndpointRecord, b DrainBatch) error {
+// It returns the target records as written (the revision one on).
+func (s *Store) InstanceDrainReplay(closed []EndpointRecord, b DrainBatch) ([]InRecord, error) {
 	return s.drain(&declInstanceDrainReplay, closed, b, true)
 }
 
-func (s *Store) followersReplay(decl *txn.Decl, ins []InRecord) error {
+func (s *Store) followersReplay(decl *txn.Decl, ins []InRecord) ([]InRecord, error) {
 	if len(ins) == 0 {
-		return nil
+		return nil, nil
 	}
-	files, err := inFiles(ins)
+	written, files, err := inFiles(ins)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tx := s.w.Begin(decl)
 	defer tx.Close()
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return err
+		return nil, err
 	}
-	return tx.Commit()
+	return committed(tx, written)
 }
 
 // PromptReplay writes the followers of a prompt, with the event applied.
-func (s *Store) PromptReplay(ins []InRecord) error { return s.followersReplay(&declPromptReplay, ins) }
+// It returns the target records as written (the revision one on).
+func (s *Store) PromptReplay(ins []InRecord) ([]InRecord, error) {
+	return s.followersReplay(&declPromptReplay, ins)
+}
 
 // BlockedReplay writes the followers of a block or a recovery.
-func (s *Store) BlockedReplay(ins []InRecord) error {
+// It returns the target records as written (the revision one on).
+func (s *Store) BlockedReplay(ins []InRecord) ([]InRecord, error) {
 	return s.followersReplay(&declBlockedReplay, ins)
 }
 

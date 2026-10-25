@@ -794,3 +794,7 @@ func misnamed(t testing.TB, claimed, under store.Record, id store.AlertID) (name
 	data[len(data)-2] ^= 0x01
 	return corruptName(under, id), data
 }
+
+// dropWritten keeps the error of a write that also returns the records it wrote,
+// for the callers that have no use for them.
+func dropWritten[T any](_ T, err error) error { return err }

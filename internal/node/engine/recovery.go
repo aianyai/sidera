@@ -243,7 +243,8 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 			}},
 		{"instance-drain-replay", func(p RecoveryPlan) int { return len(p.InstanceDrain) },
 			func(sc *store.Scan, p RecoveryPlan, now time.Time) error {
-				return e.d.Store.InstanceDrainReplay(closedRecords(p.InstanceDrain), instanceDrainBatch(sc, p.InstanceDrain, now))
+				_, err := e.d.Store.InstanceDrainReplay(closedRecords(p.InstanceDrain), instanceDrainBatch(sc, p.InstanceDrain, now))
+				return err
 			}},
 		{"orphan-gc-endpoint", func(p RecoveryPlan) int { return len(p.OrphanEndpoints) },
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
@@ -251,7 +252,8 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 			}},
 		{"endpoint-drain-replay", func(p RecoveryPlan) int { return len(p.EndpointDrain.In) + len(p.EndpointDrain.Ctl) },
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
-				return e.d.Store.EndpointDrainReplay(p.EndpointDrain)
+				_, err := e.d.Store.EndpointDrainReplay(p.EndpointDrain)
+				return err
 			}},
 		{"orphan-gc", func(p RecoveryPlan) int { return len(p.OrphanBodies) },
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error { return e.d.Store.OrphanGC(p.OrphanBodies) }},

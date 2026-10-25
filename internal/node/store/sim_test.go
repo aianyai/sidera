@@ -152,7 +152,7 @@ func (s *sim) pass() bool {
 		do("ctl-effect-replay")
 	}
 	if eps := store.InstanceDrainWork(s.scan(), s.enabled); len(eps) > 0 {
-		s.must(s.st.InstanceDrainReplay(eps, s.drainFor(s.scan(), eps)), "InstanceDrainReplay")
+		s.must(dropWritten(s.st.InstanceDrainReplay(eps, s.drainFor(s.scan(), eps))), "InstanceDrainReplay")
 		do("instance-drain-replay")
 	}
 	if eps := store.OrphanEndpoints(s.scan()); len(eps) > 0 {
@@ -160,12 +160,12 @@ func (s *sim) pass() bool {
 		do("orphan-gc-endpoint")
 	}
 	if b := s.drainBatch(s.scan()); len(b.In)+len(b.Ctl) > 0 {
-		s.must(s.st.EndpointDrainReplay(b), "EndpointDrainReplay")
+		s.must(dropWritten(s.st.EndpointDrainReplay(b)), "EndpointDrainReplay")
 		do("endpoint-drain-replay")
 	}
 	for _, w := range store.PromptReplays(s.scan()) {
 		ins := s.apply(w, delivery.Event{Type: delivery.EventNotified})
-		s.must(s.st.PromptReplay(ins), "PromptReplay")
+		s.must(dropWritten(s.st.PromptReplay(ins)), "PromptReplay")
 		do("prompt-replay")
 	}
 	for _, w := range store.BlockedReplays(s.scan()) {
@@ -173,7 +173,7 @@ func (s *sim) pass() bool {
 		if w.Head.Pending.Event == store.PendingUnblocked {
 			ev = delivery.Event{Type: delivery.EventUnblocked}
 		}
-		s.must(s.st.BlockedReplay(s.apply(w, ev)), "BlockedReplay")
+		s.must(dropWritten(s.st.BlockedReplay(s.apply(w, ev))), "BlockedReplay")
 		do("blocked-replay")
 	}
 	if outs := store.FeedbackReplays(s.scan()); len(outs) > 0 {
@@ -357,7 +357,7 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 			a := s.alert(id, "corrupt_body", store.BodiesDir+"/"+name)
 			q.Alert = &a
 		}
-		s.must(s.st.QuarantineBody(q), "QuarantineBody "+name)
+		s.must(dropWritten(s.st.QuarantineBody(q)), "QuarantineBody "+name)
 		first = false
 		if last {
 			return

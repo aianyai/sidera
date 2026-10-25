@@ -24,13 +24,13 @@ type Store interface {
 
 	EndpointUpdate(ep store.EndpointRecord) error
 	EndpointClose(ep store.EndpointRecord, result *store.AdminRecord) error
-	EndpointDrain(b store.DrainBatch) error
+	EndpointDrain(b store.DrainBatch) ([]store.InRecord, error)
 	AlertRaise(a store.AlertRecord) error
 
 	CtlEffectReplay(eps []store.EndpointRecord) error
-	InstanceDrainReplay(closed []store.EndpointRecord, b store.DrainBatch) error
+	InstanceDrainReplay(closed []store.EndpointRecord, b store.DrainBatch) ([]store.InRecord, error)
 	OrphanGCEndpoint(eps []store.EndpointRecord) error
-	EndpointDrainReplay(b store.DrainBatch) error
+	EndpointDrainReplay(b store.DrainBatch) ([]store.InRecord, error)
 	OrphanGC(bodies []string) error
 }
 

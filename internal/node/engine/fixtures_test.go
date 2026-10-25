@@ -57,7 +57,7 @@ func queuedIn(t testing.TB, i int, recipient ident.EndpointID) store.InRecord {
 func (r *rig) queue(first, n int, recipient ident.EndpointID) {
 	r.t.Helper()
 	for i := first; i < first+n; i++ {
-		if err := r.st.Deliver(bodyOf(i), []store.InRecord{queuedIn(r.t, i, recipient)}); err != nil {
+		if _, err := r.st.Deliver(bodyOf(i), []store.InRecord{queuedIn(r.t, i, recipient)}); err != nil {
 			r.t.Fatalf("Deliver %d: %v", i, err)
 		}
 	}

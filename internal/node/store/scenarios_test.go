@@ -117,7 +117,7 @@ func scenarios() []scenario {
 			durable: "deliver/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return r.st.Deliver(nil, []store.InRecord{inRev(1, 1), inRev(2, 1)})
+				return dropWritten(r.st.Deliver(nil, []store.InRecord{inRev(1, 1), inRev(2, 1)}))
 			},
 			bodiesResolve: true,
 		},
@@ -126,7 +126,7 @@ func scenarios() []scenario {
 			durable: "deliver/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return r.st.Deliver(bodyBytes(3), []store.InRecord{inRev(3, 1)})
+				return dropWritten(r.st.Deliver(bodyBytes(3), []store.InRecord{inRev(3, 1)}))
 			},
 			bodiesResolve: true,
 		},
@@ -144,7 +144,7 @@ func scenarios() []scenario {
 					Ref:      delivery.DeliveryRef{Sender: addr(local, 1), Message: msgID(1), Recipient: addr(local, 2)},
 					Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: base,
 				}}
-				return r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)})
+				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}))
 			},
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
 				// The source record is updated before the target record that depends on it.
@@ -238,7 +238,7 @@ func scenarios() []scenario {
 					in.Record = leasedRecord(in.Record, base)
 					ins = append(ins, in)
 				}
-				return r.st.Lease(ins)
+				return dropWritten(r.st.Lease(ins))
 			},
 			bodiesResolve: true,
 		},
@@ -256,7 +256,7 @@ func scenarios() []scenario {
 				a, b := inRev(1, 2), inRev(2, 2)
 				a.Body, b.Body = nil, nil
 				a.Record, b.Record = deliveredRecord(a.Record), deliveredRecord(b.Record)
-				return r.st.Ack([]store.InRecord{a, b}, []store.BodyRef{*bodyRef(1)})
+				return dropWritten(r.st.Ack([]store.InRecord{a, b}, []store.BodyRef{*bodyRef(1)}))
 			},
 			bodiesResolve: true,
 		},
@@ -278,10 +278,10 @@ func scenarios() []scenario {
 				c := sessionCtl(3, 5)
 				c.Body = nil
 				c.Record = applied(t, c.Record, delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectExpired})
-				return r.st.Tick(store.TickBatch{
+				return dropWritten(r.st.Tick(store.TickBatch{
 					Out: []store.OutRecord{out}, In: []store.InRecord{in}, Ctl: []store.CtlRecord{c},
 					Release: []store.BodyRef{*bodyRef(1), *bodyRef(2), *bodyRef(3)},
-				})
+				}))
 			},
 		},
 		{
@@ -313,7 +313,7 @@ func scenarios() []scenario {
 				if err := r.st.EndpointClose(closed, &res); err != nil {
 					return err
 				}
-				return r.st.EndpointDrain(s.drainBatch(r.scan()))
+				return dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan())))
 			},
 		},
 		{
@@ -336,7 +336,7 @@ func scenarios() []scenario {
 				}
 				// The head and the first chunk in one transaction; what is left of the
 				// drain, if any, is another.
-				if err := r.st.InstanceDrain(closed, s.drainFor(r.scan(), closed)); err != nil {
+				if _, err := r.st.InstanceDrain(closed, s.drainFor(r.scan(), closed)); err != nil {
 					return err
 				}
 				return nil
@@ -355,7 +355,7 @@ func scenarios() []scenario {
 			run: func(t *testing.T, r *rig, s *sim) error {
 				o := srcOut(1, false)
 				o.Feedback = []delivery.Item{feedbackItem(1)}
-				if err := r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)); err != nil {
+				if _, err := r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)); err != nil {
 					return err
 				}
 				o.Feedback = nil
@@ -486,9 +486,9 @@ func promptScenario(name string, ev store.PendingEvent, cause delivery.Cause) sc
 			head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(ev, cause, a, b)}
 			a.Record, b.Record = applied(t, a.Record, event), applied(t, b.Record, event)
 			if name == "blocked" {
-				return r.st.Blocked(head, []store.InRecord{a, b})
+				return dropWritten(r.st.Blocked(head, []store.InRecord{a, b}))
 			}
-			return r.st.PromptEnd(head, []store.InRecord{a, b})
+			return dropWritten(r.st.PromptEnd(head, []store.InRecord{a, b}))
 		},
 		bodiesResolve: true,
 	}

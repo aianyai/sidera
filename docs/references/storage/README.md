@@ -516,6 +516,14 @@ at each write. A head record (the prompt or block of an endpoint) lists the
 followers it still owes, each with the revision and the acceptance time the record
 had before the head was written. A rule that replays a prompt or a block acts on a
 listed follower only if it is the same record and nothing has written it since.
+The rule that a write raises the revision has one home, the store: every write
+that does so (`Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
+`Tick`, the drains and their replays, `FeedbackForm`, the followers' replays and
+`QuarantineBody`) returns the target records as written, in the order given, and a
+caller that keeps a view takes them from the return value instead of working the
+revision out again. A lost record has no revision and comes back unchanged. The
+return value is `nil` when the write failed. `TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`
+compares each returned record with what a new scan reads back.
 
 **Bodies** are content-addressed and written before the record that refers to
 them; a body is removed in the transaction that drops its last reference. What a
@@ -1013,7 +1021,7 @@ so that the double cannot drift from what it stands for.
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
-| the transactions | `internal/node/store/write.go` | `write_test.go`, `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
+| the transactions | `internal/node/store/write.go` | `write_test.go`, `written_test.go` (`TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`, `TestAFailedWriteReturnsNoRecords`),  `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
 | recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `resume_scenarios_test.go` (the resumption of each kind of unfinished quarantine, walked from the state a crash leaves), `quarantine_session_test.go` (the double fault of a session creation, `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen`, `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan`), `TestCleanScenariosLeaveNoRecoveryWork` |
 | sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` (`TestArchiveSweepWritesTheFloorOfEverySenderAndTargetOfTheRecordsItRemoves`, `TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten`), `sweep_endpoint_test.go` |
 | archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |

@@ -49,9 +49,9 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 		mustDo(t, r.st.Intake(bodyBytes(i), srcOut(i, true)))
 		check("intake")
 	}
-	mustDo(t, r.st.Deliver(nil, []store.InRecord{tgtIn(1), tgtIn(2)}))
+	mustDo(t, dropWritten(r.st.Deliver(nil, []store.InRecord{tgtIn(1), tgtIn(2)})))
 	check("deliver")
-	mustDo(t, r.st.Deliver(bodyBytes(9), []store.InRecord{tgtIn(9)}))
+	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(9), []store.InRecord{tgtIn(9)})))
 	check("deliver with a body")
 
 	a, b := withRev(tgtIn(1), 1), withRev(tgtIn(2), 1)
@@ -59,30 +59,30 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	check("prompt begin")
 	head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingNotified, delivery.CauseNone, a, b)}
 	a.Record, b.Record = applied(t, a.Record, delivery.Event{Type: delivery.EventNotified}), applied(t, b.Record, delivery.Event{Type: delivery.EventNotified})
-	mustDo(t, r.st.PromptEnd(head, []store.InRecord{a, b}))
+	mustDo(t, dropWritten(r.st.PromptEnd(head, []store.InRecord{a, b})))
 	check("prompt end")
 
 	head = store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingBlocked, delivery.CauseAdapterOffline, withRev(a, 2), withRev(b, 2))}
 	a2, b2 := withRev(a, 2), withRev(b, 2)
 	a2.Record = applied(t, a2.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
 	b2.Record = applied(t, b2.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
-	mustDo(t, r.st.Blocked(head, []store.InRecord{a2, b2}))
+	mustDo(t, dropWritten(r.st.Blocked(head, []store.InRecord{a2, b2})))
 	check("blocked")
 	head = store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingUnblocked, delivery.CauseAdapterOffline, withRev(a2, 3), withRev(b2, 3))}
 	a3, b3 := withRev(a2, 3), withRev(b2, 3)
 	a3.Record = applied(t, a3.Record, delivery.Event{Type: delivery.EventUnblocked})
 	b3.Record = applied(t, b3.Record, delivery.Event{Type: delivery.EventUnblocked})
-	mustDo(t, r.st.Blocked(head, []store.InRecord{a3, b3}))
+	mustDo(t, dropWritten(r.st.Blocked(head, []store.InRecord{a3, b3})))
 	check("block recovered")
 
 	// Leases and acknowledgements; the body goes with the last reference.
 	a4 := withRev(a3, 4)
 	a4.Record = leasedRecord(a4.Record, base)
-	mustDo(t, r.st.Lease([]store.InRecord{a4}))
+	mustDo(t, dropWritten(r.st.Lease([]store.InRecord{a4})))
 	check("lease")
 	a5 := withRev(a4, 5)
 	a5.Record, a5.Body = deliveredRecord(a5.Record), nil
-	mustDo(t, r.st.Ack([]store.InRecord{a5}, nil))
+	mustDo(t, dropWritten(r.st.Ack([]store.InRecord{a5}, nil)))
 	check("ack")
 	out1 := srcOut(1, true)
 	d, _, _ := out1.Outbound.Recipients[0].Delivery.Apply(base, delivery.Event{Type: delivery.EventDelivered})
@@ -100,38 +100,38 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	check("session created")
 	derived := derivedIn(20, 5, 0)
 	derived.Body = nil
-	mustDo(t, r.st.Deliver(nil, []store.InRecord{derived}))
+	mustDo(t, dropWritten(r.st.Deliver(nil, []store.InRecord{derived})))
 	check("the initial message delivered to the session")
 	closeCtl := closedBy(21, 5)
 	mustDo(t, r.st.ControlResult(closeCtl, ptr(closedSession(5, ctlName(20))), nil))
 	// Between a head record and its followers the disk is not at rest: the check
 	// is made when the chunks are done.
-	mustDo(t, r.st.EndpointDrain(s.drainBatch(r.scan())))
+	mustDo(t, dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan()))))
 	check("session drained")
 
 	// An endpoint is closed by the owner, then an instance disabled.
 	mustDo(t, r.st.EndpointUpdate(directEndpoint(7, "chat")))
 	mustDo(t, r.st.EndpointUpdate(directEndpoint(8, "chat")))
-	mustDo(t, r.st.Deliver(bodyBytes(30), []store.InRecord{inFor(30, 7, 0), inFor(31, 8, 0)}))
+	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(30), []store.InRecord{inFor(30, 7, 0), inFor(31, 8, 0)})))
 	check("endpoints and queued deliveries")
 	closed7 := directEndpoint(7, "chat")
 	closed7.Status, closed7.Token = store.EndpointClosed, nil
 	res := adminResult(1)
 	mustDo(t, r.st.EndpointClose(closed7, &res))
-	mustDo(t, r.st.EndpointDrain(s.drainBatch(r.scan())))
+	mustDo(t, dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan()))))
 	check("endpoint closed and drained")
 	disabled["chat"] = true
 	closed8 := directEndpoint(8, "chat")
 	closed8.Status, closed8.Token = store.EndpointClosed, nil
-	mustDo(t, r.st.InstanceDrain([]store.EndpointRecord{closed8}, store.DrainBatch{}))
-	mustDo(t, r.st.EndpointDrain(s.drainBatch(r.scan())))
+	mustDo(t, dropWritten(r.st.InstanceDrain([]store.EndpointRecord{closed8}, store.DrainBatch{})))
+	mustDo(t, dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan()))))
 	check("instance disabled and drained")
 
 	// Feedback.
 	o := srcOut(40, false)
 	o.Feedback = []delivery.Item{feedbackItem(40)}
 	mustDo(t, r.st.Intake(bodyBytes(40), o))
-	mustDo(t, r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)))
+	mustDo(t, dropWritten(r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o))))
 	o.Feedback = nil
 	mustDo(t, r.st.FeedbackClear([]store.OutRecord{o}))
 	check("feedback cleared")

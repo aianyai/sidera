@@ -45,10 +45,10 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 		{"SourceUpdate releasing a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), srcOut(1, true))) }, body,
 			func(st *store.Store) error { return st.SourceUpdate(finished(), rel) }},
 		{"Ack releasing a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, bodyBytes(1)) }, body,
-			func(st *store.Store) error { return st.Ack([]store.InRecord{delivered()}, rel) }},
+			func(st *store.Store) error { return dropWritten(st.Ack([]store.InRecord{delivered()}, rel)) }},
 		{"Tick releasing a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), srcOut(1, true))) }, body,
 			func(st *store.Store) error {
-				return st.Tick(store.TickBatch{Out: []store.OutRecord{finished()}, Release: rel})
+				return dropWritten(st.Tick(store.TickBatch{Out: []store.OutRecord{finished()}, Release: rel}))
 			}},
 		{"ControlResult releasing a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, bodyBytes(20)) }, bodyPath(20),
 			func(st *store.Store) error {
@@ -59,7 +59,7 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 			func(st *store.Store) error {
 				d := derivedIn(20, 5, 0)
 				d.Body = nil
-				return st.EndpointDrain(store.DrainBatch{In: []store.InRecord{d}, Release: rel})
+				return dropWritten(st.EndpointDrain(store.DrainBatch{In: []store.InRecord{d}, Release: rel}))
 			}},
 		{"ArchiveSweep removing a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, bodyBytes(1)) }, body,
 			func(st *store.Store) error { return st.ArchiveSweep(store.SweepChunk{Now: base, Bodies: rel}) }},

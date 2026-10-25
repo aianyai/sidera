@@ -29,7 +29,7 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 	}{
 		{"intake", nil, func(r *rig) error { return r.st.Intake(bodyBytes(1), srcOut(1, true)) },
 			[]string{path.Join(store.OutDir, srcOut(1, true).Name()), path.Join(store.BodiesDir, bodyRef(1).Name())}},
-		{"deliver", nil, func(r *rig) error { return r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)}) },
+		{"deliver", nil, func(r *rig) error { return dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)})) },
 			[]string{path.Join(store.InDir, tgtIn(1).Name()), path.Join(store.BodiesDir, bodyRef(1).Name())}},
 		{"control-reply", nil, func(r *rig) error { return r.st.ControlReply(outCtlRecord(1)) },
 			[]string{path.Join(store.OutDir, outCtlRecord(1).Name())}},
@@ -52,7 +52,7 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 		{"feedback-form", nil, func(r *rig) error {
 			o := srcOut(1, false)
 			o.Feedback = []delivery.Item{feedbackItem(1)}
-			return r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o))
+			return dropWritten(r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)))
 		}, nil},
 		{"orphan-gc", func(t *testing.T, mem *fsxtest.Mem) { seedBodies(t, mem, bodyBytes(1)) },
 			func(r *rig) error { return r.st.OrphanGC([]string{bodyRef(1).Name()}) }, nil},
@@ -90,26 +90,26 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 // revision 1 and each write after a read adds one.
 func TestTargetRecordsAreWrittenWithTheNextRevision(t *testing.T) {
 	r := newRig(t)
-	mustDo(t, r.st.Deliver(nil, []store.InRecord{tgtIn(1)}))
+	mustDo(t, dropWritten(r.st.Deliver(nil, []store.InRecord{tgtIn(1)})))
 	sc := r.scan()
 	if len(sc.In) != 1 || sc.In[0].Rev != 1 {
 		t.Fatalf("after Deliver: %+v", sc.In)
 	}
 	in := sc.In[0]
 	in.Record = leasedRecord(in.Record, base)
-	mustDo(t, r.st.Lease([]store.InRecord{in}))
+	mustDo(t, dropWritten(r.st.Lease([]store.InRecord{in})))
 	in = r.scan().In[0]
 	if in.Rev != 2 || in.Record.Lease.Handouts != 1 {
 		t.Errorf("after Lease: rev %d, handouts %d, want 2 and 1", in.Rev, in.Record.Lease.Handouts)
 	}
 	in.Record = deliveredRecord(in.Record)
-	mustDo(t, r.st.Ack([]store.InRecord{in}, nil))
+	mustDo(t, dropWritten(r.st.Ack([]store.InRecord{in}, nil)))
 	if got := r.scan().In[0].Rev; got != 3 {
 		t.Errorf("after Ack: rev %d, want 3", got)
 	}
 	// A record written again from an older read (revision 2) gets that revision
 	// plus one: the revision tells that a write happened, it does not order writers.
-	mustDo(t, r.st.Lease([]store.InRecord{in}))
+	mustDo(t, dropWritten(r.st.Lease([]store.InRecord{in})))
 	if got := r.scan().In[0].Rev; got != 3 {
 		t.Errorf("after a write of an older read: rev %d, want 3", got)
 	}
@@ -160,12 +160,12 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 		"a target record with an empty message id": func(r *rig) error {
 			in := tgtIn(1)
 			in.Key.Message = ""
-			return r.st.Deliver(nil, []store.InRecord{in})
+			return dropWritten(r.st.Deliver(nil, []store.InRecord{in}))
 		},
 		"a target record that is lost and has a body": func(r *rig) error {
 			in := tgtIn(1)
 			in.Lost = true
-			return r.st.Deliver(nil, []store.InRecord{in})
+			return dropWritten(r.st.Deliver(nil, []store.InRecord{in}))
 		},
 		"an open endpoint without a token": func(r *rig) error {
 			e := directEndpoint(7, "chat")
@@ -302,21 +302,21 @@ func TestHeadRecordRefusesAFollowerItDoesNotListAsItWasRead(t *testing.T) {
 	}
 	head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingNotified, delivery.CauseNone, a)}
 	for name, run := range map[string]func(r *rig) error{
-		"a follower that is not listed": func(r *rig) error { return r.st.PromptEnd(head, []store.InRecord{notify(a), notify(b)}) },
+		"a follower that is not listed": func(r *rig) error { return dropWritten(r.st.PromptEnd(head, []store.InRecord{notify(a), notify(b)})) },
 		"a follower with another revision than the one listed": func(r *rig) error {
 			stale := notify(a)
 			stale.Rev = 5
-			return r.st.PromptEnd(head, []store.InRecord{stale})
+			return dropWritten(r.st.PromptEnd(head, []store.InRecord{stale}))
 		},
 		"a follower accepted at another time than the one listed": func(r *rig) error {
 			other := notify(a)
 			other.AcceptedAt = other.AcceptedAt.Add(time.Second)
-			return r.st.PromptEnd(head, []store.InRecord{other})
+			return dropWritten(r.st.PromptEnd(head, []store.InRecord{other}))
 		},
 		"an event the transaction does not carry": func(r *rig) error {
 			blocked := head
 			blocked.Pending.Event = store.PendingBlocked
-			return r.st.PromptEnd(blocked, []store.InRecord{notify(a)})
+			return dropWritten(r.st.PromptEnd(blocked, []store.InRecord{notify(a)}))
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -330,5 +330,5 @@ func TestHeadRecordRefusesAFollowerItDoesNotListAsItWasRead(t *testing.T) {
 		})
 	}
 	r := newRig(t)
-	mustDo(t, r.st.PromptEnd(head, []store.InRecord{notify(a)}))
+	mustDo(t, dropWritten(r.st.PromptEnd(head, []store.InRecord{notify(a)})))
 }

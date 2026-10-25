@@ -25,7 +25,7 @@ engine applies the delivery rules and calls the writes.
 | `OutRecord`, `InRecord`, `CtlRecord`, `EndpointRecord`, `AttemptsRecord`, `CheckpointRecord`, `AdminRecord`, `AlertRecord`, `SeqRecord` | The records, in the contract types of the other packages. |
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
-| `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. |
+| `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. A write of target records returns them as written. |
 | `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |
 | `OrphanBodies`, `OrphanEndpoints`, `UnfinishedQuarantines`, `EffectReplays`, `DrainCandidates`, `PromptReplays`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
 | `Store.Quarantine`, `QuarantineResume`, `QuarantineBody`, `QuarantineSessions` | Quarantine; the alert is always the last write. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
@@ -40,6 +40,18 @@ engine applies the delivery rules and calls the writes.
   error that touches nothing.
 - **A record that replaces another is passed whole; a target record is written
   with the next revision.** The revision is the only thing a replay reads.
+- **A write that changes the stored form of a target record returns it as
+  written.** `Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
+  `Tick`, `EndpointDrain`, `InstanceDrain`, `EndpointDrainReplay`,
+  `InstanceDrainReplay`, `PromptReplay`, `BlockedReplay` and `QuarantineBody`
+  return `[]InRecord` (the records given, one revision on, in the same order; a
+  lost record has no revision and is unchanged) and `FeedbackForm` returns the
+  `InRecord`. A caller keeping a view stores what comes back and never works the
+  revision out itself: the rule has this one home. After an error nothing is
+  returned, and the caller does not apply the write to its view. The records given
+  are not changed, but the records returned are shallow copies of them: slices,
+  maps and pointers inside a record are shared with the one given, so neither is
+  modified in place. No other write sets a field of a record it is given.
 - **A head record lists its followers as it read them.** `PromptEnd` and `Blocked`
   refuse a follower that is not listed with the revision and acceptance time it was
   read with.
