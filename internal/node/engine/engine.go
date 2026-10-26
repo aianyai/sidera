@@ -120,6 +120,10 @@ type Engine struct {
 	// key of the control record; see create.go.
 	creations map[store.TargetKey]*creation
 
+	// executions are the calls of the close and interrupt signals that are not
+	// settled, by the key of the control record; see execute.go.
+	executions map[store.TargetKey]*execution
+
 	// dueTicks are the records whose entries of the schedule fell due and that are
 	// not ticked yet; tickQueued says a command to tick them is queued.
 	dueTicks   []string
@@ -207,7 +211,8 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		outbox:   newOutbox(),
 		parked:   map[ident.EndpointID][]command{},
 
-		creations: map[store.TargetKey]*creation{},
+		creations:  map[store.TargetKey]*creation{},
+		executions: map[store.TargetKey]*execution{},
 	}
 	if d.RollbackPaused {
 		e.pausedSince = d.RollbackPausedSince
@@ -772,6 +777,20 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 			e.createDeadline(now, k)
 		} else {
 			e.startCreate(now, k)
+		}
+	case schedExecuteDeadline, schedExecuteRetry, schedInterruptConfirm:
+		k, err := store.ParseTargetKey(key.id)
+		if err != nil {
+			e.log.Error("the schedule names a control record that is not one", "record", key.id)
+			return
+		}
+		switch key.kind {
+		case schedExecuteDeadline:
+			e.executeDeadline(now, k)
+		case schedExecuteRetry:
+			e.startExecute(now, k)
+		default:
+			e.interruptConfirmDue(now, k)
 		}
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {

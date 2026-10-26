@@ -35,7 +35,7 @@ type Store interface {
 	Deliver(body []byte, ins []store.InRecord) error
 	DeliverReply(body []byte, out *store.OutRecord, ins []store.InRecord) error
 	SourceUpdate(out store.OutRecord) error
-	ControlIntake(body []byte, endpoint *store.EndpointRecord, ctl store.CtlRecord) error
+	ControlIntake(body []byte, endpoint *store.EndpointRecord, ctl store.CtlRecord, derived *store.InRecord) error
 	ControlResult(ctl store.CtlRecord, endpoint *store.EndpointRecord) error
 	ControlReply(out store.OutRecord) error
 
@@ -45,10 +45,12 @@ type Store interface {
 	AlertRaise(a store.AlertRecord) error
 	AlertAck(a store.AlertAckInput) error
 	CheckpointPut(c store.CheckpointRecord) error
+	CheckpointDrop(keys []store.CheckpointKey) error
 	DaemonStop(result store.AdminRecord) error
 	InstanceDrain(closed []store.EndpointRecord, b store.DrainBatch) error
 
 	CtlEffectReplay(eps []store.EndpointRecord) error
+	DerivedReplay(ins []store.InRecord) error
 	InstanceDrainReplay(closed []store.EndpointRecord, b store.DrainBatch) error
 	OrphanGCEndpoint(eps []store.EndpointRecord) error
 	EndpointDrainReplay(b store.DrainBatch) error

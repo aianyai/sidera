@@ -114,7 +114,7 @@ func (e *Engine) registerDirect(inst string, p adapterproto.RegisterParams) (ada
 		if err := e.d.Store.EndpointUpdate(rec); err != nil {
 			return none, err
 		}
-		e.view.putEndpoint(rec, st.decl)
+		e.putEndpoint(rec, st.decl)
 		return ref, nil
 	}
 
@@ -146,7 +146,7 @@ func (e *Engine) registerDirect(inst string, p adapterproto.RegisterParams) (ada
 	if err := e.commitEndpointAndID(&declDirectRegister, ch, rec); err != nil {
 		return none, err
 	}
-	e.view.putEndpoint(rec, decl)
+	e.putEndpoint(rec, decl)
 	return ref, nil
 }
 
@@ -287,7 +287,7 @@ func (e *Engine) declare(c Caller, p DeclarationPatch) (authz.Declaration, error
 	if err := e.d.Store.EndpointUpdate(rec); err != nil {
 		return authz.Declaration{}, err
 	}
-	e.view.putEndpoint(rec, decl)
+	e.putEndpoint(rec, decl)
 	return cloneDeclaration(decl), nil
 }
 
@@ -410,7 +410,7 @@ func (e *Engine) closeEndpoint(now time.Time, id ident.EndpointID, via *closeVia
 		}
 	}
 	if outcome != CloseOutcomeAlreadyClosed {
-		e.view.putEndpoint(rec, st.decl)
+		e.putEndpoint(rec, st.decl)
 		if e.view.Draining(id) {
 			e.later(&cmdDrain{endpoint: id})
 		}
@@ -482,4 +482,36 @@ func (e *Engine) endpointViews() []EndpointView {
 func (e *Engine) Endpoints(ctx context.Context) ([]EndpointView, error) {
 	c := &cmdEndpoints{call: newCall[[]EndpointView]()}
 	return roundTrip(ctx, e, submitExternal, c, c.call)
+}
+
+// putEndpoint records an endpoint as it is on disk now. A session endpoint that is
+// closed holds no state of its session any more: the checkpoint the adapter kept
+// for it is removed after the command that closed the endpoint, whichever of the
+// ways to close one it was, and a checkpoint a crash left is removed by the scan
+// entry (store.ClosedSessionCheckpoints).
+func (e *Engine) putEndpoint(rec store.EndpointRecord, decl authz.Declaration) {
+	e.view.putEndpoint(rec, decl)
+	for key := range e.view.checkpoints {
+		if store.CheckpointOfClosedSession(key, rec) {
+			e.later(&cmdCheckpointDrop{key: key})
+		}
+	}
+}
+
+// cmdCheckpointDrop removes the checkpoint of a closed session.
+type cmdCheckpointDrop struct{ key store.CheckpointKey }
+
+func (c *cmdCheckpointDrop) gate() gate { return gateAlways }
+func (c *cmdCheckpointDrop) fail(error) {}
+func (c *cmdCheckpointDrop) run(e *Engine, _ time.Time) {
+	if _, ok := e.view.checkpoints[c.key]; !ok {
+		return
+	}
+	if err := e.classify(e.d.Store.CheckpointDrop([]store.CheckpointKey{c.key})); err != nil {
+		if e.fatal == nil {
+			e.log.Warn("the state kept for a closed session could not be removed; the next start removes it", "error", err.Error())
+		}
+		return
+	}
+	delete(e.view.checkpoints, c.key)
 }

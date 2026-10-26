@@ -24,6 +24,11 @@ type intentJSON struct {
 	Process   *adapterproto.ProcessIdentity `json:"process,omitempty"`
 }
 
+type initialJSON struct {
+	ContentType string      `json:"content_type"`
+	Body        bodyRefJSON `json:"body"`
+}
+
 type ctlJSON struct {
 	Record             recordJSON      `json:"record"`
 	Dedup              dedupJSON       `json:"dedup"`
@@ -33,7 +38,7 @@ type ctlJSON struct {
 	AcceptedAt         *wtime          `json:"accepted_at,omitempty"`
 	EndpointMaxQueueNS int64           `json:"endpoint_max_queue_ns,omitempty"`
 	SentAt             *wtime          `json:"sent_at,omitempty"`
-	Body               *bodyRefJSON    `json:"body,omitempty"`
+	Initial            *initialJSON    `json:"initial,omitempty"`
 	Intent             *intentJSON     `json:"intent,omitempty"`
 	ClosedEndpoint     string          `json:"closed_endpoint,omitempty"`
 	Result             json.RawMessage `json:"result,omitempty"`
@@ -76,8 +81,8 @@ func checkRefusedCtl(r CtlRecord) error {
 		return errors.New("a control record refused at intake has no reply")
 	case len(r.Result) != 0:
 		return errors.New("a control record refused at intake has no execution result")
-	case r.Body != nil:
-		return errors.New("a control record refused at intake holds no body")
+	case r.Initial != nil:
+		return errors.New("a control record refused at intake has no initial message")
 	case !r.SessionEndpoint.IsZero() || r.Intent != nil:
 		return errors.New("a control record refused at intake creates no session endpoint")
 	case !r.ClosedEndpoint.IsZero():
@@ -131,8 +136,21 @@ func encodeCtl(r CtlRecord) ([]byte, error) {
 		return nil, errors.New("a negative queue time")
 	}
 	j.EndpointMaxQueueNS = int64(r.EndpointMaxQueue)
-	if j.Body, err = toBodyRef(r.Body); err != nil {
-		return nil, err
+	if r.Initial != nil {
+		if r.Kind != envelope.KindSessionCreate || r.Intent == nil {
+			return nil, errors.New("an initial message belongs to a session creation that makes a session")
+		}
+		if r.Initial.ContentType == "" {
+			return nil, errors.New("an initial message has a content type")
+		}
+		ref, err := toBodyRef(&r.Initial.Body)
+		if err != nil {
+			return nil, err
+		}
+		if ref.Len == 0 {
+			return nil, errors.New("an initial message is not empty")
+		}
+		j.Initial = &initialJSON{ContentType: r.Initial.ContentType, Body: *ref}
 	}
 	if r.Intent != nil {
 		if r.Kind != envelope.KindSessionCreate {
@@ -203,9 +221,6 @@ func decodeCtl(key TargetKey, body []byte) (CtlRecord, error) {
 		return r, errors.New("a negative queue time")
 	}
 	r.EndpointMaxQueue = time.Duration(j.EndpointMaxQueueNS)
-	if r.Body, err = fromBodyRef(j.Body); err != nil {
-		return r, err
-	}
 	if j.Intent != nil {
 		if r.Kind != envelope.KindSessionCreate {
 			return r, errors.New("a creation intent belongs to a session creation")
@@ -221,6 +236,22 @@ func decodeCtl(key TargetKey, body []byte) (CtlRecord, error) {
 			return r, err
 		}
 		r.Intent = in
+	}
+	if j.Initial != nil {
+		if r.Kind != envelope.KindSessionCreate || r.Intent == nil {
+			return r, errors.New("an initial message belongs to a session creation that makes a session")
+		}
+		if j.Initial.ContentType == "" {
+			return r, errors.New("an initial message has a content type")
+		}
+		ref, err := fromBodyRef(&j.Initial.Body)
+		if err != nil {
+			return r, err
+		}
+		if ref.Len == 0 {
+			return r, errors.New("an initial message is not empty")
+		}
+		r.Initial = &InitialMessage{ContentType: j.Initial.ContentType, Body: *ref}
 	}
 	if j.ClosedEndpoint != "" {
 		if r.Kind != envelope.KindSessionClose {

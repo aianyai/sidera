@@ -32,15 +32,13 @@ func TestEndpointLeftByAFailedControlIntakeIsReclaimedAfterARetry(t *testing.T) 
 	f.faulty.Fail(fsxtest.Match{Tx: "control-intake", Role: "ctl", Step: fsx.StepCreate, Hit: 1}, syscall.ENOSPC)
 
 	first := sessionCtl(1, 5)
-	first.Body = bodyRef(1)
-	err := f.st.ControlIntake(bodyBytes(1), ptr(session(5, store.EndpointCreating, ctlName(1))), first)
+	err := f.st.ControlIntake(nil, ptr(session(5, store.EndpointCreating, ctlName(1))), first, nil)
 	if err == nil || txn.IsFatal(err) {
 		t.Fatalf("the first attempt must fail without being fatal: %v", err)
 	}
 
 	retry := sessionCtl(1, 6)
-	retry.Body = bodyRef(1)
-	mustDo(t, f.st.ControlIntake(bodyBytes(1), ptr(session(6, store.EndpointCreating, ctlName(1))), retry))
+	mustDo(t, f.st.ControlIntake(nil, ptr(session(6, store.EndpointCreating, ctlName(1))), retry, nil))
 	done := created(t, 1, 6)
 	mustDo(t, f.st.ControlResult(done, ptr(openedBy(done))))
 

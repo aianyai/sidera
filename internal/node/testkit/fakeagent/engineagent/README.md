@@ -22,8 +22,8 @@ over).
 ## Rules
 
 - **All eleven methods exist.** `Declare`, `Send`, `Reply`, `Recv`, `Ack`, `Status` and `Control` call the engine (a content type left empty is
-  `engine.DefaultContentType`, as the front ends of the interface take it; a control signal with an initial
-  message is refused as an invalid argument, since the engine's creation carries none yet). The others (`Me`, `Peers`,
+  `engine.DefaultContentType`, as the front ends of the interface take it; the body of a control signal is the
+  initial message of a session creation). The others (`Me`, `Peers`,
   `Directory`, `Probe`) answer
   `not_found/method_unknown`, which is how the agent interface answers a method the
   server does not know; the error is also `scenario.ErrNotAvailable`, so that a test

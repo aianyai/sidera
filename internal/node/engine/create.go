@@ -408,7 +408,7 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 	}
 	e.view.setCtl(n)
 	if write != nil {
-		e.view.putEndpoint(ep, st.decl)
+		e.putEndpoint(ep, st.decl)
 		if ep.Status == store.EndpointClosed && e.view.Draining(ep.ID) {
 			e.later(&cmdDrain{endpoint: ep.ID})
 		}
@@ -429,6 +429,36 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 	return nil
 }
 
+// failCreationWithoutEndpoint settles a creation whose session endpoint is not there: the
+// file of the endpoint was damaged while the creation was not settled, and settling it
+// removed the file. The creation cannot go on, since no token would open the session,
+// and the sender must not wait for one: the reply says `failed` with control_unknown (no
+// session will be attached, but a call already out may have made one that nobody
+// controls), and the owner is told of it.
+func (e *Engine) failCreationWithoutEndpoint(now time.Time, c store.CtlRecord) error {
+	failed := adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonControlUnknown}
+	n, err := e.withReply(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionCreate, Create: createResultOf(failed)})
+	if errors.Is(err, errReplyNotCommittable) {
+		e.log.Error("a creation whose endpoint is lost cannot be settled: its control record was closed before it", "record", c.Key.String())
+		e.alertUncontrolled(now, c, "the control record of a creation whose endpoint was lost was closed before the creation settled, so a session may exist")
+		e.forgetCreation(c.Key)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	intent := *n.Intent
+	intent.State = store.IntentFailed
+	n.Intent = &intent
+	if err := e.d.Store.ControlResult(n, nil); err != nil {
+		return err
+	}
+	e.view.setCtl(n)
+	e.forgetCreation(c.Key)
+	e.alertUncontrolled(now, n, "the session endpoint of a creation was lost, so no session will be attached and a native session may remain")
+	return nil
+}
+
 // forgetCreation stops the work for a creation: its deadline, its retry and the call
 // that was to be made again.
 func (e *Engine) forgetCreation(key store.TargetKey) {
@@ -445,6 +475,18 @@ func (e *Engine) forgetCreation(key store.TargetKey) {
 func (e *Engine) recoverReconcile(now time.Time) error {
 	for _, key := range e.creatingKeys() {
 		c := e.view.ctl[key]
+		if e.view.endpoints[c.Intent.Endpoint] == nil {
+			if err := e.failCreationWithoutEndpoint(now, c); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := e.reconcileInitialMessage(now, c); err != nil {
+			return err
+		}
+		if _, ok := e.creatingIntent(key); !ok {
+			continue // failed: its initial message is gone
+		}
 		due := c.AcceptedAt.Add(e.p.CreateReplyDeadline)
 		if !now.Before(due) && !e.paused {
 			e.createDeadline(now, key)
@@ -456,5 +498,5 @@ func (e *Engine) recoverReconcile(now time.Time) error {
 		e.sched.set(schedKey{schedCreateDeadline, key.String()}, due)
 		e.startCreate(now, key)
 	}
-	return nil
+	return e.recoverExecutions(now)
 }

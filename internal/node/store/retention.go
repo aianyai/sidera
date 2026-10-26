@@ -356,9 +356,6 @@ func summarize(rec Record, now time.Time) ArchiveSummary {
 		setDelivery(r.Record)
 		s.AcceptedAt = r.AcceptedAt
 		s.Digest = hex.EncodeToString(r.Dedup.Digest[:])
-		if r.Body != nil {
-			s.Size = r.Body.Len
-		}
 	case OutRecord:
 		kb, _ := r.Key.Bytes()
 		s.Kind, s.Key = r.Key.Kind(), string(kb)

@@ -43,6 +43,16 @@ const (
 	// schedCreateRetry is the next call to the adapter of a creation that is not
 	// settled; the id is the key of the control record.
 	schedCreateRetry
+	// schedExecuteDeadline is the end of the time a close or an interrupt has to be
+	// carried out; the id is the key of the control record.
+	schedExecuteDeadline
+	// schedExecuteRetry is the next call to the adapter of a signal that is not
+	// settled; the id is the key of the control record.
+	schedExecuteRetry
+	// schedInterruptConfirm is the end of the wait for the turn of a session to end
+	// after the adapter asked the runtime to stop it; the id is the key of the
+	// control record.
+	schedInterruptConfirm
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

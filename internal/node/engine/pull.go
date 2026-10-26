@@ -474,7 +474,7 @@ func (e *Engine) handoutAuthorization(now time.Time, st *endpointState, in store
 		return 0, nil
 	}
 	if in.Derived != nil {
-		return 0, errors.New("a delivery derived from a control signal is judged by the request it was admitted with, which nothing records yet")
+		return e.derivedHandoutAuthorization(now, in)
 	}
 	action, _ := envelope.KindMessage.Action()
 	var size int64

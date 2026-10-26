@@ -682,8 +682,6 @@ func bodyHeld(rec store.Record) *store.BodyRef {
 		return r.Body
 	case store.InRecord:
 		return r.Body
-	case store.CtlRecord:
-		return r.Body
 	}
 	return nil
 }
@@ -805,6 +803,35 @@ func derivedIn(ctl, session int) store.InRecord {
 	r.Dedup = delivery.NewDedupRecord(r.Key.Dedup(), digestOf(ctl), r.Record.ReportBy)
 	r.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{"stage":"intake"}`)}
 	return r
+}
+
+// withInitial gives a creation's control record the initial message i and returns
+// it with the delivery that holds the message, as a creation that carries one is
+// written.
+func withInitial(c store.CtlRecord, i int) (store.CtlRecord, store.InRecord) {
+	c.Initial = &store.InitialMessage{ContentType: "text/plain", Body: store.BodyRefOf(bodyBytes(i))}
+	c.EndpointMaxQueue = delivery.DefaultEndpointMaxQueue
+	return c, derivedOf(c)
+}
+
+// derivedOf is the delivery of the initial message a control record remembers, made
+// from the record alone, as the test knows it must be made.
+func derivedOf(c store.CtlRecord) store.InRecord {
+	rec, err := delivery.NewTargetRecord(c.AcceptedAt, c.Record.AcceptBefore, c.Record.ReportBy, c.EndpointMaxQueue)
+	if err != nil {
+		panic(err)
+	}
+	k := store.DerivedKey(c)
+	body := c.Initial.Body
+	return store.InRecord{
+		Key: k, Record: rec,
+		Dedup:         delivery.NewDedupRecord(k.Dedup(), c.Dedup.Digest, c.Record.ReportBy),
+		Auth:          delivery.Authorization{Kind: delivery.AuthorizationAllow},
+		ReplyDecision: reply.Decision{Reason: reply.ReasonNoOutbound},
+		Handout:       store.HandoutFields{ContentType: c.Initial.ContentType, SentAt: c.SentAt},
+		AcceptedAt:    c.AcceptedAt, Body: &body,
+		Derived: &store.DerivedInfo{From: c.Key.Recipient, AuthRequest: []byte(`{"action":"session.create"}`)},
+	}
 }
 
 // fixedLease is the page identifier of every lease a fixture takes.

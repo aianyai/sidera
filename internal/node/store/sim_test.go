@@ -121,6 +121,14 @@ func (s *sim) pass() bool {
 		s.must(s.st.CtlEffectReplay(eps), "CtlEffectReplay")
 		do("ctl-effect-replay")
 	}
+	if cs := store.DerivedReplays(s.scan()); len(cs) > 0 {
+		var ins []store.InRecord
+		for _, c := range cs {
+			ins = append(ins, derivedOf(c))
+		}
+		s.must(s.st.DerivedReplay(ins), "DerivedReplay")
+		do("derived-replay")
+	}
 	if eps := store.InstanceDrainWork(s.scan(), s.enabled); len(eps) > 0 {
 		s.must(s.st.InstanceDrainReplay(eps, s.drainFor(s.scan(), eps)), "InstanceDrainReplay")
 		do("instance-drain-replay")
@@ -132,6 +140,10 @@ func (s *sim) pass() bool {
 	if b := s.drainBatch(s.scan()); len(b.In)+len(b.Ctl) > 0 {
 		s.must(s.st.EndpointDrainReplay(b), "EndpointDrainReplay")
 		do("endpoint-drain-replay")
+	}
+	if keys := store.ClosedSessionCheckpoints(s.scan()); len(keys) > 0 {
+		s.must(s.st.CheckpointDrop(keys), "CheckpointDrop")
+		do("checkpoint-drop")
 	}
 	if outs := store.FeedbackReplays(s.scan()); len(outs) > 0 {
 		s.must(s.st.FeedbackReplay(outs), "FeedbackReplay")
@@ -172,9 +184,6 @@ func (s *sim) drainBatch(sc *store.Scan) store.DrainBatch {
 			continue
 		}
 		c.Record = rec
-		if !rec.NeedsBody() {
-			c.Body = nil
-		}
 		b.Ctl = append(b.Ctl, c)
 	}
 	return b
@@ -210,9 +219,6 @@ func (s *sim) bodyMismatch() {
 	}
 	for _, in := range sc.In {
 		settle(in, in.Body, store.InDir, nil)
-	}
-	for _, c := range sc.Ctl {
-		settle(c, c.Body, store.CtlDir, nil)
 	}
 }
 

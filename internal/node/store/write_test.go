@@ -175,14 +175,12 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 			return r.st.Intake(bodyBytes(1), o)
 		},
 		"a session endpoint that the intent of the control record does not name": func(r *rig) error {
-			c := sessionCtl(1, 5)
-			c.Body = bodyRef(1)
-			return r.st.ControlIntake(bodyBytes(1), ptr(session(6, store.EndpointCreating, ctlName(1))), c)
+			return r.st.ControlIntake(nil, ptr(session(6, store.EndpointCreating, ctlName(1))), sessionCtl(1, 5), nil)
 		},
 		"a session endpoint with a control record that has no intent": func(r *rig) error {
 			c := sessionCtl(1, 5)
-			c.Intent, c.Body = nil, bodyRef(1)
-			return r.st.ControlIntake(bodyBytes(1), ptr(session(5, store.EndpointCreating, ctlName(1))), c)
+			c.Intent = nil
+			return r.st.ControlIntake(nil, ptr(session(5, store.EndpointCreating, ctlName(1))), c, nil)
 		},
 		"a target record with an empty message id": func(r *rig) error {
 			in := tgtIn(1)

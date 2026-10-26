@@ -20,10 +20,10 @@ and taking in of messages: the acceptance of a message from a local endpoint, th
 outbound worker that carries it through the transport and applies what comes
 back, and the receiving side that judges an envelope and signs the reports, and the
 feedback the sender's node tells its endpoints, and the control signals: their sending,
-their taking in and the creation of sessions they ask for, and the pulling of messages: what
-recv hands out under a lease, what ack settles and what a lease that runs out does. Prompts and
-the closing and interrupting of a session join the same loop as further commands and add their
-methods to this list.
+their taking in, the creation of sessions they ask for with the initial message they may carry,
+the closing and the interrupting of a session, and the pulling of messages: what
+recv hands out under a lease, what ack settles and what a lease that runs out does. Prompts
+join the same loop as further commands and add their methods to this list.
 
 ## Entry points
 
@@ -40,7 +40,7 @@ methods to this list.
 | `ProbeTokenEnv`, `TokenEnv`, `HomeEnv`, `ProbeTokenLifetime` | The names of the environment variables that carry a probe token, an endpoint's token and the data directory, and the lifetime of the probe tokens; the Agent interface refers to them. |
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
 | `Recv`, `RecvRequest`, `Ack`, `AckRequest` | Hand the page of the queue of the caller's endpoint out under a lease (the bytes the recv command prints), and acknowledge parts of a page. The second check is made again at the hand-out, the budget and the longest wait are the adapter's declaration for the front end, and a wait is a waiter the loop owns. |
-| `Control`, `ControlRequest` | Accept a control signal (`session.create`, `endpoint.status`) from the endpoint a caller is, as `Send` does; what the target made of it is read from the status of the message. |
+| `Control`, `ControlRequest` | Accept a control signal (`session.create`, `session.close`, `session.interrupt`, `endpoint.status`) from the endpoint a caller is, as `Send` does; a creation may carry an initial message (`Body`, `ContentType`). What the target made of it is read from the status of the message. |
 | `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record, and for a control signal its verified reply. Another endpoint's message is unknown to the caller. |
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
 | `Inbound`, `Pull` | The engine as the `transport.Handler`: an envelope for this node, answered with signed reports, and a pull for the reports of a message to the recipients it names: for each, the signed report or the recipient in `NoRecord`. |
@@ -259,7 +259,8 @@ methods to this list.
   steps,** each a command of the loop that logs `startup step N begin` and
   `startup step N end`; each is empty until the feature it belongs to is added,
   except the eleventh, which settles the session creations whose time is up and asks the
-  adapter again for the others (the prompts of that step are not there yet), the twelfth,
+  adapter again for the others, and does the same for the closes and interrupts (the
+  prompts of that step are not there yet), the twelfth,
   which ticks every record that is due, and the thirteenth, which sends the feedback that
   fell due.
 - **The passing of time is read from the records, by a schedule the view keeps.** Each
@@ -415,6 +416,40 @@ methods to this list.
   transaction.** The call is made again with the same attempt until the reply deadline; then
   the creation is unconfirmed, its endpoint is closed and the owner is alerted. The reply of a
   creation reaches its source by the source's pull.
+- **The initial message of a creation is a delivery of its own, written in the intake.**
+  A creation that goes on to the adapter writes, in `control-intake`, the delivery of the
+  message to the session endpoint it allocated (`initial.go`: `derivedDelivery`, the one
+  place it is made, for the intake and for the rule that writes it again after a crash),
+  and the sender's record gets the matching delivery from the one rule that takes in a
+  control reply (`envelope.HandleControlReply`), whether the reply comes by the pull or as
+  the evidence of the session's first reply, which carries the creation's signed control
+  reply before the signed report (`evidenceFor`). The delivery is judged as the creation
+  was: it is let in because the creation was, and when its body is handed out the
+  creation is judged again from the request it remembers (`derivedHandoutAuthorization`).
+  A creation the node refuses itself, or one that fails, holds no delivery that is ever
+  read: the reply says the message did not arrive. A creation whose initial message is lost
+  while it is not settled (the body does not read, or the delivery is gone) is failed with
+  `control_unknown`, and one whose endpoint was damaged likewise (`failCreationWithoutMessage`,
+  `failCreationWithoutEndpoint`), so that nothing is made of a creation whose first message
+  is gone, and the owner is told that a session may remain.
+- **A close or an interrupt is carried out when it is accepted, not queued.** A signal
+  the endpoint does not take (`Admission.AcceptsSignal`) is answered as unsupported at
+  once; one it takes is accepted and the adapter is called by a worker the engine owns
+  (`execute.go`). The control record is not in the queue recv hands out of, so a signal
+  reaches a session whose queue is full and whose turn runs. The result is a command of
+  the loop that settles the signal in one transaction: the reply, the delivery's end and,
+  for a close, the session endpoint closed with its token gone, whatever the outcome
+  (the channel closes whatever the adapter did). A call that failed, or an adapter that is
+  not connected, is tried again until `Params.ControlReplyDeadline`; then a close is
+  told as unconfirmed and an interrupt as failed. An interrupt is told failed at once
+  when the adapter is not connected. An interrupt the adapter says it asked the runtime
+  for waits `Params.InterruptConfirmWait` for the end of the turn and is told stopped if
+  it ended and requested if it did not. A start goes on with the signals that were not
+  settled.
+- **The state kept for a session goes when its endpoint closes.** Every place the engine
+  records an endpoint (`putEndpoint`) queues the removal of the checkpoint of a session
+  endpoint that has just been closed, whichever way it was closed, and the scan entry
+  removes one a crash left (`checkpoint-drop`).
 - **No method makes a session endpoint.** The engine has no method that takes or gives the
   record of one; a session endpoint exists only through a session creation, which `Control`
   asks for and the taking in of the signal makes.
@@ -491,9 +526,13 @@ the review holds the engine to; the `_internal_test.go` files the encoding of
 the declaration field (`declaration_internal_test.go`), the view and the batches of a drain.
 `session_test.go` holds the tests of the creation of a session and of `endpoint.status`,
 judged from the ledger of the fakes, the records and the status of the message;
-`session_recovery_test.go` the control record settled by time, the body lost from one, what
+`session_recovery_test.go` the control record settled by time, the initial message or the endpoint
+lost from a creation, what
 `adapter.start` carries, and a creation cut off by a crash or overdue at the start;
-`session_crash_test.go` the crash walk of the transactions that make a session;
+`session_crash_test.go` the crash walk of the transactions that make a session, with and
+without an initial message, and of a close;
+`session_signals_test.go` the initial message, the interrupt and the close of a session, and
+what the node answers without the adapter;
 `quarantine_test.go` the damaged control record and the endpoints it was creating;
 `pull_test.go` the scenarios of recv and ack that the floor names (a delivery that goes well,
 each anomaly, a message never acknowledged, long messages, the token of another endpoint),

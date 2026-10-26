@@ -188,9 +188,6 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 				continue
 			}
 			c.Record = rec
-			if !rec.NeedsBody() {
-				c.Body = nil
-			}
 			b.Ctl = append(b.Ctl, c)
 		case strings.HasPrefix(r, "out/"):
 			old, ok := e.view.out[strings.TrimPrefix(r, "out/")]

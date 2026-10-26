@@ -235,9 +235,12 @@ type CtlRecord struct {
 	AcceptedAt       time.Time
 	EndpointMaxQueue time.Duration
 	SentAt           time.Time
-	// Body is the body of the initial message of a session creation.
-	Body   *BodyRef
-	Intent *CreateIntent
+	// Initial is what the record remembers of the initial message of a session
+	// creation that goes on to make a session: the delivery derived from the record
+	// holds the body, and this is all that is needed to make that delivery again
+	// (DerivedReplays). A creation refused at intake carries none.
+	Initial *InitialMessage
+	Intent  *CreateIntent
 	// ClosedEndpoint is the session endpoint a successful session.close of this
 	// record closed; zero otherwise.
 	ClosedEndpoint ident.EndpointID
@@ -247,6 +250,14 @@ type CtlRecord struct {
 
 // Name is the file name of the record.
 func (r CtlRecord) Name() string { return r.Key.FileName(KindCtl) }
+
+// InitialMessage is the initial message of a session creation as its control
+// record remembers it: the content type, and the digest and length of the body that
+// the delivery derived from the record holds in a file of its own.
+type InitialMessage struct {
+	ContentType string
+	Body        BodyRef
+}
 
 // EndpointStatus is the state of an endpoint record.
 type EndpointStatus uint8

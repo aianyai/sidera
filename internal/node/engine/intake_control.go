@@ -40,7 +40,11 @@ import (
 //     connected), with the reply that adapterreg.DaemonCreateFailure gives. No
 //     session endpoint is made for these and no intent is recorded.
 //  4. Otherwise a creation makes the session endpoint, with its token, and the
-//     intent to create, on disk before the adapter hears of it (see create.go).
+//     intent to create, on disk before the adapter hears of it (see create.go). A
+//     creation that carries an initial message also makes the delivery of the message
+//     to the session endpoint, in the same transaction (see initial.go).
+//  5. A close or an interrupt the endpoint takes is carried out by the adapter (see
+//     execute.go), and one it does not take is answered as not supported at once.
 
 // takeInControl takes in an envelope that carries a control signal.
 func (e *Engine) takeInControl(now time.Time, env envelope.Envelope, from transport.Origin, sender ident.EndpointID, digest delivery.BodyDigest) (transport.Receipt, error) {
@@ -71,6 +75,8 @@ func (e *Engine) takeInControl(now time.Time, env envelope.Envelope, from transp
 		err = e.answerControl(now, c, envelope.ControlResult{Signal: adapterproto.SignalEndpointStatus, Status: e.statusReply(now, st)})
 	case envelope.KindSessionCreate:
 		err = e.takeInCreate(now, env, from, st, c)
+	case envelope.KindSessionClose, envelope.KindSessionInterrupt:
+		err = e.takeInExecute(now, env, st, c)
 	default:
 		// Only the signals the node offers are taken in; the others come with the
 		// features that execute them.
@@ -137,7 +143,7 @@ func (e *Engine) refuseControl(now time.Time, env envelope.Envelope, key store.T
 		Dedup: delivery.NewDedupRecord(delivery.DedupKey{SenderNode: key.SenderNode, Message: env.ID, Recipient: key.Recipient}, digest, env.ReportBy),
 		Kind:  env.Kind, Preset: env.Preset, AcceptedAt: now, SentAt: env.SentAt,
 	}
-	if err := e.d.Store.ControlIntake(nil, nil, c); err != nil {
+	if err := e.d.Store.ControlIntake(nil, nil, c, nil); err != nil {
 		return transport.Receipt{}, err
 	}
 	e.view.setCtl(c)
@@ -162,7 +168,7 @@ func (e *Engine) answerControl(now time.Time, c store.CtlRecord, result envelope
 	if err != nil {
 		return err
 	}
-	if err := e.d.Store.ControlIntake(nil, nil, c); err != nil {
+	if err := e.d.Store.ControlIntake(nil, nil, c, nil); err != nil {
 		return err
 	}
 	e.view.setCtl(c)
@@ -276,11 +282,10 @@ func containsAnyCondition(have []adapterproto.ControlCondition, want ...adapterp
 // calls the adapter, in the order the reasons are told to the sender (the preset is
 // defined, the preset is open to a source on this node, the adapter is connected),
 // then the session endpoint with its token and the creation intent, written before
-// the adapter hears of it.
+// the adapter hears of it, and the delivery of the initial message the signal
+// carries, if it carries one. A creation the node refuses holds no message: the
+// reply that refuses it says the message did not arrive.
 func (e *Engine) takeInCreate(now time.Time, env envelope.Envelope, from transport.Origin, st *endpointState, c store.CtlRecord) error {
-	if len(env.Body) > 0 {
-		return invalidArgument("body", errors.New("a creation carries no initial message yet"))
-	}
 	if reason, refused := e.createRefusal(env.Preset, from, st); refused {
 		return e.answerControl(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionCreate, Create: createResultOf(adapterreg.DaemonCreateFailure(reason))})
 	}
@@ -301,11 +306,25 @@ func (e *Engine) takeInCreate(now time.Time, env envelope.Envelope, from transpo
 	}
 	c.SessionEndpoint = ep.ID
 	c.Intent = &store.CreateIntent{Attempt: attempt, Endpoint: ep.ID, State: store.IntentCreating}
-	if err := e.d.Store.ControlIntake(nil, &ep, c); err != nil {
+	var derived *store.InRecord
+	var body []byte
+	if len(env.Body) > 0 {
+		c.Initial = &store.InitialMessage{ContentType: env.ContentType, Body: store.BodyRefOf(env.Body)}
+		c.EndpointMaxQueue = e.d.Config.EndpointSettings(ep.Instance, ep.ID).MaxQueue
+		d, err := derivedDelivery(c)
+		if err != nil {
+			return err
+		}
+		derived, body = &d, env.Body
+	}
+	if err := e.d.Store.ControlIntake(body, &ep, c, derived); err != nil {
 		return err
 	}
 	e.view.setCtl(c)
-	e.view.putEndpoint(ep, authz.Declaration{})
+	e.putEndpoint(ep, authz.Declaration{})
+	if derived != nil {
+		e.view.setIn(*derived)
+	}
 	e.beginCreate(now, c)
 	return nil
 }

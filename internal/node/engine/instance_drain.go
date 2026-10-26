@@ -58,7 +58,7 @@ func (e *Engine) drainInstanceChunk(instance string) error {
 		return err
 	}
 	for i, id := range ids {
-		e.view.putEndpoint(closed[i], e.view.endpoints[id].decl)
+		e.putEndpoint(closed[i], e.view.endpoints[id].decl)
 		if e.view.Draining(id) {
 			e.later(&cmdDrain{endpoint: id})
 		} else {

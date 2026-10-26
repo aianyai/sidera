@@ -463,19 +463,19 @@ func TestEndpointStatusIsAnsweredByTheDaemon(t *testing.T) {
 	}
 }
 
-// Only the signals the node executes are offered, and one that carries parameters
-// it does not take is refused for the field.
+// A signal that carries parameters or a message it does not take is refused for the
+// field.
 func TestControlRequestsAreChecked(t *testing.T) {
 	h := sessionNode(t, harness.Options{}, "a")
 	for _, tc := range []struct {
 		name string
 		in   fakeagent.ControlInput
 	}{
-		{"a close is not offered yet", fakeagent.ControlInput{To: h.Addr("a"), Signal: adapterproto.SignalSessionClose}},
-		{"an interrupt is not offered yet", fakeagent.ControlInput{To: h.Addr("a"), Signal: adapterproto.SignalSessionInterrupt}},
+		{"a close takes no preset", fakeagent.ControlInput{To: h.Addr("a"), Signal: adapterproto.SignalSessionClose, Preset: "default"}},
+		{"an interrupt carries no message", fakeagent.ControlInput{To: h.Addr("a"), Signal: adapterproto.SignalSessionInterrupt, Body: "hello"}},
 		{"a creation names its preset", fakeagent.ControlInput{To: h.RuntimeAddr(), Signal: adapterproto.SignalSessionCreate}},
 		{"a status takes no preset", fakeagent.ControlInput{To: h.RuntimeAddr(), Signal: adapterproto.SignalEndpointStatus, Preset: "default"}},
-		{"a creation carries no initial message yet", fakeagent.ControlInput{To: h.RuntimeAddr(), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: "hello"}},
+		{"a status carries no message", fakeagent.ControlInput{To: h.RuntimeAddr(), Signal: adapterproto.SignalEndpointStatus, Body: "hello"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := h.Agent("a").Control(h.Ctx(), tc.in)

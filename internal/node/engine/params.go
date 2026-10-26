@@ -80,7 +80,10 @@ func DefaultParams() Params {
 
 		CreateReplyDeadline: 3 * time.Minute,
 		CreateRetryBackoff:  30 * time.Second,
-		Feedback:            delivery.DefaultFeedbackParams(),
+
+		ControlReplyDeadline: 2 * time.Minute,
+		InterruptConfirmWait: 30 * time.Second,
+		Feedback:             delivery.DefaultFeedbackParams(),
 	}
 }
 

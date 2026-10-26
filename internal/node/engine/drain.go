@@ -36,9 +36,6 @@ func closeBatch(now time.Time, ins []store.InRecord, ctls []store.CtlRecord) (b 
 			continue
 		}
 		c.Record = rec
-		if !rec.NeedsBody() {
-			c.Body = nil
-		}
 		b.Ctl = append(b.Ctl, c)
 	}
 	return b, unchanged

@@ -462,8 +462,8 @@ source record that is `queued`, and a target message record that is `accepted`
 by `NewLostRecord`; a target record that needs it has no replacement and is removed
 with an alert, as the store does for any damaged target record; every other record that
 references the body keeps its state and drops only the reference. A control record
-never needs the body: the body it references is the initial message, which the
-delivery derived from it hands out.
+never needs a body and holds none: the initial message of a creation is the body of the
+delivery derived from it, a target record like any other.
 
 ### A target that holds no record
 

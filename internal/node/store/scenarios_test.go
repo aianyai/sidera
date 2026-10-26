@@ -114,7 +114,6 @@ func created(t testing.TB, i, session int) store.CtlRecord {
 		t.Fatal(err)
 	}
 	c.Dedup = d
-	c.Body = nil
 	return c
 }
 
@@ -177,13 +176,6 @@ func rejected(in store.InRecord) store.InRecord {
 	in.Body = nil
 	in.Record.State, in.Record.Reject = delivery.StateRejected, delivery.RejectEndpointClosed
 	return in
-}
-
-// ctlWithBody is ctlTo with a body of its own.
-func ctlWithBody(i, e int) store.CtlRecord {
-	c := ctlTo(i, e)
-	c.Body = bodyRef(i)
-	return c
 }
 
 func mustDo(t testing.TB, err error) {
@@ -378,18 +370,15 @@ func scenarios() []scenario {
 			durable: "control-intake/ctl.sync-dir#1",
 			mode:    atomic,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				c := sessionCtl(1, 5)
-				c.Body = bodyRef(1)
-				return r.st.ControlIntake(bodyBytes(1), ptr(session(5, store.EndpointCreating, ctlName(1))), c)
+				c, d := withInitial(sessionCtl(1, 5), 1)
+				return r.st.ControlIntake(bodyBytes(1), ptr(session(5, store.EndpointCreating, ctlName(1))), c, &d)
 			},
 			bodiesResolve: true,
 		},
 		{
 			name: "control-result",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				c := sessionCtl(1, 5)
-				c.Body = bodyRef(1)
-				seedWithBodies(t, mem, session(5, store.EndpointCreating, ctlName(1)), c, srcOut(2, true))
+				seedWithBodies(t, mem, session(5, store.EndpointCreating, ctlName(1)), sessionCtl(1, 5), srcOut(2, true))
 			},
 			durable: "control-result/ctl.sync-dir#1",
 			mode:    atomic,
@@ -508,9 +497,7 @@ func scenarios() []scenario {
 		{
 			name: "tick",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				c := sessionCtl(3, 5)
-				c.Body = bodyRef(3)
-				seedWithBodies(t, mem, srcOut(1, false), tgtIn(2), c, tgtIn(4))
+				seedWithBodies(t, mem, srcOut(1, false), tgtIn(2), sessionCtl(3, 5), tgtIn(4))
 			},
 			durable: "tick/body-dir.sync-dir#1",
 			mode:    batch,
@@ -520,7 +507,6 @@ func scenarios() []scenario {
 				in.Body = nil
 				in.Record.State, in.Record.Reject = delivery.StateRejected, delivery.RejectBacklogExpired
 				c := sessionCtl(3, 5)
-				c.Body = nil
 				c.Record = applied(t, c.Record, delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectExpired})
 				return r.st.Tick(store.TickBatch{
 					Out: []store.OutRecord{out}, In: []store.InRecord{in}, Ctl: []store.CtlRecord{c},
@@ -529,7 +515,6 @@ func scenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				wantNoBody(t, r, srcOut(1, false))
 				wantNoBody(t, r, tgtIn(2))
-				wantNoBody(t, r, sessionCtl(3, 5))
 				wantBody(t, r, tgtIn(4), bodyBytes(4))
 				wantBodyCount(t, r, 1)
 			},
@@ -551,7 +536,7 @@ func scenarios() []scenario {
 		{
 			name: "endpoint-close",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, directEndpoint(7, "chat"), inFor(1, 7), inFor(2, 7), inFor(3, 2), ctlWithBody(4, 7))
+				seedWithBodies(t, mem, directEndpoint(7, "chat"), inFor(1, 7), inFor(2, 7), inFor(3, 2), ctlTo(4, 7))
 			},
 			durable:  "endpoint-close/endpoint.sync-dir#1",
 			mode:     atomic,
@@ -568,7 +553,6 @@ func scenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				wantNoBody(t, r, inFor(1, 7))
 				wantNoBody(t, r, inFor(2, 7))
-				wantNoBody(t, r, ctlWithBody(4, 7))
 				wantBody(t, r, inFor(3, 2), bodyBytes(3))
 				wantBodyCount(t, r, 1)
 			},
@@ -578,8 +562,8 @@ func scenarios() []scenario {
 			name: "instance-drain",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				seed(t, mem, directEndpoint(7, "chat"), directEndpoint(8, "chat"), directEndpoint(9, "other"),
-					inFor(1, 7), inFor(2, 8), inFor(3, 9), ctlWithBody(4, 8))
-				seedBodies(t, mem, inFor(1, 7), inFor(2, 8), inFor(3, 9), ctlWithBody(4, 8))
+					inFor(1, 7), inFor(2, 8), inFor(3, 9), ctlTo(4, 8))
+				seedBodies(t, mem, inFor(1, 7), inFor(2, 8), inFor(3, 9))
 			},
 			mode:         atomic,
 			mustComplete: true,
@@ -602,7 +586,6 @@ func scenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				wantNoBody(t, r, inFor(1, 7))
 				wantNoBody(t, r, inFor(2, 8))
-				wantNoBody(t, r, ctlWithBody(4, 8))
 				wantBody(t, r, inFor(3, 9), bodyBytes(3))
 				wantBodyCount(t, r, 1)
 			},

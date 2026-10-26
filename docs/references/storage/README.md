@@ -463,8 +463,8 @@ state/
   out/<e>.<h>.rec      source record: one per message or control signal sent from this node;
                        also the out-lost notices of files that were lost unread (below)
   in/<h>.rec           target record: one per message for one endpoint, deduplication included
-  ctl/<h>.rec          target control record: deduplication, stored reply, creation intent
-                       (a signal refused at intake: the refusal alone)
+  ctl/<h>.rec          target control record: deduplication, stored reply, creation intent, what
+                       it remembers of an initial message (a signal refused at intake: the refusal alone)
   bodies/<stem>.body   a body, bare bytes, named after the one record it belongs to
   endpoints/<h>.rec    endpoint runtime state: kind, instance, name, description, token, session mapping
   attempts/<h>.rec     prompt attempts, blocked report, the prompt in flight
@@ -589,7 +589,7 @@ refuse a control signal) is written as a `ctl/` record in the state
 `rejected` with its reason, so that a resend gets the same report and the sender
 learns the refusal from the first answer. It holds a refusal and nothing of an
 execution, and the store holds it to that on the way out and on the way in
-(`checkRefusedCtl`): no reply, no execution result, no body, no session endpoint, no
+(`checkRefusedCtl`): no reply, no execution result, no initial message, no session endpoint, no
 creation intent and no session it closed; `ControlIntake` also refuses a session
 endpoint offered with it. Whether the state is one a control record can have, and the
 reasons it may carry, are the delivery package's (`Record.Valid`). It is final, so the
@@ -598,6 +598,38 @@ deduplication record and the report are kept for as long as a sender can still a
 Tests: `TestARefusedControlRecordHasNoTraceOfAnExecution`, the `ctl refused` golden vector,
 the `ctl refused at intake` round trip and the retention row of
 `TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds`.
+
+**The initial message of a creation.** A creation can carry a message for the session it
+makes. It is a delivery to the session endpoint the node allocates, an `in/` record
+whose `derived` field names the runtime endpoint the signal was for and the shape of the
+request that let it in, and it holds the body in a file of its own, as any target record
+does. `ControlIntake` writes the body and the endpoint as preparation, then the control
+record, then that delivery (`control-intake`: `body`, `endpoint`, `ctl`, `derived`), so
+that a creation that carries a message and one that does not differ in the roles they
+use and nothing else, and a message cannot be accepted without a place to be delivered
+to. The control record is the authority and the delivery follows it, as the opening of
+the endpoint follows the result of the creation: the record keeps the content type and
+the digest and length of the body (`ctl.initial`) and holds no body file, so the message
+has one copy and one record that settles it, and a record that is a creation refused at
+intake holds none of it.
+
+The crash states are the prefixes of those writes. Only the body: an orphan, collected.
+The body and the endpoint, no control record: the endpoint is garbage and the body an
+orphan, collected. The control record and no delivery: `derived-replay` (`DerivedReplays`
+finds the control records that are still accepted, are creations that carry a message
+and have neither a delivery nor a damaged file under its name, though the body is on the
+disk) has the engine make the delivery from the control record alone and writes it
+(`DerivedReplay`: `derived`, `in-dir`); the body is the evidence that the delivery was
+being written, and `OrphanBodies` leaves it, whatever order the rules run in, because
+losing it would lose the message with nothing said. A control record that is settled had
+its delivery written first (the adapter is called after the intake commits), so a
+settled record without a delivery is not replayed. The delivery of the message to a
+session that is not made is closed with the endpoint, by the drain, as any record
+queued for a closed endpoint is. The sweep removes the control record before the
+delivery (below), so the rule does not bring back a delivery that was swept.
+Tests: `TestSessionCreationRecoversFromACrashAtEveryPoint` (a creation with a message,
+every step of `control-intake`), the `derived-replay` scenario of the recovery walks
+and `TestOrphanBodiesLeavesTheBodyOfADeliveryYetToBeWritten`.
 
 **Out-lost record.** A third kind of `out/` file, `out-lost`, tells a sending endpoint
 that one of its messages was lost with a file nothing could be read from, which is
@@ -729,12 +761,11 @@ the bytes of the copies (a message body is at most 64 KiB).
 A body is written before the record that refers to it, and the record holds the digest
 and the length of the bytes (`BodyRef`), which a read checks (`ReadBody`). A write that
 changes a record so that it holds no reference (a target record that reached a final
-state, a source record whose deliveries all hold receipts, a control record that does
-not need the initial message any more) removes that record's own body, after the
+state, a source record whose deliveries all hold receipts) removes that record's own body, after the
 record is written and its directory is durable, in the same transaction, if the file
 is there; the store derives it from the record it is given, so no caller lists bodies
 to remove. Every write that can leave a record without its body does it: `SourceUpdate`,
-`ControlResult`, `ControlReply`, `Lease`, `Ack`, `Tick`, the drains, `FeedbackClear` (and the
+`ControlReply`, `Lease`, `Ack`, `Tick`, the drains, `FeedbackClear` (and the
 replay that runs it again) and `DeliverReply` (the evidence in a reply can finish a
 delivery and so end the source record's body; the bodies of the reply's own target
 records are the role `reply-body`, since a role names one write of a transaction). A
@@ -1027,11 +1058,14 @@ store: every predicate is a function of one scan, and the store cannot know whic
 writes the scan it is given has seen. The order is: quarantine of damaged files
 (it writes replacement records and closed session endpoints, and raises sequence
 floors, which every later rule and the sequence book read);
-`ctl-effect-replay` and `instance-drain-replay` (they close endpoints);
+`ctl-effect-replay` (it closes endpoints), `derived-replay` (it writes the delivery of an
+initial message, before `orphan-gc` can take the body that delivery holds) and
+`instance-drain-replay` (it closes endpoints);
 `orphan-gc-endpoint`, before `endpoint-drain-replay`, so that a delivery queued
 for an orphan endpoint that a power loss left behind is drained as one for an
 endpoint that does not exist; `endpoint-drain-replay`, after every rule that
-closes or removes an endpoint; `feedback-replay`, which writes source records a
+closes or removes an endpoint; `checkpoint-drop`, which removes the state kept for
+sessions that are closed (the engine runs the same transaction when it closes one); `feedback-replay`, which writes source records a
 drain never writes, so its order against the drain does not change the result;
 `orphan-gc` after every
 replay, because quarantines overwrite or remove records and so leave bodies no record refers to; and
@@ -1048,7 +1082,7 @@ and a block have no replay: the head is written last, so a half-done one is redo
 by the next attempt, not by a rule of recovery. A second declaration of the same shape would double the crash
 points to walk and could drift from the first. Only the writes no normal transaction
 makes are `Recovery` declarations of the store: `quarantine`, `orphan-gc`,
-`orphan-gc-endpoint` and `ctl-effect-replay`.
+`orphan-gc-endpoint`, `ctl-effect-replay` and `derived-replay`.
 
 **Settle.** The rules above write their followers durably after reading a head
 record that, after a process crash, may be visible and not durable; a power loss

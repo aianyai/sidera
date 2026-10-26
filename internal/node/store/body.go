@@ -83,14 +83,6 @@ func inOwners(ins []InRecord) []bodyOwner {
 	return owners
 }
 
-func ctlOwners(ctls []CtlRecord) []bodyOwner {
-	var owners []bodyOwner
-	for _, c := range ctls {
-		owners = append(owners, bodyOwner{c.Name(), c.Body})
-	}
-	return owners
-}
-
 // bodyFiles are the files of the bodies content is for: one for each owner that
 // refers to a body, each with the bytes its reference says. Content is nil
 // exactly when no owner refers to a body; a record that refers to bytes not given

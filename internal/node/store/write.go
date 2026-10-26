@@ -280,10 +280,17 @@ func (s *Store) SourceUpdate(out OutRecord) error {
 	return tx.Commit()
 }
 
-// ControlIntake records a control signal accepted on the target: the initial
-// message's body and the session endpoint it created, as preparation, then the
-// control record.
-func (s *Store) ControlIntake(body []byte, endpoint *EndpointRecord, ctl CtlRecord) error {
+// ControlIntake records a control signal accepted on the target: the body of the
+// initial message of a creation and the session endpoint it made, as preparation,
+// then the control record, then the delivery of the initial message to the new
+// endpoint. The body belongs to that delivery alone; the control record keeps only
+// what is needed to make the delivery again (DerivedReplays), because the control
+// record is the authority and the delivery follows it, as the endpoint's opening
+// follows the result of the creation.
+//
+// A creation that carries an initial message is written with all of the three, and
+// one that does not, or that the node refused, with none of the delivery.
+func (s *Store) ControlIntake(body []byte, endpoint *EndpointRecord, ctl CtlRecord, derived *InRecord) error {
 	cf, err := recordFile(CtlDir, ctl)
 	if err != nil {
 		return err
@@ -302,9 +309,22 @@ func (s *Store) ControlIntake(body []byte, endpoint *EndpointRecord, ctl CtlReco
 		}
 		ef = &f
 	}
-	bfs, err := bodyFiles(body, ctlOwners([]CtlRecord{ctl}))
-	if err != nil {
-		return err
+	var df *file
+	var bfs []file
+	if derived != nil {
+		if err := checkDerivedOf(ctl, *derived); err != nil {
+			return err
+		}
+		files, err := inFiles([]InRecord{*derived})
+		if err != nil {
+			return err
+		}
+		df = &files[0]
+		if bfs, err = bodyFiles(body, inOwners([]InRecord{*derived})); err != nil {
+			return err
+		}
+	} else if ctl.Initial != nil || body != nil {
+		return errors.New("store: an initial message is written with the delivery that holds it")
 	}
 	tx := s.w.Begin(&declControlIntake)
 	defer tx.Close()
@@ -321,14 +341,36 @@ func (s *Store) ControlIntake(body []byte, endpoint *EndpointRecord, ctl CtlReco
 	if err := s.replace(tx, "ctl", cf); err != nil {
 		return err
 	}
+	if df != nil {
+		if err := s.replace(tx, "derived", *df); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
 }
 
 func trimRec(name string) string { return name[:len(name)-len(recordSuffix)] }
 
-// ControlResult records the result of a control signal, then the session
-// endpoint it moves, then removes the body of the control record when it no
-// longer refers to one.
+// checkDerivedOf refuses a delivery that is not the initial message of the creation
+// the control record holds: it is for the session endpoint the intent creates, from
+// the sender of the signal, under its message, derived from the runtime endpoint
+// the signal was for, and it holds the body the record says the message has.
+func checkDerivedOf(ctl CtlRecord, d InRecord) error {
+	switch {
+	case ctl.Initial == nil || ctl.Intent == nil:
+		return errors.New("store: a delivery of an initial message goes with a control record that creates a session and remembers the message")
+	case d.Key.SenderNode != ctl.Key.SenderNode || d.Key.Sender != ctl.Key.Sender || d.Key.Message != ctl.Key.Message || d.Key.Recipient != ctl.Intent.Endpoint:
+		return errors.New("store: the delivery of an initial message is for the session endpoint the creation makes, under the message of the signal")
+	case d.Derived == nil || d.Derived.From != ctl.Key.Recipient:
+		return errors.New("store: the delivery of an initial message is derived from the runtime endpoint the signal was for")
+	case d.Body == nil || *d.Body != ctl.Initial.Body || d.Handout.ContentType != ctl.Initial.ContentType:
+		return errors.New("store: the delivery of an initial message holds the message the control record remembers")
+	}
+	return nil
+}
+
+// ControlResult records the result of a control signal and then the session
+// endpoint it moves.
 func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord) error {
 	cf, err := recordFile(CtlDir, ctl)
 	if err != nil {
@@ -342,11 +384,6 @@ func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord) error {
 		}
 		ef = &f
 	}
-	dropped := droppedBodies(ctlOwners([]CtlRecord{ctl}))
-	ex, err := s.exist(dropped)
-	if err != nil {
-		return err
-	}
 	tx := s.w.Begin(&declControlResult)
 	defer tx.Close()
 	if err := s.replace(tx, "ctl", cf); err != nil {
@@ -356,9 +393,6 @@ func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord) error {
 		if err := s.replace(tx, "endpoint", *ef); err != nil {
 			return err
 		}
-	}
-	if err := s.removeBodies(tx, dropped, ex); err != nil {
-		return err
 	}
 	return tx.Commit()
 }
@@ -511,7 +545,7 @@ func (s *Store) Tick(b TickBatch) error {
 	if len(of)+len(inf)+len(cf) == 0 {
 		return errors.New("store: Tick needs a record")
 	}
-	dropped := droppedBodies(slices.Concat(outOwners(b.Out...), inOwners(b.In), ctlOwners(b.Ctl)))
+	dropped := droppedBodies(slices.Concat(outOwners(b.Out...), inOwners(b.In)))
 	ex, err := s.exist(dropped)
 	if err != nil {
 		return err
@@ -612,7 +646,7 @@ func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, wit
 	if !withHead && len(inf)+len(cf) == 0 {
 		return errors.New("store: a drain closes a record")
 	}
-	dropped := droppedBodies(slices.Concat(inOwners(b.In), ctlOwners(b.Ctl)))
+	dropped := droppedBodies(inOwners(b.In))
 	ex, err := s.exist(dropped)
 	if err != nil {
 		return err
@@ -1083,12 +1117,11 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		return nil
 	}
 
-	// The bodies of the target, control and source records that go: a record that
-	// is swept normally holds none, since it let go of its body when it ended, and
-	// the file that is still there is the one a crash left or a record that was
-	// never settled owned.
+	// The bodies of the target and source records that go: a record that is swept
+	// normally holds none, since it let go of its body when it ended, and the file
+	// that is still there is the one a crash left or a record that was never settled
+	// owned. A control record owns none.
 	var withBody []FileRef
-	withBody = append(withBody, c.Ctl...)
 	for _, f := range c.Records {
 		if f.Dir == InDir {
 			withBody = append(withBody, f)

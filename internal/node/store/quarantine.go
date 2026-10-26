@@ -292,20 +292,6 @@ func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 			return nil, err
 		}
 		stays, st.overwrite = &r, &files[0]
-	case CtlRecord:
-		dir, name = CtlDir, r.Name()
-		if r.Body == nil {
-			return nil, fmt.Errorf("store: %s refers to no body", r.Name())
-		}
-		if q.Replacement != nil {
-			return nil, errors.New("store: a control record has no replacement")
-		}
-		r.Body = nil
-		f, err := recordFile(CtlDir, r)
-		if err != nil {
-			return nil, err
-		}
-		st.overwrite = &f
 	case OutRecord:
 		dir, name = OutDir, r.Name()
 		if r.Body == nil || r.Lost != nil {

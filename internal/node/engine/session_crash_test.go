@@ -4,9 +4,11 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -39,7 +41,7 @@ func restartedWithRuntime(t *testing.T, disk *fsxtest.Mem) *harness.H {
 
 // checkCreationSettled holds a restarted node to the invariants of a signal sent
 // by a to the runtime endpoint, whose creation ended as want says.
-func checkCreationSettled(t *testing.T, h *harness.H, msg adapterproto.MessageID, want adapterproto.ControlCreateOutcome) {
+func checkCreationSettled(t *testing.T, h *harness.H, msg adapterproto.MessageID, want adapterproto.ControlCreateOutcome, withMessage bool) {
 	t.Helper()
 	sc := scanOf(t, h)
 	var outs []store.OutRecord
@@ -99,19 +101,60 @@ func checkCreationSettled(t *testing.T, h *harness.H, msg adapterproto.MessageID
 		if d := outs[0].Outbound.Recipients[0].Delivery; d.State != delivery.StateDelivered || outs[0].Outbound.ControlReplyDigest.IsZero() {
 			t.Errorf("the source record is %s with reply digest %v, want delivered by the reply", d.State, outs[0].Outbound.ControlReplyDigest)
 		}
+		if withMessage {
+			checkInitialMessage(t, sc, msg, want)
+		}
 	}
 	checkNoOrphanBody(t, sc)
+}
+
+// checkInitialMessage holds a restarted node to what a creation that carried an initial
+// message leaves: the delivery of the message to the session, on the disk with its body
+// when the session was made, and when it was not either there rejected as the endpoint
+// closed or not there at all (the node refused the creation itself and wrote none).
+func checkInitialMessage(t *testing.T, sc *store.Scan, msg adapterproto.MessageID, want adapterproto.ControlCreateOutcome) {
+	t.Helper()
+	var derived []store.InRecord
+	for _, in := range sc.In {
+		if in.Key.Message == delivery.MessageID(msg) {
+			derived = append(derived, in)
+		}
+	}
+	switch {
+	case want == adapterproto.CreateReplyCreated && len(derived) != 1:
+		t.Fatalf("%d deliveries of the initial message of a creation that made a session, want 1", len(derived))
+	case len(derived) > 1:
+		t.Fatalf("%d deliveries of one initial message", len(derived))
+	case len(derived) == 0:
+		return
+	}
+	d := derived[0]
+	switch want {
+	case adapterproto.CreateReplyCreated:
+		if d.Record.State != delivery.StateAccepted || d.Body == nil {
+			t.Errorf("the initial message is %s with body %v, want queued with its body", d.Record.State, d.Body)
+		}
+	default:
+		if d.Record.State != delivery.StateRejected || d.Record.Reject != delivery.RejectEndpointClosed || d.Body != nil {
+			t.Errorf("the initial message of a creation that made no session is %s (%s), want rejected as the endpoint closed", d.Record.State, d.Record.Reject)
+		}
+	}
 }
 
 func TestSessionCreationRecoversFromACrashAtEveryPoint(t *testing.T) {
 	walked := []string{"intake", "control-intake", "control-result", "control-reply"}
 	cov := &coverage{hit: map[fsx.Key]int{}}
-	scenario := func(name, preset string, want adapterproto.ControlCreateOutcome) {
+	scenario := func(name, preset, initial string, want adapterproto.ControlCreateOutcome) {
 		t.Run(name, func(t *testing.T) {
 			taker := newDiskTaker(cov, walked...)
 			h := sessionNode(t, harness.Options{Observer: taker}, "a")
 			taker.h = h
-			msg := create(t, h, "a", preset)
+			in := fakeagent.ControlInput{To: h.RuntimeAddr(), Signal: adapterproto.SignalSessionCreate, Preset: preset, Body: initial}
+			res, err := h.Agent("a").Control(h.Ctx(), in)
+			if err != nil {
+				t.Fatalf("session.create: %v", err)
+			}
+			msg := res.MessageID
 			quiet(t, h)
 			h.Advance(pullInterval)
 			quiet(t, h)
@@ -122,21 +165,37 @@ func TestSessionCreationRecoversFromACrashAtEveryPoint(t *testing.T) {
 			h.Stop()
 			for _, td := range taker.disks {
 				t.Run(td.where, func(t *testing.T) {
-					checkCreationSettled(t, restartedWithRuntime(t, td.disk), msg, want)
+					checkCreationSettled(t, restartedWithRuntime(t, td.disk), msg, want, initial != "")
 				})
 			}
 		})
 	}
-	scenario("a creation that makes a session", "default", adapterproto.CreateReplyCreated)
-	scenario("a creation the node refuses itself", "no-such-preset", adapterproto.CreateReplyFailed)
+	scenario("a creation that makes a session", "default", "", adapterproto.CreateReplyCreated)
+	scenario("a creation that makes a session and carries an initial message", "default", "start with the tests", adapterproto.CreateReplyCreated)
+	scenario("a creation the node refuses itself", "no-such-preset", "", adapterproto.CreateReplyFailed)
+	scenario("a creation the node refuses itself, with an initial message", "no-such-preset", "start with the tests", adapterproto.CreateReplyFailed)
 
-	// A creation carries no initial message yet, so no body is written or removed
-	// by these transactions here: the steps of a body are walked with the scenarios
-	// that have one.
+	t.Run("a close", func(t *testing.T) {
+		taker := newDiskTaker(cov, walked...)
+		h := sessionNode(t, harness.Options{Observer: taker}, "a")
+		_, id, _ := startedSession(t, h, "a", "")
+		taker.h = h // only what the close writes is walked
+		msg := signal(t, h, "a", addressOf(id), adapterproto.SignalSessionClose, "")
+		quiet(t, h)
+		h.Advance(pullInterval)
+		quiet(t, h)
+		if len(taker.disks) == 0 {
+			t.Fatal("no step of the watched transactions was reached")
+		}
+		h.Stop()
+		for _, td := range taker.disks {
+			t.Run(td.where, func(t *testing.T) { checkCloseSettled(t, restartedWithRuntime(t, td.disk), msg, id) })
+		}
+	})
 	declared := 0
 	for _, k := range harness.ProgramTable(t).Keys() {
 		for _, tx := range walked {
-			if k.Tag.Tx != tx || k.Tag.Role == "body" || k.Tag.Role == "body-dir" {
+			if k.Tag.Tx != tx {
 				continue
 			}
 			declared++
@@ -148,4 +207,46 @@ func TestSessionCreationRecoversFromACrashAtEveryPoint(t *testing.T) {
 	if declared == 0 {
 		t.Fatal("no step of the walked transactions is declared")
 	}
+}
+
+// checkCloseSettled holds a restarted node to the invariants of a close sent by a to a
+// session: whatever the crash, the signal the source holds ended once with its reply,
+// and the session endpoint is closed.
+func checkCloseSettled(t *testing.T, h *harness.H, msg adapterproto.MessageID, session ident.EndpointID) {
+	t.Helper()
+	sc := scanOf(t, h)
+	var outs []store.OutRecord
+	for _, o := range sc.Out {
+		if o.Key.Message == delivery.MessageID(msg) {
+			outs = append(outs, o)
+		}
+	}
+	var ctls []store.CtlRecord
+	for _, c := range sc.Ctl {
+		if c.Key.Message == delivery.MessageID(msg) {
+			ctls = append(ctls, c)
+		}
+	}
+	switch {
+	case len(outs) == 0:
+		if len(ctls) != 0 {
+			t.Errorf("%d control records of a signal the source never accepted", len(ctls))
+		}
+	case len(outs) > 1 || len(ctls) != 1:
+		t.Fatalf("%d source records and %d control records of one signal, want 1 and 1", len(outs), len(ctls))
+	default:
+		c := ctls[0]
+		if c.Record.State != delivery.StateDelivered || !c.Dedup.HasReply {
+			t.Errorf("the control record is %s (reply stored: %v), want delivered with its reply", c.Record.State, c.Dedup.HasReply)
+		}
+		if d := outs[0].Outbound.Recipients[0].Delivery; d.State != delivery.StateDelivered || outs[0].Outbound.ControlReplyDigest.IsZero() {
+			t.Errorf("the source record is %s with reply digest %v, want delivered by the reply", d.State, outs[0].Outbound.ControlReplyDigest)
+		}
+		for _, ep := range sc.Endpoints {
+			if ep.ID == session && (ep.Status != store.EndpointClosed || len(ep.Token) != 0) {
+				t.Errorf("the session endpoint is %v with a token of %d bytes after its close was answered, want closed and none", ep.Status, len(ep.Token))
+			}
+		}
+	}
+	checkNoOrphanBody(t, sc)
 }

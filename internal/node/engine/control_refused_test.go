@@ -43,7 +43,7 @@ func refusedCtl(t testing.TB, h *harness.H, msg adapterproto.MessageID, reason d
 	if c.Record.State != delivery.StateRejected || c.Record.Reject != reason {
 		t.Fatalf("the control record is %s (%s), want rejected (%s)", c.Record.State, c.Record.Reject, reason)
 	}
-	if c.Dedup.HasReply || c.Intent != nil || !c.SessionEndpoint.IsZero() || c.Body != nil || len(c.Result) != 0 {
+	if c.Dedup.HasReply || c.Intent != nil || !c.SessionEndpoint.IsZero() || c.Initial != nil || len(c.Result) != 0 {
 		t.Errorf("the refusal holds something of an execution: %+v", c)
 	}
 	return c

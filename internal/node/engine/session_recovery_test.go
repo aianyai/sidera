@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"errors"
 	"path"
 	"strings"
 	"testing"
@@ -84,39 +83,40 @@ func TestControlRecordIsSettledByTime(t *testing.T) {
 	}
 }
 
-// A body that is not what a control record says settles it: the creation the record
-// still holds, which needed the body, is failed with the reply control_unknown (no
-// session will be attached, but one may remain), and the endpoint it was making is
-// closed, so that nothing is made of a creation whose first message is gone. The owner
-// has an alert of the damage and one of a session nobody may control.
-func TestBodyLostFromAControlRecordFailsItsUnsettledCreation(t *testing.T) {
+// A body that is not what the delivery of an initial message says, found when the node
+// starts, settles the delivery,
+// and the creation it came with, which is not settled, is failed with the reply
+// control_unknown (no session will be attached, but one may remain), and the endpoint it
+// was making is closed, so that nothing is made of a creation whose first message is
+// gone. The owner has an alert of the damage and one of a session nobody may control.
+func TestBodyLostFromTheInitialMessageFailsItsUnsettledCreation(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)
 	attempt := adapterproto.AttemptID("0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6")
 	intent := &store.CreateIntent{Attempt: attempt, Endpoint: mustEndpoint(t, 61), State: store.IntentCreating}
 	c, ep := seedControl(t, r, 2, intent)
 	body := []byte("the initial message")
-	ref := store.BodyRefOf(body)
-	c.Body = &ref
-	if err := r.st.ControlIntake(body, &ep, c); err != nil {
+	c.Initial = &store.InitialMessage{ContentType: "text/plain", Body: store.BodyRefOf(body)}
+	c.EndpointMaxQueue = delivery.DefaultEndpointMaxQueue
+	d, err := engine.DerivedDeliveryOf(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.st.ControlIntake(body, &ep, c, &d); err != nil {
 		t.Fatalf("ControlIntake: %v", err)
 	}
 	// The body is damaged on the disk.
-	r.seedFile(store.BodiesDir, store.BodyFileName(c.Name()), []byte("not the initial message"))
+	r.seedFile(store.BodiesDir, store.BodyFileName(d.Name()), []byte("not the initial message"))
+	// The start reads the body of the message of a creation it goes on with.
 	e := r.start()
-
-	err := engine.ReadControlBody(context.Background(), e, c.Key)
-	if !errors.Is(err, store.ErrBodyMismatch) {
-		t.Fatalf("reading the body: %v, want the mismatch", err)
-	}
 	settle(t, e)
 	sc := r.scan()
-	if len(sc.Ctl) != 1 {
-		t.Fatalf("%d control records, want the one that is kept", len(sc.Ctl))
+	if len(sc.Ctl) != 1 || len(sc.In) != 0 {
+		t.Fatalf("%d control records and %d deliveries, want the control record that is kept and no delivery", len(sc.Ctl), len(sc.In))
 	}
 	got := sc.Ctl[0]
-	if got.Record.State != delivery.StateDelivered || !got.Dedup.HasReply || got.Body != nil || got.Intent == nil || got.Intent.State != store.IntentFailed {
-		t.Errorf("the control record is %+v: want delivered with a reply, no body and a failed intent", got)
+	if got.Record.State != delivery.StateDelivered || !got.Dedup.HasReply || got.Intent == nil || got.Intent.State != store.IntentFailed {
+		t.Errorf("the control record is %+v: want delivered with a reply and a failed intent", got)
 	}
 	for _, e := range sc.Endpoints {
 		if e.ID == intent.Endpoint && (e.Status != store.EndpointClosed || len(e.Token) != 0) {
@@ -150,7 +150,7 @@ func TestCreationWhoseControlRecordWasClosedIsReportedOnceAndNotRetried(t *testi
 		t.Fatalf("the record is %s after report_by (%v), want closed_unconfirmed", closed.State, err)
 	}
 	c.Record = closed
-	if err := r.st.ControlIntake(nil, &ep, c); err != nil {
+	if err := r.st.ControlIntake(nil, &ep, c, nil); err != nil {
 		t.Fatalf("ControlIntake: %v", err)
 	}
 	e := r.start()
@@ -188,7 +188,7 @@ func TestAnUncontrolledCreationIsToldOnceAcrossRestarts(t *testing.T) {
 		t.Fatalf("the record is %s after report_by (%v), want closed_unconfirmed", closed.State, err)
 	}
 	c.Record = closed
-	if err := r.st.ControlIntake(nil, &ep, c); err != nil {
+	if err := r.st.ControlIntake(nil, &ep, c, nil); err != nil {
 		t.Fatalf("ControlIntake: %v", err)
 	}
 	uncontrolled := func() int {
@@ -348,5 +348,43 @@ func TestControlRecordLostBeforeItsReplyIsTold(t *testing.T) {
 	}
 	if kinds := feedbackOf(t, h, msg); len(kinds) == 0 {
 		t.Error("the sender is owed no feedback for a signal whose record the target lost")
+	}
+}
+
+// A session endpoint that is damaged while its creation is not settled is removed with
+// its alert, and the creation, which cannot go on without it, is failed: the reply says
+// failed with control_unknown, the intent says failed and the owner is told that a
+// session may remain, instead of a creation that waits for an endpoint that is not there.
+func TestCreationWhoseEndpointWasDamagedIsFailed(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	intent := &store.CreateIntent{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Endpoint: mustEndpoint(t, 61), State: store.IntentCreating}
+	c, ep := seedControl(t, r, 4, intent)
+	if err := r.st.ControlIntake(nil, &ep, c, nil); err != nil {
+		t.Fatalf("ControlIntake: %v", err)
+	}
+	r.seedFile(store.EndpointsDir, ep.Name(), []byte("not a record"))
+	e := r.start()
+	settle(t, e)
+
+	sc := r.scan()
+	if len(sc.Ctl) != 1 {
+		t.Fatalf("%d control records, want 1", len(sc.Ctl))
+	}
+	got := sc.Ctl[0]
+	if got.Record.State != delivery.StateDelivered || !got.Dedup.HasReply || got.Intent == nil || got.Intent.State != store.IntentFailed {
+		t.Errorf("the control record is %+v: want delivered with a reply and a failed intent", got)
+	}
+	for _, e := range sc.Endpoints {
+		if e.ID == intent.Endpoint {
+			t.Errorf("the endpoint that was damaged is back: %+v", e)
+		}
+	}
+	var uncontrolled bool
+	for _, a := range sc.Alerts {
+		uncontrolled = uncontrolled || (a.Kind == "control_unknown" && a.Subject == c.SessionEndpoint.String())
+	}
+	if !uncontrolled {
+		t.Errorf("alerts %+v, want one of kind control_unknown about %s", sc.Alerts, c.SessionEndpoint)
 	}
 }

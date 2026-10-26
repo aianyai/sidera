@@ -10,7 +10,6 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
-	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Damage. A file of state/ that no longer checks out, and a body that is not what
@@ -247,7 +246,9 @@ func (e *Engine) quarantineBody(now time.Time, owner store.Record, gone bool) er
 // quarantineOwner settles one record whose body is not what it says, and follows it
 // in the view: a target record that still needs the body is removed, a source
 // record that still needs it is replaced by the lost record, and any other record
-// keeps its state and drops the reference.
+// keeps its state and drops the reference. The delivery of the initial message of a
+// creation that is not settled is a target record that needs its body: the creation
+// goes with it (failCreationWithoutMessage).
 func (e *Engine) quarantineOwner(now time.Time, owner store.Record, alert store.QuarantineAlert) error {
 	switch r := owner.(type) {
 	case store.InRecord:
@@ -263,27 +264,12 @@ func (e *Engine) quarantineOwner(now time.Time, owner store.Record, alert store.
 		}
 		if written == nil {
 			e.view.dropIn(r.Key)
+			if r.Derived != nil {
+				return e.failCreationWithoutMessage(now, store.TargetKey{SenderNode: r.Key.SenderNode, Sender: r.Key.Sender, Message: r.Key.Message, Recipient: r.Derived.From})
+			}
 			return nil
 		}
 		e.view.setIn(*written)
-	case store.CtlRecord:
-		if _, err := e.d.Store.QuarantineBody(store.BodyQuarantine{Record: r, Alert: alert}); err != nil {
-			return err
-		}
-		r.Body = nil
-		e.view.setCtl(r)
-		// The store keeps a control record and only lets go of the reference. A
-		// creation that is not settled needed the body (the initial message goes to
-		// the session it makes), and a creation that went on would make a session
-		// whose first message is gone with nothing said: it is failed instead, and the
-		// reply tells the sender. The reason is control_unknown, which says that no
-		// session will be attached but one may remain: a call already out may still
-		// make a session, which nobody controls, and the owner is told when the
-		// creation is settled.
-		if _, ok := e.creatingIntent(r.Key); ok {
-			failed := adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonControlUnknown}
-			return e.settleCreate(now, r, failed, nil)
-		}
 	case store.OutRecord:
 		q := store.BodyQuarantine{Record: r, Alert: alert}
 		var lost *store.OutRecord

@@ -6,7 +6,9 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 )
@@ -52,10 +54,10 @@ func OrphanBodies(sc *Scan) []string {
 			refs[BodyFileName(in.Name())] = true
 		}
 	}
-	for _, c := range sc.Ctl {
-		if c.Body != nil {
-			refs[BodyFileName(c.Name())] = true
-		}
+	// The body a derived delivery that is yet to be written will hold is not an
+	// orphan: its record follows the control record that remembers it.
+	for _, c := range DerivedReplays(sc) {
+		refs[BodyFileName(DerivedKey(c).FileName(KindIn))] = true
 	}
 	var out []string
 	for _, b := range sc.Bodies {
@@ -99,6 +101,73 @@ func OrphanEndpoints(sc *Scan) []EndpointRecord {
 			out = append(out, e)
 		case c != nil && (c.Intent == nil || c.Intent.Endpoint != e.ID):
 			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// DerivedKey is the key of the delivery of the initial message a control record
+// remembers: the signal's sender and message, for the session endpoint its
+// creation makes. The record has an intent.
+func DerivedKey(c CtlRecord) TargetKey {
+	k := c.Key
+	k.Recipient = c.Intent.Endpoint
+	return k
+}
+
+// DerivedReplays is the work of derived-replay, as the control records whose
+// delivery of the initial message is not there: a creation accepted with an
+// initial message whose control record is still accepted (a record that was
+// settled had its delivery written first, with the record) and whose delivery has
+// no record, though its body is on the disk. The body is the evidence that the
+// delivery was being written: it is written before the control record, and with
+// no body the delivery is not one the node owes (it was settled and swept, or
+// never made). A delivery whose file is damaged is left to the quarantine.
+func DerivedReplays(sc *Scan) []CtlRecord {
+	have := map[string]bool{}
+	for _, in := range sc.In {
+		have[in.Name()] = true
+	}
+	for _, d := range sc.Damaged {
+		if d.Dir == InDir {
+			have[d.Name] = true
+		}
+	}
+	bodies := map[string]bool{}
+	for _, b := range sc.Bodies {
+		bodies[b] = true
+	}
+	var out []CtlRecord
+	for _, c := range sc.Ctl {
+		if c.Kind != envelope.KindSessionCreate || c.Initial == nil || c.Intent == nil || c.Record.State != delivery.StateAccepted {
+			continue
+		}
+		name := DerivedKey(c).FileName(KindIn)
+		if !have[name] && bodies[BodyFileName(name)] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// CheckpointOfClosedSession reports whether the checkpoint is the state kept for
+// the session endpoint, and the endpoint is closed: the one rule of when the state
+// of a session goes, for the recovery rule and for the engine that closes a session
+// while it runs.
+func CheckpointOfClosedSession(k CheckpointKey, e EndpointRecord) bool {
+	return k.Scope == CheckpointScopeSession && e.Kind == adapterreg.KindSession && e.Status == EndpointClosed && k.ID == e.ID.String()
+}
+
+// ClosedSessionCheckpoints is the work of checkpoint-drop: the state the adapters
+// kept for session endpoints that are closed.
+func ClosedSessionCheckpoints(sc *Scan) []CheckpointKey {
+	var out []CheckpointKey
+	for _, c := range sc.Checkpoints {
+		for _, e := range sc.Endpoints {
+			if CheckpointOfClosedSession(c.Key, e) {
+				out = append(out, c.Key)
+				break
+			}
 		}
 	}
 	return out
@@ -338,6 +407,61 @@ func (s *Store) CtlEffectReplay(eps []EndpointRecord) error {
 	tx := s.w.Begin(&declCtlEffectReplay)
 	defer tx.Close()
 	if err := writeGroup(tx, "endpoint", "endpoint-dir", EndpointsDir, files); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// DerivedReplay writes the deliveries of initial messages that a crash left
+// unwritten after the control records that remember them. The bodies are on the
+// disk already, each under the name of its delivery, and are not written again.
+func (s *Store) DerivedReplay(ins []InRecord) error {
+	if len(ins) == 0 {
+		return nil
+	}
+	files, err := inFiles(ins)
+	if err != nil {
+		return err
+	}
+	for _, in := range ins {
+		if in.Derived == nil || in.Body == nil {
+			return fmt.Errorf("store: %s is not the delivery of an initial message", in.Name())
+		}
+	}
+	tx := s.w.Begin(&declDerivedReplay)
+	defer tx.Close()
+	if err := writeGroup(tx, "derived", "in-dir", InDir, files); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CheckpointDrop removes the checkpoints of the keys. It is the one way a
+// checkpoint goes before the sweep takes it with its endpoint, and the keys are
+// those of closed session endpoints (ClosedSessionCheckpoints).
+func (s *Store) CheckpointDrop(keys []CheckpointKey) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	files := make([]FileRef, len(keys))
+	for i, k := range keys {
+		if k.Scope != CheckpointScopeSession {
+			return fmt.Errorf("store: only the checkpoint of a session is dropped, not one of scope %q", k.Scope)
+		}
+		files[i] = FileRef{Dir: CheckpointsDir, Name: CheckpointRecord{Key: k}.Name()}
+	}
+	ex, err := s.exist(files)
+	if err != nil {
+		return err
+	}
+	tx := s.w.Begin(&declCheckpointDrop)
+	defer tx.Close()
+	for _, f := range files {
+		if _, err := s.removeRef(tx, "checkpoint", f, ex); err != nil {
+			return err
+		}
+	}
+	if err := tx.SyncDir("checkpoint-dir", CheckpointsDir); err != nil {
 		return err
 	}
 	return tx.Commit()

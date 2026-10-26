@@ -178,11 +178,6 @@ func checkNoOrphanBody(t *testing.T, sc *store.Scan) {
 			referenced[store.BodyFileName(in.Name())] = true
 		}
 	}
-	for _, c := range sc.Ctl {
-		if c.Body != nil {
-			referenced[store.BodyFileName(c.Name())] = true
-		}
-	}
 	for _, b := range sc.Bodies {
 		if !referenced[b] {
 			t.Errorf("body %s belongs to no record that refers to one after the start", b)

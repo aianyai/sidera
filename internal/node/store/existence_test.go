@@ -35,8 +35,6 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 		return in
 	}
 	source, target := srcOut(1, true), tgtIn(1)
-	ctl := sessionCtl(2, 5)
-	ctl.Body = bodyRef(2)
 	endpoint := directEndpoint(7, "chat")
 	for _, c := range []struct {
 		name  string
@@ -54,11 +52,6 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 			func(st *store.Store) error {
 				return st.Tick(store.TickBatch{Out: []store.OutRecord{finished()}})
 			}},
-		{"ControlResult dropping a body", func(t *testing.T, r *rig) { seedBodyOf(t, r.mem, created(t, 20, 5), bodyBytes(20)) }, bodyPath(created(t, 20, 5)),
-			func(st *store.Store) error {
-				cr := created(t, 20, 5)
-				return st.ControlResult(cr, ptr(openedBy(cr)))
-			}},
 		{"EndpointDrain dropping a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error {
 				d := rejected(tgtIn(1))
@@ -67,10 +60,6 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 		{"ArchiveSweep removing the body of a target record", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error {
 				return st.ArchiveSweep(store.SweepChunk{Records: []store.FileRef{{Dir: store.InDir, Name: target.Name()}}})
-			}},
-		{"ArchiveSweep removing the body of a control record", func(t *testing.T, r *rig) { seedBodies(t, r.mem, ctl) }, bodyPath(ctl),
-			func(st *store.Store) error {
-				return st.ArchiveSweep(store.SweepChunk{Ctl: []store.FileRef{{Dir: store.CtlDir, Name: ctl.Name()}}})
 			}},
 		{"ArchiveSweep removing the body of a source record after it wrote a floor", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), source)) }, bodyPath(source),
 			func(st *store.Store) error {

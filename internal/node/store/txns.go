@@ -68,15 +68,16 @@ var (
 		rep("out"), rm("body", many, optional), syncDir("body-dir", optional),
 	}}
 	// control-intake: a control signal accepted on the target. A session
-	// endpoint and a body are preparation: without the control record that
-	// refers to them they are garbage.
+	// endpoint and the body of an initial message are preparation: without the
+	// control record they are garbage. The delivery of the initial message follows
+	// the control record, which is the authority (derived-replay writes it again
+	// when a crash came between the two).
 	declControlIntake = txn.Decl{Name: "control-intake", Kind: txn.Normal, Writes: []txn.Write{
-		rep("body", prepare, optional), rep("endpoint", prepare, optional), rep("ctl"),
+		rep("body", prepare, optional), rep("endpoint", prepare, optional), rep("ctl"), rep("derived", optional),
 	}}
-	// control-result: the result of a control signal, then the endpoint it
-	// moves, then the body the control record no longer refers to.
+	// control-result: the result of a control signal, then the endpoint it moves.
 	declControlResult = txn.Decl{Name: "control-result", Kind: txn.Normal, Writes: []txn.Write{
-		rep("ctl"), rep("endpoint", optional), rm("body", many, optional), syncDir("body-dir", optional),
+		rep("ctl"), rep("endpoint", optional),
 	}}
 	// control-reply: the source handles a control reply; the body of the record is
 	// removed after it when it no longer refers to one.
@@ -129,8 +130,11 @@ var (
 		repDefer("out", many), syncDir("out-dir"), rm("body", many, optional), syncDir("body-dir", optional),
 	}}
 	declCheckpointPut = txn.Decl{Name: "checkpoint-put", Kind: txn.Normal, Writes: []txn.Write{rep("checkpoint")}}
-	declAlertRaise    = txn.Decl{Name: "alert-raise", Kind: txn.Normal, Writes: []txn.Write{rep("alert")}}
-	declArchiveEvents = txn.Decl{Name: "archive-events", Kind: txn.Normal, Writes: []txn.Write{w("archive", txn.OpAppend, many)}}
+	// checkpoint-drop: the state kept for a session that is closed. A recovery rule
+	// that does the same is this transaction run again.
+	declCheckpointDrop = txn.Decl{Name: "checkpoint-drop", Kind: txn.Normal, Writes: []txn.Write{rm("checkpoint", many), syncDir("checkpoint-dir")}}
+	declAlertRaise     = txn.Decl{Name: "alert-raise", Kind: txn.Normal, Writes: []txn.Write{rep("alert")}}
+	declArchiveEvents  = txn.Decl{Name: "archive-events", Kind: txn.Normal, Writes: []txn.Write{w("archive", txn.OpAppend, many)}}
 	// archive-summaries: the summaries of the records a sweep is about to remove, in a
 	// transaction of their own so that a failure to append them is the caller's to
 	// log and never stops the sweep that frees the space.
@@ -162,6 +166,7 @@ var (
 	}}
 	declOrphanGC         = txn.Decl{Name: "orphan-gc", Kind: txn.Recovery, Writes: []txn.Write{rm("body", many, optional), syncDir("dir", many)}}
 	declOrphanGCEndpoint = txn.Decl{Name: "orphan-gc-endpoint", Kind: txn.Recovery, Writes: []txn.Write{rm("endpoint", many, optional), syncDir("dir", many)}}
+	declDerivedReplay    = txn.Decl{Name: "derived-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("derived", many, optional), syncDir("in-dir", optional)}}
 	declCtlEffectReplay  = txn.Decl{Name: "ctl-effect-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("endpoint", many, optional), syncDir("endpoint-dir", optional)}}
 )
 
@@ -190,8 +195,8 @@ func Transactions() []*txn.Decl {
 		&declControlResult, &declControlReply, &declPromptBegin, &declPromptEnd, &declBlocked,
 		&declLease, &declAck, &declTick, &declEndpointUpdate, &declEndpointClose,
 		&declEndpointDrain, &declInstanceDrain, &declFeedbackForm, &declFeedbackClear,
-		&declCheckpointPut, &declAlertRaise, &declArchiveEvents, &declArchiveSummaries, &declArchiveSweep,
+		&declCheckpointPut, &declCheckpointDrop, &declAlertRaise, &declArchiveEvents, &declArchiveSummaries, &declArchiveSweep,
 		&declArchiveExpire, &declAlertAck, &declDaemonStop,
-		&declQuarantine, &declOrphanGC, &declOrphanGCEndpoint, &declCtlEffectReplay,
+		&declQuarantine, &declOrphanGC, &declOrphanGCEndpoint, &declCtlEffectReplay, &declDerivedReplay,
 	}
 }

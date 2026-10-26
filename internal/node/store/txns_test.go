@@ -55,8 +55,8 @@ var designTable = []struct {
 	{"deliver", txn.Normal, "body:Replace[MOP] in:ReplaceDefer[M] in-dir:SyncDir"},
 	{"deliver-reply", txn.Normal, "reply-body:Replace[MOP] out:Replace[O] in:ReplaceDefer[M] in-dir:SyncDir body:Remove[MO] body-dir:SyncDir[O]"},
 	{"source-update", txn.Normal, "out:Replace body:Remove[MO] body-dir:SyncDir[O]"},
-	{"control-intake", txn.Normal, "body:Replace[OP] endpoint:Replace[OP] ctl:Replace"},
-	{"control-result", txn.Normal, "ctl:Replace endpoint:Replace[O] body:Remove[MO] body-dir:SyncDir[O]"},
+	{"control-intake", txn.Normal, "body:Replace[OP] endpoint:Replace[OP] ctl:Replace derived:Replace[O]"},
+	{"control-result", txn.Normal, "ctl:Replace endpoint:Replace[O]"},
 	{"control-reply", txn.Normal, "out:Replace body:Remove[MO] body-dir:SyncDir[O]"},
 	{"prompt-begin", txn.Normal, "attempts:Replace"},
 	{"prompt-end", txn.Normal, "in:ReplaceDefer[MO] in-dir:SyncDir[O] attempts:Replace"},
@@ -71,6 +71,7 @@ var designTable = []struct {
 	{"feedback-form", txn.Normal, "body:Replace[P] notice:Replace"},
 	{"feedback-clear", txn.Normal, "out:ReplaceDefer[M] out-dir:SyncDir body:Remove[MO] body-dir:SyncDir[O]"},
 	{"checkpoint-put", txn.Normal, "checkpoint:Replace"},
+	{"checkpoint-drop", txn.Normal, "checkpoint:Remove[M] checkpoint-dir:SyncDir"},
 	{"alert-raise", txn.Normal, "alert:Replace"},
 	{"archive-events", txn.Normal, "archive:Append[M]"},
 	{"archive-summaries", txn.Normal, "archive:Append[M]"},
@@ -81,6 +82,7 @@ var designTable = []struct {
 	{"quarantine", txn.Recovery, "seq-floor:Replace[O] session:Replace[MO] out-lost:Replace[O] alert:Replace overwrite:Replace[O] record:Remove[O] dir:SyncDir[O]"},
 	{"orphan-gc", txn.Recovery, "body:Remove[MO] dir:SyncDir[M]"},
 	{"orphan-gc-endpoint", txn.Recovery, "endpoint:Remove[MO] dir:SyncDir[M]"},
+	{"derived-replay", txn.Recovery, "derived:ReplaceDefer[MO] in-dir:SyncDir[O]"},
 	{"ctl-effect-replay", txn.Recovery, "endpoint:ReplaceDefer[MO] endpoint-dir:SyncDir[O]"},
 }
 

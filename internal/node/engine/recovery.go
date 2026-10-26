@@ -23,6 +23,9 @@ type RecoveryPlan struct {
 	// CtlEffectReplay are the endpoints whose control record says more than they
 	// do.
 	CtlEffectReplay []store.EndpointRecord
+	// DerivedReplay are the control records whose delivery of an initial message a
+	// crash left unwritten.
+	DerivedReplay []store.CtlRecord
 	// InstanceDrain are the endpoints of instances the owner disabled, still not
 	// closed.
 	InstanceDrain []store.EndpointRecord
@@ -31,6 +34,8 @@ type RecoveryPlan struct {
 	OrphanEndpoints []store.EndpointRecord
 	// EndpointDrain is the closing of the records queued for closed endpoints.
 	EndpointDrain store.DrainBatch
+	// CheckpointDrop is the state kept for sessions that are closed.
+	CheckpointDrop []store.CheckpointKey
 	// FeedbackReplay is the source records still holding feedback that a notice
 	// covers.
 	FeedbackReplay []store.OutRecord
@@ -47,6 +52,8 @@ func PlanRecovery(sc *store.Scan, now time.Time, enabled func(instance string) b
 	p := RecoveryPlan{
 		Quarantine:      sc.Damaged,
 		CtlEffectReplay: store.EffectReplays(sc),
+		DerivedReplay:   store.DerivedReplays(sc),
+		CheckpointDrop:  store.ClosedSessionCheckpoints(sc),
 		InstanceDrain:   store.InstanceDrainWork(sc, enabled),
 		OrphanEndpoints: store.OrphanEndpoints(sc),
 		FeedbackReplay:  store.FeedbackReplays(sc),
@@ -69,6 +76,9 @@ func (p RecoveryPlan) Items() []string {
 	for _, ep := range p.CtlEffectReplay {
 		add("ctl-effect-replay", ep.ID.String())
 	}
+	for _, c := range p.DerivedReplay {
+		add("derived-replay", c.Key.String())
+	}
 	for _, ep := range p.InstanceDrain {
 		add("instance-drain-replay", ep.ID.String())
 	}
@@ -80,6 +90,9 @@ func (p RecoveryPlan) Items() []string {
 	}
 	for _, c := range p.EndpointDrain.Ctl {
 		add("endpoint-drain-replay", c.Key.String())
+	}
+	for _, k := range p.CheckpointDrop {
+		add("checkpoint-drop", k.Scope+"/"+k.ID)
 	}
 	for _, o := range p.FeedbackReplay {
 		add("feedback-replay", o.Name())
@@ -181,6 +194,18 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
 				return e.d.Store.CtlEffectReplay(p.CtlEffectReplay)
 			}},
+		{"derived-replay", func(p RecoveryPlan) int { return len(p.DerivedReplay) },
+			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
+				ins := make([]store.InRecord, len(p.DerivedReplay))
+				for i, c := range p.DerivedReplay {
+					d, err := derivedDelivery(c)
+					if err != nil {
+						return err
+					}
+					ins[i] = d
+				}
+				return e.d.Store.DerivedReplay(ins)
+			}},
 		{"instance-drain-replay", func(p RecoveryPlan) int { return len(p.InstanceDrain) },
 			func(sc *store.Scan, p RecoveryPlan, now time.Time) error {
 				return e.d.Store.InstanceDrainReplay(closedRecords(p.InstanceDrain), instanceDrainBatch(sc, p.InstanceDrain, now))
@@ -192,6 +217,10 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 		{"endpoint-drain-replay", func(p RecoveryPlan) int { return len(p.EndpointDrain.In) + len(p.EndpointDrain.Ctl) },
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
 				return e.d.Store.EndpointDrainReplay(p.EndpointDrain)
+			}},
+		{"checkpoint-drop", func(p RecoveryPlan) int { return len(p.CheckpointDrop) },
+			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
+				return e.d.Store.CheckpointDrop(p.CheckpointDrop)
 			}},
 		{"feedback-replay", func(p RecoveryPlan) int { return len(p.FeedbackReplay) + len(p.OutLostReplay) },
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {

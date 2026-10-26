@@ -84,6 +84,9 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return r
 	case "ctl":
 		return sessionCtl(1, 5)
+	case "ctl with an initial message":
+		c, _ := withInitial(sessionCtl(1, 5), 1)
+		return c
 	case "ctl refused":
 		return refusedCtl(1, delivery.RejectEndpointMissing)
 	case "out lost at the sender":
@@ -586,7 +589,7 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	created.Intent.State = store.IntentCreated
 	created.Intent.NativeRef = "native-1"
 	created.Intent.Process = &adapterproto.ProcessIdentity{PID: 4242, StartKey: "boot1:77"}
-	created.Body = func() *store.BodyRef { b := store.BodyRefOf(bodyBytes(2)); return &b }()
+	created, _ = withInitial(created, 2)
 	created.EndpointMaxQueue = 30 * time.Minute
 	reply1, _ := created.Dedup.WithReply([]byte("the stored control reply"))
 	created.Dedup = reply1
@@ -744,7 +747,9 @@ func TestARefusedControlRecordHasNoTraceOfAnExecution(t *testing.T) {
 	}{
 		{"a reply", func(r *store.CtlRecord) { r.Dedup = reply }},
 		{"an execution result", func(r *store.CtlRecord) { r.Result = []byte(`{"created":true}`) }},
-		{"a body", func(r *store.CtlRecord) { r.Body = bodyRef(1) }},
+		{"an initial message", func(r *store.CtlRecord) {
+			r.Initial = &store.InitialMessage{ContentType: "text/plain", Body: store.BodyRefOf(bodyBytes(1))}
+		}},
 		{"a session endpoint", func(r *store.CtlRecord) { r.SessionEndpoint = ep(5) }},
 		{"a creation intent", func(r *store.CtlRecord) { r.Intent = sessionCtl(1, 5).Intent }},
 		{"a session it closed", func(r *store.CtlRecord) {

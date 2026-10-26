@@ -96,7 +96,6 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 		held := tgtIn(2)                           // accepted: not finished, never swept
 		c := created(t, 4, 5)
 		c.Record = deliveredRecord(c.Record)
-		c.Body = bodyRef(4) // a control record that still refers to its body
 		derived := derivedIn(4, 5)
 		derived.Record = deliveredRecord(derived.Record)
 		derived.Body = bodyRef(2)        // same bytes as the body of a record that stays, in a file of its own

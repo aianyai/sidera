@@ -240,7 +240,7 @@ func (e *Engine) admitRuntime(instance string) (ident.EndpointID, error) {
 	if err := e.commitEndpointAndID(&declRuntimeAdmit, ch, rec); err != nil {
 		return ident.EndpointID{}, err
 	}
-	e.view.putEndpoint(rec, authz.Declaration{})
+	e.putEndpoint(rec, authz.Declaration{})
 	return ch.ID, nil
 }
 
@@ -370,6 +370,7 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 	// What the instance was asked to create before its last connection ended may
 	// or may not have been done: it is asked again, with the same attempt.
 	e.redriveCreates(instance, now)
+	e.redriveExecutions(instance, now)
 	return nil
 }
 
@@ -493,6 +494,7 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 	// asked again now as well, in case the call made when the adapter started found
 	// the connection not in service yet.
 	e.redriveCreates(instance, now)
+	e.redriveExecutions(instance, now)
 	return nil
 }
 
@@ -607,6 +609,7 @@ func (e *Engine) notified(now time.Time, instance string, n adapterhost.Notifica
 		setFlag(&st.busy, p.Endpoint, true)
 	case adapterproto.TurnEndedParams:
 		setFlag(&st.busy, p.Endpoint, false)
+		e.interruptTurnEnded(now, p.Endpoint)
 	case adapterproto.PromptPersistedParams:
 	default:
 		return fmt.Errorf("engine: notification %q has parameters of type %T, which is not one an adapter sends", n.Method, n.Params)

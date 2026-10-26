@@ -96,9 +96,13 @@ func TestABodyIsRefusedThatItsRecordsDoNotSay(t *testing.T) {
 			return st.DeliverReply(body, nil, []store.InRecord{in})
 		}},
 		{"ControlIntake", func(st *store.Store, body []byte, ref *store.BodyRef) error {
-			c := sessionCtl(1, 5)
-			c.Body = ref
-			return st.ControlIntake(body, ptr(session(5, store.EndpointCreating, ctlName(1))), c)
+			if ref == nil {
+				return st.ControlIntake(body, ptr(session(5, store.EndpointCreating, ctlName(1))), sessionCtl(1, 5), nil)
+			}
+			c, d := withInitial(sessionCtl(1, 5), 1)
+			d.Body = ref
+			c.Initial.Body = *ref
+			return st.ControlIntake(body, ptr(session(5, store.EndpointCreating, ctlName(1))), c, &d)
 		}},
 		{"FeedbackForm", func(st *store.Store, body []byte, ref *store.BodyRef) error {
 			o := srcOut(1, false)
@@ -151,11 +155,6 @@ type ownBodyWrite struct {
 	write func(st *store.Store, drop bool) error
 }
 
-func withCtlBody(c store.CtlRecord, i int) store.CtlRecord {
-	c.Body = bodyRef(i)
-	return c
-}
-
 func ownBodyWrites() []ownBodyWrite {
 	outOf := func(i int, drop bool) store.OutRecord {
 		if drop {
@@ -170,13 +169,7 @@ func ownBodyWrites() []ownBodyWrite {
 		}
 		return in
 	}
-	ctlOf := func(i, session int, drop bool) store.CtlRecord {
-		c := withCtlBody(sessionCtl(i, session), i)
-		if drop {
-			c.Body = nil
-		}
-		return c
-	}
+
 	closed := directEndpoint(7, "chat")
 	closed.Status, closed.Token = store.EndpointClosed, nil
 	return []ownBodyWrite{
@@ -187,8 +180,6 @@ func ownBodyWrites() []ownBodyWrite {
 				out := outOf(1, drop)
 				return st.DeliverReply(bodyBytes(3), &out, []store.InRecord{tgtIn(3)})
 			}},
-		{"ControlResult", []store.Record{withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{withCtlBody(sessionCtl(2, 6), 2)},
-			func(st *store.Store, drop bool) error { return st.ControlResult(ctlOf(1, 5, drop), nil) }},
 		{"ControlReply", []store.Record{srcOut(1, true)}, []store.Record{srcOut(2, true)},
 			func(st *store.Store, drop bool) error { return st.ControlReply(outOf(1, drop)) }},
 		{"FeedbackClear", []store.Record{srcOut(1, true)}, []store.Record{srcOut(2, true)},
@@ -197,27 +188,22 @@ func ownBodyWrites() []ownBodyWrite {
 			func(st *store.Store, drop bool) error { return st.FeedbackReplay([]store.OutRecord{outOf(1, drop)}) }},
 		{"Ack", []store.Record{tgtIn(1)}, []store.Record{tgtIn(2)},
 			func(st *store.Store, drop bool) error { return st.Ack([]store.InRecord{inOf(1, drop)}) }},
-		{"Tick with out, in and ctl",
-			[]store.Record{srcOut(1, true), tgtIn(1), withCtlBody(sessionCtl(1, 5), 1)},
-			[]store.Record{srcOut(2, true), tgtIn(2), withCtlBody(sessionCtl(2, 6), 2)},
+		{"Tick with out and in",
+			[]store.Record{srcOut(1, true), tgtIn(1)},
+			[]store.Record{srcOut(2, true), tgtIn(2)},
 			func(st *store.Store, drop bool) error {
 				return st.Tick(store.TickBatch{
 					Out: []store.OutRecord{outOf(1, drop)},
 					In:  []store.InRecord{inOf(1, drop)},
-					Ctl: []store.CtlRecord{ctlOf(1, 5, drop)},
 				})
 			}},
-		{"EndpointDrain", []store.Record{tgtIn(1), withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{tgtIn(2), withCtlBody(sessionCtl(2, 6), 2)},
+		{"EndpointDrain", []store.Record{tgtIn(1)}, []store.Record{tgtIn(2)},
 			func(st *store.Store, drop bool) error {
-				return st.EndpointDrain(store.DrainBatch{
-					In: []store.InRecord{inOf(1, drop)}, Ctl: []store.CtlRecord{ctlOf(1, 5, drop)},
-				})
+				return st.EndpointDrain(store.DrainBatch{In: []store.InRecord{inOf(1, drop)}})
 			}},
-		{"InstanceDrain", []store.Record{tgtIn(1), withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{tgtIn(2), withCtlBody(sessionCtl(2, 6), 2)},
+		{"InstanceDrain", []store.Record{tgtIn(1)}, []store.Record{tgtIn(2)},
 			func(st *store.Store, drop bool) error {
-				return st.InstanceDrain([]store.EndpointRecord{closed}, store.DrainBatch{
-					In: []store.InRecord{inOf(1, drop)}, Ctl: []store.CtlRecord{ctlOf(1, 5, drop)},
-				})
+				return st.InstanceDrain([]store.EndpointRecord{closed}, store.DrainBatch{In: []store.InRecord{inOf(1, drop)}})
 			}},
 	}
 }
@@ -331,8 +317,8 @@ func TestABodyIsRemovedAfterTheRecordThatDroppedIt(t *testing.T) {
 // is still there, after the records, and no other body.
 func TestASweepRemovesTheBodiesOfTheRecordsItRemoves(t *testing.T) {
 	r := newRig(t)
-	swept := []store.Record{tgtIn(1), withCtlBody(sessionCtl(1, 5), 1), srcOut(1, true)}
-	kept := []store.Record{tgtIn(2), withCtlBody(sessionCtl(2, 6), 2), srcOut(2, true)}
+	swept := []store.Record{tgtIn(1), sessionCtl(1, 5), srcOut(1, true)}
+	kept := []store.Record{tgtIn(2), sessionCtl(2, 6), srcOut(2, true)}
 	all := slices.Concat(swept, kept)
 	seed(t, r.mem, all...)
 	seedBodies(t, r.mem, all...)
@@ -349,10 +335,14 @@ func TestASweepRemovesTheBodiesOfTheRecordsItRemoves(t *testing.T) {
 		if _, err := r.mem.Stat(path.Join(dirOf(rec), rec.Name())); err == nil {
 			t.Errorf("%s was not removed", rec.Name())
 		}
-		assertBodyGone(t, r.mem, rec)
+		if bodyHeld(rec) != nil {
+			assertBodyGone(t, r.mem, rec)
+		}
 	}
 	for _, rec := range kept {
-		assertBodyIntact(t, r.mem, rec)
+		if bodyHeld(rec) != nil {
+			assertBodyIntact(t, r.mem, rec)
+		}
 	}
 	lastRecord, firstBody := -1, -1
 	for i, p := range r.rec.points {

@@ -704,28 +704,44 @@ func (e *Engine) encodeFor(now time.Time, o store.OutRecord, node ident.NodeID) 
 		ContentType: o.Envelope.ContentType, Body: body, Preset: o.Envelope.Preset,
 	}
 	if env.ReplyTo != "" {
-		if rec, ok, err := e.evidenceFor(now, o.Key.Sender, env.ReplyTo); err != nil {
+		evidence, err := e.evidenceFor(now, o.Key.Sender, env.ReplyTo)
+		if err != nil {
 			return nil, err
-		} else if ok {
-			env.Evidence = []record.Record{rec}
 		}
+		env.Evidence = evidence
 	}
 	return env.TrimmedFor(node).Encode(envelope.DefaultLimits())
 }
 
-// evidenceFor is this node's signed report of its delivery of a message to the
-// endpoint, which a reply carries to prove that the message arrived. It is not
-// there when the node holds no record of the message, or more than one.
-func (e *Engine) evidenceFor(now time.Time, recipient ident.EndpointID, message delivery.MessageID) (record.Record, bool, error) {
+// evidenceFor is what a reply carries to prove that the message it answers arrived: this
+// node's signed report of its delivery of the message to the endpoint and, when the
+// delivery is the initial message of a session the endpoint is, first the signed control
+// reply of the creation, which tells the sender of the signal the session the message
+// went to before it has pulled the reply (the sender takes both in by the one rule of
+// the control reply). It is empty when the node holds no record of the message, or more
+// than one.
+func (e *Engine) evidenceFor(now time.Time, recipient ident.EndpointID, message delivery.MessageID) ([]record.Record, error) {
 	keys := e.view.received[msgKey{recipient, message}]
 	if len(keys) != 1 {
-		return record.Record{}, false, nil
+		return nil, nil
 	}
-	rec, err := e.signReport(now, e.view.in[keys[0]])
+	in := e.view.in[keys[0]]
+	var evidence []record.Record
+	if in.Derived != nil {
+		creation := store.TargetKey{SenderNode: in.Key.SenderNode, Sender: in.Key.Sender, Message: in.Key.Message, Recipient: in.Derived.From}
+		if c, ok := e.view.ctl[creation]; ok && c.Dedup.HasReply {
+			reply, err := e.signControlReply(c)
+			if err != nil {
+				return nil, err
+			}
+			evidence = append(evidence, reply)
+		}
+	}
+	rep, err := e.signReport(now, in)
 	if err != nil {
-		return record.Record{}, false, err
+		return nil, err
 	}
-	return rec, true, nil
+	return append(evidence, rep), nil
 }
 
 // recoverOutbound goes on with the outgoing messages after a start: every source

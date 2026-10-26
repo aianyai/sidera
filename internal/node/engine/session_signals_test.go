@@ -64,6 +64,12 @@ func startedSession(t testing.TB, h *harness.H, from, body string) (fakeagent.Ag
 	return h.Session(id.String()), id, msg
 }
 
+func sortedIDs(ids []adapterproto.MessageID) []adapterproto.MessageID {
+	out := slices.Clone(ids)
+	slices.Sort(out)
+	return out
+}
+
 func addressOf(id ident.EndpointID) string {
 	return ident.Address{Node: harness.NodeID(), Endpoint: id}.String()
 }
@@ -71,15 +77,21 @@ func addressOf(id ident.EndpointID) string {
 // wantClose and wantInterrupt fail the test unless the reply is the outcome.
 func wantClose(t testing.TB, r *adapterproto.ControlReply, outcome adapterproto.ControlCloseOutcome, reason adapterproto.ControlCloseReason) {
 	t.Helper()
-	if r == nil || r.Close == nil || r.Close.Outcome != outcome || r.Close.Reason != reason {
-		t.Fatalf("the reply to a close is %+v, want %s (reason %s)", r, outcome, reason)
+	if r == nil || r.Close == nil {
+		t.Fatalf("the reply to a close is %+v, want %s", r, outcome)
+	}
+	if r.Close.Outcome != outcome || r.Close.Reason != reason {
+		t.Fatalf("the reply to a close is %+v, want %s (reason %s)", *r.Close, outcome, reason)
 	}
 }
 
 func wantInterrupt(t testing.TB, r *adapterproto.ControlReply, outcome adapterproto.ControlInterruptOutcome, reason adapterproto.ControlInterruptReason) {
 	t.Helper()
-	if r == nil || r.Interrupt == nil || r.Interrupt.Outcome != outcome || r.Interrupt.Reason != reason {
-		t.Fatalf("the reply to an interrupt is %+v, want %s (reason %s)", r, outcome, reason)
+	if r == nil || r.Interrupt == nil {
+		t.Fatalf("the reply to an interrupt is %+v, want %s", r, outcome)
+	}
+	if r.Interrupt.Outcome != outcome || r.Interrupt.Reason != reason {
+		t.Fatalf("the reply to an interrupt is %+v, want %s (reason %s)", *r.Interrupt, outcome, reason)
 	}
 }
 
@@ -115,6 +127,9 @@ func TestLocalEndpointsExchangeMessagesAndControlSignals(t *testing.T) {
 	}
 
 	session, id, created := startedSession(t, h, "a", "start with the tests")
+	if in := inOf(t, h, created); in.Derived == nil || in.Body == nil || in.Record.State != delivery.StateAccepted {
+		t.Errorf("the initial message is on the disk as %+v, want a queued delivery derived from the creation, with its body", in.Record)
+	}
 	page := wantOnly(t, recvAs(t, h, session, fakeagent.RecvInput{}), created)
 	if string(page.From) != h.Addr("a") || page.Body != "start with the tests" {
 		t.Errorf("the session was given %+v, want a's initial message", page)
@@ -252,8 +267,8 @@ func TestInterruptIsNotQueuedBehindMessages(t *testing.T) {
 		}
 	}
 	got := pageIDs(recvAs(t, h, session, fakeagent.RecvInput{}))
-	if want := append([]adapterproto.MessageID{created}, waiting...); !slices.Equal(got, want) {
-		t.Errorf("the session reads %v after the interrupt, want its initial message and the three that waited, in order %v", got, want)
+	if len(got) != 4 || got[0] != created || !slices.Equal(sortedIDs(got[1:]), sortedIDs(waiting)) {
+		t.Errorf("the session reads %v after the interrupt, want its initial message and then the three that waited %v", got, waiting)
 	}
 }
 
@@ -441,4 +456,17 @@ func TestInitialMessageOfACreationThatMakesNoSessionIsTold(t *testing.T) {
 			t.Errorf("the sender was told %v, want the rejection of the initial message among it", kinds)
 		}
 	})
+}
+
+// The declarations of an endpoint govern the messages it takes, not the signals that act
+// on it: a session that is paused and takes nobody's messages is still interrupted and
+// closed, so that whoever has the control of it can always reach it.
+func TestSignalsReachASessionThatTakesNothing(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	session, id, _ := startedSession(t, h, "a", "")
+	if err := session.Declare(h.Ctx(), fakeagent.DeclareInput{Paused: boolp(true), RestrictSenders: boolp(true), AcceptFrom: &[]string{}}); err != nil {
+		t.Fatal(err)
+	}
+	wantInterrupt(t, replyOf(t, h, "a", signal(t, h, "a", addressOf(id), adapterproto.SignalSessionInterrupt, "")), adapterproto.InterruptReplyStopped, 0)
+	wantClose(t, replyOf(t, h, "a", signal(t, h, "a", addressOf(id), adapterproto.SignalSessionClose, "")), adapterproto.CloseReplyClosed, 0)
 }

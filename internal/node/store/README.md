@@ -27,7 +27,7 @@ engine applies the delivery rules and calls the writes.
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
 | `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. A write of target records stores them as given and returns only an error. |
 | `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |
-| `OrphanBodies`, `OrphanEndpoints`, `EffectReplays`, `DrainCandidates`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
+| `OrphanBodies`, `OrphanEndpoints`, `EffectReplays`, `DerivedReplays`, `DrainCandidates`, `ClosedSessionCheckpoints`, ... | The predicates of the recovery rules, pure functions of a `Scan`. `DerivedKey` is the key of the delivery of the initial message a control record remembers, `CheckpointOfClosedSession` the one rule of when the state of a session goes; `Store.DerivedReplay` and `Store.CheckpointDrop` write what those find. |
 | `Store.Quarantine`, `QuarantineBody`, `QuarantineSessions` | Settling a damaged file, or the record whose body is damaged, in one transaction: the effects first, the alert, and the damaged file last. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit; `Forget` of a sender once the sweep has removed its session endpoint. |
 | `NewOutLostRecord`, `OutLostKey`, `OutLostReplays`, `Store.OutLostClear` | The notice that a file of `out/` was lost unread, built in one place; the work of the replay that clears its feedback item once a notice covers it, and the write that does. |
@@ -76,10 +76,22 @@ engine applies the delivery rules and calls the writes.
 - **A control record refused at intake holds the refusal alone.** `ControlIntake`
   takes a control record in the state `rejected` (a signal the target refused when it
   arrived; the reasons it may carry are the delivery package's) only with no reply,
-  execution result, body, session endpoint, creation intent or closed session, and
+  execution result, initial message, session endpoint, creation intent or closed session, and
   with no endpoint beside it. The record is final and kept like any finished control
   record, so a resend gets the same report. `checkRefusedCtl` is the one statement of
   that shape, for what is written and what is read.
+- **The initial message of a creation is held by a delivery of its own, written after
+  the control record.** `ControlIntake` takes the body, the session endpoint, the
+  control record and the delivery of the message to the session (`InRecord.Derived`)
+  in that order, the body and the endpoint as preparation and the delivery after the
+  commit point. The control record is the authority: it keeps the content type and the
+  digest and length of the body (`CtlRecord.Initial`), and holds no body file of its
+  own, so there is one copy of the message and one record that settles it. A crash
+  between the control record and the delivery leaves the body and no delivery, and the
+  rule `derived-replay` (`DerivedReplays`, `DerivedReplay`) writes the delivery the
+  caller makes again from the control record alone. The body is the evidence that the
+  delivery was being written, so `OrphanBodies` leaves it, and the rule runs before
+  `orphan-gc`.
 - **A session endpoint is prepared for the creation its control record holds.**
   `ControlIntake` refuses an endpoint that the record's intent does not name, and
   `OrphanEndpoints` names a creating endpoint whose control record holds no
@@ -199,12 +211,15 @@ engine applies the delivery rules and calls the writes.
   1. Quarantine of the damaged files (`Scan.Damaged`, in the order listed). A
      quarantine overwrites source records with their replacements, raises floors and
      closes session endpoints, and every later rule reads what it left.
-  2. `ctl-effect-replay`, then `instance-drain-replay`: both close endpoints.
+  2. `ctl-effect-replay`, then `derived-replay` (it writes a delivery, before
+     anything collects the body that delivery holds), then `instance-drain-replay`:
+     the two others close endpoints.
   3. `orphan-gc-endpoint`, before `endpoint-drain-replay`: a record queued for an
      endpoint that is removed is then drained as a record for an endpoint that does
      not exist, which a power loss that reordered the writes can leave.
   4. `endpoint-drain-replay`, after every rule that closes or removes an endpoint,
-     so it sees the final set of closed endpoints.
+     so it sees the final set of closed endpoints, then `checkpoint-drop`: the state
+     kept for a session whose endpoint is closed (`ClosedSessionCheckpoints`).
   5. `feedback-replay`, after the drain by convention: it writes source records,
      which a drain never writes, so their order does not change the result.
   6. `orphan-gc` last: the quarantines remove records and overwrite them without
@@ -217,8 +232,9 @@ engine applies the delivery rules and calls the writes.
   `instance-drain`, the feedback replay `feedback-clear`. The feedback
   replay has two predicates, `FeedbackReplays` for source records and
   `OutLostReplays` for out-lost ones, and the same transaction writes both.
-  Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint` and
-  `ctl-effect-replay` are `Recovery` declarations.
+  Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint`, `ctl-effect-replay` and
+  `derived-replay` are `Recovery` declarations; `checkpoint-drop` is a normal
+  transaction the engine also runs while a session closes.
   Each rule's predicate is a function of the scan it is given: a rule run on a scan
   taken before the previous rule wrote would act on records that rule has already
   settled.
@@ -255,7 +271,8 @@ engine applies the delivery rules and calls the writes.
 - On a body that is not what its record says (`ErrBodyMismatch`), call
   `QuarantineBody` for that record, with a replacement from `delivery.NewLostRecord`
   exactly when `OutRecord.NeedsBody()` says the source record still needs the bytes. A
-  control record never needs a body.
+  control record holds no body, and the delivery of an initial message is a target
+  record like any other.
 
 ## Crash tests
 

@@ -15,6 +15,14 @@ import (
 )
 
 // recoverRun is the workflow of a recovery scenario: the startup rules.
+// attemptID is the creation attempt of every fixture's session creation.
+const attemptID = "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6"
+
+// checkpointOf is a checkpoint of the scope for the id.
+func checkpointOf(scope, id string) store.CheckpointRecord {
+	return store.CheckpointRecord{Key: store.CheckpointKey{Scope: scope, ID: id}, State: []byte(`{}`)}
+}
+
 func recoverRun(t *testing.T, r *rig, s *sim) error {
 	s.recoverAll()
 	return nil
@@ -211,7 +219,7 @@ func recoveryScenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
 				_, healthy := mismatchRecords()
-				if len(sc.Alerts) != 6 {
+				if len(sc.Alerts) != 5 {
 					t.Errorf("one alert for each record with a tampered body: %d alerts", len(sc.Alerts))
 				}
 				out, _, _ := find(t, sc, srcOut(1, false).Name())
@@ -225,9 +233,6 @@ func recoveryScenarios() []scenario {
 				}
 				if _, in, _ := find(t, sc, tgtIn(6).Name()); in != nil {
 					t.Errorf("a target record that needs the body is removed: %#v", in)
-				}
-				if _, _, c := find(t, sc, sessionCtl(4, 5).Name()); c == nil || c.Body != nil {
-					t.Errorf("a control record must lose only the reference: %#v", c)
 				}
 				// Every tampered body is an orphan that goes, and the good one stays.
 				if _, in, _ := find(t, sc, healthy.Name()); in == nil || in.Body == nil {
@@ -265,7 +270,7 @@ func recoveryScenarios() []scenario {
 			// holds none left behind, are collected.
 			name: "orphan bodies",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, tgtIn(2), ctlWithBody(5, 4), srcOut(6, false))
+				seedWithBodies(t, mem, tgtIn(2), ctlTo(5, 4), srcOut(6, false))
 				seedBodyOf(t, mem, tgtIn(1), bodyBytes(1)) // no record
 				noRef := rejected(tgtIn(3))
 				seed(t, mem, noRef, finishedOut(4, false))
@@ -276,11 +281,67 @@ func recoveryScenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
 				var want []string
-				for _, rec := range []store.Record{tgtIn(2), ctlWithBody(5, 4), srcOut(6, false)} {
+				for _, rec := range []store.Record{tgtIn(2), srcOut(6, false)} {
 					want = append(want, store.BodyFileName(rec.Name()))
 				}
 				if strings.Join(sortedStrings(sc.Bodies), ",") != strings.Join(sortedStrings(want), ",") {
 					t.Errorf("bodies = %v, want only those of the records that hold a reference: %v", sc.Bodies, want)
+				}
+			},
+		},
+		{
+			// A crash between the control record and the delivery of its initial message
+			// leaves the record and the body the delivery holds, and no delivery: the
+			// delivery is written again, the body is not collected as an orphan, and a
+			// creation that was settled, or whose body is gone, is not given one.
+			name: "the delivery of an initial message a crash left unwritten",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				pending, d := withInitial(sessionCtl(1, 5), 1)
+				settled, settledIn := withInitial(created(t, 2, 6), 2)
+				noBody, _ := withInitial(sessionCtl(3, 7), 3)
+				seed(t, mem, session(5, store.EndpointCreating, ctlName(1)), pending,
+					session(6, store.EndpointOpen, ctlName(2)), settled,
+					session(7, store.EndpointCreating, ctlName(3)), noBody)
+				seedBodyOf(t, mem, d, bodyBytes(1))
+				seedBodyOf(t, mem, settledIn, bodyBytes(2))
+			},
+			mode: atomic, mustComplete: true, run: recoverRun,
+			verify: func(t *testing.T, r *rig) {
+				sc := r.scan()
+				_, want := withInitial(sessionCtl(1, 5), 1)
+				if _, got, _ := find(t, sc, want.Name()); got == nil || !equalRecords(*got, want) {
+					t.Errorf("the delivery of the pending creation is %#v, want %#v", got, want)
+				}
+				wantBody(t, r, want, bodyBytes(1))
+				settled, _ := withInitial(created(t, 2, 6), 2)
+				if _, got, _ := find(t, sc, derivedOf(settled).Name()); got != nil {
+					t.Errorf("a creation that was settled was given a delivery: %#v", got)
+				}
+				noBody, _ := withInitial(sessionCtl(3, 7), 3)
+				if _, got, _ := find(t, sc, derivedOf(noBody).Name()); got != nil {
+					t.Errorf("a creation with no body on the disk was given a delivery: %#v", got)
+				}
+				wantBodyCount(t, r, 1)
+			},
+		},
+		{
+			// The state kept for a session goes when the session is closed, and that of
+			// a session that is open, or of another scope, stays.
+			name: "the checkpoints of closed sessions",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seed(t, mem, session(5, store.EndpointClosed, ctlName(1)), session(6, store.EndpointOpen, ctlName(2)),
+					checkpointOf(store.CheckpointScopeSession, ep(5).String()), checkpointOf(store.CheckpointScopeSession, ep(6).String()),
+					checkpointOf(store.CheckpointScopeAttempt, attemptID))
+			},
+			mode: atomic, mustComplete: true, run: recoverRun,
+			verify: func(t *testing.T, r *rig) {
+				var got []string
+				for _, c := range r.scan().Checkpoints {
+					got = append(got, c.Key.Scope+"/"+c.Key.ID)
+				}
+				want := []string{store.CheckpointScopeSession + "/" + ep(6).String(), store.CheckpointScopeAttempt + "/" + attemptID}
+				if strings.Join(sortedStrings(got), ",") != strings.Join(sortedStrings(want), ",") {
+					t.Errorf("checkpoints = %v, want only %v", got, want)
 				}
 			},
 		},
@@ -359,7 +420,6 @@ func recoveryScenarios() []scenario {
 				done.Body = nil
 				c := sessionCtl(3, 5)
 				c.Key.Recipient = ep(7)
-				c.Body = bodyRef(3)
 				c.Dedup = delivery.NewDedupRecord(c.Key.Dedup(), digestOf(3), c.Record.ReportBy)
 				seedWithBodies(t, mem, closed, directEndpoint(8, "chat"), inFor(1, 7), done, c, inFor(4, 9), inFor(5, 8))
 				seedBodyOf(t, mem, done, bodyBytes(2)) // the file a crash left after the record dropped its reference
@@ -391,8 +451,8 @@ func recoveryScenarios() []scenario {
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				closed := directEndpoint(8, "chat")
 				closed.Status, closed.Token = store.EndpointClosed, nil
-				seed(t, mem, directEndpoint(7, "chat"), closed, directEndpoint(9, "other"), inFor(1, 7), inFor(2, 9), ctlWithBody(4, 7))
-				seedBodies(t, mem, inFor(1, 7), inFor(2, 9), ctlWithBody(4, 7))
+				seed(t, mem, directEndpoint(7, "chat"), closed, directEndpoint(9, "other"), inFor(1, 7), inFor(2, 9), ctlTo(4, 7))
+				seedBodies(t, mem, inFor(1, 7), inFor(2, 9))
 			},
 			enabled: func(inst string) bool { return inst != "chat" },
 			mode:    atomic, mustComplete: true, run: recoverRun,
@@ -462,11 +522,9 @@ func sortedStrings(s []string) []string {
 // longer need their bodies, the one of 6 still does, and so does the source
 // record 1, which is seeded apart.
 func mismatchRecords() (tampered []store.Record, healthy store.InRecord) {
-	ctl := sessionCtl(4, 5)
-	ctl.Body = bodyRef(4)
 	in2, in3, in5 := tgtIn(2), tgtIn(3), tgtIn(5)
 	in2.Record, in3.Record, in5.Record = deliveredRecord(in2.Record), deliveredRecord(in3.Record), deliveredRecord(in5.Record)
-	return []store.Record{srcOut(1, false), in2, in3, ctl, in5, tgtIn(6)}, tgtIn(7)
+	return []store.Record{srcOut(1, false), in2, in3, in5, tgtIn(6)}, tgtIn(7)
 }
 
 func blockedItem(i int) delivery.Item {
@@ -492,10 +550,7 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 	return scenario{
 		name: name,
 		setup: func(t *testing.T, mem *fsxtest.Mem) {
-			c := sessionCtl(1, 5)
-			c.Body = bodyRef(1)
-			derived := derivedIn(1, 5)
-			derived.Body = bodyRef(1)
+			c, derived := withInitial(sessionCtl(1, 5), 1)
 			seedWithBodies(t, mem, session(5, store.EndpointCreating, ctlName(1)), c, derived)
 			damage(t, mem, path.Join(store.CtlDir, c.Name()))
 		},
@@ -515,7 +570,7 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 			if e := endpointOf(sc, ep(5)); e == nil || e.Status != store.EndpointClosed || e.Token != nil {
 				t.Errorf("the session endpoint still being created must be closed: %#v", e)
 			}
-			if _, d, _ := find(t, sc, derivedIn(1, 5).Name()); d == nil || d.Record.State != delivery.StateRejected || d.Record.Reject != delivery.RejectEndpointClosed {
+			if _, d, _ := find(t, sc, store.DerivedKey(sessionCtl(1, 5)).FileName(store.KindIn)); d == nil || d.Record.State != delivery.StateRejected || d.Record.Reject != delivery.RejectEndpointClosed {
 				t.Errorf("the delivery derived from the quarantined control record must be rejected as the endpoint closed: %#v", d)
 			}
 			if len(sc.Bodies) != 0 {
@@ -652,4 +707,20 @@ func floorsIn(t *testing.T, where string, snap map[string]string) map[ident.Addr
 		return nil
 	}
 	return rec.(store.SeqRecord).Floors
+}
+
+// The body of the delivery of an initial message that a crash left unwritten is not an
+// orphan: it is the only copy of the message, and the delivery that holds it is written
+// from the control record before anything collects bodies. A rule that listed it would
+// lose the message with nothing said, whatever order the rules ran in.
+func TestOrphanBodiesLeavesTheBodyOfADeliveryYetToBeWritten(t *testing.T) {
+	r := newRig(t)
+	pending, d := withInitial(sessionCtl(1, 5), 1)
+	seed(t, r.mem, session(5, store.EndpointCreating, ctlName(1)), pending)
+	seedBodyOf(t, r.mem, d, bodyBytes(1))
+	seedBodyOf(t, r.mem, tgtIn(2), bodyBytes(2)) // a body no record will ever hold
+	got := store.OrphanBodies(r.scan())
+	if want := []string{store.BodyFileName(tgtIn(2).Name())}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("orphan bodies = %v, want only %v", got, want)
+	}
 }

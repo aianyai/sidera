@@ -76,12 +76,11 @@ func TestCloseBatchSetsAsideWhatAForcedCloseDoesNotChange(t *testing.T) {
 	}
 }
 
-func TestCloseBatchClosesControlRecordsAndDropsTheirBody(t *testing.T) {
+func TestCloseBatchClosesControlRecordsAsUnknown(t *testing.T) {
 	ep := idOf(t, 1)
-	body := store.BodyRefOf([]byte("initial message"))
 	accept := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
 	k := store.TargetKey{SenderNode: nodeOf(t, 2), Sender: idOf(t, 3), Message: "ctl-0001", Recipient: ep}
-	ctl := store.CtlRecord{Key: k, Record: delivery.NewTargetControlRecord(accept, accept, delivery.ReportBy(accept)), Body: &body}
+	ctl := store.CtlRecord{Key: k, Record: delivery.NewTargetControlRecord(accept, accept, delivery.ReportBy(accept))}
 	batch, unchanged := closeBatch(accept, nil, []store.CtlRecord{ctl})
 	if len(unchanged) != 0 || len(batch.Ctl) != 1 {
 		t.Fatalf("batch %+v unchanged %v", batch, unchanged)
@@ -89,7 +88,7 @@ func TestCloseBatchClosesControlRecordsAndDropsTheirBody(t *testing.T) {
 	got := batch.Ctl[0]
 	// An accepted control signal is never rejected once accepted: whether it took
 	// effect is not known, which the delivery rules say with delivery_unknown.
-	if got.Record.State != delivery.StateDeliveryUnknown || got.Body != nil {
-		t.Errorf("control record: state %v body %v, want delivery_unknown and no body", got.Record.State, got.Body)
+	if got.Record.State != delivery.StateDeliveryUnknown {
+		t.Errorf("control record: state %v, want delivery_unknown", got.Record.State)
 	}
 }

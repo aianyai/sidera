@@ -451,37 +451,9 @@ func FinalPullUntil(reportBy time.Time) time.Time { return finalPullUntil(report
 // InboxLen is how many commands wait in the inbox of the loop.
 func InboxLen(e *Engine) int { return len(e.inbox) }
 
-type cmdReadControlBody struct {
-	call[error]
-	key store.TargetKey
-}
-
-func (c *cmdReadControlBody) gate() gate { return gateAlways }
-func (c *cmdReadControlBody) run(e *Engine, now time.Time) {
-	ctl, ok := e.view.ctl[c.key]
-	if !ok || ctl.Body == nil {
-		c.done(fmt.Errorf("no control record %s that holds a body", c.key), nil)
-		return
-	}
-	_, err := e.readBody(now, ctl, *ctl.Body)
-	c.done(err, nil)
-}
-
-// ReadControlBody reads the body of the control record the way what needs it does,
-// through the one place a body is read from: a body that is not what its record says
-// settles the record before the error is returned.
-func ReadControlBody(ctx context.Context, e *Engine, key store.TargetKey) error {
-	c := &cmdReadControlBody{call: newCall[error](), key: key}
-	return roundTripValue(ctx, e, c)
-}
-
-func roundTripValue(ctx context.Context, e *Engine, c *cmdReadControlBody) error {
-	err, rtErr := roundTrip(ctx, e, submitInternal, c, c.call)
-	if rtErr != nil {
-		return rtErr
-	}
-	return err
-}
+// DerivedDeliveryOf is the delivery of the initial message the control record
+// remembers, made as the engine makes it.
+func DerivedDeliveryOf(c store.CtlRecord) (store.InRecord, error) { return derivedDelivery(c) }
 
 type cmdWaiting struct{ call[int] }
 

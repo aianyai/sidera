@@ -488,19 +488,6 @@ func TestABodyThatIsNotWhatItsRecordSaysSettlesThatRecordOnly(t *testing.T) {
 			t.Errorf("only the reference goes, no floor is raised, the body goes: %#v %v %v %v", got, sc.Seq, sc.Alerts, sc.Bodies)
 		}
 	})
-	t.Run("a control record drops the reference", func(t *testing.T) {
-		r := worldRig(t)
-		c := sessionCtl(1, 5)
-		c.Body = bodyRef(1)
-		seed(t, r.mem, c, session(5, store.EndpointOpen, ctlName(1)))
-		seedBodyOf(t, r.mem, c, wrong)
-		_, err := settleBody(t, r, store.BodyQuarantine{Record: c, Alert: newSim(t, r.st).alert("corrupt_body", store.CtlDir, c.Name())})
-		mustDo(t, err)
-		sc := settled(t, r)
-		if _, _, got := find(t, sc, c.Name()); got == nil || got.Body != nil || len(sc.Bodies) != 0 || len(sc.Alerts) != 1 {
-			t.Errorf("only the reference goes, and the body with it: %#v %v %v", got, sc.Bodies, sc.Alerts)
-		}
-	})
 	t.Run("the body files of the other records are not touched", func(t *testing.T) {
 		damaged := []struct {
 			name string
@@ -511,12 +498,11 @@ func TestABodyThatIsNotWhatItsRecordSaysSettlesThatRecordOnly(t *testing.T) {
 			{"a source record", srcOut(1, false), func(r store.Record) store.BodyQuarantine {
 				return store.BodyQuarantine{Replacement: lostOutAt(r.(store.OutRecord).Key, base)}
 			}},
-			{"a control record", func() store.Record { c := sessionCtl(1, 5); c.Body = bodyRef(1); return c }(), nil},
 		}
 		for _, d := range damaged {
 			t.Run(d.name, func(t *testing.T) {
 				r := worldRig(t)
-				others := []store.Record{tgtIn(2), srcOut(3, false), func() store.Record { c := sessionCtl(4, 6); c.Body = bodyRef(4); return c }()}
+				others := []store.Record{tgtIn(2), srcOut(3, false)}
 				seed(t, r.mem, d.rec, session(5, store.EndpointOpen, ctlName(1)), session(6, store.EndpointOpen, ctlName(4)))
 				seed(t, r.mem, others...)
 				seedBodies(t, r.mem, others...)
