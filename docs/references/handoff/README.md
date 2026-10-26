@@ -67,6 +67,12 @@ checks that the model saw it before acknowledging for the agent.
   the node cap can make an endpoint wait long, the caller gives the instant an
   adapter went offline as the start of that cause; otherwise the time held back
   would be counted as failure time.
+- The attempts the caller keeps are cut by `TrimAttempts`, not by the caller: it
+  keeps every attempt of the last hour, the newest delivered first prompt and the
+  delivered attempts after it however old, and the earliest failure of the
+  current failing run. Failed and unknown attempts older than the hour that are
+  none of these go. The record of an endpoint therefore stays small, and every
+  rule above reads the same result before and after the cut.
 - Decided values (`DefaultPromptParams`): 60 prompts per endpoint and hour, a
   re-prompt interval of 2 minutes, and 8 prompt-started turns per node. The
   reasons are under Why. The prompt wording is provisional.
@@ -241,6 +247,13 @@ The delivery side that these rules call into is described in
 - **An unset cap is an error.** Zero meaning no limit would silently remove the
   protection on a configuration that forgot it. `DecidePrompt` does not read the
   cap, but it rejects the same params, so that one value is validated in one place.
+- **The cut of the attempts is a rule of this package.** What may be dropped is
+  exactly what `DecidePrompt` and `AssessBlocked` do not read: both belong here,
+  so a caller that cut the list itself could drop an attempt one of them needs
+  (for instance the first failure that blocked delivery is measured from) and the
+  cut would have to follow every change of their rules. Keeping the earliest
+  failure of the current run, and not all of them, is enough because the blocked
+  rule takes only the start of the run from the failures.
 - **Failed attempts are not counted by the cap.** The cap protects the agent
   from being woken too often. A prompt that never reached the session woke
   nobody, and counting it would keep a recovered adapter from waking the agent
@@ -372,6 +385,8 @@ The delivery side that these rules call into is described in
   `TestNodeCapHoldIsNeitherAnAttemptNorBlocked`,
   `TestDecideNodePromptsProperties` (fixed seed, declarative assertions written
   in the test, coverage assertions), and the cap rows of `TestPromptParamsValidate`.
+- `internal/handoff/attempts.go`: `TrimAttempts`. Tests:
+  `TestTrimAttemptsKeepsOnlyWhatTheRulesStillRead`.
 - `internal/handoff/blocked.go`: `AssessBlocked`. Tests: `TestAssessBlocked`,
   `TestAssessBlockedReportsOnceAndRecoversOnce`.
 - `internal/handoff/budget.go`: units, the token estimate, `DefaultBudget` and
