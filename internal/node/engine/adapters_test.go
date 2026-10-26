@@ -1424,6 +1424,17 @@ func (r *rig) seedCreations(instance string, attempts ...string) {
 	}
 }
 
+// seedPromptInFlight puts onto the disk an open session of the instance whose attempts
+// record says a prompt with the given attempt is in flight.
+func (r *rig) seedPromptInFlight(instance, attempt string) {
+	r.t.Helper()
+	i := r.creations
+	r.creations++
+	session := mustEndpoint(r.t, byte(120+i))
+	r.seedRecord(store.EndpointRecord{ID: session, Kind: sessionKind, Instance: instance, Status: store.EndpointOpen, Token: bytes.Repeat([]byte{byte(10 + i)}, store.TokenLen), Session: &store.SessionInfo{Preset: "default"}})
+	r.seedRecord(store.AttemptsRecord{Endpoint: session, InFlight: &store.InFlightPrompt{Attempt: adapterproto.AttemptID(attempt), Kind: handoff.PromptKindFirst}})
+}
+
 func attemptPut(id, state string) adapterproto.CheckpointPutParams {
 	return adapterproto.CheckpointPutParams{Scope: adapterproto.ScopeAttempt, ID: id, State: json.RawMessage(state)}
 }
@@ -1573,18 +1584,24 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 	})
 
 	t.Run("an attempt checkpoint needs an attempt of a session of the instance", func(t *testing.T) {
-		// The attempts below are the creation attempt of a session of the instance
-		// and the first prompt that follows from it; the others belong to a session
+		// The attempts below are the creation attempt of a session of the instance, the
+		// first prompt that follows from it and a prompt in flight; the others belong to a session
 		// of another instance, to a session that is closed, or to nobody. A put for
 		// any of them would write the state that the creation of another instance
 		// reads back.
 		const (
-			mine, foreign, closedOne, nobody = "21111111-2222-4333-8444-555555555555", "31111111-2222-4333-8444-555555555555", "41111111-2222-4333-8444-555555555555", "51111111-2222-4333-8444-555555555555"
+			mine, foreign, closedOne, nobody             = "21111111-2222-4333-8444-555555555555", "31111111-2222-4333-8444-555555555555", "41111111-2222-4333-8444-555555555555", "51111111-2222-4333-8444-555555555555"
+			promptInFlight, promptForeign, promptSettled = "61111111-2222-4333-8444-555555555555", "71111111-2222-4333-8444-555555555555", "81111111-2222-4333-8444-555555555555"
 		)
 		r := newRig(t, 10)
 		r.enableInstance("agent", "")
 		r.seedCreations("chat", mine)
 		r.seedCreations("agent", foreign)
+		r.seedPromptInFlight("chat", promptInFlight)
+		r.seedPromptInFlight("agent", promptForeign)
+		// The session of the settled prompt has gone on to another attempt, so the one that
+		// settled is in no attempts record as in flight.
+		r.seedPromptInFlight("chat", "91111111-2222-4333-8444-555555555555")
 		closedSession := mustEndpoint(t, 140)
 		closedCtl := sessionCtlRecord(t, 90, closedSession)
 		closedCtl.Intent.Attempt = closedOne
@@ -1595,6 +1612,8 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 			"an attempt of a session of another instance": foreign,
 			"an attempt of a closed session":              closedOne,
 			"an attempt that belongs to nobody":           nobody,
+			"a prompt attempt of another instance":        promptForeign,
+			"a prompt attempt that has settled":           promptSettled,
 		} {
 			wantReason(t, e.CheckpointPut(ctx, "chat", attemptPut(id, `{"n":1}`)), engine.ReasonEndpointUnknown)
 			if got := checkpoints(t, r); len(got) != 0 {
@@ -1611,9 +1630,12 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 		if err := e.CheckpointPut(ctx, "chat", attemptPut(string(first), `{"n":3}`)); err != nil {
 			t.Fatalf("the first prompt of that session: %v", err)
 		}
+		if err := e.CheckpointPut(ctx, "chat", attemptPut(promptInFlight, `{"n":4}`)); err != nil {
+			t.Fatalf("the prompt in flight of a session of the instance: %v", err)
+		}
 		got := checkpoints(t, r)
-		if len(got) != 2 || got[store.CheckpointKey{Scope: "attempt", ID: mine}] != `{"n":1}` || got[store.CheckpointKey{Scope: "attempt", ID: string(first)}] != `{"n":3}` {
-			t.Errorf("on disk: %v, want the two accepted puts only", got)
+		if len(got) != 3 || got[store.CheckpointKey{Scope: "attempt", ID: mine}] != `{"n":1}` || got[store.CheckpointKey{Scope: "attempt", ID: string(first)}] != `{"n":3}` || got[store.CheckpointKey{Scope: "attempt", ID: promptInFlight}] != `{"n":4}` {
+			t.Errorf("on disk: %v, want the three accepted puts only", got)
 		}
 	})
 

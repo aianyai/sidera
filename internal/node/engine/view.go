@@ -307,10 +307,11 @@ func (v *view) resolveSessionIn(instance string, ref adapterproto.EndpointRef, s
 
 // resolveAttemptBeingMade is the session endpoint an attempt belongs to, for an
 // attempt of this instance: the creation attempt of a session endpoint of the
-// instance, and the first prompt that follows from it, while the endpoint is open or
-// being created. Any other attempt, a made-up one included, belongs to nobody and is
-// refused as the unknown endpoint is. The attempts of later prompts are not minted by
-// the engine yet; when they are, they are resolved here too, so that no attempt
+// instance and the first prompt that follows from it, while the endpoint is open or
+// being created, and the prompt in flight of an open session endpoint of the
+// instance. An attempt that has settled is no longer anyone's: a put for it would
+// leave a file that nobody deletes. Any other attempt, a made-up one included,
+// belongs to nobody and is refused as the unknown endpoint is, so that no attempt
 // escapes the instance that owns it.
 func (v *view) resolveAttemptBeingMade(instance string, attempt adapterproto.AttemptID) (*endpointState, error) {
 	for _, c := range v.ctl {
@@ -318,6 +319,11 @@ func (v *view) resolveAttemptBeingMade(instance string, attempt adapterproto.Att
 			continue
 		}
 		return v.resolveSessionBeingMade(instance, adapterproto.EndpointRef(c.Intent.Endpoint.String()))
+	}
+	for id, head := range v.attempts {
+		if head.InFlight != nil && head.InFlight.Attempt == attempt {
+			return v.resolveSession(instance, adapterproto.EndpointRef(id.String()))
+		}
 	}
 	return nil, refuse(ReasonEndpointUnknown)
 }

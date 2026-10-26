@@ -320,11 +320,13 @@ back may put its state at once. The scope `session` needs a session endpoint of 
 instance that is open or whose creation has not ended: the adapter keeps the state of
 a session while it creates it, before the node has been told the session exists, and a
 creation whose adapter was refused that put would fail for it.
-The scope `attempt` needs an attempt of such a session: its creation attempt, or the first
-prompt that follows from it. The creation reads the state back by attempt, so an adapter that
-could put one under an attempt of another instance would write what that instance's creation
-believes it saved itself. An attempt that no session of the instance has is refused as
-`endpoint_unknown`, as a session of another instance is.
+The scope `attempt` needs an attempt of such a session: its creation attempt, the first
+prompt that follows from it, or the prompt in flight of an open session of the instance (the
+state a reconciliation of that prompt is given). The creation reads the state back by attempt,
+so an adapter that could put one under an attempt of another instance would write what that
+instance's creation believes it saved itself. An attempt that no session of the instance has is
+refused as `endpoint_unknown`, as a session of another instance is; so is a prompt attempt that
+has settled, whose checkpoint is already dropped and which a late put would leave behind.
 
 `Quiesce` judges, in the same loop command as its other conditions, each instance
 named in `Expect.Adapters` against the host's counts: the notifications handled
