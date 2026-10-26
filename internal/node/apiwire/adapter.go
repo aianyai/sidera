@@ -120,6 +120,12 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonTooLarge:            internalCode,
 	engine.ReasonAlertUnknown:        internalCode,
 	engine.ReasonIdentityRetired:     internalCode,
+	// The installation of a package and the presenting of a probe token are the
+	// owner's and the agent's requests; an adapter makes neither.
+	engine.ReasonInstallInProgress:   internalCode,
+	engine.ReasonPlatformUnsupported: internalCode,
+	engine.ReasonProbeTokenUsed:      internalCode,
+	engine.ReasonProbeTokenExpired:   internalCode,
 
 	engine.ReasonNodeQueueFull:      backPressure,
 	engine.ReasonStorageFull:        backPressure,

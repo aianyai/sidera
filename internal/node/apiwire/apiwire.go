@@ -281,6 +281,14 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryNotFound, CodeAlertUnknown, "the node holds no alert with this identifier")
 	case engine.ReasonIdentityRetired:
 		return New(CategoryUnavailable, "identity_retired", "the identity of this node was retired; nothing is signed in its name and the node is stopping")
+	case engine.ReasonInstallInProgress:
+		return New(CategoryConflict, "install_in_progress", "another adapter package is being installed; try again when it is done")
+	case engine.ReasonPlatformUnsupported:
+		return New(CategoryRefused, "platform_unsupported", "the package does not run on this platform")
+	case engine.ReasonProbeTokenUsed:
+		return New(CategoryUnauthenticated, "probe_token_used", "the probe token was presented before and is good once")
+	case engine.ReasonProbeTokenExpired:
+		return New(CategoryUnauthenticated, "probe_token_expired", "the probe token expired; it is good for a few minutes")
 	case engine.ReasonStorageFatal:
 		// Whether the command took effect is what the engine says it does not know,
 		// which is the outcome a client cannot tell either, with the same way out.
