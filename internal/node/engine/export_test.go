@@ -481,3 +481,20 @@ func roundTripValue(ctx context.Context, e *Engine, c *cmdReadControlBody) error
 	}
 	return err
 }
+
+type cmdWaiting struct{ call[int] }
+
+func (c *cmdWaiting) gate() gate { return gateAlways }
+func (c *cmdWaiting) run(e *Engine, _ time.Time) {
+	c.done(len(e.waits), nil)
+}
+
+// Waiting is how many recv calls wait for a message, read in the loop.
+func Waiting(e *Engine) int {
+	c := &cmdWaiting{call: newCall[int]()}
+	n, err := roundTrip(context.Background(), e, submitExternal, c, c.call)
+	if err != nil {
+		return -1
+	}
+	return n
+}
