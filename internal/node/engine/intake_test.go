@@ -18,7 +18,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
-	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/reply"
 	"github.com/aianyai/sidera/internal/trust"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -573,7 +572,7 @@ func TestAReportIsDatedWithTheMomentTheTargetRecordedTheStateItReports(t *testin
 		}
 		pull := func() envelope.StatusReport {
 			t.Helper()
-			ans, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: delivery.MessageID(msg)})
+			ans, err := pullFor(h, adapterproto.MessageID(msg), b.Endpoint)
 			if err != nil || len(ans.Reports) != 1 {
 				t.Fatalf("the answer to a pull: %+v, %v", ans, err)
 			}

@@ -11,7 +11,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
-	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -283,7 +282,7 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 		// The evidence is the node's own report of b's receipt of the question, which
 		// the held reports kept from a.
 		h.Release(string(msg))
-		ans, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: delivery.MessageID(msg)})
+		ans, err := pullFor(h, msg, endpointOf(t, h, "b"))
 		if err != nil || len(ans.Reports) != 1 {
 			t.Fatalf("the report of the receipt: %+v, %v", ans, err)
 		}

@@ -63,23 +63,49 @@ func (c *cmdPull) run(e *Engine, now time.Time) {
 }
 
 // Pull answers a source's pull for the current reports of its deliveries of one
-// message: one signed report for each recipient the target holds a record for.
+// message to the recipients the request names: for each, the signed report of the
+// record the target holds, or the recipient listed as having no record. A
+// recipient the request does not name is not answered.
 func (e *Engine) Pull(ctx context.Context, from transport.Origin, req transport.PullRequest) (transport.PullAnswer, error) {
 	c := &cmdPull{call: newCall[transport.PullAnswer](), from: from, req: req}
 	return roundTrip(ctx, e, submitInternal, c, c.call)
 }
 
+// answerPull gives, for each recipient of the request, a signed report of its
+// record or the recipient in NoRecord, and nothing else. Every record the target
+// holds can be signed, so a held record is never left out of both lists. The
+// whole answer is refused while the node may not sign: a "no record" with no
+// report beside it would be given on the word of a node that cannot vouch for
+// the others, and a clock in doubt dates nothing.
 func (e *Engine) answerPull(now time.Time, from transport.Origin, req transport.PullRequest) (transport.PullAnswer, error) {
 	if err := e.canSign(); err != nil {
 		return transport.PullAnswer{}, err
 	}
+	if len(req.Recipients) == 0 {
+		return transport.PullAnswer{}, invalidArgument("recipients", errors.New("a pull names at least one recipient"))
+	}
+	asked := make(map[ident.EndpointID]bool, len(req.Recipients))
+	for _, r := range req.Recipients {
+		asked[r] = true
+	}
 	var ans transport.PullAnswer
+	answered := make(map[ident.EndpointID]bool, len(asked))
 	for _, k := range e.view.arrived[arrivalKey{from.Node(), req.Message}] {
+		if !asked[k.Recipient] {
+			continue
+		}
 		rec, err := e.signReport(now, e.view.in[k])
 		if err != nil {
 			return transport.PullAnswer{}, err
 		}
 		ans.Reports = append(ans.Reports, rec)
+		answered[k.Recipient] = true
+	}
+	for _, r := range req.Recipients {
+		if !answered[r] {
+			ans.NoRecord = append(ans.NoRecord, r)
+			answered[r] = true // a recipient named twice is listed once
+		}
 	}
 	return ans, nil
 }

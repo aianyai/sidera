@@ -8,7 +8,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
-	"github.com/aianyai/sidera/internal/node/transport"
 )
 
 // A setting the owner changes is read by the engine when it uses it, so the
@@ -57,7 +56,7 @@ func TestAfterTheIdentityIsRetiredNothingIsSigned(t *testing.T) {
 	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonIdentityRetired {
 		t.Errorf("an envelope taken in after the retirement: %v; want the refusal for the identity", err)
 	}
-	if _, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: delivery.MessageID(msg)}); err == nil {
+	if _, err := pullFor(h, msg, endpointOf(t, h, "b")); err == nil {
 		t.Error("a report was signed after the retirement")
 	}
 	if in := inOf(t, h, msg); in.Record.State != delivery.StateAccepted {

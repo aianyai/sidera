@@ -302,6 +302,22 @@ of the receipt are signed before anything is written and the records, with the s
 record the evidence of a reply changed, are written in one transaction. While the wall
 clock cannot be trusted nothing is signed, so an envelope and a pull are refused and the
 sender tries again.
+
+**Answering a pull.** A pull names a message and the recipients on this node the asking
+source tracks a delivery of it to. For each recipient the answer holds the signed
+report of the target record, found by the asking node and the message, or the recipient
+in `NoRecord` when there is none. A record the node holds can always be signed (every
+state has the moment it was entered), so the one reason a held record goes unreported
+is a refusal of the whole answer: while the node may not sign (a clock in doubt, a
+retired identity) the pull is refused with that reason and `NoRecord` is not given
+alone, because a "no record" next to no report would be said by a node that cannot
+vouch for the rest of the answer. A recipient the request does not name is not
+answered and one it names twice is answered once; a request that names none is
+refused as an invalid argument, since the answer for no recipient is nothing the
+source can use. The target only ever sees healthy records: it has no shape for a
+record it lost, so absence is the only way a loss shows. Control signals have
+no pull path in the engine yet; when they do, the same rule applies to the records of
+`ctl/`.
 A report is dated with the moment the record entered the state it reports
 (`Record.StateAt`, so a rejection made later by an endpoint's closing carries the time of the
 closing, not of the acceptance) and, for a delivered record, with that moment as the delivery

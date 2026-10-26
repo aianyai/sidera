@@ -11,7 +11,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
-	"github.com/aianyai/sidera/internal/node/transport"
 )
 
 // encodeClear is the result of clearing the pause as the management interface words
@@ -63,7 +62,7 @@ func TestClockRollbackPausesSigningUntilCleared(t *testing.T) {
 	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonClockRollback {
 		t.Errorf("an envelope taken in while the clock is in doubt: %v; want the refusal for the clock", err)
 	}
-	if _, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: delivery.MessageID(before)}); err == nil {
+	if _, err := pullFor(h, before, endpointOf(t, h, "b")); err == nil {
 		t.Error("a report was signed while the clock is in doubt")
 	}
 
@@ -88,7 +87,7 @@ func TestClockRollbackPausesSigningUntilCleared(t *testing.T) {
 	if in := inOf(t, h, cleared); in.Record.State != delivery.StateAccepted {
 		t.Errorf("the message after the clear is %s, want accepted", in.Record.State)
 	}
-	if _, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: delivery.MessageID(before)}); err != nil {
+	if _, err := pullFor(h, before, endpointOf(t, h, "b")); err != nil {
 		t.Errorf("a report is still not signed after the clear: %v", err)
 	}
 

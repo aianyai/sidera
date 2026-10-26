@@ -37,7 +37,7 @@ commands and add their methods to this list.
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
 | `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record. Another endpoint's message is unknown to the caller. The reply of a control signal is not part of it yet. |
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
-| `Inbound`, `Pull` | The engine as the `transport.Handler`: an envelope for this node, answered with signed reports, and a pull for the reports of a message. |
+| `Inbound`, `Pull` | The engine as the `transport.Handler`: an envelope for this node, answered with signed reports, and a pull for the reports of a message to the recipients it names: for each, the signed report or the recipient in `NoRecord`. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
 | `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseResult`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and of a close the engine's own features ask for, and the alerts. The numbers of the status are `Status`'s. |
 | `Execute`, `ManagementCommand`, `StoredResult`, `Operation`, `CloseEndpointOp`, `StopDaemonOp` | The one door of every administrative operation of the owner: the replay check, the operation, and the storing of its result with the fingerprint are one command of the loop. The owner's request to close an endpoint and to stop the daemon are the two operations there are; the package that owns the effect of another adds its type here. |
@@ -245,6 +245,13 @@ commands and add their methods to this list.
   the transport's to say (`Origin.Local`); a local request is judged by the endpoint's
   declarations alone, and a remote one by the rules with no trust, which is denied
   until trust exists.
+- **A pull is answered for the recipients it names, from the records the target
+  holds.** For each recipient the pull names, the target gives the signed report of
+  its record, or lists the recipient in `NoRecord` when it holds none for the
+  message from the asking node; a recipient not named is not answered, and one named
+  twice is answered once. Every record the target holds can be signed, so a held
+  record is never missing from both lists. The whole answer is refused while the node
+  may not sign, and a pull that names no recipient is an invalid argument.
 - **A report is dated by the record.** The target record keeps the moment it entered
   its state (`Record.StateAt`), and a report is signed with it as `reported_at` and,
   for a delivered record, as `delivered_at` (`Record.DeliveredAt`); the engine keeps no

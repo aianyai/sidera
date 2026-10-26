@@ -279,7 +279,7 @@ func TestNothingIsSignedOrAcceptedWhileTheWallClockCannotBeTrusted(t *testing.T)
 	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonClockRollback {
 		t.Errorf("an envelope taken in: %v, want a refusal for the clock", err)
 	}
-	if _, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: "m"}); err == nil {
+	if _, err := pullFor(h, "m", endpointOf(t, h, "b")); err == nil {
 		t.Error("a pull was answered with a signature")
 	}
 	if sc := scanOf(t, h); len(sc.In)+len(sc.Out) != 0 {
@@ -643,7 +643,7 @@ func bodyHeldBySourceAlone(t *testing.T, h *harness.H, body string) (adapterprot
 		t.Fatal("the target record of a rejected message refers to a body")
 	}
 	h.Release(string(msg))
-	ans, err := h.Loopback().Pull(h.Ctx(), harness.NodeID(), transport.PullRequest{Message: delivery.MessageID(msg)})
+	ans, err := pullFor(h, msg, endpointOf(t, h, "b"))
 	if err != nil || len(ans.Reports) != 1 {
 		t.Fatalf("the report of the rejection: %+v, %v", ans, err)
 	}
