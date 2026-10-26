@@ -5,7 +5,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -41,13 +41,6 @@ func writtenCases() []writtenCase {
 	mixed := func() []store.InRecord {
 		return []store.InRecord{inRev(1, 1), inRev(2, 1), inRev(3, 7)}
 	}
-	seedIns := func(ins ...int) func(t *testing.T, mem *fsxtest.Mem) {
-		return func(t *testing.T, mem *fsxtest.Mem) {
-			for _, i := range ins {
-				seed(t, mem, inRev(i, 1))
-			}
-		}
-	}
 	// copiesOfBody1 makes every record refer to the one body a call gives: each gets
 	// its own file with a copy of it.
 	copiesOfBody1 := func(ins func() []store.InRecord) func() []store.InRecord {
@@ -70,12 +63,12 @@ func writtenCases() []writtenCase {
 		}},
 		{name: "PromptEnd", ins: func() []store.InRecord { return []store.InRecord{inRev(1, 2), inRev(2, 5)} },
 			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-				head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingNotified, delivery.CauseNone, ins...)}
+				head := store.AttemptsRecord{Endpoint: ep(2)}
 				return r.st.PromptEnd(head, ins)
 			}},
 		{name: "Blocked", ins: func() []store.InRecord { return []store.InRecord{inRev(1, 3), inRev(2, 9)} },
 			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-				head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingBlocked, delivery.CauseAdapterOffline, ins...)}
+				head := store.AttemptsRecord{Endpoint: ep(2), Blocked: handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: base}}
 				return r.st.Blocked(head, ins)
 			}},
 		{name: "Lease", ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
@@ -98,12 +91,6 @@ func writtenCases() []writtenCase {
 		}},
 		{name: "InstanceDrainReplay", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.InstanceDrainReplay([]store.EndpointRecord{closed8}, store.DrainBatch{In: ins})
-		}},
-		{name: "PromptReplay", setup: seedIns(1, 2), ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-			return r.st.PromptReplay(ins)
-		}},
-		{name: "BlockedReplay", setup: seedIns(1, 2), ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-			return r.st.BlockedReplay(ins)
 		}},
 		{name: "QuarantineBody", setup: func(t *testing.T, mem *fsxtest.Mem) { seed(t, mem, deliveredWithBody(1)) },
 			ins: func() []store.InRecord { return []store.InRecord{deliveredWithBody(1)} },

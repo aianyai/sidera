@@ -385,7 +385,7 @@ func TestARecordThatStillNeedsItsBodyIsRefusedWithoutAReferenceToIt(t *testing.T
 		in.Body = nil
 		return in
 	}
-	head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingNotified, delivery.CauseNone, inRev(1, 1))}
+	head := store.AttemptsRecord{Endpoint: ep(2)}
 	for _, c := range []struct {
 		name string
 		run  func(st *store.Store) error

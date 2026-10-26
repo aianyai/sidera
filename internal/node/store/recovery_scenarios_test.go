@@ -412,8 +412,6 @@ func recoveryScenarios() []scenario {
 				}
 			},
 		},
-		followerScenario("prompt-replay", store.PendingNotified, delivery.CauseNone),
-		followerScenario("blocked-replay", store.PendingBlocked, delivery.CauseAdapterOffline),
 		{
 			name: "feedback a notice already covers",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
@@ -486,53 +484,6 @@ func closedBy(i, e int) store.CtlRecord {
 	c.ClosedEndpoint = ep(e)
 	c.Record = applied0(c.Record)
 	return c
-}
-
-// followerScenario: a head record of a prompt or a block that lists followers,
-// some of which were written since, replaced, or are gone.
-func followerScenario(name string, ev store.PendingEvent, cause delivery.Cause) scenario {
-	return scenario{
-		name: name,
-		setup: func(t *testing.T, mem *fsxtest.Mem) {
-			listed := []store.InRecord{inRev(1, 1), inRev(2, 1), inRev(3, 1), inRev(4, 1), inRev(5, 1)}
-			head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(ev, cause, listed...)}
-			written := inRev(2, 2)                 // written since the head: revision moved
-			replaced := inRev(4, 1)                // a new record of the same key after a sweep
-			replaced.AcceptedAt = base.Add(3600e9) // accepted at another time
-			if ev == store.PendingUnblocked {
-				for i := range listed {
-					listed[i].Record.Blocked, listed[i].Record.BlockedCause = true, delivery.CauseAdapterOffline
-				}
-			}
-			seed(t, mem, head, inRev(1, 1), written, replaced, inRev(5, 1)) // in(3) is gone
-		},
-		mode: atomic, mustComplete: true, run: recoverRun,
-		verify: func(t *testing.T, r *rig) {
-			sc := r.scan()
-			rev := map[string]uint64{}
-			sub := map[string]delivery.SubState{}
-			blocked := map[string]bool{}
-			for _, in := range sc.In {
-				rev[string(in.Key.Message)] = in.Rev
-				sub[string(in.Key.Message)] = in.Record.Sub
-				blocked[string(in.Key.Message)] = in.Record.Blocked
-			}
-			for m, want := range map[string]uint64{"msg-0001": 2, "msg-0002": 2, "msg-0004": 1, "msg-0005": 2} {
-				if rev[m] != want {
-					t.Errorf("%s: revision %d, want %d (only a follower that is still the same record is written)", m, rev[m], want)
-				}
-			}
-			if _, gone := rev["msg-0003"]; gone {
-				t.Errorf("a follower that was removed was written again")
-			}
-			if ev == store.PendingNotified && (sub["msg-0001"] != delivery.SubNotified || sub["msg-0004"] != delivery.SubNone) {
-				t.Errorf("notified: %v", sub)
-			}
-			if ev == store.PendingBlocked && (!blocked["msg-0001"] || blocked["msg-0004"]) {
-				t.Errorf("blocked: %v", blocked)
-			}
-		},
-	}
 }
 
 // controlQuarantine is the quarantine of a control record of a session creation

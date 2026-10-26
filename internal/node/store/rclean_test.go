@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/txn"
@@ -58,18 +59,18 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	a, b := withRev(tgtIn(1), 1), withRev(tgtIn(2), 1)
 	mustDo(t, r.st.PromptBegin(store.AttemptsRecord{Endpoint: ep(2), InFlight: &store.InFlightPrompt{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Kind: 1, Covers: []store.TargetKey{a.Key, b.Key}}}))
 	check("prompt begin")
-	head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingNotified, delivery.CauseNone, a, b)}
+	head := store.AttemptsRecord{Endpoint: ep(2), Attempts: []handoff.Attempt{{At: base, Outcome: handoff.AttemptDelivered, Kind: handoff.PromptKindFirst}}}
 	a.Record, b.Record = applied(t, a.Record, delivery.Event{Type: delivery.EventNotified}), applied(t, b.Record, delivery.Event{Type: delivery.EventNotified})
 	mustDo(t, dropWritten(r.st.PromptEnd(head, []store.InRecord{a, b})))
 	check("prompt end")
 
-	head = store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingBlocked, delivery.CauseAdapterOffline, withRev(a, 2), withRev(b, 2))}
+	head.Blocked = handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: base}
 	a2, b2 := withRev(a, 2), withRev(b, 2)
 	a2.Record = applied(t, a2.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
 	b2.Record = applied(t, b2.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
 	mustDo(t, dropWritten(r.st.Blocked(head, []store.InRecord{a2, b2})))
 	check("blocked")
-	head = store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingUnblocked, delivery.CauseAdapterOffline, withRev(a2, 3), withRev(b2, 3))}
+	head.Blocked = handoff.BlockedReport{}
 	a3, b3 := withRev(a2, 3), withRev(b2, 3)
 	a3.Record = applied(t, a3.Record, delivery.Event{Type: delivery.EventUnblocked})
 	b3.Record = applied(t, b3.Record, delivery.Event{Type: delivery.EventUnblocked})
@@ -105,8 +106,6 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	check("the initial message delivered to the session")
 	closeCtl := closedBy(21, 5)
 	mustDo(t, r.st.ControlResult(closeCtl, ptr(closedSession(5, ctlName(20)))))
-	// Between a head record and its followers the disk is not at rest: the check
-	// is made when the chunks are done.
 	mustDo(t, dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan()))))
 	check("session drained")
 

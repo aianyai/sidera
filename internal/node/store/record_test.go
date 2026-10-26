@@ -62,9 +62,6 @@ func goldenWant(t *testing.T, name string) store.Record {
 			Endpoint: ep(5),
 			Attempts: []handoff.Attempt{{At: base.Add(-10 * time.Minute), Outcome: handoff.AttemptDelivered, Kind: handoff.PromptKindFirst}},
 			Blocked:  handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: base.Add(-5 * time.Minute)},
-			Pending: store.Pending{Event: store.PendingNotified, Items: []store.PendingItem{
-				{Key: tgtKey(1), Rev: 3, AcceptedAt: base},
-			}},
 		}
 	case "endpoint":
 		return session(5, store.EndpointCreating, strings.TrimSuffix(ctlKey(1).FileName(store.KindCtl), ".rec"))
@@ -252,9 +249,7 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"an admin retention before the result", "admin", `"retain_until":"2026-10-31T09:00:00Z"`, `"retain_until":"2026-10-23T09:00:00Z"`},
 		{"an attempt outcome that is not one", "attempts", `"delivered"`, `"delivered2"`},
 		{"a prompt kind that is not one", "attempts", `"kind":"first"`, `"kind":"third"`},
-		{"a pending event that is not one", "attempts", `"event":"notified"`, `"event":"told"`},
-		{"a pending item key that is not an in key", "attempts", `"key":"node1`, `"key":"nodeX`},
-		{"a pending item of revision zero", "attempts", `"rev":3`, `"rev":0`},
+		{"a list of followers to write, which no attempts record holds", "attempts", `{"attempts":[`, `{"pending":{"event":"notified"},"attempts":[`},
 		{"an endpoint status that is not one", "endpoint", `"status":"creating"`, `"status":"half"`},
 		{"an endpoint kind that is not one", "endpoint", `"kind":"session"`, `"kind":"robot"`},
 		{"an endpoint token of the wrong length", "endpoint", `"token":"RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU"`, `"token":"RUVF"`},
@@ -628,13 +623,6 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 			{At: base.Add(time.Minute), Outcome: handoff.AttemptUnknown, Kind: handoff.PromptKindReprompt},
 		},
 		InFlight: &store.InFlightPrompt{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Kind: handoff.PromptKindFirst, Covers: []store.TargetKey{tgtKey(1), tgtKey(2)}},
-		Pending: store.Pending{Event: store.PendingBlocked, Cause: delivery.CauseNativeUnavailable, Items: []store.PendingItem{
-			{Key: tgtKey(1), Rev: 1, AcceptedAt: base}, {Key: tgtKey(2), Rev: 4, AcceptedAt: base.Add(time.Minute)},
-		}},
-	}
-	recs["attempts recovered"] = store.AttemptsRecord{
-		Endpoint: ep(6),
-		Pending:  store.Pending{Event: store.PendingUnblocked, Cause: delivery.CauseAdapterOffline},
 	}
 	recs["alert unacknowledged"] = store.AlertRecord{ID: store.AlertID{1, 2, 3}, Kind: "control_unknown", At: base, Detail: "a native process may remain"}
 	recs["seq empty floors"] = store.SeqRecord{Sender: ep(2), Floors: map[ident.Address]uint64{}}

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"syscall"
 	"testing"
-	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
@@ -365,45 +365,47 @@ func TestEveryFileIsOwnerOnly(t *testing.T) {
 	}
 }
 
-// A head record lists its followers as they were read, and the followers written
-// with it must be those: a revision or an acceptance time that is not the listed
-// one would never be replayed, and a follower that is not listed would be lost.
-func TestHeadRecordRefusesAFollowerItDoesNotListAsItWasRead(t *testing.T) {
-	a, b := inRev(1, 1), inRev(2, 1)
-	event := delivery.Event{Type: delivery.EventNotified}
-	notify := func(in store.InRecord) store.InRecord {
-		in.Record, _, _ = in.Record.Apply(base, event)
-		return in
+// A prompt and a block write their recipients, made durable together, and the
+// head record last: the head says the work is done, so it cannot be there while a
+// recipient is not. With no recipient, the head is written alone.
+func TestAPromptAndABlockWriteTheirRecipientsBeforeTheirHead(t *testing.T) {
+	event := func(t *testing.T, ev delivery.Event, ins ...store.InRecord) []store.InRecord {
+		for i := range ins {
+			ins[i].Record = applied(t, ins[i].Record, ev)
+		}
+		return ins
 	}
-	head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingNotified, delivery.CauseNone, a)}
-	for name, run := range map[string]func(r *rig) error{
-		"a follower that is not listed": func(r *rig) error { return dropWritten(r.st.PromptEnd(head, []store.InRecord{notify(a), notify(b)})) },
-		"a follower with another revision than the one listed": func(r *rig) error {
-			stale := notify(a)
-			stale.Rev = 5
-			return dropWritten(r.st.PromptEnd(head, []store.InRecord{stale}))
-		},
-		"a follower accepted at another time than the one listed": func(r *rig) error {
-			other := notify(a)
-			other.AcceptedAt = other.AcceptedAt.Add(time.Second)
-			return dropWritten(r.st.PromptEnd(head, []store.InRecord{other}))
-		},
-		"an event the transaction does not carry": func(r *rig) error {
-			blocked := head
-			blocked.Pending.Event = store.PendingBlocked
-			return dropWritten(r.st.PromptEnd(blocked, []store.InRecord{notify(a)}))
-		},
+	notified := delivery.Event{Type: delivery.EventNotified}
+	blocked := delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline}
+	report := handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: base}
+	for _, c := range []struct {
+		name string
+		run  func(t *testing.T, st *store.Store) error
+		want []string // the roles written, a run of one role counted once
+	}{
+		{"a prompt", func(t *testing.T, st *store.Store) error {
+			return dropWritten(st.PromptEnd(store.AttemptsRecord{Endpoint: ep(2)}, event(t, notified, inRev(1, 1), inRev(2, 1))))
+		}, []string{"in", "in-dir", "attempts"}},
+		{"a block", func(t *testing.T, st *store.Store) error {
+			return dropWritten(st.Blocked(store.AttemptsRecord{Endpoint: ep(2), Blocked: report}, event(t, blocked, inRev(1, 1), inRev(2, 1))))
+		}, []string{"in", "in-dir", "attempts"}},
+		{"a prompt that reached nobody", func(t *testing.T, st *store.Store) error {
+			return dropWritten(st.PromptEnd(store.AttemptsRecord{Endpoint: ep(2)}, nil))
+		}, []string{"attempts"}},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			r := newRig(t)
-			if err := run(r); err == nil {
-				t.Error("accepted")
+			seedWithBodies(t, r.mem, inRev(1, 1), inRev(2, 1))
+			var got []string
+			r.rec.on = func(p fsx.Point, _ txn.Kind) {
+				if role := p.Tag.Role; role != "" && (len(got) == 0 || got[len(got)-1] != role) {
+					got = append(got, role)
+				}
 			}
-			if r.rec.count() != 0 {
-				t.Errorf("%d crash points were reached by a call that was refused", r.rec.count())
+			mustDo(t, c.run(t, r.st))
+			if !slices.Equal(got, c.want) {
+				t.Errorf("the roles written, in order, are %v, want %v", got, c.want)
 			}
 		})
 	}
-	r := newRig(t)
-	mustDo(t, dropWritten(r.st.PromptEnd(head, []store.InRecord{notify(a)})))
 }

@@ -53,6 +53,13 @@ type scenario struct {
 	crashed func(t *testing.T, where string, snap map[string]string)
 	// retry is what the engine does again once recovery is done.
 	retry func(t *testing.T, r *rig, s *sim)
+	// redo is the work a workflow with no recovery rule leaves to its next attempt:
+	// what the engine does, once recovery has run, to do the workflow again over
+	// the disk the crash left. It runs on a copy of the recovered disk, and the copy
+	// must end in the state after, the same disk as the workflow run once without a
+	// crash. It does what the engine does and nothing more: it reads the disk, and
+	// writes only if the commit mark of the workflow is not there.
+	redo func(t *testing.T, r *rig, s *sim)
 	// bodiesResolve: in every crash state, every live record that refers to a body
 	// finds its file.
 	bodiesResolve bool
@@ -351,6 +358,18 @@ func (sc *scenario) exercise(t *testing.T, where string, cs crashState, before, 
 	noWork(t, where+", after recovery", r2.scan(), s.enabled)
 	if sc.extra != nil {
 		sc.extra(t, where, crashedSnap, fin)
+	}
+
+	if sc.redo != nil {
+		rm := openRigRaw(t, r2.mem.Clone(), nil)
+		rm.restart()
+		sm := sc.newSimFor(t, rm)
+		sm.recoverAll()
+		sc.redo(t, rm, sm)
+		sm.recoverAll()
+		if why := equalMaps(sc.filter(snapshot(t, rm.mem, ".")), sc.filter(after), sc.optional); why != "" {
+			t.Errorf("%s: doing the workflow again over the state recovery ended in does not end in the state of one clean run: %s", where, why)
+		}
 	}
 
 	// Idempotent: a second restart and a second run of the rules write nothing.

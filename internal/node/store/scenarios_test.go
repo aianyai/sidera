@@ -11,6 +11,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
+	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
@@ -76,14 +77,6 @@ func openedBy(c store.CtlRecord) store.EndpointRecord {
 func notified(t testing.TB, in store.InRecord) store.InRecord {
 	in.Record = applied(t, in.Record, delivery.Event{Type: delivery.EventNotified})
 	return in
-}
-
-func pendingOf(ev store.PendingEvent, cause delivery.Cause, ins ...store.InRecord) store.Pending {
-	p := store.Pending{Event: ev, Cause: cause}
-	for _, in := range ins {
-		p.Items = append(p.Items, store.PendingItem{Key: in.Key, Rev: in.Rev, AcceptedAt: in.AcceptedAt})
-	}
-	return p
 }
 
 // seedWithBodies writes the records and, for each one that holds a reference, the
@@ -392,8 +385,9 @@ func scenarios() []scenario {
 				}})
 			},
 		},
-		promptScenario("prompt-end", store.PendingNotified, delivery.CauseNone),
-		promptScenario("blocked", store.PendingBlocked, delivery.CauseAdapterOffline),
+		promptEndScenario(),
+		blockedScenario(false),
+		blockedScenario(true),
 		{
 			name: "lease",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
@@ -707,32 +701,170 @@ func single(name, durable string, run func(r *rig) error) scenario {
 	return scenario{name: name, durable: durable, mode: atomic, run: func(t *testing.T, r *rig, s *sim) error { return run(r) }}
 }
 
-// promptScenario is the head record of a prompt or a block and its followers.
-func promptScenario(name string, ev store.PendingEvent, cause delivery.Cause) scenario {
-	event := delivery.Event{Type: delivery.EventNotified}
-	if ev == store.PendingBlocked {
-		event = delivery.Event{Type: delivery.EventBlocked, Cause: cause}
+// headLastWrite is a prompt or a block: the target records an event applies to,
+// then the head record of the endpoint, which says the work is done. No recovery
+// rule finishes a half-done write. A crash leaves the head as it was and some, all
+// or none of the recipients written, each as it was before or as the event makes it;
+// the head is the commit mark, so a head that is there means every recipient is
+// written, and one that is not means the next attempt does the work again.
+type headLastWrite struct {
+	name string
+	// tx is the transaction the write is, and so the first part of its crash points.
+	tx string
+	// event is applied to every recipient.
+	event delivery.Event
+	// prior is the recipient before the event.
+	prior func(t testing.TB, in store.InRecord) store.InRecord
+	// before and after are the head record at rest before the write and after it.
+	before, after store.AttemptsRecord
+	// done says, from the head record alone, whether the write is done: the commit
+	// mark a reader looks at.
+	done func(store.AttemptsRecord) bool
+	// call is the store method that writes it.
+	call func(st *store.Store, head store.AttemptsRecord, ins []store.InRecord) error
+}
+
+// recipients are the target records of the write before it.
+func (w headLastWrite) recipients(t testing.TB) (a, b store.InRecord) {
+	return w.prior(t, inRev(1, 1)), w.prior(t, inRev(2, 1))
+}
+
+// written is a recipient as the event and the write leave it: the event applied,
+// the revision one on.
+func (w headLastWrite) written(t testing.TB, in store.InRecord) store.InRecord {
+	in.Record = applied(t, in.Record, w.event)
+	in.Rev++
+	return in
+}
+
+func (w headLastWrite) scenario() scenario {
+	headPath := path.Join(store.AttemptsDir, w.before.Name())
+	file := func(t testing.TB, rec store.Record) string {
+		data, err := store.EncodeRecord(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
 	}
 	return scenario{
-		name: name,
+		name: w.name,
 		setup: func(t *testing.T, mem *fsxtest.Mem) {
-			seedWithBodies(t, mem, inRev(1, 1), inRev(2, 1), store.AttemptsRecord{Endpoint: ep(2), InFlight: &store.InFlightPrompt{
-				Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Kind: 1, Covers: []store.TargetKey{tgtKey(1), tgtKey(2)},
-			}})
+			a, b := w.recipients(t)
+			seedWithBodies(t, mem, a, b, w.before)
 		},
-		durable: name + "/attempts.sync-dir#1",
-		mode:    atomic,
+		durable: w.tx + "/attempts.sync-dir#1",
+		mode:    batch,
 		run: func(t *testing.T, r *rig, s *sim) error {
-			a, b := inRev(1, 1), inRev(2, 1)
-			head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(ev, cause, a, b)}
-			a.Record, b.Record = applied(t, a.Record, event), applied(t, b.Record, event)
-			if name == "blocked" {
-				return dropWritten(r.st.Blocked(head, []store.InRecord{a, b}))
+			a, b := w.recipients(t)
+			a.Record, b.Record = applied(t, a.Record, w.event), applied(t, b.Record, w.event)
+			return w.call(r.st, w.after, []store.InRecord{a, b})
+		},
+		// In every crash state each recipient is as it was or as the write makes it,
+		// and the head is there only after the recipients: a head written first would
+		// leave a recipient the next attempt does not know it has to write.
+		crashed: func(t *testing.T, where string, snap map[string]string) {
+			a, b := w.recipients(t)
+			headDone := snap[headPath] == file(t, w.after)
+			for _, in := range []store.InRecord{a, b} {
+				p := path.Join(store.InDir, in.Name())
+				switch snap[p] {
+				case file(t, w.written(t, in)):
+				case file(t, in):
+					if headDone {
+						t.Errorf("%s: the head record is written and %s is not", where, in.Key.Message)
+					}
+				default:
+					t.Errorf("%s: %s is neither as it was nor as the write makes it", where, in.Key.Message)
+				}
 			}
-			return dropWritten(r.st.PromptEnd(head, []store.InRecord{a, b}))
+		},
+		// Recovery has no rule for it: the disk it ends in is the disk the crash left.
+		extra: func(t *testing.T, where string, crashed, fin map[string]string) {
+			if why := equalMaps(crashed, fin, nil); why != "" {
+				t.Errorf("%s: recovery changed what the crash left: %s", where, why)
+			}
+		},
+		// The next attempt: what the engine does, over the recovered disk, when it
+		// finds the head not done: apply the event to the recipients it does not hold,
+		// write those, and the head last. A write that is done is not done again.
+		redo: func(t *testing.T, r *rig, s *sim) {
+			sc := r.scan()
+			for _, h := range sc.Attempts {
+				if h.Endpoint == w.after.Endpoint && w.done(h) {
+					return
+				}
+			}
+			var todo []store.InRecord
+			a, b := w.recipients(t)
+			for _, want := range []store.InRecord{a, b} {
+				for _, in := range sc.In {
+					if in.Key != want.Key {
+						continue
+					}
+					rec, o, err := in.Record.Apply(base, w.event)
+					if err != nil {
+						t.Fatalf("applying %v to %s: %v", w.event.Type, in.Key, err)
+					}
+					if o.Result == delivery.ResultApplied {
+						in.Record = rec
+						todo = append(todo, in)
+					}
+				}
+			}
+			mustDo(t, w.call(r.st, w.after, todo))
 		},
 		bodiesResolve: true,
 	}
+}
+
+func promptEndScenario() scenario {
+	covers := []store.TargetKey{tgtKey(1), tgtKey(2)}
+	return headLastWrite{
+		name:  "prompt-end",
+		tx:    "prompt-end",
+		event: delivery.Event{Type: delivery.EventNotified},
+		prior: func(_ testing.TB, in store.InRecord) store.InRecord { return in },
+		before: store.AttemptsRecord{Endpoint: ep(2), InFlight: &store.InFlightPrompt{
+			Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Kind: handoff.PromptKindFirst, Covers: covers,
+		}},
+		after: store.AttemptsRecord{Endpoint: ep(2), Attempts: []handoff.Attempt{
+			{At: base, Outcome: handoff.AttemptDelivered, Kind: handoff.PromptKindFirst},
+		}},
+		done: func(h store.AttemptsRecord) bool { return h.InFlight == nil },
+		call: func(st *store.Store, head store.AttemptsRecord, ins []store.InRecord) error {
+			return dropWritten(st.PromptEnd(head, ins))
+		},
+	}.scenario()
+}
+
+// blockedScenario is a block, or the recovery from one: the recipients take the
+// flag and the cause, or lose them, and the head record takes the report of the
+// block, or drops it.
+func blockedScenario(recovered bool) scenario {
+	blocked := handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: base}
+	w := headLastWrite{
+		name:   "blocked",
+		tx:     "blocked",
+		event:  delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline},
+		prior:  func(_ testing.TB, in store.InRecord) store.InRecord { return in },
+		before: store.AttemptsRecord{Endpoint: ep(2)},
+		after:  store.AttemptsRecord{Endpoint: ep(2), Blocked: blocked},
+		done:   func(h store.AttemptsRecord) bool { return h.Blocked.Cause != 0 },
+		call: func(st *store.Store, head store.AttemptsRecord, ins []store.InRecord) error {
+			return dropWritten(st.Blocked(head, ins))
+		},
+	}
+	if recovered {
+		w.name = "blocked-recovered"
+		w.event = delivery.Event{Type: delivery.EventUnblocked}
+		w.prior = func(t testing.TB, in store.InRecord) store.InRecord {
+			in.Record = applied(t, in.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
+			return in
+		}
+		w.before, w.after = w.after, w.before
+		w.done = func(h store.AttemptsRecord) bool { return h.Blocked.Cause == 0 }
+	}
+	return w.scenario()
 }
 
 // sweepScenario is a sweep of every kind of thing a sweep removes.

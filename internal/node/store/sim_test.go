@@ -133,19 +133,6 @@ func (s *sim) pass() bool {
 		s.must(dropWritten(s.st.EndpointDrainReplay(b)), "EndpointDrainReplay")
 		do("endpoint-drain-replay")
 	}
-	for _, w := range store.PromptReplays(s.scan()) {
-		ins := s.apply(w, delivery.Event{Type: delivery.EventNotified})
-		s.must(dropWritten(s.st.PromptReplay(ins)), "PromptReplay")
-		do("prompt-replay")
-	}
-	for _, w := range store.BlockedReplays(s.scan()) {
-		ev := delivery.Event{Type: delivery.EventBlocked, Cause: w.Head.Pending.Cause}
-		if w.Head.Pending.Event == store.PendingUnblocked {
-			ev = delivery.Event{Type: delivery.EventUnblocked}
-		}
-		s.must(dropWritten(s.st.BlockedReplay(s.apply(w, ev))), "BlockedReplay")
-		do("blocked-replay")
-	}
 	if outs := store.FeedbackReplays(s.scan()); len(outs) > 0 {
 		s.must(s.st.FeedbackReplay(outs), "FeedbackReplay")
 		do("feedback-replay")
@@ -159,26 +146,6 @@ func (s *sim) pass() bool {
 		do("orphan-gc")
 	}
 	return worked
-}
-
-// apply applies an event to every follower of a head and returns the records
-// to write.
-func (s *sim) apply(w store.PendingWork, ev delivery.Event) []store.InRecord {
-	var out []store.InRecord
-	for _, f := range w.Followers {
-		rec, o, err := f.Record.Apply(s.now, ev)
-		if err != nil {
-			s.t.Fatalf("applying %v to %s: %v", ev.Type, f.Key, err)
-		}
-		if o.Result != delivery.ResultApplied {
-			// Nothing changed: the follower is written unchanged, which still
-			// settles the head; the revision moves, which is what a write is.
-			rec = f.Record
-		}
-		f.Record = rec
-		out = append(out, f)
-	}
-	return out
 }
 
 // drainBatch applies a forced close to the candidates of the drain and returns
@@ -285,10 +252,6 @@ func work(sc *store.Scan, enabled func(string) bool) []string {
 	add("ctl-effect-replay", len(er), func(i int) string { return er[i].ID.String() })
 	id := store.InstanceDrainWork(sc, enabled)
 	add("instance-drain-replay", len(id), func(i int) string { return id[i].ID.String() })
-	pr := store.PromptReplays(sc)
-	add("prompt-replay", len(pr), func(i int) string { return pr[i].Head.Endpoint.String() })
-	br := store.BlockedReplays(sc)
-	add("blocked-replay", len(br), func(i int) string { return br[i].Head.Endpoint.String() })
 	fr := store.FeedbackReplays(sc)
 	add("feedback-replay", len(fr), func(i int) string { return fr[i].Name() })
 	lr := store.OutLostReplays(sc)
