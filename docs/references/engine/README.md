@@ -360,8 +360,8 @@ answer is made again every `ResendBackoff` (30 s) until the delivery deadline, t
 node that has not answered (the envelope is made anew, so a reply's evidence is signed
 anew, and the request digest is the same); a delivery that is not settled is asked about
 every `PullInterval` (1 min) until its report deadline, which already holds the clock
-tolerance; after the delivery deadline a node that never answered is asked and not sent
-to. A send that carries evidence is put off while the wall clock cannot be trusted. The reports in a receipt or an answer are
+tolerance, and once more after it (below); after the delivery deadline a node that never
+answered is asked and not sent to. A send that carries evidence is put off while the wall clock cannot be trusted. The reports in a receipt or an answer are
 verified with the target's certificate and applied to the source record by the envelope
 package's one rule; the record is written with the feedback the change calls for and with
 the body reference dropped once no delivery needs the body. A report that does not verify
@@ -395,13 +395,42 @@ a `NoRecord` for a recipient the same answer reports is logged as the peer's fau
 out: the report is signed and stands, and the listing is not applied. Nothing of the sending is persisted:
 the last step of the start looks at every unsettled source record again.
 
+**The pull before the close.** A source delivery that is still `queued` or `accepted`
+after `report_by` has never been told an outcome to its sender, and the target keeps its
+record, and answers pulls from it, for about a day longer (`finalPullUntil`, which is
+`reply.RetainFactsUntil`: the longest term of what the target's store keeps for a
+delivery, a pin in `TestTheEnginesLastPullIsNeverLaterThanTheStoreKeepsARecord`). So its
+close waits for one more pull of the target (`finalPullDue`; `workFinalPull`), the only
+pull made after `report_by`. The answer is applied by the same rules as any other, with
+its true meaning though `report_by` has passed: a rejection is told as a rejection, a
+delivery stays silent, a hand-over is told (`ApplyReport` judges a report by the time the
+target recorded its state, not by when it arrived). Then, whatever came of the pull, the
+loop ticks the record: what is still `queued` or `accepted` closes with the notice the
+delivery rules give for that (the expiry, or that the result could not be learned). A
+failed call is not tried again, an answer that the target holds no record is ignored after
+`report_by` (the target may have forgotten legitimately, so it is not a loss), and when
+the target's retention is already over the delivery closes at once, with no call. A
+delivery in any other state (`expired_unconfirmed`, `delivery_unknown`) is closed without
+the pull, silently: the sender holds the notice. Nothing is persisted for this: the loop
+remembers which deliveries have been pulled (`outbox.finalPulled`), and after a restart
+the pull is made again, which is harmless. At the start the tick of step 12 leaves such a
+delivery open and step 14 makes the pull, so a node that slept past `report_by` learns what
+its targets settled before it closes and tells anything; while the node runs, the tick at
+`report_by` asks the worker for the pull and a pull still in flight when `report_by` passes
+is followed by it. A delivery of a record the worker does not carry (a control signal, a
+lost record, an engine without a transport) closes at once, so nothing waits for a pull that
+cannot come; `outboundWorks` says which. A delivery removed from the outbox because the target
+answered a send with a conflict is still queued and closes like any other, so it ends with a
+notice.
+
 **The passing of time.** Each target record and each source record has an entry of the
 schedule at its next time-driven change (`Record.NextTick`), which the view keeps current
 (`view.onTick`: a record taken in or dropped moves its entry, so no write has to
 remember to). When entries fall due their records are ticked together: a target message
 nobody read is rejected as `backlog_expired` when the endpoint's queue time runs out (the
-body reference goes with it), and any record not final after `report_by` is closed, which
-is silent. The records go to one transaction (`tick`) in chunks of `ChunkTickRecords`, with
+body reference goes with it), and any record not final after `report_by` is closed: a target
+record silently, a source record with the notice the delivery rules give for the state it was
+in (nothing for a delivery the sender was told about), after the pull described above. The records go to one transaction (`tick`) in chunks of `ChunkTickRecords`, with
 the feedback the changes call for, and the entries of the ones that changed move with the
 view. Startup step 12 ticks every record that is due before the feedback of step 13 goes
 out. Control records are not ticked here: a control signal is settled with its control
@@ -516,9 +545,9 @@ in the order the node takes them; the engine takes part in these:
 | 8 | Management interface opens; reads answer, changes are refused | `Start` |
 | 10 | Adapter instances start and are admitted | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed` |
 | 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery` |
-| 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick` |
+| 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick` (a source delivery still queued or accepted past `report_by` is left open for the pull of step 14) |
 | 13 | Send the feedback that fell due | phase `feedback` |
-| 14 | Go on with the loopback of outgoing messages | phase `outbound`: every unsettled source record is sent or asked about again |
+| 14 | Go on with the loopback of outgoing messages | phase `outbound`: every unsettled source record is sent or asked about again, and a delivery past `report_by` that waits for its last pull is pulled and closed |
 | 15 | The Agent interface serves in full | `Serve` |
 
 **Recovery.** `PlanRecovery` is a pure function of a scan: what each recovery rule
@@ -681,10 +710,20 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   ask.** Expiry says the target may have the message, which would be false news if the
   question had not been put to it; and a target unreachable for the whole of a
   delivery has no report to carry the news, so the failure of the contact is the only
-  word the sender gets, once, before the deadline. What the delivery rules do not give
-  feedback for is an accepted delivery whose target is lost from some moment to
-  `report_by`: it closes silent, and the target may have rejected it meanwhile
-  (`TestAnAcceptedDeliveryWhoseTargetIsLostToTheEndIsNotClosedSilently`, skipped, says it).
+  word the sender gets, once, before the deadline. An accepted delivery whose target is
+  lost from some moment to `report_by` gets no word from a failing contact, and the
+  target may have rejected it meanwhile, so it is not closed silent: the pull before the
+  close learns what the target settled, and when it cannot the sender is told that the
+  result could not be learned (`TestAnAcceptedDeliveryWhoseTargetIsLostToTheEndIsNotClosedSilently`).
+- **The close waits for one last pull, and a node asleep past `report_by` is the common
+  case.** A node that is off for longer than a delivery's life wakes to deliveries whose
+  targets settled them meanwhile; closing them at the start would tell nobody, or tell
+  "unknown" where the target holds a signed rejection. The target keeps its records for
+  longer than `report_by` for this, so one pull is worth making, and only one: a node
+  that cannot be reached will not be asked again, the sender is told what it is owed, and a
+  node that is asked after the target's retention would learn nothing. The tick does not
+  close ahead of the pull because it asks one question ("is the pull made?") of one
+  place, `finalPullPending`, and the delivery rules stay free of any timer.
 - **Feedback is queued where the view takes a record, and told by a notice that covers
   it.** A decision is stored with the record that made it, so a crash cannot mark a
   delivery reported without its feedback; every write of a source record goes through
@@ -809,9 +848,10 @@ reproducible).
 | Every write that tells an endpoint survives a crash | `feedback-form`, `feedback-clear` (declared by the store) | `TestFeedbackRecoversFromACrashAtEveryPoint` |
 | Every source record the loop writes enters the view through `putOut`, which queues the feedback it holds | `feedback.go` (`putOut`) | `TestEverySourceRecordTheLoopWritesEntersTheViewThroughPutOut` |
 | A clearing of the records that failed after a notice is tried again, so a notice swept later cannot cause a second one | `feedback.go` (`clearCovered`, `retryClears`) | `TestANoticeIsNotToldTwiceWhenTheRecordsCouldNotBeCleared` |
-| A target message nobody reads is rejected when the queue time runs out and the sender is told once; a record that is not final closes after `report_by` | `ticks.go`, `view.go` (`onTick`) | `TestBacklogExpiryRejectsAndIsReportedOnce`, `TestARecordThatIsNotFinalIsClosedByTheEndOfItsTime`, `TestNoRecordAfterReportByChangesNothing` |
+| A target message nobody reads is rejected when the queue time runs out and the sender is told once; a record that is not final closes after `report_by`, a source record with the notice of how it closed | `ticks.go`, `view.go` (`onTick`) | `TestBacklogExpiryRejectsAndIsReportedOnce`, `TestARecordThatIsNotFinalIsClosedByTheEndOfItsTime`, `TestNoRecordAfterReportByChangesNothing` |
+| One pull of the target before a queued or accepted source delivery closes; its answer is told with its true meaning; a failed call, no record, or a target that no longer keeps its records closes it with one notice; a delivery already told closes silently | `outbound.go` (`finalPullDue`, `finalPullPending`, `finalPullMade`), `ticks.go` (`tickedSource`) | `TestASourceAsleepPastReportByIsToldTheRejectionTheTargetSigned`, `TestASourceAsleepPastReportByTellsOnceWhenTheTargetCannotBeAsked`, `TestASourceAsleepPastTheTargetsRetentionAsksNoOne`, `TestADeliveryLearnedByThePullBeforeTheCloseIsSilent`, `TestADeliveryTheSenderWasToldExpiredClosesWithoutAWord`, `TestNoRecordInThePullBeforeTheCloseIsNotALoss`, `TestADeliveryRemovedFromTheOutboxByAConflictStillEndsWithANotice`, `TestOutboundNeedByState` |
 | A delivery with no receipt expires only after a query that was answered found none, is told once and its correction once | `outbound.go` (`applyAnswer`) | `TestExpiredUnconfirmedCorrectedOnce`, `TestSourceWithoutAReceiptIsNotToldTheTargetLostTheRecord` |
-| Contact that keeps failing is told once; twenty messages are one notice; the delivery ends closed after `report_by` | `outbound.go` (`outResult`, `noteContactFailing`) | `TestTwentyToUnreachableTargetMergeIntoOneNotice`, `TestAnUnreachableTargetIsToldOnceAndTheDeliveryClosesAfterReportBy` |
+| Contact that keeps failing is told once; twenty messages are one notice; the delivery ends closed after `report_by`, told once more as expired | `outbound.go` (`outResult`, `noteContactFailing`) | `TestTwentyToUnreachableTargetMergeIntoOneNotice`, `TestAnUnreachableTargetIsToldOnceAndTheDeliveryClosesAfterReportBy` |
 | Nothing is ticked or judged while the clock is in doubt | `ticks.go` (`tickBatch`), `outbound.go` (`observe`) | `TestClockRollbackPausesSigningUntilCleared`, `TestNoRecordIsNotAnsweredWhileTheNodeMayNotSign` |
 | The records of time survive a crash at every step | `tick` (declared by the store) | `TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint` |
 | A damaged file is settled by the scan entry first of the rules; a source record becomes the sender's lost record, a file lost unread a notice of its loss, a target record is removed; each tells the sender once and raises one alert | `quarantine.go` (`quarantineAll`, `settleFile`, `lostOut`), `recovery.go` | `TestCorruptDeliveryRecordIsReportedToTheSenderOnce`, `TestOpenQuarantinesADamagedFileAndOpens`, `TestQuarantineRecoversFromACrashAtEveryPoint` |

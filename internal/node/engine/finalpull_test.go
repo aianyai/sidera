@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"bytes"
 	"slices"
 	"testing"
 	"time"
@@ -205,8 +206,9 @@ func TestADeliveryLearnedByThePullBeforeTheCloseIsSilent(t *testing.T) {
 	quiet(t, h)
 	reportBy := sourceDelivery(t, h, msg).ReportBy
 	h.Unreachable(true)
+	ins := inRecords(t, h, msg)
 	h.Stop()
-	deliverOnDisk(t, h, msg)
+	deliverOnDisk(t, h, ins)
 	h.Advance(reportBy.Sub(h.Clock().Now()) + time.Minute)
 	h.Unreachable(false)
 	h.Start()
@@ -294,11 +296,14 @@ func TestADeliveryRemovedFromTheOutboxByAConflictStillEndsWithANotice(t *testing
 
 // deliverOnDisk makes the target record of the message delivered, as the agent's
 // acknowledgement of its body would, on the disk of a node that is down.
-func deliverOnDisk(t *testing.T, h *harness.H, msg adapterproto.MessageID) {
+func deliverOnDisk(t *testing.T, h *harness.H, ins []store.InRecord) {
 	t.Helper()
-	for _, in := range inRecords(t, h, msg) {
+	for _, in := range ins {
 		now := h.Clock().Now()
-		lease := delivery.LeaseID{1}
+		lease, err := delivery.NewLeaseID(bytes.NewReader([]byte("0123456789abcdef")))
+		if err != nil {
+			t.Fatal(err)
+		}
 		rec, res, err := in.Record.Handout(now, delivery.AuthorizationAllow, 1, 1, lease)
 		if err != nil || res.Action != delivery.HandoutGranted {
 			t.Fatalf("handing out the body: %+v %v", res, err)

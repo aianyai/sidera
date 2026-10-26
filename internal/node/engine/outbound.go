@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/internal/reply"
 )
 
 // The outbound side: what the node does after it accepted a message, until every
@@ -32,6 +33,11 @@ const (
 	workSend workKind = iota + 1
 	// workPull asks the node for the reports of the deliveries of a message.
 	workPull
+	// workFinalPull is the one pull made after report_by, before a delivery that is
+	// still queued or accepted is closed (see finalPullDue). It asks like workPull;
+	// the loop treats its end, whatever the answer, as the moment the delivery may
+	// close.
+	workFinalPull
 )
 
 // outWork is one call to the transport.
@@ -59,6 +65,18 @@ type outbox struct {
 
 	// state is what the loop knows of each source record that is not settled.
 	state map[string]*outState
+	// finalPulled are the deliveries, by source record and recipient, whose pull
+	// before the close has been made, or has failed, in this run: the close then no
+	// longer waits for it. Like state it is not persisted: after a restart the
+	// engine works out from the records which deliveries still need the pull, and a
+	// pull made twice is harmless. An entry goes when its delivery closes.
+	finalPulled map[finalPullKey]struct{}
+}
+
+// finalPullKey names one delivery of a source record.
+type finalPullKey struct {
+	name      string
+	recipient ident.EndpointID
 }
 
 // outState is the loop's memory of one source record's outbound work. It is not
@@ -77,7 +95,9 @@ type outState struct {
 	failingSince map[ident.NodeID]time.Time
 }
 
-func newOutbox() *outbox { return &outbox{state: map[string]*outState{}} }
+func newOutbox() *outbox {
+	return &outbox{state: map[string]*outState{}, finalPulled: map[finalPullKey]struct{}{}}
+}
 
 func (b *outbox) next() (outWork, bool) {
 	b.mu.Lock()
@@ -132,7 +152,7 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 			var rc transport.Receipt
 			rc, res.err = e.tr.Send(ctx, w.node, w.sender, w.data)
 			res.reports = rc.Reports
-		case workPull:
+		case workPull, workFinalPull:
 			var ans transport.PullAnswer
 			ans, res.err = e.tr.Pull(ctx, w.node, transport.PullRequest{Message: w.message, Recipients: w.recipients})
 			res.reports, res.noRecord = ans.Reports, ans.NoRecord
@@ -150,9 +170,7 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 // its result schedules the next look.
 func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	o, ok := e.view.out[name]
-	// A control signal is sent by the creation of a session, which is not this
-	// worker's work; a record that was lost holds nothing to send.
-	if !ok || o.Lost != nil || o.Key.Control || e.tr == nil || e.d.Keys == nil {
+	if !ok || !e.outboundWorks(o) {
 		delete(e.outbox.state, name)
 		return
 	}
@@ -164,7 +182,7 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	if st.inflight > 0 {
 		return
 	}
-	plan := outboundPlan(o.Outbound, now, st.sent)
+	plan := outboundPlan(o.Outbound, now, st.sent, e.finalPulledOf(name))
 	if len(plan) == 0 {
 		delete(e.outbox.state, name)
 		return
@@ -194,6 +212,42 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	}
 }
 
+// outboundWorks says whether the outbound worker carries a source record: it does
+// not for a control signal, which the creation of a session sends, nor for the
+// replacement of a lost record, which holds nothing to send, nor while the engine
+// has no transport or keys to send with. A delivery of a record it does not carry
+// is never pulled, so nothing waits for a pull before it closes.
+func (e *Engine) outboundWorks(o store.OutRecord) bool {
+	return o.Lost == nil && !o.Key.Control && e.tr != nil && e.d.Keys != nil
+}
+
+// finalPullUntil is the last instant at which a target is still pulled for a delivery
+// with this report_by: the retention the target's store gives the records of a
+// delivery, whose longest term is the one of the facts reply permission reads
+// (reply.RetainFactsUntil). Asking later would find nothing, and the target's "no
+// record" would say nothing about the delivery.
+func finalPullUntil(reportBy time.Time) time.Time { return reply.RetainFactsUntil(reportBy) }
+
+// finalPullDue says whether a delivery is waiting for its pull before the close at
+// now: it is queued or accepted, so its sender was told no outcome and the target may
+// hold one; report_by has passed, so the ordinary pulls are over; and the target still
+// keeps its records. A delivery in any other state is closed without it, because the
+// sender holds the notice that says what is known, or it is final.
+func finalPullDue(d delivery.Record, now time.Time) bool {
+	return (d.State == delivery.StateQueued || d.State == delivery.StateAccepted) &&
+		now.After(d.ReportBy) && !now.After(finalPullUntil(d.ReportBy))
+}
+
+// finalPullPending says whether the close of a delivery of the source record must wait
+// for the pull the engine makes before it: the worker carries the record, the pull is
+// due and it has not been made in this run.
+func (e *Engine) finalPullPending(o store.OutRecord, recipient ident.EndpointID, d delivery.Record, now time.Time) bool {
+	if _, done := e.outbox.finalPulled[finalPullKey{o.Name(), recipient}]; done {
+		return false
+	}
+	return e.outboundWorks(o) && finalPullDue(d, now)
+}
+
 // nodeNeed is the next piece of work a source record has for one node: a send, or
 // a pull that asks about the recipients on it whose deliveries are not settled.
 type nodeNeed struct {
@@ -207,15 +261,15 @@ type nodeNeed struct {
 // A node with nothing to do is not in the plan. A derived delivery is planned like
 // the others, but only the record of a control signal has one and the worker does
 // not take control records, so none is asked about.
-func outboundPlan(o envelope.Outbound, now time.Time, sent map[ident.NodeID]bool) map[ident.NodeID]nodeNeed {
+func outboundPlan(o envelope.Outbound, now time.Time, sent map[ident.NodeID]bool, finalPulled map[ident.EndpointID]bool) map[ident.NodeID]nodeNeed {
 	plan := map[ident.NodeID]nodeNeed{}
 	for _, t := range o.Deliveries() {
-		kind := outboundNeed(t.Delivery, o.AcceptBefore, now, sent[t.Address.Node])
+		kind := outboundNeed(t.Delivery, o.AcceptBefore, now, sent[t.Address.Node], finalPulled[t.Address.Endpoint])
 		if kind == 0 {
 			continue
 		}
 		n := plan[t.Address.Node]
-		if n.kind == 0 || kind == workSend {
+		if n.kind == 0 || kind == workSend || (kind == workPull && n.kind == workFinalPull) {
 			n.kind = kind
 		}
 		n.recipients = append(n.recipients, t.Address.Endpoint)
@@ -233,18 +287,37 @@ func outboundPlan(o envelope.Outbound, now time.Time, sent map[ident.NodeID]bool
 
 // outboundNeed says what a delivery of a source record needs next: a send while
 // its node has not answered and the delivery deadline has not passed, a pull
-// while it is not settled and the report deadline has not passed, nothing
-// otherwise. The report deadline already holds the tolerance of the clock. After
-// the delivery deadline a target that was never reached is asked, not sent to:
-// whatever it would do with the message, it would refuse it as late.
-func outboundNeed(d delivery.Record, acceptBefore, now time.Time, sent bool) workKind {
+// while it is not settled and the report deadline has not passed, the one pull
+// before the close once it has passed (finalPullDue) unless it was made already
+// (finalPulled), nothing otherwise. The report deadline already holds the tolerance
+// of the clock. After the delivery deadline a target that was never reached is
+// asked, not sent to: whatever it would do with the message, it would refuse it as
+// late.
+func outboundNeed(d delivery.Record, acceptBefore, now time.Time, sent, finalPulled bool) workKind {
 	switch {
-	case d.State.IsTerminal() || now.After(d.ReportBy):
+	case d.State.IsTerminal():
 		return 0
+	case now.After(d.ReportBy):
+		if finalPulled || !finalPullDue(d, now) {
+			return 0
+		}
+		return workFinalPull
 	case d.State == delivery.StateQueued && !sent && !now.After(acceptBefore):
 		return workSend
 	}
 	return workPull
+}
+
+// finalPulledOf are the recipients of the source record whose pull before the close
+// is made.
+func (e *Engine) finalPulledOf(name string) map[ident.EndpointID]bool {
+	done := map[ident.EndpointID]bool{}
+	for k := range e.outbox.finalPulled {
+		if k.name == name {
+			done[k.recipient] = true
+		}
+	}
+	return done
 }
 
 type cmdOutResult struct {
@@ -290,6 +363,13 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 			delete(e.outbox.state, w.name)
 			return
 		}
+		if w.kind == workFinalPull {
+			// The last look is not tried again: the delivery closes, and its sender is
+			// told that the outcome could not be learned.
+			e.log.Debug("no answer from the target to the pull before the close", "message", string(w.message), "error", callErr.Error())
+			e.finalPullMade(now, w, st)
+			return
+		}
 		e.log.Debug("no answer from the target; it is tried again", "message", string(w.message), "error", callErr.Error())
 		if _, failing := st.failingSince[w.node]; !failing {
 			st.failingSince[w.node] = now
@@ -310,7 +390,7 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 		st.sent[w.node] = true
 	}
 	var pulled []ident.EndpointID
-	if w.kind == workPull {
+	if w.kind == workPull || w.kind == workFinalPull {
 		pulled = w.recipients
 	}
 	if err := e.applyAnswer(now, w.name, w.node, reports, noRecord, pulled); err != nil {
@@ -321,6 +401,23 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 		}
 		return
 	}
+	if w.kind == workFinalPull {
+		e.finalPullMade(now, w, st)
+		return
+	}
+	if st.inflight == 0 {
+		e.afterOutbound(w.name, now)
+	}
+}
+
+// finalPullMade takes the pull before the close as made, whatever came of it, and
+// closes the deliveries of the record whose close was waiting for it. The ones whose
+// pull is still with the worker keep waiting.
+func (e *Engine) finalPullMade(now time.Time, w outWork, st *outState) {
+	for _, r := range w.recipients {
+		e.outbox.finalPulled[finalPullKey{w.name, r}] = struct{}{}
+	}
+	_ = e.tickRecords(now, []string{outTick(w.name)}) // a fatal error is e.fatal, which the loop reads
 	if st.inflight == 0 {
 		e.afterOutbound(w.name, now)
 	}
@@ -328,7 +425,9 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 
 // afterOutbound schedules the next look at a record whose work is all back: a
 // send again after ResendBackoff while a node has not answered, else a pull one
-// interval from now while a delivery is not settled, nothing when none is.
+// interval from now while a delivery is not settled, nothing when none is. A
+// delivery that is waiting for the pull before its close is looked at at once: that
+// pull is the last, and the close waits for it.
 func (e *Engine) afterOutbound(name string, now time.Time) {
 	o, ok := e.view.out[name]
 	st := e.outbox.state[name]
@@ -336,9 +435,13 @@ func (e *Engine) afterOutbound(name string, now time.Time) {
 		delete(e.outbox.state, name)
 		return
 	}
+	finalPulled := e.finalPulledOf(name)
 	var next time.Duration
 	for _, t := range o.Outbound.Deliveries() {
-		switch outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node]) {
+		switch outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node], finalPulled[t.Address.Endpoint]) {
+		case workFinalPull:
+			e.dispatchOutbound(name, now)
+			return
 		case workSend:
 			next = e.p.ResendBackoff
 		case workPull:

@@ -26,23 +26,31 @@ func TestOutboundNeedByState(t *testing.T) {
 		d    delivery.Record
 		now  time.Time
 		sent bool
-		want workKind
+		// finalPulled says the pull before the close was made already.
+		finalPulled bool
+		want        workKind
 	}{
-		{"a message not sent yet is sent", rec(delivery.StateQueued), t0, false, workSend},
-		{"a message sent is waited for with a pull", rec(delivery.StateQueued), t0, true, workPull},
-		{"the instant of the deadline is still sent to", rec(delivery.StateQueued), accept, false, workSend},
-		{"after the deadline a node that never answered is asked", rec(delivery.StateQueued), accept.Add(time.Second), false, workPull},
-		{"an accepted delivery is asked about", rec(delivery.StateAccepted), t0, true, workPull},
-		{"an expired one can still be corrected", rec(delivery.StateExpiredUnconfirmed), t0, true, workPull},
-		{"one whose result is unknown can still be corrected", rec(delivery.StateDeliveryUnknown), t0, true, workPull},
-		{"a delivered one is settled", rec(delivery.StateDelivered), t0, true, 0},
-		{"a rejected one is settled", rec(delivery.StateRejected), t0, true, 0},
-		{"a closed one is settled", rec(delivery.StateClosedUnconfirmed), t0, true, 0},
-		{"the report deadline ends the asking", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(time.Second), true, 0},
-		{"the instant of the report deadline is still asked", rec(delivery.StateAccepted), delivery.ReportBy(accept), true, workPull},
-		{"the tolerance is already in the report deadline", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(-timing.ClockTolerance), true, workPull},
+		{"a message not sent yet is sent", rec(delivery.StateQueued), t0, false, false, workSend},
+		{"a message sent is waited for with a pull", rec(delivery.StateQueued), t0, true, false, workPull},
+		{"the instant of the deadline is still sent to", rec(delivery.StateQueued), accept, false, false, workSend},
+		{"after the deadline a node that never answered is asked", rec(delivery.StateQueued), accept.Add(time.Second), false, false, workPull},
+		{"an accepted delivery is asked about", rec(delivery.StateAccepted), t0, true, false, workPull},
+		{"an expired one can still be corrected", rec(delivery.StateExpiredUnconfirmed), t0, true, false, workPull},
+		{"one whose result is unknown can still be corrected", rec(delivery.StateDeliveryUnknown), t0, true, false, workPull},
+		{"a delivered one is settled", rec(delivery.StateDelivered), t0, true, false, 0},
+		{"a rejected one is settled", rec(delivery.StateRejected), t0, true, false, 0},
+		{"a closed one is settled", rec(delivery.StateClosedUnconfirmed), t0, true, false, 0},
+		{"after the report deadline an accepted delivery is asked once more, before it closes", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(time.Second), true, false, workFinalPull},
+		{"after the report deadline a queued delivery is asked once more too", rec(delivery.StateQueued), delivery.ReportBy(accept).Add(time.Second), false, false, workFinalPull},
+		{"the pull before the close is made once", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(time.Second), true, true, 0},
+		{"an expired delivery is not asked once more: the sender was told", rec(delivery.StateExpiredUnconfirmed), delivery.ReportBy(accept).Add(time.Second), true, false, 0},
+		{"a delivery whose result is unknown is not asked once more: the sender was told", rec(delivery.StateDeliveryUnknown), delivery.ReportBy(accept).Add(time.Second), true, false, 0},
+		{"the target's retention ends the asking", rec(delivery.StateAccepted), finalPullUntil(delivery.ReportBy(accept)).Add(time.Nanosecond), true, false, 0},
+		{"the instant the target's retention ends is still asked", rec(delivery.StateAccepted), finalPullUntil(delivery.ReportBy(accept)), true, false, workFinalPull},
+		{"the instant of the report deadline is still asked", rec(delivery.StateAccepted), delivery.ReportBy(accept), true, false, workPull},
+		{"the tolerance is already in the report deadline", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(-timing.ClockTolerance), true, false, workPull},
 	} {
-		if got := outboundNeed(c.d, accept, c.now, c.sent); got != c.want {
+		if got := outboundNeed(c.d, accept, c.now, c.sent, c.finalPulled); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
 		}
 	}
@@ -71,7 +79,7 @@ func TestAPullNamesTheDeliveriesOfTheNodeThatAreNotSettled(t *testing.T) {
 	}
 	derived := at(nodeA, 13, delivery.StateAccepted)
 	o.Derived = &derived
-	plan := outboundPlan(o, t0, map[ident.NodeID]bool{nodeA: true, nodeB: false, nodeC: false})
+	plan := outboundPlan(o, t0, map[ident.NodeID]bool{nodeA: true, nodeB: false, nodeC: false}, nil)
 	if got := plan[nodeA]; got.kind != workPull || !slices.Equal(got.recipients, []ident.EndpointID{idOf(t, 10), idOf(t, 12), idOf(t, 13)}) {
 		t.Errorf("node A: %+v, want a pull naming the accepted, the unknown and the derived delivery, not the delivered one", got)
 	}
@@ -81,8 +89,20 @@ func TestAPullNamesTheDeliveriesOfTheNodeThatAreNotSettled(t *testing.T) {
 	if got := plan[nodeC]; got.kind != workSend || len(got.recipients) != 0 {
 		t.Errorf("node C: %+v, want a send that names no recipient even though one of its deliveries is accepted", got)
 	}
-	if plan = outboundPlan(o, delivery.ReportBy(accept).Add(time.Second), map[ident.NodeID]bool{nodeA: true, nodeB: true, nodeC: true}); len(plan) != 0 {
-		t.Errorf("after the report deadline: %+v, want nothing to do", plan)
+	// After the report deadline only the pull before the close is left, for the
+	// deliveries the sender was told nothing of; one already made is not made again.
+	after := delivery.ReportBy(accept).Add(time.Second)
+	sent := map[ident.NodeID]bool{nodeA: true, nodeB: true, nodeC: true}
+	plan = outboundPlan(o, after, sent, nil)
+	if got := plan[nodeA]; got.kind != workFinalPull || !slices.Equal(got.recipients, []ident.EndpointID{idOf(t, 10), idOf(t, 13)}) {
+		t.Errorf("node A after the report deadline: %+v, want the pull before the close naming the accepted and the derived delivery", got)
+	}
+	if got := plan[nodeB]; got.kind != workFinalPull || !slices.Equal(got.recipients, []ident.EndpointID{idOf(t, 20)}) {
+		t.Errorf("node B after the report deadline: %+v, want the pull before the close naming the queued delivery", got)
+	}
+	made := map[ident.EndpointID]bool{idOf(t, 10): true, idOf(t, 13): true, idOf(t, 20): true, idOf(t, 30): true, idOf(t, 31): true}
+	if plan = outboundPlan(o, after, sent, made); len(plan) != 0 {
+		t.Errorf("after the report deadline and the pulls before the close: %+v, want nothing to do", plan)
 	}
 }
 

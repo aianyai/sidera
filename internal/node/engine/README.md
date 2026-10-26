@@ -237,7 +237,10 @@ signals join the same loop as further commands and add their methods to this lis
   Entries that fall due are ticked together, in chunks of `Params.ChunkTickRecords`,
   in one `tick` transaction with the feedback the changes call for. Nothing is ticked
   and nothing is judged expired while the wall clock is in doubt. Control records are
-  not ticked here.
+  not ticked here. A source delivery that is queued or accepted when `report_by` passes
+  is not closed by the tick before the outbound worker has pulled its target one more
+  time (`finalPullPending`): at the start step 12 leaves it open and step 14 makes the
+  pull; the close then tells what the pull could not settle.
 - **A damaged file is settled first, one at a time, and a lost source record is replaced
   by the sender's.** `quarantineAll` settles the damaged files of the plan but those of
   `ctl/`, each with a scan taken after the one before, giving the store the scan and the
@@ -441,4 +444,6 @@ walk of its settlement;
 `feedback_internal_test.go` the key of a notice and the putting back of one that
 could not be written; `expiry_test.go` what the passing of time does to a delivery
 (backlog expiry, the expiry of a delivery with no receipt, failing contact, closing
-after `report_by`) and the crash walk of the `tick` transaction.
+after `report_by`) and the crash walk of the `tick` transaction; `finalpull_test.go` the
+pull before a source delivery closes at `report_by`: what a node that slept past it learns,
+what the sender is told when it cannot learn, and the window it stops asking in.
