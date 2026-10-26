@@ -31,6 +31,13 @@ type AdapterOptions struct {
 	// The host runs on the fixture's test clock, so Advance moves its pings, its
 	// backoff and its waits for a process to end.
 	Host adapterhost.Params
+	// Runtime gives the adapter a native runtime to drive, as a chat adapter that is
+	// also a front end of agents has: it declares a runtime beside its direct
+	// endpoints, so the node makes the runtime endpoint of the instance, and its
+	// sessions are those of one fake runtime in the test process, which outlives
+	// every process of the adapter, as a native process outlives the adapter that
+	// started it. H.Runtime is its controller.
+	Runtime bool
 }
 
 // adapterProgram is the program of the installed package; no launcher runs it.
@@ -49,6 +56,20 @@ func AdapterManifest(maxDirect int) fakeadapter.ManifestOptions {
 	}
 }
 
+// RuntimeAdapterManifest is AdapterManifest for an adapter that also declares a
+// runtime: the command line and MCP front ends, interrupt and acknowledging on
+// behalf, with the runtime and the tested range the fake adapter declares by
+// default.
+func RuntimeAdapterManifest(maxDirect int) fakeadapter.ManifestOptions {
+	o := AdapterManifest(maxDirect)
+	d := fakeadapter.DefaultManifestOptions()
+	o.Runtime = true
+	o.Frontends, o.Interrupt, o.AckOnBehalf = d.Frontends, d.Interrupt, d.AckOnBehalf
+	o.RecvWaitS, o.Budgets = d.RecvWaitS, d.Budgets
+	o.RuntimeName, o.RuntimeVersion, o.Tested, o.AckMarkers = d.RuntimeName, d.RuntimeVersion, d.Tested, d.AckMarkers
+	return o
+}
+
 // LauncherConfig configures an AdapterLauncher.
 type LauncherConfig struct {
 	// T receives the failures of the launcher itself.
@@ -62,6 +83,9 @@ type LauncherConfig struct {
 	Ledgers *ledger.Memory
 	// Manifest is what each adapter declares.
 	Manifest fakeadapter.ManifestOptions
+	// Runtime is the native runtime the adapters drive; required when Manifest
+	// declares a runtime, and shared by every process of the instance.
+	Runtime fakeadapter.RuntimeLauncher
 	// Arm, which may be nil, is called with the knobs of each adapter before it
 	// starts, with the number of the launch of the instance (1 is the first): a
 	// knob armed here is in place before the adapter answers anything.
@@ -114,7 +138,7 @@ func (l *AdapterLauncher) Launch(ctx context.Context, inst adapterhost.Instance)
 		endReq: make(chan struct{}), done: make(chan struct{}),
 	}
 	launch.proc = fakeadapter.StartPipe(l.c.Ctx, fakeadapter.Config{
-		InstanceID: inst.ID, Now: l.c.Now, Ledger: w, Manifest: l.c.Manifest, Knobs: knobs,
+		InstanceID: inst.ID, Now: l.c.Now, Ledger: w, Manifest: l.c.Manifest, Knobs: knobs, Runtime: l.c.Runtime,
 	})
 	l.launches[inst.ID] = append(l.launches[inst.ID], launch)
 	go launch.watch()

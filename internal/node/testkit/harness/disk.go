@@ -70,6 +70,16 @@ var manifestText = func() string {
 	return string(raw)
 }()
 
+// runtimeManifestText is the manifest of the same adapter when it also declares a
+// runtime, which a fixture with Options.Adapter.Runtime installs instead.
+var runtimeManifestText = func() string {
+	raw, err := RuntimeAdapterManifest(adapterproto.MaxDirectEndpoints).Encode()
+	if err != nil {
+		panic("harness: the manifest of the adapter with a runtime: " + err.Error())
+	}
+	return string(raw)
+}()
+
 // ManifestText is the manifest of the adapter the fixture installs.
 func ManifestText() string { return manifestText }
 
@@ -192,8 +202,13 @@ func MountOn(t testing.TB, tab *txn.Table, base fsx.FS, obs txn.Observer, arm fu
 // from what it wrote. The disk's layout must exist (MakeLayout).
 func SeedNode(t testing.TB, w *txn.Writer, at time.Time) *config.Config {
 	t.Helper()
+	return seedNode(t, w, at, manifestText)
+}
+
+func seedNode(t testing.TB, w *txn.Writer, at time.Time, manifest string) *config.Config {
+	t.Helper()
 	cfg := initConfig(t, w, at)
-	installAdapter(t, w, cfg, at)
+	installAdapter(t, w, cfg, at, manifest)
 	enableAdapter(t, cfg)
 	return cfg
 }
@@ -232,10 +247,10 @@ func initConfig(t testing.TB, w *txn.Writer, at time.Time) *config.Config {
 	return cfg
 }
 
-func installAdapter(t testing.TB, w *txn.Writer, cfg *config.Config, at time.Time) {
+func installAdapter(t testing.TB, w *txn.Writer, cfg *config.Config, at time.Time, manifest string) {
 	t.Helper()
 	src := fsxtest.NewMem()
-	for p, c := range map[string]string{"sidera-adapter.json": manifestText, "bin/sidera-adapter-chat": "#!chat\n"} {
+	for p, c := range map[string]string{"sidera-adapter.json": manifest, "bin/sidera-adapter-chat": "#!chat\n"} {
 		mustMkdir(t, src, path.Dir(p))
 		if err := fsx.Replace(src, setupTag, p, []byte(c), fsx.ModePrivate); err != nil {
 			t.Fatal(err)
@@ -323,22 +338,34 @@ func RandReader(seed uint64) io.Reader {
 // of the disk.
 var (
 	seedMu    sync.Mutex
-	seedDisks = map[int64]*fsxtest.Mem{}
+	seedDisks = map[seedKey]*fsxtest.Mem{}
 )
+
+// seedKey is what makes one seeded disk differ from another: the time its records
+// are stamped at and whether the installed adapter declares a runtime.
+type seedKey struct {
+	at      int64
+	runtime bool
+}
 
 // seededDisk returns a fresh copy of the disk of an initialised node whose
 // records are stamped at.
-func seededDisk(t testing.TB, at time.Time) *fsxtest.Mem {
+func seededDisk(t testing.TB, at time.Time, runtime bool) *fsxtest.Mem {
 	t.Helper()
 	seedMu.Lock()
 	defer seedMu.Unlock()
-	disk, ok := seedDisks[at.UnixNano()]
+	key := seedKey{at.UnixNano(), runtime}
+	disk, ok := seedDisks[key]
 	if !ok {
 		disk = fsxtest.NewMem()
 		MakeLayout(t, disk)
 		m := Mount(t, ProgramTable(t), disk, nil)
-		SeedNode(t, m.Writer, at)
-		seedDisks[at.UnixNano()] = disk
+		text := manifestText
+		if runtime {
+			text = runtimeManifestText
+		}
+		seedNode(t, m.Writer, at, text)
+		seedDisks[key] = disk
 	}
 	return disk.Clone()
 }

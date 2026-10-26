@@ -16,9 +16,9 @@ layer.
 | Name | Purpose |
 | ---- | ------- |
 | `New(t, Options)` | Makes the node, starts the engine through the startup steps it has (scan, start, admission of the adapter, recovery of deliveries, serve) and stops everything when the test ends. |
-| `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
-| `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport` | The loopback of the running process, its knobs, and the check of a report the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
-| `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. Nil: no host, and the fixture admits the instance itself through the engine's entry. |
+| `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, the presets the node has besides the one `init` makes (`Presets`, by name, each the JSON `presets add` takes, added through the configuration's own change), and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
+| `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport`, `H.VerifyControlReply` | The loopback of the running process, its knobs, and the check of a report or a control reply the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
+| `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. `AdapterOptions.Runtime` makes the adapter declare a runtime beside its direct endpoints and drive one fake runtime that the fixture owns and that outlives every process of the adapter (the manifest installed is `RuntimeAdapterManifest`, so the node makes the runtime endpoint of the instance). Nil: no host, and the fixture admits the instance itself through the engine's entry. |
 | `H.Adapter(instance)`, `H.AdapterLaunches(instance)`, `AdapterLaunch` | The controller of the latest fake adapter process (`scenario.ErrNotAvailable` without a host or before a launch), and every process the host started, in order, across restarts of the node: `Methods()` (what the daemon wrote to it), `Controller()`, `Survive()`, `End()`, `Ended()`. |
 | `AdapterLauncher`, `NewAdapterLauncher`, `LauncherConfig`, `AdapterManifest` | The one launcher the fixture and a test of the daemon share (`daemon`'s tests start fake adapters with it), and the declaration of the fake adapter, from which both the installed manifest and the capabilities the fake answers `initialize` with are made. |
 | `H.Direct`, `H.MustDirect`, `H.Addr`, `H.Agent` | A direct endpoint registered through the engine's own entry, its address, and its agent: `engineagent` wrapped in `fakeagent.Recording`. |
@@ -29,7 +29,7 @@ layer.
 | `H.BeginStep`, `H.Ledger`, `H.CheckLedger` | The script step the ledger stamps, the ledger, and the judgements that need only the ledger. |
 | `H.Records` | A read-only scan of the records on the disk. |
 | `H.Faults`, `H.Disk`, `H.Config`, `H.Engine`, `H.Log`, `H.Ctx` | The fault wrapper the running process writes through, its disk, configuration, engine, log (what the engine and the adapter host logged) and the test's context. |
-| `H.Runtime` | Returns `scenario.ErrNotAvailable`: the engine layer cannot create a session yet. |
+| `H.Runtime`, `H.RuntimeAddr` | The controller of the fake runtime of an adapter made with `AdapterOptions.Runtime` (`scenario.ErrNotAvailable` without), and the address of the runtime endpoint of the instance, the target of a session creation. |
 | `ProgramTable`, `MakeLayout`, `Mount`, `SeedNode`, `AdapterAdmission`, `RandReader`, `LogCapture`, `NoLeaks`, `DefaultStart`, `NodeID`, `Instance` | The building blocks the fixture is made of, exported so that a test of a package that needs a node but not the fixture (the engine's own tests) makes it the same way. |
 
 ## Rules
@@ -120,9 +120,10 @@ layer.
   process writes through (`fsxtest.DiskFull` is the full-disk error); a rule that never
   fires fails the test. A new process has a new wrapper with no rules.
 - **No test-only session registration.** The fixture has no method that registers a
-  session endpoint; sessions come from a session creation when the engine offers one.
+  session endpoint; sessions come from a session creation, which the agent of a direct
+  endpoint asks for with `Control` and the runtime endpoint (`RuntimeAddr`) answers.
 - **No stand-in for what is missing.** `Adapter` (without `Options.Adapter`) and
-  `Runtime` return an error that is `scenario.ErrNotAvailable`; a script that needs them
+  `Runtime` (without `AdapterOptions.Runtime`) return an error that is `scenario.ErrNotAvailable`; a script that needs them
   fails with that and says what is missing.
 - **Records are read, not written.** `Records` is the store's scan, for the scenarios
   whose judgement is the records; everything else is judged from the ledger. It reads
@@ -150,9 +151,8 @@ layer.
 The loopback with its knobs, the real file system, the free-space stand-in and the adapter host are in. Each
 later part adds to this package the capability its stream needs:
 
-- session creation: a fake runtime owned by the fixture, which the fake adapter then
-  declares (today it declares direct endpoints only), the `Runtime` method, the presets
-  and node settings in `Options`, and its idle condition in `addQuiet`;
+- the idle condition of the fake runtime in `addQuiet`, when a stream needs the fixture to
+  wait for a turn;
 
 ## Tests
 

@@ -19,6 +19,7 @@ type AgentService interface {
 	Send(ctx context.Context, c Caller, r SendRequest) (SendResult, error)
 	Reply(ctx context.Context, c Caller, r ReplyRequest) (SendResult, error)
 	MessageStatus(ctx context.Context, c Caller, id adapterproto.MessageID) (adapterproto.MessageStatusResult, error)
+	Control(ctx context.Context, c Caller, r ControlRequest) (SendResult, error)
 }
 
 // ManageService is what the management interface asks of the engine. The methods

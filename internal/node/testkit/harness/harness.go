@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"path/filepath"
 	"slices"
@@ -84,6 +85,10 @@ type Options struct {
 	// clock was set back and not cleared. It applies to every start, restarts
 	// included, because a process has no memory of the last one.
 	RollbackPaused bool
+	// Presets are presets the node has besides the one `init` makes, by name, each
+	// the JSON object `presets add` takes, added through the configuration's own
+	// change before the first start.
+	Presets map[string]string
 	// Adapter, when set, gives the node an adapter host that starts a fake adapter
 	// for the instance Instance in the test process, on the fixture's test clock,
 	// and admits the instance through it as the daemon does. Nil keeps the node
@@ -130,6 +135,9 @@ type H struct {
 	// It is the fixture's and not a process's: the launches are kept across
 	// restarts, and the ledger writer of the adapter is one for all of them.
 	launcher *AdapterLauncher
+	// runtime is the fake native runtime of an adapter that declares one, nil
+	// otherwise.
+	runtime *fakeruntime.Runtime
 	// adapterHome is the data directory the host and the engine are told: the real
 	// directory the instance lock files are in. A lock path is not a socket path,
 	// so a temporary directory of the test will do.
@@ -205,9 +213,16 @@ func New(t testing.TB, o Options) *H {
 	h.addQuiet("loopback", h.loopbackQuiet)
 	if o.Adapter != nil {
 		h.adapterHome = t.TempDir() // before the cleanup of the fixture: it is removed after the fixture has stopped
-		h.launcher = NewAdapterLauncher(LauncherConfig{
-			T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect),
-		})
+		lc := LauncherConfig{T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect)}
+		if o.Adapter.Runtime {
+			lc.Manifest = RuntimeAdapterManifest(o.MaxDirect)
+			var err error
+			if h.runtime, err = fakeruntime.New(fakeruntime.Config{Now: h.clk.Now, Ledgers: h.led, Dir: t.TempDir(), Seed: o.Seed}); err != nil {
+				t.Fatalf("harness: the fake runtime: %v", err)
+			}
+			lc.Runtime = h.runtime
+		}
+		h.launcher = NewAdapterLauncher(lc)
 		h.addAdapterQuiet(Instance)
 	}
 	t.Cleanup(h.close)
@@ -219,7 +234,7 @@ func New(t testing.TB, o Options) *H {
 		h.disk = o.Disk
 		base = h.disk
 	} else {
-		h.disk = seededDisk(t, o.Start)
+		h.disk = seededDisk(t, o.Start, o.Adapter != nil && o.Adapter.Runtime)
 		base = h.disk
 	}
 	if o.Disk == nil {
@@ -261,6 +276,23 @@ func (h *H) prepare(base fsx.FS) {
 		}
 		if err := fsx.Replace(base, setupTag, config.PolicyPath, data, fsx.ModePrivate); err != nil {
 			h.t.Fatalf("harness: writing the policy: %v", err)
+		}
+	}
+	if len(h.opts.Presets) > 0 {
+		m := MountOn(h.t, h.tab, base, nil, nil)
+		cfg, err := config.Load(m.Writer)
+		if err != nil {
+			h.t.Fatalf("harness: Load: %v", err)
+		}
+		for i, name := range slices.Sorted(maps.Keys(h.opts.Presets)) {
+			var op admin.OperationID
+			op[0], op[1] = 4, byte(i)
+			req := config.Request{Key: admin.KeyFor(admin.LocalOwner(), op), Expected: cfg.Presets().Version}
+			if _, err := cfg.AddPreset(req, name, []byte(h.opts.Presets[name]), func(config.Presets) (json.RawMessage, error) {
+				return json.RawMessage(`{"added":true}`), nil
+			}); err != nil {
+				h.t.Fatalf("harness: the preset %s: %v", name, err)
+			}
 		}
 	}
 	if h.opts.NodeSettings != "" {
@@ -429,6 +461,11 @@ func (h *H) close() {
 		h.launcher.Close()
 	}
 	h.cancel()
+	if h.runtime != nil {
+		if err := h.runtime.Close(); err != nil {
+			h.t.Errorf("harness: closing the fake runtime: %v", err)
+		}
+	}
 }
 
 // current is the running process, nil while the node is down.
@@ -568,6 +605,10 @@ func (c currentEngine) Reply(ctx context.Context, caller engine.Caller, r engine
 	return onProcess(c.h, func(e *engine.Engine) (engine.SendResult, error) { return e.Reply(ctx, caller, r) })
 }
 
+func (c currentEngine) Control(ctx context.Context, caller engine.Caller, r engine.ControlRequest) (engine.SendResult, error) {
+	return onProcess(c.h, func(e *engine.Engine) (engine.SendResult, error) { return e.Control(ctx, caller, r) })
+}
+
 func (c currentEngine) MessageStatus(ctx context.Context, caller engine.Caller, id adapterproto.MessageID) (adapterproto.MessageStatusResult, error) {
 	return onProcess(c.h, func(e *engine.Engine) (adapterproto.MessageStatusResult, error) {
 		return e.MessageStatus(ctx, caller, id)
@@ -646,6 +687,22 @@ func (h *H) VerifyReport(rec record.Record) (envelope.StatusReport, error) {
 		return envelope.StatusReport{}, err
 	}
 	return sr.Report(), nil
+}
+
+// VerifyControlReply is VerifyReport for the control reply of a signal the node
+// itself sent.
+func (h *H) VerifyControlReply(rec record.Record) (envelope.ControlReply, error) {
+	p := h.running()
+	k, err := keys.Load(p.mounted.Writer)
+	if err != nil {
+		return envelope.ControlReply{}, err
+	}
+	accepted := p.cfg.RevocationSet().NetworkKey(k.Certificate(), k.SerialSeen().Serial)
+	sr, err := envelope.VerifyControlReply(rec, NodeID(), NodeID(), accepted, h.clk.Now())
+	if err != nil {
+		return envelope.ControlReply{}, err
+	}
+	return sr.Reply(), nil
 }
 
 // Advance moves the clock forward by d. The engine reacts asynchronously: call
@@ -743,10 +800,26 @@ func (h *H) latestAdapterStats(instance string) (fakeadapter.StatsReply, bool) {
 	return st, true
 }
 
-// Runtime has nothing to return yet: native sessions exist only through a session
-// creation, which the engine does not offer.
+// Runtime is the controller of the fake native runtime of the adapter, which exists
+// when the fixture was made with Options.Adapter.Runtime. Native sessions exist only
+// through a session creation.
 func (h *H) Runtime() (fakeruntime.Controller, error) {
-	return nil, scenario.NotAvailable("the engine layer cannot create a session, so there is no runtime to drive")
+	if h.runtime == nil {
+		return nil, scenario.NotAvailable("the fixture has no runtime (Options.Adapter.Runtime)")
+	}
+	return h.runtime, nil
+}
+
+// RuntimeAddr is the address of the runtime endpoint of the adapter instance, the
+// target of a session creation. It is the id the configuration keeps for the
+// instance, so it is known from the first start on and the same after a restart.
+func (h *H) RuntimeAddr() string {
+	h.t.Helper()
+	id := h.Config().EndpointIDs(Instance).Runtime
+	if id.IsZero() {
+		h.t.Fatal("harness: the instance has no runtime endpoint: the fixture needs Options.Adapter.Runtime, and the adapter must have been taken on")
+	}
+	return ident.Address{Node: NodeID(), Endpoint: id}.String()
 }
 
 // CrashMode says what a crash takes with it.

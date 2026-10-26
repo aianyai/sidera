@@ -89,6 +89,21 @@ func (a *agent) Reply(ctx context.Context, in fakeagent.ReplyInput) (fakeagent.S
 	return sendResult(res, err)
 }
 
+// Control sends a control signal as the caller's endpoint. The engine offers
+// session.create and endpoint.status, and a creation carries no initial message yet,
+// so a body is refused here as the engine would refuse it.
+func (a *agent) Control(ctx context.Context, in fakeagent.ControlInput) (fakeagent.SendResult, error) {
+	if in.Body != "" {
+		return fakeagent.SendResult{}, &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: apiwire.CodeMalformedRequest, Message: "body: a creation carries no initial message yet"}
+	}
+	to, err := ident.ParseAddress(in.To)
+	if err != nil {
+		return fakeagent.SendResult{}, &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: apiwire.CodeMalformedRequest, Message: "to: " + err.Error()}
+	}
+	res, err := a.svc.Control(ctx, a.caller, engine.ControlRequest{To: to, Signal: in.Signal, Preset: in.Preset, IdempotencyKey: in.IdemKey})
+	return sendResult(res, err)
+}
+
 func parseAddresses(list []string) ([]ident.Address, error) {
 	out := make([]ident.Address, 0, len(list))
 	for _, s := range list {
@@ -132,9 +147,6 @@ func (a *agent) Recv(context.Context, fakeagent.RecvInput) (fakeagent.RecvResult
 }
 func (a *agent) Ack(context.Context, fakeagent.AckInput) (fakeagent.AckResult, error) {
 	return fakeagent.AckResult{}, NotSupported("ack")
-}
-func (a *agent) Control(context.Context, fakeagent.ControlInput) (fakeagent.SendResult, error) {
-	return fakeagent.SendResult{}, NotSupported("control")
 }
 
 // NotSupported is the error of a method the engine does not offer yet. Its category
