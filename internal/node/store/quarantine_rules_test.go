@@ -5,6 +5,7 @@ import (
 	"path"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
@@ -160,32 +161,225 @@ func TestADamagedSourceRecordWithATrustedFirstLineIsOverwrittenAsLost(t *testing
 	}
 }
 
-func TestADamagedSourceRecordWithAnUnreadableFirstLineIsAlertedAndDeleted(t *testing.T) {
-	t.Run("a damaged first line", func(t *testing.T) {
-		r := newRig(t)
-		seed(t, r.mem, srcOut(1, false), srcOut(2, false))
-		damageHeader(t, r.mem, path.Join(store.OutDir, srcOut(2, false).Name()))
-		sc := settled(t, r)
-		if present(t, r, store.OutDir, srcOut(2, false).Name()) {
+// A source file whose first line cannot be read says whose message it held only by
+// its name. When that names an endpoint of this node, the file is replaced by an
+// out-lost record that tells the endpoint, the floors of every pair of the endpoint
+// are raised, and the alert is raised as for any damage; the file goes last.
+func TestADamagedSourceFileWithAnUnreadableFirstLineIsToldToItsSender(t *testing.T) {
+	pair, other := addr(2, 2), addr(2, 3)
+	// Sender 1 has two pairs: its records are at 1 and 4 for the first, and the
+	// floor file remembers the second at 7 and the first at 2.
+	world := func(t *testing.T) *rig {
+		r := worldRig(t)
+		second := srcOut(4, false)
+		second.Key.Recipients = []ident.Address{pair}
+		seed(t, r.mem, srcOut(1, false), second, store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 2, other: 7}})
+		seedBodies(t, r.mem, bodyBytes(1), bodyBytes(4))
+		return r
+	}
+	check := func(t *testing.T, r *rig, sc *store.Scan, damaged string, sender int) {
+		t.Helper()
+		if present(t, r, store.OutDir, damaged) {
 			t.Error("the damaged file is still there")
 		}
-		if len(sc.Out) != 1 || len(sc.Seq) != 0 {
-			t.Errorf("nothing is known of the file: no replacement and no floor, got %d source records and floors %v", len(sc.Out), sc.Seq)
+		want := lostNotice(sender, 0, newSim(t, r.st).now)
+		want.Key.Damaged = hashOfName(t, damaged)
+		want = store.NewOutLostRecord(want.Key, node(local), newSim(t, r.st).now)
+		if len(sc.OutLost) != 1 || !equalRecords(sc.OutLost[0], want) {
+			t.Errorf("out-lost records %#v, want exactly %#v: one record, named after the damaged file, discovered when the settlement was made", sc.OutLost, want)
 		}
-		oneAlert(t, sc, store.OutDir, srcOut(2, false).Name(), "corrupt_record")
-	})
-	t.Run("all zero", func(t *testing.T) {
-		r := newRig(t)
-		seed(t, r.mem, srcOut(1, false))
-		seedRaw(t, r.mem, store.OutDir, zeroOutName(ep(1)), make([]byte, 300))
+		oneAlert(t, sc, store.OutDir, damaged, "corrupt_record")
+	}
+	t.Run("an all-zero file", func(t *testing.T) {
+		r := world(t)
+		name := zeroOutName(ep(1))
+		seedRaw(t, r.mem, store.OutDir, name, make([]byte, 300))
 		sc := settled(t, r)
-		if present(t, r, store.OutDir, zeroOutName(ep(1))) {
-			t.Error("the all-zero file is still there")
+		check(t, r, sc, name, 1)
+		if len(sc.Out) != 2 {
+			t.Errorf("the healthy records were touched: %d", len(sc.Out))
 		}
-		if len(sc.Out) != 1 || len(sc.Seq) != 0 {
-			t.Errorf("no replacement and no floor, got %d source records and floors %v", len(sc.Out), sc.Seq)
+		// m is the highest of the floor and the numbers there: 4 for the first
+		// pair, 7 for the second; every pair of the sender goes to m+1.
+		if got := floorOf(t, sc, 1, pair); got != 5 {
+			t.Errorf("floor of the first pair = %d, want 5", got)
 		}
-		oneAlert(t, sc, store.OutDir, zeroOutName(ep(1)), "corrupt_record")
+		if got := floorOf(t, sc, 1, other); got != 8 {
+			t.Errorf("floor of the second pair = %d, want 8", got)
+		}
+	})
+	t.Run("a damaged first line of a record", func(t *testing.T) {
+		r := world(t)
+		victim := srcOut(2, false)
+		seed(t, r.mem, victim)
+		damageHeader(t, r.mem, path.Join(store.OutDir, victim.Name()))
+		sc := settled(t, r)
+		check(t, r, sc, victim.Name(), 1)
+		if got := floorOf(t, sc, 1, pair); got != 5 {
+			t.Errorf("floor = %d, want 5: the number 2 of the lost record is below the highest known", got)
+		}
+	})
+	t.Run("a control signal file is told like a message", func(t *testing.T) {
+		r := world(t)
+		victim := outCtlRecord(3)
+		seed(t, r.mem, victim)
+		damageHeader(t, r.mem, path.Join(store.OutDir, victim.Name()))
+		check(t, r, settled(t, r), victim.Name(), 1)
+	})
+	t.Run("an endpoint that is closed is told too", func(t *testing.T) {
+		r := worldRig(t)
+		seed(t, r.mem, session(5, store.EndpointClosed, ctlName(4)))
+		name := zeroOutName(ep(5))
+		seedRaw(t, r.mem, store.OutDir, name, make([]byte, 64))
+		check(t, r, settled(t, r), name, 5)
+	})
+	t.Run("a sender that has no floor to raise writes none", func(t *testing.T) {
+		r := worldRig(t)
+		name := zeroOutName(ep(2))
+		seedRaw(t, r.mem, store.OutDir, name, make([]byte, 64))
+		sc := settled(t, r)
+		check(t, r, sc, name, 2)
+		if len(sc.Seq) != 0 {
+			t.Errorf("floors %v: nothing says which pairs the lost message belonged to, and the endpoint has none", sc.Seq)
+		}
+	})
+	t.Run("the settlement of two files of one sender gives two records and the item of each", func(t *testing.T) {
+		r := world(t)
+		a, b := zeroOutName(ep(1)), ep(1).String()+"."+strings.Repeat("1", 64)+".rec"
+		seedRaw(t, r.mem, store.OutDir, a, make([]byte, 64))
+		seedRaw(t, r.mem, store.OutDir, b, make([]byte, 64))
+		sc := settled(t, r)
+		if len(sc.OutLost) != 2 || len(sc.Alerts) != 2 {
+			t.Fatalf("out-lost %d alerts %d, want 2 and 2", len(sc.OutLost), len(sc.Alerts))
+		}
+		for _, o := range sc.OutLost {
+			if len(o.Feedback) != 1 {
+				t.Errorf("%s: %d items", o.Name(), len(o.Feedback))
+			}
+		}
+	})
+}
+
+// Nothing is told where nobody can be: a name whose prefix is no endpoint, a prefix
+// that is not an endpoint of this node (the system endpoint is never a sender),
+// or one still being created. The file is alerted and removed.
+func TestADamagedSourceFileThatNamesNoEndpointOfThisNodeIsAlertedAndDeleted(t *testing.T) {
+	for _, c := range []struct {
+		rule string
+		name string
+	}{
+		{"a prefix that is no endpoint", "notanendpoint." + strings.Repeat("0", 64) + ".rec"},
+		{"a prefix with a damaged checksum", func() string {
+			e := []byte(ep(1).String())
+			e[len(e)-1] ^= 1
+			return string(e) + "." + strings.Repeat("0", 64) + ".rec"
+		}()},
+		{"an endpoint that is not on this node", zeroOutName(ep(9))},
+		{"the system endpoint", zeroOutName(ident.SystemEndpoint())},
+		{"an endpoint still being created", zeroOutName(ep(5))},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			r := worldRig(t)
+			seed(t, r.mem, session(5, store.EndpointCreating, ctlName(4)), srcOut(1, false))
+			seedRaw(t, r.mem, store.OutDir, c.name, make([]byte, 64))
+			sc := settled(t, r)
+			if present(t, r, store.OutDir, c.name) {
+				t.Error("the damaged file is still there")
+			}
+			if len(sc.OutLost) != 0 || len(sc.Seq) != 0 || len(sc.Out) != 1 {
+				t.Errorf("nobody can be told and no floor can be raised: out-lost %v floors %v out %d", sc.OutLost, sc.Seq, len(sc.Out))
+			}
+			oneAlert(t, sc, store.OutDir, c.name, "corrupt_record")
+		})
+	}
+}
+
+// Settling the file of an out-lost record again, as a restart does after a crash
+// that left it, writes the same record: the name comes from the damaged file and
+// from nothing else, so neither the time nor the node makes a second record, and a
+// second record would be a second notice.
+func TestSettlingTheSameDamagedFileAgainWritesTheSameOutLostRecord(t *testing.T) {
+	r := worldRig(t)
+	seed(t, r.mem, srcOut(1, false))
+	name := zeroOutName(ep(1))
+	settle := func(at time.Time, nodeN int) {
+		t.Helper()
+		seedRaw(t, r.mem, store.OutDir, name, make([]byte, 64))
+		sc := r.scan()
+		s := newSim(t, r.st)
+		s.now = at
+		mustDo(t, r.st.Quarantine(store.Quarantine{File: sc.Damaged[0], Scan: sc, Node: node(nodeN), Alert: s.alert("corrupt_record", store.OutDir, name)}))
+	}
+	settle(base, local)
+	settle(base.Add(time.Hour), 3)
+	sc := r.scan()
+	if len(sc.OutLost) != 1 || len(sc.Alerts) != 1 || len(sc.Out) != 1 {
+		t.Fatalf("out-lost %v alerts %v: the same file settled again is the same record and the same alert", sc.OutLost, sc.Alerts)
+	}
+}
+
+// A call that cannot be settled correctly is refused before anything is written.
+func TestAnUnreadableSourceFileIsNotSettledWithoutWhatTheNoticeNeeds(t *testing.T) {
+	r := worldRig(t)
+	seed(t, r.mem, srcOut(1, false))
+	name := zeroOutName(ep(1))
+	seedRaw(t, r.mem, store.OutDir, name, make([]byte, 64))
+	before := snapshot(t, r.mem, ".")
+	sc := r.scan()
+	alert := newSim(t, r.st).alert("corrupt_record", store.OutDir, name)
+	for what, q := range map[string]store.Quarantine{
+		"no node to put in the item":                                {File: sc.Damaged[0], Scan: sc, Alert: alert},
+		"no scan to find the endpoint":                              {File: sc.Damaged[0], Node: node(local), Alert: alert},
+		"a replacement, which a file that was not read has none of": {File: sc.Damaged[0], Scan: sc, Node: node(local), Alert: alert, Replacement: lostOutAt(srcOut(1, false).Key, base)},
+	} {
+		if err := r.st.Quarantine(q); err == nil {
+			t.Errorf("%s: no error", what)
+		}
+	}
+	if diff := equalMaps(snapshot(t, r.mem, "."), before, nil); diff != "" {
+		t.Errorf("a refused call changed the disk: %s", diff)
+	}
+}
+
+// An out-lost record that is damaged in turn is the one place a notice could be
+// lost without trace, so its endpoint is told again: it is overwritten by a record
+// with its item pending, which says only what the damaged one said.
+func TestADamagedOutLostRecordIsOverwrittenWithItsNoticePendingOrRemovedWhenNobodyCanBeTold(t *testing.T) {
+	t.Run("its endpoint is on this node", func(t *testing.T) {
+		r := worldRig(t)
+		o := lostNotice(1, 3, base)
+		o.Feedback = nil // its notice had been given
+		seed(t, r.mem, o)
+		damageBody(t, r.mem, path.Join(store.OutDir, o.Name()))
+		sc := settled(t, r)
+		want := store.NewOutLostRecord(o.Key, node(local), newSim(t, r.st).now)
+		if len(sc.OutLost) != 1 || !equalRecords(sc.OutLost[0], want) || len(sc.Seq) != 0 {
+			t.Errorf("out-lost %#v floors %v, want %#v and no floor", sc.OutLost, sc.Seq, want)
+		}
+		oneAlert(t, sc, store.OutDir, o.Name(), "corrupt_record")
+	})
+	t.Run("its endpoint is gone", func(t *testing.T) {
+		r := worldRig(t)
+		o := lostNotice(9, 3, base)
+		seed(t, r.mem, o)
+		damageBody(t, r.mem, path.Join(store.OutDir, o.Name()))
+		sc := settled(t, r)
+		if len(sc.OutLost) != 0 || present(t, r, store.OutDir, o.Name()) {
+			t.Errorf("out-lost %v", sc.OutLost)
+		}
+		oneAlert(t, sc, store.OutDir, o.Name(), "corrupt_record")
+	})
+	t.Run("a replacement is refused", func(t *testing.T) {
+		r := worldRig(t)
+		o := lostNotice(1, 3, base)
+		seed(t, r.mem, o)
+		damageBody(t, r.mem, path.Join(store.OutDir, o.Name()))
+		sc := r.scan()
+		q := store.Quarantine{File: sc.Damaged[0], Scan: sc, Node: node(local), Replacement: lostOutAt(srcOut(1, false).Key, base),
+			Alert: newSim(t, r.st).alert("corrupt_record", store.OutDir, o.Name())}
+		if err := r.st.Quarantine(q); err == nil {
+			t.Error("no error")
+		}
 	})
 }
 

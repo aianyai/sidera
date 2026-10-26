@@ -3,7 +3,9 @@ package store_test
 import (
 	"path"
 	"strings"
+	syncatomic "sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
@@ -133,24 +135,7 @@ func recoveryScenarios() []scenario {
 		},
 		controlQuarantine("quarantine of a control record whose body is damaged", damageBody),
 		controlQuarantine("quarantine of a control record whose first line is damaged", damageHeader),
-		{
-			name: "quarantine of a source record whose first line is damaged",
-			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seed(t, mem, srcOut(1, false), srcOut(2, false))
-				damageHeader(t, mem, path.Join(store.OutDir, srcOut(2, false).Name()))
-			},
-			mode: atomic, mustComplete: true, run: recoverRun,
-			verify: func(t *testing.T, r *rig) {
-				sc := r.scan()
-				name := srcOut(2, false).Name()
-				if out, _, _ := find(t, sc, name); out != nil {
-					t.Errorf("a record whose key cannot be trusted was replaced")
-				}
-				if len(sc.Alerts) != 1 || len(sc.Seq) != 0 {
-					t.Errorf("one alert and no floor expected: %v %v", sc.Alerts, sc.Seq)
-				}
-			},
-		},
+		unreadableSourceScenario(),
 		{
 			name: "quarantine of a floor file whose body is damaged",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
@@ -550,3 +535,121 @@ func endpointOf(sc *store.Scan, id ident.EndpointID) *store.EndpointRecord {
 }
 
 func hasEndpoint(sc *store.Scan, id ident.EndpointID) bool { return endpointOf(sc, id) != nil }
+
+// lostRuns numbers the runs of the workflow of unreadableSourceScenario, so that
+// each takes the discovery time of its own.
+var lostRuns syncatomic.Int64
+
+// unreadableSourceScenario is the settlement of a source file whose first line
+// cannot be read, which writes the out-lost record that tells its sender, raises
+// every floor of the sender, raises the alert and only then removes the file. Each
+// run of the workflow, and each recovery, finds the damage at another time, so a
+// name that depended on the time would give a second record: what the walk
+// compares is that exactly one record and one alert are there, not the time in
+// them.
+func unreadableSourceScenario() scenario {
+	pair, other := addr(2, 2), addr(2, 3)
+	victim := srcOut(2, false)
+	damagedHash := strings.TrimSuffix(strings.TrimPrefix(victim.Name(), ep(1).String()+"."), ".rec")
+	lostName := store.NewOutLostRecord(store.OutLostKey{Sender: ep(1), Damaged: damagedHash}, node(local), base).Name()
+	// countKind counts the out-lost records or the alerts of a snapshot.
+	countKind := func(snap map[string]string, kind store.Kind) (n int) {
+		for p, content := range snap {
+			dir, name := path.Split(p)
+			dir = strings.TrimSuffix(dir, "/")
+			if dir != store.OutDir && dir != store.AlertsDir {
+				continue
+			}
+			rec, dmg := store.DecodeRecord(dir, name, []byte(content))
+			if dmg != nil {
+				continue
+			}
+			switch rec.(type) {
+			case store.OutLostRecord:
+				if kind == store.KindOutLost {
+					n++
+				}
+			case store.AlertRecord:
+				if kind == store.KindAlert {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	return scenario{
+		name: "quarantine of a source file whose first line is unreadable",
+		setup: func(t *testing.T, mem *fsxtest.Mem) {
+			seed(t, mem, srcOut(1, false), victim, srcOut(4, false), store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 2, other: 7}})
+			damageHeader(t, mem, path.Join(store.OutDir, victim.Name()))
+		},
+		mode: atomic, mustComplete: true,
+		run: func(t *testing.T, r *rig, s *sim) error {
+			s.now = s.now.Add(time.Duration(lostRuns.Add(1)) * time.Second)
+			s.recoverAll()
+			return nil
+		},
+		// What is compared is that the damaged file is gone, the healthy records are
+		// as they were and exactly the record named after the file is there. Its
+		// time, the alert's and the floors (a settlement repeated after a crash
+		// raises them once more: a gap grows, a number is never given twice) are
+		// checked by hand below.
+		ignore: func(p string) bool {
+			return strings.HasPrefix(p, store.AlertsDir+"/") || strings.HasPrefix(p, store.SeqDir+"/") || p == path.Join(store.OutDir, lostName)
+		},
+		crashed: func(t *testing.T, where string, snap map[string]string) {
+			if n := countKind(snap, store.KindOutLost); n > 1 {
+				t.Errorf("%s: %d out-lost records", where, n)
+			}
+			if n := countKind(snap, store.KindAlert); n > 1 {
+				t.Errorf("%s: %d alerts", where, n)
+			}
+			if _, there := snap[path.Join(store.OutDir, victim.Name())]; there {
+				return
+			}
+			// The file is gone: everything it was settled for is durable.
+			if countKind(snap, store.KindOutLost) != 1 || countKind(snap, store.KindAlert) != 1 {
+				t.Errorf("%s: the damaged file is gone without its out-lost record and its alert", where)
+			}
+			if f := floorsIn(t, where, snap); f[pair] < 5 || f[other] < 8 {
+				t.Errorf("%s: the damaged file is gone and the floors are %v, want at least 5 and 8", where, f)
+			}
+		},
+		extra: func(t *testing.T, where string, _, fin map[string]string) {
+			if countKind(fin, store.KindOutLost) != 1 || countKind(fin, store.KindAlert) != 1 {
+				t.Errorf("%s: want exactly one out-lost record and one alert, got %d and %d", where, countKind(fin, store.KindOutLost), countKind(fin, store.KindAlert))
+			}
+			if f := floorsIn(t, where, fin); f[pair] < 5 || f[pair] > 9 || f[other] < 8 || f[other] > 12 {
+				t.Errorf("%s: floors %v, want 5 and 8 (one settlement) up to a few more for repeated ones", where, f)
+			}
+		},
+		verify: func(t *testing.T, r *rig) {
+			sc := r.scan()
+			if len(sc.OutLost) != 1 || sc.OutLost[0].Name() != lostName || len(sc.OutLost[0].Feedback) != 1 || len(sc.Out) != 2 || len(sc.Damaged) != 0 {
+				t.Fatalf("out-lost %#v, source records %d", sc.OutLost, len(sc.Out))
+			}
+			if !onlyAlert(sc, store.OutDir, victim.Name(), "corrupt_record") {
+				t.Errorf("alerts %v", sc.Alerts)
+			}
+			if floorOf(t, sc, 1, pair) != 5 || floorOf(t, sc, 1, other) != 8 {
+				t.Errorf("floors %d and %d, want 5 and 8", floorOf(t, sc, 1, pair), floorOf(t, sc, 1, other))
+			}
+		},
+	}
+}
+
+// floorsIn is the floors of sender 1 in a snapshot of the disk.
+func floorsIn(t *testing.T, where string, snap map[string]string) map[ident.Address]uint64 {
+	t.Helper()
+	name := store.SeqRecord{Sender: ep(1)}.Name()
+	data, ok := snap[path.Join(store.SeqDir, name)]
+	if !ok {
+		return nil
+	}
+	rec, dmg := store.DecodeRecord(store.SeqDir, name, []byte(data))
+	if dmg != nil {
+		t.Errorf("%s: floor file: %+v", where, dmg)
+		return nil
+	}
+	return rec.(store.SeqRecord).Floors
+}

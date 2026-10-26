@@ -100,7 +100,7 @@ func (s *sim) pass() bool {
 	// with them.
 	for _, d := range s.scan().Damaged {
 		sc := s.scan()
-		q := store.Quarantine{File: d, Scan: sc}
+		q := store.Quarantine{File: d, Scan: sc, Node: node(local)}
 		var kindName = "corrupt_record"
 		if d.Damage.Class == store.BodyDamaged {
 			q.Replacement = s.replacement(d.Dir, d.Key)
