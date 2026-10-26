@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"sort"
 	"strings"
 	"time"
 
@@ -69,22 +68,17 @@ func (e *Engine) tickDue(record string) {
 	}
 }
 
-// recoverTick ticks every record that is due, in chunks (step 12). The entries of the
-// records that changed were moved by the view, and an entry of one that was due and did
-// not change fires once more and finds nothing to do.
+// recoverTick ticks every record whose entry is due, in chunks, in the step that does
+// so at the start: they are the entries the view gave the records the scan entry
+// loaded. The entries of the records that changed were moved by the view, and an entry
+// of one that was due and did not change is gone with this step: nothing about the
+// record would be different the next time.
 func (e *Engine) recoverTick(now time.Time) error {
-	var due []string
-	for k, in := range e.view.in {
-		if next := in.Record.NextTick(); !next.IsZero() && !next.After(now) {
-			due = append(due, inTick(k))
-		}
+	keys := e.sched.takeDueOf(schedTick, now)
+	due := make([]string, len(keys))
+	for i, k := range keys {
+		due[i] = k.id
 	}
-	for name, o := range e.view.out {
-		if next := outNextTick(o); !next.IsZero() && !next.After(now) {
-			due = append(due, outTick(name))
-		}
-	}
-	sort.Strings(due)
 	for len(due) > 0 {
 		n := min(len(due), e.p.ChunkTickRecords)
 		if err := e.tickRecords(now, due[:n]); err != nil {

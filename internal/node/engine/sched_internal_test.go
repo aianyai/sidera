@@ -65,3 +65,26 @@ func TestSchedulerHoldsOneEntryForAKeyAndSettingItAgainMovesItBehind(t *testing.
 		t.Error("an entry is left after it was removed")
 	}
 }
+
+func TestSchedulerTakesTheDueEntriesOfOneKindAndLeavesTheOthers(t *testing.T) {
+	s := newScheduler()
+	a, b, c := schedKey{schedTick, "a"}, schedKey{schedTick, "b"}, schedKey{schedTick, "c"}
+	o, late := schedKey{schedOutbound, "o"}, schedKey{schedTick, "late"}
+	s.set(b, base.Add(time.Minute))
+	s.set(o, base.Add(time.Minute))
+	s.set(a, base.Add(time.Minute))
+	s.set(c, base.Add(30*time.Second))
+	s.set(late, base.Add(time.Hour))
+	if got, want := keys(s.takeDueOf(schedTick, base.Add(time.Minute))), keys([]schedKey{c, b, a}); got != want {
+		t.Errorf("took %s, want %s: due time first, then the order of setting", got, want)
+	}
+	if got, want := keys(s.takeDue(base.Add(time.Minute))), keys([]schedKey{o}); got != want {
+		t.Errorf("the entry of another kind is %s, want %s: it was not taken", got, want)
+	}
+	if next, ok := s.next(); !ok || !next.Equal(base.Add(time.Hour)) {
+		t.Errorf("next = %v, %v; want the entry that was not due", next, ok)
+	}
+	if got := keys(s.takeDueOf(schedTick, base)); got != "" {
+		t.Errorf("took %s before anything was due", got)
+	}
+}

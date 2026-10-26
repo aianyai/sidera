@@ -2,6 +2,7 @@ package engine
 
 import (
 	"container/heap"
+	"sort"
 	"time"
 )
 
@@ -105,6 +106,29 @@ func (s *scheduler) takeDue(now time.Time) []schedKey {
 		out = append(out, e.key)
 	}
 	return out
+}
+
+// takeDueOf is takeDue for the entries of one kind: the others stay where they are.
+func (s *scheduler) takeDueOf(kind schedKind, now time.Time) []schedKey {
+	var due []*schedEntry
+	for _, e := range s.h {
+		if e.key.kind == kind && !e.due.After(now) {
+			due = append(due, e)
+		}
+	}
+	sort.Slice(due, func(i, j int) bool {
+		if !due[i].due.Equal(due[j].due) {
+			return due[i].due.Before(due[j].due)
+		}
+		return due[i].seq < due[j].seq
+	})
+	keys := make([]schedKey, 0, len(due))
+	for _, e := range due {
+		heap.Remove(&s.h, e.index)
+		delete(s.byKey, e.key)
+		keys = append(keys, e.key)
+	}
+	return keys
 }
 
 // dueCount is how many entries are due at now or before.
