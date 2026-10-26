@@ -1465,6 +1465,7 @@ reproducible).
 | A block is written marks first and head last, a failed write is tried again, and marks a crash left are lifted whatever the head says | `blocked.go` (`judgeBlocked`), `store.Blocked` | `TestBlockedReportIsWrittenAgainAfterAFailedWrite`, `TestNoRecordKeepsABlockMarkAfterACrashWhenTheCauseIsGone` |
 | A message that arrives during a block is marked; reading the messages ends the block | `blocked.go` (`judgeBlocked`), `view.go` (`onInChange`) | `TestMessageArrivingDuringABlockIsMarkedBlockedToo`, `TestReadingTheBlockedMessagesEndsTheBlock` |
 | An adapter not connected since the node began to serve is offline since then, unless the block is already reported, which a restart keeps until a connection shows the cause gone | `blocked.go` (`blockedSignals`) | `TestAdapterNotYetConnectedIsOfflineOnlySinceTheNodeBeganToServe`, `TestARestartWhileABlockIsReportedKeepsItUntilTheAdapterShowsTheCauseGone` |
+| Messages that already wait when the adapter goes away are blocked after the threshold; a prompt that fails after the cause was reported counts from when it was sent | `adapters.go` (`gone`), `prompts.go` (`settlePrompt`) | `TestMessagesThatWaitWhenTheAdapterGoesAwayAreBlockedAfterTheThreshold`, `TestAPromptThatFailsAfterTheCauseWasReportedCountsFromWhenItWasSent` |
 | The sessions of an adapter whose probe failed are judged after a wait | `adapters.go` (`markStarted`), `blocked.go` (`probeFallback`) | `TestSessionsOfAnAdapterWhoseProbeFailedAreStillPromptedAfterAWait` |
 
 Known gaps, each filled in with the feature it belongs to:
@@ -1495,6 +1496,12 @@ Known gaps, each filled in with the feature it belongs to:
   taken for delivered at once. The adapter protocol says the node reconciles it when no
   `prompt.persisted` follows but gives no time to wait, and a window is a timing of the protocol,
   so it is not invented here.
+- After an adapter reconnects and before its first availability snapshot, the engine sees no cause
+  for its sessions: the probe result's authentication and dependency findings are not mapped into
+  the signals of `adapterreg`, so a block whose cause is one of those is taken for over (and
+  corrected to the sender) at the first judgment after the connection; when the snapshot then says
+  the cause holds, the block is marked again, but a delivery is told as blocked once, so its sender
+  is not told again.
 - The block of a message is judged from the messages that wait, not from one of them: a message
   that is suspended at the second check is not waiting and is not marked. A change of the node
   rules or of the declaration that makes a suspended message wait again is not an event of the

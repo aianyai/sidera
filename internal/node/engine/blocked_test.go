@@ -211,6 +211,77 @@ func TestBlockedReportedOnceWithCauseAndRecoveredOnce(t *testing.T) {
 	}
 }
 
+// Messages that already wait when the adapter goes away are blocked once it has stayed
+// away for the threshold: the loss of the connection is the event that starts the count,
+// and nothing else asks about an endpoint whose messages have not changed.
+func TestMessagesThatWaitWhenTheAdapterGoesAwayAreBlockedAfterTheThreshold(t *testing.T) {
+	h := sessionNodeOf(t, harness.Options{}, blockedHost(), "a")
+	_, addr := idleSession(t, h, "a")
+	msg := sendToAddr(t, h, "a", addr, "sent while the adapter is here")
+	quiet(t, h)
+	wantBlockFacts(t, h, addr, false, 0, 0, msg)
+
+	adapterEnded(t, h, h.AdapterLaunches(harness.Instance)[0])
+	settle := func() { engineQuiet(t, h) }
+	settle()
+	step(h, settle, handoff.DefaultBlockedThreshold)
+	wantBlockFacts(t, h, addr, false, 0, 0, msg)
+	step(h, settle, time.Second)
+	wantBlockFacts(t, h, addr, true, delivery.CauseAdapterOffline, handoff.CauseAdapterOffline, msg)
+}
+
+// A prompt that fails after a cause was reported counts from its own start: the failing
+// run began when the prompt was sent, before the adapter said the native service is
+// down. Settling the attempt is the event that tells the judgment, since the snapshot
+// and the records are as they were, so a block is reported at the threshold after the
+// prompt and not at the threshold after the report of the cause.
+func TestAPromptThatFailsAfterTheCauseWasReportedCountsFromWhenItWasSent(t *testing.T) {
+	h := sessionNodeOf(t, harness.Options{}, blockedHost(), "a")
+	_, addr := idleSession(t, h, "a")
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeHold}); err != nil {
+		t.Fatal(err)
+	}
+	msg := sendToAddr(t, h, "a", addr, "sent before the service went down")
+	quiet(t, h)
+	wantPrompts(t, h, addr, 1)
+
+	// The service goes down while the prompt waits for its answer, and the native
+	// process with it, so that the answer is a refusal.
+	h.Advance(time.Minute)
+	rt, err := h.Runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.KillNative(nativeRef(t, h, addr)); err != nil {
+		t.Fatal(err)
+	}
+	down := []adapterproto.Availability{{Condition: adapterproto.ConditionNativeUnavailable, SinceMS: h.Clock().Now().UnixMilli()}}
+	if err := ctrl.Availability(h.Ctx(), down); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	h.Advance(time.Minute)
+	if err := ctrl.ReleaseHeld(h.Ctx()); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	if got := attemptsOf(t, h, addr).Attempts; len(got) == 0 || got[0].Outcome != handoff.AttemptFailed {
+		t.Fatalf("the attempts are %+v, want the prompt that was refused", got)
+	}
+
+	// The threshold after the prompt was sent is a minute before the threshold after the
+	// service was reported down.
+	settle := func() { quiet(t, h) }
+	step(h, settle, handoff.DefaultBlockedThreshold-2*time.Minute)
+	wantBlockFacts(t, h, addr, false, 0, 0, msg)
+	step(h, settle, time.Second)
+	wantBlockFacts(t, h, addr, true, delivery.CauseNativeUnavailable, handoff.CauseServiceUnavailable, msg)
+}
+
 // A native process that was killed refuses the prompt (or its answer is lost) with the
 // adapter online and nothing reported unavailable: that is an agent that cannot be
 // woken, which prompts retry for and no cause explains, so the sender is told nothing
