@@ -9,6 +9,8 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +19,8 @@ import (
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/internal/node/txn"
 )
 
 // seedFile writes a file onto the disk durably, outside any transaction: the
@@ -444,4 +448,118 @@ func TestShutdownEndsTheWaitOfAnAdapterRequestThatWaitsForTheRunningPhase(t *tes
 	case <-time.After(5 * time.Second):
 		t.Fatal("the request that waits for the running phase was not let go at shutdown")
 	}
+}
+
+// commitLog is a transaction observer that keeps the name of every transaction that
+// reached its commit point, and which startup steps the log had shown by then.
+type commitLog struct {
+	log atomic.Pointer[harness.LogCapture] // set once the rig has its log, which the rig makes after the observer
+	mu  sync.Mutex
+	got []string
+	// seen12 is how many times the log showed the begin of step 12 when watching
+	// began: only a later one counts.
+	seen12 int
+}
+
+// step12Begun counts the begins of step 12 the log shows.
+func (c *commitLog) step12Begun() int {
+	l := c.log.Load()
+	if l == nil {
+		return 0
+	}
+	return strings.Count(strings.Join(l.Messages(), "\n")+"\n", "startup step 12 begin\n")
+}
+
+// watch forgets what was seen so far: the commits that follow are those of the
+// process being started.
+func (c *commitLog) watch() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.got, c.seen12 = nil, c.step12Begun()
+}
+
+func (c *commitLog) Reached(p fsx.Point, _ txn.Kind) {
+	if p.Step != fsx.StepCommit {
+		return
+	}
+	stage := "before step 12"
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.step12Begun() > c.seen12 {
+		stage = "from step 12"
+	}
+	c.got = append(c.got, p.Tag.Tx+" "+stage)
+}
+
+func (c *commitLog) count(tx, stage string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return strings.Count(strings.Join(c.got, "\n")+"\n", tx+" "+stage+"\n")
+}
+
+// A record that fell due while the node was down is ticked by step 12 of the start,
+// after the adapters have said which turns run, and not by the schedule as soon as
+// the loop runs: the lease of a record is released only once it is known whether the
+// turn it was handed to still runs. The entries stay in the schedule, due, until
+// their step; one that falls due after the step and before Serve waits for Serve.
+func TestRecordsDueDuringDowntimeAreTickedByStepTwelveAndNotBefore(t *testing.T) {
+	noLeaks(t)
+	obs := &commitLog{}
+	r := newRig(t, 10, withObserver(obs))
+	obs.log.Store(r.log)
+	e := r.start()
+	a := register(t, e, "a")
+	r.restart()
+	r.queue(1, 1, a)
+	later := queuedIn(t, 2, a)
+	rec, err := delivery.NewTargetRecord(t0.Add(2*time.Second), t0.Add(2*time.Second), later.Record.ReportBy, delivery.DefaultEndpointMaxQueue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	later.Record = rec
+	if err := r.st.Deliver(bodyOf(2), []store.InRecord{later}); err != nil {
+		t.Fatal(err)
+	}
+	// The queue time of the first message ran out while the node was down, and that of
+	// the second, two seconds later, has not.
+	r.clk.Advance(delivery.DefaultEndpointMaxQueue + time.Second)
+
+	obs.watch()
+	e, _, err = r.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Start()
+	t.Cleanup(func() { r.stop2(e) })
+	// The loop runs and the adapters have not yet reported: every entry that is due
+	// would have fired by now, as time moves.
+	settle(t, e)
+	r.clk.Advance(100 * time.Millisecond)
+	settle(t, e)
+	if n := obs.count("tick", "before step 12") + obs.count("feedback-form", "before step 12"); n != 0 {
+		t.Fatalf("%d tick or feedback transactions committed before step 12 began (%v)", n, obs.got)
+	}
+
+	if err := e.RecoverDelivery(context.Background()); err != nil {
+		t.Fatalf("RecoverDelivery: %v", err)
+	}
+	if n := obs.count("tick", "before step 12"); n != 0 {
+		t.Errorf("%d tick transactions committed before step 12 began (%v)", n, obs.got)
+	}
+	ticked := obs.count("tick", "from step 12")
+	if ticked != 1 {
+		t.Fatalf("%d tick transactions committed in step 12 (%v), want the one that settles the record that is due", ticked, obs.got)
+	}
+
+	// The second record falls due after the step and before Serve: the loop is still
+	// recovering, so it waits, and Serve lets it go.
+	r.clk.Advance(time.Second)
+	settle(t, e)
+	if n := obs.count("tick", "from step 12"); n != ticked {
+		t.Fatalf("%d tick transactions before Serve, %d after step 12: the record that fell due waited for Serve", n, ticked)
+	}
+	// Nothing is sent to the loop after Serve: it has to look at its schedule by itself.
+	e.Serve()
+	waitUntil(t, func() bool { return obs.count("tick", "from step 12") == ticked+1 })
+	settle(t, e)
 }

@@ -63,11 +63,31 @@ type schedEntry struct {
 // among entries due together by the order they were set, so that the sequence of
 // the writes of a run does not depend on the heap and a crash point is the same
 // one in two runs. It is not safe for concurrent use: the loop owns it.
+//
+// While held reports true, the entries of the kinds the recovery steps of the start
+// own (recoveryKind) stay in the heap: next, takeDue and dueCount pass over them, so
+// that the loop neither fires nor waits for them. takeDueOf is how a step takes its
+// own entries, held or not.
 type scheduler struct {
 	h     entryHeap
 	byKey map[schedKey]*schedEntry
 	seq   uint64
+	held  func() bool
 }
+
+// recoveryKind says whether the start's recovery steps own the entries of a kind:
+// the ticks of the records, the flush of feedback and the look at a source record.
+// What fell due while the node was down is done by those steps, in their order,
+// and not by the schedule as soon as the loop runs.
+func recoveryKind(k schedKind) bool {
+	return k == schedTick || k == schedFeedback || k == schedOutbound
+}
+
+// holding says whether the entries of the recovery kinds are held now.
+func (s *scheduler) holding() bool { return s.held != nil && s.held() }
+
+// fireable says whether an entry may be given out now.
+func (s *scheduler) fireable(e *schedEntry) bool { return !s.holding() || !recoveryKind(e.key.kind) }
 
 func newScheduler() *scheduler { return &scheduler{byKey: map[schedKey]*schedEntry{}} }
 
@@ -94,17 +114,33 @@ func (s *scheduler) remove(key schedKey) {
 	}
 }
 
-// next is the earliest due time, and whether there is any entry.
+// next is the earliest due time of an entry that may be given out, and whether there
+// is one.
 func (s *scheduler) next() (time.Time, bool) {
 	if len(s.h) == 0 {
 		return time.Time{}, false
 	}
-	return s.h[0].due, true
+	if !s.holding() {
+		return s.h[0].due, true
+	}
+	var first *schedEntry
+	for _, e := range s.h {
+		if s.fireable(e) && (first == nil || e.due.Before(first.due)) {
+			first = e
+		}
+	}
+	if first == nil {
+		return time.Time{}, false
+	}
+	return first.due, true
 }
 
-// takeDue removes every entry due at now or before and returns their keys in the
-// order they are to run.
+// takeDue removes every entry due at now or before that may be given out and returns
+// their keys in the order they are to run.
 func (s *scheduler) takeDue(now time.Time) []schedKey {
+	if s.holding() {
+		return s.takeWhere(func(e *schedEntry) bool { return s.fireable(e) && !e.due.After(now) })
+	}
 	var out []schedKey
 	for len(s.h) > 0 && !s.h[0].due.After(now) {
 		e := heap.Pop(&s.h).(*schedEntry)
@@ -115,10 +151,17 @@ func (s *scheduler) takeDue(now time.Time) []schedKey {
 }
 
 // takeDueOf is takeDue for the entries of one kind: the others stay where they are.
+// It takes the entries of a held kind too: it is how the step that owns them does.
 func (s *scheduler) takeDueOf(kind schedKind, now time.Time) []schedKey {
+	return s.takeWhere(func(e *schedEntry) bool { return e.key.kind == kind && !e.due.After(now) })
+}
+
+// takeWhere removes the entries that match and returns their keys in the order they
+// are to run.
+func (s *scheduler) takeWhere(match func(*schedEntry) bool) []schedKey {
 	var due []*schedEntry
 	for _, e := range s.h {
-		if e.key.kind == kind && !e.due.After(now) {
+		if match(e) {
 			due = append(due, e)
 		}
 	}
@@ -137,11 +180,11 @@ func (s *scheduler) takeDueOf(kind schedKind, now time.Time) []schedKey {
 	return keys
 }
 
-// dueCount is how many entries are due at now or before.
+// dueCount is how many entries that may be given out are due at now or before.
 func (s *scheduler) dueCount(now time.Time) int {
 	n := 0
 	for _, e := range s.h {
-		if !e.due.After(now) {
+		if !e.due.After(now) && s.fireable(e) {
 			n++
 		}
 	}

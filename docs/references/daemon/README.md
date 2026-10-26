@@ -37,7 +37,7 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 | 8 | manage | The loop starts in the phase of recovery and the management interface opens: reads answer, anything that changes state is refused as `unavailable/recovering`. | this package |
 | 9 | agent-probe | Hook `AgentProbeOnly`: the Agent interface opens so that it takes only the one-use probe token. | the Agent interface |
 | 10 | adapters | The adapter host (`Config.AdapterHost`, when set) starts the enabled adapter instances and the step waits until each has answered `adapter.start` or been judged offline; then hook `Adapters` runs, for what else starts here. | `adapterhost`, `apiwire` |
-| 11 to 14 | | The engine's second recovery entry: creation intents and prompt attempts are checked, every record is ticked, feedback that fell due goes out, the loopback goes on. After step 10 on purpose: a lease is released only when no turn runs. | `engine` |
+| 11 to 14 | | The engine's second recovery entry: creation intents and prompt attempts are checked, every record is ticked, feedback that fell due goes out, the loopback goes on. After step 10 on purpose: a lease is released only when no turn runs. Until step 12 the engine's schedule holds back the ticks, the feedback and the looks at source records that fell due, so none of them runs before the adapters have reported. | `engine` |
 | 15 | serve | The engine serves; hook `AgentServe`: the Agent interface switches to full service. | the Agent interface |
 
 A hook runs inside its step, in the state of the engine the step needs (before the

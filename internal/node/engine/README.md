@@ -265,6 +265,12 @@ methods to this list.
   made while the wall clock is in doubt (`finalPullDue`), and the tick keeps the record's
   entry at the end of the target's retention, so a pull that never comes does not keep the
   delivery open.
+- **The recovery steps own the entries that fell due while the node was down.** While the
+  phase is `recovering` the schedule gives out no entry of the kinds `schedTick`,
+  `schedFeedback` and `schedOutbound` (`recoveryKind`) and does not arm the timer for
+  them: step 12 takes the due ticks (`takeDueOf`), steps 13 and 14 do the rest, and
+  `Serve` wakes the loop for what is left. Anything that makes the schedule give out one
+  of these kinds earlier ticks a record before the adapters have reported turn state.
 - **A damaged file is settled first, one at a time, and a lost source record is replaced
   by the sender's.** `quarantineAll` settles the damaged files of the plan, a control record's
   included (the pull answers from `ctl/`, so a record that goes is one the node no longer

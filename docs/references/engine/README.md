@@ -48,6 +48,17 @@ The timer is armed with the earliest entry's time itself (`Timer.ResetAt`), not 
 duration measured from an earlier reading: a clock that moves between the reading
 and the arming would otherwise leave the timer waiting for the entry's time plus
 that distance.
+While the phase is `recovering` the schedule holds back the entries of the three kinds
+the recovery steps own: the ticks of records, the flush of feedback and the look at a source
+record. They stay in the heap, due or not; the timer is armed for the earliest entry that
+is not held, and the entries count as due to `Quiesce` only once they can fire. Step 12
+takes the due ticks itself, and steps 13 and 14 do the work of the other two; `Serve` ends the
+hold and wakes the loop, so what fell due after its step and before the switch goes at once.
+Periodic tasks, the deadlines and retries of session creations, drains and the waits of recv
+fire as ever. The reason is the order of the start: a record that fell due while the node was
+down must not be ticked, nor its feedback formed, before the adapters have said which turns
+run (step 10) and the creations were settled (step 11), because the release of a lease on a
+record whose turn still runs is decided by that.
 
 **The clock.** Every command and every wake of the timer reads the wall clock once
 and observes it against the high water mark. A reading set back beyond the tolerance
@@ -684,7 +695,7 @@ in the order the node takes them; the engine takes part in these:
 | 8 | Management interface opens; reads answer, changes are refused | `Start` |
 | 10 | Adapter instances start and are admitted | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed` |
 | 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery`: creations past their deadline are settled, the others are asked of the adapter again |
-| 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick` (a source delivery still queued or accepted past `report_by` is left open for the pull of step 14) |
+| 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick`: the first time a record is ticked after the start, since the schedule holds the ticks back until then (a source delivery still queued or accepted past `report_by` is left open for the pull of step 14) |
 | 13 | Send the feedback that fell due | phase `feedback` |
 | 14 | Go on with the loopback of outgoing messages | phase `outbound`: every unsettled source record is sent or asked about again, and a delivery past `report_by` that waits for its last pull is pulled and closed |
 | 15 | The Agent interface serves in full | `Serve` |
@@ -839,6 +850,15 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   one form, so a re-encoding of what was read is the bytes that were read, and the
   fuzz target can assert it. A text that carries a display name or a description is
   not a declaration and is refused.
+- **What fell due while the node was down waits for its step.** The loop runs from step 8,
+  and an entry that is due fires as soon as the loop looks at the schedule; for the ticks of
+  records, the flush of feedback and the look at a source record that would be before the
+  adapters have reported turn state, which is what the release of a lease depends on. The
+  hold is in the schedule, by the phase, so that no caller of it and no new kind of timed
+  rule has to know about the start; a hold of those entries in the handlers would be one
+  more special case in each. The test restarts a node whose record fell due, sees no `tick`
+  commit before step 12 begins and one in it
+  (`TestRecordsDueDuringDowntimeAreTickedByStepTwelveAndNotBefore`).
 - **Time is read from the records, by the schedule the view keeps.** A timer for each
   rule of the delivery package would be a second statement of when a record changes;
   `Record.NextTick` says it once, and an entry that follows the view cannot be left stale
@@ -1013,6 +1033,7 @@ reproducible).
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |
 | The schedule | `sched.go`, `engine.go` | `sched_test.go`, `sched_internal_test.go` |
+| The ticks, the feedback flush and the looks at source records that fell due while the node was down wait for their steps of the start; `Serve` lets the rest go | `sched.go` (`recoveryKind`, `held`), `engine.go` (`Serve`, `loop`) | `TestRecordsDueDuringDowntimeAreTickedByStepTwelveAndNotBefore`, `TestSchedulerHoldsTheEntriesOfTheRecoveryKindsAndGivesOutTheOthers` |
 | The periodic sweep removes what has served its retention, in chunks, and the view agrees with the disk afterwards | `sweep.go` | `TestThePeriodicSweepRemovesWhatHasServedItsRetention`, `TestTheSweepRemovesInChunksOfAtMostChunkRemoves`, `TestCutSweepTakesAtMostTheBoundInTheOrderOfTheStoreAndLosesNothing`, `TestForgetSweptTakesTheRemovedRecordsOutOfTheView`, `TestDroppingAControlRecordLeavesTheViewAsIfItWereNeverThere`, `TestAPullForASweptControlRecordAnswersNoRecord` |
 | A summary that cannot be appended, an I/O error or a full disk, does not stop the sweep | `sweep.go` (`appendSummaries`) | `TestASummaryThatCannotBeAppendedDoesNotStopTheSweep` |
 | A notice is not swept while the item it covers is on its record, and the endpoint is told once across a restart | `store` (`PlanSweep`), `sweep.go` | `TestANoticeIsNotSweptWhileTheItemItCoversIsStillOnItsRecord` |

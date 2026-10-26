@@ -65,6 +65,7 @@ type Engine struct {
 	done     chan struct{}
 	shutdown chan struct{} // closed by BeginShutdown
 	shutOnce sync.Once
+	rearm    chan struct{} // makes the loop look at its schedule again: Serve changes the phase from outside it
 	running  chan struct{} // closed by Serve
 	runOnce  sync.Once
 	started  atomic.Bool
@@ -195,6 +196,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		paused:   d.RollbackPaused,
 		adapters: map[string]*adapterState{},
 		sched:    newScheduler(),
+		rearm:    make(chan struct{}, 1),
 		periodic: map[string]*periodicTask{},
 		waits:    map[ident.EndpointID]*waiter{},
 		outbox:   newOutbox(),
@@ -205,6 +207,9 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 	if d.RollbackPaused {
 		e.pausedSince = d.RollbackPausedSince
 	}
+	// What fell due while the node was down waits for the recovery steps of the
+	// start, which come after the adapters have said which turns run.
+	e.sched.held = func() bool { return e.Phase() == PhaseRecovering }
 	e.ctx, e.cancel = context.WithCancel(context.Background())
 	e.setPhase(PhaseOpened)
 	return e, nil
@@ -283,10 +288,16 @@ func (e *Engine) Start() {
 	go e.loop()
 }
 
-// Serve makes the engine take every command: the node has finished starting.
+// Serve makes the engine take every command: the node has finished starting. The
+// entries of the schedule that the recovery steps held back are given out from now
+// on, and the loop is woken to look at them.
 func (e *Engine) Serve() {
 	if e.Phase() == PhaseRecovering {
 		e.setPhase(PhaseRunning)
+		select {
+		case e.rearm <- struct{}{}:
+		default:
+		}
 	}
 	e.runOnce.Do(func() { close(e.running) })
 }
@@ -602,6 +613,7 @@ func (e *Engine) loop() {
 				e.step(c)
 			case <-e.timer.C():
 				e.fireDue()
+			case <-e.rearm:
 			case <-e.stopCh:
 				return
 			}
@@ -644,9 +656,9 @@ func (e *Engine) later(c command) {
 }
 
 // armTimer points the one timer of the loop at the earliest entry of the
-// schedule. Every periodic task keeps an entry, so the timer never sleeps for
-// longer than the longest period: a wall clock that jumps forward is noticed
-// by then.
+// schedule that may fire. Every periodic task keeps an entry, so the timer never
+// sleeps for longer than the longest period: a wall clock that jumps forward is
+// noticed by then.
 func (e *Engine) armTimer() {
 	next, ok := e.sched.next()
 	if !ok {

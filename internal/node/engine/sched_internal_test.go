@@ -88,3 +88,42 @@ func TestSchedulerTakesTheDueEntriesOfOneKindAndLeavesTheOthers(t *testing.T) {
 		t.Errorf("took %s before anything was due", got)
 	}
 }
+
+func TestSchedulerHoldsTheEntriesOfTheRecoveryKindsAndGivesOutTheOthers(t *testing.T) {
+	s := newScheduler()
+	holding := true
+	s.held = func() bool { return holding }
+	tick, fb, out := schedKey{schedTick, "in/a"}, schedKey{schedFeedback, ""}, schedKey{schedOutbound, "o"}
+	per, wait := schedKey{schedPeriodic, "p"}, schedKey{schedWait, "w"}
+	s.set(tick, base)
+	s.set(fb, base)
+	s.set(out, base)
+	s.set(wait, base.Add(time.Minute))
+	s.set(per, base.Add(time.Hour))
+
+	if next, ok := s.next(); !ok || !next.Equal(base.Add(time.Minute)) {
+		t.Errorf("next = %v, %v while held; want the wait, which is not held", next, ok)
+	}
+	if got := s.dueCount(base.Add(time.Minute)); got != 1 {
+		t.Errorf("dueCount = %d while held, want the one that is not held", got)
+	}
+	if got, want := keys(s.takeDue(base.Add(time.Minute))), keys([]schedKey{wait}); got != want {
+		t.Errorf("took %s while held, want %s", got, want)
+	}
+	if got, want := keys(s.takeDueOf(schedTick, base)), keys([]schedKey{tick}); got != want {
+		t.Errorf("the step took %s, want %s: it takes the entries of a held kind", got, want)
+	}
+
+	holding = false
+	if got, want := keys(s.takeDue(base)), keys([]schedKey{fb, out}); got != want {
+		t.Errorf("took %s once released, want %s: the held entries were kept", got, want)
+	}
+
+	holding = true
+	s2 := newScheduler()
+	s2.held = func() bool { return true }
+	s2.set(tick, base)
+	if next, ok := s2.next(); ok {
+		t.Errorf("next = %v with only held entries, want none: the loop would wake for nothing", next)
+	}
+}
