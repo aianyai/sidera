@@ -4,18 +4,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // adapterRow is what an adapter is told for a reason of the engine: the code, and
 // the data object as JSON text, empty for none. Every number and word is written
-// out from the table of error codes of the adapter protocol and from the interim
-// rule for the refusals that have no code there yet, and not taken from the
-// constants of the code under test.
+// out from the table of error codes of the adapter protocol, and not taken from
+// the constants of the code under test.
 type adapterRow struct {
 	code int
 	data string
@@ -31,7 +32,6 @@ var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonInstanceUnknown:   {-32603, ""},
 	engine.ReasonUnauthenticated:   {-32603, ""},
 	engine.ReasonOperationIDReused: {-32603, ""},
-	engine.ReasonRecovering:        {-32603, ""},
 	engine.ReasonStorageFatal:      {-32603, ""},
 
 	engine.ReasonIdempotencyConflict: {-32603, ""},
@@ -41,11 +41,12 @@ var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonAlertUnknown:        {-32603, ""},
 	engine.ReasonIdentityRetired:     {-32603, ""},
 
-	engine.ReasonNodeQueueFull:      {-32603, `{"reason":"node_queue_full"}`},
-	engine.ReasonStorageFull:        {-32603, `{"reason":"storage_full"}`},
-	engine.ReasonStorageUnavailable: {-32603, `{"reason":"storage_unavailable"}`},
-	engine.ReasonClockRollback:      {-32603, `{"reason":"clock_rollback"}`},
-	engine.ReasonLoopBusy:           {-32603, `{"reason":"loop_busy"}`},
+	engine.ReasonNodeQueueFull:      {1012, `{"reason":"node_queue_full"}`},
+	engine.ReasonStorageFull:        {1012, `{"reason":"storage_full"}`},
+	engine.ReasonStorageUnavailable: {1012, `{"reason":"storage_unavailable"}`},
+	engine.ReasonClockRollback:      {1012, `{"reason":"clock_rollback"}`},
+	engine.ReasonLoopBusy:           {1012, `{"reason":"loop_busy"}`},
+	engine.ReasonRecovering:         {1012, `{"reason":"recovering"}`},
 }
 
 func asPeerError(t *testing.T, err error) *peer.Error {
@@ -146,14 +147,43 @@ func TestARefusalThatTheEngineWrappedIsMappedAsTheRefusal(t *testing.T) {
 	}
 }
 
-// The protocol has no code for the refusals that mean "not now, nothing was
-// recorded": 1007 is the limit of direct endpoints, -32001 promises that the
-// handler did not run, and the other application codes name other things. Until it
-// is decided they are answered as an internal error that names the reason.
-func TestShouldStorageBackPressureOfAnAdapterRequestHaveACodeOfItsOwn(t *testing.T) {
-	t.Skip("open question, no protocol change is made without a decision: a refusal for storage or capacity back pressure " +
-		"(node_queue_full, storage_full, storage_unavailable, clock_rollback, loop_busy) is answered as -32603 with data " +
-		`{"reason":"<name>"} until the owner of the protocol says which it is: a new application code, ` +
-		"-32001 (which today promises that the handler did not run, true here but meant for the peer's own queue), " +
-		"or 1007 (the direct-endpoint limit, which an adapter reads as a limit it can stop hitting)")
+// A refusal that means "not now, nothing was recorded" is node_busy, 1012, with the
+// reason in its data: the node refused before any effect and a later retry is
+// safe. The error is one the protocol's own rules accept, the peer's effect rule
+// reads it as no effect, and exactly the reasons the protocol lists as the ones
+// this version sends are the ones that map to it: the one place the sender is
+// held to that list. A failure whose outcome is not known is no back pressure
+// and stays an internal error.
+func TestBackPressureOfAnAdapterRequestIsNodeBusyWithItsReason(t *testing.T) {
+	busy := map[string]bool{}
+	for _, r := range engine.Reasons() {
+		pe := asPeerError(t, adapterError(&engine.Refusal{Reason: r}))
+		if pe.Code != 1012 {
+			continue
+		}
+		busy[r.String()] = true
+		t.Run(r.String(), func(t *testing.T) {
+			if want := `{"reason":"` + r.String() + `"}`; string(pe.Data) != want {
+				t.Errorf("data %q, want %q", pe.Data, want)
+			}
+			if err := adapterproto.ErrorObject(*pe).Validate(); err != nil {
+				t.Errorf("the protocol refuses the error it is answered with: %v", err)
+			}
+			if !peer.NoEffect(pe) {
+				t.Error("the peer's effect rule does not read the error as no effect")
+			}
+		})
+	}
+	want := map[string]bool{}
+	for _, name := range adapterproto.BusyReasons() {
+		want[name] = true
+	}
+	if !reflect.DeepEqual(busy, want) {
+		t.Errorf("the reasons answered with 1012 are %v, the protocol names %v", busy, want)
+	}
+
+	pe := asPeerError(t, adapterError(&engine.Refusal{Reason: engine.ReasonStorageFatal}))
+	if pe.Code != peer.CodeInternalError || pe.Data != nil || !peer.ResultUnknown(pe) {
+		t.Errorf("a fatal storage error is code %d data %q, want an internal error without data whose outcome is unknown", pe.Code, pe.Data)
+	}
 }
