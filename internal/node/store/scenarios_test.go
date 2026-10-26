@@ -572,32 +572,15 @@ func sweepScenario(farFuture time.Time) scenario {
 }
 
 // sweepInvariants are what holds in every crash state of a sweep: nothing is
-// removed whose summary and sequence floor are not durable, and a control record
-// goes before the delivery derived from it.
+// removed whose sequence floor is not durable, and a control record goes before
+// the delivery derived from it. The summaries of the archive are best effort and
+// are not among them.
 func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 	t.Helper()
-	var summaries []store.ArchiveSummary
-	for p, content := range snap {
-		if strings.HasPrefix(p, store.ArchiveDir+"/") {
-			summaries = append(summaries, store.ParseArchive([]byte(content)).Summaries...)
-		}
-	}
-	has := func(key string) bool {
-		for _, s := range summaries {
-			if s.Key == key {
-				return true
-			}
-		}
-		return false
-	}
 	o1, o2 := srcOutFinished(1), srcOutFinished(2)
 	for _, o := range []store.OutRecord{o1, o2} {
 		if _, there := snap[statePath(store.OutDir, o.Name())]; there {
 			continue
-		}
-		b, _ := o.Key.Bytes()
-		if !has(string(b)) {
-			t.Errorf("%s: the source record %s is gone and its summary is not durable", where, o.Key.Message)
 		}
 		// The floor of the pair is remembered before the record goes.
 		floors := snap[statePath(store.SeqDir, store.SeqRecord{Sender: o.Key.Sender}.Name())]

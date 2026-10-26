@@ -1116,11 +1116,13 @@ func (s *Store) floorFile(sender ident.EndpointID, raises map[ident.Address]uint
 	return floorRecordFile(sender, current, raises, keep)
 }
 
-// ArchiveSweep appends the summaries to the archive, makes them durable, writes
-// the sequence floors of the source records it removes and removes the records.
-// The order is the guarantee: no record is removed before its summary and the
-// floors of its sequence numbers are durable. The floors are the store's to
-// work out (floorsOf): a caller cannot remove a source record without them.
+// ArchiveSweep appends the summaries to the archive, writes the sequence floors
+// of the source records it removes and removes the records. The summaries are best
+// effort: they are appended first and not synced, so a failure or a crash may lose
+// one or write it twice (a reader deduplicates by the file hash), and no record
+// waits for its summary. The floors are not: no record is removed before the floors
+// of its sequence numbers are durable. The floors are the store's to work out
+// (floorsOf): a caller cannot remove a source record without them.
 func (s *Store) ArchiveSweep(c SweepChunk) error {
 	for _, f := range c.Ctl {
 		if f.Dir != CtlDir {
@@ -1182,9 +1184,6 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 	if len(lines) > 0 {
 		p := path.Join(ArchiveDir, ArchiveDay(c.Now))
 		if err := tx.Append("archive", p, append([]byte("\n"), lines...)); err != nil {
-			return err
-		}
-		if err := tx.SyncFile("archive", p); err != nil {
 			return err
 		}
 	}

@@ -122,7 +122,7 @@ var (
 	declAlertRaise    = txn.Decl{Name: "alert-raise", Kind: txn.Normal, Writes: []txn.Write{rep("alert")}}
 	declArchiveEvents = txn.Decl{Name: "archive-events", Kind: txn.Normal, Writes: []txn.Write{w("archive", txn.OpAppend, many)}}
 	declArchiveSweep  = txn.Decl{Name: "archive-sweep", Kind: txn.Normal, Writes: []txn.Write{
-		w("archive", txn.OpAppend, many, optional), w("archive", txn.OpSyncFile, optional),
+		w("archive", txn.OpAppend, many, optional),
 		rep("seq-floor", many, optional),
 		rm("ctl", many, optional), syncDir("ctl-dir", optional),
 		rm("record", many, optional), rm("body", many, optional), syncDir("dir", many, optional),

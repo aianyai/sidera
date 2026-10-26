@@ -114,7 +114,7 @@ caller must do. The class is decided in one table (`classify.go`):
 | `create`, `write`, `rename`, `remove`, `remove-all`, `mkdir`, `rename-dir`, `open` | Failed | the call did not complete, so nothing durable changed; the caller rejects the request or applies backpressure. A failed append can leave a partial record that later appends follow, which is why appended formats delimit and checksum their records and a reader must resynchronise after a damaged record anywhere in the file, not only at the tail |
 | `sync` of the temporary file of a `Replace`, before its rename | Failed | the target is untouched and nothing was acknowledged; the temporary file is removed. Treating this as fatal would turn a persistent device error into a restart loop |
 | any `sync-dir` | Fatal | whether the rename or creation is durable is unknown, and memory may disagree with disk. After a failed write-back Linux marks the pages clean, so a later `fsync` can report success for data that is lost; the only safe answer is to exit and rescan |
-| `sync` of an appended file (`SyncFile`) | Fatal | the appended bytes are visible to this process but whether they are on disk is unknown. A later successful sync must not let the caller believe the whole batch is durable, for example by deleting what it just archived |
+| `sync` of an appended file (`SyncFile`) | Fatal | the appended bytes are visible to this process but whether they are on disk is unknown. A later successful sync must not let the caller believe the whole batch is durable, for example by deleting what the batch stood for |
 
 A call refused before any step ran (an invalid path, a missing directory to
 look in) is Failed. `fsx.IsFatal` finds a Fatal error through any wrapping. The
@@ -318,11 +318,11 @@ see (`Tx.run` sets it at the first such completion, whatever the writes before i
 | `Append` | none |
 
 A write without a commit step does not commit. The summaries of `archive-sweep`
-are appended and then synced, so its commit point is the `SyncFile` of the
-archive, and a failed append before it has the class `fsx` gave it (the sweep
-deletes nothing and is done again). `archive-events` only appends, with no sync
-that follows, so it has no commit point and a failure of it never becomes fatal
-by this rule.
+are appended first, without a sync, and the sequence floors and removals after
+them carry its commit point, so a failed append has the class `fsx` gave it (the
+sweep deletes nothing and is done again). `archive-events` only appends, with no
+sync that follows, so it has no commit point and a failure of it never becomes
+fatal by this rule.
 
 Before it, a failure has the class `fsx` gave it. From it on, every failure, in
 the same operation or in a later write, is `Fatal`: the disk is in one of the
@@ -723,12 +723,14 @@ the torn tail a crash leaves, and the half line a failed append leaves in the
 middle of a file, are lines of their own and cannot swallow the first line that
 follows. A reader resumes at every newline, skips empty lines, drops and counts a
 line that is not intact and ignores a last line without a newline. Events are not
-synced; a summary is appended and synced before any record it stands for is
-removed. An archive may therefore hold the same summary twice: after a crash
-between the archive sync and the deletes, the sweep that follows archives the
-records again, and so does a sweep that failed after a partial append and was
-retried. A reader that counts summaries must deduplicate them by the record's file
-hash.
+synced, and neither is a summary: the archive is best effort. A sweep appends its
+summaries first and goes on to the floors and removals without waiting for them to
+be durable, because nothing in the node reads them back to decide anything. A
+failure or a crash may therefore lose a summary (a power loss after the removals),
+or write one twice (a crash after the append and before the removals, which the
+sweep that follows archives again, and a sweep that failed after a partial append
+and was retried). A reader that counts summaries must deduplicate them by the
+record's file hash, and must not expect one for every record that left.
 
 **Retention.** A delivery record is a live file until its deliveries are final and
 the latest of the retentions of what it holds has passed: the deduplication record

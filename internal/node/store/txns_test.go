@@ -73,7 +73,7 @@ var designTable = []struct {
 	{"checkpoint-put", txn.Normal, "checkpoint:Replace"},
 	{"alert-raise", txn.Normal, "alert:Replace"},
 	{"archive-events", txn.Normal, "archive:Append[M]"},
-	{"archive-sweep", txn.Normal, "archive:Append[MO] archive:SyncFile[O] seq-floor:Replace[MO] ctl:Remove[MO] ctl-dir:SyncDir[O] record:Remove[MO] body:Remove[MO] dir:SyncDir[MO] endpoint:Remove[MO] endpoint-dir:SyncDir[O]"},
+	{"archive-sweep", txn.Normal, "archive:Append[MO] seq-floor:Replace[MO] ctl:Remove[MO] ctl-dir:SyncDir[O] record:Remove[MO] body:Remove[MO] dir:SyncDir[MO] endpoint:Remove[MO] endpoint-dir:SyncDir[O]"},
 	{"archive-expire", txn.Normal, "file:Remove[M] dir:SyncDir"},
 	{"alert-ack", txn.Normal, "alert:Replace result:Replace"},
 	{"daemon-stop", txn.Normal, "result:Replace"},

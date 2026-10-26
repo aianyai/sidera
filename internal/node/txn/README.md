@@ -71,10 +71,10 @@ declaration of its own.
   `rename-dir` (also the first step of `Discard`), `remove-all`, and for the two
   operations without a namespace step the `sync` of `SyncFile` and the
   `sync-dir` of a lone `SyncDir`. An `Append` has none, so a write that is only
-  appended to has no commit point of its own: in `archive-sweep` the appended
-  summaries are not committed until their `SyncFile` completes, and in
-  `archive-events`, whose only writes are appends with no sync, there is no
-  commit point at all and a failure keeps the class `fsx` gave it. Before the
+  appended to has no commit point of its own: in `archive-events`, whose only
+  writes are appends with no sync, there is no commit point at all and a failure
+  keeps the class `fsx` gave it, and in `archive-sweep` the appended summaries
+  come before the writes that carry the commit point. Before the
   commit step completes, a failure has the class `fsx` gave it (`Failed` unless a directory
   or appended-file sync). From then on every failure, in the same operation or a
   later write, is `Fatal`. The rule is `commitStepOf`, `Tx.run` and `Tx.fail`, and

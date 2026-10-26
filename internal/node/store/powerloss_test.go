@@ -24,7 +24,8 @@ type operation struct {
 	writes  map[string][]byte
 	removes []string
 	call    func() error
-	// summaries are the archive summaries the call makes durable, by key.
+	// summaries are the archive summaries the plan of the call must name, by key.
+	// They are best effort: a power loss may take them, so no clone is judged by them.
 	summaries []string
 	// floor is the number the call remembers for the pair of the fixtures: the
 	// highest sequence number of the source records it removes.
@@ -34,11 +35,10 @@ type operation struct {
 }
 
 // ledger is what was acknowledged: the content of every file whose write
-// returned, and what the archive was told durably.
+// returned, and the floor the sweeps remembered.
 type ledger struct {
-	files     map[string][]byte
-	summaries map[string]bool
-	floor     uint64
+	files map[string][]byte
+	floor uint64
 }
 
 // powerLossWorld drives random operations over the store and judges power-loss
@@ -323,9 +323,6 @@ func (w *powerLossWorld) commit(op *operation) {
 	for _, p := range op.removes {
 		delete(w.led.files, p)
 	}
-	for _, s := range op.summaries {
-		w.led.summaries[s] = true
-	}
 	if op.floor > w.led.floor {
 		w.led.floor = op.floor
 	}
@@ -390,20 +387,6 @@ func (w *powerLossWorld) judge(where string, clone *fsxtest.Mem) {
 			}
 		}
 	}
-	// The archive reads, and every summary acknowledged is in it.
-	var seen = map[string]bool{}
-	for p, content := range got {
-		if strings.HasPrefix(p, store.ArchiveDir+"/") {
-			for _, s := range store.ParseArchive([]byte(content)).Summaries {
-				seen[s.Key] = true
-			}
-		}
-	}
-	for k := range w.led.summaries {
-		if !seen[k] {
-			t.Errorf("%s: the summary of %q was acknowledged and is not in the archive", where, k)
-		}
-	}
 	// The floor of the pair is at least the highest number swept, and the next number is above it.
 	if w.led.floor > 0 {
 		book := store.NewSeqBook(sc)
@@ -427,7 +410,7 @@ func TestPowerLossCloneKeepsAcknowledgedWrites(t *testing.T) {
 			rng := newRand(seed)
 			w := &powerLossWorld{
 				t: t, r: r, rng: func(n int) int { return rng.IntN(n) },
-				led:   ledger{files: map[string][]byte{}, summaries: map[string]bool{}},
+				led:   ledger{files: map[string][]byte{}},
 				stage: map[int]int{}, rev: map[int]uint64{}, counts: counts,
 			}
 			// The endpoint the messages are for exists: a record for an endpoint with
