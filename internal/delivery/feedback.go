@@ -1,9 +1,11 @@
 package delivery
 
 // Kind is a category of feedback the sender's node gives its agent. The
-// channel reports only its own anomalies: normal progress and closed_unconfirmed
-// never produce feedback, so silence after the delivery deadline means the
-// message arrived.
+// channel reports only its own anomalies: normal progress never produces
+// feedback, and neither does a close that follows a notice the sender already
+// has, so silence after the delivery deadline means the message arrived. A
+// delivery that closes while it is still queued or accepted is not silent: the
+// sender has never been told an outcome, and silence would read as delivered.
 //
 // Every correction has its own kind, so a delivery that is corrected twice
 // (expired_unconfirmed to accepted, later delivery_unknown to delivered) is
@@ -45,6 +47,11 @@ const (
 	// accepted by saying it holds no record of it, with the same consequence as a
 	// loss at the sender. The sender knows only that the record is gone, not why.
 	KindLostAtTarget
+	// KindAcceptedUnconfirmed: the delivery closed at report_by while it was
+	// accepted: the target gave a receipt, and no report that settled the delivery
+	// reached the sender before the deadline for learning it. Whether it was
+	// delivered is unknown, and it is not known to have failed either.
+	KindAcceptedUnconfirmed
 	// KindLostUnknownMessage: the sender's node lost what it had stored about one
 	// of the messages an endpoint sent and cannot tell which one, because the
 	// record that said so is unreadable. It has no delivery behind it: no
@@ -56,20 +63,21 @@ const (
 // LastRecordKind is the highest kind a Record's transitions produce, and so the
 // highest a Record.Reported can hold. KindLostUnknownMessage is after it: it
 // belongs to no delivery.
-const LastRecordKind = KindLostAtTarget
+const LastRecordKind = KindAcceptedUnconfirmed
 
 var kindNames = [...]string{
-	KindUnreachable:        "unreachable",
-	KindDeliveryBlocked:    "delivery_blocked",
-	KindBlockedRecovered:   "blocked_recovered",
-	KindExpiredUnconfirmed: "expired_unconfirmed",
-	KindExpiredCorrected:   "expired_corrected",
-	KindRejected:           "rejected",
-	KindDeliveryUnknown:    "delivery_unknown",
-	KindUnknownCorrected:   "unknown_corrected",
-	KindLostAtSender:       "lost_at_sender",
-	KindLostAtTarget:       "lost_at_target",
-	KindLostUnknownMessage: "lost_unknown_message",
+	KindUnreachable:         "unreachable",
+	KindDeliveryBlocked:     "delivery_blocked",
+	KindBlockedRecovered:    "blocked_recovered",
+	KindExpiredUnconfirmed:  "expired_unconfirmed",
+	KindExpiredCorrected:    "expired_corrected",
+	KindRejected:            "rejected",
+	KindDeliveryUnknown:     "delivery_unknown",
+	KindUnknownCorrected:    "unknown_corrected",
+	KindLostAtSender:        "lost_at_sender",
+	KindLostAtTarget:        "lost_at_target",
+	KindAcceptedUnconfirmed: "accepted_unconfirmed",
+	KindLostUnknownMessage:  "lost_unknown_message",
 }
 
 func (k Kind) String() string {
@@ -104,6 +112,8 @@ func (k Kind) Summary() string {
 		return "this node lost what it had stored about the message to storage corruption, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"
 	case KindLostAtTarget:
 		return "the target node no longer holds any record of the message it had accepted, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"
+	case KindAcceptedUnconfirmed:
+		return "the target accepted the message, but its result could not be learned before the report deadline; whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"
 	case KindLostUnknownMessage:
 		return "this node lost what it had stored about one of the messages this endpoint sent, to storage corruption, and cannot tell which one; whether it was delivered is unknown; do not assume it was not delivered"
 	}
@@ -159,7 +169,11 @@ type Feedback struct {
 //     delivery_unknown for delivered, reports a correction.
 //   - Delivered after a reported block that was never reported recovered also
 //     reports the recovery, since delivered itself is silent.
-//   - Progress (queued, accepted, delivered) and closed_unconfirmed are silent.
+//   - Closing at report_by while queued reports the expiry, which the sender has
+//     not been told, and closing while accepted reports that the result could not
+//     be learned. Closing from expired_unconfirmed or delivery_unknown is silent:
+//     the sender already holds the notice that says the outcome is unknown.
+//   - Progress (queued, accepted, delivered) is silent.
 func TransitionFeedback(from, to State, unknown UnknownCause, reported KindSet) []Kind {
 	var kinds []Kind
 	switch to {
@@ -176,6 +190,13 @@ func TransitionFeedback(from, to State, unknown UnknownCause, reported KindSet) 
 		}
 	case StateExpiredUnconfirmed:
 		kinds = append(kinds, KindExpiredUnconfirmed)
+	case StateClosedUnconfirmed:
+		switch from {
+		case StateQueued:
+			kinds = append(kinds, KindExpiredUnconfirmed)
+		case StateAccepted:
+			kinds = append(kinds, KindAcceptedUnconfirmed)
+		}
 	case StateAccepted:
 		if from == StateExpiredUnconfirmed {
 			kinds = append(kinds, KindExpiredCorrected)

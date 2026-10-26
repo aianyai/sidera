@@ -74,6 +74,10 @@ const (
 	// ViolationReportedBlocked: the blocked notice, its recovery and the cause
 	// of the last block do not fit the state and each other.
 	ViolationReportedBlocked
+	// ViolationReportedClosed: the notices of a closed source delivery do not say
+	// why it closed: a delivery closes while queued or accepted with the notice of
+	// that, or after a notice that already says the outcome is unknown.
+	ViolationReportedClosed
 	// ViolationLeaseUnused: a record that is never queued for recv has lease
 	// bookkeeping.
 	ViolationLeaseUnused
@@ -131,6 +135,7 @@ var violationNames = [...]string{
 	ViolationReportedDeliveryUnknown:  "reported_delivery_unknown",
 	ViolationReportedExpiry:           "reported_expiry",
 	ViolationReportedBlocked:          "reported_blocked",
+	ViolationReportedClosed:           "reported_closed",
 	ViolationLeaseUnused:              "lease_on_unqueued_record",
 	ViolationLeaseChunks:              "lease_chunks",
 	ViolationLeaseAckedUnseen:         "lease_acked_not_handed_out",
@@ -367,6 +372,20 @@ func (r Record) checkReported() Violation {
 	}
 	if s == StateDelivered && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) && !unknownReported {
 		return ViolationReportedExpiry
+	}
+	// A delivery closes with the notice of why: the expiry when it closed while
+	// queued (or the same notice made earlier, when it closed from expired), the
+	// accepted_unconfirmed notice when it closed while accepted, or the notice of
+	// the unknown result it already held. The notice of an accepted close is only
+	// ever the one of a delivery that went through accepted, so an expiry before
+	// it was corrected, and it is never the notice of a delivery_unknown, which
+	// closes from that state silently.
+	closes := has(KindAcceptedUnconfirmed)
+	if closes && (s != StateClosedUnconfirmed || unknownReported || (has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected))) {
+		return ViolationReportedClosed
+	}
+	if s == StateClosedUnconfirmed && !closes && !unknownReported && !(has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected)) {
+		return ViolationReportedClosed
 	}
 	// A block is noticed only in accepted, so the notice comes after queued and
 	// expired_unconfirmed, and a record that was expired went through accepted,

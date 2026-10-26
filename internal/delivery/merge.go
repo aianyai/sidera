@@ -135,6 +135,12 @@ const (
 	// they give one notice again, kept apart from the unreachable hints because
 	// it is news of its own.
 	MergeExpiryByTargetNode
+	// MergeAcceptedUnconfirmedByTargetNode: accepted_unconfirmed notices of one
+	// sender endpoint for one target node. A node that could not be asked past
+	// report_by (it was asleep, or the target was away) leaves all the deliveries
+	// it had accepted unconfirmed at once, so they give one notice, kept apart from
+	// the expiry notices because it says the target did accept them.
+	MergeAcceptedUnconfirmedByTargetNode
 	// MergeLostUnknownBySender: the losses of messages nobody can name, of one
 	// sender endpoint. They name no message, node or target, so the sender alone
 	// groups them: any number gives one notice.
@@ -147,7 +153,7 @@ type MergeKey struct {
 	Class   MergeClass
 	Sender  ident.Address
 	Message MessageID     // MergeByMessage
-	Node    ident.NodeID  // MergeByTargetNode, MergeExpiryByTargetNode
+	Node    ident.NodeID  // MergeByTargetNode, MergeExpiryByTargetNode, MergeAcceptedUnconfirmedByTargetNode
 	Target  ident.Address // MergeByTargetEndpoint, MergeRecoveryByTargetEndpoint
 }
 
@@ -159,6 +165,8 @@ func MergeKeyOf(it Item) MergeKey {
 		k.Class, k.Node = MergeByTargetNode, it.Ref.Recipient.Node
 	case KindExpiredUnconfirmed:
 		k.Class, k.Node = MergeExpiryByTargetNode, it.Ref.Recipient.Node
+	case KindAcceptedUnconfirmed:
+		k.Class, k.Node = MergeAcceptedUnconfirmedByTargetNode, it.Ref.Recipient.Node
 	case KindDeliveryBlocked:
 		k.Class, k.Target = MergeByTargetEndpoint, it.Ref.Recipient
 	case KindBlockedRecovered:

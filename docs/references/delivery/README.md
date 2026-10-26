@@ -21,7 +21,7 @@ signals on the target). This document describes the committed code of `internal/
 | `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range, backlog full). On the target only for a body that was never handed out. | yes |
 | `expired_unconfirmed` | The deadline passed and an active query found no receipt. The target may have the message. | no, correctable |
 | `delivery_unknown` | Whether the delivery reached the agent cannot be told, for the cause in `Record.Unknown`. `handed_over`: the body was handed out and whether the agent saw it cannot be told; for a control signal, it was accepted for execution and its reply was never committed. `lost_at_sender`: the sender's node lost its record of the delivery to storage corruption, so nothing is known. `lost_at_target`: the target answered a pull of an accepted delivery by saying it holds no record of it. On the target, `delivery_unknown` is reached only by a delivery that was handed over (a body handed out at least once, or any accepted control signal): a target never holds a loss. On the source it has one of three causes, each with one way in: `handed_over`, from a target's report; `lost_at_target`, by `EventNoRecordAtTarget` on an accepted delivery before its `report_by`; `lost_at_sender`, only by `NewLostRecord`. | no, correctable |
-| `closed_unconfirmed` | `report_by` passed while the delivery was open. | yes, silent |
+| `closed_unconfirmed` | `report_by` passed while the delivery was open. | yes; the sender is told once when the delivery closes while `queued` or `accepted` (see Closing at `report_by`), and nothing when it closes from a state it was already told about |
 
 `notified` is a target-internal sub-state of `accepted`: a prompt was handed to
 the session. It changes nothing outside the target and never produces feedback.
@@ -42,11 +42,12 @@ shows is ignored; a fact that contradicts a final state is an error.
 
 | Kind | When | Notes |
 | ---- | ---- | ----- |
-| unreachable | Contact with the target failed for 2 minutes while the sender still retries. | Cause: network or trust chain suspended. Queued deliveries only: a delivery that has a receipt gets no feedback from failing contact, so one whose target is lost to it until `report_by` closes silent. The engine applies each failed call as `EventContactFailing`, starting from the first failure of the run. |
+| unreachable | Contact with the target failed for 2 minutes while the sender still retries. | Cause: network or trust chain suspended. Queued deliveries only: a delivery that has a receipt gets no feedback from failing contact, so one whose target is lost to it until `report_by` is told by its close instead (accepted unconfirmed, below). The engine applies each failed call as `EventContactFailing`, starting from the first failure of the run. |
 | delivery blocked | The caller reports the message cannot reach the session. | Not a state; the message stays queued. Cause: adapter offline, runtime authentication, native service. |
 | blocked recovered | The cause ended, or the message was delivered while still marked blocked. | Only if the block was reported. |
-| expired_unconfirmed | Deadline plus tolerance passed and a later active query found no receipt. | Wording: the target may have received the message. The engine reads a successful pull that has no report for the delivery (the recipient listed as having no record, or in neither list) as that query, dated now. |
+| expired_unconfirmed | Deadline plus tolerance passed and a later active query found no receipt. | Wording: the target may have received the message. A delivery that closes while still `queued` gets the same notice, once, if the sender was not told it yet. The engine reads a successful pull that has no report for the delivery (the recipient listed as having no record, or in neither list) as that query, dated now. |
 | expired corrected | An expired delivery turned out accepted or delivered. | |
+| accepted unconfirmed | `report_by` passed while the delivery was `accepted`: the target gave a receipt, and nothing that settled the delivery reached the sender before its last chance to learn it. Given once, by the close. | Wording: the target accepted the message, but its result could not be learned before the report deadline; whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered. It is not a rejection and not a loss: nothing says the target lost it or refused it. |
 | rejected | The target refused. | Carries the reason. |
 | delivery unknown | Lease redelivery exhausted, leases unsettled at the settle deadline, or a delivery whose body was handed out closed by force (backlog deadline, denied second check, closed endpoint); for a control signal, no committed reply by the settle deadline or a forced closure. | Wording: the target handed it over (to the agent, or to the adapter that executes a control signal), whether it was seen or executed is unknown, and the sender must not assume it was not delivered. |
 | unknown corrected | A late acknowledgement completed an unknown delivery. | |
@@ -54,12 +55,14 @@ shows is ignored; a fact that contradicts a final state is an error.
 | lost at target | The target answered a pull of an accepted delivery by saying it holds no record of it (`EventNoRecordAtTarget`). Given once. | Wording: the target node no longer holds any record of the message it had accepted, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered. It names no cause: the sender knows only that the record is gone. |
 | lost unknown message | A record of the sender's node was unreadable, its first line included, so nobody can tell which message it was. Not a transition of any delivery: an item built by `NewLostUnknownMessageItem`, naming no message and no recipient but the stored record that holds it (`Item.Source`): the queue keeps one item per source record and one notice per sender endpoint carries them all, so every record it names is cleared and none is told twice. | Wording: this node lost what it had stored about one of the messages this endpoint sent, to storage corruption, and cannot tell which one; whether it was delivered is unknown; do not assume it was not delivered. |
 
-Rules: normal progress and `closed_unconfirmed` give nothing; each kind is given
+Rules: normal progress gives nothing, and `closed_unconfirmed` gives nothing when it
+closes from `expired_unconfirmed`, `delivery_unknown` or a loss at the target (the
+sender already holds the notice that says the outcome is unknown); each kind is given
 at most once per delivery; moving from expired to rejected or unknown gives the
 new news instead of a correction. A recipient endpoint is never
 told of a loss: feedback goes only to the sender. Merging: one notice per message for its
 anomalies, per (sender endpoint, target node) for unreachable hints and, as a
-notice of their own, for expired_unconfirmed notices, per (sender endpoint,
+notice of their own, for expired_unconfirmed notices and, as another notice of their own, for accepted_unconfirmed notices, per (sender endpoint,
 target endpoint) for blocked reports with the recovery as its own notice, and per
 sender endpoint alone for the notices of lost unknown messages (any number is
 one notice). The
@@ -101,7 +104,35 @@ becomes `delivery_unknown` at that instant. A lease still open at
 closure once a body was handed out: a denied second check or a closed endpoint
 gives `delivery_unknown`, never `rejected`. Sender
 side: expired is judged only after the deadline plus tolerance and a query made
-after that without a receipt; open deliveries close after `report_by`.
+after that without a receipt; open deliveries close after `report_by`, and one
+that closes while `queued` or `accepted` is told to the sender (below).
+
+#### Closing at `report_by`
+
+A source delivery that is still `queued` or `accepted` when `report_by` passes has
+never been told an outcome to its sender, and "no feedback means delivered" would
+make the sender believe a message delivered that the target rejected or lost. So
+its close is not silent: from `queued` it gives the expiry notice (if the sender
+was not told it), from `accepted` the accepted_unconfirmed notice, both through
+`TransitionFeedback` like every other transition and at most once. Closing from
+`expired_unconfirmed`, `delivery_unknown` (any cause) and a sender's replacement
+for a record lost to storage is silent: the sender holds the notice already.
+Closing on the target is always silent, because only the sender's node gives
+feedback.
+
+The rule gives the caller a last chance to learn the outcome before the close. The
+target keeps its record, and answers pulls from it, for longer than `report_by`
+(its retention is the latest of the terms in `RetainUntil` of the store, about a
+day for a message), so a report that reaches the sender after `report_by` while the
+record is not yet closed is applied with its true meaning by the one rule of
+`ApplyStatusReport`: a rejection is told as a rejection, a delivery stays silent,
+a hand-over is told. Nothing in the record's rules looks at how late a report is;
+only `closed_unconfirmed` ends it. `Tick` closes at the first instant after
+`report_by` and does not know whether the caller made that last pull, so the
+caller does it before it ticks (the engine reference says when). An answer that
+the target holds no record is the exception: after `report_by` the target may have
+forgotten the record legitimately, so it is ignored (`IgnoreRetryEnded`), not read
+as a loss, and the close tells that the result could not be learned.
 
 Intake of a new request: a deadline already past is rejected as expired; one
 beyond now plus cap plus tolerance is rejected as out of range; denied
@@ -429,7 +460,7 @@ the order they are checked:
 | a target's | `ErrWrongSide` | only the sender reads the answer of a pull |
 | the replacement of the sender's own lost record | `IgnoreRecordLost` | it ignores every later fact |
 | final | `IgnoreAlreadyFinal` | the conclusion is reached, and a final source no longer pulls |
-| `now` after `ReportBy` | `IgnoreRetryEnded` | the pull window is over, and a target's retention covers only the window |
+| `now` after `ReportBy` | `IgnoreRetryEnded` | the pull window is over, and after it the target may have forgotten the record legitimately: the close tells the result could not be learned |
 | `queued`, `expired_unconfirmed` | `IgnoreNotApplicable` | there is no receipt: the target may never have taken the message in (authorization suspended stores nothing), and the expiry rule reports that case |
 | `delivery_unknown`, any cause | `IgnoreNotApplicable` | the sender has been told "unknown"; the target forgetting the record later does not change that |
 | `accepted` | `delivery_unknown`, cause `lost_at_target`, `KindLostAtTarget` once | the target gave a receipt and now says it holds no record |
@@ -458,8 +489,8 @@ permission still reads it.
 ## Why
 
 - **A target that no longer knows a delivery is a loss, not silence.** A sender
-  that holds a receipt pulls until `report_by` and then closes silently, and
-  silence means delivered. If the target lost its record in between, that closing
+  that holds a receipt pulls until `report_by` and a last time before it closes, and
+  closing without a word would mean delivered. If the target lost its record in between, that closing
   would be a false acknowledgement. The target's own word, "no record", is the
   only evidence the sender can have, so it is read as a loss, and only for an
   accepted delivery inside the pull window. Without a receipt the target may never
@@ -468,8 +499,17 @@ permission still reads it.
 - **Silence has to mean delivered.** The sender is told only about anomalies, so
   every path that can end without the sender knowing must be bounded: the target
   settles before `report_by - margin`, the sender keeps pulling until
-  `report_by`, and only then closes silently. Without the margin a result created
-  at the last instant could not be pulled in time.
+  `report_by` and once more before it closes, and a delivery that still has no
+  outcome then is closed with the notice that says so, never in silence. Without
+  the margin a result created at the last instant could not be pulled in time.
+- **A close that tells nobody is a false acknowledgement.** A sender node asleep
+  past `report_by`, or cut off from its target for the whole life of a delivery,
+  would otherwise close deliveries the target rejected or lost, and the sender
+  would read the silence as delivered. The close tells what is true: for an
+  accepted delivery that its result could not be learned (not that it failed, which
+  nobody knows), for a queued one the expiry. A close from a state already told
+  stays silent, so no delivery is told twice, and "no record" after `report_by` is
+  not a loss, because the target may legitimately have forgotten.
 - **Expiry says "may have received".** A lost receipt is indistinguishable from
   a lost message. Wording that implied non-delivery would make agents resend, and
   a resend is a new message, so the recipient could get the content twice.
@@ -729,6 +769,12 @@ permission still reads it.
 - `internal/delivery/state.go`: states, sub-state, reject reasons, causes,
   the transition table. Tests: `TestCanTransition`, `TestStateClasses`,
   `TestRejectReasonNames`.
+- Closing at `report_by` (`feedback.go`, `record.go`, `valid.go`, `merge.go`; tests in
+  `internal/delivery/closing_test.go`): `TestAClosingSourceDeliveryTellsTheSenderWhatItHasNotBeenTold`,
+  `TestTheTargetsCloseIsSilent`, `TestAReportAfterReportByIsAppliedWhileTheRecordIsNotClosed`,
+  `TestAnAnswerOfNoRecordAfterReportByIsNotALoss`, `TestALateReportMovesNoDeadline`, the rows of
+  `TestSourceTransitions`, `TestRecordValidSourceFeedbackBookkeepingIsExact` and the
+  property test (the final pull before the close).
 - `internal/delivery/feedback.go`: kinds, wording, `TransitionFeedback`. Tests:
   `TestTransitionFeedback`, `TestSummaries`, `TestLossWordingVectors`,
   `TestTransitionFeedbackChoosesKindByUnknownCause`,

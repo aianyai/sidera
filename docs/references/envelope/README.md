@@ -246,9 +246,10 @@ they reach the same state in either order. If the control signal had been judged
 `expired_unconfirmed`, the reply corrects it (one correction notice) and the
 session is still bound. If it had closed as `closed_unconfirmed`, it stays so,
 the session is still bound, and the derived delivery, which shares the signal's
-deadlines, closes silently at its next tick: a reply after the report window
-makes the session known to the sender, so a reply from it can bind, and tells
-the sender nothing it can act on.
+deadlines, closes at its next tick like any delivery that is accepted and never
+told an outcome, with the one notice that its result could not be learned: a
+reply after the report window makes the session known to the sender, so a reply
+from it can bind.
 
 `ErrPeerContradiction` is returned for a second distinct control reply, for a
 reply to a signal the target is known to have rejected, for a reply that names the

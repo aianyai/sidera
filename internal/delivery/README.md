@@ -19,12 +19,12 @@ reasons behind the rules.
 | `NewLostRecord(discoveredAt)`, `LostReportBy`, `Record.NeedsBody()` | The replacement for the sender's own delivery record lost to storage corruption (a target keeps none); the instant a replacement is kept until; whether a record still needs the bytes of its body. |
 | `Record.StateAt`, `Record.DeliveredAt()` | When this node's record entered its current state, and, for a delivered record, when it was delivered. The two times a target puts in a signed status report (`reported_at`, `delivered_at`). |
 | `Record.Apply(now, Event)` | Applies one fact or occurrence. Returns the new record and an `Outcome` (applied or ignored with a reason, the transition, and the feedback to give). |
-| `Record.Tick(now)` | Everything due by time alone: lease expiry, backlog expiry, the settle deadline, closing after `report_by`. |
+| `Record.Tick(now)` | Everything due by time alone: lease expiry, backlog expiry, the settle deadline, closing after `report_by`. A source delivery that closes while `queued` or `accepted` gives the notice of that; the caller makes its last pull of the target before it ticks (see "Closing at `report_by`"). |
 | `Record.NextTick()` | The earliest instant at which `Tick` could change the record; the zero time for a final record. |
 | `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
 | `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A page's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
 | `EventNoRecordAtTarget`, `RecordRetainUntil(reportBy)` | The source fact "the target holds no record of this delivery" (an accepted delivery before `ReportBy` becomes `delivery_unknown`, `lost_at_target`; every other state ignores it), and the instant a target may forget a delivery's record. |
-| `KindLostUnknownMessage`, `NewLostUnknownMessageItem(sender, source, at)`, `MergeLostUnknownBySender`, `LastRecordKind` | The feedback of a message nobody can name: its item (no message, no recipient, the stored record that holds it as `Item.Source`), its merge by sender endpoint, and the last kind a record can have reported (the new kind is after it: no delivery produces it). |
+| `KindLostUnknownMessage`, `NewLostUnknownMessageItem(sender, source, at)`, `MergeLostUnknownBySender`, `LastRecordKind` | The feedback of a message nobody can name: its item (no message, no recipient, the stored record that holds it as `Item.Source`), its merge by sender endpoint, and the last kind a record can have reported (the new kind is after it: no delivery produces it; `KindAcceptedUnconfirmed`, the notice of a close while accepted, is the last a record produces). |
 | `Record.StatusReport`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery, and the one rule by which the sender applies it. A reported `delivery_unknown` is always a hand-over. |
 | `Intake(now, acceptBefore, traffic, Authorization, Backlog)` | Target-side validation of the delivery deadline, the authorization verdict (kind and, for a denial, the reason) and the endpoint's backlog limit, for a request deduplication found new. Exempt traffic carries no verdict: its `Authorization` is the zero value. |
 | `Backlog`, `Record.OccupiesBacklogSlot()`, `DefaultEndpointBacklogLimit`, `ValidateEndpointBacklogLimit` | The endpoint's backlog limit: the count and limit `Intake` takes, the one rule for which records are counted, the default and its validation. |
@@ -81,8 +81,15 @@ target-internal sub-state `notified` of `accepted`.
 
 Only anomalies produce feedback: unreachable (network or suspended trust chain),
 delivery blocked and its recovery, expired_unconfirmed, rejected,
-delivery_unknown, the losses (the sender's own, the target's, and a message nobody can name), and the corrections of
-expired_unconfirmed and delivery_unknown. Normal progress and `closed_unconfirmed` never do.
+delivery_unknown, the losses (the sender's own, the target's, and a message nobody can name), the corrections of
+expired_unconfirmed and delivery_unknown, and the close of a delivery that was never told an outcome. Normal progress never does.
+
+- A source delivery that closes at `report_by` while `queued` gives the expiry
+  notice (if not given), and while `accepted` gives `accepted_unconfirmed`: the
+  target accepted the message, but its result could not be learned before the
+  report deadline, so whether it was delivered is unknown and it must not be
+  assumed not delivered. Closing from `expired_unconfirmed`, `delivery_unknown` or
+  a loss is silent, and so is every close on the target.
 
 - At most once per delivery per kind. Corrections are kinds of their own, so a
   delivery corrected twice is told twice.
@@ -139,7 +146,9 @@ with the trust and admin packages.
 `report_by = accept_before + 2 h + 4 x 15 min + 2 min`: the queue cap, the
 redelivery period (4 leases, each at most 15 min, which is the only thing it
 depends on), and the tolerance. The target settles every delivery by
-`report_by - 5 min`; the sender closes whatever is still open after `report_by`.
+`report_by - 5 min`; the sender closes whatever is still open after `report_by`,
+after one last pull of the target by the caller, and tells what it has not been
+told (see "Closing at `report_by`").
 
 ## When a record entered its state
 
@@ -187,6 +196,20 @@ body is kept.
   limit by the notices that are exempt from it.
 - The limit is a count, not a deadline: nothing in `Tick` changes with it, so
   it adds no timed rule.
+
+## Closing at `report_by`
+
+`Tick` and `EventReportByPassed` close a record that is not final from the nanosecond
+after `report_by`. They know nothing of any pull, so the caller makes its last pull
+of the target before it ticks a delivery that is `queued` or `accepted`, while the
+target still keeps its record (the target's retention outlasts `report_by`), and
+applies the answer with `ApplyStatusReport`. A report applied after `report_by`
+while the record is not closed has its true meaning: a rejection is told, a delivery
+is silent, a hand-over is told; no rule looks at how late it is. An answer that the
+target holds no record is ignored after `report_by` (`IgnoreRetryEnded`): the
+target may have forgotten it legitimately. What is still unknown then is closed with
+the notices above, at most once per delivery (`Record.Reported`). `Valid` holds a
+closed source record to it: it carries the notice of how it closed.
 
 ## Closing a delivery by force
 
@@ -300,7 +323,9 @@ record, never a clock.
   `accepted` or `delivered` unless a rejection or `delivery_unknown` replaced it
   (a loss at the target never replaces one: it is told only for an accepted
   delivery),
-  a recovery after every block that ended in `delivered` or in `accepted`.
+  a recovery after every block that ended in `delivered` or in `accepted`, and a
+  closed record that carries the notice of how it closed: the expiry, `accepted_unconfirmed`,
+  or the notice of the unknown result it held (`ViolationReportedClosed`).
 - Blocked: only an accepted record that is not a control record, with a blocking
   cause; the cause outlives the flag because the recovery notice names it.
 - Lease: only a message in the target's queue has one. Chunk flags and the
