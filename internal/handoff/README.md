@@ -40,14 +40,19 @@ Prompts:
   passed since that prompt. Until then the decision is a hold that carries
   `RetryAt`, the end of that interval.
 - `PromptDecision.RetryAt` is set for `PromptHourlyCap` (when the cap frees a
-  slot) and for a hold on a message newer than the last delivered prompt that
-  waits for the minimum interval (when it has passed). Nothing else brings the
+  slot), for `PromptRetryAfterFailure` (when the retry is due) and for a hold on a
+  message newer than the last delivered prompt that waits for the minimum
+  interval (when it has passed). Nothing else brings the
   caller back at those moments, so it evaluates again at `RetryAt` with the same
   `Trigger` as the evaluation that returned it.
 - `PromptInput.Pending` counts the messages that still have something not handed
   out: a message handed out in parts counts until its last part has been.
 - At most `MaxPerHour` prompts that may have reached the session per hour.
-- A failed attempt changes nothing: it is not an unread prompt, spends no
+- A prompt that would be sent is held until `RetryAfterFailure` (1 minute) has
+  passed since a failed attempt that is the newest of all: reason
+  `PromptRetryAfterFailure`, with `RetryAt`. The caller evaluates again then with
+  the same `Trigger`.
+- A failed attempt is otherwise invisible: it is not an unread prompt, spends no
   allowance and does not count toward the cap. An unknown outcome counts toward
   the cap only.
 
@@ -70,8 +75,8 @@ Node-wide concurrency of prompt-started turns:
   not count toward `MaxPerHour`, it is not a failure and so never makes delivery
   blocked. Messages stay queued and readable with `recv`.
 - A freed slot is not an event of any waiting endpoint, and `RetryAt` covers only
-  the hourly cap and the minimum interval. The principle: whenever free slots
-  may have grown (`running` falls or `MaxConcurrentTurns` rises), the caller
+  the hourly cap, the minimum interval and the retry of a failed prompt. The
+  principle: whenever free slots may have grown (`running` falls or `MaxConcurrentTurns` rises), the caller
   calls `DecideNodePrompts` again for all waiting endpoints. That happens when
   a turn that a prompt started ends in any way, when a dispatched prompt is
   confirmed not to have started a turn, when an adapter whose turns were counted

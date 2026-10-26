@@ -38,6 +38,14 @@ const (
 	// of the 30 queue minutes after the last one. An endpoint that never reads
 	// is woken about 30 times an hour at most, below DefaultMaxPerHour.
 	DefaultMinInterval = 2 * time.Minute
+	// DefaultRetryAfterFailure is how long after a failed prompt the next one
+	// may be sent. A prompt fails mostly because the adapter or the native
+	// service is not ready, for instance an adapter whose connection is being
+	// put in service; a minute is long enough for that to pass and short
+	// enough to cost a waiting message little of its 30 queue minutes. Sent
+	// at once, the retry would fail again and a lasting outage would turn into
+	// a loop of failures.
+	DefaultRetryAfterFailure = time.Minute
 )
 
 // PromptParams holds the values of the prompt rules. DecidePrompt and
@@ -55,6 +63,9 @@ type PromptParams struct {
 	// still running on one node, across all endpoints. Only DecideNodePrompts
 	// reads it; DecidePrompt, which judges one endpoint, does not.
 	MaxConcurrentTurns int
+	// RetryAfterFailure is how long after a failed attempt a prompt may be
+	// sent again.
+	RetryAfterFailure time.Duration
 }
 
 // DefaultPromptParams returns the decided values.
@@ -63,6 +74,7 @@ func DefaultPromptParams() PromptParams {
 		MaxPerHour:         DefaultMaxPerHour,
 		MinInterval:        DefaultMinInterval,
 		MaxConcurrentTurns: DefaultMaxConcurrentTurns,
+		RetryAfterFailure:  DefaultRetryAfterFailure,
 	}
 }
 
@@ -79,6 +91,9 @@ func (p PromptParams) Validate() error {
 	}
 	if p.MaxConcurrentTurns <= 0 {
 		return fmt.Errorf("%w: MaxConcurrentTurns must be positive, got %d", ErrInvalidParams, p.MaxConcurrentTurns)
+	}
+	if p.RetryAfterFailure <= 0 {
+		return fmt.Errorf("%w: RetryAfterFailure must be positive, got %v", ErrInvalidParams, p.RetryAfterFailure)
 	}
 	return nil
 }
@@ -218,6 +233,9 @@ const (
 	// it. It is not an attempt and no failure: the caller records nothing. When
 	// the endpoint is evaluated again is described at DecideNodePrompts.
 	PromptNodeFull
+	// PromptRetryAfterFailure: a prompt would be sent, but the latest attempt
+	// failed less than RetryAfterFailure ago. RetryAt is when it may be sent.
+	PromptRetryAfterFailure
 )
 
 // PromptDecision is the verdict of DecidePrompt.
@@ -232,7 +250,8 @@ type PromptDecision struct {
 	Count int
 	// RetryAt is when to evaluate again, for the one case in which no event of
 	// the endpoint's own will prompt that evaluation. Set for PromptHourlyCap,
-	// where it is when the cap frees a slot, and for PromptUnreadWaiting and
+	// where it is when the cap frees a slot, for PromptRetryAfterFailure, where
+	// it is when the retry of a failed prompt is due, and for PromptUnreadWaiting and
 	// PromptRepromptSpent when a message newer than the last delivered prompt
 	// is waiting for the minimum interval to pass, where it is when that
 	// happens. The caller evaluates again at RetryAt with the same Trigger as
@@ -259,13 +278,16 @@ type PromptDecision struct {
 //   - At most params.MaxPerHour prompts that may have reached the session are
 //     sent per hour.
 //
-// Two holds name when to evaluate again (PromptDecision.RetryAt): a cap that
-// frees a slot, and a message that waits for the minimum interval. No event of
-// the endpoint marks either moment.
+// Three holds name when to evaluate again (PromptDecision.RetryAt): a cap that
+// frees a slot, a message that waits for the minimum interval, and the retry of
+// a failed prompt. No event of the endpoint marks any of these moments.
 //
 // A failed attempt is invisible to all of these except that it leaves the
-// endpoint unprompted: it is not an unread prompt, spends no allowance and
-// does not count toward the cap, because it woke nobody. An attempt with an
+// endpoint unprompted and that the next prompt waits for params.RetryAfterFailure
+// after it: it is not an unread prompt, spends no allowance and does not count
+// toward the cap, because it woke nobody. A prompt that would be sent is held
+// only when the newest attempt of all is the failed one; any other hold keeps
+// its own reason. An attempt with an
 // unknown outcome counts toward the cap, since it may have woken the agent, and
 // is otherwise treated like a failed one.
 func DecidePrompt(in PromptInput, p PromptParams, now time.Time) (PromptDecision, error) {
@@ -301,6 +323,13 @@ func DecidePrompt(in PromptInput, p PromptParams, now time.Time) (PromptDecision
 		d := hold(PromptHourlyCap)
 		d.RetryAt = oldest.Add(hourlyWindow)
 		return d, nil
+	}
+	if n := len(in.Attempts); n > 0 && in.Attempts[n-1].Outcome == AttemptFailed {
+		if retryAt := in.Attempts[n-1].At.Add(p.RetryAfterFailure); now.Before(retryAt) {
+			d := hold(PromptRetryAfterFailure)
+			d.RetryAt = retryAt
+			return d, nil
+		}
 	}
 	return PromptDecision{Action: PromptSend, Reason: reason, Kind: kind, Count: in.Pending}, nil
 }

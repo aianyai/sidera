@@ -12,7 +12,7 @@ var t0 = time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 // after returns the instant d after t0.
 func after(d time.Duration) time.Time { return t0.Add(d) }
 
-var testPromptParams = PromptParams{MaxPerHour: 6, MinInterval: 5 * time.Minute, MaxConcurrentTurns: 3}
+var testPromptParams = PromptParams{MaxPerHour: 6, MinInterval: 5 * time.Minute, MaxConcurrentTurns: 3, RetryAfterFailure: time.Minute}
 
 func delivered(d time.Duration, k PromptKind) Attempt {
 	return Attempt{At: after(d), Outcome: AttemptDelivered, Kind: k}
@@ -91,12 +91,14 @@ func TestPromptParamsValidate(t *testing.T) {
 		p    PromptParams
 		ok   bool
 	}{
-		{"positive values are valid", PromptParams{MaxPerHour: 1, MinInterval: time.Second, MaxConcurrentTurns: 1}, true},
-		{"zero cap is rejected", PromptParams{MaxPerHour: 0, MinInterval: time.Second, MaxConcurrentTurns: 1}, false},
-		{"negative cap is rejected", PromptParams{MaxPerHour: -1, MinInterval: time.Second, MaxConcurrentTurns: 1}, false},
-		{"zero interval is rejected", PromptParams{MaxPerHour: 1, MaxConcurrentTurns: 1}, false},
-		{"zero node cap is rejected: unset is not unlimited", PromptParams{MaxPerHour: 1, MinInterval: time.Second}, false},
-		{"negative node cap is rejected", PromptParams{MaxPerHour: 1, MinInterval: time.Second, MaxConcurrentTurns: -1}, false},
+		{"positive values are valid", PromptParams{MaxPerHour: 1, MinInterval: time.Second, MaxConcurrentTurns: 1, RetryAfterFailure: time.Second}, true},
+		{"zero cap is rejected", PromptParams{MaxPerHour: 0, MinInterval: time.Second, MaxConcurrentTurns: 1, RetryAfterFailure: time.Second}, false},
+		{"negative cap is rejected", PromptParams{MaxPerHour: -1, MinInterval: time.Second, MaxConcurrentTurns: 1, RetryAfterFailure: time.Second}, false},
+		{"zero interval is rejected", PromptParams{MaxPerHour: 1, MaxConcurrentTurns: 1, RetryAfterFailure: time.Second}, false},
+		{"zero node cap is rejected: unset is not unlimited", PromptParams{MaxPerHour: 1, MinInterval: time.Second, RetryAfterFailure: time.Second}, false},
+		{"negative node cap is rejected", PromptParams{MaxPerHour: 1, MinInterval: time.Second, MaxConcurrentTurns: -1, RetryAfterFailure: time.Second}, false},
+		{"zero retry after a failure is rejected: unset is not at once", PromptParams{MaxPerHour: 1, MinInterval: time.Second, MaxConcurrentTurns: 1}, false},
+		{"negative retry after a failure is rejected", PromptParams{MaxPerHour: 1, MinInterval: time.Second, MaxConcurrentTurns: 1, RetryAfterFailure: -time.Second}, false},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
@@ -165,6 +167,30 @@ func TestDecidePrompt(t *testing.T) {
 				Attempts: []Attempt{delivered(0, PromptKindFirst),
 					{At: after(time.Minute), Outcome: AttemptFailed, Kind: PromptKindReprompt}}},
 			after(2 * time.Minute), PromptDecision{Action: PromptSend, Reason: PromptReprompt, Kind: PromptKindReprompt, Count: 3}},
+		{"the latest attempt failed less than a minute ago: hold until a minute after it",
+			PromptInput{Trigger: TriggerArrival, Pending: 1,
+				Attempts: []Attempt{{At: after(0), Outcome: AttemptFailed, Kind: PromptKindFirst}}},
+			after(20 * time.Second), PromptDecision{Action: PromptHold, Reason: PromptRetryAfterFailure, RetryAt: after(time.Minute)}},
+		{"a minute after the failure the prompt is sent again, inclusive",
+			PromptInput{Trigger: TriggerArrival, Pending: 1,
+				Attempts: []Attempt{{At: after(0), Outcome: AttemptFailed, Kind: PromptKindFirst}}},
+			after(time.Minute), PromptDecision{Action: PromptSend, Reason: PromptFirst, Kind: PromptKindFirst, Count: 1}},
+		{"a failed re-prompt is also retried only after a minute",
+			PromptInput{Trigger: TriggerTurnEnd, Pending: 3,
+				Attempts: []Attempt{delivered(0, PromptKindFirst), {At: after(time.Minute), Outcome: AttemptFailed, Kind: PromptKindReprompt}}},
+			after(time.Minute + 30*time.Second), PromptDecision{Action: PromptHold, Reason: PromptRetryAfterFailure, RetryAt: after(2 * time.Minute)}},
+		{"only the latest attempt counts: an unknown outcome after a failure does not hold",
+			PromptInput{Trigger: TriggerArrival, Pending: 1,
+				Attempts: []Attempt{{At: after(0), Outcome: AttemptFailed, Kind: PromptKindFirst}, {At: after(10 * time.Second), Outcome: AttemptUnknown, Kind: PromptKindFirst}}},
+			after(20 * time.Second), PromptDecision{Action: PromptSend, Reason: PromptFirst, Kind: PromptKindFirst, Count: 1}},
+		{"a failure does not turn another hold into the retry hold: an unread prompt keeps its own",
+			PromptInput{Trigger: TriggerArrival, Pending: 1,
+				Attempts: []Attempt{delivered(0, PromptKindFirst), {At: after(10 * time.Second), Outcome: AttemptFailed, Kind: PromptKindReprompt}}},
+			after(20 * time.Second), PromptDecision{Action: PromptHold, Reason: PromptUnreadWaiting}},
+		{"a busy session keeps its own hold after a failure",
+			PromptInput{Trigger: TriggerArrival, Pending: 1, Busy: true,
+				Attempts: []Attempt{{At: after(0), Outcome: AttemptFailed, Kind: PromptKindFirst}}},
+			after(20 * time.Second), PromptDecision{Action: PromptHold, Reason: PromptSessionBusy}},
 		{"an arrival is not a turn end: no re-prompt on an arrival alone",
 			PromptInput{Trigger: TriggerArrival, Pending: 3, Attempts: []Attempt{delivered(0, PromptKindFirst)}},
 			after(time.Minute), PromptDecision{Action: PromptHold, Reason: PromptUnreadWaiting}},
@@ -211,10 +237,10 @@ func TestDecidePrompt(t *testing.T) {
 			after(20 * time.Minute), PromptDecision{Action: PromptHold, Reason: PromptSessionBusy}},
 
 		// Failed and unknown attempts only affect whether to wake again.
-		{"a failed prompt is not an unread prompt: wake again",
+		{"a failed prompt is not an unread prompt: wake again once the retry is due",
 			PromptInput{Trigger: TriggerArrival, Pending: 1,
 				Attempts: []Attempt{{At: after(0), Outcome: AttemptFailed, Kind: PromptKindFirst}}},
-			after(time.Second), PromptDecision{Action: PromptSend, Reason: PromptFirst, Kind: PromptKindFirst, Count: 1}},
+			after(time.Minute), PromptDecision{Action: PromptSend, Reason: PromptFirst, Kind: PromptKindFirst, Count: 1}},
 		{"an unknown prompt is not an unread prompt: wake again",
 			PromptInput{Trigger: TriggerArrival, Pending: 1,
 				Attempts: []Attempt{{At: after(0), Outcome: AttemptUnknown, Kind: PromptKindFirst}}},
@@ -290,7 +316,7 @@ type promptSim struct {
 func (s *promptSim) decide(trigger PromptTrigger) PromptDecision {
 	s.t.Helper()
 	d, err := DecidePrompt(PromptInput{Trigger: trigger, Pending: s.pending, LastArrivalAt: s.arrival,
-		LastRecvAt: s.recv, Busy: s.busy, Attempts: s.history}, PromptParams{MaxPerHour: 20, MinInterval: 5 * time.Minute, MaxConcurrentTurns: 8}, s.now)
+		LastRecvAt: s.recv, Busy: s.busy, Attempts: s.history}, PromptParams{MaxPerHour: 20, MinInterval: 5 * time.Minute, MaxConcurrentTurns: 8, RetryAfterFailure: time.Minute}, s.now)
 	if err != nil {
 		s.t.Fatal(err)
 	}

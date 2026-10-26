@@ -33,7 +33,13 @@ checks that the model saw it before acknowledging for the agent.
   session.
 - A failed prompt is not an unread prompt, spends no allowance and is not
   counted by the cap. An unknown outcome counts toward the cap and is otherwise
-  treated like a failure. Neither changes anything outside the endpoint: the
+  treated like a failure.
+- A prompt that would be sent is held for `RetryAfterFailure` (1 minute) after
+  a failed attempt that is the newest of all: the hold carries the reason
+  `PromptRetryAfterFailure` and `RetryAt`, the failure time plus that span, and
+  the caller evaluates again then with the same trigger. Any other hold keeps
+  its own reason. The wait is a rule of the prompt decision, not of its caller,
+  so every caller retries at the same pace. Neither changes anything outside the endpoint: the
   message stays queued and readable with `recv`.
 - The number of turns that prompts have started and that are still running on
   a node is capped. `DecidePrompt` judges one endpoint and knows nothing of the
@@ -48,7 +54,8 @@ checks that the model saw it before acknowledging for the agent.
   counts toward the hourly cap, and no failure exists that could make delivery
   blocked. The message stays queued and readable with `recv`.
 - No event of a waiting endpoint marks a slot being freed, and `RetryAt` names
-  only the instants of the hourly cap and the minimum interval. So whenever free
+  only the instants of the hourly cap, the minimum interval and the retry of a
+  failed prompt. So whenever free
   slots may have grown (the running count falls or the cap rises), every waiting
   endpoint is evaluated again through `DecideNodePrompts`: when a prompt-started
   turn ends in any way, when a dispatched prompt is confirmed not to have started
@@ -74,7 +81,8 @@ checks that the model saw it before acknowledging for the agent.
   none of these go. The record of an endpoint therefore stays small, and every
   rule above reads the same result before and after the cut.
 - Decided values (`DefaultPromptParams`): 60 prompts per endpoint and hour, a
-  re-prompt interval of 2 minutes, and 8 prompt-started turns per node. The
+  re-prompt interval of 2 minutes, a retry a minute after a failed prompt, and 8
+  prompt-started turns per node. The
   reasons are under Why. The prompt wording is provisional.
 
 ### Delivery blocked
@@ -254,6 +262,16 @@ The delivery side that these rules call into is described in
   cut would have to follow every change of their rules. Keeping the earliest
   failure of the current run, and not all of them, is enough because the blocked
   rule takes only the start of the run from the failures.
+- **A failed prompt is retried after a minute, and the rule lives in the
+  decision.** A prompt fails mostly because the adapter or the native service is
+  not ready yet, for instance a connection that is being put in service. Retrying
+  at once repeats the failure and turns an outage into a loop; waiting a day-scale
+  span would strand a message that has 30 queue minutes. A minute is long enough
+  for a start to finish and costs a waiting message little. The decision carries
+  the instant (`RetryAt`) as it does for the cap and the interval, so a caller
+  needs no backoff of its own and no special case for the failure it saw; a
+  caller that borrowed another subsystem's backoff would retry at that
+  subsystem's pace.
 - **Failed attempts are not counted by the cap.** The cap protects the agent
   from being woken too often. A prompt that never reached the session woke
   nobody, and counting it would keep a recovered adapter from waking the agent

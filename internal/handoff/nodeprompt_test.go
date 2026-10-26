@@ -445,7 +445,7 @@ func TestDecideNodePromptsProperties(t *testing.T) {
 	counts := map[string]int{}
 
 	for iter := 0; iter < iterations; iter++ {
-		p := PromptParams{MaxPerHour: 6, MinInterval: 5 * time.Minute, MaxConcurrentTurns: 1 + rng.Intn(8)}
+		p := PromptParams{MaxPerHour: 6, MinInterval: 5 * time.Minute, MaxConcurrentTurns: 1 + rng.Intn(8), RetryAfterFailure: time.Minute}
 		running := rng.Intn(12)
 		n := rng.Intn(13)
 		ids := rng.Perm(12)

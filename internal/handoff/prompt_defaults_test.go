@@ -23,6 +23,7 @@ func TestDefaultPromptParamsValues(t *testing.T) {
 		{"node cap is 8 turns so that a 30-minute queue releases 16 waiting endpoints at 15-minute turns", p.MaxConcurrentTurns, 8},
 		{"endpoint cap is 60 prompts an hour so that turns of a minute or more never reach it", p.MaxPerHour, 60},
 		{"re-prompt interval is 2 minutes so that a late arrival wakes the endpoint well before the backlog expires", p.MinInterval, 2 * time.Minute},
+		{"a failed prompt is retried after a minute so that an adapter still being put in service is found in service", p.RetryAfterFailure, time.Minute},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
