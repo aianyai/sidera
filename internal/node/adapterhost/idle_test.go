@@ -60,6 +60,29 @@ func TestAProcessThatCannotBeEndedIsNotWaitedFor(t *testing.T) {
 	r.waitLaunches(2)
 }
 
+// The rule is the same on the way a process is ended after shutdown was asked and
+// it did not end: when ShutdownWait has passed the process is killed, and if Kill
+// reports it cannot end the process nothing is waited for a second time.
+func TestAProcessThatDidNotEndAfterShutdownAndCannotBeKilledIsNotWaitedForAgain(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	var pp *pipeProcess
+	var a *scripted
+	r.lau.launch = func(n int, inst adapterhost.Instance) (adapterhost.Process, error) {
+		pp, a = r.scriptedProcess(nil, true)
+		return unendable{pp}, nil
+	}
+	r.start()
+	r.ready("chat", 1)
+	r.host.Stop("chat")
+	eventually(t, "the adapter to receive shutdown", func() bool { return a.count(adapterproto.MethodShutdown) == 1 })
+	<-pp.serveDone
+	eventually(t, "the shutdown wait to be armed", func() bool { return r.clk.Timers() >= 1 })
+	r.clk.Advance(testParams().ShutdownWait)
+	eventually(t, "the process to be killed", func() bool { return pp.killed() == 1 })
+	eventually(t, "the host to leave a process that cannot be ended and wait for no other", func() bool { return r.clk.Timers() == 0 })
+	pp.release()
+}
+
 // A request the host has sent and not had answered is in Calls from the moment the
 // host waits for the answer: a caller that sees the host idle must find the
 // request there, or it takes the host for quiet while the adapter is still
