@@ -55,8 +55,14 @@ adapter fails (an error, a result that is not valid) is logged and nothing more.
 
 In service, every `PingInterval` the host sends `ping`, limited by `PingTimeout`.
 Any error is a failure. `OfflineAfterPingFailures` (two) failures in a row make the
-adapter offline: the engine is told `GonePingsFailed`, the process is killed and
-waited for at most `ShutdownWait`, and the host goes on whether it ended or not. A
+adapter offline: the forwarding of the connection is ended (the connection's context
+ends, the stream closes and what is still buffered is dropped), the engine is told
+`GonePingsFailed`, and then the process is killed and waited for at most
+`ShutdownWait`, and the host goes on whether it ended or not. The report does not wait
+for the process, and no notification reaches the engine after it: a notification that
+arrived after the report would find the instance offline and mark it busy. The requests
+of the adapter that were being answered make no such promise and may complete after
+the report, as they may after a connection that ended by itself. A
 process that `Kill` reports it cannot end (the operating system refuses the signal)
 is not waited for at all: there is nothing the wait could see.
 An answer starts the count again; an answer that comes after the timeout is dropped
@@ -288,6 +294,7 @@ check on every test):
 | Behaviour | Tests |
 | --------- | ----- |
 | Two unanswered pings make the adapter offline, one does not, an answer starts the count again; reported once; the second pass after the backoff | `TestTwoUnansweredPingsMakeTheAdapterOfflineAndOneDoesNot` |
+| No notification reaches the engine after the report that the adapter is gone | `TestNoNotificationReachesTheEngineAfterItWasToldThatTheAdapterIsGone` |
 | The exact waits, the cap, the reset after a stable connection | `TestRestartBackoffDoublesIsCappedAndBeginsAgainAfterAStableConnection` |
 | What the adapter did not declare is refused and the engine is never asked | `TestAdmissionRefusesWhatTheAdapterDidNotDeclare` |
 | The code of `Admission.Check`, `-32003` before admission, the engine not called | `TestACallOfACapabilityTheAdapterDidNotDeclareIsRefusedWithTheCodeOfAdmissionCheck` |

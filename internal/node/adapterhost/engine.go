@@ -12,7 +12,13 @@ import (
 // called in this order: AdapterAdmitted, AdapterStarted, ProbeTokens,
 // AdapterProbed, and from then on AdapterNotified and the requests of the
 // adapter, until AdapterGone. A notification reaches AdapterNotified only after
-// AdapterAdmitted has returned, in the order the adapter sent it.
+// AdapterAdmitted has returned, in the order the adapter sent it, and none
+// reaches it once AdapterGone was called for a connection that was lost or
+// refused: the host ends its forwarding first and drops what is still buffered.
+// The one report that does not end a connection is GoneStartFailed for an
+// instance that is still being taken on when StartWait passes; that connection
+// goes on. The requests of the adapter make no promise of this kind: one that was
+// being answered when the connection was lost may complete after AdapterGone.
 //
 // An error from a method that answers a request of the adapter (RegisterDirect,
 // UnregisterDirect, CheckpointPut and the methods of the optional interfaces) is

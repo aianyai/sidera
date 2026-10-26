@@ -57,8 +57,10 @@ handle the daemon gives it.
   and the probe methods included, ends the connection.
 - **Pings.** In service, every `PingInterval` the host sends `ping`, limited by
   `PingTimeout`. Any error is a failure. `OfflineAfterPingFailures` failures in a
-  row (an answer starts the count again) report `GonePingsFailed`, kill the
-  process and wait for it at most `ShutdownWait`; a process that `Kill` reports it
+  row (an answer starts the count again) end the forwarding of the connection (what
+  is still buffered is dropped), report `GonePingsFailed`, kill the
+  process and wait for it at most `ShutdownWait`; no notification reaches the engine
+  after the report, and the report does not wait for the process; a process that `Kill` reports it
   cannot end is left at once and one that does not end is left after `ShutdownWait`,
   because the instance lock keeps a second writer out whatever it does. A
   connection that ends by itself is reported as `GoneConnectionEnded`, after the
@@ -136,7 +138,7 @@ handle the daemon gives it.
 
 ## Where the tests are
 
-`supervision_test.go` (pings, backoff, `Start`, `EnsureRunning`, `Stop`,
+`supervision_test.go` (pings and what the engine receives after the report of a lost adapter, backoff, `Start`, `EnsureRunning`, `Stop`,
 `Shutdown`, `Abort`), `admission_test.go` (what is refused, the lock, the order of
 taking an adapter on), `notifications_test.go` (order, the bound, dropped ones),
 `requests_test.go` (the adapter's requests, the engine's calls, the counts),

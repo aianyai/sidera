@@ -188,6 +188,11 @@ func (s *supervisor) serve(c *conn) (stable bool, err error) {
 	switch out {
 	case outPings:
 		s.leaveService(c)
+		// The forwarding ends before the engine is told: a notification that
+		// reached the engine after the report would find the instance offline.
+		// What is still buffered is dropped, and the process is ended after the
+		// report, so that the report does not wait for it.
+		c.close()
 		s.report(GonePingsFailed)
 		s.finishConn(c, modeKill)
 		return stable, nil

@@ -166,15 +166,17 @@ func (c *conn) fail(err error) {
 	_ = c.p.Close()
 }
 
-// close ends the connection's own goroutines: the stream is closed, and what is
-// buffered and not yet handed to the engine is dropped. A connection that was
-// drained first has nothing left to drop.
+// close ends the connection's own goroutines and returns when the forwarder has
+// returned: the connection's context ends first, so that the forwarder hands the
+// engine nothing more, then the stream is closed, and what is buffered and not yet
+// handed to the engine is dropped. A connection that was drained first has nothing
+// left to drop.
 func (c *conn) close() {
 	c.closeOnce.Do(func() {
+		c.cancel()
 		if c.p != nil {
 			_ = c.p.Close()
 		}
-		c.cancel()
 		c.fwdOnce.Do(func() { close(c.fwdDone) })
 	})
 	<-c.fwdDone
@@ -193,19 +195,22 @@ func (c *conn) close() {
 
 // forward takes the notifications from the buffer in order and hands them to the
 // engine, one at a time. When the connection ended it hands over what is already
-// buffered and returns; when the connection is closed without a drain it returns
-// at once.
+// buffered and returns; when the connection is closed (its context ended) it
+// returns without handing over anything more.
 func (c *conn) forward() {
 	defer close(c.fwdDone)
 	eng := c.s.h.env.Engine
 	for {
+		if c.ctx.Err() != nil {
+			return
+		}
 		select {
 		case n := <-c.notes:
 			if !c.deliver(eng, n) {
 				return
 			}
 		case <-c.p.Done():
-			for {
+			for c.ctx.Err() == nil {
 				select {
 				case n := <-c.notes:
 					if !c.deliver(eng, n) {
@@ -215,6 +220,7 @@ func (c *conn) forward() {
 					return
 				}
 			}
+			return
 		case <-c.ctx.Done():
 			return
 		}
