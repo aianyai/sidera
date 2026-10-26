@@ -46,6 +46,7 @@ func (o *setNodeSettingsOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	e.promptsDirty = true // the cap on the turns that prompts start may have been raised
 	return n.LastOperation.Result, nil
 }
 

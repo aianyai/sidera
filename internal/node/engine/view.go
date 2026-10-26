@@ -46,6 +46,10 @@ type view struct {
 	// and id.
 	checkpoints map[store.CheckpointKey][]byte
 
+	// attempts are the prompt attempts of each endpoint that has any, as they are on
+	// disk: the head record of a prompt.
+	attempts map[ident.EndpointID]store.AttemptsRecord
+
 	// results are the stored results of administrative operations by request key,
 	// as far as the loop needs them: the fingerprint that tells a resend of a
 	// request from the reuse of its identifier, and the answer to hand back. They
@@ -133,6 +137,7 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		leased:    map[delivery.LeaseID][]store.TargetKey{},
 
 		checkpoints: map[store.CheckpointKey][]byte{},
+		attempts:    map[ident.EndpointID]store.AttemptsRecord{},
 		seq:         store.NewSeqBook(sc),
 	}
 	for _, a := range sc.Admin {
@@ -147,6 +152,9 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 	}
 	for _, c := range sc.Checkpoints {
 		v.checkpoints[c.Key] = c.State
+	}
+	for _, a := range sc.Attempts {
+		v.attempts[a.Endpoint] = a
 	}
 	for _, in := range sc.In {
 		v.setIn(in)
@@ -539,9 +547,8 @@ func (v *view) dropOut(name string) {
 }
 
 // dropSwept takes a record that the sweep removed out of the view, whatever kind it
-// is. A kind the view holds no picture of (an attempts record, a floor file) leaves
-// nothing to take out, and a source record is dropped by name (dropOut): the sweep
-// is given it whole.
+// is. A kind the view holds no picture of (a floor file) leaves nothing to take out,
+// and a source record is dropped by name (dropOut): the sweep is given it whole.
 func (v *view) dropSwept(rec store.Record) {
 	switch r := rec.(type) {
 	case store.InRecord:
@@ -559,6 +566,8 @@ func (v *view) dropSwept(rec store.Record) {
 		}
 	case store.CheckpointRecord:
 		delete(v.checkpoints, r.Key)
+	case store.AttemptsRecord:
+		delete(v.attempts, r.Endpoint)
 	case store.AdminRecord:
 		delete(v.results, r.Key)
 	case store.AlertRecord:

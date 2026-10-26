@@ -312,6 +312,16 @@ var recoveryPhases = [...]recoveryPhase{
 	{14, "outbound", (*Engine).recoverOutbound},
 }
 
+// recoverReconcile is step 11 of the start: the creations and the prompts that were
+// not settled when the node went down are settled or asked of their adapters.
+func (e *Engine) recoverReconcile(now time.Time) error {
+	if err := e.reconcileCreations(now); err != nil {
+		return err
+	}
+	e.reconcilePrompts(now)
+	return nil
+}
+
 // recoverFeedback sends the feedback that fell due while the node was down, the
 // feedback of the records replaced after a storage loss included (step 13). The
 // queue was loaded from the disk by the scan entry, after the replay of feedback

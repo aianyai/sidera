@@ -13,6 +13,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // A session endpoint is woken by a prompt: a text that says messages wait and carries
@@ -343,4 +344,120 @@ func TestDeclarationTightenedAfterPromptRejectsAtRecv(t *testing.T) {
 		t.Fatalf("the record is %s (%s), want rejected, second_check_failed", in.Record.State, in.Record.Reject)
 	}
 	wantPrompts(t, h, addr, 1)
+}
+
+// How a prompt ended is recorded as it ended, and one whose end is not known is asked
+// of the adapter and never sent again: a refusal is a failure, so the message is not
+// marked as one a prompt was sent for and the sender is told nothing; an answer lost
+// after the prompt reached the session is a delivery once the adapter says it did, and
+// an unknown outcome when it cannot say, in which case the attempt is not delivered a
+// second time.
+func TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain(t *testing.T) {
+	lostAnswer := fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError, AfterEffect: true}
+	for _, c := range []struct {
+		rule      string
+		prompt    fakeadapter.Outcome
+		reconcile *fakeadapter.Outcome
+		outcome   handoff.AttemptOutcome
+		notified  bool
+	}{
+		{"a refusal is a failure", fakeadapter.Outcome{Kind: fakeadapter.OutcomeRefuse, Reason: string(adapterproto.RefusalBusy)}, nil, handoff.AttemptFailed, false},
+		{"a lost answer is a delivery when the adapter finds the prompt", lostAnswer, nil, handoff.AttemptDelivered, true},
+		{"a lost answer is unknown when the adapter cannot tell", lostAnswer,
+			&fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate, Reason: string(adapterproto.GroundsNativeUnreachable)}, handoff.AttemptUnknown, false},
+		{"a lost answer is unknown when the adapter gives no verdict", lostAnswer,
+			&fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError}, handoff.AttemptUnknown, false},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			h := sessionNode(t, harness.Options{}, "a")
+			_, addr := idleSession(t, h, "a")
+			ctrl, err := h.Adapter(harness.Instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, c.prompt); err != nil {
+				t.Fatal(err)
+			}
+			if c.reconcile != nil {
+				if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestReconcile, *c.reconcile); err != nil {
+					t.Fatal(err)
+				}
+			}
+			msg := sendToAddr(t, h, "a", addr, "for a prompt that goes wrong")
+			quiet(t, h)
+
+			a := attemptsOf(t, h, addr)
+			if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != c.outcome {
+				t.Errorf("the attempts are %+v, want one with the outcome %v and none in flight", a, c.outcome)
+			}
+			if got := inOf(t, h, msg).Record.Sub == delivery.SubNotified; got != c.notified {
+				t.Errorf("the message is notified: %v, want %v", got, c.notified)
+			}
+			wantPrompts(t, h, addr, 1)
+			wantNoFeedback(t, h, "a", msg)
+		})
+	}
+}
+
+// The checkpoint an adapter keeps for a prompt attempt is there while the attempt is in
+// flight, so that a reconciliation can be given it, and is gone once the attempt has
+// settled.
+func TestSettledPromptAttemptDropsItsCheckpoint(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	_, addr := idleSession(t, h, "a")
+	first := h.AdapterLaunches(harness.Instance)[0]
+	if err := first.Controller().PauseAt(h.Ctx(), fakeadapter.PausePromptAfterForward); err != nil {
+		t.Fatal(err)
+	}
+	sendToAddr(t, h, "a", addr, "for a prompt with a checkpoint")
+	waitCtx, cancel := context.WithTimeout(h.Ctx(), 10*time.Second)
+	defer cancel()
+	if err := first.Controller().WaitPaused(waitCtx, fakeadapter.PausePromptAfterForward); err != nil {
+		t.Fatalf("no prompt reached the adapter: %v", err)
+	}
+	attempt := attemptsOf(t, h, addr).InFlight.Attempt
+	put := adapterproto.CheckpointPutParams{Scope: adapterproto.ScopeAttempt, ID: string(attempt), State: []byte(`{"cursor":7}`)}
+	if err := h.Engine().CheckpointPut(h.Ctx(), harness.Instance, put); err != nil {
+		t.Fatal(err)
+	}
+	if !hasCheckpoint(t, h, attempt) {
+		t.Fatal("the checkpoint of the attempt in flight is not on disk")
+	}
+	if err := first.Controller().Release(h.Ctx(), fakeadapter.PausePromptAfterForward); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	if hasCheckpoint(t, h, attempt) {
+		t.Error("the checkpoint of an attempt that settled is still on disk")
+	}
+}
+
+func hasCheckpoint(t testing.TB, h *harness.H, attempt adapterproto.AttemptID) bool {
+	t.Helper()
+	for _, c := range scanOf(t, h).Checkpoints {
+		if c.Key.Scope == string(adapterproto.ScopeAttempt) && c.Key.ID == string(attempt) {
+			return true
+		}
+	}
+	return false
+}
+
+// A session whose adapter is away is not prompted: a prompt for it is bound to fail, and
+// failures are what makes delivery to it blocked. Its message waits, with no attempt
+// recorded, and the adapter coming back is the event that wakes the session.
+func TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	_, addr := idleSession(t, h, "a")
+	adapterEnded(t, h, h.AdapterLaunches(harness.Instance)[0])
+	msg := sendToAddr(t, h, "a", addr, "sent while the adapter is away")
+	engineQuiet(t, h)
+	h.Advance(restartAfter / 2) // less than the host waits before it starts the adapter again
+	engineQuiet(t, h)
+	if a := attemptsOf(t, h, addr); len(a.Attempts) != 0 || a.InFlight != nil {
+		t.Errorf("the attempts are %+v while the adapter is away, want none: nothing was tried", a)
+	}
+
+	adapterRestarted(t, h, 2)
+	wantPrompts(t, h, addr, 1)
+	wantNoFeedback(t, h, "a", msg)
 }

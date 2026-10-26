@@ -3,9 +3,9 @@
 The single writer of the node's runtime state: the loop, its schedule, the
 registration of endpoints, the life of an adapter's connection, the capacity check,
 the two recovery entries, the sending and taking in of messages, and control signals
-with the creation of sessions they carry, the initial message of a creation, and the
-closing and interrupting of a session. What the features still to come add to the
-same loop (prompts) is described with them.
+with the creation of sessions they carry, the initial message of a creation, the
+closing and interrupting of a session, and the waking of sessions by prompts. What the
+features still to come add to the same loop is described with them.
 
 ## What
 
@@ -860,6 +860,39 @@ closed, by whichever of the ways to close one: every place the engine records an
 (`putEndpoint`) queues the removal of the checkpoint of a session endpoint that has just been
 closed, and the scan entry removes one a crash left (`checkpoint-drop`).
 
+**Prompting.** A session endpoint that is open, mapped to its native session and whose adapter
+is online is woken by a prompt when messages wait for it. Whether to send one is the decision of
+`handoff`, which the engine asks for every waiting endpoint together (`DecideNodePrompts`; a
+`DecidePrompt` of one endpoint never authorizes a send, since the cap on the turns that prompts
+started is the node's) at every moment its answer may have changed: a message that waits for the
+endpoint (an arrival, or a lease that ran out), the end of any turn, an adapter that came online or
+was probed, one that went offline, the owner's change of the cap or the clearing of a wall clock
+that was set back, and the `RetryAt` the decision names for the two holds nothing else brings it
+back from. Each endpoint keeps, in memory, the event that waits to be judged (it stays until a
+prompt is sent or nothing waits), when it last called recv, and whether a turn that a prompt
+started may be running: from the dispatch of the prompt until that turn ends or the prompt is
+known not to have started one. That count is what `DecideNodePrompts` is given as running; a turn of
+an adapter that is offline is not in it, and an endpoint whose adapter is offline does not wait.
+What waits is the messages a recv would hand something out of, less those whose check at the
+hand-out is a suspension. The cap is the node's setting `node_prompt_turns`, the other values are
+the decided ones. After every command of the loop the engine asks again if something changed (a step
+of the loop like the serving of waiting recvs), and not before the node serves.
+
+A prompt is carried out in this order. The attempt is written as in flight in the endpoint's
+attempts record (`prompt-begin`) before the adapter is called, with its kind and the target
+records it covers, so that a node that dies in between finds it. The call runs in a worker the
+engine owns, and its result is a command of the loop that records how the attempt ended
+(`prompt-end`): when the prompt was delivered the covered target records are marked notified first
+and the attempts record last, and the checkpoint of the attempt is dropped after that. A refusal,
+and a call that found the adapter not connected, is a failure; an answer that does not say whether
+the prompt arrived is asked of the adapter (`prompt.reconcile`, given the stored checkpoint of the
+attempt). The verdict found is a delivery, and counts the turn it started while it runs; provably
+absent is a failure; anything else, a call that got no answer included, is an unknown outcome,
+which counts toward the hourly cap and nothing else. The attempt is never sent again whatever the
+verdict. Step 11 of the start does the same for every attempt found in flight; an adapter that is
+not connected is asked when it is. A write that fails keeps the outcome and is tried again after
+`RetryBackoff`.
+
 **The start, as far as the engine is concerned.** The steps of the start are numbered
 in the order the node takes them; the engine takes part in these:
 
@@ -868,7 +901,7 @@ in the order the node takes them; the engine takes part in these:
 | 6 | Scan `state/`, quarantine and repair, rebuild the view | `Open` (the scan entry) |
 | 8 | Management interface opens; reads answer, changes are refused | `Start` |
 | 10 | Adapter instances start and are admitted | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed` |
-| 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery`: creations past their deadline are settled, the others are asked of the adapter again (a creation whose endpoint or initial message is lost is failed instead), and the same for the closes and interrupts |
+| 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery`: creations past their deadline are settled, the others are asked of the adapter again (a creation whose endpoint or initial message is lost is failed instead), and the same for the closes and interrupts; every prompt attempt that was in flight is asked of its adapter (`prompt.reconcile`), and none is sent again |
 | 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick`: the first time a record is ticked after the start, since the schedule holds the ticks back until then (a source delivery still queued or accepted past `report_by` is left open for the pull of step 14) |
 | 13 | Send the feedback that fell due | phase `feedback` |
 | 14 | Go on with the loopback of outgoing messages | phase `outbound`: every unsettled source record is sent or asked about again, and a delivery past `report_by` that waits for its last pull is pulled and closed |
@@ -1160,6 +1193,32 @@ reproducible).
   between the two would leave a reminder for a fact that changed. Deriving it from
   the authority means a confirmation of another statement does not count, and the
   node made again over the same data directory reminds again.
+- **The attempt is on disk before the adapter hears of it, and an unknown one is asked about,
+  never sent again.** A prompt that may have started a turn, sent a second time, may start a
+  second one, and nothing the node holds can tell the two apart afterwards. So the in-flight
+  record comes first, a restart finds it and asks the adapter (the attempt identifier is what
+  the adapter finds in the native record), and whatever the adapter says, the next prompt is a
+  new attempt chosen by the rules, never the same one again. The cost of the order is one write
+  before every prompt, which is the price of being able to say what was sent.
+- **One decision for the whole node, asked at every moment its answer may have changed.** The
+  cap on the turns that prompts started belongs to the node, so no endpoint can be judged
+  alone: a place that falls free is an event of no waiting endpoint, and an endpoint held back
+  would wait for ever for one that nothing brings. Asking again after any command that changed
+  what the decision reads, and not on a timer, keeps it out of every handler that changes the
+  state (the cap, a turn, a connection, an arrival) and makes a place that fell free go to the
+  endpoint that has waited longest in the same step. The decision is asked of every endpoint
+  that has an event and no other, so an endpoint with an unread prompt is not woken by the
+  events of others.
+- **A turn that is not observed is not counted, and one that is counted again is not forgotten.**
+  The state of a turn of an adapter that is away is unknown, and a turn nobody can see must not
+  stop the node; an endpoint whose adapter is away is not judged, because a prompt for it is
+  bound to fail and its failure would be taken for a reason to call delivery blocked. When the
+  adapter returns, the turns it reports running are the ones that still count.
+- **A prompt that found the adapter not in service waits for the probe, not for the next
+  message.** The host tells the node that an adapter started before it puts the connection in
+  service, so the first judgment after a connection can find the call refused with nothing sent.
+  That is a failure the next event cures, and the adapter's probe is that event: without it the
+  message would wait for the next arrival or turn end, which may never come.
 
 ## Where
 
@@ -1256,8 +1315,8 @@ reproducible).
 | A control signal the target refuses at intake is rejected at once with its reason, answered from its record when repeated or asked about, kept like a finished control record, and survives a crash at every write | `intake_control.go` (`controlTarget`, `refuseControl`), `inbound.go` (`answerPull`) | `TestAControlSignalTheTargetRefusesAtIntakeIsRejectedAtOnceWithItsReason`, `TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected`, `TestARefusedControlSignalIsAnsweredFromItsRecordWhenItIsRepeated`, `TestARefusedControlSignalIsKeptWhileASenderCanAskAndSweptAfter`, `TestARefusedControlSignalRecoversFromACrashAtEveryPoint` |
 | A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline` |
 | What the adapter refuses is told, the endpoint is closed and no session is made | `create.go` (`createResult`, `settleCreate`) | `TestSessionCreateWithParamsBeyondPresetIsRefused`, `TestSessionCreateFailedAsControlUnknownAlertsTheOwner` |
-| A native session made and an adapter lost are one session | `create.go` (`startCreate`, `redriveCreates`, `recoverReconcile`) | `TestAdapterKilledAfterNativeCreateYieldsOneSession`, `TestCreationCutOffByACrashIsGoneOnWithOneSession` |
-| A creation that is not ready by its deadline is unconfirmed, closes its endpoint and alerts the owner; one past its deadline at the start is settled the same way | `create.go` (`createDeadline`, `recoverReconcile`) | `TestSessionCreateNotReadyByItsDeadlineIsUnconfirmedAndALateSessionIsAlerted`, `TestCreationOverdueAtStartIsSettledAsUnconfirmed` |
+| A native session made and an adapter lost are one session | `create.go` (`startCreate`, `redriveCreates`, `reconcileCreations`) | `TestAdapterKilledAfterNativeCreateYieldsOneSession`, `TestCreationCutOffByACrashIsGoneOnWithOneSession` |
+| A creation that is not ready by its deadline is unconfirmed, closes its endpoint and alerts the owner; one past its deadline at the start is settled the same way | `create.go` (`createDeadline`, `reconcileCreations`) | `TestSessionCreateNotReadyByItsDeadlineIsUnconfirmedAndALateSessionIsAlerted`, `TestCreationOverdueAtStartIsSettledAsUnconfirmed` |
 | A creation whose control record was closed first is reported loudly once and not tried again | `create.go` (`settleCreate`, `forgetCreation`), `intake_control.go` (`withReply`) | `TestCreationWhoseControlRecordWasClosedIsReportedOnceAndNotRetried` |
 | A reply or the reply to a creation reaches a sender whose declaration takes nobody's messages | `outbound.go` (`applyControlReply`) | `TestRepliesAndCreateRepliesPassRestrictedDeclaration` |
 | `endpoint.status` is answered by the node | `intake_control.go` (`statusReply`) | `TestEndpointStatusIsAnsweredByTheDaemon` |
@@ -1296,6 +1355,13 @@ reproducible).
 | The body is held by what needs it, and every record has one of its own | `inbound.go` (`settledSource`, `writeArrivals`), `outbound.go`, `drain.go` (`settledIn`); the engine only writes the record without its reference, and the store removes that record's body | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt`, `TestEachRecordOfAMessageHasABodyFileOfItsOwnThatGoesWithItsFinalState`, `TestEvidenceThatFinishesASourceDeliveryRemovesTheBodyOfTheSourceRecord`, `TestCloseBatchClosesRecordsAndDropsTheBodyReferenceOfEachRecordItClosesAndOfNoOther` |
 | Every write of taking a message in survives a crash, and every declared step is crashed at | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint`: a message, a message the target refuses (it holds no body), an envelope and an answer that no source record of this node sent (the target writes the body), an answer with evidence, and an answer whose evidence ends the question's last delivery (the transaction removes the question's own body); a message or an answer that has a source ends handled once, and the test fails when a declared step is reached by no scenario |
 | The receiving entry under arbitrary bytes | `inbound.go` | `FuzzInbound` |
+| An endpoint is woken once for messages that arrive together, not while its turn runs or its prompt is unread, once more when a turn ends with the prompt unread, and again for a message that arrives after the minimum interval | `prompts.go` (`noteArrival`, `noteTurnEnded`, `servePrompts`, `retryPrompt`) | `TestBusyOrUnreadAgentGetsNoFeedback`, `TestUnreadPromptRepromptedOnce`, `TestNewArrivalAfterMinIntervalWakesOnce`, `TestFiveArrivalsStartOneTurn` |
+| The turns that prompts start are capped for the node, the endpoint that waited longest goes first, a raised cap and a turn that ends free places, and a turn that went on while the adapter was away holds its place | `prompts.go` (`promptRound`, `servePrompts`), `operations_settings.go` | `TestPromptTurnsBeyondNodeCapWaitOldestFirst` |
+| An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceStarted`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
+| The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
+| A refusal is a failure, a lost answer is a delivery or an unknown outcome as the adapter says, and only a delivery marks the message | `prompts.go` (`promptResult`, `reconcileResult`, `settlePrompt`) | `TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain` |
+| The checkpoint of a prompt attempt is dropped when the attempt settles | `prompts.go` (`dropAttemptCheckpoint`), `store.CheckpointDrop` | `TestSettledPromptAttemptDropsItsCheckpoint` |
+| A prompt does not make the check at recv pass | `pull.go` (`handoutAuthorization`) | `TestDeclarationTightenedAfterPromptRejectsAtRecv` |
 
 Known gaps, each filled in with the feature it belongs to:
 
@@ -1311,14 +1377,28 @@ Known gaps, each filled in with the feature it belongs to:
   was accepted and no session was made, which is what the reply of a failed creation says, but
   none of its reasons fits (they name the preset, the adapter and the native runtime), and a new
   reason is a change of the protocol.
-- Phase 11 of `RecoverDelivery` settles the creations that were not settled; what else it owns
-  waits for the prompts. A prompt and a block have no replay: the store writes their target
-  records first and the head last, and phase 11 and the prompt logic redo what the head does
-  not say is done (a prompt still in flight in the head, a block the records hold and the head
-  does not report); phase 12 ticks the target and source records, phase 13
-  sends the feedback that fell due and phase 14 goes on with the outgoing messages. The
-  tick of a target record does not yet wait for an active turn before it lets an expired
+- Phase 11 of `RecoverDelivery` settles the creations that were not settled and asks the
+  adapters about the prompts that were in flight. A prompt and a block have no replay: the
+  store writes their target records first and the head last, and phase 11 and the prompt logic
+  redo what the head does not say is done (a prompt still in flight in the head, a block the
+  records hold and the head does not report); phase 12 ticks the target and source records,
+  phase 13 sends the feedback that fell due and phase 14 goes on with the outgoing messages.
+  The tick of a target record does not yet wait for an active turn before it lets an expired
   lease go: `leaseMayRelease` says yes, and the signals of turns are to decide it there.
+- Prompts go into session endpoints only. A direct endpoint is not told that messages wait
+  (`endpoint.pending` is never sent).
+- Prompt attempts are recorded as they end, but whether delivery to an endpoint is blocked is
+  not judged yet: no block is reported and the attempts record's blocked report stays empty.
+  A change of the availability an adapter reports does not make the endpoints it names be
+  judged again either; the end of a turn, an arrival and a connection of the adapter do.
+- A prompt that failed is not sent again on a timer: the endpoint is judged again by its next
+  event, except when the call found the adapter not in service, which is retried after
+  `CreateRetryBackoff` and when the adapter has been probed. Failed attempts that follow the
+  newest delivered first prompt are all kept, one record's worth each.
+- The node does not remember across a restart whether the last prompt was read, so an
+  endpoint whose agent had read it may be woken once more by the end of a turn.
+- The checkpoint of the attempt of a session creation is not dropped when the creation
+  settles; only the checkpoint of a prompt attempt is, when the prompt settles.
 - An empty body is refused: the Agent interface says a body may be empty and an envelope
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
 - Closing a session endpoint at the owner's request does not send `session.close` to the

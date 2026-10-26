@@ -391,4 +391,10 @@ The delivery side that these rules call into is described in
   `CheckBeforeAck`. Tests: `TestCheckBeforeAck` (the markers of two runtimes
   are test data), `TestCheckBeforeAckZeroMarkerSet`, `TestCompileMarkers`,
   `TestCheckBeforeAckAcceptsPackedOutput`, `TestCheckBeforeAckProperties`.
+- `internal/node/engine/prompts.go`: the caller of the prompt rules. It asks
+  `DecideNodePrompts` for every waiting endpoint whenever free places may have grown or an
+  endpoint has an event, counts `running` from the dispatch of a prompt, leaves out the
+  endpoints and the turns of an adapter that is offline, and records each attempt before
+  the adapter is called. See [the engine reference](../engine/README.md#what) ("Prompting")
+  for the order and the tests.
 - `internal/handoff/README.md`: entry points and what the caller must guarantee.

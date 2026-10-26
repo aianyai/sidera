@@ -467,12 +467,11 @@ func (e *Engine) forgetCreation(key store.TargetKey) {
 	delete(e.creations, key)
 }
 
-// recoverReconcile settles or goes on with every creation that was not settled when
+// reconcileCreations settles or goes on with every creation that was not settled when
 // the node went down (step 11): one past its reply deadline is settled as
 // unconfirmed, one whose time is not up has its deadline set again and, when its
-// adapter is connected, its call made again with the same attempt. The prompts that
-// were not settled are reconciled with the prompts.
-func (e *Engine) recoverReconcile(now time.Time) error {
+// adapter is connected, its call made again with the same attempt.
+func (e *Engine) reconcileCreations(now time.Time) error {
 	for _, key := range e.creatingKeys() {
 		c := e.view.ctl[key]
 		if e.view.endpoints[c.Intent.Endpoint] == nil {

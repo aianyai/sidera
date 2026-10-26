@@ -22,8 +22,9 @@ back, and the receiving side that judges an envelope and signs the reports, and 
 feedback the sender's node tells its endpoints, and the control signals: their sending,
 their taking in, the creation of sessions they ask for with the initial message they may carry,
 the closing and the interrupting of a session, and the pulling of messages: what
-recv hands out under a lease, what ack settles and what a lease that runs out does. Prompts
-join the same loop as further commands and add their methods to this list.
+recv hands out under a lease, what ack settles and what a lease that runs out does, and the
+prompts that wake a session: when one is sent, how its attempt is recorded before the adapter is
+called, and how one whose outcome is not known is asked about at the start.
 
 ## Entry points
 
@@ -63,6 +64,20 @@ join the same loop as further commands and add their methods to this list.
 
 ## Rules
 
+- **A prompt's attempt is on disk before the adapter is called, and is never sent again.**
+  `dispatchPrompt` writes the attempt as in flight (`PromptBegin`) and only then spawns the call;
+  a result that does not say whether the prompt arrived is asked of the adapter
+  (`prompt.reconcile`) and recorded as the verdict says, and step 11 of the start asks about every
+  attempt found in flight. No path calls `prompt.deliver` twice for one attempt.
+- **The prompt decision is asked for the whole node, and again whenever its answer may have
+  changed.** `servePrompts` runs after each command of the loop once the node serves, and acts
+  only when `promptsDirty` says something the decision reads has changed (an arrival, the end of
+  a turn, a connection, the cap, the clock). Every event that can change it sets the flag in the
+  place that owns the event; no handler asks the decision itself. A single `DecidePrompt` never
+  authorizes a send.
+- **A turn counts against the cap from the dispatch of its prompt until it ends or the prompt is
+  known not to have started one, and only while its adapter is online.** An endpoint whose
+  adapter is offline is not judged.
 - **Workers start only in the loop.** `spawn` is called from a command or a due
   entry, never from another goroutine: `finish` waits for the workers on the loop's
   goroutine, and a worker started concurrently with that wait could be missed. It

@@ -371,6 +371,7 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 	// or may not have been done: it is asked again, with the same attempt.
 	e.redriveCreates(instance, now)
 	e.redriveExecutions(instance, now)
+	e.noteInstanceStarted(instance, now)
 	return nil
 }
 
@@ -495,6 +496,7 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 	// the connection not in service yet.
 	e.redriveCreates(instance, now)
 	e.redriveExecutions(instance, now)
+	e.noteInstanceStarted(instance, now)
 	return nil
 }
 
@@ -556,6 +558,7 @@ func (e *Engine) gone(now time.Time, instance string, cause adapterhost.GoneCaus
 		return refuse(ReasonInstanceUnknown)
 	}
 	e.adapter(instance).goOffline(now)
+	e.promptsDirty = true // the turns of its sessions no longer count against the cap
 	e.log.Info("adapter gone", "instance", instance, "cause", cause.String())
 	return nil
 }
@@ -610,6 +613,9 @@ func (e *Engine) notified(now time.Time, instance string, n adapterhost.Notifica
 	case adapterproto.TurnEndedParams:
 		setFlag(&st.busy, p.Endpoint, false)
 		e.interruptTurnEnded(now, p.Endpoint)
+		if id, err := ident.ParseEndpointID(string(p.Endpoint)); err == nil {
+			e.noteTurnEnded(id)
+		}
 	case adapterproto.PromptPersistedParams:
 	default:
 		return fmt.Errorf("engine: notification %q has parameters of type %T, which is not one an adapter sends", n.Method, n.Params)

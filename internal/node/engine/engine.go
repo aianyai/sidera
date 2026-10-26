@@ -124,6 +124,13 @@ type Engine struct {
 	// settled, by the key of the control record; see execute.go.
 	executions map[store.TargetKey]*execution
 
+	// prompts is what the loop remembers of the prompting of each session endpoint;
+	// promptsDirty says something has changed that the prompt rules read, and
+	// promptsStarted that the node has begun to serve and judged every session once.
+	prompts        map[ident.EndpointID]*promptState
+	promptsDirty   bool
+	promptsStarted bool
+
 	// dueTicks are the records whose entries of the schedule fell due and that are
 	// not ticked yet; tickQueued says a command to tick them is queued.
 	dueTicks   []string
@@ -213,6 +220,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 
 		creations:  map[store.TargetKey]*creation{},
 		executions: map[store.TargetKey]*execution{},
+		prompts:    map[ident.EndpointID]*promptState{},
 	}
 	if d.RollbackPaused {
 		e.pausedSince = d.RollbackPausedSince
@@ -630,6 +638,7 @@ func (e *Engine) loop() {
 		}
 		if e.fatal == nil {
 			e.serveReady()
+			e.servePrompts()
 		}
 		if e.fatal != nil {
 			e.failLoop()
@@ -702,6 +711,7 @@ func (e *Engine) observe(now time.Time) {
 func (e *Engine) clearRollback(now time.Time) {
 	e.hw.Reset(now)
 	e.paused, e.pausedSince = false, time.Time{}
+	e.promptsDirty = true
 }
 
 // step runs one command: one reading of the clock for all of it, then the phase
@@ -795,6 +805,18 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.later(&cmdDrain{endpoint: id})
+		}
+	case schedPromptRetry:
+		if id, err := ident.ParseEndpointID(key.id); err == nil {
+			e.retryPrompt(id)
+		}
+	case schedPromptReconcile:
+		if id, err := ident.ParseEndpointID(key.id); err == nil {
+			e.startReconcile(now, id)
+		}
+	case schedPromptSettle:
+		if id, err := ident.ParseEndpointID(key.id); err == nil {
+			e.fireSettle(now, id)
 		}
 	case schedInstanceDrain:
 		e.later(&cmdInstanceDrain{instance: key.id})

@@ -53,6 +53,15 @@ const (
 	// after the adapter asked the runtime to stop it; the id is the key of the
 	// control record.
 	schedInterruptConfirm
+	// schedPromptRetry is the next time to judge a session endpoint again that is held
+	// back or whose attempt could not be recorded; the id is the endpoint.
+	schedPromptRetry
+	// schedPromptReconcile is the next call to the adapter about an attempt in flight
+	// when the adapter was not connected; the id is the endpoint.
+	schedPromptReconcile
+	// schedPromptSettle is the retry of recording how an attempt ended after a write
+	// failed; the id is the endpoint.
+	schedPromptSettle
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

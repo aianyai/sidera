@@ -132,6 +132,9 @@ func (e *Engine) recv(now time.Time, c Caller, r RecvRequest) (recvAnswer, error
 	if err != nil {
 		return recvAnswer{}, err
 	}
+	if st.rec.Kind == adapterreg.KindSession {
+		e.promptOf(st.rec.ID).lastRecv = now // a prompt sent before now has been read
+	}
 	// A newer recv ends the older wait of the endpoint, whether or not it waits: a
 	// page handed to two readers would show the agent the same message twice.
 	e.supersede(st.rec.ID)
