@@ -628,6 +628,25 @@ func scenarios() []scenario {
 				}
 			},
 		},
+		{
+			name: "archive-summaries",
+			mode: batch,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered(), summaryQuarantined()})
+			},
+			ignore: func(p string) bool { return true }, // summaries are diagnostics; the check is the reader's, below
+			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
+				got := store.ParseArchive([]byte(fin[dayFile]))
+				if len(got.Events) != 0 || len(got.Summaries) > 2 || got.Dropped > 1 {
+					t.Errorf("%s: archive reads as %d summaries, %d events, %d dropped", where, len(got.Summaries), len(got.Events), got.Dropped)
+				}
+				for _, sm := range got.Summaries {
+					if !equalRecords(sm, summaryDelivered()) && !equalRecords(sm, summaryQuarantined()) {
+						t.Errorf("%s: archive holds a summary nobody wrote: %#v", where, sm)
+					}
+				}
+			},
+		},
 		sweepScenario(farFuture),
 		sweepClosedSessionScenario(farFuture),
 		{
@@ -893,22 +912,19 @@ func sweepScenario(farFuture time.Time) scenario {
 		name:  "archive-sweep",
 		setup: world,
 		mode:  batch,
-		ignore: func(p string) bool {
-			return strings.HasPrefix(p, store.ArchiveDir+"/")
-		},
 		run: func(t *testing.T, r *rig, s *sim) error {
 			plan := store.PlanSweep(r.scan(), farFuture)
 			if len(plan.Records) == 0 {
 				t.Fatalf("the plan sweeps nothing")
 			}
-			return r.st.ArchiveSweep(plan.Chunk(farFuture))
+			return r.st.ArchiveSweep(plan.Chunk())
 		},
 		retry: func(t *testing.T, r *rig, s *sim) {
 			plan := store.PlanSweep(r.scan(), farFuture)
 			if len(plan.Records)+len(plan.Ctl)+len(plan.Outs)+len(plan.OutLosts)+len(plan.Endpoints) == 0 {
 				return
 			}
-			mustDo(t, r.st.ArchiveSweep(plan.Chunk(farFuture)))
+			mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 		},
 		verify: func(t *testing.T, r *rig) {
 			if sc := r.scan(); len(sc.OutLost) != 0 {
@@ -928,8 +944,8 @@ func sweepScenario(farFuture time.Time) scenario {
 
 // sweepInvariants are what holds in every crash state of a sweep: nothing is
 // removed whose sequence floor is not durable, and a control record goes before
-// the delivery derived from it. The summaries of the archive are best effort and
-// are not among them.
+// the delivery derived from it. A sweep writes nothing to the archive, so the
+// summaries are not among them.
 func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 	t.Helper()
 	o1, o2 := srcOutFinished(1), srcOutFinished(2)

@@ -649,7 +649,7 @@ func TestAWriteThatMeetsADamagedFloorFileLeavesItToTheSettlement(t *testing.T) {
 	seed(t, r.mem, srcOutFinished(1), store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 40}})
 	damageBody(t, r.mem, path.Join(store.SeqDir, name))
 	plan := store.PlanSweep(r.scan(), base.Add(farAway))
-	err := r.st.ArchiveSweep(plan.Chunk(base.Add(farAway)))
+	err := r.st.ArchiveSweep(plan.Chunk())
 	var de *store.DamagedFileError
 	if !errors.As(err, &de) {
 		t.Fatalf("error = %v, want a *DamagedFileError", err)
@@ -657,7 +657,7 @@ func TestAWriteThatMeetsADamagedFloorFileLeavesItToTheSettlement(t *testing.T) {
 	sc := r.scan()
 	mustDo(t, r.st.Quarantine(store.Quarantine{File: de.File, Scan: sc, Alert: newSim(t, r.st).alert("corrupt_record", de.File.Dir, de.File.Name)}))
 	plan = store.PlanSweep(r.scan(), base.Add(farAway))
-	mustDo(t, r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	if sc := r.scan(); len(sc.Out) != 0 || len(sc.Damaged) != 0 || len(sc.Alerts) != 1 {
 		t.Errorf("the sweep must go on after the floor file was settled: %d records, damaged %v, alerts %v", len(sc.Out), sc.Damaged, sc.Alerts)
 	}

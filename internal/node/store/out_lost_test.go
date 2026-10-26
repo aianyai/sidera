@@ -204,7 +204,7 @@ func TestPlanSweepTakesAnOutLostRecordOfAnOpenEndpointOnlyOnceItsFeedbackIsGone(
 	if early := store.PlanSweep(r.scan(), at.Add(-time.Nanosecond)); len(early.OutLosts) != 0 {
 		t.Errorf("swept before its discovery time: %v", early.OutLosts)
 	}
-	mustDo(t, r.st.ArchiveSweep(plan.Chunk(at)))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	sc := r.scan()
 	if len(sc.OutLost) != 1 || sc.OutLost[0].Name() != pending.Name() || len(sc.Seq) != 0 {
 		t.Errorf("after the sweep: out-lost %v, floors %v; the pending one stays and a sweep of it writes no floor", sc.OutLost, sc.Seq)
@@ -218,11 +218,11 @@ func TestArchiveSweepRemovesOutLostRecordsAndToleratesOnesAlreadyGone(t *testing
 	gone, kept := lostNotice(1, 1, base), lostNotice(1, 2, base)
 	gone.Feedback, kept.Feedback = nil, nil
 	seed(t, r.mem, gone)
-	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: base, OutLosts: []store.OutLostRecord{gone, kept}}))
+	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{OutLosts: []store.OutLostRecord{gone, kept}}))
 	if present(t, r, store.OutDir, gone.Name()) {
 		t.Error("the record is still there")
 	}
-	if err := r.st.ArchiveSweep(store.SweepChunk{Now: base, OutLosts: []store.OutLostRecord{{}}}); err == nil {
+	if err := r.st.ArchiveSweep(store.SweepChunk{OutLosts: []store.OutLostRecord{{}}}); err == nil {
 		t.Error("a record that has no name was accepted")
 	}
 }

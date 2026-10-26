@@ -338,7 +338,6 @@ func TestASweepRemovesTheBodiesOfTheRecordsItRemoves(t *testing.T) {
 	seedBodies(t, r.mem, all...)
 	r.rec.forget()
 	err := r.st.ArchiveSweep(store.SweepChunk{
-		Now:     base,
 		Records: []store.FileRef{{Dir: store.InDir, Name: swept[0].Name()}},
 		Ctl:     []store.FileRef{{Dir: store.CtlDir, Name: swept[1].Name()}},
 		Outs:    []store.OutRecord{swept[2].(store.OutRecord)},

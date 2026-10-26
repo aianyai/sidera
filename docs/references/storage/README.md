@@ -317,12 +317,11 @@ see (`Tx.run` sets it at the first such completion, whatever the writes before i
 | `SyncDir` (a write of its own) | `sync-dir` |
 | `Append` | none |
 
-A write without a commit step does not commit. The summaries of `archive-sweep`
-are appended first, without a sync, and the sequence floors and removals after
-them carry its commit point, so a failed append has the class `fsx` gave it (the
-sweep deletes nothing and is done again). `archive-events` only appends, with no
-sync that follows, so it has no commit point and a failure of it never becomes
-fatal by this rule.
+A write without a commit step does not commit. `archive-events` and
+`archive-summaries` only append, with no sync that follows, so they have no commit
+point and a failure of either never becomes fatal by this rule. `archive-sweep`
+writes nothing to the archive: its commit point is the first sequence floor or
+removal.
 
 Before it, a failure has the class `fsx` gave it. From it on, every failure, in
 the same operation or in a later write, is `Fatal`: the disk is in one of the
@@ -910,13 +909,19 @@ the torn tail a crash leaves, and the half line a failed append leaves in the
 middle of a file, are lines of their own and cannot swallow the first line that
 follows. A reader resumes at every newline, skips empty lines, drops and counts a
 line that is not intact and ignores a last line without a newline. Events are not
-synced, and neither is a summary: the archive is best effort. A sweep appends its
-summaries first and goes on to the floors and removals without waiting for them to
-be durable, because nothing in the node reads them back to decide anything. A
-failure or a crash may therefore lose a summary (a power loss after the removals),
-or write one twice (a crash after the append and before the removals, which the
-sweep that follows archives again, and a sweep that failed after a partial append
-and was retried). A reader that counts summaries must deduplicate them by the
+synced, and neither is a summary: the archive is best effort. The summaries of a
+sweep are a transaction of their own, `archive-summaries` (`Store.ArchiveSummaries`),
+which the caller runs before the sweep and does not wait for: a sweep that failed to
+append them would not free the space of a full disk, which is when it is most
+needed, and nothing in the node reads them back to decide anything. The store has no
+log and no channel for a failure that is not fatal, so it does not swallow one: the
+caller that sweeps logs the error and sweeps on
+(`TestAFailedAppendOfSummariesDoesNotStopTheSweepThatFollows`,
+`TestASweepWritesNothingToTheArchive`). A failure or a crash may therefore lose a
+summary (a power loss after the removals, or an append that failed), or write one
+twice (a crash after the append and before the removals, which the sweep that
+follows archives again, and an append that failed halfway and was retried). A
+reader that counts summaries must deduplicate them by the
 record's file hash, and must not expect one for every record that left.
 
 **Retention.** A delivery record is a live file until its deliveries are final and

@@ -145,7 +145,7 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	if len(plan.Records)+len(plan.Outs) == 0 {
 		t.Fatal("the sweep has nothing to do after a life of finished deliveries")
 	}
-	mustDo(t, r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	check("sweep")
 	mustDo(t, r.st.ArchiveExpire(store.ExpiredArchiveFiles([]string{"2026-01-01.jsonl"}, base, 30)))
 	acked := store.AlertRecord{ID: store.AlertID{1}, Kind: "version_untested", At: base, Detail: "d", Acked: &store.AlertAcked{At: base, Operation: adminResult(3).Key.ID}}

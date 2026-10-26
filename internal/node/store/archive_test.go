@@ -81,16 +81,13 @@ func TestArchiveLinesAndFileNames(t *testing.T) {
 	if got, want := readFile(t, r, dayFile), "\n"+l.event+l.eventN; got != want {
 		t.Errorf("after ArchiveEvents:\n got %q\nwant %q", got, want)
 	}
-	err := r.st.ArchiveSweep(store.SweepChunk{
-		Now:       time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC),
-		Summaries: []store.ArchiveSummary{summaryDelivered(), summaryQuarantined()},
-	})
+	err := r.st.ArchiveSummaries(time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC), []store.ArchiveSummary{summaryDelivered(), summaryQuarantined()})
 	if err != nil {
-		t.Fatalf("ArchiveSweep: %v", err)
+		t.Fatalf("ArchiveSummaries: %v", err)
 	}
 	want := "\n" + l.event + l.eventN + "\n" + l.summaryDelivered + l.summaryQuarantined
 	if got := readFile(t, r, dayFile); got != want {
-		t.Errorf("after ArchiveSweep:\n got %q\nwant %q", got, want)
+		t.Errorf("after ArchiveSummaries:\n got %q\nwant %q", got, want)
 	}
 
 	got, err := r.st.ReadArchive("2026-10-24.jsonl")
@@ -219,9 +216,7 @@ func TestFirstAppendOfATransactionStartsAfterATornTail(t *testing.T) {
 	// A crash tears the tail of the file: half a line, no newline.
 	torn := archiveLines.eventN[:30]
 	appendRaw(t, r.mem, dayFile, torn)
-	if err := r.st.ArchiveSweep(store.SweepChunk{
-		Now: time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC), Summaries: []store.ArchiveSummary{summaryDelivered()},
-	}); err != nil {
+	if err := r.st.ArchiveSummaries(time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC), []store.ArchiveSummary{summaryDelivered()}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := r.st.ReadArchive("2026-10-24.jsonl")
@@ -283,10 +278,8 @@ func TestFailedAppendLeavesAHalfLineAndLaterTransactionsStayReadable(t *testing.
 	if err := st.ArchiveEvents(base, []store.ArchiveEvent{eventChunk()}); err != nil {
 		t.Fatalf("a later transaction: %v", err)
 	}
-	if err := st.ArchiveSweep(store.SweepChunk{
-		Now: time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC), Summaries: []store.ArchiveSummary{summaryDelivered()},
-	}); err != nil {
-		t.Fatalf("a later sweep: %v", err)
+	if err := st.ArchiveSummaries(time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC), []store.ArchiveSummary{summaryDelivered()}); err != nil {
+		t.Fatalf("a later write of summaries: %v", err)
 	}
 	got, err := st.ReadArchive("2026-10-24.jsonl")
 	if err != nil {
@@ -298,28 +291,47 @@ func TestFailedAppendLeavesAHalfLineAndLaterTransactionsStayReadable(t *testing.
 	}
 }
 
-// The first line of a sweep that follows a failed one is intact for the same
-// reason, and a failed sweep removed nothing: the summaries are written before
-// any removal and a failure of the append is before the commit point.
-func TestFailedSweepAppendRemovesNothing(t *testing.T) {
+// The summaries are a transaction of their own: one whose append failed is not
+// fatal, and the sweep that follows, which writes no archive line, removes the
+// records all the same. A sweep that waited for its summaries could not free the
+// space of a full disk.
+func TestAFailedAppendOfSummariesDoesNotStopTheSweepThatFollows(t *testing.T) {
 	r := newRig(t)
 	rec := srcOutFinished(1)
 	if err := r.st.SourceUpdate(rec); err != nil {
 		t.Fatal(err)
 	}
 	r2 := newFaultyRig(t, r.mem)
-	r2.faulty.Fail(fsxtest.Match{Tx: "archive-sweep", Role: "archive", Step: fsx.StepWrite, Hit: 1}, syscall.EIO)
-	err := r2.st.ArchiveSweep(store.SweepChunk{
-		Now: time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC), Summaries: []store.ArchiveSummary{summaryDelivered()},
-		Outs: []store.OutRecord{rec},
-	})
+	r2.faulty.Fail(fsxtest.Match{Tx: "archive-summaries", Role: "archive", Step: fsx.StepWrite, Hit: 1}, syscall.EIO)
+	err := r2.st.ArchiveSummaries(time.Date(2026, 10, 24, 13, 0, 0, 0, time.UTC), []store.ArchiveSummary{summaryDelivered()})
 	if err == nil {
 		t.Fatal("the injected failure did not surface")
 	}
 	if txn.IsFatal(err) {
-		t.Errorf("a failed append is before the commit point and is not fatal: %v", err)
+		t.Errorf("a failed append has no commit point and is not fatal: %v", err)
 	}
-	if _, err := r.mem.Stat(store.OutDir + "/" + rec.Name()); err != nil {
-		t.Errorf("a record was removed by a sweep whose summary was not written: %v", err)
+	if err := r2.st.ArchiveSweep(store.SweepChunk{Outs: []store.OutRecord{rec}}); err != nil {
+		t.Fatalf("the sweep after the failed append: %v", err)
+	}
+	if _, err := r.mem.Stat(store.OutDir + "/" + rec.Name()); err == nil {
+		t.Errorf("the record is still there: a sweep waited for a summary that was not written")
+	}
+}
+
+// A sweep appends nothing to the archive, whatever it removes.
+func TestASweepWritesNothingToTheArchive(t *testing.T) {
+	r := newRig(t)
+	rec := srcOutFinished(1)
+	if err := r.st.SourceUpdate(rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.st.ArchiveSweep(store.SweepChunk{Outs: []store.OutRecord{rec}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.mem.Stat(dayFile); err == nil {
+		t.Errorf("the sweep wrote %s", dayFile)
+	}
+	if entries, err := r.mem.ReadDir(store.ArchiveDir); err == nil && len(entries) != 0 {
+		t.Errorf("the sweep left %d files in the archive", len(entries))
 	}
 }

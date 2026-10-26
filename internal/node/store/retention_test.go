@@ -186,7 +186,7 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	// refer to the same bytes in files of their own, so the first goes and the
 	// second stays; the body of a record that does not exist was an orphan before
 	// and is the business of the orphan rule, not of the sweep.
-	mustDo(t, r.st.ArchiveSweep(plan.Chunk(now)))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	bodyFiles := snapshot(t, r.mem, store.BodiesDir)
 	for _, swept := range []store.Record{tgtIn(1), created(t, 4, 5), derivedIn(4, 5), derivedIn(6, 9)} {
 		if _, there := bodyFiles[bodyPath(swept)]; there {

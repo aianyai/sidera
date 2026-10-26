@@ -31,7 +31,7 @@ engine applies the delivery rules and calls the writes.
 | `Store.Quarantine`, `QuarantineBody`, `QuarantineSessions` | Settling a damaged file, or the record whose body is damaged, in one transaction: the effects first, the alert, and the damaged file last. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
 | `NewOutLostRecord`, `OutLostKey`, `OutLostReplays`, `Store.OutLostClear` | The notice that a file of `out/` was lost unread, built in one place; the work of the replay that clears its feedback item once a notice covers it, and the write that does. |
-| `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves. |
+| `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSummaries`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves: the summaries first in a transaction of their own, which the caller logs and goes on without, then the removals. |
 | `BodyFileName`, `Store.ReadBody`, `Store.Available` | The name of a record's own body file, a body read checked against the digest and length its record holds, and free space. |
 | `MissingStateDirs`, `StateDirs` | The directories of `state/`, for the layout rule of the composition root. |
 
@@ -148,6 +148,10 @@ engine applies the delivery rules and calls the writes.
   writes: a read that failed after the commit point would be an ordinary error on
   a disk that already changed.
 - **A removal is checked.** The sweep refuses a name that is not a record file.
+- **A sweep writes nothing to the archive.** The summaries of what it removes are
+  `ArchiveSummaries`, a transaction of the caller's choosing and best effort: a sweep
+  that waited for them could not run on a full disk, where it is needed. The store
+  has no log, so the error is the caller's to log.
 - **A control record goes before the delivery derived from it** in a sweep.
 - **Floors are written before records are removed, and `ArchiveSweep` works them
   out.** A chunk carries the source records it removes (`SweepChunk.Outs`), not

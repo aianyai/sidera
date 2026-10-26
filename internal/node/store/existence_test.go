@@ -64,23 +64,23 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 			}},
 		{"ArchiveSweep removing the body of a target record", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error {
-				return st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.InDir, Name: target.Name()}}})
+				return st.ArchiveSweep(store.SweepChunk{Records: []store.FileRef{{Dir: store.InDir, Name: target.Name()}}})
 			}},
 		{"ArchiveSweep removing the body of a control record", func(t *testing.T, r *rig) { seedBodies(t, r.mem, ctl) }, bodyPath(ctl),
 			func(st *store.Store) error {
-				return st.ArchiveSweep(store.SweepChunk{Now: base, Ctl: []store.FileRef{{Dir: store.CtlDir, Name: ctl.Name()}}})
+				return st.ArchiveSweep(store.SweepChunk{Ctl: []store.FileRef{{Dir: store.CtlDir, Name: ctl.Name()}}})
 			}},
 		{"ArchiveSweep removing the body of a source record after it wrote a floor", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), source)) }, bodyPath(source),
 			func(st *store.Store) error {
-				return st.ArchiveSweep(store.SweepChunk{Now: base, Outs: []store.OutRecord{source}})
+				return st.ArchiveSweep(store.SweepChunk{Outs: []store.OutRecord{source}})
 			}},
 		{"ArchiveSweep removing a record", func(t *testing.T, r *rig) { seed(t, r.mem, tgtIn(1)) }, path.Join(store.InDir, tgtIn(1).Name()),
 			func(st *store.Store) error {
-				return st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.InDir, Name: tgtIn(1).Name()}}})
+				return st.ArchiveSweep(store.SweepChunk{Records: []store.FileRef{{Dir: store.InDir, Name: tgtIn(1).Name()}}})
 			}},
 		{"ArchiveSweep removing an endpoint", func(t *testing.T, r *rig) { seed(t, r.mem, endpoint) }, path.Join(store.EndpointsDir, endpoint.Name()),
 			func(st *store.Store) error {
-				return st.ArchiveSweep(store.SweepChunk{Now: base, Endpoints: []store.FileRef{{Dir: store.EndpointsDir, Name: endpoint.Name()}}})
+				return st.ArchiveSweep(store.SweepChunk{Endpoints: []store.FileRef{{Dir: store.EndpointsDir, Name: endpoint.Name()}}})
 			}},
 		{"OrphanGC", func(t *testing.T, r *rig) { seedBodyOf(t, r.mem, target, bodyBytes(1)) }, bodyPath(target),
 			func(st *store.Store) error { return st.OrphanGC([]string{store.BodyFileName(target.Name())}) }},

@@ -50,6 +50,8 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 			[]string{path.Join(store.AdminDir, adminResult(2).Name())}},
 		{"archive-events", nil, func(r *rig) error { return r.st.ArchiveEvents(base, []store.ArchiveEvent{eventAccepted()}) },
 			[]string{dayFile}},
+		{"archive-summaries", nil, func(r *rig) error { return r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered()}) },
+			[]string{dayFile}},
 		{"feedback-form", nil, func(r *rig) error {
 			o := srcOut(1, false)
 			o.Feedback = []delivery.Item{feedbackItem(1)}
@@ -223,13 +225,13 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 		"a source record of a sweep that has no sending endpoint": func(r *rig) error {
 			o := srcOutFinished(1)
 			o.Key.Sender = ident.EndpointID{}
-			return r.st.ArchiveSweep(store.SweepChunk{Now: base, Outs: []store.OutRecord{o}})
+			return r.st.ArchiveSweep(store.SweepChunk{Outs: []store.OutRecord{o}})
 		},
 		"a source record among the records of a sweep": func(r *rig) error {
-			return r.st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.OutDir, Name: srcOutFinished(1).Name()}}})
+			return r.st.ArchiveSweep(store.SweepChunk{Records: []store.FileRef{{Dir: store.OutDir, Name: srcOutFinished(1).Name()}}})
 		},
 		"an endpoint among the records of a sweep": func(r *rig) error {
-			return r.st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.EndpointsDir, Name: session(5, store.EndpointClosed, "").Name()}}})
+			return r.st.ArchiveSweep(store.SweepChunk{Records: []store.FileRef{{Dir: store.EndpointsDir, Name: session(5, store.EndpointClosed, "").Name()}}})
 		},
 		"an archive event without a file": func(r *rig) error {
 			return r.st.ArchiveEvents(base, []store.ArchiveEvent{{At: base, Event: "x"}})

@@ -131,11 +131,14 @@ var (
 	declCheckpointPut = txn.Decl{Name: "checkpoint-put", Kind: txn.Normal, Writes: []txn.Write{rep("checkpoint")}}
 	declAlertRaise    = txn.Decl{Name: "alert-raise", Kind: txn.Normal, Writes: []txn.Write{rep("alert")}}
 	declArchiveEvents = txn.Decl{Name: "archive-events", Kind: txn.Normal, Writes: []txn.Write{w("archive", txn.OpAppend, many)}}
+	// archive-summaries: the summaries of the records a sweep is about to remove, in a
+	// transaction of their own so that a failure to append them is the caller's to
+	// log and never stops the sweep that frees the space.
+	declArchiveSummaries = txn.Decl{Name: "archive-summaries", Kind: txn.Normal, Writes: []txn.Write{w("archive", txn.OpAppend, many)}}
 	// archive-sweep: the records go and their directories are synced before any body
 	// is removed and bodies/ is synced, so that no crash, not even a power loss that
 	// keeps the directories in another order, leaves a record whose body is gone.
 	declArchiveSweep = txn.Decl{Name: "archive-sweep", Kind: txn.Normal, Writes: []txn.Write{
-		w("archive", txn.OpAppend, many, optional),
 		rep("seq-floor", many, optional),
 		rm("ctl", many, optional), syncDir("ctl-dir", optional),
 		rm("record", many, optional), syncDir("record-dir", many, optional),
@@ -187,7 +190,7 @@ func Transactions() []*txn.Decl {
 		&declControlResult, &declControlReply, &declPromptBegin, &declPromptEnd, &declBlocked,
 		&declLease, &declAck, &declTick, &declEndpointUpdate, &declEndpointClose,
 		&declEndpointDrain, &declInstanceDrain, &declFeedbackForm, &declFeedbackClear,
-		&declCheckpointPut, &declAlertRaise, &declArchiveEvents, &declArchiveSweep,
+		&declCheckpointPut, &declAlertRaise, &declArchiveEvents, &declArchiveSummaries, &declArchiveSweep,
 		&declArchiveExpire, &declAlertAck, &declDaemonStop,
 		&declQuarantine, &declOrphanGC, &declOrphanGCEndpoint, &declCtlEffectReplay,
 	}

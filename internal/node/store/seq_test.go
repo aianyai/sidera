@@ -128,7 +128,7 @@ func TestSweepKeepsNumbersFromBeingGivenAgain(t *testing.T) {
 	if len(plan.Outs) != 3 {
 		t.Fatalf("the sweep takes %d source records, want 3", len(plan.Outs))
 	}
-	mustDo(t, r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	after := openRig(t, r.mem.CrashCloneWorst())
 	sc = after.scan()
 	if len(sc.Out) != 0 {
@@ -147,7 +147,6 @@ func TestSweepFloorsPruneTargetsThatCannotReceiveAndNeverLowerAFloor(t *testing.
 	toKept.Key.Recipients, toKept.Envelope.Seq = []ident.Address{kept}, map[ident.EndpointID]uint64{kept.Endpoint: 4}
 	toNew.Key.Recipients, toNew.Envelope.Seq = []ident.Address{addr(2, 9)}, map[ident.EndpointID]uint64{ep(9): 2}
 	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{
-		Now:        base,
 		Outs:       []store.OutRecord{toKept, toNew},
 		KeepTarget: func(a ident.Address) bool { return a != gone },
 	}))
@@ -203,7 +202,7 @@ func TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten(t *testing.T) 
 		if len(plan.Outs) != 3 {
 			t.Fatalf("the plan takes %d source records, want 3", len(plan.Outs))
 		}
-		wantDamaged(t, "ArchiveSweep", r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
+		wantDamaged(t, "ArchiveSweep", r.st.ArchiveSweep(plan.Chunk()))
 		if diff := equalMaps(snapshot(t, r.mem, "."), before, nil); diff != "" {
 			t.Errorf("a sweep that could not read a floor file changed the disk: %s", diff)
 		}
@@ -237,7 +236,7 @@ func TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten(t *testing.T) 
 			t.Errorf("the damaged source record was not replaced")
 		}
 		plan := store.PlanSweep(sc, base.Add(farAway))
-		mustDo(t, r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
+		mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	})
 }
 
@@ -257,7 +256,7 @@ func TestArchiveSweepWritesTheFloorOfEverySenderAndTargetOfTheRecordsItRemoves(t
 	other.Envelope.Seq = map[ident.EndpointID]uint64{a.Endpoint: 5}
 	lost := lostOutAt(finishedOutOf(1, 3).Key, base)
 	seed(t, r.mem, multi, other, lost)
-	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Now: base, Outs: []store.OutRecord{multi, other, lost}}))
+	mustDo(t, r.st.ArchiveSweep(store.SweepChunk{Outs: []store.OutRecord{multi, other, lost}}))
 	sc := r.scan()
 	if len(sc.Out) != 0 {
 		t.Fatalf("%d source records left", len(sc.Out))

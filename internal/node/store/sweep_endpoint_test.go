@@ -3,7 +3,6 @@ package store_test
 import (
 	"fmt"
 	"path"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,7 +30,7 @@ func outRetention(i int) time.Time {
 func sweepOnce(t testing.TB, r *rig, now time.Time) store.SweepPlan {
 	t.Helper()
 	plan := store.PlanSweep(r.scan(), now)
-	mustDo(t, r.st.ArchiveSweep(plan.Chunk(now)))
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	return plan
 }
 
@@ -155,7 +154,7 @@ func sweepClosedSessionScenario(farFuture time.Time) scenario {
 			if len(plan.Records)+len(plan.Outs)+len(plan.Endpoints)+len(plan.Ctl) == 0 {
 				return nil
 			}
-			if err := r.st.ArchiveSweep(plan.Chunk(farFuture)); err != nil {
+			if err := r.st.ArchiveSweep(plan.Chunk()); err != nil {
 				return err
 			}
 		}
@@ -170,8 +169,7 @@ func sweepClosedSessionScenario(farFuture time.Time) scenario {
 				store.SeqRecord{Sender: ep(5), Floors: map[ident.Address]uint64{addr(2, 2): 1}})
 		},
 		mode: batch, mustComplete: true,
-		ignore: func(p string) bool { return strings.HasPrefix(p, store.ArchiveDir+"/") },
-		run:    func(t *testing.T, r *rig, s *sim) error { return passes(r) },
+		run: func(t *testing.T, r *rig, s *sim) error { return passes(r) },
 		retry: func(t *testing.T, r *rig, s *sim) {
 			mustDo(t, passes(r))
 		},

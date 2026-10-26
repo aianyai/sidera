@@ -25,7 +25,7 @@ type operation struct {
 	removes []string
 	call    func() error
 	// summaries are the archive summaries the plan of the call must name, by key.
-	// They are best effort: a power loss may take them, so no clone is judged by them.
+	// The plan names them for the caller to append; a sweep itself writes none.
 	summaries []string
 	// floor is the number the call remembers for the pair of the fixtures: the
 	// highest sequence number of the source records it removes.
@@ -308,7 +308,7 @@ func (w *powerLossWorld) sweep() *operation {
 				w.t.Errorf("the sweep plan does not match what the model says is finished (%s):\n plan  %v\n model %v", c.what, got, want)
 			}
 		}
-		return r.st.ArchiveSweep(plan.Chunk(now))
+		return r.st.ArchiveSweep(plan.Chunk())
 	}
 	return op
 }

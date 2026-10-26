@@ -102,6 +102,9 @@ func RetainUntil(rec Record) (until time.Time, finished bool) {
 
 // SweepPlan is the work of one pass of the archive sweep.
 type SweepPlan struct {
+	// Summaries are the archive summaries of the records the plan removes, for the
+	// caller to append (ArchiveSummaries) before it sweeps. A chunk does not carry
+	// them: no record waits for its summary.
 	Summaries []ArchiveSummary
 	Ctl       []FileRef
 	// Records are the files of every directory but out/ and endpoints/.
@@ -117,12 +120,12 @@ type SweepPlan struct {
 	Endpoints []FileRef
 }
 
-// Chunk is the whole plan as one chunk of the sweep at now. A caller that sweeps
-// in smaller chunks cuts the groups of the chunk it takes from here; a source
-// record is cut as a record, so its floor goes with it.
-func (p SweepPlan) Chunk(now time.Time) SweepChunk {
+// Chunk is the whole plan as one chunk of the sweep. A caller that sweeps in
+// smaller chunks cuts the groups of the chunk it takes from here; a source record
+// is cut as a record, so its floor goes with it.
+func (p SweepPlan) Chunk() SweepChunk {
 	return SweepChunk{
-		Now: now, Summaries: p.Summaries, Ctl: p.Ctl, Records: p.Records,
+		Ctl: p.Ctl, Records: p.Records,
 		Outs: p.Outs, OutLosts: p.OutLosts, Endpoints: p.Endpoints,
 	}
 }

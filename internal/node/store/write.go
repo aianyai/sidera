@@ -848,7 +848,37 @@ func (s *Store) ArchiveEvents(at time.Time, events []ArchiveEvent) error {
 		}
 		lines = append(lines, l...)
 	}
-	tx := s.w.Begin(&declArchiveEvents)
+	return s.appendArchive(&declArchiveEvents, at, lines)
+}
+
+// ArchiveSummaries appends the summaries of records that are about to leave the
+// live files to the archive file of the day of at. It is a transaction of its own,
+// never a part of the sweep: the archive is best effort and nothing reads it back to
+// decide anything, and a sweep that waited for it could not run on a full disk,
+// which is when it is needed most. The store has no log and no channel for a
+// failure that is not fatal, so the caller that sweeps logs the error and sweeps on.
+// Nothing is synced: a failure or a crash may lose a summary, or leave one that a
+// later sweep writes again, and a reader deduplicates by the hash of the file.
+func (s *Store) ArchiveSummaries(at time.Time, summaries []ArchiveSummary) error {
+	if len(summaries) == 0 {
+		return nil
+	}
+	lines := []byte("\n")
+	for _, sm := range summaries {
+		l, err := summaryLine(sm)
+		if err != nil {
+			return err
+		}
+		lines = append(lines, l...)
+	}
+	return s.appendArchive(&declArchiveSummaries, at, lines)
+}
+
+// appendArchive appends lines to the archive file of the day of at, in the
+// transaction d. The lines begin with a newline, so that the torn tail a crash
+// leaves is a line of its own and cannot swallow the first one that follows.
+func (s *Store) appendArchive(d *txn.Decl, at time.Time, lines []byte) error {
+	tx := s.w.Begin(d)
 	defer tx.Close()
 	if err := tx.Append("archive", path.Join(ArchiveDir, ArchiveDay(at)), lines); err != nil {
 		return err
@@ -917,9 +947,6 @@ func checkRef(f FileRef) error {
 
 // SweepChunk is one chunk of the archive sweep.
 type SweepChunk struct {
-	// Now is the time of the sweep; its UTC date names the archive file.
-	Now       time.Time
-	Summaries []ArchiveSummary
 	// Ctl, Records and Outs are removed in that order, then the bodies of the
 	// target, control and source records among them that still have one, the
 	// directory of Ctl synced after the group and the others after the last of
@@ -1001,13 +1028,12 @@ func (s *Store) floorFile(sender ident.EndpointID, raises map[ident.Address]uint
 	return floorRecordFile(sender, current, raises, keep)
 }
 
-// ArchiveSweep appends the summaries to the archive, writes the sequence floors
-// of the source records it removes and removes the records. The summaries are best
-// effort: they are appended first and not synced, so a failure or a crash may lose
-// one or write it twice (a reader deduplicates by the file hash), and no record
-// waits for its summary. The floors are not: no record is removed before the floors
-// of its sequence numbers are durable. The floors are the store's to work out
-// (floorsOf): a caller cannot remove a source record without them.
+// ArchiveSweep writes the sequence floors of the source records it removes and
+// removes the records. The archive summaries are not its business (ArchiveSummaries,
+// a transaction of the caller's own, so that no record waits for its summary). No
+// record is removed before the floors of its sequence numbers are durable. The
+// floors are the store's to work out (floorsOf): a caller cannot remove a source
+// record without them.
 func (s *Store) ArchiveSweep(c SweepChunk) error {
 	for _, f := range c.Ctl {
 		if f.Dir != CtlDir {
@@ -1046,14 +1072,6 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 			return err
 		}
 	}
-	var lines []byte
-	for _, sm := range c.Summaries {
-		l, err := summaryLine(sm)
-		if err != nil {
-			return err
-		}
-		lines = append(lines, l...)
-	}
 	var floors []file
 	for _, w := range floorsOf(c.Outs) {
 		f, err := s.floorFile(w.Sender, w.Floors, c.KeepTarget)
@@ -1062,7 +1080,7 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		}
 		floors = append(floors, f)
 	}
-	if len(lines)+len(floors)+len(c.Ctl)+len(c.Records)+len(outs)+len(c.Endpoints) == 0 {
+	if len(floors)+len(c.Ctl)+len(c.Records)+len(outs)+len(c.Endpoints) == 0 {
 		return nil
 	}
 
@@ -1087,12 +1105,6 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 	}
 	tx := s.w.Begin(&declArchiveSweep)
 	defer tx.Close()
-	if len(lines) > 0 {
-		p := path.Join(ArchiveDir, ArchiveDay(c.Now))
-		if err := tx.Append("archive", p, append([]byte("\n"), lines...)); err != nil {
-			return err
-		}
-	}
 	for _, f := range floors {
 		if err := s.replace(tx, "seq-floor", f); err != nil {
 			return err
