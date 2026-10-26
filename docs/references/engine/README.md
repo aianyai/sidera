@@ -885,7 +885,8 @@ attempts record (`prompt-begin`) before the adapter is called, with its kind and
 records it covers, so that a node that dies in between finds it. The call runs in a worker the
 engine owns, and its result is a command of the loop that records how the attempt ended
 (`prompt-end`): when the prompt was delivered the covered target records are marked notified first
-and the attempts record last, and the checkpoint of the attempt is dropped after that. A refusal,
+and the attempts record last, and the checkpoint of the attempt is dropped after that. The attempts
+the record keeps are cut by `handoff.TrimAttempts` each time one is added. A refusal,
 and a call that found the adapter not connected, is a failure; an answer that does not say whether
 the prompt arrived is asked of the adapter (`prompt.reconcile`, given the stored checkpoint of the
 attempt). The verdict found is a delivery, and counts the turn it started while it runs; provably
@@ -1395,8 +1396,7 @@ Known gaps, each filled in with the feature it belongs to:
   judged again either; the end of a turn, an arrival and a connection of the adapter do.
 - A prompt that failed is not sent again on a timer: the endpoint is judged again by its next
   event, except when the call found the adapter not in service, which is retried after
-  `CreateRetryBackoff` and when the adapter has been probed. Failed attempts that follow the
-  newest delivered first prompt are all kept, one record's worth each.
+  `CreateRetryBackoff` and when the adapter has been probed.
 - The node does not remember across a restart whether the last prompt was read, so an
   endpoint whose agent had read it may be woken once more by the end of a turn.
 - The checkpoint of the attempt of a session creation is not dropped when the creation

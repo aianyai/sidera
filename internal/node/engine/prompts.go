@@ -508,25 +508,6 @@ func (e *Engine) reconcilePrompts(now time.Time) {
 // ---------------------------------------------------------------------------
 // Settling an attempt
 
-// attemptWindow is how long an attempt matters to the hourly cap.
-const attemptWindow = time.Hour
-
-// trimAttempts drops the attempts nothing reads any more: those that are older than
-// the window of the hourly cap and come before the newest delivered first prompt,
-// which is where the chain of repeats the rules count begins.
-func trimAttempts(attempts []handoff.Attempt, now time.Time) []handoff.Attempt {
-	keep := 0
-	for i, a := range attempts {
-		if a.Outcome == handoff.AttemptDelivered && a.Kind == handoff.PromptKindFirst {
-			keep = i
-		}
-	}
-	for keep > 0 && attempts[keep-1].At.After(now.Add(-attemptWindow)) {
-		keep--
-	}
-	return attempts[keep:]
-}
-
 // settlePrompt records how the attempt in flight ended, whose outcome is known. The
 // target records it covers are marked notified when it was delivered, and the
 // endpoint's attempts say it is done last. The checkpoint of the attempt is dropped
@@ -541,7 +522,7 @@ func (e *Engine) settlePrompt(now time.Time, id ident.EndpointID) {
 		at = now
 	}
 	head := e.view.attempts[id]
-	head.Attempts = trimAttempts(append(slices.Clone(head.Attempts), handoff.Attempt{At: at, Outcome: f.outcome, Kind: f.kind}), now)
+	head.Attempts = handoff.TrimAttempts(append(slices.Clone(head.Attempts), handoff.Attempt{At: at, Outcome: f.outcome, Kind: f.kind}), now)
 	head.InFlight = nil
 	var ins []store.InRecord
 	if f.outcome == handoff.AttemptDelivered {
