@@ -394,6 +394,30 @@ func scenarios() []scenario {
 			bodiesResolve: true,
 		},
 		{
+			// The creation ended as created for an endpoint the owner closed while it was
+			// made: the native session is recorded on the closed endpoint, in the transaction
+			// that ends the creation, and a crash between the two is made good by the replay.
+			name: "control-result for an endpoint closed meanwhile",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seedWithBodies(t, mem, session(5, store.EndpointClosed, ctlName(1)), sessionCtl(1, 5))
+			},
+			durable: "control-result/ctl.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				c := created(t, 1, 5)
+				closed := session(5, store.EndpointClosed, ctlName(1))
+				closed.Session.NativeRef, closed.Session.Process = c.Intent.NativeRef, c.Intent.Process
+				return r.st.ControlResult(c, &closed)
+			},
+			verify: func(t *testing.T, r *rig) {
+				for _, e := range r.scan().Endpoints {
+					if e.ID == ep(5) && !e.ReleasePending() {
+						t.Errorf("the closed endpoint does not hold the native session to release: %#v", e)
+					}
+				}
+			},
+		},
+		{
 			// The reply finishes the delivery of the source record, which drops its
 			// body; the body goes after the record, and the body of another source
 			// record stays.
@@ -966,7 +990,8 @@ func sweepScenario(farFuture time.Time) scenario {
 		derived.Record = deliveredRecord(derived.Record)
 		derived.Body = nil
 		lost := lostOutAt(srcOut(6, false).Key, base) // a replacement
-		closed := session(5, store.EndpointClosed, ctlName(4))
+		closed := session(5, store.EndpointClosed, ctlName(4)) // its session was released, or the sweep would keep it
+		closed.Session.NativeRef, closed.Session.Process, closed.Session.Released = c.Intent.NativeRef, c.Intent.Process, true
 		notified := lostNotice(1, 6, base) // an out-lost record whose notice was given
 		notified.Feedback = nil
 		keep := srcOut(8, false) // a queued source record: not finished, never swept

@@ -95,13 +95,18 @@ func TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone(t 
 }
 
 // Whatever has the endpoint as sender keeps it: a record whole, queued, lost or
-// damaged with a key that can be trusted. A closed endpoint of another kind is not
-// the case: its floor file is not removed with it.
+// damaged with a key that can be trusted, and so does a native session that is not
+// recorded released, which the node is still to ask its adapter to release. A closed
+// endpoint of another kind is not the case: its floor file is not removed with it.
 func TestPlanSweepKeepsAClosedSessionEndpointWhileAnySourceRecordOfItIsThere(t *testing.T) {
 	closedSession := session(5, store.EndpointClosed, ctlName(4))
 	closedDirect := directEndpoint(5, "chat")
 	closedDirect.Status, closedDirect.Token = store.EndpointClosed, nil
 	damaged := finishedOutOf(5, 1)
+	holding := closedSession
+	holding.Session = &store.SessionInfo{Preset: "default", NativeRef: "native-5"}
+	released := holding
+	released.Session = &store.SessionInfo{Preset: "default", NativeRef: "native-5", Released: true}
 	for _, c := range []struct {
 		rule     string
 		endpoint store.EndpointRecord
@@ -120,6 +125,8 @@ func TestPlanSweepKeepsAClosedSessionEndpointWhileAnySourceRecordOfItIsThere(t *
 			damageBody(t, r.mem, path.Join(store.OutDir, damaged.Name()))
 		}, false},
 		{"a source record of another sender", closedSession, func(t *testing.T, r *rig) { seed(t, r.mem, finishedOutOf(6, 1)) }, true},
+		{"a native session that is not released", holding, func(t *testing.T, r *rig) {}, false},
+		{"a native session that is released", released, func(t *testing.T, r *rig) {}, true},
 		{"a closed endpoint of another kind", closedDirect, func(t *testing.T, r *rig) { seed(t, r.mem, finishedOutOf(5, 1)) }, true},
 	} {
 		t.Run(c.rule, func(t *testing.T) {

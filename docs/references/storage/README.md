@@ -743,8 +743,17 @@ may never have put one (`TestCheckpointDropRemovesOnlyTheCheckpointNamed`).
 the order they are written: `kind`, `instance`, `display_name` and `description`
 (both optional, omitted when empty), `status`, `token` (32 bytes, present while the
 endpoint is creating or open, absent once it is closed), `declaration` (compact
-JSON owned by the engine), `session` (the mapping of a session endpoint) and
-`created_by` (the control record that created a session endpoint). The name and the
+JSON owned by the engine), `session` (the mapping of a session endpoint: `preset`, `native_ref`, `process`,
+`tool_access`, and `released`) and
+`created_by` (the control record that created a session endpoint). `released` says
+the adapter confirmed that the native session is released, or that it no longer
+exists, after the endpoint was closed; only a closed endpoint with a `native_ref`
+can have it, and a record that says otherwise is refused when it is written and when it
+is read (`TestDecodeRecordBodyRules`). A closed session endpoint with a `native_ref`
+and no `released` is the node's record that the native session may still exist, and
+the sweep keeps it (see below); the fact is written by `endpoint-update`, and by the
+transactions that close the endpoint when they already know the answer
+(`TestRecordGoldenVectors`, vectors `endpoint released` and `endpoint closed unreleased`). The name and the
 description are what the adapter registered the endpoint under and are held to the
 bounds of that protocol (`adapterproto.MaxDisplayName` and
 `adapterproto.MaxDescription`, counted in characters, valid UTF-8): a record the
@@ -1016,7 +1025,11 @@ item it covers: the cover is what the replay of feedback reads to take the item 
 the record, so a notice swept first would have the next start tell the item again
 (`TestPlanSweepKeepsANoticeWhileAnItemItCoversIsStillOnItsRecord`,
 `TestPlanSweepTakesASourceRecordThatHoldsFeedbackOnlyWhenItsSenderCanNoLongerReadIt`,
-`TestPlanSweepTakesANoticeWithTheClosedSendersRecordItCovers`). A closed session endpoint goes
+`TestPlanSweepTakesANoticeWithTheClosedSendersRecordItCovers`). A closed session endpoint whose native session is not recorded released is never
+swept (`EndpointRecord.ReleasePending`,
+`TestPlanSweepKeepsAClosedSessionEndpointWhileAnySourceRecordOfItIsThere`): its record is where the
+node finds the release it still owes the adapter, and a sweep must not make the node forget
+it. A closed session endpoint goes
 with its attempts, checkpoints and floor file, but not while any source record or
 out-lost record has it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
 a source record writes the floor of its sender, and a floor file written after the
@@ -1070,7 +1083,7 @@ store: every predicate is a function of one scan, and the store cannot know whic
 writes the scan it is given has seen. The order is: quarantine of damaged files
 (it writes replacement records and closed session endpoints, and raises sequence
 floors, which every later rule and the sequence book read);
-`ctl-effect-replay` (it closes endpoints), `derived-replay` (it writes the delivery of an
+`ctl-effect-replay` (it closes endpoints, and records the native session of a creation that ended as created on an endpoint that was closed meanwhile, the recovery scenario "effect of a control result not yet applied to its endpoint" of `TestEveryTransactionConvergesFromEveryCrashState`), `derived-replay` (it writes the delivery of an
 initial message, before `orphan-gc` can take the body that delivery holds) and
 `instance-drain-replay` (it closes endpoints);
 `orphan-gc-endpoint`, before `endpoint-drain-replay`, so that a delivery queued

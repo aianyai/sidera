@@ -65,6 +65,10 @@ func goldenWant(t *testing.T, name string) store.Record {
 		}
 	case "endpoint":
 		return session(5, store.EndpointCreating, strings.TrimSuffix(ctlKey(1).FileName(store.KindCtl), ".rec"))
+	case "endpoint released", "endpoint closed unreleased":
+		r := session(5, store.EndpointClosed, strings.TrimSuffix(ctlKey(1).FileName(store.KindCtl), ".rec"))
+		r.Session.NativeRef, r.Session.Released = "sess_1", name == "endpoint released"
+		return r
 	case "endpoint named":
 		r := directEndpoint(6, "chat")
 		r.Declaration = nil
@@ -263,6 +267,8 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"an endpoint display name over the bound of the protocol", "endpoint named", `"display_name":"Büro phone"`, `"display_name":"` + strings.Repeat("n", adapterproto.MaxDisplayName+1) + `"`},
 		{"an endpoint description over the bound of the protocol", "endpoint named", `"description":"The front desk line, answered 9 to 5."`, `"description":"` + strings.Repeat("n", adapterproto.MaxDescription+1) + `"`},
 		{"an endpoint display name that is not UTF-8", "endpoint named", `"display_name":"Büro phone"`, `"display_name":"B` + "\xff" + `ro phone"`},
+		{"a native session released on an endpoint that is not closed", "endpoint", `"preset":"default"`, `"preset":"default","released":true`},
+		{"a native session released that is not there", "endpoint released", `"native_ref":"sess_1",`, ``},
 		{"a session endpoint with created_by that is not a hash", "endpoint", `"created_by":"`, `"created_by":"x`},
 		{"an in record that still carries the revision it once had", "in", `{"record":`, `{"rev":1,"record":`},
 		{"an in record without its record", "in", `"record":{"side":"target","state":"accepted","state_at":"2026-10-24T09:00:00Z","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z","backlog_deadline":"2026-10-24T09:30:00Z"},`, ``},

@@ -185,6 +185,9 @@ engine applies the delivery rules and calls the writes.
   attempts, checkpoints and floor file. An out-lost record is swept as soon as its
   item is gone or its sender is closed or has no record, since a closed endpoint
   can never be handed the notice: otherwise it would keep the endpoint for good.
+  A closed session endpoint whose native session is not recorded released
+  (`EndpointRecord.ReleasePending`) is never swept: the record is where the node
+  finds the release it still owes the adapter.
   Its record (`SweepChunk.Endpoints`) is
   removed last, after the directories of the others are durable, so a crash cannot
   leave a file that only the endpoint record would have led a sweep to.

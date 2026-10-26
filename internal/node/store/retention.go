@@ -143,7 +143,10 @@ func (p SweepPlan) Chunk() SweepChunk {
 // one nothing would ever remove. The sweep that removes the last of its source
 // records leaves it, and the next one removes the endpoint with its floor file.
 // An out-lost record of a closed endpoint is swept whatever its item says, so
-// that it does not keep the endpoint for good.
+// that it does not keep the endpoint for good. A closed session endpoint whose
+// native session is not recorded released is kept whatever else is true of it
+// (EndpointRecord.ReleasePending): the record is where the work of releasing the
+// session is found, and the sweep must not make the node forget it.
 //
 // Feedback is told before its record goes. A source record that still holds an item
 // is kept while its sender is open, as an out-lost record is, and goes at once when
@@ -300,7 +303,7 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 		}
 	}
 	for _, e := range sc.Endpoints {
-		if e.Status != EndpointClosed || live[e.ID] || (e.Kind == adapterreg.KindSession && sends[e.ID]) {
+		if e.Status != EndpointClosed || live[e.ID] || (e.Kind == adapterreg.KindSession && sends[e.ID]) || e.ReleasePending() {
 			continue
 		}
 		add(&plan.Endpoints, EndpointsDir, e.Name())

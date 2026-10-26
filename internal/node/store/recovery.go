@@ -197,8 +197,9 @@ func QuarantineSessions(sc *Scan, ctlName string) []EndpointRecord {
 
 // EffectReplays is the work of ctl-effect-replay, as the endpoint records to
 // write: a session endpoint still being created whose control record holds the
-// end of the creation becomes open or closed accordingly, and an open session
-// endpoint a control record closed becomes closed. Nothing is ever moved from
+// end of the creation becomes open or closed accordingly, an open session
+// endpoint a control record closed becomes closed, and a closed one whose creation
+// ended as created gets the native session recorded. Nothing is ever moved from
 // closed to open.
 func EffectReplays(sc *Scan) []EndpointRecord {
 	ctls := map[string]*CtlRecord{}
@@ -234,6 +235,22 @@ func EffectReplays(sc *Scan) []EndpointRecord {
 		case e.Status == EndpointOpen && closedBy[e.ID]:
 			n := e
 			n.Status, n.Token = EndpointClosed, nil
+			out = append(out, n)
+		case e.Status == EndpointClosed && e.CreatedBy != "" && (e.Session == nil || e.Session.NativeRef == ""):
+			// The endpoint was closed while its session was being made, and the
+			// session was made all the same: the native session is recorded on the
+			// closed endpoint, where the work of releasing it finds it.
+			c := ctls[e.CreatedBy+recordSuffix]
+			if c == nil || c.Intent == nil || c.Intent.Endpoint != e.ID || c.Intent.State != IntentCreated {
+				continue
+			}
+			n := e
+			sess := SessionInfo{}
+			if e.Session != nil {
+				sess = *e.Session
+			}
+			sess.Preset, sess.NativeRef, sess.Process = c.Preset, c.Intent.NativeRef, c.Intent.Process
+			n.Session = &sess
 			out = append(out, n)
 		}
 	}

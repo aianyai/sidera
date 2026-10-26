@@ -30,6 +30,14 @@ var goldenRecords = []struct {
 	{name: "endpoint", dir: store.EndpointsDir,
 		file: "sidera-record 1 endpoint 14d0a10f 254 ZXAxejUyMzI5ZzR6NTIzMjlnNHo1MjMyOWc0ejVrOHEyZzQ\n{\"kind\":\"session\",\"instance\":\"claude\",\"status\":\"creating\",\"token\":\"RUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUU\",\"session\":{\"preset\":\"default\",\"tool_access\":[\"SIDERA_TOKEN\"]},\"created_by\":\"b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d\"}",
 		hash: "c2ccbb5272953d655682b33fc9219b88055463bccb316d5d1750793bbe10e030.rec"},
+	// A closed session endpoint whose native session the adapter confirmed released, and
+	// the same endpoint with the native session still to be released.
+	{name: "endpoint released", dir: store.EndpointsDir,
+		file: "sidera-record 1 endpoint 33f5b75c 236 ZXAxejUyMzI5ZzR6NTIzMjlnNHo1MjMyOWc0ejVrOHEyZzQ\n{\"kind\":\"session\",\"instance\":\"claude\",\"status\":\"closed\",\"session\":{\"preset\":\"default\",\"native_ref\":\"sess_1\",\"tool_access\":[\"SIDERA_TOKEN\"],\"released\":true},\"created_by\":\"b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d\"}",
+		hash: "c2ccbb5272953d655682b33fc9219b88055463bccb316d5d1750793bbe10e030.rec"},
+	{name: "endpoint closed unreleased", dir: store.EndpointsDir,
+		file: "sidera-record 1 endpoint 18a620b2 220 ZXAxejUyMzI5ZzR6NTIzMjlnNHo1MjMyOWc0ejVrOHEyZzQ\n{\"kind\":\"session\",\"instance\":\"claude\",\"status\":\"closed\",\"session\":{\"preset\":\"default\",\"native_ref\":\"sess_1\",\"tool_access\":[\"SIDERA_TOKEN\"]},\"created_by\":\"b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d\"}",
+		hash: "c2ccbb5272953d655682b33fc9219b88055463bccb316d5d1750793bbe10e030.rec"},
 	// A direct endpoint with the name and the description its adapter registered
 	// it under (the name holds a character of two bytes: the length counts bytes).
 	{name: "endpoint named", dir: store.EndpointsDir,

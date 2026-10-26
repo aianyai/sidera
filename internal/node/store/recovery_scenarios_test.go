@@ -382,7 +382,8 @@ func recoveryScenarios() []scenario {
 				// a session closed by a control record
 				c2 := closedBy(2, 6)
 				seed(t, mem, session(6, store.EndpointOpen, ctlName(9)), c2)
-				// the end of a creation whose endpoint is already closed or already open: nothing to do
+				// the end of a creation whose endpoint is already closed or already open: the endpoint
+				// keeps its status, and a closed one gets the native session recorded so it can be released
 				c3 := created(t, 3, 7)
 				seed(t, mem, session(7, store.EndpointClosed, ctlName(3)), c3)
 				c4 := created(t, 4, 8)
@@ -402,8 +403,11 @@ func recoveryScenarios() []scenario {
 				if e := by[ep(6)]; e.Status != store.EndpointClosed || e.Token != nil {
 					t.Errorf("a session a control record closed must close and lose its token: %#v", e)
 				}
-				if e := by[ep(7)]; e.Status != store.EndpointClosed {
+				if e := by[ep(7)]; e.Status != store.EndpointClosed || e.Token != nil {
 					t.Errorf("a closed endpoint is never opened again: %#v", e)
+				}
+				if e := by[ep(7)]; e.Session == nil || e.Session.NativeRef != "native-7" || e.Session.Released {
+					t.Errorf("a session made for an endpoint closed meanwhile must be recorded on it, not released: %#v", e.Session)
 				}
 				if e := by[ep(8)]; e.Status != store.EndpointOpen {
 					t.Errorf("an open endpoint was changed: %#v", e)

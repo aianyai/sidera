@@ -24,6 +24,7 @@ type sessionJSON struct {
 	NativeRef  string                        `json:"native_ref,omitempty"`
 	Process    *adapterproto.ProcessIdentity `json:"process,omitempty"`
 	ToolAccess []string                      `json:"tool_access,omitempty"`
+	Released   bool                          `json:"released,omitempty"`
 }
 
 type endpointJSON struct {
@@ -39,6 +40,15 @@ type endpointJSON struct {
 }
 
 var errEmptySession = errors.New("an empty session mapping is not written")
+
+// checkReleased holds the fact that a native session was released to the endpoint
+// it can be true of: one that is closed and has a native session to release.
+func checkReleased(status EndpointStatus, s SessionInfo) error {
+	if s.Released && (status != EndpointClosed || s.NativeRef == "") {
+		return errors.New("only a closed session endpoint with a native session has it released")
+	}
+	return nil
+}
 
 // TokenLen is the length of an endpoint token in bytes.
 const TokenLen = 32
@@ -121,7 +131,10 @@ func encodeEndpoint(r EndpointRecord) ([]byte, error) {
 				return nil, fmt.Errorf("session process: %w", err)
 			}
 		}
-		j.Session = &sessionJSON{Preset: s.Preset, NativeRef: s.NativeRef, Process: s.Process, ToolAccess: s.ToolAccess}
+		if err := checkReleased(r.Status, *s); err != nil {
+			return nil, err
+		}
+		j.Session = &sessionJSON{Preset: s.Preset, NativeRef: s.NativeRef, Process: s.Process, ToolAccess: s.ToolAccess, Released: s.Released}
 	}
 	if r.CreatedBy != "" {
 		if r.Kind != adapterreg.KindSession {
@@ -173,9 +186,12 @@ func decodeEndpoint(id ident.EndpointID, body []byte) (EndpointRecord, error) {
 		if r.Kind != adapterreg.KindSession {
 			return r, errors.New("a session mapping belongs to a session endpoint")
 		}
-		s := &SessionInfo{Preset: j.Session.Preset, NativeRef: j.Session.NativeRef, Process: j.Session.Process, ToolAccess: j.Session.ToolAccess}
+		s := &SessionInfo{Preset: j.Session.Preset, NativeRef: j.Session.NativeRef, Process: j.Session.Process, ToolAccess: j.Session.ToolAccess, Released: j.Session.Released}
 		if s.empty() {
 			return r, errEmptySession
+		}
+		if err := checkReleased(r.Status, *s); err != nil {
+			return r, err
 		}
 		if s.Process != nil {
 			if err := s.Process.Validate(); err != nil {

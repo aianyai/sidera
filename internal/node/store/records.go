@@ -303,12 +303,25 @@ type SessionInfo struct {
 	NativeRef  string
 	Process    *adapterproto.ProcessIdentity
 	ToolAccess []string
+	// Released says the adapter confirmed that the native session is released (or
+	// that it no longer exists), after the endpoint was closed. It is the fact the
+	// engine acts on: a closed session endpoint with a native session that is not
+	// released is one the adapter is still to be asked to release. Only a closed
+	// endpoint with a native reference has it.
+	Released bool
 }
 
 // empty reports whether the mapping says nothing. Such a mapping is neither
 // written nor read: an endpoint without one has a nil Session.
 func (s SessionInfo) empty() bool {
 	return s.Preset == "" && s.NativeRef == "" && s.Process == nil && len(s.ToolAccess) == 0
+}
+
+// ReleasePending says the endpoint is a closed session endpoint whose native
+// session the adapter has not confirmed released: the channel is closed, and the
+// native session may still exist.
+func (r EndpointRecord) ReleasePending() bool {
+	return r.Kind == adapterreg.KindSession && r.Status == EndpointClosed && r.Session != nil && r.Session.NativeRef != "" && !r.Session.Released
 }
 
 // Name is the file name of the record.
