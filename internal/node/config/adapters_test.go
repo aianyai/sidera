@@ -54,7 +54,7 @@ func ensureState(t testing.TB, mem *fsxtest.Mem) { mkdirAll(t, mem, "state") }
 func install(t testing.TB, rg *rig, c *config.Config, staged config.Staged) error {
 	t.Helper()
 	ensureState(t, rg.mem)
-	plan, err := c.PlanInstall(staged)
+	plan, err := c.PlanInstall(staged, nil)
 	if err != nil || plan.AlreadyCurrent {
 		return err
 	}
@@ -338,7 +338,7 @@ func TestUnstage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		plan, err := c.PlanInstall(staged)
+		plan, err := c.PlanInstall(staged, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -480,7 +480,7 @@ func TestInstallBecomesCurrent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		plan, err := c.PlanInstall(staged)
+		plan, err := c.PlanInstall(staged, nil)
 		if err != nil || !plan.AlreadyCurrent {
 			t.Errorf("PlanInstall = %+v, %v, want AlreadyCurrent", plan, err)
 		}
@@ -491,9 +491,37 @@ func TestInstallBecomesCurrent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = c.PlanInstall(staged)
+		_, err = c.PlanInstall(staged, nil)
 		if ce := changeReason(t, err); ce.Reason != config.ChangeAdapterInUse {
 			t.Errorf("reason = %v, want adapter_in_use", ce.Reason)
+		}
+	})
+	t.Run("an adapter whose disabled instance still has a process ending is not upgraded", func(t *testing.T) {
+		rg, c := loaded(t)
+		doc := strings.Replace(goldenInstances, `"enabled": true`, `"enabled": false`, 1)
+		if err := fsx.Replace(rg.mem, setupTag, config.InstancesPath, []byte(doc), fsx.ModePrivate); err != nil {
+			t.Fatal(err)
+		}
+		c = rg.load()
+		staged, err := c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
+		if err != nil {
+			t.Fatal(err)
+		}
+		ending := true
+		var asked []string
+		_, err = c.PlanInstall(staged, func(instance string) bool { asked = append(asked, instance); return ending })
+		if ce := changeReason(t, err); ce.Reason != config.ChangeAdapterInUse || ce.Field != "instances.example" {
+			t.Errorf("PlanInstall = %+v, want adapter_in_use for instances.example", ce)
+		}
+		ending = false
+		if _, err := c.PlanInstall(staged, func(string) bool { return ending }); err != nil {
+			t.Errorf("PlanInstall once the process has ended: %v", err)
+		}
+		if _, err := c.PlanInstall(staged, nil); err != nil {
+			t.Errorf("PlanInstall of a disabled instance with no way to ask: %v", err)
+		}
+		if !reflect.DeepEqual(asked, []string{"example"}) {
+			t.Errorf("asked about %v, want the one instance of the adapter", asked)
 		}
 	})
 	t.Run("a first installation is not an upgrade whatever instances exist", func(t *testing.T) {
@@ -508,7 +536,7 @@ func TestInstallBecomesCurrent(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := c.PlanInstall(staged); err != nil {
+		if _, err := c.PlanInstall(staged, nil); err != nil {
 			t.Errorf("PlanInstall: %v", err)
 		}
 	})

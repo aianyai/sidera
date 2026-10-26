@@ -375,11 +375,18 @@ type Install struct {
 
 var errAlreadyCurrent = errors.New("config: the staged version is already current")
 
+// StillEnding says whether a process of the instance is still being ended. Config
+// does not run adapters, so the caller that does tells it.
+type StillEnding func(instance string) bool
+
 // PlanInstall plans the installation of a staged package. An adapter that has
 // an enabled instance is not upgraded: the instance runs the version that is
 // current, so the change is refused with ChangeAdapterInUse until the owner has
-// disabled it. A first installation has no such instance to disturb.
-func (c *Config) PlanInstall(s Staged) (Install, error) {
+// disabled it. Neither is one whose disabled instance still has a process ending
+// (ending says so; nil says none does): the process may hold the files of the
+// version that the installation discards, which a running executable does not
+// allow on every platform. A first installation has no such instance to disturb.
+func (c *Config) PlanInstall(s Staged, ending StillEnding) (Install, error) {
 	c.wmu.Lock()
 	defer c.wmu.Unlock()
 	st := c.read()
@@ -390,9 +397,15 @@ func (c *Config) PlanInstall(s Staged) (Install, error) {
 			return plan, nil
 		}
 		for _, name := range sortedKeys(st.instances.Items) {
-			if in := st.instances.Items[name]; in.Adapter == s.ID && in.Enabled {
+			in := st.instances.Items[name]
+			switch {
+			case in.Adapter != s.ID:
+			case in.Enabled:
 				return Install{}, &ChangeError{Reason: ChangeAdapterInUse, Field: "instances." + name,
 					Err: fmt.Errorf("the instance %q is enabled and runs version %s", name, cur.Version)}
+			case ending != nil && ending(name):
+				return Install{}, &ChangeError{Reason: ChangeAdapterInUse, Field: "instances." + name,
+					Err: fmt.Errorf("the process of the disabled instance %q, which runs version %s, is still ending", name, cur.Version)}
 			}
 		}
 		plan.previous = cur.Version

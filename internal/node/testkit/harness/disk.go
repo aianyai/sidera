@@ -245,7 +245,7 @@ func installAdapter(t testing.TB, w *txn.Writer, cfg *config.Config, at time.Tim
 	if err != nil {
 		t.Fatalf("harness: StageAdapter: %v", err)
 	}
-	plan, err := cfg.PlanInstall(staged)
+	plan, err := cfg.PlanInstall(staged, nil)
 	if err != nil {
 		t.Fatalf("harness: PlanInstall: %v", err)
 	}

@@ -105,7 +105,7 @@ func (o *installAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if o.stageErr != nil {
 		return nil, o.stageErr
 	}
-	plan, err := e.d.Config.PlanInstall(o.staged)
+	plan, err := e.d.Config.PlanInstall(o.staged, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -88,7 +88,7 @@ func TestEveryDeclaredCrashPointIsReached(t *testing.T) {
 	// unstage of the version.
 	staged, err = c.StageAdapter(srcPackage(t, "example", "2.0.0", nil), suffixReader())
 	must(err)
-	plan, err := c.PlanInstall(staged)
+	plan, err := c.PlanInstall(staged, nil)
 	must(err)
 	tx := rg.w.Begin(testAdapterInstall)
 	must(plan.Promote(tx))

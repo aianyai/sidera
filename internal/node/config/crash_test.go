@@ -296,7 +296,7 @@ func crashCases(t *testing.T) []crashCase {
 			disk:      disabledTree,
 			prepare: func(t *testing.T, rg *rig, c *config.Config) {
 				staged = stagedFresh(t, c, "example", "2.0.0")
-				plan, err := c.PlanInstall(staged)
+				plan, err := c.PlanInstall(staged, nil)
 				if err != nil {
 					t.Fatal(err)
 				}

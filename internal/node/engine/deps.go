@@ -91,7 +91,7 @@ type Config interface {
 	// runs in the loop.
 	StageAdapter(src fsx.Reader, rnd io.Reader) (config.Staged, error)
 	Unstage(s config.Staged) error
-	PlanInstall(s config.Staged) (config.Install, error)
+	PlanInstall(s config.Staged, ending config.StillEnding) (config.Install, error)
 }
 
 var _ Config = (*config.Config)(nil)

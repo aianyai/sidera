@@ -87,7 +87,7 @@ func TestCleanScenariosLeaveNoConfigRecoveryWork(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			if _, err := c.PlanInstall(staged); err == nil {
+			if _, err := c.PlanInstall(staged, nil); err == nil {
 				t.Error("an adapter with enabled instances was planned for an upgrade")
 			}
 			return c.Unstage(staged)
@@ -132,7 +132,7 @@ func TestCleanScenariosLeaveNoConfigRecoveryWork(t *testing.T) {
 			if err != nil {
 				return err
 			}
-			plan, err := c.PlanInstall(staged)
+			plan, err := c.PlanInstall(staged, nil)
 			if err != nil {
 				return err
 			}

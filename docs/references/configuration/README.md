@@ -331,7 +331,10 @@ it is installed.
    `current` (the commit point); the caller's own result write; discard the
    previous version. An adapter that has an enabled instance is not upgraded
    (`adapter_in_use`): it runs the version that is current, and the owner
-   disables it first. The same version that is already current is "already
+   disables it first. Nor is one whose disabled instance still has a process
+   ending, which the caller that runs the adapters says through the `StillEnding`
+   it passes to `PlanInstall`: the process may hold the files of the version the
+   installation discards. The same version that is already current is "already
    installed" and writes nothing.
 3. An installation that did not install is unstaged by the install worker: when
    the result is "already installed", when it is refused, and when it failed

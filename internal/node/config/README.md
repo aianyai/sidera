@@ -175,7 +175,9 @@ The prompt turns and the endpoint defaults are not here: they are
   concurrently with the writer loop: they take no lock of `Config` and touch
   only staging and version directories that no change reads.
 - Run `PlanInstall` and the transaction it plans in the same loop command, so
-  that nothing changes between the plan and its writes. Call `Unstage` when the
+  that nothing changes between the plan and its writes. Pass it the `StillEnding`
+  that asks the adapter host whether a process of an instance is still ending
+  (nil when nothing runs adapters), so that an adapter is not upgraded under it. Call `Unstage` when the
   result is `AlreadyCurrent`, when the installation is refused and when it
   failed with an error that is not fatal; after a fatal error the next start
   removes what is left.
