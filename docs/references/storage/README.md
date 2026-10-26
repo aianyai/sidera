@@ -745,7 +745,8 @@ gap, never a number given twice); neither that nor anything else it repeats lose
 anything. The bad bytes are not kept. The alert id is the store's: the first 16
 bytes of the SHA-256 of the directory, the file name and the bytes of the damaged
 file (for a record whose body is not what it says, the directory and name of
-the record and the digest it holds), so the settlement redone after a crash
+the record and the bytes of the body file, a body that is gone being evidence of its
+own), so the settlement redone after a crash
 rewrites its alert and adds no second, and a later, different damage of a file of
 the same name (a resent message taken in again) is an alert of its own, never one
 that replaces an alert the owner has acknowledged. The caller states the kind, the

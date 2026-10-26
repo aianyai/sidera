@@ -82,9 +82,10 @@ engine applies the delivery rules and calls the writes.
   higher floor (a gap, never a number given twice). The alert id is the store's, so
   the repetition rewrites the alert and adds no second: it is derived in one place
   (`damageAlert`) from the directory and name of the file and the bytes that show
-  the damage (for `QuarantineBody`, the record and the name of its body), so a
-  later, different damage of a file of the same name is an alert of its own and
-  never replaces one that was acknowledged. What the file held is not kept.
+  the damage (for `QuarantineBody`, the record and the bytes of its body file, which
+  the call reads itself), so a later, different damage of a file of the same name,
+  or of a body under a record rebuilt with the same digest, is an alert of its own
+  and never replaces one that was acknowledged. What the file held is not kept.
 - **A quarantine closes every creating endpoint of the damaged control record,
   and the store decides which.** A control record accepted again after a failed
   first acceptance has the same name and a new endpoint, so several session

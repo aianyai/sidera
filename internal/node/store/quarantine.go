@@ -94,8 +94,8 @@ type QuarantineAlert struct {
 
 // damageAlert is the alert record of a settlement. The id is the first 16 bytes
 // of the hash of the directory and name of the file or record settled and the
-// evidence of the damage: the bytes of a damaged file, or the digest a record
-// holds of a body that is not what it says.
+// evidence of the damage: the bytes of the damaged file, or of the body file that
+// is not what its record says.
 func damageAlert(a QuarantineAlert, dir, name string, evidence []byte) AlertRecord {
 	h := sha256.New()
 	h.Write([]byte(dir + "\x00" + name + "\x00"))
@@ -268,12 +268,11 @@ func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 	st := &settlement{}
 	var written *InRecord
 	var err error
-	// The record settled and the body it refers to; they identify the damage.
+	// The record settled; with the bytes of its body they identify the damage.
 	var dir, name string
-	var body *BodyRef
 	switch r := q.Record.(type) {
 	case InRecord:
-		dir, name, body = InDir, r.Name(), r.Body
+		dir, name = InDir, r.Name()
 		if r.Body == nil {
 			return nil, fmt.Errorf("store: %s refers to no body", r.Name())
 		}
@@ -291,7 +290,7 @@ func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 		}
 		written, st.overwrite = &w[0], &files[0]
 	case CtlRecord:
-		dir, name, body = CtlDir, r.Name(), r.Body
+		dir, name = CtlDir, r.Name()
 		if r.Body == nil {
 			return nil, fmt.Errorf("store: %s refers to no body", r.Name())
 		}
@@ -305,7 +304,7 @@ func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 		}
 		st.overwrite = &f
 	case OutRecord:
-		dir, name, body = OutDir, r.Name(), r.Body
+		dir, name = OutDir, r.Name()
 		if r.Body == nil || r.Lost != nil {
 			return nil, fmt.Errorf("store: %s refers to no body", r.Name())
 		}
@@ -327,7 +326,16 @@ func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 	default:
 		return nil, fmt.Errorf("store: %T is not a record that refers to a body", q.Record)
 	}
-	if st.alert, err = recordFile(AlertsDir, damageAlert(q.Alert, dir, name, body.Digest[:])); err != nil {
+	// The evidence is what the body file holds, as for a damaged record file, not
+	// what the record says it should: the same damage settled again is the same
+	// alert, and a different damage under a record rebuilt with the same name and
+	// digest is another one, never a rewrite of an alert that was acknowledged. A
+	// body that is gone has no bytes to show and is evidence of its own.
+	damaged, err := s.r.ReadFile(path.Join(BodiesDir, BodyFileName(name)))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil, err
+	}
+	if st.alert, err = recordFile(AlertsDir, damageAlert(q.Alert, dir, name, damaged)); err != nil {
 		return nil, err
 	}
 	if err := s.settle(st); err != nil {

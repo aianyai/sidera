@@ -700,19 +700,26 @@ func TestTheAlertOfASettlementFollowsTheDamageAndNotTheCall(t *testing.T) {
 			t.Errorf("alerts = %v, want one for each damage", sc.Alerts)
 		}
 	})
-	t.Run("a body that is another file under the same record name is another alert", func(t *testing.T) {
+	// The evidence is what the body file holds. The record is rebuilt with the same
+	// name and the same digest each time, so only the bytes can tell the damages
+	// apart.
+	t.Run("the same damaged body settled again is the same alert, another one under the same record is another alert", func(t *testing.T) {
 		r := worldRig(t)
-		settle := func(body int) {
+		settle := func(damaged string) {
 			in := inRev(1, 1)
-			in.Body = bodyRef(body)
 			seed(t, r.mem, in)
+			seedBodyOf(t, r.mem, in, []byte(damaged))
 			_, err := r.st.QuarantineBody(store.BodyQuarantine{Record: in, Alert: newSim(t, r.st).alert("corrupt_body", store.InDir, in.Name())})
 			mustDo(t, err)
 		}
-		settle(1)
-		settle(2)
+		settle("damaged one way")
+		settle("damaged one way")
+		if sc := r.scan(); len(sc.Alerts) != 1 {
+			t.Errorf("alerts = %v, want one for the one damage settled twice", sc.Alerts)
+		}
+		settle("damaged another way")
 		if sc := r.scan(); len(sc.Alerts) != 2 {
-			t.Errorf("alerts = %v, want one for each body", sc.Alerts)
+			t.Errorf("alerts = %v, want one for each damage", sc.Alerts)
 		}
 	})
 	t.Run("the id is what a test that names the alert file restates", func(t *testing.T) {
