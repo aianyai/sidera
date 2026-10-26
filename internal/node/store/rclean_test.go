@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
@@ -147,7 +148,7 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	}
 	mustDo(t, r.st.ArchiveSweep(plan.Chunk()))
 	check("sweep")
-	mustDo(t, r.st.ArchiveExpire(store.ExpiredArchiveFiles([]string{"2026-01-01.jsonl"}, base, 30)))
+	mustDo(t, r.st.ArchiveExpire(store.ExpiredArchiveFiles([]string{"2026-01-01.jsonl"}, base, 30*24*time.Hour)))
 	acked := store.AlertRecord{ID: store.AlertID{1}, Kind: "version_untested", At: base, Detail: "d", Acked: &store.AlertAcked{At: base, Operation: adminResult(3).Key.ID}}
 	mustDo(t, r.st.AlertAck(store.AlertAckInput{Alert: acked, Result: adminResult(3)}))
 	check("alert acknowledged")

@@ -207,11 +207,13 @@ func archiveDate(name string) (time.Time, bool) {
 }
 
 // ExpiredArchiveFiles returns the names of the archive files whose date is
-// more than retentionDays days before the date of now, from the names of the
-// directory. Names that are not archive file names are not returned.
-func ExpiredArchiveFiles(names []string, now time.Time, retentionDays int) []string {
+// more than retention before the date of now, from the names of the
+// directory. The retention is the one the node's settings give
+// (config.NodeSettings.ArchiveRetention), counted back from the start of the
+// date of now. Names that are not archive file names are not returned.
+func ExpiredArchiveFiles(names []string, now time.Time, retention time.Duration) []string {
 	today, _ := time.Parse(archiveLayout, now.UTC().Format(archiveLayout))
-	cutoff := today.AddDate(0, 0, -retentionDays)
+	cutoff := today.Add(-retention)
 	var out []string
 	for _, n := range names {
 		if d, ok := archiveDate(n); ok && d.Before(cutoff) {

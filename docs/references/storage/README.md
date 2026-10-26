@@ -956,7 +956,9 @@ a source record writes the floor of its sender, and a floor file written after t
 endpoint's was removed with it would stay forever. The sweep that removes its last
 source record leaves the endpoint, and the next one takes it. Administrative
 results are kept 7 days, acknowledged alerts 7 days after the acknowledgement, and
-archive files 30 days, uncompressed. An archived message costs about 2.4 KiB (two
+archive files for the retention the owner sets (30 days by default; `ExpiredArchiveFiles`
+takes it as a duration and names the files whose date is older, `Store.ArchiveExpire`
+removes them), uncompressed. An archived message costs about 2.4 KiB (two
 summaries and about eight events), so at 3,000 messages an hour, the upper scale
 the design assumes, a day is about 169 MiB and 30 days about 4.9 GiB; at 500 an
 hour about 0.8 GiB. The archive is not part of the free-space reserve a node keeps

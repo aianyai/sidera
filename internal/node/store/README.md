@@ -32,6 +32,7 @@ engine applies the delivery rules and calls the writes.
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
 | `NewOutLostRecord`, `OutLostKey`, `OutLostReplays`, `Store.OutLostClear` | The notice that a file of `out/` was lost unread, built in one place; the work of the replay that clears its feedback item once a notice covers it, and the write that does. |
 | `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSummaries`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves: the summaries first in a transaction of their own, which the caller logs and goes on without, then the removals. |
+| `ExpiredArchiveFiles`, `Store.ArchiveExpire` | The archive files older than a retention given as a duration (the node's setting, read only through `config.NodeSettings.ArchiveRetention`), and their removal. |
 | `BodyFileName`, `Store.ReadBody`, `Store.Available` | The name of a record's own body file, a body read checked against the digest and length its record holds, and free space. |
 | `MissingStateDirs`, `StateDirs` | The directories of `state/`, for the layout rule of the composition root. |
 

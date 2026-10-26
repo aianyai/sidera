@@ -139,6 +139,7 @@ func TestArchiveDayNamesTheUTCDate(t *testing.T) {
 }
 
 func TestExpiredArchiveFiles(t *testing.T) {
+	const day = 24 * time.Hour
 	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
 	names := []string{
 		"2026-09-23.jsonl", // 31 days before: expired
@@ -152,7 +153,7 @@ func TestExpiredArchiveFiles(t *testing.T) {
 		"2026-9-1.jsonl",
 		"2026-08-01.jsonl",
 	}
-	got := store.ExpiredArchiveFiles(names, now, 30)
+	got := store.ExpiredArchiveFiles(names, now, 30*day)
 	want := []string{"2026-09-23.jsonl", "2026-08-01.jsonl"}
 	if len(got) != len(want) {
 		t.Fatalf("ExpiredArchiveFiles = %v, want %v", got, want)
@@ -162,8 +163,13 @@ func TestExpiredArchiveFiles(t *testing.T) {
 			t.Errorf("ExpiredArchiveFiles[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
-	if got := store.ExpiredArchiveFiles(names, now, 1000); len(got) != 0 {
+	if got := store.ExpiredArchiveFiles(names, now, 1000*day); len(got) != 0 {
 		t.Errorf("with a retention of 1000 days, expired = %v", got)
+	}
+	// The cutoff is the retention before the start of the date of now, so a
+	// retention that is not a whole number of days falls between two files.
+	if got := store.ExpiredArchiveFiles([]string{"2026-10-21.jsonl", "2026-10-22.jsonl", "2026-10-23.jsonl"}, now, 36*time.Hour); len(got) != 2 || got[1] != "2026-10-22.jsonl" {
+		t.Errorf("with a retention of 36 hours, expired = %v, want the files of the 21st and the 22nd", got)
 	}
 }
 
