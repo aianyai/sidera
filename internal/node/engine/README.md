@@ -36,7 +36,8 @@ signals join the same loop as further commands and add their methods to this lis
 | `Adapter`, `AdapterView`, `AdapterSignals`, `ProbeTokenView` | Reads of what the engine knows of an instance (admission, online or offline since when, probe result, availability, busy turns), and the availability as `handoff.Signals` for one endpoint. |
 | `ProbeTokenEnv`, `HomeEnv`, `ProbeTokenLifetime` | The names and the lifetime of the probe tokens; the Agent interface refers to them. |
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
-| `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record. Another endpoint's message is unknown to the caller. The reply of a control signal is not part of it yet. |
+| `Control`, `ControlRequest` | Accept a control signal (`session.create`, `endpoint.status`) from the endpoint a caller is, as `Send` does; what the target made of it is read from the status of the message. |
+| `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record, and for a control signal its verified reply. Another endpoint's message is unknown to the caller. |
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
 | `Inbound`, `Pull` | The engine as the `transport.Handler`: an envelope for this node, answered with signed reports, and a pull for the reports of a message to the recipients it names: for each, the signed report or the recipient in `NoRecord`. |
 | `Declare`, `Caller`, `ByToken`, `ByAdapter` | The declaration of an endpoint, by whoever the endpoint's own caller is, resolved in the command. |
@@ -316,8 +317,9 @@ signals join the same loop as further commands and add their methods to this lis
   about every `PullInterval` until its report deadline, which already holds the
   tolerance of the clock (a pull names each delivery of the record on that node that
   is not settled, and the target answers for those only; a derived delivery, which only a
-  control signal's record has, is not asked about, as the worker takes no control record), and after the delivery deadline a node that never answered is
-  asked, not sent to. The evidence of a reply is a signature: while the wall clock
+  control signal's record has, is asked about like the others, since the worker carries a
+  control signal as it carries a message), and after the delivery deadline a node that never
+  answered is asked, not sent to. The evidence of a reply is a signature: while the wall clock
   cannot be trusted the send is put off. Nothing about the sending is persisted: after a restart every unsettled
   source record is looked at again (the start's last step), and the target answers a
   send it already took in from its record. A worker waiting out a delay that the
@@ -375,11 +377,21 @@ signals join the same loop as further commands and add their methods to this lis
   copy for each target record that holds the body.
 - **Evidence that does not verify is discarded and alerted.** The reply is judged as if
   it carried none, and an alert of the kind `evidence_error` names the message.
-- **A control signal is none of this worker's.** The source records of control signals
-  are sent by the creation of sessions.
-- **No method makes a session endpoint.** The engine has no method that takes or
-  gives the record of one; a session endpoint exists only through a session
-  creation, which is added with it.
+- **A control signal is sent as a message is.** Its source record is sent and asked about by
+  the same worker, and the control reply the receipt or the answer to a pull carries is applied
+  first, by the envelope package's one rule, and written in the transaction `control-reply`.
+- **A control signal is taken in by one order, and one that cannot be has no record.** A
+  repeat is answered from the record, an unusable endpoint or an unallowed signal gets no
+  receipt (a control record is never rejected), and what the node answers itself (a status, a
+  creation it refuses for the preset or the adapter) is answered in the transaction that accepts
+  the signal.
+- **A creation's intent is on disk before the adapter is called, and is settled in one
+  transaction.** The call is made again with the same attempt until the reply deadline; then
+  the creation is unconfirmed, its endpoint is closed and the owner is alerted. The reply of a
+  creation reaches its source by the source's pull.
+- **No method makes a session endpoint.** The engine has no method that takes or gives the
+  record of one; a session endpoint exists only through a session creation, which `Control`
+  asks for and the taking in of the signal makes.
 
 ## What the caller must guarantee
 

@@ -440,7 +440,7 @@ func (l LoopSide) SendInFlight(name string) {
 // conflict: another request is held under its identifier. A send must be in flight
 // (SendInFlight).
 func (l LoopSide) SendRefusedAsConflict(name string, node ident.NodeID, message delivery.MessageID) {
-	l.e.outResult(l.e.d.Clock.Now(), outWork{kind: workSend, name: name, node: node, message: message}, nil, nil, &Refusal{Reason: ReasonMessageConflict})
+	l.e.outResult(l.e.d.Clock.Now(), outWork{kind: workSend, name: name, node: node, message: message}, nil, nil, nil, &Refusal{Reason: ReasonMessageConflict})
 }
 
 // FinalPullUntil is the last instant at which the engine makes its last pull of a

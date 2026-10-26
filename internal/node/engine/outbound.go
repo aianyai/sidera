@@ -156,11 +156,11 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 		case workSend:
 			var rc transport.Receipt
 			rc, res.err = e.tr.Send(ctx, w.node, w.sender, w.data)
-			res.reports = rc.Reports
+			res.reports, res.controlReply = rc.Reports, rc.ControlReply
 		case workPull, workFinalPull:
 			var ans transport.PullAnswer
 			ans, res.err = e.tr.Pull(ctx, w.node, transport.PullRequest{Message: w.message, Recipients: w.recipients})
-			res.reports, res.noRecord = ans.Reports, ans.NoRecord
+			res.reports, res.noRecord, res.controlReply = ans.Reports, ans.NoRecord, ans.ControlReply
 		}
 		if _, err := roundTrip(ctx, e, submitInternal, res, res.call); err != nil && ctx.Err() != nil {
 			return
@@ -222,12 +222,12 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 }
 
 // outboundWorks says whether the outbound worker carries a source record: it does
-// not for a control signal, which the creation of a session sends, nor for the
-// replacement of a lost record, which holds nothing to send, nor while the engine
-// has no transport or keys to send with. A delivery of a record it does not carry
-// is never pulled, so nothing waits for a pull before it closes.
+// not for the replacement of a lost record, which holds nothing to send, nor while
+// the engine has no transport or keys to send with. A control signal is carried like
+// a message. A delivery of a record it does not carry is never pulled, so nothing
+// waits for a pull before it closes.
 func (e *Engine) outboundWorks(o store.OutRecord) bool {
-	return o.Lost == nil && !o.Key.Control && e.tr != nil && e.d.Keys != nil
+	return o.Lost == nil && e.tr != nil && e.d.Keys != nil
 }
 
 // finalPullUntil is the last instant at which a target is still pulled for a delivery
@@ -270,9 +270,8 @@ type nodeNeed struct {
 // outboundPlan says what a source record needs next, by node: a send to a node
 // when one of its deliveries needs one (the send carries every recipient on the
 // node), otherwise a pull naming each recipient on the node that still needs one.
-// A node with nothing to do is not in the plan. A derived delivery is planned like
-// the others, but only the record of a control signal has one and the worker does
-// not take control records, so none is asked about.
+// A node with nothing to do is not in the plan. A derived delivery, which only the
+// record of a control signal has, is planned like the others.
 func (e *Engine) outboundPlan(o envelope.Outbound, now time.Time, sent map[ident.NodeID]bool, finalPulled map[ident.EndpointID]bool) map[ident.NodeID]nodeNeed {
 	plan := map[ident.NodeID]nodeNeed{}
 	for _, t := range o.Deliveries() {
@@ -350,12 +349,15 @@ type cmdOutResult struct {
 	// noRecord are the recipients a target answered to a pull that it holds no
 	// record of; a receipt has none.
 	noRecord []ident.EndpointID
-	err      error
+	// controlReply is the signed control reply a receipt or an answer to a pull
+	// carried, nil when it carried none.
+	controlReply *record.Record
+	err          error
 }
 
 func (c *cmdOutResult) gate() gate { return gateLoopback }
 func (c *cmdOutResult) run(e *Engine, now time.Time) {
-	e.outResult(now, c.work, c.reports, c.noRecord, c.err)
+	e.outResult(now, c.work, c.reports, c.noRecord, c.controlReply, c.err)
 	c.done(struct{}{}, nil)
 }
 
@@ -370,7 +372,7 @@ func (c *cmdOutResult) run(e *Engine, now time.Time) {
 // found none, which is what the expiry of a delivery is judged by; for any other
 // delivery it says nothing yet and the next pull asks again. A call that got no
 // answer is also what the unreachable hint is judged by.
-func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, noRecord []ident.EndpointID, callErr error) {
+func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, noRecord []ident.EndpointID, controlReply *record.Record, callErr error) {
 	st := e.outbox.state[w.name]
 	if st == nil { // the record was settled or taken away while the call was out
 		return
@@ -415,7 +417,7 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 	if w.kind == workPull || w.kind == workFinalPull {
 		pulled = w.recipients
 	}
-	if err := e.applyAnswer(now, w.name, w.node, reports, noRecord, pulled); err != nil {
+	if err := e.applyAnswer(now, w.name, w.node, reports, noRecord, controlReply, pulled); err != nil {
 		e.classify(err) // a fatal error stops the loop after this command
 		if e.fatal == nil {
 			e.log.Warn("reports could not be written; they are asked for again", "message", string(w.message), "error", err.Error())
@@ -496,6 +498,9 @@ type sourceChange struct {
 	node    ident.NodeID
 	old, o  store.OutRecord
 	changed bool
+	// replied is set when the change took in a control reply, which the record is
+	// written with by the transaction of that.
+	replied bool
 }
 
 // changeSource starts a change of the source record of the name, from what the view
@@ -515,6 +520,38 @@ func (c *sourceChange) take(next envelope.Outbound, recipient ident.EndpointID, 
 	c.o.Outbound = next
 	c.o = c.e.withFeedback(c.now, c.o, ident.Address{Node: c.node, Endpoint: recipient}, outcomes)
 	c.changed = true
+}
+
+// applyControlReply takes in the control reply of the signal, which the one rule
+// of the envelope package applies: the delivery of the signal ends, and the
+// initial message of a creation gets its delivery to the session endpoint the reply
+// names. A reply that does not verify, one that is not the signal's or that
+// contradicts what the record accepted before is the peer's fault, logged and left
+// out; the same reply again changes nothing.
+func (c *sourceChange) applyControlReply(rec record.Record) {
+	e := c.e
+	sr, err := e.verifyControlReply(c.now, rec, c.node)
+	if err != nil {
+		e.log.Warn("a control reply of the target did not verify", "node", c.node.String(), "error", err.Error())
+		return
+	}
+	if c.o.Outbound.ControlReplyDigest == sr.Digest() {
+		return
+	}
+	h, err := envelope.HandleControlReply(c.now, c.o.Outbound, sr, nil)
+	if err != nil {
+		e.log.Warn("a control reply of the target is refused", "node", c.node.String(), "error", err.Error())
+		return
+	}
+	encoded, err := rec.Encode()
+	if err != nil {
+		e.log.Error("a control reply that verified cannot be encoded", "error", err.Error())
+		return
+	}
+	c.o.Outbound, c.o.ControlReply = h.Outbound, encoded
+	target := c.o.Outbound.Recipients[0].Address
+	c.o = e.withFeedback(c.now, c.o, target, []delivery.Outcome{h.Control})
+	c.changed, c.replied = true, true
 }
 
 // observe applies a fact the sender sees itself to the delivery to recipient, and
@@ -545,15 +582,20 @@ func (c *sourceChange) commit() error {
 		return nil
 	}
 	o := settledSource(c.o)
-	if err := c.e.d.Store.SourceUpdate(o); err != nil {
+	write := c.e.d.Store.SourceUpdate
+	if c.replied {
+		write = c.e.d.Store.ControlReply
+	}
+	if err := write(o); err != nil {
 		return err
 	}
 	c.e.putOut(c.now, o)
 	return nil
 }
 
-// applyAnswer applies what a node answered about a message this node sent: each
-// report is verified and applied to the source record, and each recipient the node
+// applyAnswer applies what a node answered about a message this node sent: the
+// control reply, when the message is a control signal and the answer has it, and
+// each report is verified and applied to the source record, and each recipient the node
 // lists as having no record is applied by the rule of the delivery. It writes the
 // record when one of them changed it. Whatever is not applied, a report that does
 // not verify, one that no state of the delivery can follow, an answer about a node
@@ -568,10 +610,15 @@ func (c *sourceChange) commit() error {
 // record or in neither list, is a query that found no receipt: it is what the
 // expiry of a delivery that has none is judged by (delivery.EventExpiryQueried),
 // and the delivery rules ignore it for every delivery that has one.
-func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs []record.Record, noRecord []ident.EndpointID, pulled []ident.EndpointID) error {
+func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs []record.Record, noRecord []ident.EndpointID, controlReply *record.Record, pulled []ident.EndpointID) error {
 	c, ok := e.changeSource(now, name, node)
 	if !ok {
 		return nil
+	}
+	if controlReply != nil {
+		// The reply comes first: it ends the delivery of the signal and binds what the
+		// signal made, which a report that comes with it may be about.
+		c.applyControlReply(*controlReply)
 	}
 	reported := map[ident.EndpointID]bool{}
 	for _, rec := range recs {
@@ -652,9 +699,9 @@ func (e *Engine) encodeFor(now time.Time, o store.OutRecord, node ident.NodeID) 
 	}
 	env := envelope.Envelope{
 		ID: o.Outbound.Message, To: slices.Clone(o.Key.Recipients), MultiRecipient: len(o.Key.Recipients) > 1,
-		DiscloseRecipients: o.Envelope.DiscloseRecipients, Kind: envelope.KindMessage, ReplyTo: o.Envelope.ReplyTo, Thread: o.Envelope.Thread,
+		DiscloseRecipients: o.Envelope.DiscloseRecipients, Kind: o.Outbound.Kind, ReplyTo: o.Envelope.ReplyTo, Thread: o.Envelope.Thread,
 		Seq: o.Envelope.Seq, SentAt: o.Envelope.SentAt, AcceptBefore: o.Outbound.AcceptBefore, ReportBy: o.Envelope.ReportBy,
-		ContentType: o.Envelope.ContentType, Body: body,
+		ContentType: o.Envelope.ContentType, Body: body, Preset: o.Envelope.Preset,
 	}
 	if env.ReplyTo != "" {
 		if rec, ok, err := e.evidenceFor(now, o.Key.Sender, env.ReplyTo); err != nil {

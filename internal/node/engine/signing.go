@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -70,23 +71,67 @@ func (e *Engine) signRefusal() Reason { return SignRefusalOf(e.retired, e.paused
 // carries the delivery time. It refuses while the node may not sign (see
 // canSign).
 func (e *Engine) signReport(now time.Time, in store.InRecord) (record.Record, error) {
+	return e.signRecordReport(now, in.Key, in.Record)
+}
+
+// signControlReport is signReport for the record of a control signal.
+func (e *Engine) signControlReport(now time.Time, c store.CtlRecord) (record.Record, error) {
+	return e.signRecordReport(now, c.Key, c.Record)
+}
+
+// signRecordReport is the one place a report of a target delivery is made, whether
+// the record is a message's or a control signal's.
+func (e *Engine) signRecordReport(now time.Time, key store.TargetKey, rec delivery.Record) (record.Record, error) {
 	if err := e.canSign(); err != nil {
 		return record.Record{}, err
 	}
 	rep := envelope.StatusReport{
-		Sender: in.Key.SenderNode, Message: in.Key.Message, Recipient: in.Key.Recipient,
-		Status: in.Record.StatusReport(), ReportedAt: in.Record.StateAt, DeliveredAt: in.Record.DeliveredAt(),
+		Sender: key.SenderNode, Message: key.Message, Recipient: key.Recipient,
+		Status: rec.StatusReport(), ReportedAt: rec.StateAt, DeliveredAt: rec.DeliveredAt(),
 	}
 	d := envelope.StatusReportDescriptor(e.d.Node, e.acceptedKey(e.d.Node), now)
-	rec, err := record.Seal(d, rep, e.d.Keys.NetworkSigner())
+	signed, err := record.Seal(d, rep, e.d.Keys.NetworkSigner())
 	if err != nil {
-		return record.Record{}, fmt.Errorf("engine: signing the report of %s: %w", in.Key.Message, err)
+		return record.Record{}, fmt.Errorf("engine: signing the report of %s: %w", key.Message, err)
 	}
-	return rec, nil
+	return signed, nil
+}
+
+// controlReplyPayload is the payload of the control reply of a signal, which the
+// target stores with the signal's deduplication record: the reply is made once, at
+// the moment the result is committed, and signed again each time it is sent.
+func (e *Engine) controlReplyPayload(now time.Time, key store.TargetKey, result envelope.ControlResult) ([]byte, error) {
+	now = now.UTC().Truncate(time.Second) // what a reply can say
+	reply := envelope.ControlReply{Sender: key.SenderNode, Message: key.Message, Recipient: key.Recipient, IssuedAt: now, Result: result}
+	d := envelope.ControlReplyDescriptor(e.d.Node, e.acceptedKey(e.d.Node), now)
+	payload, err := record.EncodePayload(d, reply)
+	if err != nil {
+		return nil, fmt.Errorf("engine: the control reply of %s: %w", key.Message, err)
+	}
+	return payload, nil
+}
+
+// signControlReply signs the stored control reply of a control record, with the
+// node's current network key.
+func (e *Engine) signControlReply(c store.CtlRecord) (record.Record, error) {
+	if err := e.canSign(); err != nil {
+		return record.Record{}, err
+	}
+	signed, err := record.Sign(envelope.ControlReplyType, c.Dedup.Reply, e.d.Keys.NetworkSigner())
+	if err != nil {
+		return record.Record{}, fmt.Errorf("engine: signing the control reply of %s: %w", c.Key.Message, err)
+	}
+	return signed, nil
 }
 
 // verifyReport verifies a report a node signed about a message this node sent to
 // it.
 func (e *Engine) verifyReport(now time.Time, rec record.Record, target ident.NodeID) (envelope.SignedReport, error) {
 	return envelope.VerifyStatusReport(rec, target, e.d.Node, e.acceptedKey(target), now)
+}
+
+// verifyControlReply verifies a control reply a node signed about a signal this
+// node sent to it.
+func (e *Engine) verifyControlReply(now time.Time, rec record.Record, target ident.NodeID) (envelope.SignedControlReply, error) {
+	return envelope.VerifyControlReply(rec, target, e.d.Node, e.acceptedKey(target), now)
 }

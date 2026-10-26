@@ -71,6 +71,11 @@ type outgoing struct {
 	accept   time.Duration
 	idemKey  string
 	disclose bool
+	// kind is what the envelope asks for; the zero value is a message. A control
+	// signal has one recipient and no reply to, and preset is the parameter of a
+	// session creation.
+	kind   envelope.Kind
+	preset string
 }
 
 type cmdSend struct {
@@ -219,11 +224,15 @@ func checkOutgoing(m *outgoing) error {
 // request the envelope refuses is refused for the field it names; one it refuses
 // for another reason is a defect of the engine's own.
 func (e *Engine) envelopeOf(now time.Time, sender ident.EndpointID, id delivery.MessageID, m outgoing) (envelope.Envelope, error) {
+	if m.kind == envelope.KindInvalid {
+		m.kind = envelope.KindMessage
+	}
 	acceptBefore := now.Add(m.accept).Truncate(time.Second)
 	env := envelope.Envelope{
 		ID: id, To: slices.Clone(m.to), MultiRecipient: len(m.to) > 1, DiscloseRecipients: m.disclose && len(m.to) > 1,
-		Kind: envelope.KindMessage, ReplyTo: m.replyTo, Thread: m.thread, Seq: map[ident.EndpointID]uint64{},
+		Kind: m.kind, ReplyTo: m.replyTo, Thread: m.thread, Seq: map[ident.EndpointID]uint64{},
 		SentAt: now, AcceptBefore: acceptBefore, ReportBy: delivery.ReportBy(acceptBefore), ContentType: m.ctype, Body: m.body,
+		Preset: m.preset,
 	}
 	for _, to := range m.to {
 		env.Seq[to.Endpoint] = e.view.seq.Next(sender, to)
@@ -262,17 +271,20 @@ func (e *Engine) repeat(prior store.OutRecord, env envelope.Envelope) (SendResul
 // fields it needs to send it again, one delivery for each recipient, the body
 // reference and the digest of the request.
 func (e *Engine) sourceRecord(now time.Time, sender ident.EndpointID, env envelope.Envelope, m outgoing) store.OutRecord {
-	ref := store.BodyRefOf(env.Body)
 	o := store.OutRecord{
-		Key: store.OutKey{Sender: sender, Message: env.ID, Recipients: env.To},
+		Key: store.OutKey{Sender: sender, Message: env.ID, Recipients: env.To, Control: env.Kind.IsControl()},
 		Outbound: envelope.Outbound{
-			Message: env.ID, From: sender, Kind: envelope.KindMessage, BodyNonEmpty: true, AcceptBefore: env.AcceptBefore,
+			Message: env.ID, From: sender, Kind: env.Kind, BodyNonEmpty: len(env.Body) > 0, AcceptBefore: env.AcceptBefore,
 		},
 		Envelope: store.OutEnvelope{
 			To: env.To, DiscloseRecipients: env.DiscloseRecipients, ReplyTo: env.ReplyTo, Thread: env.Thread, Seq: env.Seq, SentAt: env.SentAt,
-			ReportBy: env.ReportBy, ContentType: env.ContentType,
+			ReportBy: env.ReportBy, ContentType: env.ContentType, Preset: env.Preset,
 		},
-		Body: &ref, BodyDigest: env.Digest(),
+		BodyDigest: env.Digest(),
+	}
+	if len(env.Body) > 0 {
+		ref := store.BodyRefOf(env.Body)
+		o.Body = &ref
 	}
 	for _, to := range env.To {
 		o.Outbound.Recipients = append(o.Outbound.Recipients, envelope.Tracked{Address: to, Delivery: delivery.NewSourceRecord(now, env.AcceptBefore)})

@@ -35,6 +35,9 @@ type Store interface {
 	Deliver(body []byte, ins []store.InRecord) error
 	DeliverReply(body []byte, out *store.OutRecord, ins []store.InRecord) error
 	SourceUpdate(out store.OutRecord) error
+	ControlIntake(body []byte, endpoint *store.EndpointRecord, ctl store.CtlRecord) error
+	ControlResult(ctl store.CtlRecord, endpoint *store.EndpointRecord) error
+	ControlReply(out store.OutRecord) error
 
 	EndpointUpdate(ep store.EndpointRecord) error
 	EndpointClose(ep store.EndpointRecord, result *store.AdminRecord) error
