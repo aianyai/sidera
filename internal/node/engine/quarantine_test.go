@@ -11,12 +11,14 @@ import "testing"
 //
 // The store decides which endpoints a control record's quarantine closes
 // (store.QuarantineSessions), from the scan the engine hands it, so the engine
-// passes no list. The quarantine of damaged files is wired with the pull answer
-// that tells a source a target holds no record (the scan entry refuses to open
-// over a damaged file until then). This test is the requirement kept in sight until
-// the engine wires the quarantine; it is skipped until then and must not be removed.
+// passes no list. The quarantine of a damaged control record is not wired: it
+// removes the record's file, and a control signal's record must not go before the
+// pull of control signals answers from it, so the scan entry refuses to open over one
+// (TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet). This test is the
+// requirement kept in sight until the engine wires it; it is skipped until then and
+// must not be removed.
 func TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord(t *testing.T) {
-	t.Skip("pending: the quarantine of damaged files is wired with the pull answer that tells a source a target holds no record; " +
-		"the store picks the session endpoints to close from the scan it is given, so wiring it means giving " +
+	t.Skip("pending: the quarantine of a damaged control record is wired with the pull of control signals, which answers " +
+		"from ctl/; the store picks the session endpoints to close from the scan it is given, so wiring it means giving " +
 		"store.Quarantine that scan")
 }

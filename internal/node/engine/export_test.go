@@ -358,3 +358,26 @@ func SignReport(ctx context.Context, e *Engine, in store.InRecord) (record.Recor
 	c := &cmdSign{call: newCall[record.Record](), in: in}
 	return roundTrip(ctx, e, submitExternal, c, c.call)
 }
+
+// ReadBody reads a body as the loop does for whatever needs its bytes (a send
+// again, the hand-out of a message): a body that is not what its record, owner,
+// says settles that record.
+func (l LoopSide) ReadBody(owner store.Record, ref store.BodyRef) error {
+	_, err := l.e.readBody(l.e.d.Clock.Now(), owner, ref)
+	return err
+}
+
+// SettleDamaged settles the damaged file the disk has at dir/name as the loop does
+// for a file it meets while it runs; the file must be one the scan lists.
+func (l LoopSide) SettleDamaged(dir, name string) error {
+	sc, err := l.e.d.Store.Scan()
+	if err != nil {
+		return err
+	}
+	for _, d := range sc.Damaged {
+		if d.Dir == dir && d.Name == name {
+			return l.e.settleLive(l.e.d.Clock.Now(), d)
+		}
+	}
+	return fmt.Errorf("no damaged file %s/%s", dir, name)
+}

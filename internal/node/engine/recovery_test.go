@@ -171,18 +171,24 @@ func TestOpenClosesTheEndpointsOfADisabledInstance(t *testing.T) {
 }
 
 // The scan entry never opens over work that a rule that is not wired yet would
-// have to do: it says which rule, and it has changed nothing on the way. A
-// damaged file is not quietly kept out of the view.
+// have to do: it says which rule, and it has changed nothing on the way. A damaged
+// control record is such work: quarantining it removes its file, and a control
+// signal's record must not go before the pull of control signals answers from it, so
+// it is left, and the start is refused, until then. Nothing else damaged is: the
+// quarantine of every other file is wired.
 func TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet(t *testing.T) {
 	noLeaks(t)
 	hash := strings.Repeat("a1", 32)
 	for _, tc := range []struct {
-		name  string
-		seed  func(r *rig)
-		rule  string
-		check func(t *testing.T, r *rig)
+		name string
+		seed func(r *rig)
+		rule string
 	}{
-		{"a damaged record", func(r *rig) { r.seedFile(store.InDir, hash+".rec", []byte("not a record")) }, "quarantine", nil},
+		{"a damaged control record", func(r *rig) { r.seedFile(store.CtlDir, hash+".rec", []byte("not a record")) }, "quarantine"},
+		{"a damaged control record beside a damaged target record", func(r *rig) {
+			r.seedFile(store.CtlDir, hash+".rec", []byte("not a record"))
+			r.seedFile(store.InDir, strings.Repeat("b2", 32)+".rec", []byte("not a record"))
+		}, "quarantine"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t, 10)
@@ -194,9 +200,67 @@ func TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet(t *testing.T) {
 				t.Fatalf("Open error %v, want a PendingRecoveryError of rule %s", err, tc.rule)
 			}
 			if after := r.snapshot(); fmt.Sprint(after) != fmt.Sprint(before) {
-				t.Errorf("the refused scan entry changed the disk")
+				t.Errorf("the refused scan entry changed the disk: the damaged file beside the control record must wait for it too")
 			}
 		})
+	}
+}
+
+// A damaged file of any other directory is settled by the scan entry, which opens
+// over it: the file is gone, the owner has an alert, and the node starts.
+func TestOpenQuarantinesADamagedFileAndOpens(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	name := strings.Repeat("a1", 32) + ".rec"
+	r.seedFile(store.InDir, name, []byte("not a record"))
+	e, rep, err := r.open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer r.stop2(e)
+	if rep.Rules["quarantine"] != 1 || len(rep.Order) == 0 || rep.Order[0] != "quarantine" {
+		t.Errorf("the rules that ran: %v in the order %v, want the quarantine, first", rep.Rules, rep.Order)
+	}
+	sc := r.scan()
+	if len(sc.Damaged) != 0 || len(sc.In) != 0 {
+		t.Errorf("the disk holds %d damaged files and %d target records after the scan entry, want none", len(sc.Damaged), len(sc.In))
+	}
+	if len(sc.Alerts) != 1 || sc.Alerts[0].Kind != "corrupt_record" {
+		t.Errorf("the owner has the alerts %+v, want one of kind corrupt_record", sc.Alerts)
+	}
+}
+
+// The quarantine is the first of the rules, because a settlement overwrites source
+// records, raises floors and removes records that every later rule reads: a record
+// that is damaged and queued for a closed endpoint is removed before the drain looks
+// at the queue, and the drain does not close what is not there.
+func TestTheQuarantineRunsBeforeTheOtherRecoveryRules(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	e := r.start()
+	closed := register(t, e, "closed")
+	r.restart()
+	var closedRec store.EndpointRecord
+	for _, ep := range r.scan().Endpoints {
+		if ep.ID == closed {
+			closedRec = ep
+		}
+	}
+	closedRec.Status, closedRec.Token = store.EndpointClosed, nil
+	if err := r.st.EndpointClose(closedRec, nil); err != nil {
+		t.Fatal(err)
+	}
+	r.queue(1, 2, closed)
+	orphan := r.seedBody([]byte("nobody refers to this"))
+	r.seedFile(store.InDir, strings.Repeat("a1", 32)+".rec", []byte("not a record"))
+	e2, rep, err := r.open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer r.stop2(e2)
+	want := []string{"quarantine", "endpoint-drain-replay", "orphan-gc"}
+	if fmt.Sprint(rep.Order) != fmt.Sprint(want) {
+		t.Errorf("the rules ran in the order %v, want %v (the orphan body %s is the last)", rep.Order, want, orphan[:8])
 	}
 }
 
