@@ -46,11 +46,14 @@ type Stage uint8
 // which check it is making is told off instead of getting one of them silently.
 const (
 	// StageIntake is the check made when the message arrives. Whatever the
-	// endpoint has declared about new messages applies, including a pause.
+	// endpoint has declared about new messages applies, including a pause and the
+	// refusal of messages with several recipients.
 	StageIntake Stage = iota + 1
 	// StageRecv is the check made when recv hands out the body. The endpoint is
 	// pulling its own queued messages, so its pause does not apply: a pause
-	// stops new intake, not the endpoint's reading of what it already holds.
+	// stops new intake, not the endpoint's reading of what it already holds. The
+	// refusal of several recipients does not apply either: it is about how the
+	// message arrived, which only the entry knows.
 	StageRecv
 )
 
@@ -75,7 +78,8 @@ type Request struct {
 	// Preset is the runtime preset to start (session.create only; required).
 	Preset string
 	// MultiRecipient is true when the message is addressed to several
-	// recipients (message.send only).
+	// recipients (message.send only). It is read at StageIntake only; at
+	// StageRecv the caller has no such fact to pass and leaves it false.
 	MultiRecipient bool
 
 	// Reply is the caller's verified fact that this message is a reply inside an

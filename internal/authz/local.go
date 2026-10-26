@@ -16,7 +16,8 @@ type LocalRequest struct {
 	Target Target
 
 	// MultiRecipient is true when the message is addressed to several
-	// recipients (message.send only).
+	// recipients (message.send only), as for Request.MultiRecipient: read at
+	// StageIntake only.
 	MultiRecipient bool
 	// Reply is the caller's verified fact that this message is a reply inside an
 	// outstanding reply permission, as for Request.Reply; at StageRecv the value

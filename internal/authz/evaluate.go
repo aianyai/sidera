@@ -211,11 +211,13 @@ func (r Request) wellFormed() bool {
 	return r.Action != ActionSessionCreate || r.Preset != ""
 }
 
-// declinedBy applies the target endpoint's self-declarations. The pause (at
-// intake only) and hidden declarations hold even for a reply; a reply only lifts
-// the sender restriction, because that restriction is the inbound policy the
-// reply permission exists to pass. At recv the endpoint is reading its own
-// queued messages, so its pause is not applied.
+// declinedBy applies the target endpoint's self-declarations. The pause and the
+// refusal of several recipients (both at intake only) and hidden declarations hold
+// even for a reply; a reply only lifts the sender restriction, because that
+// restriction is the inbound policy the reply permission exists to pass. At recv
+// the endpoint is reading its own queued messages, so its pause is not applied,
+// and whether a message had several recipients is a fact of its entry that the
+// caller does not keep, so the refusal of them is not applied either.
 func (a asked) declinedBy(reply bool) (Reason, bool) {
 	d := a.declaration
 	switch a.action {
@@ -223,7 +225,7 @@ func (a asked) declinedBy(reply bool) (Reason, bool) {
 		switch {
 		case d.Paused && a.stage == StageIntake:
 			return ReasonEndpointPaused, true
-		case d.RefuseMultiRecipient && a.multiRecipient:
+		case d.RefuseMultiRecipient && a.multiRecipient && a.stage == StageIntake:
 			return ReasonEndpointRefusesMultiRecipient, true
 		case d.RestrictSenders && !reply && !d.accepts(a.sender):
 			return ReasonSenderNotAccepted, true

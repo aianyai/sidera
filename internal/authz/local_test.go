@@ -74,12 +74,12 @@ func TestEvaluateLocal(t *testing.T) {
 				r.TargetDeclaration = Declaration{Paused: true}
 			}),
 			want: ReasonGranted},
-		{name: "declaration refuse-multi-recipient: refused for a multi-recipient message at both checks",
+		{name: "declaration refuse-multi-recipient: refused for a multi-recipient message at intake, not at recv",
 			req: withLocal(localSend(), func(r *LocalRequest) {
 				r.TargetDeclaration = Declaration{RefuseMultiRecipient: true}
 				r.MultiRecipient = true
 			}),
-			want: ReasonEndpointRefusesMultiRecipient},
+			want: ReasonEndpointRefusesMultiRecipient, wantRecv: ReasonGranted},
 		{name: "declaration refuse-multi-recipient: a single-recipient message is granted",
 			req:  withLocal(localSend(), func(r *LocalRequest) { r.TargetDeclaration = Declaration{RefuseMultiRecipient: true} }),
 			want: ReasonGranted},
@@ -119,7 +119,7 @@ func TestEvaluateLocal(t *testing.T) {
 				r.MultiRecipient = true
 				r.Reply = true
 			}),
-			want: ReasonEndpointRefusesMultiRecipient},
+			want: ReasonEndpointRefusesMultiRecipient, wantRecv: ReasonGranted},
 		{name: "a verified reply is granted outright: there is no rule for it to stand in for",
 			req:  withLocal(localSend(), func(r *LocalRequest) { r.Reply = true }),
 			want: ReasonGranted},
@@ -415,7 +415,7 @@ func modelLocal(r LocalRequest) Reason {
 		if d.Paused && r.Stage == StageIntake {
 			return ReasonEndpointPaused
 		}
-		if d.RefuseMultiRecipient && r.MultiRecipient {
+		if d.RefuseMultiRecipient && r.MultiRecipient && r.Stage == StageIntake {
 			return ReasonEndpointRefusesMultiRecipient
 		}
 		if d.RestrictSenders && !r.Reply {
@@ -496,7 +496,7 @@ func TestEvaluateLocalAgreesWithModel(t *testing.T) {
 	// Requests refused only because of their sender's endpoint: the same request
 	// from an ordinary endpoint is not malformed.
 	onlySystemSender, onlyZeroSenderEndpoint := 0, 0
-	for i := 0; i < 200000; i++ {
+	for i := 0; i < 300000; i++ {
 		r := randomLocalRequest(rng)
 		want := modelLocal(r)
 		got := EvaluateLocal(r)

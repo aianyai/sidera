@@ -270,12 +270,12 @@ func TestEvaluate(t *testing.T) {
 				r.Stage = StageRecv
 				r.TargetDeclaration = Declaration{Paused: true, RestrictSenders: true, AcceptFrom: []ident.Address{addr(1, 2)}}
 			}), ReasonSenderNotAccepted},
-		{"declaration: at recv the other declarations still apply: multi-recipient refusal", DefaultPolicy(),
+		{"declaration: at recv the refusal of several recipients is not applied: whether the message had several is a fact of its entry", DefaultPolicy(),
 			with(send(), func(r *Request) {
 				r.Stage = StageRecv
 				r.MultiRecipient = true
-				r.TargetDeclaration = Declaration{Paused: true, RefuseMultiRecipient: true}
-			}), ReasonEndpointRefusesMultiRecipient},
+				r.TargetDeclaration = Declaration{RefuseMultiRecipient: true}
+			}), ReasonGranted},
 		{"declaration: at recv a hidden endpoint is still hidden from the directory", DefaultPolicy(),
 			with(send(), func(r *Request) {
 				r.Stage = StageRecv

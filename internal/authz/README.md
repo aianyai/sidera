@@ -82,8 +82,8 @@ set of nodes).
    by a restriction (not authorized), preset not allowed, body too large, or not
    authorized.
 5. The target endpoint's own declarations (paused at intake, refuses
-   multi-recipient, accepts only listed senders, hidden from directory). They can
-   only turn an allow into a reject.
+   multi-recipient at intake, accepts only listed senders, hidden from directory).
+   They can only turn an allow into a reject.
 6. If the result is an allow and trust is suspended, the verdict is `Suspend`
    with no obligations.
 
@@ -165,9 +165,9 @@ an outstanding reply permission. The caller has checked the evidence against its
 own send records; this package does not. The fact is read for `message.send`
 only. It replaces the missing allow rule and lifts both a restriction and an
 accept-only-from list. Only a deny stops it, besides the endpoint's paused
-declaration at intake, a multi-recipient refusal and connection trust. A reply
-admitted without an allow rule has no size cap, because the caps belong to rules
-that did not grant it, and a reply never carries a rate obligation.
+declaration and its multi-recipient refusal (both at intake) and connection trust.
+A reply admitted without an allow rule has no size cap, because the caps belong to
+rules that did not grant it, and a reply never carries a rate obligation.
 
 The verdict is made once, at intake. The caller stores it with the target record
 of the message and passes the stored value unchanged at `StageRecv`: the window
@@ -181,7 +181,10 @@ rule does not.
 `Request.TargetDeclaration` is looked up by the caller. Paused, multi-recipient
 refusal and the sender list apply to `message.send`. Pausing stops new intake: it
 is applied at `StageIntake` only, because at `StageRecv` the endpoint is pulling
-the messages it already holds. The other declarations apply at both stages.
+the messages it already holds. So is the refusal of several recipients, because
+whether a message had several recipients is a fact of its entry that the caller
+does not keep for the hand-out: tightening the declaration later does not refuse
+messages already taken in. The sender list applies at both stages.
 Hidden-from-directory applies to `see` on an endpoint and nothing else: a hidden
 endpoint can still be messaged. A declaration never turns a reject into an allow.
 

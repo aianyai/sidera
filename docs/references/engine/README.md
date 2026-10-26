@@ -354,10 +354,12 @@ when its body was never handed out, `delivery_unknown` when it was) and its body
 it. Only what the page reaches is judged: a refused message behind the last one the page
 holds is left, because the declaration may be loosened before it would be handed out and
 a message closed meanwhile would have been lost for a rule never applied to it; the next
-recv reaches it. A notice of the system endpoint is exempt traffic and has no check. What is
-not kept of a message is whether it had several recipients, so the refusal of several
-recipients is made at intake only; a delivery derived from a control signal is not handed
-out until the request it was admitted with is kept, and is logged as an error.
+recv reaches it. A notice of the system endpoint is exempt traffic and has no check. The
+refusal of several recipients is made at intake only, as the pause is (`authz`'s second
+check ignores it): whether a message had several recipients is a fact of its entry that is
+not kept, so tightening the declaration later does not refuse messages already taken in. A
+delivery derived from a control signal is not handed out until the request it was admitted
+with is kept, and is logged as an error.
 
 The page is built within the budget of the front end the request names, which is the
 adapter's declaration (`Admission.Budget`; a direct endpoint's is that of the front end

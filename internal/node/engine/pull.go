@@ -471,9 +471,8 @@ func (e *Engine) handoutAuthorization(now time.Time, st *endpointState, in store
 	if in.Body != nil {
 		size = int64(in.Body.Len)
 	}
-	// Whether the message was one of several recipients is not kept, so the
-	// refusal of several recipients is made at intake only. Local is the node's own
-	// transport: another node cannot present this node's identifier.
+	// Local is the node's own transport: another node cannot present this node's
+	// identifier.
 	v := e.evaluate(now, authCheck{
 		stage: authz.StageRecv, local: in.Key.SenderNode == e.d.Node,
 		sender: authz.Sender{Node: in.Key.SenderNode, Endpoint: in.Key.Sender}, action: action,

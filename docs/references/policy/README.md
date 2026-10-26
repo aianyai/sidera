@@ -105,7 +105,7 @@ from the request's size.
 **Reply permission.** The caller verifies the reply evidence and passes the fact (`reply.Admit`, see [envelope](../envelope/README.md)).
 For `message.send` it stands in for a missing allow rule and lifts both a
 restriction and an accept-only-from list. It never overrides an explicit deny, a
-paused endpoint at intake, a multi-recipient refusal or connection trust. It
+paused endpoint or a multi-recipient refusal (both at intake), or connection trust. It
 carries no rate obligation and no size cap. The verdict is made once, at intake,
 and stored with the target's record of the message; at the `recv` check the
 caller passes the stored value unchanged. The window of the permission governs
@@ -115,8 +115,10 @@ refuses it there.
 
 **Endpoint self-declarations.** An endpoint can pause itself, refuse
 multi-recipient messages, accept only listed senders, and hide from the
-directory. They only narrow. Pausing applies at intake only: at `recv` the
-endpoint is reading what it already holds. Hidden affects the `see` action on that
+directory. They only narrow. Pausing and the refusal of several recipients apply at
+intake only: at `recv` the endpoint is reading what it already holds, and whether a
+message had several recipients is a fact of its entry that is not kept for the
+hand-out, so tightening the refusal later does not refuse messages already taken in. Hidden affects the `see` action on that
 endpoint only; the endpoint stays reachable.
 
 **Exempt traffic.** Status reports, control replies, system-endpoint feedback and
@@ -238,9 +240,12 @@ Tighten, because it stops their replies.
   same once trust returns, and a deny rule or a lost grant must not leave a delivery
   queued behind a lapsed guarantee, so it is given at once. A suspended sender counts
   as inherited, since a lapsed direct tie is not a direct tie.
-- **Pause applies at intake only.** Pausing stops new messages. The endpoint
-  pulling a message that is already queued wants it, and rejecting it at `recv`
-  would end a delivery that was accepted.
+- **Pause and the refusal of several recipients apply at intake only.** Pausing
+  stops new messages. The endpoint pulling a message that is already queued wants
+  it, and rejecting it at `recv` would end a delivery that was accepted. Whether a
+  message had several recipients is a fact of its entry, and the target record does
+  not keep it, so the refusal is judged where the fact is known; a declaration
+  tightened afterwards does not refuse what was taken in.
 - **A reply's permission is decided once.** The reply window is a limit on how
   long a conversation may be answered, and the endpoint's agent has by then been
   promised the message: a reply that was let in and is queued must not be refused
