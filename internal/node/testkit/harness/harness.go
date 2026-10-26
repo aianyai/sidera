@@ -2,6 +2,7 @@ package harness
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -584,8 +585,61 @@ func (h *H) Agent(name string) fakeagent.Agent {
 		h.t.Fatalf("harness: ledger writer of %s: %v", name, err)
 	}
 	inner := engineagent.New(currentEngine{h}, engine.ByAdapter(Instance, ep.ref))
-	a := fakeagent.Recording(inner, w, id, fakeagent.RecordingOptions{})
+	a := fakeagent.Recording(inner, w, id, h.recordingOptions())
 	h.agent[name] = a
+	return a
+}
+
+// recordingOptions are what every agent of the fixture writes to the ledger besides
+// its calls: what each page showed, one model.saw entry for each message or part, with
+// the notices of the node's own system endpoint told from the messages of others.
+func (h *H) recordingOptions() fakeagent.RecordingOptions {
+	system := ident.Address{Node: NodeID(), Endpoint: ident.SystemEndpoint()}.String()
+	return fakeagent.RecordingOptions{
+		ModelSaw: true,
+		Feedback: func(from, _ string) (string, bool) { return "notice", from == system },
+	}
+}
+
+// Session returns the agent of a session endpoint, by the endpoint's identifier as the
+// reply to its creation names it: the engine-layer backend that holds the token of the
+// session, as the tools of a session do. The token is read from the endpoint's record
+// on the disk, so a test reaches a session only through what the node has made, never
+// by registering one. The same agent is returned for the same endpoint for the life of
+// the fixture, across restarts.
+func (h *H) Session(endpointID string) fakeagent.Agent {
+	h.t.Helper()
+	id, err := ident.ParseEndpointID(endpointID)
+	if err != nil {
+		h.t.Fatalf("harness: Session(%q): %v", endpointID, err)
+	}
+	h.mu.Lock()
+	a, ok := h.agent["session/"+endpointID]
+	h.mu.Unlock()
+	if ok {
+		return a
+	}
+	sc, err := h.Records()
+	if err != nil {
+		h.t.Fatalf("harness: Session(%q): %v", endpointID, err)
+	}
+	var token adapterproto.Token
+	for _, ep := range sc.Endpoints {
+		if ep.ID == id && ep.Kind == adapterreg.KindSession && ep.Status == store.EndpointOpen {
+			token = adapterproto.Token(base64.RawURLEncoding.EncodeToString(ep.Token))
+		}
+	}
+	if token == "" {
+		h.t.Fatalf("harness: Session(%q): the node holds no open session endpoint of that identifier", endpointID)
+	}
+	w, err := h.led.Open("agent/"+id.String(), 0, h.clk.Now)
+	if err != nil {
+		h.t.Fatalf("harness: ledger writer of the session %s: %v", id, err)
+	}
+	a = fakeagent.Recording(engineagent.New(currentEngine{h}, engine.ByToken(token)), w, id.String(), h.recordingOptions())
+	h.mu.Lock()
+	h.agent["session/"+endpointID] = a
+	h.mu.Unlock()
 	return a
 }
 
@@ -607,6 +661,14 @@ func (c currentEngine) Reply(ctx context.Context, caller engine.Caller, r engine
 
 func (c currentEngine) Control(ctx context.Context, caller engine.Caller, r engine.ControlRequest) (engine.SendResult, error) {
 	return onProcess(c.h, func(e *engine.Engine) (engine.SendResult, error) { return e.Control(ctx, caller, r) })
+}
+
+func (c currentEngine) Recv(ctx context.Context, caller engine.Caller, r engine.RecvRequest) ([]byte, error) {
+	return onProcess(c.h, func(e *engine.Engine) ([]byte, error) { return e.Recv(ctx, caller, r) })
+}
+
+func (c currentEngine) Ack(ctx context.Context, caller engine.Caller, r engine.AckRequest) ([]adapterproto.PartAck, error) {
+	return onProcess(c.h, func(e *engine.Engine) ([]adapterproto.PartAck, error) { return e.Ack(ctx, caller, r) })
 }
 
 func (c currentEngine) MessageStatus(ctx context.Context, caller engine.Caller, id adapterproto.MessageID) (adapterproto.MessageStatusResult, error) {

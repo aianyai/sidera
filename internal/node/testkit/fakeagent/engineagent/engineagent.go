@@ -1,8 +1,11 @@
 package engineagent
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
@@ -104,6 +107,36 @@ func (a *agent) Control(ctx context.Context, in fakeagent.ControlInput) (fakeage
 	return sendResult(res, err)
 }
 
+// Recv asks for a page. The page is kept as printed, which is what the model sees, and
+// decoded strictly, so that a page that is not the shape of the protocol fails here.
+func (a *agent) Recv(ctx context.Context, in fakeagent.RecvInput) (fakeagent.RecvResult, error) {
+	raw, err := a.svc.Recv(ctx, a.caller, engine.RecvRequest{
+		Frontend: in.Frontend, Wait: time.Duration(in.WaitS) * time.Second, Msg: in.Msg, Part: in.Part, AckLease: in.AckLease,
+	})
+	if err != nil {
+		return fakeagent.RecvResult{}, MapError(err)
+	}
+	var page adapterproto.RecvPage
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&page); err != nil {
+		return fakeagent.RecvResult{}, fmt.Errorf("engineagent: the page is not JSON of the shape of the protocol: %w", err)
+	}
+	if err := page.Validate(); err != nil {
+		return fakeagent.RecvResult{}, fmt.Errorf("engineagent: the page does not validate: %w", err)
+	}
+	return fakeagent.RecvResult{Raw: raw, Page: page}, nil
+}
+
+// Ack acknowledges parts of a page; no items means every part the lease handed out.
+func (a *agent) Ack(ctx context.Context, in fakeagent.AckInput) (fakeagent.AckResult, error) {
+	items, err := a.svc.Ack(ctx, a.caller, engine.AckRequest{Lease: in.Lease, Items: in.Items})
+	if err != nil {
+		return fakeagent.AckResult{}, MapError(err)
+	}
+	return fakeagent.AckResult{Items: items}, nil
+}
+
 func parseAddresses(list []string) ([]ident.Address, error) {
 	out := make([]ident.Address, 0, len(list))
 	for _, s := range list {
@@ -141,12 +174,6 @@ func (a *agent) Directory(context.Context, fakeagent.DirectoryInput) (fakeagent.
 }
 func (a *agent) Probe(context.Context, fakeagent.ProbeInput) (fakeagent.ProbeResult, error) {
 	return fakeagent.ProbeResult{}, NotSupported("probe")
-}
-func (a *agent) Recv(context.Context, fakeagent.RecvInput) (fakeagent.RecvResult, error) {
-	return fakeagent.RecvResult{}, NotSupported("recv")
-}
-func (a *agent) Ack(context.Context, fakeagent.AckInput) (fakeagent.AckResult, error) {
-	return fakeagent.AckResult{}, NotSupported("ack")
 }
 
 // NotSupported is the error of a method the engine does not offer yet. Its category

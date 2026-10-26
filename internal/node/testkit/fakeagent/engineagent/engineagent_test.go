@@ -147,11 +147,9 @@ func TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError(t *testing.T) {
 		"Peers":     func() error { _, err := a.Peers(ctx); return err },
 		"Directory": func() error { _, err := a.Directory(ctx, fakeagent.DirectoryInput{}); return err },
 		"Probe":     func() error { _, err := a.Probe(ctx, fakeagent.ProbeInput{}); return err },
-		"Recv":      func() error { _, err := a.Recv(ctx, fakeagent.RecvInput{}); return err },
-		"Ack":       func() error { _, err := a.Ack(ctx, fakeagent.AckInput{}); return err },
 	}
-	if len(calls) != 6 {
-		t.Fatalf("%d calls listed: the agent has eleven methods and Declare, Send, Reply, Status and Control are the ones the engine offers", len(calls))
+	if len(calls) != 4 {
+		t.Fatalf("%d calls listed: the agent has eleven methods and Declare, Send, Reply, Recv, Ack, Status and Control are the ones the engine offers", len(calls))
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
