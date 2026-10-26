@@ -303,18 +303,22 @@ func (c *cmdPrepare) run(e *Engine, _ time.Time) {
 		c.done(res, err)
 		return
 	}
-	if !e.installing.CompareAndSwap(false, true) {
-		c.fail(refuse(ReasonInstallInProgress))
+	if !e.installing.CompareAndSwap(nil, &c.cmd.Key) {
+		if running := e.installing.Load(); running != nil && *running == c.cmd.Key {
+			c.fail(refuse(ReasonInstallRepeated))
+		} else {
+			c.fail(refuse(ReasonInstallInProgress))
+		}
 		return
 	}
 	var drawn [config.StageSuffixBytes]byte
 	if _, err := io.ReadFull(e.randomReader(), drawn[:]); err != nil {
-		e.installing.Store(false)
+		e.installing.Store(nil)
 		c.fail(fmt.Errorf("engine: the randomness for a staging directory: %w", err))
 		return
 	}
 	if !e.spawn(func(ctx context.Context) { c.done(e.runPrepared(ctx, c, drawn[:])) }) {
-		e.installing.Store(false)
+		e.installing.Store(nil)
 		c.fail(refuse(ReasonShuttingDown))
 	}
 }
@@ -327,7 +331,7 @@ func (c *cmdPrepare) run(e *Engine, _ time.Time) {
 // because the staging does not take a context; the settling that follows it is what
 // does not happen.
 func (e *Engine) runPrepared(ctx context.Context, c *cmdPrepare, drawn []byte) (StoredResult, error) {
-	defer e.installing.Store(false)
+	defer e.installing.Store(nil)
 	if e.diskFailed(nil) {
 		return StoredResult{}, refuse(ReasonStorageFatal)
 	}

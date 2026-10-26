@@ -171,7 +171,8 @@ loop and the engine runs it in a fixed order (`preparedOperation`). The loop loo
 request up in the stored results first, and a request that was done is answered
 without the package being read; otherwise it takes the one place of the install worker
 (a second installation meanwhile is refused with `install_in_progress`, nothing of it
-done) and draws the randomness that names the staging directory, because the engine
+done; the same request sent again while it is copied is `ReasonInstallRepeated`, which the
+interface words as that installation still being in progress) and draws the randomness that names the staging directory, because the engine
 draws randomness only in the loop. The worker, which is a goroutine the engine owns and
 `Quiesce` counts, opens the directory through `Deps.OpenPackage`, copies it next to the
 versions of its adapter with every file and directory synced (`config.StageAdapter`),

@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -98,12 +99,12 @@ type Engine struct {
 	outbox     *outbox
 	waits      map[ident.EndpointID]*waiter
 	cont       []continuation
-	parked     map[ident.EndpointID][]command // commands that wait for the drain of an endpoint
-	ran        uint64                         // how many commands the loop has taken from the inbox
-	fatal      error                          // set by classify; the loop stops after the command that set it
-	probed     bool                           // the command that just ran was a probe of Quiesce
-	installing atomic.Bool                    // an adapter package is being copied: one is at a time
-	inLoop     atomic.Bool                    // the loop is running a command or the due entries of the schedule: what spawn asserts
+	parked     map[ident.EndpointID][]command   // commands that wait for the drain of an endpoint
+	ran        uint64                           // how many commands the loop has taken from the inbox
+	fatal      error                            // set by classify; the loop stops after the command that set it
+	probed     bool                             // the command that just ran was a probe of Quiesce
+	installing atomic.Pointer[admin.RequestKey] // the request whose adapter package is being copied: one is at a time, nil when none
+	inLoop     atomic.Bool                      // the loop is running a command or the due entries of the schedule: what spawn asserts
 }
 
 // continuation is a command the loop queued for itself: the next chunk of a long

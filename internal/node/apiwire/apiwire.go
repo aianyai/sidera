@@ -286,6 +286,8 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryUnavailable, "identity_retired", "the identity of this node was retired; nothing is signed in its name and the node is stopping")
 	case engine.ReasonInstallInProgress:
 		return New(CategoryConflict, "install_in_progress", "another adapter package is being installed; try again when it is done")
+	case engine.ReasonInstallRepeated:
+		return New(CategoryConflict, "install_in_progress", "this installation is still in progress; ask for its result with the same operation identifier when it is done")
 	case engine.ReasonPlatformUnsupported:
 		return New(CategoryRefused, "platform_unsupported", "the package does not run on this platform")
 	case engine.ReasonProbeTokenUsed:

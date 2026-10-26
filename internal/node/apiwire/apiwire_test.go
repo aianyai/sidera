@@ -55,6 +55,7 @@ var engineReasons = map[engine.Reason]want{
 	// not run on is refused by the rules; a probe token is refused as used or as
 	// expired the way a token the node does not know is refused, as not authenticated.
 	engine.ReasonInstallInProgress:   {"conflict", "install_in_progress"},
+	engine.ReasonInstallRepeated:     {"conflict", "install_in_progress"},
 	engine.ReasonPlatformUnsupported: {"refused", "platform_unsupported"},
 	engine.ReasonProbeTokenUsed:      {"unauthenticated", "probe_token_used"},
 	engine.ReasonProbeTokenExpired:   {"unauthenticated", "probe_token_expired"},
@@ -434,5 +435,18 @@ func TestTheAnswersAnInterfaceGivesOnItsOwnAreDefinedHere(t *testing.T) {
 	engineWords := apiwire.FromError(&engine.Refusal{Reason: engine.ReasonEndpointUnknown})
 	if got := apiwire.EndpointUnknown(); got.Category != engineWords.Category || got.Code != engineWords.Code || got.Message != engineWords.Message {
 		t.Errorf("an endpoint that is not on this node says %+v, the engine's refusal says %+v", got, engineWords)
+	}
+}
+
+// A request that is sent again while it is being installed has the code of an
+// installation in the way and the words that say it is that one still running.
+func TestAResendOfTheInstallationBeingCopiedSaysItIsStillInProgress(t *testing.T) {
+	other := apiwire.FromError(&engine.Refusal{Reason: engine.ReasonInstallInProgress})
+	same := apiwire.FromError(&engine.Refusal{Reason: engine.ReasonInstallRepeated})
+	if other.Code != same.Code || other.Category != same.Category {
+		t.Errorf("the code is %s/%s for a resend and %s/%s for another request", same.Category, same.Code, other.Category, other.Code)
+	}
+	if other.Message == same.Message || !strings.Contains(same.Message, "this installation is still in progress") {
+		t.Errorf("messages %q and %q", other.Message, same.Message)
 	}
 }

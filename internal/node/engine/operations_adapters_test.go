@@ -662,6 +662,10 @@ func TestOnlyOneInstallationRunsAtATime(t *testing.T) {
 	if _, ok := installedVersion(r.cfg, "other"); ok {
 		t.Error("the refused installation went on")
 	}
+	// the same request again, while it is being copied, is told that it is the one
+	// that is in progress and not another that is in the way
+	_, err = e.Execute(ctx, installCommand(12, "install relay", "/src/relay"))
+	wantReason(t, err, engine.ReasonInstallRepeated)
 	qctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
 	if rep, err := e.Quiesce(qctx, engine.Expect{}); err == nil || rep.Workers != 1 {

@@ -84,6 +84,11 @@ const (
 	// ReasonProbeTokenExpired: the probe token was issued more than
 	// ProbeTokenLifetime ago.
 	ReasonProbeTokenExpired
+	// ReasonInstallRepeated: the installation this request names is the one being
+	// copied now, so the request is a resend of it that arrived too early; nothing
+	// of it was done again. The interface says it as ReasonInstallInProgress, with
+	// the words of a request that is still running.
+	ReasonInstallRepeated
 
 	reasonEnd
 )
@@ -114,6 +119,7 @@ var reasonNames = [reasonEnd]string{
 	ReasonPlatformUnsupported: "platform_unsupported",
 	ReasonProbeTokenUsed:      "probe_token_used",
 	ReasonProbeTokenExpired:   "probe_token_expired",
+	ReasonInstallRepeated:     "install_repeated",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

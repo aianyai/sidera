@@ -42,6 +42,7 @@ var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonIdentityRetired:     {-32603, ""},
 
 	engine.ReasonInstallInProgress:   {-32603, ""},
+	engine.ReasonInstallRepeated:     {-32603, ""},
 	engine.ReasonPlatformUnsupported: {-32603, ""},
 	engine.ReasonProbeTokenUsed:      {-32603, ""},
 	engine.ReasonProbeTokenExpired:   {-32603, ""},
