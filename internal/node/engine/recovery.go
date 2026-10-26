@@ -96,49 +96,6 @@ func (p RecoveryPlan) Items() []string {
 // Empty reports whether no rule has anything to do.
 func (p RecoveryPlan) Empty() bool { return len(p.Items()) == 0 }
 
-// unwired is the first rule of the plan that has work and that is not
-// wired yet, with how many things it has to do; ok is false when there is none.
-// The quarantine of a damaged control record is not wired: it removes the file of a
-// control signal's record, which the pull of control signals must answer from
-// before it may go.
-func (p RecoveryPlan) unwired() (rule string, items int, ok bool) {
-	for _, r := range []struct {
-		name string
-		n    int
-	}{
-		{"quarantine", len(p.damagedControl())},
-	} {
-		if r.n > 0 {
-			return r.name, r.n, true
-		}
-	}
-	return "", 0, false
-}
-
-// damagedControl is the damaged files of ctl/ in the plan.
-func (p RecoveryPlan) damagedControl() []store.DamagedFile {
-	var out []store.DamagedFile
-	for _, d := range p.Quarantine {
-		if d.Dir == store.CtlDir {
-			out = append(out, d)
-		}
-	}
-	return out
-}
-
-// PendingRecoveryError is the refusal of the scan entry to open over work of a
-// rule that is not wired yet. It is returned before the entry writes
-// anything in the pass that found the work: a damaged file is not left out of
-// the view as if it were not there.
-type PendingRecoveryError struct {
-	Rule  string
-	Items int
-}
-
-func (e *PendingRecoveryError) Error() string {
-	return fmt.Sprintf("engine: the recovery rule %s has work (%d) and is not wired", e.Rule, e.Items)
-}
-
 // ScanReport says what the scan entry did.
 type ScanReport struct {
 	// Passes is how many times the rules were run over a fresh scan; one when
@@ -201,9 +158,6 @@ func Open(ctx context.Context, d Deps, p Params) (*Engine, ScanReport, error) {
 			rep.Endpoints, rep.Unfinished = e.view.OpenEndpoints(), e.view.Unfinished()
 			return e, rep, nil
 		}
-		if rule, n, ok := plan.unwired(); ok {
-			return nil, rep, &PendingRecoveryError{Rule: rule, Items: n}
-		}
 		if err := e.runRules(ctx, sc, plan, enabled, &rep); err != nil {
 			return nil, rep, err
 		}
@@ -221,7 +175,7 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 		work func(RecoveryPlan) int
 		do   func(sc *store.Scan, plan RecoveryPlan, now time.Time) error
 	}{
-		{"quarantine", func(p RecoveryPlan) int { return len(p.Quarantine) - len(p.damagedControl()) },
+		{"quarantine", func(p RecoveryPlan) int { return len(p.Quarantine) },
 			func(_ *store.Scan, p RecoveryPlan, now time.Time) error { return e.quarantineAll(now, p.Quarantine) }},
 		{"ctl-effect-replay", func(p RecoveryPlan) int { return len(p.CtlEffectReplay) },
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
@@ -272,9 +226,6 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 			return err
 		}
 		plan = PlanRecovery(sc, e.d.Clock.Now(), enabled)
-		if rule, n, ok := plan.unwired(); ok {
-			return &PendingRecoveryError{Rule: rule, Items: n}
-		}
 	}
 	return nil
 }
@@ -331,10 +282,6 @@ var recoveryPhases = [...]recoveryPhase{
 	{13, "feedback", (*Engine).recoverFeedback},
 	{14, "outbound", (*Engine).recoverOutbound},
 }
-
-// recoverReconcile checks the creation intents and the prompt attempts that were
-// not settled (step 11). Filled in with the prompts and the session creation.
-func (e *Engine) recoverReconcile(time.Time) error { return nil }
 
 // recoverFeedback sends the feedback that fell due while the node was down, the
 // feedback of the records replaced after a storage loss included (step 13). The
@@ -499,13 +446,20 @@ func (c *cmdQuiesce) run(e *Engine, now time.Time) {
 		r.Workers-- // the worker waits out a delay; that is not work
 	}
 	// The counts of the host are read in this command, after the others, so that
-	// what the loop was doing and what the host counts are of one moment.
+	// what the loop was doing and what the host counts are of one moment. A worker
+	// that waits for a request the adapter holds on purpose is not at work: the
+	// host's own check below makes sure that the requests it has in flight are
+	// exactly those the caller expects held.
 	var pending []string
+	held := 0
 	for _, inst := range sortedKeys(c.expect.Adapters) {
-		if ok, why := c.expect.Adapters[inst].holds(e.d.Adapters.Counts(inst)); !ok {
+		x := c.expect.Adapters[inst]
+		held += len(x.Held)
+		if ok, why := x.holds(e.d.Adapters.Counts(inst)); !ok {
 			pending = append(pending, fmt.Sprintf("adapter %q: %s", inst, why))
 		}
 	}
+	r.Workers -= min(int(e.adapterCalls.Load()), held, r.Workers)
 	r.AdaptersPending = len(pending)
 	r.Satisfied = r.InboxLen == 0 && r.Continuations == 0 && r.DueEntries == 0 && r.Parked == 0 && r.Workers == 0 && r.AdaptersPending == 0
 	c.done(quiesceAnswer{report: r, pending: pending, poll: e.outboundActive() && !parked}, nil)

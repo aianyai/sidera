@@ -2,9 +2,10 @@
 
 The single writer of the node's runtime state: the loop, its schedule, the
 registration of endpoints, the life of an adapter's connection, the capacity check,
-the two recovery entries, and the sending and taking in of messages. What the
-features still to come add to the same loop (pulling, prompts, control signals,
-feedback) is described with them.
+the two recovery entries, the sending and taking in of messages, and control signals
+with the creation of sessions they carry. What the features still to come add to the
+same loop (pulling messages, prompts, closing and interrupting a session) is described
+with them.
 
 ## What
 
@@ -272,7 +273,9 @@ the instance not admitted. The token of a runtime endpoint is minted because the
 store requires one and is shown to no one. The admission returns what
 `adapter.start` carries: the node, the runtime endpoint, the instance's values, the
 presets with the values each holds for this adapter, the open direct endpoints by
-key and the sessions (none yet).
+key and the open sessions of the instance, each with the native session it maps to,
+the tool access its agent was created with (its token and the data directory, in
+`SIDERA_TOKEN` and `SIDERA_HOME`) and the state the adapter kept for it.
 
 An instance is online from `adapter.start` until the engine is told the connection
 ended, and offline otherwise. The time it went offline is the engine's own clock at
@@ -296,15 +299,20 @@ A checkpoint (`CheckpointPut`) is one replaced file under `state/checkpoints/` i
 the transaction `checkpoint-put`, answered after the commit, stored compact, one
 value for each (scope, id). It is taken while the node recovers as well as after it
 serves, because adapters start before the node serves and a session being taken
-back may put its state at once. The scope `session` needs an open session endpoint
-of the instance, so until sessions can be created every such put is refused.
+back may put its state at once. The scope `session` needs a session endpoint of the
+instance that is open or whose creation has not ended: the adapter keeps the state of
+a session while it creates it, before the node has been told the session exists, and a
+creation whose adapter was refused that put would fail for it.
 
 `Quiesce` judges, in the same loop command as its other conditions, each instance
 named in `Expect.Adapters` against the host's counts: the notifications handled
 equal what the adapter says it sent, none is buffered, no request of the adapter is
 being answered, the host is not working, and the requests the host has sent that
 have no answer are exactly the ones the caller says the adapter holds on purpose
-(as multisets). Instances not named are not judged.
+(as multisets). Instances not named are not judged. A worker of the engine that is
+inside a call to an adapter is work until the adapter answers, except for the calls the
+caller says the adapter holds on purpose: those are the requests the host's own check
+has just matched with the held list, so the workers that wait for them are not counted.
 
 **Waiting.** A recv that finds nothing queued and is asked to wait is registered as
 a waiter in the same command, so no arrival is missed between the check and the
@@ -371,9 +379,14 @@ package's one rule; the record is written with the feedback the change calls for
 the body reference dropped once no delivery needs the body. A report that does not verify
 or that no state can follow is logged and left out. A pull names the recipients on the node
 whose deliveries are not settled (`outboundPlan`; the send of a node still owed one carries
-all its recipients, so no pull is made for it). A derived delivery, which only the record of
-a control signal has, would be planned like the others, but the worker takes no control
-record, so none is asked about. The answer to it is read as three different things: an error is no answer and
+all its recipients, so no pull is made for it). The worker sends and asks about the record
+of a control signal like any other, and a derived delivery, which only the record of a
+control signal has, is planned like the others. The receipt of a send and the answer to a
+pull may carry the control reply of a signal: it is verified and applied first, by the
+envelope package's one rule, because it ends the signal's delivery and binds what the signal
+made, which a report that comes with it may be about; it is written with the record in the
+transaction `control-reply`, and a reply that does not verify or that contradicts the one the
+record accepted is logged and left out. The answer to it is read as three different things: an error is no answer and
 the pull is made again after `ResendBackoff`; a recipient in `NoRecord` is applied by the
 envelope package's rule for it, which turns an accepted delivery inside its report window
 into `delivery_unknown` (`lost_at_target`) with one notice, and ignores it for every other
@@ -453,8 +466,11 @@ record silently, a source record with the notice the delivery rules give for the
 in (nothing for a delivery the sender was told about), after the pull described above. The records go to one transaction (`tick`) in chunks of `ChunkTickRecords`, with
 the feedback the changes call for, and the entries of the ones that changed move with the
 view. Startup step 12 ticks every record that is due before the feedback of step 13 goes
-out. Control records are not ticked here: a control signal is settled with its control
-reply, which belongs to the creation of sessions. A target record under a lease is
+out. A control record is ticked like a target record: one that is accepted and has no reply
+at the settle deadline becomes `delivery_unknown`, since the signal was handed to be executed
+and no reply was committed, and one not final after `report_by` is closed. The engine settles
+a creation long before either (see the creation of a session), so what these rules close is a
+signal whose reply a crash lost. A target record under a lease is
 ticked by the same rule as any other; leases are made by the hand-out of messages, which
 the pull of messages adds together with the rule of when an expired lease is released. While the wall clock is in doubt
 nothing is ticked and nothing is judged expired: a clock set back and then moved on is
@@ -509,19 +525,26 @@ record that names the sending endpoint, whose one item (`KindLostUnknownMessage`
 loaded into the queue at the start and told by one notice that covers it however many
 files were lost; a target record is removed and nothing replaces it, because a target
 keeps no loss: its source learns it from the next pull, in which the target says it holds
-no record. The alert ids are the store's. A damaged file of `ctl/` is the one thing not
-settled: removing it would remove a control signal's record before the pull of
-control signals answers from `ctl/`, so the scan entry still refuses to open and says
-which rule, before it has written anything in that pass, damaged files beside it
-included.
+no record. The alert ids are the store's. A damaged file of `ctl/` is settled like the
+others, and it can be because the pull answers from `ctl/`: the record that goes is
+answered as one the node does not hold, so its source is told it was lost, and the session
+endpoints still being created by it are closed in the same settlement, since the intent that
+would have settled them went with the record. When one was being created a native session
+may exist that nobody will settle, so the alert is of kind `control_unknown`, the
+alert of a session nobody controls, and not of the plain damage.
 
 A body that is not what its record says is found when something reads it
 (`readBody`, which the sending of a message uses and the hand-out of a message will
 use). Every body belongs to one record, so that one record is settled by what it still
 needs: a target record that needs it is removed and leaves the view, a source record
-that needs it is replaced by the lost record, a control record or any other record
-that does not keeps its state without the reference; the settlement has an alert of
-its own. A write that
+that needs it is replaced by the lost record, a record that does not need it keeps its
+state without the reference; the settlement has an alert of its own. A control record
+that still holds a creation which is not settled needed the body (the initial message goes
+to the session the creation makes), and the store keeps a control record and only lets go
+of the reference, so the engine fails the creation: the reply says `failed` with
+`control_unknown` (no session will be attached, but a call already out may still make one that
+nobody controls, so the owner gets that alert), the endpoint it was making is closed, and
+nothing is made of a creation whose first message is gone. A write that
 meets a damaged floor file while it runs (`DamagedFileError`), which is the one
 damaged file a write can meet, has the file settled and is tried again; a damaged
 file of another directory is not settled while the node runs, and the write fails
@@ -557,7 +580,8 @@ memory, built by the scan entry after the replay of feedback from the items the
 records hold and from the notices on disk, so a restart loses no item and gives no
 endpoint a new rate window; step 13 sends what fell due while the node was down.
 
-**Taking in an envelope.** `Inbound` is the handler of the transport. For each recipient
+**Taking in an envelope.** `Inbound` is the handler of the transport. An envelope that carries
+a control signal is taken in as described under control signals below. For each recipient
 on this node it finds the record of the request or judges it: a repeat gets the record's
 report, another body under the same message identifier is refused as a conflict and
 nothing changes; for a new request the reply permission and its evidence are decided,
@@ -584,14 +608,72 @@ vouch for the rest of the answer. A recipient the request does not name is not
 answered and one it names twice is answered once; a request that names none is
 refused as an invalid argument, since the answer for no recipient is nothing the
 source can use. The target only ever sees healthy records: it has no shape for a
-record it lost, so absence is the only way a loss shows. Control signals have
-no pull path in the engine yet; when they do, the same rule applies to the records of
-`ctl/`.
+record it lost, so absence is the only way a loss shows. The records the target holds for a
+message are found by the node and the message the asker sent, whether they are in `in/` or in
+`ctl/`: the record of a control signal answers with its report and, when it holds one, its
+control reply, and the delivery of an initial message to the session a creation made is an
+`in/` record of the same message, so one pull asks about both. A pull that looked in `in/`
+alone would answer "no record" for a signal the node accepted, which its sender reads as a
+loss.
 A report is dated with the moment the record entered the state it reports
 (`Record.StateAt`, so a rejection made later by an endpoint's closing carries the time of the
 closing, not of the acceptance) and, for a delivered record, with that moment as the delivery
 time (`TestAReportIsDatedWithTheMomentTheTargetRecordedTheStateItReports`); every state has a
 report, and a pull for an unchanged state repeats the same time.
+
+**Control signals.** `Control` accepts a control signal from the endpoint its caller is, as
+`Send` accepts a message: the same capacity check (a signal is new work), the same envelope
+checks, one recipient, and a source record of the kind `ctl` that the worker sends like a
+message. Two signals are offered: `session.create`, which names a preset and carries no initial
+message yet, and `endpoint.status`; the others are refused for the field, as is a creation
+without a preset or a status with one (the rule between a signal and its parameters is
+`adapterproto.Control.Validate`'s).
+
+The target takes a control signal in by one order. A repeat is answered from the record the
+node holds, with its report and its control reply when it has one, and another body under the
+identifier is a conflict that changes nothing. The endpoint must exist and be open, the
+signal allowed (the declarations of the endpoint, and for a source elsewhere the rules of the
+node) and in time. A signal that fails there gets no record and no receipt, because a control
+record is never rejected (see below): the sender's send fails and is sent again like a send that got
+no answer, so the sender is told, after about two minutes, that the target was unreachable with the
+cause `network`, although the target is the node that refused it, and at about 12.5 minutes, when its
+delivery closes with nothing learned, with `expired_unconfirmed` (known gap, below). Then the signal is accepted, and what the node
+answers itself is answered in the same transaction, `control-intake`: `endpoint.status` from
+what the engine has observed (the activity of the endpoint, the messages waiting, the
+conditions `adapterreg.StatusConditions` gives, and for a runtime endpoint which presets can be
+used), and a creation it refuses before it calls the adapter, with the reply
+`adapterreg.DaemonCreateFailure` gives and no session endpoint and no intent: the preset is not
+defined (`preset_unknown`), the preset says it is closed to endpoints on this node and the
+signal came from one (`preset_unavailable`, by `authz.LocalCreate`, after the record is accepted
+so that the answer is a control reply), or the adapter is not connected (`adapter_offline`).
+
+**The creation of a session.** A creation the node does not refuse makes, in `control-intake`,
+the control record with its creation intent and the session endpoint with its token, being
+created and naming the record that makes it; both are on disk before the adapter is called.
+The adapter is called by a worker the engine owns (`session.create`: the attempt of the intent,
+the runtime endpoint, the new endpoint, the preset, the first prompt, the tool access and the
+checkpoint of the attempt), and its result is a command of the loop that settles the intent in
+one transaction, `control-result`: the control reply is made and stored with the deduplication
+record, the delivery of the signal ends as delivered, and the endpoint opens, mapped to the native
+session, when the session was created and is closed with its token dropped when it was not. The
+first prompt's attempt follows from the creation attempt, so a call made again carries what the
+first carried, as the adapter requires, and nothing else is stored for it. A call that failed, an
+answer of `indeterminate` and an adapter that is not connected are tried again, after
+`CreateRetryBackoff` and at the next connection of the instance, until the reply deadline,
+`CreateReplyDeadline` (3 minutes) from the moment the signal was accepted. Then the intent is
+settled as unconfirmed: the reply says a session may exist and names the endpoint, the endpoint is
+closed, and the owner gets an alert of kind `control_unknown`, because a native session may exist
+that nobody controls. A creation the adapter reports as failed for `control_unknown` has the same
+alert. Whatever the adapter answers after a creation was settled changes nothing. A control record that was
+closed while its creation was unsettled can take no reply, and a retry would fail every time: the engine
+logs it as an error that names the record, tells the owner of a session that may exist, and stops the work
+for the creation. At the start, step
+11 settles the creations past their deadline as unconfirmed and calls the adapter again for the
+others, with the same attempt; the adapter answers an attempt it knows with the session it made, so a
+crash or a killed adapter after the native session was made still yields one session. A turn of the new
+session may be reported before the result of its creation (the session works on its first prompt as
+soon as it exists): the notification is kept by reference and writes nothing, and the endpoint is
+open when the result is in.
 
 **The start, as far as the engine is concerned.** The steps of the start are numbered
 in the order the node takes them; the engine takes part in these:
@@ -601,7 +683,7 @@ in the order the node takes them; the engine takes part in these:
 | 6 | Scan `state/`, quarantine and repair, rebuild the view | `Open` (the scan entry) |
 | 8 | Management interface opens; reads answer, changes are refused | `Start` |
 | 10 | Adapter instances start and are admitted | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed` |
-| 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery` |
+| 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery`: creations past their deadline are settled, the others are asked of the adapter again |
 | 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick` (a source delivery still queued or accepted past `report_by` is left open for the pull of step 14) |
 | 13 | Send the feedback that fell due | phase `feedback` |
 | 14 | Go on with the loopback of outgoing messages | phase `outbound`: every unsettled source record is sent or asked about again, and a delivery past `report_by` that waits for its last pull is pulled and closed |
@@ -609,7 +691,7 @@ in the order the node takes them; the engine takes part in these:
 
 **Recovery.** `PlanRecovery` is a pure function of a scan: what each recovery rule
 has to do. `Open` runs the rules that have work in the order the store fixes
-(`quarantine` first, then `ctl-effect-replay`, `instance-drain-replay`,
+(`quarantine` first, a damaged control record included, then `ctl-effect-replay`, `instance-drain-replay`,
 `orphan-gc-endpoint`, `endpoint-drain-replay`, then the replay of feedback, then `orphan-gc`), works the plan out again from a fresh scan after each rule
 that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup steps
 11 to 14 as four commands and logs `startup step N begin` and `startup step N end`.
@@ -757,9 +839,6 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   one form, so a re-encoding of what was read is the bytes that were read, and the
   fuzz target can assert it. A text that carries a display name or a description is
   not a declaration and is refused.
-- **Recovery work of an unwired rule stops `Open`.** Opening over a damaged control
-  record would leave it out of the view as if it were not there, silently. The refusal
-  names the rule and happens before any write of that pass.
 - **Time is read from the records, by the schedule the view keeps.** A timer for each
   rule of the delivery package would be a second statement of when a record changes;
   `Record.NextTick` says it once, and an entry that follows the view cannot be left stale
@@ -836,7 +915,27 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   writes made in several chunks, so a view that drifted from the disk fails there.
   The recovery rules keep no view (it is built from the last scan).
 - **An accepted control signal is never rejected.** Closing a control record of a
-  closed endpoint is what the delivery rules say: `delivery_unknown`.
+  closed endpoint is what the delivery rules say: `delivery_unknown`. For the same reason a
+  control signal the target cannot take in at all (the endpoint is not there, is closed or is
+  no runtime, or the node's rules refuse the sender) has no record: the delivery contract has
+  no rejected control record, so it gets no receipt. Its sender takes the refusal for a send that
+  got no answer and is told, as such, that the target is unreachable (cause `network`) after about
+  two minutes and `expired_unconfirmed` after about 12.5, which is wrong about the cause and slow
+  (known gap, below). A creation the node refuses for what it knows (preset,
+  adapter) is the other case, and is answered, since the signal was accepted.
+- **A creation refused for an adapter that is not connected is answered at once.** Keeping the
+  signal until the adapter returns would make the sender wait for a reply that the next restart
+  may not bring; the reply `adapter_offline` is the protocol's, and the agent that wants a
+  session asks again.
+- **An unconfirmed creation closes its endpoint.** Closed is absorbing, and the store's
+  recovery closes the endpoint of an intent that is neither creating nor created, so the
+  unconfirmed reply names an endpoint that cannot be used; the alert is what the owner has for
+  the native session that may remain. The alternative, keeping the endpoint to be opened by a
+  late result, would let the endpoint of a reply that said "not confirmed" start taking messages.
+- **The reply of a creation is not pushed to its source.** The source pulls until the reply
+  comes, so the sender sees it within `PullInterval`; a faster path (the target asking its own
+  source node to pull at once) would be a second way a reply reaches a source, and none is
+  needed by a sender that polls the status of its message.
 
 Prior art taken: the typed command with a capacity-one answer and a context that
 does not retract a handed command (etcd raft node), the heap with one timer re-armed
@@ -878,7 +977,7 @@ reproducible).
 | A runtime outside the tested ranges is one alert | `adapters.go` (`probeResult`) | `TestVersionUntestedAlertIsRaisedOnceForARuntimeOutsideTheTestedRanges` |
 | Availability becomes handoff's signals; online and offline | `adapters.go` (`notified`, `gone`, `AdapterSignals`) | `TestAvailabilitySnapshotsBecomeHandoffSignals`, `TestAnAdapterThatIsGoneKeepsItsEndpointsItsRecordsAndItsAdmission`, `TestAnInstanceTheConfigurationDoesNotEnableIsUnknownToReadsAndToGone` |
 | Notifications about unknown endpoints write nothing; the busy state at start | `adapters.go` (`notified`, `markStarted`) | `TestNotificationsAboutUnknownEndpointsAreAcceptedAndSetNothingOnDisk`, `TestAdapterStartedTakesTheBusyStateOfTheSessionsItKnowsAndIgnoresTheRest`, `TestANewConnectionStartsFromWhatItReportsAndNotFromTheOneBefore` |
-| A checkpoint is on disk before it is answered | `adapters.go` (`checkpointPut`) | `TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt`, `TestCheckpointPutRecoversFromACrashAtEveryPoint` |
+| A checkpoint is on disk before it is answered; a session's is taken while the session is being created | `adapters.go` (`checkpointPut`), `view.go` (`resolveSessionBeingMade`) | `TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt`, `TestCheckpointPutRecoversFromACrashAtEveryPoint` |
 | `Quiesce` judges the host's counts | `recovery.go` | `TestQuiesceJudgesTheAdapterHostsCounts` |
 | `Quiesce` sees the outbound worker begin to wait out a delay after it looked at the worker running | `recovery.go` | `TestQuiesceSeesTheWorkerBeginToWaitOutADelayAfterItLookedAtTheWorkerRunning` |
 | The result of a close is stored with it | `endpoints.go` (`closeEndpoint`), `manage.go` (`CloseEndpointOp`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint` |
@@ -914,7 +1013,7 @@ reproducible).
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |
 | The schedule | `sched.go`, `engine.go` | `sched_test.go`, `sched_internal_test.go` |
-| The periodic sweep removes what has served its retention, in chunks, and the view agrees with the disk afterwards | `sweep.go` | `TestThePeriodicSweepRemovesWhatHasServedItsRetention`, `TestTheSweepRemovesInChunksOfAtMostChunkRemoves`, `TestCutSweepTakesAtMostTheBoundInTheOrderOfTheStoreAndLosesNothing`, `TestForgetSweptTakesTheRemovedRecordsOutOfTheView` |
+| The periodic sweep removes what has served its retention, in chunks, and the view agrees with the disk afterwards | `sweep.go` | `TestThePeriodicSweepRemovesWhatHasServedItsRetention`, `TestTheSweepRemovesInChunksOfAtMostChunkRemoves`, `TestCutSweepTakesAtMostTheBoundInTheOrderOfTheStoreAndLosesNothing`, `TestForgetSweptTakesTheRemovedRecordsOutOfTheView`, `TestDroppingAControlRecordLeavesTheViewAsIfItWereNeverThere`, `TestAPullForASweptControlRecordAnswersNoRecord` |
 | A summary that cannot be appended, an I/O error or a full disk, does not stop the sweep | `sweep.go` (`appendSummaries`) | `TestASummaryThatCannotBeAppendedDoesNotStopTheSweep` |
 | A notice is not swept while the item it covers is on its record, and the endpoint is told once across a restart | `store` (`PlanSweep`), `sweep.go` | `TestANoticeIsNotSweptWhileTheItemItCoversIsStillOnItsRecord` |
 | A pass ends when an endpoint it has yet to remove is open again, and the files of that endpoint stay | `sweep.go` (`planIsStale`) | `TestAPassEndsWhenAClosedEndpointItWasToRemoveIsRegisteredAgainBetweenChunks`, `TestAPlanWithAnEndpointThatIsOpenAgainIsStale` |
@@ -937,7 +1036,19 @@ reproducible).
 | Nothing is ticked or judged while the clock is in doubt | `ticks.go` (`tickBatch`), `outbound.go` (`observe`) | `TestClockRollbackPausesSigningUntilCleared`, `TestNoRecordIsNotAnsweredWhileTheNodeMayNotSign` |
 | The records of time survive a crash at every step | `tick` (declared by the store) | `TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint` |
 | A damaged file is settled by the scan entry first of the rules; a source record becomes the sender's lost record, a file lost unread a notice of its loss, a target record is removed; each tells the sender once and raises one alert | `quarantine.go` (`quarantineAll`, `settleFile`, `lostOut`), `recovery.go` | `TestCorruptDeliveryRecordIsReportedToTheSenderOnce`, `TestOpenQuarantinesADamagedFileAndOpens`, `TestQuarantineRecoversFromACrashAtEveryPoint` |
-| A damaged control record stops the start, and everything damaged beside it waits | `recovery.go` (`unwired`, `damagedControl`) | `TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet` |
+| A damaged control record is settled with the others, closes the endpoints it was creating, and is a record the node no longer holds | `quarantine.go` (`quarantineAll`, `damagedCtlAlert`) | `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`, `TestControlRecordLostBeforeItsReplyIsTold` |
+| A control signal is sent by the worker, taken in by one order, and answered with its report and reply | `control.go`, `intake_control.go`, `inbound.go`, `outbound.go` | `TestSessionCreateMakesAnEndpointAndTellsItsSender`, `TestControlRequestsAreChecked`, `TestControlSignalIsRefusedWhenTheNodeQueueIsFull`, `TestSessionCreateAtAnEndpointThatIsNoRuntimeLeavesNoRecord`, `FuzzInbound` |
+| A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline` |
+| What the adapter refuses is told, the endpoint is closed and no session is made | `create.go` (`createResult`, `settleCreate`) | `TestSessionCreateWithParamsBeyondPresetIsRefused`, `TestSessionCreateFailedAsControlUnknownAlertsTheOwner` |
+| A native session made and an adapter lost are one session | `create.go` (`startCreate`, `redriveCreates`, `recoverReconcile`) | `TestAdapterKilledAfterNativeCreateYieldsOneSession`, `TestCreationCutOffByACrashIsGoneOnWithOneSession` |
+| A creation that is not ready by its deadline is unconfirmed, closes its endpoint and alerts the owner; one past its deadline at the start is settled the same way | `create.go` (`createDeadline`, `recoverReconcile`) | `TestSessionCreateNotReadyByItsDeadlineIsUnconfirmedAndALateSessionIsAlerted`, `TestCreationOverdueAtStartIsSettledAsUnconfirmed` |
+| A creation whose control record was closed first is reported loudly once and not tried again | `create.go` (`settleCreate`, `forgetCreation`), `intake_control.go` (`withReply`) | `TestCreationWhoseControlRecordWasClosedIsReportedOnceAndNotRetried` |
+| A reply or the reply to a creation reaches a sender whose declaration takes nobody's messages | `outbound.go` (`applyControlReply`) | `TestRepliesAndCreateRepliesPassRestrictedDeclaration` |
+| `endpoint.status` is answered by the node | `intake_control.go` (`statusReply`) | `TestEndpointStatusIsAnsweredByTheDaemon` |
+| A control record is settled by time | `ticks.go` (`tickBatch`), `view.go` (`setCtl`) | `TestControlRecordIsSettledByTime`, `TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint` |
+| A body lost from a control record fails the creation it still holds | `quarantine.go` (`quarantineOwner`) | `TestBodyLostFromAControlRecordFailsItsUnsettledCreation` |
+| `adapter.start` lists the open sessions with their access and checkpoint | `adapters.go` (`sessionAttaches`) | `TestAdapterStartCarriesTheOpenSessionsWithTheirAccess` |
+| Every write of a session creation survives a crash | `control-intake`, `control-result`, `control-reply` (declared by the store) | `TestSessionCreationRecoversFromACrashAtEveryPoint` |
 | A body that is not what its record says settles that record by what it needs | `quarantine.go` (`readBody`, `quarantineBody`) | `TestBodyWithWrongHashIsQuarantinedAndRecordsTreatedAsLost` |
 | A damaged floor file met by a write is settled and the write goes on; a damaged file of another directory is not settled while the node runs | `quarantine.go` (`settleLive`, `retryingDamaged`, `syncAfterSettlement`) | `TestADamagedFileOtherThanAFloorFileIsNotSettledWhileTheNodeRuns`, `TestADamagedFloorFileMetWhileTheNodeRunsIsSettledAndTheWriteGoesOn` |
 | The view takes what the store returned and agrees with the disk | `drain.go`, `view.go` | `TestViewMatchesAFreshScanAfterWrites` |
@@ -947,7 +1058,7 @@ reproducible).
 | A lost receipt and a resend leave one record; another body under one identifier is a conflict | `inbound.go` (`takeIn`), `outbound.go` | `TestLostReceiptRetryKeepsOneRecord`, `TestSameIDDifferentBodyConflicts` |
 | The backlog of an endpoint, the queue and the disk of the node | `inbound.go`, `send.go`, `capacity.go` | `TestEndpointBacklogFullIsRejectedWithReason`, `TestNodeQueueFullBackpressuresNewSends`, `TestDiskFullGivesNoFalseAcknowledgement`, `TestDiskFullAtTheTargetGivesNoReceipt` |
 | Requests no node takes, sequence numbers, the clock pause, idempotency retention | `send.go` | `TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing`, `TestASendWithAnEmptyBodyIsRefused`, `TestSequenceNumbersCountEachPairOfSenderAndRecipientFromOne`, `TestNothingIsSignedOrAcceptedWhileTheWallClockCannotBeTrusted`, `TestAnIdempotencyKeyIsRememberedUntilItsRetentionEnds` |
-| The state of each delivery of a message is read from the sender's record, for its sender alone | `status.go` | `TestTheStatusOfAMessageIsTheStateOfEachDeliveryAsTheSenderHoldsIt`, `TestOnlyTheSenderOfAMessageIsToldItsStatus`, `TestTheStatusOfAMessageSurvivesARestart`, `TestEveryStateAndRejectReasonHasAWireName`, `TestTheRecipientsOfASourceRecordAreTheOnesOfItsKeyInOrder` |
+| The state of each delivery of a message and, for a signal, its verified reply are read from the sender's record, for its sender alone | `status.go` | `TestTheStatusOfAMessageIsTheStateOfEachDeliveryAsTheSenderHoldsIt`, `TestOnlyTheSenderOfAMessageIsToldItsStatus`, `TestTheStatusOfAMessageSurvivesARestart`, `TestEveryStateAndRejectReasonHasAWireName`, `TestTheRecipientsOfASourceRecordAreTheOnesOfItsKeyInOrder` |
 | A key used again for other recipients, or in another order, is a conflict | `send.go` (`repeat`) | `TestTheSameIdempotencyKeyForOtherRecipientsIsAConflict` |
 | What no node takes is what the envelope refuses, by the field it names; deadlines are whole seconds | `send.go` (`envelopeOf`) | `TestARequestTheEnvelopeRefusesIsRefusedForTheFieldItNames`, `TestADeadlineOfPartOfASecondIsKeptToTheSecondAnEnvelopeCanSay` |
 | An answer is made only to a message the endpoint took in | `send.go` (`heldBy`) | `TestNoAnswerIsMadeToAMessageTheEndpointRefusedAtIntake` |
@@ -963,17 +1074,21 @@ reproducible).
 
 Known gaps, each filled in with the feature it belongs to:
 
-- The quarantine of a damaged control record is not wired, and the scan entry refuses
-  to open while one is there. The store decides which session endpoints a quarantined
-  control record closes (every creating one that names it,
-  `store.QuarantineSessions`), so the engine passes the scan and no list;
-  `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
-  is skipped until the pull of control signals answers from `ctl/`, and the quarantine
-  of `ctl/` is wired with it.
-- Phase 11 of `RecoverDelivery` is empty until the feature that owns it exists. A prompt
-  and a block have no replay: the store writes their target records first and the
-  head last, and phase 11 and the prompt logic redo what the head does not say is
-  done (a prompt still in flight in the head, a block the records hold and the head
+- The creation carries no initial message: the delivery of the first message to the new
+  session, the closing and the interrupting of a session and the execution of those signals
+  come with the second half of control signals. A creation that names a body is refused for
+  the field.
+- A control signal that cannot be taken in (an endpoint that is not there, or no runtime) has
+  no record and no receipt (see above). Its sender reads the refusal as a failed send: after about
+  two minutes it gets a notice that the target is unreachable with the cause `network`, although
+  the target is the node that refused it, and at about 12.5 minutes the delivery closes with
+  `expired_unconfirmed`. A following change of the delivery contract lets the target write a
+  rejected control record instead, so that the sender learns the refusal and its reason from the
+  first answer.
+- Phase 11 of `RecoverDelivery` settles the creations that were not settled; what else it owns
+  waits for the prompts. A prompt and a block have no replay: the store writes their target
+  records first and the head last, and phase 11 and the prompt logic redo what the head does
+  not say is done (a prompt still in flight in the head, a block the records hold and the head
   does not report); phase 12 ticks the target and source records, phase 13
   sends the feedback that fell due and phase 14 goes on with the outgoing messages. The
   tick of a target record does not yet wait for an active turn before it lets an expired
@@ -982,9 +1097,7 @@ Known gaps, each filled in with the feature it belongs to:
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
 - Closing a session endpoint does not yet send `session.close` to the adapter: the
   outcome says `closing`, and the release of the native session comes with the
-  creation of sessions, which is the feature that makes one.
-- `adapter.start` lists no session: the list is filled with the open sessions of
-  the instance when sessions can be created.
+  second half of control signals.
 - A write that fails on `endpoint.register` is refused with the engine's own
   reason (`storage_full`, `storage_unavailable`, `storage_fatal`). Which code of the
   adapter protocol each maps to is for the adapter host to decide; if no existing

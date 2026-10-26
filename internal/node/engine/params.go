@@ -40,6 +40,15 @@ type Params struct {
 	// PullInterval is how long a sender waits between two pulls of the reports of
 	// a delivery that is not final, until its report deadline.
 	PullInterval time.Duration
+	// CreateReplyDeadline is how long a session creation has, from the moment the
+	// node accepted the signal, to show the session ready: when it ends the sender
+	// is told that the creation is unconfirmed. Until then a call that failed or
+	// was not answered is made again.
+	CreateReplyDeadline time.Duration
+	// CreateRetryBackoff is how long a creation waits before the call to the
+	// adapter is made again after one that failed or was answered as
+	// indeterminate, on the injected clock.
+	CreateRetryBackoff time.Duration
 	// Feedback are the merge window and the rate cap of the notices the node tells
 	// its endpoints; delivery.FeedbackParams says what each is for.
 	Feedback delivery.FeedbackParams
@@ -59,7 +68,10 @@ func DefaultParams() Params {
 		RetryBackoff:     time.Minute,
 		ResendBackoff:    30 * time.Second,
 		PullInterval:     time.Minute,
-		Feedback:         delivery.DefaultFeedbackParams(),
+
+		CreateReplyDeadline: 3 * time.Minute,
+		CreateRetryBackoff:  30 * time.Second,
+		Feedback:            delivery.DefaultFeedbackParams(),
 	}
 }
 
@@ -88,6 +100,12 @@ func (p Params) withDefaults() Params {
 	}
 	if p.PullInterval <= 0 {
 		p.PullInterval = d.PullInterval
+	}
+	if p.CreateReplyDeadline <= 0 {
+		p.CreateReplyDeadline = d.CreateReplyDeadline
+	}
+	if p.CreateRetryBackoff <= 0 {
+		p.CreateRetryBackoff = d.CreateRetryBackoff
 	}
 	if p.Feedback.MergeWindow <= 0 {
 		p.Feedback.MergeWindow = d.Feedback.MergeWindow

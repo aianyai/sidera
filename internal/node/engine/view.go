@@ -89,7 +89,9 @@ type msgKey struct {
 }
 
 // arrivalKey names a message as the node it came from sent it: what a pull of its
-// reports asks for.
+// reports asks for. It finds the target records of the message in in/ and the
+// control record in ctl/ alike: whichever the node holds is what a pull is
+// answered from.
 type arrivalKey struct {
 	node    ident.NodeID
 	message delivery.MessageID
@@ -263,12 +265,23 @@ func (v *view) resolve(c Caller) (*endpointState, error) {
 // by the reference the adapter uses. A direct endpoint is not one, nor is a
 // session of another instance: an adapter keeps state only for what it owns.
 func (v *view) resolveSession(instance string, ref adapterproto.EndpointRef) (*endpointState, error) {
+	return v.resolveSessionIn(instance, ref, store.EndpointOpen)
+}
+
+// resolveSessionBeingMade is resolveSession for a session endpoint that is open or
+// whose creation has not ended: the adapter keeps the state of a session while it
+// creates it, before the node has been told that it exists.
+func (v *view) resolveSessionBeingMade(instance string, ref adapterproto.EndpointRef) (*endpointState, error) {
+	return v.resolveSessionIn(instance, ref, store.EndpointOpen, store.EndpointCreating)
+}
+
+func (v *view) resolveSessionIn(instance string, ref adapterproto.EndpointRef, statuses ...store.EndpointStatus) (*endpointState, error) {
 	id, err := ident.ParseEndpointID(string(ref))
 	if err != nil {
 		return nil, refuse(ReasonEndpointUnknown)
 	}
 	e := v.endpoints[id]
-	if e == nil || e.rec.Kind != adapterreg.KindSession || e.rec.Instance != instance || e.rec.Status != store.EndpointOpen {
+	if e == nil || e.rec.Kind != adapterreg.KindSession || e.rec.Instance != instance || !slices.Contains(statuses, e.rec.Status) {
 		return nil, refuse(ReasonEndpointUnknown)
 	}
 	return e, nil
@@ -377,6 +390,8 @@ func (v *view) ticks(record string, next time.Time) {
 
 func inTick(key store.TargetKey) string { return "in/" + key.String() }
 
+func ctlTick(key store.TargetKey) string { return "ctl/" + key.String() }
+
 func outTick(name string) string { return "out/" + name }
 
 // outNextTick is the earliest time-driven change of a source record: that of the
@@ -399,18 +414,23 @@ func outNextTick(o store.OutRecord) time.Time {
 	return next
 }
 
-// setCtl is setIn for a control record.
+// setCtl is setIn for a control record. A control record is found by a pull as a
+// target record is, by the node and the message it came from.
 func (v *view) setCtl(c store.CtlRecord) {
 	if old, ok := v.ctl[c.Key]; ok {
 		if ctlUnfinished(old) {
 			v.unfinished--
 		}
+	} else {
+		a := arrivalKey{c.Key.SenderNode, c.Key.Message}
+		v.arrived[a] = append(v.arrived[a], c.Key)
 	}
 	v.ctl[c.Key] = c
 	if ctlUnfinished(c) {
 		v.unfinished++
 	}
 	v.queue(c.Key.Recipient, c.Key, c.Record.State == delivery.StateAccepted)
+	v.ticks(ctlTick(c.Key), c.Record.NextTick())
 }
 
 // setOut is setIn for a source record.
@@ -441,6 +461,12 @@ func (v *view) dropCtl(key store.TargetKey) {
 	}
 	delete(v.ctl, key)
 	v.queue(key.Recipient, key, false)
+	a := arrivalKey{key.SenderNode, key.Message}
+	v.arrived[a] = slices.DeleteFunc(v.arrived[a], func(x store.TargetKey) bool { return x == key })
+	if len(v.arrived[a]) == 0 {
+		delete(v.arrived, a)
+	}
+	v.ticks(ctlTick(key), time.Time{})
 }
 
 // dropOut is dropIn for a source record, by its file name.

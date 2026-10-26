@@ -19,8 +19,11 @@ import (
 // remember to move it. When entries fall due their records are ticked together, a
 // chunk of at most Params.ChunkTickRecords to a transaction; at the start every record
 // that is due is ticked in the step that does so, before the feedback goes out.
-// Control records are not ticked here: a control signal is settled with its control
-// reply, which belongs to the creation of sessions.
+// A control record is ticked like a target record: an accepted one that has no reply
+// at the settle deadline becomes delivery_unknown (the signal was handed to the
+// adapter and its reply was never committed), and one that is not final after
+// report_by closes. A creation is settled by the engine long before either (see
+// create.go), so what these rules close is the signal whose reply a crash lost.
 //
 // A source delivery that is still queued or accepted when report_by passes is not
 // closed at once: the outbound worker pulls its target one more time while the target
@@ -42,6 +45,9 @@ func (e *Engine) watchTicks() {
 	}
 	for k, in := range e.view.in {
 		e.view.ticks(inTick(k), in.Record.NextTick())
+	}
+	for k, c := range e.view.ctl {
+		e.view.ticks(ctlTick(k), c.Record.NextTick())
 	}
 	for name, o := range e.view.out {
 		e.view.ticks(outTick(name), outNextTick(o))
@@ -153,6 +159,29 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 			}
 			in.Record = rec
 			b.In = append(b.In, settledIn(in))
+		case strings.HasPrefix(r, "ctl/"):
+			key, err := store.ParseTargetKey(strings.TrimPrefix(r, "ctl/"))
+			if err != nil {
+				e.log.Error("the schedule names a control record that is not one", "record", r)
+				continue
+			}
+			c, ok := e.view.ctl[key]
+			if !ok {
+				continue
+			}
+			rec, outcomes, err := c.Record.Tick(now)
+			if err != nil {
+				e.log.Error("a control record cannot be ticked", "record", r, "error", err.Error())
+				continue
+			}
+			if !applied(outcomes) {
+				continue
+			}
+			c.Record = rec
+			if !rec.NeedsBody() {
+				c.Body = nil
+			}
+			b.Ctl = append(b.Ctl, c)
 		case strings.HasPrefix(r, "out/"):
 			old, ok := e.view.out[strings.TrimPrefix(r, "out/")]
 			if !ok {
@@ -169,12 +198,15 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 			b.Out = append(b.Out, o)
 		}
 	}
-	if len(b.In)+len(b.Out) > 0 {
+	if len(b.In)+len(b.Out)+len(b.Ctl) > 0 {
 		if err := e.d.Store.Tick(b); err != nil {
 			return err
 		}
 		for _, in := range b.In {
 			e.view.setIn(in)
+		}
+		for _, c := range b.Ctl {
+			e.view.setCtl(c)
 		}
 		for _, o := range outs {
 			e.putOut(now, o)

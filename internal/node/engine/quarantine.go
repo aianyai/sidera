@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Damage. A file of state/ that no longer checks out, and a body that is not what
@@ -23,10 +24,11 @@ import (
 // lost: a target keeps no loss, and the source learns it when the target answers a
 // pull that it holds no record.
 //
-// A damaged file of ctl/ is not settled here: removing it would remove the record of
-// a control signal before the pull of control signals answers from ctl/, and the
-// source would never be told (the target would answer "no record" for a signal it
-// had accepted). The scan entry refuses to open while one is there.
+// A damaged file of ctl/ is settled like the others: the pull answers from ctl/, so
+// the record that goes is answered as the record the node no longer holds and the
+// source is told it was lost; the session endpoints still being created by it are
+// closed in the same settlement, for the intent that would have settled them went
+// with the record.
 
 // quarantineAlertKinds are the kinds of the alerts of a settlement.
 const (
@@ -44,6 +46,31 @@ const maxSettlePasses = 4
 func damagedAlert(now time.Time, d store.DamagedFile) store.QuarantineAlert {
 	subject := d.Dir + "/" + d.Name
 	return store.QuarantineAlert{Kind: alertCorruptRecord, At: now, Subject: subject, Detail: subject + " is damaged: " + d.Damage.Reason.String()}
+}
+
+// damagedCtlAlert is the alert of a damaged control record. When the record was
+// still creating a session, a native session may exist that the node can no longer
+// settle the creation of: it is the alert of a session nobody controls, as the
+// adapter's own control_unknown is, so that the owner looks for it.
+func damagedCtlAlert(now time.Time, sc *store.Scan, d store.DamagedFile) store.QuarantineAlert {
+	a := damagedAlert(now, d)
+	for _, ep := range store.QuarantineSessions(sc, d.Name) {
+		if cur := endpointIn(sc, ep.ID); cur != nil && cur.Status == store.EndpointCreating {
+			a.Kind = alertControlUnknown
+			a.Detail += "; a session being created for it may exist, and its endpoint is closed"
+			break
+		}
+	}
+	return a
+}
+
+func endpointIn(sc *store.Scan, id ident.EndpointID) *store.EndpointRecord {
+	for i := range sc.Endpoints {
+		if sc.Endpoints[i].ID == id {
+			return &sc.Endpoints[i]
+		}
+	}
+	return nil
 }
 
 // lostOut is the record that replaces a source record that was lost: one lost
@@ -71,6 +98,9 @@ func (e *Engine) lostOut(key store.OutKey, now time.Time) (store.OutRecord, erro
 // that replaces it; every other file is settled by the store alone.
 func (e *Engine) settleFile(now time.Time, sc *store.Scan, d store.DamagedFile) error {
 	q := store.Quarantine{File: d, Alert: damagedAlert(now, d), Scan: sc, Node: e.d.Node}
+	if d.Dir == store.CtlDir {
+		q.Alert = damagedCtlAlert(now, sc, d)
+	}
 	if key, ok := d.Key.(store.OutKey); ok && d.Dir == store.OutDir && d.Damage.Class == store.BodyDamaged {
 		o, err := e.lostOut(key, now)
 		if err != nil {
@@ -85,15 +115,11 @@ func (e *Engine) settleFile(now time.Time, sc *store.Scan, d store.DamagedFile) 
 	return nil
 }
 
-// quarantineAll settles the damaged files the plan lists, but those of ctl/, one at
-// a time, each with a scan taken after the one before was settled: a settlement
+// quarantineAll settles the damaged files the plan lists, one at a time, each with a scan taken after the one before was settled: a settlement
 // raises floors, overwrites records and writes records that the next one reads. A
 // file that an earlier settlement removed is not settled again.
 func (e *Engine) quarantineAll(now time.Time, files []store.DamagedFile) error {
 	for _, d := range files {
-		if d.Dir == store.CtlDir {
-			continue
-		}
 		sc, err := e.d.Store.Scan()
 		if err != nil {
 			return err
@@ -230,6 +256,18 @@ func (e *Engine) quarantineOwner(now time.Time, owner store.Record, alert store.
 		}
 		r.Body = nil
 		e.view.setCtl(r)
+		// The store keeps a control record and only lets go of the reference. A
+		// creation that is not settled needed the body (the initial message goes to
+		// the session it makes), and a creation that went on would make a session
+		// whose first message is gone with nothing said: it is failed instead, and the
+		// reply tells the sender. The reason is control_unknown, which says that no
+		// session will be attached but one may remain: a call already out may still
+		// make a session, which nobody controls, and the owner is told when the
+		// creation is settled.
+		if _, ok := e.creatingIntent(r.Key); ok {
+			failed := adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonControlUnknown}
+			return e.settleCreate(now, r, failed, nil)
+		}
 	case store.OutRecord:
 		q := store.BodyQuarantine{Record: r, Alert: alert}
 		var lost *store.OutRecord

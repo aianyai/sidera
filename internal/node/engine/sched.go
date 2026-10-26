@@ -37,6 +37,12 @@ const (
 	// record and each source record; the id is "in/" and its key or "out/" and its
 	// file name.
 	schedTick
+	// schedCreateDeadline is the end of the time a session creation has to show the
+	// session ready; the id is the key of the control record.
+	schedCreateDeadline
+	// schedCreateRetry is the next call to the adapter of a creation that is not
+	// settled; the id is the key of the control record.
+	schedCreateRetry
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

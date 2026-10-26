@@ -72,7 +72,9 @@ func (e *Engine) Pull(ctx context.Context, from transport.Origin, req transport.
 }
 
 // answerPull gives, for each recipient of the request, a signed report of its
-// record or the recipient in NoRecord, and nothing else. Every record the target
+// record, whether the node holds it as a target record or as the record of a
+// control signal (with the control reply, when it has one), or the recipient in
+// NoRecord, and nothing else. Every record the target
 // holds can be signed, so a held record is never left out of both lists. The
 // whole answer is refused while the node may not sign: a "no record" with no
 // report beside it would be given on the word of a node that cannot vouch for
@@ -92,6 +94,15 @@ func (e *Engine) answerPull(now time.Time, from transport.Origin, req transport.
 	answered := make(map[ident.EndpointID]bool, len(asked))
 	for _, k := range e.view.arrived[arrivalKey{from.Node(), req.Message}] {
 		if !asked[k.Recipient] {
+			continue
+		}
+		if c, ok := e.view.ctl[k]; ok {
+			rep, reply, err := e.controlAnswer(now, c)
+			if err != nil {
+				return transport.PullAnswer{}, err
+			}
+			ans.Reports, ans.ControlReply = append(ans.Reports, rep), reply
+			answered[k.Recipient] = true
 			continue
 		}
 		rec, err := e.signReport(now, e.view.in[k])
@@ -128,10 +139,11 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 	if err != nil {
 		return transport.Receipt{}, invalidArgument("envelope", err)
 	}
-	if env.Kind != envelope.KindMessage {
-		return transport.Receipt{}, invalidArgument("kind", errors.New("a control signal is taken in with the creation of sessions"))
+	digest := env.Digest()
+	if env.Kind.IsControl() {
+		return e.takeInControl(now, env, from, sender, digest)
 	}
-	digest, ref := env.Digest(), store.BodyRefOf(env.Body)
+	ref := store.BodyRefOf(env.Body)
 	var arrivals []arrival
 	var updatedOut *store.OutRecord
 	var evidence []error
@@ -313,26 +325,35 @@ func rejected(now time.Time, in store.InRecord, reason delivery.RejectReason) (s
 	return in, nil
 }
 
-// judgeAuthz is the authorization check of the intake: the declarations of the
-// endpoint and, for a request that did not come over the loopback, the node's
-// rules. A local source is never judged by node rules; which requests are local
-// is the transport's to say, and nothing the request claims.
+// judgeAuthz is the authorization check of the intake of a message: the
+// declarations of the endpoint and, for a request that did not come over the
+// loopback, the node's rules (see judgeRequest).
 func (e *Engine) judgeAuthz(now time.Time, env envelope.Envelope, from transport.Origin, sender ident.EndpointID,
 	recipient ident.EndpointID, st *endpointState, replyGranted bool) authz.Verdict {
+	return e.judgeRequest(now, env, from, sender, authz.Target{Kind: authz.TargetEndpoint, Endpoint: recipient}, st.decl, replyGranted)
+}
+
+// judgeRequest is the one authorization check of an envelope that is taken in,
+// whatever it asks for: the action is the envelope kind's, the target is what it
+// is aimed at, and the declarations of the endpoint apply. A local source is never
+// judged by node rules; which requests are local is the transport's to say, and
+// nothing the request claims. Local-source judgement of a preset is not made here:
+// the preset is known only after the signal is accepted (see takeInControl).
+func (e *Engine) judgeRequest(now time.Time, env envelope.Envelope, from transport.Origin, sender ident.EndpointID,
+	target authz.Target, decl authz.Declaration, replyGranted bool) authz.Verdict {
 	action, _ := env.Kind.Action()
 	snd := authz.Sender{Node: from.Node(), Endpoint: sender}
-	target := authz.Target{Kind: authz.TargetEndpoint, Endpoint: recipient}
 	if from.Local() {
 		return authz.EvaluateLocal(authz.LocalRequest{
 			Stage: authz.StageIntake, Sender: snd, Action: action, Target: target,
-			MultiRecipient: env.MultiRecipient, Reply: replyGranted, TargetDeclaration: st.decl,
+			MultiRecipient: env.MultiRecipient, Reply: replyGranted, TargetDeclaration: decl,
 		})
 	}
 	// The trust of a node elsewhere is not known yet, and the request carries the
 	// zero value, which is denied: a remote sender is refused until trust exists.
 	return authz.Evaluate(e.d.Config.Policy().Policy, authz.Request{
-		Now: now, Stage: authz.StageIntake, Sender: snd, Action: action, Target: target,
-		BodySize: int64(len(env.Body)), MultiRecipient: env.MultiRecipient, Reply: replyGranted, TargetDeclaration: st.decl,
+		Now: now, Stage: authz.StageIntake, Sender: snd, Action: action, Target: target, Preset: env.Preset,
+		BodySize: int64(len(env.Body)), MultiRecipient: env.MultiRecipient, Reply: replyGranted, TargetDeclaration: decl,
 	})
 }
 

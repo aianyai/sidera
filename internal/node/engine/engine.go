@@ -14,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -71,8 +72,11 @@ type Engine struct {
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	workers  atomic.Int32
-	waiting  atomic.Int32 // adapter requests waiting for the running phase
-	activity chan struct{}
+	// adapterCalls is how many of the workers are inside a call to an adapter, which
+	// Quiesce does not count as work while the adapter holds the request on purpose.
+	adapterCalls atomic.Int32
+	waiting      atomic.Int32 // adapter requests waiting for the running phase
+	activity     chan struct{}
 
 	errMu sync.Mutex
 	err   error
@@ -107,6 +111,10 @@ type Engine struct {
 	probed     bool                             // the command that just ran was a probe of Quiesce
 	installing atomic.Pointer[admin.RequestKey] // the request whose adapter package is being copied: one is at a time, nil when none
 	inLoop     atomic.Bool                      // the loop is running a command or the due entries of the schedule: what spawn asserts
+
+	// creations are the calls of the session creations that are not settled, by the
+	// key of the control record; see create.go.
+	creations map[store.TargetKey]*creation
 
 	// dueTicks are the records whose entries of the schedule fell due and that are
 	// not ticked yet; tickQueued says a command to tick them is queued.
@@ -191,6 +199,8 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		waits:    map[ident.EndpointID]*waiter{},
 		outbox:   newOutbox(),
 		parked:   map[ident.EndpointID][]command{},
+
+		creations: map[store.TargetKey]*creation{},
 	}
 	if d.RollbackPaused {
 		e.pausedSince = d.RollbackPausedSince
@@ -732,6 +742,17 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		e.retryClears(now)
 	case schedTick:
 		e.tickDue(key.id)
+	case schedCreateDeadline, schedCreateRetry:
+		k, err := store.ParseTargetKey(key.id)
+		if err != nil {
+			e.log.Error("the schedule names a control record that is not one", "record", key.id)
+			return
+		}
+		if key.kind == schedCreateDeadline {
+			e.createDeadline(now, k)
+		} else {
+			e.startCreate(now, k)
+		}
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.later(&cmdDrain{endpoint: id})

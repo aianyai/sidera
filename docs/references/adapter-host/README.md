@@ -142,7 +142,11 @@ returns. Those that arrive before the admission is complete wait in the buffer a
 are delivered after it. A notification the declaration does not allow (checked when
 the forwarder takes it, because the declaration is not known before) is logged and
 dropped and counts as handled. The engine receives the parameters as the value of
-their type.
+their type. Notifications do not wait for a request the host has sent: the host's call
+to the adapter is one thing and the stream of notifications another, so the first
+`turn.started` of a session that is being created can be handed to the engine before the
+result of the `session.create` that made it (the adapter-protocol reference says why the
+engine takes it). The host does not reorder either.
 
 When the buffer is full the handler blocks; the peer's own queue then fills and the
 peer ends the connection, which the host reports as `GoneConnectionEnded` and

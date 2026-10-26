@@ -468,6 +468,26 @@ correlated by `turn`. Turns the runtime starts itself (an automatic continuation
 work triggered by background activity) are reported the same way. A turn caused
 by a prompt names the attempt.
 
+**The order of a creation's events.** A session works on its first prompt as soon as
+it exists, so the first `turn.started` of a session (with the attempt of the first
+prompt) may reach the daemon before the result of the `session.create` that made it,
+and so may a `turn.ended`. The protocol does not forbid it and a real adapter cannot
+help it: it judges the session ready by finding the first prompt in the native record,
+and the turn that prompt starts begins first. The daemon therefore accepts the
+notifications of a session whose creation has not returned: the host forwards them in
+the order they were sent, and the engine keeps the busy state by the endpoint reference
+and writes nothing for an endpoint it does not know as open. The endpoint is open when
+the result is in. For the same reason the state of a session that the adapter puts with
+`checkpoint.put` (scope `session`) is accepted while the endpoint is being created as well
+as when it is open: the adapter keeps it before it answers `created`. A checkpoint for an
+endpoint that is closed, that belongs to another instance or that does not exist is refused
+with `1001`.
+
+**Tool access.** The `env` of `tool_access`, in `session.create` and in the entries of
+`adapter.start`, holds what the session's tools need to reach the daemon: the token of
+the session endpoint in `SIDERA_TOKEN` and the data directory in `SIDERA_HOME`. The adapter
+puts both into the environment of the agent and interprets neither.
+
 **Acknowledging on the agent's behalf.** `recv.observed` carries the text of a
 `recv` tool result as the model received it, read from the runtime's durable
 record, with the lease the result names. The daemon decides whether that proves

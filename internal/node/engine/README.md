@@ -19,8 +19,10 @@ life of an adapter's connection, the capacity check, the storage of alerts, the 
 and taking in of messages: the acceptance of a message from a local endpoint, the
 outbound worker that carries it through the transport and applies what comes
 back, and the receiving side that judges an envelope and signs the reports, and the
-feedback the sender's node tells its endpoints. Prompts, pulling and control
-signals join the same loop as further commands and add their methods to this list.
+feedback the sender's node tells its endpoints, and the control signals: their sending,
+their taking in and the creation of sessions they ask for. Prompts, pulling and the
+closing and interrupting of a session join the same loop as further commands and add their
+methods to this list.
 
 ## Entry points
 
@@ -34,7 +36,7 @@ signals join the same loop as further commands and add their methods to this lis
 | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed`, `AdapterGone`, `AdapterNotified` | What the adapter host calls for the life of a connection, in that order: the admission of an instance (which makes its runtime endpoint and returns what `adapter.start` carries), what the adapter answered to `adapter.start` and `adapter.probe`, the probe tokens, the end of the connection, and the notifications. `*Engine` satisfies `adapterhost.Engine`. |
 | `RegisterDirect`, `UnregisterDirect`, `CheckpointPut` | What the adapter host calls to answer the requests of an adapter: the registration and unregistration of its direct endpoints, and the state it asks the node to keep. |
 | `Adapter`, `AdapterView`, `AdapterSignals`, `ProbeTokenView` | Reads of what the engine knows of an instance (admission, online or offline since when, probe result, availability, busy turns), and the availability as `handoff.Signals` for one endpoint. |
-| `ProbeTokenEnv`, `HomeEnv`, `ProbeTokenLifetime` | The names and the lifetime of the probe tokens; the Agent interface refers to them. |
+| `ProbeTokenEnv`, `TokenEnv`, `HomeEnv`, `ProbeTokenLifetime` | The names of the environment variables that carry a probe token, an endpoint's token and the data directory, and the lifetime of the probe tokens; the Agent interface refers to them. |
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
 | `Control`, `ControlRequest` | Accept a control signal (`session.create`, `endpoint.status`) from the endpoint a caller is, as `Send` does; what the target made of it is read from the status of the message. |
 | `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record, and for a control signal its verified reply. Another endpoint's message is unknown to the caller. |
@@ -156,7 +158,8 @@ signals join the same loop as further commands and add their methods to this lis
   configuration, and is valid.** The node, the runtime endpoint (only for a runtime),
   the instance's configuration values, the presets (only for a runtime) each with
   the values it holds for the adapter, the open direct endpoints by key, and the
-  sessions, empty until sessions can be created. Every list is present and sorted.
+  open sessions with the native session each maps to, its tool access (token and data
+  directory) and the state the adapter kept. Every list is present and sorted.
 - **An instance is online from `adapter.start` to the end of the connection, and
   offline otherwise.** Gone sets the time to the engine's clock unless the instance
   was not online, in which case the earlier time stays (zero for an instance that
@@ -237,33 +240,35 @@ signals join the same loop as further commands and add their methods to this lis
 - **Recovery is a plan, then rules.** `PlanRecovery` is a pure function of a scan.
   `Open` runs the rules in the order the store's README fixes, works the plan out
   again from a fresh scan after a rule has written, and repeats until nothing is
-  left. Work of a rule that is not wired yet (the quarantine of a damaged control record) makes `Open` return a
-  `PendingRecoveryError` before it writes anything in that pass, damaged files of other
-  directories included. The replay of
+  left. The replay of
   feedback is wired: it takes off the source and out-lost records the items a
   notice already covers, and the scan entry loads the queue of feedback only after
   it has run.
 - **The recovery of deliveries is four phases in the order of the startup
   steps,** each a command of the loop that logs `startup step N begin` and
   `startup step N end`; each is empty until the feature it belongs to is added,
-  except the twelfth, which ticks every record that is due, and the thirteenth,
-  which sends the feedback that fell due.
+  except the eleventh, which settles the session creations whose time is up and asks the
+  adapter again for the others (the prompts of that step are not there yet), the twelfth,
+  which ticks every record that is due, and the thirteenth, which sends the feedback that
+  fell due.
 - **The passing of time is read from the records, by a schedule the view keeps.** Each
-  target record and source record has an entry at its next time-driven change
+  target record, control record and source record has an entry at its next time-driven change
   (`Record.NextTick`); `view.onTick` moves it whenever a record is taken in or dropped.
   Entries that fall due are ticked together, in chunks of `Params.ChunkTickRecords`,
   in one `tick` transaction with the feedback the changes call for. Nothing is ticked
-  and nothing is judged expired while the wall clock is in doubt. Control records are
-  not ticked here. A source delivery that is queued or accepted when `report_by` passes
-  is not closed by the tick before the outbound worker has pulled its target one more
-  time (`finalPullPending`): at the start step 12 leaves it open and step 14 makes the
-  pull; the close then tells what the pull could not settle. No such pull is made while
-  the wall clock is in doubt (`finalPullDue`), and the tick keeps the record's entry
-  at the end of the target's retention, so a pull that never comes does not keep the
+  and nothing is judged expired while the wall clock is in doubt. A creation's own time
+  is another entry (`CreateReplyDeadline`), which the engine settles long before the
+  settle deadline of its control record. A source delivery that is queued or accepted when
+  `report_by` passes is not closed by the tick before the outbound worker has pulled its
+  target one more time (`finalPullPending`): at the start step 12 leaves it open and step
+  14 makes the pull; the close then tells what the pull could not settle. No such pull is
+  made while the wall clock is in doubt (`finalPullDue`), and the tick keeps the record's
+  entry at the end of the target's retention, so a pull that never comes does not keep the
   delivery open.
 - **A damaged file is settled first, one at a time, and a lost source record is replaced
-  by the sender's.** `quarantineAll` settles the damaged files of the plan but those of
-  `ctl/`, each with a scan taken after the one before, giving the store the scan and the
+  by the sender's.** `quarantineAll` settles the damaged files of the plan, a control record's
+  included (the pull answers from `ctl/`, so a record that goes is one the node no longer
+  holds), each with a scan taken after the one before, giving the store the scan and the
   node; a source record whose first line can be trusted gets the lost record
   (`lostOut`) and a file lost unread the out-lost record the store writes, whose item the
   queue of feedback loads. A body that is not what its record says (`readBody`, which
@@ -463,8 +468,12 @@ transactions that take a message in; `intake_fuzz_test.go` the receiving entry u
 arbitrary bytes; `intake_internal_test.go` the decision of what to send and the indexes of the view; `static_test.go` the lists
 the review holds the engine to; the `_internal_test.go` files the encoding of
 the declaration field (`declaration_internal_test.go`), the view and the batches of a drain.
-`TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord` is a
-requirement kept in sight and skipped until the quarantine is wired.
+`session_test.go` holds the tests of the creation of a session and of `endpoint.status`,
+judged from the ledger of the fakes, the records and the status of the message;
+`session_recovery_test.go` the control record settled by time, the body lost from one, what
+`adapter.start` carries, and a creation cut off by a crash or overdue at the start;
+`session_crash_test.go` the crash walk of the transactions that make a session;
+`quarantine_test.go` the damaged control record and the endpoints it was creating.
 
 `sweep_test.go` the sweep as the node runs it over a node of the harness (the periodic
 task, chunks, a summary that cannot be appended, a notice that is kept for the item it

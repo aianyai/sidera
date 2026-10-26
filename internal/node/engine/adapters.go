@@ -37,6 +37,9 @@ const (
 	// ProbeTokenEnv is the environment variable that carries a probe token to the
 	// tool whose reach of the node is being probed.
 	ProbeTokenEnv = "SIDERA_PROBE_TOKEN"
+	// TokenEnv is the environment variable that carries the token of a session
+	// endpoint to its tools, which are the Agent interface's front ends.
+	TokenEnv = "SIDERA_TOKEN"
 	// HomeEnv is the environment variable that carries the data directory.
 	HomeEnv = "SIDERA_HOME"
 	// ProbeTokenLifetime is how long a probe token is valid, on the injected clock,
@@ -64,6 +67,11 @@ type adapterState struct {
 	// engine's own time of receiving it.
 	snapshot []adapterproto.Availability
 	received time.Time
+
+	// controlUnknown: the adapter told the node that it cannot tell who controls a
+	// native session it was creating, which may remain. It is memory, as the other
+	// conditions are, and the alert that told the owner is on disk.
+	controlUnknown bool
 
 	probed          bool
 	probe           adapterproto.ProbeResult
@@ -176,7 +184,10 @@ func (e *Engine) admit(instance string, a adapterreg.Admission, info adapterprot
 		}
 		runtime = adapterproto.EndpointRef(id.String())
 	}
-	start := e.startParams(instance, in, a, runtime)
+	start, err := e.startParams(instance, in, a, runtime)
+	if err != nil {
+		return none, err
+	}
 	if err := start.Validate(); err != nil {
 		return none, fmt.Errorf("engine: what adapter.start carries for instance %q is not valid: %w", instance, err)
 	}
@@ -235,15 +246,12 @@ func (e *Engine) admitRuntime(instance string) (ident.EndpointID, error) {
 
 // startParams is what adapter.start carries, built from the configuration and the
 // engine's view. Every list is present, even when empty.
-func (e *Engine) startParams(instance string, in config.Instance, a adapterreg.Admission, runtime adapterproto.EndpointRef) adapterproto.StartParams {
+func (e *Engine) startParams(instance string, in config.Instance, a adapterreg.Admission, runtime adapterproto.EndpointRef) (adapterproto.StartParams, error) {
 	p := adapterproto.StartParams{
 		Node:            e.d.Node.String(),
 		RuntimeEndpoint: runtime,
 		Config:          configValues(in.Config),
 		Presets:         []adapterproto.PresetConfig{},
-		// Session endpoints come only from a session creation, which is not built
-		// yet; the list is filled with the open sessions of the instance when they
-		// exist.
 		Sessions:        []adapterproto.SessionAttach{},
 		DirectEndpoints: []adapterproto.DirectAttach{},
 	}
@@ -260,7 +268,46 @@ func (e *Engine) startParams(instance string, in config.Instance, a adapterreg.A
 			p.DirectEndpoints = append(p.DirectEndpoints, adapterproto.DirectAttach{Endpoint: adapterproto.EndpointRef(direct[key].String()), Key: key})
 		}
 	}
-	return p
+	sessions, err := e.sessionAttaches(instance)
+	if err != nil {
+		return adapterproto.StartParams{}, err
+	}
+	p.Sessions = sessions
+	return p, nil
+}
+
+// sessionAttaches are the open sessions of the instance, which it is asked to take
+// back control of: the endpoint, the preset and the native session it maps to, the
+// access its tools need (the token of the endpoint, which the session was created
+// with and holds in its environment) and the state the adapter kept for it. A session
+// whose creation has not ended has no native session to take back: its creation is
+// called again, as a creation is, and a closed one is not listed. They come sorted
+// by endpoint.
+func (e *Engine) sessionAttaches(instance string) ([]adapterproto.SessionAttach, error) {
+	out := []adapterproto.SessionAttach{}
+	var ids []ident.EndpointID
+	for id, st := range e.view.endpoints {
+		if st.rec.Kind == adapterreg.KindSession && st.rec.Instance == instance && st.rec.Status == store.EndpointOpen && st.rec.Session != nil && st.rec.Session.NativeRef != "" {
+			ids = append(ids, id)
+		}
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+	for _, id := range ids {
+		rec := e.view.endpoints[id].rec
+		access, err := e.toolAccess(rec.Token)
+		if err != nil {
+			return nil, err
+		}
+		a := adapterproto.SessionAttach{
+			Endpoint: adapterproto.EndpointRef(id.String()), Preset: rec.Session.Preset, NativeRef: adapterproto.NativeRef(rec.Session.NativeRef),
+			Process: rec.Session.Process, ToolAccess: access,
+		}
+		if cp, ok := e.view.checkpoints[store.CheckpointKey{Scope: string(adapterproto.ScopeSession), ID: id.String()}]; ok {
+			a.Checkpoint = append([]byte(nil), cp...)
+		}
+		out = append(out, a)
+	}
+	return out, nil
 }
 
 // configValues is a copy of configuration values that is never nil.
@@ -291,8 +338,8 @@ type cmdStarted struct {
 }
 
 func (c *cmdStarted) gate() gate { return gateAlways }
-func (c *cmdStarted) run(e *Engine, _ time.Time) {
-	c.done(struct{}{}, e.markStarted(c.instance, c.result))
+func (c *cmdStarted) run(e *Engine, now time.Time) {
+	c.done(struct{}{}, e.markStarted(now, c.instance, c.result))
 }
 
 // AdapterStarted tells the engine what the adapter answered to adapter.start:
@@ -305,7 +352,7 @@ func (e *Engine) AdapterStarted(ctx context.Context, instance string, r adapterp
 	return err
 }
 
-func (e *Engine) markStarted(instance string, r adapterproto.StartResult) error {
+func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.StartResult) error {
 	st, err := e.admitted(instance)
 	if err != nil {
 		return err
@@ -320,6 +367,9 @@ func (e *Engine) markStarted(instance string, r adapterproto.StartResult) error 
 		}
 		setFlag(&st.busy, s.Endpoint, s.TurnActive)
 	}
+	// What the instance was asked to create before its last connection ended may
+	// or may not have been done: it is asked again, with the same attempt.
+	e.redriveCreates(instance, now)
 	return nil
 }
 
@@ -438,6 +488,11 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 	}
 	st.probed, st.probe, st.probedAt, st.versionUntested = true, r, now, untested
 	e.declareIfPassed(instance, st, now)
+	// The probe is a call the host made to the adapter, so the connection is in
+	// service: what the node asked the instance to create before this connection is
+	// asked again now as well, in case the call made when the adapter started found
+	// the connection not in service yet.
+	e.redriveCreates(instance, now)
 	return nil
 }
 
@@ -732,8 +787,9 @@ func (c *cmdCheckpoint) run(e *Engine, _ time.Time) {
 
 // CheckpointPut keeps the state an adapter asked the node to keep, one value for
 // each (scope, id): a later put replaces the earlier. The scope attempt takes any
-// valid attempt identifier; the scope session needs an open session endpoint of
-// the instance. The state is stored compact and is on disk when this returns.
+// valid attempt identifier; the scope session needs a session endpoint of the
+// instance that is open or being created, for the adapter keeps the state of a
+// session while it creates it. The state is stored compact and is on disk when this returns.
 func (e *Engine) CheckpointPut(ctx context.Context, instance string, p adapterproto.CheckpointPutParams) error {
 	c := &cmdCheckpoint{call: newCall[struct{}](), instance: instance, params: p}
 	_, err := roundTrip(ctx, e, submitInternal, c, c.call)
@@ -749,7 +805,7 @@ func (e *Engine) checkpointPut(instance string, p adapterproto.CheckpointPutPara
 	}
 	key := store.CheckpointKey{Scope: string(p.Scope), ID: p.ID}
 	if p.Scope == adapterproto.ScopeSession {
-		st, err := e.view.resolveSession(instance, adapterproto.EndpointRef(p.ID))
+		st, err := e.view.resolveSessionBeingMade(instance, adapterproto.EndpointRef(p.ID))
 		if err != nil {
 			return err
 		}
