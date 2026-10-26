@@ -61,4 +61,10 @@ var goldenRecords = []struct {
 	{name: "out lost at the sender", dir: store.OutDir,
 		file: "sidera-record 1 out c2b6e47c 576 ZXAxenlnM3p5ZzN6eWczenlnM3p5ZzN6eWczenlqMGtjZ3EgbXNnLTAwMDIgbm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkL2VwMXpnZnB5eXNqemdmcHl5c2p6Z2ZweXlzanpndGxuNHBj\n{\"lost\":{\"at\":\"2026-10-24T10:00:00Z\",\"deliveries\":[{\"side\":\"source\",\"state\":\"delivery_unknown\",\"state_at\":\"2026-10-24T10:00:00Z\",\"unknown\":\"lost_at_sender\",\"lost\":true,\"report_by\":\"2026-10-24T14:04:00Z\",\"reported\":[\"lost_at_sender\"]}]},\"feedback\":[{\"sender\":\"node1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqsnp67e9/ep1zyg3zyg3zyg3zyg3zyg3zyg3zyj0kcgq\",\"message\":\"msg-0002\",\"recipient\":\"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\",\"kind\":\"lost_at_sender\",\"state\":\"delivery_unknown\",\"at\":\"2026-10-24T10:00:00Z\"}]}",
 		hash: e1 + ".ef9ba86060ef0b002fd40522d8da8a67e6010656eb53e54bc573c0ad0af540d5.rec"},
+	// The notice of a source file nothing could be read from: named after the damaged
+	// file (the hash of its name is in the key), holding the one feedback item until a
+	// notice covers it.
+	{name: "out lost notice", dir: store.OutDir,
+		file: "sidera-record 1 out-lost 521713ef 155 ZXAxenlnM3p5ZzN6eWczenlnM3p5ZzN6eWczenlqMGtjZ3EgMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZg\n{\"at\":\"2026-10-24T10:00:00Z\",\"feedback\":[{\"sender\":\"node1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqsnp67e9/ep1zyg3zyg3zyg3zyg3zyg3zyg3zyj0kcgq\"}]}",
+		hash: e1 + ".14eae9848c676a357c5cf6ee0eb572deeb46e4a3de1cee1084546d314330433b.rec"},
 }

@@ -17,7 +17,7 @@ var recordDirs = []string{
 
 var allKinds = []store.Kind{
 	store.KindOut, store.KindOutCtl, store.KindIn, store.KindCtl, store.KindEndpoint,
-	store.KindAttempts, store.KindCheckpoint, store.KindAdmin, store.KindAlert, store.KindSeq,
+	store.KindAttempts, store.KindCheckpoint, store.KindAdmin, store.KindAlert, store.KindSeq, store.KindOutLost,
 }
 
 // Whatever DecodeRecord accepts re-encodes to the same bytes, and is the
@@ -63,6 +63,7 @@ func FuzzParseKey(f *testing.F) {
 	f.Add(uint8(6), []byte("attempt 0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6"))
 	f.Add(uint8(7), []byte("local "+op))
 	f.Add(uint8(8), []byte(aid))
+	f.Add(uint8(10), []byte(e1+" "+strings.Repeat("0123456789abcdef", 4)))
 	f.Fuzz(func(t *testing.T, kindIdx uint8, key []byte) {
 		kind := allKinds[int(kindIdx)%len(allKinds)]
 		k, err := store.ParseKey(kind, key)
@@ -117,7 +118,7 @@ func FuzzDecodeRecordBody(f *testing.F) {
 			keys[kind] = key
 		}
 	}
-	kindsInOrder := []store.Kind{store.KindOut, store.KindIn, store.KindCtl, store.KindEndpoint, store.KindAttempts, store.KindCheckpoint, store.KindAdmin, store.KindAlert, store.KindSeq}
+	kindsInOrder := []store.Kind{store.KindOut, store.KindIn, store.KindCtl, store.KindEndpoint, store.KindAttempts, store.KindCheckpoint, store.KindAdmin, store.KindAlert, store.KindSeq, store.KindOutLost}
 	for i, k := range kindsInOrder {
 		for _, g := range goldenRecords {
 			if strings.Fields(g.file)[2] == string(k) {

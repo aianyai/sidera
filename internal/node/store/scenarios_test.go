@@ -539,7 +539,9 @@ func sweepScenario(farFuture time.Time) scenario {
 		derived.Body = nil
 		lost := lostOutAt(srcOut(6, false).Key, base) // a replacement
 		closed := session(5, store.EndpointClosed, ctlName(4))
-		seed(t, mem, o1, o2, inDone, c, derived, lost, closed,
+		notified := lostNotice(1, 6, base) // an out-lost record whose notice was given
+		notified.Feedback = nil
+		seed(t, mem, o1, o2, inDone, c, derived, lost, closed, notified,
 			store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "out/x"},
 			adminResult(1))
 		seedBodies(t, mem, bodyBytes(3))
@@ -560,10 +562,15 @@ func sweepScenario(farFuture time.Time) scenario {
 		},
 		retry: func(t *testing.T, r *rig, s *sim) {
 			plan := store.PlanSweep(r.scan(), farFuture)
-			if len(plan.Records)+len(plan.Ctl)+len(plan.Bodies)+len(plan.Outs)+len(plan.Endpoints) == 0 {
+			if len(plan.Records)+len(plan.Ctl)+len(plan.Bodies)+len(plan.Outs)+len(plan.OutLosts)+len(plan.Endpoints) == 0 {
 				return
 			}
 			mustDo(t, r.st.ArchiveSweep(plan.Chunk(farFuture)))
+		},
+		verify: func(t *testing.T, r *rig) {
+			if sc := r.scan(); len(sc.OutLost) != 0 {
+				t.Errorf("an out-lost record whose notice was given is left: %v", sc.OutLost)
+			}
 		},
 		crashed: func(t *testing.T, where string, snap map[string]string) {
 			sweepInvariants(t, where, snap)

@@ -91,10 +91,16 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return sessionCtl(1, 5)
 	case "out lost at the sender":
 		return lostOutAt(outKey(2, false), base.Add(time.Hour))
+	case "out lost notice":
+		return store.NewOutLostRecord(store.OutLostKey{Sender: ep(1), Damaged: strings.Repeat("0123456789abcdef", 4)}, node(local), base.Add(time.Hour))
 	}
 	t.Fatalf("no record for the golden vector %q", name)
 	return nil
 }
+
+// oneSender is the sender of the feedback item of the golden vector of an out-lost
+// record: the local node and the endpoint of its key.
+const oneSender = "node1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqsnp67e9/" + e1
 
 func TestRecordGoldenVectors(t *testing.T) {
 	for _, g := range goldenRecords {
@@ -137,7 +143,7 @@ func nameOf(kind, key string) string {
 	h := sha256.Sum256([]byte(kind + " " + key))
 	name := hex.EncodeToString(h[:]) + ".rec"
 	if strings.HasPrefix(kind, "out") {
-		return strings.Fields(key)[0] + "." + name
+		return strings.SplitN(key, " ", 2)[0] + "." + name
 	}
 	return name
 }
@@ -288,6 +294,16 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"a body reference of a negative length", "in", `"len":17`, `"len":-1`},
 		{"a body reference past the limit of a body", "in", `"len":17`, `"len":99999999`},
 		{"a dedup record with no digest", "in", `"digest":"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",`, ``},
+		{"an out-lost record without its discovery time", "out lost notice", `"at":"2026-10-24T10:00:00Z",`, ``},
+		{"an out-lost record whose discovery time is null", "out lost notice", `"at":"2026-10-24T10:00:00Z",`, `"at":null,`},
+		{"an out-lost record with two feedback items", "out lost notice", `"feedback":[{`, `"feedback":[{"sender":"` + oneSender + `"},{`},
+		{"an out-lost item of another endpoint than its sender", "out lost notice", `/ep1zyg3zyg3zyg3zyg3zyg3zyg3zyj0kcgq"}`, `/` + e2 + `"}`},
+		{"an out-lost item that names a message", "out lost notice", `{"sender":`, `{"message":"msg-0001","sender":`},
+		{"an out-lost item that names a recipient", "out lost notice", `{"sender":`, `{"recipient":"` + oneSender + `","sender":`},
+		{"an out-lost item without a sender", "out lost notice", `{"sender":"` + oneSender + `"}`, `{}`},
+		{"an out-lost item whose sender is not an address", "out lost notice", `"sender":"node1`, `"sender":"nodeX`},
+		{"an out-lost record with a field of its own that nothing reads", "out lost notice", `{"at":`, `{"extra":1,"at":`},
+		{"an out-lost record whose item is written as an empty list", "out lost notice", `"feedback":[{"sender":"` + oneSender + `"}]`, `"feedback":[]`},
 		{"an out kind that is not an envelope kind", "out", `"kind":"message"`, `"kind":"shout"`},
 		{"an out kind that is a control signal in a message file", "out", `"kind":"message"`, `"kind":"control.session.close"`},
 		{"an out record without recipients", "out", `"recipients":[{"address":"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc","delivery":{"side":"source","state":"queued","state_at":"2026-10-24T09:00:00Z","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z"}}],`, ``},
@@ -451,7 +467,7 @@ func TestRecordsRoundTrip(t *testing.T) {
 
 func dirOf(rec store.Record) string {
 	switch r := rec.(type) {
-	case store.OutRecord:
+	case store.OutRecord, store.OutLostRecord:
 		return store.OutDir
 	case store.InRecord:
 		return store.InDir
@@ -566,6 +582,13 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	notice.Dedup = delivery.NewDedupRecord(notice.Key.Dedup(), digestOf(5), notice.Record.ReportBy)
 	notice.Covers = []store.CoverRef{{Out: srcOut(4, false).Name(), Recipient: addr(2, 2), Kind: delivery.KindRejected}}
 	recs["in notice that covers feedback"] = notice
+	lostCover := notice
+	lostCover.Covers = []store.CoverRef{{Out: lostNotice(1, 3, base).Name(), Kind: delivery.KindLostUnknownMessage}, notice.Covers[0]}
+	recs["in notice that covers the feedback of an out-lost record"] = lostCover
+	recs["out-lost with its feedback pending"] = lostNotice(1, 2, base.Add(time.Hour))
+	cleared := lostNotice(2, 4, base.Add(2*time.Hour))
+	cleared.Feedback = nil
+	recs["out-lost whose feedback was covered"] = cleared
 
 	// Control records.
 	c := sessionCtl(1, 5)

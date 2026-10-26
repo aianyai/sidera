@@ -231,6 +231,29 @@ func recoveryScenarios() []scenario {
 			},
 		},
 		{
+			// The notice was written and the crash came before the item it covers was
+			// cleared: the replay clears it, once, whatever the crash left.
+			name: "feedback replay of an out-lost record",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				a, b := lostNotice(1, 1, base), lostNotice(1, 2, base)
+				seed(t, mem, a, b, noticeForLost(a))
+				seedBodies(t, mem, []byte("feedback wording"))
+			},
+			mode: atomic, mustComplete: true, run: recoverRun,
+			verify: func(t *testing.T, r *rig) {
+				sc := r.scan()
+				for _, o := range sc.OutLost {
+					pending := len(o.Feedback)
+					if (o.Name() == lostNotice(1, 1, base).Name()) == (pending != 0) {
+						t.Errorf("%s: %d items pending: only the record no notice covers keeps its item", o.Name(), pending)
+					}
+				}
+				if len(sc.OutLost) != 2 || len(sc.Alerts) != 0 {
+					t.Errorf("out-lost %d alerts %d", len(sc.OutLost), len(sc.Alerts))
+				}
+			},
+		},
+		{
 			name: "orphan bodies",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				seedBodies(t, mem, bodyBytes(1), bodyBytes(2))

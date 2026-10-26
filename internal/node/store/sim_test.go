@@ -149,6 +149,10 @@ func (s *sim) pass() bool {
 		s.must(s.st.FeedbackReplay(outs), "FeedbackReplay")
 		do("feedback-replay")
 	}
+	if lost := store.OutLostReplays(s.scan()); len(lost) > 0 {
+		s.must(s.st.OutLostClear(lost), "OutLostClear")
+		do("feedback-replay")
+	}
 	if bodies := store.OrphanBodies(s.scan()); len(bodies) > 0 {
 		s.must(s.st.OrphanGC(bodies), "OrphanGC")
 		do("orphan-gc")
@@ -323,6 +327,8 @@ func work(sc *store.Scan, enabled func(string) bool) []string {
 	add("blocked-replay", len(br), func(i int) string { return br[i].Head.Endpoint.String() })
 	fr := store.FeedbackReplays(sc)
 	add("feedback-replay", len(fr), func(i int) string { return fr[i].Name() })
+	lr := store.OutLostReplays(sc)
+	add("feedback-replay", len(lr), func(i int) string { return lr[i].Name() })
 	// A candidate of the drain is work only when a forced close changes it.
 	for _, in := range func() []store.InRecord { a, _ := store.DrainCandidates(sc); return a }() {
 		if _, o, err := in.Record.Apply(base, delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectEndpointClosed}); err == nil && o.Result == delivery.ResultApplied {

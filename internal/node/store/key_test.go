@@ -250,6 +250,12 @@ func reencodeSimpleKey(t *testing.T, kind store.Kind, k any) []byte {
 		return store.AdminKeyBytes(v)
 	case store.AlertID:
 		return store.AlertKeyBytes(v)
+	case store.OutLostKey:
+		b, err := v.Bytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
 	}
 	t.Fatalf("kind %s parsed to the unexpected type %T", kind, k)
 	return nil
