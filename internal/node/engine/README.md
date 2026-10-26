@@ -241,7 +241,9 @@ signals join the same loop as further commands and add their methods to this lis
   is not closed by the tick before the outbound worker has pulled its target one more
   time (`finalPullPending`): at the start step 12 leaves it open and step 14 makes the
   pull; the close then tells what the pull could not settle. No such pull is made while
-  the wall clock is in doubt (`finalPullDue`).
+  the wall clock is in doubt (`finalPullDue`), and the tick keeps the record's entry
+  at the end of the target's retention, so a pull that never comes does not keep the
+  delivery open.
 - **A damaged file is settled first, one at a time, and a lost source record is replaced
   by the sender's.** `quarantineAll` settles the damaged files of the plan but those of
   `ctl/`, each with a scan taken after the one before, giving the store the scan and the

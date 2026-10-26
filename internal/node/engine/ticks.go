@@ -130,7 +130,7 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 	}
 	var b store.TickBatch
 	var outs []store.OutRecord
-	var waiting []string
+	var waiting []finalPullWait
 	for _, r := range records {
 		switch {
 		case strings.HasPrefix(r, "in/"):
@@ -158,9 +158,9 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 			if !ok {
 				continue
 			}
-			o, changed, deferred := e.tickedSource(now, old)
-			if deferred {
-				waiting = append(waiting, old.Name())
+			o, changed, waitUntil := e.tickedSource(now, old)
+			if !waitUntil.IsZero() {
+				waiting = append(waiting, finalPullWait{r, waitUntil})
 			}
 			if !changed {
 				continue
@@ -169,36 +169,48 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 			b.Out = append(b.Out, o)
 		}
 	}
-	e.askForFinalPulls(now, waiting)
-	if len(b.In)+len(b.Out) == 0 {
-		return nil
-	}
-	if err := e.d.Store.Tick(b); err != nil {
-		return err
-	}
-	for _, in := range b.In {
-		e.view.setIn(in)
-	}
-	for _, o := range outs {
-		e.putOut(now, o)
-		for _, t := range o.Outbound.Deliveries() {
-			if t.Delivery.State.IsTerminal() {
-				delete(e.outbox.finalPulled, finalPullKey{o.Name(), t.Address.Endpoint})
+	if len(b.In)+len(b.Out) > 0 {
+		if err := e.d.Store.Tick(b); err != nil {
+			return err
+		}
+		for _, in := range b.In {
+			e.view.setIn(in)
+		}
+		for _, o := range outs {
+			e.putOut(now, o)
+			for _, t := range o.Outbound.Deliveries() {
+				if t.Delivery.State.IsTerminal() {
+					delete(e.outbox.finalPulled, finalPullKey{o.Name(), t.Address.Endpoint})
+				}
 			}
 		}
 	}
+	e.holdForFinalPulls(now, waiting)
 	return nil
 }
 
-// askForFinalPulls has the outbound worker look at the source records whose close
-// waits for the pull before it. At the start the outbound step does that for every
-// record, after the feedback step, so nothing is asked for before it.
-func (e *Engine) askForFinalPulls(now time.Time, records []string) {
-	if e.Phase() == PhaseRecovering {
-		return
-	}
-	for _, name := range records {
-		e.sched.set(schedKey{schedOutbound, name}, now)
+// finalPullWait is a source record, by its entry of the schedule, with a delivery
+// whose close waits for the pull before it, and the instant that waiting ends at the
+// latest.
+type finalPullWait struct {
+	record string
+	until  time.Time
+}
+
+// holdForFinalPulls has the outbound worker look at the source records whose close
+// waits for the pull before it, and sets each one's entry of the schedule to the
+// instant the wait ends at the latest: a pull that never comes (the window was over
+// before the worker took the record up, or a send answered with a conflict left the
+// record with no work) must not keep the delivery open until the next start. It runs
+// after the records were written, because writing one moves its entry. At the start
+// the outbound step looks at every record, after the feedback step, so nothing is
+// asked for before it.
+func (e *Engine) holdForFinalPulls(now time.Time, waiting []finalPullWait) {
+	for _, w := range waiting {
+		e.sched.set(schedKey{schedTick, w.record}, w.until)
+		if e.Phase() != PhaseRecovering {
+			e.sched.set(schedKey{schedOutbound, strings.TrimPrefix(w.record, "out/")}, now)
+		}
 	}
 }
 
@@ -206,8 +218,10 @@ func (e *Engine) askForFinalPulls(now time.Time, records []string) {
 // deliveries that the time closes, with the feedback that calls for (the delivery
 // rules say which: a close from a state the sender was told nothing of tells it), the
 // body reference dropped once no delivery needs the body, whether anything changed,
-// and whether a delivery was left open for the pull that comes before its close.
-func (e *Engine) tickedSource(now time.Time, o store.OutRecord) (store.OutRecord, bool, bool) {
+// and, when a delivery was left open for the pull that comes before its close, the
+// first instant at which the pull is no longer made and the delivery closes without it
+// (the zero time when none was).
+func (e *Engine) tickedSource(now time.Time, o store.OutRecord) (store.OutRecord, bool, time.Time) {
 	ev := delivery.Event{Type: delivery.EventReportByPassed}
 	changed := false
 	if o.Lost != nil {
@@ -224,12 +238,14 @@ func (e *Engine) tickedSource(now time.Time, o store.OutRecord) (store.OutRecord
 			}
 		}
 		o.Lost = &lost
-		return o, changed, false
+		return o, changed, time.Time{}
 	}
-	deferred := false
+	var waitUntil time.Time
 	for _, t := range o.Outbound.Deliveries() {
 		if e.finalPullPending(o, t.Address.Endpoint, t.Delivery, now) {
-			deferred = true
+			if until := finalPullUntil(t.Delivery.ReportBy).Add(time.Nanosecond); until.After(waitUntil) {
+				waitUntil = until
+			}
 			continue
 		}
 		next, eff, out, err := o.Outbound.ApplyObservation(now, t.Address.Node, t.Address.Endpoint, ev)
@@ -242,7 +258,7 @@ func (e *Engine) tickedSource(now time.Time, o store.OutRecord) (store.OutRecord
 			o = e.withFeedback(now, o, t.Address, []delivery.Outcome{out})
 		}
 	}
-	return settledSource(o), changed, deferred
+	return settledSource(o), changed, waitUntil
 }
 
 // applied reports whether any of the outcomes changed the record.
