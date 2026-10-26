@@ -121,10 +121,12 @@ Closing on the target is always silent, because only the sender's node gives
 feedback.
 
 The rule gives the caller a last chance to learn the outcome before the close. The
-target keeps its record, and answers pulls from it, for longer than `report_by`
-(its retention is the latest of the terms in `RetainUntil` of the store, about a
-day for a message), so a report that reaches the sender after `report_by` while the
-record is not yet closed is applied with its true meaning by the one rule of
+protocol guarantees only that a target keeps its record until
+`RecordRetainUntil(report_by)`; this implementation keeps it for longer (its
+retention is the latest of the terms in `RetainUntil` of the store, about a day for
+a message), so the last pull is an extra chance taken while the record is still
+there, and when it yields nothing the delivery closes with the notice. A report that
+reaches the sender after `report_by` while the record is not yet closed is applied with its true meaning by the one rule of
 `ApplyStatusReport`: a rejection is told as a rejection, a delivery stays silent,
 a hand-over is told. Nothing in the record's rules looks at how late a report is;
 only `closed_unconfirmed` ends it. `Tick` closes at the first instant after

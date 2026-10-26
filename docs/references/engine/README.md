@@ -398,8 +398,11 @@ the last step of the start looks at every unsettled source record again.
 **The pull before the close.** A source delivery that is still `queued` or `accepted`
 after `report_by` has never been told an outcome to its sender, and the target keeps its
 record, and answers pulls from it, for about a day longer (`finalPullUntil`, which is
-`reply.RetainFactsUntil`: the longest term of what the target's store keeps for a
-delivery, a pin in `TestTheEnginesLastPullIsNeverLaterThanTheStoreKeepsARecord`). So its
+`reply.RetainFactsUntil`: the longest term of what this implementation's store keeps for a
+delivery, a pin in `TestTheEnginesLastPullIsNeverLaterThanTheStoreKeepsARecord`). The
+protocol guarantees only `RecordRetainUntil(report_by)`, so the pull after it is an extra
+chance taken while this implementation still keeps the record, not a promise of the
+target. So its
 close waits for one more pull of the target (`finalPullDue`; `workFinalPull`), the only
 pull made after `report_by`. The answer is applied by the same rules as any other, with
 its true meaning though `report_by` has passed: a rejection is told as a rejection, a
@@ -420,8 +423,13 @@ its targets settled before it closes and tells anything; while the node runs, th
 is followed by it. A delivery of a record the worker does not carry (a control signal, a
 lost record, an engine without a transport) closes at once, so nothing waits for a pull that
 cannot come; `outboundWorks` says which. A delivery removed from the outbox because the target
-answered a send with a conflict is still queued and closes like any other, so it ends with a
-notice.
+answered a send with a conflict is still queued, is no longer sent to, and is still pulled
+before its close; what that learns depends on what the target holds. When the target cannot
+be reached or holds no record of the message, the delivery closes with the notice like any
+other. When the target holds the conflicting request, its pull returns that request's
+report (a report is not bound to the digest of the request it was made for) and the
+delivery follows it, as it would follow any report of the target; the engine does not tell
+the two requests apart.
 
 **The passing of time.** Each target record and each source record has an entry of the
 schedule at its next time-driven change (`Record.NextTick`), which the view keeps current
