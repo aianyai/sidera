@@ -2,8 +2,10 @@ package engine
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/store"
@@ -37,12 +39,31 @@ func (e *Engine) raiseAlert(now time.Time, kind, subject, detail string) (store.
 	if id == (store.AlertID{}) {
 		return store.AlertID{}, errors.New("engine: the random source gave an alert identifier of zero bytes")
 	}
-	a := store.AlertRecord{ID: id, Kind: kind, At: now, Subject: subject, Detail: detail}
+	return id, e.putAlert(store.AlertRecord{ID: id, Kind: kind, At: now, Subject: subject, Detail: detail})
+}
+
+// raiseAlertOnce raises the alert of a fact that belongs to one record, named by
+// owner (the file name of the record): the identifier follows from the kind and the
+// owner, so that coming to the same fact again, as every start does for a creation it
+// cannot settle, finds the alert and raises no other. The alert that is there stays as
+// it is, an acknowledgement of the owner's included.
+func (e *Engine) raiseAlertOnce(now time.Time, kind, owner, subject, detail string) error {
+	sum := sha256.Sum256([]byte(kind + "\x00" + owner))
+	var id store.AlertID
+	copy(id[:], sum[:])
+	if slices.ContainsFunc(e.view.alerts, func(a store.AlertRecord) bool { return a.ID == id }) {
+		return nil
+	}
+	return e.putAlert(store.AlertRecord{ID: id, Kind: kind, At: now, Subject: subject, Detail: detail})
+}
+
+// putAlert writes an alert and takes it into the view.
+func (e *Engine) putAlert(a store.AlertRecord) error {
 	if err := e.d.Store.AlertRaise(a); err != nil {
-		return store.AlertID{}, err
+		return err
 	}
 	e.view.alerts = append(e.view.alerts, a)
-	return id, nil
+	return nil
 }
 
 type cmdAlerts struct{ call[[]store.AlertRecord] }

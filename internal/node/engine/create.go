@@ -315,10 +315,12 @@ func (e *Engine) lateCreate(c store.CtlRecord, r *cmdCreateResult) {
 }
 
 // alertUncontrolled tells the owner of a native session that may remain and that
-// the node does not control. The endpoint is named, and nothing of its content.
+// the node does not control. The endpoint is named, and nothing of its content. The
+// alert is of the control record of the creation and told once: a creation the node
+// cannot settle is met again at every start.
 func (e *Engine) alertUncontrolled(now time.Time, c store.CtlRecord, why string) {
 	subject := c.SessionEndpoint.String()
-	if _, err := e.raiseAlert(now, alertControlUnknown, subject, why+" (session endpoint "+subject+")"); err != nil {
+	if err := e.raiseAlertOnce(now, alertControlUnknown, c.Name(), subject, why+" (session endpoint "+subject+")"); err != nil {
 		e.classify(err)
 		if e.fatal == nil {
 			e.log.Error("the alert of a session nobody controls could not be recorded", "endpoint", subject, "error", err.Error())

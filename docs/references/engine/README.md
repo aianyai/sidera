@@ -678,7 +678,10 @@ that nobody controls. A creation the adapter reports as failed for `control_unkn
 alert. Whatever the adapter answers after a creation was settled changes nothing. A control record that was
 closed while its creation was unsettled can take no reply, and a retry would fail every time: the engine
 logs it as an error that names the record, tells the owner of a session that may exist, and stops the work
-for the creation. At the start, step
+for the creation. The alert the engine raises of a session nobody controls has an identifier that follows from the kind
+and the name of the control record, and one that is there is not written again, so a creation that is
+met unsettled at every start (the closed control record) is one alert for the owner, and an
+acknowledgement of it stands. At the start, step
 11 settles the creations past their deadline as unconfirmed and calls the adapter again for the
 others, with the same attempt; the adapter answers an attempt it knows with the session it made, so a
 crash or a killed adapter after the native session was made still yields one session. A turn of the new
@@ -1011,6 +1014,7 @@ reproducible).
 | The retirement keeps the statement, asks for the stop, and nothing is signed after it | `operations_identity.go`, `signing.go` (`canSign`) | `TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop`, `TestAfterTheIdentityIsRetiredNothingIsSigned` |
 | After the retirement a send is refused and nothing is recorded; a periodic task is told that the node may not sign | `capacity.go`, `signing.go` (`SignRefusalOf`), `engine.go` (`fire`) | `TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded`, `TestCheckCapacityTable`, `TestAPeriodicTaskIsToldWhetherTheNodeMaySign` |
 | An alert is acknowledged and takes the file it names | `operations_alerts.go` | `TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames` |
+| A session nobody controls is one alert for the control record of its creation, however often the node starts | `alerts.go` (`raiseAlertOnce`), `create.go` (`alertUncontrolled`) | `TestAnUncontrolledCreationIsToldOnceAcrossRestarts` |
 | Settings are a versioned change through the door and are in force for the next command | `operations_settings.go` | `TestChangingTheSettingsOfTheNodeIsAVersionedChangeThroughTheDoor`, `TestChangingTheSettingsOfAnEndpointFindsItsInstance`, `TestChangedSettingsAreInForceForTheNextCommand` |
 | The owner's operations recover from a crash at every point | `transactions.go` | `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |
 | The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |

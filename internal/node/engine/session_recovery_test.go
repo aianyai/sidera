@@ -175,6 +175,44 @@ func TestCreationWhoseControlRecordWasClosedIsReportedOnceAndNotRetried(t *testi
 	}
 }
 
+// The alert of a session nobody controls is about one fact, the creation that could not
+// be settled, and a restart that finds the creation unsettled again does not make another:
+// the owner has one alert for it, however many times the node starts.
+func TestAnUncontrolledCreationIsToldOnceAcrossRestarts(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	intent := &store.CreateIntent{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Endpoint: mustEndpoint(t, 61), State: store.IntentCreating}
+	c, ep := seedControl(t, r, 3, intent)
+	closed, _, err := c.Record.Tick(c.Record.ReportBy.Add(time.Second))
+	if err != nil || closed.State != delivery.StateClosedUnconfirmed {
+		t.Fatalf("the record is %s after report_by (%v), want closed_unconfirmed", closed.State, err)
+	}
+	c.Record = closed
+	if err := r.st.ControlIntake(nil, &ep, c); err != nil {
+		t.Fatalf("ControlIntake: %v", err)
+	}
+	uncontrolled := func() int {
+		n := 0
+		for _, a := range r.scan().Alerts {
+			if a.Kind == "control_unknown" && a.Subject == c.SessionEndpoint.String() {
+				n++
+			}
+		}
+		return n
+	}
+	for start := 1; start <= 3; start++ {
+		e := r.start()
+		advance(t, r, e, engine.DefaultParams().CreateReplyDeadline+time.Second)
+		if got := uncontrolled(); got != 1 {
+			t.Fatalf("%d alerts of a session nobody controls after start %d, want 1", got, start)
+		}
+		if got, err := e.Alerts(context.Background()); err != nil || len(got) != 1 {
+			t.Fatalf("the engine lists %d alerts after start %d (%v), want 1", len(got), start, err)
+		}
+		r.restart()
+	}
+}
+
 // What adapter.start carries for a session is what the adapter needs to take it back:
 // the native session it maps to, the tool access its agent was created with (its own
 // token and the data directory) and the state the adapter kept for it. A session
