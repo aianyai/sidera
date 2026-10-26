@@ -29,6 +29,21 @@ func reservedName(name string) bool {
 	return strings.HasPrefix(name, fsx.TempPrefix) || strings.HasPrefix(name, fsx.TrashPrefix) || strings.HasPrefix(name, stagePrefix)
 }
 
+// SourceError is a package that cannot be read: Path is the directory or file
+// inside the package whose reading failed, relative to the package, "." for the
+// package itself. The package is not what it should be, and the owner who named
+// it can fix it; that is no failure of this node's own storage.
+type SourceError struct {
+	Path string
+	Err  error
+}
+
+func (e *SourceError) Error() string {
+	return fmt.Sprintf("config: reading %q of the package: %v", e.Path, e.Err)
+}
+
+func (e *SourceError) Unwrap() error { return e.Err }
+
 func readAdapters(r fsx.Reader, st *state) error {
 	entries, err := listDir(r, AdaptersDir)
 	if err != nil {
@@ -159,7 +174,7 @@ func readPackage(src fsx.Reader) (pkg, error) {
 	walk = func(dir string) error {
 		entries, err := src.ReadDir(dir)
 		if err != nil {
-			return fmt.Errorf("config: reading the package at %q: %w", dir, err)
+			return &SourceError{Path: dir, Err: err}
 		}
 		for _, e := range entries {
 			rel := path.Join(dir, e.Name)
@@ -265,7 +280,7 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) error {
 	for _, f := range p.files {
 		data, err := src.ReadFile(f)
 		if err != nil {
-			return fmt.Errorf("config: reading %q of the package: %w", f, err)
+			return &SourceError{Path: f, Err: err}
 		}
 		mode := fsx.ModePrivate
 		if f == program {

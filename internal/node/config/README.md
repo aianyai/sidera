@@ -168,7 +168,9 @@ The prompt turns and the endpoint defaults are not here: they are
 - For `StageAdapter`, pass a `fsx.Reader` rooted at the package directory, a
   reader of at least `StageSuffixBytes` bytes of randomness for the name of the
   staging directory, and check the platform in `Staged.Manifest`
-  (`adapterreg.RunsOn`). `StageAdapter` and `Unstage` are
+  (`adapterreg.RunsOn`). A directory or file of the package that cannot be read
+  is a `*SourceError` naming its path inside the package, and is not a failure of
+  the node's own storage. `StageAdapter` and `Unstage` are
   called only by the single install worker, one at a time, and may run
   concurrently with the writer loop: they take no lock of `Config` and touch
   only staging and version directories that no change reads.

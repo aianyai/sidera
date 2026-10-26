@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"path"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -208,6 +209,64 @@ func TestRefusedStageLeavesNothing(t *testing.T) {
 			}
 			if work, err := config.AdapterGCWork(rg.mem); err != nil || len(work) != 0 {
 				t.Errorf("gc work after a refused stage = %+v, %v", work, err)
+			}
+		})
+	}
+}
+
+// unreadable is a package some of whose files and directories fail to be read.
+type unreadable struct {
+	fsx.Reader
+	files, dirs []string
+}
+
+func (u *unreadable) ReadFile(p string) ([]byte, error) {
+	if slices.Contains(u.files, p) {
+		return nil, &fs.PathError{Op: "read", Path: p, Err: fs.ErrPermission}
+	}
+	return u.Reader.ReadFile(p)
+}
+
+func (u *unreadable) ReadDir(d string) ([]fsx.Entry, error) {
+	if slices.Contains(u.dirs, d) {
+		return nil, &fs.PathError{Op: "open", Path: d, Err: fs.ErrPermission}
+	}
+	return u.Reader.ReadDir(d)
+}
+
+// A file or a directory of the package that cannot be read is a SourceError that
+// names it, and the refusal leaves nothing behind: the owner can fix the package,
+// and it is no failure of this node's own storage.
+func TestAPackageThatCannotBeReadIsASourceErrorThatNamesWhatFailed(t *testing.T) {
+	rows := []struct {
+		name string
+		src  func() fsx.Reader
+		path string
+	}{
+		{"a file", func() fsx.Reader {
+			return &unreadable{Reader: srcPackage(t, "fresh", "0.1.0", nil), files: []string{"lib/a/b.txt"}}
+		}, "lib/a/b.txt"},
+		{"the program", func() fsx.Reader {
+			return &unreadable{Reader: srcPackage(t, "fresh", "0.1.0", nil), files: []string{"bin/sidera-adapter-example"}}
+		}, "bin/sidera-adapter-example"},
+		{"a directory", func() fsx.Reader {
+			return &unreadable{Reader: srcPackage(t, "fresh", "0.1.0", nil), dirs: []string{"lib/a"}}
+		}, "lib/a"},
+		{"the package itself", func() fsx.Reader {
+			return &unreadable{Reader: srcPackage(t, "fresh", "0.1.0", nil), dirs: []string{"."}}
+		}, "."},
+	}
+	for _, r := range rows {
+		t.Run(r.name, func(t *testing.T) {
+			rg, c := loaded(t)
+			before := snapshot(t, rg.mem)
+			_, err := c.StageAdapter(r.src(), suffixReader())
+			var se *config.SourceError
+			if !errors.As(err, &se) || se.Path != r.path || !errors.Is(err, fs.ErrPermission) {
+				t.Fatalf("StageAdapter = %v, want a SourceError for %q caused by the permission", err, r.path)
+			}
+			if after := snapshot(t, rg.mem); !reflect.DeepEqual(before, after) {
+				t.Errorf("a package that cannot be read left %v", diffKeys(before, after))
 			}
 		})
 	}

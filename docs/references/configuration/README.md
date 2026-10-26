@@ -318,9 +318,12 @@ it is installed.
    `versions/.stage-<hex>` beside the versions, because a rename needs one
    parent. The copy's manifest is parsed again and must name the same adapter
    and version as the source did, so the package cannot change between the check
-   and the install. Everything staging writes is preparation. A copy can take as
-   long as the package is big and touches only a directory that no change reads,
-   so the versioned changes of the loop never wait for it.
+   and the install. A directory or file of the package that cannot be read is a
+   `SourceError` that names its path inside the package: the owner can mend the
+   package, and it is no failure of the node's own storage. Everything staging
+   writes is preparation. A copy can take as long as the package is big and touches
+   only a directory that no change reads, so the versioned changes of the loop
+   never wait for it.
 2. In the loop, `PlanInstall` and the transaction it plans in the same command,
    so that nothing changes between the plan and its writes. The transaction:
    discard a leftover directory of the version if
