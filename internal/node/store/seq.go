@@ -99,3 +99,15 @@ func (b *SeqBook) Note(sender ident.EndpointID, target ident.Address, seq uint64
 		b.high[p] = seq
 	}
 }
+
+// Forget drops every pair of the sender. Call it when the sweep has removed the
+// record of a session endpoint with its floor file: the identifier of a session
+// endpoint is new every time, so no number of its pairs is given again, and the
+// book built from a scan after that holds no pair of it either.
+func (b *SeqBook) Forget(sender ident.EndpointID) {
+	for p := range b.high {
+		if p.sender == sender {
+			delete(b.high, p)
+		}
+	}
+}

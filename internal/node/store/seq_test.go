@@ -92,6 +92,22 @@ func TestSeqBookMovesOnlyWhenNoted(t *testing.T) {
 	}
 }
 
+// Forget takes every pair of one sender out of the book and leaves the others.
+func TestSeqBookForgetsEveryPairOfASender(t *testing.T) {
+	b := store.NewSeqBook(scanWith(t, nil, withSeq(1, 3, false), withSeq(2, 8, true)))
+	b.Note(ep(3), addr(2, 2), 5)
+	b.Forget(ep(1))
+	if got := b.High(ep(1), addr(2, 2)); got != 0 {
+		t.Errorf("High of a pair of the forgotten sender = %d, want 0", got)
+	}
+	if got := b.High(ep(1), addr(local, 2)); got != 0 {
+		t.Errorf("High of its other pair = %d, want 0", got)
+	}
+	if got := b.High(ep(3), addr(2, 2)); got != 5 {
+		t.Errorf("High of another sender = %d, want 5", got)
+	}
+}
+
 func TestFailedIntakeGivesTheNumberAgain(t *testing.T) {
 	r := newRig(t)
 	f := newFaultyRig(t, r.mem)
