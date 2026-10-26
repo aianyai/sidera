@@ -808,7 +808,9 @@ node learns the session from the control reply, by the pull or as the evidence o
 session's first reply, which carries the signed reply of the creation and then the signed
 report of the delivery, and the one rule of the control reply (`envelope.HandleControlReply`)
 gives it a delivery of its own for the message, to the session endpoint, whichever of the two
-came first. If the session is not made (the creation failed, or was not confirmed and
+came first. Either way the reply is applied by one function (`withControlReply`): the signed text
+is stored for the status of the signal, and the feedback the end of the signal calls for is told,
+so a pull that comes after the evidence finds the digest it carries and adds nothing. If the session is not made (the creation failed, or was not confirmed and
 the endpoint was closed), the delivery is closed with the endpoint, as any record queued for
 a closed endpoint is (`rejected`, `endpoint_closed`), and the sender, who tracks the
 delivery when the reply names an endpoint at all, hears of it as of any rejected message; a
@@ -1254,7 +1256,7 @@ reproducible).
 | `endpoint.status` is answered by the node | `intake_control.go` (`statusReply`) | `TestEndpointStatusIsAnsweredByTheDaemon` |
 | A control record is settled by time | `ticks.go` (`tickBatch`), `view.go` (`setCtl`) | `TestControlRecordIsSettledByTime`, `TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint` |
 | An initial message is delivered to the session as any message is, and judged again as the creation when handed out | `initial.go`, `intake_control.go` (`takeInCreate`), `pull.go` (`handoutAuthorization`) | `TestLocalEndpointsExchangeMessagesAndControlSignals`, `TestForgedHeaderInInitialMessageDoesNotChangeFrom` |
-| The reply of the new session carries the creation's reply, and the sender takes the session from it | `outbound.go` (`evidenceFor`, `encodeFor`) | `TestReplyFromNewSessionBeforeControlReplyIsAdmitted` |
+| The reply of the new session carries the creation's reply, and the sender takes the session from it | `outbound.go` (`evidenceFor`, `encodeFor`, `withControlReply`) | `TestReplyFromNewSessionBeforeControlReplyIsAdmitted` |
 | The initial message of a creation that makes no session is told, not lost | `create.go` (`settleCreate`), `drain.go` | `TestInitialMessageOfACreationThatMakesNoSessionIsTold` |
 | A creation whose initial message or endpoint is lost while it is not settled is failed | `initial.go` (`failCreationWithoutMessage`, `reconcileInitialMessage`), `create.go` (`failCreationWithoutEndpoint`) | `TestBodyLostFromTheInitialMessageFailsItsUnsettledCreation`, `TestCreationWhoseEndpointWasDamagedIsFailed` |
 | An interrupt is carried out when accepted and is not behind the messages of the session | `execute.go`, `view.go` (`queuedIn`) | `TestInterruptIsNotQueuedBehindMessages` |

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
@@ -13,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
+	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/reply"
 )
 
@@ -260,7 +262,9 @@ func (e *Engine) judge(now time.Time, env envelope.Envelope, from transport.Orig
 		}
 		decision, j.evidenceErr = adm.Decision, adm.EvidenceError
 		if adm.Outbound != nil && adm.Outbound != ob {
-			j.out = e.withEvidence(now, *outRec, adm, ident.Address{Node: from.Node(), Endpoint: sender})
+			if j.out, err = e.withEvidence(now, *outRec, adm, env.Evidence, ident.Address{Node: from.Node(), Endpoint: sender}); err != nil {
+				return j, err
+			}
 		}
 	}
 	key := store.TargetKey{SenderNode: from.Node(), Sender: sender, Message: env.ID, Recipient: recipient}
@@ -407,13 +411,24 @@ func (e *Engine) admitReply(now time.Time, env envelope.Envelope, from transport
 }
 
 // withEvidence is the source record after the evidence of a reply was applied: the
-// outbound the admission returns, the feedback the evidence caused, and the body
-// reference gone once no delivery of the record needs the body.
-func (e *Engine) withEvidence(now time.Time, o store.OutRecord, adm reply.Admission, replier ident.Address) *store.OutRecord {
+// outbound the admission returns, the control reply the evidence carried (taken in as
+// the pull takes it in), the feedback the evidence caused, and the body reference
+// gone once no delivery of the record needs the body.
+func (e *Engine) withEvidence(now time.Time, o store.OutRecord, adm reply.Admission, evidence []record.Record, replier ident.Address) (*store.OutRecord, error) {
 	o.Outbound = *adm.Outbound
+	if adm.Handling != nil {
+		i := slices.IndexFunc(evidence, func(r record.Record) bool { return r.Type == envelope.ControlReplyType })
+		if i < 0 {
+			return nil, fmt.Errorf("engine: the evidence handled a control reply that it does not hold")
+		}
+		var err error
+		if o, err = e.withControlReply(now, o, *adm.Handling, evidence[i]); err != nil {
+			return nil, fmt.Errorf("engine: the control reply of the evidence: %w", err)
+		}
+	}
 	o = e.withFeedback(now, o, replier, adm.Reported)
 	o = settledSource(o)
-	return &o
+	return &o, nil
 }
 
 // settledSource drops the body reference of a source record none of whose

@@ -543,15 +543,28 @@ func (c *sourceChange) applyControlReply(rec record.Record) {
 		e.log.Warn("a control reply of the target is refused", "node", c.node.String(), "error", err.Error())
 		return
 	}
-	encoded, err := rec.Encode()
+	o, err := e.withControlReply(c.now, c.o, h, rec)
 	if err != nil {
-		e.log.Error("a control reply that verified cannot be encoded", "error", err.Error())
+		e.log.Error("a control reply that verified cannot be taken in", "error", err.Error())
 		return
 	}
-	c.o.Outbound, c.o.ControlReply = h.Outbound, encoded
-	target := c.o.Outbound.Recipients[0].Address
-	c.o = e.withFeedback(c.now, c.o, target, []delivery.Outcome{h.Control})
+	c.o = o
 	c.changed, c.replied = true, true
+}
+
+// withControlReply is the source record after a control reply was applied to it
+// (envelope.HandleControlReply, which made h): the outbound it returns, the reply as
+// it was received, which the status of the signal verifies again, and the feedback
+// the end of the delivery of the signal calls for. It is the one place a control reply
+// is applied, whether the pull of the sender brought it or the evidence of a reply
+// from the session the signal made did.
+func (e *Engine) withControlReply(now time.Time, o store.OutRecord, h envelope.Handling, rec record.Record) (store.OutRecord, error) {
+	encoded, err := rec.Encode()
+	if err != nil {
+		return o, err
+	}
+	o.Outbound, o.ControlReply = h.Outbound, encoded
+	return e.withFeedback(now, o, o.Outbound.Recipients[0].Address, []delivery.Outcome{h.Control}), nil
 }
 
 // observe applies a fact the sender sees itself to the delivery to recipient, and

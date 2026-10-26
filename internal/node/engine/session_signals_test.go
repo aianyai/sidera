@@ -198,6 +198,12 @@ func TestReplyFromNewSessionBeforeControlReplyIsAdmitted(t *testing.T) {
 	if in.ReplyDecision.Reason == reply.ReasonNoOutbound {
 		t.Errorf("the reply was judged as one to a message a never sent")
 	}
+	// The pull of the reply is still held back, so what the status shows is what the
+	// evidence stored: a later pull finds the digest it carries and stores nothing.
+	r := controlReply(t, h, "a", msg)
+	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated || r.Create.SessionEndpoint != adapterproto.EndpointRef(eps[0].ID.String()) {
+		t.Errorf("the status of the signal shows %+v, want the creation reply the evidence carried, with the session %s", r, eps[0].ID)
+	}
 }
 
 // An initial message is the sender's text and nothing else: a body that is written as
