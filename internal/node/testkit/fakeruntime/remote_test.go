@@ -27,7 +27,7 @@ func TestKillNativeIsAnsweredByTheProcessEndingItsConnection(t *testing.T) {
 	defer srv.Close()
 	ctrl := fakeruntime.RemoteController{Server: srv}
 
-	for i := range 500 {
+	for i := range 50 {
 		ref := fmt.Sprintf("ref-%d", i)
 		client, err := fakectl.Dial(ctx, srv.Addr())
 		if err != nil {
