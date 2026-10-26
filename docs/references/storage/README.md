@@ -927,7 +927,12 @@ checksum covers the record. A transaction that appends starts with a newline, so
 the torn tail a crash leaves, and the half line a failed append leaves in the
 middle of a file, are lines of their own and cannot swallow the first line that
 follows. A reader resumes at every newline, skips empty lines, drops and counts a
-line that is not intact and ignores a last line without a newline. Events are not
+line that is not intact and ignores a last line without a newline. A crash that
+cuts an append leaves no dropped line, but a power loss can also damage the bytes
+of an append that was not synced, and damaged bytes can hold any number of
+newlines: the number of lines a reader drops after a crash has no bound, and the
+bytes that were synced before the append are never touched
+(`archive-events` and `archive-summaries` of the crash walks). Events are not
 synced, and neither is a summary: the archive is best effort. The summaries of a
 sweep are a transaction of their own, `archive-summaries` (`Store.ArchiveSummaries`),
 which the caller runs before the sweep and does not wait for: a sweep that failed to

@@ -19,6 +19,60 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
+// seedArchiveDay returns the setup that makes line the content of the archive file
+// of the day, durable: what an earlier transaction appended before a sync.
+func seedArchiveDay(line string) func(*testing.T, *fsxtest.Mem) {
+	return func(t *testing.T, mem *fsxtest.Mem) {
+		seedRaw(t, mem, store.ArchiveDir, path.Base(dayFile), []byte("\n"+line))
+	}
+}
+
+// checkTornAppend judges the bytes of an archive file after a crash that cut an
+// append of lines (written out whole, after the newline an append starts with)
+// from a file that held the line committed before. Whatever a damaged block
+// turns the appended bytes into, the committed part is untouched, so it must
+// open the file. When the file is only a cut of the bytes the transaction wrote,
+// no block was damaged and the reader must drop nothing: cut says so, and kept
+// is the number of lines of the append that are whole in it.
+func checkTornAppend(t *testing.T, where, data, committed string, lines ...string) (cut bool, kept int) {
+	t.Helper()
+	committedPart := "\n" + committed
+	if !strings.HasPrefix(data, committedPart) {
+		t.Errorf("%s: the archive does not begin with the line made durable before the append: %q", where, data)
+		return false, 0
+	}
+	written := "\n" + strings.Join(lines, "")
+	appended := data[len(committedPart):]
+	if !strings.HasPrefix(written, appended) {
+		return false, 0
+	}
+	end := 1 // the newline the append starts with
+	for _, l := range lines {
+		end += len(l)
+		if end <= len(appended) {
+			kept++
+		}
+	}
+	return true, kept
+}
+
+// checkAppendedRecords checks that the records read back from an append are some
+// of the records written, each at most once and in the order written.
+func checkAppendedRecords[T any](t *testing.T, where string, got []T, written ...T) {
+	t.Helper()
+	next := 0
+	for _, g := range got {
+		for next < len(written) && !equalRecords(g, written[next]) {
+			next++
+		}
+		if next == len(written) {
+			t.Errorf("%s: the archive holds a record nobody wrote, or a record twice, or out of order: %#v", where, g)
+			return
+		}
+		next++
+	}
+}
+
 // ctlName is the name, without the extension, of the control record i.
 func ctlName(i int) string { return strings.TrimSuffix(ctlKey(i).FileName(store.KindCtl), ".rec") }
 
@@ -610,40 +664,49 @@ func scenarios() []scenario {
 			return r.st.DaemonStop(adminResult(7))
 		}),
 		{
-			name: "archive-events",
-			mode: batch,
+			// The file already holds a summary that an earlier transaction appended and
+			// a later sync made durable. The append of events is not synced, so what it
+			// leaves is anything from nothing to every line, and a damaged block can
+			// leave any number of broken lines: the reader's number of dropped lines is
+			// not bounded, and the checks do not bound it.
+			name:  "archive-events",
+			setup: seedArchiveDay(archiveLines.summaryDelivered),
+			mode:  batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				return r.st.ArchiveEvents(base, []store.ArchiveEvent{eventAccepted(), eventChunk()})
 			},
 			ignore: func(p string) bool { return true }, // events are diagnostics; the check is the reader's, below
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
-				got := store.ParseArchive([]byte(fin[dayFile]))
-				if len(got.Summaries) != 0 || len(got.Events) > 2 || got.Dropped > 1 {
-					t.Errorf("%s: archive reads as %d summaries, %d events, %d dropped", where, len(got.Summaries), len(got.Events), got.Dropped)
+				data := fin[dayFile]
+				cut, kept := checkTornAppend(t, where, data, archiveLines.summaryDelivered, archiveLines.event, archiveLines.eventN)
+				got := store.ParseArchive([]byte(data))
+				if len(got.Summaries) != 1 || !equalRecords(got.Summaries[0], summaryDelivered()) {
+					t.Errorf("%s: the summary made durable before the append reads as %#v", where, got.Summaries)
 				}
-				for _, e := range got.Events {
-					if !equalRecords(e, eventAccepted()) && !equalRecords(e, eventChunk()) {
-						t.Errorf("%s: archive holds an event nobody wrote: %#v", where, e)
-					}
+				checkAppendedRecords(t, where, got.Events, eventAccepted(), eventChunk())
+				if cut && (got.Dropped != 0 || len(got.Events) != kept) {
+					t.Errorf("%s: the file is a cut of what was written with %d complete lines of the append, and reads as %d events, %d dropped", where, kept, len(got.Events), got.Dropped)
 				}
 			},
 		},
 		{
-			name: "archive-summaries",
-			mode: batch,
+			name:  "archive-summaries",
+			setup: seedArchiveDay(archiveLines.event),
+			mode:  batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				return r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered(), summaryQuarantined()})
 			},
 			ignore: func(p string) bool { return true }, // summaries are diagnostics; the check is the reader's, below
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
-				got := store.ParseArchive([]byte(fin[dayFile]))
-				if len(got.Events) != 0 || len(got.Summaries) > 2 || got.Dropped > 1 {
-					t.Errorf("%s: archive reads as %d summaries, %d events, %d dropped", where, len(got.Summaries), len(got.Events), got.Dropped)
+				data := fin[dayFile]
+				cut, kept := checkTornAppend(t, where, data, archiveLines.event, archiveLines.summaryDelivered, archiveLines.summaryQuarantined)
+				got := store.ParseArchive([]byte(data))
+				if len(got.Events) != 1 || !equalRecords(got.Events[0], eventAccepted()) {
+					t.Errorf("%s: the event made durable before the append reads as %#v", where, got.Events)
 				}
-				for _, sm := range got.Summaries {
-					if !equalRecords(sm, summaryDelivered()) && !equalRecords(sm, summaryQuarantined()) {
-						t.Errorf("%s: archive holds a summary nobody wrote: %#v", where, sm)
-					}
+				checkAppendedRecords(t, where, got.Summaries, summaryDelivered(), summaryQuarantined())
+				if cut && (got.Dropped != 0 || len(got.Summaries) != kept) {
+					t.Errorf("%s: the file is a cut of what was written with %d complete lines of the append, and reads as %d summaries, %d dropped", where, kept, len(got.Summaries), got.Dropped)
 				}
 			},
 		},
