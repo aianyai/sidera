@@ -762,6 +762,39 @@ func TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints(t *testin
 	}
 }
 
+// A request of the adapter that was past the host's check when the instance was
+// disabled reaches the engine after the disabling. It is refused: what it would
+// open is an endpoint of an instance that is not enabled, which nothing would close,
+// and the enabling that follows would wait for it for ever. No probe token is issued
+// for the instance either.
+func TestAnAdapterRequestAfterTheDisablingIsRefusedAndEnablingAgainCompletes(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10, withAdapters(newHostDouble()))
+	e := r.start()
+	register(t, e, "a")
+	version := r.cfg.Instances().Version
+	if _, err := e.Execute(ctx, disableCommand(34, "disable", version, "chat")); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, e)
+
+	_, err := e.RegisterDirect(ctx, "chat", adapterproto.RegisterParams{Key: "late", DisplayName: "Late"})
+	wantReason(t, err, engine.ReasonInstanceUnknown)
+	_, err = e.ProbeTokens(ctx, "chat")
+	wantReason(t, err, engine.ReasonInstanceUnknown)
+	settle(t, e)
+	if got := openEndpoints(t, e); got != 0 {
+		t.Fatalf("%d endpoints are open on the disabled instance", got)
+	}
+
+	// bounded: an endpoint nothing closes would be waited for, for ever
+	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if _, err := e.Execute(wait, enableCommand(35, "enable", r.cfg.Instances().Version, "chat", "chat", "")); err != nil {
+		t.Fatalf("enabling again: %v", err)
+	}
+}
+
 // An instance that is enabled again while the records of its endpoints are still
 // being closed waits for the closing to end: the endpoints that were there when
 // the owner disabled it are closed when it runs again, and the answer to the

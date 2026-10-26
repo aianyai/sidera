@@ -287,12 +287,15 @@ func (o *disableAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 
 // instanceDisabled is what follows the commit of a disabling, driven by the state
 // that was committed: the host stops the instance, the engine marks it offline and
-// forgets what it learned of the adapter that ran (its probe and its tokens, so that
-// the next adapter that runs is probed anew), and the closing of its endpoints is
-// queued. A start that finds the instance disabled does the closing from the disk.
+// forgets what it learned of the adapter that ran (its admission, its probe and its
+// tokens, so that the next adapter that runs is admitted and probed anew), and the
+// closing of its endpoints is queued. The admission goes first among them: a
+// request of the adapter that was past the host's check when the host stopped it
+// must not open an endpoint that the closing, already queued, would not reach. A start that finds the instance disabled does the closing from the disk.
 func (e *Engine) instanceDisabled(now time.Time, instance string) {
 	if st := e.adapters[instance]; st != nil {
 		st.goOffline(now)
+		st.admitted = false
 		st.tokens, st.probed, st.probe, st.probedAt, st.versionUntested, st.declared = nil, false, adapterproto.ProbeResult{}, time.Time{}, false, false
 	}
 	if e.d.Adapters != nil {

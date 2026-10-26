@@ -46,8 +46,9 @@ const (
 
 // adapterState is what the loop holds of one adapter instance besides its
 // endpoints, which are records. It is made by the first thing that is told about
-// the instance and is never dropped: an instance that is gone keeps its
-// admission, so that its endpoints go on being judged by what it declared.
+// the instance and is never dropped: an instance whose adapter is gone keeps its
+// admission, so that its endpoints go on being judged by what it declared. Only
+// the owner's disabling of the instance ends the admission.
 type adapterState struct {
 	admitted bool
 	adm      adapterreg.Admission

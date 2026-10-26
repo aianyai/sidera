@@ -199,8 +199,12 @@ was committed, so a restart does the same. Enabling asks the host to run the ins
 the host starts it in the background and the owner reads whether it came up from the
 list of the adapters. Disabling asks the host to stop it and marks it offline here, with
 the time of the disabling, because the host reports nothing when it stops an instance
-and `AdapterGone` is taken only for an instance that is enabled; it forgets the probe
-and the tokens of the adapter that ran, and the runtime endpoint stops being declared.
+and `AdapterGone` is taken only for an instance that is enabled; it forgets the
+admission, the probe and the tokens of the adapter that ran, and the runtime endpoint
+stops being declared. With the admission gone, a request of the adapter that was past
+the host's check when it was stopped is refused as `instance_unknown`: it cannot open
+an endpoint that the closing would not reach and that would hold the next enabling for
+ever. The next adapter that runs is admitted anew.
 The endpoints of the instance are then closed, at most `Params.ChunkReplaces` at a time
 (`instance-drain`, a continuation of the loop), each as any closed endpoint is closed,
 its queued records closed after it in chunks. If a chunk cannot be written it is tried
@@ -643,6 +647,7 @@ reproducible).
 | An installation, and the store of the result of one that found its version current, recover from a crash at every point | `transactions.go` (`adapter-install`, `adapter-install-current`), `config` (`adapter-stage`, `adapter-unstage`) | `TestAnInstallationRecoversFromACrashAtEveryPoint`, `TestStoringTheResultOfAnInstallationThatFoundItDoneRecoversFromACrash` |
 | Enabling starts the instance through the host; what is refused starts nothing | `operations_adapters.go` (`enableAdapterOp`) | `TestEnablingAnInstanceStartsItThroughTheHost` |
 | Disabling stops the instance, marks it offline, closes its endpoints | `operations_adapters.go` (`instanceDisabled`), `instance_drain.go` | `TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints` |
+| A request of the adapter after the disabling is refused, and enabling again completes | `operations_adapters.go` (`instanceDisabled`) | `TestAnAdapterRequestAfterTheDisablingIsRefusedAndEnablingAgainCompletes` |
 | Enabling again waits for the closing of the disabling | `operations_adapters.go` (`instanceClosing`), `manage.go` (`waitForDrain`) | `TestEnablingAnInstanceWaitsForTheDrainOfItsDisabling` |
 | Disabling, enabling and the presets recover from a crash at every point | `config` (`adapter-disable`, `adapter-enable`, `presets-change`), `store` (`instance-drain`) | `TestDisablingAnInstanceRecoversFromACrashAtEveryPoint`, `TestEnablingAnInstanceAndChangingPresetsRecoverFromACrashAtEveryPoint` |
 | Presets carry the class of the change and the version of the collection | `operations_presets.go` | `TestPresetsAreAddedAndRemovedWithTheirClassAndTheCollectionVersion` |
