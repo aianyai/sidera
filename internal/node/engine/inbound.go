@@ -156,6 +156,9 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 			arrivals = append(arrivals, arrival{in: old})
 			continue
 		}
+		if _, ok := e.view.ctl[key]; ok {
+			return transport.Receipt{}, refuse(ReasonMessageConflict) // the identifier is a control signal's
+		}
 		j, err := e.judge(now, env, from, sender, r, digest, ref)
 		if err != nil {
 			return transport.Receipt{}, err

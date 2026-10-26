@@ -303,6 +303,26 @@ func TestSameIDDifferentBodyConflicts(t *testing.T) {
 	})
 }
 
+// A message identifier names one kind of request for a sender and a recipient. A
+// message sent under the identifier of a control signal the node holds is refused:
+// taken in, it would have a record whose report no pull could reach, because a pull
+// answers from the control record that holds the identifier.
+func TestAMessageUnderTheIdentifierOfAControlSignalIsAConflict(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a", "b")
+	toAddr := addrOf(t, h, "b")
+	from := endpointOf(t, h, "a")
+	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, forgedControl(t, h, "shared-id", toAddr, envelope.KindEndpointStatus, "")); err != nil {
+		t.Fatalf("the control signal: %v", err)
+	}
+	_, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), from, forged(t, h, "shared-id", toAddr, "", "a message"))
+	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonMessageConflict {
+		t.Fatalf("a message under the identifier of a control signal got %v, want a refusal for a conflict", err)
+	}
+	if sc := scanOf(t, h); len(sc.In) != 0 || len(sc.Ctl) != 1 {
+		t.Errorf("the target holds %d message records and %d control records, want none and the one", len(sc.In), len(sc.Ctl))
+	}
+}
+
 // The request digest leaves the recipients out when they are not disclosed, so the
 // digest alone cannot tell a send again from the same key to someone else.
 func TestTheSameIdempotencyKeyForOtherRecipientsIsAConflict(t *testing.T) {

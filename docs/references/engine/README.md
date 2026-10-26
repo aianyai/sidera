@@ -594,7 +594,8 @@ endpoint a new rate window; step 13 sends what fell due while the node was down.
 **Taking in an envelope.** `Inbound` is the handler of the transport. An envelope that carries
 a control signal is taken in as described under control signals below. For each recipient
 on this node it finds the record of the request or judges it: a repeat gets the record's
-report, another body under the same message identifier is refused as a conflict and
+report, another body under the same message identifier, or the identifier of a control
+signal the node holds for that sender and recipient, is refused as a conflict and
 nothing changes; for a new request the reply permission and its evidence are decided,
 then the endpoint (a closed endpoint is rejected as `endpoint_closed`; one that is not
 there, one whose creation has not ended and a runtime endpoint, which takes control
@@ -1089,7 +1090,7 @@ reproducible).
 | No method makes a session endpoint | — | `TestEngineHasNoMethodThatMakesASessionEndpoint` |
 | Node rules do not apply to a local sender, declarations do | `inbound.go` (`judgeAuthz`) | `TestLocalSourcesIgnoreNodeRules`, `TestEndpointDeclarationRestrictsLocalSenders`, `TestARemoteSenderIsJudgedByTheNodeRulesAndALocalOneIsNot` |
 | A reply with evidence is admitted before the report was pulled, a forged reply-to gets nothing | `inbound.go` (`admitReply`) | `TestReplyWithEvidenceAdmittedBeforeReportPulled`, `TestForgedReplyToGetsNoPermission`, `TestEvidenceThatDoesNotVerifyIsDiscardedAndTheOwnerIsToldOfIt` |
-| A lost receipt and a resend leave one record; another body under one identifier is a conflict | `inbound.go` (`takeIn`), `outbound.go` | `TestLostReceiptRetryKeepsOneRecord`, `TestSameIDDifferentBodyConflicts` |
+| A lost receipt and a resend leave one record; another body under one identifier, or a message under the identifier of a control signal, is a conflict | `inbound.go` (`takeIn`), `outbound.go` | `TestLostReceiptRetryKeepsOneRecord`, `TestSameIDDifferentBodyConflicts`, `TestAMessageUnderTheIdentifierOfAControlSignalIsAConflict` |
 | The backlog of an endpoint, the queue and the disk of the node | `inbound.go`, `send.go`, `capacity.go` | `TestEndpointBacklogFullIsRejectedWithReason`, `TestNodeQueueFullBackpressuresNewSends`, `TestDiskFullGivesNoFalseAcknowledgement`, `TestDiskFullAtTheTargetGivesNoReceipt` |
 | Requests no node takes, sequence numbers, the clock pause, idempotency retention | `send.go` | `TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing`, `TestASendWithAnEmptyBodyIsRefused`, `TestSequenceNumbersCountEachPairOfSenderAndRecipientFromOne`, `TestNothingIsSignedOrAcceptedWhileTheWallClockCannotBeTrusted`, `TestAnIdempotencyKeyIsRememberedUntilItsRetentionEnds` |
 | The state of each delivery of a message and, for a signal, its verified reply are read from the sender's record, for its sender alone | `status.go` | `TestTheStatusOfAMessageIsTheStateOfEachDeliveryAsTheSenderHoldsIt`, `TestOnlyTheSenderOfAMessageIsToldItsStatus`, `TestTheStatusOfAMessageSurvivesARestart`, `TestEveryStateAndRejectReasonHasAWireName`, `TestTheRecipientsOfASourceRecordAreTheOnesOfItsKeyInOrder` |
