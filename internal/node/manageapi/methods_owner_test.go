@@ -41,6 +41,13 @@ func TestEachMethodOfTheOwnerIsTheOperationOfTheCatalogueItIsMappedTo(t *testing
 		{"node.show", admin.OpRead, false, false},
 		{"node.set", admin.OpChangeNodeSettings, true, true},
 		{"endpoints.set", admin.OpChangeEndpointSettings, true, true},
+		{"adapters.install", admin.OpInstallAdapter, true, false},
+		{"adapters.list", admin.OpRead, false, false},
+		{"adapters.enable", admin.OpEnableAdapter, true, true},
+		{"adapters.disable", admin.OpDisableAdapter, true, true},
+		{"presets.list", admin.OpRead, false, false},
+		{"presets.add", admin.OpChangePreset, true, true},
+		{"presets.remove", admin.OpChangePreset, true, true},
 	} {
 		m := r.srv.methods[tc.method]
 		if m == nil {

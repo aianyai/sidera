@@ -41,6 +41,11 @@ var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonAlertUnknown:        {-32603, ""},
 	engine.ReasonIdentityRetired:     {-32603, ""},
 
+	engine.ReasonInstallInProgress:   {-32603, ""},
+	engine.ReasonPlatformUnsupported: {-32603, ""},
+	engine.ReasonProbeTokenUsed:      {-32603, ""},
+	engine.ReasonProbeTokenExpired:   {-32603, ""},
+
 	engine.ReasonNodeQueueFull:      {1012, `{"reason":"node_queue_full"}`},
 	engine.ReasonStorageFull:        {1012, `{"reason":"storage_full"}`},
 	engine.ReasonStorageUnavailable: {1012, `{"reason":"storage_unavailable"}`},

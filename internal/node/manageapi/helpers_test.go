@@ -79,6 +79,9 @@ type fakeService struct {
 	status engine.NodeStatus
 	node   config.Node
 	export engine.RevocationExport
+	// adapters and presets are what the reads of the adapters and the presets answer.
+	adapters engine.AdapterList
+	presets  config.Presets
 }
 
 func (f *fakeService) Endpoints(context.Context) ([]engine.EndpointView, error) {
@@ -100,6 +103,16 @@ func (f *fakeService) NodeSettings(context.Context) (config.Node, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.node, nil
+}
+func (f *fakeService) AdapterList(context.Context) (engine.AdapterList, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.adapters, nil
+}
+func (f *fakeService) Presets(context.Context) (config.Presets, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.presets, nil
 }
 func (f *fakeService) ExportRevocation(context.Context) (engine.RevocationExport, error) {
 	f.mu.Lock()

@@ -51,6 +51,13 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonTooLarge:            {"refused", "too_large"},
 	engine.ReasonAlertUnknown:        {"not_found", "alert_unknown"},
 	engine.ReasonIdentityRetired:     {"unavailable", "identity_retired"},
+	// One installation is copied at a time; a package for a platform this node does
+	// not run on is refused by the rules; a probe token is refused as used or as
+	// expired the way a token the node does not know is refused, as not authenticated.
+	engine.ReasonInstallInProgress:   {"conflict", "install_in_progress"},
+	engine.ReasonPlatformUnsupported: {"refused", "platform_unsupported"},
+	engine.ReasonProbeTokenUsed:      {"unauthenticated", "probe_token_used"},
+	engine.ReasonProbeTokenExpired:   {"unauthenticated", "probe_token_expired"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {
@@ -96,6 +103,10 @@ func TestARefusalCarriesWhatSaysWhichLimitAndWhichValue(t *testing.T) {
 			want{"invalid_argument", "node_mismatch"}, map[string]any{"field": "node"}},
 		{"a digest that is not this node's", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "digest", Detail: engine.DetailDigestMismatch},
 			want{"invalid_argument", "digest_mismatch"}, map[string]any{"field": "digest"}},
+		{"a front end that is not the token's", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "frontend", Detail: engine.DetailProbeFrontendMismatch},
+			want{"invalid_argument", "probe_frontend_mismatch"}, map[string]any{"field": "frontend"}},
+		{"a package directory that cannot be read", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "source", Detail: engine.DetailSourceUnreadable},
+			want{"invalid_argument", "source_unreadable"}, map[string]any{"field": "source"}},
 		{"a value", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "endpoint"},
 			want{"invalid_argument", "malformed_request"}, map[string]any{"field": "endpoint"}},
 		{"the field a body was too large in", &engine.Refusal{Reason: engine.ReasonTooLarge, Field: "body"},
@@ -318,7 +329,7 @@ func TestNoTwoCategoriesShareAnExitCode(t *testing.T) {
 var listedInvalidArgumentCodes = []string{
 	"malformed_request", "request_too_large", "single_recipient_only", "empty_patch", "cursor_invalid",
 	"probe_frontend_mismatch", "node_mismatch", "digest_mismatch", "unexpected_version", "method_not_allowed",
-	"config_invalid",
+	"config_invalid", "source_unreadable",
 }
 
 func TestAnInvalidArgumentIsAnsweredWithACodeTheCategoryListsAndNeverAMadeUpOne(t *testing.T) {

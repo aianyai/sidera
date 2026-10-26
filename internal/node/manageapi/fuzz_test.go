@@ -34,6 +34,15 @@ func FuzzDecodeRequest(f *testing.F) {
 		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"settings":{"disk_reserve_bytes":9223372036854775807,"reply_permission":true}}}`,
 		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"settings":{"a":null,"b":[1,{"c":1e2}],"d":"\u00e9"}}}`,
 		`{"params":{"include_acknowledged":true}}`,
+		// adapters and presets: a package path, an adapter with and without its instance
+		// and configuration, a preset document
+		`{"operation_id":"00000000000000000000000000000001","params":{"source":"/srv/adapters/relay"}}`,
+		`{"operation_id":"00000000000000000000000000000001","params":{"source":"relative/path"}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"adapter":"relay"}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"adapter":"relay","instance":"second","config":{"b":[1,2],"a":{"c":"x"}}}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"instance":"relay"}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"name":"tight","preset":{"local_sources":"deny","config":{"relay":{"k":1}}}}}`,
+		`{"operation_id":"00000000000000000000000000000001","expected_version":2,"params":{"name":"tight"}}`,
 	} {
 		for _, m := range methodNames(f) {
 			f.Add(m, []byte(s))
