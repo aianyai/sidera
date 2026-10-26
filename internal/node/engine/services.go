@@ -34,6 +34,8 @@ type ManageService interface {
 	Alerts(ctx context.Context) ([]store.AlertRecord, error)
 	Status(ctx context.Context) (NodeStatus, error)
 	NodeSettings(ctx context.Context) (config.Node, error)
+	AdapterList(ctx context.Context) (AdapterList, error)
+	Presets(ctx context.Context) (config.Presets, error)
 	ExportRevocation(ctx context.Context) (RevocationExport, error)
 	Execute(ctx context.Context, c ManagementCommand) (StoredResult, error)
 	OperationResult(ctx context.Context, key admin.RequestKey) ([]byte, bool, error)

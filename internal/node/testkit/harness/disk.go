@@ -76,14 +76,26 @@ func ManifestText() string { return manifestText }
 // setupTag tags the writes that lay out a disk before any process mounts it.
 var setupTag = fsx.Tag{Tx: "setup", Role: "f"}
 
-// The transactions that the composition root and the install flow own, declared
-// here the way they declare them, so that the table of the program is complete.
+// The transactions that the composition root owns, declared here the way it
+// declares them, so that the table of the program is complete, and the engine's
+// installation, which the fixture runs.
 var (
 	initDecl = &txn.Decl{Name: "init", Kind: txn.Normal, Writes: append(append(keys.InitWrites(), config.InitWrites()...),
 		keys.InitMarkerWrite())}
-	installDecl = &txn.Decl{Name: "adapter-install", Kind: txn.Normal, Writes: append(config.InstallWrites(),
-		txn.Write{Role: store.RoleResult, Op: txn.OpReplace}, config.InstallOldWrite())}
+	// installDecl is the engine's own declaration of the installation, which the
+	// fixture runs as the engine does when it installs the adapter of the node.
+	installDecl = engineDecl("adapter-install")
 )
+
+// engineDecl finds a declaration among the engine's by name.
+func engineDecl(name string) *txn.Decl {
+	for _, d := range engine.Transactions() {
+		if d.Name == name {
+			return d
+		}
+	}
+	panic("harness: the engine declares no transaction " + name)
+}
 
 // ProgramTable is the table of every transaction of the program: the internal
 // ones, those of the store, the configuration, the keys and the engine, and the
@@ -94,7 +106,7 @@ func ProgramTable(t testing.TB) *txn.Table {
 	decls = append(decls, config.Transactions()...)
 	decls = append(decls, keys.Transactions()...)
 	decls = append(decls, engine.Transactions()...)
-	decls = append(decls, initDecl, installDecl)
+	decls = append(decls, initDecl)
 	tab, err := txn.NewTable(decls...)
 	if err != nil {
 		t.Fatalf("harness: NewTable: %v", err)

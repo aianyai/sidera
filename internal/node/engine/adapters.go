@@ -66,7 +66,13 @@ type adapterState struct {
 
 	probed          bool
 	probe           adapterproto.ProbeResult
+	probedAt        time.Time
 	versionUntested bool
+	// declared: the probe has passed once since the instance was enabled, so the
+	// runtime endpoint is part of what the node declares. It is not withdrawn when
+	// the instance later becomes unusable, so that the declaration does not flap,
+	// and it ends with the disabling of the instance.
+	declared bool
 
 	// busy holds the endpoints with a running turn and rejected those whose
 	// runtime had a request refused, both by reference: an adapter may report a
@@ -79,13 +85,15 @@ type adapterState struct {
 }
 
 // probeToken is a token issued for a probe of one front end of one preset. The
-// Agent interface will present it to the engine to prove the front end reaches
-// the node; the consumption is not here yet.
+// Agent interface presents it to the engine (PresentProbeToken) to prove the front
+// end reaches the node; once presented it is used, and stays in the list so that
+// the state of the probe can be told from which tokens were seen.
 type probeToken struct {
 	preset   string
 	frontend adapterproto.Frontend
 	token    []byte
 	expires  time.Time
+	used     bool
 }
 
 func (e *Engine) adapter(instance string) *adapterState {
@@ -427,7 +435,8 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 			}
 		}
 	}
-	st.probed, st.probe, st.versionUntested = true, r, untested
+	st.probed, st.probe, st.probedAt, st.versionUntested = true, r, now, untested
+	e.declareIfPassed(instance, st, now)
 	return nil
 }
 
@@ -475,15 +484,20 @@ func (e *Engine) AdapterGone(ctx context.Context, instance string, cause adapter
 	return err
 }
 
-func (e *Engine) gone(now time.Time, instance string, cause adapterhost.GoneCause) error {
-	if _, ok := e.enabledInstance(instance); !ok {
-		return refuse(ReasonInstanceUnknown)
-	}
-	st := e.adapter(instance)
+// goOffline makes the instance offline since now, unless it was not online, in
+// which case the time it had stays, and its busy states unknown.
+func (st *adapterState) goOffline(now time.Time) {
 	if st.online {
 		st.online, st.offlineSince = false, now
 	}
 	st.busy = nil
+}
+
+func (e *Engine) gone(now time.Time, instance string, cause adapterhost.GoneCause) error {
+	if _, ok := e.enabledInstance(instance); !ok {
+		return refuse(ReasonInstanceUnknown)
+	}
+	e.adapter(instance).goOffline(now)
 	e.log.Info("adapter gone", "instance", instance, "cause", cause.String())
 	return nil
 }
@@ -640,6 +654,11 @@ type AdapterView struct {
 	ServerRequestRejected []adapterproto.EndpointRef
 	// ProbeTokens are the probe tokens held, in the order they were issued.
 	ProbeTokens []ProbeTokenView
+	// Probe is how far the probe of the instance has come.
+	Probe ProbeView
+	// RuntimeDeclared is whether the runtime endpoint is part of what the node
+	// declares: the instance is enabled and its probe has passed.
+	RuntimeDeclared bool
 }
 
 type cmdAdapter struct {
@@ -648,7 +667,7 @@ type cmdAdapter struct {
 }
 
 func (c *cmdAdapter) gate() gate { return gateRead }
-func (c *cmdAdapter) run(e *Engine, _ time.Time) {
+func (c *cmdAdapter) run(e *Engine, now time.Time) {
 	if _, ok := e.enabledInstance(c.instance); !ok {
 		c.done(AdapterView{}, refuse(ReasonInstanceUnknown))
 		return
@@ -673,6 +692,7 @@ func (c *cmdAdapter) run(e *Engine, _ time.Time) {
 	for _, t := range st.tokens {
 		v.ProbeTokens = append(v.ProbeTokens, ProbeTokenView{Preset: t.preset, Frontend: t.frontend, ExpiresAt: t.expires})
 	}
+	v.Probe, v.RuntimeDeclared = st.probeView(now), st.declared
 	c.done(v, nil)
 }
 

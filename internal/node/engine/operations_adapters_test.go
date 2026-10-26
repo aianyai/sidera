@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"path"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -104,7 +105,7 @@ func otherOS() string {
 func foreignManifest(t testing.TB, version string) string {
 	t.Helper()
 	text := manifestFile(t, relayOptions(version))
-	swapped := strings.Replace(text, `"os":"`+runtime.GOOS+`"`, `"os":"`+otherOS()+`"`, 1)
+	swapped := regexp.MustCompile(`"os":\s*"`+runtime.GOOS+`"`).ReplaceAllString(text, `"os": "`+otherOS()+`"`)
 	if swapped == text {
 		t.Fatalf("the manifest names no platform %q:\n%s", runtime.GOOS, text)
 	}
@@ -177,6 +178,10 @@ func (g *gatedReader) ReadFile(p string) ([]byte, error) {
 // ---------------------------------------------------------------------------
 // The requests, as the management interface builds them
 
+// idBase keeps the identifiers of these requests clear of the two that the fixture
+// used to install and enable the adapter of the node.
+const idBase = 128
+
 func encodeInstalled(a engine.AdapterInstalled) ([]byte, error) {
 	return json.Marshal(struct {
 		Adapter struct {
@@ -191,7 +196,7 @@ func encodeInstalled(a engine.AdapterInstalled) ([]byte, error) {
 
 func installCommand(b byte, content, source string) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf(content), Name: "adapters.install",
+		Key: requestKey(b + idBase), Fingerprint: fingerprintOf(content), Name: "adapters.install",
 		Operation: engine.InstallAdapterOp(source, encodeInstalled),
 	}
 }
@@ -220,14 +225,14 @@ func enableCommand(b byte, content string, expected admin.Version, adapter, inst
 		raw = []byte(doc)
 	}
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf(content), Expected: expected, Name: "adapters.enable",
+		Key: requestKey(b + idBase), Fingerprint: fingerprintOf(content), Expected: expected, Name: "adapters.enable",
 		Operation: engine.EnableAdapterOp(adapter, instance, raw, encodeInstance),
 	}
 }
 
 func disableCommand(b byte, content string, expected admin.Version, instance string) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf(content), Expected: expected, Name: "adapters.disable",
+		Key: requestKey(b + idBase), Fingerprint: fingerprintOf(content), Expected: expected, Name: "adapters.disable",
 		Operation: engine.DisableAdapterOp(instance, encodeInstance),
 	}
 }
@@ -241,14 +246,14 @@ func encodePreset(c engine.PresetChange) ([]byte, error) {
 
 func addPresetCommand(b byte, content string, expected admin.Version, name, doc string) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf(content), Expected: expected, Name: "presets.add",
+		Key: requestKey(b + idBase), Fingerprint: fingerprintOf(content), Expected: expected, Name: "presets.add",
 		Operation: engine.AddPresetOp(name, []byte(doc), encodePreset),
 	}
 }
 
 func removePresetCommand(b byte, content string, expected admin.Version, name string) engine.ManagementCommand {
 	return engine.ManagementCommand{
-		Key: requestKey(b), Fingerprint: fingerprintOf(content), Expected: expected, Name: "presets.remove",
+		Key: requestKey(b + idBase), Fingerprint: fingerprintOf(content), Expected: expected, Name: "presets.remove",
 		Operation: engine.RemovePresetOp(name, encodePreset),
 	}
 }
@@ -1227,6 +1232,8 @@ func TestAnInstallationRecoversFromACrashAtEveryPoint(t *testing.T) {
 	if _, err := e.Execute(ctx, installCommand(69, "install 1", "/src/relay1")); err != nil {
 		t.Fatal(err)
 	}
+	r.restart() // the walk counts the points of the installation it walks, not of the setup
+	e = r.start()
 	walker.rig = r
 	if _, err := e.Execute(ctx, cmd()); err != nil {
 		t.Fatal(err)
@@ -1278,6 +1285,8 @@ func TestStoringTheResultOfAnInstallationThatFoundItDoneRecoversFromACrash(t *te
 	if _, err := e.Execute(ctx, installCommand(71, "install 1", "/src/relay1")); err != nil {
 		t.Fatal(err)
 	}
+	r.restart()
+	e = r.start()
 	walker.rig = r
 	if _, err := e.Execute(ctx, cmd()); err != nil {
 		t.Fatal(err)
@@ -1299,7 +1308,8 @@ func TestDisablingAnInstanceRecoversFromACrashAtEveryPoint(t *testing.T) {
 	noLeaks(t)
 	var r *rig
 	checked, enabledStates, disabledStates := 0, 0, 0
-	cmd := func() engine.ManagementCommand { return disableCommand(80, "disable", 1, "chat") }
+	var version admin.Version
+	cmd := func() engine.ManagementCommand { return disableCommand(80, "disable", version, "chat") }
 	walker := newCrashWalker(func(where string, disk *fsxtest.Mem) {
 		checked++
 		f := r.fork(disk)
@@ -1338,7 +1348,12 @@ func TestDisablingAnInstanceRecoversFromACrashAtEveryPoint(t *testing.T) {
 		if plan := engine.PlanRecovery(sc, f.clk.Now(), func(name string) bool { return f.cfg.Instances().Items[name].Enabled }); !plan.Empty() {
 			t.Errorf("%s: work left after Open: %v", where, plan.Items())
 		}
-		startForked(t, f, e)
+		// the instance may be disabled, which the host would not admit
+		e.Start()
+		if err := e.RecoverDelivery(ctx); err != nil {
+			t.Errorf("%s: RecoverDelivery: %v", where, err)
+		}
+		e.Serve()
 		defer f.stop2(e)
 		_, err = e.Execute(ctx, cmd())
 		if err != nil {
@@ -1366,6 +1381,7 @@ func TestDisablingAnInstanceRecoversFromACrashAtEveryPoint(t *testing.T) {
 	r.queue(1, 3, a)
 	r.queue(4, 2, b)
 	e = r.start()
+	version = r.cfg.Instances().Version
 	walker.rig = r
 	if _, err := e.Execute(ctx, cmd()); err != nil {
 		t.Fatal(err)

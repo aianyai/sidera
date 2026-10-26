@@ -7,7 +7,6 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
-	"github.com/aianyai/sidera/internal/node/store"
 )
 
 // configRequest is what a versioned change of the configuration takes from the
@@ -88,11 +87,7 @@ func (o *setEndpointSettingsOp) run(e *Engine, x *opRun) ([]byte, error) {
 		return nil, refuse(ReasonEndpointUnknown)
 	}
 	instance := st.rec.Instance
-	open := func(id ident.EndpointID) bool {
-		s := e.view.endpoints[id]
-		return s != nil && s.rec.Status != store.EndpointClosed
-	}
-	after, err := e.d.Config.SetEndpointSettings(x.configRequest(), instance, o.endpoint, o.patch, open,
+	after, err := e.d.Config.SetEndpointSettings(x.configRequest(), instance, o.endpoint, o.patch, e.endpointOpen,
 		func(in config.Instances) (json.RawMessage, error) {
 			b, err := o.encode(EndpointChange{Endpoint: o.endpoint, Settings: in.Items[instance].Endpoints[o.endpoint], Version: in.Version})
 			if err != nil {

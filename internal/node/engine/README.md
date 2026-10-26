@@ -42,13 +42,16 @@ commands and add their methods to this list.
 | `Endpoints`, `CloseEndpoint`, `CloseRequest`, `CloseResult`, `Alerts`, `RaiseAlert` | The engine side of `endpoint list` and of a close the engine's own features ask for, and the alerts. The numbers of the status are `Status`'s. |
 | `Execute`, `ManagementCommand`, `StoredResult`, `Operation`, `CloseEndpointOp`, `StopDaemonOp` | The one door of every administrative operation of the owner: the replay check, the operation, and the storing of its result with the fingerprint are one command of the loop. The owner's request to close an endpoint and to stop the daemon are the two operations there are; the package that owns the effect of another adds its type here. |
 | `ClearClockRollbackOp`, `ConfirmRevocationBackupOp`, `RetireIdentityOp`, `AcknowledgeAlertOp`, `SetNodeSettingsOp`, `SetEndpointSettingsOp` | The owner's operations on the clock, the identity, the alerts and the settings, each an `Operation` with the effect in the loop and its result made by a function the interface passes in (`ClockClear`, `BackupConfirmed`, `EndpointChange` say what was done). |
+| `InstallAdapterOp`, `EnableAdapterOp`, `DisableAdapterOp`, `AddPresetOp`, `RemovePresetOp` | The owner's operations on adapters and presets, each an `Operation` with its result made by a function the interface passes in. An installation has work outside the loop (see the rules); enabling asks the host to run the instance, disabling asks it to stop and closes the instance's endpoints. |
+| `AdapterList`, `Presets` | Reads of the installed adapters, the instances with the probe of each enabled one, and the presets with the version a change of them names. |
+| `PresentProbeToken`, `ProbeTarget`, `ProbeView`, `ProbeState` | What a front end calls to prove it reaches the node, and what the engine says of the probe of an instance. Not part of `AgentService` yet: the Agent interface adds it when it calls it. |
 | `NodeSettings` | A read of `node.json` as the loop sees it, with the version a change of it names. |
 | `Status`, `NodeStatus`, `ReminderKind` | A read of what the owner is shown of the node, from the loop's state at one command: the phase, the reminders, the clock and its pause, the certificate, the room, the deliveries by state, the endpoints. |
 | `ExportRevocation`, `RevocationExport` | The self-revocation the keys verified as this node's, armored, with its digest. Not in the loop and stored nowhere. |
 | `OperationResult` | A read: the result stored for a request key, from either place a result is kept, and whether there is one. Taken while the node starts; writes nothing. |
 | `PlanRecovery`, `RecoveryPlan` | The work of the recovery rules as a pure function of a scan. |
 | `Reason`, `Refusal`, `ReasonOf` | The closed set of reasons a method refuses for; the interface packages alone map them to the wire. |
-| `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register` and `runtime-admit`, and for the owner's operations `clock-clear`, `backup-confirm` and `identity-retire`, each the effect followed by the result. |
+| `Transactions()` | The declarations of the transactions of two owners that the engine opens: `direct-register` and `runtime-admit`, and for the owner's operations `clock-clear`, `backup-confirm` and `identity-retire`, each the effect followed by the result, and the installation of an adapter, `adapter-install` (the rename of the staged directory, the pointer, the result, the discarding of the old version) and `adapter-install-current` (the result alone). |
 | `AgentService`, `ManageService` | What the Agent and management interfaces ask of the engine; `*Engine` implements them, and the methods are added as the engine learns to do them. Everything of `ManageService` that changes state is `Execute`; the other methods read. |
 | `Store`, `Config`, `Beginner`, `Adapters` | What the engine asks of the store, the configuration, the transaction writer and the adapter host (its calls to an adapter, and `Counts`, which only reads). |
 
@@ -85,6 +88,19 @@ commands and add their methods to this list.
   `config`), because the check and the write are one step; it is not made a second
   time here. `StoredResult.Stop` follows the operation, so a resend of a request
   that stops the daemon asks for the stop again.
+- **A package is copied outside the loop and committed inside it.** An operation that
+  has long work first (`preparedOperation`) is run in this order and no other: the loop
+  looks the request up and, only if it is to run, takes the one place of the install
+  worker and draws the randomness for the staging name; the worker, a goroutine the
+  engine owns that `Quiesce` counts, prepares, has the loop run the operation as an
+  ordinary one (which looks the request up again) and settles what the preparation left,
+  and only then is the request answered. A request that was done is answered without any
+  preparation, so nothing is copied twice. What is judged is the staged copy, never the
+  source.
+- **Enabling again waits for the closing of the disabling.** An operation that cannot
+  run until the records of an endpoint are closed returns `waitForDrain`; its command is
+  held as a registration is and run again from the start, so the operation is never
+  carried out in part.
 - **The owner's clear of the pause is one replacement.** `ClearClockRollbackOp` sets
   the mark to the clock as it reads (which may be below the mark it replaces) and
   removes the pause flag in the one replacement of `keys/clock.rec` that
@@ -309,6 +325,10 @@ commands and add their methods to this list.
   connection in the order the table gives, and notifications in the order the
   adapter sent them. `AdapterGone` may be called for any enabled instance, admitted
   or not.
+- Give `Deps.OpenPackage` when packages may be installed: it opens the directory the
+  owner names as a reader rooted there, and is the one place the engine reaches a
+  directory that is not the node's. `Deps.Rand` is read in the loop only; the staging
+  name's randomness is drawn there and handed to the worker.
 - Set `Deps.Home` to the absolute data directory when adapters are probed:
   `ProbeTokens` fails without it. Set `Deps.Adapters` when `Quiesce` is asked about
   adapters; `Counts` must read counters and never wait, because it is called in the
@@ -346,6 +366,7 @@ closing and its chunks; `execute_test.go` and `execute_crash_test.go` the door o
 `recovery_test.go` the scan entry and the recovery entry; `loop_test.go` the
 loop, back pressure and the fatal path; `sched_test.go` and
 `sched_internal_test.go` the schedule; `waiters_test.go` the waits; `capacity_test.go` the capacity check;
+`operations_adapters_test.go` the installation, enabling and disabling of adapters, the presets, the probe and the crash points of each;
 `adapters_test.go` the life of a connection (admission and the runtime endpoint, what
 `adapter.start` carries, probe tokens, availability and signals, notifications,
 checkpoints, and `Quiesce` against a test double of the host);

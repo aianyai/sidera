@@ -86,23 +86,24 @@ type Engine struct {
 	pausedSince time.Time
 	// retired: the owner retired the identity of the node. Nothing is signed in its
 	// name from then on, and the node is going down.
-	retired   bool
-	startedAt time.Time                // the time Start was called
-	adapters  map[string]*adapterState // by instance; see adapters.go
-	sched     *scheduler
-	timer     clock.Timer
-	periodic  map[string]*periodicTask
-	order     []string  // names of the periodic tasks, in the order they were added
-	clockTask string    // the periodic task that persists the clock state, if one was added
-	tr        Transport // set by SetTransport before Start
-	outbox    *outbox
-	waits     map[ident.EndpointID]*waiter
-	cont      []continuation
-	parked    map[ident.EndpointID][]command // commands that wait for the drain of an endpoint
-	ran       uint64                         // how many commands the loop has taken from the inbox
-	fatal     error                          // set by classify; the loop stops after the command that set it
-	probed    bool                           // the command that just ran was a probe of Quiesce
-	inLoop    atomic.Bool                    // the loop is running a command or the due entries of the schedule: what spawn asserts
+	retired    bool
+	startedAt  time.Time                // the time Start was called
+	adapters   map[string]*adapterState // by instance; see adapters.go
+	sched      *scheduler
+	timer      clock.Timer
+	periodic   map[string]*periodicTask
+	order      []string  // names of the periodic tasks, in the order they were added
+	clockTask  string    // the periodic task that persists the clock state, if one was added
+	tr         Transport // set by SetTransport before Start
+	outbox     *outbox
+	waits      map[ident.EndpointID]*waiter
+	cont       []continuation
+	parked     map[ident.EndpointID][]command // commands that wait for the drain of an endpoint
+	ran        uint64                         // how many commands the loop has taken from the inbox
+	fatal      error                          // set by classify; the loop stops after the command that set it
+	probed     bool                           // the command that just ran was a probe of Quiesce
+	installing atomic.Bool                    // an adapter package is being copied: one is at a time
+	inLoop     atomic.Bool                    // the loop is running a command or the due entries of the schedule: what spawn asserts
 }
 
 // continuation is a command the loop queued for itself: the next chunk of a long
@@ -725,6 +726,8 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.later(&cmdDrain{endpoint: id})
 		}
+	case schedInstanceDrain:
+		e.later(&cmdInstanceDrain{instance: key.id})
 	case schedPeriodic:
 		p := e.periodic[key.id]
 		err := p.task(TaskInput{Now: now, HighWater: e.hw.Value(), RollbackPaused: e.paused, SignRefusal: e.signRefusal()})

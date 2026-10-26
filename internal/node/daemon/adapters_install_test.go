@@ -140,7 +140,7 @@ func TestAnAdapterInstalledAndEnabledThroughTheManagementInterfaceIsStartedProbe
 		"operation_id": opID(2), "expected_version": listed.Result.Version, "params": map[string]any{"adapter": relay},
 	})
 	enabled := answerOf(t, status, body)
-	if want := `{"instance":"relay","enabled":true,"version":` + itoa(listed.Result.Version+1) + `}`; string(enabled.Result) != want {
+	if want := `{"instance":"relay","enabled":true,"version":` + number(listed.Result.Version+1) + `}`; string(enabled.Result) != want {
 		t.Fatalf("enabling: %s, want %s", enabled.Result, want)
 	}
 	launch := a.launchesOf(t, relay, 1)[0]
@@ -182,7 +182,7 @@ func TestAnAdapterInstalledAndEnabledThroughTheManagementInterfaceIsStartedProbe
 		"operation_id": opID(3), "expected_version": listed.Result.Version, "params": map[string]any{"instance": relay},
 	})
 	disabled := answerOf(t, status, body)
-	if want := `{"instance":"relay","enabled":false,"version":` + itoa(listed.Result.Version+1) + `}`; string(disabled.Result) != want {
+	if want := `{"instance":"relay","enabled":false,"version":` + number(listed.Result.Version+1) + `}`; string(disabled.Result) != want {
 		t.Fatalf("disabling: %s, want %s", disabled.Result, want)
 	}
 	if err := waitFor(func() bool { return launch.Ended() }); err != nil {
@@ -222,7 +222,7 @@ func (a *adapters) launchesOf(t testing.TB, instance string, n int) []*harness.A
 	}
 }
 
-func itoa(n uint64) string { b, _ := json.Marshal(n); return string(b) }
+func number(n uint64) string { b, _ := json.Marshal(n); return string(b) }
 
 func waitFor(cond func() bool) error {
 	deadline := time.Now().Add(30 * time.Second)
@@ -315,7 +315,7 @@ func TestPresetsAreAddedListedAndRemovedThroughTheManagementInterface(t *testing
 		"params": map[string]any{"name": "tight", "preset": map[string]any{"local_sources": "deny", "description": "closed"}},
 	})
 	added := answerOf(t, status, out)
-	if want := `{"name":"tight","version":` + itoa(version+1) + `}`; string(added.Result) != want {
+	if want := `{"name":"tight","version":` + number(version+1) + `}`; string(added.Result) != want {
 		t.Errorf("adding: %s, want %s", added.Result, want)
 	}
 	_, body = list()
@@ -326,7 +326,7 @@ func TestPresetsAreAddedListedAndRemovedThroughTheManagementInterface(t *testing
 		"operation_id": opID(21), "expected_version": version,
 		"params": map[string]any{"name": "other", "preset": map[string]any{"local_sources": "allow"}},
 	})
-	if status != 409 || !strings.Contains(string(out), `"version_conflict"`) || !strings.Contains(string(out), `"current_version":`+itoa(version+1)) {
+	if status != 409 || !strings.Contains(string(out), `"version_conflict"`) || !strings.Contains(string(out), `"current_version":`+number(version+1)) {
 		t.Errorf("a stale version: %d %s", status, out)
 	}
 	status, out = manage(t, c.Home, "presets.add", map[string]any{
@@ -340,7 +340,7 @@ func TestPresetsAreAddedListedAndRemovedThroughTheManagementInterface(t *testing
 		"operation_id": opID(23), "expected_version": version + 1, "params": map[string]any{"name": "tight"},
 	})
 	removed := answerOf(t, status, out)
-	if want := `{"name":"tight","version":` + itoa(version+2) + `}`; string(removed.Result) != want {
+	if want := `{"name":"tight","version":` + number(version+2) + `}`; string(removed.Result) != want {
 		t.Errorf("removing: %s, want %s", removed.Result, want)
 	}
 	if _, body = list(); strings.Contains(body, "tight") {

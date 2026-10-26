@@ -23,6 +23,9 @@ const (
 	// schedOutbound is the next time to send a message again or to ask for the
 	// reports of its deliveries; the id is the name of the source record.
 	schedOutbound
+	// schedInstanceDrain is the retry of closing the endpoints of a disabled
+	// instance after a write failed; the id is the instance.
+	schedInstanceDrain
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

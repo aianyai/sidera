@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/transport"
@@ -43,6 +44,7 @@ type Store interface {
 	AlertAck(a store.AlertAckInput) error
 	CheckpointPut(c store.CheckpointRecord) error
 	DaemonStop(result store.AdminRecord) error
+	InstanceDrain(closed []store.EndpointRecord, b store.DrainBatch) ([]store.InRecord, error)
 
 	CtlEffectReplay(eps []store.EndpointRecord) error
 	InstanceDrainReplay(closed []store.EndpointRecord, b store.DrainBatch) ([]store.InRecord, error)
@@ -76,6 +78,20 @@ type Config interface {
 	SetNodeSettings(req config.Request, patch []byte, result config.ResultFunc[config.Node]) (config.Node, error)
 	SetEndpointSettings(req config.Request, instance string, endpoint ident.EndpointID, patch []byte,
 		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
+
+	AddPreset(req config.Request, name string, preset []byte, result config.ResultFunc[config.Presets]) (config.Presets, error)
+	RemovePreset(req config.Request, name string, result config.ResultFunc[config.Presets]) (config.Presets, error)
+	EnableAdapter(req config.Request, instance, adapter string, instanceConfig []byte,
+		open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
+	DisableAdapter(req config.Request, instance string, open config.OpenEndpoints, result config.ResultFunc[config.Instances]) (config.Instances, error)
+
+	// StageAdapter and Unstage copy a package next to the versions and drop what an
+	// installation left; they run outside the loop, in the install worker. PlanInstall
+	// plans the writes of the transaction that makes the staged package current, and
+	// runs in the loop.
+	StageAdapter(src fsx.Reader, rnd io.Reader) (config.Staged, error)
+	Unstage(s config.Staged) error
+	PlanInstall(s config.Staged) (config.Install, error)
 }
 
 var _ Config = (*config.Config)(nil)
@@ -142,7 +158,7 @@ type Adapters interface {
 }
 
 // Deps is what the composition root hands the engine. Every field except
-// Adapters, Log and RollbackPaused is required.
+// Adapters, OpenPackage, Log and RollbackPaused is required.
 type Deps struct {
 	// Node is this node's identifier: the node part of the address of every
 	// endpoint of the node, the system endpoint included.
@@ -178,6 +194,10 @@ type Deps struct {
 	// tools find the node. It is not required: a rig that probes no adapter does
 	// not set it, and ProbeTokens then fails.
 	Home string
+	// OpenPackage opens the directory an owner names as an adapter package, to read
+	// it: a reader rooted at that directory. It is given by the composition root,
+	// which alone reaches the file system; an engine without it refuses to install.
+	OpenPackage func(dir string) (fsx.Reader, error)
 	// Log receives diagnostics, never a message body, a token or a key; nil
 	// discards them.
 	Log *slog.Logger

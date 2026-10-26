@@ -137,6 +137,9 @@ wire stay with the interface.
 | `RetireIdentityOp` | the self-revocation the keys verified is kept as a revocation under `config/revocations/`; nothing is signed from the commit on; the daemon is asked to stop | `state/admin/`, `identity-retire` |
 | `AcknowledgeAlertOp` | the alert is marked | `state/admin/`, `alert-ack` (the store's) |
 | `SetNodeSettingsOp`, `SetEndpointSettingsOp` | a patch merged and judged whole by `config`, which checks the version inside the change | the `last_operation` of `node.json` and of `instances.json` |
+| `InstallAdapterOp` | a package is copied outside the loop, the copy is judged, and the loop renames it to its version and replaces the pointer that makes it current | `state/admin/`, the last-but-one write of `adapter-install`, or alone in `adapter-install-current` |
+| `EnableAdapterOp`, `DisableAdapterOp` | the instance is made (or turned on) or turned off in `instances.json`; then the host is asked to run or stop it | the `last_operation` of `instances.json` |
+| `AddPresetOp`, `RemovePresetOp` | a preset is added from its document or removed, in `presets.json`; adding is judged as loosening and removing as narrowing | the `last_operation` of `presets.json` |
 
 Each of the first three is one transaction of two owners that the engine opens,
 because only the composer can declare a transaction of two owners: the effect and
@@ -161,6 +164,68 @@ record of its own. `ExportRevocation` is the one thing of the interface that is
 neither a read of the loop nor stored: the statement does not change while the node
 runs, and its result is not stored because the statement can retire the node.
 `NodeSettings` reads `node.json` in the loop, with the version a change names.
+
+**Installing an adapter package.** The copy of a package takes as long as the package
+is large and the loop must not wait for it, so `InstallAdapterOp` has work outside the
+loop and the engine runs it in a fixed order (`preparedOperation`). The loop looks the
+request up in the stored results first, and a request that was done is answered
+without the package being read; otherwise it takes the one place of the install worker
+(a second installation meanwhile is refused with `install_in_progress`, nothing of it
+done) and draws the randomness that names the staging directory, because the engine
+draws randomness only in the loop. The worker, which is a goroutine the engine owns and
+`Quiesce` counts, opens the directory through `Deps.OpenPackage`, copies it next to the
+versions of its adapter with every file and directory synced (`config.StageAdapter`),
+parses the **copy** and checks that the copy lists this machine's platform
+(`adapterreg.RunsOn`); what is judged is what would be installed, and a source that
+changes while it is copied cannot make the check and the install disagree. It then has
+the loop run the operation as any other, which looks the request up again (an identical
+resend may have arrived meanwhile), refuses an upgrade of an adapter that has an
+enabled instance (`adapter_in_use`: the instance runs the version that is current),
+and commits one transaction, `adapter-install`: discard a leftover directory of the
+version, rename the copy to the version, replace the pointer (the commit point), store
+the result, discard the previous version. A package whose version is already the
+current one stores only its result (`adapter-install-current`). Last, the worker drops
+what the commit did not take over (a refusal, a version found current, a resend that was
+answered) and only then is the request answered, so that a refused package leaves
+nothing and the answer never comes with staging still on the disk. A crash before the
+pointer leaves the old version current and a directory that the repair of the adapter
+directory removes at the next start; after it the new version is current and the repair
+removes what is left of the old.
+
+**Enabling and disabling an instance.** Both change `instances.json` through `config`
+(one replacement, with the version of the whole collection checked inside and the
+operation and its result in the same file) and what follows is driven by the state that
+was committed, so a restart does the same. Enabling asks the host to run the instance;
+the host starts it in the background and the owner reads whether it came up from the
+list of the adapters. Disabling asks the host to stop it and marks it offline here, with
+the time of the disabling, because the host reports nothing when it stops an instance
+and `AdapterGone` is taken only for an instance that is enabled; it forgets the probe
+and the tokens of the adapter that ran, and the runtime endpoint stops being declared.
+The endpoints of the instance are then closed, at most `Params.ChunkReplaces` at a time
+(`instance-drain`, a continuation of the loop), each as any closed endpoint is closed,
+its queued records closed after it in chunks. If a chunk cannot be written it is tried
+again after `RetryBackoff`, and a crash between chunks is finished by the scan entry
+(`instance-drain-replay`). An instance that is enabled again while any of its endpoints
+is open or has records not closed waits for that to end (the request is held as a
+registration is) so that the closing never meets an endpoint of an instance that is
+enabled.
+
+**The probe of an instance.** The adapter's report that its tool probes ran is
+necessary and not enough: the node believes it only for the tokens it has seen
+presented. `PresentProbeToken(token, front end)` is what the Agent interface calls: a
+token no instance holds is not authenticated, a token presented before is
+`probe_token_used`, one older than five minutes `probe_token_expired`, and a front end
+other than the token's is refused (`invalid_argument`, `probe_frontend_mismatch`) and
+leaves the token good, so a misconfigured front end does not use up the probe. The
+token is compared with every token held, in constant time, and used up when accepted.
+The probe of an enabled instance is `pending` until the adapter has reported and every
+token issued for the round is presented or expired, `passed` when the adapter reported
+every tool probe as ran and every token was presented (an adapter with nothing to probe
+passes with its report), and `failed` when a tool probe did not run or a token expired
+unpresented. A runtime endpoint becomes part of what the node declares the first time
+its probe passes, and is not withdrawn when the adapter later becomes unusable, so that
+the declaration does not flap; disabling the instance ends it. `AdapterList` reads the
+installed adapters, the instances and the probe of each enabled one at one command.
 
 `Declare` changes the declaration of the endpoint the caller is: `ByToken` is the
 session endpoint of an open token, `ByAdapter` a direct endpoint of the adapter's
@@ -195,8 +260,8 @@ ended, and offline otherwise. The time it went offline is the engine's own clock
 the report, and the earlier time stays when it is reported again; an instance that
 has not been online since the engine started is offline since an unknown time. The
 host reports nothing when it stops an instance (`Host.Stop`, `Shutdown`, `Abort`), so
-the caller that disables an instance marks it offline itself with `AdapterGone`,
-which the engine takes only for an instance that is still enabled.
+the disabling of an instance marks it offline itself, as the report of a lost
+connection does, and `AdapterGone` is taken only for an instance that is enabled.
 `AdapterSignals` is `adapterreg.Signals` over the last availability snapshot and
 that observation. The snapshot, the busy turns and the requests the runtime saw
 refused are memory: they are rebuilt by the adapter after a restart, and a
@@ -571,6 +636,17 @@ reproducible).
 | Settings are a versioned change through the door and are in force for the next command | `operations_settings.go` | `TestChangingTheSettingsOfTheNodeIsAVersionedChangeThroughTheDoor`, `TestChangingTheSettingsOfAnEndpointFindsItsInstance`, `TestChangedSettingsAreInForceForTheNextCommand` |
 | The owner's operations recover from a crash at every point | `transactions.go` | `TestTheOwnersOperationsRecoverFromACrashAtEveryPoint` |
 | The status and the export | `nodestatus.go` | `TestStatusShowsWhatTheNodeKnowsOfItself`, `TestTheExportOfTheSelfRevocationIsTheStatementOnDiskAndIsStoredNowhere` |
+| A package is copied once, outside the loop, and a resend copies nothing | `manage.go` (`preparedOperation`, `cmdPrepare`, `replayOf`), `operations_adapters.go` | `TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing` |
+| The copy is what is judged | `operations_adapters.go` (`stagePackage`) | `TestThePlatformIsJudgedOnTheCopyThatWouldBeInstalledAndNotOnTheSource`, `TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree` |
+| The version that is current is installed again by storing its result; an upgrade needs no enabled instance | `operations_adapters.go`, `transactions.go` | `TestInstallingTheVersionThatIsCurrentWritesOnlyItsResult`, `TestUpgradingWhileAnInstanceIsEnabledIsRefusedAndOtherwiseReplacesTheVersion` |
+| One installation at a time, counted by `Quiesce` | `manage.go` (`cmdPrepare`) | `TestOnlyOneInstallationRunsAtATime` |
+| An installation, and the store of the result of one that found its version current, recover from a crash at every point | `transactions.go` (`adapter-install`, `adapter-install-current`), `config` (`adapter-stage`, `adapter-unstage`) | `TestAnInstallationRecoversFromACrashAtEveryPoint`, `TestStoringTheResultOfAnInstallationThatFoundItDoneRecoversFromACrash` |
+| Enabling starts the instance through the host; what is refused starts nothing | `operations_adapters.go` (`enableAdapterOp`) | `TestEnablingAnInstanceStartsItThroughTheHost` |
+| Disabling stops the instance, marks it offline, closes its endpoints | `operations_adapters.go` (`instanceDisabled`), `instance_drain.go` | `TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints` |
+| Enabling again waits for the closing of the disabling | `operations_adapters.go` (`instanceClosing`), `manage.go` (`waitForDrain`) | `TestEnablingAnInstanceWaitsForTheDrainOfItsDisabling` |
+| Disabling, enabling and the presets recover from a crash at every point | `config` (`adapter-disable`, `adapter-enable`, `presets-change`), `store` (`instance-drain`) | `TestDisablingAnInstanceRecoversFromACrashAtEveryPoint`, `TestEnablingAnInstanceAndChangingPresetsRecoverFromACrashAtEveryPoint` |
+| Presets carry the class of the change and the version of the collection | `operations_presets.go` | `TestPresetsAreAddedAndRemovedWithTheirClassAndTheCollectionVersion` |
+| The probe passes only for the tokens the node saw; a token is used once, expires, and is for one front end | `probe.go` | `TestAnInstalledAdapterIsDeclaredOnceItsProbeHasPassedAndTheTokensWerePresented`, `TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe` |
 | Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |

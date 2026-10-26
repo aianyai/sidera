@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"slices"
+
 	"github.com/aianyai/sidera/internal/node/config"
 	nodekeys "github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -62,10 +64,32 @@ var declRuntimeAdmit = txn.Decl{Name: "runtime-admit", Kind: txn.Normal, Writes:
 	{Role: store.RoleEndpoint, Op: txn.OpReplace},
 }}
 
+// The installation of an adapter package. The package is copied into a directory
+// next to the versions outside the loop (config's adapter-stage), and this is the
+// part that goes through the loop: the staged directory is renamed to its version,
+// the pointer that names the current version is replaced (the commit point), the
+// result is stored, and the previous version is discarded. A crash before the
+// pointer leaves a directory that the repair of the adapter directory removes, and
+// the old version current; after it the new version is current, and a version left
+// over is removed by the same repair. The writes of the package's files are config's
+// and are composed here in the order its Install documents, with the result between
+// the pointer and the discarding of the old version.
+var declAdapterInstall = txn.Decl{Name: "adapter-install", Kind: txn.Normal, Writes: slices.Concat(
+	config.InstallWrites(),
+	[]txn.Write{{Role: store.RoleResult, Op: txn.OpReplace}},
+	[]txn.Write{config.InstallOldWrite()},
+)}
+
+// adapter-install-current stores the result of an installation that found its
+// version current: there is nothing to rename, and the result is all there is.
+var declAdapterInstallCurrent = txn.Decl{Name: "adapter-install-current", Kind: txn.Normal, Writes: []txn.Write{
+	{Role: store.RoleResult, Op: txn.OpReplace},
+}}
+
 // Transactions returns the declarations of the transactions of the engine that
 // write the files of more than one owner, for the composition root to put in
 // the table of the program. The transactions of one owner are declared by the
 // owner.
 func Transactions() []*txn.Decl {
-	return []*txn.Decl{&declDirectRegister, &declRuntimeAdmit, &declClockClear, &declBackupConfirm, &declIdentityRetire}
+	return []*txn.Decl{&declDirectRegister, &declRuntimeAdmit, &declClockClear, &declBackupConfirm, &declIdentityRetire, &declAdapterInstall, &declAdapterInstallCurrent}
 }

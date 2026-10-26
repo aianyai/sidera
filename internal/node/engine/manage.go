@@ -1,9 +1,11 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
@@ -111,6 +113,13 @@ type cmdExecute struct {
 func (c *cmdExecute) gate() gate { return gateWrite }
 func (c *cmdExecute) run(e *Engine, now time.Time) {
 	res, err := e.execute(now, c.cmd)
+	var wait *waitForDrain
+	if errors.As(err, &wait) {
+		// The operation cannot run until the records of an endpoint are closed: it is
+		// run again from the start when they are, and answered then.
+		e.parkUntilDrained(wait.endpoint, c)
+		return
+	}
 	c.done(res, e.classify(err))
 }
 
@@ -131,11 +140,19 @@ func (e *Engine) Execute(ctx context.Context, c ManagementCommand) (StoredResult
 	case c.Key.ID.IsZero():
 		return StoredResult{}, errors.New("engine: a management command without an operation identifier")
 	}
+	if p, ok := c.Operation.(preparedOperation); ok {
+		cmd := &cmdPrepare{call: newCall[StoredResult](), cmd: c, op: p}
+		return roundTrip(ctx, e, submitExternal, cmd, cmd.call)
+	}
 	cmd := &cmdExecute{call: newCall[StoredResult](), cmd: c}
 	return roundTrip(ctx, e, submitExternal, cmd, cmd.call)
 }
 
-func (e *Engine) execute(now time.Time, c ManagementCommand) (StoredResult, error) {
+// replayOf is the replay check of the administrative rules, made against every
+// stored result: the stored result of the same request (nothing is to run), a
+// refusal for the identifier of another request, or neither, in which case the
+// operation is to run. It is the one place the check is made.
+func (e *Engine) replayOf(c ManagementCommand) (res StoredResult, answered bool, err error) {
 	var seen *admin.StoredRequest
 	stored, ok := e.view.results[c.Key]
 	if ok {
@@ -143,9 +160,16 @@ func (e *Engine) execute(now time.Time, c ManagementCommand) (StoredResult, erro
 	}
 	switch v := admin.CheckReplay(seen, c.Fingerprint); v.Action {
 	case admin.ReplayReturnStored:
-		return StoredResult{Result: stored.result, Replayed: true, Stop: c.Operation.stops()}, nil
+		return StoredResult{Result: stored.result, Replayed: true, Stop: c.Operation.stops()}, true, nil
 	case admin.ReplayConflict:
-		return StoredResult{}, refuse(ReasonOperationIDReused)
+		return StoredResult{}, true, refuse(ReasonOperationIDReused)
+	}
+	return StoredResult{}, false, nil
+}
+
+func (e *Engine) execute(now time.Time, c ManagementCommand) (StoredResult, error) {
+	if res, answered, err := e.replayOf(c); answered {
+		return res, err
 	}
 	x := &opRun{now: now, key: c.Key, fingerprint: c.Fingerprint, expected: c.Expected, name: c.Name}
 	result, err := c.Operation.run(e, x)
@@ -233,4 +257,75 @@ func (o *stopDaemonOp) run(e *Engine, x *opRun) ([]byte, error) {
 		return nil, err
 	}
 	return result, nil
+}
+
+// waitForDrain is what an operation returns when it cannot run until the records
+// queued for an endpoint are closed. The command that carries it is held until
+// then and run again; the operation is not carried out in part.
+type waitForDrain struct{ endpoint ident.EndpointID }
+
+func (w *waitForDrain) Error() string {
+	return "engine: waiting for the records of endpoint " + w.endpoint.String() + " to be closed"
+}
+
+// preparedOperation is an operation that has work to do outside the loop before
+// the loop may commit it: the copy of an adapter package, which takes as long as
+// the package is large and must not hold up the loop (the adapters' notifications
+// are held in a buffer that the loop's stall must stay short enough for). The
+// engine runs it in this order: the loop looks the request up in the stored results
+// (a request that was done is answered without any preparation, so that nothing is
+// copied again), takes the one place of the install worker, and starts the worker;
+// the worker prepares, then has the loop run the operation as an ordinary one,
+// which looks the request up again, because an identical resend may have come
+// between the two, and commits; the worker then settles whatever the preparation
+// left, whether the commit happened or not, and only then is the request answered.
+type preparedOperation interface {
+	Operation
+	// prepare runs in the install worker, outside the loop. rnd is what the loop
+	// drew for it: the worker draws no randomness of its own.
+	prepare(ctx context.Context, e *Engine, rnd io.Reader)
+	// settle runs in the install worker after the loop has answered the command
+	// that carried the operation, with the error it was answered with: it drops what
+	// the preparation left that the commit did not take over.
+	settle(e *Engine, err error)
+}
+
+type cmdPrepare struct {
+	call[StoredResult]
+	cmd ManagementCommand
+	op  preparedOperation
+}
+
+func (c *cmdPrepare) gate() gate { return gateWrite }
+func (c *cmdPrepare) run(e *Engine, _ time.Time) {
+	if res, answered, err := e.replayOf(c.cmd); answered {
+		c.done(res, err)
+		return
+	}
+	if !e.installing.CompareAndSwap(false, true) {
+		c.fail(refuse(ReasonInstallInProgress))
+		return
+	}
+	var drawn [config.StageSuffixBytes]byte
+	if _, err := io.ReadFull(e.randomReader(), drawn[:]); err != nil {
+		e.installing.Store(false)
+		c.fail(fmt.Errorf("engine: the randomness for a staging directory: %w", err))
+		return
+	}
+	if !e.spawn(func(ctx context.Context) { c.done(e.runPrepared(ctx, c, drawn[:])) }) {
+		e.installing.Store(false)
+		c.fail(refuse(ReasonShuttingDown))
+	}
+}
+
+// runPrepared is the install worker's whole task. It holds the place of the
+// worker until it has settled, so that the next installation does not start while
+// this one's staging is still on the disk.
+func (e *Engine) runPrepared(ctx context.Context, c *cmdPrepare, drawn []byte) (StoredResult, error) {
+	defer e.installing.Store(false)
+	c.op.prepare(ctx, e, bytes.NewReader(drawn))
+	run := &cmdExecute{call: newCall[StoredResult](), cmd: c.cmd}
+	res, err := roundTrip(ctx, e, submitInternal, run, run.call)
+	c.op.settle(e, err)
+	return res, err
 }
