@@ -125,7 +125,11 @@ func TestNoRecordAtTargetIsLostAtTargetOnlyFromAccepted(t *testing.T) {
 					t.Errorf("at %v: the same fact again: %+v %v", now.Sub(t0), out, err)
 				}
 				corrected, out, err := after.Apply(now, Event{Type: EventDelivered})
-				if err != nil || corrected.State != StateDelivered || len(out.Feedback) == 0 || out.Feedback[0].Kind != KindUnknownCorrected {
+				wantCorrection := []Kind{KindUnknownCorrected}
+				if name == "accepted and blocked" {
+					wantCorrection = append(wantCorrection, KindBlockedRecovered) // delivered is silent, so it reports the recovery of the block too
+				}
+				if err != nil || corrected.State != StateDelivered || !sameKinds(kindsOf(out.Feedback), wantCorrection) {
 					t.Errorf("at %v: a later delivery: %+v %v", now.Sub(t0), out, err)
 				}
 				if err := corrected.Valid(); err != nil {

@@ -59,6 +59,14 @@ func TestTargetNeverHoldsALossCause(t *testing.T) {
 	ctlDelivered, _ := mustApply(t, controlRecord(), at(time.Minute), replyCommitted())
 	srcLostAtTarget, _ := mustApply(t, sourceInState(t, "accepted"), at(time.Minute), Event{Type: EventNoRecordAtTarget})
 	mutate := func(r Record, f func(*Record)) Record { f(&r); return cloneRecord(r) }
+	// asReplacement gives a record every field a sender's replacement has but its
+	// side, so that only the side keeps it from being one.
+	asReplacement := func(r Record) Record {
+		return mutate(r, func(r *Record) {
+			r.Lost, r.AcceptBefore, r.BacklogDeadline, r.Sub = true, time.Time{}, time.Time{}, SubNone
+			r.Reported = KindSet(0).With(KindLostAtSender)
+		})
+	}
 
 	rows := []struct {
 		rule string
@@ -73,6 +81,9 @@ func TestTargetNeverHoldsALossCause(t *testing.T) {
 		{"a target with lost_at_target", mutate(handedUnknown, func(r *Record) { r.Unknown = UnknownLostAtTarget }), ViolationUnknownCause},
 		{"a control record with lost_at_target", mutate(ctlUnknown, func(r *Record) { r.Unknown = UnknownLostAtTarget }), ViolationUnknownCause},
 		{"a target with lost_at_sender", mutate(handedUnknown, func(r *Record) { r.Unknown = UnknownLostAtSender }), ViolationUnknownCause},
+		{"a target with lost_at_sender and the marker", mutate(handedUnknown, func(r *Record) { r.Unknown, r.Lost = UnknownLostAtSender, true }), ViolationUnknownCause},
+		{"a closed target shaped like a sender's replacement", asReplacement(closed), ViolationLostShape},
+		{"a closed control record shaped like a sender's replacement", asReplacement(mutate(ctlDelivered, func(r *Record) { r.State = StateClosedUnconfirmed })), ViolationLostShape},
 		{"a target handed over with the marker", mutate(handedUnknown, func(r *Record) { r.Lost = true }), ViolationUnknownCause},
 		{"a control record handed over with the marker", mutate(ctlUnknown, func(r *Record) { r.Lost = true }), ViolationUnknownCause},
 		{"an accepted target with the marker", mutate(accepted, func(r *Record) { r.Lost = true }), ViolationLostShape},
