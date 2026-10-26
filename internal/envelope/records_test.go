@@ -479,3 +479,26 @@ func TestControlReplyBinds(t *testing.T) {
 		t.Error("a close reply binds nothing")
 	}
 }
+
+// TestControlResultAdapterForm: an agent reads a reply in the values of the adapter
+// protocol, and the session endpoint of a creation is written as the reference the
+// protocol uses for an endpoint.
+func TestControlResultAdapterForm(t *testing.T) {
+	create := ControlResult{Signal: adapterproto.SignalSessionCreate, Create: &CreateResult{Outcome: adapterproto.CreateReplyCreated, SessionEndpoint: ep(3)}}
+	got := create.AdapterForm()
+	if got.Signal != adapterproto.SignalSessionCreate || got.Create == nil || got.Create.Outcome != adapterproto.CreateReplyCreated ||
+		got.Create.SessionEndpoint != adapterproto.EndpointRef(ep(3).String()) {
+		t.Errorf("a creation: %+v", got)
+	}
+	if err := got.Validate(); err != nil {
+		t.Errorf("a creation reply does not validate in the protocol's form: %v", err)
+	}
+	failed := ControlResult{Signal: adapterproto.SignalSessionCreate, Create: &CreateResult{Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonPresetUnknown}}
+	if got := failed.AdapterForm(); got.Create == nil || got.Create.SessionEndpoint != "" || got.Create.Reason != adapterproto.CreateReasonPresetUnknown {
+		t.Errorf("a failed creation: %+v", got)
+	}
+	status := ControlResult{Signal: adapterproto.SignalEndpointStatus, Status: &adapterproto.ControlStatusReply{Activity: adapterproto.ActivityIdle, AsOf: unixT0}}
+	if got := status.AdapterForm(); got.Status != status.Status || got.Create != nil {
+		t.Errorf("a status: %+v", got)
+	}
+}

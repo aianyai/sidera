@@ -168,6 +168,11 @@ record and signs it again, with its current network key, each time it sends it a
 evidence or in answer to a pull. The digest excludes signatures, so a reply
 signed again (after a key rotation, say) has the digest it had.
 
+An agent reads the reply in the values of the adapter protocol, not of the signed
+record: `ControlResult.AdapterForm` gives them, so the one place that knows how the
+session endpoint of a creation is written there is this package's (test
+`TestControlResultAdapterForm`).
+
 ### The sender's record and applying a report
 
 `Outbound` is the sender node's record of one message: the local sending

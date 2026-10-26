@@ -44,6 +44,18 @@ type ControlResult struct {
 	Status    *adapterproto.ControlStatusReply
 }
 
+// AdapterForm is the result in the values of the adapter protocol, as an agent
+// reads it (the status of a message that carried the signal): the same fields,
+// with the session endpoint of a creation as the reference the protocol writes.
+func (r ControlResult) AdapterForm() adapterproto.ControlReply {
+	out := adapterproto.ControlReply{Signal: r.Signal, Close: r.Close, Interrupt: r.Interrupt, Status: r.Status}
+	if r.Create != nil {
+		create := r.Create.adapterForm()
+		out.Create = &create
+	}
+	return out
+}
+
 // ControlReply is a target node's signed statement of what came of a control
 // signal. It is committed with the execution result and stored with the
 // request's deduplication record, so a retry of the same request gets the same
