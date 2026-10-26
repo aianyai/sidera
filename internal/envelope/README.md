@@ -22,7 +22,7 @@ this package is [`reply`](../reply/README.md).
 | `Kind`, `Kind.Action()`, `Kind.Signal()`, `KindOfSignal` | The five kinds, the mapping to `authz.Action` (a control signal's action comes from `adapterreg.ActionOf`), and the mapping to the adapter protocol's control signals. |
 | `ValidMessageID(id)` | The one rule for what a message id is (1 to `MaxIDLen` bytes of visible ASCII; an error wraps `ErrID`). The decoders apply it to every id on the wire; whoever stores an id outside an envelope, such as a record key, asks here instead of copying the rule. |
 | `CheckEvidence(records)` | The shape of an evidence list: at most one control reply, then at most one status report. |
-| `StatusReport` (its `Status` carries the cause of an unknown result, which `delivery` owns), `StatusReportDescriptor(node, accepted, now)`, `VerifyStatusReport(record, target, local, accepted, now)` | The signed status report. `SignedReport` is the verified value and remembers the node it was verified for. The report names the sending node, which must be `local`. |
+| `StatusReport` (its `Status` is the state, reject reason and block cause that `delivery` owns), `StatusReportDescriptor(node, accepted, now)`, `VerifyStatusReport(record, target, local, accepted, now)` | The signed status report. `SignedReport` is the verified value and remembers the node it was verified for. The report names the sending node, which must be `local`. |
 | `ControlReply`, `ControlResult`, `CreateResult`, `ControlReplyDescriptor(node, accepted, now)`, `VerifyControlReply(record, target, local, accepted, now)` | The signed control reply for the four control signals, in the values of `adapterproto`. `SignedControlReply` is the verified value. The reply names the sending node, which must be `local`. |
 | `Outbound`, `Tracked`, `Arrival` | The sender's record of a message it sent: one delivery per recipient, the derived delivery of an initial message, the digest of the accepted control reply, and what signed reports proved about arrival. |
 | `Outbound.ApplyNoRecord(now, node, recipient)` | Applies a target's unsigned answer that it holds no record of the delivery to the tracked delivery (original or derived) on that node, through `delivery.EventNoRecordAtTarget`. Returns a `ReportEffect`: applied (the delivery may ignore it) or not tracked. |
@@ -68,13 +68,12 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   endpoint-level size caps of the policy are separate.
 - **Params.** Only `session.create` has params, `{1: preset}`, and it requires
   them; the preset follows `adapterproto.ValidatePresetName`.
-- **Status report unknown cause.** The cause is `delivery.StatusReport.Unknown`,
-  set exactly with the state delivery_unknown. On the wire it is key 9, with one
-  value, `lost_at_target`; a state 4 without the key is `handed_over`. Only
-  `handed_over` proves arrival. Encoding returns `ErrReport` for a cause the wire
-  format cannot carry (`lost_at_sender` among them: a loss of the sender's own
-  record is never sent as a report) and for a cause that does not match the
-  state; neither writes the report without it.
+- **A status report carries no cause of an unknown result.** A state
+  delivery_unknown is a delivery handed over and nothing else: a target never
+  reports a loss, and the sender learns that a target holds no record from the
+  target's answer to a pull, applied with `Outbound.ApplyNoRecord`. The status
+  report has eight keys; key 9, which once carried `lost_at_target`, is an unknown
+  key and a payload with it is refused. A delivery_unknown report proves arrival.
 - **Evidence.** At most two records: a control reply, then a status report. An
   envelope with evidence has a `reply_to`. Signatures are not checked in the
   envelope; `reply` checks them against the sender's own records.

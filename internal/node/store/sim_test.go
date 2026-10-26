@@ -64,25 +64,11 @@ func (s *sim) alert(id store.AlertID, kind, subject string) store.AlertRecord {
 
 func (s *sim) lostOut(k store.OutKey) store.OutRecord { return lostOutAt(k, s.now) }
 
-func (s *sim) lostIn(k store.TargetKey) store.InRecord { return lostInAt(k, s.now) }
-
-func (s *sim) lostCtl(k store.TargetKey) store.CtlRecord { return lostCtlAt(k, s.now) }
-
 // replacement is the record that goes under the name of a damaged delivery
-// record, or nil when there is none to build.
+// record, or nil when there is none to build: only a source record has one.
 func (s *sim) replacement(dir string, key any) store.Record {
-	switch k := key.(type) {
-	case store.OutKey:
-		if dir == store.OutDir {
-			return s.lostOut(k)
-		}
-	case store.TargetKey:
-		switch dir {
-		case store.InDir:
-			return s.lostIn(k)
-		case store.CtlDir:
-			return s.lostCtl(k)
-		}
+	if k, ok := key.(store.OutKey); ok && dir == store.OutDir {
+		return s.lostOut(k)
 	}
 	return nil
 }
@@ -277,9 +263,10 @@ func unreferenced(sc *store.Scan, ins []store.InRecord, ctls []store.CtlRecord) 
 }
 
 // bodyMismatch is what the engine does when a body it reads does not hash to its
-// name: the body is quarantined, and every record that refers to it is replaced
-// by a lost record when it still needs the body, and stripped of the reference
-// when it does not, in chunks of s.chunk records.
+// name: the body is quarantined, and every source record that refers to it is
+// replaced by a lost record when it still needs the body and stripped of the
+// reference when it does not; a target record has no replacement and is only
+// stripped of the reference, in chunks of s.chunk records.
 func (s *sim) bodyMismatch(name string) {
 	s.t.Helper()
 	id := alertFor(store.BodiesDir, name)
@@ -301,7 +288,7 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 			o.Body = nil
 			for i, tr := range o.Outbound.Recipients {
 				if tr.Delivery.NeedsBody() {
-					lost, feedback := lostRecord(delivery.SideSource, false, s.now)
+					lost, feedback := lostRecord(s.now)
 					o.Outbound.Recipients[i].Delivery = lost
 					for _, f := range feedback {
 						o.Feedback = append(o.Feedback, delivery.Item{
@@ -316,22 +303,13 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 	}
 	for _, in := range sc.In {
 		if in.Body != nil && in.Body.Name() == name {
-			if in.Record.NeedsBody() {
-				in = s.lostIn(in.Key)
-				in.Rev = 0
-			} else {
-				in.Body = nil
-			}
+			in.Body = nil // a target keeps no replacement of a record it lost
 			ins = append(ins, in)
 		}
 	}
 	for _, c := range sc.Ctl {
 		if c.Body != nil && c.Body.Name() == name {
-			if c.Record.NeedsBody() {
-				c = s.lostCtl(c.Key)
-			} else {
-				c.Body = nil
-			}
+			c.Body = nil
 			ctls = append(ctls, c)
 		}
 	}

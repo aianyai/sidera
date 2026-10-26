@@ -78,8 +78,8 @@ func resumedQuarantines() []scenario {
 				sc := r.scan()
 				name := sessionCtl(1, 5).Name()
 				id := alertFor(store.CtlDir, name)
-				if _, _, c := find(t, sc, name); c == nil || !c.Lost {
-					t.Errorf("the resumed quarantine did not put the replacement: %#v", c)
+				if _, _, c := find(t, sc, name); c != nil {
+					t.Errorf("a control record has no replacement, yet the resumed quarantine put one: %#v", c)
 				}
 				if !hasAlert(sc, id, "control_unknown") {
 					t.Errorf("the alert must say a native session may remain: %v", sc.Alerts)

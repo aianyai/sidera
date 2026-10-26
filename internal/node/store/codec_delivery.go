@@ -528,18 +528,16 @@ type coverJSON struct {
 }
 
 type inJSON struct {
-	Rev          *uint64      `json:"rev,omitempty"`
-	Lost         bool         `json:"lost,omitempty"`
-	DiscoveredAt *wtime       `json:"discovered_at,omitempty"`
-	Record       recordJSON   `json:"record"`
-	Dedup        dedupJSON    `json:"dedup"`
-	Auth         *authJSON    `json:"auth,omitempty"`
-	Reply        *replyJSON   `json:"reply,omitempty"`
-	Handout      *handoutJSON `json:"handout,omitempty"`
-	AcceptedAt   *wtime       `json:"accepted_at,omitempty"`
-	Body         *bodyRefJSON `json:"body,omitempty"`
-	Derived      *derivedJSON `json:"derived,omitempty"`
-	Covers       []coverJSON  `json:"covers,omitempty"`
+	Rev        *uint64      `json:"rev,omitempty"`
+	Record     recordJSON   `json:"record"`
+	Dedup      dedupJSON    `json:"dedup"`
+	Auth       *authJSON    `json:"auth,omitempty"`
+	Reply      *replyJSON   `json:"reply,omitempty"`
+	Handout    *handoutJSON `json:"handout,omitempty"`
+	AcceptedAt *wtime       `json:"accepted_at,omitempty"`
+	Body       *bodyRefJSON `json:"body,omitempty"`
+	Derived    *derivedJSON `json:"derived,omitempty"`
+	Covers     []coverJSON  `json:"covers,omitempty"`
 }
 
 func toHandout(h HandoutFields) (*handoutJSON, error) {
@@ -622,22 +620,8 @@ func encodeIn(r InRecord) ([]byte, error) {
 	if r.Dedup.HasReply {
 		return nil, errors.New("an in record does not store a control reply")
 	}
-	if r.Lost {
-		if r.Rev != 0 || r.Auth != (delivery.Authorization{}) || r.ReplyDecision != (reply.Decision{}) || r.Handout != (HandoutFields{}) ||
-			!r.AcceptedAt.IsZero() || r.Body != nil || r.Derived != nil || len(r.Covers) != 0 {
-			return nil, errors.New("a lost in record holds the parts of a regular one")
-		}
-		if j.DiscoveredAt = tptr(r.DiscoveredAt); j.DiscoveredAt == nil {
-			return nil, errors.New("the discovery time is required")
-		}
-		j.Lost = true
-		return marshal(j)
-	}
-	if !r.DiscoveredAt.IsZero() {
-		return nil, errors.New("a regular in record has no discovery time")
-	}
 	if r.Rev < 1 {
-		return nil, errors.New("a regular in record has a revision of at least 1")
+		return nil, errors.New("an in record has a revision of at least 1")
 	}
 	rev := r.Rev
 	j.Rev = &rev
@@ -710,25 +694,12 @@ func decodeIn(key TargetKey, body []byte) (InRecord, error) {
 	if r.Dedup.HasReply {
 		return r, errors.New("an in record does not store a control reply")
 	}
-	if j.Lost {
-		if j.Rev != nil || j.Auth != nil || j.Reply != nil || j.Handout != nil || j.AcceptedAt != nil || j.Body != nil || j.Derived != nil || len(j.Covers) != 0 {
-			return r, errors.New("a lost in record holds the parts of a regular one")
-		}
-		r.Lost = true
-		if r.DiscoveredAt, err = tmust(j.DiscoveredAt, "discovered_at"); err != nil {
-			return r, err
-		}
-		return r, nil
-	}
-	if j.DiscoveredAt != nil {
-		return r, errors.New("a regular in record has no discovery time")
-	}
 	if j.Rev == nil || *j.Rev < 1 {
-		return r, errors.New("a regular in record has a revision of at least 1")
+		return r, errors.New("an in record has a revision of at least 1")
 	}
 	r.Rev = *j.Rev
 	if j.Handout == nil || j.AcceptedAt == nil {
-		return r, errors.New("a regular in record needs its handout fields and acceptance time")
+		return r, errors.New("an in record needs its handout fields and acceptance time")
 	}
 	if err := checkVerdictParts(key, r.Record.Exempt, j.Auth != nil, j.Reply != nil); err != nil {
 		return r, err

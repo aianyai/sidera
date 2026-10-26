@@ -24,15 +24,16 @@ const (
 	// later facts correct it.
 	StateExpiredUnconfirmed
 	// StateDeliveryUnknown: whether the delivery reached the agent cannot be
-	// told, for the cause in Record.Unknown. The target produces it for a
-	// delivery that was handed over: a body handed out at least once, when the
+	// told, for the cause in Record.Unknown. The target produces it, with the
+	// cause handed_over, for a delivery that was handed over: a body handed out at least once, when the
 	// leases run out, when the settle deadline passes under a lease, and when a
 	// delivery that was handed out is closed forcibly (backlog deadline, a
 	// denied second check, a closed endpoint), because "rejected" would tell the
-	// sender the message was not delivered; or any accepted control signal. A
-	// record that replaces one lost to storage corruption starts here too, and
-	// only NewLostRecord makes one. Not final: a late acknowledgement or a
-	// committed reply corrects it.
+	// sender the message was not delivered; or any accepted control signal. The
+	// sender enters it too, for a loss: the sender's own (NewLostRecord starts a
+	// record here) or the target's answer that it holds no record
+	// (EventNoRecordAtTarget). Not final: a late acknowledgement or a committed
+	// reply corrects it.
 	StateDeliveryUnknown
 	// StateClosedUnconfirmed: report_by passed while the delivery was not
 	// final. Final and silent.
@@ -138,10 +139,11 @@ const (
 	// at least once, or an accepted control signal) and cannot tell the result.
 	UnknownHandedOver
 	// UnknownLostAtSender: the sender's node lost what it had stored about the
-	// delivery to storage corruption. A target never reports it.
+	// delivery to storage corruption. Only the sender's replacement holds it.
 	UnknownLostAtSender
-	// UnknownLostAtTarget: the target node lost what it had stored about the
-	// delivery to storage corruption.
+	// UnknownLostAtTarget: the target node answered a pull of the delivery by
+	// saying it holds no record of it (EventNoRecordAtTarget). Only a source record
+	// holds it: a target never knows of its own loss.
 	UnknownLostAtTarget
 )
 

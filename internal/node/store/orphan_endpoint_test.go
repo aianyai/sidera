@@ -77,7 +77,6 @@ func TestOrphanEndpointsNamesAnEndpointItsControlRecordDoesNotCreate(t *testing.
 		{"a control record without an intent", noIntent, true},
 		{"a control record whose intent names another endpoint", sessionCtl(1, 6), true},
 		{"a control record whose intent names the endpoint", sessionCtl(1, 5), false},
-		{"a lost replacement of the control record", lostCtlAt(ctlKey(1), base), false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			mem := (&scenario{name: "x"}).fresh(t)

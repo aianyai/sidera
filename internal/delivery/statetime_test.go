@@ -26,11 +26,7 @@ func TestConstructorsStartTheStateAtTheGivenTime(t *testing.T) {
 		t.Fatal(err)
 	}
 	control := NewTargetControlRecord(acceptedAt, ab, ReportBy(ab))
-	lostSource, _, err := NewLostRecord(SideSource, false, acceptedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	lostTarget, _, err := NewLostRecord(SideTarget, true, acceptedAt)
+	lostSource, _, err := NewLostRecord(acceptedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +39,6 @@ func TestConstructorsStartTheStateAtTheGivenTime(t *testing.T) {
 		{"a target notice record starts accepted at the time it was accepted", notice},
 		{"a target control record starts accepted at the time it was accepted", control},
 		{"a lost source record starts at the time the loss was discovered", lostSource},
-		{"a lost target record starts at the time the loss was discovered", lostTarget},
 	}
 	for _, r := range rows {
 		t.Run(r.rule, func(t *testing.T) {
@@ -108,8 +103,8 @@ func TestEveryTransitionIntoAStateSetsTheStateAtToItsClock(t *testing.T) {
 		{"a source record that learns of a receipt", source, apply(Event{Type: EventReceipt}), StateAccepted},
 		{"a source record that learns of a delivery", source, apply(Event{Type: EventDelivered}), StateDelivered},
 		{"a source record that learns of a rejection", source, apply(Event{Type: EventRejected, Reject: RejectUnauthorized}), StateRejected},
-		{"a source record that learns the result is unknown", sourceAccepted, apply(Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver}), StateDeliveryUnknown},
-		{"a source record that learns the target lost its record", sourceAccepted, apply(Event{Type: EventDeliveryUnknown, Unknown: UnknownLostAtTarget}), StateDeliveryUnknown},
+		{"a source record that learns the result is unknown", sourceAccepted, apply(Event{Type: EventDeliveryUnknown}), StateDeliveryUnknown},
+		{"a source record that learns the target holds no record", sourceAccepted, apply(Event{Type: EventNoRecordAtTarget}), StateDeliveryUnknown},
 		{"a source record judged expired by a query", source, func(t *testing.T, r Record, now time.Time) Record {
 			n, _ := mustApply(t, r, now, Event{Type: EventExpiryQueried, QueriedAt: now})
 			return n
@@ -411,13 +406,11 @@ func TestConstructorsThatCanRefuseRefuseTheZeroTime(t *testing.T) {
 	ab := at(10 * time.Minute)
 	_, targetErr := NewTargetRecord(time.Time{}, ab, ReportBy(ab), time.Hour)
 	_, noticeErr := NewTargetNoticeRecord(time.Time{}, ab, ReportBy(ab), time.Hour)
-	_, _, sourceLostErr := NewLostRecord(SideSource, false, time.Time{})
-	_, _, targetLostErr := NewLostRecord(SideTarget, false, time.Time{})
+	_, _, lostErr := NewLostRecord(time.Time{})
 	for rule, err := range map[string]error{
 		"a target message record at the zero time":    targetErr,
 		"a target notice record at the zero time":     noticeErr,
-		"a lost source record found at the zero time": sourceLostErr,
-		"a lost target record found at the zero time": targetLostErr,
+		"a lost source record found at the zero time": lostErr,
 	} {
 		if !errors.Is(err, ErrInvalidInput) {
 			t.Errorf("%s: err = %v, want ErrInvalidInput", rule, err)

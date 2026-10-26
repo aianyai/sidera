@@ -483,7 +483,7 @@ signal) that share a key text.
 (`recfile`), the body follows. The checksum covers the body only; the kind and
 the key of the first line are verified by the file name, which is their hash, so
 a first line that passed can be trusted to name its key even when the body is
-gone, which is what a replacement of a damaged delivery record needs. The detail of
+gone, which is what the replacement of a damaged source record needs. The detail of
 a damage names the rule and the field, never what the first line holds: a damaged
 newline can glue the body of a file, a private key for one under `keys/`, into it.
 A file is
@@ -500,10 +500,11 @@ validated in seven steps, and each failure has a class:
 | 7 | the body decodes strictly, is the canonical encoding of what it decodes to, and passes the checks of its kind; every delivery record in it also passes `delivery.Record.Valid()` | body damaged |
 
 A first line whose checksum or length field is itself damaged while the body is
-intact fails step 5 or 6 and is treated as a damaged body: a delivery record is
-then replaced by a lost record. That reports "lost, outcome unknown" to the sender
-where the record might have been read; nothing is lost and the failure is
-visible, so there is no separate path for it.
+intact fails step 5 or 6 and is treated as a damaged body: a source record is
+then replaced by a lost record, and a target or control record is quarantined with
+no replacement. That reports "lost, outcome unknown" to the sender where the
+record might have been read; nothing is lost and the failure is visible, so there
+is no separate path for it.
 
 A body is JSON written by `encoding/json` from structs of the package, with
 times as RFC 3339 in UTC with a `Z` and fractional seconds without trailing
@@ -518,12 +519,13 @@ transitions can produce, and a well-formed record that is impossible (a lease
 whose chunk flags disagree with its chunk count would make a later hand-out index
 out of range) is a damaged body like any other. The same check runs before a
 record is written, so a defect upstream is refused where it happens and not
-written down as a file that would be quarantined and replaced by a lost record
-when it is read. Besides the fields of a delivery record that every record has,
-the stored form carries the cause of an unknown result and the lost marker (which
-a replacement keeps after it closes, so that it is not judged by the shape of a
-delivery accepted normally), and the deduplication record carries the flag that
-says its digest was lost.
+written down as a file that would be quarantined when it is read. Besides the
+fields of a delivery record that every record has, the stored form carries the
+cause of an unknown result and the lost marker (which the sender's replacement
+keeps after it closes, so that it is not judged by the shape of a delivery
+accepted normally). A target record has neither a lost marker nor a loss cause,
+and the deduplication record has no flag for a lost digest: a body that still
+carries one is a damaged body.
 
 **The time of the state.** Every stored delivery record, whatever its side, kind
 or shape, carries `state_at`, the moment the record entered its current state
@@ -551,11 +553,16 @@ the disclosure rows of `TestDecodeRecordBodyRules`, the two disclosed records of
 `TestRecordsRoundTrip` and the `store.OutEnvelope` row of
 `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`.
 
-**Two shapes.** A source, target or control record is regular or lost. A lost
-record is what replaces a delivery record that was damaged: it has the key of the
+**Two shapes of a source record.** A source record is regular or lost. A lost
+record is what replaces a source record that was damaged: it has the key of the
 damaged one, the delivery records the delivery package builds for that case, the
-discovery time and, on the source side, the feedback it owes. It has no envelope,
-no sequence numbers, no body reference and, on the target side, no revision.
+discovery time and the feedback it owes. It has no envelope, no sequence numbers
+and no body reference. A target or control record has one shape: a target that
+loses a record keeps nothing in its place (the sender learns of it when the target
+answers a pull that it holds no record), so a damaged one is quarantined, with its
+alert and, for a control record, the closed session endpoints, and nothing is put
+under its name. A resend of a delivery whose target record was lost is taken in as
+new before the delivery deadline, and may be handed out a second time.
 
 **Revision.** A regular target record carries `rev`, which the store raises by one
 at each write. A head record (the prompt or block of an endpoint) lists the
@@ -567,8 +574,7 @@ that does so (`Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
 `Tick`, the drains and their replays, `FeedbackForm`, the followers' replays and
 `QuarantineBody`) returns the target records as written, in the order given, and a
 caller that keeps a view takes them from the return value instead of working the
-revision out again. A lost record has no revision and comes back unchanged. The
-return value is `nil` when the write failed. `TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`
+revision out again. The return value is `nil` when the write failed. `TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`
 compares each returned record with what a new scan reads back.
 
 **Endpoint record.** One per endpoint, under the hash of its id. Its fields, in
@@ -611,8 +617,9 @@ takes a release). What a
 crash leaves between the two is an orphan, removed by the first rule of the next
 start. A body is checked against its name when it is read (a start does not read
 them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch quarantines the body and
-every record that refers to it either becomes a lost record, if it still needs the
-bytes, or loses the reference.
+every source record that refers to it either becomes a lost record, if it still
+needs the bytes, or loses the reference. A target record has no replacement: the
+store writes it as given, with the reference dropped.
 
 **Existence is read before the transaction opens.** A call that removes files
 (a release of bodies, a sweep, an orphan collection) asks the disk which of them
@@ -624,13 +631,14 @@ nothing written. A file that is gone is skipped, so a release interrupted by a
 crash can be repeated.
 
 **Quarantine.** A damaged file is renamed `<name>.<alert id>.corrupt`, where the
-alert id is chosen before and never repeats, so a replacement that is damaged in
-its turn gets a file of its own. The last write of every quarantine is the alert,
+alert id is chosen before and never repeats, so a source replacement that is
+damaged in its turn gets a file of its own. The last write of every quarantine is the alert,
 and an alert is deleted only after the file it names. So "a quarantined file with
 no alert" is exactly an unfinished quarantine. The rule that finishes it writes
-what the first pass wrote, in the same order: the replacement (the same name, built
-by the same rule, so there is one such record and the feedback it owes is not
-formed a second time), the closed session endpoints, and the alert last. The first
+what the first pass wrote, in the same order: the replacement of a source record
+(the same name, built by the same rule, so there is one such record and the
+feedback it owes is not formed a second time), the closed session endpoints of a
+control record, and the alert last. The first
 line of a quarantined file is trusted by the same rule as that of a live one,
 against the name the file had (steps 1 to 4): a first line that parses but does not
 hash to that name is handled like an unreadable one, with no replacement and no
@@ -641,7 +649,7 @@ A quarantine of a control record closes every session endpoint still being creat
 that names the record as its creator, not only the first. A control record accepted
 again after a failed first acceptance has the same name and a new endpoint, so a
 record can have several; the rules that remove endpoints leave a creating endpoint
-alone while its record is lost, quarantined or damaged, so one left behind would
+alone while its record is quarantined or damaged, so one left behind would
 hold one of the node's endpoint slots for good. The store decides which endpoints
 close, from the scan the quarantine is given (`QuarantineSessions`: every session
 endpoint whose creator is the record and that is not open, written closed, in the
@@ -699,13 +707,14 @@ whole `report_by` window after its creation, and the facts reply permission read
 until `report_by` plus the clock tolerance plus the reply window. That is about 27
 hours after the delivery deadline. Then a summary goes to the archive and the file
 is removed, a quarantined file with its replacement (the file first). A quarantined
-file of a delivery directory whose first line was unreadable (or does not belong to
-the name the file had) has no replacement,
-and nothing in it says what it was; it stays until the retention a lost record
-would have if it were found at the time of the file's alert has passed (the
-longest delivery deadline, the clock tolerance, the report offset and the reply
-facts window, counted from the discovery), because until then a delivery related
-to it may still be live. The alert goes after it. A closed session endpoint goes
+file of `out/` whose first line was unreadable (or does not belong to the name the
+file had) has no replacement, and nothing in it says what it was; it stays until
+the retention a lost record would have if it were found at the time of the file's
+alert has passed (the longest delivery deadline, the clock tolerance, the report
+offset and the reply facts window, counted from the discovery), because until then
+a delivery related to it may still be live. The alert goes after it. A quarantined
+file of `in/` or `ctl/` has no replacement and no such bound: it stays for the
+owner, until the alert is acknowledged. A closed session endpoint goes
 with its attempts, checkpoints and floor file, but not while any source record has
 it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
 a source record writes the floor of its sender, and a floor file written after the
@@ -743,7 +752,7 @@ and the store offers the write that carries it out. The predicates the store own
 orphan bodies; session endpoints being created that no control record creates (the
 record is not there, or it is a regular record whose intent holds no creation of that
 endpoint, as after an intake that failed and a signal accepted again with a new
-endpoint; a lost, quarantined or damaged record keeps the endpoint for its
+endpoint; a quarantined or damaged record keeps the endpoint for its
 quarantine); quarantined
 files with no alert (records, and bodies, which continue in chunks); a session
 endpoint whose control record holds the end of its creation or its close; the
@@ -1051,7 +1060,7 @@ so that the double cannot drift from what it stands for.
   sender, is what the rule reads, because the decision belongs to the delivery
   rules; the sender must still agree (the system endpoint sends exactly the
   exempt records), so a record that lost the marker is damaged too. A notice
-  that was lost and replaced keeps neither: a replacement is never handed out.
+  that was lost is quarantined: a target keeps no replacement.
 - **The kind is hashed into the file name.** One flipped bit would otherwise turn a
   message record into a control record.
 - **Nothing is skipped on a resumption because it seems to be done.** What a
@@ -1084,7 +1093,7 @@ so that the double cannot drift from what it stands for.
 
 - **`DrainCandidates` is not known to be the whole predicate** of the replay that
   drains the records queued for a closed endpoint: it names the accepted target and
-  control records that are not lost replacements, and the engine decides whether a
+  control records, and the engine decides whether a
   forced close also changes records in other states or shapes. The test that would
   compare it with the delivery package for every state is skipped, with the
   question as its reason.
@@ -1122,14 +1131,14 @@ so that the double cannot drift from what it stands for.
 | read side | `internal/node/txn/writer.go` | `reader_test.go` |
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `TestHeaderDamageNeverEchoesTheFirstLine`, `FuzzDecodeFrame` |
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
-| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestLostShapesAreExclusive`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
+| record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestTargetRecordsHaveNoLostShape`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
 | scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `written_test.go` (`TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`, `TestAFailedWriteReturnsNoRecords`),  `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing, and no crash during recovery), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
 | recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `resume_scenarios_test.go` (the resumption of each kind of unfinished quarantine, walked from the state a crash leaves), `quarantine_session_test.go` (the double fault of a session creation, `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen`, `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan`), `TestCleanScenariosLeaveNoRecoveryWork` |
 | sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` (`TestArchiveSweepWritesTheFloorOfEverySenderAndTargetOfTheRecordsItRemoves`, `TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten`), `sweep_endpoint_test.go` |
 | archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |
-| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound`, `TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased` among them), `sweep_endpoint_test.go` (`TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone`, the crash walk of a closed session's sweep) |
+| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound` (source records; those of target and control records stay), `TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased` among them), `sweep_endpoint_test.go` (`TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone`, the crash walk of a closed session's sweep) |
 | deleting `state/`, the layout rule | `internal/node/store/recovery.go` | `state_deleted_test.go` |
 | cold start | `internal/node/store/bench_test.go` | `BenchmarkColdStartScan`, `TestColdStartFixtureScansBack` |
 

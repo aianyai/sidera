@@ -88,7 +88,7 @@ var (
 		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventDelivered})
 	}}
 	baseSrcUnknownDelivered = validBase{"source delivered after delivery_unknown", func(t *testing.T) Record {
-		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver}, Event{Type: EventDelivered})
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventDeliveryUnknown}, Event{Type: EventDelivered})
 	}}
 	baseSrcExpired = validBase{"source expired_unconfirmed", func(t *testing.T) Record {
 		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), farFuture, Event{Type: EventExpiryQueried, QueriedAt: farFuture})
@@ -118,13 +118,12 @@ var (
 		return applyAll(t, targetRecord(t, t0, 30*time.Minute), at(time.Minute), Event{Type: EventRejected, Reject: RejectEndpointClosed})
 	}}
 	baseControlRecord = validBase{"control accepted", func(t *testing.T) Record { return controlRecord() }}
-	baseLostSource    = validBase{"lost source record", func(t *testing.T) Record { return newLostRecord(t, SideSource, false) }}
-	baseLostTarget    = validBase{"lost target record", func(t *testing.T) Record { return newLostRecord(t, SideTarget, false) }}
+	baseLostSource    = validBase{"lost source record", func(t *testing.T) Record { return newLostRecord(t) }}
 )
 
-func newLostRecord(t *testing.T, side Side, control bool) Record {
+func newLostRecord(t *testing.T) Record {
 	t.Helper()
-	r, _ := newLost(t, side, control)
+	r, _ := newLost(t)
 	return r
 }
 
@@ -147,7 +146,7 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		// exempt
 		{"exempt is set on a source record", baseQueued, func(r *Record) { r.Exempt = true }, ViolationExemptShape},
 		{"exempt is set on a control record", baseControlRecord, func(r *Record) { r.Exempt = true }, ViolationExemptShape},
-		{"exempt is set on a replacement of a lost record", baseLostTarget, func(r *Record) { r.Exempt = true }, ViolationExemptShape},
+		{"exempt is set on a replacement of a lost record", baseLostSource, func(r *Record) { r.Exempt = true }, ViolationExemptShape},
 		// state fits the kind of record
 		{"a target is never queued", baseTgt, func(r *Record) { r.State = StateQueued }, ViolationState},
 		{"a target is never expired_unconfirmed", baseTgt, func(r *Record) { r.State = StateExpiredUnconfirmed }, ViolationState},
@@ -166,11 +165,11 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		// unknown cause and the replacement of a lost record
 		{"a cause is set only with delivery_unknown", baseQueued, func(r *Record) { r.Unknown = UnknownHandedOver }, ViolationUnknownCause},
 		{"delivery_unknown has a cause", baseSrcUnknownDelivered, func(r *Record) { r.State, r.Unknown = StateDeliveryUnknown, UnknownCauseNone }, ViolationUnknownCause},
-		{"a lost record keeps its replacement marker's cause", baseLostTarget, func(r *Record) { r.Unknown = UnknownHandedOver }, ViolationUnknownCause},
-		{"lost_at_target on a target is the replacement's", baseTgtUnknown, func(r *Record) { r.Unknown = UnknownLostAtTarget }, ViolationUnknownCause},
+		{"a lost record keeps its replacement marker's cause", baseLostSource, func(r *Record) { r.Unknown = UnknownHandedOver }, ViolationUnknownCause},
+		{"a target never holds lost_at_target", baseTgtUnknown, func(r *Record) { r.Unknown = UnknownLostAtTarget }, ViolationUnknownCause},
 		{"the marker goes only on a replacement's states", baseQueued, func(r *Record) { r.Lost = true }, ViolationLostShape},
-		{"a replacement has a report_by and no envelope deadlines", baseLostTarget, func(r *Record) { r.AcceptBefore = validAcceptBefore }, ViolationLostShape},
-		{"a replacement has no lease", baseLostTarget, func(r *Record) { r.Lease.Handouts = 1 }, ViolationLostShape},
+		{"a replacement has a report_by and no envelope deadlines", baseLostSource, func(r *Record) { r.AcceptBefore = validAcceptBefore }, ViolationLostShape},
+		{"a replacement has no lease", baseLostSource, func(r *Record) { r.Lease.Handouts = 1 }, ViolationLostShape},
 		{"a source replacement has reported exactly its own notice", baseLostSource, func(r *Record) { r.Reported = 0 }, ViolationLostShape},
 		// deadlines
 		{"accept_before is set", baseQueued, func(r *Record) { r.AcceptBefore = time.Time{} }, ViolationDeadlinesUnset},
@@ -182,7 +181,7 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		// the time the state was entered
 		{"a record that never entered its state", baseQueued, func(r *Record) { r.StateAt = time.Time{} }, ViolationStateAt},
 		{"a target record that never entered its state", baseTgtDelivered, func(r *Record) { r.StateAt = time.Time{} }, ViolationStateAt},
-		{"a replacement of a lost record that never entered its state", baseLostTarget, func(r *Record) { r.StateAt = time.Time{} }, ViolationStateAt},
+		{"a replacement of a lost record that never entered its state", baseLostSource, func(r *Record) { r.StateAt = time.Time{} }, ViolationStateAt},
 		{"a source record has no backlog deadline", baseQueued, func(r *Record) { r.BacklogDeadline = t0 }, ViolationBacklogDeadline},
 		{"a control record has no backlog deadline", baseControlRecord, func(r *Record) { r.BacklogDeadline = t0 }, ViolationBacklogDeadline},
 		// produced feedback
@@ -356,9 +355,7 @@ func TestRecordValidSourceFeedbackBookkeepingIsExact(t *testing.T) {
 	for _, ty := range []EventType{EventReceipt, EventDelivered, EventReportByPassed, EventUnblocked} {
 		events = append(events, Event{Type: ty})
 	}
-	for _, cause := range []UnknownCause{UnknownHandedOver, UnknownLostAtTarget} {
-		events = append(events, Event{Type: EventDeliveryUnknown, Unknown: cause})
-	}
+	events = append(events, Event{Type: EventDeliveryUnknown}, Event{Type: EventNoRecordAtTarget})
 	events = append(events,
 		Event{Type: EventRejected, Reject: RejectTooLarge},
 		Event{Type: EventExpiryQueried, QueriedAt: farFuture},
@@ -512,8 +509,6 @@ var requiredRecordTags = []string{
 	"target last lease", "target lease renewed", "target lease at cap", "target several chunks", "target unknown after hand-out", "target several pages",
 	"control accepted", "control delivered", "control delivery_unknown", "control closed_unconfirmed",
 	"source lost delivery_unknown", "source lost closed_unconfirmed", "source reported lost_at_sender", "source reported lost_at_target",
-	"target lost delivery_unknown", "target lost closed_unconfirmed",
-	"control lost delivery_unknown", "control lost delivered", "control lost closed_unconfirmed",
 }
 
 func (o *recordObserver) requireCoverage(t *testing.T) {
@@ -534,26 +529,30 @@ func (o *recordObserver) requireCoverage(t *testing.T) {
 }
 
 // runSourceLearnsLoss drives source records that hear from the target that it
-// lost its record: the loss is reported at a random stage and then corrected by
-// a delivery, or left until the record closes. observe sees every record.
+// holds no record: the answer comes to an accepted delivery, reached by a plain
+// receipt, after a corrected expiry or while blocked, and the loss is then
+// corrected by a delivery, or left until the record closes. observe sees every
+// record.
 func runSourceLearnsLoss(t *testing.T, runs int, observe func(*testing.T, Record)) {
 	t.Helper()
 	rng := rand.New(rand.NewSource(5))
-	lost := StatusReport{State: StateDeliveryUnknown, Unknown: UnknownLostAtTarget}
 	for i := 0; i < runs; i++ {
 		r := NewSourceRecord(t0, validAcceptBefore)
 		observe(t, r)
 		switch rng.Intn(3) {
-		case 1:
+		case 0:
 			r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventReceipt})
-		case 2:
+		case 1:
 			r, _ = mustApply(t, r, farFuture, Event{Type: EventExpiryQueried, QueriedAt: farFuture})
+			observe(t, r)
+			r, _ = mustApply(t, r, farFuture.Add(time.Second), Event{Type: EventReceipt})
+		case 2:
+			r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventReceipt})
+			observe(t, r)
+			r, _ = mustApply(t, r, at(time.Minute+time.Second), Event{Type: EventBlocked, Cause: CauseAdapterOffline})
 		}
 		observe(t, r)
-		r, _, err := r.ApplyStatusReport(at(2*time.Minute), lost)
-		if err != nil {
-			t.Fatal(err)
-		}
+		r, _ = mustApply(t, r, at(2*time.Minute), Event{Type: EventNoRecordAtTarget})
 		observe(t, r)
 		switch rng.Intn(3) {
 		case 0:

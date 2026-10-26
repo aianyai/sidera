@@ -54,7 +54,7 @@ func TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds(t *testing.T) {
 		{"a source record waiting for a receipt", queued, want, false},
 		{"a source record's idempotency key outlives its facts", idem, want.Add(72 * time.Hour), true},
 		{"a delivered control record", closedCtl, want, true},
-		{"a lost record is finished by its retention alone", lostInAt(tgtKey(1), base), lostWant, true},
+		{"a lost record is finished by its retention alone", lostOutAt(srcOut(1, false).Key, base), lostWant, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			until, finished := store.RetainUntil(c.rec)
@@ -102,7 +102,7 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 		orphanDerived := derivedIn(6, 9, 2) // its control record is gone: swept by its own retention
 		orphanDerived.Record = deliveredRecord(orphanDerived.Record)
 		orphanDerived.Body = bodyRef(4)
-		lost := lostInAt(tgtKey(7), base)
+		lost := lostOutAt(srcOut(7, false).Key, base)
 		closed := session(5, store.EndpointClosed, ctlName(4))
 		open := directEndpoint(7, "chat")
 		stillQueued := inFor(8, 3, 1) // targets a closed endpoint but is not final: the endpoint stays
@@ -124,7 +124,7 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 			store.SeqRecord{Sender: ep(5), Floors: map[ident.Address]uint64{addr(2, 2): 3}},
 			store.SeqRecord{Sender: ep(7), Floors: map[ident.Address]uint64{addr(2, 2): 3}},
 			srcOutFinished(10), srcOut(11, false))
-		seedRaw(t, r.mem, store.InDir, lost.Name()+"."+store.AlertID{9}.String()+".corrupt", []byte("junk"))
+		seedRaw(t, r.mem, store.OutDir, lost.Name()+"."+store.AlertID{9}.String()+".corrupt", []byte("junk"))
 		seedRaw(t, r.mem, store.EndpointsDir, zeroRec+"."+alertHeld.ID.String()+".corrupt", []byte("junk"))
 		seedBodies(t, r.mem, bodyBytes(1), bodyBytes(2), bodyBytes(4), bodyBytes(9))
 		_ = soon
@@ -148,7 +148,6 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 		p(store.InDir, inRev(1, 2)),        // finished, past retention
 		p(store.InDir, derivedIn(4, 5, 2)), // derived of a control record that goes in the same plan
 		p(store.InDir, derivedIn(6, 9, 2)), // derived whose control record is gone
-		p(store.InDir, store.InRecord{Key: tgtKey(7)}),
 		p(store.EndpointsDir, session(5, store.EndpointClosed, ctlName(4))),
 		p(store.AttemptsDir, store.AttemptsRecord{Endpoint: ep(5)}),
 		p(store.CheckpointsDir, store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}}),
@@ -167,7 +166,7 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	if got := names(plan.Ctl); len(got) != 1 || got[0] != p(store.CtlDir, c4) {
 		t.Errorf("control records = %v, want only the finished one, which goes before its derived delivery", got)
 	}
-	wantCorrupt := []string{path.Join(store.InDir, inRev(1, 1).Name()[:0]+store.InRecord{Key: tgtKey(7)}.Name()+"."+store.AlertID{9}.String()+".corrupt")}
+	wantCorrupt := []string{path.Join(store.OutDir, lostOutAt(srcOut(7, false).Key, base).Name()+"."+store.AlertID{9}.String()+".corrupt")}
 	if got := names(plan.Corrupt); strings.Join(got, "\n") != strings.Join(wantCorrupt, "\n") {
 		t.Errorf("quarantined files = %v, want %v: a replacement's quarantined file goes with it, before it", got, wantCorrupt)
 	}
@@ -207,10 +206,10 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 		kinds = append(kinds, string(s.Kind))
 	}
 	sort.Strings(kinds)
-	if strings.Join(kinds, ",") != "ctl,in,in,in,in,out" {
-		t.Errorf("summaries of %v, want ctl, in x4 and out", kinds)
+	if strings.Join(kinds, ",") != "ctl,in,in,in,out,out" {
+		t.Errorf("summaries of %v, want ctl, in x3 and out x2", kinds)
 	}
-	if len(plan.Outs) != 1 || plan.Outs[0].Key.Message != msgID(10) {
+	if len(plan.Outs) != 2 {
 		t.Errorf("source records swept: %v", plan.Outs)
 	}
 	for _, s := range plan.Summaries {
@@ -248,13 +247,15 @@ func TestPlanSweepKeepsADerivedDeliveryWhileItsControlRecordIsLive(t *testing.T)
 	}
 }
 
-// The quarantined file of a delivery record whose first line cannot be read has
-// no replacement, so nothing says when it may go but the time the node found it
+// The quarantined file of a source record whose first line cannot be read has no
+// replacement, so nothing says when it may go but the time the node found it
 // (the time of its alert). It stays until what a lost record found at that time
 // would be kept: the longest delivery deadline an accepted message can have (1
 // hour), the clock tolerance (2 minutes), the report offset (3 hours 2 minutes)
 // and the retention of the facts reply permission reads (24 hours 2 minutes),
-// counted from the discovery. Not a nanosecond earlier.
+// counted from the discovery. Not a nanosecond earlier. The quarantined files of
+// target and control records have no replacement and no such bound: they stay
+// for the owner to see, until the alert is acknowledged.
 func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *testing.T) {
 	bound := base.Add(time.Hour + 2*time.Minute).Add(3*time.Hour + 2*time.Minute).Add(24*time.Hour + 2*time.Minute)
 	name := func(i int) string { return fmt.Sprintf("%064x.rec", i) }
@@ -286,19 +287,17 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 		seedRaw(t, r.mem, store.InDir, damaged.Name()+"."+store.AlertID{5}.String()+".corrupt", damagedData)
 		// A replacement and the quarantined file it replaced (here with an unreadable
 		// first line): the file goes with the replacement, once.
-		replacement := lostInAt(tgtKey(6), base)
-		seed(t, r.mem, replacement, store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "in"})
-		seedRaw(t, r.mem, store.InDir, replacement.Name()+"."+store.AlertID{6}.String()+".corrupt", []byte("not a first line"))
+		replacement := lostOutAt(srcOut(6, false).Key, base)
+		seed(t, r.mem, replacement, store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "out"})
+		seedRaw(t, r.mem, store.OutDir, replacement.Name()+"."+store.AlertID{6}.String()+".corrupt", []byte("not a first line"))
 		// A directory that holds no delivery records is the owner's to acknowledge.
 		seed(t, r.mem, store.AlertRecord{ID: store.AlertID{7}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "checkpoints"})
 		seedRaw(t, r.mem, store.CheckpointsDir, corrupt(store.CheckpointsDir, 7, store.AlertID{7}), []byte("not a first line"))
 		return r
 	}
 	want := []string{
-		path.Join(store.CtlDir, corrupt(store.CtlDir, 2, store.AlertID{3})),
-		path.Join(store.InDir, corrupt(store.InDir, 1, store.AlertID{2})),
 		path.Join(store.OutDir, corrupt(store.OutDir, 0, store.AlertID{1})),
-		path.Join(store.InDir, lostInAt(tgtKey(6), base).Name()+"."+store.AlertID{6}.String()+".corrupt"),
+		path.Join(store.OutDir, lostOutAt(srcOut(6, false).Key, base).Name()+"."+store.AlertID{6}.String()+".corrupt"),
 	}
 	sort.Strings(want)
 	for _, c := range []struct {
@@ -328,15 +327,16 @@ func TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound(t *t
 	r := build(t)
 	plan := store.PlanSweep(r.scan(), bound)
 	mustDo(t, r.st.ArchiveSweep(plan.Chunk(bound)))
-	if left := r.scan().Corrupt; len(left) != 3 {
-		t.Errorf("%d quarantined files left after the sweep, want the three that must stay (no alert yet, a readable first line without a replacement, not a delivery directory): %v", len(left), left)
+	if left := r.scan().Corrupt; len(left) != 5 {
+		t.Errorf("%d quarantined files left after the sweep, want the five that must stay (no alert yet, a readable first line without a replacement, not a delivery directory, and the unreadable ones of in/ and ctl/): %v", len(left), left)
 	}
 }
 
-// A quarantined file whose first line parses but does not belong to the name the
-// file had is a file whose record is unknown, like one with an unreadable first
-// line: it goes after the lost record's bound counted from its alert, and the
-// acknowledged alert is released only then.
+// A quarantined file of out/ whose first line parses but does not belong to the
+// name the file had is a file whose record is unknown, like one with an
+// unreadable first line: it goes after the lost record's bound counted from its
+// alert, and the acknowledged alert is released only then. The same file of in/
+// or ctl/ has no bound and stays, with its alert, until the owner acknowledges it.
 func TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased(t *testing.T) {
 	bound := base.Add(time.Hour + 2*time.Minute).Add(3*time.Hour + 2*time.Minute).Add(24*time.Hour + 2*time.Minute)
 	id := store.AlertID{1}
@@ -372,6 +372,12 @@ func TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAle
 			}
 			if got, alert := swept(bound.Add(-time.Nanosecond)); len(got) != 0 || alert {
 				t.Fatalf("before the bound: swept %v, alert %v; want nothing", got, alert)
+			}
+			if dir != store.OutDir {
+				if got, alert := swept(bound.Add(1000 * 24 * time.Hour)); len(got) != 0 || alert {
+					t.Fatalf("long after: swept %v, alert %v; a target's quarantined file stays for the owner", got, alert)
+				}
+				return
 			}
 			got, alert := swept(bound)
 			if len(got) != 1 || got[0] != file || alert {

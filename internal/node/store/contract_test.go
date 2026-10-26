@@ -28,7 +28,7 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 		{"delivery.Record", reflect.TypeOf(delivery.Record{}), "Side State Sub Reject Unknown StateAt Lost Control Exempt AcceptBefore ReportBy BacklogDeadline Reported Blocked BlockedCause Lease"},
 		{"store.OutEnvelope", reflect.TypeOf(store.OutEnvelope{}), "To ReplyTo Thread Seq SentAt ReportBy ContentType Preset DiscloseRecipients"},
 		{"delivery.Lease", reflect.TypeOf(delivery.Lease{}), "Handouts IDs Active IssuedAt ExpiresAt Chunks HandedOut Acked"},
-		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply DigestLost"},
+		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply"},
 		{"delivery.Authorization", reflect.TypeOf(delivery.Authorization{}), "Kind Reject"},
 		{"delivery.Item", reflect.TypeOf(delivery.Item{}), "Ref Feedback At"},
 		{"delivery.Feedback", reflect.TypeOf(delivery.Feedback{}), "Kind Cause Reject State"},
@@ -71,7 +71,7 @@ func deliveryRecordsOfEveryShape(t *testing.T) (source, target []delivery.Record
 	// of the failure, of the unknown result and its correction.
 	a := src()
 	a = applied(t, a, delivery.Event{Type: delivery.EventContactFailing, Cause: delivery.CauseNetwork, Since: base.Add(-delivery.UnreachableHintAfter)})
-	a = applied(t, a, delivery.Event{Type: delivery.EventDeliveryUnknown, Unknown: delivery.UnknownHandedOver})
+	a = applied(t, a, delivery.Event{Type: delivery.EventDeliveryUnknown})
 	a = applied(t, a, delivery.Event{Type: delivery.EventDelivered})
 
 	// Expired, received, blocked and unblocked: four notices of the sender's.
@@ -81,12 +81,13 @@ func deliveryRecordsOfEveryShape(t *testing.T) (source, target []delivery.Record
 	b = applied(t, b, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseRuntimeAuth})
 	b = applied(t, b, delivery.Event{Type: delivery.EventUnblocked})
 
-	// Rejected at the target, and the target's loss told by a status report.
+	// Rejected at the target, and the target's answer that it holds no record of
+	// a delivery it had accepted.
 	c := applied(t, src(), delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectBacklogFull})
-	d := applied(t, src(), delivery.Event{Type: delivery.EventDeliveryUnknown, Unknown: delivery.UnknownLostAtTarget})
+	d := applied(t, applied(t, src(), delivery.Event{Type: delivery.EventReceipt}), delivery.Event{Type: delivery.EventNoRecordAtTarget})
 
 	// The sender's own loss.
-	e, _ := lostRecord(delivery.SideSource, false, base.Add(time.Hour))
+	e, _ := lostRecord(base.Add(time.Hour))
 
 	// A target message with two chunks, the first acknowledged, notified and blocked.
 	f := tgtIn(1).Record
@@ -107,16 +108,14 @@ func deliveryRecordsOfEveryShape(t *testing.T) (source, target []delivery.Record
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A control record, delivered by its committed reply, and one whose result is unknown.
+	// A control record, delivered by its committed reply.
 	h := deliveredRecord(sessionCtl(1, 5).Record)
-	i, _ := lostRecord(delivery.SideTarget, true, base.Add(time.Hour))
-	j, _ := lostRecord(delivery.SideTarget, false, base.Add(time.Hour))
 	// A notice of the system endpoint: exempt traffic, handed out without a second check.
 	k, _, err := noticeIn(3).Record.Handout(base.Add(time.Minute), 0, 1, 1, fixedLease)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return []delivery.Record{a, b, c, d, e}, []delivery.Record{f, g, h, i, j, k}
+	return []delivery.Record{a, b, c, d, e}, []delivery.Record{f, g, h, k}
 }
 
 // Every field of the stored types, set to a value that is not the zero value in
@@ -149,24 +148,9 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 		in := tgtIn(20 + n)
 		in.Rev = uint64(n + 1)
 		in.Record = r
-		switch {
-		case r.Control && r.Lost:
-			c := lostCtlAt(ctlKey(20+n), base.Add(time.Hour))
-			data, err := store.EncodeRecord(c)
-			if err != nil {
-				t.Fatal(err)
-			}
-			got, dmg := store.DecodeRecord(store.CtlDir, c.Name(), data)
-			if dmg != nil || !equalRecords(got, c) {
-				t.Errorf("lost control record: %+v\n got  %#v\n want %#v", dmg, got, c)
-			}
-			dedups = append(dedups, c.Dedup)
-			all = append(all, c.Record)
-			continue
-		case r.Control:
-			continue // the control record of a session is covered below
-		case r.Lost:
-			in = lostInAt(in.Key, base.Add(time.Hour))
+		if r.Control {
+			all = append(all, r)
+			continue // the control record of a session is round-tripped below
 		}
 		in.Auth = delivery.Authorization{Kind: delivery.AuthorizationSuspend}
 		if r.Exempt {
@@ -174,17 +158,13 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 			in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(20+n), r.ReportBy)
 			in.Auth = delivery.Authorization{}
 		}
-		if in.Lost {
-			in.Auth = delivery.Authorization{}
+		if !r.Exempt {
+			in.ReplyDecision = reply.Decision{Reason: reply.ReasonArrivalWindow, Until: base.Add(25 * time.Hour)}
 		} else {
-			if !r.Exempt {
-				in.ReplyDecision = reply.Decision{Reason: reply.ReasonArrivalWindow, Until: base.Add(25 * time.Hour)}
-			} else {
-				in.ReplyDecision = reply.Decision{}
-			}
-			in.Handout = store.HandoutFields{ContentType: "text/plain; charset=utf-8", ReplyTo: msgID(8), Thread: "thread", Seq: 3, SentAt: base.Add(time.Second)}
-			in.AcceptedAt = base.Add(2 * time.Second)
+			in.ReplyDecision = reply.Decision{}
 		}
+		in.Handout = store.HandoutFields{ContentType: "text/plain; charset=utf-8", ReplyTo: msgID(8), Thread: "thread", Seq: 3, SentAt: base.Add(time.Second)}
+		in.AcceptedAt = base.Add(2 * time.Second)
 		data, err := store.EncodeRecord(in)
 		if err != nil {
 			t.Fatalf("target record %d (%v): %v", n, r.State, err)
@@ -212,17 +192,10 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 			t.Errorf("no record of the test has the field Record.%s set: the test does not show it survives the disk", name)
 		}
 	}
-	for k := delivery.KindUnreachable; !strings.HasPrefix(k.String(), "invalid"); k++ {
+	for k := delivery.KindUnreachable; k <= delivery.LastRecordKind; k++ {
 		if !kinds.Has(k) {
 			t.Errorf("no source record of the test reports the feedback kind %s", k)
 		}
-	}
-	lost := false
-	for _, d := range dedups {
-		lost = lost || d.DigestLost
-	}
-	if !lost {
-		t.Errorf("no deduplication record of the test has DigestLost set")
 	}
 
 	var data []byte

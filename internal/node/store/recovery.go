@@ -74,17 +74,15 @@ func OrphanBodies(sc *Scan) []string {
 // all, or the creation of another endpoint, which is what a signal accepted again
 // after a failed intake has: the same record name and a new endpoint).
 //
-// A record that is lost, quarantined or damaged keeps the endpoint: the
-// quarantine of the record settles it, as it needs to know it is there.
+// A record that is quarantined or damaged keeps the endpoint: the quarantine of
+// the record settles it, as it needs to know it is there.
 func OrphanEndpoints(sc *Scan) []EndpointRecord {
-	regular := map[string]*CtlRecord{}
+	ctls := map[string]*CtlRecord{}
 	exists := map[string]bool{}
 	for i := range sc.Ctl {
 		c := &sc.Ctl[i]
 		exists[c.Name()] = true
-		if !c.Lost {
-			regular[c.Name()] = c
-		}
+		ctls[c.Name()] = c
 	}
 	for _, c := range sc.Corrupt {
 		if c.Dir == CtlDir {
@@ -102,7 +100,7 @@ func OrphanEndpoints(sc *Scan) []EndpointRecord {
 			continue
 		}
 		name := e.CreatedBy + recordSuffix
-		switch c := regular[name]; {
+		switch c := ctls[name]; {
 		case e.CreatedBy == "" || !exists[name]:
 			out = append(out, e)
 		case c != nil && (c.Intent == nil || c.Intent.Endpoint != e.ID):
@@ -210,7 +208,7 @@ func EffectReplays(sc *Scan) []EndpointRecord {
 }
 
 // DrainCandidates is the structural part of the work of endpoint-drain-replay:
-// the target and control records still accepted, not lost, whose endpoint is
+// the target and control records still accepted, whose endpoint is
 // closed or has no record. The engine decides, with the delivery rules, which
 // of them a forced close changes.
 func DrainCandidates(sc *Scan) (in []InRecord, ctl []CtlRecord) {
@@ -221,12 +219,12 @@ func DrainCandidates(sc *Scan) (in []InRecord, ctl []CtlRecord) {
 		}
 	}
 	for _, r := range sc.In {
-		if !r.Lost && r.Record.State == delivery.StateAccepted && !alive[r.Key.Recipient] {
+		if r.Record.State == delivery.StateAccepted && !alive[r.Key.Recipient] {
 			in = append(in, r)
 		}
 	}
 	for _, r := range sc.Ctl {
-		if !r.Lost && r.Record.State == delivery.StateAccepted && !alive[r.Key.Recipient] {
+		if r.Record.State == delivery.StateAccepted && !alive[r.Key.Recipient] {
 			ctl = append(ctl, r)
 		}
 	}
@@ -267,7 +265,7 @@ func pendingWork(sc *Scan, events ...PendingEvent) []PendingWork {
 		}
 		w := PendingWork{Head: a}
 		for _, it := range a.Pending.Items {
-			if r := byKey[it.Key]; r != nil && !r.Lost && r.Rev == it.Rev && r.AcceptedAt.Equal(it.AcceptedAt) {
+			if r := byKey[it.Key]; r != nil && r.Rev == it.Rev && r.AcceptedAt.Equal(it.AcceptedAt) {
 				w.Followers = append(w.Followers, *r)
 			}
 		}
@@ -297,9 +295,6 @@ func FeedbackReplays(sc *Scan) []OutRecord {
 	}
 	next := map[int][]delivery.Item{}
 	for _, n := range sc.In {
-		if n.Lost {
-			continue
-		}
 		for _, c := range n.Covers {
 			i, ok := idx[c.Out]
 			if !ok {
@@ -333,7 +328,8 @@ type Quarantine struct {
 	// of the quarantined name.
 	Alert AlertRecord
 	// Replacement is the record to put under the original name, for a damaged
-	// delivery record whose key can be trusted; nil otherwise.
+	// source record whose key can be trusted; nil otherwise, and always nil for a
+	// target or control record, which has none.
 	Replacement Record
 	// Scan is the scan the quarantine is part of: the other source records of a
 	// pair set the sequence floor, and the session endpoints of a control record
@@ -431,48 +427,29 @@ func (s *Store) raiseFloors(key OutKey, scanned *Scan, self string) (*file, erro
 	return &f, nil
 }
 
-// replacementFile encodes the replacement of a damaged delivery record: a
-// record of its directory that has the name the damaged file had.
+// replacementFile encodes the replacement of a damaged source record: a lost
+// record of out/ that has the name the damaged file had. Only a source record has
+// one: a target that lost a record keeps nothing, and the sender learns of it when
+// the target answers a pull that it holds no record.
 func replacementFile(dir, name string, rec Record) (*file, error) {
 	if rec == nil {
 		return nil, nil
 	}
-	if d := dirOfRecord(rec); d != dir || rec.Name() != name {
-		return nil, fmt.Errorf("store: the replacement must be a record of %s named %s", dir, name)
+	out, ok := rec.(OutRecord)
+	if !ok {
+		return nil, errors.New("store: only a source record has a replacement")
+	}
+	if dir != OutDir || out.Name() != name {
+		return nil, fmt.Errorf("store: the replacement must be a record of %s named %s", OutDir, name)
+	}
+	if out.Lost == nil {
+		return nil, errors.New("store: a replacement is a lost record")
 	}
 	f, err := recordFile(dir, rec)
 	if err != nil {
 		return nil, err
 	}
-	switch r := rec.(type) {
-	case OutRecord:
-		if r.Lost == nil {
-			return nil, errors.New("store: a replacement is a lost record")
-		}
-	case InRecord:
-		if !r.Lost {
-			return nil, errors.New("store: a replacement is a lost record")
-		}
-	case CtlRecord:
-		if !r.Lost {
-			return nil, errors.New("store: a replacement is a lost record")
-		}
-	default:
-		return nil, errors.New("store: only a delivery record has a replacement")
-	}
 	return &f, nil
-}
-
-func dirOfRecord(rec Record) string {
-	switch rec.(type) {
-	case OutRecord:
-		return OutDir
-	case InRecord:
-		return InDir
-	case CtlRecord:
-		return CtlDir
-	}
-	return ""
 }
 
 // tail is what follows the rename in a quarantine and in its resumption, all of

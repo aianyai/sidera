@@ -33,40 +33,31 @@ func latest(ts ...time.Time) time.Time {
 // targetRetention is the retention of a target delivery: the latest of what the
 // deduplication record, the status report and the facts reply permission reads
 // need, each as the delivery and reply packages define it.
-func targetRetention(r delivery.Record, createdAt time.Time, dedup delivery.DedupRecord) time.Time {
+func targetRetention(reportBy, createdAt time.Time, dedup delivery.DedupRecord) time.Time {
 	return latest(
-		delivery.DedupRetainUntil(r.ReportBy),
+		delivery.DedupRetainUntil(reportBy),
 		dedup.RetainUntil,
-		delivery.StatusReportRetainUntil(createdAt, r.ReportBy),
-		reply.RetainFactsUntil(r.ReportBy),
+		delivery.StatusReportRetainUntil(createdAt, reportBy),
+		reply.RetainFactsUntil(reportBy),
 	)
 }
 
 // RetainUntil is the instant until which the records of a delivery are kept as
 // live files, and whether they are finished: every delivery in a final state, or
-// a replacement for a record lost to storage corruption. A replacement is not
-// final in the delivery rules: Tick still closes it at its ReportBy and a lost
-// control record on the target can still become delivered. Treating it as
-// finished is safe because neither change moves what the retention is computed
-// from (ReportBy is fixed for a replacement) and the sweep waits until the
-// returned instant, which is not earlier than the retention that follows from
-// that ReportBy. It is the latest of the
-// retentions the delivery and reply packages define for the facts the record
-// holds. A record that is not finished is never swept.
+// the sender's replacement for a record lost to storage corruption. A
+// replacement is not final in the delivery rules: Tick still closes it at its
+// ReportBy. Treating it as finished is safe because that change does not move
+// what the retention is computed from (ReportBy is fixed for a replacement) and
+// the sweep waits until the returned instant, which is not earlier than the
+// retention that follows from that ReportBy. It is the latest of the retentions
+// the delivery and reply packages define for the facts the record holds. A
+// record that is not finished is never swept.
 func RetainUntil(rec Record) (until time.Time, finished bool) {
 	switch r := rec.(type) {
 	case InRecord:
-		created := r.AcceptedAt
-		if r.Lost {
-			created = r.DiscoveredAt
-		}
-		return targetRetention(r.Record, created, r.Dedup), r.Lost || r.Record.State.IsTerminal()
+		return targetRetention(r.Record.ReportBy, r.AcceptedAt, r.Dedup), r.Record.State.IsTerminal()
 	case CtlRecord:
-		created := r.AcceptedAt
-		if r.Lost {
-			created = r.DiscoveredAt
-		}
-		return targetRetention(r.Record, created, r.Dedup), r.Lost || r.Record.State.IsTerminal()
+		return targetRetention(r.Record.ReportBy, r.AcceptedAt, r.Dedup), r.Record.State.IsTerminal()
 	case OutRecord:
 		var ds []delivery.Record
 		finished = true
@@ -101,31 +92,19 @@ func RetainUntil(rec Record) (until time.Time, finished bool) {
 	return time.Time{}, false
 }
 
-func isDeliveryDir(dir string) bool { return dir == OutDir || dir == InDir || dir == CtlDir }
-
-// lostRetention is the instant until which a record of the delivery directory
-// dir that was lost at the time at, and replaced then, would be kept: the
-// retention of the replacement the delivery package makes for it. It bounds the
-// retention of every delivery that was accepted before at, so once it has passed
-// nothing that could be related to the lost file is still live. It is computed
-// with the same function the sweep uses for a replacement that exists.
-func lostRetention(dir string, at time.Time) (until time.Time, ok bool) {
-	side, control := delivery.SideTarget, dir == CtlDir
-	if dir == OutDir {
-		side = delivery.SideSource
-	}
-	rec, _, err := delivery.NewLostRecord(side, control, at)
+// lostRetention is the instant until which a source record that was lost at the
+// time at, and replaced then, would be kept: the retention of the replacement the
+// delivery package makes for it. It bounds the retention of every source record
+// that was accepted before at, so once it has passed nothing that could be
+// related to the lost file is still live. It is computed with the same function
+// the sweep uses for a replacement that exists. A target record has no
+// replacement, so no such bound exists for the files of in/ and ctl/.
+func lostRetention(at time.Time) (until time.Time, ok bool) {
+	rec, _, err := delivery.NewLostRecord(at)
 	if err != nil {
 		return time.Time{}, false // an alert without a time: nothing says when, so the file stays
 	}
-	switch dir {
-	case OutDir:
-		until, _ = RetainUntil(OutRecord{Lost: &LostOut{DiscoveredAt: at, Deliveries: []delivery.Record{rec}}})
-	case CtlDir:
-		until, _ = RetainUntil(CtlRecord{Lost: true, DiscoveredAt: at, Record: rec, Dedup: delivery.NewLostDedupRecord(delivery.DedupKey{}, at)})
-	default:
-		until, _ = RetainUntil(InRecord{Lost: true, DiscoveredAt: at, Record: rec, Dedup: delivery.NewLostDedupRecord(delivery.DedupKey{}, at)})
-	}
+	until, _ = RetainUntil(OutRecord{Lost: &LostOut{DiscoveredAt: at, Deliveries: []delivery.Record{rec}}})
 	return until, true
 }
 
@@ -245,11 +224,12 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 		}
 		plan.Corrupt = append(plan.Corrupt, FileRef{Dir: c.Dir, Name: c.Name})
 	}
-	// A quarantined file of a delivery directory whose first line is unreadable
-	// has no replacement, so no record's retention ends with it. Until a lost
-	// record's own retention from the time the loss was found has passed, the name
-	// still counts as a record that may exist (see lostRetention), and then the
-	// file goes.
+	// A quarantined file of out/ whose first line is unreadable has no
+	// replacement, so no record's retention ends with it. Until a lost record's
+	// own retention from the time the loss was found has passed, the name still
+	// counts as a record that may exist (see lostRetention), and then the file
+	// goes. The quarantined files of in/ and ctl/ have no replacement and no such
+	// bound: they stay for the owner to see, until the alert is acknowledged.
 	discovered := map[AlertID]time.Time{}
 	for _, a := range sc.Alerts {
 		discovered[a.ID] = a.At
@@ -268,14 +248,14 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 		exists[path.Join(d.Dir, d.Name)] = true
 	}
 	for _, c := range sc.Corrupt {
-		if c.Key != nil || !isDeliveryDir(c.Dir) || exists[path.Join(c.Dir, c.Original)] {
+		if c.Key != nil || c.Dir != OutDir || exists[path.Join(c.Dir, c.Original)] {
 			continue // with a file under the name, the file's own retention decides
 		}
 		at, ok := discovered[c.Alert]
 		if !ok {
 			continue // an unfinished quarantine: its alert is not written yet
 		}
-		if until, ok := lostRetention(c.Dir, at); ok && !now.Before(until) {
+		if until, ok := lostRetention(at); ok && !now.Before(until) {
 			plan.Corrupt = append(plan.Corrupt, FileRef{Dir: c.Dir, Name: c.Name})
 		}
 	}
@@ -386,24 +366,16 @@ func summarize(rec Record, now time.Time) ArchiveSummary {
 	case InRecord:
 		s.Kind, s.Key = KindIn, r.Key.String()
 		setDelivery(r.Record)
-		s.AcceptedAt, s.Quarantined = r.AcceptedAt, r.Lost
-		if r.Lost {
-			s.Reason, s.AcceptedAt = "storage_loss", time.Time{}
-		} else {
-			s.Digest = hex.EncodeToString(r.Dedup.Digest[:])
-		}
+		s.AcceptedAt = r.AcceptedAt
+		s.Digest = hex.EncodeToString(r.Dedup.Digest[:])
 		if r.Body != nil {
 			s.Size = r.Body.Len
 		}
 	case CtlRecord:
 		s.Kind, s.Key = KindCtl, r.Key.String()
 		setDelivery(r.Record)
-		s.AcceptedAt, s.Quarantined = r.AcceptedAt, r.Lost
-		if r.Lost {
-			s.Reason, s.AcceptedAt = "storage_loss", time.Time{}
-		} else {
-			s.Digest = hex.EncodeToString(r.Dedup.Digest[:])
-		}
+		s.AcceptedAt = r.AcceptedAt
+		s.Digest = hex.EncodeToString(r.Dedup.Digest[:])
 		if r.Body != nil {
 			s.Size = r.Body.Len
 		}

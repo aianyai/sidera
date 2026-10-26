@@ -49,12 +49,9 @@ func committed[T any](tx *txn.Tx, written T) (T, error) {
 	return written, nil
 }
 
-// bumped is a target record as it is written: one revision on. A lost record
-// has none.
+// bumped is a target record as it is written: one revision on.
 func bumped(in InRecord) InRecord {
-	if !in.Lost {
-		in.Rev++
-	}
+	in.Rev++
 	return in
 }
 

@@ -422,7 +422,6 @@ type dedupJSON struct {
 	Digest      string  `json:"digest"`
 	RetainUntil wtime   `json:"retain_until"`
 	Reply       *string `json:"reply,omitempty"`
-	DigestLost  bool    `json:"digest_lost,omitempty"`
 }
 
 func toDedup(d delivery.DedupRecord, key TargetKey) (dedupJSON, error) {
@@ -433,7 +432,7 @@ func toDedup(d delivery.DedupRecord, key TargetKey) (dedupJSON, error) {
 	if err != nil {
 		return dedupJSON{}, err
 	}
-	j := dedupJSON{Digest: hex.EncodeToString(d.Digest[:]), RetainUntil: ru, DigestLost: d.DigestLost}
+	j := dedupJSON{Digest: hex.EncodeToString(d.Digest[:]), RetainUntil: ru}
 	if d.HasReply {
 		s := b64(d.Reply)
 		j.Reply = &s
@@ -444,7 +443,7 @@ func toDedup(d delivery.DedupRecord, key TargetKey) (dedupJSON, error) {
 }
 
 func fromDedup(j dedupJSON, key TargetKey) (delivery.DedupRecord, error) {
-	d := delivery.DedupRecord{Key: key.Dedup(), RetainUntil: time.Time(j.RetainUntil), DigestLost: j.DigestLost}
+	d := delivery.DedupRecord{Key: key.Dedup(), RetainUntil: time.Time(j.RetainUntil)}
 	dig, err := hexN(j.Digest, 32)
 	if err != nil {
 		return d, fmt.Errorf("digest: %w", err)

@@ -54,22 +54,11 @@ var goldenRecords = []struct {
 	{name: "ctl", dir: store.CtlDir,
 		file: "sidera-record 1 ctl 12a8daed 600 bm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkIGVwMXp2ZjN4eWNuenZmM3h5Y256dmYzeHljbnp2bDV1NGNkIG1zZy0wMDAxIGVwMXpzMnBnOXE1enMycGc5cTV6czJwZzlxNXpzenYwMjNx\n{\"record\":{\"side\":\"target\",\"state\":\"accepted\",\"state_at\":\"2026-10-24T09:00:00Z\",\"control\":true,\"accept_before\":\"2026-10-24T09:01:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\"},\"dedup\":{\"digest\":\"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\",\"retain_until\":\"2026-10-24T12:03:00Z\"},\"kind\":\"control.session.create\",\"preset\":\"default\",\"session_endpoint\":\"ep1z52329g4z52329g4z52329g4z5k8q2g4\",\"accepted_at\":\"2026-10-24T09:00:00Z\",\"sent_at\":\"2026-10-24T09:00:00Z\",\"intent\":{\"attempt\":\"0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6\",\"endpoint\":\"ep1z52329g4z52329g4z52329g4z5k8q2g4\",\"state\":\"creating\"}}",
 		hash: "b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d.rec"},
-	// Replacements of records lost to storage corruption, discovered at 10:00.
-	// Their report_by is the discovery plus the longest delivery deadline (1 h),
-	// the clock tolerance (2 min) and the report offset (3 h 2 min): 14:04. A
-	// replacement keeps its lost marker after it closes, when the unknown cause
-	// is gone, and the deduplication record that stands in for a lost one has no
-	// digest and says so.
+	// The replacement of a source record lost to storage corruption, discovered at
+	// 10:00. Its report_by is the discovery plus the longest delivery deadline
+	// (1 h), the clock tolerance (2 min) and the report offset (3 h 2 min): 14:04.
+	// A target keeps no replacement, so there is no such vector for in/ and ctl/.
 	{name: "out lost at the sender", dir: store.OutDir,
 		file: "sidera-record 1 out c2b6e47c 576 ZXAxenlnM3p5ZzN6eWczenlnM3p5ZzN6eWczenlqMGtjZ3EgbXNnLTAwMDIgbm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkL2VwMXpnZnB5eXNqemdmcHl5c2p6Z2ZweXlzanpndGxuNHBj\n{\"lost\":{\"at\":\"2026-10-24T10:00:00Z\",\"deliveries\":[{\"side\":\"source\",\"state\":\"delivery_unknown\",\"state_at\":\"2026-10-24T10:00:00Z\",\"unknown\":\"lost_at_sender\",\"lost\":true,\"report_by\":\"2026-10-24T14:04:00Z\",\"reported\":[\"lost_at_sender\"]}]},\"feedback\":[{\"sender\":\"node1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqsnp67e9/ep1zyg3zyg3zyg3zyg3zyg3zyg3zyj0kcgq\",\"message\":\"msg-0002\",\"recipient\":\"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\",\"kind\":\"lost_at_sender\",\"state\":\"delivery_unknown\",\"at\":\"2026-10-24T10:00:00Z\"}]}",
 		hash: "ef9ba86060ef0b002fd40522d8da8a67e6010656eb53e54bc573c0ad0af540d5.rec"},
-	{name: "in lost at the target", dir: store.InDir,
-		file: "sidera-record 1 in e53de3ff 357 bm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkIGVwMXp2ZjN4eWNuenZmM3h5Y256dmYzeHljbnp2bDV1NGNkIG1zZy0wMDAyIGVwMXpnZnB5eXNqemdmcHl5c2p6Z2ZweXlzanpndGxuNHBj\n{\"lost\":true,\"discovered_at\":\"2026-10-24T10:00:00Z\",\"record\":{\"side\":\"target\",\"state\":\"delivery_unknown\",\"state_at\":\"2026-10-24T10:00:00Z\",\"unknown\":\"lost_at_target\",\"lost\":true,\"report_by\":\"2026-10-24T14:04:00Z\"},\"dedup\":{\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"retain_until\":\"2026-10-24T14:04:00Z\",\"digest_lost\":true}}",
-		hash: "93296c16f98561e6ffdb38fc8bec895b0f1897685a05961f88aff05083ee2935.rec"},
-	{name: "in lost and closed", dir: store.InDir,
-		file: "sidera-record 1 in 9778c240 342 bm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkIGVwMXp2ZjN4eWNuenZmM3h5Y256dmYzeHljbnp2bDV1NGNkIG1zZy0wMDAyIGVwMXpnZnB5eXNqemdmcHl5c2p6Z2ZweXlzanpndGxuNHBj\n{\"lost\":true,\"discovered_at\":\"2026-10-24T10:00:00Z\",\"record\":{\"side\":\"target\",\"state\":\"closed_unconfirmed\",\"state_at\":\"2026-10-24T14:04:00.000000001Z\",\"lost\":true,\"report_by\":\"2026-10-24T14:04:00Z\"},\"dedup\":{\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"retain_until\":\"2026-10-24T14:04:00Z\",\"digest_lost\":true}}",
-		hash: "93296c16f98561e6ffdb38fc8bec895b0f1897685a05961f88aff05083ee2935.rec"},
-	{name: "ctl lost at the target", dir: store.CtlDir,
-		file: "sidera-record 1 ctl ec57a9e7 372 bm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkIGVwMXp2ZjN4eWNuenZmM3h5Y256dmYzeHljbnp2bDV1NGNkIG1zZy0wMDAyIGVwMXpzMnBnOXE1enMycGc5cTV6czJwZzlxNXpzenYwMjNx\n{\"lost\":true,\"discovered_at\":\"2026-10-24T10:00:00Z\",\"record\":{\"side\":\"target\",\"state\":\"delivery_unknown\",\"state_at\":\"2026-10-24T10:00:00Z\",\"unknown\":\"lost_at_target\",\"lost\":true,\"control\":true,\"report_by\":\"2026-10-24T14:04:00Z\"},\"dedup\":{\"digest\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"retain_until\":\"2026-10-24T14:04:00Z\",\"digest_lost\":true}}",
-		hash: "0df26f39c01b29369253a694c836d59b33c26ba5d3a83ac2343b21d52a4b56a2.rec"},
 }

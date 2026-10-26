@@ -95,48 +95,21 @@ key.
 | 6 | reported_at | when the target recorded the state the report states |
 | 7 | delivered_at | exactly when delivered; not after `reported_at` |
 | 8 | sender | the node that sent the message, as the target saw it on the connection |
-| 9 | unknown_cause | optional; only with delivery_unknown; 1 lost_at_target. Absent means the delivery was handed over and its result is unknown |
 
 The blocked flag of `delivery.StatusReport` is the presence of key 5. A report
-proves arrival when its state is accepted or delivered, or delivery_unknown with
-the cause `handed_over`: no other cause proves it.
+proves arrival when its state is accepted, delivered or delivery_unknown: a
+delivery_unknown report is always a delivery handed over (see below).
 
-**Unknown cause.** A target whose record of a delivery was lost to storage
-corruption cannot claim it handed the message over, which is what a plain
-delivery_unknown says, and the sender must not take its silence for delivery.
-Key 9 lets it say so: `lost_at_target` means the target lost what it had stored
-about the message, so whether it was delivered (or, for a control signal,
-executed) is unknown. It is not "not delivered". The cause belongs to
-[delivery](../delivery/README.md): it is `delivery.StatusReport.Unknown`, and
-this layer only maps it to and from key 9. The rules, enforced by the decoding
-path, which encoding also runs on what it writes:
-
-- key 9 appears only with state 4; with any other state the report is refused;
-- the only value is 1, `lost_at_target`; absence of the key is `handed_over`, so
-  a decoded state 4 without key 9 has the cause `handed_over`, an explicit 0 is
-  refused as non-canonical, and any other value is refused;
-- encoding needs a cause exactly when the state is 4 (`StatusReport.Validate` of
-  delivery); `handed_over` is written as no key, `lost_at_target` as 1, and a
-  cause the format cannot carry is an encoding error (`ErrReport`), never a
-  report written without the key, which a reader would take for a delivery
-  handed over. In particular `lost_at_sender` is never sent: a node's loss of
-  its own record is not something a target reports, so a report that names it
-  is a bug of the caller made visible;
-- only `handed_over` proves arrival, and so only it opens or moves the reply
-  window: the `reported_at` of a `lost_at_target` report is when the target found
-  the loss, not when the message arrived, and a message that may never have been
-  read needs no reply permission.
-
-The key is optional and absent by default, so every report written before it
-keeps its bytes and still decodes. A reader built without key 9 refuses a
-report that carries it, since unknown fields are refused, and with it a reply
-that carries such a report as evidence. The type string stays
-`sidera/status-report/1` only because the key was added before any node outside
-this repository's own builds exchanged status reports; once nodes are deployed,
-a new field is a new type string. `Outbound.ApplyReport` hands the report's
-`delivery.StatusReport` to the delivery record, so the cause arrives with it: a
-sender that applies a `lost_at_target` report is told the lost-at-target wording
-and never the one that says the target handed the message over.
+**A target never reports a loss.** A target whose record of a delivery was lost to
+storage has nothing to report, and the sender learns of it from the target's
+answer to a pull that it holds no record (an unsigned answer: see the sender's
+record, below), so a status report has no cause of an unknown result and the
+state 4 means a delivery handed over and nothing else. Key 9, which once carried
+`lost_at_target`, is not part of the format: a payload that has it is refused like
+any other unknown key, whatever the state and the value, and no report is encoded
+with it. It needs no reserved number: no report with it was ever issued outside
+this repository's own builds, and the type string stays `sidera/status-report/1`
+for that reason; once nodes are deployed, a new field is a new type string.
 
 The reject reason codes are written down in this table, not taken from the
 order of the Go constants of `delivery`, so reordering those never changes what
@@ -482,13 +455,12 @@ which may still admit it.
   `TestRetryAndDeduplication`, `TestEncodeRefusesWhatDecodeRefuses`, and for the
   system endpoint the rows of `TestEnvelopeDecodeRules` and
   `TestSystemEndpointIsNoRecipient`);
-  `records_test.go` (`TestStatusReportRules`, `TestStatusReportUnknownCauseDecodeRules`,
-  `TestStatusReportUnknownCauseRoundTrips`,
-  `TestStatusReportRefusesUnknownCauseWithoutWireValue`,
-  `TestUnknownCauseWireTableIsIndependentOfGoOrder`,
+  `records_test.go` (`TestStatusReportRules`, `TestStatusReportOfAnUnknownResultIsAHandOver`,
   `TestStatusReportProvesArrival`, `TestControlReplyRules`,
   `TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey`, which includes the
   sending-node check); `golden_test.go` (`TestGoldenRequestDigest`);
+  `keynine_test.go` (`TestStatusReportRefusesKeyNine`); `norecord_test.go`
+  (`TestApplyNoRecordFindsTheTrackedDeliveryOnItsNode`);
   `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`,
   `TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply`,
   `TestAReportDatedAfterTheDeliverysReportByIsIgnored`);

@@ -371,7 +371,7 @@ func (v *view) setIn(in store.InRecord) {
 	if inUnfinished(in) {
 		v.unfinished++
 	}
-	v.queue(in.Key.Recipient, in.Key, !in.Lost && in.Record.State == delivery.StateAccepted)
+	v.queue(in.Key.Recipient, in.Key, in.Record.State == delivery.StateAccepted)
 }
 
 // setCtl is setIn for a control record.
@@ -387,7 +387,7 @@ func (v *view) setCtl(c store.CtlRecord) {
 	if ctlUnfinished(c) {
 		v.unfinished++
 	}
-	v.queue(c.Key.Recipient, c.Key, !c.Lost && c.Record.State == delivery.StateAccepted)
+	v.queue(c.Key.Recipient, c.Key, c.Record.State == delivery.StateAccepted)
 }
 
 // setOut is setIn for a source record.

@@ -98,18 +98,15 @@ type Idempotency struct {
 func (r OutRecord) Name() string { return r.Key.FileName() }
 
 // InRecord is the target side record of one message for one endpoint, a
-// deduplication record included. Like OutRecord it has a regular and a lost
-// shape; the lost shape is the replacement of a damaged record, and then only
-// Lost, DiscoveredAt, Record and Dedup are set.
+// deduplication record included. A target keeps no replacement of a damaged
+// record: the sender learns of the loss when the target answers a pull that it
+// holds no record.
 type InRecord struct {
 	Key TargetKey
 	// Rev is the revision of the record as it was read, 0 for a record not
 	// written yet. Writing a record stores Rev+1. Nothing but the replay of a
 	// prompt or a block reads it, to tell whether a record was written since.
 	Rev uint64
-
-	Lost         bool
-	DiscoveredAt time.Time
 
 	Record delivery.Record
 	Dedup  delivery.DedupRecord
@@ -179,13 +176,10 @@ type CreateIntent struct {
 }
 
 // CtlRecord is the target side record of a control signal, with the stored
-// control reply and, for a session creation, the creation intent. It has the
-// same two shapes as InRecord.
+// control reply and, for a session creation, the creation intent. Like InRecord
+// it has no replacement of a damaged one.
 type CtlRecord struct {
 	Key TargetKey
-
-	Lost         bool
-	DiscoveredAt time.Time
 
 	Record delivery.Record
 	// Dedup holds the stored control reply, once there is one.

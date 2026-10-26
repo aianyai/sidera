@@ -171,7 +171,8 @@ func (w *powerLossWorld) next() *operation {
 
 // damageOp damages the body of a target record that is on the disk, as the
 // disk may while the node is stopped, and runs the startup rules over it: the
-// record is quarantined and replaced by a lost record, with an alert.
+// record is quarantined, with an alert, and nothing replaces it: a target that
+// lost a record keeps none.
 func (w *powerLossWorld) damageOp() *operation {
 	if w.rng(6) != 0 {
 		return nil // rare: most messages live a full life
@@ -203,11 +204,11 @@ func (w *powerLossWorld) damageOp() *operation {
 				return nil
 			},
 			writes: map[string][]byte{
-				p: w.enc(s.lostIn(in.Key)),
 				path.Join(store.InDir, corruptName(in, id)): damaged,
 				path.Join(store.AlertsDir, alert.Name()):    w.enc(alert),
 			},
-			after: func() { w.stage[i] = 7 },
+			removes: []string{p},
+			after:   func() { w.stage[i] = 7 },
 		}
 	}
 	return nil
@@ -232,9 +233,10 @@ func (w *powerLossWorld) leased(i int) store.InRecord {
 // stages of the messages and the fixtures, never from the store's own plan: the
 // plan is what the call below uses, and the plan is checked against this.
 //
-// A target record is finished once acknowledged (stage 4 and after) or when it
-// is the replacement of a lost one (stage 7, with its quarantined file); a
-// source record once its delivery was reported (stage 5). Administrative
+// A target record is finished once acknowledged (stage 4 and after); one that
+// was quarantined (stage 7) is no longer there, and its quarantined file stays
+// for the owner until the alert is acknowledged. A source record is finished once
+// its delivery was reported (stage 5). Administrative
 // results are past their seven days. Nothing else is finished in this world: the
 // alerts are not acknowledged, the endpoints are open, and the bodies a swept
 // record referred to were released by the update that finished it.
@@ -248,10 +250,7 @@ func (w *powerLossWorld) sweep() *operation {
 		in, out := tgtIn(i), srcOut(i, true)
 		inFile, outFile := path.Join(store.InDir, in.Name()), path.Join(store.OutDir, out.Name())
 		switch stage := w.stage[i]; {
-		case has(inFile) && (stage == 4 || stage == 5 || stage == 7):
-			if stage == 7 {
-				op.removes = append(op.removes, path.Join(store.InDir, corruptName(in, alertFor(store.InDir, in.Name()))))
-			}
+		case has(inFile) && (stage == 4 || stage == 5):
 			op.removes = append(op.removes, inFile)
 			op.summaries = append(op.summaries, tgtKey(i).String())
 		}

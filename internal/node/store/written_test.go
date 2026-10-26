@@ -11,8 +11,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 )
 
-// A write of target records returns them as written: one revision on, and a
-// lost record unchanged. The expectation is the disk read back by a new scan,
+// A write of target records returns them as written: one revision on. The expectation is the disk read back by a new scan,
 // never the function's own computation.
 
 // writtenCase is one write function, the records it is given and what it returns.
@@ -31,8 +30,8 @@ func writtenCases() []writtenCase {
 	one := func(i int) func() []store.InRecord {
 		return func() []store.InRecord { return []store.InRecord{inRev(i, 1), withRev(inRev(i+1, 4), 4)} }
 	}
-	lost := func() []store.InRecord {
-		return []store.InRecord{inRev(1, 1), lostInAt(tgtKey(2), base), inRev(3, 7)}
+	mixed := func() []store.InRecord {
+		return []store.InRecord{inRev(1, 1), inRev(2, 1), inRev(3, 7)}
 	}
 	seedIns := func(ins ...int) func(t *testing.T, mem *fsxtest.Mem) {
 		return func(t *testing.T, mem *fsxtest.Mem) {
@@ -44,7 +43,7 @@ func writtenCases() []writtenCase {
 	closed8 := directEndpoint(8, "chat")
 	closed8.Status, closed8.Token = store.EndpointClosed, nil
 	return []writtenCase{
-		{name: "Deliver", ins: lost, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+		{name: "Deliver", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.Deliver(nil, ins)
 		}},
 		{name: "DeliverReply", ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
@@ -66,19 +65,19 @@ func writtenCases() []writtenCase {
 		{name: "Ack", ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.Ack(ins, nil)
 		}},
-		{name: "Tick", ins: lost, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+		{name: "Tick", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.Tick(store.TickBatch{In: ins})
 		}},
-		{name: "EndpointDrain", ins: lost, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+		{name: "EndpointDrain", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.EndpointDrain(store.DrainBatch{In: ins})
 		}},
-		{name: "InstanceDrain", ins: lost, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+		{name: "InstanceDrain", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.InstanceDrain([]store.EndpointRecord{closed8}, store.DrainBatch{In: ins})
 		}},
-		{name: "EndpointDrainReplay", ins: lost, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+		{name: "EndpointDrainReplay", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.EndpointDrainReplay(store.DrainBatch{In: ins})
 		}},
-		{name: "InstanceDrainReplay", ins: lost, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+		{name: "InstanceDrainReplay", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.InstanceDrainReplay([]store.EndpointRecord{closed8}, store.DrainBatch{In: ins})
 		}},
 		{name: "PromptReplay", setup: seedIns(1, 2), ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
@@ -87,7 +86,7 @@ func writtenCases() []writtenCase {
 		{name: "BlockedReplay", setup: seedIns(1, 2), ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.BlockedReplay(ins)
 		}},
-		{name: "QuarantineBody", ins: lost, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+		{name: "QuarantineBody", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.QuarantineBody(store.BodyQuarantine{Name: store.BodyRefOf(bodyBytes(1)).Name(), AlertID: alertFor(store.BodiesDir, "x"), In: ins})
 		}},
 		{name: "FeedbackForm", ins: func() []store.InRecord { return []store.InRecord{noticeFor(srcOut(40, false))} },
@@ -121,9 +120,6 @@ func TestWritesReturnTheTargetRecordsAsAScanReadsThemBack(t *testing.T) {
 			sc := r.scan() // a new scan: the disk, not the call
 			for i, w := range written {
 				wantRev := given[i].Rev + 1
-				if given[i].Lost {
-					wantRev = given[i].Rev
-				}
 				if w.Key != given[i].Key || w.Rev != wantRev {
 					t.Errorf("record %d: returned %s at revision %d, want %s at revision %d", i, w.Key, w.Rev, given[i].Key, wantRev)
 				}

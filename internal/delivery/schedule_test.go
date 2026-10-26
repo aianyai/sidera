@@ -66,7 +66,7 @@ func mustReject(t *testing.T, r Record, now time.Time) Record {
 func TestNextTickNamesEachDeadline(t *testing.T) {
 	sourceQueued := NewSourceRecord(t0, schedAcceptBefore)
 	sourceExpired, _ := mustApply(t, sourceQueued, at(13*time.Minute), Event{Type: EventExpiryQueried, QueriedAt: at(13 * time.Minute)})
-	sourceUnknown, _ := mustApply(t, sourceQueued, at(13*time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
+	sourceUnknown, _ := mustApply(t, sourceQueued, at(13*time.Minute), Event{Type: EventDeliveryUnknown})
 	sourceDelivered, _ := mustApply(t, sourceQueued, at(time.Minute), Event{Type: EventDelivered})
 	sourceClosed := mustTick(t, sourceQueued, afterReportBy)
 
@@ -212,7 +212,8 @@ func scheduleRecord(rng *rand.Rand) Record {
 			apply(event(Event{Type: EventReceipt})),
 			apply(event(Event{Type: EventDelivered})),
 			apply(event(Event{Type: EventRejected, Reject: RejectUnauthorized})),
-			apply(event(Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})),
+			apply(event(Event{Type: EventDeliveryUnknown})),
+			apply(event(Event{Type: EventNoRecordAtTarget})),
 		}
 	case 1:
 		maxQueues := []time.Duration{5 * time.Minute, 30 * time.Minute, time.Hour, MaxQueueCap}
@@ -321,33 +322,20 @@ func lateTargetRecord(rng *rand.Rand, ab time.Time) Record {
 	return r
 }
 
-// lostScheduleRecord is a record that replaces one lost to storage corruption,
-// of a random kind, discovered at a whole minute: it has a ReportBy and none of
-// the other deadlines, and half of them have gone on to close, or, for a control
-// signal, to be delivered.
+// lostScheduleRecord is the sender's record that replaces one lost to storage
+// corruption, discovered at a whole minute: it has a ReportBy and none of the
+// other deadlines, and a quarter of them have gone on to close.
 func lostScheduleRecord(rng *rand.Rand) Record {
 	discovered := t0.Add(time.Duration(rng.Intn(120)) * time.Minute)
-	side, control := SideTarget, false
-	switch rng.Intn(3) {
-	case 0:
-		side = SideSource
-	case 1:
-		control = true
-	}
-	r, _, err := NewLostRecord(side, control, discovered)
+	r, _, err := NewLostRecord(discovered)
 	if err != nil {
 		panic(err)
 	}
-	switch rng.Intn(4) {
-	case 0:
+	if rng.Intn(4) == 0 {
 		r, _, err = r.Tick(r.ReportBy.Add(time.Nanosecond))
-	case 1:
-		if control {
-			r, _, err = r.Apply(discovered, Event{Type: EventReplyCommitted})
+		if err != nil {
+			panic(err)
 		}
-	}
-	if err != nil {
-		panic(err)
 	}
 	return r
 }
@@ -402,8 +390,7 @@ var requiredNextTickPaths = []string{
 	"backlog deadline", "backlog deadline clamped to settle",
 	"close after report_by: source queued", "close after report_by: source expired_unconfirmed",
 	"close after report_by: target delivery_unknown", "close after report_by: control delivery_unknown",
-	"close after report_by: lost source delivery_unknown", "close after report_by: lost target delivery_unknown",
-	"close after report_by: lost control delivery_unknown",
+	"close after report_by: lost source delivery_unknown",
 }
 
 // TestPropertyNextTickAgreesWithFineStepTick checks NextTick against Tick run

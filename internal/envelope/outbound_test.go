@@ -146,25 +146,10 @@ func TestApplyReport(t *testing.T) {
 		}
 	})
 	t.Run("a delivery_unknown report proves arrival", func(t *testing.T) {
-		n, _, _, err := outboundTo(t, KindMessage, true).ApplyReport(now, signedReport(t, reportFor("ctl-0001", 2, delivery.StatusReport{State: delivery.StateDeliveryUnknown, Unknown: delivery.UnknownHandedOver}, 100*time.Second, 0)))
+		n, _, _, err := outboundTo(t, KindMessage, true).ApplyReport(now, signedReport(t, reportFor("ctl-0001", 2, delivery.StatusReport{State: delivery.StateDeliveryUnknown}, 100*time.Second, 0)))
 		requireNoErr(t, err)
 		if n.Recipients[0].Arrival.ArrivedAt.IsZero() {
 			t.Error("no arrival")
-		}
-	})
-	t.Run("a lost_at_target report carries its cause to the record, gives its own notice and proves no arrival", func(t *testing.T) {
-		st := delivery.StatusReport{State: delivery.StateDeliveryUnknown, Unknown: delivery.UnknownLostAtTarget}
-		n, _, outs, err := outboundTo(t, KindMessage, true).ApplyReport(now, signedReport(t, reportFor("ctl-0001", 2, st, 100*time.Second, 0)))
-		requireNoErr(t, err)
-		got := n.Recipients[0]
-		if got.Delivery.State != delivery.StateDeliveryUnknown || got.Delivery.Unknown != delivery.UnknownLostAtTarget {
-			t.Errorf("state %v cause %v", got.Delivery.State, got.Delivery.Unknown)
-		}
-		if !got.Arrival.ArrivedAt.IsZero() {
-			t.Errorf("a loss found at %v opened the reply window", got.Arrival.ArrivedAt)
-		}
-		if len(outs) != 1 || len(outs[0].Feedback) != 1 || outs[0].Feedback[0].Kind != delivery.KindLostAtTarget {
-			t.Errorf("outcomes %+v, want one lost_at_target notice", outs)
 		}
 	})
 	t.Run("a rejected report proves no arrival", func(t *testing.T) {
@@ -669,7 +654,7 @@ func TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply(t *testing.T) {
 		for name, st := range map[string]delivery.StatusReport{
 			"accepted":          accepted(),
 			"accepted, blocked": {State: delivery.StateAccepted, Blocked: true, BlockedCause: delivery.CauseAdapterOffline},
-			"delivery_unknown":  {State: delivery.StateDeliveryUnknown, Unknown: delivery.UnknownHandedOver},
+			"delivery_unknown":  {State: delivery.StateDeliveryUnknown},
 			"rejected":          {State: delivery.StateRejected, Reject: delivery.RejectUnauthorized},
 		} {
 			n, eff, _, err := createOutbound(t).ApplyReport(now, signedReport(t, reportFor("ctl-0001", 2, st, 100*time.Second, 0)))

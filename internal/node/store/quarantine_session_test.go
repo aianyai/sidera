@@ -39,8 +39,8 @@ func verifyDoubleFault(t *testing.T, r *rig) {
 	if !hasAlert(sc, id, "control_unknown") {
 		t.Errorf("the alert must say a native session may remain: %v", sc.Alerts)
 	}
-	if _, _, c := find(t, sc, name); c == nil || !c.Lost {
-		t.Errorf("the replacement of the control record is missing: %#v", c)
+	if _, _, c := find(t, sc, name); c != nil {
+		t.Errorf("a control record has no replacement, yet one is there: %#v", c)
 	}
 	for _, id := range doubleFaultEndpoints {
 		if e := endpointOf(sc, id); e == nil || e.Status != store.EndpointClosed || e.Token != nil {

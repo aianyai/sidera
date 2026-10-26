@@ -22,7 +22,7 @@ const (
 	// ViolationControlSide: Control is set on a record that is not the target's.
 	ViolationControlSide
 	// ViolationExemptShape: Exempt is set on a record that is not the target's
-	// record of a message, or on one that replaces a lost record.
+	// record of a message.
 	ViolationExemptShape
 	// ViolationState: the state is not one this kind of record can be in: a
 	// target is never queued or expired_unconfirmed, a control record is never
@@ -36,11 +36,11 @@ const (
 	ViolationSubState
 	// ViolationUnknownCause: the cause of an unknown result is set outside
 	// delivery_unknown, is missing or unknown there, or is not one the record's
-	// side and kind can hold.
+	// side can hold (a target holds handed_over alone).
 	ViolationUnknownCause
-	// ViolationLostShape: a record that replaces one lost to storage corruption
-	// does not have the shape of one, or the marker is on a record that cannot be
-	// one.
+	// ViolationLostShape: a record that replaces the sender's own record lost to
+	// storage corruption does not have the shape of one, or the marker is on a
+	// record that cannot be one (a target's, among them).
 	ViolationLostShape
 	// ViolationDeadlinesUnset: AcceptBefore or ReportBy is not set.
 	ViolationDeadlinesUnset
@@ -102,8 +102,7 @@ const (
 	// is acknowledged.
 	ViolationDelivered
 	// ViolationDeliveryUnknownUnhandled: a target is delivery_unknown for a
-	// delivery that was never handed over, unless it replaces one lost to storage
-	// corruption, which is never handed out.
+	// delivery that was never handed over.
 	ViolationDeliveryUnknownUnhandled
 	// ViolationRejectedHandedOver: a target rejected a delivery that was handed
 	// over, which must have become delivery_unknown.
@@ -180,12 +179,13 @@ func (e *InvalidRecordError) Unwrap() error { return ErrInvalidRecord }
 // The invariants are those of the transitions: what change clears when the
 // state changes, what only the target or only the sender sets, and what a lease
 // can look like after Handout, Renew and Tick. A record that replaces one lost
-// to storage corruption is recognised by its Lost marker, which it keeps in every
-// state it can reach, and is held to the shape NewLostRecord gives it instead of
-// that of a delivery accepted normally; without the marker such a record would
-// be judged corrupt again after it closed, and replaced and reported once more. The checks run in the order of
-// the Violation constants, so the answer for a record with several faults does
-// not depend on how many there are.
+// to storage corruption (the sender's own) is recognised by its Lost marker, which
+// it keeps in every state it can reach, and is held to the shape NewLostRecord
+// gives it instead of that of a delivery accepted normally; without the marker
+// such a record would be judged corrupt again after it closed, and replaced and
+// reported once more. A target's record never has the marker or a loss cause. The
+// checks run in the order of the Violation constants, so the answer for a record
+// with several faults does not depend on how many there are.
 func (r Record) Valid() error {
 	for _, check := range []func() Violation{
 		r.checkKind, r.checkUnknownCause, r.checkLostShape, r.checkDeadlines, r.checkStateAt, r.checkBlocked, r.checkReported, r.checkLease, r.checkOutcome,
@@ -222,7 +222,7 @@ func (r Record) checkKind() Violation {
 	if r.Control && r.Side != SideTarget {
 		return ViolationControlSide
 	}
-	if r.Exempt && (!r.hasQueue() || r.Lost) {
+	if r.Exempt && !r.hasQueue() {
 		return ViolationExemptShape
 	}
 	if !r.stateAllowed() {
@@ -324,7 +324,7 @@ func (r Record) checkReported() Violation {
 		return ViolationReportedRejected
 	}
 	// delivery_unknown is reported on entering it, as the notice of its cause: the
-	// handed-over notice, or the loss at the target that a status report told. The
+	// handed-over notice, or the loss at the target that its answer told. The
 	// notice of the sender's own loss belongs to a replacement alone, which
 	// returned above. One delivery gets at most one of these notices, because
 	// delivery_unknown is entered once. The states after it are delivered (which
@@ -358,6 +358,11 @@ func (r Record) checkReported() Violation {
 		return ViolationReportedExpiry
 	}
 	if s == StateAccepted && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) {
+		return ViolationReportedExpiry
+	}
+	// A loss at the target is learned only for an accepted delivery, so an expiry
+	// notice before it was corrected on the way to accepted.
+	if has(KindLostAtTarget) && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) {
 		return ViolationReportedExpiry
 	}
 	if s == StateDelivered && has(KindExpiredUnconfirmed) && !has(KindExpiredCorrected) && !unknownReported {
@@ -467,7 +472,7 @@ func (r Record) checkOutcome() Violation {
 			return ViolationDelivered
 		}
 	}
-	if r.State == StateDeliveryUnknown && !r.Lost && !r.handedOver() {
+	if r.State == StateDeliveryUnknown && !r.handedOver() {
 		return ViolationDeliveryUnknownUnhandled
 	}
 	if r.State == StateRejected && r.handedOver() {

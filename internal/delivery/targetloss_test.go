@@ -51,7 +51,10 @@ func TestTargetNeverHoldsALossCause(t *testing.T) {
 	handedUnknown, _ := mustApply(t, handed, at(time.Minute), unknown(0).ev)
 	ctlUnknown, _ := mustApply(t, controlRecord(), at(time.Minute), unknown(0).ev)
 	accepted := targetRecord(t, t0, time.Hour)
-	closed := closeAt(t, accepted)
+	closed, _, err := handedUnknown.Tick(handedUnknown.ReportBy.Add(time.Nanosecond))
+	if err != nil || closed.State != StateClosedUnconfirmed {
+		t.Fatalf("closing: state %s err %v", closed.State, err)
+	}
 	delivered := deliverBody(t, accepted, at(time.Minute))
 	ctlDelivered, _ := mustApply(t, controlRecord(), at(time.Minute), replyCommitted())
 	srcLostAtTarget, _ := mustApply(t, sourceInState(t, "accepted"), at(time.Minute), Event{Type: EventNoRecordAtTarget})

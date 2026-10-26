@@ -44,8 +44,8 @@ engine applies the delivery rules and calls the writes.
   written.** `Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
   `Tick`, `EndpointDrain`, `InstanceDrain`, `EndpointDrainReplay`,
   `InstanceDrainReplay`, `PromptReplay`, `BlockedReplay` and `QuarantineBody`
-  return `[]InRecord` (the records given, one revision on, in the same order; a
-  lost record has no revision and is unchanged) and `FeedbackForm` returns the
+  return `[]InRecord` (the records given, one revision on, in the same order) and
+  `FeedbackForm` returns the
   `InRecord`. A caller keeping a view stores what comes back and never works the
   revision out itself: the rule has this one home. After an error nothing is
   returned, and the caller does not apply the write to its view. The records given
@@ -65,15 +65,15 @@ engine applies the delivery rules and calls the writes.
   read with.
 - **A session endpoint is prepared for the creation its control record holds.**
   `ControlIntake` refuses an endpoint that the record's intent does not name, and
-  `OrphanEndpoints` names a creating endpoint whose regular control record holds no
+  `OrphanEndpoints` names a creating endpoint whose control record holds no
   creation of it: an intake that failed before its commit point leaves its endpoint,
   and the signal accepted again has the same record name and a new endpoint, so the
-  record alone does not say which endpoint is the live one. A lost, quarantined or
+  record alone does not say which endpoint is the live one. A quarantined or
   damaged record keeps the endpoint for the quarantine.
 - **The alert is the last write of a quarantine.** A resumed quarantine writes what
-  the first pass wrote, in the same order (floors, the replacement under the same
-  name, the closed sessions, the alert last); nothing is skipped because it seems
-  done.
+  the first pass wrote, in the same order (floors, the replacement of a source
+  record under the same name, the closed sessions, the alert last); nothing is
+  skipped because it seems done.
 - **A quarantine closes every creating endpoint of the damaged control record,
   and the store decides which.** A control record accepted again after a failed
   first acceptance has the same name and a new endpoint, so several session
@@ -83,7 +83,7 @@ engine applies the delivery rules and calls the writes.
   that is not open, written closed with its token dropped, in the `session` role
   declared as many), and a caller cannot pass another: one left behind would hold
   one of the node's endpoint slots for good, because the rules that remove an
-  endpoint leave a creating one alone while its record is lost, quarantined or
+  endpoint leave a creating one alone while its record is quarantined or
   damaged, and one wrongly closed (an open endpoint, or another record's) would be
   a live session whose deliveries a drain then drops. A control record is refused
   without the scan.
@@ -98,11 +98,12 @@ engine applies the delivery rules and calls the writes.
   The scan and `DecodeRecord` share one function for it (kind held by the
   directory, name equal to the hash of kind and key, key parses); a first line
   that parses but does not match the name the file had leaves `CorruptFile.Key` nil.
-- **A header-unreadable quarantined file of a delivery directory is swept after a
-  lost record's retention.** With no replacement, nothing but the time of its
-  alert says when it may go: the retention of a lost record found then (from
-  `delivery.LostReportBy`) is the bound. A file with a record under its name goes
-  with that record.
+- **A header-unreadable quarantined file of `out/` is swept after a lost record's
+  retention.** With no replacement, nothing but the time of its alert says when it
+  may go: the retention of a lost record found then (from `delivery.LostReportBy`)
+  is the bound. A file with a record under its name goes with that record. The
+  quarantined files of `in/` and `ctl/` have no replacement and no such bound: a
+  target keeps no loss, so they stay for the owner until the alert is acknowledged.
 - **Existence is read before the transaction opens.** A call that removes files
   asks the disk which are there first and only consults the answer while it
   writes: a read that failed after the commit point would be an ordinary error on
@@ -178,14 +179,15 @@ engine applies the delivery rules and calls the writes.
   is cut as a record, never as a file name, so its floor goes with it.
 - Quarantine the files of `Scan.Damaged` in the order listed, and on a
   `*DamagedFileError` quarantine the file it names and try again.
-- Give `Quarantine` and `QuarantineResume` a replacement only for a delivery
-  record whose first line was trusted (`DamagedFile.Key`, `CorruptFile.Key` set),
-  built with the delivery package's constructor for a lost record.
-- On a body that does not hash to its name, replace a record with a lost record
-  only when `delivery.Record.NeedsBody()` says it still needs the bytes (the
-  replacement comes from `delivery.NewLostRecord`, and on the target side
-  `delivery.NewLostDedupRecord`); any other record keeps its state and only drops
-  the reference to the body.
+- Give `Quarantine` and `QuarantineResume` a replacement only for a source record
+  (`out/`) whose first line was trusted (`DamagedFile.Key`, `CorruptFile.Key` set),
+  built with the delivery package's constructor for a lost record. A target or
+  control record has none: a target keeps no loss, and the store refuses one.
+- On a body that does not hash to its name, replace a source record with a lost
+  record only when `delivery.Record.NeedsBody()` says it still needs the bytes (the
+  replacement comes from `delivery.NewLostRecord`); any other record keeps its
+  state and only drops the reference to the body, and a target record is written
+  with the reference dropped, whatever it needs.
 
 ## Crash tests
 

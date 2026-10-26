@@ -539,13 +539,12 @@ func sweepScenario(farFuture time.Time) scenario {
 		derived := derivedIn(4, 5, 2) // its derived delivery
 		derived.Record = deliveredRecord(derived.Record)
 		derived.Body = nil
-		lost := inRev(6, 1) // a replacement and its quarantined file
-		lost = lostInAt(lost.Key, base)
+		lost := lostOutAt(srcOut(6, false).Key, base) // a replacement and its quarantined file
 		closed := session(5, store.EndpointClosed, ctlName(4))
 		seed(t, mem, o1, o2, inDone, c, derived, lost, closed,
-			store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "in/x"},
+			store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "out/x"},
 			adminResult(1))
-		seedRaw(t, mem, store.InDir, lost.Name()+"."+store.AlertID{6}.String()+".corrupt", []byte("damaged"))
+		seedRaw(t, mem, store.OutDir, lost.Name()+"."+store.AlertID{6}.String()+".corrupt", []byte("damaged"))
 		seedBodies(t, mem, bodyBytes(3))
 	}
 	return scenario{
@@ -619,10 +618,10 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 			t.Errorf("%s: floor %d for a pair whose record with number %d is gone", where, got, o.Envelope.Seq[o.Key.Recipients[0].Endpoint])
 		}
 	}
-	lostName := inRev(6, 1).Name()
+	lostName := srcOut(6, false).Name()
 	corrupt := lostName + "." + store.AlertID{6}.String() + ".corrupt"
-	_, hasCorrupt := snap[statePath(store.InDir, corrupt)]
-	_, hasLost := snap[statePath(store.InDir, lostName)]
+	_, hasCorrupt := snap[statePath(store.OutDir, corrupt)]
+	_, hasLost := snap[statePath(store.OutDir, lostName)]
 	if hasCorrupt && !hasLost {
 		t.Errorf("%s: the replacement is gone while its quarantined file is still there", where)
 	}

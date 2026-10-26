@@ -56,7 +56,7 @@ func TestNoRecordAtTargetIsLostAtTargetOnlyFromAccepted(t *testing.T) {
 	inside := []time.Time{at(time.Minute), reportBy}
 	outside := []time.Time{reportBy.Add(time.Nanosecond), reportBy.Add(time.Hour)}
 
-	senderReplacement, _ := newLost(t, SideSource, false)
+	senderReplacement, _ := newLost(t)
 	senderReplacementClosed := closeAt(t, senderReplacement)
 
 	ignoredRows := []struct {
@@ -165,7 +165,7 @@ func TestNoRecordAtTargetIsLostAtTargetOnlyFromAccepted(t *testing.T) {
 	})
 	t.Run("the fact is no status report: a target never reports it", func(t *testing.T) {
 		src := sourceInState(t, "accepted")
-		for _, rep := range []StatusReport{{State: StateAccepted}, {State: StateDeliveryUnknown, Unknown: UnknownHandedOver}} {
+		for _, rep := range []StatusReport{{State: StateAccepted}, {State: StateDeliveryUnknown}} {
 			after, _, err := src.ApplyStatusReport(at(time.Minute), rep)
 			if err != nil || after.Unknown == UnknownLostAtTarget {
 				t.Errorf("report %+v: record cause %s, err %v", rep, after.Unknown, err)

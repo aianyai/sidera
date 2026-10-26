@@ -215,9 +215,6 @@ func TestReplyPermissionAgainstAnOracle(t *testing.T) {
 				if st == delivery.StateRejected {
 					rep.Reject = delivery.RejectBacklogExpired
 				}
-				if st == delivery.StateDeliveryUnknown {
-					rep.Unknown = delivery.UnknownHandedOver
-				}
 				if st == delivery.StateDelivered {
 					del = secs(delAt)
 				}

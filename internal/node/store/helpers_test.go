@@ -789,11 +789,11 @@ func deliveredRecord(r delivery.Record) delivery.Record {
 	return out
 }
 
-// lostRecord is the record that replaces a delivery record lost to storage
-// corruption at at, with the feedback its construction owes, from the delivery
-// package's own constructor.
-func lostRecord(side delivery.Side, control bool, at time.Time) (delivery.Record, []delivery.Feedback) {
-	r, o, err := delivery.NewLostRecord(side, control, at)
+// lostRecord is the record that replaces the sender's delivery record lost to
+// storage corruption at at, with the feedback its construction owes, from the
+// delivery package's own constructor.
+func lostRecord(at time.Time) (delivery.Record, []delivery.Feedback) {
+	r, o, err := delivery.NewLostRecord(at)
 	if err != nil {
 		panic(err)
 	}
@@ -805,7 +805,7 @@ func lostRecord(side delivery.Side, control bool, at time.Time) (delivery.Record
 func lostOutAt(k store.OutKey, at time.Time) store.OutRecord {
 	rec := store.OutRecord{Key: k, Lost: &store.LostOut{DiscoveredAt: at}}
 	for _, to := range k.Recipients {
-		r, feedback := lostRecord(delivery.SideSource, false, at)
+		r, feedback := lostRecord(at)
 		rec.Lost.Deliveries = append(rec.Lost.Deliveries, r)
 		for _, f := range feedback {
 			rec.Feedback = append(rec.Feedback, delivery.Item{
@@ -815,19 +815,6 @@ func lostOutAt(k store.OutKey, at time.Time) store.OutRecord {
 		}
 	}
 	return rec
-}
-
-// lostInAt is the replacement of the target record under k, with the dedup
-// record that stands in for the lost one.
-func lostInAt(k store.TargetKey, at time.Time) store.InRecord {
-	r, _ := lostRecord(delivery.SideTarget, false, at)
-	return store.InRecord{Key: k, Lost: true, DiscoveredAt: at, Record: r, Dedup: delivery.NewLostDedupRecord(k.Dedup(), at)}
-}
-
-// lostCtlAt is the replacement of the control record under k.
-func lostCtlAt(k store.TargetKey, at time.Time) store.CtlRecord {
-	r, _ := lostRecord(delivery.SideTarget, true, at)
-	return store.CtlRecord{Key: k, Lost: true, DiscoveredAt: at, Record: r, Dedup: delivery.NewLostDedupRecord(k.Dedup(), at)}
 }
 
 // misnamed is the content of a quarantined file whose first line parses, is of a

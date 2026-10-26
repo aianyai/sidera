@@ -91,18 +91,6 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return sessionCtl(1, 5)
 	case "out lost at the sender":
 		return lostOutAt(outKey(2, false), base.Add(time.Hour))
-	case "in lost at the target":
-		return lostInAt(tgtKey(2), base.Add(time.Hour))
-	case "in lost and closed":
-		in := lostInAt(tgtKey(2), base.Add(time.Hour))
-		closed, _, err := in.Record.Tick(in.Record.ReportBy.Add(time.Nanosecond))
-		if err != nil || closed.State != delivery.StateClosedUnconfirmed {
-			t.Fatalf("Tick of a replacement at its report_by: %v %v", closed.State, err)
-		}
-		in.Record = closed
-		return in
-	case "ctl lost at the target":
-		return lostCtlAt(ctlKey(2), base.Add(time.Hour))
 	}
 	t.Fatalf("no record for the golden vector %q", name)
 	return nil
@@ -276,7 +264,7 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"a state time with trailing zeros in the fraction", "in", `"state_at":"2026-10-24T09:00:00Z"`, `"state_at":"2026-10-24T09:00:00.000Z"`},
 		{"a source delivery without the time it entered its state", "out", `"state_at":"2026-10-24T09:00:00Z",`, ``},
 		{"a control record without the time it entered its state", "ctl", `"state_at":"2026-10-24T09:00:00Z",`, ``},
-		{"a replacement of a lost record without the time it entered its state", "in lost at the target", `"state_at":"2026-10-24T10:00:00Z",`, ``},
+		{"a replacement of a lost record without the time it entered its state", "out lost at the sender", `"state_at":"2026-10-24T10:00:00Z",`, ``},
 		{"a lost source replacement without the time it entered its state", "out lost at the sender", `"state_at":"2026-10-24T10:00:00Z",`, ``},
 		{"a state that is not a state", "in", `"state":"accepted"`, `"state":"accepted2"`},
 		{"the invalid state", "in", `"state":"accepted"`, `"state":"invalid"`},
@@ -341,25 +329,25 @@ func frameHead(t *testing.T, vector string) []byte {
 	return nil
 }
 
-// The shapes: a record is regular or lost, never a mixture.
-func TestLostShapesAreExclusive(t *testing.T) {
-	_, key, body := golden(t, "in")
-	lost := `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":{"side":"target","state":"delivery_unknown","state_at":"2026-10-24T10:00:00Z","unknown":"lost_at_target","lost":true,"report_by":"2026-10-24T14:04:00Z"},"dedup":{"digest":"0000000000000000000000000000000000000000000000000000000000000000","retain_until":"2026-10-24T14:04:00Z","digest_lost":true}}`
-	if _, dmg := store.DecodeRecord(store.InDir, nameOf("in", key), frameOf("in", key, lost)); dmg != nil {
-		t.Fatalf("a lost in record: %+v", dmg)
-	}
-	for name, mixed := range map[string]string{
-		"a lost record with a revision":           strings.Replace(lost, `{"lost":true,`, `{"rev":1,"lost":true,`, 1),
-		"a lost record with an authorization":     strings.Replace(lost, `"dedup"`, `"auth":{"kind":"allow"},"dedup"`, 1),
-		"a lost record with a body":               strings.Replace(lost, `"dedup"`, `"body":{"sha256":"ea8c004183bd3bd33e27907ed5cb35a24808cb99ab2bb41a727d0c675f5bcdfc","len":17},"dedup"`, 1),
-		"a lost record without a discovery":       strings.Replace(lost, `"discovered_at":"2026-10-24T10:00:00Z",`, ``, 1),
-		"a replacement that is not marked lost":   strings.Replace(lost, `"lost":true,"report_by"`, `"report_by"`, 1),
-		"a replacement without its unknown cause": strings.Replace(lost, `"unknown":"lost_at_target",`, ``, 1),
-		"a replacement of the wrong side's cause": strings.Replace(lost, `lost_at_target`, `lost_at_sender`, 1),
-		"a regular record with a discovery":       strings.Replace(body, `{"rev":1,`, `{"rev":1,"discovered_at":"2026-10-24T10:00:00Z",`, 1),
+// A target keeps no replacement of a record it lost: a body of the shape the
+// store once wrote for one (the lost marker, the discovery time, a record of the
+// replacement's shape) is a damaged body, in and ctl alike.
+func TestTargetRecordsHaveNoLostShape(t *testing.T) {
+	record := `{"side":"target","state":"delivery_unknown","state_at":"2026-10-24T10:00:00Z","unknown":"lost_at_target","lost":true,"report_by":"2026-10-24T14:04:00Z"}`
+	dedup := `{"digest":"0000000000000000000000000000000000000000000000000000000000000000","retain_until":"2026-10-24T14:04:00Z"}`
+	_, inKey, inBody := golden(t, "in")
+	_, ctlKeyText, _ := golden(t, "ctl")
+	for name, c := range map[string]struct {
+		dir, kind, key, body string
+	}{
+		"in":  {store.InDir, "in", inKey, `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":` + record + `,"dedup":` + dedup + `}`},
+		"ctl": {store.CtlDir, "ctl", ctlKeyText, `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":` + record + `,"dedup":` + dedup + `}`},
+		"in with the marker added to a regular body":  {store.InDir, "in", inKey, strings.Replace(inBody, `{"rev":1,`, `{"rev":1,"lost":true,`, 1)},
+		"in with a discovery added to a regular body": {store.InDir, "in", inKey, strings.Replace(inBody, `{"rev":1,`, `{"rev":1,"discovered_at":"2026-10-24T10:00:00Z",`, 1)},
+		"in with a digest marked lost":                {store.InDir, "in", inKey, strings.Replace(inBody, `"retain_until"`, `"digest_lost":true,"retain_until"`, 1)},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, dmg := store.DecodeRecord(store.InDir, nameOf("in", key), frameOf("in", key, mixed)); dmg == nil {
+			if _, dmg := store.DecodeRecord(c.dir, nameOf(c.kind, c.key), frameOf(c.kind, c.key, c.body)); dmg == nil {
 				t.Error("accepted")
 			}
 		})
@@ -571,7 +559,6 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	notice.Dedup = delivery.NewDedupRecord(notice.Key.Dedup(), digestOf(5), notice.Record.ReportBy)
 	notice.Covers = []store.CoverRef{{Out: srcOut(4, false).Name(), Recipient: addr(2, 2), Kind: delivery.KindRejected}}
 	recs["in notice that covers feedback"] = notice
-	recs["in lost"] = lostInAt(tgtKey(6), base.Add(time.Hour))
 
 	// Control records.
 	c := sessionCtl(1, 5)
@@ -591,7 +578,6 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	closeCtl.Preset, closeCtl.SessionEndpoint, closeCtl.Intent = "", ident.EndpointID{}, nil
 	closeCtl.ClosedEndpoint = ep(6)
 	recs["ctl that closed a session"] = closeCtl
-	recs["ctl lost"] = lostCtlAt(ctlKey(4), base.Add(time.Hour))
 
 	// The rest.
 	recs["endpoint direct"] = directEndpoint(7, "chat")

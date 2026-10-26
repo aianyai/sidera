@@ -25,8 +25,6 @@ type intentJSON struct {
 }
 
 type ctlJSON struct {
-	Lost               bool            `json:"lost,omitempty"`
-	DiscoveredAt       *wtime          `json:"discovered_at,omitempty"`
 	Record             recordJSON      `json:"record"`
 	Dedup              dedupJSON       `json:"dedup"`
 	Kind               string          `json:"kind,omitempty"`
@@ -80,20 +78,6 @@ func encodeCtl(r CtlRecord) ([]byte, error) {
 	j.Record = rj
 	if j.Dedup, err = toDedup(r.Dedup, r.Key); err != nil {
 		return nil, err
-	}
-	if r.Lost {
-		if r.Kind != 0 || r.Preset != "" || !r.SessionEndpoint.IsZero() || !r.AcceptedAt.IsZero() || r.EndpointMaxQueue != 0 || !r.SentAt.IsZero() ||
-			r.Body != nil || r.Intent != nil || !r.ClosedEndpoint.IsZero() || len(r.Result) != 0 {
-			return nil, errors.New("a lost control record holds the parts of a regular one")
-		}
-		if j.DiscoveredAt = tptr(r.DiscoveredAt); j.DiscoveredAt == nil {
-			return nil, errors.New("the discovery time is required")
-		}
-		j.Lost = true
-		return marshal(j)
-	}
-	if !r.DiscoveredAt.IsZero() {
-		return nil, errors.New("a regular control record has no discovery time")
 	}
 	if !r.Kind.IsControl() {
 		return nil, fmt.Errorf("%s is not a control signal", r.Kind)
@@ -164,18 +148,6 @@ func decodeCtl(key TargetKey, body []byte) (CtlRecord, error) {
 	}
 	if r.Dedup, err = fromDedup(j.Dedup, key); err != nil {
 		return r, err
-	}
-	if j.Lost {
-		if j.Kind != "" || j.Preset != "" || j.SessionEndpoint != "" || j.AcceptedAt != nil || j.EndpointMaxQueueNS != 0 || j.SentAt != nil ||
-			j.Body != nil || j.Intent != nil || j.ClosedEndpoint != "" || len(j.Result) != 0 {
-			return r, errors.New("a lost control record holds the parts of a regular one")
-		}
-		r.Lost = true
-		r.DiscoveredAt, err = tmust(j.DiscoveredAt, "discovered_at")
-		return r, err
-	}
-	if j.DiscoveredAt != nil {
-		return r, errors.New("a regular control record has no discovery time")
 	}
 	if r.Kind, err = enumValue(j.Kind, envKindNames, "envelope kind"); err != nil {
 		return r, err

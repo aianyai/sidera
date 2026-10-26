@@ -31,14 +31,12 @@ type StatusReport struct {
 	// message of a created session it is the session endpoint, not the runtime
 	// endpoint the control signal was addressed to.
 	Recipient ident.EndpointID
-	// Status is the state, with the reason of a rejection, the cause of a block
-	// and the cause of an unknown result, as delivery reports it. The wire form
-	// writes the block cause only while the delivery is blocked. The unknown
-	// cause is written as key 9 for a loss at the target, and not at all for a
-	// delivery handed over, which a reader takes the absence to mean. Encoding
-	// refuses a cause the wire format cannot carry, a loss at the sender among
-	// them: a source-side loss is never sent as a status report, and writing it
-	// without the cause would pass it off as a delivery handed over.
+	// Status is the state, with the reason of a rejection and the cause of a
+	// block, as delivery reports it. The wire form writes the block cause only
+	// while the delivery is blocked. A state delivery_unknown is always a delivery
+	// handed over: a target never reports a loss, because a target that lost its
+	// record has nothing to report and the sender learns of it from the target's
+	// answer that it holds no record.
 	Status delivery.StatusReport
 	// ReportedAt is the moment the target recorded the state the report states,
 	// not the moment it signed the report. A target that sends the report again
@@ -53,16 +51,11 @@ type StatusReport struct {
 
 // ProvesArrival reports whether the report shows that the message reached the
 // target node and was kept: accepted (queued or leased), delivered, or handed
-// out with an unknown result. A rejection and a closed delivery do not, and
-// neither does an unknown result of any cause but a delivery handed over: a
-// loss at the target reports when the target found it, not when the message
-// arrived.
+// out with an unknown result. A rejection and a closed delivery do not.
 func (r StatusReport) ProvesArrival() bool {
 	switch r.Status.State {
-	case delivery.StateAccepted, delivery.StateDelivered:
+	case delivery.StateAccepted, delivery.StateDelivered, delivery.StateDeliveryUnknown:
 		return true
-	case delivery.StateDeliveryUnknown:
-		return r.Status.Unknown == delivery.UnknownHandedOver
 	}
 	return false
 }
@@ -96,11 +89,6 @@ var (
 		2: delivery.CauseRuntimeAuth,
 		3: delivery.CauseNativeUnavailable,
 	}
-	// unknownCauseWire has no entry for a delivery handed over, which is the
-	// absence of key 9, nor for a loss at the sender, which is never reported.
-	unknownCauseWire = []delivery.UnknownCause{
-		1: delivery.UnknownLostAtTarget,
-	}
 )
 
 func toWireCode[T comparable](table []T, v T) (uint64, bool) {
@@ -129,13 +117,9 @@ type statusReportWire struct {
 	ReportedAt   int64  `cbor:"6,keyasint"`
 	DeliveredAt  *int64 `cbor:"7,keyasint,omitempty"`
 	Sender       []byte `cbor:"8,keyasint"`
-	UnknownCause uint64 `cbor:"9,keyasint,omitempty"`
 }
 
 func statusReportToWire(r StatusReport) (statusReportWire, error) {
-	if err := r.Status.Validate(); err != nil {
-		return statusReportWire{}, fmt.Errorf("%w: %w", ErrReport, err)
-	}
 	state, ok := toWireCode(stateWire, r.Status.State)
 	if !ok {
 		return statusReportWire{}, fmt.Errorf("%w: a target does not report state %s", ErrReport, r.Status.State)
@@ -153,11 +137,6 @@ func statusReportToWire(r StatusReport) (statusReportWire, error) {
 		w.BlockedCause, ok = toWireCode(causeWire, r.Status.BlockedCause)
 		if !ok {
 			return statusReportWire{}, fmt.Errorf("%w: block cause %s", ErrReport, r.Status.BlockedCause)
-		}
-	}
-	if r.Status.Unknown != delivery.UnknownCauseNone && r.Status.Unknown != delivery.UnknownHandedOver {
-		if w.UnknownCause, ok = toWireCode(unknownCauseWire, r.Status.Unknown); !ok {
-			return statusReportWire{}, fmt.Errorf("%w: unknown cause %s has no wire value", ErrReport, r.Status.Unknown)
 		}
 	}
 	var err error
@@ -202,17 +181,6 @@ func statusReportFromWire(w statusReportWire) (StatusReport, error) {
 		r.Status.Blocked = true
 		if r.Status.BlockedCause, ok = fromWireCode(causeWire, w.BlockedCause); !ok {
 			return StatusReport{}, fmt.Errorf("%w: block cause %d", ErrReport, w.BlockedCause)
-		}
-	}
-	if w.UnknownCause != 0 && state != delivery.StateDeliveryUnknown {
-		return StatusReport{}, fmt.Errorf("%w: an unknown cause is given only with the state delivery_unknown", ErrReport)
-	}
-	if state == delivery.StateDeliveryUnknown {
-		r.Status.Unknown = delivery.UnknownHandedOver
-		if w.UnknownCause != 0 {
-			if r.Status.Unknown, ok = fromWireCode(unknownCauseWire, w.UnknownCause); !ok {
-				return StatusReport{}, fmt.Errorf("%w: unknown cause %d", ErrReport, w.UnknownCause)
-			}
 		}
 	}
 	if r.ReportedAt, err = record.TimeFromWire(w.ReportedAt); err != nil {

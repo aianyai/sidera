@@ -49,7 +49,7 @@ func TestHandout(t *testing.T) {
 		}, 2 * time.Minute, AuthorizationAllow, 1, HandoutUnavailable, false, UnavailableNotQueued, StateDelivered, 1},
 		{"a delivery_unknown message is not handed out again", func(t *testing.T) Record {
 			r := handOut(t, targetRecord(t, t0, time.Hour), at(time.Minute), 1, 1)
-			r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
+			r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventDeliveryUnknown})
 			return r
 		}, 2 * time.Minute, AuthorizationAllow, 1, HandoutUnavailable, false, UnavailableNotQueued, StateDeliveryUnknown, 1},
 		{"denied authorization at recv closes a delivery with a live lease as delivery_unknown", func(t *testing.T) Record {
@@ -452,7 +452,7 @@ func TestChunkedAck(t *testing.T) {
 	})
 	t.Run("late chunk acknowledgements correct delivery_unknown only when complete", func(t *testing.T) {
 		r := start(t)
-		r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
+		r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventDeliveryUnknown})
 		r, v, _, _ := ackUnder(r, at(2*time.Minute), good(1))
 		if v != AckRecorded || r.State != StateDeliveryUnknown {
 			t.Fatalf("verdict %v state %s", v, r.State)
@@ -696,7 +696,7 @@ func TestAckLease(t *testing.T) {
 	})
 	t.Run("a late acknowledgement under a known lease still corrects delivery_unknown", func(t *testing.T) {
 		r, l := leased(t)
-		r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
+		r, _ = mustApply(t, r, at(time.Minute), Event{Type: EventDeliveryUnknown})
 		r, v, _, _ := r.Ack(at(2*time.Minute), Ack{Part: 1, Lease: l, TokenMatches: true})
 		if v != AckRecorded || r.State != StateDeliveryUnknown {
 			t.Errorf("verdict %v state %s", v, r.State)

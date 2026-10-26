@@ -15,7 +15,7 @@ type step struct {
 func receipt(at time.Duration) step   { return step{at, Event{Type: EventReceipt}} }
 func delivered(at time.Duration) step { return step{at, Event{Type: EventDelivered}} }
 func unknown(at time.Duration) step {
-	return step{at, Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver}}
+	return step{at, Event{Type: EventDeliveryUnknown}}
 }
 func rejectedBy(at time.Duration, why RejectReason) step {
 	return step{at, Event{Type: EventRejected, Reject: why}}
@@ -239,7 +239,7 @@ func TestTargetRecordProducesNoFeedback(t *testing.T) {
 	}{
 		{"a rejection on the target emits no feedback", false, Event{Type: EventRejected, Reject: RejectBacklogExpired}, StateRejected},
 		{"a closure after a hand-out on the target emits no feedback", true, Event{Type: EventRejected, Reject: RejectEndpointClosed}, StateDeliveryUnknown},
-		{"delivery_unknown on the target emits no feedback", true, Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver}, StateDeliveryUnknown},
+		{"delivery_unknown on the target emits no feedback", true, Event{Type: EventDeliveryUnknown}, StateDeliveryUnknown},
 		{"a block on the target emits no feedback", false, Event{Type: EventBlocked, Cause: CauseAdapterOffline}, StateAccepted},
 	}
 	for _, r := range rows {
@@ -265,21 +265,21 @@ func TestTargetRecordProducesNoFeedback(t *testing.T) {
 
 func TestTargetDeliveryUnknownNeedsHandout(t *testing.T) {
 	t.Run("delivery_unknown without a body that was handed out is illegal", func(t *testing.T) {
-		_, _, err := targetRecord(t, t0, time.Hour).Apply(at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
+		_, _, err := targetRecord(t, t0, time.Hour).Apply(at(time.Minute), Event{Type: EventDeliveryUnknown})
 		if !errors.Is(err, ErrIllegalTransition) {
 			t.Errorf("err = %v, want ErrIllegalTransition", err)
 		}
 	})
 	t.Run("a refused delivery_unknown leaves the record as it was", func(t *testing.T) {
 		rec := targetRecord(t, t0, time.Hour)
-		after, _, _ := rec.Apply(at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
+		after, _, _ := rec.Apply(at(time.Minute), Event{Type: EventDeliveryUnknown})
 		if after.State != StateAccepted {
 			t.Errorf("state %s", after.State)
 		}
 	})
 	t.Run("after a hand-out delivery_unknown is legal", func(t *testing.T) {
 		rec := handOut(t, targetRecord(t, t0, time.Hour), at(30*time.Second), 1, 1)
-		rec, _ = mustApply(t, rec, at(time.Minute), Event{Type: EventDeliveryUnknown, Unknown: UnknownHandedOver})
+		rec, _ = mustApply(t, rec, at(time.Minute), Event{Type: EventDeliveryUnknown})
 		if rec.State != StateDeliveryUnknown {
 			t.Errorf("state %s", rec.State)
 		}

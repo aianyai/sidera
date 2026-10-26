@@ -370,7 +370,7 @@ func TestWindow(t *testing.T) {
 		}
 	})
 	t.Run("a handed-out delivery with an unknown result proves arrival", func(t *testing.T) {
-		unknown := learn(t, messageOutbound(), sealReport(t, "m-1", runtimeR, delivery.StatusReport{State: delivery.StateDeliveryUnknown, Unknown: delivery.UnknownHandedOver}, t0.Add(time.Minute), time.Time{}, idA, netA), t0.Add(2*time.Minute))
+		unknown := learn(t, messageOutbound(), sealReport(t, "m-1", runtimeR, delivery.StatusReport{State: delivery.StateDeliveryUnknown}, t0.Add(time.Minute), time.Time{}, idA, netA), t0.Add(2*time.Minute))
 		adm := mustAdmit(t, request(&unknown, onA(2), t0.Add(3*time.Minute)))
 		if adm.Decision.Reason != ReasonArrivalWindow {
 			t.Errorf("decision %+v", adm.Decision)

@@ -206,9 +206,9 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 			in.Key.Message = ""
 			return dropWritten(r.st.Deliver(nil, []store.InRecord{in}))
 		},
-		"a target record that is lost and has a body": func(r *rig) error {
+		"a target record without the fields of a handout": func(r *rig) error {
 			in := tgtIn(1)
-			in.Lost = true
+			in.Handout = store.HandoutFields{}
 			return dropWritten(r.st.Deliver(nil, []store.InRecord{in}))
 		},
 		"an open endpoint without a token": func(r *rig) error {
