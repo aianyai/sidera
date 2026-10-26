@@ -277,8 +277,9 @@ methods to this list.
   holds), each with a scan taken after the one before, giving the store the scan and the
   node; a source record whose first line can be trusted gets the lost record
   (`lostOut`) and a file lost unread the out-lost record the store writes, whose item the
-  queue of feedback loads. A body that is not what its record says (`readBody`, which
-  takes the record that owns it) settles that one record; a write that meets a damaged
+  queue of feedback loads. A body that is not what its record says, or is gone (`readBody`, which
+  takes the record that owns it) settles that one record, and a notice among them is told
+  again from what it covered (`reissueCovered`); a write that meets a damaged
   floor file (`retryingDamaged`) has it settled and is tried again, and the book of
   sequence numbers is built again from the disk. A damaged file of any other
   directory is not settled while the node runs: `settleLive` refuses it and the write

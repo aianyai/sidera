@@ -204,13 +204,13 @@ func (e *Engine) retryingDamaged(now time.Time, write func() error) error {
 }
 
 // readBody reads the body of the record owner, which holds ref, for whatever needs
-// its bytes. A body that is not what its record says is damage: the record is
-// settled before the error is returned, so that whoever asked is told what it found
-// and need not know what was done.
+// its bytes. A body that is not what its record says, and one whose file is gone,
+// are damage: the record is settled before the error is returned, so that whoever
+// asked is told what it found and need not know what was done.
 func (e *Engine) readBody(now time.Time, owner store.Record, ref store.BodyRef) ([]byte, error) {
 	b, err := e.d.Store.ReadBody(owner.Name(), ref)
-	if errors.Is(err, store.ErrBodyMismatch) {
-		if qerr := e.quarantineBody(now, owner); qerr != nil {
+	if gone := errors.Is(err, store.ErrBodyMissing); gone || errors.Is(err, store.ErrBodyMismatch) {
+		if qerr := e.quarantineBody(now, owner, gone); qerr != nil {
 			e.classify(qerr) // a fatal error stops the loop after this command
 			return nil, errors.Join(err, qerr)
 		}
@@ -218,15 +218,19 @@ func (e *Engine) readBody(now time.Time, owner store.Record, ref store.BodyRef) 
 	return b, err
 }
 
-// quarantineBody settles the record whose body is not what it says, with an alert of
-// its own. The body file is left: once the record is settled, it is an orphan and
+// quarantineBody settles the record whose body is not what it says, or is gone (gone),
+// with an alert of its own. The body file is left: once the record is settled, it is an orphan and
 // the next start removes it. A record that fails to be settled keeps its reference,
 // so the next read of the body finds it again.
-func (e *Engine) quarantineBody(now time.Time, owner store.Record) error {
+func (e *Engine) quarantineBody(now time.Time, owner store.Record, gone bool) error {
 	file := path.Join(store.BodiesDir, store.BodyFileName(owner.Name()))
+	what := " is not what its record says"
+	if gone {
+		what = " is gone"
+	}
 	alert := store.QuarantineAlert{
 		Kind: alertCorruptBody, At: now, Subject: file,
-		Detail: file + " is not what its record says; the record is settled",
+		Detail: file + what + "; the record is settled",
 	}
 	if err := e.retryingDamaged(now, func() error { return e.quarantineOwner(now, owner, alert) }); err != nil {
 		return err
@@ -241,6 +245,12 @@ func (e *Engine) quarantineBody(now time.Time, owner store.Record) error {
 func (e *Engine) quarantineOwner(now time.Time, owner store.Record, alert store.QuarantineAlert) error {
 	switch r := owner.(type) {
 	case store.InRecord:
+		if len(r.Covers) > 0 {
+			// A notice that is lost owes its sender what it told, again.
+			if err := e.reissueCovered(now, r); err != nil {
+				return err
+			}
+		}
 		written, err := e.d.Store.QuarantineBody(store.BodyQuarantine{Record: r, Alert: alert})
 		if err != nil {
 			return err

@@ -257,6 +257,67 @@ func (e *Engine) formNotice(now time.Time, st *endpointState, n delivery.Notice,
 	return in, body, nil
 }
 
+// reissueCovered owes a sender again what a notice told it, for a notice that is lost
+// with its body: the items it covered were taken off their source records when it
+// was written, and no other record would say they were never read. Each goes back on
+// the record it came from, written before the notice is settled, so that a crash in
+// between finds the notice damaged again and writes the same items again, and the
+// queue then tells it with a new notice. A cover whose source record is gone (swept,
+// or lost and replaced by another) is left out with a word in the log, and so is the
+// cover of an out-lost record, whose item is built from the name of a file that
+// cannot be read again once the record is swept; the owner holds the alerts of both
+// losses.
+func (e *Engine) reissueCovered(now time.Time, notice store.InRecord) error {
+	outs := map[string]store.OutRecord{}
+	for _, c := range notice.Covers {
+		o, ok := outs[c.Out]
+		if !ok {
+			if o, ok = e.view.out[c.Out]; !ok {
+				e.log.Warn("a notice that was lost covered an item of a record this node does not hold; it is not owed again", "kind", c.Kind.String())
+				continue
+			}
+		}
+		it := e.coveredItem(now, o, c)
+		// An item a failed clearing left on the record is the one the cover names: a cover
+		// clears by the recipient and the kind (withoutItem).
+		if slices.ContainsFunc(o.Feedback, func(x delivery.Item) bool {
+			return x.Ref.Recipient == it.Ref.Recipient && x.Feedback.Kind == it.Feedback.Kind
+		}) {
+			continue
+		}
+		o.Feedback = append(slices.Clone(o.Feedback), it)
+		outs[c.Out] = o
+	}
+	for _, o := range sortedOuts(outs) {
+		if err := e.d.Store.SourceUpdate(o); err != nil {
+			return err
+		}
+		e.putOut(now, o)
+	}
+	return nil
+}
+
+// coveredItem is the item that a cover stands for, as the delivery rules made it as
+// far as the record still says: the kind is the cover's, the reason of a rejection and
+// the state of the delivery are the record's now.
+func (e *Engine) coveredItem(now time.Time, o store.OutRecord, c store.CoverRef) delivery.Item {
+	fb := delivery.Feedback{Kind: c.Kind}
+	if o.Lost == nil {
+		for _, t := range o.Outbound.Deliveries() {
+			if t.Address == c.Recipient {
+				fb.State = t.Delivery.State
+				if c.Kind == delivery.KindRejected {
+					fb.Reject = t.Delivery.Reject
+				}
+			}
+		}
+	}
+	return delivery.Item{
+		Ref:      delivery.DeliveryRef{Sender: ident.Address{Node: e.d.Node, Endpoint: o.Key.Sender}, Message: o.Key.Message, Recipient: c.Recipient},
+		Feedback: fb, At: now,
+	}
+}
+
 // recordOfItem is the file name of the record that holds an item: the out-lost
 // record that names itself, or the source record of the message the item is about.
 func (e *Engine) recordOfItem(it delivery.Item) (string, bool) {

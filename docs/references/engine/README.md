@@ -544,12 +544,19 @@ would have settled them went with the record. When one was being created a nativ
 may exist that nobody will settle, so the alert is of kind `control_unknown`, the
 alert of a session nobody controls, and not of the plain damage.
 
-A body that is not what its record says is found when something reads it
-(`readBody`, which the sending of a message uses and the hand-out of a message will
-use). Every body belongs to one record, so that one record is settled by what it still
+A body that is not what its record says, or whose file is gone, is found when something
+reads it (`readBody`, which the sending of a message and the hand-out of a message use;
+the alert says which of the two it was). Every body belongs to one record, so that one record is settled by what it still
 needs: a target record that needs it is removed and leaves the view, a source record
 that needs it is replaced by the lost record, a record that does not need it keeps its
-state without the reference; the settlement has an alert of its own. A control record
+state without the reference; the settlement has an alert of its own. A notice of the system
+endpoint that is settled this way owes its sender what it told: each item it covered goes
+back on the source record it came from (`reissueCovered`), written before the notice is
+removed so that a crash in between finds the notice damaged again and writes the same items
+again, and the queue tells them with a new notice. What the item says of the delivery is the
+record's now (the kind is the cover's). A cover whose source record is gone, and the cover of
+an out-lost record, whose item is built from the name of a file that cannot be read again, are
+left out with a word in the log; the owner holds the alert of each loss. A control record
 that still holds a creation which is not settled needed the body (the initial message goes
 to the session the creation makes), and the store keeps a control record and only lets go
 of the reference, so the engine fails the creation: the reply says `failed` with
