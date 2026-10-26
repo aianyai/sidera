@@ -43,10 +43,12 @@ func programTable(t testing.TB) *txn.Table { return harness.ProgramTable(t) }
 
 // rig is one process of the node over a disk.
 type rig struct {
-	t      testing.TB
-	mem    *fsxtest.Mem
-	faulty *fsxtest.Faulty
-	clk    *clocktest.Fake
+	t testing.TB
+	// creations counts the sessions seedCreations has put on the disk.
+	creations int
+	mem       *fsxtest.Mem
+	faulty    *fsxtest.Faulty
+	clk       *clocktest.Fake
 	// engineClock, when set, is the clock the engine is given instead of clk: a
 	// wrapper of it that a test uses to move time at a chosen moment.
 	engineClock clock.Clock

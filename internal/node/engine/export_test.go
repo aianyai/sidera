@@ -16,6 +16,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/record"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // The hooks the tests of the engine use to reach what only the loop may touch.
@@ -521,4 +522,10 @@ func NotTheToken(valid string) map[string]string {
 		"spare bits of the last character set": valid[:len(valid)-1] + string(alphabet[last+1]),
 		"nothing":                              "",
 	}
+}
+
+// FirstPromptAttempt is the attempt of the first prompt of the session that a
+// creation attempt makes.
+func FirstPromptAttempt(a adapterproto.AttemptID) adapterproto.AttemptID {
+	return firstPromptAttempt(a)
 }

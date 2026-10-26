@@ -1407,6 +1407,23 @@ func checkpoints(t testing.TB, r *rig) map[store.CheckpointKey]string {
 	return out
 }
 
+// seedCreations puts onto the disk a session of the instance for each attempt, as
+// a creation that has ended leaves it: the open endpoint and the control record
+// whose intent names the attempt. An adapter may put the checkpoint of an attempt
+// only when the node knows the attempt as one of a session of the instance.
+func (r *rig) seedCreations(instance string, attempts ...string) {
+	r.t.Helper()
+	for _, a := range attempts {
+		i := r.creations
+		r.creations++
+		session := mustEndpoint(r.t, byte(120+i))
+		rec := sessionCtlRecord(r.t, 70+i, session)
+		rec.Intent.Attempt = adapterproto.AttemptID(a)
+		r.seedRecord(store.EndpointRecord{ID: session, Kind: sessionKind, Instance: instance, Status: store.EndpointOpen, Token: bytes.Repeat([]byte{byte(10 + i)}, store.TokenLen), Session: &store.SessionInfo{Preset: "default"}, CreatedBy: strings.TrimSuffix(rec.Name(), ".rec")})
+		r.seedRecord(rec)
+	}
+}
+
 func attemptPut(id, state string) adapterproto.CheckpointPutParams {
 	return adapterproto.CheckpointPutParams{Scope: adapterproto.ScopeAttempt, ID: id, State: json.RawMessage(state)}
 }
@@ -1416,7 +1433,9 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 	key := store.CheckpointKey{Scope: "attempt", ID: attemptA}
 
 	t.Run("the state is stored compact, on disk when the answer comes, and a later put replaces it", func(t *testing.T) {
+		const other = "11111111-2222-4333-8444-555555555555"
 		r := newRig(t, 10)
+		r.seedCreations("chat", attemptA, other)
 		e := r.start()
 		if err := e.CheckpointPut(ctx, "chat", attemptPut(attemptA, "{ \"a\": 1,\n \"b\": [1, 2] }")); err != nil {
 			t.Fatal(err)
@@ -1430,7 +1449,6 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 		if got := checkpoints(t, r); len(got) != 1 || got[key] != `{"a":2}` {
 			t.Fatalf("on disk after a second put: %v, want the state replaced", got)
 		}
-		other := "11111111-2222-4333-8444-555555555555"
 		if err := e.CheckpointPut(ctx, "chat", attemptPut(other, `{"b":1}`)); err != nil {
 			t.Fatal(err)
 		}
@@ -1457,6 +1475,7 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 			return `{"k":"` + strings.Repeat("x", total-frame) + `"}`
 		}
 		r := newRig(t, 10)
+		r.seedCreations("chat", attemptA)
 		e := r.start()
 		if err := e.CheckpointPut(ctx, "chat", attemptPut(attemptA, fill(limit))); err != nil {
 			t.Fatalf("a state of exactly %d bytes: %v", limit, err)
@@ -1553,6 +1572,51 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 		}
 	})
 
+	t.Run("an attempt checkpoint needs an attempt of a session of the instance", func(t *testing.T) {
+		// The attempts below are the creation attempt of a session of the instance
+		// and the first prompt that follows from it; the others belong to a session
+		// of another instance, to a session that is closed, or to nobody. A put for
+		// any of them would write the state that the creation of another instance
+		// reads back.
+		const (
+			mine, foreign, closedOne, nobody = "21111111-2222-4333-8444-555555555555", "31111111-2222-4333-8444-555555555555", "41111111-2222-4333-8444-555555555555", "51111111-2222-4333-8444-555555555555"
+		)
+		r := newRig(t, 10)
+		r.enableInstance("agent", "")
+		r.seedCreations("chat", mine)
+		r.seedCreations("agent", foreign)
+		closedSession := mustEndpoint(t, 140)
+		closedCtl := sessionCtlRecord(t, 90, closedSession)
+		closedCtl.Intent.Attempt = closedOne
+		r.seedRecord(store.EndpointRecord{ID: closedSession, Kind: sessionKind, Instance: "chat", Status: store.EndpointClosed, Session: &store.SessionInfo{Preset: "default"}, CreatedBy: strings.TrimSuffix(closedCtl.Name(), ".rec")})
+		r.seedRecord(closedCtl)
+		e := r.start()
+		for name, id := range map[string]string{
+			"an attempt of a session of another instance": foreign,
+			"an attempt of a closed session":              closedOne,
+			"an attempt that belongs to nobody":           nobody,
+		} {
+			wantReason(t, e.CheckpointPut(ctx, "chat", attemptPut(id, `{"n":1}`)), engine.ReasonEndpointUnknown)
+			if got := checkpoints(t, r); len(got) != 0 {
+				t.Errorf("%s: a refused put left %v on disk", name, got)
+			}
+		}
+		if err := e.CheckpointPut(ctx, "chat", attemptPut(mine, `{"n":1}`)); err != nil {
+			t.Fatalf("the creation attempt of a session of the instance: %v", err)
+		}
+		if err := e.CheckpointPut(ctx, "agent", attemptPut(mine, `{"n":2}`)); err == nil {
+			t.Error("another instance put the checkpoint of an attempt of this one")
+		}
+		first := engine.FirstPromptAttempt(adapterproto.AttemptID(mine))
+		if err := e.CheckpointPut(ctx, "chat", attemptPut(string(first), `{"n":3}`)); err != nil {
+			t.Fatalf("the first prompt of that session: %v", err)
+		}
+		got := checkpoints(t, r)
+		if len(got) != 2 || got[store.CheckpointKey{Scope: "attempt", ID: mine}] != `{"n":1}` || got[store.CheckpointKey{Scope: "attempt", ID: string(first)}] != `{"n":3}` {
+			t.Errorf("on disk: %v, want the two accepted puts only", got)
+		}
+	})
+
 	t.Run("an instance that was not admitted is unknown", func(t *testing.T) {
 		r := newRig(t, 10)
 		r.enableInstance("agent", "")
@@ -1566,6 +1630,7 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 
 	t.Run("it is taken while the engine recovers and after it serves", func(t *testing.T) {
 		r := newRig(t, 10)
+		r.seedCreations("chat", attemptA)
 		e, _, err := r.open()
 		if err != nil {
 			t.Fatal(err)
@@ -1609,6 +1674,7 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				r := newRig(t, 10)
+				r.seedCreations("chat", attemptA)
 				e := r.start()
 				if err := e.CheckpointPut(ctx, "chat", attemptPut(attemptA, `{"old":true}`)); err != nil {
 					t.Fatal(err)
@@ -1633,6 +1699,7 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 
 	t.Run("a failure after the commit point stops the loop as for every write", func(t *testing.T) {
 		r := newRig(t, 10)
+		r.seedCreations("chat", attemptA)
 		e := r.start()
 		rule := r.faulty.Fail(failMatch("checkpoint-put", fsxSyncDir), errIO)
 		wantReason(t, e.CheckpointPut(ctx, "chat", attemptPut(attemptA, `{"a":1}`)), engine.ReasonStorageFatal)

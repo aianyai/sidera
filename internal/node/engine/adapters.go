@@ -786,10 +786,11 @@ func (c *cmdCheckpoint) run(e *Engine, _ time.Time) {
 }
 
 // CheckpointPut keeps the state an adapter asked the node to keep, one value for
-// each (scope, id): a later put replaces the earlier. The scope attempt takes any
-// valid attempt identifier; the scope session needs a session endpoint of the
-// instance that is open or being created, for the adapter keeps the state of a
-// session while it creates it. The state is stored compact and is on disk when this returns.
+// each (scope, id): a later put replaces the earlier. The scope session needs a
+// session endpoint of the instance that is open or being created, for the adapter
+// keeps the state of a session while it creates it; the scope attempt needs an
+// attempt of such an endpoint, so an adapter cannot write the state another
+// instance's creation will read back. The state is stored compact and is on disk when this returns.
 func (e *Engine) CheckpointPut(ctx context.Context, instance string, p adapterproto.CheckpointPutParams) error {
 	c := &cmdCheckpoint{call: newCall[struct{}](), instance: instance, params: p}
 	_, err := roundTrip(ctx, e, submitInternal, c, c.call)
@@ -804,12 +805,19 @@ func (e *Engine) checkpointPut(instance string, p adapterproto.CheckpointPutPara
 		return invalidParams(err)
 	}
 	key := store.CheckpointKey{Scope: string(p.Scope), ID: p.ID}
-	if p.Scope == adapterproto.ScopeSession {
+	switch p.Scope {
+	case adapterproto.ScopeSession:
 		st, err := e.view.resolveSessionBeingMade(instance, adapterproto.EndpointRef(p.ID))
 		if err != nil {
 			return err
 		}
 		key.ID = st.rec.ID.String()
+	case adapterproto.ScopeAttempt:
+		// An attempt is keyed by its own identifier, but it belongs to a session
+		// endpoint, and an adapter may keep state only for what its instance owns.
+		if _, err := e.view.resolveAttemptBeingMade(instance, adapterproto.AttemptID(p.ID)); err != nil {
+			return err
+		}
 	}
 	var compact bytes.Buffer
 	if err := json.Compact(&compact, p.State); err != nil {

@@ -481,7 +481,8 @@ the result is in. For the same reason the state of a session that the adapter pu
 `checkpoint.put` (scope `session`) is accepted while the endpoint is being created as well
 as when it is open: the adapter keeps it before it answers `created`. A checkpoint for an
 endpoint that is closed, that belongs to another instance or that does not exist is refused
-with `1001`.
+with `1001`; so is a checkpoint (scope `attempt`) for an attempt that is not one of a session of
+the instance, its creation attempt or the first prompt that follows from it.
 
 **Tool access.** The `env` of `tool_access`, in `session.create` and in the entries of
 `adapter.start`, holds what the session's tools need to reach the daemon: the token of

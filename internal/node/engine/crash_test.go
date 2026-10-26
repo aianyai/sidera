@@ -473,6 +473,7 @@ func TestCheckpointPutRecoversFromACrashAtEveryPoint(t *testing.T) {
 		}
 	}, "checkpoint-put")
 	r = newRig(t, 10, withObserver(walker))
+	r.seedCreations("chat", attemptA)
 	e := r.start()
 	if err := e.CheckpointPut(context.Background(), "chat", attemptPut(attemptA, old)); err != nil {
 		t.Fatal(err)

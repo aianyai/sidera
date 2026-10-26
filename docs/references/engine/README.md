@@ -319,6 +319,11 @@ back may put its state at once. The scope `session` needs a session endpoint of 
 instance that is open or whose creation has not ended: the adapter keeps the state of
 a session while it creates it, before the node has been told the session exists, and a
 creation whose adapter was refused that put would fail for it.
+The scope `attempt` needs an attempt of such a session: its creation attempt, or the first
+prompt that follows from it. The creation reads the state back by attempt, so an adapter that
+could put one under an attempt of another instance would write what that instance's creation
+believes it saved itself. An attempt that no session of the instance has is refused as
+`endpoint_unknown`, as a session of another instance is.
 
 `Quiesce` judges, in the same loop command as its other conditions, each instance
 named in `Expect.Adapters` against the host's counts: the notifications handled
@@ -1098,7 +1103,7 @@ reproducible).
 | A runtime outside the tested ranges is one alert | `adapters.go` (`probeResult`) | `TestVersionUntestedAlertIsRaisedOnceForARuntimeOutsideTheTestedRanges` |
 | Availability becomes handoff's signals; online and offline | `adapters.go` (`notified`, `gone`, `AdapterSignals`) | `TestAvailabilitySnapshotsBecomeHandoffSignals`, `TestAnAdapterThatIsGoneKeepsItsEndpointsItsRecordsAndItsAdmission`, `TestAnInstanceTheConfigurationDoesNotEnableIsUnknownToReadsAndToGone` |
 | Notifications about unknown endpoints write nothing; the busy state at start | `adapters.go` (`notified`, `markStarted`) | `TestNotificationsAboutUnknownEndpointsAreAcceptedAndSetNothingOnDisk`, `TestAdapterStartedTakesTheBusyStateOfTheSessionsItKnowsAndIgnoresTheRest`, `TestANewConnectionStartsFromWhatItReportsAndNotFromTheOneBefore` |
-| A checkpoint is on disk before it is answered; a session's is taken while the session is being created | `adapters.go` (`checkpointPut`), `view.go` (`resolveSessionBeingMade`) | `TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt`, `TestCheckpointPutRecoversFromACrashAtEveryPoint` |
+| A checkpoint is on disk before it is answered; a session's is taken while the session is being created | `adapters.go` (`checkpointPut`), `view.go` (`resolveSessionBeingMade`, `resolveAttemptBeingMade`) | `TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt`, `TestCheckpointPutRecoversFromACrashAtEveryPoint` |
 | `Quiesce` judges the host's counts | `recovery.go` | `TestQuiesceJudgesTheAdapterHostsCounts` |
 | `Quiesce` sees the outbound worker begin to wait out a delay after it looked at the worker running | `recovery.go` | `TestQuiesceSeesTheWorkerBeginToWaitOutADelayAfterItLookedAtTheWorkerRunning` |
 | The result of a close is stored with it | `endpoints.go` (`closeEndpoint`), `manage.go` (`CloseEndpointOp`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint` |

@@ -297,6 +297,23 @@ func (v *view) resolveSessionIn(instance string, ref adapterproto.EndpointRef, s
 	return e, nil
 }
 
+// resolveAttemptBeingMade is the session endpoint an attempt belongs to, for an
+// attempt of this instance: the creation attempt of a session endpoint of the
+// instance, and the first prompt that follows from it, while the endpoint is open or
+// being created. Any other attempt, a made-up one included, belongs to nobody and is
+// refused as the unknown endpoint is. The attempts of later prompts are not minted by
+// the engine yet; when they are, they are resolved here too, so that no attempt
+// escapes the instance that owns it.
+func (v *view) resolveAttemptBeingMade(instance string, attempt adapterproto.AttemptID) (*endpointState, error) {
+	for _, c := range v.ctl {
+		if c.Intent == nil || (c.Intent.Attempt != attempt && firstPromptAttempt(c.Intent.Attempt) != attempt) {
+			continue
+		}
+		return v.resolveSessionBeingMade(instance, adapterproto.EndpointRef(c.Intent.Endpoint.String()))
+	}
+	return nil, refuse(ReasonEndpointUnknown)
+}
+
 // What counts as an unfinished delivery is what still has work behind it that the
 // node took in through an entry of new work (the capacity check bounds exactly
 // that). A target message is unfinished while the delivery rules say it still
