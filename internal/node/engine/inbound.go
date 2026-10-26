@@ -345,18 +345,42 @@ func (e *Engine) judgeAuthz(now time.Time, env envelope.Envelope, from transport
 func (e *Engine) judgeRequest(now time.Time, env envelope.Envelope, from transport.Origin, sender ident.EndpointID,
 	target authz.Target, decl authz.Declaration, replyGranted bool) authz.Verdict {
 	action, _ := env.Kind.Action()
-	snd := authz.Sender{Node: from.Node(), Endpoint: sender}
-	if from.Local() {
+	return e.evaluate(now, authCheck{
+		stage: authz.StageIntake, local: from.Local(), sender: authz.Sender{Node: from.Node(), Endpoint: sender},
+		action: action, target: target, preset: env.Preset, bodySize: int64(len(env.Body)),
+		multiRecipient: env.MultiRecipient, reply: replyGranted, decl: decl,
+	})
+}
+
+// authCheck is what an authorization check is made of, for either of the two moments
+// it is made at: the arrival of an envelope and the hand-out of its body.
+type authCheck struct {
+	stage          authz.Stage
+	local          bool
+	sender         authz.Sender
+	action         authz.Action
+	target         authz.Target
+	preset         string
+	bodySize       int64
+	multiRecipient bool
+	reply          bool
+	decl           authz.Declaration
+}
+
+// evaluate is the one place the engine asks the authorization rules: a local source is
+// judged by the declarations of the target alone, and any other by the node's rules,
+// with the trust of a node elsewhere not known yet, which is the zero value and is
+// denied: a remote sender is refused until trust exists.
+func (e *Engine) evaluate(now time.Time, c authCheck) authz.Verdict {
+	if c.local {
 		return authz.EvaluateLocal(authz.LocalRequest{
-			Stage: authz.StageIntake, Sender: snd, Action: action, Target: target,
-			MultiRecipient: env.MultiRecipient, Reply: replyGranted, TargetDeclaration: decl,
+			Stage: c.stage, Sender: c.sender, Action: c.action, Target: c.target,
+			MultiRecipient: c.multiRecipient, Reply: c.reply, TargetDeclaration: c.decl,
 		})
 	}
-	// The trust of a node elsewhere is not known yet, and the request carries the
-	// zero value, which is denied: a remote sender is refused until trust exists.
 	return authz.Evaluate(e.d.Config.Policy().Policy, authz.Request{
-		Now: now, Stage: authz.StageIntake, Sender: snd, Action: action, Target: target, Preset: env.Preset,
-		BodySize: int64(len(env.Body)), MultiRecipient: env.MultiRecipient, Reply: replyGranted, TargetDeclaration: decl,
+		Now: now, Stage: c.stage, Sender: c.sender, Action: c.action, Target: c.target, Preset: c.preset,
+		BodySize: c.bodySize, MultiRecipient: c.multiRecipient, Reply: c.reply, TargetDeclaration: c.decl,
 	})
 }
 
