@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 )
 
@@ -37,7 +38,7 @@ func encodeOutLost(r OutLostRecord) ([]byte, error) {
 	case 0:
 	case 1:
 		it := r.Feedback[0]
-		want := newOutLostItem(it.Ref.Sender, r.Name(), r.DiscoveredAt)
+		want := delivery.NewLostUnknownMessageItem(it.Ref.Sender, r.Name(), r.DiscoveredAt)
 		if it.Ref.Sender.Endpoint != r.Key.Sender || it.Ref != want.Ref || it.Feedback != want.Feedback || it.Source != want.Source || !it.At.Equal(want.At) {
 			return nil, errors.New("the feedback item of an out-lost record is the one of its sender, its file and its discovery time")
 		}
@@ -69,7 +70,7 @@ func decodeOutLost(key OutLostKey, body []byte) (OutLostRecord, error) {
 		if sender.Endpoint != key.Sender {
 			return r, errors.New("the feedback item of an out-lost record is for the endpoint of its key")
 		}
-		r.Feedback = append(r.Feedback, newOutLostItem(sender, r.Name(), at))
+		r.Feedback = append(r.Feedback, delivery.NewLostUnknownMessageItem(sender, r.Name(), at))
 	}
 	return r, nil
 }

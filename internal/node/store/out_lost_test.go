@@ -82,6 +82,17 @@ func TestAnOutLostRecordIsNamedAfterItsDamagedFile(t *testing.T) {
 	}
 }
 
+// A record without a valid key has no name: asking for it is a programming error
+// and fails loudly instead of naming some other file.
+func TestTheNameOfAnOutLostRecordWithoutAValidKeyPanics(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Error("Name() of a zero record did not panic")
+		}
+	}()
+	_ = store.OutLostRecord{}.Name()
+}
+
 func TestAnOutLostRecordIsRefusedWhereItIsNotOneAndEncodedOnlyWhole(t *testing.T) {
 	good := lostNotice(1, 3, base)
 	two := good

@@ -121,7 +121,7 @@ func readHeader(dir, name string, data []byte) (h recfile.Header, body []byte, k
 	if !slices.Contains(kindsOf(dir), Kind(h.Kind)) {
 		return h, nil, nil, headerDamage(ReasonKindNotAllowed, "%s does not hold %q", dir, h.Kind)
 	}
-	if want := RecordFileName(Kind(h.Kind), h.Key); name != want {
+	if want := recordFileName(Kind(h.Kind), h.Key); name != want {
 		return h, nil, nil, headerDamage(ReasonNameMismatch, "the name is %q, kind and key hash to %q", name, want)
 	}
 	key, err := ParseKey(Kind(h.Kind), h.Key)

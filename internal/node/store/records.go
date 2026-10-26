@@ -3,6 +3,7 @@ package store
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"github.com/aianyai/sidera/internal/node/recfile"
 	"time"
 
@@ -132,18 +133,18 @@ type OutLostRecord struct {
 // the record its shape.
 func NewOutLostRecord(key OutLostKey, node ident.NodeID, at time.Time) OutLostRecord {
 	r := OutLostRecord{Key: key, DiscoveredAt: at}
-	r.Feedback = []delivery.Item{newOutLostItem(ident.Address{Node: node, Endpoint: key.Sender}, r.Name(), at)}
+	r.Feedback = []delivery.Item{delivery.NewLostUnknownMessageItem(ident.Address{Node: node, Endpoint: key.Sender}, r.Name(), at)}
 	return r
 }
 
-// newOutLostItem is the feedback item of an out-lost record.
-func newOutLostItem(sender ident.Address, record string, at time.Time) delivery.Item {
-	return delivery.NewLostUnknownMessageItem(sender, record, at)
-}
-
-// Name is the file name of the record.
+// Name is the file name of the record. It panics for a record whose key is not
+// valid: every path that names a record from outside the store checks the key
+// first, so a record that gets here without one is a programming error.
 func (r OutLostRecord) Name() string {
-	key, _ := r.Key.Bytes()
+	key, err := r.Key.Bytes()
+	if err != nil {
+		panic(fmt.Sprintf("store: the name of an out-lost record with an invalid key: %v", err))
+	}
 	return outFileName(KindOutLost, key)
 }
 

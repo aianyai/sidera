@@ -485,7 +485,7 @@ only in the names of `out/`. It is there because a file whose first line cannot 
 read, an all-zero one after a power loss included, says nothing of whose message it
 held unless its name does, and the sender is the one thing the node can tell that
 sender with (see the quarantine below). The name is made in one place
-(`store.RecordFileName`; `recfile` keeps the hash and knows nothing of the prefix):
+(`recordFileName`; `recfile` keeps the hash and knows nothing of the prefix):
 the hash is the one of every other directory, and the prefix is the first field of
 the key, which is the sender in every key of `out/`. A name is accepted only when
 the hash is that of kind and key and the prefix is the sender the key names, and

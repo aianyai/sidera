@@ -100,11 +100,11 @@ func (k OutKey) FileName() string {
 	return outFileName(k.Kind(), []byte(strings.Join(parts, " ")))
 }
 
-// RecordFileName is the name of the file of the record of a kind with a key:
+// recordFileName is the name of the file of the record of a kind with a key:
 // the hex SHA-256 of kind, a space and the key, then ".rec" (recfile.FileName),
 // and for a file of out/ the sending endpoint before it. It is the one place the
 // name is made, so the decoder, the scan and every record agree on it.
-func RecordFileName(kind Kind, key []byte) string {
+func recordFileName(kind Kind, key []byte) string {
 	if kind.Dir() == OutDir {
 		return outFileName(kind, key)
 	}

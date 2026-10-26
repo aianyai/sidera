@@ -24,7 +24,6 @@ engine applies the delivery rules and calls the writes.
 | `EncodeRecord`, `DecodeRecord` | The file of a record, and its validation in seven steps with a class of damage. The seventh step asks the delivery package whether every delivery record in the body is one its rules can produce (`Record.Valid()`), and the same question is asked before a record is written. A message id in a key is judged by `envelope.ValidMessageID`. |
 | `OutRecord`, `OutLostRecord`, `InRecord`, `CtlRecord`, `EndpointRecord`, `AttemptsRecord`, `CheckpointRecord`, `AdminRecord`, `AlertRecord`, `SeqRecord` | The records, in the contract types of the other packages. |
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
-| `RecordFileName(kind, key)` | The name of a record file, the one place it is made: the hash of kind and key and, for a file of `out/`, the sender before it (`<sender>.<hash>.rec`). |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
 | `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. A write of target records returns them as written. |
 | `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |

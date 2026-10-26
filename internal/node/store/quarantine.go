@@ -391,7 +391,11 @@ func (s *Store) tellSender(st *settlement, name string, q Quarantine) error {
 	if err != nil {
 		return err
 	}
-	floors, err := s.raiseFloors(e, nil, q.Scan)
+	pairs, err := s.knownPairs(e, q.Scan)
+	if err != nil {
+		return err
+	}
+	floors, err := s.raiseFloors(e, pairs, q.Scan)
 	if err != nil {
 		return err
 	}
@@ -441,17 +445,11 @@ func sessionFiles(sc *Scan, ctlName string) ([]file, error) {
 // highest of the floor on the disk now and the numbers of the source records still
 // there. The lost record may have used the number after m and no other that is
 // not below it, so the next number of the pair is above it. A floor is never
-// lowered. Without targets (nil) the floors of every pair the sender is known
-// to have are raised: those of its floor file and of its source records. Where
-// there is nothing to raise there is no file to write.
+// lowered. Where there is nothing to raise there is no file to write.
 func (s *Store) raiseFloors(sender ident.EndpointID, targets []ident.Address, scanned *Scan) (*file, error) {
 	current, err := s.readFloors(sender)
 	if err != nil {
 		return nil, err
-	}
-	if targets == nil {
-		// Every pair of the sender is known only from what is left of it.
-		targets = senderPairs(scanned, sender, current)
 	}
 	raises := map[ident.Address]uint64{}
 	for _, to := range targets {
@@ -471,6 +469,16 @@ func (s *Store) raiseFloors(sender ident.EndpointID, targets []ident.Address, sc
 		return nil, err
 	}
 	return &f, nil
+}
+
+// knownPairs lists every target the sender is known to have sent to, which is
+// all that is left of it when a message of unknown targets is lost.
+func (s *Store) knownPairs(sender ident.EndpointID, scanned *Scan) ([]ident.Address, error) {
+	current, err := s.readFloors(sender)
+	if err != nil {
+		return nil, err
+	}
+	return senderPairs(scanned, sender, current), nil
 }
 
 // senderPairs lists the targets a sender is known to have sent to: those its

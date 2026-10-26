@@ -20,7 +20,7 @@ library, and does no I/O.
 | `ParseHeader(data)` | Checks the syntax of the first line (step 1) and returns it with the bytes after it. |
 | `CheckBody(h, body)` | The length and the checksum (steps 5 and 6). |
 | `DecodeFrame(data)` | Both of the above, for a caller that checks the kind and key itself. |
-| `FileName(kind, key)` | The name of the file of a record whose name is derived: the hex SHA-256 of kind, a space and the key, then `.rec`. The files of `store`'s `out/` put the sending endpoint before it; `store` makes that name (`RecordFileName`) and this package is unchanged. |
+| `FileName(kind, key)` | The name of the file of a record whose name is derived: the hex SHA-256 of kind, a space and the key, then `.rec`. The files of `store`'s `out/` put the sending endpoint before it; `store` makes that name and this package is unchanged. |
 | `EncodeSingleton`, `DecodeSingleton` | A record of which there is one: its key is its kind and its file name is fixed by the owner. |
 | `Damage`, `DamageClass`, `DamageReason`, `HeaderDamage` | What a failed validation reports, with a class and a typed reason. |
 | `Checksum`, `ChecksumText`, `ValidChecksumText` | The CRC32C of the format, for other formats that check pieces the same way. |
