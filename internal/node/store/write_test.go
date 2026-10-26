@@ -221,6 +221,12 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 			in.Handout = store.HandoutFields{}
 			return dropWritten(r.st.Deliver(nil, []store.InRecord{in}))
 		},
+		"a prompt whose target record is another endpoint's than its head's": func(r *rig) error {
+			return dropWritten(r.st.PromptEnd(store.AttemptsRecord{Endpoint: ep(4)}, []store.InRecord{inRev(1, 1)}))
+		},
+		"a block whose target record is another endpoint's than its head's": func(r *rig) error {
+			return dropWritten(r.st.Blocked(store.AttemptsRecord{Endpoint: ep(4)}, []store.InRecord{inRev(1, 1)}))
+		},
 		"an open endpoint without a token": func(r *rig) error {
 			e := directEndpoint(7, "chat")
 			e.Token = nil

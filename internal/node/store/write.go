@@ -426,11 +426,18 @@ func (s *Store) PromptBegin(a AttemptsRecord) error {
 // head is the commit mark: when it is there, every recipient is written, and when it
 // is not, the work is done again by the next attempt, which finds each recipient
 // as the event leaves it or as it was and writes it the same. No rule finishes a
-// half-done write.
+// half-done write. A recipient of another endpoint than the head's is refused
+// before anything is written: the head would say that work is done which it does
+// not cover.
 func (s *Store) recipientsThenHead(decl *txn.Decl, head AttemptsRecord, ins []InRecord) ([]InRecord, error) {
 	af, err := recordFile(AttemptsDir, head)
 	if err != nil {
 		return nil, err
+	}
+	for _, in := range ins {
+		if in.Key.Recipient != head.Endpoint {
+			return nil, fmt.Errorf("store: a target record of %s cannot go with the head of %s: the head says the work for its own endpoint is done", in.Key.Recipient, head.Endpoint)
+		}
 	}
 	written, files, err := inFiles(ins)
 	if err != nil {
