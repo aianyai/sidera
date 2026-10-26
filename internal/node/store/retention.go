@@ -31,11 +31,15 @@ func latest(ts ...time.Time) time.Time {
 }
 
 // targetRetention is the retention of a target delivery: the latest of what the
-// deduplication record, the status report and the facts reply permission reads
-// need, each as the delivery and reply packages define it.
+// deduplication record, the answer to a source's pull, the status report and the
+// facts reply permission reads need, each as the delivery and reply packages
+// define it. The pull window is today always shorter than the facts window, so
+// it never decides the result; it is a term of its own so that the delivery
+// rule holds whatever the facts window becomes.
 func targetRetention(reportBy, createdAt time.Time, dedup delivery.DedupRecord) time.Time {
 	return latest(
 		delivery.DedupRetainUntil(reportBy),
+		delivery.RecordRetainUntil(reportBy),
 		dedup.RetainUntil,
 		delivery.StatusReportRetainUntil(createdAt, reportBy),
 		reply.RetainFactsUntil(reportBy),

@@ -708,7 +708,11 @@ hash.
 
 **Retention.** A delivery record is a live file until its deliveries are final and
 the latest of the retentions of what it holds has passed: the deduplication record
-and the idempotency key until `report_by`, the status report until `report_by` or a
+and the idempotency key until `report_by`, the record itself, which answers a
+source's pulls, until `delivery.RecordRetainUntil(report_by)` (the clock tolerance
+after `report_by`; the facts window below is longer today, and the store takes
+the delivery rule as one of the terms so that it holds whatever that window
+becomes), the status report until `report_by` or a
 whole `report_by` window after its creation, and the facts reply permission reads
 until `report_by` plus the clock tolerance plus the reply window. That is about 27
 hours after the delivery deadline. Then a summary goes to the archive and the file
