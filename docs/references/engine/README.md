@@ -524,8 +524,7 @@ in the order the node takes them; the engine takes part in these:
 **Recovery.** `PlanRecovery` is a pure function of a scan: what each recovery rule
 has to do. `Open` runs the rules that have work in the order the store fixes
 (`quarantine` first, then `ctl-effect-replay`, `instance-drain-replay`,
-`orphan-gc-endpoint`, `endpoint-drain-replay`, then the replays of prompts, blocks and
-feedback, then `orphan-gc`), works the plan out again from a fresh scan after each rule
+`orphan-gc-endpoint`, `endpoint-drain-replay`, then the replay of feedback, then `orphan-gc`), works the plan out again from a fresh scan after each rule
 that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup steps
 11 to 14 as four commands and logs `startup step N begin` and `startup step N end`.
 
@@ -850,8 +849,11 @@ Known gaps, each filled in with the feature it belongs to:
   `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
   is skipped until the pull of control signals answers from `ctl/`, and the quarantine
   of `ctl/` is wired with it.
-- The prompt and block replays and phase 11 of `RecoverDelivery` are empty until the
-  features that own them exist; phase 12 ticks the target and source records, phase 13
+- Phase 11 of `RecoverDelivery` is empty until the feature that owns it exists. A prompt
+  and a block have no replay: the store writes their target records first and the
+  head last, and phase 11 and the prompt logic redo what the head does not say is
+  done (a prompt still in flight in the head, a block the records hold and the head
+  does not report); phase 12 ticks the target and source records, phase 13
   sends the feedback that fell due and phase 14 goes on with the outgoing messages. The
   tick of a target record does not yet wait for an active turn before it lets an expired
   lease go: there are no leases until messages are handed out.

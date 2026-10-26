@@ -421,30 +421,13 @@ func (s *Store) PromptBegin(a AttemptsRecord) error {
 	return tx.Commit()
 }
 
-// checkFollowers verifies that the records written with a head record are
-// followers it lists, as they were read: the same revision and acceptance time.
-// A head that lists a revision the follower does not have would never be
-// replayed, and one that lists a record it does not write would lose it.
-func checkFollowers(head AttemptsRecord, events []PendingEvent, ins []InRecord) error {
-	if !slices.Contains(events, head.Pending.Event) {
-		return fmt.Errorf("store: the head record's pending event is %d, not one of %v", head.Pending.Event, events)
-	}
-	for _, in := range ins {
-		i := slices.IndexFunc(head.Pending.Items, func(it PendingItem) bool { return it.Key == in.Key })
-		if i < 0 {
-			return fmt.Errorf("store: %s is written with the head record but not listed in it", in.Key)
-		}
-		if it := head.Pending.Items[i]; it.Rev != in.Rev || !it.AcceptedAt.Equal(in.AcceptedAt) {
-			return fmt.Errorf("store: %s is listed with revision %d accepted at %v, and written as revision %d accepted at %v", in.Key, it.Rev, it.AcceptedAt, in.Rev, in.AcceptedAt)
-		}
-	}
-	return nil
-}
-
-func (s *Store) headAndFollowers(decl *txn.Decl, head AttemptsRecord, events []PendingEvent, ins []InRecord) ([]InRecord, error) {
-	if err := checkFollowers(head, events, ins); err != nil {
-		return nil, err
-	}
+// recipientsThenHead writes the target records an event of a prompt or a block
+// applies to, made durable together, and the head record of the endpoint last. The
+// head is the commit mark: when it is there, every recipient is written, and when it
+// is not, the work is done again by the next attempt, which finds each recipient
+// as the event leaves it or as it was and writes it the same. No rule finishes a
+// half-done write.
+func (s *Store) recipientsThenHead(decl *txn.Decl, head AttemptsRecord, ins []InRecord) ([]InRecord, error) {
 	af, err := recordFile(AttemptsDir, head)
 	if err != nil {
 		return nil, err
@@ -455,26 +438,27 @@ func (s *Store) headAndFollowers(decl *txn.Decl, head AttemptsRecord, events []P
 	}
 	tx := s.w.Begin(decl)
 	defer tx.Close()
-	if err := s.replace(tx, "attempts", af); err != nil {
+	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
 		return nil, err
 	}
-	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
+	if err := s.replace(tx, "attempts", af); err != nil {
 		return nil, err
 	}
 	return committed(tx, written)
 }
 
-// PromptEnd records the result of a prompt, then the notified target records
-// its Pending lists.
+// PromptEnd writes the target records the prompt notified, then the head record
+// with the result of the prompt.
 // It returns the target records as written (the revision one on).
 func (s *Store) PromptEnd(a AttemptsRecord, ins []InRecord) ([]InRecord, error) {
-	return s.headAndFollowers(&declPromptEnd, a, []PendingEvent{PendingNotified}, ins)
+	return s.recipientsThenHead(&declPromptEnd, a, ins)
 }
 
-// Blocked records a blocked report, then the target records its Pending lists.
+// Blocked writes the target records a block or the recovery from one applies to,
+// then the head record with the blocked report.
 // It returns the target records as written (the revision one on).
 func (s *Store) Blocked(a AttemptsRecord, ins []InRecord) ([]InRecord, error) {
-	return s.headAndFollowers(&declBlocked, a, []PendingEvent{PendingBlocked, PendingUnblocked}, ins)
+	return s.recipientsThenHead(&declBlocked, a, ins)
 }
 
 // Lease records the leases of one page of target records.

@@ -27,7 +27,7 @@ engine applies the delivery rules and calls the writes.
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
 | `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. A write of target records returns them as written. |
 | `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |
-| `OrphanBodies`, `OrphanEndpoints`, `EffectReplays`, `DrainCandidates`, `PromptReplays`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
+| `OrphanBodies`, `OrphanEndpoints`, `EffectReplays`, `DrainCandidates`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
 | `Store.Quarantine`, `QuarantineBody`, `QuarantineSessions` | Settling a damaged file, or the record whose body is damaged, in one transaction: the effects first, the alert, and the damaged file last. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
 | `NewOutLostRecord`, `OutLostKey`, `OutLostReplays`, `Store.OutLostClear` | The notice that a file of `out/` was lost unread, built in one place; the work of the replay that clears its feedback item once a notice covers it, and the write that does. |
@@ -40,11 +40,11 @@ engine applies the delivery rules and calls the writes.
 - **Encode before opening a transaction.** A record that cannot be written is an
   error that touches nothing.
 - **A record that replaces another is passed whole; a target record is written
-  with the next revision.** The revision is the only thing a replay reads.
+  with the next revision.** No rule of the store reads the revision.
 - **A write that changes the stored form of a target record returns it as
   written.** `Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
-  `Tick`, `EndpointDrain`, `InstanceDrain`, `EndpointDrainReplay`,
-  `InstanceDrainReplay`, `PromptReplay` and `BlockedReplay`
+  `Tick`, `EndpointDrain`, `InstanceDrain`, `EndpointDrainReplay` and
+  `InstanceDrainReplay`
   return `[]InRecord` (the records given, one revision on, in the same order),
   `FeedbackForm` returns the `InRecord`, and `QuarantineBody` returns a pointer to
   the one it wrote, nil when it removed the record. A caller keeping a view stores what comes back and never works the
@@ -61,9 +61,19 @@ engine applies the delivery rules and calls the writes.
   apply the tighter bound of the node's declaration to peers
   (`publication.MaxNameLen`): whoever builds that declaration decides what happens
   to a longer name.
-- **A head record lists its followers as it read them.** `PromptEnd` and `Blocked`
-  refuse a follower that is not listed with the revision and acceptance time it was
-  read with.
+- **A prompt and a block write their target records first and the head record
+  last.** `PromptEnd` and `Blocked` write the target records the event applies to,
+  made durable together, and then the endpoint's attempts record, which is the commit
+  mark: a head that holds the result of the prompt or the blocked report says every
+  target record is written, and a head that does not says the next attempt does the
+  work again. No recovery rule finishes a half-done one. A crash leaves some, all or
+  none of the records written, each as it was or as the event makes it, and each
+  write is safe to repeat: the delivery package ignores an event a record already
+  holds (`EventNotified`, `EventBlocked` and `EventUnblocked` on a record in that
+  state change nothing). A reader takes a record's own flags as what it can tell the
+  sender and the head as what the engine last settled, and never infers one from the
+  other. All the records of a prompt or a block go in one call, because the call
+  writes the head: a call with only some of them would mark the rest as done.
 - **A session endpoint is prepared for the creation its control record holds.**
   `ControlIntake` refuses an endpoint that the record's intent does not name, and
   `OrphanEndpoints` names a creating endpoint whose control record holds no
@@ -185,10 +195,8 @@ engine applies the delivery rules and calls the writes.
      not exist, which a power loss that reordered the writes can leave.
   4. `endpoint-drain-replay`, after every rule that closes or removes an endpoint,
      so it sees the final set of closed endpoints.
-  5. `prompt-replay`, `blocked-replay` and `feedback-replay`, after the drain by
-     convention: they skip a record a drain already rewrote (its revision no longer
-     matches what the head lists), so neither their order among themselves nor
-     their order against the drain changes the result.
+  5. `feedback-replay`, after the drain by convention: it writes source records,
+     which a drain never writes, so their order does not change the result.
   6. `orphan-gc` last: the quarantines remove records and overwrite them without
      their reference, so only after all of them is the body of a record that is
      gone, or that holds no reference, an orphan.
@@ -196,8 +204,7 @@ engine applies the delivery rules and calls the writes.
      raises floors and replaces records, and the book must see both.
   A rule whose write has the shape of a normal transaction is that transaction, run
   again, with no declaration of its own: the drains use `endpoint-drain` and
-  `instance-drain`, the prompt and block replays `lease`, the feedback replay
-  `feedback-clear`. The feedback
+  `instance-drain`, the feedback replay `feedback-clear`. The feedback
   replay has two predicates, `FeedbackReplays` for source records and
   `OutLostReplays` for out-lost ones, and the same transaction writes both.
   Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint` and
@@ -213,8 +220,9 @@ engine applies the delivery rules and calls the writes.
 - Acknowledge and update memory only after a method returns nil; on `txn.IsFatal`
   exit and rescan.
 - Call `SeqBook.Note` only after the commit that wrote the number.
-- Run a drain or a prompt or block follower write in chunks of the engine's
-  choosing; the store accepts any size. A sweep is cut from the groups
+- Run a drain in chunks of the engine's choosing; the store accepts any size. A
+  prompt or a block is one call with all its target records (at most the endpoint's
+  queue), never chunks, for the reason above. A sweep is cut from the groups
   of `SweepPlan` (`SweepPlan.Chunk` is the whole plan as one chunk): a source record
   is cut as a record, never as a file name, so its floor goes with it.
 - Quarantine the files of `Scan.Damaged` in the order listed, and on a
@@ -259,10 +267,16 @@ redone.
   point of its recovery, in both kinds of crash (`runNestedWalks`). The order is
   fixed by the seed of the scenario, so the choice does not depend on which walk
   finishes first. A replay that writes under the declaration of a normal
-  transaction (the drains, the prompt and block replays under `lease`, the feedback
-  replay under `feedback-clear`) is outside that domain: a crash in the middle of
-  it leaves the disk the walk of that declaration crashes at, so that walk already
-  covers it.
+  transaction (the drains, the feedback replay under `feedback-clear`) is outside
+  that domain: a crash in the middle of it leaves the disk the walk of that
+  declaration crashes at, so that walk already covers it.
+- A workflow with no recovery rule states its own rule in the walk. A prompt and a
+  block (`headLastWrite` in `scenarios_test.go`) check, in every crash state, that
+  each target record is as it was or as the write makes it and that the head is
+  never there before a record; that recovery changes nothing; and, through the
+  scenario's `redo`, that the work done again over the recovered disk, as the engine
+  does it (apply the event, write the records that change, the head last, and
+  nothing at all when the head says it is done), ends in the disk of one clean run.
 - The coverage assertions derive from the same selection: every declared point is
   crashed at in both kinds by the walk of a workflow, and every point of a
   recovery rule is crashed at during a recovery in both kinds.

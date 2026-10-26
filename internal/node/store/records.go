@@ -152,8 +152,7 @@ func (r OutLostRecord) Name() string {
 type InRecord struct {
 	Key TargetKey
 	// Rev is the revision of the record as it was read, 0 for a record not
-	// written yet. Writing a record stores Rev+1. Nothing but the replay of a
-	// prompt or a block reads it, to tell whether a record was written since.
+	// written yet. Writing a record stores Rev+1. No rule of the store reads it.
 	Rev uint64
 
 	Record delivery.Record
@@ -309,34 +308,6 @@ func (r EndpointRecord) Name() string {
 	return recfile.FileName(string(KindEndpoint), EndpointKeyBytes(r.ID))
 }
 
-// PendingEvent is the event a prompt or block applied to the in records its
-// head record lists.
-type PendingEvent uint8
-
-const (
-	PendingNone PendingEvent = iota
-	PendingNotified
-	PendingBlocked
-	PendingUnblocked
-)
-
-// PendingItem is one follower of a head record: a target record, the revision
-// it had before the head was written and its acceptance time. The pair tells a
-// record that has not been written since from one that was, and from a new
-// record that took the same key after the old one was removed.
-type PendingItem struct {
-	Key        TargetKey
-	Rev        uint64
-	AcceptedAt time.Time
-}
-
-// Pending is the set of followers a head record's transaction still owes.
-type Pending struct {
-	Event PendingEvent
-	Cause delivery.Cause
-	Items []PendingItem
-}
-
 // InFlightPrompt is a prompt handed to the adapter whose result is not yet
 // recorded.
 type InFlightPrompt struct {
@@ -345,13 +316,17 @@ type InFlightPrompt struct {
 	Covers  []TargetKey
 }
 
-// AttemptsRecord is the prompt attempts and blocked report of one endpoint.
+// AttemptsRecord is the prompt attempts and blocked report of one endpoint. It is
+// the head record of a prompt and of a block: PromptEnd and Blocked write the
+// target records the event applies to first and this record last, so a record
+// that holds the result of a prompt or the report of a block says that every
+// target record it concerns is written, and one that does not says the work is
+// to be done again.
 type AttemptsRecord struct {
 	Endpoint ident.EndpointID
 	Attempts []handoff.Attempt
 	Blocked  handoff.BlockedReport
 	InFlight *InFlightPrompt
-	Pending  Pending
 }
 
 // Name is the file name of the record.

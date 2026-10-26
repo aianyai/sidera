@@ -10,7 +10,6 @@ import (
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
-	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -205,7 +204,6 @@ var (
 	blockedNames = names[handoff.Cause]{
 		{handoff.CauseAdapterOffline, "adapter_offline"}, {handoff.CauseAuthInvalid, "auth_invalid"}, {handoff.CauseServiceUnavailable, "service_unavailable"},
 	}
-	pendingNames = names[PendingEvent]{{PendingNotified, "notified"}, {PendingBlocked, "blocked"}, {PendingUnblocked, "unblocked"}}
 )
 
 type attemptJSON struct {
@@ -225,23 +223,10 @@ type inFlightJSON struct {
 	Covers  []string `json:"covers,omitempty"`
 }
 
-type pendingItemJSON struct {
-	Key        string `json:"key"`
-	Rev        uint64 `json:"rev"`
-	AcceptedAt wtime  `json:"accepted_at"`
-}
-
-type pendingJSON struct {
-	Event string            `json:"event"`
-	Cause string            `json:"cause,omitempty"`
-	Items []pendingItemJSON `json:"items,omitempty"`
-}
-
 type attemptsJSON struct {
 	Attempts []attemptJSON `json:"attempts,omitempty"`
 	Blocked  *blockedJSON  `json:"blocked,omitempty"`
 	InFlight *inFlightJSON `json:"in_flight,omitempty"`
-	Pending  *pendingJSON  `json:"pending,omitempty"`
 }
 
 func encodeAttempts(r AttemptsRecord) ([]byte, error) {
@@ -293,34 +278,6 @@ func encodeAttempts(r AttemptsRecord) ([]byte, error) {
 			j.InFlight.Covers = append(j.InFlight.Covers, k.String())
 		}
 	}
-	if r.Pending.Event != PendingNone {
-		en, err := pendingNames.name(r.Pending.Event, "pending event")
-		if err != nil {
-			return nil, err
-		}
-		p := &pendingJSON{Event: en}
-		if r.Pending.Cause != delivery.CauseNone {
-			if p.Cause, err = enumName(r.Pending.Cause, delivery.Cause.String, "cause"); err != nil {
-				return nil, err
-			}
-		}
-		for _, it := range r.Pending.Items {
-			if _, err := it.Key.Bytes(); err != nil {
-				return nil, err
-			}
-			if it.Rev < 1 {
-				return nil, errors.New("a follower of revision zero")
-			}
-			at, err := wreq(it.AcceptedAt, "the acceptance time of a follower")
-			if err != nil {
-				return nil, err
-			}
-			p.Items = append(p.Items, pendingItemJSON{Key: it.Key.String(), Rev: it.Rev, AcceptedAt: at})
-		}
-		j.Pending = p
-	} else if r.Pending.Cause != delivery.CauseNone || len(r.Pending.Items) != 0 {
-		return nil, errors.New("pending followers without an event")
-	}
 	return marshal(j)
 }
 
@@ -365,27 +322,6 @@ func decodeAttempts(id ident.EndpointID, body []byte) (AttemptsRecord, error) {
 			in.Covers = append(in.Covers, k)
 		}
 		r.InFlight = in
-	}
-	if p := j.Pending; p != nil {
-		var err error
-		if r.Pending.Event, err = pendingNames.value(p.Event, "pending event"); err != nil {
-			return r, err
-		}
-		if p.Cause != "" {
-			if r.Pending.Cause, err = enumValue(p.Cause, delivery.Cause.String, "cause"); err != nil {
-				return r, err
-			}
-		}
-		for _, it := range p.Items {
-			k, err := ParseTargetKey(it.Key)
-			if err != nil {
-				return r, err
-			}
-			if it.Rev < 1 {
-				return r, errors.New("a follower of revision zero")
-			}
-			r.Pending.Items = append(r.Pending.Items, PendingItem{Key: k, Rev: it.Rev, AcceptedAt: time.Time(it.AcceptedAt)})
-		}
 	}
 	return r, nil
 }

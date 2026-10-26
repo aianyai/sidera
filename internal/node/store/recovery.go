@@ -9,7 +9,6 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
-	"github.com/aianyai/sidera/internal/node/txn"
 )
 
 // Recovery rules. Each rule has a predicate, a pure function of a Scan that
@@ -17,8 +16,7 @@ import (
 // rule and the check "a run without a crash or damage has no recovery work" both
 // call, so the check cannot drift from the rule. The predicates of the rules
 // that need the delivery rules to decide what to write (draining records of a
-// closed endpoint, applying the event of a prompt or a block) return the
-// candidates and the engine applies the transition.
+// closed endpoint) return the candidates and the engine applies the transition.
 
 // MissingStateDirs lists the directories of state/ that do not exist, parent
 // first: the work of the layout rule.
@@ -212,45 +210,6 @@ func InstanceDrainWork(sc *Scan, enabled func(instance string) bool) []EndpointR
 	return out
 }
 
-// PendingWork is one head record with the followers it still owes: the target
-// records that exist, were not written since the head, and are the same record.
-type PendingWork struct {
-	Head      AttemptsRecord
-	Followers []InRecord
-}
-
-func pendingWork(sc *Scan, events ...PendingEvent) []PendingWork {
-	byKey := map[TargetKey]*InRecord{}
-	for i := range sc.In {
-		byKey[sc.In[i].Key] = &sc.In[i]
-	}
-	var out []PendingWork
-	for _, a := range sc.Attempts {
-		if !slices.Contains(events, a.Pending.Event) {
-			continue
-		}
-		w := PendingWork{Head: a}
-		for _, it := range a.Pending.Items {
-			if r := byKey[it.Key]; r != nil && r.Rev == it.Rev && r.AcceptedAt.Equal(it.AcceptedAt) {
-				w.Followers = append(w.Followers, *r)
-			}
-		}
-		if len(w.Followers) > 0 {
-			out = append(out, w)
-		}
-	}
-	return out
-}
-
-// PromptReplays is the work of prompt-replay.
-func PromptReplays(sc *Scan) []PendingWork { return pendingWork(sc, PendingNotified) }
-
-// BlockedReplays is the work of blocked-replay: the pending lists of blocks and
-// of recoveries.
-func BlockedReplays(sc *Scan) []PendingWork {
-	return pendingWork(sc, PendingBlocked, PendingUnblocked)
-}
-
 // coversByFile lists the feedback items the notices of a scan already cover, by
 // the name of the file of out/ that holds each: the one place a cover is read,
 // for source records and for out-lost records alike.
@@ -396,34 +355,6 @@ func (s *Store) EndpointDrainReplay(b DrainBatch) ([]InRecord, error) {
 // It returns the target records as written (the revision one on).
 func (s *Store) InstanceDrainReplay(closed []EndpointRecord, b DrainBatch) ([]InRecord, error) {
 	return s.drain(&declInstanceDrain, closed, b, true)
-}
-
-func (s *Store) followersReplay(decl *txn.Decl, ins []InRecord) ([]InRecord, error) {
-	if len(ins) == 0 {
-		return nil, nil
-	}
-	written, files, err := inFiles(ins)
-	if err != nil {
-		return nil, err
-	}
-	tx := s.w.Begin(decl)
-	defer tx.Close()
-	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return nil, err
-	}
-	return committed(tx, written)
-}
-
-// PromptReplay writes the followers of a prompt, with the event applied.
-// It returns the target records as written (the revision one on).
-func (s *Store) PromptReplay(ins []InRecord) ([]InRecord, error) {
-	return s.followersReplay(&declLease, ins)
-}
-
-// BlockedReplay writes the followers of a block or a recovery.
-// It returns the target records as written (the revision one on).
-func (s *Store) BlockedReplay(ins []InRecord) ([]InRecord, error) {
-	return s.followersReplay(&declLease, ins)
 }
 
 // FeedbackReplay writes the source records without the feedback a notice covers.

@@ -86,19 +86,22 @@ var (
 	declPromptBegin = txn.Decl{Name: "prompt-begin", Kind: txn.Normal, Writes: []txn.Write{
 		rep("attempts"),
 	}}
+	// prompt-end and blocked: the target records the event applies to, then the head
+	// record of the endpoint, which is the commit mark. A prompt and a block leave a
+	// delivery accepted, and an accepted record keeps its body (checkBodyKept), so
+	// neither removes a body. No recovery rule exists for either: a head that is not
+	// there means the next attempt does the work again.
 	declPromptEnd = txn.Decl{Name: "prompt-end", Kind: txn.Normal, Writes: []txn.Write{
-		rep("attempts"), repDefer("in", many, optional), syncDir("in-dir", optional),
+		repDefer("in", many, optional), syncDir("in-dir", optional), rep("attempts"),
 	}}
 	declBlocked = txn.Decl{Name: "blocked", Kind: txn.Normal, Writes: []txn.Write{
-		rep("attempts"), repDefer("in", many, optional), syncDir("in-dir", optional),
+		repDefer("in", many, optional), syncDir("in-dir", optional), rep("attempts"),
 	}}
-	// lease: the target records of a hand-out are written. The replays of a prompt
-	// and of a block write their followers with this same declaration, and the
-	// replays of a drain and of a feedback notice with endpoint-drain,
-	// instance-drain and feedback-clear: a recovery rule that writes what a normal
-	// transaction writes is that transaction, run again. None of these writes ends a
-	// delivery (a prompt, a block and a lease leave it accepted, and an accepted
-	// record keeps its body: checkBodyKept), so none removes a body.
+	// lease: the target records of a hand-out are written. The replays of a drain
+	// and of a feedback notice write with endpoint-drain, instance-drain and
+	// feedback-clear: a recovery rule that writes what a normal transaction writes
+	// is that transaction, run again. A lease leaves a delivery accepted, so it
+	// removes no body.
 	declLease = txn.Decl{Name: "lease", Kind: txn.Normal, Writes: []txn.Write{
 		repDefer("in", many), syncDir("in-dir"),
 	}}

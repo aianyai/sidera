@@ -31,10 +31,8 @@ type RecoveryPlan struct {
 	OrphanEndpoints []store.EndpointRecord
 	// EndpointDrain is the closing of the records queued for closed endpoints.
 	EndpointDrain store.DrainBatch
-	// PromptReplay, BlockedReplay and FeedbackReplay are the followers of a head
-	// record that a crash left unwritten.
-	PromptReplay   []store.PendingWork
-	BlockedReplay  []store.PendingWork
+	// FeedbackReplay is the source records still holding feedback that a notice
+	// covers.
 	FeedbackReplay []store.OutRecord
 	// OutLostReplay are the out-lost records whose item a notice already covers.
 	OutLostReplay []store.OutLostRecord
@@ -51,8 +49,6 @@ func PlanRecovery(sc *store.Scan, now time.Time, enabled func(instance string) b
 		CtlEffectReplay: store.EffectReplays(sc),
 		InstanceDrain:   store.InstanceDrainWork(sc, enabled),
 		OrphanEndpoints: store.OrphanEndpoints(sc),
-		PromptReplay:    store.PromptReplays(sc),
-		BlockedReplay:   store.BlockedReplays(sc),
 		FeedbackReplay:  store.FeedbackReplays(sc),
 		OutLostReplay:   store.OutLostReplays(sc),
 		OrphanBodies:    store.OrphanBodies(sc),
@@ -85,12 +81,6 @@ func (p RecoveryPlan) Items() []string {
 	for _, c := range p.EndpointDrain.Ctl {
 		add("endpoint-drain-replay", c.Key.String())
 	}
-	for _, w := range p.PromptReplay {
-		add("prompt-replay", w.Head.Endpoint.String())
-	}
-	for _, w := range p.BlockedReplay {
-		add("blocked-replay", w.Head.Endpoint.String())
-	}
 	for _, o := range p.FeedbackReplay {
 		add("feedback-replay", o.Name())
 	}
@@ -110,16 +100,13 @@ func (p RecoveryPlan) Empty() bool { return len(p.Items()) == 0 }
 // wired yet, with how many things it has to do; ok is false when there is none.
 // The quarantine of a damaged control record is not wired: it removes the file of a
 // control signal's record, which the pull of control signals must answer from
-// before it may go, and the replays of a prompt and of a block belong to the
-// prompts: each is filled in with the feature that writes what it replays.
+// before it may go.
 func (p RecoveryPlan) unwired() (rule string, items int, ok bool) {
 	for _, r := range []struct {
 		name string
 		n    int
 	}{
 		{"quarantine", len(p.damagedControl())},
-		{"prompt-replay", len(p.PromptReplay)},
-		{"blocked-replay", len(p.BlockedReplay)},
 	} {
 		if r.n > 0 {
 			return r.name, r.n, true

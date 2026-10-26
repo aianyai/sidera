@@ -216,8 +216,7 @@ signals join the same loop as further commands and add their methods to this lis
 - **Recovery is a plan, then rules.** `PlanRecovery` is a pure function of a scan.
   `Open` runs the rules in the order the store's README fixes, works the plan out
   again from a fresh scan after a rule has written, and repeats until nothing is
-  left. Work of a rule that is not wired yet (the quarantine of a damaged control record,
-  the replay of prompts and blocks) makes `Open` return a
+  left. Work of a rule that is not wired yet (the quarantine of a damaged control record) makes `Open` return a
   `PendingRecoveryError` before it writes anything in that pass, damaged files of other
   directories included. The replay of
   feedback is wired: it takes off the source and out-lost records the items a

@@ -467,7 +467,7 @@ state/
   ctl/<h>.rec          target control record: deduplication, stored reply, creation intent
   bodies/<stem>.body   a body, bare bytes, named after the one record it belongs to
   endpoints/<h>.rec    endpoint runtime state: kind, instance, name, description, token, session mapping
-  attempts/<h>.rec     prompt attempts, blocked report, the followers a head record owes
+  attempts/<h>.rec     prompt attempts, blocked report, the prompt in flight
   checkpoints/<h>.rec  an adapter's checkpoint
   admin/<h>.rec        result and fingerprint of an administrative operation
   alerts/<h>.rec       owner alerts
@@ -622,17 +622,41 @@ sweep takes the endpoint, the same two steps as for a source record
 (`TestPlanSweepTakesTheOutLostRecordOfAClosedEndpoint`).
 
 **Revision.** A regular target record carries `rev`, which the store raises by one
-at each write. A head record (the prompt or block of an endpoint) lists the
-followers it still owes, each with the revision and the acceptance time the record
-had before the head was written. A rule that replays a prompt or a block acts on a
-listed follower only if it is the same record and nothing has written it since.
-The rule that a write raises the revision has one home, the store: every write
-that does so (`Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
-`Tick`, the drains and their replays, `FeedbackForm`, the followers' replays and
-`QuarantineBody`) returns the target records as written, in the order given, and a
+at each write. No rule of the store reads it. The rule that a write raises the
+revision has one home, the store: every write that does so (`Deliver`,
+`DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`, `Tick`, the drains and their
+replays, `FeedbackForm` and `QuarantineBody`) returns the target records as written, in the order given, and a
 caller that keeps a view takes them from the return value instead of working the
 revision out again. The return value is `nil` when the write failed. `TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`
 compares each returned record with what a new scan reads back.
+
+**Attempts record, the head of a prompt and of a block.** One per endpoint: the
+attempts to prompt it, the report that delivery to it is blocked and the prompt in
+flight (its attempt, kind and the target records it covers). `PromptEnd` and
+`Blocked` write the target records the event applies to (notified, blocked or no
+longer blocked), made durable together, and this record last, so it is the commit
+mark of the work: a record that holds the result of a prompt or the report of a
+block says every target record it concerns is written. A crash before it leaves
+some, all or none of the target records written, each as it was or as the event
+makes it (a record is replaced whole, so there is no third form), and the old head,
+whose prompt in flight or old report says the work is not done. Nothing finishes it
+at the next start. The next attempt applies the event again and writes the records
+that change and the head last; the delivery rules ignore an event a record already
+holds, so a record written before the crash is not written again, and one written
+again is written the same. The order is what the floor asks of it: a record that
+says "blocked" is a fact a sender may be told, and it is on the disk before the head
+that would stop anyone looking for it, so a block is never settled in the head and
+lost in the records. A target record flagged blocked or notified while the head
+does not say so is a true fact of an attempt that was under way, not an
+acknowledgement of anything, and the only thing it can cost is one prompt more than
+the cap allows. A reader that finds the head not blocked applies the unblock to every
+record that still holds the flag, found by the flag, never by the head. All the
+records of a prompt or a block go in one call, since the call writes the head:
+chunks would mark the unwritten rest as done
+(`TestAPromptAndABlockWriteTheirRecipientsBeforeTheirHead`, and the walks
+`prompt-end`, `blocked` and `blocked-recovered` of
+`TestEveryTransactionConvergesFromEveryCrashState`, which also state that recovery
+changes nothing and that doing the work again ends in the disk of one clean run).
 
 **Endpoint record.** One per endpoint, under the hash of its id. Its fields, in
 the order they are written: `kind`, `instance`, `display_name` and `description`
@@ -926,7 +950,7 @@ record is not there, or it is a regular record whose intent holds no creation of
 endpoint, as after an intake that failed and a signal accepted again with a new
 endpoint; a damaged record keeps the endpoint for its quarantine); a session
 endpoint whose control record holds the end of its creation or its close; the
-followers a prompt or a block owes; feedback a notice already covers; the endpoints
+feedback a notice already covers; the endpoints
 of a disabled instance; and the candidates of the drain of records queued for a
 closed endpoint, which the engine narrows with the delivery rules. A run with no
 crash and no damage finds none of them at any quiet point, and a finished recovery
@@ -942,10 +966,9 @@ floors, which every later rule and the sequence book read);
 `orphan-gc-endpoint`, before `endpoint-drain-replay`, so that a delivery queued
 for an orphan endpoint that a power loss left behind is drained as one for an
 endpoint that does not exist; `endpoint-drain-replay`, after every rule that
-closes or removes an endpoint; `prompt-replay`, `blocked-replay` and
-`feedback-replay`, which skip a record a drain rewrote because its revision no
-longer matches, so their order among themselves and against the drain does not
-change the result; `orphan-gc` after every
+closes or removes an endpoint; `feedback-replay`, which writes source records a
+drain never writes, so its order against the drain does not change the result;
+`orphan-gc` after every
 replay, because quarantines overwrite or remove records and so leave bodies no record refers to; and
 the sequence book last. Each rule runs on a scan taken after the writes of the
 previous one, or on an equivalent view of the committed writes, and the sequence
@@ -955,9 +978,9 @@ the recovery of every scenario.
 
 A rule whose write has the shape of a normal transaction is that transaction, run
 again, and has no declaration of its own: the drain rules write with `endpoint-drain`
-and `instance-drain`, the replays of a prompt and of a block with `lease` (their
-followers are written as a hand-out writes its records), and the replay of feedback
-with `feedback-clear`. A second declaration of the same shape would double the crash
+and `instance-drain`, and the replay of feedback with `feedback-clear`. A prompt
+and a block have no replay: the head is written last, so a half-done one is redone
+by the next attempt, not by a rule of recovery. A second declaration of the same shape would double the crash
 points to walk and could drift from the first. Only the writes no normal transaction
 makes are `Recovery` declarations of the store: `quarantine`, `orphan-gc`,
 `orphan-gc-endpoint` and `ctl-effect-replay`.
@@ -1031,8 +1054,7 @@ crashed again at every point of its recovery, in both kinds. That redoes the
 recovery transactions, the cleanup and the settle after a crash in the middle of
 them, which is what the third property needs, from a state where the rule finds
 half-written work. A replay that writes under the declaration of a normal
-transaction (the drains, the prompt and block replays under `lease`, the feedback
-replay under `feedback-clear`) is not a point of its own in this domain, and it
+transaction (the drains, the feedback replay under `feedback-clear`) is not a point of its own in this domain, and it
 needs no walk of its own: a crash in the middle of it leaves the disk that the walk
 of that declaration crashes at, and the recovery that follows is the one that walk
 already runs and checks. The assertions are derived from the
@@ -1157,8 +1179,9 @@ so that the double cannot drift from what it stands for.
 
 - **No generic commit manifest.** Every transaction that spans files has one of
   three shapes: prepare then commit (the body files, then the records that
-  refer to them), authority then followers (the first file decides, the others
-  follow from it and from the records already there), or an independent batch
+  refer to them; the target records of a prompt or a block, then the head record
+  that is their commit mark), authority then followers (the first file decides, the
+  others follow from it and from the records already there), or an independent batch
   (every file is a valid single-record change, so any subset is a valid state).
   None needs several files that cannot be derived from each other to appear
   all-or-nothing, which is the only thing a manifest buys. A manifest would cost
@@ -1219,8 +1242,20 @@ so that the double cannot drift from what it stands for.
   written after, and a rule that can recompute them from the authority repairs a
   crash between. The rules are stated as implications that hold on every state a
   crash cannot have caused, so they find no work on a clean disk: "closed" is
-  absorbing, a follower that no longer exists is done, and a follower of a head
-  record is listed with the revision it had.
+  absorbing and a follower that no longer exists is done.
+- **A prompt and a block write their target records first and the head last.**
+  The head used to be written first with a revision and a list of the records it
+  still owed, and two rules finished the list after a crash. That machinery resumed
+  half-done work, which the reliability floor does not ask for: a failure must
+  produce feedback, and data may be lost, never silently and never acknowledged
+  falsely. With the head last there is nothing to resume. The records come first
+  because they are the facts a sender may be told (a block is reported from them),
+  so a block can never be recorded in the head and missing from the records; the
+  head comes last because it is the only thing that says the work is done, so a
+  crash before it simply gets the work done again, and the repeat is safe because
+  the delivery rules ignore an event a record already holds. The cost is that a
+  half-done prompt can leave a record notified with no attempt in the head, which
+  counts at most one prompt too few against the cap.
 - **The damaged file goes last, after every effect that can be written again.**
   A settlement interrupted anywhere leaves the file where the next start finds it,
   and writes the same effects once more: nothing has to know how far the first
