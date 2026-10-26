@@ -779,3 +779,24 @@ func withSender(t testing.TB, r StatusReport) StatusReport {
 func createOutbound2(t testing.TB) func() Outbound {
 	return func() Outbound { return createOutbound(t) }
 }
+
+// TestDeliveriesListsTheOriginalOnesThenTheDerivedOne: every delivery the sender
+// tracks is listed once, so that a caller that asks the target about all of them
+// cannot leave the derived one out.
+func TestDeliveriesListsTheOriginalOnesThenTheDerivedOne(t *testing.T) {
+	o := outboundTo(t, KindSessionCreate, true)
+	if got := o.Deliveries(); !reflect.DeepEqual(got, o.Recipients) {
+		t.Errorf("without a derived delivery: %+v, want the recipients %+v", got, o.Recipients)
+	}
+	o.Derived = &Tracked{Address: addr(nodeOf(t, keyIdentityA), 3), Delivery: delivery.NewSourceRecord(t0, acceptBefore)}
+	o.ControlReplyDigest = record.Digest{1}
+	requireNoErr(t, o.Validate())
+	got := o.Deliveries()
+	if len(got) != len(o.Recipients)+1 || !reflect.DeepEqual(got[len(got)-1], *o.Derived) {
+		t.Errorf("with a derived delivery: %+v, want the recipients and then %+v", got, *o.Derived)
+	}
+	got[0].Address = ident.Address{}
+	if o.Recipients[0].Address.IsZero() {
+		t.Error("the list shares its storage with the record")
+	}
+}

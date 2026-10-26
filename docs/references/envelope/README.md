@@ -196,6 +196,10 @@ sender has no delivery to is `ReportNotTracked`. The answer is not signed: it
 comes only over the connection the network key authenticates and is no evidence
 for a third party, the reason a status report is signed.
 
+`Outbound.Deliveries()` lists every delivery the record tracks, the original ones in
+recipient order and then the derived one, so that a caller that goes through all of
+them cannot leave the derived delivery out.
+
 A control signal's own delivery ends only through its control reply. While the
 sender has accepted none (`ControlReplyDigest` is zero), a `delivered` report for
 the signal's recipient is not applied and `ApplyReport` returns

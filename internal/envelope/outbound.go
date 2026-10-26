@@ -92,7 +92,7 @@ func (o Outbound) Validate() error {
 		return fmt.Errorf("%w: only a control signal has a control reply", ErrOutbound)
 	}
 	seen := map[ident.EndpointID]struct{}{}
-	for _, t := range append(slices.Clone(o.Recipients), derivedList(o.Derived)...) {
+	for _, t := range o.Deliveries() {
 		if t.Address.IsZero() || t.Delivery.Side != delivery.SideSource {
 			return fmt.Errorf("%w: every tracked delivery has an address and a source record", ErrOutbound)
 		}
@@ -102,6 +102,12 @@ func (o Outbound) Validate() error {
 		seen[t.Address.Endpoint] = struct{}{}
 	}
 	return nil
+}
+
+// Deliveries returns every delivery the sender tracks of the message, the
+// original ones in recipient order and then the derived one, if there is one.
+func (o Outbound) Deliveries() []Tracked {
+	return append(slices.Clone(o.Recipients), derivedList(o.Derived)...)
 }
 
 func derivedList(d *Tracked) []Tracked {

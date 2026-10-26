@@ -26,6 +26,7 @@ this package is [`reply`](../reply/README.md).
 | `ControlReply`, `ControlResult`, `CreateResult`, `ControlReplyDescriptor(node, accepted, now)`, `VerifyControlReply(record, target, local, accepted, now)` | The signed control reply for the four control signals, in the values of `adapterproto`. `SignedControlReply` is the verified value. The reply names the sending node, which must be `local`. |
 | `Outbound`, `Tracked`, `Arrival` | The sender's record of a message it sent: one delivery per recipient, the derived delivery of an initial message, the digest of the accepted control reply, and what signed reports proved about arrival. |
 | `Outbound.ApplyNoRecord(now, node, recipient)` | Applies a target's unsigned answer that it holds no record of the delivery to the tracked delivery (original or derived) on that node, through `delivery.EventNoRecordAtTarget`. Returns a `ReportEffect`: applied (the delivery may ignore it) or not tracked. |
+| `Outbound.Deliveries()` | Every delivery the sender tracks of the message, the original ones and then the derived one, so that a caller that asks a target about them all cannot leave the derived one out. |
 | `Outbound.ApplyReport(now, report)` | The one rule by which a sender applies a verified status report, pulled or attached to a reply. Returns a `ReportEffect`: applied, not tracked, too late, or awaiting the control reply. |
 | `HandleControlReply(now, outbound, reply, report)` | The one rule by which a sender applies a verified control reply, pulled or attached to a reply. |
 
