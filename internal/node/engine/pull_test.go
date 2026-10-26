@@ -211,7 +211,7 @@ func TestLargeMessagesWholeOrPartsAndAckCountsMatch(t *testing.T) {
 	bodies[short] = "a short one that fits whole"
 	for i := 0; i < 5; i++ {
 		body := bigText(fmt.Sprintf("long message %d", i), 60*1024)
-		bodies[sendBody(t, h, "a", "b", body)] = body
+		bodies[send(t, h, "a", "b", body)] = body
 	}
 	quiet(t, h)
 
@@ -341,10 +341,4 @@ func TestOtherEndpointTokenCannotAcknowledge(t *testing.T) {
 	if in := inOf(t, h, m2); in.Record.State != delivery.StateAccepted {
 		t.Errorf("the record of the second session is %s, want accepted: it did not acknowledge", in.Record.State)
 	}
-}
-
-// sendBody is send for a text of any length.
-func sendBody(t testing.TB, h *harness.H, from, to, body string) adapterproto.MessageID {
-	t.Helper()
-	return send(t, h, from, to, body)
 }

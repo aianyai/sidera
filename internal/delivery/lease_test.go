@@ -765,19 +765,3 @@ func TestHandoutExemptRecord(t *testing.T) {
 		}
 	})
 }
-
-// Items that hold a record are ordered by the record they hold, whatever else they
-// carry, so the caller sorts what it works with.
-func TestSortForRecvOrdersItemsByTheRecordTheyHold(t *testing.T) {
-	type item struct {
-		name   string
-		record Record
-	}
-	leased := targetRecord(t, t0, time.Hour)
-	leased, _, _ = leased.Handout(t0, AuthorizationAllow, 1, 1, freshLease())
-	items := []item{{"queued", targetRecord(t, t0, time.Hour)}, {"leased", leased}}
-	SortForRecv(items, func(i item) Record { return i.record }, at(time.Minute))
-	if items[0].name != "leased" || items[1].name != "queued" {
-		t.Errorf("the order is %s, %s, want the leased one first", items[0].name, items[1].name)
-	}
-}

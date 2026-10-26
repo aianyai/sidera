@@ -1131,8 +1131,7 @@ reproducible).
 | Long messages go whole or in parts within the budget, as many acknowledgements as parts shown, delivered only when the last part is acknowledged; a part can be asked for by number | `pull.go` (`pack`, `recvPart`) | `TestLargeMessagesWholeOrPartsAndAckCountsMatch`, `TestAPartOfAMessageCanBeFetchedByNumber` |
 | An endpoint cannot acknowledge a lease it was not handed | `pull.go` (`ack`), `view.go` (`leased`) | `TestOtherEndpointTokenCannotAcknowledge` |
 | The second check is made again at the hand-out, and only for what the page reaches | `pull.go` (`tryPage`, `handoutAuthorization`) | `TestADeclarationTightenedAfterIntakeRejectsAtRecv`, `TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck` |
-| A body that is wrong or gone is settled, not handed out, the others go on, the sender is told by the pull | `pull.go` (`pack`), `quarantine.go` (`readBody`) | `TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt` |
-| A recv hands out only target records, never a control record | `view.go` (`queuedIn`) | `TestQueuedInHoldsTheTargetRecordsOfAnEndpointInTheOrderTheyArrivedAndNoControlRecord` |
+| A body that is wrong or gone is settled, not handed out, the others go on | `pull.go` (`pack`), `quarantine.go` (`readBody`) | `TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt` |
 | A lease is on disk: live across a restart, released at the start when it ran out; an acknowledgement comes with the next recv | `pull.go`, `ticks.go` | `TestALeaseAcrossARestart`, `TestRecvAcknowledgesTheEarlierPageFirst` |
 | A recv that waits is served by an arrival, ends at its deadline, is cut to the front end's limit | `pull.go` (`serveReady`), `waiters.go` | `TestARecvThatWaits` |
 | A notice whose body is damaged is told again from what it covered | `feedback.go` (`reissueCovered`), `quarantine.go` | `TestANoticeWhoseBodyIsDamagedIsToldAgainFromWhatItCovered` |

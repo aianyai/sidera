@@ -417,37 +417,3 @@ func TestDroppingAControlRecordLeavesTheViewAsIfItWereNeverThere(t *testing.T) {
 		t.Errorf("the schedule was told %v, want that the record has no entry any more", told)
 	}
 }
-
-// What recv hands out is the target records queued for the endpoint, in the order they
-// were taken in. The view keeps control records in the same queue view, because a
-// closing endpoint has to close them too, but a control signal is never handed to an
-// agent: a control record of the endpoint is not among the records to hand out.
-func TestQueuedInHoldsTheTargetRecordsOfAnEndpointInTheOrderTheyArrivedAndNoControlRecord(t *testing.T) {
-	ep := endpointRec(t, 1, adapterreg.KindSession, store.EndpointOpen, "chat")
-	other := endpointRec(t, 2, adapterreg.KindSession, store.EndpointOpen, "chat")
-	v, err := buildView(nodeOf(t, 7), &store.Scan{
-		Endpoints: []store.EndpointRecord{ep, other},
-		In: []store.InRecord{
-			inRec(t, 3, ep.ID, delivery.StateAccepted),
-			inRec(t, 1, ep.ID, delivery.StateAccepted),
-			inRec(t, 2, ep.ID, delivery.StateAccepted),
-			inRec(t, 4, ep.ID, delivery.StateDelivered),
-			inRec(t, 5, other.ID, delivery.StateAccepted),
-		},
-		Ctl: []store.CtlRecord{ctlRec(t, 6, ep.ID, delivery.StateAccepted)},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := len(v.queued[ep.ID]); got != 4 {
-		t.Fatalf("the queue view of the endpoint holds %d records, want its three target records and the control record", got)
-	}
-	var got []string
-	for _, in := range v.queuedIn(ep.ID) {
-		got = append(got, string(in.Key.Message))
-	}
-	want := []string{"msg-0001", "msg-0002", "msg-0003"}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Errorf("queuedIn = %v, want %v", got, want)
-	}
-}

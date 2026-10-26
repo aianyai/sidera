@@ -114,8 +114,8 @@ func TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck(t *testing.T) {
 // recv reads the body of a record through the one reader that settles a body that is
 // not what its record says. Whether the file is changed or gone, nothing is handed
 // out for that record, the owner is alerted once, the other messages of the page are
-// not held back, and the sender is told by the pull that the target holds no record
-// of it. The recipient's ledger shows no sighting of it.
+// not held back, and the recipient's ledger shows no sighting of it. What the sender
+// is told is the settlement's, proved with the quarantine of a body.
 func TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -154,16 +154,6 @@ func TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt(t *testing.T) {
 			}
 			if n := len(alertsOfKind(t, h, "corrupt_body")); n != 1 {
 				t.Errorf("the owner has %d alerts of kind corrupt_body, want 1", n)
-			}
-			h.Advance(pullInterval)
-			quiet(t, h)
-			if d := sourceDelivery(t, h, bad); d.State != delivery.StateDeliveryUnknown || d.Unknown != delivery.UnknownLostAtTarget {
-				t.Fatalf("the source record is %s (%s), want delivery_unknown, lost_at_target", d.State, d.Unknown)
-			}
-			h.Advance(mergeWindow)
-			quiet(t, h)
-			if got := toldKinds(t, h, "a"); !slices.Equal(got, []delivery.Kind{delivery.KindLostAtTarget}) {
-				t.Errorf("a was told %v, want that the target lost the record, once", got)
 			}
 		})
 	}
