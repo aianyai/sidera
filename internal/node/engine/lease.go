@@ -91,14 +91,6 @@ func (e *Engine) serveLeases() {
 	if e.Phase() != PhaseRunning || e.fatal != nil {
 		return
 	}
-	if !e.leasesStarted {
-		// The node has just begun to serve: the leases of the records it recovered have
-		// had no event.
-		e.leasesStarted = true
-		for id := range e.view.endpoints {
-			e.markLeasesFor(id)
-		}
-	}
 	if len(e.leaseDirty) == 0 {
 		return
 	}

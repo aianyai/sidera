@@ -592,9 +592,9 @@ holds one entry (`schedRenew`) for each session endpoint, at the earliest such i
 leases, and `serveLeases`, a step of the loop like `serveBlocked`, extends what is due in one `lease`
 transaction (the transaction a recv writes its leases with, in chunks of `ChunkReplaces`) and plans
 the entry again. The entry is planned again whenever what it reads changes: a record of the
-endpoint, a turn that began or ended, an adapter that was admitted, started or is gone, and once for
-every session when the node begins to serve. While the wall clock is in doubt nothing is extended,
-as nothing is judged expired. A lease the extension missed (the loop was busy for longer than the
+endpoint, a turn that began or ended, an adapter that was admitted, started or is gone; what is
+marked while the node starts stays marked until it serves. While the wall clock is in doubt nothing
+is extended, as nothing is judged expired. A lease the extension missed (the loop was busy for longer than the
 lead, the node was down) simply runs out and is released; the message comes back as a possible
 duplicate, and an acknowledgement that names the earlier page still counts.
 

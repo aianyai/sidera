@@ -146,10 +146,9 @@ type Engine struct {
 	releases map[ident.EndpointID]*release
 
 	// leaseDirty are the session endpoints whose leases are to be looked at at the next
-	// step of the loop, and leasesStarted says the node has begun to serve and looked at
-	// every session once; see lease.go.
-	leaseDirty    map[ident.EndpointID]bool
-	leasesStarted bool
+	// step of the loop; see lease.go. What is marked while the node starts stays
+	// marked until it serves.
+	leaseDirty map[ident.EndpointID]bool
 
 	// dueTicks are the records whose entries of the schedule fell due and that are
 	// not ticked yet; tickQueued says a command to tick them is queued.
