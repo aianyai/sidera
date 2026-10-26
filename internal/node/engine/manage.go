@@ -285,9 +285,10 @@ type preparedOperation interface {
 	// drew for it: the worker draws no randomness of its own.
 	prepare(ctx context.Context, e *Engine, rnd io.Reader)
 	// settle runs in the install worker after the loop has answered the command
-	// that carried the operation, with the error it was answered with: it drops what
-	// the preparation left that the commit did not take over.
-	settle(e *Engine, err error)
+	// that carried the operation: it drops what the preparation left that the commit
+	// did not take over. It is not called after a fatal failure of the disk: nothing
+	// more is written then.
+	settle(e *Engine)
 }
 
 type cmdPrepare struct {
@@ -320,12 +321,31 @@ func (c *cmdPrepare) run(e *Engine, _ time.Time) {
 
 // runPrepared is the install worker's whole task. It holds the place of the
 // worker until it has settled, so that the next installation does not start while
-// this one's staging is still on the disk.
+// this one's staging is still on the disk. After a fatal failure of the disk it
+// writes nothing more, neither the preparation nor the settling: the next start
+// removes what is left. A copy that is under way when the failure comes finishes,
+// because the staging does not take a context; the settling that follows it is what
+// does not happen.
 func (e *Engine) runPrepared(ctx context.Context, c *cmdPrepare, drawn []byte) (StoredResult, error) {
 	defer e.installing.Store(false)
+	if e.diskFailed(nil) {
+		return StoredResult{}, refuse(ReasonStorageFatal)
+	}
 	c.op.prepare(ctx, e, bytes.NewReader(drawn))
 	run := &cmdExecute{call: newCall[StoredResult](), cmd: c.cmd}
 	res, err := roundTrip(ctx, e, submitInternal, run, run.call)
-	c.op.settle(e, err)
+	if !e.diskFailed(err) {
+		c.op.settle(e)
+	}
 	return res, err
+}
+
+// diskFailed says whether the engine has met a fatal failure of the disk, which is
+// the end of everything it writes: it is in the failed phase, or err, the answer to
+// a command, says the command met it and the loop is about to fail.
+func (e *Engine) diskFailed(err error) bool {
+	if r, ok := ReasonOf(err); ok && r == ReasonStorageFatal {
+		return true
+	}
+	return e.Phase() == PhaseFailed
 }

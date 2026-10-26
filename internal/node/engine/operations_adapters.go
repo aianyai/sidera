@@ -163,14 +163,11 @@ func (o *installAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 }
 
 // settle drops the staging when the commit did not take it over (refused, found
-// current, a resend that was answered, a failure that a retry may cure). After a
-// fatal failure of the disk nothing more is written, and the next start removes
-// what is left.
-func (o *installAdapterOp) settle(e *Engine, err error) {
+// current, a resend that was answered, a failure that a retry may cure). It is not
+// called after a fatal failure of the disk, when nothing more is written and the
+// next start removes what is left.
+func (o *installAdapterOp) settle(e *Engine) {
 	if o.staged.Dir == "" || o.committed {
-		return
-	}
-	if r, ok := ReasonOf(err); ok && r == ReasonStorageFatal {
 		return
 	}
 	e.unstage(o.staged)

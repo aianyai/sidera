@@ -679,6 +679,50 @@ func TestOnlyOneInstallationRunsAtATime(t *testing.T) {
 	}
 }
 
+// After a fatal failure of the disk nothing more is written: an installation whose
+// copy was under way when another command met the failure finishes the copy, and
+// does not drop it, so what it left is for the next start to remove.
+func TestAnInstallationWritesNothingMoreAfterAFatalFailureOfTheDisk(t *testing.T) {
+	noLeaks(t)
+	gate := newGatedReader(relayPackage(t, "1.0.0"))
+	r := newRig(t, 10, withPackage("/src/relay", gate))
+	e := r.start()
+	id := register(t, e, "a")
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.Execute(ctx, installCommand(14, "install relay", "/src/relay"))
+		done <- err
+	}()
+	<-gate.entered
+	rule := r.faulty.Fail(failMatch("endpoint-update", fsxSyncDir), errIO)
+	_, err := e.Declare(ctx, engineCaller(id), engine.DeclarationPatch{Paused: ptr(true)})
+	wantReason(t, err, engine.ReasonStorageFatal)
+	if rule.Hits() == 0 {
+		t.Fatal("the fault was not injected")
+	}
+	// the engine is done only when its workers are, and this one waits for the gate
+	waitUntil(t, func() bool { return e.Phase() == engine.PhaseFailed })
+
+	close(gate.release)
+	if err := <-done; err == nil {
+		t.Fatal("the installation was answered as done on an engine that failed")
+	}
+	entries, err := r.mem.ReadDir(config.AdapterVersionsDir("relay"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	staging := 0
+	for _, en := range entries {
+		if strings.HasPrefix(en.Name, ".stage-") {
+			staging++
+		}
+	}
+	if staging != 1 {
+		t.Errorf("%d staging directories are left, want the one the next start removes", staging)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Enabling and disabling
 

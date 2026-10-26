@@ -194,7 +194,9 @@ current one stores only its result (`adapter-install-current`), and `AdapterInst
 lets the interface say so in that result. Last, the worker drops
 what the commit did not take over (a refusal, a version found current, a resend that was
 answered) and only then is the request answered, so that a refused package leaves
-nothing and the answer never comes with staging still on the disk. A crash before the
+nothing and the answer never comes with staging still on the disk. After a fatal failure of the disk the worker
+writes nothing more, neither the copy it has not begun nor the dropping: the next start
+removes what is left (a copy under way finishes, because staging takes no context). A crash before the
 pointer leaves the old version current and a directory that the repair of the adapter
 directory removes at the next start; after it the new version is current and the repair
 removes what is left of the old.
@@ -650,6 +652,7 @@ reproducible).
 | A package is copied once, outside the loop, and a resend copies nothing | `manage.go` (`preparedOperation`, `cmdPrepare`, `replayOf`), `operations_adapters.go` | `TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing` |
 | The copy is what is judged | `operations_adapters.go` (`stagePackage`) | `TestThePlatformIsJudgedOnTheCopyThatWouldBeInstalledAndNotOnTheSource`, `TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree` |
 | The version that is current is installed again by storing its result; an upgrade needs no enabled instance | `operations_adapters.go`, `transactions.go` | `TestInstallingTheVersionThatIsCurrentWritesOnlyItsResult`, `TestUpgradingWhileAnInstanceIsEnabledIsRefusedAndOtherwiseReplacesTheVersion` |
+| After a fatal failure of the disk an installation writes nothing more | `manage.go` (`runPrepared`, `diskFailed`) | `TestAnInstallationWritesNothingMoreAfterAFatalFailureOfTheDisk` |
 | One installation at a time, counted by `Quiesce` | `manage.go` (`cmdPrepare`) | `TestOnlyOneInstallationRunsAtATime` |
 | An installation, and the store of the result of one that found its version current, recover from a crash at every point | `transactions.go` (`adapter-install`, `adapter-install-current`), `config` (`adapter-stage`, `adapter-unstage`) | `TestAnInstallationRecoversFromACrashAtEveryPoint`, `TestStoringTheResultOfAnInstallationThatFoundItDoneRecoversFromACrash` |
 | Enabling starts the instance through the host; what is refused starts nothing | `operations_adapters.go` (`enableAdapterOp`) | `TestEnablingAnInstanceStartsItThroughTheHost` |
