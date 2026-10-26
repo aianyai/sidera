@@ -123,6 +123,22 @@ func Signals(conditions []adapterproto.Availability, endpoint adapterproto.Endpo
 	return s
 }
 
+// BlockedCause maps the cause handoff judged delivery blocked by onto the cause the
+// delivery rules record on the target record and tell the sender: the adapter being
+// offline, the runtime's authentication being invalid and its service being
+// unavailable are the three blocking causes of both.
+func BlockedCause(c handoff.Cause) (delivery.Cause, error) {
+	switch c {
+	case handoff.CauseAdapterOffline:
+		return delivery.CauseAdapterOffline, nil
+	case handoff.CauseAuthInvalid:
+		return delivery.CauseRuntimeAuth, nil
+	case handoff.CauseServiceUnavailable:
+		return delivery.CauseNativeUnavailable, nil
+	}
+	return 0, unmapped("blocked cause", int(c))
+}
+
 func appliesTo(c adapterproto.Availability, endpoint adapterproto.EndpointRef) bool {
 	return len(c.Endpoints) == 0 || slices.Contains(c.Endpoints, endpoint)
 }

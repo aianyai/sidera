@@ -570,3 +570,19 @@ func TestDaemonCreateFailure(t *testing.T) {
 		}
 	})
 }
+
+func TestBlockedCause(t *testing.T) {
+	for c, want := range map[handoff.Cause]delivery.Cause{
+		handoff.CauseAdapterOffline: delivery.CauseAdapterOffline, handoff.CauseAuthInvalid: delivery.CauseRuntimeAuth,
+		handoff.CauseServiceUnavailable: delivery.CauseNativeUnavailable,
+	} {
+		if got, err := adapterreg.BlockedCause(c); err != nil || got != want {
+			t.Errorf("BlockedCause(%d) = %v, %v, want %v", c, got, err, want)
+		}
+	}
+	for _, c := range []handoff.Cause{0, 99} {
+		if _, err := adapterreg.BlockedCause(c); !errors.Is(err, adapterreg.ErrUnmapped) {
+			t.Errorf("BlockedCause(%d) = %v", c, err)
+		}
+	}
+}

@@ -778,6 +778,7 @@ except the two that are plain calls (marked "call"):
 | availability `native_unavailable`, `dependency_missing` | `Signals.ServiceUnavailable` |
 | probed runtime name and version outside every tested range of the manifest (`RuntimeVersionUntested`) | no cause; status condition 6 `version_untested`, written by the daemon |
 | the daemon's own loss of the connection or two failed pings | `Signals.AdapterOffline`, with `Since` the moment it dropped |
+| the cause `handoff.AssessBlocked` names (`AdapterOffline`, `AuthInvalid`, `ServiceUnavailable`) | `delivery.CauseAdapterOffline`, `CauseRuntimeAuth`, `CauseNativeUnavailable` (`BlockedCause`) |
 | `since_ms` | `Signals.Since`; zero (unknown) when absent or later than the moment the snapshot arrived, or when any condition of the cause lacks one |
 | a `session.create` the daemon refuses itself, before calling the adapter (`DaemonCreateFailure`): preset unknown, preset closed to local sources, adapter offline | control reply failed with `preset_unknown`, `preset_unavailable`, `adapter_offline`, and no session endpoint |
 | `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`, `control_unknown` stays `control_unknown`, the others keep their names); keep reconciling, then unconfirmed |
