@@ -382,7 +382,7 @@ func sortedLosts(m map[string]store.OutLostRecord) []store.OutLostRecord {
 func noticeKey(node ident.NodeID, n delivery.Notice) store.TargetKey {
 	lines := make([]string, 0, len(n.Items))
 	for _, it := range n.Items {
-		lines = append(lines, fmt.Sprintf("%s %s %d %s", it.Ref.Message, it.Ref.Recipient, it.Feedback.Kind, it.Source))
+		lines = append(lines, fmt.Sprintf("%s %s %s %s", it.Ref.Message, it.Ref.Recipient, it.Feedback.Kind, it.Source))
 	}
 	sort.Strings(lines)
 	sum := sha256.Sum256([]byte(n.Sender.String() + "\n" + strings.Join(lines, "\n")))

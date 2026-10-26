@@ -485,8 +485,9 @@ send it later. One entry of the schedule is due when the queue next has a notice
 notice is written by `FeedbackForm` as a record of the system endpoint that is exempt
 traffic: a full queue of the endpoint does not refuse it, it takes no place of that
 queue, and it does not go through the capacity check, which judges new work. Its key
-is made from its items alone, so a notice formed again after a crash is the same
-record. It covers its items by the name of the record that holds each; once the
+is made from its items alone, naming each kind by its name rather than its number so
+that a kind added later does not change the key of a notice of another, and so a
+notice formed again after a crash is the same record. It covers its items by the name of the record that holds each; once the
 notice is written the items are taken off those records (`FeedbackClear`), a write
 of that which failed is tried again after the retry back-off (`retryClears`), and the
 replay of feedback at the start does it for a crash in between. The words of a
@@ -844,7 +845,7 @@ reproducible).
 | Waiting | `waiters.go` | `waiters_test.go` (`TestShutdownEndsEveryWaitEvenWhenTheInboxIsFull`, `TestAPageThatIsReadyWinsOverTheShutdown`) |
 | An anomaly is told once, in one notice that waits out the window and the cap; the queue survives a restart; feedback for a closed endpoint is dropped | `feedback.go` (`putOut`, `flushFeedback`, `sendNotice`, `loadFeedback`) | `TestAnAnomalyIsToldToTheSenderOnceInOneNotice`, `TestNoticesOverTheRateCapAreHeldAndNeverDropped`, `TestFeedbackThatFellDueWhileTheNodeWasDownIsSentAtTheStart`, `TestFeedbackForAnEndpointThatWasClosedIsDroppedAndLogged` |
 | A notice goes to an endpoint whose queue is full and takes no place of it | `feedback.go` (`formNotice`) | `TestSystemFeedbackIsNotRefusedByFullBacklog` |
-| A notice formed again is the same record; a notice that failed to be written goes back whole | `feedback.go` (`noticeKey`, `unsend`) | `TestTheKeyOfANoticeFollowsFromItsItemsAlone`, `TestUnsendPutsBackWhatFlushTookOut` |
+| A notice formed again is the same record; a notice that failed to be written goes back whole | `feedback.go` (`noticeKey`, `unsend`) | `TestTheKeyOfANoticeFollowsFromItsItemsAlone`, `TestTheKeyOfANoticeNamesItsKindsByTheirNames`, `TestUnsendPutsBackWhatFlushTookOut` |
 | Every write that tells an endpoint survives a crash | `feedback-form`, `feedback-clear` (declared by the store) | `TestFeedbackRecoversFromACrashAtEveryPoint` |
 | Every source record the loop writes enters the view through `putOut`, which queues the feedback it holds | `feedback.go` (`putOut`) | `TestEverySourceRecordTheLoopWritesEntersTheViewThroughPutOut` |
 | A clearing of the records that failed after a notice is tried again, so a notice swept later cannot cause a second one | `feedback.go` (`clearCovered`, `retryClears`) | `TestANoticeIsNotToldTwiceWhenTheRecordsCouldNotBeCleared` |

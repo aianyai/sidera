@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -62,6 +64,23 @@ func TestTheKeyOfANoticeFollowsFromItsItemsAlone(t *testing.T) {
 	}
 	if !key.Sender.IsSystem() || key.SenderNode != node || key.Recipient != sender.Endpoint {
 		t.Errorf("the key %+v is not the one of a notice of the system endpoint of the node to its sender", key)
+	}
+}
+
+// The identifier of a notice names each kind by its name and not by its number, so a
+// kind inserted among the others later does not change the identifier of a notice
+// of a kind that was there, which a notice formed again after an upgrade would need.
+// The oracle spells the identifier out of the notice of one item, independently of
+// noticeKey.
+func TestTheKeyOfANoticeNamesItsKindsByTheirNames(t *testing.T) {
+	at := time.Date(2026, 10, 25, 9, 0, 0, 0, time.UTC)
+	it := feedbackItem(t, "m-1", 60, delivery.KindRejected, at)
+	it.Source = "out/source-record"
+	line := "m-1 " + it.Ref.Recipient.String() + " rejected out/source-record"
+	sum := sha256.Sum256([]byte(it.Ref.Sender.String() + "\n" + line))
+	want := delivery.MessageID("n-" + hex.EncodeToString(sum[:16]))
+	if got := noticeKey(nodeOf(t, 1), delivery.Notice{Sender: it.Ref.Sender, Items: []delivery.Item{it}}).Message; got != want {
+		t.Errorf("the identifier is %s, want %s", got, want)
 	}
 }
 
