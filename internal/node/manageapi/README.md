@@ -29,7 +29,9 @@ The rows are in `methods.go` (`endpoints.list`, `endpoints.close`,
 `daemon.stop`, `operation.result`), `methods_status.go` (`status`, `alerts.list`,
 `alerts.ack`), `methods_identity.go` (`identity.export_revocation`,
 `identity.confirm_backup`, `identity.retire`, `clock.clear_rollback`) and
-`methods_settings.go` (`node.show`, `node.set`, `endpoints.set`). The words of each
+`methods_settings.go` (`node.show`, `node.set`, `endpoints.set`) and
+`methods_adapters.go` (`adapters.install|list|enable|disable`,
+`presets.list|add|remove`). The words of each
 result, and of the reminders, are the interface's: the engine says which reminder
 stands and what an operation did, and a function the row passes to the operation
 words it. A patch of settings is passed to the engine as it was written, in a
@@ -73,7 +75,9 @@ test clock, quiescence, the crash points) are added by the streams that own them
 - **One fingerprint per meaning.** `SHA-256("sidera-manage-v1" NUL method NUL
   canonical params NUL decimal expected version)`; the canonical params are the
   decoded params encoded again with the fields of their type in declared order. The
-  rule is here and nowhere else.
+  rule is here and nowhere else. A default the interface applies (the instance of an
+  enabling is named after the adapter) is applied before the params are encoded, so
+  that a request that leaves it out and one that writes it are one request.
 - **The answer after the work.** A request that changes state is answered with the
   identifier, whether it was a resend, and the result the engine stored; the stop
   that an operation asks for is requested after the answer was flushed, once.
@@ -108,4 +112,9 @@ operation each is authorized as, the strict reading of their params, the command
 the fingerprint of a patch, the stop after a retirement, and the golden answers of
 `status`, `alerts.list`, `node.show` and the export); `fuzz_test.go` fuzzes the one
 entry that reads a request, for every method the table has: it never panics, and
-what it accepts is canonical.
+what it accepts is canonical. `methods_adapters_test.go` the rows for adapters and
+presets: the operation each is authorized as (a preset is added as loosening and
+removed as narrowing), the strict reading of their params (a package named by a
+path that is not absolute, a member that is empty or null), what the engine is asked
+(an enabling that leaves out the instance is the request that names it after the
+adapter), and the golden answers of the two lists.

@@ -91,6 +91,8 @@ func defaultMethods() (map[string]*method, error) {
 		status, alertsList, alertsAck,
 		identityExportRevocation, identityConfirmBackup, identityRetire, clockClearRollback,
 		nodeShow, nodeSet,
+		adaptersInstall, adaptersList, adaptersEnable, adaptersDisable,
+		presetsList, presetsAdd, presetsRemove,
 		endpointsList, endpointsClose, endpointsSet, daemonStop, operationResult,
 	}
 	for _, m := range append(rows, testMethods()...) {
