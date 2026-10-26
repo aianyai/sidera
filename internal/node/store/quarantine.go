@@ -40,9 +40,15 @@ import (
 //     then the file is removed. There is no replacement: nothing says what it was.
 //   - out/ with a first line that is unreadable and a name that names no such
 //     endpoint: the alert; then the file is removed. Nobody can be told.
-//   - an out-lost record that is damaged: the same notice again, written over it,
-//     when its endpoint is on this node, for it is the one place a notice could
-//     vanish without a trace; otherwise the alert, then the file is removed.
+//   - an out-lost record that is damaged and whose first line can be trusted: the
+//     same notice again, written over it in place, when its endpoint is on this
+//     node, for it is the one place a notice could vanish without a trace;
+//     otherwise the alert, then the file is removed.
+//   - an out-lost record whose first line is unreadable: handled like any other
+//     out/ file whose first line is unreadable (the case above), so another
+//     out-lost record is derived from its name, the floors of the endpoint are
+//     raised once more (one extra gap, never a number given twice) and the
+//     endpoint may hear of the loss twice.
 //   - seq/ with a first line that can be trusted: the alert; then the file is
 //     overwritten with the floors its sender's source records say, which is what
 //     a missing floor file amounts to. With an unreadable first line the alert,

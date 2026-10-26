@@ -720,7 +720,8 @@ durable before the next, so a file that is gone always has its alert.
 | `out/`, first line trusted | the sequence floors of every pair of its key raised; alert | file overwritten in place with the sender's lost record and its feedback |
 | `out/`, first line unreadable (all zero included), the sender in its name is an endpoint of this node, open or closed | the floors of every pair of the sender raised; the out-lost record that tells the sender; alert | file removed |
 | `out/`, first line unreadable, any other name (a prefix that is no endpoint, an endpoint of no record here, one still being created, the system endpoint) | alert | file removed |
-| `out/`, an out-lost record that is damaged | its sender, if an endpoint of this node: the record again, with its item pending; alert | the record written over the file, or, for an endpoint that is gone, the file removed |
+| `out/`, an out-lost record that is damaged, first line trusted | its sender, if an endpoint of this node: the record again, with its item pending; alert | the record written over the file, or, for an endpoint that is gone, the file removed |
+| `out/`, an out-lost record whose first line is unreadable | as for any `out/` file with an unreadable first line (the two rows for those): the sender's floors raised and another out-lost record, derived from the name of this one, written; alert | file removed |
 | `seq/`, first line trusted | alert | file overwritten with the floors its sender's source records say |
 | `seq/`, first line unreadable | alert | file removed |
 | any other directory | alert | file removed |
@@ -754,11 +755,18 @@ second record). What the engine does with the record (loads its item into the fe
 queue, tells the endpoint, clears the item) is its own work; a floor raised for a pair the lost
 message belonged to and nobody else knows (only that message ever went from this sender to
 that target, and its record is the damaged one) is the pair the raise cannot reach, and the
-next number of it is 1 again, the repeated value the design accepts. An out-lost record that is itself
-damaged is written again over the file with its item pending, because it is the one place a notice could
+next number of it is 1 again. A target does not deduplicate by sequence number, so the
+repeat costs nothing in delivery; it only misleads a reader that looks for gaps in the
+sequence. An out-lost record that is itself
+damaged, with a first line that can be trusted, is written again in place over the file with its item pending, because it is the one place a notice could
 vanish without trace: the endpoint may hear twice that a message was lost, never
 not at all
 (`TestADamagedOutLostRecordIsOverwrittenWithItsNoticePendingOrRemovedWhenNobodyCanBeTold`).
+When its first line cannot be read, the record is handled like any unreadable `out/`
+file: its name gives the sender and the hash, so another out-lost record is derived from
+that name (a different record from the damaged one, keyed on the damaged out-lost file
+itself), the floors of the sender are raised once more, which adds one extra gap and no
+repeated number, and the endpoint may hear of the loss twice.
 The same rule settles the damage a write meets (`DamagedFileError`). Configuration
 and key files are never quarantined: a damaged one stops the start and is named.
 
