@@ -660,35 +660,51 @@ record file without `.rec`, then `.body` (`BodyFileName`, the one place a body i
 named; the prefix of a name of `out/` goes with it, so the name is `<h>.body` or
 `<e>.<h>.body`). Nothing is shared: one local delivery to several recipients writes a
 copy of the message for each target record that holds one, and the source record on
-the same node has its own, because a body that has a single owner is settled by the
-transaction that changes that owner and by nothing else. Content addressing, reference
-counts and release lists existed to save disk and produced a silent loss (a release that
-removed a body that a record written in the same transaction still referred to); the
-floor, that a failure always produces feedback and that data is never lost silently, does
-not need them, and the cost is the bytes of the copies (a message body is at most 64 KiB).
+the same node has its own. A body has exactly one owner, and the transaction that
+changes that owner settles the body and nothing else, so no write has to ask who else
+refers to a body and none can remove bytes that another record still needs. The cost is
+the bytes of the copies (a message body is at most 64 KiB).
 
 A body is written before the record that refers to it, and the record holds the digest
 and the length of the bytes (`BodyRef`), which a read checks (`ReadBody`). A write that
 changes a record so that it holds no reference (a target record that reached a final
 state, a source record whose deliveries all hold receipts, a control record that does
 not need the initial message any more) removes that record's own body, after the
-record is written and in the same transaction, if the file is there; the store derives
-it from the record it is given, so no caller lists bodies to remove. The writes that can
-do it are `SourceUpdate`, `ControlResult`, `Ack`, `Tick`, the drains and `DeliverReply`
-(the evidence in a reply can finish a delivery and so end the source record's body; the
-bodies of the reply's own target records are the role `reply-body`, since a role names
-one write of a transaction), and the sweep removes the own body of every record it
-removes. A body is removed last, so a crash never leaves a record that points at a body
-that is gone (`ErrBodyMissing` is impossible for a healthy record); what a crash leaves
-is a body no record refers to, removed by the first rule of the next start.
+record is written and its directory is durable, in the same transaction, if the file
+is there; the store derives it from the record it is given, so no caller lists bodies
+to remove. Every write that can leave a record without its body does it: `SourceUpdate`,
+`ControlResult`, `ControlReply`, `Ack`, `Tick`, the drains, `FeedbackClear` (and the
+replay that runs it again) and `DeliverReply` (the evidence in a reply can finish a
+delivery and so end the source record's body; the bodies of the reply's own target
+records are the role `reply-body`, since a role names one write of a transaction). The
+writes of a prompt, a block and a lease leave a delivery accepted, and an accepted
+record keeps its body, so none of them removes one. The sweep removes the own body of
+every record it removes: the records first, then their directories made durable, then
+the bodies, then `bodies/`. A body is removed last, durably after the records, so a
+crash, even a power loss that keeps the removal of one directory entry and loses that of
+another, never leaves a record that points at a body that is gone (`ErrBodyMissing` is
+impossible for a healthy record); what a crash leaves is a body no record refers to,
+removed by the first rule of the next start.
+
+The one thing that would make that removal a silent loss is a record that still
+needs its body written without a reference to it: the removal would destroy the only
+copy of bytes the record has still to hand out or send again. The store refuses such a
+record before anything is written (`ErrBodyDropped`): an `InRecord` whose delivery
+needs the body (`delivery.Record.NeedsBody`), and an `OutRecord` that had a body
+(`Outbound.BodyNonEmpty`) and still has a queued delivery, with `Body == nil`. A source
+record of a control signal sent with no body never had one and is written as it is.
 
 Tests: `TestEveryRecordHasABodyOfItsOwn`, `TestBodyFilesAreNamedAfterTheirRecords`,
 `TestTheNameOfABodyFileIsTheNameOfItsRecord`, `TestABodyIsRefusedThatItsRecordsDoNotSay`,
 `TestARecordThatStopsNeedingItsBodyRemovesItsOwnBodyAndNoOther`,
 `TestABodyIsRemovedAfterTheRecordThatDroppedIt`,
+`TestARecordThatStillNeedsItsBodyIsRefusedWithoutAReferenceToIt`,
 `TestASweepRemovesTheBodiesOfTheRecordsItRemoves`, and the walks of the `deliver to
-several recipients`, `deliver with a rejected record among the accepted` and `ack
-removes only its own body` workflows of `TestEveryTransactionConvergesFromEveryCrashState`.
+several recipients`, `deliver with a rejected record among the accepted`, `ack
+removes only its own body`, `archive-sweep` and the other workflows that remove a
+body of `TestEveryTransactionConvergesFromEveryCrashState`, which check in every
+crash state, power losses included, that every record that refers to a body finds
+its file.
 
 A body is an orphan unless a record of the same name stem exists and holds a reference
 (`OrphanBodies`): the body of a record that is gone is what a crash left between writing
@@ -1217,6 +1233,10 @@ so that the double cannot drift from what it stands for.
 - **Floors are written before records are removed, and the store works them out.**
   A number derived from the records that happen to be there would be given again
   after a sweep; and a floor the caller had to pass in could be left out.
+- **The sweep makes the removal of its records durable before it removes a body.**
+  Directories are made durable one at a time; a power loss between two of them keeps
+  the removal in one and loses it in the other, so syncing `bodies/` before `in/` or
+  `out/` could keep a record and lose the body it still refers to.
 - **An endpoint record goes after what hangs on it, once that is durably gone.** A
   crash, or a power loss that kept the removal of the endpoint and lost that of its
   floor, attempts or checkpoint file, would leave a file no sweep looks for, since

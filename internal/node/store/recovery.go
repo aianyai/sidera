@@ -431,16 +431,7 @@ func (s *Store) FeedbackReplay(outs []OutRecord) error {
 	if len(outs) == 0 {
 		return nil
 	}
-	files, err := outFiles(outs)
-	if err != nil {
-		return err
-	}
-	tx := s.w.Begin(&declFeedbackClear)
-	defer tx.Close()
-	if err := writeGroup(tx, "out", "out-dir", OutDir, files); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.FeedbackClear(outs)
 }
 
 // OutLostClear writes the out-lost records without the feedback item a notice

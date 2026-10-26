@@ -31,6 +31,9 @@ type file struct {
 }
 
 func recordFile(dir string, rec Record) (file, error) {
+	if err := checkBodyKept(rec); err != nil {
+		return file{}, err
+	}
 	data, err := EncodeRecord(rec)
 	if err != nil {
 		return file{}, err
@@ -381,15 +384,24 @@ func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord) error {
 	return tx.Commit()
 }
 
-// ControlReply replaces a source record that handled a control reply.
+// ControlReply replaces a source record that handled a control reply and, when it
+// no longer refers to a body, removes the body it had.
 func (s *Store) ControlReply(out OutRecord) error {
 	of, err := recordFile(OutDir, out)
+	if err != nil {
+		return err
+	}
+	dropped := droppedBodies(outOwners(out))
+	ex, err := s.exist(dropped)
 	if err != nil {
 		return err
 	}
 	tx := s.w.Begin(&declControlReply)
 	defer tx.Close()
 	if err := s.replace(tx, "out", of); err != nil {
+		return err
+	}
+	if err := s.removeBodies(tx, dropped, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -704,7 +716,7 @@ func (s *Store) FeedbackForm(body []byte, notice InRecord) (InRecord, error) {
 }
 
 // FeedbackClear replaces the source records whose feedback items were covered
-// by a notice.
+// by a notice and removes the body of each that no longer refers to one.
 func (s *Store) FeedbackClear(outs []OutRecord) error {
 	if len(outs) == 0 {
 		return errors.New("store: FeedbackClear needs a record")
@@ -713,9 +725,17 @@ func (s *Store) FeedbackClear(outs []OutRecord) error {
 	if err != nil {
 		return err
 	}
+	dropped := droppedBodies(outOwners(outs...))
+	ex, err := s.exist(dropped)
+	if err != nil {
+		return err
+	}
 	tx := s.w.Begin(&declFeedbackClear)
 	defer tx.Close()
 	if err := writeGroup(tx, "out", "out-dir", OutDir, files); err != nil {
+		return err
+	}
+	if err := s.removeBodies(tx, dropped, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -1120,27 +1140,15 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 	if err := s.removeAll(tx, "ctl", "ctl-dir", c.Ctl, ex); err != nil {
 		return err
 	}
-	dirs := map[string]bool{}
-	for _, group := range [][]FileRef{c.Records, outs} {
-		for _, f := range group {
-			if removed, err := s.removeRef(tx, "record", f, ex); err != nil {
-				return err
-			} else if removed {
-				dirs[f.Dir] = true
-			}
-		}
+	// The records go first and their directories are made durable before any body
+	// is removed: a power loss may keep the removal of a directory entry and lose
+	// that of another directory, so syncing bodies/ before in/ or out/ could keep a
+	// record and lose the body it still refers to.
+	if err := s.removeAll(tx, "record", "record-dir", slices.Concat(c.Records, outs), ex); err != nil {
+		return err
 	}
-	for _, f := range bodies {
-		if removed, err := s.removeRef(tx, "body", f, ex); err != nil {
-			return err
-		} else if removed {
-			dirs[BodiesDir] = true
-		}
-	}
-	for _, d := range sortedDirs(dirs) {
-		if err := tx.SyncDir("dir", d); err != nil {
-			return err
-		}
+	if err := s.removeAll(tx, "body", "body-dir", bodies, ex); err != nil {
+		return err
 	}
 	// The endpoint records go once what hangs on them is durably gone: a power
 	// loss that kept the removal of the endpoint and lost that of its floor file

@@ -265,6 +265,7 @@ func scenarios() []scenario {
 				wantBody(t, r, inRev(9, 1), bodyBytes(9))
 				wantBodyCount(t, r, 2)
 			},
+			bodiesResolve: true,
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
 				if _, ok := fin[bodyPath(srcOut(1, true))]; !ok {
 					t.Errorf("%s: the body of the source record, which still refers to it, was removed", where)
@@ -295,6 +296,7 @@ func scenarios() []scenario {
 				wantBody(t, r, inRev(9, 1), bodyBytes(9))
 				wantBodyCount(t, r, 2)
 			},
+			bodiesResolve: true,
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
 				// The source record is updated before the target record that depends on it.
 				in := path.Join(store.InDir, inRev(9, 1).Name())
@@ -356,18 +358,29 @@ func scenarios() []scenario {
 			bodiesResolve: true,
 		},
 		{
+			// The reply finishes the delivery of the source record, which drops its
+			// body; the body goes after the record, and the body of another source
+			// record stays.
 			name: "control-reply",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, outCtlRecord(1))
+				seedWithBodies(t, mem, outCtlRecord(1), srcOut(2, false))
 			},
 			durable: "control-reply/out.sync-dir#1",
 			mode:    atomic,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				o := outCtlRecord(1)
+				o.Outbound.Recipients[0].Delivery = applied(t, o.Outbound.Recipients[0].Delivery, delivery.Event{Type: delivery.EventDelivered})
+				o.Body = nil
 				o.ControlReply = []byte("reply")
 				o.Outbound.ControlReplyDigest = [32]byte{1}
 				return r.st.ControlReply(o)
 			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, outCtlRecord(1))
+				wantBody(t, r, srcOut(2, false), bodyBytes(2))
+				wantBodyCount(t, r, 1)
+			},
+			bodiesResolve: true,
 		},
 		{
 			name:    "prompt-begin",
@@ -472,6 +485,7 @@ func scenarios() []scenario {
 				wantBody(t, r, inRev(4, 1), bodyBytes(4))
 				wantBodyCount(t, r, 1)
 			},
+			bodiesResolve: true,
 		},
 		{
 			name: "endpoint-update",
@@ -544,6 +558,7 @@ func scenarios() []scenario {
 				wantBody(t, r, inFor(3, 9, 1), bodyBytes(3))
 				wantBodyCount(t, r, 1)
 			},
+			bodiesResolve: true,
 		},
 		{
 			name: "feedback-form",
@@ -568,6 +583,28 @@ func scenarios() []scenario {
 				wantBody(t, r, noticeFor(srcOut(1, false)), []byte("feedback wording"))
 				wantBodyCount(t, r, 2)
 			},
+		},
+		{
+			// The notice's coverage clears the feedback of a record that is finished
+			// by now: it drops its body, which goes after the record, and the body
+			// of another source record stays.
+			name: "feedback-clear",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				o := srcOut(1, false)
+				o.Feedback = []delivery.Item{feedbackItem(1)}
+				seedWithBodies(t, mem, o, srcOut(2, false))
+			},
+			durable: "feedback-clear/out-dir.sync-dir#1",
+			mode:    atomic,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return r.st.FeedbackClear([]store.OutRecord{srcOutFinished(1)})
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, srcOut(1, false))
+				wantBody(t, r, srcOut(2, false), bodyBytes(2))
+				wantBodyCount(t, r, 1)
+			},
+			bodiesResolve: true,
 		},
 		single("checkpoint-put", "checkpoint-put/checkpoint.sync-dir#1", func(r *rig) error {
 			return r.st.CheckpointPut(store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{"cursor":1}`)})
@@ -755,6 +792,7 @@ func sweepScenario(farFuture time.Time) scenario {
 		crashed: func(t *testing.T, where string, snap map[string]string) {
 			sweepInvariants(t, where, snap)
 		},
+		bodiesResolve: true,
 	}
 }
 

@@ -12,8 +12,13 @@ import (
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
-// Errors of reading a body.
+// Errors of reading and writing a body.
 var (
+	// ErrBodyDropped: a record that still needs its body was given with no
+	// reference to it. A record written without one has its body file removed, so
+	// writing it would destroy bytes the record still has to hand out or send
+	// again. Nothing is written.
+	ErrBodyDropped = errors.New("store: a record that still needs its body refers to none")
 	// ErrBodyMissing: the file of a body is not there.
 	ErrBodyMissing = errors.New("store: body file missing")
 	// ErrBodyMismatch: the content of a body file is not what its record says

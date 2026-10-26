@@ -101,8 +101,7 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	mustDo(t, r.st.ControlResult(cr, ptr(openedBy(cr))))
 	check("session created")
 	derived := derivedIn(20, 5, 0)
-	derived.Body = nil
-	mustDo(t, dropWritten(r.st.Deliver(nil, []store.InRecord{derived})))
+	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(20), []store.InRecord{derived})))
 	check("the initial message delivered to the session")
 	closeCtl := closedBy(21, 5)
 	mustDo(t, r.st.ControlResult(closeCtl, ptr(closedSession(5, ctlName(20)))))

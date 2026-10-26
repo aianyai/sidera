@@ -78,9 +78,10 @@ var (
 	declControlResult = txn.Decl{Name: "control-result", Kind: txn.Normal, Writes: []txn.Write{
 		rep("ctl"), rep("endpoint", optional), rm("body", many, optional), syncDir("body-dir", optional),
 	}}
-	// control-reply: the source handles a control reply.
+	// control-reply: the source handles a control reply; the body of the record is
+	// removed after it when it no longer refers to one.
 	declControlReply = txn.Decl{Name: "control-reply", Kind: txn.Normal, Writes: []txn.Write{
-		rep("out"),
+		rep("out"), rm("body", many, optional), syncDir("body-dir", optional),
 	}}
 	declPromptBegin = txn.Decl{Name: "prompt-begin", Kind: txn.Normal, Writes: []txn.Write{
 		rep("attempts"),
@@ -95,7 +96,9 @@ var (
 	// and of a block write their followers with this same declaration, and the
 	// replays of a drain and of a feedback notice with endpoint-drain,
 	// instance-drain and feedback-clear: a recovery rule that writes what a normal
-	// transaction writes is that transaction, run again.
+	// transaction writes is that transaction, run again. None of these writes ends a
+	// delivery (a prompt, a block and a lease leave it accepted, and an accepted
+	// record keeps its body: checkBodyKept), so none removes a body.
 	declLease = txn.Decl{Name: "lease", Kind: txn.Normal, Writes: []txn.Write{
 		repDefer("in", many), syncDir("in-dir"),
 	}}
@@ -119,15 +122,21 @@ var (
 	declEndpointDrain = txn.Decl{Name: "endpoint-drain", Kind: txn.Normal, Writes: drainWrites(nil)}
 	declInstanceDrain = txn.Decl{Name: "instance-drain", Kind: txn.Normal, Writes: drainWrites(instanceHead())}
 	declFeedbackForm  = txn.Decl{Name: "feedback-form", Kind: txn.Normal, Writes: []txn.Write{rep("body", prepare), rep("notice")}}
-	declFeedbackClear = txn.Decl{Name: "feedback-clear", Kind: txn.Normal, Writes: []txn.Write{repDefer("out", many), syncDir("out-dir")}}
+	declFeedbackClear = txn.Decl{Name: "feedback-clear", Kind: txn.Normal, Writes: []txn.Write{
+		repDefer("out", many), syncDir("out-dir"), rm("body", many, optional), syncDir("body-dir", optional),
+	}}
 	declCheckpointPut = txn.Decl{Name: "checkpoint-put", Kind: txn.Normal, Writes: []txn.Write{rep("checkpoint")}}
 	declAlertRaise    = txn.Decl{Name: "alert-raise", Kind: txn.Normal, Writes: []txn.Write{rep("alert")}}
 	declArchiveEvents = txn.Decl{Name: "archive-events", Kind: txn.Normal, Writes: []txn.Write{w("archive", txn.OpAppend, many)}}
-	declArchiveSweep  = txn.Decl{Name: "archive-sweep", Kind: txn.Normal, Writes: []txn.Write{
+	// archive-sweep: the records go and their directories are synced before any body
+	// is removed and bodies/ is synced, so that no crash, not even a power loss that
+	// keeps the directories in another order, leaves a record whose body is gone.
+	declArchiveSweep = txn.Decl{Name: "archive-sweep", Kind: txn.Normal, Writes: []txn.Write{
 		w("archive", txn.OpAppend, many, optional),
 		rep("seq-floor", many, optional),
 		rm("ctl", many, optional), syncDir("ctl-dir", optional),
-		rm("record", many, optional), rm("body", many, optional), syncDir("dir", many, optional),
+		rm("record", many, optional), syncDir("record-dir", many, optional),
+		rm("body", many, optional), syncDir("body-dir", optional),
 		rm("endpoint", many, optional), syncDir("endpoint-dir", optional),
 	}}
 	declArchiveExpire = txn.Decl{Name: "archive-expire", Kind: txn.Normal, Writes: []txn.Write{rm("file", many), syncDir("dir")}}

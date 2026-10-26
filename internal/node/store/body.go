@@ -40,6 +40,26 @@ func isBodyName(name string) bool {
 	return ok
 }
 
+// checkBodyKept refuses a record that still needs its body and refers to none.
+// A record written without a reference has its body file removed
+// (droppedBodies), so such a write would delete, silently and for good, the only
+// copy of bytes the record has still to hand out or send again. A source record
+// that never had a body (a control signal, a message sent with none) is not one:
+// Outbound.BodyNonEmpty says it had one.
+func checkBodyKept(rec Record) error {
+	switch r := rec.(type) {
+	case InRecord:
+		if r.Body == nil && r.Record.NeedsBody() {
+			return fmt.Errorf("%w: %s", ErrBodyDropped, r.Name())
+		}
+	case OutRecord:
+		if r.Body == nil && r.Lost == nil && r.Outbound.BodyNonEmpty && r.NeedsBody() {
+			return fmt.Errorf("%w: %s", ErrBodyDropped, r.Name())
+		}
+	}
+	return nil
+}
+
 // bodyOwner is a record that may refer to a body: the name of its file and the
 // reference it holds, nil when it needs none.
 type bodyOwner struct {

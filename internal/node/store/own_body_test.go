@@ -2,6 +2,8 @@ package store_test
 
 import (
 	"bytes"
+	"errors"
+	"maps"
 	"path"
 	"slices"
 	"testing"
@@ -37,9 +39,8 @@ func TestEveryRecordHasABodyOfItsOwn(t *testing.T) {
 	t.Run("Deliver", func(t *testing.T) {
 		r := newRig(t)
 		accepted := []store.InRecord{inFor(1, 2, 0), inFor(1, 3, 0), inFor(1, 4, 0)}
-		rejected := inFor(1, 5, 0)
-		rejected.Body = nil
-		if _, err := r.st.Deliver(bodyBytes(1), append(slices.Clone(accepted), rejected)); err != nil {
+		refused := rejected(inFor(1, 5, 0))
+		if _, err := r.st.Deliver(bodyBytes(1), append(slices.Clone(accepted), refused)); err != nil {
 			t.Fatal(err)
 		}
 		var owners []store.Record
@@ -53,8 +54,8 @@ func TestEveryRecordHasABodyOfItsOwn(t *testing.T) {
 		if got, want := bodyFilesOnDisk(t, r), wantBodyFiles(owners...); !slices.Equal(got, want) {
 			t.Errorf("bodies = %v, want exactly one for each accepted record: %v", got, want)
 		}
-		if _, err := r.mem.Stat(bodyPath(rejected)); err == nil {
-			t.Errorf("the rejected record %s has a body", rejected.Name())
+		if _, err := r.mem.Stat(bodyPath(refused)); err == nil {
+			t.Errorf("the rejected record %s has a body", refused.Name())
 		}
 	})
 	t.Run("Intake", func(t *testing.T) {
@@ -165,7 +166,7 @@ func ownBodyWrites() []ownBodyWrite {
 	inOf := func(i int, drop bool) store.InRecord {
 		in := inRev(i, 1)
 		if drop {
-			in.Body = nil
+			in.Record, in.Body = deliveredRecord(in.Record), nil
 		}
 		return in
 	}
@@ -188,6 +189,12 @@ func ownBodyWrites() []ownBodyWrite {
 			}},
 		{"ControlResult", []store.Record{withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{withCtlBody(sessionCtl(2, 6), 2)},
 			func(st *store.Store, drop bool) error { return st.ControlResult(ctlOf(1, 5, drop), nil) }},
+		{"ControlReply", []store.Record{srcOut(1, true)}, []store.Record{srcOut(2, true)},
+			func(st *store.Store, drop bool) error { return st.ControlReply(outOf(1, drop)) }},
+		{"FeedbackClear", []store.Record{srcOut(1, true)}, []store.Record{srcOut(2, true)},
+			func(st *store.Store, drop bool) error { return st.FeedbackClear([]store.OutRecord{outOf(1, drop)}) }},
+		{"FeedbackReplay", []store.Record{srcOut(1, true)}, []store.Record{srcOut(2, true)},
+			func(st *store.Store, drop bool) error { return st.FeedbackReplay([]store.OutRecord{outOf(1, drop)}) }},
 		{"Ack", []store.Record{inRev(1, 1)}, []store.Record{inRev(2, 1)},
 			func(st *store.Store, drop bool) error { return dropWritten(st.Ack([]store.InRecord{inOf(1, drop)})) }},
 		{"Tick with out, in and ctl",
@@ -360,4 +367,83 @@ func TestASweepRemovesTheBodiesOfTheRecordsItRemoves(t *testing.T) {
 	if firstBody < 0 || lastRecord < 0 || lastRecord > firstBody {
 		t.Errorf("the last record was removed at point %d, the first body at %d: the bodies go after the records (points %v)", lastRecord, firstBody, r.rec.points)
 	}
+}
+
+// A record that still needs its body is never written without a reference to it:
+// the write would remove the body, and the record would be left with nothing to
+// hand out or send again. The call is refused, typed, before anything is written
+// and with the body untouched. The same holds for every write of records, whether
+// or not it can drop a body.
+func TestARecordThatStillNeedsItsBodyIsRefusedWithoutAReferenceToIt(t *testing.T) {
+	queued := func() store.OutRecord {
+		o := srcOut(1, true)
+		o.Body = nil
+		return o
+	}
+	accepted := func() store.InRecord {
+		in := inRev(1, 1)
+		in.Body = nil
+		return in
+	}
+	head := store.AttemptsRecord{Endpoint: ep(2), Pending: pendingOf(store.PendingNotified, delivery.CauseNone, inRev(1, 1))}
+	for _, c := range []struct {
+		name string
+		run  func(st *store.Store) error
+	}{
+		{"Intake", func(st *store.Store) error { return st.Intake(nil, queued()) }},
+		{"Deliver", func(st *store.Store) error { return dropWritten(st.Deliver(nil, []store.InRecord{accepted()})) }},
+		{"DeliverReply with an updated out", func(st *store.Store) error {
+			o := queued()
+			return dropWritten(st.DeliverReply(bodyBytes(3), &o, []store.InRecord{tgtIn(3)}))
+		}},
+		{"DeliverReply with a target record", func(st *store.Store) error {
+			return dropWritten(st.DeliverReply(nil, nil, []store.InRecord{accepted()}))
+		}},
+		{"SourceUpdate", func(st *store.Store) error { return st.SourceUpdate(queued()) }},
+		{"ControlReply", func(st *store.Store) error { return st.ControlReply(queued()) }},
+		{"PromptEnd", func(st *store.Store) error {
+			return dropWritten(st.PromptEnd(head, []store.InRecord{accepted()}))
+		}},
+		{"Lease", func(st *store.Store) error { return dropWritten(st.Lease([]store.InRecord{accepted()})) }},
+		{"Ack", func(st *store.Store) error { return dropWritten(st.Ack([]store.InRecord{accepted()})) }},
+		{"Tick with a source record", func(st *store.Store) error {
+			return dropWritten(st.Tick(store.TickBatch{Out: []store.OutRecord{queued()}}))
+		}},
+		{"Tick with a target record", func(st *store.Store) error {
+			return dropWritten(st.Tick(store.TickBatch{In: []store.InRecord{accepted()}}))
+		}},
+		{"EndpointDrain", func(st *store.Store) error {
+			return dropWritten(st.EndpointDrain(store.DrainBatch{In: []store.InRecord{accepted()}}))
+		}},
+		{"FeedbackClear", func(st *store.Store) error { return st.FeedbackClear([]store.OutRecord{queued()}) }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newRig(t)
+			seed(t, r.mem, srcOut(1, true), inRev(1, 1))
+			seedBodies(t, r.mem, srcOut(1, true), inRev(1, 1))
+			before := snapshot(t, r.mem, ".")
+			r.rec.forget()
+			err := c.run(r.st)
+			if !errors.Is(err, store.ErrBodyDropped) {
+				t.Fatalf("err = %v, want ErrBodyDropped", err)
+			}
+			if n := r.rec.count(); n != 0 {
+				t.Errorf("%d crash points were reached by a call that was refused", n)
+			}
+			after := snapshot(t, r.mem, ".")
+			if !maps.Equal(before, after) {
+				t.Errorf("the disk changed: %v -> %v", keysOf(before), keysOf(after))
+			}
+		})
+	}
+
+	// A source record that never had a body (a control signal sent with none) is
+	// queued without a reference and is written as it is.
+	t.Run("a source record that never had a body", func(t *testing.T) {
+		r := newRig(t)
+		o := srcOut(1, false)
+		o.Body, o.Outbound.BodyNonEmpty, o.Envelope.ContentType = nil, false, ""
+		mustDo(t, r.st.Intake(nil, o))
+		mustDo(t, r.st.SourceUpdate(o))
+	})
 }

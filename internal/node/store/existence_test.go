@@ -59,8 +59,7 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 			}},
 		{"EndpointDrain dropping a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error {
-				d := tgtIn(1)
-				d.Body = nil
+				d := rejected(tgtIn(1))
 				return dropWritten(st.EndpointDrain(store.DrainBatch{In: []store.InRecord{d}}))
 			}},
 		{"ArchiveSweep removing the body of a target record", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),

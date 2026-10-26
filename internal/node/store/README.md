@@ -104,13 +104,20 @@ engine applies the delivery rules and calls the writes.
   nothing is shared or counted. A write refuses, before anything is written, a record
   that holds a reference to bytes not given with it, bytes no record refers to, and
   bytes that are not what the reference says. The writes that can end a record's need
-  of its body (`SourceUpdate`, `DeliverReply`, `ControlResult`, `Ack`, `Tick`, the
-  drains) take no list of bodies: a record written with no reference has its own
-  body file removed, after the records, in the same transaction, if the file is
-  there (a body already gone is not an error), so a crash never leaves a record
-  pointing at a missing body, and the sweep likewise removes the body of each record
-  it removes. The body of a record that holds no reference, or that does not exist,
-  is an orphan.
+  of its body (`SourceUpdate`, `DeliverReply`, `ControlResult`, `ControlReply`, `Ack`,
+  `Tick`, the drains, `FeedbackClear` and its replay) take no list of bodies: a record
+  written with no reference has its own body file removed, after the records and
+  their directory are durable, in the same transaction, if the file is there (a body
+  already gone is not an error). The sweep removes the records, makes their directories
+  durable, and only then removes the bodies and syncs `bodies/`. So a crash, a power
+  loss included, never leaves a record pointing at a body that is gone. The body of a
+  record that holds no reference, or that does not exist, is an orphan.
+- **A record that still needs its body is never written without a reference to it.**
+  Writing it would remove the body, and the record would be left with nothing to hand
+  out or send again, silently. `ErrBodyDropped` refuses it before anything is written:
+  an `InRecord` whose delivery needs the body (`NeedsBody`), and an `OutRecord` that
+  had a body (`Outbound.BodyNonEmpty`) and still has a queued delivery. The one place
+  that says so is `checkBodyKept`, called by `recordFile` for every write.
 - **A damaged file's first line is trusted by the rule of a live file.**
   The scan and `DecodeRecord` share one function for it (kind held by the
   directory, name equal to the hash of kind and key and, in `out/`, the sender of
