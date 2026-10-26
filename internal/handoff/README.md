@@ -19,8 +19,8 @@ to the delivery side, which calls into this package.
 | `DecideNodePrompts([]WaitingPrompt, running, PromptParams, now)` | Which waiting endpoints of the node are prompted now, so that prompt-started turns never exceed `MaxConcurrentTurns`: one `PromptDecision` per endpoint, ordered earliest waiter first, held ones with `PromptNodeFull`. It calls `DecidePrompt` for each endpoint and adds only the node-wide limit. |
 | `DefaultPromptParams()`, `DefaultBlockedParams()` | The decided values of `PromptParams` and `BlockedParams`. |
 | `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. |
-| `Pack(queue, delivery.LeaseID, Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the first part not yet acknowledged). |
-| `Part(msg, k, delivery.LeaseID, Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
+| `Pack(queue, delivery.LeaseID, Budget, cutFor ...Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the first part not yet acknowledged). The page is bounded by the budget; a message is cut for it and for every budget of `cutFor`. |
+| `Part(msg, k, delivery.LeaseID, Budget, cutFor ...Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
 | `AckMarkers.Compile()` then `CheckBeforeAck(MarkerSet, observed, expected)` | Whether an adapter may acknowledge for the agent. The markers are the adapter's declaration of how its runtime shows a replaced or cut result; the package knows no runtime. |
 | `Budget`, `DefaultBudget()`, `EstimateTokens`, `UTF16Len` | The output budget, the conservative default used when an adapter declares none, and the units budgets are measured in. |
 
@@ -127,6 +127,12 @@ Delivery blocked:
   acknowledged. `Page.ExitCode` is 0.
 - `EstimateTokens` is the UTF-8 byte count, an upper bound on any tokenizer's
   count.
+- `cutFor` are the budgets of the other front ends of an endpoint. A message is one
+  part only when its page fits the budget and every one of them, and every part fits
+  all of them, so a message is cut in the same parts whichever front end reads it;
+  the page itself is bounded by the budget alone. The cut fits each budget, and does
+  not follow the smaller limit, because limits in characters and in tokens have no
+  order (a Chinese character is one character and three bytes).
 - The package names no runtime and holds no per-runtime limit. Each adapter
   declares the budget of each front end it serves, and the caller passes it to
   `Pack` and `Part`. `DefaultBudget` is for a front end whose adapter declares
@@ -218,9 +224,9 @@ Before acknowledging:
 - Marker and budget declarations come from the adapter's manifest; the caller
   compiles the markers once when the adapter is admitted and rejects the
   adapter if that fails.
-- `Part` is called with the budget `Pack` used for part 1. The cut points depend
-  on the message and the budget, so changing the budget between the two changes
-  the parts.
+- `Part` is called with the budget and the `cutFor` budgets `Pack` used for part 1.
+  The cut points depend on the message and those budgets, so changing them between
+  the two changes the parts.
 - The order of one `recv` on the delivery side
   ([delivery](../delivery/README.md)):
   1. Generate one `delivery.LeaseID` for the `recv` (`delivery.NewLeaseID`).

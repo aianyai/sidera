@@ -3,6 +3,7 @@ package engine_test
 import (
 	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +199,59 @@ func TestALeaseAcrossARestart(t *testing.T) {
 			t.Errorf("the message is handed out again with possibly_duplicate %v under the lease %s, want a possible duplicate under a new lease", m.PossiblyDuplicate, res.Page.Lease)
 		}
 	})
+}
+
+// A long message is cut for every front end its endpoint can be read through, whichever
+// one asks: the adapter of the fixture declares a budget in characters for the command
+// line and one in tokens for MCP, and a message read through both is cut in the same
+// parts, so that the parts handed out through one are the ones acknowledged through the
+// other and the message ends delivered.
+func TestALongMessageIsCutTheSameThroughEveryFrontEnd(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	s, addr := newSession(t, h, "a")
+	body := bigText("a message read through two front ends", 60*1024)
+	msg := sendToAddr(t, h, "a", addr, body)
+	quiet(t, h)
+
+	through := func(front adapterproto.Frontend, in fakeagent.RecvInput) adapterproto.PageMessage {
+		t.Helper()
+		in.Frontend = front
+		res, err := s.Recv(h.Ctx(), in)
+		if err != nil {
+			t.Fatalf("recv through %s: %v", front, err)
+		}
+		return wantPart(t, res, msg, max(in.Part, 1))
+	}
+	byCLI := through(adapterproto.FrontendCLI, fakeagent.RecvInput{Msg: msg, Part: 1})
+	byMCP := through(adapterproto.FrontendMCP, fakeagent.RecvInput{Msg: msg, Part: 1})
+	if byCLI.Part.Total < 2 || byCLI.Part.Total != byMCP.Part.Total || byCLI.Body != byMCP.Body {
+		t.Fatalf("part 1 of %d through the command line and of %d through MCP, bodies %d and %d bytes, want the same cut",
+			byCLI.Part.Total, byMCP.Part.Total, len(byCLI.Body), len(byMCP.Body))
+	}
+
+	// The message is read to its end, the front end changing with each page, and every
+	// part is acknowledged normally.
+	var got strings.Builder
+	fronts := []adapterproto.Frontend{adapterproto.FrontendMCP, adapterproto.FrontendCLI}
+	for i := 0; i < byCLI.Part.Total; i++ {
+		res := recvAs(t, h, s, fakeagent.RecvInput{Frontend: fronts[i%2]})
+		m := wantPart(t, res, msg, i+1)
+		got.WriteString(m.Body)
+		want := adapterproto.ItemRecorded
+		if i == byCLI.Part.Total-1 {
+			want = adapterproto.ItemCompleted
+		}
+		if acks := ackAs(t, h, s, res.Page.Lease); len(acks) != 1 || acks[0].Ack != want {
+			t.Fatalf("the acknowledgement of part %d is %+v, want %s", i+1, acks, want)
+		}
+	}
+	quiet(t, h)
+	if got.String() != body {
+		t.Errorf("the parts read add up to %d bytes, want the %d of the message", got.Len(), len(body))
+	}
+	if in := inOf(t, h, msg); in.Record.State != delivery.StateDelivered {
+		t.Errorf("the message is %s, want delivered", in.Record.State)
+	}
 }
 
 // A part of a message can be asked for by its number, whether or not the parts before

@@ -3,6 +3,7 @@ package adapterreg_test
 import (
 	"bytes"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -288,6 +289,34 @@ func TestBudgetsAndMarkers(t *testing.T) {
 	}
 	if got := a.Budget("nonsense"); got != handoff.DefaultBudget() {
 		t.Errorf("an unknown front end's budget = %+v", got)
+	}
+}
+
+// TestPartBudgets: a long message is cut for every front end its endpoint can be read
+// through, the default counting for one that declares nothing, and a direct endpoint
+// for the front end direct alone.
+func TestPartBudgets(t *testing.T) {
+	caps := adapterproto.Capabilities{Runtime: runtimeCaps(true, true, true, "cli", "mcp").Runtime, Direct: directCaps(5)}
+	a, err := adapterreg.Admit(caps, withBudgets(man(), manifest.Budget{Frontend: "cli", Unit: "chars", Limit: 27000}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cli := handoff.Budget{Unit: handoff.UnitChars, Limit: 27000}
+	for _, tc := range []struct {
+		name string
+		kind adapterreg.EndpointKind
+		want []handoff.Budget
+	}{
+		{"a session: cli as declared, mcp as the default", adapterreg.KindSession, []handoff.Budget{cli, handoff.DefaultBudget()}},
+		{"a runtime endpoint as a session", adapterreg.KindRuntime, []handoff.Budget{cli, handoff.DefaultBudget()}},
+		{"a direct endpoint: the front end direct, the default here", adapterreg.KindDirect, []handoff.Budget{handoff.DefaultBudget()}},
+	} {
+		if got := a.PartBudgets(tc.kind); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %+v, want %+v", tc.name, got, tc.want)
+		}
+	}
+	if got := (adapterreg.Admission{}).PartBudgets(adapterreg.KindSession); len(got) != 0 {
+		t.Errorf("the zero admission names no front end, got %+v", got)
 	}
 }
 

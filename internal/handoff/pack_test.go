@@ -800,3 +800,71 @@ func TestPackProperties(t *testing.T) {
 		}
 	}
 }
+
+// A message is cut for every budget it is given, so that an endpoint read through
+// several front ends gets the same parts from each: whichever budget asks, the cut
+// is the one that fits them all, and a message that fits the asking budget whole is
+// still cut when another budget cannot take it whole. Budgets in different units
+// have no order (a Chinese character is one character and three bytes), so the cut
+// fits each of them instead of following the smaller limit.
+func TestACutFitsEveryBudgetItIsGivenWhicheverOneAsks(t *testing.T) {
+	chars := Budget{UnitChars, 3_000}
+	tokens := Budget{UnitTokens, 4_000}
+	wide := Budget{UnitTokens, 50_000}
+	partsOf := func(t *testing.T, m Message, b Budget, cutFor ...Budget) []string {
+		t.Helper()
+		first, err := Pack([]Message{m}, testLease, b, cutFor...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var bodies []string
+		for k := 1; k <= first.HandedOut[0].Parts; k++ {
+			p, err := Part(m, k, testLease, b, cutFor...)
+			if err != nil {
+				t.Fatalf("Part %d: %v", k, err)
+			}
+			for _, each := range append([]Budget{b}, cutFor...) {
+				if got := each.Measure(string(p.Output)); got > each.Limit {
+					t.Fatalf("part %d measures %d in %v, over %d", k, got, each.Unit, each.Limit)
+				}
+			}
+			bodies = append(bodies, decode(t, p).Messages[0].Body)
+		}
+		return bodies
+	}
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"english", strings.Repeat("the quick brown fox ", 1_000)},
+		{"chinese", strings.Repeat("你好，世界。", 700)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := msg(t, "m1", tc.body)
+			want := partsOf(t, m, chars, tokens)
+			if len(want) < 2 {
+				t.Fatalf("the test needs a message cut in parts, got %d", len(want))
+			}
+			for _, asks := range []struct {
+				name   string
+				b      Budget
+				cutFor []Budget
+			}{
+				{"the characters ask", chars, []Budget{tokens}},
+				{"the tokens ask", tokens, []Budget{chars}},
+				{"a wide budget asks", wide, []Budget{chars, tokens}},
+			} {
+				got := partsOf(t, m, asks.b, asks.cutFor...)
+				if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+					t.Errorf("%s: %d parts that differ from the %d the others get", asks.name, len(got), len(want))
+				}
+			}
+			if whole := partsOf(t, m, wide); len(whole) != 1 {
+				t.Errorf("the wide budget alone cuts the message in %d parts, want it whole: the case that tells a cut from none", len(whole))
+			}
+			if got := strings.Join(want, ""); got != tc.body {
+				t.Error("the parts do not add up to the body")
+			}
+		})
+	}
+}

@@ -261,6 +261,29 @@ func (a Admission) Budget(f manifest.Frontend) handoff.Budget {
 	return handoff.DefaultBudget()
 }
 
+// PartBudgets are the budgets that a long message is cut for on an endpoint of kind k,
+// which handoff.Pack and handoff.Part take beside the budget of the front end that
+// reads: the budget of every front end the endpoint can be read through, each as
+// Budget gives it. A runtime's endpoints are read through the front ends the runtime
+// declares, a direct endpoint through the front end direct. The parts of a message
+// are counted and acknowledged one by one, so a message must be cut in the same parts
+// whichever front end reads it, and a front end that declares nothing counts with
+// the default, because it is read with that. An admission that declares no runtime
+// has no agent front end to name.
+func (a Admission) PartBudgets(k EndpointKind) []handoff.Budget {
+	if k == KindDirect {
+		return []handoff.Budget{a.Budget(manifest.FrontendDirect)}
+	}
+	if a.caps.Runtime == nil {
+		return nil
+	}
+	out := make([]handoff.Budget, 0, len(a.caps.Runtime.Frontends))
+	for _, f := range a.caps.Runtime.Frontends {
+		out = append(out, a.Budget(manifest.Frontend(f)))
+	}
+	return out
+}
+
 // RecvWait is the longest a recv through the agent front end may wait: the limit
 // the manifest declares, or DefaultRecvWait when it declares none for the front
 // end. It does not apply to direct endpoints: the adapter chooses the wait of

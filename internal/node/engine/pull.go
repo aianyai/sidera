@@ -192,6 +192,16 @@ func (e *Engine) recvLimits(st *endpointState, r RecvRequest) (handoff.Budget, t
 	return adm.Budget(manifest.Frontend(r.Frontend)), min(r.Wait, adm.RecvWait(r.Frontend)), nil
 }
 
+// partBudgets are the budgets that the parts of a long message are cut for on the
+// endpoint, beside the budget of the front end that reads it. Which front ends there
+// are, and what each one's budget is, is the admission's to say; the cut is then the
+// same whichever front end asks, so that the parts a message was handed out in are the
+// parts it is handed out in through any other.
+func (e *Engine) partBudgets(st *endpointState) []handoff.Budget {
+	adm, _ := e.admission(st.rec.Instance) // an adapter not admitted declares nothing: the defaults
+	return adm.PartBudgets(st.rec.Kind)
+}
+
 // txnFatal says whether the engine will stop after the command that met the error.
 func txnFatal(err error) bool {
 	r, ok := ReasonOf(err)
@@ -269,7 +279,7 @@ func (e *Engine) tryPage(now time.Time, st *endpointState, lease delivery.LeaseI
 		}
 		judged++
 	}
-	pageOf, retry, err := e.pack(now, lease, budget, cands, skip)
+	pageOf, retry, err := e.pack(now, lease, budget, e.partBudgets(st), cands, skip)
 	if err != nil || retry {
 		return nil, 0, retry, err
 	}
@@ -322,7 +332,7 @@ type packed struct {
 // the page is built from the first few, and from more when it reached the last of
 // them. A message that cannot be handed out is put in skip and the attempt is made
 // again.
-func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budget, cands []candidate, skip map[store.TargetKey]bool) (packed, bool, error) {
+func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budget, cutFor []handoff.Budget, cands []candidate, skip map[store.TargetKey]bool) (packed, bool, error) {
 	bodies := make([]string, len(cands))
 	loaded := 0
 	load := func(upto int) (bool, error) {
@@ -362,7 +372,7 @@ func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budg
 				Body: bodies[i], PossiblyDuplicate: c.in.Record.PossibleDuplicate(next), NextPart: c.in.Record.NextPart(),
 			}
 		}
-		page, err := handoff.Pack(msgs, lease, budget)
+		page, err := handoff.Pack(msgs, lease, budget, cutFor...)
 		if err != nil {
 			return packed{}, false, fmt.Errorf("engine: the page of %d messages: %w", len(cands), err)
 		}
@@ -375,9 +385,9 @@ func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budg
 			rec, res, err := c.in.Record.Handout(now, c.auth, h.Parts, h.Part, lease)
 			switch {
 			case errors.Is(err, delivery.ErrInvalidInput):
-				// The message was handed out before in another number of parts: another
-				// front end or another budget cuts it differently, and a part of one cut
-				// is not a part of the other.
+				// The message was handed out before in another number of parts: the budgets
+				// the adapter declares changed since (every front end cuts a message the same
+				// way while they hold), and a part of one cut is not a part of the other.
 				e.log.Error("a queued message was handed out in another number of parts and is not handed out now", "message", string(c.in.Key.Message), "error", err.Error())
 				skip[c.in.Key] = true
 				return packed{}, true, nil
@@ -543,7 +553,7 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 		ID: string(in.Key.Message), From: ident.Address{Node: in.Key.SenderNode, Endpoint: in.Key.Sender},
 		Body: string(body), PossiblyDuplicate: in.Record.PossibleDuplicate(r.Part), NextPart: in.Record.NextPart(),
 	}
-	page, err := handoff.Part(msg, r.Part, lease, budget)
+	page, err := handoff.Part(msg, r.Part, lease, budget, e.partBudgets(st)...)
 	if errors.Is(err, handoff.ErrNoSuchPart) {
 		return nil, invalidArgument("part", err)
 	}

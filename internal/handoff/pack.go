@@ -92,8 +92,16 @@ var (
 // fetched with Part. Every part fits the budget.
 //
 // The budget is checked against the encoded output, not against the bodies.
-func Pack(queue []Message, lease delivery.LeaseID, b Budget) (Page, error) {
-	if err := b.validate(); err != nil {
+//
+// cutFor are further budgets that a message is cut for: a message is one part
+// only when its page fits b and every one of them, and every part fits all of
+// them. The page itself is bounded by b alone. A caller whose endpoint is read
+// through several front ends passes the budgets of the others, so that a message
+// is cut in the same parts whichever front end reads it: the parts are counted
+// and acknowledged one by one, and a part of one cut is not a part of another.
+func Pack(queue []Message, lease delivery.LeaseID, b Budget, cutFor ...Budget) (Page, error) {
+	budgets, err := cutBudgets(b, cutFor)
+	if err != nil {
 		return Page{}, err
 	}
 	if err := validateLease(lease); err != nil {
@@ -103,7 +111,7 @@ func Pack(queue []Message, lease delivery.LeaseID, b Budget) (Page, error) {
 	var handed []Handout
 	var out []byte
 	for i, m := range queue {
-		parts, err := splitBody(m, b)
+		parts, err := splitBody(m, budgets)
 		if err != nil {
 			return Page{}, err
 		}
@@ -138,15 +146,16 @@ func Pack(queue []Message, lease delivery.LeaseID, b Budget) (Page, error) {
 // Part builds the output of recv --msg <id> --part k: part k, counted from 1,
 // of a message. A message that fits whole has the single part 1. The parts of
 // a message are fixed by its ID, sender and body and by the budget, so the
-// budget must be the one Pack used when it handed out the first part.
-func Part(m Message, k int, lease delivery.LeaseID, b Budget) (Page, error) {
-	if err := b.validate(); err != nil {
+// budget and cutFor must be the ones Pack used when it handed out the first part.
+func Part(m Message, k int, lease delivery.LeaseID, b Budget, cutFor ...Budget) (Page, error) {
+	budgets, err := cutBudgets(b, cutFor)
+	if err != nil {
 		return Page{}, err
 	}
 	if err := validateLease(lease); err != nil {
 		return Page{}, err
 	}
-	parts, err := splitBody(m, b)
+	parts, err := splitBody(m, budgets)
 	if err != nil {
 		return Page{}, err
 	}
@@ -154,6 +163,18 @@ func Part(m Message, k int, lease delivery.LeaseID, b Budget) (Page, error) {
 		return Page{}, fmt.Errorf("%w: %d of %d", ErrNoSuchPart, k, len(parts))
 	}
 	return buildPage(m, parts, k, 0, lease, b)
+}
+
+// cutBudgets are the budgets a message is cut for: the one of the page, then the
+// others the caller names. Each must be valid.
+func cutBudgets(b Budget, cutFor []Budget) ([]Budget, error) {
+	budgets := append([]Budget{b}, cutFor...)
+	for _, c := range budgets {
+		if err := c.validate(); err != nil {
+			return nil, err
+		}
+	}
+	return budgets, nil
 }
 
 func validateLease(lease delivery.LeaseID) error {
@@ -198,8 +219,9 @@ func buildPage(m Message, parts []string, k, more int, lease delivery.LeaseID, b
 // later recv --part would not know.
 const maxMore = 999_999
 
-// splitBody cuts the body of m into the parts of the message. A message whose
-// whole page fits is a single part.
+// splitBody cuts the body of m into the parts of the message, so that each part's
+// page fits every one of the budgets. A message whose whole page fits them all is
+// a single part.
 //
 // The cut points depend only on the message's ID, sender and body and on the
 // budget. Everything else that varies from one recv to the next is sized at its
@@ -208,13 +230,18 @@ const maxMore = 999_999
 // the count of other queued messages and the part numbers. A later recv for
 // another part, which knows none of these as they were, then cuts where part 1
 // did.
-func splitBody(m Message, b Budget) ([]string, error) {
+func splitBody(m Message, budgets []Budget) ([]string, error) {
 	sized := m
 	sized.PossiblyDuplicate = true
 	reserved := strings.Repeat("x", MaxLeaseLen)
 	fits := func(body string, part, parts int) bool {
-		out := encodePage(reserved, []wireMessage{wireOf(sized, body, part, parts)}, maxMore)
-		return b.Measure(string(out)) <= b.Limit
+		out := string(encodePage(reserved, []wireMessage{wireOf(sized, body, part, parts)}, maxMore))
+		for _, b := range budgets {
+			if b.Measure(out) > b.Limit {
+				return false
+			}
+		}
+		return true
 	}
 	if fits(m.Body, 0, 0) {
 		return []string{m.Body}, nil

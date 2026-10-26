@@ -21,6 +21,7 @@ not frame, send or store anything.
 | `Admit(capabilities, manifest)` | Whether an adapter is admitted, and the `Admission` that records what it may do. Refusals are an `*AdmitError` with a typed `AdmitReason`. |
 | `Admission.Declares`, `DeclaredKinds`, `Signals(kind)`, `AcceptsSignal` | The endpoint kinds the adapter may own and the control signals each accepts. |
 | `Admission.Budget(frontend)`, `Markers()` | The output budget of `recv` per front end (the default when the manifest gives none) and the compiled acknowledgement markers. |
+| `Admission.PartBudgets(kind)` | The budgets a long message is cut for on an endpoint of that kind, whichever front end reads it: those of every front end the endpoint can be read through, so that every front end cuts it in the same parts. |
 | `Admission.RecvWait(frontend)`, `DefaultRecvWait` | The longest an agent's `recv` may wait through an agent front end (`cli` or `mcp`): the manifest's limit, or `DefaultRecvWait` (8 seconds) when it gives none. It does not apply to direct endpoints. |
 | `MethodAllowed(kind, method)`, `RequirementOf` | The method requirement matrix: forbidden, optional or required per kind. |
 | `Admission.Check(kind, method)` | The error code to answer a call the adapter made with (`0` when it is acceptable): method not found (unknown, or a method only the daemon may call), wrong endpoint kind, or a capability not declared. |
@@ -52,7 +53,9 @@ not frame, send or store anything.
   without calling the adapter.
 - **Budgets.** A manifest budget for `cli` or `mcp` needs a runtime that declares
   that front end, and one for `direct` needs direct endpoints; otherwise the
-  adapter is refused. A front end without a budget uses `handoff.DefaultBudget()`.
+  adapter is refused. A front end without a budget uses `handoff.DefaultBudget()`. A
+  message is cut for the budgets of all the front ends of the runtime (`PartBudgets`),
+  the default counting for one that declares none.
 - **Receive wait.** A limit applies to the agent front ends, `cli` and `mcp`;
   the manifest refuses one for `direct`. A limit for an agent front end that no
   declared runtime lists refuses the adapter, as a budget does

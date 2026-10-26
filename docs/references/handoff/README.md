@@ -114,6 +114,14 @@ checks that the model saw it before acknowledging for the agent.
   `delivery.Record.PossibleDuplicate(part)`, and passes the same identifier to
   `delivery.Record.Handout` for every entry of the page.
 - The exit code is 0 whenever messages are handed out.
+- The cut of a long message can follow more budgets than the page's. `Pack` and `Part`
+  take the budget of the page and, beside it, the budgets of the other front ends of
+  the endpoint: a message is one part only when its page fits them all, and every part
+  fits them all, while the page is bounded by the first alone. The parts of a message
+  are counted and acknowledged one by one, so an endpoint read through several front
+  ends must get the same parts from each; the cut fits each budget and does not follow
+  the smaller limit, because limits in characters and in tokens have no order (a Chinese
+  character is one character and three bytes).
 - The budget is not fixed by this package. Each adapter declares the budget of
   each front end it serves (a unit and a limit), and the caller passes it in.
   For a front end with no declaration there is a default of 9,000 estimated
@@ -374,6 +382,7 @@ The delivery side that these rules call into is described in
   `TestPackPaging`, `TestPackEncoding`, `TestPackFiveLargeMessages`,
   `TestPackChineseAndEnglishAreMeasuredInTheirOwnUnits`, `TestPartErrors`,
   `TestPackPartsAreStableForTheSameBudget`,
+  `TestACutFitsEveryBudgetItIsGivenWhicheverOneAsks`,
   `TestPartsDoNotDependOnThePossiblyDuplicateFlag`,
   `TestPartsDoNotDependOnTheLease`, `TestLeaseLength`,
   `TestPackContinuesAChunkedMessage`, `TestPackProperties`,

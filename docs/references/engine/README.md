@@ -371,10 +371,15 @@ built without it, while the other messages go on. Bodies are read as far as the 
 reaches, not for the whole queue. When the settlement of such a body fails for good,
 the error of the recv is that failure alone, because the error that says a body is damaged
 is read as "settled" and the record may not be. A body that is not text is not handed out and is logged:
-a page cannot carry it, and the message ends as a message nobody reads. A message that was
-handed out in some number of parts is not handed out through a front end or a budget that
-cuts it in another number: a part of one cut is not a part of the other. It is logged, left
-out, and ends as the message nobody reads does.
+a page cannot carry it, and the message ends as a message nobody reads. A long message is
+cut for every front end the endpoint can be read through, whichever one asks
+(`Admission.PartBudgets`, passed to `handoff.Pack` and `handoff.Part` beside the budget of
+the asking front end, which alone bounds the page): the parts are counted and acknowledged
+one by one, so the command line and MCP must cut a message in the same parts, or a part
+shown through one would be no part of the other. A message that was handed out in some
+number of parts is still not handed out in another number, which happens only when an
+adapter's upgrade changed its budgets: it is logged, left out, and ends as the message
+nobody reads does.
 
 `Ack` takes the lease of the page and the parts, or no parts for all the page. A lease no
 record of the caller's endpoint holds is `lease_unknown`, whoever holds it: a record of
@@ -1139,6 +1144,7 @@ reproducible).
 | A delivery that goes well tells its sender nothing; each anomaly is told once, in its own kind | `pull.go`, `feedback.go` | `TestNormalDeliveryGivesNoFeedback`, `TestEachAnomalyIsReportedOnce` |
 | A message never acknowledged is handed out four times, each again as a possible duplicate, then is unknown and told once; a late acknowledgement corrects it once | `pull.go` (`recv`, `ack`), `ticks.go` | `TestNeverAcknowledgedStopsAfterThirdRedeliveryAndReportsOnce` |
 | Long messages go whole or in parts within the budget, as many acknowledgements as parts shown, delivered only when the last part is acknowledged; a part can be asked for by number | `pull.go` (`pack`, `recvPart`) | `TestLargeMessagesWholeOrPartsAndAckCountsMatch`, `TestAPartOfAMessageCanBeFetchedByNumber` |
+| A long message is cut in the same parts through every front end of its endpoint, and acknowledged normally across them | `pull.go` (`partBudgets`), `adapterreg` (`PartBudgets`) | `TestALongMessageIsCutTheSameThroughEveryFrontEnd` |
 | An acknowledgement of a whole page that the node no longer remembers (after a restart, or past `pageMemory`) acknowledges the messages that fit whole and never a part of a message that was cut | `pull.go` (`itemsToAck`) | `TestAWholePageAcknowledgementAfterThePageIsForgottenAcknowledgesOnlyWhatFitsWhole` |
 | An endpoint cannot acknowledge a lease it was not handed | `pull.go` (`ack`), `view.go` (`leased`) | `TestOtherEndpointTokenCannotAcknowledge` |
 | The second check is made again at the hand-out, and only for what the page reaches | `pull.go` (`tryPage`, `handoutAuthorization`) | `TestADeclarationTightenedAfterIntakeRejectsAtRecv`, `TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck` |

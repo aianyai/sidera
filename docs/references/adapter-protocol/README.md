@@ -740,7 +740,9 @@ capabilities or manifest break a rule, whose manifest gives a budget for a front
 end it does not declare or a receive wait limit for an agent front end no declared
 runtime lists, or whose acknowledgement markers `handoff` cannot compile.
 Otherwise the admission records the kinds, the signals of each kind, the budget
-per front end (the manifest's, or the default), the receive wait per agent front
+per front end (the manifest's, or the default; `Admission.PartBudgets` gives the budgets of
+every front end an endpoint can be read through, which a long message is cut for so that
+each front end gets the same parts), the receive wait per agent front
 end (`Admission.RecvWait`: the manifest's limit, or `adapterreg.DefaultRecvWait`,
 8 seconds; it does not apply to direct endpoints) and the compiled markers.
 `CheckHandshake` additionally requires that the adapter reports the manifest's id
