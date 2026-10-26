@@ -848,7 +848,8 @@ if it does not. A result that could not be written is kept and written again aft
 `RetryBackoff`, and the adapter is not asked again for it: it has done what it was asked, and an
 interrupt asked a second time may reach the next turn or answer `not_running`, which hides that
 the first one stopped the turn. Past the deadline the write is tried again at the same pace by
-the deadline itself, so a signal is never left accepted until the next start. A start goes on with the
+the deadline itself, so a signal is never left accepted until the next start. A connection that
+closes while the call is out is told as an adapter that is not connected. A start goes on with the
 signals that were not settled, asking the adapter again, which does what it did before idempotently,
 or settling those past their deadline as the deadline does.
 

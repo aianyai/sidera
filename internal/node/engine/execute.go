@@ -12,6 +12,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // The execution of the two signals that act on a session, close and interrupt.
@@ -190,7 +191,9 @@ func (e *Engine) executeResult(now time.Time, r *cmdExecuteResult) {
 	switch {
 	case errors.Is(r.err, context.Canceled):
 		return // the engine is stopping; the start finds the signal again
-	case errors.Is(r.err, adapterhost.ErrNotConnected):
+	case errors.Is(r.err, adapterhost.ErrNotConnected), errors.Is(r.err, peer.ErrClosed):
+		// A connection that closes with the call out is one that is gone: the call may
+		// have reached the adapter, and the signal is told as when it is not connected.
 		x.offline = true
 		if c.Kind == envelope.KindSessionInterrupt {
 			e.settleFailedExecution(now, c, x)
