@@ -44,8 +44,11 @@ func TestClockRollbackPausesSigningUntilCleared(t *testing.T) {
 	ctx := context.Background()
 	before := send(t, h, "a", "b", "taken in before the clock was set back")
 	quiet(t, h)
-	h.Advance(time.Hour)
-	send(t, h, "a", "b", "raises the mark to an hour on") // a command reads the clock and raises the mark
+	// The mark moves by less than the queue time of an endpoint: what the node took in
+	// is untouched by the pause only if nothing else has touched it, and a message
+	// nobody reads is rejected when its queue time runs out.
+	h.Advance(10 * time.Minute)
+	send(t, h, "a", "b", "raises the mark to ten minutes on") // a command reads the clock and raises the mark
 	quiet(t, h)
 	mark := h.Clock().Now()
 

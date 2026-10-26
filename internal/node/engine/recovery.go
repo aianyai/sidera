@@ -198,6 +198,7 @@ func Open(ctx context.Context, d Deps, p Params) (*Engine, ScanReport, error) {
 			if err := e.loadFeedback(sc, d.Clock.Now()); err != nil {
 				return nil, rep, err
 			}
+			e.watchTicks()
 			rep.Endpoints, rep.Unfinished = e.view.OpenEndpoints(), e.view.Unfinished()
 			return e, rep, nil
 		}
@@ -335,10 +336,6 @@ var recoveryPhases = [...]recoveryPhase{
 // recoverReconcile checks the creation intents and the prompt attempts that were
 // not settled (step 11). Filled in with the prompts and the session creation.
 func (e *Engine) recoverReconcile(time.Time) error { return nil }
-
-// recoverTick runs Tick on every record, in chunks, and settles what became due
-// (step 12). Filled in with the pull of messages.
-func (e *Engine) recoverTick(time.Time) error { return nil }
 
 // recoverFeedback sends the feedback that fell due while the node was down, the
 // feedback of the records replaced after a storage loss included (step 13). The

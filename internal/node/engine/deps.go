@@ -52,6 +52,7 @@ type Store interface {
 	EndpointDrainReplay(b store.DrainBatch) ([]store.InRecord, error)
 	OrphanGC(bodies []string) error
 
+	Tick(b store.TickBatch) ([]store.InRecord, error)
 	FeedbackForm(body []byte, notice store.InRecord) (store.InRecord, error)
 	FeedbackClear(outs []store.OutRecord) error
 	FeedbackReplay(outs []store.OutRecord) error

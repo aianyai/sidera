@@ -32,6 +32,10 @@ const (
 	// schedFeedbackClear is the retry of taking the items a written notice covers off
 	// their records after a write failed; there is one entry, with no id.
 	schedFeedbackClear
+	// schedTick is the next time-driven change of a record, one entry for each target
+	// record and each source record; the id is "in/" and its key or "out/" and its
+	// file name.
+	schedTick
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

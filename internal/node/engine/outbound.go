@@ -71,6 +71,10 @@ type outState struct {
 	sent map[ident.NodeID]bool
 	// inflight is how many pieces of work for the record are with the worker.
 	inflight int
+	// failingSince is, for each node a call has failed to, the time of the first
+	// failure of the run that is going on: it is forgotten when a call to the node
+	// gets an answer. It says for how long contact has been failing.
+	failingSince map[ident.NodeID]time.Time
 }
 
 func newOutbox() *outbox { return &outbox{state: map[string]*outState{}} }
@@ -154,7 +158,7 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	}
 	st := e.outbox.state[name]
 	if st == nil {
-		st = &outState{sent: map[ident.NodeID]bool{}}
+		st = &outState{sent: map[ident.NodeID]bool{}, failingSince: map[ident.NodeID]time.Time{}}
 		e.outbox.state[name] = st
 	}
 	if st.inflight > 0 {
@@ -267,8 +271,10 @@ func (c *cmdOutResult) run(e *Engine, now time.Time) {
 // that did is applied: the reports are verified and applied to the source record,
 // and so are the recipients the target says it holds no record of, which is
 // written with the body released when no delivery needs it any more. A successful
-// answer that says nothing of a recipient says nothing yet: it changes nothing and
-// the next pull asks again.
+// answer to a pull that has no report for a delivery with no receipt is a query that
+// found none, which is what the expiry of a delivery is judged by; for any other
+// delivery it says nothing yet and the next pull asks again. A call that got no
+// answer is also what the unreachable hint is judged by.
 func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, noRecord []ident.EndpointID, callErr error) {
 	st := e.outbox.state[w.name]
 	if st == nil { // the record was settled or taken away while the call was out
@@ -285,15 +291,29 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, no
 			return
 		}
 		e.log.Debug("no answer from the target; it is tried again", "message", string(w.message), "error", callErr.Error())
+		if _, failing := st.failingSince[w.node]; !failing {
+			st.failingSince[w.node] = now
+		}
+		if err := e.noteContactFailing(now, w.name, w.node, st.failingSince[w.node]); err != nil {
+			e.classify(err) // a fatal error stops the loop after this command
+			if e.fatal == nil {
+				e.log.Warn("the failure to reach a node could not be recorded; it is recorded with the next call", "message", string(w.message), "error", err.Error())
+			}
+		}
 		if st.inflight == 0 {
 			e.sched.set(schedKey{schedOutbound, w.name}, now.Add(e.p.ResendBackoff))
 		}
 		return
 	}
+	delete(st.failingSince, w.node)
 	if w.kind == workSend {
 		st.sent[w.node] = true
 	}
-	if err := e.applyAnswer(now, w.name, w.node, reports, noRecord); err != nil {
+	var pulled []ident.EndpointID
+	if w.kind == workPull {
+		pulled = w.recipients
+	}
+	if err := e.applyAnswer(now, w.name, w.node, reports, noRecord, pulled); err != nil {
 		e.classify(err) // a fatal error stops the loop after this command
 		if e.fatal == nil {
 			e.log.Warn("reports could not be written; they are asked for again", "message", string(w.message), "error", err.Error())
@@ -337,6 +357,72 @@ func (e *Engine) afterOutbound(name string, now time.Time) {
 	e.sched.set(schedKey{schedOutbound, name}, now.Add(next))
 }
 
+// sourceChange is the change one answer from a node, or one failure to get an
+// answer, makes to a source record: each fact is applied to the delivery it is
+// about by the rules of the envelope and delivery packages, and the record is written
+// once, with the feedback the facts call for, when any of them changed it.
+type sourceChange struct {
+	e       *Engine
+	now     time.Time
+	node    ident.NodeID
+	old, o  store.OutRecord
+	changed bool
+}
+
+// changeSource starts a change of the source record of the name, from what the view
+// holds of it; ok is false when the record is not there or holds nothing tracked (the
+// replacement of a lost one).
+func (e *Engine) changeSource(now time.Time, name string, node ident.NodeID) (*sourceChange, bool) {
+	o, ok := e.view.out[name]
+	if !ok || o.Lost != nil {
+		return nil, false
+	}
+	return &sourceChange{e: e, now: now, node: node, old: o, o: o}, true
+}
+
+// take puts the delivery the rules changed in the record, with the feedback the
+// outcomes call for.
+func (c *sourceChange) take(next envelope.Outbound, recipient ident.EndpointID, outcomes []delivery.Outcome) {
+	c.o.Outbound = next
+	c.o = c.e.withFeedback(c.now, c.o, ident.Address{Node: c.node, Endpoint: recipient}, outcomes)
+	c.changed = true
+}
+
+// observe applies a fact the sender sees itself to the delivery to recipient, and
+// takes it when the delivery rules did not ignore it.
+//
+// None is applied while the wall clock is in doubt: each of them is a judgement by a
+// deadline, and a clock set back and then moved on is not one to judge by until the
+// owner has cleared it.
+func (c *sourceChange) observe(recipient ident.EndpointID, ev delivery.Event) {
+	if c.e.paused {
+		return
+	}
+	next, effect, outcome, err := c.o.Outbound.ApplyObservation(c.now, c.node, recipient, ev)
+	if err != nil {
+		c.e.log.Warn("an observation of a delivery is refused", "node", c.node.String(), "error", err.Error())
+		return
+	}
+	if effect == envelope.ReportApplied && outcome.Result == delivery.ResultApplied {
+		c.take(next, recipient, []delivery.Outcome{outcome})
+	}
+}
+
+// commit writes the record and takes it into the view; it does nothing when
+// nothing changed. The store removes the body of a record that is written without
+// one.
+func (c *sourceChange) commit() error {
+	if !c.changed {
+		return nil
+	}
+	o := settledSource(c.o)
+	if err := c.e.d.Store.SourceUpdate(o); err != nil {
+		return err
+	}
+	c.e.putOut(c.now, o)
+	return nil
+}
+
 // applyAnswer applies what a node answered about a message this node sent: each
 // report is verified and applied to the source record, and each recipient the node
 // lists as having no record is applied by the rule of the delivery. It writes the
@@ -347,16 +433,18 @@ func (e *Engine) afterOutbound(name string, now time.Time) {
 // its report or its absence (transport.PullAnswer); a recipient it both reports and
 // lists is such a fault too, and the listing is the half that is left out, because
 // the report is signed and the listing is not.
-func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs []record.Record, noRecord []ident.EndpointID) error {
-	old := e.view.out[name]
-	o := old
-	changed := false
-	reported := map[ident.EndpointID]bool{}
-	take := func(next envelope.Outbound, recipient ident.EndpointID, outcomes []delivery.Outcome) {
-		o.Outbound = next
-		o = e.withFeedback(now, o, ident.Address{Node: node, Endpoint: recipient}, outcomes)
-		changed = true
+//
+// pulled are the recipients the answer is to a pull for (nil for the answer to a
+// send). A recipient of them that the answer has no report for, listed as having no
+// record or in neither list, is a query that found no receipt: it is what the
+// expiry of a delivery that has none is judged by (delivery.EventExpiryQueried),
+// and the delivery rules ignore it for every delivery that has one.
+func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs []record.Record, noRecord []ident.EndpointID, pulled []ident.EndpointID) error {
+	c, ok := e.changeSource(now, name, node)
+	if !ok {
+		return nil
 	}
+	reported := map[ident.EndpointID]bool{}
 	for _, rec := range recs {
 		sr, err := e.verifyReport(now, rec, node)
 		if err != nil {
@@ -364,7 +452,7 @@ func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs
 			continue
 		}
 		reported[sr.Report().Recipient] = true
-		next, effect, outcomes, err := o.Outbound.ApplyReport(now, sr)
+		next, effect, outcomes, err := c.o.Outbound.ApplyReport(now, sr)
 		if err != nil {
 			e.log.Warn("a report of the target contradicts the delivery", "node", node.String(), "error", err.Error())
 			continue
@@ -373,15 +461,15 @@ func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs
 		// arrived, from which the reply window is counted, so every applied report
 		// is written.
 		if effect == envelope.ReportApplied {
-			take(next, sr.Report().Recipient, outcomes)
+			c.take(next, sr.Report().Recipient, outcomes)
 		}
 	}
 	for _, recipient := range noRecord {
 		if reported[recipient] {
-			e.log.Warn("the target answered both a report and no record for a recipient; the no record is left out", "node", node.String(), "message", string(o.Outbound.Message))
+			e.log.Warn("the target answered both a report and no record for a recipient; the no record is left out", "node", node.String(), "message", string(c.o.Outbound.Message))
 			continue
 		}
-		next, effect, outcome, err := o.Outbound.ApplyNoRecord(now, node, recipient)
+		next, effect, outcome, err := c.o.Outbound.ApplyNoRecord(now, node, recipient)
 		if err != nil {
 			e.log.Warn("the target says it holds no record of a delivery that is not on it", "node", node.String(), "error", err.Error())
 			continue
@@ -389,18 +477,34 @@ func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs
 		// An answer the delivery ignores (no receipt yet, already settled, past
 		// report_by) leaves the record as it is and is not written.
 		if effect == envelope.ReportApplied && outcome.Result == delivery.ResultApplied {
-			take(next, recipient, []delivery.Outcome{outcome})
+			c.take(next, recipient, []delivery.Outcome{outcome})
 		}
 	}
-	if !changed {
+	for _, recipient := range pulled {
+		if !reported[recipient] {
+			c.observe(recipient, delivery.Event{Type: delivery.EventExpiryQueried, QueriedAt: now})
+		}
+	}
+	return c.commit()
+}
+
+// noteContactFailing tells the deliveries of a record on a node that contact with
+// it has been failing since the given time. The delivery rules judge whether that
+// is news (delivery.EventContactFailing): for a delivery that has no receipt, once it
+// has failed long enough while the sender still retries. A call that failed for any
+// reason but the engine's own stopping counts: the target did not answer in a way
+// that carries the message on.
+func (e *Engine) noteContactFailing(now time.Time, name string, node ident.NodeID, since time.Time) error {
+	c, ok := e.changeSource(now, name, node)
+	if !ok {
 		return nil
 	}
-	o = settledSource(o)
-	if err := e.d.Store.SourceUpdate(o); err != nil {
-		return err
+	for _, t := range c.o.Outbound.Deliveries() {
+		if t.Address.Node == node {
+			c.observe(t.Address.Endpoint, delivery.Event{Type: delivery.EventContactFailing, Cause: delivery.CauseNetwork, Since: since})
+		}
 	}
-	e.putOut(now, o)
-	return nil
+	return c.commit()
 }
 
 // encodeFor is the envelope of a source record as it is sent to one node. It is

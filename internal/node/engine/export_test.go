@@ -257,7 +257,7 @@ func (l LoopSide) Submit(fn func()) bool {
 // outbound worker's result does, to the source record named name: the answer is
 // the caller's to make, so that a test can offer one a transport must never give.
 func (l LoopSide) ApplyAnswer(name string, node ident.NodeID, reports []record.Record, noRecord []ident.EndpointID) error {
-	return l.e.applyAnswer(l.e.d.Clock.Now(), name, node, reports, noRecord)
+	return l.e.applyAnswer(l.e.d.Clock.Now(), name, node, reports, noRecord, nil)
 }
 
 type cmdHook struct {

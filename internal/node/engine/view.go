@@ -2,7 +2,9 @@ package engine
 
 import (
 	"fmt"
+	"slices"
 	"sort"
+	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/admin"
@@ -64,6 +66,13 @@ type view struct {
 	unfinished int
 	alerts     []store.AlertRecord
 	seq        *store.SeqBook
+
+	// onTick, when set, is told, whenever a record is taken in or dropped, the
+	// instant of the next time-driven change of the record (the zero time for none):
+	// the record is "in/" + the text of its key, or "out/" + its file name. The
+	// engine keeps its schedule of ticks from it, so the schedule follows the view
+	// and no write has to remember to move it.
+	onTick func(record string, next time.Time)
 }
 
 // idemKey names an idempotency key: the key is the sender's own.
@@ -310,6 +319,65 @@ func (v *view) setIn(in store.InRecord) {
 		v.unfinished++
 	}
 	v.queue(in.Key.Recipient, in.Key, in.Record.State == delivery.StateAccepted)
+	v.ticks(inTick(in.Key), in.Record.NextTick())
+}
+
+// dropIn takes a target record out of the view, as its file being removed does.
+func (v *view) dropIn(key store.TargetKey) {
+	old, ok := v.in[key]
+	if !ok {
+		return
+	}
+	if inUnfinished(old) {
+		v.unfinished--
+	}
+	if old.Record.OccupiesBacklogSlot() {
+		v.backlog[key.Recipient]--
+	}
+	delete(v.in, key)
+	v.queue(key.Recipient, key, false)
+	k := msgKey{key.Recipient, key.Message}
+	v.received[k] = slices.DeleteFunc(v.received[k], func(x store.TargetKey) bool { return x == key })
+	if len(v.received[k]) == 0 {
+		delete(v.received, k)
+	}
+	a := arrivalKey{key.SenderNode, key.Message}
+	v.arrived[a] = slices.DeleteFunc(v.arrived[a], func(x store.TargetKey) bool { return x == key })
+	if len(v.arrived[a]) == 0 {
+		delete(v.arrived, a)
+	}
+	v.ticks(inTick(key), time.Time{})
+}
+
+// ticks tells the watcher of the schedule when a record next changes with time.
+func (v *view) ticks(record string, next time.Time) {
+	if v.onTick != nil {
+		v.onTick(record, next)
+	}
+}
+
+func inTick(key store.TargetKey) string { return "in/" + key.String() }
+
+func outTick(name string) string { return "out/" + name }
+
+// outNextTick is the earliest time-driven change of a source record: that of the
+// first of its deliveries (the replacement of a lost record has its own).
+func outNextTick(o store.OutRecord) time.Time {
+	var recs []delivery.Record
+	if o.Lost != nil {
+		recs = o.Lost.Deliveries
+	} else {
+		for _, t := range o.Outbound.Deliveries() {
+			recs = append(recs, t.Delivery)
+		}
+	}
+	var next time.Time
+	for _, r := range recs {
+		if n := r.NextTick(); !n.IsZero() && (next.IsZero() || n.Before(next)) {
+			next = n
+		}
+	}
+	return next
 }
 
 // setCtl is setIn for a control record.
@@ -340,4 +408,5 @@ func (v *view) setOut(o store.OutRecord) {
 	}
 	v.out[o.Name()] = o
 	v.unfinished += outUnfinished(o)
+	v.ticks(outTick(o.Name()), outNextTick(o))
 }

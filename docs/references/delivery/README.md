@@ -42,10 +42,10 @@ shows is ignored; a fact that contradicts a final state is an error.
 
 | Kind | When | Notes |
 | ---- | ---- | ----- |
-| unreachable | Contact with the target failed for 2 minutes while the sender still retries. | Cause: network or trust chain suspended. Queued deliveries only. |
+| unreachable | Contact with the target failed for 2 minutes while the sender still retries. | Cause: network or trust chain suspended. Queued deliveries only: a delivery that has a receipt gets no feedback from failing contact, so one whose target is lost to it until `report_by` closes silent. The engine applies each failed call as `EventContactFailing`, starting from the first failure of the run. |
 | delivery blocked | The caller reports the message cannot reach the session. | Not a state; the message stays queued. Cause: adapter offline, runtime authentication, native service. |
 | blocked recovered | The cause ended, or the message was delivered while still marked blocked. | Only if the block was reported. |
-| expired_unconfirmed | Deadline plus tolerance passed and a later active query found no receipt. | Wording: the target may have received the message. |
+| expired_unconfirmed | Deadline plus tolerance passed and a later active query found no receipt. | Wording: the target may have received the message. The engine reads a successful pull that has no report for the delivery (the recipient listed as having no record, or in neither list) as that query, dated now. |
 | expired corrected | An expired delivery turned out accepted or delivered. | |
 | rejected | The target refused. | Carries the reason. |
 | delivery unknown | Lease redelivery exhausted, leases unsettled at the settle deadline, or a delivery whose body was handed out closed by force (backlog deadline, denied second check, closed endpoint); for a control signal, no committed reply by the settle deadline or a forced closure. | Wording: the target handed it over (to the agent, or to the adapter that executes a control signal), whether it was seen or executed is unknown, and the sender must not assume it was not delivered. |

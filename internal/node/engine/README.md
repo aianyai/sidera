@@ -225,7 +225,19 @@ signals join the same loop as further commands and add their methods to this lis
 - **The recovery of deliveries is four phases in the order of the startup
   steps,** each a command of the loop that logs `startup step N begin` and
   `startup step N end`; each is empty until the feature it belongs to is added,
-  except the thirteenth, which sends the feedback that fell due.
+  except the twelfth, which ticks every record that is due, and the thirteenth,
+  which sends the feedback that fell due.
+- **The passing of time is read from the records, by a schedule the view keeps.** Each
+  target record and source record has an entry at its next time-driven change
+  (`Record.NextTick`); `view.onTick` moves it whenever a record is taken in or dropped.
+  Entries that fall due are ticked together, in chunks of `Params.ChunkTickRecords`,
+  in one `tick` transaction with the feedback the changes call for. Nothing is ticked
+  and nothing is judged expired while the wall clock is in doubt. Control records are
+  not ticked here.
+- **A query that was answered and found no receipt expires a delivery; a call that was
+  not answered is a failing contact.** Both are read in the one place the answers are
+  read (`applyAnswer`, `outResult`) and applied through
+  `envelope.Outbound.ApplyObservation`, so the rules stay in the delivery package.
 - **Feedback is queued by the one place that takes a source record into the view,
   and told by one notice per merged group.** `putOut` replaces a source record in the
   view and queues the items the record holds that the one it replaces did not, so a
@@ -409,4 +421,6 @@ requirement kept in sight and skipped until the quarantine is wired.
 for a closed endpoint, a full queue, and the crash walk of the writes that tell an
 endpoint) and `feedback_helpers_test.go` reads them from the disk;
 `feedback_internal_test.go` the key of a notice and the putting back of one that
-could not be written.
+could not be written; `expiry_test.go` what the passing of time does to a delivery
+(backlog expiry, the expiry of a delivery with no receipt, failing contact, closing
+after `report_by`) and the crash walk of the `tick` transaction.

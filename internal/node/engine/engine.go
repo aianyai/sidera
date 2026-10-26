@@ -106,6 +106,11 @@ type Engine struct {
 	probed     bool                             // the command that just ran was a probe of Quiesce
 	installing atomic.Pointer[admin.RequestKey] // the request whose adapter package is being copied: one is at a time, nil when none
 	inLoop     atomic.Bool                      // the loop is running a command or the due entries of the schedule: what spawn asserts
+
+	// dueTicks are the records whose entries of the schedule fell due and that are
+	// not ticked yet; tickQueued says a command to tick them is queued.
+	dueTicks   []string
+	tickQueued bool
 }
 
 // continuation is a command the loop queued for itself: the next chunk of a long
@@ -728,6 +733,8 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		_ = e.runFeedback(now) // a fatal error is e.fatal, which the caller reads
 	case schedFeedbackClear:
 		e.retryClears(now)
+	case schedTick:
+		e.tickDue(key.id)
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.later(&cmdDrain{endpoint: id})

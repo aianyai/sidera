@@ -374,8 +374,18 @@ the pull is made again after `ResendBackoff`; a recipient in `NoRecord` is appli
 envelope package's rule for it, which turns an accepted delivery inside its report window
 into `delivery_unknown` (`lost_at_target`) with one notice, and ignores it for every other
 state or after the window (the answer was slow, and the window the target keeps its
-records for is over); a successful answer that
-has the recipient in neither list is nothing yet, and changes nothing. The source never
+records for is over); a successful answer that has the recipient in neither list says
+nothing yet. What the answer lacks is also a fact of its own: a successful pull that has
+no report for a delivery that has no receipt, whether the recipient is listed as having no
+record or is in neither list, is a query that found no receipt
+(`delivery.EventExpiryQueried`, dated now), the only thing an expiry is judged by, and it
+is applied in `applyAnswer`, the one place the answers are read. A call that got no answer
+is the other fact: the first failure of a run of failures to a node is remembered (in
+memory, per record and node) and each further failure applies
+`delivery.EventContactFailing` with that start, so that the unreachable hint is given
+once contact has failed for two minutes while the sender still retries; an answer that
+comes ends the run. Both go through the envelope package's `ApplyObservation`, and
+neither is applied while the wall clock is in doubt. The source never
 sends the message again because of a `NoRecord`: a message it holds a receipt for is not in
 doubt, only the target's record of it is, and whether to send again is the agents' to decide
 from the notice. The reports and the `NoRecord` entries are applied by one function and
@@ -384,6 +394,23 @@ the record does not track is dropped. A target says at most one thing about a re
 a `NoRecord` for a recipient the same answer reports is logged as the peer's fault and left
 out: the report is signed and stands, and the listing is not applied. Nothing of the sending is persisted:
 the last step of the start looks at every unsettled source record again.
+
+**The passing of time.** Each target record and each source record has an entry of the
+schedule at its next time-driven change (`Record.NextTick`), which the view keeps current
+(`view.onTick`: a record taken in or dropped moves its entry, so no write has to
+remember to). When entries fall due their records are ticked together: a target message
+nobody read is rejected as `backlog_expired` when the endpoint's queue time runs out (the
+body reference goes with it), and any record not final after `report_by` is closed, which
+is silent. The records go to one transaction (`tick`) in chunks of `ChunkTickRecords`, with
+the feedback the changes call for, and the entries of the ones that changed move with the
+view. Startup step 12 ticks every record that is due before the feedback of step 13 goes
+out. Control records are not ticked here: a control signal is settled with its control
+reply, which belongs to the creation of sessions. A target record under a lease is
+ticked by the same rule as any other; leases are made by the hand-out of messages, which
+the pull of messages adds together with the rule of when an expired lease is released. While the wall clock is in doubt
+nothing is ticked and nothing is judged expired: a clock set back and then moved on is
+not one to judge a deadline by until the owner has cleared it, and what the node took in
+before the pause stays as it was.
 
 **Feedback.** What goes wrong with a delivery is told to the endpoint that sent the
 message, once, by a notice of the system endpoint that the endpoint receives like a
@@ -612,6 +639,21 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
 - **Recovery work of an unwired rule stops `Open`.** Opening over a damaged file
   would leave it out of the view as if it were not there, silently. The refusal
   names the rule and happens before any write of that pass.
+- **Time is read from the records, by the schedule the view keeps.** A timer for each
+  rule of the delivery package would be a second statement of when a record changes;
+  `Record.NextTick` says it once, and an entry that follows the view cannot be left stale
+  by a write that forgot it. A record the rules do not change is not looked at again until
+  it is written: an entry that fell due and found nothing would otherwise spin the loop.
+  Nothing is judged by a clock the owner has not cleared.
+- **A query that was answered and found no receipt is the only thing that expires a
+  delivery, and a failing contact is the only thing that is told for one nobody could
+  ask.** Expiry says the target may have the message, which would be false news if the
+  question had not been put to it; and a target unreachable for the whole of a
+  delivery has no report to carry the news, so the failure of the contact is the only
+  word the sender gets, once, before the deadline. What the delivery rules do not give
+  feedback for is an accepted delivery whose target is lost from some moment to
+  `report_by`: it closes silent, and the target may have rejected it meanwhile
+  (`TestAnAcceptedDeliveryWhoseTargetIsLostToTheEndIsNotClosedSilently`, skipped, says it).
 - **Feedback is queued where the view takes a record, and told by a notice that covers
   it.** A decision is stored with the record that made it, so a crash cannot mark a
   delivery reported without its feedback; every write of a source record goes through
@@ -722,6 +764,11 @@ reproducible).
 | Every write that tells an endpoint survives a crash | `feedback-form`, `feedback-clear` (declared by the store) | `TestFeedbackRecoversFromACrashAtEveryPoint` |
 | Every source record the loop writes enters the view through `putOut`, which queues the feedback it holds | `feedback.go` (`putOut`) | `TestEverySourceRecordTheLoopWritesEntersTheViewThroughPutOut` |
 | A clearing of the records that failed after a notice is tried again, so a notice swept later cannot cause a second one | `feedback.go` (`clearCovered`, `retryClears`) | `TestANoticeIsNotToldTwiceWhenTheRecordsCouldNotBeCleared` |
+| A target message nobody reads is rejected when the queue time runs out and the sender is told once; a record that is not final closes after `report_by` | `ticks.go`, `view.go` (`onTick`) | `TestBacklogExpiryRejectsAndIsReportedOnce`, `TestARecordThatIsNotFinalIsClosedByTheEndOfItsTime`, `TestNoRecordAfterReportByChangesNothing` |
+| A delivery with no receipt expires only after a query that was answered found none, is told once and its correction once | `outbound.go` (`applyAnswer`) | `TestExpiredUnconfirmedCorrectedOnce`, `TestSourceWithoutAReceiptIsNotToldTheTargetLostTheRecord` |
+| Contact that keeps failing is told once; twenty messages are one notice; the delivery ends closed after `report_by` | `outbound.go` (`outResult`, `noteContactFailing`) | `TestTwentyToUnreachableTargetMergeIntoOneNotice`, `TestAnUnreachableTargetIsToldOnceAndTheDeliveryClosesAfterReportBy` |
+| Nothing is ticked or judged while the clock is in doubt | `ticks.go` (`tickBatch`), `outbound.go` (`observe`) | `TestClockRollbackPausesSigningUntilCleared`, `TestNoRecordIsNotAnsweredWhileTheNodeMayNotSign` |
+| The records of time survive a crash at every step | `tick` (declared by the store) | `TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint` |
 | The view takes what the store returned and agrees with the disk | `drain.go`, `view.go` | `TestViewMatchesAFreshScanAfterWrites` |
 | No method makes a session endpoint | — | `TestEngineHasNoMethodThatMakesASessionEndpoint` |
 | Node rules do not apply to a local sender, declarations do | `inbound.go` (`judgeAuthz`) | `TestLocalSourcesIgnoreNodeRules`, `TestEndpointDeclarationRestrictsLocalSenders`, `TestARemoteSenderIsJudgedByTheNodeRulesAndALocalOneIsNot` |
@@ -751,13 +798,13 @@ Known gaps, each filled in with the feature it belongs to:
   `store.QuarantineSessions`), so the engine passes the scan and no list;
   `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
   is skipped until the engine wires the quarantine.
-- The prompt and block replays and phases 11 and 12 of `RecoverDelivery` are empty
-  until the features that own them exist; phase 13 sends the feedback that fell due and
-  phase 14 goes on with the outgoing messages.
+- The prompt and block replays and phase 11 of `RecoverDelivery` are empty until the
+  features that own them exist; phase 12 ticks the target and source records, phase 13
+  sends the feedback that fell due and phase 14 goes on with the outgoing messages. The
+  tick of a target record does not yet wait for an active turn before it lets an expired
+  lease go: there are no leases until messages are handed out.
 - An empty body is refused: the Agent interface says a body may be empty and an envelope
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
-- The unreachable hint and the expiry of a delivery nobody answered are not applied by the
-  sender yet; they come with the feedback.
 - Closing a session endpoint does not yet send `session.close` to the adapter: the
   outcome says `closing`, and the release of the native session comes with the
   creation of sessions, which is the feature that makes one.
