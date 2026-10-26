@@ -936,7 +936,8 @@ still short (`BlockedVerdict.RetryAt`), since no event marks it. The adapter's s
 connected since the node began to serve is offline since then and not since an unknown time: the
 node did not look before, and a message that waited while the node was down would otherwise be
 reported blocked in the moment the node starts, for an adapter that is about to connect. For an
-endpoint whose block is reported (the head says so) the start of the cause is left unknown, which
+endpoint whose block is reported (the head says so, or a message that waits carries the mark, which
+a crash between the writes of the marks and of the head leaves) the start of the cause is left unknown, which
 measures from the oldest message that waits: counting from the start of the node would shorten the
 failing run below the threshold, the judgment would take the block for over and correct it to the
 sender, and the block that the adapter's absence then reports again would never be told, since a

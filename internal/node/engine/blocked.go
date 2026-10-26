@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"slices"
 	"sort"
 	"time"
 
@@ -110,12 +111,21 @@ func (e *Engine) serveBlocked() {
 // shorten the failing run of a block the senders were told of, because a correction
 // would then be false and the block, told once per delivery, would never be told again.
 // The block then goes on until a connection shows the cause gone or a prompt is delivered.
-func (e *Engine) blockedSignals(st *endpointState, reported bool) handoff.Signals {
+// A block is reported when the head says so or when a message that waits carries the mark:
+// a crash between the writes of the marks and of the head leaves senders that may already
+// have been told.
+func (e *Engine) blockedSignals(st *endpointState, head store.AttemptsRecord, pending []store.InRecord) handoff.Signals {
 	sig := e.adapterSignals(st.rec.Instance, adapterproto.EndpointRef(st.rec.ID.String()))
-	if sig.AdapterOffline && sig.Since.IsZero() && !reported {
+	if sig.AdapterOffline && sig.Since.IsZero() && !blockedReported(head, pending) {
 		sig.Since = e.servingSince
 	}
 	return sig
+}
+
+// blockedReported says whether senders may have been told that delivery to the endpoint is
+// blocked.
+func blockedReported(head store.AttemptsRecord, pending []store.InRecord) bool {
+	return head.Blocked.Cause != 0 || slices.ContainsFunc(pending, func(in store.InRecord) bool { return in.Record.Blocked })
 }
 
 // judgeBlocked asks whether delivery to the endpoint is blocked and writes what the
@@ -132,7 +142,7 @@ func (e *Engine) judgeBlocked(now time.Time, id ident.EndpointID) {
 	head := e.view.attempts[id]
 	head.Endpoint = id
 	pending := e.pendingOf(now, st)
-	in := handoff.BlockedInput{Attempts: head.Attempts, Signals: e.blockedSignals(st, head.Blocked.Cause != 0), Reported: head.Blocked}
+	in := handoff.BlockedInput{Attempts: head.Attempts, Signals: e.blockedSignals(st, head, pending), Reported: head.Blocked}
 	if len(pending) > 0 {
 		in.OldestPendingAt = pending[0].AcceptedAt
 	}

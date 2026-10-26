@@ -527,45 +527,68 @@ func headOf(t *testing.T, r *rig, id ident.EndpointID) store.AttemptsRecord {
 // is only for a block nobody has reported. Telling the sender the block is over at the
 // start would be false, and it would never hear of the block again, since a delivery
 // is told as blocked once. The block goes on until a connection shows the cause gone,
-// and then it is corrected once.
+// and then it is corrected once. A block counts as reported when the head says so or when
+// a waiting target record carries the mark: a crash between the two writes leaves marks
+// that senders may already have been told of.
 func TestARestartWhileABlockIsReportedKeepsItUntilTheAdapterShowsTheCauseGone(t *testing.T) {
-	host := &promptRecorder{hostDouble: newHostDouble()}
-	r, session, key := waitingSession(t, host)
-	since := r.clk.Now().Add(-10 * time.Minute)
-	for _, in := range r.scan().In {
-		rec, _, err := in.Record.Apply(since, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
-		if err != nil {
-			t.Fatal(err)
-		}
-		in.Record = rec
-		r.seedRecord(in)
-	}
-	r.seedRecord(store.AttemptsRecord{Endpoint: session, Blocked: handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: since}})
-	written := r.commits("blocked")
+	for _, tc := range []struct {
+		name        string
+		headWritten bool
+	}{
+		{"the head reports the block", true},
+		{"a crash left the targets marked and the head not written", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := &promptRecorder{hostDouble: newHostDouble()}
+			r, session, key := waitingSession(t, host)
+			since := r.clk.Now().Add(-10 * time.Minute)
+			for _, in := range r.scan().In {
+				rec, _, err := in.Record.Apply(since, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
+				if err != nil {
+					t.Fatal(err)
+				}
+				in.Record = rec
+				r.seedRecord(in)
+			}
+			if tc.headWritten {
+				r.seedRecord(store.AttemptsRecord{Endpoint: session, Blocked: handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: since}})
+			}
+			written := r.commits("blocked")
 
-	e := r.start()
-	rigQuiet(t, e)
-	r.clk.Advance(handoff.DefaultBlockedThreshold + time.Second)
-	rigQuiet(t, e)
-	if !blockedOn(t, r, key) || headOf(t, r, session).Blocked.Cause != handoff.CauseAdapterOffline {
-		t.Fatal("the block was lifted although the adapter has not connected since the node began to serve")
-	}
-	if n := r.commits("blocked"); n != written {
-		t.Fatalf("%d blocks were written while the cause held, want none", n-written)
-	}
+			e := r.start()
+			rigQuiet(t, e)
+			r.clk.Advance(handoff.DefaultBlockedThreshold + time.Second)
+			rigQuiet(t, e)
+			if !blockedOn(t, r, key) {
+				t.Fatal("the mark was lifted although the adapter has not connected since the node began to serve")
+			}
+			if got := headOf(t, r, session).Blocked.Cause; got != handoff.CauseAdapterOffline {
+				t.Fatalf("the head reports cause %v, want the block that is still on", got)
+			}
+			// A head that was written reports nothing new; one that was not is written once,
+			// when the failing run is long enough, and the marks are not touched.
+			wantWrites := 0
+			if !tc.headWritten {
+				wantWrites = 1
+			}
+			if n := r.commits("blocked") - written; n != wantWrites {
+				t.Fatalf("%d writes of a block while the cause held, want %d", n, wantWrites)
+			}
 
-	if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{Sessions: []adapterproto.SessionState{}}); err != nil {
-		t.Fatal(err)
-	}
-	r.clk.Advance(engine.DefaultParams().RetryBackoff)
-	rigQuiet(t, e)
-	waitUntil(t, func() bool { return host.prompts.Load() == 1 })
-	rigQuiet(t, e)
-	if blockedOn(t, r, key) || headOf(t, r, session).Blocked.Cause != 0 {
-		t.Error("the block is still recorded after the adapter connected and the prompt was delivered")
-	}
-	if n := r.commits("blocked"); n != written+1 {
-		t.Errorf("%d writes of a block followed the connection, want the one that lifts it", n-written)
+			if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{Sessions: []adapterproto.SessionState{}}); err != nil {
+				t.Fatal(err)
+			}
+			r.clk.Advance(engine.DefaultParams().RetryBackoff)
+			rigQuiet(t, e)
+			waitUntil(t, func() bool { return host.prompts.Load() == 1 })
+			rigQuiet(t, e)
+			if blockedOn(t, r, key) || headOf(t, r, session).Blocked.Cause != 0 {
+				t.Error("the block is still recorded after the adapter connected and the prompt was delivered")
+			}
+			if n := r.commits("blocked") - written; n != wantWrites+1 {
+				t.Errorf("%d writes of a block in all, want %d: the report if it was missing and the one that lifts it", n, wantWrites+1)
+			}
+		})
 	}
 }
 
