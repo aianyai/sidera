@@ -70,6 +70,29 @@ func decodeParams[P any](raw json.RawMessage, p *P) error {
 	return nil
 }
 
+// checkPlan refuses a plan that is not what the row's operation authorized. The
+// request is authorized by the row's op before its params are read, and what runs
+// is the plan's operation, which the engine's door judges by its own Admin(): were
+// the two different, a request would be authorized as one catalogue entry and
+// carried out as another. A row that changes state must plan an operation whose
+// Admin() is its op and no read; a row that does not must plan a read and no
+// operation. A row that breaks this is a defect of the program, not of the request.
+func (m *method) checkPlan(p *plan) error {
+	if m.op.SideEffecting() {
+		switch {
+		case p.operation == nil || p.read != nil:
+			return fmt.Errorf("manageapi: %q is authorized as an operation that changes state and plans none", m.name)
+		case p.operation.Admin() != m.op:
+			return fmt.Errorf("manageapi: %q is authorized as %+v and would run as %+v", m.name, m.op, p.operation.Admin())
+		}
+		return nil
+	}
+	if p.operation != nil || p.read == nil {
+		return fmt.Errorf("manageapi: %q is authorized as a read and does not plan one", m.name)
+	}
+	return nil
+}
+
 // canonical is the encoding of read params that equal requests share: the fields
 // of the type in the order it declares them.
 func canonical(p any) []byte {

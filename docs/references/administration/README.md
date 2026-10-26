@@ -168,7 +168,8 @@ denied caller can neither file nor probe results.
 
 In the node the first two steps are the management interface's and the rest is one
 command of the engine's single writer: `internal/node/manageapi` authorizes against
-the catalogue and validates the shape, then asks the engine's one door,
+the catalogue and validates the shape (and checks that the operation the row plans is
+the catalogue entry it was authorized as, an internal error otherwise), then asks the engine's one door,
 `engine.Execute`, which looks the key up in all stored results, runs the operation
 and stores the result with the fingerprint in the transaction of its effect. The
 version is checked by `config` inside the change that writes the versioned file,

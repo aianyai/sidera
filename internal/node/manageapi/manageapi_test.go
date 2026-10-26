@@ -188,7 +188,7 @@ func extraMethods(s *Server) {
 				return nil, err
 			}
 			// the fake service never runs the operation; any value of the type will do
-			return &plan{canonical: canonical(p), operation: engine.CloseEndpointOp(endpointOf(1), nil)}, nil
+			return &plan{canonical: canonical(p), operation: engine.SetNodeSettingsOp([]byte(`{}`), nil)}, nil
 		},
 	}
 	s.methods["test.unknown"] = &method{
@@ -228,6 +228,62 @@ func TestAnOperationOutsideTheCatalogueIsNeverRun(t *testing.T) {
 	if n := len(r.svc.calls()); n != 0 {
 		t.Errorf("the engine was asked %d times", n)
 	}
+}
+
+// A request is authorized by the row's op before its params are read and carried
+// out as the plan's operation, which the engine judges by its own Admin(). A row
+// whose two differ would have a request authorized as one catalogue entry and run
+// as another: it is refused as a defect of the program, whatever the request, and
+// the engine is never asked.
+func TestARowWhoseOperationIsNotWhatItIsAuthorizedAsIsNeverRun(t *testing.T) {
+	read := func(context.Context, engine.ManageService) (any, error) { return struct{}{}, nil }
+	closeIt := engine.CloseEndpointOp(endpointOf(1), nil)
+	setNode := engine.SetNodeSettingsOp([]byte(`{}`), nil)
+	for _, tc := range []struct {
+		name string
+		op   admin.Operation
+		plan plan
+	}{
+		{"a change authorized as another entry", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{operation: closeIt}},
+		{"a change of a preset authorized as the other class", admin.Operation{Kind: admin.OpChangePreset, PresetChange: admin.PresetChangeNarrowing}, plan{operation: engine.AddPresetOp("x", nil, nil)}},
+		{"a change that plans a read", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{read: read}},
+		{"a change that plans nothing", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{}},
+		{"a change that plans both", admin.Operation{Kind: admin.OpChangeNodeSettings}, plan{operation: setNode, read: read}},
+		{"a read that plans an operation", admin.Operation{Kind: admin.OpRead}, plan{operation: setNode}},
+		{"a read that plans nothing", admin.Operation{Kind: admin.OpRead}, plan{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, func(s *Server) {
+				pl := tc.plan
+				pl.canonical = []byte(`{}`)
+				s.methods["test.row"] = &method{name: "test.row", op: tc.op, plan: func(*Server, json.RawMessage) (*plan, error) { return &pl, nil }}
+			})
+			body := `{}`
+			if tc.op.SideEffecting() {
+				body = `{"operation_id":"` + opID(5) + `"`
+				if tc.op.IsConfigChange() {
+					body += `,"expected_version":1`
+				}
+				body += `}`
+			}
+			status, out := r.post("test.row", body)
+			r.wantError(500, "internal", "internal", status, out)
+			if n := len(r.svc.calls()); n != 0 {
+				t.Errorf("the engine was asked %d times", n)
+			}
+		})
+	}
+	t.Run("a row that is what it is authorized as is run", func(t *testing.T) {
+		r := newRig(t, func(s *Server) {
+			s.methods["test.row"] = &method{name: "test.row", op: admin.Operation{Kind: admin.OpChangeNodeSettings}, plan: func(*Server, json.RawMessage) (*plan, error) {
+				return &plan{canonical: []byte(`{}`), operation: setNode}, nil
+			}}
+		})
+		status, out := r.post("test.row", `{"operation_id":"`+opID(5)+`","expected_version":1}`)
+		if status != 200 || len(r.svc.calls()) != 1 {
+			t.Fatalf("answered %d %s with %d calls, want 200 and one", status, out, len(r.svc.calls()))
+		}
+	})
 }
 
 // What the engine is asked: the operation identifier scoped to the local owner,

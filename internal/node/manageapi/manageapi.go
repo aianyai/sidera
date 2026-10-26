@@ -203,6 +203,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, err, 0)
 		return
 	}
+	if err := m.checkPlan(d.plan); err != nil {
+		s.fail(w, err, 0)
+		return
+	}
 
 	if d.plan.read != nil {
 		result, err := d.plan.read(r.Context(), s.cfg.Service)

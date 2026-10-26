@@ -64,6 +64,13 @@ test clock, quiescence, the crash points) are added by the streams that own them
   `admin.KeyFor(owner, id)`, the fingerprint and the expected version. The replay
   check, the version check and the storing of the result are the engine's and are
   not made here.
+- **A row is authorized as what it runs as.** Authorization uses the row's `op`
+  before the params are read, and what runs is the plan's operation, which the
+  engine judges by its own `Admin()`. After the params are read the server checks
+  that the two are the same catalogue entry (a change plans an operation and no read,
+  a read plans a read and no operation); a row that breaks it is answered as an
+  internal error and the engine is never asked, so a request can never be
+  authorized as one entry and carried out as another.
 - **Strict decoding.** An unknown member, a repeated key, `null`, a key of another
   case and a value of another type are `malformed_request`, with the path of the
   fault when the decoder can place it. The operation identifier is 32 lower-case
