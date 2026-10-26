@@ -118,3 +118,30 @@ func TestEveryPresetOnDiskMadeTheStatement(t *testing.T) {
 		}
 	}
 }
+
+// A preset is shown as the document that presets.add takes: decoding what it shows
+// gives the same preset, the members it does not have are left out, and a preset
+// that makes no statement about local sources is not shown at all.
+func TestAPresetIsShownAsTheDocumentThatAddsIt(t *testing.T) {
+	for _, tc := range []struct{ doc, want string }{
+		{`{"local_sources":"allow"}`, `{"local_sources":"allow"}`},
+		{`{ "description" : "closed", "local_sources" : "deny" }`, `{"local_sources":"deny","description":"closed"}`},
+		{`{"local_sources":"deny","config":{"relay":{"k":1}}}`, `{"local_sources":"deny","config":{"relay":{"k":1}}}`},
+	} {
+		p, err := config.DecodePreset([]byte(tc.doc))
+		if err != nil {
+			t.Fatalf("DecodePreset(%s): %v", tc.doc, err)
+		}
+		got, err := p.WireJSON()
+		if err != nil || string(got) != tc.want {
+			t.Errorf("WireJSON of %s = %s, %v; want %s", tc.doc, got, err, tc.want)
+		}
+		again, err := config.DecodePreset(got)
+		if err != nil || !reflect.DeepEqual(again, p) {
+			t.Errorf("the shown form of %s decodes to %+v, %v; want %+v", tc.doc, again, err, p)
+		}
+	}
+	if got, err := (config.Preset{}).WireJSON(); err == nil {
+		t.Errorf("a preset with no statement about local sources is shown as %s", got)
+	}
+}

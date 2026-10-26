@@ -74,6 +74,18 @@ func (p Preset) wire() (presetWire, error) {
 	return w, nil
 }
 
+// WireJSON is the preset as the owner's commands show it and as presets.add takes
+// it: the compact JSON object that presets.json holds under the preset's name.
+// It is the one place the names of a preset's members are written for anything
+// but the file, so that what a command shows is what the file says.
+func (p Preset) WireJSON() ([]byte, error) {
+	w, err := p.wire()
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(w)
+}
+
 // DecodePreset decodes one preset document, as presets.add carries it. The
 // statement about local sources is required and has no default: a document
 // without it, or with a value that is not exactly "allow" or "deny", is
