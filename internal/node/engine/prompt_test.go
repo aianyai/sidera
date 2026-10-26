@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
+	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -496,4 +500,56 @@ func TestRefusedPromptIsRetriedAfterTheRetryTimeAndDelivered(t *testing.T) {
 		t.Errorf("the record is %s (%v), want accepted and notified", in.Record.State, in.Record.Sub)
 	}
 	wantNoFeedback(t, h, "a", msg)
+}
+
+// The attempt is on disk as in flight before the adapter is called: when that write
+// fails no prompt reaches the adapter, nothing is recorded, and the endpoint is judged
+// again after the retry backoff, when the prompt goes out. A prompt sent before it was
+// recorded could not be found, asked about or kept from being sent twice by a node that
+// died after sending it.
+func TestPromptIsRecordedBeforeTheAdapterIsCalledAndAFailedWriteIsRetried(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	_, addr := idleSession(t, h, "a")
+	rule := h.Faults().Fail(fsxtest.Match{Tx: "prompt-begin", Step: fsx.StepWrite, Hit: 1}, syscall.EIO)
+	msg := sendToAddr(t, h, "a", addr, "for a prompt that cannot be recorded")
+	quiet(t, h)
+	if rule.Hits() == 0 {
+		t.Fatal("the write of the attempt was never reached, so the fault was not injected")
+	}
+	wantPrompts(t, h, addr, 0)
+	if a := attemptsOf(t, h, addr); a.InFlight != nil || len(a.Attempts) != 0 {
+		t.Errorf("the attempts are %+v after a write that failed, want none", a)
+	}
+
+	h.Advance(engine.DefaultParams().RetryBackoff - time.Second)
+	quiet(t, h)
+	wantPrompts(t, h, addr, 0)
+	h.Advance(time.Second)
+	quiet(t, h)
+	wantPrompts(t, h, addr, 1)
+	if a := attemptsOf(t, h, addr); a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+		t.Errorf("the attempts are %+v, want one delivered and none in flight", a)
+	}
+	if in := inOf(t, h, msg); in.Record.Sub != delivery.SubNotified {
+		t.Errorf("the record is %s (%v), want accepted and notified", in.Record.State, in.Record.Sub)
+	}
+}
+
+// The two scenarios of the cap on the node's prompt-started turns that need a second
+// adapter instance. The harness runs one adapter instance, so they cannot be expressed
+// until it runs two; each is skipped with that reason and listed as untested in the
+// engine reference.
+
+// An endpoint whose adapter is offline is not among the waiting endpoints, so it takes
+// no place: with the node's only free place and the offline endpoint the longer waiter,
+// an endpoint of another adapter that is online is prompted.
+func TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter(t *testing.T) {
+	t.Skip("the harness runs one adapter instance, so a node cannot have one adapter offline while another serves its sessions")
+}
+
+// A turn of an adapter that went offline is not counted against the cap, and is counted
+// again when the adapter returns and reports the turn running: the place it held is
+// free to an endpoint of another adapter meanwhile.
+func TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning(t *testing.T) {
+	t.Skip("the harness runs one adapter instance, so a node cannot have one adapter offline while another serves its sessions")
 }

@@ -1368,6 +1368,7 @@ reproducible).
 | An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceProbed`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
 | A prompt that failed is held for the retry time of the rules and then sent again, with nothing else bringing the endpoint back | `prompts.go` (`settlePrompt`, `servePrompts`), `handoff.DecidePrompt` | `TestRefusedPromptIsRetriedAfterTheRetryTimeAndDelivered` |
 | The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
+| The attempt is recorded as in flight before the adapter is called, and a write that fails sends nothing and is retried after the backoff | `prompts.go` (`dispatchPrompt`) | `TestPromptIsRecordedBeforeTheAdapterIsCalledAndAFailedWriteIsRetried` |
 | A refusal is a failure, a lost answer is a delivery or an unknown outcome as the adapter says, and only a delivery marks the message | `prompts.go` (`promptResult`, `reconcileResult`, `settlePrompt`) | `TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain` |
 | The checkpoint of a prompt attempt is dropped when the attempt settles | `prompts.go` (`dropAttemptCheckpoint`), `store.CheckpointDrop` | `TestSettledPromptAttemptDropsItsCheckpoint` |
 | A prompt does not make the check at recv pass | `pull.go` (`handoutAuthorization`) | `TestDeclarationTightenedAfterPromptRejectsAtRecv` |
@@ -1406,6 +1407,14 @@ Known gaps, each filled in with the feature it belongs to:
   endpoint whose agent had read it may be woken once more by the end of a turn.
 - The checkpoint of the attempt of a session creation is not dropped when the creation
   settles; only the checkpoint of a prompt attempt is, when the prompt settles.
+- Two scenarios of the cap on the turns that prompts start are untested because the harness
+  runs one adapter instance (`TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter`
+  and `TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning`, both skipped):
+  the endpoints and turns of an adapter that is offline take no place while another adapter's
+  endpoint is prompted, and a turn that went on while its adapter was away is counted again
+  when the adapter reports it. The exclusion is made in `promptRound`; the single-instance cases
+  are covered by `TestPromptTurnsBeyondNodeCapWaitOldestFirst` and
+  `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack`.
 - An empty body is refused: the Agent interface says a body may be empty and an envelope
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
 - Closing a session endpoint at the owner's request does not send `session.close` to the
