@@ -584,8 +584,11 @@ type BodyQuarantine struct {
 	// Rename is set on the first chunk: the body is renamed before anything
 	// else, which makes the head record of the transaction.
 	Rename bool
-	// Out, In and Ctl are the records that refer to the body, each replaced by
-	// a lost record or stripped of the reference.
+	// Out, In and Ctl are the records that refer to the body. A source record is
+	// replaced by a lost record when it still needs the body and stripped of the
+	// reference otherwise. A target record has no replacement, so it is only ever
+	// stripped, and one that still needs the body is refused (ErrBodyStillNeeded).
+	// A control record never needs a body (delivery.Record.NeedsBody).
 	Out []OutRecord
 	In  []InRecord
 	Ctl []CtlRecord
@@ -594,10 +597,17 @@ type BodyQuarantine struct {
 }
 
 // QuarantineBody writes a chunk of the quarantine of a body.
-// It returns the target records as written (the revision one on).
+// It returns the target records as written (the revision one on). A target
+// record that still needs its body and no longer refers to it is refused before
+// anything is written.
 func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
 	if !isHashName(q.Name) || q.AlertID == (AlertID{}) {
 		return nil, errors.New("store: a body quarantine names a body and an alert")
+	}
+	for _, in := range q.In {
+		if in.Body == nil && in.Record.NeedsBody() {
+			return nil, fmt.Errorf("%w: %s", ErrBodyStillNeeded, in.Name())
+		}
 	}
 	of, err := outFiles(q.Out)
 	if err != nil {

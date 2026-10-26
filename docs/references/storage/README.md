@@ -504,7 +504,9 @@ intact fails step 5 or 6 and is treated as a damaged body: a source record is
 then replaced by a lost record, and a target or control record is quarantined with
 no replacement. That reports "lost, outcome unknown" to the sender where the
 record might have been read; nothing is lost and the failure is visible, so there
-is no separate path for it.
+is no separate path for it. This is a damaged
+record file; a body file whose content does not hash to its name is a different
+case, with its own rule for target records (see the quarantine of a body below).
 
 A body is JSON written by `encoding/json` from structs of the package, with
 times as RFC 3339 in UTC with a `Z` and fractional seconds without trailing
@@ -618,8 +620,12 @@ crash leaves between the two is an orphan, removed by the first rule of the next
 start. A body is checked against its name when it is read (a start does not read
 them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch quarantines the body and
 every source record that refers to it either becomes a lost record, if it still
-needs the bytes, or loses the reference. A target record has no replacement: the
-store writes it as given, with the reference dropped.
+needs the bytes, or loses the reference. A target record has no replacement, so one
+that still needs the bytes (an accepted message waiting to be handed out) cannot
+lose the reference: the quarantine refuses it with `ErrBodyStillNeeded` before it
+writes anything (`TestABodyQuarantineRefusesATargetRecordThatStillNeedsTheBodyItDrops`), and the caller ends that delivery by the delivery rules first. Any
+other target record, and every control record (which never needs a body), is written
+with the reference dropped.
 
 **Existence is read before the transaction opens.** A call that removes files
 (a release of bodies, a sweep, an orphan collection) asks the disk which of them

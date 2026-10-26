@@ -186,8 +186,11 @@ engine applies the delivery rules and calls the writes.
 - On a body that does not hash to its name, replace a source record with a lost
   record only when `delivery.Record.NeedsBody()` says it still needs the bytes (the
   replacement comes from `delivery.NewLostRecord`); any other record keeps its
-  state and only drops the reference to the body, and a target record is written
-  with the reference dropped, whatever it needs.
+  state and only drops the reference to the body. A target record has no
+  replacement, so `QuarantineBody` refuses one that still needs the bytes and no
+  longer refers to them (`ErrBodyStillNeeded`, before anything is written): the
+  caller ends that delivery by the delivery rules first. A control record never
+  needs a body.
 
 ## Crash tests
 

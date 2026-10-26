@@ -25,6 +25,12 @@ var (
 // write stores refers to. Nothing was written.
 var ErrReleasedBodyInUse = errors.New("store: a released body is referred to by a record written with it")
 
+// ErrBodyStillNeeded: a body quarantine was given a target record that still needs
+// its body, with the reference to it dropped. A target keeps no replacement of a
+// record, so the record would wait to be handed out with nothing to hand. Nothing
+// was written.
+var ErrBodyStillNeeded = errors.New("store: a target record that still needs its body cannot lose the reference to it")
+
 // Store writes and reads state/. It keeps no state of its own besides the
 // writer: the engine's view of the records is built from a Scan.
 type Store struct {

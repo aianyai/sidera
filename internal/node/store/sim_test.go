@@ -266,7 +266,9 @@ func unreferenced(sc *store.Scan, ins []store.InRecord, ctls []store.CtlRecord) 
 // name: the body is quarantined, and every source record that refers to it is
 // replaced by a lost record when it still needs the body and stripped of the
 // reference when it does not; a target record has no replacement and is only
-// stripped of the reference, in chunks of s.chunk records.
+// stripped of the reference, in chunks of s.chunk records. The store refuses a
+// target record that still needs the body, so a scenario that runs this has
+// ended such deliveries before, and the model stops on one it finds.
 func (s *sim) bodyMismatch(name string) {
 	s.t.Helper()
 	id := alertFor(store.BodiesDir, name)
@@ -303,6 +305,9 @@ func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
 	}
 	for _, in := range sc.In {
 		if in.Body != nil && in.Body.Name() == name {
+			if in.Record.NeedsBody() {
+				s.t.Fatalf("the target record %s still needs the body %s: the store refuses to strip it", in.Name(), name)
+			}
 			in.Body = nil // a target keeps no replacement of a record it lost
 			ins = append(ins, in)
 		}

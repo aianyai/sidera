@@ -179,10 +179,11 @@ func recoveryScenarios() []scenario {
 				seedRaw(t, mem, store.BodiesDir, name, []byte("tampered content"))
 				ctl := sessionCtl(4, 5)
 				ctl.Body = bodyRef(1)
-				// Every record refers to the one body.
+				// Every record refers to the one body. The target records no longer need
+				// it: the store refuses to strip one that does.
 				in2, d3, in5 := inRev(2, 1), inRev(3, 1), inRev(5, 1)
 				in2.Body, d3.Body, in5.Body = bodyRef(1), bodyRef(1), bodyRef(1)
-				d3.Record = deliveredRecord(d3.Record)
+				in2.Record, d3.Record, in5.Record = deliveredRecord(in2.Record), deliveredRecord(d3.Record), deliveredRecord(in5.Record)
 				seed(t, mem, srcOut(1, false), in2, d3, ctl, in5)
 			},
 			durable: "quarantine-body/body.sync-dir#1",
@@ -214,8 +215,8 @@ func recoveryScenarios() []scenario {
 					t.Errorf("a source record still waiting for a receipt was not marked: %#v", out)
 				}
 				_, in2, _ = find(t, sc, inRev(2, 1).Name())
-				if in2 == nil || in2.Body != nil {
-					t.Errorf("a queued message must lose the reference: a target keeps no replacement: %#v", in2)
+				if in2 == nil || in2.Body != nil || in2.Record.State != delivery.StateDelivered {
+					t.Errorf("a delivered message must lose only the reference: %#v", in2)
 				}
 				if _, d, _ := find(t, sc, inRev(3, 1).Name()); d == nil || d.Body != nil || d.Record.State != delivery.StateDelivered {
 					t.Errorf("a delivered message must lose only the reference: %#v", d)

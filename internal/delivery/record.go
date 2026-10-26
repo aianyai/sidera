@@ -555,9 +555,9 @@ func (r Record) checkLostShape() Violation {
 // control record never does: its own content is in the record, and the body it
 // references is the initial message, which the delivery derived from it hands
 // out. A source record whose body turns out to be corrupt and which needs it is
-// replaced by NewLostRecord, a target record has no replacement (a target keeps no
-// loss), and any other record keeps its state and merely drops its reference to
-// the body.
+// replaced by NewLostRecord, a target record that needs it has no replacement (a
+// target keeps no loss) and cannot drop its reference to the body, and any other
+// record keeps its state and merely drops its reference to the body.
 func (r Record) NeedsBody() bool {
 	switch r.Side {
 	case SideSource:

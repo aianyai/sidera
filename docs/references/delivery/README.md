@@ -410,7 +410,8 @@ it can run the signal once more.
 `Record.NeedsBody()` says whether a record still needs the bytes of its body: a
 source record that is `queued`, and a target message record that is `accepted`
 (queued or under a lease). A source record that needs a corrupt body is replaced
-by `NewLostRecord`; a target record has no replacement; every other record that
+by `NewLostRecord`; a target record that needs it has no replacement and cannot drop
+the reference either (the store refuses to write it so); every other record that
 references the body keeps its state and drops only the reference. A control record
 never needs the body: the body it references is the initial message, which the
 delivery derived from it hands out.
