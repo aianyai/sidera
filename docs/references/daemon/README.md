@@ -178,7 +178,7 @@ children, and has no work on a data directory that init made or a start repaired
 ### Periodic tasks
 
 The tasks are entries of the engine's schedule on the injected clock, registered
-at step 6. The daemon has two of its own. The certificate check runs every hour
+at step 6. The daemon has three of its own. The certificate check runs every hour
 (`CertificateCheckEvery`) and does what step 5 does, with the clock of the command:
 the certificate lasts 30 days and is renewed with 10 or fewer left, so an hour is a
 small part of the margin, and a node that was down is brought up to date by the
@@ -193,8 +193,22 @@ the high water mark and the pause are made durable, and a crash loses at most a
 minute of a mark, which only makes the next start trust the clock less. The pause
 keeps the time it began while it lasts and forgets it when the owner clears it, so
 a later pause begins at its own time. The engine
-also runs it at once when it finds the clock set back. Other features add theirs in
-`Attachments.Periodic`.
+also runs it at once when it finds the clock set back. The third is the archive sweep,
+every hour (`ArchiveSweepEvery`): the daemon names the period and the engine owns
+the sweep (`engine.AddArchiveSweep`), because the engine is the single writer and holds the
+view that follows every removal. What it sweeps has served a retention of a day or more
+(a delivery about 27 hours after its deadline, a result or an acknowledged alert a week
+after), so it is never urgent; an hour keeps a pass to what a node at its upper scale
+finishes in that time. A pass stalls the engine's loop once for a full scan of the live
+files (the storage reference measures about 3.2 s for 50,000 files and 11 to 13 s for
+200,000, warm), then for a fraction of a second at a time as it removes in chunks;
+callers that meet the stall are told `loop_busy`, which they retry. It runs on the
+injected clock like the others and waits while the clock is in doubt
+(`TestTheDaemonSweepsTheArchiveEveryPeriodOnTheInjectedClock` for the period;
+engine's `TestNoSweepWhileTheClockIsInDoubt` for the wait: several periods pass with the
+pause in force and what is due stays, then the first period after the owner clears it
+removes it). Other
+features add theirs in `Attachments.Periodic`.
 
 ### The logs
 
@@ -315,7 +329,7 @@ interface: a sandbox must deny the socket to an agent.
 | `TrustSync` | 7 | trust synchronisation |
 | `AgentProbeOnly`, `AgentServe`, `StopInterfaces` | 9, 15, shutdown 2 | the Agent interface |
 | `Adapters`, `StopAdapters` | 10, shutdown 3 | what else starts and stops with the adapters; the adapter host itself is `Config.AdapterHost`, wired by this package, and is not a hook |
-| `Periodic` | 6 | any feature with a task on a period (archive sweep, disk polling); the daemon's own tasks, the clock state and the hourly certificate check, are not among them |
+| `Periodic` | 6 | any feature with a task on a period (disk polling); the daemon's own tasks, the clock state, the hourly certificate check and the archive sweep, are not among them |
 | a row of `manageapi`'s method table, and a type of `engine.Operation` | | the owner of an operation |
 
 ## Why
@@ -408,6 +422,7 @@ interface: a sandbox must deny the socket to an agent.
   `TestTheStartMakesTheLayoutTheOwnerRemovedAgain`,
   `TestTheDaemonLogsToTheFileUnderLogsWithTheTimeOfItsClock`,
   `TestThePeriodicTasksRunEveryPeriodOnTheInjectedClock`,
+  `TestTheDaemonSweepsTheArchiveEveryPeriodOnTheInjectedClock`,
   `TestAClockSetBackIsPausedAtStartAndThePauseAndTheMarkAreKept`,
   `TestShutdownRunsInItsFixedOrder`, `TestRequestStopRunsTheShutdownOnce`,
   `TestTheOwnerStopsTheDaemonThroughTheManagementInterface`,

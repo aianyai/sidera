@@ -252,6 +252,19 @@ func seedHome(t testing.TB, home string, recs ...store.EndpointRecord) {
 	if err := os.WriteFile(filepath.Join(home, "config", "instances.json"), ins, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	seedStore(t, home, func(st *store.Store) {
+		for _, r := range recs {
+			if err := st.EndpointUpdate(r); err != nil {
+				t.Fatalf("seeding %s: %v", r.ID, err)
+			}
+		}
+	})
+}
+
+// seedStore lets write put records through the store on the disk of an initialized
+// home while no daemon runs over it.
+func seedStore(t testing.TB, home string, write func(st *store.Store)) {
+	t.Helper()
 	fsys, err := fsx.OpenOS(home, seeded(9))
 	if err != nil {
 		t.Fatal(err)
@@ -269,12 +282,7 @@ func seedHome(t testing.TB, home string, recs ...store.EndpointRecord) {
 	if err := w.Recover(); err != nil {
 		t.Fatal(err)
 	}
-	st := store.New(w)
-	for _, r := range recs {
-		if err := st.EndpointUpdate(r); err != nil {
-			t.Fatalf("seeding %s: %v", r.ID, err)
-		}
-	}
+	write(store.New(w))
 }
 
 func endpointID(t testing.TB, b byte) ident.EndpointID {

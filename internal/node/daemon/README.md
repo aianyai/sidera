@@ -25,7 +25,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
 | `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
 | `Table`, `Declarations`, `Transactions`, `LayoutWork`, `RepairLayout` | The one table of the program's transactions, the two this package declares (`init` and `layout`), and the layout rule. |
-| `ClockStateEvery`, `CertificateCheckEvery` | The period of the clock state, and of the look at the certificate. |
+| `ClockStateEvery`, `CertificateCheckEvery`, `ArchiveSweepEvery` | The period of the clock state, of the look at the certificate, and of the archive sweep (the engine's: the daemon names only the period). |
 
 ## Rules
 
@@ -115,5 +115,5 @@ not ended, a stop that races with a failed start, a context or a signal during t
 start; `adapters_test.go` the adapter host at step 10 and step 3, over fake adapters in the test
 process (the launcher is `harness.AdapterLauncher`); `adapters_install_test.go` installing, enabling, listing and disabling an adapter, and the presets, through the management interface of a whole daemon;
 `env_test.go` what a hook is given; `logging_test.go` the deferred log handler;
-`periodic_test.go` the clock state's pause; `replay_test.go` a management operation
+`periodic_test.go` the clock state's pause; `sweep_test.go` the archive sweep on its period; `replay_test.go` a management operation
 resent through the whole daemon.

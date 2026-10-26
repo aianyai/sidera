@@ -251,6 +251,9 @@ func (d *Daemon) stepScan(ctx context.Context) error {
 	if err := e.AddPeriodic(certificateTask, CertificateCheckEvery, d.certificateTask); err != nil {
 		return err
 	}
+	if err := e.AddArchiveSweep(ArchiveSweepEvery); err != nil {
+		return err
+	}
 	for _, t := range d.cfg.Attach.Periodic {
 		if err := e.AddPeriodic(t.Name, t.Every, t.Run); err != nil {
 			return err

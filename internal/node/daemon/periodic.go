@@ -34,6 +34,16 @@ const CertificateCheckEvery = time.Hour
 
 const certificateTask = "certificate-renewal"
 
+// ArchiveSweepEvery is how often the archive sweep runs. A delivery is swept about 27
+// hours after its deadline and an administrative result or an acknowledged alert a
+// week after they were made, so the sweep is never urgent. An hour keeps one pass to
+// what a node at its upper scale (about 3,000 messages an hour) finishes in that
+// time. A pass stalls the engine's loop once for a full scan of the files (about 3.2 s
+// at 50,000 files and 11 to 13 s at 200,000, warm, as the storage reference measures),
+// and then for a fraction of a second at a time while it removes in chunks; callers
+// that meet the stall are told loop_busy and retry.
+const ArchiveSweepEvery = time.Hour
+
 // pauseClock remembers when the pause of a clock set back began. It is read and
 // written only in the loop (the clock task) and, before the loop exists, by the
 // start.
