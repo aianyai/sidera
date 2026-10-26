@@ -145,6 +145,12 @@ func (c *cmdPresentProbeToken) run(e *Engine, now time.Time) {
 // used up, and the probe of its instance may pass. The token is compared against
 // every token held, in constant time, and is never logged.
 func (e *Engine) PresentProbeToken(ctx context.Context, token adapterproto.Token, frontend adapterproto.Frontend) (ProbeTarget, error) {
+	// The format of a token is the protocol's, and only a text in that form is one:
+	// the decoder alone would skip a newline and accept spare bits in the last
+	// character, so that a text that is not the token would be taken for it.
+	if token.Validate() != nil {
+		return ProbeTarget{}, refuse(ReasonUnauthenticated)
+	}
 	raw, err := base64.RawURLEncoding.DecodeString(string(token))
 	if err != nil {
 		return ProbeTarget{}, refuse(ReasonUnauthenticated)

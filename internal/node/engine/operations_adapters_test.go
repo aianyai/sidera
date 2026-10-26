@@ -1474,3 +1474,57 @@ func TestEnablingAnInstanceAndChangingPresetsRecoverFromACrashAtEveryPoint(t *te
 		})
 	}
 }
+
+// FuzzPresentProbeToken presents arbitrary text as a probe token, with an arbitrary
+// front end, to an engine that holds the tokens of an adapter. Whatever the text is,
+// the engine does not panic and refuses with one of its own refusals; only a token
+// it issued, presented with the front end it was issued for, is accepted, and then it
+// is accepted once.
+func FuzzPresentProbeToken(f *testing.F) {
+	r := newRig(f, 10, withAdapters(newHostDouble()), withPackage("/src/relay", relayPackage(f, "1.0.0")))
+	e := r.start()
+	if _, err := e.Execute(ctx, installCommand(1, "install", "/src/relay")); err != nil {
+		f.Fatal(err)
+	}
+	if _, err := e.Execute(ctx, enableCommand(2, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
+		f.Fatal(err)
+	}
+	adm, info := relayAdmission(f)
+	if _, err := e.AdapterAdmitted(ctx, "relay", adm, info); err != nil {
+		f.Fatal(err)
+	}
+	reqs, err := e.ProbeTokens(ctx, "relay")
+	if err != nil {
+		f.Fatal(err)
+	}
+	issued := map[string]adapterproto.Frontend{}
+	// The seeds run in the order they are added, and a token is good once: the ones
+	// that are not the token come first, or the token would be used up before them.
+	// The decoder alone skips a newline, so the token with one in it is the token to
+	// a decoder and is not to the node.
+	for _, q := range reqs {
+		f.Add(string(q.Token[:10])+"\n"+string(q.Token[10:]), string(q.Frontend))
+	}
+	for _, q := range reqs {
+		issued[string(q.Token)] = q.Frontend
+		f.Add(string(q.Token), string(q.Frontend))
+		f.Add(string(q.Token), "mcp")
+	}
+	f.Add(strings.Repeat("A", 43), "cli")
+	f.Add("", "")
+	f.Add("not base64 !", "cli")
+	f.Add(strings.Repeat("A", 44), "cli")
+	f.Fuzz(func(t *testing.T, token, frontend string) {
+		target, err := e.PresentProbeToken(ctx, adapterproto.Token(token), adapterproto.Frontend(frontend))
+		if err != nil {
+			if _, ok := engine.ReasonOf(err); !ok {
+				t.Fatalf("a token was refused with %v, which is no refusal of the engine", err)
+			}
+			return
+		}
+		want, ok := issued[token]
+		if !ok || string(want) != frontend || target.Instance != "relay" || target.Frontend != want {
+			t.Fatalf("the token %q for %q was accepted as %+v; the node issued %v", token, frontend, target, issued)
+		}
+	})
+}
