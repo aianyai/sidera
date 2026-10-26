@@ -35,11 +35,12 @@ func cloneRecord(r Record) Record {
 	return r
 }
 
-// lastKind is the highest Kind that exists, found by walking the kinds so no
-// test names it; kindSetBits is the width of a KindSet.
+// lastKind is the highest Kind a record's transitions produce, found by walking
+// the kinds so no test names it: the kinds after it (KindLostUnknownMessage)
+// belong to no delivery. kindSetBits is the width of a KindSet.
 var lastKind = func() Kind {
 	k := KindUnreachable
-	for (k + 1).valid() {
+	for (k + 1).valid() && (k+1) != KindLostUnknownMessage {
 		k++
 	}
 	return k

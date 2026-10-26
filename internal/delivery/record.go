@@ -242,6 +242,9 @@ const (
 	// delivers a control record; the sender applies the reply with
 	// EventDelivered.
 	EventReplyCommitted
+	// EventNoRecordAtTarget: the target node answered a pull by saying it holds
+	// no record of the delivery (source only).
+	EventNoRecordAtTarget
 )
 
 // Event is one input to Record.Apply.
@@ -352,6 +355,8 @@ func (r Record) Apply(now time.Time, ev Event) (Record, Outcome, error) {
 		return r.noteBlocked(ev)
 	case EventUnblocked:
 		return r.noteUnblocked()
+	case EventNoRecordAtTarget:
+		return r.noRecordAtTarget(now)
 	}
 	return r, Outcome{}, fmt.Errorf("%w: unknown event type %d", ErrInvalidEvent, ev.Type)
 }
@@ -371,6 +376,36 @@ func (r Record) applyUnknown(now time.Time, cause UnknownCause) (Record, Outcome
 		return r, Outcome{}, fmt.Errorf("%w: delivery_unknown for cause %s", ErrInvalidEvent, cause)
 	}
 	return r.moveToUnknown(now, cause)
+}
+
+// noRecordAtTarget applies the target's answer that it holds no record of the
+// delivery. Only a delivery the target accepted, with a receipt in hand, was lost
+// there; every other state ignores it, in this order:
+//
+//   - A target's record is refused: only the sender reads pull answers.
+//   - The replacement of the sender's own lost record ignores every later fact.
+//   - A final delivery has its conclusion, and is no longer pulled.
+//   - After ReportBy the sender no longer pulls, and the target's retention
+//     (RecordRetainUntil) covers only the window, so the answer is moot.
+//   - Without a receipt (queued, expired_unconfirmed) the target may never have
+//     taken the message in, for example while authorization is suspended, which
+//     stores nothing; the expiry rule judges that case.
+//   - A delivery already delivery_unknown stays so: the sender has been told
+//     "unknown", and the target forgetting the record later does not change that.
+func (r Record) noRecordAtTarget(now time.Time) (Record, Outcome, error) {
+	switch {
+	case r.Side != SideSource:
+		return r, Outcome{}, fmt.Errorf("%w: only the sender reads the answer of a pull", ErrWrongSide)
+	case r.Lost:
+		return r, ignored(r.State, IgnoreRecordLost), nil
+	case r.State.IsTerminal():
+		return r, ignored(r.State, IgnoreAlreadyFinal), nil
+	case now.After(r.ReportBy):
+		return r, ignored(r.State, IgnoreRetryEnded), nil
+	case r.State != StateAccepted:
+		return r, ignored(r.State, IgnoreNotApplicable), nil
+	}
+	return r.moveToUnknown(now, UnknownLostAtTarget)
 }
 
 // moveTo changes the state to any state but delivery_unknown, which moveToUnknown

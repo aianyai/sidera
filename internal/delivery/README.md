@@ -23,6 +23,8 @@ reasons behind the rules.
 | `Record.NextTick()` | The earliest instant at which `Tick` could change the record; the zero time for a final record. |
 | `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
 | `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A page's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
+| `EventNoRecordAtTarget`, `RecordRetainUntil(reportBy)` | The source fact "the target holds no record of this delivery" (an accepted delivery before `ReportBy` becomes `delivery_unknown`, `lost_at_target`; every other state ignores it), and the instant a target may forget a delivery's record. |
+| `KindLostUnknownMessage`, `NewLostUnknownMessageItem(sender, at)`, `MergeLostUnknownBySender`, `LastRecordKind` | The feedback of a message nobody can name: its item (no message, no recipient), its merge by sender endpoint, and the last kind a record can have reported (the new kind is after it: no delivery produces it). |
 | `Record.StatusReport`, `StatusReport.Validate`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery (with the cause of an unknown result), and the one rule by which the sender applies it. |
 | `Intake(now, acceptBefore, traffic, Authorization, Backlog)` | Target-side validation of the delivery deadline, the authorization verdict (kind and, for a denial, the reason) and the endpoint's backlog limit, for a request deduplication found new. Exempt traffic carries no verdict: its `Authorization` is the zero value. |
 | `Backlog`, `Record.OccupiesBacklogSlot()`, `DefaultEndpointBacklogLimit`, `ValidateEndpointBacklogLimit` | The endpoint's backlog limit: the count and limit `Intake` takes, the one rule for which records are counted, the default and its validation. |
@@ -85,11 +87,18 @@ expired_unconfirmed and delivery_unknown. Normal progress and `closed_unconfirme
 - At most once per delivery per kind. Corrections are kinds of their own, so a
   delivery corrected twice is told twice.
 - The expiry notice says the target may have received the message.
-- The two storage-loss notices (`lost_at_sender`, `lost_at_target`) say that a
-  node lost what it had stored about the message to storage corruption, that
-  whether it was delivered, or for a control signal executed, is unknown, and that
-  the sender must not assume it was not delivered. They never say the target
-  handed anything over: a node that lost its record cannot know. They are kinds of
+- `lost_at_target` is given when the target answers a pull by saying it holds no
+  record of an accepted delivery (see "A target that holds no record" in the
+  reference). It names no cause, because the sender knows only that the record is
+  gone. `lost_unknown_message` belongs to no delivery: no transition produces it
+  and `Valid` refuses a record that reports it; its item has no message or
+  recipient and merges per sender endpoint.
+- The two loss notices (`lost_at_sender`, `lost_at_target`) say that the node
+  lost what it had stored about the message (the target's wording: no longer holds
+  any record of it), that whether it was delivered, or for a control signal
+  executed, is unknown, and that the sender must not assume it was not delivered.
+  They never say the target handed anything over: a node that lost its record
+  cannot know. They are kinds of
   their own and merge by message. A `lost_at_target` the sender learned from a
   report is corrected like `delivery_unknown` by a later `delivered`, while a
   sender's own loss (`lost_at_sender`) never is: its replacement ignores every

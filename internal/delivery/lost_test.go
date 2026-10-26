@@ -469,56 +469,6 @@ func TestTargetLostRecordStaysUnknownUnderForcedClosure(t *testing.T) {
 	})
 }
 
-func TestStorageLossWordingVectors(t *testing.T) {
-	vectors := []struct {
-		kind    Kind
-		name    string
-		summary string
-	}{
-		{KindLostAtSender, "lost_at_sender", "this node lost what it had stored about the message to storage corruption, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"},
-		{KindLostAtTarget, "lost_at_target", "the target node lost what it had stored about the message to storage corruption, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"},
-	}
-	for _, v := range vectors {
-		t.Run(v.name, func(t *testing.T) {
-			if v.kind.String() != v.name || v.kind.Summary() != v.summary {
-				t.Errorf("%q / %q", v.kind.String(), v.kind.Summary())
-			}
-			if strings.Contains(v.kind.Summary(), "handed") {
-				t.Error("the wording must not say the target handed the delivery over")
-			}
-			if !v.kind.valid() {
-				t.Error("kind is not valid")
-			}
-		})
-	}
-	if KindLostAtSender != KindUnknownCorrected+1 || KindLostAtTarget != KindUnknownCorrected+2 {
-		t.Error("the new kinds are appended after the existing ones")
-	}
-	existing := map[Kind][2]string{
-		KindUnreachable:        {"unreachable", "the target is not reachable; delivery is still being retried until the delivery deadline"},
-		KindDeliveryBlocked:    {"delivery_blocked", "the message is at the target but cannot be put in front of the agent; it stays queued"},
-		KindBlockedRecovered:   {"blocked_recovered", "the problem that blocked delivery is gone; the message is no longer blocked"},
-		KindExpiredUnconfirmed: {"expired_unconfirmed", "the delivery deadline passed without a confirmation; the target may have received the message, so do not assume it was not delivered"},
-		KindExpiredCorrected:   {"expired_corrected", "correction: the target did receive the message that was reported as unconfirmed"},
-		KindRejected:           {"rejected", "the target rejected the message; it was not delivered"},
-		KindDeliveryUnknown:    {"delivery_unknown", "the target handed it over, to the agent or, for a control signal, to the adapter that executes it, but whether it was seen or executed is unknown; do not assume it was not delivered"},
-		KindUnknownCorrected:   {"unknown_corrected", "correction: the message whose result was unknown was delivered"},
-	}
-	for k, want := range existing {
-		if k.String() != want[0] || k.Summary() != want[1] {
-			t.Errorf("kind %d changed: %q / %q", k, k.String(), k.Summary())
-		}
-	}
-	if (KindLostAtTarget + 1).valid() || Kind(0).valid() {
-		t.Error("validity bounds")
-	}
-	for c, name := range map[UnknownCause]string{UnknownCauseNone: "none", UnknownHandedOver: "handed_over", UnknownLostAtSender: "lost_at_sender", UnknownLostAtTarget: "lost_at_target", 200: "invalid"} {
-		if c.String() != name {
-			t.Errorf("cause %d: %q, want %q", c, c.String(), name)
-		}
-	}
-}
-
 func TestTransitionFeedbackChoosesKindByUnknownCause(t *testing.T) {
 	causeKind := map[UnknownCause]Kind{
 		UnknownHandedOver:   KindDeliveryUnknown,

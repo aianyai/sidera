@@ -55,7 +55,8 @@ state is an error.
 | delivery unknown | Lease redelivery exhausted, leases unsettled at the settle deadline, or a delivery whose body was handed out closed by force (backlog deadline, denied second check, closed endpoint); for a control signal, no committed reply by the settle deadline or a forced closure. | Wording: the target handed it over (to the agent, or to the adapter that executes a control signal), whether it was seen or executed is unknown, and the sender must not assume it was not delivered. |
 | unknown corrected | A late acknowledgement completed an unknown delivery. | |
 | lost at sender | The sender's node lost its record of the delivery to storage corruption. Given once, when the replacement record is made. | Wording: this node lost what it had stored about the message, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered. Never says the target handed anything over. |
-| lost at target | The target reported `delivery_unknown` with the cause `lost_at_target`. | Wording: the same, about the target node. |
+| lost at target | The target answered a pull of an accepted delivery by saying it holds no record of it (`EventNoRecordAtTarget`). Given once. | Wording: the target node no longer holds any record of the message it had accepted, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered. It names no cause: the sender knows only that the record is gone. |
+| lost unknown message | The sender's node found a record of its own unreadable beyond its key and cannot tell which message it was. Not a transition of any delivery: an item built by `NewLostUnknownMessageItem`, naming no message and no recipient. | Wording: this node lost what it had stored about one of the messages this endpoint sent, to storage corruption, and cannot tell which one; whether it was delivered is unknown; do not assume it was not delivered. |
 
 Rules: normal progress and `closed_unconfirmed` give nothing; each kind is given
 at most once per delivery; moving from expired to rejected, unknown or a storage
@@ -63,7 +64,9 @@ loss gives the new news instead of a correction. A recipient endpoint is never
 told of a loss: feedback goes only to the sender. Merging: one notice per message for its
 anomalies, per (sender endpoint, target node) for unreachable hints and, as a
 notice of their own, for expired_unconfirmed notices, per (sender endpoint,
-target endpoint) for blocked reports with the recovery as its own notice. The
+target endpoint) for blocked reports with the recovery as its own notice, and per
+sender endpoint alone for the notices of lost unknown messages (any number is
+one notice). The
 merge window (1 minute) and the per-endpoint rate cap (10 notices per 10
 minutes) are the values of `DefaultFeedbackParams`; notices over the cap are
 held, not dropped.
@@ -86,6 +89,12 @@ longer of until `report_by` and a full `report_by` window from their creation;
 the sender's idempotency keys as long as the dedup records. Reply permission
 reads some of these facts for longer; see
 [what each side keeps](../envelope/README.md#what-each-side-keeps).
+
+A target keeps its record of a delivery until `RecordRetainUntil(report_by)`,
+`report_by` plus the clock tolerance. A source pulls until `report_by` on its own
+clock and reads a missing record as a loss at the target (below), so a target
+whose clock is ahead of the sender's by the whole tolerance must still hold the
+record at the sender's last pull.
 
 Target guarantee: by `report_by - margin` every delivery is final or reported as
 `delivery_unknown`. A queued message becomes `rejected` (backlog expired) at the
@@ -410,6 +419,34 @@ the body keeps its state and drops only the reference. A control record never
 needs the body: the body it references is the initial message, which the
 delivery derived from it hands out.
 
+### A target that holds no record
+
+The sender pulls a delivery it has a receipt for until `report_by`. If the target
+answers a pull by saying it holds no record of the delivery, the record was lost
+at the target: the target did give the receipt. The sender's record applies the
+answer with `EventNoRecordAtTarget`, a fact of the source only. Its rules, in
+the order they are checked:
+
+| The record | Result | Reason |
+| ---------- | ------ | ------ |
+| a target's | `ErrWrongSide` | only the sender reads the answer of a pull |
+| the replacement of the sender's own lost record | `IgnoreRecordLost` | it ignores every later fact |
+| final | `IgnoreAlreadyFinal` | the conclusion is reached, and a final source no longer pulls |
+| `now` after `ReportBy` | `IgnoreRetryEnded` | the pull window is over, and a target's retention covers only the window |
+| `queued`, `expired_unconfirmed` | `IgnoreNotApplicable` | there is no receipt: the target may never have taken the message in (authorization suspended stores nothing), and the expiry rule reports that case |
+| `delivery_unknown`, any cause | `IgnoreNotApplicable` | the sender has been told "unknown"; the target forgetting the record later does not change that |
+| `accepted` | `delivery_unknown`, cause `lost_at_target`, `KindLostAtTarget` once | the target gave a receipt and now says it holds no record |
+
+The feedback is chosen by `TransitionFeedback` like every other, and each kind is
+still given at most once. A delivery derived from a control signal is accepted
+from its start, so it is lost at the target the same way. `envelope`'s
+`Outbound.ApplyNoRecord` finds the tracked delivery and checks its node before
+calling `Apply`; the rule itself lives only in `Record.Apply`. Tests:
+`TestNoRecordAtTargetIsLostAtTargetOnlyFromAccepted` (every state, inside and
+outside the window, the replacement, the target's records), `TestLossWordingVectors`,
+`TestLostUnknownMessageKindBelongsToNoRecord`, `TestLostUnknownMessageItemsMergeBySender`,
+`TestRecordRetainUntilCoversThePullWindowOfASlowerSender`.
+
 ### Deduplication
 
 A request is identified by (sender node, message id, recipient endpoint) and a
@@ -422,6 +459,14 @@ permission still reads it.
 
 ## Why
 
+- **A target that no longer knows a delivery is a loss, not silence.** A sender
+  that holds a receipt pulls until `report_by` and then closes silently, and
+  silence means delivered. If the target lost its record in between, that closing
+  would be a false acknowledgement. The target's own word, "no record", is the
+  only evidence the sender can have, so it is read as a loss, and only for an
+  accepted delivery inside the pull window. Without a receipt the target may never
+  have taken the message in, and after the window a target may have forgotten it
+  legitimately.
 - **Silence has to mean delivered.** The sender is told only about anomalies, so
   every path that can end without the sender knowing must be bounded: the target
   settles before `report_by - margin`, the sender keeps pulling until

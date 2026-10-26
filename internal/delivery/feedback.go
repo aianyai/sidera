@@ -41,10 +41,22 @@ const (
 	// delivery to storage corruption, so whether the message was delivered, or a
 	// control signal executed, is unknown. It says nothing of the target.
 	KindLostAtSender
-	// KindLostAtTarget: the target's node lost what it had stored about the
-	// delivery to storage corruption, with the same consequence.
+	// KindLostAtTarget: the target's node answered a pull of a delivery it had
+	// accepted by saying it holds no record of it, with the same consequence as a
+	// loss at the sender. The sender knows only that the record is gone, not why.
 	KindLostAtTarget
+	// KindLostUnknownMessage: the sender's node lost what it had stored about one
+	// of the messages an endpoint sent and cannot tell which one, because the
+	// record that said so is unreadable. It has no delivery behind it: no
+	// transition produces it, no Record reports it, and its item names no message
+	// and no recipient (NewLostUnknownMessageItem).
+	KindLostUnknownMessage
 )
+
+// LastRecordKind is the highest kind a Record's transitions produce, and so the
+// highest a Record.Reported can hold. KindLostUnknownMessage is after it: it
+// belongs to no delivery.
+const LastRecordKind = KindLostAtTarget
 
 var kindNames = [...]string{
 	KindUnreachable:        "unreachable",
@@ -57,6 +69,7 @@ var kindNames = [...]string{
 	KindUnknownCorrected:   "unknown_corrected",
 	KindLostAtSender:       "lost_at_sender",
 	KindLostAtTarget:       "lost_at_target",
+	KindLostUnknownMessage: "lost_unknown_message",
 }
 
 func (k Kind) String() string {
@@ -90,12 +103,14 @@ func (k Kind) Summary() string {
 	case KindLostAtSender:
 		return "this node lost what it had stored about the message to storage corruption, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"
 	case KindLostAtTarget:
-		return "the target node lost what it had stored about the message to storage corruption, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"
+		return "the target node no longer holds any record of the message it had accepted, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"
+	case KindLostUnknownMessage:
+		return "this node lost what it had stored about one of the messages this endpoint sent, to storage corruption, and cannot tell which one; whether it was delivered is unknown; do not assume it was not delivered"
 	}
 	return ""
 }
 
-func (k Kind) valid() bool { return k >= KindUnreachable && k <= KindLostAtTarget }
+func (k Kind) valid() bool { return k >= KindUnreachable && k <= KindLostUnknownMessage }
 
 // KindSet is a set of Kind values. A Record uses it to remember which
 // feedback it has already produced.
@@ -104,9 +119,10 @@ type KindSet uint16
 // Has reports whether k is in the set.
 func (s KindSet) Has(k Kind) bool { return s&(1<<k) != 0 }
 
-// known reports whether the set holds only kinds that exist.
+// known reports whether the set holds only kinds a record can have produced
+// (up to LastRecordKind).
 func (s KindSet) known() bool {
-	for k := KindUnreachable; k.valid(); k++ {
+	for k := KindUnreachable; k <= LastRecordKind; k++ {
 		s &^= 1 << k
 	}
 	return s == 0

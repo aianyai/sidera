@@ -92,6 +92,14 @@ func DedupRetainUntil(reportBy time.Time) time.Time {
 	return reportBy
 }
 
+// RecordRetainUntil is the earliest instant a target may forget its record of
+// a delivery with this report_by. A source pulls until report_by on its own
+// clock and reads a missing record as a loss, so the target keeps the record,
+// and answers pulls from it, for the clock tolerance after report_by.
+func RecordRetainUntil(reportBy time.Time) time.Time {
+	return reportBy.Add(timing.ClockTolerance)
+}
+
 // IdempotencyKeyRetainUntil returns how long the sender's node remembers a
 // caller-supplied idempotency key. It is never shorter than the target's
 // deduplication record, so a caller's retry is recognized for as long as the

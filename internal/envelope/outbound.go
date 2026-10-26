@@ -148,14 +148,16 @@ func (o *Outbound) replace(t Tracked) {
 	}
 }
 
-// ReportEffect says what became of a status report offered to an Outbound.
+// ReportEffect says what became of a status report, or of a target's answer
+// that it holds no record, offered to an Outbound.
 type ReportEffect uint8
 
 const (
 	// ReportNone: no report was offered.
 	ReportNone ReportEffect = iota
 	// ReportApplied: the report belongs to a delivery of the message and was
-	// applied; its outcomes are in the result.
+	// applied; its outcomes are in the result. An answer that the target holds no
+	// record is applied the same way, and the delivery may ignore it.
 	ReportApplied
 	// ReportNotTracked: the sender holds no delivery of the message to the
 	// reported endpoint, so there is nothing to apply the report to. A sender
@@ -243,4 +245,36 @@ func (o Outbound) ApplyReport(now time.Time, rep SignedReport) (Outbound, Report
 	n := o.clone()
 	n.replace(t)
 	return n, ReportApplied, outs, nil
+}
+
+// ApplyNoRecord applies the answer of the target node that it holds no record of
+// the delivery of the message to recipient, to the delivery the sender tracks
+// for that endpoint, original or derived. The delivery must be on node, the node
+// that answered. An endpoint with no delivery here changes nothing
+// (ReportNotTracked). Whether the answer means a loss is the rule of
+// delivery.Record.Apply for EventNoRecordAtTarget, which the delivery may
+// ignore; the outcome says which. On an error nothing changes.
+//
+// Like a status report, the answer is believed because it came over the
+// connection the network key authenticates; it is not signed and is no evidence
+// for a third party.
+func (o Outbound) ApplyNoRecord(now time.Time, node ident.NodeID, recipient ident.EndpointID) (Outbound, ReportEffect, delivery.Outcome, error) {
+	if err := o.Validate(); err != nil {
+		return o, ReportNone, delivery.Outcome{}, err
+	}
+	t, ok := o.Find(recipient)
+	if !ok {
+		return o, ReportNotTracked, delivery.Outcome{}, nil
+	}
+	if t.Address.Node != node {
+		return o, ReportNone, delivery.Outcome{}, fmt.Errorf("%w: the delivery is on another node than the one that answered", ErrMismatch)
+	}
+	d, out, err := t.Delivery.Apply(now, delivery.Event{Type: delivery.EventNoRecordAtTarget})
+	if err != nil {
+		return o, ReportNone, delivery.Outcome{}, err
+	}
+	t.Delivery = d
+	n := o.clone()
+	n.replace(t)
+	return n, ReportApplied, out, nil
 }

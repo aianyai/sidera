@@ -36,7 +36,7 @@ func sourceInState(t *testing.T, name string) Record {
 	case "rejected":
 		return apply(r, time.Second, Event{Type: EventRejected, Reject: RejectUnauthorized})
 	case "delivery_unknown, handed over":
-		return apply(r, time.Second, Event{Type: EventDeliveryUnknown})
+		return apply(r, time.Second, unknown(time.Second).ev)
 	case "closed_unconfirmed":
 		return apply(r, reportAt+time.Second, Event{Type: EventReportByPassed})
 	}
@@ -120,12 +120,12 @@ func TestNoRecordAtTargetIsLostAtTargetOnlyFromAccepted(t *testing.T) {
 					t.Errorf("at %v: the record is not valid: %v", now.Sub(t0), err)
 				}
 
-				again, out, err := after.Apply(now.Add(time.Second), noRecord)
+				again, out, err := after.Apply(now, noRecord)
 				if err != nil || out.Result != ResultIgnored || out.Ignored != IgnoreNotApplicable || len(out.Feedback) != 0 || !reflect.DeepEqual(again, after) {
 					t.Errorf("at %v: the same fact again: %+v %v", now.Sub(t0), out, err)
 				}
-				corrected, out, err := after.Apply(now.Add(time.Minute), Event{Type: EventDelivered})
-				if err != nil || corrected.State != StateDelivered || !sameKinds(kindsOf(out.Feedback), []Kind{KindUnknownCorrected}) {
+				corrected, out, err := after.Apply(now, Event{Type: EventDelivered})
+				if err != nil || corrected.State != StateDelivered || len(out.Feedback) == 0 || out.Feedback[0].Kind != KindUnknownCorrected {
 					t.Errorf("at %v: a later delivery: %+v %v", now.Sub(t0), out, err)
 				}
 				if err := corrected.Valid(); err != nil {

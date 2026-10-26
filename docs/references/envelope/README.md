@@ -214,6 +214,15 @@ that slept past `report_by` settles late and its honest report carries that late
 `reported_at`. In the reply evidence such a report contributes nothing and is not
 an evidence error.
 
+`Outbound.ApplyNoRecord(now, node, recipient)` takes in the other answer a pull
+can bring: the target holds no record of the delivery. It finds the tracked
+delivery of the endpoint (original or derived), checks that it is on the node
+that answered (`ErrMismatch` otherwise), and applies
+`delivery.EventNoRecordAtTarget`, whose rule lives in `delivery`. An endpoint the
+sender has no delivery to is `ReportNotTracked`. The answer is not signed: it
+comes only over the connection the network key authenticates and is no evidence
+for a third party, the reason a status report is signed.
+
 A control signal's own delivery ends only through its control reply. While the
 sender has accepted none (`ControlReplyDigest` is zero), a `delivered` report for
 the signal's recipient is not applied and `ApplyReport` returns

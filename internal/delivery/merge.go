@@ -99,6 +99,15 @@ type Item struct {
 	At time.Time
 }
 
+// NewLostUnknownMessageItem returns the item that tells the sender endpoint
+// that its node lost what it had stored about one of the messages the endpoint
+// sent, decided at at. It names no message and no recipient, because the record
+// that said so could not be read. It is the one place that gives the item its
+// shape.
+func NewLostUnknownMessageItem(sender ident.Address, at time.Time) Item {
+	return Item{Ref: DeliveryRef{Sender: sender}, Feedback: Feedback{Kind: KindLostUnknownMessage}, At: at}
+}
+
 // MergeClass says what a group of notices has in common.
 type MergeClass uint8
 
@@ -120,6 +129,10 @@ const (
 	// they give one notice again, kept apart from the unreachable hints because
 	// it is news of its own.
 	MergeExpiryByTargetNode
+	// MergeLostUnknownBySender: the losses of messages nobody can name, of one
+	// sender endpoint. They name no message, node or target, so the sender alone
+	// groups them: any number gives one notice.
+	MergeLostUnknownBySender
 )
 
 // MergeKey is what notices must share to be sent as one. Fields that the class
@@ -144,6 +157,8 @@ func MergeKeyOf(it Item) MergeKey {
 		k.Class, k.Target = MergeByTargetEndpoint, it.Ref.Recipient
 	case KindBlockedRecovered:
 		k.Class, k.Target = MergeRecoveryByTargetEndpoint, it.Ref.Recipient
+	case KindLostUnknownMessage:
+		k.Class = MergeLostUnknownBySender
 	default:
 		k.Class, k.Message = MergeByMessage, it.Ref.Message
 	}

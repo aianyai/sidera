@@ -328,10 +328,11 @@ func toRecord(r delivery.Record) (recordJSON, error) {
 	return j, nil
 }
 
-// lastFeedbackKind is the highest feedback kind: the reported set is stored as
-// the names of the kinds from the first to this one. A kind added after it is
-// refused at encoding (the set has a bit that is no kind), never dropped.
-const lastFeedbackKind = delivery.KindLostAtTarget
+// lastFeedbackKind is the highest kind a record can have reported: the reported
+// set is stored as the names of the kinds from the first to this one. A kind
+// added after it is refused at encoding (the set has a bit that is no kind),
+// never dropped.
+const lastFeedbackKind = delivery.LastRecordKind
 
 func kindSetBeyond(s delivery.KindSet) bool {
 	var known delivery.KindSet
