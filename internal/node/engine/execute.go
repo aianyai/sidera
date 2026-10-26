@@ -444,8 +444,10 @@ func (e *Engine) redriveExecutions(instance string, now time.Time) {
 // recoverExecutions goes on with every close and interrupt that was not settled when
 // the node went down (step 11): one past its deadline is settled as the deadline
 // settles it, one whose time is not up has its deadline set again and, when its
-// adapter is connected, its call made again; the adapter does what it did before
-// idempotently, as a session that is released or a turn that is stopped stays so.
+// adapter is connected, its call made again. A signal thus reaches the adapter at
+// least once: a close asked again does what it did before, as a session that is
+// released stays so, but an interrupt asked again after the adapter restarted may
+// reach a later turn or find none and answer not_running.
 func (e *Engine) recoverExecutions(now time.Time) error {
 	for _, key := range e.executionKeys() {
 		c := e.view.ctl[key]

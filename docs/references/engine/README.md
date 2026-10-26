@@ -850,8 +850,10 @@ interrupt asked a second time may reach the next turn or answer `not_running`, w
 the first one stopped the turn. Past the deadline the write is tried again at the same pace by
 the deadline itself, so a signal is never left accepted until the next start. A connection that
 closes while the call is out is told as an adapter that is not connected. A start goes on with the
-signals that were not settled, asking the adapter again, which does what it did before idempotently,
-or settling those past their deadline as the deadline does.
+signals that were not settled: those past their deadline are settled as the deadline does, and for
+the others the adapter is asked again, so a signal reaches the adapter at least once. A close asked
+again does what it did before, as a session that is released stays so, but an interrupt asked again
+after the adapter restarted may reach a later turn or find none and answer `not_running`.
 
 The state an adapter kept for a session (its checkpoint) is removed when the endpoint is
 closed, by whichever of the ways to close one: every place the engine records an endpoint
