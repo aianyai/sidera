@@ -116,6 +116,10 @@ type Engine struct {
 	installing atomic.Pointer[admin.RequestKey] // the request whose adapter package is being copied: one is at a time, nil when none
 	inLoop     atomic.Bool                      // the loop is running a command or the due entries of the schedule: what spawn asserts
 
+	// pendingNotices are the direct endpoints that a message became ready for since the
+	// last step of the loop, to be told with endpoint.pending; see pending.go.
+	pendingNotices map[ident.EndpointID]bool
+
 	// creations are the calls of the session creations that are not settled, by the
 	// key of the control record; see create.go.
 	creations map[store.TargetKey]*creation
@@ -222,6 +226,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		executions: map[store.TargetKey]*execution{},
 		prompts:    map[ident.EndpointID]*promptState{},
 	}
+	e.pendingNotices = map[ident.EndpointID]bool{}
 	if d.RollbackPaused {
 		e.pausedSince = d.RollbackPausedSince
 	}
@@ -638,6 +643,7 @@ func (e *Engine) loop() {
 		}
 		if e.fatal == nil {
 			e.serveReady()
+			e.servePending()
 			e.servePrompts()
 		}
 		if e.fatal != nil {

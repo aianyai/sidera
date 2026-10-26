@@ -514,6 +514,17 @@ envelope requires of every message: no node can hand out an empty one, so the
 schema (`minLength: 1`) and `PageMessage.Validate` refuse a page that holds it
 (`TestRecvPageRules`, `invalid/endpoint-recv--result-page-message-with-empty-body.json`).
 
+The daemon tells the adapter of a direct endpoint, with the notification
+`endpoint.pending` (`endpoint`, `count`), that messages wait for the endpoint. `count`
+is the number of messages that wait, at least 1. The notification is
+level-triggered and may be coalesced: it says there is something to read, not how many
+notifications were sent, and one carries the count of all that became ready together.
+It is best effort: the daemon records nothing, does not repeat it and does not wait for
+the adapter, so an adapter must not depend on receiving it and reads with
+`endpoint.recv` (which may wait) on its own schedule. The daemon sends it when a message
+becomes ready to be handed out to the endpoint, and not for a message that a waiting
+`endpoint.recv` of the endpoint took.
+
 **Errors.** Codes `-32700` to `-32600` and `-32603` are JSON-RPC's; `-32001`
 to `-32004`, `-32022` and `-32800` are the implementation-defined range; both
 groups are defined by the peer layer (`peer.Code*`) and listed here to be read

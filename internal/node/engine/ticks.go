@@ -40,6 +40,7 @@ func (e *Engine) watchTicks() {
 		if e.waits[recipient] != nil {
 			e.ready[recipient] = true
 		}
+		e.notePending(recipient)
 		e.noteArrival(recipient)
 	}
 	e.view.onTick = func(record string, next time.Time) {

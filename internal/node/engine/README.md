@@ -233,6 +233,11 @@ called, and how one whose outcome is not known is asked about at the start.
   Shutdown ends every wait with an empty page, before the interfaces stop; the
   waiting side watches the shutdown itself, because the command that ends the waits
   is dropped when the inbox is full.
+- **A direct endpoint is told with `endpoint.pending` after the command that made a message
+  ready, once for each endpoint, and is not repeated.** `notePending` marks the endpoint where the
+  view queues the message, and `servePending` runs after `serveReady`, so a message that a
+  waiting recv took is not announced. The notification is best effort: it is neither recorded nor
+  repeated.
 - **A recv judges again, hands out only what it reaches, and writes before it answers.**
   The second check is made at the hand-out with the declarations as they are then; a
   refused message the page does not reach is left for the next recv; the leases and

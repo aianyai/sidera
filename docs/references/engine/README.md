@@ -884,6 +884,22 @@ hand-out is a suspension. The cap is the node's setting `node_prompt_turns`, the
 the decided ones. After every command of the loop the engine asks again if something changed (a step
 of the loop like the serving of waiting recvs), and not before the node serves.
 
+**Announcing.** A direct endpoint that is open is told with `endpoint.pending`, sent to the
+adapter instance that serves it, that messages wait for it, at the moments a message becomes
+ready to be handed out to it: taken in, or queued again when its lease ran out. The command that
+makes a message ready marks the endpoint (`notePending`), and once the command is over, and the
+waiting recv has been handed what it could take (`serveReady`), a step of the loop of its own
+(`servePending`) sends one notification for each marked endpoint, however many messages became
+ready in that command. The `count` is the number of messages that wait for the endpoint, counted
+as the prompt rules count them (`pendingOf`: queued, to be handed out, and not suspended by the
+check at the hand-out), and a message that the waiting recv took is not among them, so an
+endpoint whose waiter took the only message is told nothing. The notification is best effort:
+nothing is recorded, nothing is sent again at a later moment and nothing waits for the adapter,
+because the adapter reads with `endpoint.recv`, which may wait, and a notice that was lost or
+sent while the adapter was away costs it nothing but the time until its next recv. A mark made
+while the node does not serve, the wall clock is in doubt or the identity is retired is dropped.
+A session endpoint and a runtime endpoint are never sent this notification.
+
 A prompt is carried out in this order. The attempt is written as in flight in the endpoint's
 attempts record (`prompt-begin`) before the adapter is called, with its kind and the target
 records it covers, so that a node that dies in between finds it. The call runs in a worker the
@@ -977,6 +993,14 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   The newer recv wins and the older gets an empty page, not an error: a client
   that was killed and retried did nothing wrong, and a page given to two waiters
   would show an agent a message twice.
+- **A direct endpoint is told once per command, and only of what still waits.** The
+  notification says that there is something to read, not how many notifications were sent, so
+  the engine marks the endpoint in the command that made a message ready and sends after
+  the command: several messages made ready together are one notification with their number,
+  and a message handed to a waiting recv in the same step is not announced. Repeating the
+  notification on a timer for an agent that does not read was left out: it would be a rate
+  to choose, with nothing lost without it, since the adapter is the reader and chooses its
+  own waits.
 - **Workers are started only in the loop.** The engine's stop waits for its
   workers with a `WaitGroup` on the loop's goroutine; adding to a `WaitGroup`
   concurrently with a wait that starts from a zero count is a misuse the library
@@ -1310,6 +1334,7 @@ reproducible).
 | Nothing is handed out or written by a recv after a fatal storage error, whether it met it ticking or settling a body | `pull.go` (`recv`, `buildPage`), `quarantine.go` (`readBody`) | `TestRecvHandsNothingOutAfterAFatalStorageError` |
 | A lease is on disk: live across a restart, released at the start when it ran out; an acknowledgement comes with the next recv | `pull.go`, `ticks.go` | `TestALeaseAcrossARestart`, `TestRecvAcknowledgesTheEarlierPageFirst` |
 | A recv that waits is served by an arrival, ends at its deadline, is cut to the front end's limit | `pull.go` (`serveReady`), `waiters.go` | `TestARecvThatWaits` |
+| A direct endpoint is told with `endpoint.pending` how many messages wait for it, once for each message made ready by a separate command, not for a message a waiting recv took, and a session endpoint is not told | `pending.go` (`notePending`, `servePending`) | `TestADirectEndpointIsToldOnceThatAMessageWaits`, `TestAMessageHandedToAWaitingRecvIsNotAnnounced`, `TestASessionEndpointIsNotToldWithEndpointPending` |
 | A notice whose body is damaged is told again from what it covered, and a crash anywhere in the settlement loses none of it and tells it only once | `feedback.go` (`reissueCovered`), `quarantine.go` (`quarantineOwner`) | `TestANoticeWhoseBodyIsDamagedIsToldAgainFromWhatItCovered`, `TestADamagedNoticeIsToldAgainOnceWhereverTheNodeDiesSettlingIt` |
 | Every write of a recv and an ack survives a crash at every point | `lease`, `ack` (declared by the store) | `TestRecvAndAckRecoverFromACrashAtEveryPoint` |
 | An anomaly is told once, in one notice that waits out the window and the cap; the queue survives a restart; feedback for a closed endpoint is dropped | `feedback.go` (`putOut`, `flushFeedback`, `sendNotice`, `loadFeedback`) | `TestAnAnomalyIsToldToTheSenderOnceInOneNotice`, `TestNoticesOverTheRateCapAreHeldAndNeverDropped`, `TestFeedbackThatFellDueWhileTheNodeWasDownIsSentAtTheStart`, `TestFeedbackForAnEndpointThatWasClosedIsDroppedAndLogged` |
@@ -1405,8 +1430,8 @@ Known gaps, each filled in with the feature it belongs to:
   phase 13 sends the feedback that fell due and phase 14 goes on with the outgoing messages.
   The tick of a target record does not yet wait for an active turn before it lets an expired
   lease go: `leaseMayRelease` says yes, and the signals of turns are to decide it there.
-- Prompts go into session endpoints only. A direct endpoint is not told that messages wait
-  (`endpoint.pending` is never sent).
+- Prompts go into session endpoints only; a direct endpoint is told that messages wait with
+  `endpoint.pending`, which is a different thing (see Announcing).
 - Prompt attempts are recorded as they end, but whether delivery to an endpoint is blocked is
   not judged yet: no block is reported and the attempts record's blocked report stays empty.
   A change of the availability an adapter reports does not make the endpoints it names be
