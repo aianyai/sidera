@@ -40,14 +40,29 @@ func nativeRef(t testing.TB, h *harness.H, addr string) string {
 	return ""
 }
 
+// runtimeOfAddr is the fake runtime that holds the native session of the session
+// endpoint at addr: the one of the instance the endpoint belongs to.
+func runtimeOfAddr(t testing.TB, h *harness.H, addr string) fakeruntime.Controller {
+	t.Helper()
+	id := endpointOfAddr(t, addr)
+	for _, ep := range sessionEndpoints(t, h) {
+		if ep.ID == id {
+			rt, err := h.RuntimeOf(ep.Instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return rt
+		}
+	}
+	t.Fatalf("the node holds no session endpoint %s", addr)
+	return nil
+}
+
 // endTurn ends the turn the native session of the endpoint is running, as its model
 // finishing it does, and waits for the node to settle.
 func endTurn(t testing.TB, h *harness.H, addr string) {
 	t.Helper()
-	rt, err := h.Runtime()
-	if err != nil {
-		t.Fatal(err)
-	}
+	rt := runtimeOfAddr(t, h, addr)
 	if err := rt.EndTurn(nativeRef(t, h, addr), fakeruntime.FinalCompleted); err != nil {
 		t.Fatalf("ending the turn of %s: %v", addr, err)
 	}
@@ -61,11 +76,7 @@ func endTurn(t testing.TB, h *harness.H, addr string) {
 // holds the turn back: the runtime has the prompt and the node has heard nothing of a turn.
 func holdBackTurn(t testing.TB, h *harness.H, addr string) {
 	t.Helper()
-	rt, err := h.Runtime()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := rt.SetPlan(nativeRef(t, h, addr), fakeruntime.TurnPlan{ManualStart: true}); err != nil {
+	if err := runtimeOfAddr(t, h, addr).SetPlan(nativeRef(t, h, addr), fakeruntime.TurnPlan{ManualStart: true}); err != nil {
 		t.Fatalf("holding back the next turn of %s: %v", addr, err)
 	}
 }
@@ -75,7 +86,13 @@ func holdBackTurn(t testing.TB, h *harness.H, addr string) {
 // a turn runs, so a test of what wakes a session starts from one that is idle.
 func idleSession(t testing.TB, h *harness.H, from string) (fakeagent.Agent, string) {
 	t.Helper()
-	agent, addr := newSession(t, h, from)
+	return idleSessionOn(t, h, harness.Instance, from)
+}
+
+// idleSessionOn is idleSession on another instance of the fixture.
+func idleSessionOn(t testing.TB, h *harness.H, instance, from string) (fakeagent.Agent, string) {
+	t.Helper()
+	agent, addr := newSessionOn(t, h, instance, from)
 	endTurn(t, h, addr)
 	return agent, addr
 }

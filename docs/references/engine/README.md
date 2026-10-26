@@ -1398,6 +1398,7 @@ reproducible).
 | An endpoint is woken once for messages that arrive together, not while its turn runs or its prompt is unread, once more when a turn ends with the prompt unread, and again for a message that arrives after the minimum interval | `prompts.go` (`noteArrival`, `noteTurnEnded`, `servePrompts`, `retryPrompt`) | `TestBusyOrUnreadAgentGetsNoFeedback`, `TestUnreadPromptRepromptedOnce`, `TestNewArrivalAfterMinIntervalWakesOnce`, `TestFiveArrivalsStartOneTurn` |
 | The turns that prompts start are capped for the node, the endpoint that waited longest goes first, a raised cap and a turn that ends free places, and a turn that went on while the adapter was away holds its place | `prompts.go` (`promptRound`, `servePrompts`), `operations_settings.go` | `TestPromptTurnsBeyondNodeCapWaitOldestFirst` |
 | An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceProbed`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
+| The endpoints and turns of an adapter that is offline take no place of the node's cap: another adapter's waiting endpoint is prompted in the free place, and a turn that went on while its adapter was away is counted again when the adapter reports it, two adapter instances on one node | `prompts.go` (`promptRound`) | `TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter`, `TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning` |
 | After a restart the time of the last recv is taken from the newest lease of the endpoint's messages, so a prompt the agent had read still looks read | `prompts.go` (`approximateLastRecv`) | `TestARestartDoesNotMakeAReadPromptLookUnread` |
 | A turn that began for the prompt in flight settles it as delivered, so an agent idle at every turn end is woken once more and not every time | `prompts.go` (`noteTurnStarted`), `adapters.go` (`notified`) | `TestTurnStartedForThePromptInFlightSettlesItDelivered` |
 | A prompt that failed is held for the retry time of the rules and then sent again, with nothing else bringing the endpoint back | `prompts.go` (`settlePrompt`, `servePrompts`), `handoff.DecidePrompt` | `TestRefusedPromptIsRetriedAfterTheRetryTimeAndDelivered` |
@@ -1446,14 +1447,6 @@ Known gaps, each filled in with the feature it belongs to:
   that issued no lease (the queue was empty) or only handed a part out again under a lease that
   still ran is forgotten, and an endpoint whose agent had read its last prompt that way may be
   woken once more by the end of a turn. A prompt that was not read is never taken for read.
-- Two scenarios of the cap on the turns that prompts start are untested because the harness
-  runs one adapter instance (`TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter`
-  and `TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning`, both skipped):
-  the endpoints and turns of an adapter that is offline take no place while another adapter's
-  endpoint is prompted, and a turn that went on while its adapter was away is counted again
-  when the adapter reports it. The exclusion is made in `promptRound`; the single-instance cases
-  are covered by `TestPromptTurnsBeyondNodeCapWaitOldestFirst` and
-  `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack`.
 - An empty body is refused: the Agent interface says a body may be empty and an envelope
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
 - Closing a session endpoint at the owner's request does not send `session.close` to the

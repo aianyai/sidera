@@ -73,7 +73,14 @@ func wantEmpty(t testing.TB, res fakeagent.RecvResult) {
 // from a creation.
 func newSession(t testing.TB, h *harness.H, from string) (fakeagent.Agent, string) {
 	t.Helper()
-	msg := create(t, h, from, "default")
+	return newSessionOn(t, h, harness.Instance, from)
+}
+
+// newSessionOn is newSession on another instance of the fixture: the session is made by
+// that instance's adapter and runtime.
+func newSessionOn(t testing.TB, h *harness.H, instance, from string) (fakeagent.Agent, string) {
+	t.Helper()
+	msg := createOn(t, h, instance, from, "default")
 	quiet(t, h)
 	h.Advance(pullInterval) // the reply reaches its sender by the sender's pull
 	quiet(t, h)

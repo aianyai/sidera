@@ -617,21 +617,97 @@ func TestPromptIsRecordedBeforeTheAdapterIsCalledAndAFailedWriteIsRetried(t *tes
 	}
 }
 
-// The two scenarios of the cap on the node's prompt-started turns that need a second
-// adapter instance. The harness runs one adapter instance, so they cannot be expressed
-// until it runs two; each is skipped with that reason and listed as untested in the
-// engine reference.
+// The cap on the turns that prompts start is the node's, and counts only the adapters
+// that are online. These two tests run a node with two adapter instances, each with
+// its own adapter and runtime, and the cap at one turn.
+
+// otherInstance is the second adapter instance of the tests below.
+const otherInstance = "other"
+
+// twoAdapterNode makes a node with two adapter instances, Instance and otherInstance,
+// that lets one turn that prompts started run at a time, and a direct endpoint "a".
+func twoAdapterNode(t *testing.T) *harness.H {
+	t.Helper()
+	return sessionNode(t, harness.Options{
+		NodeSettings: `{"node_prompt_turns":1}`,
+		Adapter:      &harness.AdapterOptions{ExtraInstances: []string{otherInstance}},
+	}, "a")
+}
+
+// readAndEndTurn is what an agent does to leave its place: it reads what it was woken
+// for and its turn ends.
+func readAndEndTurn(t *testing.T, h *harness.H, agent fakeagent.Agent, addr string) {
+	t.Helper()
+	page := recvAs(t, h, agent, fakeagent.RecvInput{})
+	ackAs(t, h, agent, page.Page.Lease)
+	endTurn(t, h, addr)
+}
 
 // An endpoint whose adapter is offline is not among the waiting endpoints, so it takes
 // no place: with the node's only free place and the offline endpoint the longer waiter,
-// an endpoint of another adapter that is online is prompted.
+// an endpoint of another adapter that is online is prompted. The offline endpoint is
+// prompted when its adapter is back and a place is free again.
 func TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter(t *testing.T) {
-	t.Skip("the harness runs one adapter instance, so a node cannot have one adapter offline while another serves its sessions")
+	h := twoAdapterNode(t)
+	_, away := idleSession(t, h, "a")
+	otherAgent, served := idleSessionOn(t, h, otherInstance, "a")
+
+	adapterEnded(t, h, h.AdapterLaunches(harness.Instance)[0])
+	sendToAddr(t, h, "a", away, "for the session of the adapter that is away")
+	engineQuiet(t, h)
+	h.Advance(time.Second) // the message for the offline adapter has waited longer
+	sendToAddr(t, h, "a", served, "for the session of the adapter that serves")
+	engineQuiet(t, h)
+
+	wantPrompts(t, h, served, 1)
+	wantPrompts(t, h, away, 0)
+	if a := attemptsOf(t, h, away); len(a.Attempts) != 0 || a.InFlight != nil {
+		t.Errorf("the attempts into the session of the offline adapter are %+v, want none: nothing was tried", a)
+	}
+
+	// The adapter is back: the place is held by the other adapter's turn, so its session
+	// waits, and goes when that turn ends.
+	adapterRestarted(t, h, 2)
+	h.Advance(time.Minute)
+	quiet(t, h)
+	wantPrompts(t, h, away, 0)
+	readAndEndTurn(t, h, otherAgent, served)
+	wantPrompts(t, h, away, 1)
 }
 
 // A turn of an adapter that went offline is not counted against the cap, and is counted
 // again when the adapter returns and reports the turn running: the place it held is
-// free to an endpoint of another adapter meanwhile.
+// free to an endpoint of another adapter meanwhile, and is taken again after.
 func TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning(t *testing.T) {
-	t.Skip("the harness runs one adapter instance, so a node cannot have one adapter offline while another serves its sessions")
+	h := twoAdapterNode(t)
+	firstAgent, first := idleSession(t, h, "a")
+	secondAgent, second := idleSessionOn(t, h, otherInstance, "a")
+	_, third := idleSessionOn(t, h, otherInstance, "a")
+
+	sendToAddr(t, h, "a", first, "for the first")
+	quiet(t, h)
+	wantPrompts(t, h, first, 1)
+
+	// The adapter of the running turn goes away; the turn goes on in the runtime, and its
+	// place is free to the other adapter.
+	adapterEnded(t, h, h.AdapterLaunches(harness.Instance)[0])
+	h.Advance(time.Second)
+	sendToAddr(t, h, "a", second, "for the second")
+	engineQuiet(t, h)
+	wantPrompts(t, h, second, 1)
+
+	// The adapter returns and says the turn still runs: it takes a place again, so
+	// the turn that ends on the other adapter does not free one for the third.
+	adapterRestarted(t, h, 2)
+	h.Advance(time.Second)
+	sendToAddr(t, h, "a", third, "for the third")
+	quiet(t, h)
+	wantPrompts(t, h, third, 0)
+	readAndEndTurn(t, h, secondAgent, second)
+	h.Advance(time.Minute)
+	quiet(t, h)
+	wantPrompts(t, h, third, 0)
+
+	readAndEndTurn(t, h, firstAgent, first)
+	wantPrompts(t, h, third, 1)
 }

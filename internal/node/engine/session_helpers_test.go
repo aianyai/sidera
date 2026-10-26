@@ -43,7 +43,8 @@ func awayHostParams() adapterhost.Params {
 }
 
 // sessionNode makes a node with an adapter that has a runtime, taken on, and a
-// direct endpoint for each name.
+// direct endpoint for each name. A test that wants more adapter instances passes
+// them as o.Adapter.ExtraInstances; the host and the runtime are set here.
 func sessionNode(t *testing.T, o harness.Options, names ...string) *harness.H {
 	t.Helper()
 	return sessionNodeOf(t, o, sessionHostParams(), names...)
@@ -54,7 +55,10 @@ func sessionNode(t *testing.T, o harness.Options, names ...string) *harness.H {
 // at all within the time the test moves the clock.
 func sessionNodeOf(t *testing.T, o harness.Options, host adapterhost.Params, names ...string) *harness.H {
 	t.Helper()
-	o.Adapter = &harness.AdapterOptions{Host: host, Runtime: true}
+	if o.Adapter == nil {
+		o.Adapter = &harness.AdapterOptions{}
+	}
+	o.Adapter.Host, o.Adapter.Runtime = host, true
 	h := harness.New(t, o)
 	quiet(t, h)
 	for _, n := range names {
@@ -137,7 +141,13 @@ func adapterRestarted(t testing.TB, h *harness.H, launches int) {
 // from, and returns the message that carries the signal.
 func create(t testing.TB, h *harness.H, from, preset string) adapterproto.MessageID {
 	t.Helper()
-	res, err := h.Agent(from).Control(h.Ctx(), fakeagent.ControlInput{To: h.RuntimeAddr(), Signal: adapterproto.SignalSessionCreate, Preset: preset})
+	return createOn(t, h, harness.Instance, from, preset)
+}
+
+// createOn is create at the runtime endpoint of another instance of the fixture.
+func createOn(t testing.TB, h *harness.H, instance, from, preset string) adapterproto.MessageID {
+	t.Helper()
+	res, err := h.Agent(from).Control(h.Ctx(), fakeagent.ControlInput{To: h.RuntimeAddrOf(instance), Signal: adapterproto.SignalSessionCreate, Preset: preset})
 	if err != nil {
 		t.Fatalf("session.create with preset %q: %v", preset, err)
 	}
