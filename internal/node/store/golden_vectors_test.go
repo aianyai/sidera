@@ -5,7 +5,7 @@ import "github.com/aianyai/sidera/internal/node/store"
 // goldenRecords are complete record files of every kind, written out by hand (the checksums and names
 // were computed with a separate implementation of CRC32C and SHA-256): the
 // body is the canonical JSON the format defines, the first line carries its
-// CRC32C, its length and the key, and the file name is the hash of kind and key.
+// CRC32C, its length and the key, and the file name is the hash of kind and key (for a file of out/ the sending endpoint comes before it).
 var goldenRecords = []struct {
 	name string
 	dir  string
@@ -45,12 +45,12 @@ var goldenRecords = []struct {
 		hash: "a035bbd39591f93d4dbadb7fed6023a8001e3a56c443fed431057ec792b43006.rec"},
 	{name: "out", dir: store.OutDir,
 		file: "sidera-record 1 out c7fba894 809 ZXAxenlnM3p5ZzN6eWczenlnM3p5ZzN6eWczenlqMGtjZ3EgbXNnLTAwMDEgbm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkL2VwMXpnZnB5eXNqemdmcHl5c2p6Z2ZweXlzanpndGxuNHBj\n{\"kind\":\"message\",\"body_non_empty\":true,\"accept_before\":\"2026-10-24T09:01:00Z\",\"recipients\":[{\"address\":\"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\",\"delivery\":{\"side\":\"source\",\"state\":\"queued\",\"state_at\":\"2026-10-24T09:00:00Z\",\"accept_before\":\"2026-10-24T09:01:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\"}}],\"to\":[\"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\"],\"seq\":[{\"endpoint\":\"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\",\"seq\":1}],\"sent_at\":\"2026-10-24T09:00:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\",\"content_type\":\"text/plain\",\"body\":{\"sha256\":\"ea8c004183bd3bd33e27907ed5cb35a24808cb99ab2bb41a727d0c675f5bcdfc\",\"len\":17},\"body_digest\":\"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\"}",
-		hash: "32bb53b3134a3e55c25a074dd89be386eab83340dfc46b65e4478d271eeb9db0.rec"},
+		hash: e1 + ".32bb53b3134a3e55c25a074dd89be386eab83340dfc46b65e4478d271eeb9db0.rec"},
 	// The sender discloses the recipients: each recipient may see the whole list, and
 	// a resend must carry the same flag, which the digest of the envelope covers.
 	{name: "out disclosed", dir: store.OutDir,
 		file: "sidera-record 1 out 2bd38a39 836 ZXAxenlnM3p5ZzN6eWczenlnM3p5ZzN6eWczenlqMGtjZ3EgbXNnLTAwMDEgbm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkL2VwMXpnZnB5eXNqemdmcHl5c2p6Z2ZweXlzanpndGxuNHBj\n{\"kind\":\"message\",\"body_non_empty\":true,\"accept_before\":\"2026-10-24T09:01:00Z\",\"recipients\":[{\"address\":\"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\",\"delivery\":{\"side\":\"source\",\"state\":\"queued\",\"state_at\":\"2026-10-24T09:00:00Z\",\"accept_before\":\"2026-10-24T09:01:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\"}}],\"to\":[\"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\"],\"disclose_recipients\":true,\"seq\":[{\"endpoint\":\"ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\",\"seq\":1}],\"sent_at\":\"2026-10-24T09:00:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\",\"content_type\":\"text/plain\",\"body\":{\"sha256\":\"ea8c004183bd3bd33e27907ed5cb35a24808cb99ab2bb41a727d0c675f5bcdfc\",\"len\":17},\"body_digest\":\"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\"}",
-		hash: "32bb53b3134a3e55c25a074dd89be386eab83340dfc46b65e4478d271eeb9db0.rec"},
+		hash: e1 + ".32bb53b3134a3e55c25a074dd89be386eab83340dfc46b65e4478d271eeb9db0.rec"},
 	{name: "ctl", dir: store.CtlDir,
 		file: "sidera-record 1 ctl 12a8daed 600 bm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkIGVwMXp2ZjN4eWNuenZmM3h5Y256dmYzeHljbnp2bDV1NGNkIG1zZy0wMDAxIGVwMXpzMnBnOXE1enMycGc5cTV6czJwZzlxNXpzenYwMjNx\n{\"record\":{\"side\":\"target\",\"state\":\"accepted\",\"state_at\":\"2026-10-24T09:00:00Z\",\"control\":true,\"accept_before\":\"2026-10-24T09:01:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\"},\"dedup\":{\"digest\":\"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\",\"retain_until\":\"2026-10-24T12:03:00Z\"},\"kind\":\"control.session.create\",\"preset\":\"default\",\"session_endpoint\":\"ep1z52329g4z52329g4z52329g4z5k8q2g4\",\"accepted_at\":\"2026-10-24T09:00:00Z\",\"sent_at\":\"2026-10-24T09:00:00Z\",\"intent\":{\"attempt\":\"0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6\",\"endpoint\":\"ep1z52329g4z52329g4z52329g4z5k8q2g4\",\"state\":\"creating\"}}",
 		hash: "b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d.rec"},
@@ -60,5 +60,5 @@ var goldenRecords = []struct {
 	// A target keeps no replacement, so there is no such vector for in/ and ctl/.
 	{name: "out lost at the sender", dir: store.OutDir,
 		file: "sidera-record 1 out c2b6e47c 576 ZXAxenlnM3p5ZzN6eWczenlnM3p5ZzN6eWczenlqMGtjZ3EgbXNnLTAwMDIgbm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkL2VwMXpnZnB5eXNqemdmcHl5c2p6Z2ZweXlzanpndGxuNHBj\n{\"lost\":{\"at\":\"2026-10-24T10:00:00Z\",\"deliveries\":[{\"side\":\"source\",\"state\":\"delivery_unknown\",\"state_at\":\"2026-10-24T10:00:00Z\",\"unknown\":\"lost_at_sender\",\"lost\":true,\"report_by\":\"2026-10-24T14:04:00Z\",\"reported\":[\"lost_at_sender\"]}]},\"feedback\":[{\"sender\":\"node1qyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqsnp67e9/ep1zyg3zyg3zyg3zyg3zyg3zyg3zyj0kcgq\",\"message\":\"msg-0002\",\"recipient\":\"node1qgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpqyqszqgpq7haevd/ep1zgfpyysjzgfpyysjzgfpyysjzgtln4pc\",\"kind\":\"lost_at_sender\",\"state\":\"delivery_unknown\",\"at\":\"2026-10-24T10:00:00Z\"}]}",
-		hash: "ef9ba86060ef0b002fd40522d8da8a67e6010656eb53e54bc573c0ad0af540d5.rec"},
+		hash: e1 + ".ef9ba86060ef0b002fd40522d8da8a67e6010656eb53e54bc573c0ad0af540d5.rec"},
 }

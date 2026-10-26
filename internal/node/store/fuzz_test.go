@@ -35,7 +35,7 @@ func FuzzDecodeRecord(f *testing.F) {
 		dir := recordDirs[int(dirIdx)%len(recordDirs)]
 		name := "x.rec"
 		if fr, dmg := recfile.DecodeFrame(data); dmg == nil {
-			name = recfile.FileName(fr.Kind, fr.Key)
+			name = nameOf(fr.Kind, string(fr.Key))
 		}
 		rec, dmg := store.DecodeRecord(dir, name, data)
 		if dmg != nil {
@@ -134,7 +134,7 @@ func FuzzDecodeRecordBody(f *testing.F) {
 		if err != nil {
 			return
 		}
-		rec, dmg := store.DecodeRecord(dir, recfile.FileName(string(kind), []byte(key)), file)
+		rec, dmg := store.DecodeRecord(dir, nameOf(string(kind), key), file)
 		if dmg != nil {
 			if dmg.Class != store.BodyDamaged {
 				t.Fatalf("a frame with a valid key and checksum is damaged in its first line: %+v", dmg)

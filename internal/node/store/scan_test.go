@@ -59,7 +59,7 @@ func TestScanClassifiesFileNames(t *testing.T) {
 	good := srcOut(1, false)
 	seed(t, r.mem, good)
 	seedRaw(t, r.mem, store.OutDir, "stray.txt", []byte("x"))
-	seedRaw(t, r.mem, store.OutDir, strings.Repeat("0", 64)+".rec", []byte("not a record"))
+	seedRaw(t, r.mem, store.OutDir, zeroOutName(ep(1)), []byte("not a record"))
 	seedRaw(t, r.mem, store.OutDir, ".tmp-123", []byte("debris"))
 	seedRaw(t, r.mem, store.BodiesDir, bodyRef(1).Name(), bodyBytes(1))
 	seedRaw(t, r.mem, store.BodiesDir, "oddly-named", []byte("x"))

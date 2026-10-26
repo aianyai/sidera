@@ -130,9 +130,16 @@ func frameOf(kind string, key, body string) []byte {
 		base64.RawURLEncoding.EncodeToString([]byte(key)), body))
 }
 
+// nameOf is the file name of a record, restated from the rule: the hash of kind,
+// a space and the key, and for a file of out/ the sending endpoint, the first
+// field of the key, before it.
 func nameOf(kind, key string) string {
 	h := sha256.Sum256([]byte(kind + " " + key))
-	return hex.EncodeToString(h[:]) + ".rec"
+	name := hex.EncodeToString(h[:]) + ".rec"
+	if strings.HasPrefix(kind, "out") {
+		return strings.Fields(key)[0] + "." + name
+	}
+	return name
 }
 
 func golden(t *testing.T, name string) (dir, key, body string) {
