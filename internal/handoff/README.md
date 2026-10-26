@@ -19,7 +19,7 @@ to the delivery side, which calls into this package.
 | `DecideNodePrompts([]WaitingPrompt, running, PromptParams, now)` | Which waiting endpoints of the node are prompted now, so that prompt-started turns never exceed `MaxConcurrentTurns`: one `PromptDecision` per endpoint, ordered earliest waiter first, held ones with `PromptNodeFull`. It calls `DecidePrompt` for each endpoint and adds only the node-wide limit. |
 | `DefaultPromptParams()`, `DefaultBlockedParams()` | The decided values of `PromptParams` and `BlockedParams`. |
 | `TrimAttempts(attempts, now)` | The attempts of an endpoint that the rules still read, for the caller to keep: the last hour, the newest delivered first prompt with the delivered attempts after it, and the earliest failure of the current failing run. The caller trims through it and keeps nothing else back. |
-| `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. |
+| `AssessBlocked(BlockedInput, BlockedParams, now)` | Whether delivery to an endpoint is blocked: not blocked, newly blocked (with cause and since), still blocked, or recovered. A short run with an active cause carries `RetryAt`, the first instant the run is longer than the threshold. |
 | `Pack(queue, delivery.LeaseID, Budget, cutFor ...Budget)` | The output of `recv`: whole messages that fit, or one part of an oversized first message (the first part not yet acknowledged). The page is bounded by the budget; a message is cut for it and for every budget of `cutFor`. |
 | `Part(msg, k, delivery.LeaseID, Budget, cutFor ...Budget)` | The output of fetching part k of a message (`recv --msg <id> --part k` on the CLI). |
 | `AckMarkers.Compile()` then `CheckBeforeAck(MarkerSet, observed, expected)` | Whether an adapter may acknowledge for the agent. The markers are the adapter's declaration of how its runtime shows a replaced or cut result; the package knows no runtime. |
@@ -187,7 +187,10 @@ Before acknowledging:
   creation.
 - `Busy` is true from the moment a prompt is dispatched until its turn ends.
 - The caller records every prompt attempt, with the `Kind` that `DecidePrompt`
-  returned, and stores the `BlockedReport` of each `BlockedNew`.
+  returned, and stores the `BlockedReport` of each `BlockedNew`. It evaluates
+  `AssessBlocked` whenever an attempt, a signal or the waiting messages change, and
+  at `BlockedVerdict.RetryAt`: nothing else marks the moment a run passes the
+  threshold.
 - At `RetryAt`, and on any event of an endpoint (arrival, turn end, adapter back
   online), the caller evaluates all waiting endpoints with `DecideNodePrompts`,
   each with the `Trigger` it has pending; a `PromptSend` from `DecidePrompt` alone

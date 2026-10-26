@@ -132,6 +132,13 @@ type BlockedVerdict struct {
 	Reason BlockedReason
 	Cause  Cause
 	Since  time.Time
+	// RetryAt is when to evaluate again, set only for ReasonBelowThreshold: no
+	// event marks the moment a failing run grows past the threshold, so without
+	// the instant a block would be reported only when something unrelated happened
+	// to ask again. It is the first instant at which the run, if nothing about it
+	// changes, is longer than the threshold. Anything that does change the input
+	// (an attempt, a signal, the waiting messages) is an event of the caller.
+	RetryAt time.Time
 }
 
 // AssessBlocked decides whether delivery to an endpoint is blocked: whether
@@ -156,6 +163,10 @@ type BlockedVerdict struct {
 func AssessBlocked(in BlockedInput, p BlockedParams, now time.Time) BlockedVerdict {
 	since, reason := failingSince(in, p, now)
 	cause, hasCause := in.Signals.cause()
+	var retryAt time.Time
+	if reason == ReasonBelowThreshold && hasCause {
+		retryAt = since.Add(p.Threshold).Add(time.Nanosecond)
+	}
 	if reason == 0 && !hasCause {
 		reason = ReasonNoKnownCause
 	}
@@ -169,13 +180,14 @@ func AssessBlocked(in BlockedInput, p BlockedParams, now time.Time) BlockedVerdi
 	}
 	if in.Reported.reported() {
 		return BlockedVerdict{Status: BlockedRecovered, Reason: reason,
-			Cause: in.Reported.Cause, Since: in.Reported.Since}
+			Cause: in.Reported.Cause, Since: in.Reported.Since, RetryAt: retryAt}
 	}
-	return BlockedVerdict{Status: NotBlocked, Reason: reason}
+	return BlockedVerdict{Status: NotBlocked, Reason: reason, RetryAt: retryAt}
 }
 
 // failingSince returns when the current run of failed prompts began. A
-// non-zero reason means there is no failing run longer than the threshold.
+// non-zero reason means there is no failing run longer than the threshold; for
+// ReasonBelowThreshold the start of the shorter run is returned as well.
 func failingSince(in BlockedInput, p BlockedParams, now time.Time) (time.Time, BlockedReason) {
 	if in.OldestPendingAt.IsZero() {
 		return time.Time{}, ReasonNothingPending
@@ -207,7 +219,7 @@ func failingSince(in BlockedInput, p BlockedParams, now time.Time) (time.Time, B
 		return time.Time{}, ReasonNoFailures
 	}
 	if now.Sub(since) <= p.Threshold {
-		return time.Time{}, ReasonBelowThreshold
+		return since, ReasonBelowThreshold
 	}
 	return since, 0
 }

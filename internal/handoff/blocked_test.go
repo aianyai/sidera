@@ -57,11 +57,11 @@ func TestAssessBlocked(t *testing.T) {
 		{"failing for exactly the threshold is not yet blocked",
 			BlockedInput{OldestPendingAt: after(0), Signals: offlineSince1m, Attempts: []Attempt{failed(time.Minute)}},
 			after(6 * time.Minute),
-			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold}},
+			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold, RetryAt: after(6*time.Minute + time.Nanosecond)}},
 		{"failing for less than the threshold is not blocked",
 			BlockedInput{OldestPendingAt: after(0), Signals: offline, Attempts: []Attempt{failed(time.Minute)}},
 			after(2 * time.Minute),
-			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold}},
+			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold, RetryAt: after(5*time.Minute + time.Nanosecond)}},
 
 		// Never blocked: the agent's own behaviour.
 		{"busy agent: no prompt was attempted, so nothing failed",
@@ -97,15 +97,15 @@ func TestAssessBlocked(t *testing.T) {
 		{"active cause with unknown start is not blocked before the message has waited the threshold",
 			BlockedInput{OldestPendingAt: after(0), Signals: offline},
 			after(5 * time.Minute),
-			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold}},
+			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold, RetryAt: after(5*time.Minute + time.Nanosecond)}},
 		{"busy, then the adapter goes offline but not yet for the threshold: not blocked",
 			BlockedInput{OldestPendingAt: after(0), Signals: Signals{AdapterOffline: true, Since: after(10 * time.Minute)}},
 			after(15 * time.Minute),
-			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold}},
+			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold, RetryAt: after(15*time.Minute + time.Nanosecond)}},
 		{"a cause older than the waiting message counts from the message",
 			BlockedInput{OldestPendingAt: after(20 * time.Minute), Signals: Signals{AuthInvalid: true, Since: after(0)}},
 			after(24 * time.Minute),
-			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold}},
+			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold, RetryAt: after(25*time.Minute + time.Nanosecond)}},
 		{"a cause older than the waiting message blocks once the message has waited the threshold",
 			BlockedInput{OldestPendingAt: after(20 * time.Minute), Signals: Signals{AuthInvalid: true, Since: after(0)}},
 			after(26 * time.Minute),
@@ -135,7 +135,7 @@ func TestAssessBlocked(t *testing.T) {
 			BlockedInput{OldestPendingAt: after(0), Signals: offline,
 				Attempts: []Attempt{failed(time.Minute), delivered(2*time.Minute, PromptKindFirst), failed(50 * time.Minute)}},
 			after(54 * time.Minute),
-			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold}},
+			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold, RetryAt: after(55*time.Minute + time.Nanosecond)}},
 		{"a delivered prompt after the failures ends the run",
 			BlockedInput{OldestPendingAt: after(0), Signals: offline,
 				Attempts: []Attempt{failed(time.Minute), delivered(2*time.Minute, PromptKindFirst)}},
@@ -150,12 +150,12 @@ func TestAssessBlocked(t *testing.T) {
 			BlockedInput{OldestPendingAt: after(0), Signals: Signals{AdapterOffline: true, Since: after(58 * time.Minute)},
 				Attempts: []Attempt{unknown(time.Minute), unknown(2 * time.Minute)}},
 			after(time.Hour),
-			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold}},
+			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold, RetryAt: after(63*time.Minute + time.Nanosecond)}},
 		{"failures before the oldest waiting message belong to earlier messages: only the cause counts",
 			BlockedInput{OldestPendingAt: after(30 * time.Minute), Signals: Signals{AdapterOffline: true, Since: after(55 * time.Minute)},
 				Attempts: []Attempt{failed(time.Minute)}},
 			after(time.Hour),
-			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold}},
+			BlockedVerdict{Status: NotBlocked, Reason: ReasonBelowThreshold, RetryAt: after(60*time.Minute + time.Nanosecond)}},
 
 		// Edge-triggered reporting.
 		{"already reported: still blocked, nothing new to report, reported cause kept",
@@ -233,5 +233,36 @@ func TestAssessBlockedReportsOnceAndRecoversOnce(t *testing.T) {
 	}
 	if statuses[BlockedOngoing] != 3 {
 		t.Fatalf("ongoing = %d, want 3 (the evaluations at 10, 20 and 30 minutes)", statuses[BlockedOngoing])
+	}
+}
+
+// RetryAt is the first instant at which the run is longer than the threshold: asked
+// again then, with nothing else changed, the verdict is a new block; asked at the
+// instant before, it is not. Without a cause there is nothing to wait for.
+func TestAssessBlockedRetryAtIsWhenTheRunPassesTheThreshold(t *testing.T) {
+	ins := map[string]BlockedInput{
+		"a failed prompt and the cause":      {OldestPendingAt: after(0), Signals: Signals{AdapterOffline: true, Since: after(time.Minute)}, Attempts: []Attempt{failed(time.Minute)}},
+		"a cause of unknown start":           {OldestPendingAt: after(3 * time.Minute), Signals: Signals{AuthInvalid: true}},
+		"a cause that began after the wait":  {OldestPendingAt: after(0), Signals: Signals{ServiceUnavailable: true, Since: after(9 * time.Minute)}},
+		"the report of an earlier block run": {OldestPendingAt: after(0), Signals: Signals{AdapterOffline: true, Since: after(9 * time.Minute)}, Reported: BlockedReport{Cause: CauseAuthInvalid, Since: after(time.Minute)}},
+	}
+	for name, in := range ins {
+		t.Run(name, func(t *testing.T) {
+			first := AssessBlocked(in, DefaultBlockedParams(), after(4*time.Minute))
+			if first.RetryAt.IsZero() {
+				t.Fatalf("no retry instant for a run that is short: %+v", first)
+			}
+			if got := AssessBlocked(in, DefaultBlockedParams(), first.RetryAt.Add(-time.Nanosecond)); got.RetryAt != first.RetryAt || got.Reason != ReasonBelowThreshold {
+				t.Errorf("an instant before RetryAt: %+v, want still below the threshold", got)
+			}
+			in.Reported = BlockedReport{}
+			if got := AssessBlocked(in, DefaultBlockedParams(), first.RetryAt); got.Status != BlockedNew || !got.RetryAt.IsZero() {
+				t.Errorf("at RetryAt: %+v, want a new block and no further retry", got)
+			}
+		})
+	}
+	noCause := BlockedInput{OldestPendingAt: after(0), Attempts: []Attempt{failed(time.Minute)}}
+	if got := AssessBlocked(noCause, DefaultBlockedParams(), after(2*time.Minute)); !got.RetryAt.IsZero() {
+		t.Errorf("a short run with no cause has retry instant %v, want none", got.RetryAt)
 	}
 }

@@ -100,6 +100,10 @@ checks that the model saw it before acknowledging for the agent.
   more.
 - A busy agent whose adapter is online, or an agent that leaves a delivered
   prompt unread, is never blocked.
+- A run that is below the threshold while a cause is active carries `RetryAt`, the
+  first instant at which it is longer, so the caller needs no timer of its own and
+  no guess at how often to look. Without a cause there is no instant: nothing is
+  failing that matters, and a signal is an event of the caller.
 - One blocked period yields one "new" verdict and one "recovered" verdict. How
   the sender is told, and how reports are merged and corrected, belongs to the
   delivery side.
@@ -281,6 +285,11 @@ The delivery side that these rules call into is described in
   wait. Counting failures without a cause would report passing glitches the
   sender cannot do anything about. The 5 minute threshold fits the pace of
   agent conversations, where a day-scale wait would hide a dead adapter.
+- **The instant a run passes the threshold is named by the rule.** No event marks
+  it, as none marks the end of the minimum interval between prompts; a caller that
+  chose its own polling pace would report a block up to that pace late and would
+  have to know the threshold. The verdict carries the instant, and the caller
+  evaluates again then, exactly as it does for the holds of the prompt decision.
 - **Edge-triggered reporting.** The pure function is evaluated repeatedly; the
   stored `Reported` value is what turns a level ("still blocked") into the two
   events the sender is told about.
