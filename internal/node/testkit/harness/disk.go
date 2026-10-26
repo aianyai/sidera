@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"path"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -59,26 +60,41 @@ func NodeID() ident.NodeID {
 // fixture uses them, and so does a test of a package that needs the pieces and
 // not the whole fixture, so that the way a node is made is written once.
 
-// manifestText is the manifest of the adapter the fixture installs. It is made from
-// the same options as what the fake adapter declares (AdapterManifest), so that the
-// installed package and the adapter that runs as it cannot disagree.
-var manifestText = func() string {
-	raw, err := AdapterManifest(adapterproto.MaxDirectEndpoints).Encode()
+// manifestTextOf is the manifest of the adapter package of an instance, made from
+// the same options as what the fake adapter declares (AdapterManifestOf), so that
+// the installed package and the adapter that runs as it cannot disagree. With
+// runtime it is the manifest of an adapter that also declares a runtime, which a
+// fixture with Options.Adapter.Runtime installs.
+func manifestTextOf(instance string, runtime bool) string {
+	o := AdapterManifestOf(instance, adapterproto.MaxDirectEndpoints)
+	if runtime {
+		o = RuntimeAdapterManifestOf(instance, adapterproto.MaxDirectEndpoints)
+	}
+	raw, err := o.Encode()
 	if err != nil {
-		panic("harness: the manifest of the adapter: " + err.Error())
+		panic("harness: the manifest of the adapter " + instance + ": " + err.Error())
 	}
 	return string(raw)
-}()
+}
 
-// runtimeManifestText is the manifest of the same adapter when it also declares a
-// runtime, which a fixture with Options.Adapter.Runtime installs instead.
-var runtimeManifestText = func() string {
-	raw, err := RuntimeAdapterManifest(adapterproto.MaxDirectEndpoints).Encode()
-	if err != nil {
-		panic("harness: the manifest of the adapter with a runtime: " + err.Error())
+// manifestText is the manifest of the adapter Instance the fixture installs.
+var manifestText = manifestTextOf(Instance, false)
+
+// adapterPackage is an adapter package the fixture installs and enables under the
+// name of its instance.
+type adapterPackage struct {
+	instance, manifest string
+}
+
+// adapterPackages are the packages of a node: Instance first, then the extra
+// instances in the order given.
+func adapterPackages(runtime bool, extra []string) []adapterPackage {
+	pkgs := []adapterPackage{{Instance, manifestTextOf(Instance, runtime)}}
+	for _, name := range extra {
+		pkgs = append(pkgs, adapterPackage{name, manifestTextOf(name, runtime)})
 	}
-	return string(raw)
-}()
+	return pkgs
+}
 
 // ManifestText is the manifest of the adapter the fixture installs.
 func ManifestText() string { return manifestText }
@@ -202,14 +218,24 @@ func MountOn(t testing.TB, tab *txn.Table, base fsx.FS, obs txn.Observer, arm fu
 // from what it wrote. The disk's layout must exist (MakeLayout).
 func SeedNode(t testing.TB, w *txn.Writer, at time.Time) *config.Config {
 	t.Helper()
-	return seedNode(t, w, at, manifestText)
+	return seedNode(t, w, at, adapterPackages(false, nil))
 }
 
-func seedNode(t testing.TB, w *txn.Writer, at time.Time, manifest string) *config.Config {
+// seedNode is SeedNode for the packages given: each is installed and enabled under
+// its instance name, by operations of its own, so that no two share a request key.
+func seedNode(t testing.TB, w *txn.Writer, at time.Time, pkgs []adapterPackage) *config.Config {
 	t.Helper()
 	cfg := initConfig(t, w, at)
-	installAdapter(t, w, cfg, at, manifest)
-	enableAdapter(t, cfg)
+	for i, p := range pkgs {
+		// The first package keeps the operation numbers 1 and 2 of the one-instance node;
+		// further ones take 5 and 6, numbered by the second byte.
+		install, enable := admin.OperationID{1}, admin.OperationID{2}
+		if i > 0 {
+			install, enable = admin.OperationID{5, byte(i)}, admin.OperationID{6, byte(i)}
+		}
+		installAdapter(t, w, cfg, at, p.manifest, install)
+		enableAdapter(t, cfg, p.instance, enable)
+	}
 	return cfg
 }
 
@@ -247,7 +273,7 @@ func initConfig(t testing.TB, w *txn.Writer, at time.Time) *config.Config {
 	return cfg
 }
 
-func installAdapter(t testing.TB, w *txn.Writer, cfg *config.Config, at time.Time, manifest string) {
+func installAdapter(t testing.TB, w *txn.Writer, cfg *config.Config, at time.Time, manifest string, op admin.OperationID) {
 	t.Helper()
 	src := fsxtest.NewMem()
 	for p, c := range map[string]string{"sidera-adapter.json": manifest, "bin/sidera-adapter-chat": "#!chat\n"} {
@@ -264,8 +290,6 @@ func installAdapter(t testing.TB, w *txn.Writer, cfg *config.Config, at time.Tim
 	if err != nil {
 		t.Fatalf("harness: PlanInstall: %v", err)
 	}
-	var op admin.OperationID
-	op[0] = 1
 	res, err := store.PrepareAdminResult(store.AdminRecord{
 		Key: admin.RequestKey{ID: op}, Op: "adapter.install", Result: []byte(`{"installed":true}`),
 		At: at, RetainUntil: at.Add(store.AdminResultRetention),
@@ -297,12 +321,10 @@ func installAdapter(t testing.TB, w *txn.Writer, cfg *config.Config, at time.Tim
 	done()
 }
 
-func enableAdapter(t testing.TB, cfg *config.Config) {
+func enableAdapter(t testing.TB, cfg *config.Config, instance string, op admin.OperationID) {
 	t.Helper()
-	var op admin.OperationID
-	op[0] = 2
 	req := config.Request{Key: admin.KeyFor(admin.LocalOwner(), op), Expected: cfg.Instances().Version}
-	if _, err := cfg.EnableAdapter(req, Instance, Instance, nil, nil, func(config.Instances) (json.RawMessage, error) {
+	if _, err := cfg.EnableAdapter(req, instance, instance, nil, nil, func(config.Instances) (json.RawMessage, error) {
 		return json.RawMessage(`{"enabled":true}`), nil
 	}); err != nil {
 		t.Fatalf("harness: EnableAdapter: %v", err)
@@ -342,29 +364,27 @@ var (
 )
 
 // seedKey is what makes one seeded disk differ from another: the time its records
-// are stamped at and whether the installed adapter declares a runtime.
+// are stamped at, whether the installed adapter declares a runtime and which
+// further instances it has (their names, joined).
 type seedKey struct {
 	at      int64
 	runtime bool
+	extra   string
 }
 
 // seededDisk returns a fresh copy of the disk of an initialised node whose
 // records are stamped at.
-func seededDisk(t testing.TB, at time.Time, runtime bool) *fsxtest.Mem {
+func seededDisk(t testing.TB, at time.Time, runtime bool, extra []string) *fsxtest.Mem {
 	t.Helper()
 	seedMu.Lock()
 	defer seedMu.Unlock()
-	key := seedKey{at.UnixNano(), runtime}
+	key := seedKey{at.UnixNano(), runtime, strings.Join(extra, ",")}
 	disk, ok := seedDisks[key]
 	if !ok {
 		disk = fsxtest.NewMem()
 		MakeLayout(t, disk)
 		m := Mount(t, ProgramTable(t), disk, nil)
-		text := manifestText
-		if runtime {
-			text = runtimeManifestText
-		}
-		seedNode(t, m.Writer, at, text)
+		seedNode(t, m.Writer, at, adapterPackages(runtime, extra))
 		seedDisks[key] = disk
 	}
 	return disk.Clone()

@@ -2,14 +2,17 @@ package harness_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
+	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -270,5 +273,76 @@ func TestTheAdapterOfTheFixtureIsTakenOnThroughTheHost(t *testing.T) {
 	}
 	if _, err := h.Direct("notes"); err != nil {
 		t.Fatalf("a direct endpoint cannot be registered on an instance the host took on: %v", err)
+	}
+}
+
+// An instance added with ExtraInstances is taken on through the host like the first,
+// with an adapter process, a runtime and a runtime endpoint of its own, reached by
+// its name; ending the adapter of one leaves the other online, and a name the
+// fixture does not have has no runtime.
+func TestAnExtraInstanceHasItsOwnAdapterRuntimeAndEndpoints(t *testing.T) {
+	const other = "other"
+	h := harness.New(t, harness.Options{Adapter: &harness.AdapterOptions{
+		Host: hostParams(), Runtime: true, ExtraInstances: []string{other},
+	}})
+	if err := h.Quiesce(); err != nil {
+		t.Fatalf("Quiesce: %v", err)
+	}
+	for _, name := range []string{harness.Instance, other} {
+		v, err := h.Engine().Adapter(context.Background(), name)
+		if err != nil {
+			t.Fatalf("Adapter(%q): %v", name, err)
+		}
+		if !v.Admitted || !v.Online || v.Info.Adapter.ID != name {
+			t.Fatalf("the engine's view of %s is %+v", name, v)
+		}
+		if n := len(h.AdapterLaunches(name)); n != 1 {
+			t.Fatalf("%d adapter processes of %s, want 1", n, name)
+		}
+	}
+	if h.RuntimeAddr() == h.RuntimeAddrOf(other) {
+		t.Errorf("both instances have the runtime endpoint %s", h.RuntimeAddr())
+	}
+	first, err := h.Runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := h.RuntimeOf(other)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Error("both instances drive the same runtime")
+	}
+	if _, err := h.RuntimeOf("nobody"); !errors.Is(err, scenario.ErrNotAvailable) {
+		t.Errorf("the runtime of an instance the fixture does not have is %v, want ErrNotAvailable", err)
+	}
+
+	if _, err := h.DirectOn(other, "notes"); err != nil {
+		t.Fatalf("DirectOn: %v", err)
+	}
+	eps, err := h.Engine().Endpoints(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(eps, func(e engine.EndpointView) bool { return e.Address.String() == h.Addr("notes") }); i < 0 || eps[i].Instance != other {
+		t.Errorf("the endpoint registered on %s is not listed under it: %+v", other, eps)
+	}
+
+	// The other instance's adapter ends; the first stays online.
+	h.AdapterLaunches(other)[0].End()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		v, err := h.Engine().Adapter(context.Background(), other)
+		if err == nil && !v.Online {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the node still holds %s online after its process ended (%v)", other, err)
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if !online(t, h) {
+		t.Errorf("the adapter %s went offline with the adapter of %s", harness.Instance, other)
 	}
 }

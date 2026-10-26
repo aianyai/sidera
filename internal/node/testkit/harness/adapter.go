@@ -38,6 +38,17 @@ type AdapterOptions struct {
 	// every process of the adapter, as a native process outlives the adapter that
 	// started it. H.Runtime is its controller.
 	Runtime bool
+	// ExtraInstances are further adapter instances the node has besides Instance,
+	// each installed, enabled and run the way Instance is: its own package, its
+	// own fake adapter processes and controller, and, with Runtime, its own fake
+	// runtime and runtime endpoint. They are for a test of what a node does when
+	// one adapter is away while another serves. Each name must be a valid adapter
+	// identifier, different from Instance and from the others. The accessors that
+	// take an instance (Adapter, AdapterLaunches, RuntimeOf, RuntimeAddrOf,
+	// DirectOn) reach them by name; the ones that take none (Direct, Runtime,
+	// RuntimeAddr) stay on Instance. Options.Disk is used as it is, so a disk
+	// handed in must already have these instances installed and enabled.
+	ExtraInstances []string
 }
 
 // adapterProgram is the program of the installed package; no launcher runs it.
@@ -49,8 +60,14 @@ const adapterProgram = "bin/sidera-adapter-chat"
 // The manifest the fixture installs and the capabilities the fake answers
 // initialize with both come from it, so they cannot disagree.
 func AdapterManifest(maxDirect int) fakeadapter.ManifestOptions {
+	return AdapterManifestOf(Instance, maxDirect)
+}
+
+// AdapterManifestOf is AdapterManifest for the adapter of another name: what a
+// further instance of the fixture (AdapterOptions.ExtraInstances) declares.
+func AdapterManifestOf(instance string, maxDirect int) fakeadapter.ManifestOptions {
 	return fakeadapter.ManifestOptions{
-		ID: Instance, Version: "1.0.0",
+		ID: instance, Version: "1.0.0",
 		Direct: true, MaxDirectEndpoints: maxDirect,
 		Program: adapterProgram,
 	}
@@ -61,7 +78,12 @@ func AdapterManifest(maxDirect int) fakeadapter.ManifestOptions {
 // behalf, with the runtime and the tested range the fake adapter declares by
 // default.
 func RuntimeAdapterManifest(maxDirect int) fakeadapter.ManifestOptions {
-	o := AdapterManifest(maxDirect)
+	return RuntimeAdapterManifestOf(Instance, maxDirect)
+}
+
+// RuntimeAdapterManifestOf is RuntimeAdapterManifest for the adapter of another name.
+func RuntimeAdapterManifestOf(instance string, maxDirect int) fakeadapter.ManifestOptions {
+	o := AdapterManifestOf(instance, maxDirect)
 	d := fakeadapter.DefaultManifestOptions()
 	o.Runtime = true
 	o.Frontends, o.Interrupt, o.AckOnBehalf = d.Frontends, d.Interrupt, d.AckOnBehalf
@@ -86,10 +108,22 @@ type LauncherConfig struct {
 	// Runtime is the native runtime the adapters drive; required when Manifest
 	// declares a runtime, and shared by every process of the instance.
 	Runtime fakeadapter.RuntimeLauncher
+	// Instances, which may be nil, holds what an instance that is not like the
+	// others declares and drives, by instance: an instance named here takes this
+	// pair in place of Manifest and Runtime.
+	Instances map[string]LauncherInstance
 	// Arm, which may be nil, is called with the knobs of each adapter before it
 	// starts, with the number of the launch of the instance (1 is the first): a
 	// knob armed here is in place before the adapter answers anything.
 	Arm func(instance string, n int, k *fakeadapter.Knobs)
+}
+
+// LauncherInstance is what the adapters of one instance declare and drive.
+type LauncherInstance struct {
+	Manifest fakeadapter.ManifestOptions
+	// Runtime is the native runtime the instance's adapters drive; required when
+	// Manifest declares a runtime.
+	Runtime fakeadapter.RuntimeLauncher
 }
 
 // AdapterLauncher is an adapterhost.Launcher whose processes are fake adapters in
@@ -137,8 +171,12 @@ func (l *AdapterLauncher) Launch(ctx context.Context, inst adapterhost.Instance)
 		t: l.c.T, knobs: knobs, ctl: knobs.Controller(),
 		endReq: make(chan struct{}), done: make(chan struct{}),
 	}
+	own := LauncherInstance{Manifest: l.c.Manifest, Runtime: l.c.Runtime}
+	if o, ok := l.c.Instances[inst.ID]; ok {
+		own = o
+	}
 	launch.proc = fakeadapter.StartPipe(l.c.Ctx, fakeadapter.Config{
-		InstanceID: inst.ID, Now: l.c.Now, Ledger: w, Manifest: l.c.Manifest, Knobs: knobs, Runtime: l.c.Runtime,
+		InstanceID: inst.ID, Now: l.c.Now, Ledger: w, Manifest: own.Manifest, Knobs: knobs, Runtime: own.Runtime,
 	})
 	l.launches[inst.ID] = append(l.launches[inst.ID], launch)
 	go launch.watch()

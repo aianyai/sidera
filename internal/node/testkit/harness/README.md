@@ -18,10 +18,10 @@ layer.
 | `New(t, Options)` | Makes the node, starts the engine through the startup steps it has (scan, start, admission of the adapter, recovery of deliveries, serve) and stops everything when the test ends. |
 | `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, the presets the node has besides the one `init` makes (`Presets`, by name, each the JSON `presets add` takes, added through the configuration's own change), and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
 | `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport`, `H.VerifyControlReply` | The loopback of the running process, its knobs, and the check of a report or a control reply the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
-| `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. `AdapterOptions.Runtime` makes the adapter declare a runtime beside its direct endpoints and drive one fake runtime that the fixture owns and that outlives every process of the adapter (the manifest installed is `RuntimeAdapterManifest`, so the node makes the runtime endpoint of the instance). Nil: no host, and the fixture admits the instance itself through the engine's entry. |
-| `H.Adapter(instance)`, `H.AdapterLaunches(instance)`, `AdapterLaunch` | The controller of the latest fake adapter process (`scenario.ErrNotAvailable` without a host or before a launch), and every process the host started, in order, across restarts of the node: `Methods()` (what the daemon wrote to it), `Controller()`, `Survive()`, `End()`, `Ended()`. |
-| `AdapterLauncher`, `NewAdapterLauncher`, `LauncherConfig`, `AdapterManifest` | The one launcher the fixture and a test of the daemon share (`daemon`'s tests start fake adapters with it), and the declaration of the fake adapter, from which both the installed manifest and the capabilities the fake answers `initialize` with are made. |
-| `H.Direct`, `H.MustDirect`, `H.Addr`, `H.Agent` | A direct endpoint registered through the engine's own entry, its address, and its agent: `engineagent` wrapped in `fakeagent.Recording`. |
+| `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. `AdapterOptions.Runtime` makes the adapter declare a runtime beside its direct endpoints and drive one fake runtime that the fixture owns and that outlives every process of the adapter (the manifest installed is `RuntimeAdapterManifest`, so the node makes the runtime endpoint of the instance). `AdapterOptions.ExtraInstances` names further instances, each installed, enabled and run like `Instance` with an adapter, controller, presets and (with `Runtime`) runtime and runtime endpoint of its own (below). Nil: no host, and the fixture admits the instance itself through the engine's entry. |
+| `H.Adapter(instance)`, `H.AdapterLaunches(instance)`, `AdapterLaunch` | The controller of the latest fake adapter process (`scenario.ErrNotAvailable` without a host or before a launch), and every process the host started, in order, across restarts of the node: `Methods()` (what the daemon wrote to it), `Controller()`, `Survive()`, `End()`, `Ended()`. Both take the name of any instance of the fixture. |
+| `AdapterLauncher`, `NewAdapterLauncher`, `LauncherConfig`, `LauncherInstance`, `AdapterManifest`, `AdapterManifestOf`, `RuntimeAdapterManifestOf` | The one launcher the fixture and a test of the daemon share (`daemon`'s tests start fake adapters with it), and the declaration of the fake adapter, from which both the installed manifest and the capabilities the fake answers `initialize` with are made. `LauncherConfig.Instances` gives an instance a manifest and runtime other than the default pair. |
+| `H.Direct`, `H.DirectOn`, `H.MustDirect`, `H.Addr`, `H.Agent` | A direct endpoint registered through the engine's own entry (`DirectOn` on a named instance of the fixture), its address, and its agent: `engineagent` wrapped in `fakeagent.Recording`, calling as the endpoint's own instance. A name stands for one endpoint of the whole fixture. |
 | `H.Session` | The agent of a session endpoint the node made by a creation, by the identifier the reply to the creation names. The token is read from the endpoint's record on the disk, so a session is reached only through what the node made. Every agent of the fixture also writes a `model.saw` entry for each message or part a page showed, the notices of the node's own system endpoint told from the messages of others. |
 | `NewControlGen`, `ControlGen.Next`, `ControlGen.Paths`, `ControlPaths` | The generator of control signals for a model test of what becomes of every record: creations with and without an initial message, creations the node refuses, statuses of every kind of endpoint, interrupts and closes of the sessions it made, of one it closed and of endpoints that do not take them. The draw is a function of the seed; `Paths` counts how often each path was taken, so a test asserts that none stopped being reached. |
 | `H.Advance`, `H.Set`, `H.Clock` | The one test clock. `Clock().Now` is the `func() time.Time` a fake takes. |
@@ -31,8 +31,12 @@ layer.
 | `H.BeginStep`, `H.Ledger`, `H.CheckLedger` | The script step the ledger stamps, the ledger, and the judgements that need only the ledger. |
 | `H.Records` | A read-only scan of the records on the disk. |
 | `H.Faults`, `H.Disk`, `H.Config`, `H.Engine`, `H.Log`, `H.Ctx` | The fault wrapper the running process writes through, its disk, configuration, engine, log (what the engine and the adapter host logged) and the test's context. |
-| `H.Runtime`, `H.RuntimeAddr` | The controller of the fake runtime of an adapter made with `AdapterOptions.Runtime` (`scenario.ErrNotAvailable` without), and the address of the runtime endpoint of the instance, the target of a session creation. |
+| `H.Runtime`, `H.RuntimeAddr`, `H.RuntimeOf`, `H.RuntimeAddrOf` | The controller of the fake runtime of an adapter made with `AdapterOptions.Runtime` (`scenario.ErrNotAvailable` without), and the address of the runtime endpoint of the instance, the target of a session creation. The first two are `Instance`'s; the others take the name of any instance of the fixture. |
 | `ProgramTable`, `MakeLayout`, `Mount`, `SeedNode`, `AdapterAdmission`, `RandReader`, `LogCapture`, `NoLeaks`, `DefaultStart`, `NodeID`, `Instance` | The building blocks the fixture is made of, exported so that a test of a package that needs a node but not the fixture (the engine's own tests) makes it the same way. |
+
+## Several adapter instances
+
+By default the node has one instance, `Instance`, and every accessor without a name belongs to it. `AdapterOptions.ExtraInstances` adds instances for a test of what the node does when one adapter is away while another serves (the node-wide cap on prompt turns counts only adapters that are online). Each extra instance is its own adapter package, named for the instance and installed and enabled through the same entries as `Instance`, so the host starts one fake adapter process for it and its sessions are those of a fake runtime of its own (seeded `Seed` plus its place in the list, so no two runtimes name a native session alike). A session is made by a creation at `RuntimeAddrOf(instance)`, and a session agent (`H.Session`) is reached by the identifier as for `Instance`. The names must be valid adapter identifiers, different from `Instance` and from each other, or `New` fails the test; `Options.Disk` is used as it is, so a disk handed in must already have the instances installed and enabled.
 
 ## Rules
 
@@ -47,7 +51,7 @@ layer.
 - **There is one clock.** The engine reads it, the ledger and the agents stamp with
   it, and a fake takes its `Now` method value. A crash does not move it.
 - **With an adapter host, quiet also means the adapter is.** The fixture adds a condition
-  for the latest launch of the instance: it has no request of its own that the daemon
+  for the latest launch of each instance: it has no request of its own that the daemon
   has not answered (`Controller.Stats().Outstanding` is zero), and its progress is the
   notifications it has sent. The engine is asked with `Expect.Adapters[instance]` set to
   the notifications the latest launch has sent and the requests it holds on purpose
@@ -55,7 +59,10 @@ layer.
   given 100 ms of real time at most, because the numbers the engine holds do not follow
   an adapter that sends while it is asked. Only the latest launch is asked, so a process
   that is hung or abandoned never makes the fixture wait for ever once the host has
-  started another.
+  started another. An instance whose latest process has ended is still asked, and its connection's counts
+  stay where the process left them, so the fixture's quiet does not return while any
+  instance's adapter is away: a test that keeps one away waits with the engine's own
+  `Quiesce` until the host has started another.
 - **Quiet is a round in which no count moved.** A condition of the fixture's parts
   answers whether it holds and a count that never goes down (notifications sent, turns
   ended). `Quiesce` looks at the conditions, asks the engine (`engine.Quiesce`, with an
@@ -186,7 +193,8 @@ later part adds to this package the capability its stream needs:
 `adapter_test.go`: `TestNoSecondWriterAfterAdapterRestart`,
 `TestACrashCutsTheAdapterWithoutAShutdownAndACleanRestartShutsItDown`,
 `TestQuiesceWaitsUntilTheEngineHasHandledEveryNotificationTheAdapterSent`,
-`TestTheAdapterOfTheFixtureIsTakenOnThroughTheHost`;
+`TestTheAdapterOfTheFixtureIsTakenOnThroughTheHost`,
+`TestAnExtraInstanceHasItsOwnAdapterRuntimeAndEndpoints`;
 `harness_internal_test.go`: the wrapper of the adapter host after a crash
 (`TestACallToTheAdapterHostOfALiveProcessIsPassedOn`,
 `TestACallToTheAdapterHostAfterTheProcessWasAbandonedIsNeverSent`,

@@ -91,8 +91,9 @@ type Options struct {
 	// change before the first start.
 	Presets map[string]string
 	// Adapter, when set, gives the node an adapter host that starts a fake adapter
-	// for the instance Instance in the test process, on the fixture's test clock,
-	// and admits the instance through it as the daemon does. Nil keeps the node
+	// for the instance Instance (and for each of Adapter.ExtraInstances) in the test
+	// process, on the fixture's test clock, and admits the instances through it as the
+	// daemon does. Nil keeps the node
 	// without a host: the fixture admits the instance itself through the engine's
 	// entry, and Adapter has nothing to return.
 	Adapter *AdapterOptions
@@ -136,9 +137,12 @@ type H struct {
 	// It is the fixture's and not a process's: the launches are kept across
 	// restarts, and the ledger writer of the adapter is one for all of them.
 	launcher *AdapterLauncher
-	// runtime is the fake native runtime of an adapter that declares one, nil
-	// otherwise.
-	runtime *fakeruntime.Runtime
+	// instances are the adapter instances of the node, Instance first; without
+	// Options.Adapter Instance alone, which the fixture then admits itself.
+	instances []string
+	// runtimes are the fake native runtimes of the adapters that declare one, by
+	// instance; none otherwise.
+	runtimes map[string]*fakeruntime.Runtime
 	// adapterHome is the data directory the host and the engine are told: the real
 	// directory the instance lock files are in. A lock path is not a socket path,
 	// so a temporary directory of the test will do.
@@ -174,8 +178,10 @@ type process struct {
 
 // endpoint is a direct endpoint registered through the fixture.
 type endpoint struct {
-	ref  adapterproto.EndpointRef
-	addr ident.Address
+	// instance is the adapter instance the endpoint belongs to.
+	instance string
+	ref      adapterproto.EndpointRef
+	addr     ident.Address
 }
 
 var _ scenario.Env = (*H)(nil)
@@ -197,7 +203,7 @@ func New(t testing.TB, o Options) *H {
 		o.MaxDirect = adapterproto.MaxDirectEndpoints
 	}
 	h := &H{
-		t: t, opts: o,
+		t: t, opts: o, instances: []string{Instance},
 		clk:   clocktest.NewFake(o.Start),
 		led:   ledger.NewMemory(),
 		tab:   ProgramTable(t),
@@ -214,17 +220,32 @@ func New(t testing.TB, o Options) *H {
 	h.addQuiet("loopback", h.loopbackQuiet)
 	if o.Adapter != nil {
 		h.adapterHome = t.TempDir() // before the cleanup of the fixture: it is removed after the fixture has stopped
-		lc := LauncherConfig{T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect)}
-		if o.Adapter.Runtime {
-			lc.Manifest = RuntimeAdapterManifest(o.MaxDirect)
-			var err error
-			if h.runtime, err = fakeruntime.New(fakeruntime.Config{Now: h.clk.Now, Ledgers: h.led, Dir: t.TempDir(), Seed: o.Seed}); err != nil {
-				t.Fatalf("harness: the fake runtime: %v", err)
+		h.instances = append(h.instances, checkedExtraInstances(t, o.Adapter.ExtraInstances)...)
+		h.runtimes = map[string]*fakeruntime.Runtime{}
+		lc := LauncherConfig{
+			T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect),
+			Instances: map[string]LauncherInstance{},
+		}
+		for i, name := range h.instances {
+			own := LauncherInstance{Manifest: AdapterManifestOf(name, o.MaxDirect)}
+			if o.Adapter.Runtime {
+				own.Manifest = RuntimeAdapterManifestOf(name, o.MaxDirect)
+				// The seed names the native sessions, so each runtime has one of its own.
+				rt, err := fakeruntime.New(fakeruntime.Config{Now: h.clk.Now, Ledgers: h.led, Dir: t.TempDir(), Seed: o.Seed + uint64(i)})
+				if err != nil {
+					t.Fatalf("harness: the fake runtime of %s: %v", name, err)
+				}
+				h.runtimes[name] = rt
+				own.Runtime = rt
 			}
-			lc.Runtime = h.runtime
+			if i == 0 {
+				lc.Manifest, lc.Runtime = own.Manifest, own.Runtime
+			} else {
+				lc.Instances[name] = own
+			}
+			h.addAdapterQuiet(name)
 		}
 		h.launcher = NewAdapterLauncher(lc)
-		h.addAdapterQuiet(Instance)
 	}
 	t.Cleanup(h.close)
 	var base fsx.FS
@@ -235,7 +256,7 @@ func New(t testing.TB, o Options) *H {
 		h.disk = o.Disk
 		base = h.disk
 	} else {
-		h.disk = seededDisk(t, o.Start, o.Adapter != nil && o.Adapter.Runtime)
+		h.disk = seededDisk(t, o.Start, o.Adapter != nil && o.Adapter.Runtime, h.extraInstances())
 		base = h.disk
 	}
 	if o.Disk == nil {
@@ -243,6 +264,27 @@ func New(t testing.TB, o Options) *H {
 	}
 	h.proc = h.boot(base, nil)
 	return h
+}
+
+// extraInstances are the instances of the node besides Instance.
+func (h *H) extraInstances() []string { return h.instances[1:] }
+
+// checkedExtraInstances fails the test when a name of AdapterOptions.ExtraInstances
+// is not a valid adapter identifier, is Instance, or is given twice: the node
+// would refuse it much later and less clearly.
+func checkedExtraInstances(t testing.TB, names []string) []string {
+	t.Helper()
+	seen := map[string]bool{Instance: true}
+	for _, n := range names {
+		if err := adapterproto.ValidateAdapterID(n); err != nil {
+			t.Fatalf("harness: ExtraInstances: %v", err)
+		}
+		if seen[n] {
+			t.Fatalf("harness: ExtraInstances: the instance %q is Instance or given twice", n)
+		}
+		seen[n] = true
+	}
+	return names
 }
 
 // realDisk makes an initialised node in a directory of the real file system. It
@@ -462,9 +504,11 @@ func (h *H) close() {
 		h.launcher.Close()
 	}
 	h.cancel()
-	if h.runtime != nil {
-		if err := h.runtime.Close(); err != nil {
-			h.t.Errorf("harness: closing the fake runtime: %v", err)
+	for _, name := range h.instances {
+		if rt := h.runtimes[name]; rt != nil {
+			if err := rt.Close(); err != nil {
+				h.t.Errorf("harness: closing the fake runtime of %s: %v", name, err)
+			}
 		}
 	}
 }
@@ -525,9 +569,24 @@ func (h *H) Ctx() context.Context { return h.ctx }
 // through the entry the adapter host will call, and returns its address. The same
 // name is the same endpoint, before and after a restart. A refusal is returned as
 // the engine gave it.
-func (h *H) Direct(name string) (string, error) {
+func (h *H) Direct(name string) (string, error) { return h.DirectOn(Instance, name) }
+
+// DirectOn is Direct for the endpoint of another instance of the fixture
+// (AdapterOptions.ExtraInstances). A name stands for one endpoint of the whole
+// fixture, so the same name on two instances fails the test.
+func (h *H) DirectOn(instance, name string) (string, error) {
+	h.t.Helper()
+	if !slices.Contains(h.instances, instance) {
+		h.t.Fatalf("harness: DirectOn(%q, %q): the fixture has no such instance", instance, name)
+	}
+	h.mu.Lock()
+	known, ok := h.names[name]
+	h.mu.Unlock()
+	if ok && known.instance != instance {
+		h.t.Fatalf("harness: DirectOn(%q, %q): the name is already an endpoint of %q", instance, name, known.instance)
+	}
 	res, err := onProcess(h, func(e *engine.Engine) (adapterproto.RegisterResult, error) {
-		return e.RegisterDirect(h.ctx, Instance, adapterproto.RegisterParams{Key: name, DisplayName: "Name of " + name})
+		return e.RegisterDirect(h.ctx, instance, adapterproto.RegisterParams{Key: name, DisplayName: "Name of " + name})
 	})
 	if err != nil {
 		return "", err
@@ -536,7 +595,7 @@ func (h *H) Direct(name string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("harness: the engine returned the endpoint %q: %w", res.Endpoint, err)
 	}
-	ep := endpoint{ref: res.Endpoint, addr: ident.Address{Node: NodeID(), Endpoint: id}}
+	ep := endpoint{instance: instance, ref: res.Endpoint, addr: ident.Address{Node: NodeID(), Endpoint: id}}
 	h.mu.Lock()
 	h.names[name] = ep
 	h.mu.Unlock()
@@ -584,7 +643,7 @@ func (h *H) Agent(name string) fakeagent.Agent {
 	if err != nil {
 		h.t.Fatalf("harness: ledger writer of %s: %v", name, err)
 	}
-	inner := engineagent.New(currentEngine{h}, engine.ByAdapter(Instance, ep.ref))
+	inner := engineagent.New(currentEngine{h}, engine.ByAdapter(ep.instance, ep.ref))
 	a := fakeagent.Recording(inner, w, id, h.recordingOptions())
 	h.agent[name] = a
 	return a
@@ -862,24 +921,33 @@ func (h *H) latestAdapterStats(instance string) (fakeadapter.StatsReply, bool) {
 	return st, true
 }
 
-// Runtime is the controller of the fake native runtime of the adapter, which exists
-// when the fixture was made with Options.Adapter.Runtime. Native sessions exist only
-// through a session creation.
-func (h *H) Runtime() (fakeruntime.Controller, error) {
-	if h.runtime == nil {
-		return nil, scenario.NotAvailable("the fixture has no runtime (Options.Adapter.Runtime)")
+// Runtime is the controller of the fake native runtime of the adapter Instance,
+// which exists when the fixture was made with Options.Adapter.Runtime. Native
+// sessions exist only through a session creation.
+func (h *H) Runtime() (fakeruntime.Controller, error) { return h.RuntimeOf(Instance) }
+
+// RuntimeOf is Runtime for another instance of the fixture
+// (AdapterOptions.ExtraInstances): each has a runtime of its own, and the sessions
+// of an instance are those of its runtime.
+func (h *H) RuntimeOf(instance string) (fakeruntime.Controller, error) {
+	rt := h.runtimes[instance]
+	if rt == nil {
+		return nil, scenario.NotAvailable("the fixture has no runtime of " + instance + " (Options.Adapter.Runtime, and the instance must be one of the fixture's)")
 	}
-	return h.runtime, nil
+	return rt, nil
 }
 
 // RuntimeAddr is the address of the runtime endpoint of the adapter instance, the
 // target of a session creation. It is the id the configuration keeps for the
 // instance, so it is known from the first start on and the same after a restart.
-func (h *H) RuntimeAddr() string {
+func (h *H) RuntimeAddr() string { h.t.Helper(); return h.RuntimeAddrOf(Instance) }
+
+// RuntimeAddrOf is RuntimeAddr for another instance of the fixture.
+func (h *H) RuntimeAddrOf(instance string) string {
 	h.t.Helper()
-	id := h.Config().EndpointIDs(Instance).Runtime
+	id := h.Config().EndpointIDs(instance).Runtime
 	if id.IsZero() {
-		h.t.Fatal("harness: the instance has no runtime endpoint: the fixture needs Options.Adapter.Runtime, and the adapter must have been taken on")
+		h.t.Fatalf("harness: the instance %s has no runtime endpoint: the fixture needs Options.Adapter.Runtime, and the adapter must have been taken on", instance)
 	}
 	return ident.Address{Node: NodeID(), Endpoint: id}.String()
 }
@@ -1081,11 +1149,15 @@ func (h *H) expect() engine.Expect {
 	if h.launcher == nil {
 		return engine.Expect{}
 	}
-	var x engine.AdapterExpect
-	if st, ok := h.latestAdapterStats(Instance); ok {
-		x = engine.AdapterExpect{Notifications: st.NotificationsSent, Held: st.Held}
+	adapters := make(map[string]engine.AdapterExpect, len(h.instances))
+	for _, instance := range h.instances {
+		var x engine.AdapterExpect
+		if st, ok := h.latestAdapterStats(instance); ok {
+			x = engine.AdapterExpect{Notifications: st.NotificationsSent, Held: st.Held}
+		}
+		adapters[instance] = x
 	}
-	return engine.Expect{Adapters: map[string]engine.AdapterExpect{Instance: x}}
+	return engine.Expect{Adapters: adapters}
 }
 
 // QuiesceError says why the system did not go quiet in time.
