@@ -414,6 +414,10 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 		}
 	}
 	e.forgetCreation(c.Key)
+	// The checkpoints the adapter kept for the creation and for the first prompt are
+	// what a call made again would be given; none will be made now.
+	e.dropAttemptCheckpoint(intent.Attempt)
+	e.dropAttemptCheckpoint(firstPromptAttempt(intent.Attempt))
 	if st.rec.Status == store.EndpointClosed && intent.State == store.IntentCreated {
 		e.alertUncontrolled(now, n, "a session was created for an endpoint that had been closed")
 	}

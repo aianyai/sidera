@@ -771,7 +771,9 @@ one transaction, `control-result`: the control reply is made and stored with the
 record, the delivery of the signal ends as delivered, and the endpoint opens, mapped to the native
 session, when the session was created and is closed with its token dropped when it was not. The
 first prompt's attempt follows from the creation attempt, so a call made again carries what the
-first carried, as the adapter requires, and nothing else is stored for it. A call that failed, an
+first carried, as the adapter requires, and nothing else is stored for it. Once the intent is settled,
+whatever the outcome, the checkpoints the adapter kept under the creation attempt and under the first
+prompt's attempt are dropped: no call will be made again. A call that failed, an
 answer of `indeterminate` and an adapter that is not connected are tried again, after
 `CreateRetryBackoff` and at the next connection of the instance, until the reply deadline,
 `CreateReplyDeadline` (3 minutes) from the moment the signal was accepted. Then the intent is
@@ -1377,6 +1379,7 @@ reproducible).
 | The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
 | The attempt is recorded as in flight before the adapter is called, and a write that fails sends nothing and is retried after the backoff | `prompts.go` (`dispatchPrompt`) | `TestPromptIsRecordedBeforeTheAdapterIsCalledAndAFailedWriteIsRetried` |
 | A refusal is a failure, a lost answer is a delivery or an unknown outcome as the adapter says, and only a delivery marks the message | `prompts.go` (`promptResult`, `reconcileResult`, `settlePrompt`) | `TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain` |
+| The checkpoints of the creation attempt and of the first prompt are dropped when the creation settles | `create.go` (`settleCreate`), `prompts.go` (`dropAttemptCheckpoint`) | `TestSettledCreationDropsTheCheckpointsOfItsAttempts` |
 | The checkpoint of a prompt attempt is dropped when the attempt settles | `prompts.go` (`dropAttemptCheckpoint`), `store.CheckpointDrop` | `TestSettledPromptAttemptDropsItsCheckpoint` |
 | A prompt does not make the check at recv pass | `pull.go` (`handoutAuthorization`) | `TestDeclarationTightenedAfterPromptRejectsAtRecv` |
 
@@ -1418,8 +1421,6 @@ Known gaps, each filled in with the feature it belongs to:
   that issued no lease (the queue was empty) or only handed a part out again under a lease that
   still ran is forgotten, and an endpoint whose agent had read its last prompt that way may be
   woken once more by the end of a turn. A prompt that was not read is never taken for read.
-- The checkpoint of the attempt of a session creation is not dropped when the creation
-  settles; only the checkpoint of a prompt attempt is, when the prompt settles.
 - Two scenarios of the cap on the turns that prompts start are untested because the harness
   runs one adapter instance (`TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter`
   and `TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning`, both skipped):

@@ -252,6 +252,53 @@ func TestAdapterKilledAfterNativeCreateYieldsOneSession(t *testing.T) {
 	oneSessionPerAttempt(t, h)
 }
 
+// The checkpoints an adapter keeps while it creates a session, under the creation attempt
+// and under the first prompt that follows from it, are what a call made again after a
+// crash is given. Once the creation has settled nobody asks for them, so they go with it
+// and no file is left that nothing deletes.
+func TestSettledCreationDropsTheCheckpointsOfItsAttempts(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	first := h.AdapterLaunches(harness.Instance)[0]
+	if err := first.Controller().PauseAt(h.Ctx(), fakeadapter.PauseCreateAfterNative); err != nil {
+		t.Fatal(err)
+	}
+	create(t, h, "a", "default")
+	if err := first.Controller().WaitPaused(h.Ctx(), fakeadapter.PauseCreateAfterNative); err != nil {
+		t.Fatal(err)
+	}
+	var creation adapterproto.AttemptID
+	for _, c := range scanOf(t, h).Ctl {
+		if c.Intent != nil {
+			creation = c.Intent.Attempt
+		}
+	}
+	if creation == "" {
+		t.Fatal("no creation is in the records")
+	}
+	for name, attempt := range map[string]adapterproto.AttemptID{"the creation attempt": creation, "the first prompt": engine.FirstPromptAttempt(creation)} {
+		put := adapterproto.CheckpointPutParams{Scope: adapterproto.ScopeAttempt, ID: string(attempt), State: []byte(`{"cursor":1}`)}
+		if err := h.Engine().CheckpointPut(h.Ctx(), harness.Instance, put); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !hasCheckpoint(t, h, attempt) {
+			t.Fatalf("the checkpoint of %s is not on disk", name)
+		}
+	}
+	if err := first.Controller().Release(h.Ctx(), fakeadapter.PauseCreateAfterNative); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(pullInterval)
+	quiet(t, h)
+	if eps := sessionEndpoints(t, h); len(eps) != 1 || eps[0].Status != store.EndpointOpen {
+		t.Fatalf("the endpoints are %+v, want one open session", eps)
+	}
+	for name, attempt := range map[string]adapterproto.AttemptID{"the creation attempt": creation, "the first prompt": engine.FirstPromptAttempt(creation)} {
+		if hasCheckpoint(t, h, attempt) {
+			t.Errorf("the checkpoint of %s is still on disk after the creation settled", name)
+		}
+	}
+}
+
 // A reply to an endpoint that takes messages from nobody still comes, and so does
 // the reply to a session creation of one: neither is a message the endpoint is
 // asked to take in, and a declaration that narrows what the endpoint takes does
