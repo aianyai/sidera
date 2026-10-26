@@ -723,8 +723,8 @@ the retention a lost record would have if it were found at the time of the file'
 alert has passed (the longest delivery deadline, the clock tolerance, the report
 offset and the reply facts window, counted from the discovery), because until then
 a delivery related to it may still be live. The alert goes after it. A quarantined
-file of `in/` or `ctl/` has no replacement and no such bound: it stays for the
-owner, until the alert is acknowledged. A closed session endpoint goes
+file of `in/` or `ctl/` has no replacement and no bound; nothing removes it, and
+its alert stays with it (the sweep keeps an alert while its file is there). A closed session endpoint goes
 with its attempts, checkpoints and floor file, but not while any source record has
 it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
 a source record writes the floor of its sender, and a floor file written after the

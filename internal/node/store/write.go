@@ -868,7 +868,8 @@ type AlertAckInput struct {
 	Result AdminRecord
 	// Quarantined is the file the alert names when it is one of a directory
 	// other than the delivery ones: it is removed before the alert is marked.
-	// Nil when there is none or when the clean-up belongs to the sweep.
+	// Nil when there is none or when the file is one of a delivery directory,
+	// which an acknowledgement never removes.
 	Quarantined *CorruptFile
 }
 
@@ -891,7 +892,7 @@ func (s *Store) AlertAck(a AlertAckInput) error {
 			return err
 		}
 		if a.Quarantined.Dir == OutDir || a.Quarantined.Dir == InDir || a.Quarantined.Dir == CtlDir {
-			return errors.New("store: an alert does not remove the quarantined file of a delivery record: the sweep does")
+			return errors.New("store: an acknowledgement does not remove the quarantined file of a delivery record")
 		}
 		q = path.Join(a.Quarantined.Dir, a.Quarantined.Name)
 	}

@@ -101,9 +101,10 @@ engine applies the delivery rules and calls the writes.
 - **A header-unreadable quarantined file of `out/` is swept after a lost record's
   retention.** With no replacement, nothing but the time of its alert says when it
   may go: the retention of a lost record found then (from `delivery.LostReportBy`)
-  is the bound. A file with a record under its name goes with that record. The
-  quarantined files of `in/` and `ctl/` have no replacement and no such bound: a
-  target keeps no loss, so they stay for the owner until the alert is acknowledged.
+  is the bound. A file with a record under its name goes with that record. A
+  quarantined file of `in/` or `ctl/` has no replacement and no bound, because a
+  target keeps no loss: nothing removes it, and its alert stays with it (the sweep
+  keeps an alert while its file is there).
 - **Existence is read before the transaction opens.** A call that removes files
   asks the disk which are there first and only consults the answer while it
   writes: a read that failed after the commit point would be an ordinary error on

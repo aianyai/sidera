@@ -232,8 +232,9 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	// replacement, so no record's retention ends with it. Until a lost record's
 	// own retention from the time the loss was found has passed, the name still
 	// counts as a record that may exist (see lostRetention), and then the file
-	// goes. The quarantined files of in/ and ctl/ have no replacement and no such
-	// bound: they stay for the owner to see, until the alert is acknowledged.
+	// goes. A quarantined file of in/ or ctl/ has no replacement and no bound:
+	// nothing removes it, and its alert stays with it (an alert is kept while its
+	// file is there).
 	discovered := map[AlertID]time.Time{}
 	for _, a := range sc.Alerts {
 		discovered[a.ID] = a.At

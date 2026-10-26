@@ -10,11 +10,12 @@ import (
 // AcknowledgeAlertOp is the operation that marks an alert as seen by the owner.
 // An alert that names a quarantined file of a directory that is not one of the
 // deliveries has the file removed with the acknowledgement, before the alert is
-// marked, so that an acknowledged alert never names a file that is still there;
-// the quarantined files of deliveries stay for the sweep. An alert that was
-// acknowledged before is written as it is and the result stored, so that a request
-// under a new identifier is answered like the first. encode makes the result from
-// the alert; it runs in the loop and must not wait.
+// marked, so that an acknowledged alert never names a file that is still there.
+// The quarantined files of deliveries are not removed by an acknowledgement (the
+// store refuses it), and the sweep removes only those of out/ that it bounds. An
+// alert that was acknowledged before is written as it is and the result stored,
+// so that a request under a new identifier is answered like the first. encode
+// makes the result from the alert; it runs in the loop and must not wait.
 func AcknowledgeAlertOp(alert store.AlertID, encode func(store.AlertID) ([]byte, error)) Operation {
 	return &acknowledgeAlertOp{alert: alert, encode: encode}
 }
@@ -64,7 +65,7 @@ func (v *view) alertIndex(id store.AlertID) int {
 
 // quarantinedFileOf is the quarantined file the alert names, when it is one that
 // the acknowledgement removes: not a file of the deliveries, which the sweep
-// removes after their holding period.
+// removes when it can (a quarantined file of in/ or ctl/ stays).
 func (v *view) quarantinedFileOf(id store.AlertID) *store.CorruptFile {
 	for _, c := range v.corrupt {
 		if c.Alert != id {
