@@ -16,14 +16,10 @@ import (
 var (
 	// ErrBodyMissing: the file of a body is not there.
 	ErrBodyMissing = errors.New("store: body file missing")
-	// ErrBodyMismatch: the content of a body file does not hash to its name.
-	// The caller settles each record that refers to it (QuarantineBody).
-	ErrBodyMismatch = errors.New("store: body file does not match its name")
+	// ErrBodyMismatch: the content of a body file is not what its record says
+	// (the digest and the length). The caller settles the record (QuarantineBody).
+	ErrBodyMismatch = errors.New("store: body file is not what its record says")
 )
-
-// ErrReleasedBodyInUse: a write was asked to remove a body that a record the same
-// write stores refers to. Nothing was written.
-var ErrReleasedBodyInUse = errors.New("store: a released body is referred to by a record written with it")
 
 // Store writes and reads state/. It keeps no state of its own besides the
 // writer: the engine's view of the records is built from a Scan.
@@ -47,18 +43,20 @@ func (s *Store) Available() (uint64, error) {
 	return n, err
 }
 
-// ReadBody returns the content of a body and checks it against its name. A
-// damaged body is ErrBodyMismatch, a missing one ErrBodyMissing.
-func (s *Store) ReadBody(ref BodyRef) ([]byte, error) {
-	data, err := s.r.ReadFile(path.Join(BodiesDir, ref.Name()))
+// ReadBody returns the content of the body of the record file named owner and
+// checks it against the reference the record holds. A body that is not what the
+// record says is ErrBodyMismatch, a missing one ErrBodyMissing.
+func (s *Store) ReadBody(owner string, ref BodyRef) ([]byte, error) {
+	name := BodyFileName(owner)
+	data, err := s.r.ReadFile(path.Join(BodiesDir, name))
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("%w: %s", ErrBodyMissing, ref.Name())
+		return nil, fmt.Errorf("%w: %s", ErrBodyMissing, name)
 	}
 	if err != nil {
 		return nil, err
 	}
 	if sum := sha256.Sum256(data); !bytes.Equal(sum[:], ref.Digest[:]) || len(data) != ref.Len {
-		return nil, fmt.Errorf("%w: %s", ErrBodyMismatch, ref.Name())
+		return nil, fmt.Errorf("%w: %s", ErrBodyMismatch, name)
 	}
 	return data, nil
 }

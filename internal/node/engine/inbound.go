@@ -164,7 +164,7 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 		}
 		rc.Reports = append(rc.Reports, rec)
 	}
-	if err := e.writeArrivals(env, ref, arrivals, updatedOut); err != nil {
+	if err := e.writeArrivals(env, arrivals, updatedOut); err != nil {
 		return transport.Receipt{}, err
 	}
 	for _, ee := range evidence {
@@ -180,32 +180,28 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 
 // writeArrivals writes the target records of the new arrivals, with the source
 // record the reply evidence changed in the same transaction, and takes what was
-// written into the view. The body goes with them only when no record holds it
-// yet, and then in the first record that refers to it: a source on this node has
-// written it already.
-func (e *Engine) writeArrivals(env envelope.Envelope, ref store.BodyRef, arrivals []arrival, out *store.OutRecord) error {
+// written into the view. The message goes with them as the body of every record
+// that holds one: each has a copy of its own, even when the source record on this
+// node holds the same bytes.
+func (e *Engine) writeArrivals(env envelope.Envelope, arrivals []arrival, out *store.OutRecord) error {
 	var ins []store.InRecord
+	var body []byte
 	for _, a := range arrivals {
-		if a.fresh && a.in.Body != nil {
-			ins = append(ins, a.in)
+		if !a.fresh {
+			continue
 		}
-	}
-	for _, a := range arrivals {
-		if a.fresh && a.in.Body == nil {
-			ins = append(ins, a.in)
+		ins = append(ins, a.in)
+		if a.in.Body != nil {
+			body = env.Body
 		}
 	}
 	if len(ins) == 0 {
 		return nil
 	}
-	var body []byte
-	if ins[0].Body != nil && e.view.bodyRefs[ref.Name()] == 0 {
-		body = env.Body
-	}
 	var written []store.InRecord
 	var err error
 	if out != nil {
-		written, err = e.d.Store.DeliverReply(body, out, ins, e.releasedByReply(*out, ins))
+		written, err = e.d.Store.DeliverReply(body, out, ins)
 	} else {
 		written, err = e.d.Store.Deliver(body, ins)
 	}
@@ -219,18 +215,6 @@ func (e *Engine) writeArrivals(env envelope.Envelope, ref store.BodyRef, arrival
 		e.view.setIn(in)
 	}
 	return nil
-}
-
-// releasedByReply lists the bodies that no record refers to once the reply is
-// written: the body the source record let go of, unless the reply or another
-// record this transaction writes refers to the same bytes.
-func (e *Engine) releasedByReply(out store.OutRecord, ins []store.InRecord) []store.BodyRef {
-	dropped := []*store.BodyRef{e.view.out[out.Name()].Body}
-	added := []*store.BodyRef{out.Body}
-	for _, in := range ins {
-		added = append(added, in.Body)
-	}
-	return e.view.bodyRefs.unreferencedAfter(dropped, added)
 }
 
 // judgement is what the target decided about one recipient of an envelope.
@@ -326,7 +310,7 @@ func rejected(now time.Time, in store.InRecord, reason delivery.RejectReason) (s
 		return in, fmt.Errorf("engine: rejecting %s as %s: %v (%v)", in.Key.Message, reason, err, o.Ignored)
 	}
 	in.Record = rec
-	in, _ = settledIn(in) // a rejected record holds no body; none was given to it
+	in = settledIn(in) // a rejected record holds no body; none was given to it
 	return in, nil
 }
 

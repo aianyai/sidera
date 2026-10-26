@@ -28,11 +28,11 @@ engine applies the delivery rules and calls the writes.
 | `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. A write of target records returns them as written. |
 | `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |
 | `OrphanBodies`, `OrphanEndpoints`, `EffectReplays`, `DrainCandidates`, `PromptReplays`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
-| `Store.Quarantine`, `QuarantineBody`, `QuarantineSessions` | Settling a damaged file, or a record whose body is damaged, in one transaction: the effects first, the alert, and the damaged file last. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
+| `Store.Quarantine`, `QuarantineBody`, `QuarantineSessions` | Settling a damaged file, or the record whose body is damaged, in one transaction: the effects first, the alert, and the damaged file last. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
 | `NewOutLostRecord`, `OutLostKey`, `OutLostReplays`, `Store.OutLostClear` | The notice that a file of `out/` was lost unread, built in one place; the work of the replay that clears its feedback item once a notice covers it, and the write that does. |
 | `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves. |
-| `Store.ReadBody`, `Store.Available` | Body reads checked against their names, and free space. |
+| `BodyFileName`, `Store.ReadBody`, `Store.Available` | The name of a record's own body file, a body read checked against the digest and length its record holds, and free space. |
 | `MissingStateDirs`, `StateDirs` | The directories of `state/`, for the layout rule of the composition root. |
 
 ## Rules
@@ -44,10 +44,10 @@ engine applies the delivery rules and calls the writes.
 - **A write that changes the stored form of a target record returns it as
   written.** `Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
   `Tick`, `EndpointDrain`, `InstanceDrain`, `EndpointDrainReplay`,
-  `InstanceDrainReplay`, `PromptReplay`, `BlockedReplay` and `QuarantineBody`
-  return `[]InRecord` (the records given, one revision on, in the same order) and
-  `FeedbackForm` returns the
-  `InRecord`. A caller keeping a view stores what comes back and never works the
+  `InstanceDrainReplay`, `PromptReplay` and `BlockedReplay`
+  return `[]InRecord` (the records given, one revision on, in the same order),
+  `FeedbackForm` returns the `InRecord`, and `QuarantineBody` returns a pointer to
+  the one it wrote, nil when it removed the record. A caller keeping a view stores what comes back and never works the
   revision out itself: the rule has this one home. After an error nothing is
   returned, and the caller does not apply the write to its view. The records given
   are not changed, but the records returned are shallow copies of them: slices,
@@ -98,13 +98,19 @@ engine applies the delivery rules and calls the writes.
   wrongly closed (an open endpoint, or another record's) would be
   a live session whose deliveries a drain then drops. A control record is refused
   without the scan.
-- **Bodies first, and removed last.** The caller works out which bodies lost their
-  last reference (the reference count is in the engine's view) and says so; a body
-  already gone is not an error. `DeliverReply` takes the release like the other writes that can drop a body:
-  the evidence in a reply can finish a delivery. The caller counts the records the
-  transaction writes as well as the ones it replaces, because records that say the
-  same bytes share one body file; a write refuses (`ErrReleasedBodyInUse`, before
-  anything is written) a release that names a body one of its own records refers to.
+- **A body belongs to one record, is written first and is removed last.** The body
+  file is named after its record (`BodyFileName`), so `Deliver` to several recipients
+  writes a copy of the message for each target record that holds a reference, and
+  nothing is shared or counted. A write refuses, before anything is written, a record
+  that holds a reference to bytes not given with it, bytes no record refers to, and
+  bytes that are not what the reference says. The writes that can end a record's need
+  of its body (`SourceUpdate`, `DeliverReply`, `ControlResult`, `Ack`, `Tick`, the
+  drains) take no list of bodies: a record written with no reference has its own
+  body file removed, after the records, in the same transaction, if the file is
+  there (a body already gone is not an error), so a crash never leaves a record
+  pointing at a missing body, and the sweep likewise removes the body of each record
+  it removes. The body of a record that holds no reference, or that does not exist,
+  is an orphan.
 - **A damaged file's first line is trusted by the rule of a live file.**
   The scan and `DecodeRecord` share one function for it (kind held by the
   directory, name equal to the hash of kind and key and, in `out/`, the sender of
@@ -112,15 +118,15 @@ engine applies the delivery rules and calls the writes.
   that parses but does not match the name of the file leaves `DamagedFile.Key` nil,
   and nothing is built from the key it claims.
 - **A record whose body is damaged is settled by its own call.** The body file is
-  checked against its name when it is read, never at the start. `QuarantineBody`
-  takes one record that refers to it and decides by the delivery rules the store
+  checked against its record's digest and length when it is read, never at the start.
+  `QuarantineBody` takes the one record that owns it and decides by the delivery rules the store
   already holds (`NeedsBody`): a record that still needs the bytes is lost with them
   (a target record is removed after its alert, a source record is overwritten with
   its lost replacement after its floors are raised), any other record keeps its
   state and is overwritten without the reference. A replacement is given for a
   source record that needs the body and for no other, and a call that gets this
   wrong is refused before anything is written. The body file is not touched: once
-  no record refers to it, it is an orphan.
+  the record is settled it is an orphan.
 - **Existence is read before the transaction opens.** A call that removes files
   asks the disk which are there first and only consults the answer while it
   writes: a read that failed after the commit point would be an ordinary error on
@@ -175,8 +181,9 @@ engine applies the delivery rules and calls the writes.
      convention: they skip a record a drain already rewrote (its revision no longer
      matches what the head lists), so neither their order among themselves nor
      their order against the drain changes the result.
-  6. `orphan-gc` last: the replays and the quarantines add and drop references to
-     bodies, so only after all of them is a body without a reference an orphan.
+  6. `orphan-gc` last: the quarantines remove records and overwrite them without
+     their reference, so only after all of them is the body of a record that is
+     gone, or that holds no reference, an orphan.
   7. The sequence book, from a scan taken after all of the above: a quarantine
      raises floors and replaces records, and the book must see both.
   A rule whose write has the shape of a normal transaction is that transaction, run
@@ -216,10 +223,10 @@ engine applies the delivery rules and calls the writes.
   discovery time of that record is the time of the alert. Loading the item of an
   out-lost record into the feedback queue, giving it to the sender and clearing it
   with `OutLostClear` is the caller's.
-- On a body that does not hash to its name, call `QuarantineBody` for each record
-  that refers to it, with a replacement from `delivery.NewLostRecord` exactly when
-  `OutRecord.NeedsBody()` says the source record still needs the bytes. A control
-  record never needs a body.
+- On a body that is not what its record says (`ErrBodyMismatch`), call
+  `QuarantineBody` for that record, with a replacement from `delivery.NewLostRecord`
+  exactly when `OutRecord.NeedsBody()` says the source record still needs the bytes. A
+  control record never needs a body.
 
 ## Crash tests
 

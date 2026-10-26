@@ -9,7 +9,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/txn"
@@ -95,22 +94,6 @@ func ctlFiles(ctls []CtlRecord) ([]file, error) {
 	return fs, nil
 }
 
-// bodyFile is the file of a body, which must be what the reference of the
-// record that holds it says.
-func bodyFile(content []byte, ref *BodyRef) (*file, error) {
-	if content == nil {
-		return nil, nil
-	}
-	if len(content) > envelope.MaxBody {
-		return nil, fmt.Errorf("store: a body of %d bytes is over the limit of %d", len(content), envelope.MaxBody)
-	}
-	want := BodyRefOf(content)
-	if ref == nil || *ref != want {
-		return nil, errors.New("store: the record does not refer to the body written with it")
-	}
-	return &file{path.Join(BodiesDir, want.Name()), content}, nil
-}
-
 // groups writes files with ReplaceDefer under role and syncs dir once after
 // them. With no files it writes nothing.
 func writeGroup(tx *txn.Tx, role, syncRole, dir string, files []file) error {
@@ -159,91 +142,27 @@ func (e existence) take(f FileRef) bool {
 	return there
 }
 
-// bodyFiles are the files of the bodies, each once.
-func bodyFiles(refs []BodyRef) []FileRef {
-	var out []FileRef
-	for _, r := range dedupe(refs) {
-		out = append(out, FileRef{Dir: BodiesDir, Name: r.Name()})
-	}
-	return out
-}
-
-// release removes the body files named, those that are there, and syncs
-// bodies/. A body that is already gone was removed by an earlier, interrupted
-// release.
-func (s *Store) release(tx *txn.Tx, refs []BodyRef, ex existence) error {
-	if len(refs) == 0 {
-		return nil
-	}
-	for _, f := range bodyFiles(refs) {
+// removeBodies removes the body files named, those that are there, and syncs
+// bodies/. It comes after the records that stopped needing them are written, in
+// the same transaction: a crash between the two leaves a body no record refers to,
+// which the orphan collection removes, and never a record that points at a body
+// that is gone. A body that is already gone was removed by an earlier,
+// interrupted transaction of the same write.
+func (s *Store) removeBodies(tx *txn.Tx, files []FileRef, ex existence) error {
+	removed := false
+	for _, f := range files {
 		if !ex.take(f) {
 			continue
 		}
 		if err := tx.Remove("body", path.Join(f.Dir, f.Name)); err != nil {
 			return err
 		}
+		removed = true
+	}
+	if !removed {
+		return nil
 	}
 	return tx.SyncDir("body-dir", BodiesDir)
-}
-
-func dedupe(refs []BodyRef) []BodyRef {
-	seen := map[BodyRef]bool{}
-	var out []BodyRef
-	for _, r := range refs {
-		if !seen[r] {
-			seen[r] = true
-			out = append(out, r)
-		}
-	}
-	return out
-}
-
-// outBodies, inBodies and ctlBodies are the references to bodies of the records a
-// transaction writes.
-func outBodies(outs ...OutRecord) []*BodyRef {
-	var refs []*BodyRef
-	for _, o := range outs {
-		refs = append(refs, o.Body)
-	}
-	return refs
-}
-
-func inBodies(ins []InRecord) []*BodyRef {
-	var refs []*BodyRef
-	for _, in := range ins {
-		refs = append(refs, in.Body)
-	}
-	return refs
-}
-
-func ctlBodies(ctls []CtlRecord) []*BodyRef {
-	var refs []*BodyRef
-	for _, c := range ctls {
-		refs = append(refs, c.Body)
-	}
-	return refs
-}
-
-// checkRelease refuses a release that names a body a record the same transaction
-// writes refers to. Bodies are addressed by content, so records that say the same
-// bytes share one file, and the caller's reference counts are only as good as its
-// own bookkeeping; removing that file would leave the written record pointing at a
-// body that is gone, which nothing reports until the record is read, and the bytes
-// cannot be brought back. Every write that takes a release calls it before it opens
-// a transaction, so a refused call has changed nothing.
-func checkRelease(release []BodyRef, written ...[]*BodyRef) error {
-	released := make(map[string]bool, len(release))
-	for _, r := range release {
-		released[r.Name()] = true
-	}
-	for _, group := range written {
-		for _, r := range group {
-			if r != nil && released[r.Name()] {
-				return fmt.Errorf("%w: %s", ErrReleasedBodyInUse, r.Name())
-			}
-		}
-	}
-	return nil
 }
 
 // Intake records a message accepted from a local sender: the body, if any, and
@@ -256,14 +175,14 @@ func (s *Store) Intake(body []byte, out OutRecord) error {
 	if out.Lost != nil {
 		return errors.New("store: a lost record is never accepted")
 	}
-	bf, err := bodyFile(body, out.Body)
+	bfs, err := bodyFiles(body, outOwners(out))
 	if err != nil {
 		return err
 	}
 	tx := s.w.Begin(&declIntake)
 	defer tx.Close()
-	if bf != nil {
-		if err := s.replace(tx, "body", *bf); err != nil {
+	for _, bf := range bfs {
+		if err := s.replace(tx, "body", bf); err != nil {
 			return err
 		}
 	}
@@ -273,9 +192,12 @@ func (s *Store) Intake(body []byte, out OutRecord) error {
 	return tx.Commit()
 }
 
-// Deliver records the messages accepted for the endpoints of this node. The
-// body is nil when the message was rejected, or when it is already there
-// because the source on this node wrote it. It returns the records as written.
+// Deliver records the messages accepted for the endpoints of this node. Every
+// record that refers to a body gets a file of its own with a copy of body, written
+// before the records, so one local delivery to several recipients writes as many
+// bodies as it has records that need one, and no record shares its body with
+// another. A rejected record refers to none, and body is nil when none of them
+// does. It returns the records as written.
 func (s *Store) Deliver(body []byte, ins []InRecord) ([]InRecord, error) {
 	if len(ins) == 0 {
 		return nil, errors.New("store: Deliver needs a record")
@@ -284,16 +206,14 @@ func (s *Store) Deliver(body []byte, ins []InRecord) ([]InRecord, error) {
 	if err != nil {
 		return nil, err
 	}
-	var bf *file
-	if body != nil {
-		if bf, err = bodyFile(body, ins[0].Body); err != nil {
-			return nil, err
-		}
+	bfs, err := bodyFiles(body, inOwners(ins))
+	if err != nil {
+		return nil, err
 	}
 	tx := s.w.Begin(&declDeliver)
 	defer tx.Close()
-	if bf != nil {
-		if err := s.replace(tx, "body", *bf); err != nil {
+	for _, bf := range bfs {
+		if err := s.replace(tx, "body", bf); err != nil {
 			return nil, err
 		}
 	}
@@ -303,50 +223,41 @@ func (s *Store) Deliver(body []byte, ins []InRecord) ([]InRecord, error) {
 	return committed(tx, written)
 }
 
-// DeliverReply records a reply that carries evidence: the updated source
-// record of the message it answers, if the evidence changed it, before the
-// target records of the reply, then removes the bodies whose last reference
-// this transaction drops; the caller computes them from its reference counts,
-// counting the records this transaction writes (a reply may say the same bytes
-// as the message it answers, and then refers to that very body).
+// DeliverReply records a reply that carries evidence: the bodies of its target
+// records, the updated source record of the message it answers, if the evidence
+// changed it, before the target records of the reply, then removes the body of
+// the source record when the update no longer refers to one.
 // It returns the target records as written (the revision one on).
-func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord, release []BodyRef) ([]InRecord, error) {
+func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord) ([]InRecord, error) {
 	if len(ins) == 0 {
 		return nil, errors.New("store: DeliverReply needs a record")
-	}
-	refs := inBodies(ins)
-	if out != nil {
-		refs = append(refs, out.Body)
-	}
-	if err := checkRelease(release, refs); err != nil {
-		return nil, err
 	}
 	written, files, err := inFiles(ins)
 	if err != nil {
 		return nil, err
 	}
+	bfs, err := bodyFiles(body, inOwners(ins))
+	if err != nil {
+		return nil, err
+	}
 	var of *file
+	var dropped []FileRef
 	if out != nil {
 		f, err := recordFile(OutDir, *out)
 		if err != nil {
 			return nil, err
 		}
 		of = &f
+		dropped = droppedBodies(outOwners(*out))
 	}
-	var bf *file
-	if body != nil {
-		if bf, err = bodyFile(body, ins[0].Body); err != nil {
-			return nil, err
-		}
-	}
-	ex, err := s.exist(bodyFiles(release))
+	ex, err := s.exist(dropped)
 	if err != nil {
 		return nil, err
 	}
 	tx := s.w.Begin(&declDeliverReply)
 	defer tx.Close()
-	if bf != nil {
-		if err := s.replace(tx, "reply-body", *bf); err != nil {
+	for _, bf := range bfs {
+		if err := s.replace(tx, "reply-body", bf); err != nil {
 			return nil, err
 		}
 	}
@@ -358,23 +269,21 @@ func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord, releas
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
 		return nil, err
 	}
-	if err := s.release(tx, release, ex); err != nil {
+	if err := s.removeBodies(tx, dropped, ex); err != nil {
 		return nil, err
 	}
 	return committed(tx, written)
 }
 
-// SourceUpdate replaces one source record and removes the bodies whose last
-// reference it dropped.
-func (s *Store) SourceUpdate(out OutRecord, release []BodyRef) error {
-	if err := checkRelease(release, outBodies(out)); err != nil {
-		return err
-	}
+// SourceUpdate replaces one source record and, when it no longer refers to a
+// body, removes the body it had.
+func (s *Store) SourceUpdate(out OutRecord) error {
 	of, err := recordFile(OutDir, out)
 	if err != nil {
 		return err
 	}
-	ex, err := s.exist(bodyFiles(release))
+	dropped := droppedBodies(outOwners(out))
+	ex, err := s.exist(dropped)
 	if err != nil {
 		return err
 	}
@@ -383,7 +292,7 @@ func (s *Store) SourceUpdate(out OutRecord, release []BodyRef) error {
 	if err := s.replace(tx, "out", of); err != nil {
 		return err
 	}
-	if err := s.release(tx, release, ex); err != nil {
+	if err := s.removeBodies(tx, dropped, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -411,14 +320,14 @@ func (s *Store) ControlIntake(body []byte, endpoint *EndpointRecord, ctl CtlReco
 		}
 		ef = &f
 	}
-	bf, err := bodyFile(body, ctl.Body)
+	bfs, err := bodyFiles(body, ctlOwners([]CtlRecord{ctl}))
 	if err != nil {
 		return err
 	}
 	tx := s.w.Begin(&declControlIntake)
 	defer tx.Close()
-	if bf != nil {
-		if err := s.replace(tx, "body", *bf); err != nil {
+	for _, bf := range bfs {
+		if err := s.replace(tx, "body", bf); err != nil {
 			return err
 		}
 	}
@@ -436,11 +345,9 @@ func (s *Store) ControlIntake(body []byte, endpoint *EndpointRecord, ctl CtlReco
 func trimRec(name string) string { return name[:len(name)-len(recordSuffix)] }
 
 // ControlResult records the result of a control signal, then the session
-// endpoint it moves, then removes the bodies it released.
-func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord, release []BodyRef) error {
-	if err := checkRelease(release, ctlBodies([]CtlRecord{ctl})); err != nil {
-		return err
-	}
+// endpoint it moves, then removes the body of the control record when it no
+// longer refers to one.
+func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord) error {
 	cf, err := recordFile(CtlDir, ctl)
 	if err != nil {
 		return err
@@ -453,7 +360,8 @@ func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord, release [
 		}
 		ef = &f
 	}
-	ex, err := s.exist(bodyFiles(release))
+	dropped := droppedBodies(ctlOwners([]CtlRecord{ctl}))
+	ex, err := s.exist(dropped)
 	if err != nil {
 		return err
 	}
@@ -467,7 +375,7 @@ func (s *Store) ControlResult(ctl CtlRecord, endpoint *EndpointRecord, release [
 			return err
 		}
 	}
-	if err := s.release(tx, release, ex); err != nil {
+	if err := s.removeBodies(tx, dropped, ex); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -575,20 +483,19 @@ func (s *Store) Lease(ins []InRecord) ([]InRecord, error) {
 	return committed(tx, written)
 }
 
-// Ack records acknowledgements and removes the bodies they released.
+// Ack records acknowledgements and removes the body of each record that no longer
+// refers to one.
 // It returns the target records as written (the revision one on).
-func (s *Store) Ack(ins []InRecord, release []BodyRef) ([]InRecord, error) {
+func (s *Store) Ack(ins []InRecord) ([]InRecord, error) {
 	if len(ins) == 0 {
 		return nil, errors.New("store: Ack needs a record")
-	}
-	if err := checkRelease(release, inBodies(ins)); err != nil {
-		return nil, err
 	}
 	written, files, err := inFiles(ins)
 	if err != nil {
 		return nil, err
 	}
-	ex, err := s.exist(bodyFiles(release))
+	dropped := droppedBodies(inOwners(ins))
+	ex, err := s.exist(dropped)
 	if err != nil {
 		return nil, err
 	}
@@ -597,7 +504,7 @@ func (s *Store) Ack(ins []InRecord, release []BodyRef) ([]InRecord, error) {
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
 		return nil, err
 	}
-	if err := s.release(tx, release, ex); err != nil {
+	if err := s.removeBodies(tx, dropped, ex); err != nil {
 		return nil, err
 	}
 	return committed(tx, written)
@@ -605,18 +512,14 @@ func (s *Store) Ack(ins []InRecord, release []BodyRef) ([]InRecord, error) {
 
 // TickBatch is the records one Tick moved.
 type TickBatch struct {
-	Out     []OutRecord
-	In      []InRecord
-	Ctl     []CtlRecord
-	Release []BodyRef
+	Out []OutRecord
+	In  []InRecord
+	Ctl []CtlRecord
 }
 
 // Tick records records moved by the passing of time.
 // It returns the target records as written (the revision one on).
 func (s *Store) Tick(b TickBatch) ([]InRecord, error) {
-	if err := checkRelease(b.Release, outBodies(b.Out...), inBodies(b.In), ctlBodies(b.Ctl)); err != nil {
-		return nil, err
-	}
 	of, err := outFiles(b.Out)
 	if err != nil {
 		return nil, err
@@ -632,7 +535,8 @@ func (s *Store) Tick(b TickBatch) ([]InRecord, error) {
 	if len(of)+len(inf)+len(cf) == 0 {
 		return nil, errors.New("store: Tick needs a record")
 	}
-	ex, err := s.exist(bodyFiles(b.Release))
+	dropped := droppedBodies(slices.Concat(outOwners(b.Out...), inOwners(b.In), ctlOwners(b.Ctl)))
+	ex, err := s.exist(dropped)
 	if err != nil {
 		return nil, err
 	}
@@ -647,7 +551,7 @@ func (s *Store) Tick(b TickBatch) ([]InRecord, error) {
 	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
 		return nil, err
 	}
-	if err := s.release(tx, b.Release, ex); err != nil {
+	if err := s.removeBodies(tx, dropped, ex); err != nil {
 		return nil, err
 	}
 	return committed(tx, written)
@@ -700,17 +604,13 @@ func (s *Store) EndpointClose(ep EndpointRecord, result *AdminRecord) error {
 
 // DrainBatch is a chunk of the records closed because their endpoint is.
 type DrainBatch struct {
-	In      []InRecord
-	Ctl     []CtlRecord
-	Release []BodyRef
+	In  []InRecord
+	Ctl []CtlRecord
 }
 
 // drain writes the endpoint records that close an instance's endpoints, when
 // there are any, and a chunk of closed deliveries.
 func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, withHead bool) ([]InRecord, error) {
-	if err := checkRelease(b.Release, inBodies(b.In), ctlBodies(b.Ctl)); err != nil {
-		return nil, err
-	}
 	var ep []file
 	for _, e := range closed {
 		if e.Status != EndpointClosed {
@@ -736,7 +636,8 @@ func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, wit
 	if !withHead && len(inf)+len(cf) == 0 {
 		return nil, errors.New("store: a drain closes a record")
 	}
-	ex, err := s.exist(bodyFiles(b.Release))
+	dropped := droppedBodies(slices.Concat(inOwners(b.In), ctlOwners(b.Ctl)))
+	ex, err := s.exist(dropped)
 	if err != nil {
 		return nil, err
 	}
@@ -753,7 +654,7 @@ func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, wit
 	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
 		return nil, err
 	}
-	if err := s.release(tx, b.Release, ex); err != nil {
+	if err := s.removeBodies(tx, dropped, ex); err != nil {
 		return nil, err
 	}
 	return committed(tx, written)
@@ -784,16 +685,16 @@ func (s *Store) FeedbackForm(body []byte, notice InRecord) (InRecord, error) {
 	if err != nil {
 		return InRecord{}, err
 	}
-	bf, err := bodyFile(body, notice.Body)
+	if notice.Body == nil {
+		return InRecord{}, errors.New("store: a notice has a body")
+	}
+	bfs, err := bodyFiles(body, inOwners([]InRecord{notice}))
 	if err != nil {
 		return InRecord{}, err
 	}
-	if bf == nil {
-		return InRecord{}, errors.New("store: a notice has a body")
-	}
 	tx := s.w.Begin(&declFeedbackForm)
 	defer tx.Close()
-	if err := s.replace(tx, "body", *bf); err != nil {
+	if err := s.replace(tx, "body", bfs[0]); err != nil {
 		return InRecord{}, err
 	}
 	if err := s.replace(tx, "notice", nf); err != nil {
@@ -1021,7 +922,7 @@ type FileRef struct {
 // checkRef refuses a name that would reach outside the directory it names or a
 // file that is not a record file.
 func checkRef(f FileRef) error {
-	if !slices.Contains(recordDirs, f.Dir) && f.Dir != BodiesDir {
+	if !slices.Contains(recordDirs, f.Dir) {
 		return fmt.Errorf("store: %q is not a directory of records", f.Dir)
 	}
 	if f.Name == "" || path.Base(f.Name) != f.Name || fsx.IsLeftover(f.Name) {
@@ -1038,9 +939,10 @@ type SweepChunk struct {
 	// Now is the time of the sweep; its UTC date names the archive file.
 	Now       time.Time
 	Summaries []ArchiveSummary
-	// Ctl, Records and Outs are removed in that order, then Bodies, the directory
-	// of Ctl synced after the group and the others after the last of them;
-	// Endpoints go last, after that sync.
+	// Ctl, Records and Outs are removed in that order, then the bodies of the
+	// target, control and source records among them that still have one, the
+	// directory of Ctl synced after the group and the others after the last of
+	// them; Endpoints go last, after that sync.
 	//
 	// A record that depends on a control record (the derived delivery of a
 	// session creation) goes in Records and its control record in Ctl. Records
@@ -1059,7 +961,6 @@ type SweepChunk struct {
 	// hold no sequence number, so no floor is written for them.
 	OutLosts  []OutLostRecord
 	Endpoints []FileRef
-	Bodies    []BodyRef
 	// KeepTarget, when set, prunes from the floor files the sweep writes the
 	// floors of targets that can no longer receive messages.
 	KeepTarget func(ident.Address) bool
@@ -1136,8 +1037,8 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		}
 	}
 	for _, f := range c.Records {
-		if f.Dir == BodiesDir || f.Dir == OutDir || f.Dir == EndpointsDir {
-			return fmt.Errorf("store: %s is not removed as a record of a sweep: bodies, source records and endpoints have their own groups", f.Dir)
+		if f.Dir == OutDir || f.Dir == EndpointsDir {
+			return fmt.Errorf("store: %s is not removed as a record of a sweep: source records and endpoints have their own groups", f.Dir)
 		}
 		if err := checkRef(f); err != nil {
 			return err
@@ -1180,11 +1081,26 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		}
 		floors = append(floors, f)
 	}
-	if len(lines)+len(floors)+len(c.Ctl)+len(c.Records)+len(outs)+len(c.Endpoints)+len(c.Bodies) == 0 {
+	if len(lines)+len(floors)+len(c.Ctl)+len(c.Records)+len(outs)+len(c.Endpoints) == 0 {
 		return nil
 	}
 
-	ex, err := s.exist(c.Ctl, c.Records, outs, bodyFiles(c.Bodies), c.Endpoints)
+	// The bodies of the target, control and source records that go: a record that
+	// is swept normally holds none, since it let go of its body when it ended, and
+	// the file that is still there is the one a crash left or a record that was
+	// never settled owned.
+	var withBody []FileRef
+	withBody = append(withBody, c.Ctl...)
+	for _, f := range c.Records {
+		if f.Dir == InDir {
+			withBody = append(withBody, f)
+		}
+	}
+	for _, o := range c.Outs {
+		withBody = append(withBody, FileRef{Dir: OutDir, Name: o.Name()})
+	}
+	bodies := bodyFilesOf(withBody)
+	ex, err := s.exist(c.Ctl, c.Records, outs, bodies, c.Endpoints)
 	if err != nil {
 		return err
 	}
@@ -1214,7 +1130,7 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 			}
 		}
 	}
-	for _, f := range bodyFiles(c.Bodies) {
+	for _, f := range bodies {
 		if removed, err := s.removeRef(tx, "body", f, ex); err != nil {
 			return err
 		} else if removed {

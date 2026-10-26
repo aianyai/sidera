@@ -30,12 +30,12 @@ import (
 type Store interface {
 	Scan() (*store.Scan, error)
 	Available() (uint64, error)
-	ReadBody(ref store.BodyRef) ([]byte, error)
+	ReadBody(owner string, ref store.BodyRef) ([]byte, error)
 
 	Intake(body []byte, out store.OutRecord) error
 	Deliver(body []byte, ins []store.InRecord) ([]store.InRecord, error)
-	DeliverReply(body []byte, out *store.OutRecord, ins []store.InRecord, release []store.BodyRef) ([]store.InRecord, error)
-	SourceUpdate(out store.OutRecord, release []store.BodyRef) error
+	DeliverReply(body []byte, out *store.OutRecord, ins []store.InRecord) ([]store.InRecord, error)
+	SourceUpdate(out store.OutRecord) error
 
 	EndpointUpdate(ep store.EndpointRecord) error
 	EndpointClose(ep store.EndpointRecord, result *store.AdminRecord) error

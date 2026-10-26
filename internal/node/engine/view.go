@@ -61,7 +61,6 @@ type view struct {
 	arrived   map[arrivalKey][]store.TargetKey
 	backlog   map[ident.EndpointID]int
 
-	bodyRefs   bodyCounts
 	unfinished int
 	alerts     []store.AlertRecord
 	seq        *store.SeqBook
@@ -93,57 +92,6 @@ type storedResult struct {
 	result      []byte
 }
 
-// bodyCounts is how many records refer to each body, by the name of its file.
-type bodyCounts map[string]int
-
-func (c bodyCounts) add(r *store.BodyRef, n int) {
-	if r == nil {
-		return
-	}
-	if c[r.Name()]+n <= 0 {
-		delete(c, r.Name())
-		return
-	}
-	c[r.Name()] += n
-}
-
-// unreferencedAfter lists the bodies that no record refers to once a transaction
-// has dropped one reference for each entry of dropped and added one for each entry
-// of added, each once and in the order dropped names them. A transaction releases
-// exactly these: a body is addressed by its content, so a record the transaction
-// writes may refer to the bytes another record let go of, and that body must stay.
-// c is how many records refer to each body now; it is not changed.
-func (c bodyCounts) unreferencedAfter(dropped, added []*store.BodyRef) []store.BodyRef {
-	net := map[string]int{}
-	for _, r := range dropped {
-		if r != nil {
-			net[r.Name()]--
-		}
-	}
-	for _, r := range added {
-		if r != nil {
-			net[r.Name()]++
-		}
-	}
-	var out []store.BodyRef
-	listed := map[string]bool{}
-	for _, r := range dropped {
-		if r != nil && !listed[r.Name()] && c[r.Name()]+net[r.Name()] <= 0 {
-			listed[r.Name()] = true
-			out = append(out, *r)
-		}
-	}
-	return out
-}
-
-func (c bodyCounts) clone() bodyCounts {
-	out := make(bodyCounts, len(c))
-	for k, v := range c {
-		out[k] = v
-	}
-	return out
-}
-
 // buildView reads a scan into a view. An endpoint whose declaration field the
 // engine cannot read is an error: the engine owns the field, and the record
 // passed the store's checks, so what is wrong is not the store's to quarantine.
@@ -162,7 +110,6 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		received:  map[msgKey][]store.TargetKey{},
 		arrived:   map[arrivalKey][]store.TargetKey{},
 		backlog:   map[ident.EndpointID]int{},
-		bodyRefs:  bodyCounts{},
 
 		checkpoints: map[store.CheckpointKey][]byte{},
 		seq:         store.NewSeqBook(sc),
@@ -246,9 +193,6 @@ func (v *view) openDirect(instance string) int {
 // Unfinished is how many deliveries the node holds that still have work behind
 // them (see inUnfinished).
 func (v *view) Unfinished() int { return v.unfinished }
-
-// BodyRefs is how many records refer to the body of that name.
-func (v *view) BodyRefs(name string) int { return v.bodyRefs[name] }
 
 // Draining reports whether the endpoint is closed and records are still queued
 // for it that its closing has not closed yet.
@@ -346,7 +290,6 @@ func (v *view) queue(recipient ident.EndpointID, key store.TargetKey, queued boo
 // one the view held.
 func (v *view) setIn(in store.InRecord) {
 	if old, ok := v.in[in.Key]; ok {
-		v.bodyRefs.add(old.Body, -1)
 		if inUnfinished(old) {
 			v.unfinished--
 		}
@@ -363,7 +306,6 @@ func (v *view) setIn(in store.InRecord) {
 		v.backlog[in.Key.Recipient]++
 	}
 	v.in[in.Key] = in
-	v.bodyRefs.add(in.Body, 1)
 	if inUnfinished(in) {
 		v.unfinished++
 	}
@@ -373,13 +315,11 @@ func (v *view) setIn(in store.InRecord) {
 // setCtl is setIn for a control record.
 func (v *view) setCtl(c store.CtlRecord) {
 	if old, ok := v.ctl[c.Key]; ok {
-		v.bodyRefs.add(old.Body, -1)
 		if ctlUnfinished(old) {
 			v.unfinished--
 		}
 	}
 	v.ctl[c.Key] = c
-	v.bodyRefs.add(c.Body, 1)
 	if ctlUnfinished(c) {
 		v.unfinished++
 	}
@@ -389,7 +329,6 @@ func (v *view) setCtl(c store.CtlRecord) {
 // setOut is setIn for a source record.
 func (v *view) setOut(o store.OutRecord) {
 	if old, ok := v.out[o.Name()]; ok {
-		v.bodyRefs.add(old.Body, -1)
 		v.unfinished -= outUnfinished(old)
 		if old.Idempotency != nil && v.idem[idemKey{old.Key.Sender, old.Idempotency.Key}] == o.Name() {
 			delete(v.idem, idemKey{old.Key.Sender, old.Idempotency.Key})
@@ -400,6 +339,5 @@ func (v *view) setOut(o store.OutRecord) {
 		v.idem[idemKey{o.Key.Sender, o.Idempotency.Key}] = o.Name()
 	}
 	v.out[o.Name()] = o
-	v.bodyRefs.add(o.Body, 1)
 	v.unfinished += outUnfinished(o)
 }

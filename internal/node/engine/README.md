@@ -294,11 +294,11 @@ commands and add their methods to this list.
   the message has several recipients is `len(To) > 1`.
 - **The body is held by what still needs it.** The source record drops its reference
   when no delivery of it needs the body, in the write of the receipt that settled it; a
-  rejected delivery holds no body at all. Every write that drops a reference removes,
-  in its own transaction, the bodies no record refers to afterwards, and counts the
-  records it writes itself (`bodyCounts.unreferencedAfter`): a body is addressed by its
-  content, so a reply that says the same bytes as the message it answers refers to the
-  very body the evidence just released, and that body stays.
+  rejected delivery holds no body at all. Every record has a body of its own, so a
+  write that drops a reference only has to write the record without it: the store
+  removes that record's own body in the same transaction, and the engine keeps no
+  count of who refers to what. One message to several local recipients is stored as a
+  copy for each target record that holds the body.
 - **Evidence that does not verify is discarded and alerted.** The reply is judged as if
   it carried none, and an alert of the kind `evidence_error` names the message.
 - **A control signal is none of this worker's.** The source records of control signals

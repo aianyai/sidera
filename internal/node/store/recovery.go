@@ -36,23 +36,27 @@ func MissingStateDirs(r fsx.Reader) ([]string, error) {
 	return out, nil
 }
 
-// OrphanBodies is the work of orphan-gc: the bodies no record refers to. A
-// record refers to the body it holds a reference to.
+// OrphanBodies is the work of orphan-gc: the bodies no record refers to. A body
+// belongs to the record it is named after (BodyFileName), and is kept exactly
+// while that record exists and holds a reference to a body: the body of a record
+// that is gone is what a crash left between writing a body and its record, and
+// the body of a record that no longer refers to one is what a crash left between
+// writing the record and removing the body.
 func OrphanBodies(sc *Scan) []string {
 	refs := map[string]bool{}
 	for _, o := range sc.Out {
 		if o.Body != nil {
-			refs[o.Body.Name()] = true
+			refs[BodyFileName(o.Name())] = true
 		}
 	}
 	for _, in := range sc.In {
 		if in.Body != nil {
-			refs[in.Body.Name()] = true
+			refs[BodyFileName(in.Name())] = true
 		}
 	}
 	for _, c := range sc.Ctl {
 		if c.Body != nil {
-			refs[c.Body.Name()] = true
+			refs[BodyFileName(c.Name())] = true
 		}
 	}
 	var out []string
@@ -308,7 +312,7 @@ func (s *Store) OrphanGC(bodies []string) error {
 		return nil
 	}
 	for _, b := range bodies {
-		if !isHashName(b) {
+		if !isBodyName(b) {
 			return fmt.Errorf("store: %q is not the name of a body", b)
 		}
 	}

@@ -115,7 +115,6 @@ type SweepPlan struct {
 	// Endpoints are the records of the closed endpoints to remove, which go after
 	// the files that hang on them.
 	Endpoints []FileRef
-	Bodies    []BodyRef
 }
 
 // Chunk is the whole plan as one chunk of the sweep at now. A caller that sweeps
@@ -124,14 +123,15 @@ type SweepPlan struct {
 func (p SweepPlan) Chunk(now time.Time) SweepChunk {
 	return SweepChunk{
 		Now: now, Summaries: p.Summaries, Ctl: p.Ctl, Records: p.Records,
-		Outs: p.Outs, OutLosts: p.OutLosts, Endpoints: p.Endpoints, Bodies: p.Bodies,
+		Outs: p.Outs, OutLosts: p.OutLosts, Endpoints: p.Endpoints,
 	}
 }
 
 // PlanSweep selects what is ready to leave the live files at now: records that
 // are finished and past their retention, with a session's derived delivery after
 // its control record; admin results past theirs; acknowledged alerts; closed
-// endpoints nothing live points to; and the bodies nothing refers to afterwards.
+// endpoints nothing live points to. The bodies of the records that go are not
+// listed: the sweep removes each record's own.
 //
 // A closed session endpoint is kept while any source record, or out-lost record,
 // has it as sender, swept or not: the sweep of a source record writes the floor
@@ -166,12 +166,9 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 			}
 		}
 	}
-	swept := map[string]bool{} // by path
 	add := func(refs *[]FileRef, dir, name string) {
 		*refs = append(*refs, FileRef{Dir: dir, Name: name})
-		swept[path.Join(dir, name)] = true
 	}
-	var bodiesOfSwept []BodyRef
 	summary := func(rec Record) {
 		plan.Summaries = append(plan.Summaries, summarize(rec, now))
 	}
@@ -180,9 +177,6 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 		if ready(c) {
 			add(&plan.Ctl, CtlDir, c.Name())
 			summary(c)
-			if c.Body != nil {
-				bodiesOfSwept = append(bodiesOfSwept, *c.Body)
-			}
 		}
 	}
 	for _, in := range sc.In {
@@ -197,20 +191,13 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 		}
 		add(&plan.Records, InDir, in.Name())
 		summary(in)
-		if in.Body != nil {
-			bodiesOfSwept = append(bodiesOfSwept, *in.Body)
-		}
 	}
 	for _, o := range sc.Out {
 		if !ready(o) {
 			continue
 		}
-		swept[path.Join(OutDir, o.Name())] = true
 		summary(o)
 		plan.Outs = append(plan.Outs, o)
-		if o.Body != nil {
-			bodiesOfSwept = append(bodiesOfSwept, *o.Body)
-		}
 	}
 	// An out-lost record is also swept once its sender is closed or gone: the
 	// notice can no longer be handed out, and nothing would clear its item.
@@ -220,7 +207,6 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	}
 	for _, o := range sc.OutLost {
 		if ready(o) || !endpointOpen[o.Key.Sender] {
-			swept[path.Join(OutDir, o.Name())] = true
 			plan.OutLosts = append(plan.OutLosts, o)
 		}
 	}
@@ -288,36 +274,12 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 			}
 		}
 	}
-	// Bodies a swept record referred to and no record that stays refers to.
-	stays := map[string]bool{}
-	hold := func(name string, r *BodyRef) {
-		if r != nil && !swept[name] {
-			stays[r.Name()] = true
-		}
-	}
-	for _, o := range sc.Out {
-		hold(path.Join(OutDir, o.Name()), o.Body)
-	}
-	for _, in := range sc.In {
-		hold(path.Join(InDir, in.Name()), in.Body)
-	}
-	for _, c := range sc.Ctl {
-		hold(path.Join(CtlDir, c.Name()), c.Body)
-	}
-	seen := map[string]bool{}
-	for _, b := range bodiesOfSwept {
-		if !stays[b.Name()] && !seen[b.Name()] {
-			seen[b.Name()] = true
-			plan.Bodies = append(plan.Bodies, b)
-		}
-	}
 	sortRefs := func(r []FileRef) {
 		sort.Slice(r, func(i, j int) bool { return path.Join(r[i].Dir, r[i].Name) < path.Join(r[j].Dir, r[j].Name) })
 	}
 	sortRefs(plan.Ctl)
 	sortRefs(plan.Records)
 	sortRefs(plan.Endpoints)
-	sort.Slice(plan.Bodies, func(i, j int) bool { return plan.Bodies[i].Name() < plan.Bodies[j].Name() })
 	return plan
 }
 

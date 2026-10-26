@@ -43,25 +43,27 @@ func prepare(x *txn.Write)  { x.Prepare = true }
 // and PutAdminResult with the roles above.
 var (
 	// intake: a message accepted from a local sender. The body is written first
-	// and is garbage until the record that refers to it is there.
+	// and is garbage until the record it is named after is there.
 	declIntake = txn.Decl{Name: "intake", Kind: txn.Normal, Writes: []txn.Write{
 		rep("body", prepare, optional), rep("out"),
 	}}
-	// deliver: a message accepted on the target. A rejected message has no body.
+	// deliver: a message accepted on the target. Every accepted record has a body
+	// file of its own, written first; a rejected one has none.
 	declDeliver = txn.Decl{Name: "deliver", Kind: txn.Normal, Writes: []txn.Write{
-		rep("body", prepare, optional), repDefer("in", many), syncDir("in-dir"),
+		rep("body", prepare, many, optional), repDefer("in", many), syncDir("in-dir"),
 	}}
 	// deliver-reply: a reply that carries evidence. The source record is
-	// updated before the target record that depends on it, and a body whose last
-	// reference the evidence dropped is removed at the end. The reply's own body
-	// has a role of its own: a role names one write of a transaction, and the
-	// removal of released bodies is the "body" of the other transactions.
+	// updated before the target record that depends on it, and the body of the
+	// source record, when the evidence ended its last delivery, is removed at the
+	// end. The bodies of the reply's own records have a role of their own: a role
+	// names one write of a transaction, and the removal of a body is the "body" of
+	// the other transactions.
 	declDeliverReply = txn.Decl{Name: "deliver-reply", Kind: txn.Normal, Writes: []txn.Write{
-		rep("reply-body", prepare, optional), rep("out", optional), repDefer("in", many), syncDir("in-dir"),
+		rep("reply-body", prepare, many, optional), rep("out", optional), repDefer("in", many), syncDir("in-dir"),
 		rm("body", many, optional), syncDir("body-dir", optional),
 	}}
-	// source-update: one source record changes; the body is removed when the
-	// last reference went.
+	// source-update: one source record changes; its body is removed when the
+	// record no longer refers to one.
 	declSourceUpdate = txn.Decl{Name: "source-update", Kind: txn.Normal, Writes: []txn.Write{
 		rep("out"), rm("body", many, optional), syncDir("body-dir", optional),
 	}}
@@ -72,7 +74,7 @@ var (
 		rep("body", prepare, optional), rep("endpoint", prepare, optional), rep("ctl"),
 	}}
 	// control-result: the result of a control signal, then the endpoint it
-	// moves, then the body that is no longer referenced.
+	// moves, then the body the control record no longer refers to.
 	declControlResult = txn.Decl{Name: "control-result", Kind: txn.Normal, Writes: []txn.Write{
 		rep("ctl"), rep("endpoint", optional), rm("body", many, optional), syncDir("body-dir", optional),
 	}}
@@ -156,7 +158,7 @@ func instanceHead() []txn.Write {
 
 // drainWrites is the declaration of closing the deliveries queued for closed
 // endpoints, after an optional head: the target records, the control records,
-// and the bodies nothing refers to any more.
+// and the bodies they no longer refer to.
 func drainWrites(head []txn.Write) []txn.Write {
 	return append(append([]txn.Write(nil), head...),
 		repDefer("in", many, optional), syncDir("in-dir", optional),

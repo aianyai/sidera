@@ -94,8 +94,8 @@ type QuarantineAlert struct {
 
 // damageAlert is the alert record of a settlement. The id is the first 16 bytes
 // of the hash of the directory and name of the file or record settled and the
-// evidence of the damage: the bytes of a damaged file, or the name of the body a
-// record refers to that does not hash to it.
+// evidence of the damage: the bytes of a damaged file, or the digest a record
+// holds of a body that is not what it says.
 func damageAlert(a QuarantineAlert, dir, name string, evidence []byte) AlertRecord {
 	h := sha256.New()
 	h.Write([]byte(dir + "\x00" + name + "\x00"))
@@ -105,9 +105,9 @@ func damageAlert(a QuarantineAlert, dir, name string, evidence []byte) AlertReco
 	return AlertRecord{ID: id, Kind: a.Kind, At: a.At, Detail: a.Detail, Subject: a.Subject}
 }
 
-// BodyQuarantine settles a record that refers to a body whose content does not
-// hash to its name (ErrBodyMismatch). Only the records that refer to the body are
-// affected; the body file itself is an orphan once none does.
+// BodyQuarantine settles a record whose body is not what the record says
+// (ErrBodyMismatch). The body belongs to that record alone, so nothing else is
+// affected; the body file itself is an orphan once the record is settled.
 //
 //   - A record that still needs the body (OutRecord.NeedsBody, or the Record of an
 //     InRecord) is lost with it: a target record is removed after the alert, and a
@@ -262,11 +262,11 @@ func (s *Store) Quarantine(q Quarantine) error {
 	return s.settle(st)
 }
 
-// QuarantineBody settles one record whose body is damaged; see BodyQuarantine.
-// It returns the target record as written, when it was written.
-func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
+// QuarantineBody settles the record whose body is damaged; see BodyQuarantine.
+// It returns the target record as written, nil when none was written.
+func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 	st := &settlement{}
-	var written []InRecord
+	var written *InRecord
 	var err error
 	// The record settled and the body it refers to; they identify the damage.
 	var dir, name string
@@ -285,11 +285,11 @@ func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
 			break
 		}
 		r.Body = nil
-		var files []file
-		if written, files, err = inFiles([]InRecord{r}); err != nil {
+		w, files, err := inFiles([]InRecord{r})
+		if err != nil {
 			return nil, err
 		}
-		st.overwrite = &files[0]
+		written, st.overwrite = &w[0], &files[0]
 	case CtlRecord:
 		dir, name, body = CtlDir, r.Name(), r.Body
 		if r.Body == nil {
@@ -327,7 +327,7 @@ func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
 	default:
 		return nil, fmt.Errorf("store: %T is not a record that refers to a body", q.Record)
 	}
-	if st.alert, err = recordFile(AlertsDir, damageAlert(q.Alert, dir, name, []byte(body.Name()))); err != nil {
+	if st.alert, err = recordFile(AlertsDir, damageAlert(q.Alert, dir, name, body.Digest[:])); err != nil {
 		return nil, err
 	}
 	if err := s.settle(st); err != nil {

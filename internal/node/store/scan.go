@@ -130,7 +130,7 @@ func (s *Store) Scan() (*Scan, error) {
 			continue
 		}
 		switch {
-		case !e.IsDir && isHashName(e.Name):
+		case !e.IsDir && isBodyName(e.Name):
 			sc.Bodies = append(sc.Bodies, e.Name)
 		default:
 			sc.Unknown = append(sc.Unknown, path.Join(BodiesDir, e.Name))

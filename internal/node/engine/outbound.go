@@ -396,8 +396,7 @@ func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs
 		return nil
 	}
 	o = settledSource(o)
-	release := e.view.bodyRefs.unreferencedAfter([]*store.BodyRef{old.Body}, []*store.BodyRef{o.Body})
-	if err := e.d.Store.SourceUpdate(o, release); err != nil {
+	if err := e.d.Store.SourceUpdate(o); err != nil {
 		return err
 	}
 	e.view.setOut(o)
@@ -414,7 +413,7 @@ func (e *Engine) encodeFor(now time.Time, o store.OutRecord, node ident.NodeID) 
 	var body []byte
 	if o.Body != nil {
 		var err error
-		if body, err = e.d.Store.ReadBody(*o.Body); err != nil {
+		if body, err = e.d.Store.ReadBody(o.Name(), *o.Body); err != nil {
 			return nil, err
 		}
 	}

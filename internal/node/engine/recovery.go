@@ -55,23 +55,8 @@ func PlanRecovery(sc *store.Scan, now time.Time, enabled func(instance string) b
 		OrphanBodies:    store.OrphanBodies(sc),
 	}
 	ins, ctls := store.DrainCandidates(sc)
-	p.EndpointDrain, _ = closeBatch(countBodies(sc), now, ins, ctls)
+	p.EndpointDrain, _ = closeBatch(now, ins, ctls)
 	return p
-}
-
-// countBodies is how many records of the scan refer to each body.
-func countBodies(sc *store.Scan) bodyCounts {
-	c := bodyCounts{}
-	for _, o := range sc.Out {
-		c.add(o.Body, 1)
-	}
-	for _, in := range sc.In {
-		c.add(in.Body, 1)
-	}
-	for _, ctl := range sc.Ctl {
-		c.add(ctl.Body, 1)
-	}
-	return c
 }
 
 // Items names the work, one line for each thing a rule has to do, in the form
@@ -302,7 +287,7 @@ func instanceDrainBatch(sc *store.Scan, eps []store.EndpointRecord, now time.Tim
 		}
 	}
 	ins, ctls := store.DrainCandidates(&shadow)
-	b, _ := closeBatch(countBodies(sc), now, ins, ctls)
+	b, _ := closeBatch(now, ins, ctls)
 	return b
 }
 

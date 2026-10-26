@@ -64,7 +64,8 @@ The system endpoint is not registered, counted, listed or closable.
 
 Closing an endpoint is a head record (closed, token gone), then chunks of at most
 `ChunkReplaces` (16) records queued for it, each closed by the delivery rules and
-stripped of its body reference, the bodies nothing refers to any more released.
+stripped of its body reference, whose own body file the store removes in the same
+transaction.
 While queued records remain the endpoint is draining and its key is not
 registered again: a registration of the key waits, parked in the loop, until the
 last chunk is done, and is then queued behind the commands the inbox holds. It is
@@ -664,7 +665,7 @@ reproducible).
 | Disabling, enabling and the presets recover from a crash at every point | `config` (`adapter-disable`, `adapter-enable`, `presets-change`), `store` (`instance-drain`) | `TestDisablingAnInstanceRecoversFromACrashAtEveryPoint`, `TestEnablingAnInstanceAndChangingPresetsRecoverFromACrashAtEveryPoint` |
 | Presets carry the class of the change and the version of the collection | `operations_presets.go` | `TestPresetsAreAddedAndRemovedWithTheirClassAndTheCollectionVersion` |
 | The probe passes only for the tokens the node saw; a token is used once, expires, and is for one front end | `probe.go` | `TestAnInstalledAdapterIsDeclaredOnceItsProbeHasPassedAndTheTokensWerePresented`, `TestAProbeTokenExpiresAndAFailedToolProbeFailsTheProbe` |
-| Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
+| Closing, chunks, bodies | `drain.go`, `endpoints.go` | `TestCloseRejectsTheQueuedDeliveriesInChunksAndRemovesTheirBodies`, `TestCloseBatch…` (`drain_internal_test.go`), `TestRegisteringTheKeyOfAnEndpointStillDrainingWaitsForTheDrain`, `TestARegistrationWaitsAcrossAFailedChunkOfTheDrain` |
 | Declarations and callers | `endpoints.go`, `declaration.go`, `view.go` | `declare_test.go`, `declaration_internal_test.go` (golden vectors, refusals, `FuzzDecodeDeclaration`), `TestTheRecordHoldsTheNameAndTheDescriptionApartFromTheDeclaration`, `TestResolveGivesTheEndpointOfACallerAndRefusesTheRest` |
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |
@@ -689,8 +690,8 @@ reproducible).
 | A source with a receipt learns of a lost record once and does not send again; an answer after the report deadline changes nothing | `outbound.go` (`applyAnswer`) | `TestSourceWithAReceiptGivesLostAtTargetOnce`, `TestSourceWithoutAReceiptIsNotToldTheTargetLostTheRecord`, `TestNoRecordAfterReportByChangesNothing`, `TestAnAnswerThatReportsAndListsARecipientIsNotReadAsALoss` |
 | No evidence is signed while the wall clock cannot be trusted | `signing.go` (`canSign`) | `TestNoEvidenceIsSignedWhileTheWallClockCannotBeTrusted` |
 | An engine does not open with the keys of another node | `engine.go` (`newEngine`) | `TestAnEngineWithTheKeysOfAnotherNodeDoesNotStart` |
-| The body is held by what needs it | `inbound.go` (`settledSource`, `releasedByReply`), `outbound.go`, `drain.go`; the one rule of what a transaction releases is `bodyCounts.unreferencedAfter`: the references it drops, less the ones it writes | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt`, `TestUnreferencedAfterCountsTheReferencesATransactionAddsAsWellAsTheOnesItDrops`, `TestEvidenceThatReleasesTheLastReferenceToABodyRemovesIt`, `TestAReplyWhoseBodyEqualsTheOriginalKeepsTheBodyTheEvidenceReleased` |
-| Every write of taking a message in survives a crash, and every declared step is crashed at | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint`: a message, a message the target refuses (the body is released), an envelope and an answer that no source record of this node sent (the target writes the body), an answer with evidence, and an answer whose evidence releases the last reference to the question's body (the transaction removes it); a message or an answer that has a source ends handled once, and the test fails when a declared step is reached by no scenario |
+| The body is held by what needs it, and every record has one of its own | `inbound.go` (`settledSource`, `writeArrivals`), `outbound.go`, `drain.go` (`settledIn`); the engine only writes the record without its reference, and the store removes that record's body | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt`, `TestEachRecordOfAMessageHasABodyFileOfItsOwnThatGoesWithItsFinalState`, `TestEvidenceThatFinishesASourceDeliveryRemovesTheBodyOfTheSourceRecord`, `TestCloseBatchClosesRecordsAndDropsTheBodyReferenceOfEachRecordItClosesAndOfNoOther` |
+| Every write of taking a message in survives a crash, and every declared step is crashed at | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint`: a message, a message the target refuses (it holds no body), an envelope and an answer that no source record of this node sent (the target writes the body), an answer with evidence, and an answer whose evidence ends the question's last delivery (the transaction removes the question's own body); a message or an answer that has a source ends handled once, and the test fails when a declared step is reached by no scenario |
 | The receiving entry under arbitrary bytes | `inbound.go` | `FuzzInbound` |
 
 Known gaps, each filled in with the feature it belongs to:

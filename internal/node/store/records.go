@@ -2,7 +2,6 @@ package store
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"github.com/aianyai/sidera/internal/node/recfile"
 	"time"
@@ -17,8 +16,9 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// BodyRef names a body file: the SHA-256 of the content, which is the file
-// name, and its length.
+// BodyRef is what a record says of its own body: the SHA-256 of the content and
+// its length. The file is named after the record (BodyFileName); the digest is
+// what a read of it is checked against.
 type BodyRef struct {
 	Digest [sha256.Size]byte
 	Len    int
@@ -28,9 +28,6 @@ type BodyRef struct {
 func BodyRefOf(content []byte) BodyRef {
 	return BodyRef{Digest: sha256.Sum256(content), Len: len(content)}
 }
-
-// Name is the name of the body file: the lowercase hex of the digest.
-func (r BodyRef) Name() string { return hex.EncodeToString(r.Digest[:]) }
 
 // OutRecord is the source side record of one message or control signal: the
 // sender's node's view of it. It has two shapes, exactly one of which is used.
@@ -46,7 +43,7 @@ type OutRecord struct {
 
 	Outbound envelope.Outbound
 	Envelope OutEnvelope
-	// Body is nil when the message has no body or when the body was released:
+	// Body is nil when the message has no body or when its body was removed:
 	// after every recipient's receipt is applied, only BodyDigest remains.
 	Body       *BodyRef
 	BodyDigest delivery.BodyDigest

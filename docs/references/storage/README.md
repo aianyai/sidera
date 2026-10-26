@@ -465,7 +465,7 @@ state/
                        also the out-lost notices of files that were lost unread (below)
   in/<h>.rec           target record: one per message for one endpoint, deduplication included
   ctl/<h>.rec          target control record: deduplication, stored reply, creation intent
-  bodies/<sha256>      a body, bare bytes, named by its digest
+  bodies/<stem>.body   a body, bare bytes, named after the one record it belongs to
   endpoints/<h>.rec    endpoint runtime state: kind, instance, name, description, token, session mapping
   attempts/<h>.rec     prompt attempts, blocked report, the followers a head record owes
   checkpoints/<h>.rec  an adapter's checkpoint
@@ -521,9 +521,8 @@ then overwritten by a lost record, and a target or control record is alerted and
 removed, with no replacement. That reports "lost, outcome unknown" to the sender where the
 record might have been read; nothing is lost and the failure is visible, so there
 is no separate path for it. This is a damaged
-record file; a body file whose content does not hash to its name is a different
-case, settled through the records that refer to it (see the quarantine of a body
-below).
+record file; a body file whose content is not what its record says is a different
+case, settled through that one record (see the quarantine of a body below).
 
 A body is JSON written by `encoding/json` from structs of the package, with
 times as RFC 3339 in UTC with a `Z` and fractional seconds without trailing
@@ -655,46 +654,71 @@ the check that a body is the canonical encoding of what it decodes
 (`TestEndpointTextThatIsNotUTF8IsRefusedOnRead`)). The bounds on length are checked on read
 in the decoder itself (`TestEndpointTextOverTheBoundIsRefusedOnRead`).
 
-**Bodies** are content-addressed and written before the record that refers to
-them; a body is removed in the transaction that drops its last reference, at
-its end, after the records are durable. Every write that can drop one takes the
-bodies to release as an argument: `SourceUpdate`, `ControlResult`, `Ack`, `Tick`,
-the drains, and `DeliverReply`, whose reply can carry the evidence that finishes
-a delivery and so drops the source record's body (`deliver-reply` removes it with
-`body` and `body-dir`; the body of the reply itself is the role `reply-body`, since
-a role names one write of a transaction). Tests:
-`TestDeliverReplyRemovesTheBodiesItReleases` and the `deliver-reply` walks of
-`TestEveryTransactionConvergesFromEveryCrashState`. Bodies are addressed by
-content, so a record the same transaction writes can refer to the file it was asked to
-remove (a reply whose bytes equal the message it answers refers to that very body); every
-write that takes a release refuses such a release with `ErrReleasedBodyInUse` before it
-opens a transaction, because the removal would be silent and irreversible: the record
-would point at bytes that are gone until someone reads it
-(`TestAWriteRefusesToReleaseABodyARecordItWritesRefersTo`, one case for every write that
-takes a release). What a
-crash leaves between the two is an orphan, removed by the first rule of the next
-start. A body is checked against its name when it is read (a start does not read
-them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch affects the records that
-refer to it and nothing else, and each is settled by a call of its own
-(`QuarantineBody`). A record that still needs the bytes is lost with them: a target
-record (an accepted message waiting to be handed out) is alerted and removed, a
-source record is overwritten with its lost record, as a damaged source record is.
-Any other record, and every control record (which never needs a body), keeps its
-state and is written with the reference dropped. The body file is left alone and
-is an orphan once no record refers to it. Whether a record needs the bytes is the
-delivery rules' answer (`delivery.Record.NeedsBody`), asked by the store itself, so
-a target record that needs its body cannot be written without it; a call that gives
-a replacement the record does not call for, or omits the one it does, is refused
-before anything is written (`TestABodyThatDoesNotMatchItsNameSettlesEachRecordThatRefersToIt`).
+**Bodies** belong to one record each. A record of `in/`, `ctl/` or `out/` that needs
+its message bytes has a body file of its own, named after the record: the name of the
+record file without `.rec`, then `.body` (`BodyFileName`, the one place a body is
+named; the prefix of a name of `out/` goes with it, so the name is `<h>.body` or
+`<e>.<h>.body`). Nothing is shared: one local delivery to several recipients writes a
+copy of the message for each target record that holds one, and the source record on
+the same node has its own, because a body that has a single owner is settled by the
+transaction that changes that owner and by nothing else. Content addressing, reference
+counts and release lists existed to save disk and produced a silent loss (a release that
+removed a body that a record written in the same transaction still referred to); the
+floor, that a failure always produces feedback and that data is never lost silently, does
+not need them, and the cost is the bytes of the copies (a message body is at most 64 KiB).
+
+A body is written before the record that refers to it, and the record holds the digest
+and the length of the bytes (`BodyRef`), which a read checks (`ReadBody`). A write that
+changes a record so that it holds no reference (a target record that reached a final
+state, a source record whose deliveries all hold receipts, a control record that does
+not need the initial message any more) removes that record's own body, after the
+record is written and in the same transaction, if the file is there; the store derives
+it from the record it is given, so no caller lists bodies to remove. The writes that can
+do it are `SourceUpdate`, `ControlResult`, `Ack`, `Tick`, the drains and `DeliverReply`
+(the evidence in a reply can finish a delivery and so end the source record's body; the
+bodies of the reply's own target records are the role `reply-body`, since a role names
+one write of a transaction), and the sweep removes the own body of every record it
+removes. A body is removed last, so a crash never leaves a record that points at a body
+that is gone (`ErrBodyMissing` is impossible for a healthy record); what a crash leaves
+is a body no record refers to, removed by the first rule of the next start.
+
+Tests: `TestEveryRecordHasABodyOfItsOwn`, `TestBodyFilesAreNamedAfterTheirRecords`,
+`TestTheNameOfABodyFileIsTheNameOfItsRecord`, `TestABodyIsRefusedThatItsRecordsDoNotSay`,
+`TestARecordThatStopsNeedingItsBodyRemovesItsOwnBodyAndNoOther`,
+`TestABodyIsRemovedAfterTheRecordThatDroppedIt`,
+`TestASweepRemovesTheBodiesOfTheRecordsItRemoves`, and the walks of the `deliver to
+several recipients`, `deliver with a rejected record among the accepted` and `ack
+removes only its own body` workflows of `TestEveryTransactionConvergesFromEveryCrashState`.
+
+A body is an orphan unless a record of the same name stem exists and holds a reference
+(`OrphanBodies`): the body of a record that is gone is what a crash left between writing
+a body and its record; the body of a record that holds no reference is what a crash left
+between writing the record and removing the body, or a body the quarantine of a record
+left behind. A body whose record holds a reference is never an orphan, so a collection
+never takes a body a record points at.
+
+A body is checked against its record when it is read (a start does not read them: 10,000
+bodies of 64 KiB are 625 MiB); a mismatch affects the one record that owns the body
+and nothing else, and is settled by a call (`QuarantineBody`). A record that still
+needs the bytes is lost with them: a target record (an accepted message waiting to be
+handed out) is alerted and removed, a source record is overwritten with its lost
+record, as a damaged source record is. Any other record, and every control record (which
+never needs a body), keeps its state and is written with the reference dropped. The
+body file is left alone and is an orphan once the record is settled. Whether a record
+needs the bytes is the delivery rules' answer (`delivery.Record.NeedsBody`), asked by
+the store itself, so a target record that needs its body cannot be written without it; a
+call that gives a replacement the record does not call for, or omits the one it does, is
+refused before anything is written
+(`TestABodyThatIsNotWhatItsRecordSaysSettlesThatRecordOnly`).
 
 **Existence is read before the transaction opens.** A call that removes files
-(a release of bodies, a sweep, an orphan collection) asks the disk which of them
-are there before it begins, and the removals only consult that answer. A read
-that failed inside the transaction after its commit point would be an ordinary
+(the body of a record that dropped its reference, a sweep, an orphan collection) asks the
+disk which of them are there before it begins, and the removals only consult that answer.
+A read that failed inside the transaction after its commit point would be an ordinary
 error on a disk that already changed, and the caller would go on with a view of
 memory that is no longer the disk; a failed read before it ends the call with
-nothing written. A file that is gone is skipped, so a release interrupted by a
-crash can be repeated.
+nothing written. A file that is gone is skipped, so a write interrupted by a crash can
+be repeated.
 
 **Quarantine.** A damaged file is settled by one transaction that writes every
 effect first and removes the file, or overwrites it in place, last. Each effect
@@ -704,8 +728,8 @@ there is nothing to resume. What the repetition can add is a floor one higher (a
 gap, never a number given twice); neither that nor anything else it repeats loses
 anything. The bad bytes are not kept. The alert id is the store's: the first 16
 bytes of the SHA-256 of the directory, the file name and the bytes of the damaged
-file (for a record whose body does not match its name, the directory and name of
-the record and the name of the body), so the settlement redone after a crash
+file (for a record whose body is not what it says, the directory and name of
+the record and the digest it holds), so the settlement redone after a crash
 rewrites its alert and adds no second, and a later, different damage of a file of
 the same name (a resent message taken in again) is an alert of its own, never one
 that replaces an alert the owner has acknowledged. The caller states the kind, the
@@ -905,7 +929,7 @@ closes or removes an endpoint; `prompt-replay`, `blocked-replay` and
 `feedback-replay`, which skip a record a drain rewrote because its revision no
 longer matches, so their order among themselves and against the drain does not
 change the result; `orphan-gc` after every
-replay, because replays and quarantines add and drop references to bodies; and
+replay, because quarantines overwrite or remove records and so leave bodies no record refers to; and
 the sequence book last. Each rule runs on a scan taken after the writes of the
 previous one, or on an equivalent view of the committed writes, and the sequence
 repeats until no rule has work. The test simulator (`sim.pass`, `sim.recoverAll`
@@ -1115,8 +1139,8 @@ so that the double cannot drift from what it stands for.
   skipped by observers and by fault rules that do not name it.
 
 - **No generic commit manifest.** Every transaction that spans files has one of
-  three shapes: prepare then commit (a body file, then the one record that
-  refers to it), authority then followers (the first file decides, the others
+  three shapes: prepare then commit (the body files, then the records that
+  refer to them), authority then followers (the first file decides, the others
   follow from it and from the records already there), or an independent batch
   (every file is a valid single-record change, so any subset is a valid state).
   None needs several files that cannot be derived from each other to appear
@@ -1276,7 +1300,7 @@ so that the double cannot drift from what it stands for.
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `TestHeaderDamageNeverEchoesTheFirstLine`, `FuzzDecodeFrame` |
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestTargetRecordsHaveNoLostShape`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
-| scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfADamagedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
+| scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfADamagedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheOwnersFileAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `written_test.go` (`TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`, `TestAFailedWriteReturnsNoRecords`),  `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing, and no crash during recovery), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
 | recovery rules | `internal/node/store/recovery.go` | `recovery_scenarios_test.go` (each rule, and the settlement of each kind of damaged file, walked from the state a crash leaves), `quarantine_session_test.go` (the double fault of a session creation, `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen`, `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan`), `TestCleanScenariosLeaveNoRecoveryWork` |
