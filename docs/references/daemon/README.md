@@ -295,9 +295,11 @@ wrote a request and did not read the answer whole, and the daemon says it
 in flight; either way the request is sent again with the same operation identifier,
 which returns the stored result if it ran and runs it if it did not. A refusal for an
 invalid argument with no detail is `malformed_request`. The text of an error nobody
-expected is logged and never sent. Two words belong to the owner's operations: `not_found/alert_unknown`,
-and `unavailable/identity_retired`, which is what anything that would sign is told
-between the retirement and the end of the daemon.
+expected is logged and never sent. Some words belong to the owner's operations alone:
+`not_found/alert_unknown`; `invalid_argument/empty_patch`, `node_mismatch`,
+`digest_mismatch` and `source_unreadable`; `conflict/install_in_progress`;
+`refused/platform_unsupported`; and `unavailable/identity_retired`, which is what
+anything that would sign is told between the retirement and the end of the daemon.
 
 Who the local owner is: whoever connected to the management listener, which is
 the user's own socket or pipe, checked by `ipc` on every accept. `manageapi.Listen`
