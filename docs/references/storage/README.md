@@ -734,12 +734,13 @@ not need the initial message any more) removes that record's own body, after the
 record is written and its directory is durable, in the same transaction, if the file
 is there; the store derives it from the record it is given, so no caller lists bodies
 to remove. Every write that can leave a record without its body does it: `SourceUpdate`,
-`ControlResult`, `ControlReply`, `Ack`, `Tick`, the drains, `FeedbackClear` (and the
+`ControlResult`, `ControlReply`, `Lease`, `Ack`, `Tick`, the drains, `FeedbackClear` (and the
 replay that runs it again) and `DeliverReply` (the evidence in a reply can finish a
 delivery and so end the source record's body; the bodies of the reply's own target
-records are the role `reply-body`, since a role names one write of a transaction). The
-writes of a prompt, a block and a lease leave a delivery accepted, and an accepted
-record keeps its body, so none of them removes one. The sweep removes the own body of
+records are the role `reply-body`, since a role names one write of a transaction). A
+lease is written with the records that the second check at the hand-out closed, and
+removes the body of those alone; the writes of a prompt and a block leave a delivery
+accepted, and an accepted record keeps its body, so neither removes one. The sweep removes the own body of
 every record it removes: the records first, then their directories made durable, then
 the bodies, then `bodies/`. A body is removed last, durably after the records, so a
 crash, even a power loss that keeps the removal of one directory entry and loses that of

@@ -61,7 +61,7 @@ var designTable = []struct {
 	{"prompt-begin", txn.Normal, "attempts:Replace"},
 	{"prompt-end", txn.Normal, "in:ReplaceDefer[MO] in-dir:SyncDir[O] attempts:Replace"},
 	{"blocked", txn.Normal, "in:ReplaceDefer[MO] in-dir:SyncDir[O] attempts:Replace"},
-	{"lease", txn.Normal, "in:ReplaceDefer[M] in-dir:SyncDir"},
+	{"lease", txn.Normal, "in:ReplaceDefer[M] in-dir:SyncDir body:Remove[MO] body-dir:SyncDir[O]"},
 	{"ack", txn.Normal, "in:ReplaceDefer[M] in-dir:SyncDir body:Remove[MO] body-dir:SyncDir[O]"},
 	{"tick", txn.Normal, "out:ReplaceDefer[MO] out-dir:SyncDir[O] in:ReplaceDefer[MO] in-dir:SyncDir[O] ctl:ReplaceDefer[MO] ctl-dir:SyncDir[O] body:Remove[MO] body-dir:SyncDir[O]"},
 	{"endpoint-update", txn.Normal, "endpoint:Replace"},

@@ -445,21 +445,14 @@ func (s *Store) Blocked(a AttemptsRecord, ins []InRecord) error {
 	return s.recipientsThenHead(&declBlocked, a, ins)
 }
 
-// Lease records the leases of one page of target records.
+// Lease records one page of a recv: the records that were leased, and those that the
+// second check at the hand-out closed, which no longer refer to a body; the body of
+// each of those is removed.
 func (s *Store) Lease(ins []InRecord) error {
 	if len(ins) == 0 {
 		return errors.New("store: Lease needs a record")
 	}
-	files, err := inFiles(ins)
-	if err != nil {
-		return err
-	}
-	tx := s.w.Begin(&declLease)
-	defer tx.Close()
-	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return err
-	}
-	return tx.Commit()
+	return s.replaceTargets(&declLease, ins)
 }
 
 // Ack records acknowledgements and removes the body of each record that no longer
@@ -468,6 +461,12 @@ func (s *Store) Ack(ins []InRecord) error {
 	if len(ins) == 0 {
 		return errors.New("store: Ack needs a record")
 	}
+	return s.replaceTargets(&declAck, ins)
+}
+
+// replaceTargets writes target records under a declaration of the shape lease and ack
+// share: the records, durable together, then the body of each that holds no reference.
+func (s *Store) replaceTargets(decl *txn.Decl, ins []InRecord) error {
 	files, err := inFiles(ins)
 	if err != nil {
 		return err
@@ -477,7 +476,7 @@ func (s *Store) Ack(ins []InRecord) error {
 	if err != nil {
 		return err
 	}
-	tx := s.w.Begin(&declAck)
+	tx := s.w.Begin(decl)
 	defer tx.Close()
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
 		return err

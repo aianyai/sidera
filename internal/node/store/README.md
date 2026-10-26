@@ -121,7 +121,7 @@ engine applies the delivery rules and calls the writes.
   nothing is shared or counted. A write refuses, before anything is written, a record
   that holds a reference to bytes not given with it, bytes no record refers to, and
   bytes that are not what the reference says. The writes that can end a record's need
-  of its body (`SourceUpdate`, `DeliverReply`, `ControlResult`, `ControlReply`, `Ack`,
+  of its body (`SourceUpdate`, `DeliverReply`, `ControlResult`, `ControlReply`, `Lease`, `Ack`,
   `Tick`, the drains, `FeedbackClear` and its replay) take no list of bodies: a record
   written with no reference has its own body file removed, after the records and
   their directory are durable, in the same transaction, if the file is there (a body

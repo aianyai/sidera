@@ -675,6 +675,29 @@ func scenarios() []scenario {
 				return r.st.AlertAck(store.AlertAckInput{Alert: a, Result: adminResult(2)})
 			},
 		},
+		{
+			// A page leases one record and closes another, which the second check at
+			// the hand-out refused: only the body of the closed one goes, and in no
+			// crash state does a record point to a missing body.
+			name: "lease removes only the body of a record it closed",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seedWithBodies(t, mem, tgtIn(1), tgtIn(2), tgtIn(3))
+			},
+			durable: "lease/in-dir.sync-dir#1",
+			mode:    batch,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				a, b := tgtIn(1), tgtIn(2)
+				a.Record = leasedRecord(a.Record, base)
+				return r.st.Lease([]store.InRecord{a, rejected(b)})
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, tgtIn(2))
+				wantBody(t, r, tgtIn(1), bodyBytes(1))
+				wantBody(t, r, tgtIn(3), bodyBytes(3))
+				wantBodyCount(t, r, 2)
+			},
+			bodiesResolve: true,
+		},
 	}
 }
 

@@ -48,6 +48,8 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 			func(st *store.Store) error { return st.SourceUpdate(finished()) }},
 		{"Ack dropping a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error { return st.Ack([]store.InRecord{delivered()}) }},
+		{"Lease closing a record that held a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
+			func(st *store.Store) error { return st.Lease([]store.InRecord{rejected(tgtIn(1))}) }},
 		{"Tick dropping a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), source)) }, bodyPath(source),
 			func(st *store.Store) error {
 				return st.Tick(store.TickBatch{Out: []store.OutRecord{finished()}})

@@ -97,13 +97,13 @@ var (
 	declBlocked = txn.Decl{Name: "blocked", Kind: txn.Normal, Writes: []txn.Write{
 		repDefer("in", many, optional), syncDir("in-dir", optional), rep("attempts"),
 	}}
-	// lease: the target records of a hand-out are written. The replays of a drain
-	// and of a feedback notice write with endpoint-drain, instance-drain and
-	// feedback-clear: a recovery rule that writes what a normal transaction writes
-	// is that transaction, run again. A lease leaves a delivery accepted, so it
-	// removes no body.
+	// lease: the target records of a hand-out are written, and the body of each that
+	// the second check closed is removed. The replays of a drain and of a feedback
+	// notice write with endpoint-drain, instance-drain and feedback-clear: a recovery
+	// rule that writes what a normal transaction writes is that transaction, run
+	// again. A lease that leaves a delivery accepted removes no body.
 	declLease = txn.Decl{Name: "lease", Kind: txn.Normal, Writes: []txn.Write{
-		repDefer("in", many), syncDir("in-dir"),
+		repDefer("in", many), syncDir("in-dir"), rm("body", many, optional), syncDir("body-dir", optional),
 	}}
 	declAck = txn.Decl{Name: "ack", Kind: txn.Normal, Writes: []txn.Write{
 		repDefer("in", many), syncDir("in-dir"), rm("body", many, optional), syncDir("body-dir", optional),
