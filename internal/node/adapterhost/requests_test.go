@@ -447,7 +447,7 @@ func TestCountsFollowNotificationsRequestsCallsAndTheTimersOfTheHost(t *testing.
 		eventually(t, "no call to be without an answer", func() bool { return len(r.host.Counts("chat").Calls) == 0 })
 	})
 
-	t.Run("a ping that has no answer yet is not among the calls", func(t *testing.T) {
+	t.Run("a ping that has no answer yet is among the calls, from the moment the host is idle", func(t *testing.T) {
 		r := newRig(t, rigOptions{})
 		var a *scripted
 		r.lau.launch = func(n int, inst adapterhost.Instance) (adapterhost.Process, error) {
@@ -459,10 +459,16 @@ func TestCountsFollowNotificationsRequestsCallsAndTheTimersOfTheHost(t *testing.
 		}
 		r.start()
 		r.ready("chat", 1)
+		// advance returns when the host is idle: a caller that finds it so, as the
+		// engine's quiet check does, must already find the ping in the counts.
 		r.advance(testParams().PingInterval)
+		if c := r.host.Counts("chat"); !slices.Equal(c.Calls, []string{adapterproto.MethodPing}) {
+			t.Fatalf("Calls = %v while a ping is out, want [%s]", c.Calls, adapterproto.MethodPing)
+		}
 		waitPings(t, a, 1)
+		r.advance(testParams().PingTimeout)
 		if c := r.host.Counts("chat"); len(c.Calls) != 0 {
-			t.Fatalf("Calls = %v while only a ping is out, want none", c.Calls)
+			t.Fatalf("Calls = %v after the ping timed out, want none", c.Calls)
 		}
 	})
 

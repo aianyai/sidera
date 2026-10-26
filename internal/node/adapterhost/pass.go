@@ -273,7 +273,14 @@ func (s *supervisor) watch(c *conn) (stable bool, out outcome, err error) {
 			pingCancel = cancel
 			pingRes = make(chan error, 1)
 			res := pingRes
-			s.spawn(func() { res <- c.call(ctx, adapterproto.MethodPing, adapterproto.Empty{}, &adapterproto.Empty{}) })
+			// The ping is counted before the supervisor parks, as rpc counts its
+			// request: a caller that finds the host idle must find it in the counts.
+			done := c.track(adapterproto.MethodPing)
+			s.spawn(func() {
+				err := c.send(ctx, adapterproto.MethodPing, adapterproto.Empty{}, &adapterproto.Empty{})
+				done()
+				res <- err
+			})
 		case slotRes, slotLimit:
 			// The ping is over: answered, failed, or too slow.
 			if sl == slotLimit {

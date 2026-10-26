@@ -99,14 +99,12 @@ func (c *conn) counts() ConnCounts {
 }
 
 // track counts a request of the host as sent and not answered until the returned
-// function is called. A ping is not counted: it only asks whether the adapter is
-// there. Whoever sends a request on a goroutine of its own and waits for it
-// elsewhere counts it before it starts waiting, so that a caller that finds the
-// host idle finds the request in the counts.
+// function is called, a ping included: while one is out the supervisor is parked
+// with its timeout armed, and a caller that found the host quiet then would move
+// the test clock into that timeout. Whoever sends a request on a goroutine of its
+// own and waits for it elsewhere counts it before it starts waiting, so that a
+// caller that finds the host idle finds the request in the counts.
 func (c *conn) track(method string) (done func()) {
-	if method == adapterproto.MethodPing {
-		return func() {}
-	}
 	c.mu.Lock()
 	c.calls[method]++
 	c.mu.Unlock()

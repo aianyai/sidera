@@ -177,7 +177,9 @@ with the effect rule; a result that does not decode is an error that is not a
 
 `Counts(instance)` returns the notifications handled and buffered, the requests of
 the adapter being answered, the methods of the requests the host sent that have no
-answer (one entry each, a ping excluded), whether a connection is in service and
+answer (one entry each, a ping included: while one is out the host is parked
+with its timeout armed, and a caller that found the host quiet would move the test
+clock past it), whether a connection is in service and
 whether the host is working. `Working` is true while the supervisor does anything of
 its own and while a timer of the instance is due and not yet taken; the supervisor
 answers from inside its park, so the call returns when it next parks. After the test
