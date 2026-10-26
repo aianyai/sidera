@@ -614,14 +614,9 @@ func (e *Engine) settlePrompt(now time.Time, id ident.EndpointID) {
 // failure leaves a file nobody asks for again, so it is logged and not tried again.
 func (e *Engine) dropAttemptCheckpoint(attempt adapterproto.AttemptID) {
 	key := store.CheckpointKey{Scope: store.CheckpointScopeAttempt, ID: string(attempt)}
-	if err := e.d.Store.CheckpointDrop([]store.CheckpointKey{key}); err != nil {
-		e.classify(err)
-		if e.fatal == nil {
-			e.log.Warn("the checkpoint of a settled attempt could not be removed", "attempt", string(attempt), "error", err.Error())
-		}
-		return
+	if err := e.dropCheckpoint(key); err != nil && e.fatal == nil {
+		e.log.Warn("the checkpoint of a settled attempt could not be removed", "attempt", string(attempt), "error", err.Error())
 	}
-	delete(e.view.checkpoints, key)
 }
 
 // fireSettle is the retry of an outcome that could not be written.

@@ -507,11 +507,18 @@ func (c *cmdCheckpointDrop) run(e *Engine, _ time.Time) {
 	if _, ok := e.view.checkpoints[c.key]; !ok {
 		return
 	}
-	if err := e.classify(e.d.Store.CheckpointDrop([]store.CheckpointKey{c.key})); err != nil {
-		if e.fatal == nil {
-			e.log.Warn("the state kept for a closed session could not be removed; the next start removes it", "error", err.Error())
-		}
-		return
+	if err := e.dropCheckpoint(c.key); err != nil && e.fatal == nil {
+		e.log.Warn("the state kept for a closed session could not be removed; the next start removes it", "error", err.Error())
 	}
-	delete(e.view.checkpoints, c.key)
+}
+
+// dropCheckpoint removes a checkpoint from the disk and from the view: the one place the
+// engine removes one, for the state of a closed session and for the checkpoint of an
+// attempt that has settled.
+func (e *Engine) dropCheckpoint(key store.CheckpointKey) error {
+	if err := e.classify(e.d.Store.CheckpointDrop([]store.CheckpointKey{key})); err != nil {
+		return err
+	}
+	delete(e.view.checkpoints, key)
+	return nil
 }
