@@ -231,7 +231,7 @@ func New(t testing.TB, o Options) *H {
 			if o.Adapter.Runtime {
 				own.Manifest = RuntimeAdapterManifestOf(name, o.MaxDirect)
 				// The seed names the native sessions, so each runtime has one of its own.
-				rt, err := fakeruntime.New(fakeruntime.Config{Now: h.clk.Now, Ledgers: h.led, Dir: t.TempDir(), Seed: o.Seed + uint64(i)})
+				rt, err := fakeruntime.New(fakeruntime.Config{Now: h.clk.Now, Ledgers: h.led, Dir: t.TempDir(), Seed: o.Seed + uint64(i), Runner: engineRunner{h}})
 				if err != nil {
 					t.Fatalf("harness: the fake runtime of %s: %v", name, err)
 				}
