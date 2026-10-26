@@ -65,8 +65,12 @@ signals join the same loop as further commands and add their methods to this lis
   with a `run`; commands run in the order they entered the inbox. Commands a
   command queues for itself (the chunks of a long batch) run after the commands
   the inbox holds at that moment and before those that arrive later, so a busy
-  inbox neither starves them nor is held up by more than one chunk. A command is answered exactly once, on a channel of capacity one,
-  so the loop never waits for a caller that has gone.
+  inbox neither starves them nor is held up by more than one chunk. The target
+  records of a prompt or a block are the known exception: they are one call (the
+  head is written last, so a chunked write would mark the rest as done), bounded by
+  the endpoint's backlog limit plus the system feedback instead of
+  `Params.ChunkReplaces`. A command is answered exactly once, on a channel of
+  capacity one, so the loop never waits for a caller that has gone.
 - **A command that entered the inbox is run, whoever waits for it.** A caller
   whose context ends first learns only that it did not hear.
 - **Two kinds of submitter.** An outside caller waits `Params.SubmitWait` for

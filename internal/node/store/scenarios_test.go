@@ -705,7 +705,7 @@ func single(name, durable string, run func(r *rig) error) scenario {
 // then the head record of the endpoint, which says the work is done. No recovery
 // rule finishes a half-done write. A crash leaves the head as it was and some, all
 // or none of the recipients written, each as it was before or as the event makes it;
-// the head is the commit mark, so a head that is there means every recipient is
+// the head is the completion mark, so a head that is there means every recipient is
 // written, and one that is not means the next attempt does the work again.
 type headLastWrite struct {
 	name string

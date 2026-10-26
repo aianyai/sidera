@@ -87,7 +87,7 @@ var (
 		rep("attempts"),
 	}}
 	// prompt-end and blocked: the target records the event applies to, then the head
-	// record of the endpoint, which is the commit mark. A prompt and a block leave a
+	// record of the endpoint, which is the completion mark. A prompt and a block leave a
 	// delivery accepted, and an accepted record keeps its body (checkBodyKept), so
 	// neither removes a body. No recovery rule exists for either: a head that is not
 	// there means the next attempt does the work again.

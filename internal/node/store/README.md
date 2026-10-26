@@ -73,7 +73,9 @@ engine applies the delivery rules and calls the writes.
   state change nothing). A reader takes a record's own flags as what it can tell the
   sender and the head as what the engine last settled, and never infers one from the
   other. All the records of a prompt or a block go in one call, because the call
-  writes the head: a call with only some of them would mark the rest as done.
+  writes the head: a call with only some of them would mark the rest as done. A
+  target record whose recipient is not the head's endpoint is refused before
+  anything is written.
 - **A session endpoint is prepared for the creation its control record holds.**
   `ControlIntake` refuses an endpoint that the record's intent does not name, and
   `OrphanEndpoints` names a creating endpoint whose control record holds no
@@ -221,8 +223,11 @@ engine applies the delivery rules and calls the writes.
   exit and rescan.
 - Call `SeqBook.Note` only after the commit that wrote the number.
 - Run a drain in chunks of the engine's choosing; the store accepts any size. A
-  prompt or a block is one call with all its target records (at most the endpoint's
-  queue), never chunks, for the reason above. A sweep is cut from the groups
+  prompt or a block is one call with all its target records, never chunks: the head
+  is written last, so only the last call could carry it, and the methods write it
+  every time. The bound is the endpoint's backlog limit (200 by default, an owner
+  may raise it) plus the system feedback the limit does not count, a known
+  exception to the engine's `ChunkReplaces` bound. A sweep is cut from the groups
   of `SweepPlan` (`SweepPlan.Chunk` is the whole plan as one chunk): a source record
   is cut as a record, never as a file name, so its floor goes with it.
 - Quarantine the files of `Scan.Damaged` in the order listed, and on a

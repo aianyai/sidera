@@ -20,7 +20,10 @@ type Params struct {
 	SubmitWait time.Duration
 	// ChunkReplaces is the most records one transaction of a long batch
 	// replaces, and so the most the loop is held for by one chunk: closing the
-	// queued deliveries of a closed endpoint is the case that needs it.
+	// queued deliveries of a closed endpoint is the case that needs it. The
+	// target records of a prompt or a block are the known exception: they go in
+	// one call, because the head is written last and every call writes it, so
+	// their bound is the endpoint's backlog limit plus the system feedback.
 	ChunkReplaces int
 	// ChunkRemoves is the most files one transaction of a sweep removes.
 	ChunkRemoves int

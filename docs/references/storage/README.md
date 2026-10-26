@@ -634,11 +634,15 @@ compares each returned record with what a new scan reads back.
 attempts to prompt it, the report that delivery to it is blocked and the prompt in
 flight (its attempt, kind and the target records it covers). `PromptEnd` and
 `Blocked` write the target records the event applies to (notified, blocked or no
-longer blocked), made durable together, and this record last, so it is the commit
+longer blocked), made durable together, and this record last, so it is the completion
 mark of the work: a record that holds the result of a prompt or the report of a
-block says every target record it concerns is written. A crash before it leaves
-some, all or none of the target records written, each as it was or as the event
-makes it (a record is replaced whole, so there is no third form), and the old head,
+block says every target record it concerns is written. The completion mark is not
+the commit point of the transaction: that is the rename of the first target record
+(or of the head, when there is none), as the commit-point rule of
+[the transaction layer](#the-transaction-layer) defines it. Before it a failure
+means nothing was written; from it on a failure is fatal. A crash before the
+head leaves some, all or none of the target records written, each as it was or as
+the event makes it (a record is replaced whole, so there is no third form), and the old head,
 whose prompt in flight or old report says the work is not done. Nothing finishes it
 at the next start. The next attempt applies the event again and writes the records
 that change and the head last; the delivery rules ignore an event a record already
@@ -648,11 +652,23 @@ says "blocked" is a fact a sender may be told, and it is on the disk before the 
 that would stop anyone looking for it, so a block is never settled in the head and
 lost in the records. A target record flagged blocked or notified while the head
 does not say so is a true fact of an attempt that was under way, not an
-acknowledgement of anything, and the only thing it can cost is one prompt more than
-the cap allows. A reader that finds the head not blocked applies the unblock to every
-record that still holds the flag, found by the flag, never by the head. All the
-records of a prompt or a block go in one call, since the call writes the head:
-chunks would mark the unwritten rest as done
+acknowledgement of anything. For a prompt, the head still holds the attempt in
+flight and the start-up step that reconciles prompts settles it as a result
+unknown, so the cost is at most one prompt more than the cap allows. For a block,
+the flag on the record is a true fact and costs nothing, as long as the reader
+unblocks by the record's own flag: a reader that finds the head not blocked applies
+the unblock to every record that still holds the flag, found by the flag, never by
+the head. Without that rule the source would keep a stale "blocked" for a record
+the head does not report, and no recovery notice would ever tell its sender.
+
+All the records of a prompt or a block go in one call, never in chunks. The head is
+written last, so only the last call of several could carry it, and the methods write
+it every time: a chunked write would mark the unwritten rest as done. What bounds
+the call is therefore not the engine's `ChunkReplaces` but the endpoint's backlog
+limit (200 by default, and an owner may raise it, see the
+[backlog limit](../delivery/README.md#backlog-limit)) plus the system feedback the
+limit does not count. This is a known exception to the loop-hold bound that
+`ChunkReplaces` gives every other long batch.
 (`TestAPromptAndABlockWriteTheirRecipientsBeforeTheirHead`, and the walks
 `prompt-end`, `blocked` and `blocked-recovered` of
 `TestEveryTransactionConvergesFromEveryCrashState`, which also state that recovery
@@ -1240,7 +1256,9 @@ so that the double cannot drift from what it stands for.
   transactions needs several files that cannot be derived from one another to
   appear together. The authority is written first and durably; the followers are
   written after, and a rule that can recompute them from the authority repairs a
-  crash between. The rules are stated as implications that hold on every state a
+  crash between. A prompt and a block are the exception: their head is written
+  last, as the completion mark, and nothing repairs a crash before it (see the next
+  item). The rules are stated as implications that hold on every state a
   crash cannot have caused, so they find no work on a clean disk: "closed" is
   absorbing and a follower that no longer exists is done.
 - **A prompt and a block write their target records first and the head last.**
@@ -1253,9 +1271,13 @@ so that the double cannot drift from what it stands for.
   so a block can never be recorded in the head and missing from the records; the
   head comes last because it is the only thing that says the work is done, so a
   crash before it simply gets the work done again, and the repeat is safe because
-  the delivery rules ignore an event a record already holds. The cost is that a
-  half-done prompt can leave a record notified with no attempt in the head, which
-  counts at most one prompt too few against the cap.
+  the delivery rules ignore an event a record already holds. The cost differs by
+  kind. For a prompt, the head still holds the attempt in flight, and the start-up step that
+  reconciles prompts settles it as a result unknown, so at most one prompt more
+  than the cap allows. For a block, the flag on a record is a true fact and costs
+  nothing as long as the reader unblocks by the record's flag; otherwise the source
+  would keep a stale "blocked" with no recovery notice, which is why the reader
+  rule exists.
 - **The damaged file goes last, after every effect that can be written again.**
   A settlement interrupted anywhere leaves the file where the next start finds it,
   and writes the same effects once more: nothing has to know how far the first
