@@ -135,6 +135,13 @@ type Engine struct {
 	promptsDirty   bool
 	promptsStarted bool
 
+	// blockedDirty are the session endpoints whose delivery is to be judged blocked or
+	// not at the next step of the loop, and servingSince is when the node began to
+	// serve: an adapter that has not connected since is offline since then, as far as
+	// the node can vouch.
+	blockedDirty map[ident.EndpointID]bool
+	servingSince time.Time
+
 	// dueTicks are the records whose entries of the schedule fell due and that are
 	// not ticked yet; tickQueued says a command to tick them is queued.
 	dueTicks   []string
@@ -225,6 +232,8 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		creations:  map[store.TargetKey]*creation{},
 		executions: map[store.TargetKey]*execution{},
 		prompts:    map[ident.EndpointID]*promptState{},
+
+		blockedDirty: map[ident.EndpointID]bool{},
 	}
 	e.pendingNotices = map[ident.EndpointID]bool{}
 	if d.RollbackPaused {
@@ -644,6 +653,7 @@ func (e *Engine) loop() {
 		if e.fatal == nil {
 			e.serveReady()
 			e.servePending()
+			e.serveBlocked()
 			e.servePrompts()
 		}
 		if e.fatal != nil {
@@ -718,6 +728,7 @@ func (e *Engine) clearRollback(now time.Time) {
 	e.hw.Reset(now)
 	e.paused, e.pausedSince = false, time.Time{}
 	e.promptsDirty = true
+	e.noteBlockedAll()
 }
 
 // step runs one command: one reading of the clock for all of it, then the phase
@@ -814,6 +825,12 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		}
 	case schedPromptRetry:
 		e.promptsDirty = true
+	case schedBlocked:
+		if id, err := ident.ParseEndpointID(key.id); err == nil {
+			e.blockedDirty[id] = true
+		}
+	case schedProbeFallback:
+		e.probeFallback(now, key.id)
 	case schedPromptReconcile:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.startReconcile(now, id)

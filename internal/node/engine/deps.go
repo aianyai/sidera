@@ -60,6 +60,7 @@ type Store interface {
 	QuarantineBody(q store.BodyQuarantine) (*store.InRecord, error)
 	PromptBegin(a store.AttemptsRecord) error
 	PromptEnd(a store.AttemptsRecord, ins []store.InRecord) error
+	Blocked(a store.AttemptsRecord, ins []store.InRecord) error
 	Lease(ins []store.InRecord) error
 	Ack(ins []store.InRecord) error
 	Tick(b store.TickBatch) error

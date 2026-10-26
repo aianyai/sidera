@@ -1,18 +1,22 @@
 package engine_test
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"strings"
-	"syscall"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -284,7 +288,7 @@ func TestBlockedReportIsWrittenAgainAfterAFailedWrite(t *testing.T) {
 	settle := func() { engineQuiet(t, h) }
 	msg := sendToAddr(t, h, "a", addr, "sent while the adapter is away")
 	settle()
-	rule := h.Faults().Fail(fsxtest.Match{Tx: "blocked", Step: fsx.StepWrite, Hit: 1}, syscall.EIO)
+	rule := h.Faults().Fail(fsxtest.Match{Tx: "blocked", Role: "in", Step: fsx.StepWrite, Hit: 1}, fsxtest.DiskFull)
 	step(h, settle, handoff.DefaultBlockedThreshold+time.Second)
 	if rule.Hits() == 0 {
 		t.Fatal("the write of the block was never reached, so the fault was not injected")
@@ -361,5 +365,164 @@ func TestNoRecordKeepsABlockMarkAfterACrashWhenTheCauseIsGone(t *testing.T) {
 		if k.Tag.Tx == "blocked" && cov.hit[k.Key] == 0 {
 			t.Errorf("the step %s %q of transaction blocked was never reached", k.Step, k.Tag.Role)
 		}
+	}
+}
+
+// promptRecorder is an adapter host whose connection takes every prompt and counts them.
+type promptRecorder struct {
+	*hostDouble
+	prompts atomic.Int64
+}
+
+func (p *promptRecorder) DeliverPrompt(context.Context, string, adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error) {
+	p.prompts.Add(1)
+	return adapterproto.PromptDeliverResult{Stage: adapterproto.PromptPersisted}, nil
+}
+
+// waitingSession is a node whose session endpoint has a message from a local sender that
+// has waited since long before the node started. The adapter has not connected.
+func waitingSession(t *testing.T, host engine.Adapters) (*rig, ident.EndpointID, store.TargetKey) {
+	t.Helper()
+	session := mustEndpoint(t, 80)
+	r := newRig(t, 10, withAdapters(host))
+	r.seedRecord(store.EndpointRecord{ID: session, Kind: sessionKind, Instance: "chat", Status: store.EndpointOpen,
+		Token: bytes.Repeat([]byte{0x5a}, store.TokenLen), Session: &store.SessionInfo{Preset: "default", NativeRef: "native-1"}})
+	in := queuedIn(t, 1, session)
+	in.Key.SenderNode = r.node
+	in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(1), in.Record.ReportBy)
+	if err := r.st.Deliver(bodyOf(1), []store.InRecord{in}); err != nil {
+		t.Fatal(err)
+	}
+	r.clk.Advance(20 * time.Minute)
+	return r, session, in.Key
+}
+
+func rigQuiet(t *testing.T, e *engine.Engine) {
+	t.Helper()
+	qctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := e.Quiesce(qctx, engine.Expect{}); err != nil {
+		t.Fatalf("the engine did not settle: %v", err)
+	}
+}
+
+func blockedOn(t *testing.T, r *rig, key store.TargetKey) bool {
+	t.Helper()
+	for _, in := range r.scan().In {
+		if in.Key == key {
+			return in.Record.Blocked
+		}
+	}
+	t.Fatalf("no record %v", key)
+	return false
+}
+
+// An adapter that has not connected since the node began to serve is offline since
+// then, as far as the node can say: a message that waited while the node was down is
+// not reported blocked in the moment the node starts, when the adapter is about to
+// connect. It is, once the adapter has stayed away for the threshold.
+func TestAdapterNotYetConnectedIsOfflineOnlySinceTheNodeBeganToServe(t *testing.T) {
+	r, _, key := waitingSession(t, newHostDouble())
+	e := r.start()
+	rigQuiet(t, e)
+	if blockedOn(t, r, key) {
+		t.Fatal("the message is blocked at the start of the node, for a wait the node did not see")
+	}
+	r.clk.Advance(handoff.DefaultBlockedThreshold)
+	rigQuiet(t, e)
+	if blockedOn(t, r, key) {
+		t.Fatal("the message is blocked after exactly the threshold")
+	}
+	r.clk.Advance(time.Second)
+	rigQuiet(t, e)
+	if !blockedOn(t, r, key) {
+		t.Fatal("the message is not blocked after the adapter stayed away longer than the threshold")
+	}
+}
+
+// The host logs a probe that failed and goes on, with the connection in service. What
+// waited for the adapter is judged once the probe has had time to answer all the same,
+// and not left for an event that may never come.
+func TestSessionsOfAnAdapterWhoseProbeFailedAreStillPromptedAfterAWait(t *testing.T) {
+	host := &promptRecorder{hostDouble: newHostDouble()}
+	r, _, _ := waitingSession(t, host)
+	e := r.start()
+	if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{Sessions: []adapterproto.SessionState{}}); err != nil {
+		t.Fatal(err)
+	}
+	rigQuiet(t, e)
+	if n := host.prompts.Load(); n != 0 {
+		t.Fatalf("%d prompts were sent before the probe had time to answer, want none", n)
+	}
+	r.clk.Advance(engine.DefaultParams().RetryBackoff)
+	rigQuiet(t, e)
+	waitUntil(t, func() bool { return host.prompts.Load() == 1 })
+}
+
+// blockedSession is a session whose adapter has been away for more than the threshold
+// with messages waiting, the block reported to the sender: the adapter stays away for
+// the rest of the test.
+func blockedSession(t *testing.T, msgs int) (h *harness.H, agent fakeagent.Agent, addr string, sent []adapterproto.MessageID) {
+	t.Helper()
+	h = sessionNodeOf(t, harness.Options{}, blockedHost(), "a")
+	agent, addr = idleSession(t, h, "a")
+	adapterEnded(t, h, h.AdapterLaunches(harness.Instance)[0])
+	for i := 0; i < msgs; i++ {
+		sent = append(sent, sendToAddr(t, h, "a", addr, fmt.Sprintf("message %d", i)))
+	}
+	engineQuiet(t, h)
+	step(h, func() { engineQuiet(t, h) }, handoff.DefaultBlockedThreshold+time.Second)
+	wantBlockFacts(t, h, addr, true, delivery.CauseAdapterOffline, handoff.CauseAdapterOffline, sent...)
+	return h, agent, addr, sent
+}
+
+// told counts the items of each kind the endpoint has been told.
+func told(t testing.TB, h *harness.H, who string) map[delivery.Kind]int {
+	t.Helper()
+	out := map[delivery.Kind]int{}
+	for _, k := range toldKinds(t, h, who) {
+		out[k]++
+	}
+	return out
+}
+
+// A message that arrives while delivery to its endpoint is blocked is blocked too: it
+// waits behind the same cause, and its sender is told as the senders of the others were.
+func TestMessageArrivingDuringABlockIsMarkedBlockedToo(t *testing.T) {
+	h, _, addr, sent := blockedSession(t, 1)
+	settle := func() { engineQuiet(t, h) }
+	late := sendToAddr(t, h, "a", addr, "sent after the report")
+	settle()
+	wantBlockFacts(t, h, addr, true, delivery.CauseAdapterOffline, handoff.CauseAdapterOffline, late, sent[0])
+	for i := 0; i < 4; i++ {
+		step(h, settle, time.Minute)
+	}
+	if got := told(t, h, "a"); got[delivery.KindDeliveryBlocked] != 2 || len(got) != 1 {
+		t.Errorf("a was told %v, want one block for each of the two messages and nothing else", got)
+	}
+}
+
+// The agent reads what waits although its adapter is away: nothing waits any more, so
+// the block is over for what it has taken, and the sender who was told of it is told it
+// is over. No record keeps the mark.
+func TestReadingTheBlockedMessagesEndsTheBlock(t *testing.T) {
+	h, agent, addr, sent := blockedSession(t, 2)
+	settle := func() { engineQuiet(t, h) }
+	for i := 0; i < 3; i++ {
+		step(h, settle, time.Minute)
+	}
+	if got := told(t, h, "a"); got[delivery.KindDeliveryBlocked] != 2 || len(got) != 1 {
+		t.Fatalf("a was told %v before the read, want the two blocks", got)
+	}
+	if page := recvAs(t, h, agent, fakeagent.RecvInput{}); len(page.Page.Messages) != 2 {
+		t.Fatalf("the page holds %v, want both messages", pageIDs(page))
+	}
+	settle()
+	wantBlockFacts(t, h, addr, false, 0, 0, sent...)
+	for i := 0; i < 3; i++ {
+		step(h, settle, time.Minute)
+	}
+	if got := told(t, h, "a"); got[delivery.KindDeliveryBlocked] != 2 || got[delivery.KindBlockedRecovered] != 2 || len(got) != 2 {
+		t.Errorf("a was told %v, want each block and each recovery once", got)
 	}
 }

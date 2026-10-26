@@ -924,6 +924,33 @@ verdict. Step 11 of the start does the same for every attempt found in flight; a
 not connected is asked when it is. A write that fails keeps the outcome and is tried again after
 `RetryBackoff`.
 
+**Blocked delivery.** Delivery to a session endpoint is judged blocked by `handoff.AssessBlocked`
+(prompts failing for longer than 5 minutes because of a cause that holds: the adapter offline, the
+runtime's authentication invalid or its service unavailable). The engine judges an endpoint at
+every moment the input of the rule may have changed: a target record of the endpoint taken in or
+dropped (an arrival, a lease, an acknowledgement, an expiry), an attempt settled, an availability
+snapshot, the adapter's connection ending or its probe being answered, the start of the node and the
+clearing of a wall clock that was set back; and at the instant the rule names for a run that is
+still short (`BlockedVerdict.RetryAt`), since no event marks it. The adapter's signals are those of
+`AdapterSignals`, except that an adapter that has not connected since the node began to serve is
+offline since then and not since an unknown time: the node did not look before, and a message that
+waited while the node was down would otherwise be reported blocked in the moment the node starts,
+for an adapter that is about to connect.
+
+A verdict is recorded like a prompt: the target records first and the endpoint's attempts record,
+the head, last, in one call (`store.Blocked`). A new block marks every message that waits with the
+cause (`delivery.EventBlocked`, the cause mapped by `adapterreg.BlockedCause`) and stores the cause
+and its start in the head; while the block lasts, a message that arrives is marked as well; when
+the block is over (the cause is gone, a prompt was delivered, or nothing waits any more) the head is
+cleared and every record that still holds a mark is lifted (`delivery.EventUnblocked`). The marks
+are found by the records' own flag and not by the head, so a block that a crash left half written
+(some records marked, the head not saying so) is lifted by the first judgment after the cause is
+gone. A verdict that changes no record and not the head writes nothing, and a write that fails is
+tried again after `RetryBackoff`. The sender is told by the usual way: it pulls the report of the
+target, which carries the mark and its cause, its delivery rules decide that the news is owed once
+per delivery (and the correction once, if the block was told), and the feedback queue merges the
+blocks of one target endpoint into one notice and the corrections into another.
+
 **The start, as far as the engine is concerned.** The steps of the start are numbered
 in the order the node takes them; the engine takes part in these:
 
@@ -1248,6 +1275,25 @@ reproducible).
   endpoint that has waited longest in the same step. The decision is asked of every endpoint
   that has an event and no other, so an endpoint with an unread prompt is not woken by the
   events of others.
+- **A block is a fact on the records of the messages, and the head says it is reported.** The
+  sender learns what happened to a delivery from the report of its target, so the mark belongs on
+  the target record, where the report reads it, and the endpoint's head holds only what edge
+  triggering needs (the cause and when it began, so that a block is reported once and its recovery
+  once, and a restart does not report it again). Judging by the endpoint at every change of the
+  records is cheap and leaves no case to remember; judging on a timer would report a block up to
+  the pace of the timer late. A block that fails to be written is retried and never dropped, since
+  a block the sender is not told of is a message that waits for an unreadable reason.
+- **A failed prompt without a cause is not a block.** A native process that was killed refuses the
+  prompt (or its answer is lost) with the adapter online and nothing reported unavailable. That is
+  an agent that cannot be woken, which the retries of the prompt rules go on trying, and no cause
+  explains it to the sender; the message stays queued until its queue time and is told as expired
+  then, as the other messages that were never read.
+- **The probe is the moment a connection is judged, and a wait covers the probe that failed.** The
+  host puts a connection in service before it probes, logs a probe that failed and goes on, so the
+  engine never hears of it. The sessions of the instance are judged when the probe answers, and
+  once `RetryBackoff` after the start for the case it did not: the connection was usable all along,
+  and the judgment costs one prompt that may fail and be retried at the pace of the rules, which no
+  loop can grow from.
 - **A turn that is not observed is not counted, and one that is counted again is not forgotten.**
   The state of a turn of an adapter that is away is unknown, and a turn nobody can see must not
   stop the node; an endpoint whose adapter is away is not judged, because a prompt for it is
@@ -1408,6 +1454,12 @@ reproducible).
 | The checkpoints of the creation attempt and of the first prompt are dropped when the creation settles | `create.go` (`settleCreate`, `failCreationWithoutEndpoint`, `dropCreationCheckpoints`), `prompts.go` (`dropAttemptCheckpoint`) | `TestSettledCreationDropsTheCheckpointsOfItsAttempts` |
 | The checkpoint of a prompt attempt is dropped when the attempt settles | `prompts.go` (`dropAttemptCheckpoint`), `store.CheckpointDrop` | `TestSettledPromptAttemptDropsItsCheckpoint` |
 | A prompt does not make the check at recv pass | `pull.go` (`handoutAuthorization`) | `TestDeclarationTightenedAfterPromptRejectsAtRecv` |
+| Delivery blocked past the threshold is reported once with its cause to the sender, merged for several messages, and its recovery once | `blocked.go` (`serveBlocked`, `judgeBlocked`), `adapterreg.BlockedCause` | `TestBlockedReportedOnceWithCauseAndRecoveredOnce` |
+| A native process killed during a prompt gives no feedback and the message stays readable | `blocked.go` (`judgeBlocked`; no cause, no block) | `TestNativeKilledDuringPromptGivesNoFeedbackAndKeepsMessage` |
+| A block is written marks first and head last, a failed write is tried again, and marks a crash left are lifted whatever the head says | `blocked.go` (`judgeBlocked`), `store.Blocked` | `TestBlockedReportIsWrittenAgainAfterAFailedWrite`, `TestNoRecordKeepsABlockMarkAfterACrashWhenTheCauseIsGone` |
+| A message that arrives during a block is marked; reading the messages ends the block | `blocked.go` (`judgeBlocked`), `view.go` (`onInChange`) | `TestMessageArrivingDuringABlockIsMarkedBlockedToo`, `TestReadingTheBlockedMessagesEndsTheBlock` |
+| An adapter not connected since the node began to serve is offline since then | `blocked.go` (`blockedSignals`) | `TestAdapterNotYetConnectedIsOfflineOnlySinceTheNodeBeganToServe` |
+| The sessions of an adapter whose probe failed are judged after a wait | `adapters.go` (`markStarted`), `blocked.go` (`probeFallback`) | `TestSessionsOfAnAdapterWhoseProbeFailedAreStillPromptedAfterAWait` |
 
 Known gaps, each filled in with the feature it belongs to:
 
@@ -1433,15 +1485,14 @@ Known gaps, each filled in with the feature it belongs to:
   lease go: `leaseMayRelease` says yes, and the signals of turns are to decide it there.
 - Prompts go into session endpoints only; a direct endpoint is told that messages wait with
   `endpoint.pending`, which is a different thing (see Announcing).
-- Prompt attempts are recorded as they end, but whether delivery to an endpoint is blocked is
-  not judged yet: no block is reported and the attempts record's blocked report stays empty.
-  A change of the availability an adapter reports does not make the endpoints it names be
-  judged again either; the end of a turn, an arrival and a connection of the adapter do.
 - A prompt the adapter accepted (`accepted`) and never made durable with `prompt.persisted` is
-  taken for delivered at once; the adapter protocol says the node reconciles it when no
-  `prompt.persisted` follows, and that is not built here.
-- An adapter whose probe failed (the host logs it and goes on) is not judged when it connects:
-  the endpoints of its sessions are judged by the next event of their own.
+  taken for delivered at once. The adapter protocol says the node reconciles it when no
+  `prompt.persisted` follows but gives no time to wait, and a window is a timing of the protocol,
+  so it is not invented here.
+- The block of a message is judged from the messages that wait, not from one of them: a message
+  that is suspended at the second check is not waiting and is not marked. A change of the node
+  rules or of the declaration that makes a suspended message wait again is not an event of the
+  judgment, as it is none of the prompt rules; the next change of the endpoint's records judges.
 - The node does not keep when an endpoint last called recv. After a restart the time is taken
   from the newest lease issued for the endpoint's messages (`approximateLastRecv`), so a recv
   that issued no lease (the queue was empty) or only handed a part out again under a lease that

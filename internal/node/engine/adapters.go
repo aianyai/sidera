@@ -371,6 +371,9 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 	// or may not have been done: it is asked again, with the same attempt.
 	e.redriveCreates(instance, now)
 	e.redriveExecutions(instance, now)
+	// The probe answering is what judges the sessions of the instance (probeResult). One
+	// that fails is only logged by the host, so the judgment is also made after a wait.
+	e.sched.set(schedKey{schedProbeFallback, instance}, now.Add(e.p.RetryBackoff))
 	return nil
 }
 
@@ -495,6 +498,7 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 	// the connection not in service yet.
 	e.redriveCreates(instance, now)
 	e.redriveExecutions(instance, now)
+	e.sched.remove(schedKey{schedProbeFallback, instance})
 	e.noteInstanceProbed(instance, now)
 	return nil
 }
@@ -557,7 +561,9 @@ func (e *Engine) gone(now time.Time, instance string, cause adapterhost.GoneCaus
 		return refuse(ReasonInstanceUnknown)
 	}
 	e.adapter(instance).goOffline(now)
-	e.promptsDirty = true // the turns of its sessions no longer count against the cap
+	e.sched.remove(schedKey{schedProbeFallback, instance})
+	e.noteBlockedInstance(instance) // the adapter being away is a cause that has just begun
+	e.promptsDirty = true           // the turns of its sessions no longer count against the cap
 	e.log.Info("adapter gone", "instance", instance, "cause", cause.String())
 	return nil
 }
@@ -604,6 +610,7 @@ func (e *Engine) notified(now time.Time, instance string, n adapterhost.Notifica
 	switch p := notificationParams(n.Params).(type) {
 	case adapterproto.AvailabilityParams:
 		st.snapshot, st.received = cloneAvailability(p.Conditions), now
+		e.noteBlockedInstance(instance)
 	case adapterproto.NativeRequestHandledParams:
 		if p.Disposition == adapterproto.DispositionRejectedByPreset || p.Disposition == adapterproto.DispositionRejectedUnknown {
 			setFlag(&st.rejected, p.Endpoint, true)
@@ -665,11 +672,19 @@ func (c *cmdSignals) run(e *Engine, _ time.Time) {
 		c.done(handoff.Signals{}, refuse(ReasonInstanceUnknown))
 		return
 	}
-	var st adapterState // an instance that never connected: offline, since when unknown
-	if known := e.adapters[c.instance]; known != nil {
+	c.done(e.adapterSignals(c.instance, c.endpoint), nil)
+}
+
+// adapterSignals is what keeps the adapter of an instance from working for one
+// endpoint: its last availability snapshot and the engine's own observation of
+// whether it is connected. An instance that never connected is offline, since when
+// unknown.
+func (e *Engine) adapterSignals(instance string, endpoint adapterproto.EndpointRef) handoff.Signals {
+	var st adapterState
+	if known := e.adapters[instance]; known != nil {
 		st = *known
 	}
-	c.done(adapterreg.Signals(st.snapshot, c.endpoint, st.received, !st.online, st.offlineSince), nil)
+	return adapterreg.Signals(st.snapshot, endpoint, st.received, !st.online, st.offlineSince)
 }
 
 // AdapterSignals is what keeps the adapter from working for one endpoint, as

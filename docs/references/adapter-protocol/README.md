@@ -818,7 +818,7 @@ except the two that are plain calls (marked "call"):
 
 - `internal/adapterreg` (`admit.go`, `methods.go`, `mappings.go`); tests
   `TestAdmitDecisions`, `TestDeclaredKindsAndSignals`, `TestMethodMatrix`,
-  `TestCreateReplyMapsEveryCreateFailure`, `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestDaemonCreateFailure`, `TestInterruptReply`,
+  `TestCreateReplyMapsEveryCreateFailure`, `TestCheck`, `TestCheckRefusesADaemonToAdapterMethodCalledByTheAdapter`, `TestPromptOutcomeOnAttemptConflictIsUnknown`, `TestInvalidEndpointKindFailsClosedInAuthorization`, `TestSignals`, `TestBlockedCause`, `TestStatusConditions`, `TestRuntimeVersionUntested`, `TestCreateReply`, `TestDaemonCreateFailure`, `TestInterruptReply`,
   `TestCloseReply`, `TestCheckHandshake`.
 
 ## Control signals

@@ -63,6 +63,14 @@ const (
 	// schedPromptSettle is the retry of recording how an attempt ended after a write
 	// failed; the id is the endpoint.
 	schedPromptSettle
+	// schedBlocked is the next time to judge whether delivery to a session endpoint is
+	// blocked that the judgment names (the instant a failing run passes the threshold)
+	// or whose block could not be recorded; the id is the endpoint.
+	schedBlocked
+	// schedProbeFallback is the moment an adapter whose connection has been in service
+	// for a while is judged although its probe has not answered; the id is the
+	// instance.
+	schedProbeFallback
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

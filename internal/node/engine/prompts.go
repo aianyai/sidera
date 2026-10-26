@@ -168,6 +168,7 @@ func (e *Engine) noteInstanceProbed(instance string, now time.Time) {
 		}
 	}
 	e.promptsDirty = true
+	e.noteBlockedInstance(instance)
 	e.redrivePrompts(instance, now)
 }
 
@@ -601,6 +602,7 @@ func (e *Engine) settlePrompt(now time.Time, id ident.EndpointID) {
 	}
 	e.sched.remove(promptKey(schedPromptSettle, id))
 	e.sched.remove(promptKey(schedPromptReconcile, id))
+	e.markBlockedFor(id) // the attempts are what the judgment of a block reads
 	e.dropAttemptCheckpoint(f.attempt)
 	if f.outcome == handoff.AttemptFailed && p.trigger == 0 {
 		// A failed prompt woke nobody, so the endpoint is judged again with the event

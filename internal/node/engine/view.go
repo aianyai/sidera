@@ -86,6 +86,11 @@ type view struct {
 	// onQueued, when set, is told whenever a target record that waits to be handed out
 	// with no lease on it is taken in: a message has arrived, or a lease has run out.
 	onQueued func(recipient ident.EndpointID)
+
+	// onInChange, when set, is told whenever a target record of an endpoint is taken in
+	// or dropped, whatever the change: what waits for the endpoint, and so whether
+	// delivery to it is blocked, follows from the records.
+	onInChange func(recipient ident.EndpointID)
 }
 
 // idemKey names an idempotency key: the key is the sender's own.
@@ -403,6 +408,9 @@ func (v *view) setIn(in store.InRecord) {
 	}
 	v.queue(in.Key.Recipient, in.Key, in.Record.State == delivery.StateAccepted)
 	v.ticks(inTick(in.Key), in.Record.NextTick())
+	if v.onInChange != nil {
+		v.onInChange(in.Key.Recipient)
+	}
 	for _, id := range in.Record.Lease.IDs {
 		if !slices.Contains(v.leased[id], in.Key) {
 			v.leased[id] = append(v.leased[id], in.Key)
@@ -443,6 +451,9 @@ func (v *view) dropIn(key store.TargetKey) {
 		delete(v.arrived, a)
 	}
 	v.ticks(inTick(key), time.Time{})
+	if v.onInChange != nil {
+		v.onInChange(key.Recipient)
+	}
 }
 
 // ticks tells the watcher of the schedule when a record next changes with time.

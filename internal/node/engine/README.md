@@ -24,7 +24,8 @@ their taking in, the creation of sessions they ask for with the initial message 
 the closing and the interrupting of a session, and the pulling of messages: what
 recv hands out under a lease, what ack settles and what a lease that runs out does, and the
 prompts that wake a session: when one is sent, how its attempt is recorded before the adapter is
-called, and how one whose outcome is not known is asked about at the start.
+called, and how one whose outcome is not known is asked about at the start; and the blocked
+delivery to a session: when it is judged and how the verdict is recorded.
 
 ## Entry points
 
@@ -77,6 +78,17 @@ called, and how one whose outcome is not known is asked about at the start.
   cap, the clock, the retry time the decision names after a failed prompt). Every event that can change it sets the flag in the
   place that owns the event; no handler asks the decision itself. A single `DecidePrompt` never
   authorizes a send.
+- **Blocked delivery is judged by the endpoint, whenever its input may have changed, and a
+  verdict that changes nothing writes nothing.** `serveBlocked` (`blocked.go`) judges the
+  endpoints marked since the last step: a record of the endpoint taken in or dropped
+  (`view.onInChange`), an attempt settled, the adapter's availability, connection or probe, the
+  start of the node and the clearing of a wall clock that was set back. The rule names the
+  instant a short run of failures passes the threshold (`BlockedVerdict.RetryAt`), and that is the
+  entry `schedBlocked`. A block is written like a prompt: the target records first, the head last,
+  one call (`store.Blocked`). Marks are found by the records' own flag and not by the head, so a
+  block a crash left half written is lifted when its cause is gone. Nothing here tells a sender
+  anything: the sender pulls the report of the target, which carries the flag, and the delivery
+  rules make the item of feedback.
 - **A turn counts against the cap from the dispatch of its prompt until it ends or the prompt is
   known not to have started one, and only while its adapter is online.** An endpoint whose
   adapter is offline is not judged.

@@ -43,6 +43,7 @@ func (e *Engine) watchTicks() {
 		e.notePending(recipient)
 		e.noteArrival(recipient)
 	}
+	e.view.onInChange = e.noteBlockedInput
 	e.view.onTick = func(record string, next time.Time) {
 		key := schedKey{schedTick, record}
 		if next.IsZero() {
