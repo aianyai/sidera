@@ -368,6 +368,46 @@ func TestEnsureRunningAndStopOfAnInstance(t *testing.T) {
 	})
 }
 
+// Stop returns at once and the process may live up to ShutdownWait (and as long
+// again after the kill) with the files of its version open, so the host says that
+// the instance is still stopping until its supervision has finished.
+func TestAnInstanceIsStoppingUntilItsProcessHasEnded(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	var first *pipeProcess
+	r.lau.launch = func(n int, inst adapterhost.Instance) (adapterhost.Process, error) {
+		pp, _ := r.scriptedProcess(nil, true)
+		first = pp
+		return pp, nil
+	}
+	if r.host.Stopping("chat") {
+		t.Fatal("an instance the host has not started is stopping")
+	}
+	r.start()
+	r.waitConnected("chat")
+	r.settle()
+	if r.host.Stopping("chat") {
+		t.Fatal("an instance that is running is stopping")
+	}
+
+	r.host.Stop("chat")
+	if !r.host.Stopping("chat") {
+		t.Fatal("an instance Stop was called for is not stopping when Stop returns")
+	}
+	// The adapter is stubborn: it ends only when killed, after ShutdownWait.
+	<-first.serveDone
+	eventually(t, "the shutdown wait to be armed", func() bool { return r.clk.Timers() >= 1 })
+	if !r.host.Stopping("chat") {
+		t.Fatal("an instance whose process is still ending is not stopping")
+	}
+	r.clk.Advance(testParams().ShutdownWait)
+	eventually(t, "the process to be killed", func() bool { return first.killed() == 1 })
+	first.release()
+	eventually(t, "the instance to have stopped", func() bool { return !r.host.Stopping("chat") })
+	if r.host.Stopping("chat") {
+		t.Fatal("an instance whose process has ended is stopping")
+	}
+}
+
 // Shutdown sends shutdown to every adapter in service, closes the stream and waits
 // for the process at most ShutdownWait before it kills it; the host reports nothing.
 func TestShutdownSendsShutdownWaitsThenKills(t *testing.T) {

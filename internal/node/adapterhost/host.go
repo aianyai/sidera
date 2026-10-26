@@ -224,6 +224,20 @@ func (h *Host) Stop(instance string) {
 	}
 }
 
+// Stopping reports whether a process of the instance is still being ended: Stop
+// was called for it and its supervision has not finished, which is until the
+// adapter has ended, or has been killed after Params.ShutdownWait and been given
+// that long again. Stop returns at once, so this is what tells a caller that must
+// not touch what the adapter runs from (the files of its version) that the process
+// may still hold them. It is false for an instance that is running, that is
+// waiting to be started again, and that is not supervised.
+func (h *Host) Stopping(instance string) bool {
+	h.mu.Lock()
+	s := h.sups[instance]
+	h.mu.Unlock()
+	return s != nil && s.isStopping()
+}
+
 // Counts returns what the host counts of the connection of an instance. It is all
 // zero for an instance that is not supervised and after the host ended.
 func (h *Host) Counts(instance string) ConnCounts {

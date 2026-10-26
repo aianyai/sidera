@@ -193,7 +193,13 @@ and sends nothing, not even a cancellation of a request in flight. Both are
 idempotent; after either, calls return `ErrNotConnected` and `Start` fails. `Stop`
 does for one instance what `Shutdown` does for all, returns at once, and an
 `EnsureRunning` that follows it waits for the old adapter to end before it launches
-the next.
+the next. Because `Stop` returns before the process has ended, `Stopping(instance)` says
+whether one is still ending: it is true from `Stop` until the supervision has finished
+(the adapter ended, or was killed after `ShutdownWait` and given that long again), and
+false for an instance that runs, that waits to be started again or that is not
+supervised. A caller that must not remove what the adapter runs from while a process may
+hold it (the files of its version, which a running executable keeps open on Windows)
+asks it first.
 `Stop` reports nothing to the engine either, so the engine goes on showing the
 instance as online until it is told otherwise: the caller that disables an instance
 marks it offline itself, with `AdapterGone`, which the engine takes only for an
@@ -292,7 +298,7 @@ Everything about Windows and Linux is pending verification by CI on main.
 
 | Concern | Code |
 | ------- | ---- |
-| `Host`, `Start`, `Shutdown`, `Abort`, `EnsureRunning`, `Stop`, `Counts`, `LockPath` | `internal/node/adapterhost/host.go` |
+| `Host`, `Start`, `Shutdown`, `Abort`, `EnsureRunning`, `Stop`, `Stopping`, `Counts`, `LockPath` | `internal/node/adapterhost/host.go` |
 | The supervisor, its waits and the question whether it is working | `supervisor.go` |
 | One pass: launch, handshake, probe, pings, ending a connection | `pass.go` |
 | A connection: handlers of the adapter's requests and notifications, the buffer and the forwarder, the counts | `conn.go` |
@@ -323,6 +329,7 @@ check on every test):
 | What an error of the engine does to the connection | `TestAnErrorOfTheEngineEndsTheConnection`, `TestRequestsAfterShutdownBeganAreAnsweredAsShuttingDown` |
 | `Start`, `StartWait`, refusals | `TestStartReturnsWhenEveryEnabledInstanceHasStartedOrBeenJudgedOffline`, `TestStartRefusesWhatItCannotStart`, `TestStartEndsWithItsContext` |
 | `EnsureRunning` and `Stop` | `TestEnsureRunningAndStopOfAnInstance` |
+| `Stopping` is true from `Stop` until the process has ended | `TestAnInstanceIsStoppingUntilItsProcessHasEnded` |
 | `Shutdown` and `Abort` | `TestShutdownSendsShutdownWaitsThenKills`, `TestAbortKillsAtOnceAndSendsNoShutdown` |
 | The log of the adapter | `TestTheStderrOfTheAdapterGoesToItsLog` |
 | The lock path and the instance the launcher is given | `TestLockPath`, `TestTheLockPathAndTheInstanceAreWhatTheLauncherAndTheAdapterAreTold` |

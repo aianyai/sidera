@@ -16,6 +16,7 @@ import (
 var _ interface {
 	EnsureRunning(instance string)
 	Stop(instance string)
+	Stopping(instance string) bool
 	CreateSession(ctx context.Context, instance string, p adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error)
 	DeliverPrompt(ctx context.Context, instance string, p adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error)
 	Reconcile(ctx context.Context, instance string, p adapterproto.ReconcileParams) (adapterproto.ReconcileResult, error)
