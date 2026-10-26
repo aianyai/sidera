@@ -1292,6 +1292,73 @@ func TestAdapterStartedTakesTheBusyStateOfTheSessionsItKnowsAndIgnoresTheRest(t 
 	}
 }
 
+// What was known of an earlier connection is not carried into the next one: the
+// host reports nothing when it stops an instance, so a connection can follow
+// another with no AdapterGone between. The busy state is replaced by what the new
+// adapter.start result lists, not merged into the old one, and the availability
+// snapshot is cleared until the new adapter sends one.
+func TestANewConnectionStartsFromWhatItReportsAndNotFromTheOneBefore(t *testing.T) {
+	noLeaks(t)
+	session, left := mustEndpoint(t, 80), mustEndpoint(t, 81)
+	r := newRig(t, 10)
+	for i, id := range []ident.EndpointID{session, left} {
+		r.seedRecord(store.EndpointRecord{ID: id, Kind: sessionKind, Instance: "chat", Status: store.EndpointOpen,
+			Token: bytes.Repeat([]byte{0x5a + byte(i)}, store.TokenLen), Session: &store.SessionInfo{Preset: "default"}})
+	}
+	e := r.start()
+	ref := func(id ident.EndpointID) adapterproto.EndpointRef { return adapterproto.EndpointRef(id.String()) }
+	startWith := func(busy ...ident.EndpointID) {
+		t.Helper()
+		var res adapterproto.StartResult
+		res.Sessions = []adapterproto.SessionState{}
+		for _, id := range busy {
+			res.Sessions = append(res.Sessions, adapterproto.SessionState{Endpoint: ref(id), State: adapterproto.AttachAttached, TurnActive: true})
+		}
+		if err := e.AdapterStarted(ctx, "chat", res); err != nil {
+			t.Fatal(err)
+		}
+	}
+	view := func() engine.AdapterView {
+		t.Helper()
+		v, err := e.Adapter(ctx, "chat")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+
+	// The first connection: two sessions busy and a snapshot of availability.
+	startWith(session, left)
+	available(t, e, "chat", adapterproto.Availability{Condition: adapterproto.ConditionRuntimeAuth, SinceMS: ms(t0)})
+	if v := view(); len(v.Busy) != 2 || len(v.Conditions) != 1 {
+		t.Fatalf("the first connection: busy %v, conditions %v", v.Busy, v.Conditions)
+	}
+
+	// The next one reports one of them. The other is idle, not remembered as busy.
+	startWith(session)
+	if v := view(); !slices.Equal(v.Busy, []adapterproto.EndpointRef{ref(session)}) {
+		t.Errorf("busy %v after a start that lists only %s, want only that one", v.Busy, ref(session))
+	}
+
+	// A new admission, with no report of the end of the connection before it: the
+	// snapshot and the busy states of the connection before are gone until the
+	// adapter reports them again.
+	if err := admitOn(ctx, e, "chat", r.admit); err != nil {
+		t.Fatal(err)
+	}
+	v := view()
+	if len(v.Conditions) != 0 || !v.ConditionsReceived.IsZero() || len(v.Busy) != 0 {
+		t.Errorf("after a new admission: conditions %v (received %v), busy %v; want none of them", v.Conditions, v.ConditionsReceived, v.Busy)
+	}
+	sig, err := e.AdapterSignals(ctx, "chat", ref(session))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sig.AuthInvalid {
+		t.Error("the signals of an endpoint still carry the availability of the connection before")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Checkpoints
 
