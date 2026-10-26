@@ -989,7 +989,7 @@ func sweepScenario(farFuture time.Time) scenario {
 		derived := derivedIn(4, 5) // its derived delivery
 		derived.Record = deliveredRecord(derived.Record)
 		derived.Body = nil
-		lost := lostOutAt(srcOut(6, false).Key, base) // a replacement
+		lost := lostOutAt(srcOut(6, false).Key, base)          // a replacement
 		closed := session(5, store.EndpointClosed, ctlName(4)) // its session was released, or the sweep would keep it
 		closed.Session.NativeRef, closed.Session.Process, closed.Session.Released = c.Intent.NativeRef, c.Intent.Process, true
 		notified := lostNotice(1, 6, base) // an out-lost record whose notice was given

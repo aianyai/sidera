@@ -780,7 +780,9 @@ answer of `indeterminate` and an adapter that is not connected are tried again, 
 settled as unconfirmed: the reply says a session may exist and names the endpoint, the endpoint is
 closed, and the owner gets an alert of kind `control_unknown`, because a native session may exist
 that nobody controls. A creation the adapter reports as failed for `control_unknown` has the same
-alert. Whatever the adapter answers after a creation was settled changes nothing. A control record that was
+alert. Whatever the adapter answers after a creation was settled changes nothing, except that a
+session reported as created for an endpoint the owner closed meanwhile is recorded on the closed
+endpoint and released (see releasing the native session). A control record that was
 closed while its creation was unsettled can take no reply, and a retry would fail every time: the engine
 logs it as an error that names the record, tells the owner of a session that may exist, and stops the work
 for the creation. The alert the engine raises of a session nobody controls has an identifier that follows from the kind
@@ -858,6 +860,40 @@ signals that were not settled: those past their deadline are settled as the dead
 the others the adapter is asked again, so a signal reaches the adapter at least once. A close asked
 again does what it did before, as a session that is released stays so, but an interrupt asked again
 after the adapter restarted may reach a later turn or find none and answer `not_running`.
+
+**Releasing the native session.** Closing a session endpoint ends the session in the channel,
+and the native session may still be there. The endpoint record says whether the adapter has
+confirmed that it is released (`released` in the session mapping; the store's
+`EndpointRecord.ReleasePending` is the one rule of what is still owed). Every way to close a
+session endpoint leaves the native session owed unless the answer is already known: the signal
+`session.close`, the owner's close through the management interface, the disabling of the
+instance, and a creation that ends as created for an endpoint that was closed meanwhile (the
+endpoint stays closed, closed being absorbing, and the native session is recorded on it so that
+it can be released). A signal the adapter answered `closed` records the release in the
+transaction that closes the endpoint; every other way records nothing, and the engine
+(`release.go`) asks the adapter in the command after the endpoint was recorded closed:
+`session.close` with the endpoint and the native reference, so that an adapter that restarted
+and holds no closed endpoint can still find the session. An answer of `closed` is recorded with
+`endpoint-update`; an unconfirmed close and a call that got no answer are asked again after
+`RetryBackoff`, and so is a call that found the adapter not connected, because the host tells the
+node that an adapter started before it puts the connection in service, so a call made between the
+two has no later connection to wait for. An adapter that is not online is not asked, and every
+connection of its instance asks again once it is in service (after `adapter.start`, and after
+`adapter.probe`), as for the signals and the creations it owes. The adapter answers `closed` for a native session
+that is released or gone, so asking again after a crash between the answer and its record, which
+is how a release is found at the start (step 11), does no harm. The owed state is the record
+alone: nothing else is kept, and the archive sweep keeps a closed session endpoint while its
+native session is owed. When it stays owed for `ControlReplyDeadline` from the moment the node
+began on it (the close, or the start that found it again), the owner gets one alert of kind
+`control_unknown`, the kind of a native session that nobody controls: its identifier follows
+from the kind and the endpoint record, so the alert is one however many times the node starts,
+an acknowledgement of it stands until the alert is swept (`AlertAckRetention`, 7 days after the
+acknowledgement), and a later start that finds the release still owed raises it again, and the
+adapter is asked on. The reply to a close signal does
+not change with any of this: it is `closed` or `close_unconfirmed` as the adapter answered, and
+the endpoint is closed either way. The node refuses `checkpoint.put` for a closed session
+endpoint, so a creation reaches the end described above only when the owner's close comes after
+the adapter's last checkpoint of the session.
 
 The state an adapter kept for a session (its checkpoint) is removed when the endpoint is
 closed, by whichever of the ways to close one: every place the engine records an endpoint
@@ -966,7 +1002,7 @@ in the order the node takes them; the engine takes part in these:
 | 6 | Scan `state/`, quarantine and repair, rebuild the view | `Open` (the scan entry) |
 | 8 | Management interface opens; reads answer, changes are refused | `Start` |
 | 10 | Adapter instances start and are admitted | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed` |
-| 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery`: creations past their deadline are settled, the others are asked of the adapter again (a creation whose endpoint or initial message is lost is failed instead), and the same for the closes and interrupts; every prompt attempt that was in flight is asked of its adapter (`prompt.reconcile`), and none is sent again |
+| 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery`: creations past their deadline are settled, the others are asked of the adapter again (a creation whose endpoint or initial message is lost is failed instead), and the same for the closes and interrupts, and for the native sessions of closed endpoints that are still owed; every prompt attempt that was in flight is asked of its adapter (`prompt.reconcile`), and none is sent again |
 | 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick`: the first time a record is ticked after the start, since the schedule holds the ticks back until then (a source delivery still queued or accepted past `report_by` is left open for the pull of step 14) |
 | 13 | Send the feedback that fell due | phase `feedback` |
 | 14 | Go on with the loopback of outgoing messages | phase `outbound`: every unsettled source record is sent or asked about again, and a delivery past `report_by` that waits for its last pull is pulled and closed |
@@ -1419,6 +1455,8 @@ reproducible).
 | The initial message of a creation that makes no session is told, not lost | `create.go` (`settleCreate`), `drain.go` | `TestInitialMessageOfACreationThatMakesNoSessionIsTold` |
 | A creation whose initial message or endpoint is lost while it is not settled is failed | `initial.go` (`failCreationWithoutMessage`, `reconcileInitialMessage`), `create.go` (`failCreationWithoutEndpoint`) | `TestBodyLostFromTheInitialMessageFailsItsUnsettledCreation`, `TestCreationWhoseEndpointWasDamagedIsFailed` |
 | An interrupt is carried out when accepted and is not behind the messages of the session | `execute.go`, `view.go` (`queuedIn`) | `TestInterruptIsNotQueuedBehindMessages` |
+| A closed session endpoint owes its native session to the adapter until the adapter answers `closed`: asked at once, after the retry backoff and at every connection; the answer is recorded; an owner close, a close signal that was not confirmed and a session made for a closed endpoint are released | `release.go`, `execute.go` (`writeExecution`), `create.go` (`settleCreate`), `endpoints.go` (`putEndpoint`) | `TestOwnerClosingASessionReleasesItsNativeSession`, `TestAClosedAnswerToACloseSignalIsRecordedAsTheRelease`, `TestAnUnconfirmedCloseSignalIsFollowedByARelease`, `TestAReleaseThatCouldNotBeSentIsSentWhenTheAdapterConnects`, `TestASessionCreatedForAnEndpointThatWasClosedMeanwhileIsReleased`, `TestOnlyAClosedAnswerRecordsTheRelease`, `TestAReleasedNativeSessionIsNeverAskedAboutAgain`, `TestAReleaseIsAskedAgainAtEveryConnectionOfItsAdapter`, `TestAReleaseIsAskedAgainAfterACrashBetweenTheAnswerAndTheRecord` |
+| A native session that stays owed for the reply deadline is told to the owner once, across restarts | `release.go` (`releaseDeadline`) | `TestAReleaseThatIsNeverConfirmedRaisesOneAlertAfterTheDeadline`, `TestAReleaseThatSucceedsBeforeTheDeadlineRaisesNoAlert` |
 | A close releases the native session, closes the endpoint, settles the queue and removes the state kept for the session | `execute.go` (`settleExecution`), `endpoints.go` (`putEndpoint`) | `TestSessionCloseReleasesTheNativeSessionAndSettlesWhatWasQueued` |
 | A result of a close or an interrupt that could not be written is written again without asking the adapter again, also after the deadline | `execute.go` (`settleExecution`, `executeRetry`, `executeDeadline`) | `TestFailedWriteOfTheResultOfASignalIsTriedAgainWithoutAskingTheAdapter` |
 | An interrupt of a running turn is told stopped when the turn ends within the wait and requested when it does not; the end of a turn finds nothing to settle for a signal that has no execution | `execute.go` (`interruptTurnEnded`, `interruptConfirmDue`) | `TestInterruptOfARunningTurnIsToldByWhetherTheTurnEnds`, `TestTurnEndedForAnInterruptThatHasNoExecutionSettlesNothing` |
@@ -1514,16 +1552,6 @@ Known gaps, each filled in with the feature it belongs to:
   woken once more by the end of a turn. A prompt that was not read is never taken for read.
 - An empty body is refused: the Agent interface says a body may be empty and an envelope
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
-- Closing a session endpoint at the owner's request does not send `session.close` to the
-  adapter: the outcome says `closing`, and nothing releases the native session or records
-  that it was released. The signal `session.close` does release it. Where the fact of the
-  release is kept for the owner to see, and what is told when it cannot be made, is not
-  decided.
-- While an adapter stays unreachable, the native session of a session closed by the signal
-  `session.close` is not released and nobody is alerted: the signal is told `close_unconfirmed`
-  to its sender at the deadline and the endpoint is closed, and nothing asks the adapter again
-  when it returns. Releasing the session after the close, with an alert for the owner while
-  it cannot be released, is not built.
 - A body that is not what the delivery of an initial message says, found when the session
   is already made, loses the message: the delivery is removed with an alert and its sender is
   told by the record the target no longer holds (`lost_at_target`).

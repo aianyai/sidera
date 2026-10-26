@@ -488,9 +488,14 @@ func (e *Engine) Endpoints(ctx context.Context) ([]EndpointView, error) {
 // closed holds no state of its session any more: the checkpoint the adapter kept
 // for it is removed after the command that closed the endpoint, whichever of the
 // ways to close one it was, and a checkpoint a crash left is removed by the scan
-// entry (store.ClosedSessionCheckpoints).
+// entry (store.ClosedSessionCheckpoints). Its native session, when the adapter has not
+// confirmed releasing it, is released after the command (see release.go), whichever way
+// the endpoint was closed.
 func (e *Engine) putEndpoint(rec store.EndpointRecord, decl authz.Declaration) {
 	e.view.putEndpoint(rec, decl)
+	if rec.ReleasePending() {
+		e.later(&cmdRelease{endpoint: rec.ID})
+	}
 	for key := range e.view.checkpoints {
 		if store.CheckpointOfClosedSession(key, rec) {
 			e.later(&cmdCheckpointDrop{key: key})

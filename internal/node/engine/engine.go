@@ -141,6 +141,9 @@ type Engine struct {
 	// the node can vouch.
 	blockedDirty map[ident.EndpointID]bool
 	servingSince time.Time
+	// releases are the closed session endpoints whose native session is owed to the
+	// adapter, by endpoint; see release.go.
+	releases map[ident.EndpointID]*release
 
 	// dueTicks are the records whose entries of the schedule fell due and that are
 	// not ticked yet; tickQueued says a command to tick them is queued.
@@ -234,6 +237,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		prompts:    map[ident.EndpointID]*promptState{},
 
 		blockedDirty: map[ident.EndpointID]bool{},
+		releases:     map[ident.EndpointID]*release{},
 	}
 	e.pendingNotices = map[ident.EndpointID]bool{}
 	if d.RollbackPaused {
@@ -818,6 +822,17 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 			e.executeRetry(now, k)
 		default:
 			e.interruptConfirmDue(now, k)
+		}
+	case schedReleaseRetry, schedReleaseDeadline:
+		id, err := ident.ParseEndpointID(key.id)
+		if err != nil {
+			e.log.Error("the schedule names an endpoint that is not one", "endpoint", key.id)
+			return
+		}
+		if key.kind == schedReleaseRetry {
+			e.startRelease(now, id)
+		} else {
+			e.releaseDeadline(now, id)
 		}
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {

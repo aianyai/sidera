@@ -21,7 +21,7 @@ outbound worker that carries it through the transport and applies what comes
 back, and the receiving side that judges an envelope and signs the reports, and the
 feedback the sender's node tells its endpoints, and the control signals: their sending,
 their taking in, the creation of sessions they ask for with the initial message they may carry,
-the closing and the interrupting of a session, and the pulling of messages: what
+the closing and the interrupting of a session, the release of the native session of a session endpoint that is closed (`release.go`: what is owed is read from the endpoint record, `store.EndpointRecord.ReleasePending`, and every way of closing an endpoint goes through `putEndpoint`, which begins it), and the pulling of messages: what
 recv hands out under a lease, what ack settles and what a lease that runs out does, and the
 prompts that wake a session: when one is sent, how its attempt is recorded before the adapter is
 called, and how one whose outcome is not known is asked about at the start; and the blocked

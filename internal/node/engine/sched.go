@@ -71,6 +71,12 @@ const (
 	// for a while is judged although its probe has not answered; the id is the
 	// instance.
 	schedProbeFallback
+	// schedReleaseRetry is the next call to the adapter to release the native session of
+	// a closed session endpoint; the id is the endpoint.
+	schedReleaseRetry
+	// schedReleaseDeadline is the end of the time a native session has to be released
+	// before the owner is told; the id is the endpoint.
+	schedReleaseDeadline
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

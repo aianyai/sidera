@@ -374,6 +374,7 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 	// The probe answering is what judges the sessions of the instance (probeResult). One
 	// that fails is only logged by the host, so the judgment is also made after a wait.
 	e.sched.set(schedKey{schedProbeFallback, instance}, now.Add(e.p.RetryBackoff))
+	e.redriveReleases(instance, now)
 	return nil
 }
 
@@ -499,6 +500,7 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 	e.redriveCreates(instance, now)
 	e.redriveExecutions(instance, now)
 	e.sched.remove(schedKey{schedProbeFallback, instance})
+	e.redriveReleases(instance, now)
 	e.noteInstanceProbed(instance, now)
 	return nil
 }

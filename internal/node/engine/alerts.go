@@ -48,13 +48,25 @@ func (e *Engine) raiseAlert(now time.Time, kind, subject, detail string) (store.
 // cannot settle, finds the alert and raises no other. The alert that is there stays as
 // it is, an acknowledgement of the owner's included.
 func (e *Engine) raiseAlertOnce(now time.Time, kind, owner, subject, detail string) error {
-	sum := sha256.Sum256([]byte(kind + "\x00" + owner))
-	var id store.AlertID
-	copy(id[:], sum[:])
-	if slices.ContainsFunc(e.view.alerts, func(a store.AlertRecord) bool { return a.ID == id }) {
+	id := onceAlertID(kind, owner)
+	if e.alertExists(id) {
 		return nil
 	}
 	return e.putAlert(store.AlertRecord{ID: id, Kind: kind, At: now, Subject: subject, Detail: detail})
+}
+
+// onceAlertID is the identifier of the alert of a fact that belongs to one record: it
+// follows from the kind and the owner, the one place it is made.
+func onceAlertID(kind, owner string) store.AlertID {
+	sum := sha256.Sum256([]byte(kind + "\x00" + owner))
+	var id store.AlertID
+	copy(id[:], sum[:])
+	return id
+}
+
+// alertExists says whether the view holds the alert, acknowledged or not.
+func (e *Engine) alertExists(id store.AlertID) bool {
+	return slices.ContainsFunc(e.view.alerts, func(a store.AlertRecord) bool { return a.ID == id })
 }
 
 // putAlert writes an alert and takes it into the view.

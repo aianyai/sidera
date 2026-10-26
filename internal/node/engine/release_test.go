@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -35,7 +36,7 @@ func nativeSessionReleased(t testing.TB, h *harness.H, ep store.EndpointRecord) 
 		t.Fatal(err)
 	}
 	for _, e := range log.Kind(ledger.KindRuntimeClosed) {
-		if e.Attrs.NativeRef == ep.Session.NativeRef {
+		if e.Writer == "runtime/"+ep.Session.NativeRef {
 			return true
 		}
 	}
@@ -122,7 +123,7 @@ func TestAClosedAnswerToACloseSignalIsRecordedAsTheRelease(t *testing.T) {
 // A close signal the adapter could not confirm closes the endpoint all the same; the
 // native session is still the node's to release, and the adapter is asked again until it
 // says it is.
-func TestAnUnconfirmedCloseSignalIsFollowedByAReleaseThatSucceeds(t *testing.T) {
+func TestAnUnconfirmedCloseSignalIsFollowedByARelease(t *testing.T) {
 	h := sessionNode(t, harness.Options{}, "a")
 	_, id, _ := startedSession(t, h, "a", "")
 	ctrl, err := h.Adapter(harness.Instance)
@@ -134,14 +135,12 @@ func TestAnUnconfirmedCloseSignalIsFollowedByAReleaseThatSucceeds(t *testing.T) 
 	}
 	closing := signal(t, h, "a", addressOf(id), adapterproto.SignalSessionClose, "")
 	wantClose(t, replyOf(t, h, "a", closing), adapterproto.CloseReplyUnconfirmed, adapterproto.CloseReasonNativeUnreachable)
-	wantReleased(t, endpointRecord(t, scanOf(t, h), id), false)
 
-	h.Advance(engine.DefaultParams().RetryBackoff)
-	quiet(t, h)
-	wantReleased(t, endpointRecord(t, scanOf(t, h), id), true)
+	// The endpoint closed with the signal, and the release follows at once.
 	if n := ledgerCount(t, h, ledger.KindCloseReceived, id); n != 2 {
 		t.Errorf("the adapter was asked to close the session %d times, want the signal's and one release", n)
 	}
+	wantReleased(t, endpointRecord(t, scanOf(t, h), id), true)
 }
 
 // The adapter is away when the endpoint is closed: nothing can be asked then, and the
@@ -173,48 +172,6 @@ func TestAReleaseThatCouldNotBeSentIsSentWhenTheAdapterConnects(t *testing.T) {
 	}
 }
 
-// The owner closes an endpoint while its session is being made, and the adapter then
-// reports the session as created: the endpoint stays closed, and the session that was
-// made for it is released at once.
-func TestASessionCreatedForAnEndpointThatWasClosedMeanwhileIsReleased(t *testing.T) {
-	h := sessionNode(t, harness.Options{}, "a")
-	ctrl, err := h.Adapter(harness.Instance)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeHold}); err != nil {
-		t.Fatal(err)
-	}
-	msg := create(t, h, "a", "default")
-	quiet(t, h)
-	eps := sessionEndpoints(t, h)
-	if len(eps) != 1 {
-		t.Fatalf("%d session endpoints while the creation is held, want the one being made", len(eps))
-	}
-	id := eps[0].ID
-	if _, err := h.Engine().CloseEndpoint(h.Ctx(), engine.CloseRequest{Endpoint: id}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := ctrl.ReleaseHeld(h.Ctx()); err != nil {
-		t.Fatal(err)
-	}
-	quiet(t, h)
-	_ = msg
-
-	if n := nativeSessions(t, h); n != 1 {
-		t.Fatalf("%d native sessions were made, want the one the held creation made", n)
-	}
-	ep := endpointRecord(t, scanOf(t, h), id)
-	wantReleased(t, ep, true)
-	if n := ledgerCount(t, h, ledger.KindCloseReceived, id); n != 1 {
-		t.Errorf("the adapter was asked to close the session %d times, want once", n)
-	}
-	if !nativeSessionReleased(t, h, ep) {
-		t.Error("the session made for a closed endpoint is not released")
-	}
-}
-
 // ---------------------------------------------------------------------------
 // The engine over a host that answers as the test says
 
@@ -225,6 +182,15 @@ type closeHost struct {
 	mu     sync.Mutex
 	asked  []adapterproto.CloseParams
 	answer func(n int) (adapterproto.CloseResult, error) // n counts the calls from 1
+	// created, when set, is the answer to session.create.
+	created *adapterproto.SessionCreateResult
+}
+
+func (h *closeHost) CreateSession(ctx context.Context, instance string, p adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {
+	if h.created == nil {
+		return h.hostDouble.CreateSession(ctx, instance, p)
+	}
+	return *h.created, nil
 }
 
 func newCloseHost(answer func(n int) (adapterproto.CloseResult, error)) *closeHost {
@@ -269,15 +235,26 @@ func closedSession(t testing.TB, b byte, released bool) store.EndpointRecord {
 // adapter that restarted finds the session by.
 func TestOnlyAClosedAnswerRecordsTheRelease(t *testing.T) {
 	for _, c := range []struct {
-		rule     string
-		answer   func(int) (adapterproto.CloseResult, error)
-		released bool
+		rule          string
+		answer        func(int) (adapterproto.CloseResult, error)
+		released      bool // after the first call
+		callsAfter    int  // after the retry backoff
+		releasedAfter bool
 	}{
-		{"closed", answerClosed, true},
+		{"closed", answerClosed, true, 1, true},
 		{"unconfirmed", func(int) (adapterproto.CloseResult, error) {
 			return adapterproto.CloseResult{Outcome: adapterproto.CloseUnconfirmed, Reason: adapterproto.CloseNativeUnreachable}, nil
-		}, false},
-		{"no answer", answerNothing, false},
+		}, false, 2, false},
+		{"no answer", answerNothing, false, 2, false},
+		// The host tells the node that an adapter started before it puts the connection in
+		// service, so the first call can find the adapter not connected; no later connection
+		// is to be waited for.
+		{"not connected yet", func(n int) (adapterproto.CloseResult, error) {
+			if n == 1 {
+				return adapterproto.CloseResult{}, adapterhost.ErrNotConnected
+			}
+			return adapterproto.CloseResult{Outcome: adapterproto.CloseClosed}, nil
+		}, false, 2, true},
 	} {
 		t.Run(c.rule, func(t *testing.T) {
 			noLeaks(t)
@@ -296,9 +273,10 @@ func TestOnlyAClosedAnswerRecordsTheRelease(t *testing.T) {
 			wantReleased(t, endpointRecord(t, r.scan(), ep.ID), c.released)
 
 			advance(t, r, e, engine.DefaultParams().RetryBackoff)
-			if got, want := len(host.calls()), map[bool]int{true: 1, false: 2}[c.released]; got != want {
-				t.Errorf("%d calls after the retry backoff, want %d", got, want)
+			if got := len(host.calls()); got != c.callsAfter {
+				t.Errorf("%d calls after the retry backoff, want %d", got, c.callsAfter)
 			}
+			wantReleased(t, endpointRecord(t, r.scan(), ep.ID), c.releasedAfter)
 		})
 	}
 }
@@ -426,8 +404,7 @@ func TestAReleaseThatIsNeverConfirmedRaisesOneAlertAfterTheDeadline(t *testing.T
 	wantReleased(t, endpointRecord(t, r.scan(), ep.ID), false)
 }
 
-// An endpoint whose native session is released in time raises no alert, and an alert the
-// owner has is not made again by a release that comes late.
+// An endpoint whose native session is released in time raises no alert.
 func TestAReleaseThatSucceedsBeforeTheDeadlineRaisesNoAlert(t *testing.T) {
 	noLeaks(t)
 	host := newCloseHost(func(n int) (adapterproto.CloseResult, error) {
@@ -447,5 +424,35 @@ func TestAReleaseThatSucceedsBeforeTheDeadlineRaisesNoAlert(t *testing.T) {
 	advance(t, r, e, 10*engine.DefaultParams().ControlReplyDeadline)
 	if n := uncontrolledAlerts(t, r.scan(), ep.ID); n != 0 {
 		t.Errorf("%d alerts for a native session that was released in time, want none", n)
+	}
+}
+
+// The owner closed an endpoint while its session was being made, and the adapter reports
+// the session as created: the endpoint stays closed, the native session is recorded on it,
+// and the adapter is asked at once to release it.
+func TestASessionCreatedForAnEndpointThatWasClosedMeanwhileIsReleased(t *testing.T) {
+	noLeaks(t)
+	host := newCloseHost(answerClosed)
+	host.created = &adapterproto.SessionCreateResult{Outcome: adapterproto.CreateCreated, NativeRef: "native-made", Frontends: []adapterproto.Frontend{adapterproto.FrontendCLI}}
+	r := newRig(t, 10, withAdapters(host))
+	intent := &store.CreateIntent{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Endpoint: mustEndpoint(t, 61), State: store.IntentCreating}
+	c, ep := seedControl(t, r, 3, intent)
+	if err := r.st.ControlIntake(nil, &ep, c, nil); err != nil {
+		t.Fatalf("ControlIntake: %v", err)
+	}
+	ep.Status, ep.Token = store.EndpointClosed, nil // the owner closed it while the session was being made
+	r.seedRecord(ep)
+	e := r.start()
+	started(t, e, "chat")
+	settle(t, e)
+
+	rec := endpointRecord(t, r.scan(), ep.ID)
+	wantReleased(t, rec, true)
+	if rec.Session.NativeRef != "native-made" {
+		t.Errorf("the endpoint maps to native session %q, want the one the adapter made", rec.Session.NativeRef)
+	}
+	calls := host.calls()
+	if len(calls) != 1 || calls[0].NativeRef != "native-made" {
+		t.Errorf("the adapter was asked %+v, want one close of the native session it made", calls)
 	}
 }

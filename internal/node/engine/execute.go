@@ -145,12 +145,16 @@ func (e *Engine) startExecute(now time.Time, key store.TargetKey) {
 		return
 	}
 	ref := adapterproto.EndpointRef(c.Key.Recipient.String())
+	var native adapterproto.NativeRef
+	if st.rec.Session != nil {
+		native = adapterproto.NativeRef(st.rec.Session.NativeRef)
+	}
 	x.inflight, x.offline = true, false
 	if !e.spawn(func(ctx context.Context) {
 		e.adapterCalls.Add(1)
 		r := &cmdExecuteResult{call: newCall[struct{}](), key: key}
 		if c.Kind == envelope.KindSessionClose {
-			r.closed, r.err = e.d.Adapters.Close(ctx, instance, adapterproto.CloseParams{Endpoint: ref})
+			r.closed, r.err = e.d.Adapters.Close(ctx, instance, adapterproto.CloseParams{Endpoint: ref, NativeRef: native})
 		} else {
 			r.interrupted, r.err = e.d.Adapters.Interrupt(ctx, instance, adapterproto.InterruptParams{Endpoint: ref})
 		}
@@ -393,6 +397,9 @@ func (e *Engine) writeExecution(now time.Time, c store.CtlRecord, result envelop
 	if c.Kind == envelope.KindSessionClose && st != nil && st.rec.Status == store.EndpointOpen {
 		closed := st.rec
 		closed.Status, closed.Token = store.EndpointClosed, nil
+		if result.Close != nil && result.Close.Outcome == adapterproto.CloseReplyClosed && closed.ReleasePending() {
+			closed = releasedRecord(closed) // the answer of the signal is the release
+		}
 		write, n.ClosedEndpoint = &closed, closed.ID
 	}
 	if err := e.d.Store.ControlResult(n, write); err != nil {
@@ -462,5 +469,6 @@ func (e *Engine) recoverExecutions(now time.Time) error {
 		e.sched.set(schedKey{schedExecuteDeadline, key.String()}, due)
 		e.startExecute(now, key)
 	}
+	e.recoverReleases(now)
 	return nil
 }

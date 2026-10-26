@@ -382,14 +382,16 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 	switch reply.Outcome {
 	case adapterproto.CreateReplyCreated:
 		intent.State, intent.NativeRef, intent.Process = store.IntentCreated, string(native.NativeRef), native.Process
+		// A session made for an endpoint the owner closed meanwhile leaves the endpoint
+		// closed, with the native session recorded on it: that is what the node releases.
+		sess := store.SessionInfo{Preset: c.Preset, ToolAccess: []string{TokenEnv, HomeEnv}}
+		if ep.Session != nil {
+			sess = *ep.Session
+		}
+		sess.NativeRef, sess.Process = intent.NativeRef, intent.Process
+		ep.Session = &sess
 		if ep.Status == store.EndpointCreating {
 			ep.Status = store.EndpointOpen
-			sess := store.SessionInfo{Preset: c.Preset, ToolAccess: []string{TokenEnv, HomeEnv}}
-			if ep.Session != nil {
-				sess = *ep.Session
-			}
-			sess.NativeRef, sess.Process = intent.NativeRef, intent.Process
-			ep.Session = &sess
 		}
 	case adapterproto.CreateReplyUnconfirmed:
 		intent.State = store.IntentUnconfirmed
@@ -400,7 +402,7 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 	}
 	n.Intent = &intent
 	var write *store.EndpointRecord
-	if ep.Status != st.rec.Status {
+	if ep.Status != st.rec.Status || (reply.Outcome == adapterproto.CreateReplyCreated && ep.Status == store.EndpointClosed) {
 		write = &ep
 	}
 	if err := e.d.Store.ControlResult(n, write); err != nil {
