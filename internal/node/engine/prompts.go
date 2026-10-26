@@ -27,9 +27,13 @@ import (
 // What the decision reads about an endpoint that the node does not keep on disk is
 // memory: the event that is waiting to be judged (promptState.trigger), when the
 // endpoint last called recv, and whether a turn that a prompt started may be running.
-// A restart forgets them and starts with every endpoint judged once, which costs at
-// most one extra prompt for one whose agent had read the last. What it must not forget
-// is on disk: the attempts of the endpoint, and the one in flight.
+// A restart forgets them. It starts with every endpoint judged once, and with the time
+// of the last recv taken from the newest lease of the endpoint's messages
+// (approximateLastRecv). That time is early or missing for an agent whose recv issued
+// no lease, so a prompt it had read may look unread and the agent is woken once more
+// than needed; the other way round, a prompt that was not read is never taken for read,
+// since a lease is issued only by a recv. What it must not forget is on disk: the
+// attempts of the endpoint, and the one in flight.
 //
 // A prompt is carried out in this order. The attempt is recorded as in flight
 // (prompt-begin) before the adapter is called, so that a node that dies in between
@@ -251,6 +255,22 @@ func (e *Engine) promptRound(now time.Time) promptRound {
 	return r
 }
 
+// approximateLastRecv sets, for each session endpoint, when it last called recv as the
+// newest lease issued for any of its target records: a restart forgets the real time,
+// and without one a prompt the agent had read looks unread. A recv that issued no lease
+// (it found nothing to hand out) leaves no trace on disk and is forgotten, as is a recv
+// that only handed out again a part under a lease still running; the cost is one extra
+// prompt for an agent that had read its last one, never a missed one.
+func (e *Engine) approximateLastRecv() {
+	for _, in := range e.view.in {
+		if st := e.view.endpoints[in.Key.Recipient]; promptable(st) {
+			if p := e.promptOf(in.Key.Recipient); in.Record.Lease.IssuedAt.After(p.lastRecv) {
+				p.lastRecv = in.Record.Lease.IssuedAt
+			}
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Asking the decision
 
@@ -272,6 +292,7 @@ func (e *Engine) servePrompts() {
 				}
 			}
 		}
+		e.approximateLastRecv()
 	}
 	if !e.promptsDirty {
 		return

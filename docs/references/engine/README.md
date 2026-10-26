@@ -1371,6 +1371,7 @@ reproducible).
 | An endpoint is woken once for messages that arrive together, not while its turn runs or its prompt is unread, once more when a turn ends with the prompt unread, and again for a message that arrives after the minimum interval | `prompts.go` (`noteArrival`, `noteTurnEnded`, `servePrompts`, `retryPrompt`) | `TestBusyOrUnreadAgentGetsNoFeedback`, `TestUnreadPromptRepromptedOnce`, `TestNewArrivalAfterMinIntervalWakesOnce`, `TestFiveArrivalsStartOneTurn` |
 | The turns that prompts start are capped for the node, the endpoint that waited longest goes first, a raised cap and a turn that ends free places, and a turn that went on while the adapter was away holds its place | `prompts.go` (`promptRound`, `servePrompts`), `operations_settings.go` | `TestPromptTurnsBeyondNodeCapWaitOldestFirst` |
 | An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceProbed`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
+| After a restart the time of the last recv is taken from the newest lease of the endpoint's messages, so a prompt the agent had read still looks read | `prompts.go` (`approximateLastRecv`) | `TestARestartDoesNotMakeAReadPromptLookUnread` |
 | A turn that began for the prompt in flight settles it as delivered, so an agent idle at every turn end is woken once more and not every time | `prompts.go` (`noteTurnStarted`), `adapters.go` (`notified`) | `TestTurnStartedForThePromptInFlightSettlesItDelivered` |
 | A prompt that failed is held for the retry time of the rules and then sent again, with nothing else bringing the endpoint back | `prompts.go` (`settlePrompt`, `servePrompts`), `handoff.DecidePrompt` | `TestRefusedPromptIsRetriedAfterTheRetryTimeAndDelivered` |
 | The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
@@ -1412,8 +1413,11 @@ Known gaps, each filled in with the feature it belongs to:
   `prompt.persisted` follows, and that is not built here.
 - An adapter whose probe failed (the host logs it and goes on) is not judged when it connects:
   the endpoints of its sessions are judged by the next event of their own.
-- The node does not remember across a restart whether the last prompt was read, so an
-  endpoint whose agent had read it may be woken once more by the end of a turn.
+- The node does not keep when an endpoint last called recv. After a restart the time is taken
+  from the newest lease issued for the endpoint's messages (`approximateLastRecv`), so a recv
+  that issued no lease (the queue was empty) or only handed a part out again under a lease that
+  still ran is forgotten, and an endpoint whose agent had read its last prompt that way may be
+  woken once more by the end of a turn. A prompt that was not read is never taken for read.
 - The checkpoint of the attempt of a session creation is not dropped when the creation
   settles; only the checkpoint of a prompt attempt is, when the prompt settles.
 - Two scenarios of the cap on the turns that prompts start are untested because the harness

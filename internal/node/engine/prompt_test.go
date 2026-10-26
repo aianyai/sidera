@@ -456,6 +456,34 @@ func TestTurnStartedForThePromptInFlightSettlesItDelivered(t *testing.T) {
 	}
 }
 
+// A restart forgets when the endpoint last called recv, and a prompt it had read would
+// look unread again. The agent that took part of a long message after the repeat was
+// sent has read what it was woken for, so the next turn end must wake it for the rest
+// and not find the allowance of repeats spent: the time of its last recv is taken from
+// the newest lease of its messages, which is on disk.
+func TestARestartDoesNotMakeAReadPromptLookUnread(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	agent, addr := idleSession(t, h, "a")
+	msg := sendToAddr(t, h, "a", addr, bigText("a message of several parts", 60*1024))
+	quiet(t, h)
+	wantPrompts(t, h, addr, 1)
+	endTurn(t, h, addr) // the agent does not read: it is woken once more
+	wantPrompts(t, h, addr, 2)
+	h.Advance(time.Second)
+	page := recvAs(t, h, agent, fakeagent.RecvInput{})
+	if m := wantPart(t, page, msg, 1); m.Part.Total < 2 {
+		t.Fatalf("the message has %d parts, want 2 or more", m.Part.Total)
+	}
+
+	h.Crash(harness.ProcessCrash)
+	quiet(t, h)
+	endTurn(t, h, addr) // the turn of the repeat ends
+	wantPrompts(t, h, addr, 3)
+	if got, want := attemptKinds(t, h, addr), []handoff.PromptKind{handoff.PromptKindFirst, handoff.PromptKindReprompt, handoff.PromptKindFirst}; !slices.Equal(got, want) {
+		t.Errorf("the prompts delivered were %v, want %v: the rest of the message is a new wake-up", got, want)
+	}
+}
+
 // The checkpoint an adapter keeps for a prompt attempt is there while the attempt is in
 // flight, so that a reconciliation can be given it, and is gone once the attempt has
 // settled.
