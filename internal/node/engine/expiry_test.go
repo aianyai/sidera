@@ -188,9 +188,9 @@ func TestTwentyToUnreachableTargetMergeIntoOneNotice(t *testing.T) {
 // failure that has no report to carry it, so the sender is told by the failure of
 // the contact itself. It is told once, while the node still retries; the deadline
 // passes with no query that could have been answered, so no expiry is judged; and
-// the delivery ends closed at report_by, which is silent, with the sender told. A
-// delivery that nobody ever said a word about would end the same way and be read as
-// delivered.
+// the delivery ends closed at report_by, with the sender told once more that its
+// delivery expired unconfirmed: the pull made before the close fails too. A delivery
+// that nobody ever said a word about would end the same way and be read as delivered.
 func TestAnUnreachableTargetIsToldOnceAndTheDeliveryClosesAfterReportBy(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	h.Unreachable(true)
@@ -228,8 +228,10 @@ func TestAnUnreachableTargetIsToldOnceAndTheDeliveryClosesAfterReportBy(t *testi
 	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed {
 		t.Fatalf("the source record is %s after report_by, want closed_unconfirmed", d.State)
 	}
-	if got := toldKinds(t, h, "a"); !slices.Equal(got, []delivery.Kind{delivery.KindUnreachable}) {
-		t.Errorf("a was told %v by the end, want the one unreachable notice and nothing else", got)
+	h.Advance(mergeWindow)
+	quiet(t, h)
+	if got := toldKinds(t, h, "a"); !slices.Equal(got, []delivery.Kind{delivery.KindUnreachable, delivery.KindExpiredUnconfirmed}) {
+		t.Errorf("a was told %v by the end, want the unreachable notice and then, once, that the delivery expired unconfirmed", got)
 	}
 	if o := outOf(t, h, msg); o.Body != nil {
 		t.Error("the closed source record still refers to a body it has no use for")
@@ -237,18 +239,38 @@ func TestAnUnreachableTargetIsToldOnceAndTheDeliveryClosesAfterReportBy(t *testi
 }
 
 // An accepted delivery whose target cannot be reached from some moment on to report_by
-// ends closed and silent, and the target may meanwhile have rejected it: a failure the
-// sender is never told of. The delivery rules have no feedback for contact that fails
-// after a receipt, so this is a requirement kept in sight, skipped until it has a rule.
+// must not end closed and silent while the target meanwhile rejected it: the sender
+// would read the silence as delivered. The pull the node makes before it closes the
+// delivery fails too, so the sender is told once that the result could not be learned.
+// (When the pull before the close gets through, what the target says is told as it is:
+// see TestASourceAsleepPastReportByIsToldTheRejectionTheTargetSigned.)
 func TestAnAcceptedDeliveryWhoseTargetIsLostToTheEndIsNotClosedSilently(t *testing.T) {
-	t.Skip("pending a decision: delivery.Record.Apply ignores a failing contact for every state but queued " +
-		"(noteUnreachable), so an accepted delivery whose target is unreachable until report_by closes with no word, " +
-		"even when the target rejected or lost it in the meantime")
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	msg := send(t, h, "a", "b", "rejected while the sender cannot ask")
+	quiet(t, h)
+	reportBy := sourceDelivery(t, h, msg).ReportBy
+	h.Unreachable(true)
+	h.Advance(delivery.DefaultEndpointMaxQueue + time.Minute)
+	quiet(t, h)
+	if in := inOf(t, h, msg); in.Record.State != delivery.StateRejected {
+		t.Fatalf("the target record is %s, want rejected", in.Record.State)
+	}
+	h.Advance(reportBy.Sub(h.Clock().Now()) + time.Minute)
+	quiet(t, h)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed {
+		t.Fatalf("the source record is %s after report_by, want closed_unconfirmed", d.State)
+	}
+	h.Advance(mergeWindow)
+	quiet(t, h)
+	if got := toldKinds(t, h, "a"); !slices.Equal(got, []delivery.Kind{delivery.KindAcceptedUnconfirmed}) {
+		t.Errorf("a was told %v, want once that the result of the accepted message could not be learned", got)
+	}
 }
 
 // A target record that is not final when its queue time runs out or report_by comes
 // is closed by the passing of time, at start as well as while the node runs; the
-// records the sender holds close at report_by, silently.
+// records the sender holds close at report_by, and the sender is told once what it
+// had not been told.
 func TestARecordThatIsNotFinalIsClosedByTheEndOfItsTime(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	msg := send(t, h, "a", "b", "accepted and never answered")
@@ -267,6 +289,7 @@ func TestARecordThatIsNotFinalIsClosedByTheEndOfItsTime(t *testing.T) {
 	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed {
 		t.Errorf("the source record is %s at the start after report_by, want closed_unconfirmed", d.State)
 	}
+	toldOnce(t, h, []delivery.Kind{delivery.KindAcceptedUnconfirmed})
 }
 
 // A clock that was set back and then moved on is not one to judge a deadline by
@@ -352,11 +375,23 @@ func TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint(t *testing.T) {
 		h.Advance(reportBy.Sub(h.Clock().Now()) + time.Minute)
 		quiet(t, h)
 		walk(t, taker, func(t *testing.T, r *harness.H) {
-			if d := sourceDelivery(t, r, msg); d.State != delivery.StateClosedUnconfirmed {
-				t.Errorf("the source record is %s, want closed_unconfirmed", d.State)
+			// The target rejected the message while the sender could not ask. Where the
+			// node died decides whether the restarted node learns that (the pull before
+			// the close, when the close was not written) or closes (when it was), and
+			// in both the sender is told what the delivery ended as, once.
+			want := delivery.KindAcceptedUnconfirmed
+			switch d := sourceDelivery(t, r, msg); d.State {
+			case delivery.StateClosedUnconfirmed:
+			case delivery.StateRejected:
+				want = delivery.KindRejected
+			default:
+				t.Errorf("the source record is %s, want closed_unconfirmed or rejected", d.State)
 			}
 			if o := outOf(t, r, msg); o.Body != nil {
-				t.Error("the closed source record still refers to its body")
+				t.Error("the settled source record still refers to its body")
+			}
+			if got := toldKinds(t, r, "a"); !slices.Equal(got, []delivery.Kind{want}) {
+				t.Errorf("a was told %v, want %s once", got, want)
 			}
 		})
 	})

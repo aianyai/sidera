@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/record"
@@ -381,3 +382,21 @@ func (l LoopSide) SettleDamaged(dir, name string) error {
 	}
 	return fmt.Errorf("no damaged file %s/%s", dir, name)
 }
+
+// SendRefusedAsConflict is the result the outbound worker brings the loop when the
+// target answers the send of a message of the source record named name with a
+// conflict: another request is held under its identifier. The record must have
+// work out, as it has while a send is under way.
+func (l LoopSide) SendRefusedAsConflict(name string, node ident.NodeID, message delivery.MessageID) {
+	st := l.e.outbox.state[name]
+	if st == nil {
+		st = &outState{sent: map[ident.NodeID]bool{}, failingSince: map[ident.NodeID]time.Time{}}
+		l.e.outbox.state[name] = st
+	}
+	st.inflight++
+	l.e.outResult(l.e.d.Clock.Now(), outWork{kind: workSend, name: name, node: node, message: message}, nil, nil, &Refusal{Reason: ReasonMessageConflict})
+}
+
+// FinalPullUntil is the last instant at which the engine makes its last pull of a
+// target for a delivery with this report_by.
+func FinalPullUntil(reportBy time.Time) time.Time { return finalPullUntil(reportBy) }

@@ -424,11 +424,12 @@ func TestAnAnswerThatReportsAndListsARecipientIsNotReadAsALoss(t *testing.T) {
 	}
 }
 
-// The source pulls until the delivery's report_by and no longer. An answer that
-// the target holds no record, which reaches the source after that moment (it was
-// asked before, and the answer was slow), changes nothing: the pull window the
-// target keeps its records for is over, and the delivery is settled as it would
-// have been had the answer never come.
+// The source pulls until the delivery's report_by, and once more before it closes the
+// delivery. An answer that the target holds no record, which reaches the source after
+// report_by (it was asked before, and the answer was slow), changes nothing: after the
+// window the target may have forgotten the record legitimately. The pull before the
+// close is answered the same way, and the delivery closes with the one notice that its
+// result could not be learned, not as a loss at the target.
 func TestNoRecordAfterReportByChangesNothing(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	msg := send(t, h, "a", "b", "its record will be lost")
@@ -442,15 +443,15 @@ func TestNoRecordAfterReportByChangesNothing(t *testing.T) {
 	waitUntil(t, func() bool { return h.Loopback().Waiting() == 1 })
 	quiet(t, h)
 
-	// The time moves past report_by and the answer comes after it.
+	// The time moves past report_by and the answer comes after it; the pull before the
+	// close that follows it is made without a delay.
+	h.Delay(0)
 	h.Advance(reportBy.Sub(h.Clock().Now()) + time.Minute)
 	quiet(t, h)
-	if got := feedbackOf(t, h, msg); len(got) != 0 {
-		t.Errorf("the sender is told %v by an answer that came after report_by, want nothing", got)
+	if got := feedbackOf(t, h, msg); !slices.Equal(got, []delivery.Kind{delivery.KindAcceptedUnconfirmed}) {
+		t.Errorf("the sender is owed %v after an answer that came after report_by, want only that the result could not be learned", got)
 	}
-	// The record is closed by the passing of report_by, as every delivery that is not
-	// final by then is, and not turned into a loss by an answer that came too late: a
-	// delivery that merely "is not a loss" would also be one that nothing closed.
+	// The record is closed, and not turned into a loss by an answer that came too late.
 	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed || d.Unknown != delivery.UnknownCauseNone {
 		t.Errorf("the delivery is %s (%s) after a late answer, want closed_unconfirmed and no loss", d.State, d.Unknown)
 	}
