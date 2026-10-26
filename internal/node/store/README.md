@@ -136,7 +136,10 @@ engine applies the delivery rules and calls the writes.
 - **A closed session endpoint waits for its source records.** `PlanSweep` keeps it
   while any source record (whole, lost, or damaged with a trusted key) or out-lost
   record has it as sender; the sweep after the one that removed the last takes the endpoint with its
-  attempts, checkpoints and floor file. Its record (`SweepChunk.Endpoints`) is
+  attempts, checkpoints and floor file. An out-lost record is swept as soon as its
+  item is gone or its sender is closed or has no record, since a closed endpoint
+  can never be handed the notice: otherwise it would keep the endpoint for good.
+  Its record (`SweepChunk.Endpoints`) is
   removed last, after the directories of the others are durable, so a crash cannot
   leave a file that only the endpoint record would have led a sweep to.
 - **A write that meets a damaged floor file does nothing** and returns a

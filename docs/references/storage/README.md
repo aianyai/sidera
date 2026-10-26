@@ -610,10 +610,17 @@ functions as the replay of source records (`FeedbackReplays`), so the rule that 
 cover clears an item has one home. A record whose item is gone is finished: it is
 swept as soon as it is, at its discovery time or later, not by the retention of a
 source record, because nothing waits for a reply to it (`RetainUntil`,
-`SweepPlan.OutLosts`, `TestPlanSweepTakesAnOutLostRecordOnlyOnceItsFeedbackIsGone`).
+`SweepPlan.OutLosts`,
+`TestPlanSweepTakesAnOutLostRecordOfAnOpenEndpointOnlyOnceItsFeedbackIsGone`).
 A closed session endpoint is kept while an out-lost record has it as sender, with or
 without its item, for the same reason as for a source record: the notice is
 addressed to it (`TestAClosedSessionEndpointIsKeptWhileAnOutLostRecordNamesItAsSender`).
+The record itself does not wait for its item when its sender is closed or has no
+record: closing is irreversible, so the notice can never be handed out and
+nothing would clear the item; it would keep the endpoint, with its attempts,
+checkpoints and floor file, for good. Such a record is swept at once, and the next
+sweep takes the endpoint, the same two steps as for a source record
+(`TestPlanSweepTakesTheOutLostRecordOfAClosedEndpoint`).
 
 **Revision.** A regular target record carries `rev`, which the store raises by one
 at each write. A head record (the prompt or block of an endpoint) lists the

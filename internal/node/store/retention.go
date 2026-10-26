@@ -109,7 +109,8 @@ type SweepPlan struct {
 	// Outs are the source records to remove, whole: the sweep writes the sequence
 	// floors of their numbers before it removes them.
 	Outs []OutRecord
-	// OutLosts are the out-lost records whose notice has been given.
+	// OutLosts are the out-lost records whose notice has been given, or whose
+	// sender is closed or gone, so that it never will be.
 	OutLosts []OutLostRecord
 	// Endpoints are the records of the closed endpoints to remove, which go after
 	// the files that hang on them.
@@ -133,10 +134,12 @@ func (p SweepPlan) Chunk(now time.Time) SweepChunk {
 // endpoints nothing live points to; and the bodies nothing refers to afterwards.
 //
 // A closed session endpoint is kept while any source record, or out-lost record,
-// has it as sender, swept or not: the sweep of a source record writes the floor of its sender, and
-// a floor file written for an endpoint whose record is gone is one nothing would
-// ever remove. The sweep that removes the last of its source records leaves it,
-// and the next one removes the endpoint with its floor file.
+// has it as sender, swept or not: the sweep of a source record writes the floor
+// of its sender, and a floor file written for an endpoint whose record is gone is
+// one nothing would ever remove. The sweep that removes the last of its source
+// records leaves it, and the next one removes the endpoint with its floor file.
+// An out-lost record of a closed endpoint is swept whatever its item says, so
+// that it does not keep the endpoint for good.
 func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	var plan SweepPlan
 	ready := func(rec Record) bool {
@@ -209,8 +212,14 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 			bodiesOfSwept = append(bodiesOfSwept, *o.Body)
 		}
 	}
+	// An out-lost record is also swept once its sender is closed or gone: the
+	// notice can no longer be handed out, and nothing would clear its item.
+	endpointOpen := map[ident.EndpointID]bool{}
+	for _, e := range sc.Endpoints {
+		endpointOpen[e.ID] = e.Status != EndpointClosed
+	}
 	for _, o := range sc.OutLost {
-		if ready(o) {
+		if ready(o) || !endpointOpen[o.Key.Sender] {
 			swept[path.Join(OutDir, o.Name())] = true
 			plan.OutLosts = append(plan.OutLosts, o)
 		}

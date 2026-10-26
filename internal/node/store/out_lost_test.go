@@ -177,12 +177,12 @@ func TestAnOutLostRecordIsFinishedOnceItsFeedbackIsGone(t *testing.T) {
 	}
 }
 
-func TestPlanSweepTakesAnOutLostRecordOnlyOnceItsFeedbackIsGone(t *testing.T) {
+func TestPlanSweepTakesAnOutLostRecordOfAnOpenEndpointOnlyOnceItsFeedbackIsGone(t *testing.T) {
 	at := base.Add(time.Hour)
 	pending, cleared := lostNotice(1, 1, at), lostNotice(1, 2, at)
 	cleared.Feedback = nil
 	r := newRig(t)
-	seed(t, r.mem, pending, cleared)
+	seed(t, r.mem, session(1, store.EndpointOpen, ctlName(4)), pending, cleared)
 	plan := store.PlanSweep(r.scan(), at)
 	if len(plan.OutLosts) != 1 || plan.OutLosts[0].Name() != cleared.Name() {
 		t.Errorf("planned %v, want only the one whose item is gone", plan.OutLosts)
@@ -255,6 +255,50 @@ func TestAClosedSessionEndpointIsKeptWhileAnOutLostRecordNamesItAsSender(t *test
 			t.Fatalf("after the first sweep: out-lost %v, endpoint kept %v", sc.OutLost, hasEndpoint(sc, ep(5)))
 		}
 		sweepOnce(t, r, outRetention(1000))
+		if sc := r.scan(); hasEndpoint(sc, ep(5)) || len(sc.Seq) != 0 {
+			t.Errorf("after the second sweep: endpoint %v, floors %v", hasEndpoint(sc, ep(5)), sc.Seq)
+		}
+	})
+}
+
+// An out-lost record whose sending endpoint is closed, or gone, is swept whatever
+// its item says: closing is irreversible, so the notice can never be handed out
+// and nothing would ever clear the item. The endpoint, which the record kept, goes
+// in the sweep after it, as it does after a source record.
+func TestPlanSweepTakesTheOutLostRecordOfAClosedEndpoint(t *testing.T) {
+	at := base.Add(time.Hour)
+	for _, c := range []struct {
+		rule   string
+		seeded []store.Record
+		swept  bool
+	}{
+		{"the sender is closed", []store.Record{session(5, store.EndpointClosed, ctlName(4))}, true},
+		{"the sender has no endpoint record", nil, true},
+		{"the sender is open", []store.Record{session(5, store.EndpointOpen, ctlName(4))}, false},
+		{"the sender is still being created", []store.Record{session(5, store.EndpointCreating, ctlName(4))}, false},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			r := newRig(t)
+			pending := lostNotice(5, 1, at)
+			seed(t, r.mem, append(c.seeded, pending)...)
+			plan := store.PlanSweep(r.scan(), at)
+			if got := len(plan.OutLosts) == 1; got != c.swept {
+				t.Errorf("a record with its item pending was planned = %v, want %v: %v", got, c.swept, plan.OutLosts)
+			}
+		})
+	}
+	t.Run("the endpoint goes in the sweep after the one that removed the record", func(t *testing.T) {
+		r := newRig(t)
+		seed(t, r.mem, session(5, store.EndpointClosed, ctlName(4)), lostNotice(5, 1, at),
+			store.SeqRecord{Sender: ep(5), Floors: map[ident.Address]uint64{addr(2, 2): 1}})
+		if plan := sweepOnce(t, r, at); len(plan.OutLosts) != 1 || len(plan.Endpoints) != 0 {
+			t.Fatalf("first sweep: out-lost %v, endpoints %v", plan.OutLosts, plan.Endpoints)
+		}
+		sc := r.scan()
+		if len(sc.OutLost) != 0 || !hasEndpoint(sc, ep(5)) {
+			t.Fatalf("after the first sweep: out-lost %v, endpoint kept %v", sc.OutLost, hasEndpoint(sc, ep(5)))
+		}
+		sweepOnce(t, r, at)
 		if sc := r.scan(); hasEndpoint(sc, ep(5)) || len(sc.Seq) != 0 {
 			t.Errorf("after the second sweep: endpoint %v, floors %v", hasEndpoint(sc, ep(5)), sc.Seq)
 		}
