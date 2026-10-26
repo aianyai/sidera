@@ -33,6 +33,15 @@ func sessionHostParams() adapterhost.Params {
 	}
 }
 
+// awayHostParams are the host tunables of a test in which an adapter that ended stays
+// away for the whole time the test moves the clock: the host starts it again only after
+// ten reply deadlines of a control signal.
+func awayHostParams() adapterhost.Params {
+	p := sessionHostParams()
+	p.RestartBackoffMin, p.RestartBackoffMax = 10*engine.DefaultParams().ControlReplyDeadline, 10*engine.DefaultParams().ControlReplyDeadline
+	return p
+}
+
 // sessionNode makes a node with an adapter that has a runtime, taken on, and a
 // direct endpoint for each name.
 func sessionNode(t *testing.T, o harness.Options, names ...string) *harness.H {

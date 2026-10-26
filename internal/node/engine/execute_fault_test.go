@@ -22,7 +22,7 @@ func TestFailedWriteOfTheResultOfASignalIsTriedAgainWithoutAskingTheAdapter(t *t
 		name string
 		sig  adapterproto.ControlSignal
 		// away says the adapter is gone for the whole test, so the deadline settles the
-		// signal; its restart is put further off than the time the test moves the clock.
+		// signal.
 		away bool
 		// asked is the ledger kind of the call to the adapter, and times how often it
 		// is made.
@@ -42,9 +42,7 @@ func TestFailedWriteOfTheResultOfASignalIsTriedAgainWithoutAskingTheAdapter(t *t
 			}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			host := sessionHostParams()
-			host.RestartBackoffMin, host.RestartBackoffMax = 10*engine.DefaultParams().ControlReplyDeadline, 10*engine.DefaultParams().ControlReplyDeadline
-			h := sessionNodeOf(t, harness.Options{}, host, "a")
+			h := sessionNodeOf(t, harness.Options{}, awayHostParams(), "a")
 			_, id, _ := startedSession(t, h, "a", "")
 			settle := quiet
 			if tc.away {
