@@ -483,3 +483,27 @@ func TestTheAlertOfASettlementFollowsTheDamageAndNotTheCall(t *testing.T) {
 		}
 	})
 }
+
+// The floors of a sender are written only to the floor file of that sender: a
+// damaged file whose key names another sender is refused and nothing is written.
+func TestAFloorFileIsNotOverwrittenWithTheFloorsOfAnotherSender(t *testing.T) {
+	pair := addr(2, 2)
+	r := newRig(t)
+	seed(t, r.mem, srcOut(1, false),
+		store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 40}},
+		store.SeqRecord{Sender: ep(2), Floors: map[ident.Address]uint64{pair: 7}})
+	damageBody(t, r.mem, path.Join(store.SeqDir, store.SeqRecord{Sender: ep(1)}.Name()))
+	sc := r.scan()
+	if len(sc.Damaged) != 1 || sc.Damaged[0].Dir != store.SeqDir {
+		t.Fatalf("damaged = %v, want the floor file", sc.Damaged)
+	}
+	d := sc.Damaged[0]
+	d.Key = ep(2)
+	before := snapshot(t, r.mem, ".")
+	if err := r.st.Quarantine(store.Quarantine{File: d, Scan: sc, Alert: newSim(t, r.st).alert("corrupt_record", d.Dir, d.Name)}); err == nil {
+		t.Fatal("the floor file of one sender was settled with the key of another")
+	}
+	if diff := equalMaps(snapshot(t, r.mem, "."), before, nil); diff != "" {
+		t.Errorf("a refused quarantine changed the disk: %s", diff)
+	}
+}

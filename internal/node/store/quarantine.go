@@ -204,6 +204,9 @@ func (s *Store) Quarantine(q Quarantine) error {
 		if err != nil {
 			return err
 		}
+		if path.Base(f.path) != d.Name {
+			return fmt.Errorf("store: the floors of %s would overwrite %s/%s, which is not the file of that sender", sender, d.Dir, d.Name)
+		}
 		st.overwrite, st.remove = &f, FileRef{}
 	case d.Dir == CtlDir:
 		if q.Scan == nil {
