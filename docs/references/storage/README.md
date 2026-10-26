@@ -727,6 +727,18 @@ limit does not count. This is a known exception to the loop-hold bound that
 `TestEveryTransactionConvergesFromEveryCrashState`, which also state that recovery
 changes nothing and that doing the work again ends in the disk of one clean run).
 
+**Checkpoint.** The state an adapter asks the node to keep, one file per scope and id
+(`checkpoint-put`), at most 16 KiB. A checkpoint of the scope `attempt` belongs to one
+attempt and is of use only until the attempt settles, so the caller drops it then
+(`checkpoint-drop`: the removal and a sync of the directory, the one transaction that also
+removes the state of a closed session). The drop comes after the
+write that settles the attempt, never before: the checkpoint is what a reconciliation of an
+attempt that did not settle is given, and a crash between the two must leave it. What a
+crash between them leaves is a file nobody asks for again, which costs space and no
+record, so no rule finishes the removal. A drop of a checkpoint that is not there writes
+nothing and is no error, since it is made whenever an attempt settles and the adapter
+may never have put one (`TestCheckpointDropRemovesOnlyTheCheckpointNamed`).
+
 **Endpoint record.** One per endpoint, under the hash of its id. Its fields, in
 the order they are written: `kind`, `instance`, `display_name` and `description`
 (both optional, omitted when empty), `status`, `token` (32 bytes, present while the
@@ -1065,7 +1077,7 @@ initial message, before `orphan-gc` can take the body that delivery holds) and
 for an orphan endpoint that a power loss left behind is drained as one for an
 endpoint that does not exist; `endpoint-drain-replay`, after every rule that
 closes or removes an endpoint; `checkpoint-drop`, which removes the state kept for
-sessions that are closed (the engine runs the same transaction when it closes one); `feedback-replay`, which writes source records a
+sessions that are closed (the engine runs the same transaction when it closes one, and when an attempt settles); `feedback-replay`, which writes source records a
 drain never writes, so its order against the drain does not change the result;
 `orphan-gc` after every
 replay, because quarantines overwrite or remove records and so leave bodies no record refers to; and

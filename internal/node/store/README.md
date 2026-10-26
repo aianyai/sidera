@@ -33,6 +33,7 @@ engine applies the delivery rules and calls the writes.
 | `NewOutLostRecord`, `OutLostKey`, `OutLostReplays`, `Store.OutLostClear` | The notice that a file of `out/` was lost unread, built in one place; the work of the replay that clears its feedback item once a notice covers it, and the write that does. |
 | `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSummaries`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves: the summaries first in a transaction of their own, which the caller logs and goes on without, then the removals. |
 | `ExpiredArchiveFiles`, `Store.ArchiveExpire` | The archive files older than a retention given as a duration (the node's setting, read only through `config.NodeSettings.ArchiveRetention`), and their removal. |
+| `Store.CheckpointPut` | The state an adapter asks the node to keep, one file per scope and id. `Store.CheckpointDrop` removes it: the state of a closed session, and the checkpoint of an attempt once it has settled; a key whose checkpoint is not there is dropped without an error, and none being there writes nothing. |
 | `BodyFileName`, `Store.ReadBody`, `Store.Available` | The name of a record's own body file, a body read checked against the digest and length its record holds, and free space. |
 | `MissingStateDirs`, `StateDirs` | The directories of `state/`, for the layout rule of the composition root. |
 
@@ -234,7 +235,7 @@ engine applies the delivery rules and calls the writes.
   `OutLostReplays` for out-lost ones, and the same transaction writes both.
   Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint`, `ctl-effect-replay` and
   `derived-replay` are `Recovery` declarations; `checkpoint-drop` is a normal
-  transaction the engine also runs while a session closes.
+  transaction the engine also runs while a session closes and when an attempt settles.
   Each rule's predicate is a function of the scan it is given: a rule run on a scan
   taken before the previous rule wrote would act on records that rule has already
   settled.

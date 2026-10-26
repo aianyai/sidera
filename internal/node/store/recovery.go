@@ -436,23 +436,34 @@ func (s *Store) DerivedReplay(ins []InRecord) error {
 	return tx.Commit()
 }
 
-// CheckpointDrop removes the checkpoints of the keys. It is the one way a
-// checkpoint goes before the sweep takes it with its endpoint, and the keys are
-// those of closed session endpoints (ClosedSessionCheckpoints).
+// CheckpointDrop removes the checkpoints of the keys: those of closed session
+// endpoints (ClosedSessionCheckpoints) before the sweep takes them with their
+// endpoint, and the checkpoint of an attempt that has settled. The caller of the
+// second drops it after the write that settles the attempt and never before,
+// because the checkpoint is what a reconciliation of an attempt that did not settle
+// is given; a crash between the two leaves a file nobody asks for again, which costs
+// space and no record, so no rule finishes that removal. A checkpoint that is not
+// there is not an error, and when none of the keys is there nothing is written: the
+// drop of an attempt is asked for whenever one settles, and its adapter may never
+// have put a checkpoint.
 func (s *Store) CheckpointDrop(keys []CheckpointKey) error {
-	if len(keys) == 0 {
-		return nil
-	}
 	files := make([]FileRef, len(keys))
 	for i, k := range keys {
-		if k.Scope != CheckpointScopeSession {
-			return fmt.Errorf("store: only the checkpoint of a session is dropped, not one of scope %q", k.Scope)
+		if _, err := CheckpointKeyBytes(k); err != nil {
+			return err
 		}
 		files[i] = FileRef{Dir: CheckpointsDir, Name: CheckpointRecord{Key: k}.Name()}
 	}
 	ex, err := s.exist(files)
 	if err != nil {
 		return err
+	}
+	there := false
+	for _, f := range files {
+		there = there || ex[f]
+	}
+	if !there {
+		return nil
 	}
 	tx := s.w.Begin(&declCheckpointDrop)
 	defer tx.Close()

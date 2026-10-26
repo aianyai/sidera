@@ -130,8 +130,10 @@ var (
 		repDefer("out", many), syncDir("out-dir"), rm("body", many, optional), syncDir("body-dir", optional),
 	}}
 	declCheckpointPut = txn.Decl{Name: "checkpoint-put", Kind: txn.Normal, Writes: []txn.Write{rep("checkpoint")}}
-	// checkpoint-drop: the state kept for a session that is closed. A recovery rule
-	// that does the same is this transaction run again.
+	// checkpoint-drop: the state kept for a session that is closed, and the checkpoint of
+	// an attempt that has settled. A recovery rule that does the first is this transaction
+	// run again; a crash before the engine drops the second leaves a file nobody asks for
+	// again, which costs space and no record, so no rule finishes it.
 	declCheckpointDrop = txn.Decl{Name: "checkpoint-drop", Kind: txn.Normal, Writes: []txn.Write{rm("checkpoint", many), syncDir("checkpoint-dir")}}
 	declAlertRaise     = txn.Decl{Name: "alert-raise", Kind: txn.Normal, Writes: []txn.Write{rep("alert")}}
 	declArchiveEvents  = txn.Decl{Name: "archive-events", Kind: txn.Normal, Writes: []txn.Write{w("archive", txn.OpAppend, many)}}

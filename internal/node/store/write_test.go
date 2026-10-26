@@ -43,6 +43,9 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 		{"checkpoint-put", nil, func(r *rig) error {
 			return r.st.CheckpointPut(store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{}`)})
 		}, nil},
+		{"checkpoint-drop", func(t *testing.T, mem *fsxtest.Mem) { seed(t, mem, attemptCheckpoint()) }, func(r *rig) error {
+			return r.st.CheckpointDrop([]store.CheckpointKey{attemptCheckpoint().Key})
+		}, nil},
 		{"alert-raise", nil, func(r *rig) error {
 			return r.st.AlertRaise(store.AlertRecord{ID: store.AlertID{1}, Kind: "k", At: base, Detail: "d"})
 		}, nil},
@@ -384,5 +387,42 @@ func TestAPromptAndABlockWriteTheirRecipientsBeforeTheirHead(t *testing.T) {
 				t.Errorf("the roles written, in order, are %v, want %v", got, c.want)
 			}
 		})
+	}
+}
+
+// attemptCheckpoint is the state an adapter put for a prompt attempt.
+func attemptCheckpoint() store.CheckpointRecord {
+	return store.CheckpointRecord{
+		Key:   store.CheckpointKey{Scope: store.CheckpointScopeAttempt, ID: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6"},
+		State: []byte(`{"cursor":7}`),
+	}
+}
+
+// A checkpoint is dropped alone: the one named goes and every other stays, and one that
+// was never put, or was dropped before, is not an error and opens no transaction, since
+// the removal is asked for whenever an attempt settles.
+func TestCheckpointDropRemovesOnlyTheCheckpointNamed(t *testing.T) {
+	r := newRig(t)
+	other := store.CheckpointRecord{Key: store.CheckpointKey{Scope: store.CheckpointScopeSession, ID: ep(5).String()}, State: []byte(`{}`)}
+	seed(t, r.mem, attemptCheckpoint(), other)
+
+	if err := r.st.CheckpointDrop([]store.CheckpointKey{attemptCheckpoint().Key}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.scan().Checkpoints; len(got) != 1 || got[0].Key != other.Key {
+		t.Fatalf("checkpoints after the drop: %+v, want only the other one", got)
+	}
+	steps := r.rec.count()
+	if steps == 0 {
+		t.Fatal("dropping a checkpoint that was there reached no crash point")
+	}
+	if err := r.st.CheckpointDrop([]store.CheckpointKey{attemptCheckpoint().Key}); err != nil {
+		t.Fatalf("dropping a checkpoint that is gone: %v", err)
+	}
+	if r.rec.count() != steps {
+		t.Errorf("dropping a checkpoint that is gone reached %d more crash points, want none", r.rec.count()-steps)
+	}
+	if err := r.st.CheckpointDrop([]store.CheckpointKey{{Scope: "global", ID: "x"}}); err == nil {
+		t.Error("a checkpoint under a scope that does not exist was dropped without an error")
 	}
 }
