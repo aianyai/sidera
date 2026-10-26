@@ -16,9 +16,9 @@ import (
 // of review: a new method is added to it by a change that says what it is for.
 func TestEngineHasNoMethodThatMakesASessionEndpoint(t *testing.T) {
 	allowed := []string{
-		"Adapter", "AdapterAdmitted", "AdapterGone", "AdapterNotified", "AdapterProbed", "AdapterSignals", "AdapterStarted",
+		"Adapter", "AdapterAdmitted", "AdapterGone", "AdapterList", "AdapterNotified", "AdapterProbed", "AdapterSignals", "AdapterStarted",
 		"AddClockState", "AddPeriodic", "Alerts", "BeginShutdown", "CheckpointPut", "CloseEndpoint", "Declare", "Done",
-		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "MessageStatus", "NodeSettings", "OperationResult", "Phase", "ProbeTokens", "Pull", "Quiesce", "RaiseAlert", "RecoverDelivery",
+		"Endpoints", "Err", "Execute", "ExportRevocation", "Inbound", "MessageStatus", "NodeSettings", "OperationResult", "Phase", "PresentProbeToken", "Presets", "ProbeTokens", "Pull", "Quiesce", "RaiseAlert", "RecoverDelivery",
 		"RegisterDirect", "Reply", "Send", "Serve", "SetTransport", "Start", "Status", "Stop", "SystemAddress", "UnregisterDirect",
 	}
 	typ := reflect.TypeOf(&engine.Engine{})
@@ -68,7 +68,7 @@ func TestTheEngineDeclaresTheTransactionsOfTwoOwnersItOpens(t *testing.T) {
 		got = append(got, d.Name)
 	}
 	sort.Strings(got)
-	if want := []string{"backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"adapter-install", "adapter-install-current", "backup-confirm", "clock-clear", "direct-register", "identity-retire", "runtime-admit"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("engine.Transactions = %v, want %v", got, want)
 	}
 }

@@ -41,6 +41,9 @@ type hostDouble struct {
 	mu     sync.Mutex
 	counts map[string]adapterhost.ConnCounts
 	asked  atomic.Int64
+	// calls are the starts and stops the engine asked for, in order, as
+	// "run:<instance>" and "stop:<instance>".
+	calls []string
 }
 
 var _ engine.Adapters = (*hostDouble)(nil)
@@ -62,8 +65,21 @@ func (h *hostDouble) Counts(instance string) adapterhost.ConnCounts {
 	return c
 }
 
-func (h *hostDouble) EnsureRunning(string) {}
-func (h *hostDouble) Stop(string)          {}
+func (h *hostDouble) EnsureRunning(instance string) { h.record("run:" + instance) }
+func (h *hostDouble) Stop(instance string)          { h.record("stop:" + instance) }
+
+func (h *hostDouble) record(call string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.calls = append(h.calls, call)
+}
+
+// asks are the starts and stops the engine asked the host for so far.
+func (h *hostDouble) asks() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.calls)
+}
 func (h *hostDouble) CreateSession(context.Context, string, adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {
 	return adapterproto.SessionCreateResult{}, adapterhost.ErrNotConnected
 }

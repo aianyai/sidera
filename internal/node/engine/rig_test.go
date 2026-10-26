@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"path"
 	"runtime"
@@ -70,6 +71,9 @@ type rig struct {
 	// installed, when set, changes the installed adapter packages the engine
 	// reads from the configuration (a test that needs tested runtime ranges).
 	installed func([]config.Adapter) []config.Adapter
+	// packages are the package directories an owner can name to install, by the
+	// path the owner names; each is a disk of its own, rooted at the package.
+	packages map[string]fsx.Reader
 }
 
 // testHome is the data directory of a rig, unless a test says it has none.
@@ -104,6 +108,27 @@ func withAdapters(a engine.Adapters) rigOption { return func(r *rig) { r.adapter
 
 func withInstalled(f func([]config.Adapter) []config.Adapter) rigOption {
 	return func(r *rig) { r.installed = f }
+}
+
+// withPackage makes the directory dir the package src, for the owner to install.
+func withPackage(dir string, src fsx.Reader) rigOption {
+	return func(r *rig) { r.addPackage(dir, src) }
+}
+
+func (r *rig) addPackage(dir string, src fsx.Reader) {
+	if r.packages == nil {
+		r.packages = map[string]fsx.Reader{}
+	}
+	r.packages[dir] = src
+}
+
+// openPackage is how the engine reads a package directory the owner named: the
+// disk of the package, or the error of a directory that is not there.
+func (r *rig) openPackage(dir string) (fsx.Reader, error) {
+	if src, ok := r.packages[dir]; ok {
+		return src, nil
+	}
+	return nil, &fs.PathError{Op: "open", Path: dir, Err: fs.ErrNotExist}
 }
 
 // newRig builds a node that has been initialised, has the adapter "chat"
@@ -149,7 +174,7 @@ func (r *rig) deps() engine.Deps {
 	d := engine.Deps{
 		Node: r.node, Clock: r.clk, HighWater: r.hw, RollbackPaused: r.paused,
 		Writer: r.w, Store: r.st, Config: r.engineConfig(), Rand: harness.RandReader(r.seed),
-		Adapters: r.adapters, Home: r.home, Log: slog.New(r.log),
+		Adapters: r.adapters, Home: r.home, Log: slog.New(r.log), OpenPackage: r.openPackage,
 	}
 	if r.keys != nil {
 		d.Keys = r.keys
@@ -448,7 +473,7 @@ func engineCaller(id ident.EndpointID) engine.Caller {
 // gives, with its configuration loaded and nothing started.
 func (r *rig) fork(disk *fsxtest.Mem) *rig {
 	r.t.Helper()
-	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys, home: r.home, adapters: r.adapters, installed: r.installed}
+	f := &rig{t: r.t, clk: clocktest.NewFake(r.clk.Now()), log: &harness.LogCapture{}, seed: r.seed + 100, node: r.node, tab: r.tab, admit: r.admit, params: r.params, wantKeys: r.wantKeys, home: r.home, adapters: r.adapters, installed: r.installed, packages: r.packages}
 	f.mount(disk)
 	var err error
 	if f.cfg, err = config.Load(f.w); err != nil {
