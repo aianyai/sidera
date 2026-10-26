@@ -248,6 +248,9 @@ func fromRefusal(r *engine.Refusal) *Error {
 		if r.Field != "" {
 			e.with("field", r.Field)
 		}
+		if r.Path != "" {
+			e.with("path", r.Path)
+		}
 		return e
 	case engine.ReasonOperationIDReused:
 		return New(CategoryConflict, "operation_id_reused", "the operation identifier was used for another request")

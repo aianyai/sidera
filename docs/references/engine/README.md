@@ -177,7 +177,10 @@ draws randomness only in the loop. The worker, which is a goroutine the engine o
 versions of its adapter with every file and directory synced (`config.StageAdapter`),
 parses the **copy** and checks that the copy lists this machine's platform
 (`adapterreg.RunsOn`); what is judged is what would be installed, and a source that
-changes while it is copied cannot make the check and the install disagree. It then has
+changes while it is copied cannot make the check and the install disagree. A directory
+or file of the package that cannot be read is refused as `invalid_argument` with the
+detail `source_unreadable` and, in `Refusal.Path`, the place inside the package (empty
+when the directory the owner named is the fault). It then has
 the loop run the operation as any other, which looks the request up again (an identical
 resend may have arrived meanwhile), refuses an upgrade of an adapter that has an
 enabled instance (`adapter_in_use`: the instance runs the version that is current),

@@ -107,6 +107,8 @@ func TestARefusalCarriesWhatSaysWhichLimitAndWhichValue(t *testing.T) {
 			want{"invalid_argument", "probe_frontend_mismatch"}, map[string]any{"field": "frontend"}},
 		{"a package directory that cannot be read", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "source", Detail: engine.DetailSourceUnreadable},
 			want{"invalid_argument", "source_unreadable"}, map[string]any{"field": "source"}},
+		{"a file of a package that cannot be read", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "source", Detail: engine.DetailSourceUnreadable, Path: "lib/a.txt"},
+			want{"invalid_argument", "source_unreadable"}, map[string]any{"field": "source", "path": "lib/a.txt"}},
 		{"a value", &engine.Refusal{Reason: engine.ReasonInvalidArgument, Field: "endpoint"},
 			want{"invalid_argument", "malformed_request"}, map[string]any{"field": "endpoint"}},
 		{"the field a body was too large in", &engine.Refusal{Reason: engine.ReasonTooLarge, Field: "body"},

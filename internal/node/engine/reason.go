@@ -174,8 +174,8 @@ const (
 	// DetailProbeFrontendMismatch: the front end that presented a probe token is
 	// not the one the token was issued for.
 	DetailProbeFrontendMismatch
-	// DetailSourceUnreadable: the directory the owner named as a package cannot be
-	// read.
+	// DetailSourceUnreadable: the directory the owner named as a package, or a
+	// directory or file inside it, cannot be read.
 	DetailSourceUnreadable
 
 	detailEnd
@@ -222,6 +222,11 @@ type Refusal struct {
 	// Detail says in which way it was not acceptable, when one of the details
 	// applies; set for ReasonInvalidArgument only.
 	Detail Detail
+	// Path is where in what the request named the fault is, when the request names
+	// a place that holds more than one value: the file or directory inside the
+	// package that cannot be read, set for DetailSourceUnreadable only, and empty
+	// when the package itself is the fault.
+	Path string
 	// Err is the cause, when there is one beyond the reason (a storage error).
 	Err error
 }

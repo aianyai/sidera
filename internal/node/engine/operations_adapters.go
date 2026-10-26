@@ -80,7 +80,11 @@ func (e *Engine) stagePackage(source string, rnd io.Reader) (config.Staged, erro
 		return config.Staged{}, &Refusal{Reason: ReasonInvalidArgument, Field: "source", Detail: DetailSourceUnreadable, Err: err}
 	}
 	staged, err := e.d.Config.StageAdapter(src, rnd)
-	if err != nil {
+	var unreadable *config.SourceError
+	switch {
+	case errors.As(err, &unreadable):
+		return config.Staged{}, &Refusal{Reason: ReasonInvalidArgument, Field: "source", Detail: DetailSourceUnreadable, Path: unreadable.Path, Err: err}
+	case err != nil:
 		return config.Staged{}, err
 	}
 	if !adapterreg.RunsOn(staged.Manifest, runtime.GOOS, runtime.GOARCH) {

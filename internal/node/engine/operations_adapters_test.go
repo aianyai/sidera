@@ -431,6 +431,10 @@ func TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree(t *testing.T) {
 					t.Errorf("reason %v, want invalid", got)
 				}
 			}},
+		{"a file of the package that cannot be read", &unreadablePackage{Reader: packageDisk(t, map[string]string{"sidera-adapter.json": manifestFile(t, o), o.Program: "x", "lib/a.txt": "x"}), file: "lib/a.txt"},
+			func(t *testing.T, err error) { wantUnreadable(t, err, "lib/a.txt") }},
+		{"a directory of the package that cannot be read", &unreadablePackage{Reader: packageDisk(t, map[string]string{"sidera-adapter.json": manifestFile(t, o), o.Program: "x", "lib/a.txt": "x"}), dir: "lib"},
+			func(t *testing.T, err error) { wantUnreadable(t, err, "lib") }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t, 10, withPackage("/src/bad", tc.src), withPackage("/src/good", good))
@@ -456,7 +460,7 @@ func TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree(t *testing.T) {
 		e := r.start()
 		before := r.snapshot()
 		_, err := e.Execute(ctx, installCommand(4, "install", "/src/nothing"))
-		wantInvalid(t, err, "source", engine.DetailSourceUnreadable)
+		wantUnreadable(t, err, "")
 		if !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("error %v, want the cause to be that the directory does not exist", err)
 		}
@@ -464,6 +468,38 @@ func TestAPackageThatIsRefusedLeavesNothingAndItsIdentifierFree(t *testing.T) {
 			t.Error("a directory that is not there left something on the disk")
 		}
 	})
+}
+
+// unreadablePackage is a package disk with one file or directory that fails to be
+// read.
+type unreadablePackage struct {
+	fsx.Reader
+	file, dir string
+}
+
+func (u *unreadablePackage) ReadFile(p string) ([]byte, error) {
+	if p == u.file {
+		return nil, &fs.PathError{Op: "read", Path: p, Err: fs.ErrPermission}
+	}
+	return u.Reader.ReadFile(p)
+}
+
+func (u *unreadablePackage) ReadDir(d string) ([]fsx.Entry, error) {
+	if d == u.dir {
+		return nil, &fs.PathError{Op: "open", Path: d, Err: fs.ErrPermission}
+	}
+	return u.Reader.ReadDir(d)
+}
+
+// wantUnreadable wants the refusal for a package that cannot be read, naming the
+// place inside it, empty when the directory the owner named is the fault.
+func wantUnreadable(t testing.TB, err error, path string) {
+	t.Helper()
+	wantInvalid(t, err, "source", engine.DetailSourceUnreadable)
+	var ref *engine.Refusal
+	if errors.As(err, &ref) && ref.Path != path {
+		t.Errorf("the refusal names %q, want %q", ref.Path, path)
+	}
 }
 
 // A version that is already the current one is installed: the request is answered
