@@ -77,6 +77,49 @@ checks cannot tell the two apart, because both have the user's uid. The
 directory permission of the sandbox is therefore the only thing that keeps the
 name, and it has to be read-only for the agent (connect only).
 
+#### Sandboxes and the rest of the data directory
+
+On every platform a sandbox must not read the data directory at all. Claude Code's sandbox can read
+the whole machine unless told otherwise, and the data directory holds two kinds
+of secret that the socket checks above do nothing to protect: the token of every
+session endpoint, kept in clear in `state/endpoints/` (the node must send it to
+the adapter again when a session is attached again, so it cannot be kept as a
+hash), and the node's private key in `keys/`. An agent that reads another
+session's token acts as that session; one that reads the key signs as the node.
+The agent runs as the owner, so file permissions do not hold it back either.
+
+The rule for a sandbox is therefore: deny reading and writing `<SIDERA_HOME>`
+entirely, and allow only connecting to `<SIDERA_HOME>/run/agent.sock`. An example
+for Claude Code, with the home at `~/.sidera`:
+
+```json
+{
+  "sandbox": {
+    "filesystem": {
+      "denyRead": ["~/.sidera"],
+      "denyWrite": ["~/.sidera"]
+    },
+    "network": {
+      "allowUnixSockets": ["~/.sidera/run/agent.sock"]
+    }
+  }
+}
+```
+
+The key names and the path prefixes (`~/` is the user's home directory, `/` an
+absolute path) are those of Claude Code's settings reference, checked on
+2026-10-26: `sandbox.filesystem.denyRead` and `denyWrite` block paths that the
+default policy would allow, and `sandbox.network.allowUnixSockets` lists the
+socket paths a sandboxed command may connect to. Two things the reference does
+not settle, and that a sandbox author checks against the sandbox in use. First,
+whether a read denial on the directory also stops a connection to the socket
+inside it; if it does, `filesystem.allowRead` for `<SIDERA_HOME>/run` re-opens
+only that directory, which holds nothing but the socket. Second, the reference
+says that on Linux and WSL2 the list is ignored and the only way to allow Unix
+sockets is to allow all of them, which also allows the management socket; there a
+path-based sandbox cannot keep the agent off the management interface, and the
+sandbox must be given no route to it by other means.
+
 ### Windows
 
 Established by the Windows tests listed under Where, which pass on the

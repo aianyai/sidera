@@ -159,6 +159,20 @@ Tighten, because it stops their replies.
   that "not written" can never be confused with "written as closed" or read as
   open; the default preset of a new node is `allow` so that an agent can start a
   session out of the box.
+  The statement holds only while the sandbox keeps the agent out of the data
+  directory: an agent that could read another session's token or the node key
+  would not need a preset to act outside its sandbox (see
+  [local-ipc](../local-ipc/README.md), "Sandboxes and the rest of the data
+  directory").
+- **A creation accepted under a preset keeps the judgement it was accepted with.**
+  The preset is read once, when the caller judges the control record, and the
+  adapter is called with what that judgement allowed. If the owner narrows the
+  preset, closes it to local sources or removes it before the adapter call, that
+  creation still proceeds as accepted; the next creation is judged by the new
+  preset. The window is the time the adapter takes to reconnect, so it is short,
+  and the alternative, judging again at the adapter call, would make one
+  creation answer to two readings of the owner's configuration and could fail a
+  creation that the sender was already told was in progress.
 - **A local source is told by a control reply, a remote one by a status report.**
   A request refused at intake is refused before its control record is accepted, so
   the sender could only learn of it as a rejected status report that says no more

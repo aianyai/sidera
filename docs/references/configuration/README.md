@@ -482,7 +482,10 @@ version of `instances.json`, for the same reason.
 it, an agent in a sandbox could create a session with a preset that has none and
 start whatever it likes. A boolean would let "forgot to write it" and "wrote
 false" look alike on disk and have a default; the words `allow` and `deny` have
-neither, and a file without one is refused.
+neither, and a file without one is refused. The statement protects only while the
+sandbox does not read the data directory, where the tokens of other sessions and
+the node key are kept (see [local-ipc](../local-ipc/README.md), "Sandboxes and
+the rest of the data directory").
 
 **The version is checked inside the change.** The check and the write must be one
 step; if a caller checked first and wrote after, a change could slip in between.
