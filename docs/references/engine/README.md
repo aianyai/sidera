@@ -1324,6 +1324,11 @@ Known gaps, each filled in with the feature it belongs to:
   that it was released. The signal `session.close` does release it. Where the fact of the
   release is kept for the owner to see, and what is told when it cannot be made, is not
   decided.
+- While an adapter stays unreachable, the native session of a session closed by the signal
+  `session.close` is not released and nobody is alerted: the signal is told `close_unconfirmed`
+  to its sender at the deadline and the endpoint is closed, and nothing asks the adapter again
+  when it returns. Releasing the session after the close, with an alert for the owner while
+  it cannot be released, is not built.
 - A body that is not what the delivery of an initial message says, found when the session
   is already made, loses the message: the delivery is removed with an alert and its sender is
   told by the record the target no longer holds (`lost_at_target`).
