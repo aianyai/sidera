@@ -105,3 +105,15 @@ func TestSystemTimerResetRearmsAndLeavesNoStaleValue(t *testing.T) {
 	}
 	receiveWithin(t, timer.C())
 }
+
+func TestSystemTimerResetAtFiresAtThatTimeAndAPastTimeAtOnce(t *testing.T) {
+	timer := clock.System().NewTimer(time.Hour)
+	if !timer.ResetAt(clock.System().Now().Add(time.Millisecond)) {
+		t.Fatal("ResetAt() = false on an armed timer, want true")
+	}
+	receiveWithin(t, timer.C())
+	if timer.ResetAt(clock.System().Now().Add(-time.Hour)) {
+		t.Fatal("ResetAt() = true after the value was received, want false")
+	}
+	receiveWithin(t, timer.C())
+}

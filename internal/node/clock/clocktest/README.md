@@ -12,6 +12,7 @@ interface it implements.
 | `NewFake(start)`         | A fake clock reading `start`; panics on the zero time. `start` is converted to UTC: a start from `time.UnixMilli` is local time and `NewFake` converts it. |
 | `Fake.Now`               | The current fake time: UTC, no monotonic reading, like `clock.System().Now`.     |
 | `Fake.NewTimer(d)`       | A timer due at `Now()+d`; with `d <= 0` it has fired when the call returns.      |
+| `Timer.ResetAt(t)`       | Re-arms a fake timer to fire when the fake reads `t`; a `t` that is not after `Now()` fires at once. The deadline is absolute, so moving the fake before the call does not delay it. |
 | `Fake.Advance(d)`        | Moves forward by `d >= 0` and fires every timer due at or before the new time.   |
 | `Fake.Set(t)`            | Moves to the absolute time `t`; forward behaves like `Advance`, backward fires nothing and keeps each timer's remaining duration. |
 | `Fake.Timers()`          | The number of armed timers, so a test can wait until a waiter has armed its deadline. |
@@ -39,7 +40,7 @@ interface it implements.
 - **Timer semantics match Go 1.23 timers**: `Stop` and `Reset` return `true` for
   a timer that is armed or whose due value was not received, and discard that
   value; they return `false` once the value was received or the timer was
-  already stopped. `Reset` counts from the current fake time.
+  already stopped. `Reset` counts from the current fake time; `ResetAt` takes the deadline itself.
 - **A fired timer's channel reports `len == 1` and `cap == 1`;** a real Go 1.23+
   timer reports 0 and 0, so code must not use `len(C())`.
 - **Safe for concurrent use**, including `Now` read while another goroutine

@@ -642,11 +642,7 @@ func (e *Engine) armTimer() {
 		e.timer.Stop()
 		return
 	}
-	d := next.Sub(e.d.Clock.Now())
-	if d < 0 {
-		d = 0
-	}
-	e.timer.Reset(d)
+	e.timer.ResetAt(next)
 }
 
 // observe reads the wall clock into the high water mark: a reading far behind it

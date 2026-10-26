@@ -46,7 +46,7 @@ func (f *Fake) NewTimer(d time.Duration) clock.Timer {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	t := &fakeTimer{f: f, c: make(chan time.Time, 1)}
-	f.arm(t, d)
+	f.arm(t, f.now.Add(d))
 	return t
 }
 
@@ -105,7 +105,15 @@ func (t *fakeTimer) Reset(d time.Duration) bool {
 	t.f.mu.Lock()
 	defer t.f.mu.Unlock()
 	pending := t.f.disarm(t)
-	t.f.arm(t, d)
+	t.f.arm(t, t.f.now.Add(d))
+	return pending
+}
+
+func (t *fakeTimer) ResetAt(at time.Time) bool {
+	t.f.mu.Lock()
+	defer t.f.mu.Unlock()
+	pending := t.f.disarm(t)
+	t.f.arm(t, at.UTC())
 	return pending
 }
 
@@ -128,11 +136,11 @@ func (f *Fake) set(t time.Time) {
 	}
 }
 
-// arm starts t's next setting. The caller holds f.mu and t is not armed and its
-// channel is empty.
-func (f *Fake) arm(t *fakeTimer, d time.Duration) {
-	t.deadline = f.now.Add(d)
-	if d <= 0 {
+// arm starts t's next setting, due at deadline. The caller holds f.mu and t is
+// not armed and its channel is empty.
+func (f *Fake) arm(t *fakeTimer, deadline time.Time) {
+	t.deadline = deadline
+	if !deadline.After(f.now) {
 		t.c <- f.now
 		return
 	}

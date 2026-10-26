@@ -473,3 +473,60 @@ func TestFakeAdvanceWakesAWaiterBlockedOnItsTimer(t *testing.T) {
 		t.Fatal("blocked waiter was not woken by Advance")
 	}
 }
+
+func TestFakeResetAtFiresWhenTheClockReadsThatTime(t *testing.T) {
+	f := clocktest.NewFake(start)
+	timer := f.NewTimer(time.Hour)
+	deadline := start.Add(10 * time.Minute)
+	if !timer.ResetAt(deadline) {
+		t.Fatal("ResetAt() = false on an armed timer, want true")
+	}
+	f.Advance(10*time.Minute - time.Second)
+	if fired(timer) {
+		t.Fatal("timer fired before the time it was reset to")
+	}
+	f.Advance(time.Second)
+	if got := value(t, timer); !got.Equal(deadline) {
+		t.Fatalf("value = %v, want the deadline %v", got, deadline)
+	}
+}
+
+// The time given is absolute, so moving the clock before the call does not push
+// the deadline out the way a duration measured earlier would.
+func TestFakeResetAtAfterTheClockMovedPastTheTimeFiresAtOnce(t *testing.T) {
+	f := clocktest.NewFake(start)
+	timer := f.NewTimer(time.Hour)
+	deadline := start.Add(time.Minute)
+	f.Advance(25 * time.Hour)
+	value(t, timer)
+	timer.ResetAt(deadline)
+	if got := f.Timers(); got != 0 {
+		t.Fatalf("Timers() = %d, want 0: a time in the past fires at once", got)
+	}
+	if got := value(t, timer); !got.Equal(f.Now()) {
+		t.Fatalf("value = %v, want the current time %v", got, f.Now())
+	}
+}
+
+func TestFakeResetAtOnAStoppedTimerReturnsFalseAndRearms(t *testing.T) {
+	f := clocktest.NewFake(start)
+	timer := f.NewTimer(time.Minute)
+	timer.Stop()
+	if timer.ResetAt(start.Add(time.Minute)) {
+		t.Fatal("ResetAt() = true on a stopped timer, want false")
+	}
+	f.Advance(time.Minute)
+	value(t, timer)
+}
+
+func TestFakeResetAtBeforeTheFiredValueIsReceivedReturnsTrueAndDiscardsIt(t *testing.T) {
+	f := clocktest.NewFake(start)
+	timer := f.NewTimer(time.Minute)
+	f.Advance(time.Minute) // due, not received
+	if !timer.ResetAt(start.Add(time.Hour)) {
+		t.Fatal("ResetAt() = false for a due value that was not received, want true")
+	}
+	if fired(timer) {
+		t.Fatal("the value of the earlier setting was received after ResetAt")
+	}
+}

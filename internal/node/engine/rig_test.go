@@ -47,19 +47,22 @@ type rig struct {
 	mem    *fsxtest.Mem
 	faulty *fsxtest.Faulty
 	clk    *clocktest.Fake
-	tab    *txn.Table
-	w      *txn.Writer
-	st     *store.Store
-	cfg    *config.Config
-	log    *harness.LogCapture
-	node   ident.NodeID
-	hw     clock.HighWater
-	seed   uint64
-	eng    *engine.Engine
-	params engine.Params
-	admit  adapterreg.Admission
-	paused bool
-	obs    txn.Observer
+	// engineClock, when set, is the clock the engine is given instead of clk: a
+	// wrapper of it that a test uses to move time at a chosen moment.
+	engineClock clock.Clock
+	tab         *txn.Table
+	w           *txn.Writer
+	st          *store.Store
+	cfg         *config.Config
+	log         *harness.LogCapture
+	node        ident.NodeID
+	hw          clock.HighWater
+	seed        uint64
+	eng         *engine.Engine
+	params      engine.Params
+	admit       adapterreg.Admission
+	paused      bool
+	obs         txn.Observer
 	// keys are the node's keys, loaded from its disk, for a rig made withKeys; nil
 	// otherwise, as for an engine that is not told to sign.
 	keys     *nodekeys.Keys
@@ -171,8 +174,12 @@ func (r *rig) mount(disk *fsxtest.Mem) {
 // deps is what the composition root hands the engine on this rig.
 func (r *rig) deps() engine.Deps {
 	r.seed++
+	var clk clock.Clock = r.clk
+	if r.engineClock != nil {
+		clk = r.engineClock
+	}
 	d := engine.Deps{
-		Node: r.node, Clock: r.clk, HighWater: r.hw, RollbackPaused: r.paused,
+		Node: r.node, Clock: clk, HighWater: r.hw, RollbackPaused: r.paused,
 		Writer: r.w, Store: r.st, Config: r.engineConfig(), Rand: harness.RandReader(r.seed),
 		Adapters: r.adapters, Home: r.home, Log: slog.New(r.log), OpenPackage: r.openPackage,
 	}

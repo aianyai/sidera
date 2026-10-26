@@ -31,6 +31,13 @@ clock, which no contract package may. See
   is due but not yet received counts as pending: `Stop` and `Reset` report
   `true` for it. `System()` wraps `time.Timer`; the fake reproduces the same
   results.
+- **A deadline is armed with `ResetAt`, never with `Reset(t.Sub(Now()))`.**
+  `ResetAt(t)` reads the clock and arms the timer in one step, so the time that
+  passes between a reading and the arming cannot stretch the wait. On the real
+  clock that is a delay of microseconds; on the fake it is the distance a test
+  moved the clock in between, which would push the deadline out by that distance
+  and leave the timer silent. A `t` that is not after the clock's reading fires at
+  once. `Reset(d)` is for a wait that is a duration by nature (a backoff).
 - **Deliberately absent: `Sleep`, `AfterFunc`, `Ticker`.** A sleep cannot be
   cancelled; an `AfterFunc` callback runs on an arbitrary goroutine, which
   breaks the single-writer loop; periodic work is an entry in the scheduler,

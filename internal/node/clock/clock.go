@@ -31,6 +31,13 @@ type Timer interface {
 	// Reset re-arms the timer to fire after d and reports whether it was still
 	// pending.
 	Reset(d time.Duration) bool
+	// ResetAt re-arms the timer to fire when the clock reads t, and reports
+	// whether it was still pending, as Reset does. A t that is not after the
+	// clock's reading fires at once. The clock reads the time and arms the
+	// timer in one step: Reset(t.Sub(Now())) would let time pass between the two
+	// calls and stretch the wait by it, which on a clock a test moves is the
+	// whole distance it moved in between.
+	ResetAt(t time.Time) bool
 }
 
 // System is the real clock. Code that needs real time (I/O timeouts, ping,
@@ -51,3 +58,8 @@ type systemTimer struct{ t *time.Timer }
 func (s systemTimer) C() <-chan time.Time        { return s.t.C }
 func (s systemTimer) Stop() bool                 { return s.t.Stop() }
 func (s systemTimer) Reset(d time.Duration) bool { return s.t.Reset(d) }
+
+// ResetAt converts t to a duration at the last moment, as close to the arming as
+// the standard timer allows. t carries no monotonic reading (Now strips it), so
+// the difference is the wall-clock one.
+func (s systemTimer) ResetAt(t time.Time) bool { return s.t.Reset(time.Until(t)) }

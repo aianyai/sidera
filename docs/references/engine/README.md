@@ -43,6 +43,10 @@ injected clock. Entries due together run in the order they were set. A periodic
 task is due one period after `Start` and one period after each run; a clock that
 jumps over several periods runs it once. A task that fails with an error a retry
 may cure runs again after `RetryBackoff` (1 minute); a fatal error stops the loop.
+The timer is armed with the earliest entry's time itself (`Timer.ResetAt`), not with a
+duration measured from an earlier reading: a clock that moves between the reading
+and the arming would otherwise leave the timer waiting for the entry's time plus
+that distance.
 
 **The clock.** Every command and every wake of the timer reads the wall clock once
 and observes it against the high water mark. A reading set back beyond the tolerance
