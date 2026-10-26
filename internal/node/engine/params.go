@@ -49,6 +49,15 @@ type Params struct {
 	// adapter is made again after one that failed or was answered as
 	// indeterminate, on the injected clock.
 	CreateRetryBackoff time.Duration
+	// ControlReplyDeadline is how long a close or an interrupt has, from the moment
+	// the node accepted the signal, to be carried out by the adapter: a call that
+	// failed or got no answer is made again until then, and then the sender is told
+	// the outcome could not be confirmed.
+	ControlReplyDeadline time.Duration
+	// InterruptConfirmWait is how long the node waits for the end of the turn after
+	// the adapter said it asked the runtime to stop it, before it tells the sender
+	// that the interrupt was requested and not confirmed.
+	InterruptConfirmWait time.Duration
 	// Feedback are the merge window and the rate cap of the notices the node tells
 	// its endpoints; delivery.FeedbackParams says what each is for.
 	Feedback delivery.FeedbackParams
@@ -106,6 +115,12 @@ func (p Params) withDefaults() Params {
 	}
 	if p.CreateRetryBackoff <= 0 {
 		p.CreateRetryBackoff = d.CreateRetryBackoff
+	}
+	if p.ControlReplyDeadline <= 0 {
+		p.ControlReplyDeadline = d.ControlReplyDeadline
+	}
+	if p.InterruptConfirmWait <= 0 {
+		p.InterruptConfirmWait = d.InterruptConfirmWait
 	}
 	if p.Feedback.MergeWindow <= 0 {
 		p.Feedback.MergeWindow = d.Feedback.MergeWindow
