@@ -131,11 +131,15 @@ func (e *Engine) give(w outWork) {
 // outboundParked says that the worker has nothing to do but wait out a delay the
 // transport was asked to make: that is not work, and the engine is quiet.
 func (e *Engine) outboundParked() bool {
+	return e.outboundActive() && e.tr != nil && e.tr.Waiting() > 0
+}
+
+// outboundActive says that the worker goroutine is running, whether it works or waits.
+func (e *Engine) outboundActive() bool {
 	b := e.outbox
 	b.mu.Lock()
-	active := b.active
-	b.mu.Unlock()
-	return active && e.tr != nil && e.tr.Waiting() > 0
+	defer b.mu.Unlock()
+	return b.active
 }
 
 // pumpOutbox is the worker: it makes the calls one after another and hands each

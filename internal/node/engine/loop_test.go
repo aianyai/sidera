@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,8 @@ import (
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -316,6 +319,27 @@ func TestQuiesceWaitsForTheWorkersTheEngineOwns(t *testing.T) {
 	}
 	close(block)
 	settle(t, e)
+}
+
+// The outbound worker is not work while it waits out a delay of the transport, and
+// a Quiesce that looked a moment before the worker began to wait is not left to wait
+// for ever: the count of waiting calls moves without the engine being told, so the
+// next look is not left to the engine's activity. One processor makes the worker
+// start only after that look, which is the order that left Quiesce stuck.
+func TestQuiesceSeesTheWorkerBeginToWaitOutADelayAfterItLookedAtTheWorkerRunning(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	const delay = time.Hour
+	for i := 0; i < 5; i++ {
+		h.Delay(delay)
+		send(t, h, "a", "b", "its call waits for the clock")
+		if err := h.Quiesce(scenario.WithTimeout(10 * time.Second)); err != nil {
+			t.Fatalf("round %d: the node did not settle while its worker waits out a delay: %v", i, err)
+		}
+		h.Delay(0)
+		h.Advance(delay)
+		quiet(t, h)
+	}
 }
 
 // A worker the engine owns ends when the engine stops, whatever it waits for, and

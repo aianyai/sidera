@@ -470,10 +470,16 @@ type Report struct {
 }
 
 // quiesceAnswer is a Report and, for the error of a Quiesce that gives up, what
-// each pending adapter lacks.
+// each pending adapter lacks, and whether the next look must not wait for the
+// engine's activity alone.
 type quiesceAnswer struct {
 	report  Report
 	pending []string
+	// poll is set while the outbound worker runs and is not yet seen to wait out a
+	// delay: the transport counts a call that starts to wait without telling the
+	// engine, so a probe that came a moment before it would otherwise never be
+	// followed by another.
+	poll bool
 }
 
 type cmdQuiesce struct {
@@ -488,7 +494,8 @@ func (c *cmdQuiesce) run(e *Engine, now time.Time) {
 		InboxLen: len(e.inbox), Continuations: len(e.cont), DueEntries: e.sched.dueCount(now),
 		Parked: len(e.parked), Workers: int(e.workers.Load()),
 	}
-	if e.outboundParked() && r.Workers > 0 {
+	parked := e.outboundParked()
+	if parked && r.Workers > 0 {
 		r.Workers-- // the worker waits out a delay; that is not work
 	}
 	// The counts of the host are read in this command, after the others, so that
@@ -501,13 +508,14 @@ func (c *cmdQuiesce) run(e *Engine, now time.Time) {
 	}
 	r.AdaptersPending = len(pending)
 	r.Satisfied = r.InboxLen == 0 && r.Continuations == 0 && r.DueEntries == 0 && r.Parked == 0 && r.Workers == 0 && r.AdaptersPending == 0
-	c.done(quiesceAnswer{report: r, pending: pending}, nil)
+	c.done(quiesceAnswer{report: r, pending: pending, poll: e.outboundActive() && !parked}, nil)
 }
 
-// adapterPoll is how often, on the real clock, Quiesce looks again while an adapter
-// does not hold: the host's counts move without the engine being told, and nothing
+// quiescePoll is how often, on the real clock, Quiesce looks again while an adapter
+// does not hold or the outbound worker may be about to wait out a delay: the host's
+// counts and the transport's count move without the engine being told, and nothing
 // else would wake the loop to look at them.
-const adapterPoll = 2 * time.Millisecond
+const quiescePoll = 2 * time.Millisecond
 
 // Quiesce returns when the engine has nothing left to do at the time of its
 // clock: no command waits, the loop has none queued for itself or held for the
@@ -529,7 +537,7 @@ func (e *Engine) Quiesce(ctx context.Context, x Expect) (Report, error) {
 			if last = a; a.report.Satisfied {
 				return a.report, nil
 			}
-			err = e.awaitChange(ctx, a.report.AdaptersPending > 0)
+			err = e.awaitChange(ctx, a.report.AdaptersPending > 0 || a.poll)
 		}
 		if err != nil {
 			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
@@ -541,11 +549,13 @@ func (e *Engine) Quiesce(ctx context.Context, x Expect) (Report, error) {
 }
 
 // awaitChange waits for something that may have changed what Quiesce found: the
-// engine's own activity, and with poll also a short time on the real clock.
+// engine's own activity, and with poll also a short time on the real clock (the
+// adapter host's counts and the transport's count of waiting calls move without
+// the engine being told).
 func (e *Engine) awaitChange(ctx context.Context, poll bool) error {
 	var tick <-chan time.Time
 	if poll {
-		t := clock.System().NewTimer(adapterPoll)
+		t := clock.System().NewTimer(quiescePoll)
 		defer t.Stop()
 		tick = t.C()
 	}

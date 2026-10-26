@@ -732,7 +732,11 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
 - **`Quiesce` polls the host's counts on the real clock while an adapter does not
   hold.** The host's counters move when the adapter or the host does, not when the
   engine does; the engine's own activity alone would not wake a waiter that looked
-  a moment too early.
+  a moment too early. It polls the same way while the outbound worker runs and has
+  not been seen to wait out a delay: the transport's count of waiting calls also
+  moves without the engine being told, so a look that came before the worker's call
+  began to wait would otherwise be the last one, and the test would wait for the
+  limit of its real clock.
 - **The cap counts creating endpoints too.** A session endpoint being created has a
   record, a token and a place in the node's declaration as soon as it is committed;
   leaving it out would let a node pass the cap during a creation.
@@ -875,6 +879,7 @@ reproducible).
 | Notifications about unknown endpoints write nothing; the busy state at start | `adapters.go` (`notified`, `markStarted`) | `TestNotificationsAboutUnknownEndpointsAreAcceptedAndSetNothingOnDisk`, `TestAdapterStartedTakesTheBusyStateOfTheSessionsItKnowsAndIgnoresTheRest`, `TestANewConnectionStartsFromWhatItReportsAndNotFromTheOneBefore` |
 | A checkpoint is on disk before it is answered | `adapters.go` (`checkpointPut`) | `TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt`, `TestCheckpointPutRecoversFromACrashAtEveryPoint` |
 | `Quiesce` judges the host's counts | `recovery.go` | `TestQuiesceJudgesTheAdapterHostsCounts` |
+| `Quiesce` sees the outbound worker begin to wait out a delay after it looked at the worker running | `recovery.go` | `TestQuiesceSeesTheWorkerBeginToWaitOutADelayAfterItLookedAtTheWorkerRunning` |
 | The result of a close is stored with it | `endpoints.go` (`closeEndpoint`), `manage.go` (`CloseEndpointOp`), `view.go` (`results`) | `TestCloseStoresTheResultOfTheOperationWithTheHeadRecord`, `TestTheStoredResultSaysWhatTheCloseDidForEveryKindOfEndpoint` |
 | One identifier has one result, for every operation and every place a result is kept | `manage.go` (`Execute`, `execute`, `addConfigResults`), `recovery.go` (`Open`) | `TestAResendReturnsTheStoredResultAndAReusedIdentifierIsRefused`, `TestConcurrentResendsOfOneRequestRunOnce`, `TestARefusedRequestStoresNothingAndTheIdentifierStaysFree`, `TestAVersionedChangeIsAppliedOnceAndAStaleOneNeverIsApplied` |
 | A crash at any point of an operation leaves nothing, the effect alone or both, never the result alone; a resend is carried out again or answered from the result | `manage.go`, `endpoints.go` (`closeWithResult`) | `TestAnAdministrativeOperationRecoversFromACrashAtEveryPoint` |
