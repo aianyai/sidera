@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/testkit/fakectl"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 // RemoteController is the script's hold on runtime processes: it finds the process
@@ -66,8 +67,10 @@ func (c RemoteController) EndTurn(ref, final string) error {
 }
 
 // KillNative ends the runtime process of the session. The process ends its
-// connection rather than answer, so a connection that ended after the request
-// counts as the answer.
+// connection rather than answer, so a call that ended because the connection did
+// counts as the answer. The call's own error says so; the connection's done
+// channel does not, because it is closed a moment after the pending calls are
+// ended.
 func (c RemoteController) KillNative(ref string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), reach)
 	defer cancel()
@@ -75,13 +78,10 @@ func (c RemoteController) KillNative(ref string) error {
 	if err != nil {
 		return err
 	}
-	err = remoteError(conn.Knob(ctx, KnobKill, nil, nil))
-	select {
-	case <-conn.Done():
-		return nil
-	default:
+	if err := conn.Knob(ctx, KnobKill, nil, nil); !errors.Is(err, peer.ErrClosed) {
+		return remoteError(err)
 	}
-	return err
+	return nil
 }
 
 // SetFirstTurn sets the plan of the first turn of the sessions that the adapters
