@@ -463,27 +463,6 @@ func TestEndpointStatusIsAnsweredByTheDaemon(t *testing.T) {
 	}
 }
 
-// A control signal the node cannot take in has no record: a creation aimed at an
-// endpoint that is no runtime is refused, and nothing is allocated or called.
-func TestSessionCreateAtAnEndpointThatIsNoRuntimeLeavesNoRecord(t *testing.T) {
-	h := sessionNode(t, harness.Options{}, "a", "b")
-	res, err := h.Agent("a").Control(h.Ctx(), fakeagent.ControlInput{To: h.Addr("b"), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
-	if err != nil {
-		t.Fatalf("the signal is accepted by its sender's node: %v", err)
-	}
-	quiet(t, h)
-	if ctl := ctlRecords(t, h); len(ctl) != 0 {
-		t.Errorf("%d control records for a signal the target cannot take in, want none", len(ctl))
-	}
-	if d := sourceDelivery(t, h, res.MessageID); d.State != delivery.StateQueued {
-		t.Errorf("the sender's record is %s, want queued: it was given no receipt and sends again until its deadline", d.State)
-	}
-	nothingWasMade(t, h)
-	if eps := sessionEndpoints(t, h); len(eps) != 0 {
-		t.Errorf("%d session endpoints, want none", len(eps))
-	}
-}
-
 // Only the signals the node executes are offered, and one that carries parameters
 // it does not take is refused for the field.
 func TestControlRequestsAreChecked(t *testing.T) {

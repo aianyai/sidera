@@ -391,11 +391,14 @@ methods to this list.
 - **A control signal is sent as a message is.** Its source record is sent and asked about by
   the same worker, and the control reply the receipt or the answer to a pull carries is applied
   first, by the envelope package's one rule, and written in the transaction `control-reply`.
-- **A control signal is taken in by one order, and one that cannot be has no record.** A
-  repeat is answered from the record, an unusable endpoint or an unallowed signal gets no
-  receipt (a control record is never rejected), and what the node answers itself (a status, a
-  creation it refuses for the preset or the adapter) is answered in the transaction that accepts
-  the signal.
+- **A control signal is taken in by one order, and one that cannot be is rejected.** A
+  repeat is answered from the record, an unusable endpoint or an unallowed signal gets a
+  control record born rejected with the reason and a receipt that carries its report and no
+  control reply (`delivery.NewRejectedTargetControlRecord`; an accepted record is never
+  rejected afterwards), and what the node answers itself (a status, a creation it refuses for
+  the preset or the adapter) is answered in the transaction that accepts the signal. A
+  creation that would exceed the node's endpoint limit is still refused with a call error and
+  no record: no reason of a failed creation says it (see the reference).
 - **A creation's intent is on disk before the adapter is called, and is settled in one
   transaction.** The call is made again with the same attempt until the reply deadline; then
   the creation is unconfirmed, its endpoint is closed and the owner is alerted. The reply of a

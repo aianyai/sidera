@@ -27,14 +27,12 @@ import (
 //     identifier is a conflict that changes nothing.
 //  2. The endpoint must exist and be open, and the signal must be allowed (the
 //     declarations of the endpoint, and for a source that is not on this node the
-//     rules of the node) and in time. A signal that fails here has no record: a
-//     control record is never rejected (delivery.Record.Valid), because accepting
-//     one hands it to be executed. It gets no receipt, and its sender takes the
-//     refusal for a send that got no answer: it is told after about two minutes that
-//     the target is unreachable (cause network, although the target is this node)
-//     and at about 12.5 minutes that the delivery could not be confirmed. That is a
-//     known gap: the delivery contract has to let the target write a rejected
-//     control record before the sender can be told the refusal.
+//     rules of the node) and in time. A signal that fails here is refused: its
+//     control record is written rejected, with the reason, and holds nothing of an
+//     execution, and the receipt carries its report and no control reply. That is
+//     the one way a control record is rejected (delivery.NewRejectedTargetControlRecord):
+//     accepting one hands it to be executed, so an accepted record is never rejected
+//     afterwards. A repeat is answered from that record like any other.
 //  3. The signal is accepted. What the node answers itself is answered in the same
 //     transaction as the acceptance: endpoint.status from what the engine knows,
 //     and a creation it refuses before it calls the adapter (the preset is not
@@ -60,9 +58,12 @@ func (e *Engine) takeInControl(now time.Time, env envelope.Envelope, from transp
 	if _, ok := e.view.in[key]; ok {
 		return transport.Receipt{}, refuse(ReasonMessageConflict) // the identifier is a message's
 	}
-	st, err := e.controlTarget(now, env, from, sender, key.Recipient)
+	st, refusal, err := e.controlTarget(now, env, from, sender, key.Recipient)
 	if err != nil {
 		return transport.Receipt{}, err
+	}
+	if refusal != delivery.RejectNone {
+		return e.refuseControl(now, env, key, digest, refusal)
 	}
 	c := newCtlRecord(now, env, key, digest, e.d.Config.EndpointSettings(st.rec.Instance, st.rec.ID).MaxQueue)
 	switch env.Kind {
@@ -83,26 +84,27 @@ func (e *Engine) takeInControl(now time.Time, env envelope.Envelope, from transp
 
 // controlTarget is the endpoint a control signal is for, when the signal may be
 // taken in (see the order above): it exists, is open, allows the sender and is in
-// time. The reasons it is not are errors the node refuses the call with, not
-// records.
-func (e *Engine) controlTarget(now time.Time, env envelope.Envelope, from transport.Origin, sender, recipient ident.EndpointID) (*endpointState, error) {
+// time. When it may not, the endpoint is nil and the reason is the one the sender
+// is told (delivery.RejectNone when the signal may be taken in). An error is a
+// failure of the node itself, not a refusal of the signal.
+func (e *Engine) controlTarget(now time.Time, env envelope.Envelope, from transport.Origin, sender, recipient ident.EndpointID) (*endpointState, delivery.RejectReason, error) {
 	st := e.view.endpoints[recipient]
 	if reason := controlRefusal(st); reason != delivery.RejectNone {
-		return nil, controlRefused(reason)
+		return nil, reason, nil
 	}
 	target := authz.Target{Kind: st.rec.Kind.TargetKind(), Endpoint: recipient}
 	auth := delivery.IntakeAuthorization(e.judgeRequest(now, env, from, sender, target, st.decl, false))
 	verdict, err := delivery.Intake(now, env.AcceptBefore, authz.TrafficControlSignal, auth, delivery.Backlog{})
 	if err != nil {
-		return nil, fmt.Errorf("engine: intake of %s: %w", env.ID, err)
+		return nil, delivery.RejectNone, fmt.Errorf("engine: intake of %s: %w", env.ID, err)
 	}
 	switch verdict.Outcome {
 	case delivery.IntakeAccept:
-		return st, nil
+		return st, delivery.RejectNone, nil
 	case delivery.IntakeReject:
-		return nil, controlRefused(verdict.Reject)
+		return nil, verdict.Reject, nil
 	}
-	return nil, fmt.Errorf("engine: intake of %s: a suspended request has no answer here", env.ID)
+	return nil, delivery.RejectNone, fmt.Errorf("engine: intake of %s: a suspended request has no answer here", env.ID)
 }
 
 // controlRefusal says why an endpoint cannot be given a control signal, or
@@ -120,10 +122,26 @@ func controlRefusal(st *endpointState) delivery.RejectReason {
 	return delivery.RejectNone
 }
 
-// controlRefused is the refusal of a control signal that has no record: the call
-// has no receipt, and says why in words that name the delivery rule's reason.
-func controlRefused(reason delivery.RejectReason) error {
-	return invalidArgument("to", fmt.Errorf("the control signal is refused: %s", reason))
+// refuseControl writes the record of a control signal the target refuses and answers
+// with its report. The record holds the refusal alone: the signal was never accepted,
+// so there is no reply, no endpoint it made and no intent, and the queue time of the
+// endpoint, which only a creation's first message uses, is not asked of an endpoint
+// that may not be there.
+func (e *Engine) refuseControl(now time.Time, env envelope.Envelope, key store.TargetKey, digest delivery.BodyDigest, reason delivery.RejectReason) (transport.Receipt, error) {
+	rec, err := delivery.NewRejectedTargetControlRecord(now, env.AcceptBefore, env.ReportBy, reason)
+	if err != nil {
+		return transport.Receipt{}, fmt.Errorf("engine: refusing the control signal %s: %w", env.ID, err)
+	}
+	c := store.CtlRecord{
+		Key: key, Record: rec,
+		Dedup: delivery.NewDedupRecord(delivery.DedupKey{SenderNode: key.SenderNode, Message: env.ID, Recipient: key.Recipient}, digest, env.ReportBy),
+		Kind:  env.Kind, Preset: env.Preset, AcceptedAt: now, SentAt: env.SentAt,
+	}
+	if err := e.d.Store.ControlIntake(nil, nil, c); err != nil {
+		return transport.Receipt{}, err
+	}
+	e.view.setCtl(c)
+	return e.controlReceipt(now, c)
 }
 
 // newCtlRecord is the record of a control signal at the moment it is accepted.
@@ -267,6 +285,10 @@ func (e *Engine) takeInCreate(now time.Time, env envelope.Envelope, from transpo
 		return e.answerControl(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionCreate, Create: createResultOf(adapterreg.DaemonCreateFailure(reason))})
 	}
 	if e.view.OpenEndpoints() >= publication.MaxEndpointsPerNode {
+		// The signal is acceptable and no session is made, which the reply of a failed
+		// creation could say, but none of its reasons does: they name the preset, the
+		// adapter and the native runtime. Until the protocol has one, the call is
+		// refused and nothing is recorded.
 		return &Refusal{Reason: ReasonEndpointLimit, Limit: LimitNode}
 	}
 	ep, err := e.newSessionEndpoint(st, c)

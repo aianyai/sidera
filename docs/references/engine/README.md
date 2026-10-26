@@ -644,11 +644,15 @@ The target takes a control signal in by one order. A repeat is answered from the
 node holds, with its report and its control reply when it has one, and another body under the
 identifier is a conflict that changes nothing. The endpoint must exist and be open, the
 signal allowed (the declarations of the endpoint, and for a source elsewhere the rules of the
-node) and in time. A signal that fails there gets no record and no receipt, because a control
-record is never rejected (see below): the sender's send fails and is sent again like a send that got
-no answer, so the sender is told, after about two minutes, that the target was unreachable with the
-cause `network`, although the target is the node that refused it, and at about 12.5 minutes, when its
-delivery closes with nothing learned, with `expired_unconfirmed` (known gap, below). Then the signal is accepted, and what the node
+node) and in time. A signal that fails there is refused, and the refusal is answered at once:
+the target writes its control record `rejected` with the reason (`delivery.NewRejectedTargetControlRecord`,
+in `control-intake`, holding nothing of an execution) and the receipt carries its report and no
+control reply, so the sender's delivery is `rejected` with the reason and the sender is told
+once, in the notice of a rejection (see below). The reasons are those of the intake: an
+endpoint that is not there (`endpoint_missing`), that was closed (`endpoint_closed`), a
+request the policy cannot make (`malformed`: a creation aimed at an endpoint that stands for no
+runtime), a source elsewhere that the rules of the node refuse (`unauthorized`), a deadline
+out of range. A repeat is answered from that record. Then the signal is accepted, and what the node
 answers itself is answered in the same transaction, `control-intake`: `endpoint.status` from
 what the engine has observed (the activity of the endpoint, the messages waiting, the
 conditions `adapterreg.StatusConditions` gives, and for a runtime endpoint which presets can be
@@ -937,15 +941,19 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   `TestViewMatchesAFreshScanAfterWrites` compares the view with a fresh scan after
   writes made in several chunks, so a view that drifted from the disk fails there.
   The recovery rules keep no view (it is built from the last scan).
-- **An accepted control signal is never rejected.** Closing a control record of a
-  closed endpoint is what the delivery rules say: `delivery_unknown`. For the same reason a
-  control signal the target cannot take in at all (the endpoint is not there, is closed or is
-  no runtime, or the node's rules refuse the sender) has no record: the delivery contract has
-  no rejected control record, so it gets no receipt. Its sender takes the refusal for a send that
-  got no answer and is told, as such, that the target is unreachable (cause `network`) after about
-  two minutes and `expired_unconfirmed` after about 12.5, which is wrong about the cause and slow
-  (known gap, below). A creation the node refuses for what it knows (preset,
-  adapter) is the other case, and is answered, since the signal was accepted.
+- **An accepted control signal is never rejected afterwards, and a refused one is rejected
+  from the start.** Closing a control record of a closed endpoint is what the delivery rules
+  say: `delivery_unknown`, because the adapter may have executed it. A control signal the target
+  cannot take in at all (the endpoint is not there, is closed or is no runtime, or the node's
+  rules refuse the sender) was certainly not executed, so its record is born `rejected` and the
+  sender hears the reason with the first answer. Writing nothing and giving no receipt
+  would make the sender read a refusal as a send that got no answer: after about two minutes a notice
+  that the target is unreachable with the cause `network`, although the target is the node that
+  refused it, and after about 12.5 minutes `expired_unconfirmed`, which says the signal may have
+  been received. The declarations of an endpoint do not refuse a control signal (they govern
+  messages), so the owner can always reach an endpoint that takes nothing. A creation the node
+  refuses for what it knows (preset, adapter) is the other case, and is answered with a control
+  reply, since the signal was accepted.
 - **A creation refused for an adapter that is not connected is answered at once.** Keeping the
   signal until the adapter returns would make the sender wait for a reply that the next restart
   may not bring; the reply `adapter_offline` is the protocol's, and the agent that wants a
@@ -1062,7 +1070,8 @@ reproducible).
 | The records of time survive a crash at every step | `tick` (declared by the store) | `TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint` |
 | A damaged file is settled by the scan entry first of the rules; a source record becomes the sender's lost record, a file lost unread a notice of its loss, a target record is removed; each tells the sender once and raises one alert | `quarantine.go` (`quarantineAll`, `settleFile`, `lostOut`), `recovery.go` | `TestCorruptDeliveryRecordIsReportedToTheSenderOnce`, `TestOpenQuarantinesADamagedFileAndOpens`, `TestQuarantineRecoversFromACrashAtEveryPoint` |
 | A damaged control record is settled with the others, closes the endpoints it was creating, and is a record the node no longer holds | `quarantine.go` (`quarantineAll`, `damagedCtlAlert`) | `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`, `TestControlRecordLostBeforeItsReplyIsTold` |
-| A control signal is sent by the worker, taken in by one order, and answered with its report and reply | `control.go`, `intake_control.go`, `inbound.go`, `outbound.go` | `TestSessionCreateMakesAnEndpointAndTellsItsSender`, `TestControlRequestsAreChecked`, `TestControlSignalIsRefusedWhenTheNodeQueueIsFull`, `TestSessionCreateAtAnEndpointThatIsNoRuntimeLeavesNoRecord`, `FuzzInbound` |
+| A control signal is sent by the worker, taken in by one order, and answered with its report and reply | `control.go`, `intake_control.go`, `inbound.go`, `outbound.go` | `TestSessionCreateMakesAnEndpointAndTellsItsSender`, `TestControlRequestsAreChecked`, `TestControlSignalIsRefusedWhenTheNodeQueueIsFull`, `FuzzInbound` |
+| A control signal the target refuses at intake is rejected at once with its reason, answered from its record when repeated or asked about, kept like a finished control record, and survives a crash at every write | `intake_control.go` (`controlTarget`, `refuseControl`), `inbound.go` (`answerPull`) | `TestAControlSignalTheTargetRefusesAtIntakeIsRejectedAtOnceWithItsReason`, `TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected`, `TestARefusedControlSignalIsAnsweredFromItsRecordWhenItIsRepeated`, `TestARefusedControlSignalIsKeptWhileASenderCanAskAndSweptAfter`, `TestARefusedControlSignalRecoversFromACrashAtEveryPoint` |
 | A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline` |
 | What the adapter refuses is told, the endpoint is closed and no session is made | `create.go` (`createResult`, `settleCreate`) | `TestSessionCreateWithParamsBeyondPresetIsRefused`, `TestSessionCreateFailedAsControlUnknownAlertsTheOwner` |
 | A native session made and an adapter lost are one session | `create.go` (`startCreate`, `redriveCreates`, `recoverReconcile`) | `TestAdapterKilledAfterNativeCreateYieldsOneSession`, `TestCreationCutOffByACrashIsGoneOnWithOneSession` |
@@ -1103,13 +1112,12 @@ Known gaps, each filled in with the feature it belongs to:
   session, the closing and the interrupting of a session and the execution of those signals
   come with the second half of control signals. A creation that names a body is refused for
   the field.
-- A control signal that cannot be taken in (an endpoint that is not there, or no runtime) has
-  no record and no receipt (see above). Its sender reads the refusal as a failed send: after about
-  two minutes it gets a notice that the target is unreachable with the cause `network`, although
-  the target is the node that refused it, and at about 12.5 minutes the delivery closes with
-  `expired_unconfirmed`. A following change of the delivery contract lets the target write a
-  rejected control record instead, so that the sender learns the refusal and its reason from the
-  first answer.
+- A creation that would make the node hold more endpoints than a node may have is refused
+  with a call error and no record, so its sender reads the refusal as a failed send (the
+  unreachable notice after about two minutes, `expired_unconfirmed` after about 12.5). The signal
+  was accepted and no session was made, which is what the reply of a failed creation says, but
+  none of its reasons fits (they name the preset, the adapter and the native runtime), and a new
+  reason is a change of the protocol.
 - Phase 11 of `RecoverDelivery` settles the creations that were not settled; what else it owns
   waits for the prompts. A prompt and a block have no replay: the store writes their target
   records first and the head last, and phase 11 and the prompt logic redo what the head does
