@@ -73,6 +73,13 @@ engine applies the delivery rules and calls the writes.
   writes the head: a call with only some of them would mark the rest as done. A
   target record whose recipient is not the head's endpoint is refused before
   anything is written.
+- **A control record refused at intake holds the refusal alone.** `ControlIntake`
+  takes a control record in the state `rejected` (a signal the target refused when it
+  arrived; the reasons it may carry are the delivery package's) only with no reply,
+  execution result, body, session endpoint, creation intent or closed session, and
+  with no endpoint beside it. The record is final and kept like any finished control
+  record, so a resend gets the same report. `checkRefusedCtl` is the one statement of
+  that shape, for what is written and what is read.
 - **A session endpoint is prepared for the creation its control record holds.**
   `ControlIntake` refuses an endpoint that the record's intent does not name, and
   `OrphanEndpoints` names a creating endpoint whose control record holds no

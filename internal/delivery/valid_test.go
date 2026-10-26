@@ -123,8 +123,15 @@ var (
 	baseTgtRejected = validBase{"target rejected", func(t *testing.T) Record {
 		return applyAll(t, targetRecord(t, t0, 30*time.Minute), at(time.Minute), Event{Type: EventRejected, Reject: RejectEndpointClosed})
 	}}
-	baseControlRecord = validBase{"control accepted", func(t *testing.T) Record { return controlRecord() }}
-	baseLostSource    = validBase{"lost source record", func(t *testing.T) Record { return newLostRecord(t) }}
+	baseControlRecord  = validBase{"control accepted", func(t *testing.T) Record { return controlRecord() }}
+	baseControlRefused = validBase{"control refused at intake", func(t *testing.T) Record {
+		r, err := NewRejectedTargetControlRecord(t0, controlAcceptBefore, controlReportBy, RejectEndpointClosed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}}
+	baseLostSource = validBase{"lost source record", func(t *testing.T) Record { return newLostRecord(t) }}
 )
 
 func newLostRecord(t *testing.T) Record {
@@ -156,7 +163,9 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		// state fits the kind of record
 		{"a target is never queued", baseTgt, func(r *Record) { r.State = StateQueued }, ViolationState},
 		{"a target is never expired_unconfirmed", baseTgt, func(r *Record) { r.State = StateExpiredUnconfirmed }, ViolationState},
-		{"a control record is never rejected", baseControlRecord, func(r *Record) { r.State, r.Reject = StateRejected, RejectTooLarge }, ViolationState},
+		{"a control record is rejected only for a reason of its intake", baseControlRecord, func(r *Record) { r.State, r.Reject = StateRejected, RejectBacklogExpired }, ViolationState},
+		{"a refused control record has an intake reason", baseControlRefused, func(r *Record) { r.Reject = RejectSecondCheckFailed }, ViolationState},
+		{"a refused control record has a reason", baseControlRefused, func(r *Record) { r.Reject = RejectNone }, ViolationState},
 		{"the state is unset", baseQueued, func(r *Record) { r.State = StateInvalid }, ViolationState},
 		{"the state is unknown", baseQueued, func(r *Record) { r.State = 99 }, ViolationState},
 		// rejection reason
@@ -297,7 +306,7 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 }
 
 func TestRecordValidAcceptsFreshRecords(t *testing.T) {
-	for _, b := range []validBase{baseQueued, baseTgt, baseControlRecord} {
+	for _, b := range []validBase{baseQueued, baseTgt, baseControlRecord, baseControlRefused} {
 		if err := b.build(t).Valid(); err != nil {
 			t.Errorf("%s: %v", b.name, err)
 		}

@@ -18,7 +18,7 @@ signals on the target). This document describes the committed code of `internal/
 | `queued` | The sender's node has recorded the message. Sender view only. | no |
 | `accepted` | The target authorized, deduplicated and stored it. On the target this covers waiting in the queue and being leased. | no |
 | `delivered` | The whole body reached the agent and was acknowledged; for a control signal, its reply was committed. | yes |
-| `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range, backlog full). On the target only for a body that was never handed out. | yes |
+| `rejected` | The target refused it, with a reason (unauthorized, endpoint missing or closed, endpoint declined, too large, expired, backlog expired, second authorization check failed, malformed, deadline out of range, backlog full). On the target only for a body that was never handed out, or for a control signal refused at intake (never for an accepted one). | yes |
 | `expired_unconfirmed` | The deadline passed and an active query found no receipt. The target may have the message. | no, correctable |
 | `delivery_unknown` | Whether the delivery reached the agent cannot be told, for the cause in `Record.Unknown`. `handed_over`: the body was handed out and whether the agent saw it cannot be told; for a control signal, it was accepted for execution and its reply was never committed. `lost_at_sender`: the sender's node lost its record of the delivery to storage corruption, so nothing is known. `lost_at_target`: the target answered a pull of an accepted delivery by saying it holds no record of it. On the target, `delivery_unknown` is reached only by a delivery that was handed over (a body handed out at least once, or any accepted control signal): a target never holds a loss. On the source it has one of three causes, each with one way in: `handed_over`, from a target's report; `lost_at_target`, by `EventNoRecordAtTarget` on an accepted delivery before its `report_by`; `lost_at_sender`, only by `NewLostRecord`. | no, correctable |
 | `closed_unconfirmed` | `report_by` passed while the delivery was open. | yes; the sender is told once when the delivery closes while `queued` or `accepted` (see Closing at `report_by`), and nothing when it closes from a state it was already told about |
@@ -269,7 +269,8 @@ was never handed out, `delivery_unknown` if it was.
 A control signal is executed by the runtime's adapter, not handed to an agent by
 `recv`, and its reply is committed together with the execution result. Its
 target record is built by `NewTargetControlRecord(acceptedAt, acceptBefore, reportBy)` and
-differs from a message record in four ways:
+differs from a message record in four ways (a signal refused at intake is the fifth
+case, below):
 
 - It is never queued for `recv`: `Handout` and `Ack` refuse it (`ErrWrongSide`),
   `Renew` finds no lease, a prompt (`EventNotified`) and a block
@@ -289,6 +290,21 @@ differs from a message record in four ways:
   `delivered` once the reply is committed, or `delivery_unknown` after
   settlement.
 
+A control signal the target refuses when it arrives (the endpoint is not there,
+is closed or is no runtime, the rules of the node refuse a source elsewhere, the
+deadline is out of range) has a record of its own kind, built by
+`NewRejectedTargetControlRecord(rejectedAt, acceptBefore, reportBy, reason)`: born
+`rejected`, final, with `StateAt` the time of the refusal. The reason must be one
+a control intake gives (`RejectReason.AtControlIntake`), otherwise the constructor
+refuses it with `ErrInvalidInput`; `Valid` holds a rejected control record to the
+same set. The set allows `endpoint_declined`, but the declarations of an endpoint
+do not refuse a control signal today, so no intake gives it. The record was never accepted, so it was never handed over: `Tick` and
+every later fact leave it alone (a repeated rejection or `EventDeliveryUnknown` is
+ignored, a committed reply is `ErrIllegalTransition`). Its status report is
+`rejected` with the reason, which the sender applies with the ordinary rule: the
+delivery is `rejected` and the one `rejected` notice, with the reason, is given.
+No control reply goes with it.
+
 The sender applies the signed reply with the existing `EventDelivered`; nothing
 on the source side changes. A `delivered` status report of the control signal
 does not end the sender's record: the reply carries the result and the session
@@ -298,7 +314,7 @@ endpoint, so the sender keeps pulling until it has the reply (see
 ### Validity of a restored record
 
 Every record that the constructors (`NewSourceRecord`, `NewTargetRecord`,
-`NewTargetNoticeRecord`, `NewTargetControlRecord`) and the transitions (`Apply`, `Tick`, `Handout`,
+`NewTargetNoticeRecord`, `NewTargetControlRecord`, `NewRejectedTargetControlRecord`) and the transitions (`Apply`, `Tick`, `Handout`,
 `Renew`, `Ack`) produce is accepted by `Record.Valid`, under the caller
 guarantees of the package README, and every invariant listed there is refused;
 the accepted set is not claimed to equal the reachable set, and only for the
@@ -350,7 +366,7 @@ blocked notice.
 `Record.StateAt` is the moment the record entered its current state: the time the
 constructor was given (`NewSourceRecord(queuedAt, ...)`,
 `NewTargetRecord`, `NewTargetNoticeRecord` and `NewTargetControlRecord` take the
-acceptance time, `NewLostRecord` the discovery time), then the `now` of the
+acceptance time, `NewRejectedTargetControlRecord` the time of the refusal, `NewLostRecord` the discovery time), then the `now` of the
 transition that last changed `State`. `change` is the only writer, so `Apply`,
 `Tick`, a second-check denial in `Handout`, `Ack` and the forcible close all stamp
 the state they enter with their own clock, and a fact that leaves the state alone
@@ -721,6 +737,20 @@ permission still reads it.
   of every delivery before it stops asking; leaving it to close silently would
   tell the sender nothing about a signal that may have been executed. A reply
   committed late still corrects it.
+- **A control signal is rejected only at its birth.** A signal the target refuses
+  at intake is certainly not executed, so "rejected" is true and the sender may be
+  told at once, with the reason, instead of waiting out its deadline for a verdict
+  that would be wrong (the target is reachable and answered) and slow. The
+  guarantee above is kept by making rejection a way to start a record, not a
+  transition: an accepted control record that is later rejected still goes through
+  the forced closure to `delivery_unknown`, because it was handed over, and
+  `handedOver` is false only for a control record that is already rejected. The
+  alternative, letting `accepted` move to `rejected` for a control signal, was
+  rejected because it is exactly the claim the target must never make about
+  something the adapter may have executed; the alternative of recording nothing and
+  giving no receipt was rejected because the sender then reads a refusal as a lost
+  send. The reasons are limited to those of the intake so that no late reason (the
+  backlog, the second check) can mark a record that was accepted.
 - **No scheduler.** A timer inside the package would need a clock; contract
   packages read none, so callers run `Tick` when an instant may have passed.
 - **The package answers "when next".** A scheduler that guessed from the fields
@@ -807,7 +837,9 @@ permission still reads it.
   `TestSideRules` (including that a source record has no queue),
   `TestNotifiedSubState`.
 - Control records (`record.go`, tests in `internal/delivery/control_test.go`):
-  `TestNewTargetControlRecord`, `TestControlRecordIsNeverHandedOut` (also
+  `TestNewTargetControlRecord`, `TestNewRejectedTargetControlRecord`,
+  `TestARefusedControlRecordIsFinalAndNeverHandedOver`,
+  `TestControlRecordIsNeverHandedOut` (also
   prompts and blocks refused), `TestReplyCommitted`,
   `TestReplyCommittedAppliesToControlRecordsOnly`,
   `TestControlRecordSettlement`, `TestControlStatusReport`,

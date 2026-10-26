@@ -767,6 +767,18 @@ func inFor(i, e int) store.InRecord {
 	return r
 }
 
+// refusedCtl is the control record of a session creation the target refused at
+// intake: born rejected, with no session endpoint, no intent, no reply and no body.
+func refusedCtl(i int, reason delivery.RejectReason) store.CtlRecord {
+	c := sessionCtl(i, 5)
+	rec, err := delivery.NewRejectedTargetControlRecord(base, c.Record.AcceptBefore, c.Record.ReportBy, reason)
+	if err != nil {
+		panic(err)
+	}
+	c.Record, c.SessionEndpoint, c.Intent = rec, ident.EndpointID{}, nil
+	return c
+}
+
 // bodyRef is the reference of the body of message i.
 func bodyRef(i int) *store.BodyRef {
 	b := store.BodyRefOf(bodyBytes(i))

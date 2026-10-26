@@ -464,6 +464,7 @@ state/
                        also the out-lost notices of files that were lost unread (below)
   in/<h>.rec           target record: one per message for one endpoint, deduplication included
   ctl/<h>.rec          target control record: deduplication, stored reply, creation intent
+                       (a signal refused at intake: the refusal alone)
   bodies/<stem>.body   a body, bare bytes, named after the one record it belongs to
   endpoints/<h>.rec    endpoint runtime state: kind, instance, name, description, token, session mapping
   attempts/<h>.rec     prompt attempts, blocked report, the prompt in flight
@@ -580,6 +581,23 @@ answers a pull that it holds no record), so a damaged one is settled with an ale
 and, for a control record, the closed session endpoints, then removed, and nothing
 is put under its name. A resend of a delivery whose target record was lost is taken in as
 new before the delivery deadline, and may be handed out a second time.
+
+**A control record refused at intake.** A control signal the target refuses when it
+arrives (the endpoint is missing, closed or no runtime, the rules of the node refuse a
+source elsewhere, the deadline is out of range; the declarations of an endpoint do not
+refuse a control signal) is written as a `ctl/` record in the state
+`rejected` with its reason, so that a resend gets the same report and the sender
+learns the refusal from the first answer. It holds a refusal and nothing of an
+execution, and the store holds it to that on the way out and on the way in
+(`checkRefusedCtl`): no reply, no execution result, no body, no session endpoint, no
+creation intent and no session it closed; `ControlIntake` also refuses a session
+endpoint offered with it. Whether the state is one a control record can have, and the
+reasons it may carry, are the delivery package's (`Record.Valid`). It is final, so the
+retention of a finished control record applies to it as it is (`RetainUntil`): the
+deduplication record and the report are kept for as long as a sender can still ask.
+Tests: `TestARefusedControlRecordHasNoTraceOfAnExecution`, the `ctl refused` golden vector,
+the `ctl refused at intake` round trip and the retention row of
+`TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds`.
 
 **Out-lost record.** A third kind of `out/` file, `out-lost`, tells a sending endpoint
 that one of its messages was lost with a file nothing could be read from, which is

@@ -25,8 +25,8 @@ const (
 	// record of a message.
 	ViolationExemptShape
 	// ViolationState: the state is not one this kind of record can be in: a
-	// target is never queued or expired_unconfirmed, a control record is never
-	// rejected.
+	// target is never queued or expired_unconfirmed, a control record is rejected
+	// only for a reason of its intake.
 	ViolationState
 	// ViolationRejectReason: a rejection reason is recorded exactly when the
 	// state is rejected, and it is a known reason.
@@ -204,14 +204,15 @@ func (r Record) Valid() error {
 
 // stateAllowed reports whether a record of this side and kind can be in its
 // state: a target starts at accepted and is never queued or expired_unconfirmed,
-// and a control record is delivered or left unknown but never rejected, because
-// it counts as handed over from acceptance (see closeForcibly).
+// and a control record is rejected only when it was refused at intake (see
+// NewRejectedTargetControlRecord): once accepted it counts as handed over, so it
+// is delivered or left unknown, never rejected (see closeForcibly).
 func (r Record) stateAllowed() bool {
 	switch r.State {
 	case StateAccepted, StateDelivered, StateDeliveryUnknown, StateClosedUnconfirmed:
 		return true
 	case StateRejected:
-		return !r.Control
+		return !r.Control || r.Reject.AtControlIntake()
 	case StateQueued, StateExpiredUnconfirmed:
 		return r.Side == SideSource
 	}

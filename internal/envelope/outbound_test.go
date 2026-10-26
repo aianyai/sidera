@@ -668,6 +668,17 @@ func TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply(t *testing.T) {
 			}
 		}
 	})
+	t.Run("the report of a control signal the target refused at intake is applied, not held back for a control reply", func(t *testing.T) {
+		refused, err := delivery.NewRejectedTargetControlRecord(t0, acceptBefore, delivery.ReportBy(acceptBefore), delivery.RejectEndpointClosed)
+		requireNoErr(t, err)
+		rep := signedReport(t, reportFor("ctl-0001", 2, refused.StatusReport(), 100*time.Second, 0))
+		n, eff, _, err := createOutbound(t).ApplyReport(now, rep)
+		requireNoErr(t, err)
+		d := n.Recipients[0].Delivery
+		if eff != ReportApplied || d.State != delivery.StateRejected || d.Reject != delivery.RejectEndpointClosed {
+			t.Fatalf("effect %v, state %v, reason %v", eff, d.State, d.Reject)
+		}
+	})
 	t.Run("every control signal waits for its reply", func(t *testing.T) {
 		for _, kind := range []Kind{KindSessionCreate, KindSessionClose, KindSessionInterrupt, KindEndpointStatus} {
 			o := outboundTo(t, kind, false)

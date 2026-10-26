@@ -169,6 +169,28 @@ func NewTargetControlRecord(acceptedAt, acceptBefore, reportBy time.Time) Record
 	}
 }
 
+// NewRejectedTargetControlRecord returns the target's record of a control signal
+// it refused at intake at rejectedAt, for a reason that intake gives (see
+// RejectReason.AtControlIntake). The arguments are those of NewTargetControlRecord.
+// The record is born rejected: the signal was never handed over, so the sender is
+// told it was not delivered, and nothing that follows can change that.
+//
+// A control record is rejected only here. An accepted one is handed over to be
+// executed, so a rejection reported to it ends in delivery_unknown, as it does for
+// a message whose body was handed out (see closeForcibly). A reason that is not an
+// intake reason, or a zero rejectedAt, is ErrInvalidInput.
+func NewRejectedTargetControlRecord(rejectedAt, acceptBefore, reportBy time.Time, reason RejectReason) (Record, error) {
+	if rejectedAt.IsZero() {
+		return Record{}, fmt.Errorf("%w: a rejected control record needs the time it was refused", ErrInvalidInput)
+	}
+	if !reason.AtControlIntake() {
+		return Record{}, fmt.Errorf("%w: %s is not a reason a control signal is refused at intake", ErrInvalidInput, reason)
+	}
+	r := NewTargetControlRecord(rejectedAt, acceptBefore, reportBy)
+	r.State, r.Reject = StateRejected, reason
+	return r, nil
+}
+
 // NewLostRecord returns the record that replaces the sender's delivery record
 // lost to storage corruption, discovered at discoveredAt. Only what the lost
 // file's first line tells survives: the delivery's identity, which the caller
@@ -462,9 +484,10 @@ func (r Record) withFeedback(from, to State, reject RejectReason) (Record, []Fee
 // handedOver reports whether the target has passed the delivery on to where
 // it can act on it unseen, so that its result may be unknown: a message body
 // was handed out at least once, or a control signal was accepted, which hands
-// it to the adapter to execute.
+// it to the adapter to execute. A control signal refused at intake was never
+// accepted, so it was not handed over.
 func (r Record) handedOver() bool {
-	return r.Control || r.Lease.Handouts > 0
+	return r.Control && r.State != StateRejected || r.Lease.Handouts > 0
 }
 
 // hasQueue reports whether the record waits in the target's recv queue, with

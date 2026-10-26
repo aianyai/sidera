@@ -63,6 +63,29 @@ func checkIntent(in *CreateIntent) error {
 	return nil
 }
 
+// checkRefusedCtl holds a control record that was refused at intake to its shape:
+// nothing was executed, so it has no reply, no execution result, no body, no session
+// endpoint, no creation intent and no endpoint it closed. It is the one statement
+// of that shape, for what is written and what is read.
+func checkRefusedCtl(r CtlRecord) error {
+	if r.Record.State != delivery.StateRejected {
+		return nil
+	}
+	switch {
+	case r.Dedup.HasReply:
+		return errors.New("a control record refused at intake has no reply")
+	case len(r.Result) != 0:
+		return errors.New("a control record refused at intake has no execution result")
+	case r.Body != nil:
+		return errors.New("a control record refused at intake holds no body")
+	case !r.SessionEndpoint.IsZero() || r.Intent != nil:
+		return errors.New("a control record refused at intake creates no session endpoint")
+	case !r.ClosedEndpoint.IsZero():
+		return errors.New("a control record refused at intake closes no session endpoint")
+	}
+	return nil
+}
+
 func encodeCtl(r CtlRecord) ([]byte, error) {
 	if _, err := r.Key.Bytes(); err != nil {
 		return nil, err
@@ -74,6 +97,9 @@ func encodeCtl(r CtlRecord) ([]byte, error) {
 	}
 	if r.Record.Side != delivery.SideTarget || !r.Record.Control {
 		return nil, errors.New("a control record holds a delivery of the target side that is a control signal")
+	}
+	if err := checkRefusedCtl(r); err != nil {
+		return nil, err
 	}
 	j.Record = rj
 	if j.Dedup, err = toDedup(r.Dedup, r.Key); err != nil {
@@ -209,6 +235,9 @@ func decodeCtl(key TargetKey, body []byte) (CtlRecord, error) {
 			return r, err
 		}
 		r.Result = []byte(j.Result)
+	}
+	if err := checkRefusedCtl(r); err != nil {
+		return r, err
 	}
 	return r, nil
 }

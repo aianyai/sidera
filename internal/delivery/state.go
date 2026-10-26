@@ -203,6 +203,20 @@ const (
 	RejectBacklogFull
 )
 
+// AtControlIntake reports whether a control signal can be refused for this
+// reason when it arrives: the reasons of the endpoint and of the policy, and
+// those of the deadline and of the envelope. The later reasons (the backlog, the
+// second check) belong to a message that waits to be handed out, which a control
+// signal never does, and the backlog limit never governs a control signal.
+func (r RejectReason) AtControlIntake() bool {
+	switch r {
+	case RejectUnauthorized, RejectEndpointMissing, RejectEndpointClosed, RejectEndpointDeclined,
+		RejectTooLarge, RejectExpired, RejectMalformed, RejectDeadlineOutOfRange:
+		return true
+	}
+	return false
+}
+
 var rejectNames = [...]string{
 	RejectNone:               "none",
 	RejectUnauthorized:       "unauthorized",

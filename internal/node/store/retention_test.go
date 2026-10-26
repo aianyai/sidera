@@ -53,6 +53,7 @@ func TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds(t *testing.T) {
 		{"a source record waiting for a receipt", queued, want, false},
 		{"a source record's idempotency key outlives its facts", idem, want.Add(72 * time.Hour), true},
 		{"a delivered control record", closedCtl, want, true},
+		{"a control record refused at intake is kept like a finished one, so a resend gets the same report", refusedCtl(1, delivery.RejectEndpointMissing), want, true},
 		{"a lost record is finished by its retention alone", lostOutAt(srcOut(1, false).Key, base), lostWant, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {

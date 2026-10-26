@@ -15,6 +15,7 @@ reasons behind the rules.
 | `NewSourceRecord(queuedAt, acceptBefore)`, `NewTargetRecord(acceptedAt, ...)` | Create the sender's or the recipient node's `Record` of a delivery, entered into its first state at the given time (`Record.StateAt`). |
 | `NewTargetNoticeRecord` | Create the recipient's `Record` of a notice of the system endpoint (system feedback, exempt traffic): marked `Record.Exempt`, so no authorization verdict is made, stored or read for it. |
 | `NewTargetControlRecord(acceptedAt, acceptBefore, reportBy)` | Create the target's `Record` of a control signal: never queued for `recv`, no backlog deadline, delivered by `EventReplyCommitted`. |
+| `NewRejectedTargetControlRecord(rejectedAt, acceptBefore, reportBy, reason)`, `RejectReason.AtControlIntake()` | Create the target's `Record` of a control signal it refused when it arrived: born `rejected` with an intake reason, final, never handed over. The only way a control record is `rejected`. |
 | `Record.Valid()` | Says whether a record is one the constructors and transitions can produce, and names the first invariant it breaks (`*InvalidRecordError`, `ErrInvalidRecord`, `Violation`). For a record restored from storage. |
 | `NewLostRecord(discoveredAt)`, `LostReportBy`, `Record.NeedsBody()` | The replacement for the sender's own delivery record lost to storage corruption (a target keeps none); the instant a replacement is kept until; whether a record still needs the bytes of its body. |
 | `Record.StateAt`, `Record.DeliveredAt()` | When this node's record entered its current state, and, for a delivered record, when it was delivered. The two times a target puts in a signed status report (`reported_at`, `delivered_at`). |
@@ -222,7 +223,12 @@ it becomes `delivery_unknown`, because the agent may have seen the body and
 then corrects it to `delivered`. Handing out is what counts, not prompting: a
 delivery that was only announced with a prompt is still rejected. A control record
 counts as handed out from acceptance, so its forced closure is always
-`delivery_unknown`. A delivery that is already `delivery_unknown`, whatever the
+`delivery_unknown`: a control record is `rejected` only when it was refused at
+intake (`NewRejectedTargetControlRecord`), before it was ever accepted, and with
+one of the reasons a control intake gives (`RejectReason.AtControlIntake`: the
+endpoint's and the policy's, the deadline's and the envelope's, not the backlog's
+or the second check's). A refused control record is final, was never handed over,
+and ignores every later fact except a committed reply, which contradicts it. A delivery that is already `delivery_unknown`, whatever the
 cause, stays so: a forced closure of it is `IgnoreDuplicate`, never `rejected`.
 
 ## Records lost to storage corruption
@@ -416,7 +422,10 @@ correction and the blocked notice.
   `NewTargetRecord`, and `EventReplyCommitted` is applied in the same
   transaction that commits the control reply and the execution result. A caller
   never passes a control record to `Handout`, `Ack`, `EventNotified` or
-  `EventBlocked`.
+  `EventBlocked`. A control signal the target refuses at intake is recorded with
+  `NewRejectedTargetControlRecord` and the report of that record is the answer: no
+  control reply goes with it, and no execution result or session endpoint is
+  stored for it.
 - Run `Tick` before `Handout`, and whenever a lease, backlog, settle or
   `report_by` instant may have passed. A scheduler arms its timer for
   `Record.NextTick()` (the zero time: no timer) and for

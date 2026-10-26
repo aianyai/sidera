@@ -54,6 +54,11 @@ var goldenRecords = []struct {
 	{name: "ctl", dir: store.CtlDir,
 		file: "sidera-record 1 ctl 12a8daed 600 bm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkIGVwMXp2ZjN4eWNuenZmM3h5Y256dmYzeHljbnp2bDV1NGNkIG1zZy0wMDAxIGVwMXpzMnBnOXE1enMycGc5cTV6czJwZzlxNXpzenYwMjNx\n{\"record\":{\"side\":\"target\",\"state\":\"accepted\",\"state_at\":\"2026-10-24T09:00:00Z\",\"control\":true,\"accept_before\":\"2026-10-24T09:01:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\"},\"dedup\":{\"digest\":\"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\",\"retain_until\":\"2026-10-24T12:03:00Z\"},\"kind\":\"control.session.create\",\"preset\":\"default\",\"session_endpoint\":\"ep1z52329g4z52329g4z52329g4z5k8q2g4\",\"accepted_at\":\"2026-10-24T09:00:00Z\",\"sent_at\":\"2026-10-24T09:00:00Z\",\"intent\":{\"attempt\":\"0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6\",\"endpoint\":\"ep1z52329g4z52329g4z52329g4z5k8q2g4\",\"state\":\"creating\"}}",
 		hash: "b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d.rec"},
+	// A control signal the target refused at intake: rejected with the reason, and nothing
+	// of an execution (no session endpoint, no intent, no reply, no body).
+	{name: "ctl refused", dir: store.CtlDir,
+		file: "sidera-record 1 ctl b1923e90 443 bm9kZTFxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxeXFzenFncHF5cXN6cWdwcXlxc3pxZ3BxN2hhZXZkIGVwMXp2ZjN4eWNuenZmM3h5Y256dmYzeHljbnp2bDV1NGNkIG1zZy0wMDAxIGVwMXpzMnBnOXE1enMycGc5cTV6czJwZzlxNXpzenYwMjNx\n{\"record\":{\"side\":\"target\",\"state\":\"rejected\",\"state_at\":\"2026-10-24T09:00:00Z\",\"reject\":\"endpoint_missing\",\"control\":true,\"accept_before\":\"2026-10-24T09:01:00Z\",\"report_by\":\"2026-10-24T12:03:00Z\"},\"dedup\":{\"digest\":\"0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\",\"retain_until\":\"2026-10-24T12:03:00Z\"},\"kind\":\"control.session.create\",\"preset\":\"default\",\"accepted_at\":\"2026-10-24T09:00:00Z\",\"sent_at\":\"2026-10-24T09:00:00Z\"}",
+		hash: "b5c8d7b80655e880380440180e306644b581f191eb47622b58ece7c2bac4748d.rec"},
 	// The replacement of a source record lost to storage corruption, discovered at
 	// 10:00. Its report_by is the discovery plus the longest delivery deadline
 	// (1 h), the clock tolerance (2 min) and the report offset (3 h 2 min): 14:04.

@@ -25,6 +25,15 @@ func controlRecord() Record {
 
 func replyCommitted() Event { return Event{Type: EventReplyCommitted} }
 
+func refusedControlRecord(t *testing.T, reason RejectReason) Record {
+	t.Helper()
+	rec, err := NewRejectedTargetControlRecord(t0, controlAcceptBefore, controlReportBy, reason)
+	if err != nil {
+		t.Fatalf("a control signal refused for %s: %v", reason, err)
+	}
+	return rec
+}
+
 func TestNewTargetControlRecord(t *testing.T) {
 	rec := controlRecord()
 	want := Record{
@@ -138,8 +147,7 @@ func TestReplyCommitted(t *testing.T) {
 		}
 	})
 	t.Run("a reply committed for a rejected control record contradicts it", func(t *testing.T) {
-		rec := controlRecord()
-		rec.State, rec.Reject = StateRejected, RejectMalformed
+		rec := refusedControlRecord(t, RejectMalformed)
 		after, _, err := rec.Apply(at(time.Minute), replyCommitted())
 		if !errors.Is(err, ErrIllegalTransition) || !reflect.DeepEqual(after, rec) {
 			t.Errorf("err = %v, record %+v", err, after)
@@ -595,4 +603,103 @@ func runRandomControl(t *testing.T, seed int64, paths map[string]int, observe fu
 	if !tgt.State.IsTerminal() {
 		fail("target not final at the end: %s", tgt.State)
 	}
+}
+
+// A control signal the target refuses when it arrives is rejected from the start:
+// it was never handed over, so the sender may be told it was not delivered. Every
+// other way a control record can end stays as it was: an accepted one is handed
+// over and is never rejected afterwards.
+func TestNewRejectedTargetControlRecord(t *testing.T) {
+	t.Run("the record is born rejected with the reason and the deadlines of the envelope", func(t *testing.T) {
+		rec := refusedControlRecord(t, RejectEndpointClosed)
+		want := Record{
+			Side:         SideTarget,
+			State:        StateRejected,
+			Reject:       RejectEndpointClosed,
+			StateAt:      t0,
+			Control:      true,
+			AcceptBefore: controlAcceptBefore,
+			ReportBy:     controlReportBy,
+		}
+		if !reflect.DeepEqual(rec, want) {
+			t.Errorf("record = %+v, want %+v", rec, want)
+		}
+		if err := rec.Valid(); err != nil {
+			t.Errorf("a refused control record is not valid: %v", err)
+		}
+		if got, want := rec.StatusReport(), (StatusReport{State: StateRejected, Reject: RejectEndpointClosed}); got != want {
+			t.Errorf("report %+v, want %+v", got, want)
+		}
+	})
+	t.Run("the reasons of the intake are accepted and no other", func(t *testing.T) {
+		intake := map[RejectReason]bool{
+			RejectUnauthorized: true, RejectEndpointMissing: true, RejectEndpointClosed: true, RejectEndpointDeclined: true,
+			RejectTooLarge: true, RejectExpired: true, RejectMalformed: true, RejectDeadlineOutOfRange: true,
+		}
+		seen := 0
+		for reason := RejectNone; reason.String() != "invalid"; reason++ {
+			seen++
+			rec, err := NewRejectedTargetControlRecord(t0, controlAcceptBefore, controlReportBy, reason)
+			switch {
+			case intake[reason] && err != nil:
+				t.Errorf("%s: refused: %v", reason, err)
+			case intake[reason] && rec.Valid() != nil:
+				t.Errorf("%s: the record is not valid: %v", reason, rec.Valid())
+			case !intake[reason] && !errors.Is(err, ErrInvalidInput):
+				t.Errorf("%s: err = %v, want ErrInvalidInput", reason, err)
+			}
+		}
+		if seen != len(intake)+4 { // none, backlog_expired, second_check_failed, backlog_full
+			t.Errorf("the reasons changed (%d known): decide whether the new one is a reason of a control intake", seen)
+		}
+		if _, err := NewRejectedTargetControlRecord(t0, controlAcceptBefore, controlReportBy, RejectReason(200)); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("an unknown reason: err = %v, want ErrInvalidInput", err)
+		}
+	})
+	t.Run("the time of the refusal is required", func(t *testing.T) {
+		if _, err := NewRejectedTargetControlRecord(time.Time{}, controlAcceptBefore, controlReportBy, RejectExpired); !errors.Is(err, ErrInvalidInput) {
+			t.Errorf("err = %v, want ErrInvalidInput", err)
+		}
+	})
+}
+
+func TestARefusedControlRecordIsFinalAndNeverHandedOver(t *testing.T) {
+	rec := refusedControlRecord(t, RejectUnauthorized)
+	t.Run("time changes nothing, and no time-driven change is pending", func(t *testing.T) {
+		if !rec.NextTick().IsZero() {
+			t.Errorf("NextTick = %v, want none", rec.NextTick())
+		}
+		for _, now := range []time.Time{controlSettleBy, controlReportBy.Add(time.Hour)} {
+			after, outs, err := rec.Tick(now)
+			if err != nil || len(outs) != 0 || !reflect.DeepEqual(after, rec) {
+				t.Errorf("Tick(%v): err %v, outcomes %+v, record %+v", now, err, outs, after)
+			}
+		}
+	})
+	t.Run("what can still be said about it changes nothing", func(t *testing.T) {
+		for _, ev := range []Event{
+			{Type: EventRejected, Reject: RejectEndpointClosed},
+			{Type: EventDeliveryUnknown},
+			{Type: EventReportByPassed},
+		} {
+			after, out, err := rec.Apply(at(time.Minute), ev)
+			if err != nil || out.Result != ResultIgnored || !reflect.DeepEqual(after, rec) {
+				t.Errorf("event %d: err %v, outcome %+v, record %+v", ev.Type, err, out, after)
+			}
+		}
+	})
+	t.Run("a committed reply contradicts it", func(t *testing.T) {
+		after, _, err := rec.Apply(at(time.Minute), replyCommitted())
+		if !errors.Is(err, ErrIllegalTransition) || !reflect.DeepEqual(after, rec) {
+			t.Errorf("err = %v, record %+v", err, after)
+		}
+	})
+	t.Run("a refusal reported to an accepted control record still ends as delivery_unknown", func(t *testing.T) {
+		for _, reason := range []RejectReason{RejectEndpointClosed, RejectUnauthorized, RejectExpired} {
+			accepted, out := mustApply(t, controlRecord(), at(time.Minute), Event{Type: EventRejected, Reject: reason})
+			if accepted.State != StateDeliveryUnknown || out.To != StateDeliveryUnknown || accepted.Reject != RejectNone {
+				t.Errorf("%s: state %s reject %s", reason, accepted.State, accepted.Reject)
+			}
+		}
+	})
 }

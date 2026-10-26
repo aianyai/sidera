@@ -84,6 +84,8 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return r
 	case "ctl":
 		return sessionCtl(1, 5)
+	case "ctl refused":
+		return refusedCtl(1, delivery.RejectEndpointMissing)
 	case "out lost at the sender":
 		return lostOutAt(outKey(2, false), base.Add(time.Hour))
 	case "out lost notice":
@@ -385,10 +387,10 @@ func TestStoreRefusesAnInvalidDecodedRecord(t *testing.T) {
 			func(b string) string {
 				return strings.Replace(b, `"state":"accepted"`, `"state":"delivery_unknown"`, 1)
 			}, "an unknown result without a cause"},
-		{"a control record is never rejected", "ctl", store.CtlDir,
+		{"a control record is rejected only for a reason of its intake", "ctl", store.CtlDir,
 			func(b string) string {
-				return strings.Replace(b, `"state":"accepted","state_at":"2026-10-24T09:00:00Z","control":true`, `"state":"rejected","state_at":"2026-10-24T09:00:00Z","reject":"unauthorized","control":true`, 1)
-			}, "a rejected control record"},
+				return strings.Replace(b, `"state":"accepted","state_at":"2026-10-24T09:00:00Z","control":true`, `"state":"rejected","state_at":"2026-10-24T09:00:00Z","reject":"backlog_expired","control":true`, 1)
+			}, "a control record rejected as a queued message is"},
 		{"a source delivery has no backlog deadline", "out", store.OutDir,
 			func(b string) string {
 				return strings.Replace(b, `"report_by":"2026-10-24T12:03:00Z"}}],"to"`, `"report_by":"2026-10-24T12:03:00Z","backlog_deadline":"2026-10-24T09:30:00Z"}}],"to"`, 1)
@@ -595,6 +597,7 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	closeCtl.Preset, closeCtl.SessionEndpoint, closeCtl.Intent = "", ident.EndpointID{}, nil
 	closeCtl.ClosedEndpoint = ep(6)
 	recs["ctl that closed a session"] = closeCtl
+	recs["ctl refused at intake"] = refusedCtl(4, delivery.RejectEndpointClosed)
 
 	// The rest.
 	recs["endpoint direct"] = directEndpoint(7, "chat")
@@ -724,4 +727,48 @@ func TestVerdictPartsFollowTheExemptMarker(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A control record refused at intake has the shape of a refusal and nothing of an
+// execution: the record is refused on the way out and damaged on the way in when it
+// carries a reply, an execution result, a body, a session endpoint, a creation
+// intent or a session it closed, whatever the delivery package says about its state.
+func TestARefusedControlRecordHasNoTraceOfAnExecution(t *testing.T) {
+	reply, err := refusedCtl(1, delivery.RejectEndpointClosed).Dedup.WithReply([]byte("a reply"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		rule string
+		edit func(r *store.CtlRecord)
+	}{
+		{"a reply", func(r *store.CtlRecord) { r.Dedup = reply }},
+		{"an execution result", func(r *store.CtlRecord) { r.Result = []byte(`{"created":true}`) }},
+		{"a body", func(r *store.CtlRecord) { r.Body = bodyRef(1) }},
+		{"a session endpoint", func(r *store.CtlRecord) { r.SessionEndpoint = ep(5) }},
+		{"a creation intent", func(r *store.CtlRecord) { r.Intent = sessionCtl(1, 5).Intent }},
+		{"a session it closed", func(r *store.CtlRecord) {
+			r.Kind, r.Preset, r.ClosedEndpoint = envelope.KindSessionClose, "", ep(6)
+		}},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			r := refusedCtl(1, delivery.RejectEndpointClosed)
+			c.edit(&r)
+			if data, err := store.EncodeRecord(r); err == nil {
+				t.Fatalf("EncodeRecord wrote a refused control record with %s: %q", c.rule, data)
+			}
+		})
+	}
+	t.Run("a stored body with a session endpoint and an intent is damaged", func(t *testing.T) {
+		_, key, body := golden(t, "ctl")
+		accepted := sessionCtl(1, 5)
+		if data, err := store.EncodeRecord(accepted); err != nil || !strings.Contains(string(data), body) {
+			t.Fatalf("the accepted vector is not the record of the test: %v", err)
+		}
+		edited := strings.Replace(body, `"state":"accepted","state_at":"2026-10-24T09:00:00Z","control":true`, `"state":"rejected","state_at":"2026-10-24T09:00:00Z","reject":"unauthorized","control":true`, 1)
+		_, dmg := store.DecodeRecord(store.CtlDir, nameOf("ctl", key), frameOf("ctl", key, edited))
+		if dmg == nil || dmg.Class != store.BodyDamaged || dmg.Reason != store.ReasonBodyInvalid || !strings.Contains(dmg.Detail, "refused at intake") {
+			t.Errorf("damage = %+v, want a damaged body that says the refusal holds an execution", dmg)
+		}
+	})
 }
