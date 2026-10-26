@@ -28,6 +28,7 @@ not frame, send or store anything.
 | `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, the error a `prompt.deliver` call returned and a reconciliation verdict as `handoff.AttemptOutcome`. |
 | `Signals(conditions, endpoint, received, offline, offlineSince)` | An availability snapshot as `handoff.Signals`, with `Since`. |
 | `StatusConditions(...)` | The `conditions` of a status reply, from the snapshot and the daemon's own observations, `version_untested` among them. |
+| `RunsOn(manifest, goos, goarch)` | Whether the manifest lists the platform: the one judge of whether a package may be installed on this machine. |
 | `RuntimeVersionUntested(manifest, runtime)` | Whether the probed runtime version is outside every tested range of the manifest: the one judge of the status condition `version_untested`. |
 | `CreateReply`, `CreateUnconfirmed`, `InterruptReply`, `CloseReply` | Adapter results as the reply to a control signal. |
 | `DaemonCreateFailure(DaemonCreateReason)` | The reply to a `session.create` the daemon refuses itself, before calling the adapter: preset unknown, preset closed to local sources, adapter offline. |

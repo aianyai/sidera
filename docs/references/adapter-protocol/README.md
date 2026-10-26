@@ -935,6 +935,11 @@ waits at most `adapterreg.DefaultRecvWait`, 8 seconds. A direct endpoint's
 `endpoint.recv` has its own cap, `adapterproto.MaxWaitSeconds` (30 seconds),
 which this field does not govern: the adapter chooses that wait in `wait_s`.
 
+`platforms` is what the installation judges: a package whose list does not hold the
+operating system and architecture of the machine is refused when it is installed
+(`adapterreg.RunsOn`), because it would otherwise be installed and fail to start,
+which the owner would meet only as an instance that never comes online.
+
 A native version outside the tested ranges still runs. The daemon compares the
 name and version that `adapter.probe` reported with the ranges and produces the
 status condition `version_untested`, shown to the owner and in the status of the

@@ -432,3 +432,17 @@ func ActionOf(s adapterproto.ControlSignal) (authz.Action, error) {
 	}
 	return 0, unmapped("control signal", string(s))
 }
+
+// RunsOn reports whether the manifest lists the platform among those the package
+// runs on, in the vocabulary of GOOS and GOARCH. It is the one judge of whether
+// an adapter package may be installed on a machine: a package that does not list
+// the platform would be installed and then fail to start, which the owner would
+// meet only as an instance that never comes online.
+func RunsOn(m manifest.Manifest, goos, goarch string) bool {
+	for _, p := range m.Platforms {
+		if p.OS == goos && p.Arch == goarch {
+			return true
+		}
+	}
+	return false
+}
