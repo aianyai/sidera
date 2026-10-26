@@ -44,11 +44,26 @@ func (x *tokenIndex) remove(id ident.EndpointID) {
 	}
 }
 
-// lookup finds the endpoint of a token as presented, in its text form. Text that
-// is not the unpadded base64url of 32 bytes is no token.
-func (x *tokenIndex) lookup(t adapterproto.Token) (ident.EndpointID, bool) {
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(string(t))
+// decodeToken is the bytes of a token as presented, in its text form. What a token's
+// text looks like is adapterproto.Token.Validate's rule and nobody else's: text it
+// refuses is no token, so a spelling that a lenient decoder would read as the
+// bytes of one (a newline, spare bits in the last character) is not one either.
+func decodeToken(t adapterproto.Token) ([]byte, bool) {
+	if t.Validate() != nil {
+		return nil, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(string(t))
 	if err != nil || len(raw) != store.TokenLen {
+		return nil, false
+	}
+	return raw, true
+}
+
+// lookup finds the endpoint of a token as presented, in its text form. Text that
+// is not a token (see decodeToken) finds nothing.
+func (x *tokenIndex) lookup(t adapterproto.Token) (ident.EndpointID, bool) {
+	raw, ok := decodeToken(t)
+	if !ok {
 		return ident.EndpointID{}, false
 	}
 	id, ok := x.byHash[sha256.Sum256(raw)]

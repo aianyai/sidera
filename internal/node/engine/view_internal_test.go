@@ -80,6 +80,16 @@ func TestTokenIndexFindsOnlyWhatWasAddedAndNotWhatWasRemoved(t *testing.T) {
 		})
 	}
 
+	// What looks like the token to a lenient decoder is not the token: the format
+	// is adapterproto's, and the lookup asks it.
+	for name, text := range NotTheToken(string(tokenText(0x41))) {
+		t.Run("not the token: "+name, func(t *testing.T) {
+			if got, ok := x.lookup(adapterproto.Token(text)); ok {
+				t.Errorf("lookup(%q) found %s, want nothing", text, got)
+			}
+		})
+	}
+
 	x.remove(a)
 	if _, ok := x.lookup(tokenText(0x41)); ok {
 		t.Errorf("a removed token still finds its endpoint")
@@ -100,6 +110,26 @@ func TestTokenIndexFindsOnlyWhatWasAddedAndNotWhatWasRemoved(t *testing.T) {
 	if len(x.byHash) != 1 || len(x.byEndpoint) != 1 {
 		t.Errorf("the index holds %d hashes for %d tokens, want 1 and 1", len(x.byHash), len(x.byEndpoint))
 	}
+}
+
+// FuzzTokenIndexLookup looks up arbitrary text in an index that holds one token.
+// Whatever the text is, the lookup does not panic, and it finds the endpoint only
+// for the exact text of the token.
+func FuzzTokenIndexLookup(f *testing.F) {
+	held := tokenText(0x41)
+	x := newTokenIndex()
+	id := idOf(f, 1)
+	x.add(id, tokenBytes(0x41))
+	f.Add(string(held))
+	for _, text := range NotTheToken(string(held)) {
+		f.Add(text)
+	}
+	f.Fuzz(func(t *testing.T, text string) {
+		got, ok := x.lookup(adapterproto.Token(text))
+		if ok != (text == string(held)) || (ok && got != id) {
+			t.Fatalf("lookup(%q) = %s, %v; the token is %q", text, got, ok, held)
+		}
+	})
 }
 
 // scanOf is a scan of the given endpoints and records, as the store returns it.

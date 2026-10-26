@@ -498,3 +498,27 @@ func Waiting(e *Engine) int {
 	}
 	return n
 }
+
+// NotTheToken names texts that are not the token valid, though a lenient decoder
+// would read some of them as its bytes: a newline anywhere (Go's base64 skips it),
+// padding, one character too few or too many, characters outside the alphabet and
+// spare bits in the last character. Both doors that take a token as text, the
+// lookup of a session endpoint and the probe, refuse every one of them.
+func NotTheToken(valid string) map[string]string {
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	last := strings.IndexByte(alphabet, valid[len(valid)-1])
+	return map[string]string{
+		"a newline at the end":                 valid + "\n",
+		"a carriage return and newline":        valid + "\r\n",
+		"a newline at the start":               "\n" + valid,
+		"a newline in the middle":              valid[:10] + "\n" + valid[10:],
+		"padding":                              valid + "=",
+		"one character too few":                valid[:len(valid)-1],
+		"one character too many":               valid + "A",
+		"a character outside the alphabet (+)": "+" + valid[1:],
+		"a character outside the alphabet (/)": valid[:5] + "/" + valid[6:],
+		"a space":                              valid[:5] + " " + valid[6:],
+		"spare bits of the last character set": valid[:len(valid)-1] + string(alphabet[last+1]),
+		"nothing":                              "",
+	}
+}

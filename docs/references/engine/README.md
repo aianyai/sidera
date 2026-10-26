@@ -249,6 +249,11 @@ token no instance holds is not authenticated, a token presented before is
 other than the token's is refused (`invalid_argument`, `probe_frontend_mismatch`) and
 leaves the token good, so a misconfigured front end does not use up the probe. The
 token is compared with every token held, in constant time, and used up when accepted.
+What a token's text is (32 bytes in unpadded base64url, in exactly one spelling) is
+`adapterproto.Token.Validate`'s rule alone, and both doors that take a token as text, this
+one and the lookup of a session endpoint by `ByToken`, ask it first: Go's base64 decoder
+skips a newline and takes spare bits in the last character, so a decoder of their own
+would take a text that is not the token for it.
 The probe of an enabled instance is `pending` until the adapter has reported and every
 token issued for the round is presented or expired, `passed` when the adapter reported
 every tool probe as ran and every token was presented (an adapter with nothing to probe

@@ -3,11 +3,9 @@ package engine
 import (
 	"context"
 	"crypto/subtle"
-	"encoding/base64"
 	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
-	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -146,12 +144,8 @@ func (c *cmdPresentProbeToken) run(e *Engine, now time.Time) {
 // used up, and the probe of its instance may pass. The token is compared against
 // every token held, in constant time, and is never logged.
 func (e *Engine) PresentProbeToken(ctx context.Context, token adapterproto.Token, frontend adapterproto.Frontend) (ProbeTarget, error) {
-	// Only a text in the form of a token is one: unpadded base64url of 32 bytes. The
-	// decoder alone would skip a newline, so the length of the text is checked as
-	// well, and the strict decoder refuses spare bits in the last character; either
-	// would let a text that is not the token be taken for it.
-	raw, err := base64.RawURLEncoding.Strict().DecodeString(string(token))
-	if err != nil || len(token) != base64.RawURLEncoding.EncodedLen(store.TokenLen) || len(raw) != store.TokenLen {
+	raw, ok := decodeToken(token)
+	if !ok {
 		return ProbeTarget{}, refuse(ReasonUnauthenticated)
 	}
 	c := &cmdPresentProbeToken{call: newCall[ProbeTarget](), token: raw, frontend: frontend}

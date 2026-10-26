@@ -1645,6 +1645,38 @@ func TestEnablingAnInstanceAndChangingPresetsRecoverFromACrashAtEveryPoint(t *te
 	}
 }
 
+// A text that is not the token is refused at the door as unauthenticated, even
+// where a lenient decoder would read it as the token's bytes, and the token stays
+// good: the probe is not used up by a spelling of it.
+func TestAProbeTokenIsOnlyTheExactTextTheNodeIssued(t *testing.T) {
+	r := newRig(t, 10, withAdapters(newHostDouble()), withPackage("/src/relay", relayPackage(t, "1.0.0")))
+	e := r.start()
+	if _, err := e.Execute(ctx, installCommand(1, "install", "/src/relay")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Execute(ctx, enableCommand(2, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
+		t.Fatal(err)
+	}
+	adm, info := relayAdmission(t)
+	if _, err := e.AdapterAdmitted(ctx, "relay", adm, info); err != nil {
+		t.Fatal(err)
+	}
+	reqs, err := e.ProbeTokens(ctx, "relay")
+	if err != nil || len(reqs) == 0 {
+		t.Fatalf("ProbeTokens: %v, %d requests", err, len(reqs))
+	}
+	q := reqs[0]
+	for name, text := range engine.NotTheToken(string(q.Token)) {
+		t.Run(name, func(t *testing.T) {
+			_, err := e.PresentProbeToken(ctx, adapterproto.Token(text), q.Frontend)
+			wantReason(t, err, engine.ReasonUnauthenticated)
+		})
+	}
+	if _, err := e.PresentProbeToken(ctx, q.Token, q.Frontend); err != nil {
+		t.Fatalf("the token itself after the refused spellings: %v, want it accepted (they must not use it up)", err)
+	}
+}
+
 // FuzzPresentProbeToken presents arbitrary text as a probe token, with an arbitrary
 // front end, to an engine that holds the tokens of an adapter. Whatever the text is,
 // the engine does not panic and refuses with one of its own refusals; only a token
