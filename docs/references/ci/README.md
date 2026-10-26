@@ -8,17 +8,37 @@ The workflow is [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml).
 
 The workflow runs on every push to `main`, on every pull request and on manual
 dispatch. Every step fails its job on any failure; there is no
-`continue-on-error`; the only tests skipped are the power-loss tests on macOS
-and Windows (see below), and the suite runs without `-short`. The `-race` steps
-run every test, the crash walks of `internal/node/store` included.
+`continue-on-error`; the only tests left out of a job are the power-loss tests on
+macOS and Windows and the crash walk of the built binary, which has jobs of its
+own (see below), and the suite runs without `-short`. The `-race` steps run every
+test, the crash walks of `internal/node/store` included.
 
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
 | `format` | Linux | `gofmt -l .` must print nothing |
 | `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
 | `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
+| `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
+| `crashwalk` | Linux (3 shards), macOS (2), Windows (4) | the crash walk of the built binary: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -race="$RACE" -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
 | `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64 |
+
+Limits of every job, in minutes. `go test -timeout` is set a few minutes under
+the job's limit so that a hang ends with the goroutine dump of the test binary:
+
+| Job | Instances | `timeout-minutes` | `go test -timeout` |
+| --- | --------- | ----------------- | ------------------ |
+| `format` | 1 | 10 | none |
+| `test` | 3 | 40 | 30m per step |
+| `test-tags` | 3 | 40 | 30m per step |
+| `acceptance` | 3 | 30 | 25m |
+| `crashwalk` | 9: Linux 3, macOS 2, Windows 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
+| `sdk-standalone` | 1 | 15 | go default |
+| `cross-compile` | 5 | 15 | none |
+
+A run starts 25 jobs, five of them on macOS. GitHub limits how many jobs of a
+plan run at once, macOS jobs more tightly than the others, so some of them may
+wait for a runner.
 
 `./...` at the root covers every package of the root module, `cmd/` binaries
 included; `./sdk/go/...` adds the SDK module that `go.work` joins to it. The
@@ -26,18 +46,72 @@ five platforms are the ones Sidera ships binaries for.
 
 ### Build tags
 
-Three tags exist; none selects code yet, so until tagged files land the
-`test-tags` job compiles and runs exactly what `test` does.
+Three tags exist. `crashtest` and `testclock` select the test methods of the
+management interface (`internal/node/manageapi`) and, later, the crash points and
+the clock of the binaries; no file carries `acceptance` until the tests that
+drive binaries land.
 
 | Tag | Selects | Compiled by |
 | --- | ------- | ----------- |
 | `crashtest` | binary-level crash points, which stop a real process at a named step | `test-tags` |
 | `testclock` | the test clock a binary reads from its environment | `test-tags` |
-| `acceptance` | the test files that drive built binaries | `go vet` in `test-tags`; their tests run only in the acceptance jobs |
+| `acceptance` | the test files that drive built binaries | `go vet` in `test-tags`; their tests run only in `acceptance` and `crashwalk` |
 
 `go test` in `test-tags` leaves `acceptance` off on purpose: those tests start
 binaries and have their own jobs, limits and timeouts. `go vet` in `test-tags`
 adds it so the files are at least type-checked on every platform.
+
+### The crash walk of the binary
+
+The walk kills a real `sidera` at each crash point (a transaction, the role of
+a file in it, a step, and which time that step was reached) and checks what the
+restart finds. The tests of the walk are the ones whose names start with
+`TestCrashAtEveryCrashPoint`: that prefix is what `acceptance` skips and
+`crashwalk` runs, so each test runs in exactly one of the two, and a new walk
+test must keep the prefix.
+
+Two environment variables choose what a run takes; the parts that read them are
+`crashwalk.ParseMode` and `crashwalk.ParseShard` in
+`internal/node/testkit/crashwalk`, which take the value of the variable from the
+test that reads it and also define what each value means:
+
+| Variable | Values | Meaning |
+| -------- | ------ | ------- |
+| `SIDERA_CRASHWALK` | `full`, `smoke`; unset is `smoke` | `full` takes every crash point of the window, a kill after every step of the scenario and every recovery case; `smoke` takes one point per transaction and one recovery case per recovery transaction |
+| `SIDERA_CRASHWALK_SHARD` | `i/n`; unset is `1/1` | the shard takes every `n`-th run of the walk, starting at the `i`-th; the shards together take every run once |
+
+The mode of a CI run is the `crashwalk` input of `workflow_dispatch`, `full` or
+`smoke`. A run that has no input (a push to `main`, a pull request) takes `full`,
+because the workflow reads `inputs.crashwalk || 'full'`. `smoke` is for running
+again, after a failure, with the fast part of the walk:
+
+```sh
+gh workflow run ci.yml --ref main -f crashwalk=smoke
+```
+
+Dispatch is used on `main` only. The local default is the other way round: a
+walk run without the variable takes `smoke`, so that a walk on a development
+machine is fast unless it asks for `full`.
+
+Today no test reads either variable: the walks of `internal/node/store`,
+`internal/node/engine`, `internal/node/config`, `internal/node/keys` and
+`internal/node/daemon` walk every crash point of their transactions and assert that every declared
+point was crashed at, which a subset could not, and they run in every `test` and
+`test-tags` job. The variables are read by the walk of the
+built binary and by any walk that is driven by `crashwalk.Walk`; until the
+walk of the binary exists, the `crashwalk` job fails at its first step, and the
+`acceptance` job at its only one, because the package they name is not there.
+That is the intended state: a job that passed without running anything would
+hide a missing walk.
+
+The first step of `crashwalk` exists because `go test -run` with a pattern that
+matches no test in an existing package passes: a renamed walk would otherwise
+leave the job green and empty. The step lists the tests and `grep` exits 1 if
+none starts with the prefix.
+
+The `-v` of the `crashwalk` step puts the time of every rerun and of the whole
+walk into the log of each shard. Those numbers, not the estimates the shard
+counts were first set from, are what the counts and limits are adjusted by.
 
 ### Not run yet
 
@@ -99,6 +173,26 @@ to the workflow.
   package-wide run also covers a platform test added later. It adds no check of its
   own, since the same tests ran in the steps before it. The package list must grow
   with any package that gets platform tests which log or skip.
+- **Why the walk of the binary has jobs apart from the tests**: a rerun starts a
+  process, kills it and starts it again, so a walk takes minutes where the tests
+  of a package take seconds, and its cost grows with the number of declared crash
+  points. It is split over shards so that no job's limit has to hold a whole
+  platform's walk, and the shard counts differ by platform because the cost of a
+  rerun is expected to: starting processes is slowest on Windows. The counts
+  (Linux 3, macOS 2, Windows 4) and the limits were estimated from the expected
+  number of reruns, not measured: the first run of the workflow is the first
+  measurement (see below).
+- **The inner binary is built with `-race` on Linux only**: the test binary of
+  the acceptance tests builds the binaries it drives, and gives them `-race`
+  when it was built with `-race` itself (a constant set by the `race` build
+  constraint, so that no flag has to be passed twice). The `acceptance` and
+  `crashwalk` steps therefore pass `-race` on Linux, where the race detector
+  watches real processes talking to each other and is cheapest, and not on macOS
+  and Windows, where the point of the jobs is the behaviour of renames and
+  processes, and where `-race` would multiply the time of every rerun. The
+  `RACE` variable is a boolean passed as `-race="$RACE"`, because a flag
+  that is sometimes empty would need an unquoted expansion in the script; with
+  `GOFLAGS` the flag would also reach the `go build` that the test binary runs.
 - **Race and plain runs are separate steps**: the race detector changes timing
   and memory use; a failure in one mode must be visible without the other.
 - **Why a second tagged job**: tagged files are not compiled without their tag,
@@ -202,6 +296,22 @@ the plain run takes less than a twentieth of the CPU time. The walks of the
 engine took 3.4 s before and 1.9 s after, with two crash states per point instead of
 four or five.
 
+### Pending verification
+
+Nothing in the two jobs above has run on a hosted runner: the workflow is
+checked locally with `actionlint`, and each command was run on macOS against a
+stand-in package, which proved that the flags, the `-skip` and `-run` split, the
+guard and both environment variables work together. Until a run on `main` shows
+otherwise these are not verified, and each is pending verification by CI on
+`main`: that the three Windows shards fit in 60 minutes and the others in 45;
+the time of a rerun on each platform and so whether the shard counts are right;
+that the five macOS jobs of a run start together; that `-race` on the Linux
+walk costs what was assumed; that `inputs.crashwalk` is empty on a push and a
+pull request, so that the mode is `full`. The package under
+`./cmd/sidera/internal/acceptance/` does not exist yet, so the commands of the
+`acceptance` and `crashwalk` jobs are those of the walk-to-be and nothing of the
+walk was timed.
+
 ## Where
 
 - Workflow: `.github/workflows/ci.yml`.
@@ -222,11 +332,22 @@ go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
 go test -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 
+# the jobs of the binary; they need ./cmd/sidera/internal/acceptance, which comes with
+# the tests that drive binaries
+go test -race=false -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+SIDERA_CRASHWALK=smoke go test -count=1 -v -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+
+# the whole walk, or one shard of it, as a CI job takes it (on Linux add -race)
+SIDERA_CRASHWALK=full go test -count=1 -v -timeout 55m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+SIDERA_CRASHWALK=full SIDERA_CRASHWALK_SHARD=1/3 go test -count=1 -v -timeout 40m -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+
 (cd sdk/go && GOWORK=off go build ./... && GOWORK=off go test ./... && GOWORK=off go mod tidy -diff)
 
 for p in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64 windows/amd64; do
   CGO_ENABLED=0 GOOS=${p%/*} GOARCH=${p#*/} go build ./... ./sdk/go/... || echo "build failed: $p"
 done
 ```
+
+The workflow file is checked with `actionlint .github/workflows/ci.yml`.
 
 `gofmt -l .` lists the files that need formatting; `gofmt -w` fixes them.
