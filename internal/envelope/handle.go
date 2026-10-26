@@ -52,8 +52,9 @@ type Handling struct {
 //     delivered and executed or refused by the adapter. A signal judged
 //     expired_unconfirmed is corrected; one already closed_unconfirmed is left
 //     as it is and the reply still takes effect below (the derived delivery,
-//     which shares the signal's deadlines, then closes silently at its next
-//     tick). A signal the target is known to have rejected cannot have a reply:
+//     which shares the signal's deadlines, then closes at its next tick with
+//     the one accepted_unconfirmed notice, like any delivery that is accepted
+//     and was never told an outcome). A signal the target is known to have rejected cannot have a reply:
 //     that is ErrPeerContradiction.
 //  3. For a session.create with a body whose outcome is created or unconfirmed,
 //     the initial message goes to the session endpoint the reply names: the

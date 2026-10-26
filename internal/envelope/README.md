@@ -129,7 +129,8 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
   same digest again changes nothing, any other is `ErrPeerContradiction` (so a
   creation after a recorded failure builds no delivery). A reply after the
   signal closed as `closed_unconfirmed` still binds the session, and the derived
-  delivery closes silently at its next tick. The pull path and the evidence path
+  delivery closes at its next tick, as every delivery that is accepted and was
+  never told an outcome does: with the one `accepted_unconfirmed` notice. The pull path and the evidence path
   reach the same state in either order.
 
 ## What the caller must guarantee
