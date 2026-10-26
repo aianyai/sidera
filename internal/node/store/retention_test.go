@@ -247,3 +247,71 @@ func TestPlanSweepKeepsADerivedDeliveryWhileItsControlRecordIsLive(t *testing.T)
 		t.Errorf("the derived delivery was swept while its control record is live: %+v", plan)
 	}
 }
+
+// A finished target record is kept until the instant its retention ends and goes
+// from that instant: one nanosecond earlier it stays. The instant is written out by
+// hand (outRetention).
+func TestPlanSweepTakesAFinishedTargetRecordAtItsRetentionAndNotBefore(t *testing.T) {
+	until := outRetention(1)
+	in := tgtIn(1)
+	in.Record = deliveredRecord(in.Record)
+	out := srcOutFinished(1)
+	for _, c := range []struct {
+		at    time.Time
+		swept bool
+	}{
+		{until.Add(-time.Nanosecond), false},
+		{until, true},
+	} {
+		r := newRig(t)
+		seed(t, r.mem, in, out)
+		plan := store.PlanSweep(r.scan(), c.at)
+		if got := plannedRecord(plan, store.InDir, in.Name()); got != c.swept {
+			t.Errorf("at retention %+v: target record planned = %v, want %v", c.at.Sub(until), got, c.swept)
+		}
+		if got := len(plan.Outs) == 1; got != c.swept {
+			t.Errorf("at retention %+v: source record planned = %v, want %v", c.at.Sub(until), got, c.swept)
+		}
+	}
+}
+
+// A source record whose delivery is still queued or accepted after report_by is
+// waiting for the pull before its close, which only a running node makes: it is not
+// planned, however late the sweep runs. It is planned once the close has written a
+// final state, and then only by its retention.
+func TestPlanSweepNeverPlansASourceRecordWaitingForItsFinalPull(t *testing.T) {
+	withState := func(o store.OutRecord, ev delivery.Event, at time.Time) store.OutRecord {
+		d, _, err := o.Outbound.Recipients[0].Delivery.Apply(at, ev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		o.Outbound.Recipients[0].Delivery = d
+		return o
+	}
+	queued := srcOut(1, false)
+	accepted := withState(srcOut(2, false), delivery.Event{Type: delivery.EventReceipt}, base)
+	pastReportBy := base.Add(farAway)
+	for _, o := range []store.OutRecord{queued, accepted} {
+		if o.Outbound.Recipients[0].Delivery.ReportBy.After(pastReportBy) {
+			t.Fatal("the scenario's sweep is not past report_by")
+		}
+		r := newRig(t)
+		seed(t, r.mem, o)
+		plan := store.PlanSweep(r.scan(), pastReportBy)
+		if len(plan.Outs) != 0 || len(plan.Summaries) != 0 {
+			t.Errorf("%s: a record that waits for its final pull is planned: outs %v, summaries %v", o.Outbound.Recipients[0].Delivery.State, plan.Outs, plan.Summaries)
+		}
+	}
+	closed := withState(accepted, delivery.Event{Type: delivery.EventReportByPassed}, pastReportBy)
+	if st := closed.Outbound.Recipients[0].Delivery.State; st != delivery.StateClosedUnconfirmed {
+		t.Fatalf("the close left the delivery %s, want closed_unconfirmed", st)
+	}
+	r := newRig(t)
+	seed(t, r.mem, closed)
+	if plan := store.PlanSweep(r.scan(), outRetention(2).Add(-time.Nanosecond)); len(plan.Outs) != 0 {
+		t.Errorf("a closed record is planned before its retention: %v", plan.Outs)
+	}
+	if plan := store.PlanSweep(r.scan(), outRetention(2)); len(plan.Outs) != 1 {
+		t.Errorf("a closed record is not planned at its retention: %v", plan.Outs)
+	}
+}
