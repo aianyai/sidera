@@ -165,8 +165,10 @@ The prompt turns and the endpoint defaults are not here: they are
 - Call the `AfterCommit` of a write function only after `Commit` returned nil.
 - Pass `OpenEndpoints` to every write of `instances.json`, with the set of
   endpoints that are open now.
-- For `StageAdapter`, pass a `fsx.Reader` rooted at the package directory and
-  check the platform in `Staged.Manifest`. `StageAdapter` and `Unstage` are
+- For `StageAdapter`, pass a `fsx.Reader` rooted at the package directory, a
+  reader of at least `StageSuffixBytes` bytes of randomness for the name of the
+  staging directory, and check the platform in `Staged.Manifest`
+  (`adapterreg.RunsOn`). `StageAdapter` and `Unstage` are
   called only by the single install worker, one at a time, and may run
   concurrently with the writer loop: they take no lock of `Config` and touch
   only staging and version directories that no change reads.

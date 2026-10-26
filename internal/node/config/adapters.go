@@ -15,8 +15,11 @@ import (
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
-// stageSuffixBytes is how much randomness names a staging directory.
-const stageSuffixBytes = 8
+// StageSuffixBytes is how much randomness StageAdapter reads from its reader to
+// name a staging directory. A caller that may not let the staging read its own
+// source of randomness (the engine draws only in its loop, and staging runs
+// outside it) draws this many bytes first and hands them over.
+const StageSuffixBytes = 8
 
 // reservedName reports whether a name inside a package would be taken for the
 // debris of an interrupted operation: the cleanup at start removes the
@@ -202,7 +205,7 @@ func (c *Config) StageAdapter(src fsx.Reader, rnd io.Reader) (Staged, error) {
 	if err != nil {
 		return Staged{}, err
 	}
-	var suffix [stageSuffixBytes]byte
+	var suffix [StageSuffixBytes]byte
 	if _, err := io.ReadFull(rnd, suffix[:]); err != nil {
 		return Staged{}, fmt.Errorf("config: naming the staging directory: %w", err)
 	}
