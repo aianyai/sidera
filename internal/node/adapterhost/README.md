@@ -107,8 +107,8 @@ handle the daemon gives it.
 - **Shutdown** sends `shutdown` to each connection in service (limited by
   `HandshakeTimeout`), closes the stream, waits for the process at most
   `ShutdownWait` and kills it if it stays. `Stop` does the same for one instance.
-  Neither reports to the engine, and what is still buffered for the engine is
-  dropped. **Abort** kills every process at once and writes nothing, not even a
+  Neither reports to the engine (the caller that disables an instance marks it
+  offline itself), and what is still buffered for the engine is dropped. **Abort** kills every process at once and writes nothing, not even a
   cancellation of a request in flight. After either, calls return
   `ErrNotConnected` and `Start` fails; both are idempotent.
 - **Counts** are exact. `Calls` lists the requests the host sent that have no

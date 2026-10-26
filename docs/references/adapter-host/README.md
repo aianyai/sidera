@@ -194,6 +194,10 @@ idempotent; after either, calls return `ErrNotConnected` and `Start` fails. `Sto
 does for one instance what `Shutdown` does for all, returns at once, and an
 `EnsureRunning` that follows it waits for the old adapter to end before it launches
 the next.
+`Stop` reports nothing to the engine either, so the engine goes on showing the
+instance as online until it is told otherwise: the caller that disables an instance
+marks it offline itself, with `AdapterGone`, which the engine takes only for an
+instance that is still enabled.
 
 ### The exec launcher
 

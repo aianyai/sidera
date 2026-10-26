@@ -139,7 +139,9 @@ commands and add their methods to this list.
   offline otherwise.** Gone sets the time to the engine's clock unless the instance
   was not online, in which case the earlier time stays (zero for an instance that
   has not been online since the engine started). Going away keeps the endpoints,
-  records and admission, and makes the busy states unknown.
+  records and admission, and makes the busy states unknown. The host reports
+  nothing when it stops an instance, so the caller that disables one marks it
+  offline itself with `AdapterGone`, which takes only an enabled instance.
 - **A new connection starts from what it reports.** A successful admission forgets
   the busy states and the availability snapshot of the connection before, and
   `AdapterStarted` replaces the busy states with the sessions its result lists as

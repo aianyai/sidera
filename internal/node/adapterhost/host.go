@@ -211,9 +211,10 @@ func (h *Host) EnsureRunning(instance string) {
 
 // Stop ends the supervision of an instance gracefully: the adapter is sent
 // shutdown, given Params.ShutdownWait to end and killed if it does not. It is
-// idempotent, returns at once and reports nothing to the engine. From the moment
-// it returns, calls to the instance return ErrNotConnected and the adapter's
-// requests are answered as the host shutting down.
+// idempotent, returns at once and reports nothing to the engine: the caller that
+// disables an instance marks it offline itself. From the moment it returns, calls
+// to the instance return ErrNotConnected and the adapter's requests are answered
+// as the host shutting down.
 func (h *Host) Stop(instance string) {
 	h.mu.Lock()
 	s := h.sups[instance]

@@ -193,7 +193,10 @@ key and the sessions (none yet).
 An instance is online from `adapter.start` until the engine is told the connection
 ended, and offline otherwise. The time it went offline is the engine's own clock at
 the report, and the earlier time stays when it is reported again; an instance that
-has not been online since the engine started is offline since an unknown time.
+has not been online since the engine started is offline since an unknown time. The
+host reports nothing when it stops an instance (`Host.Stop`, `Shutdown`, `Abort`), so
+the caller that disables an instance marks it offline itself with `AdapterGone`,
+which the engine takes only for an instance that is still enabled.
 `AdapterSignals` is `adapterreg.Signals` over the last availability snapshot and
 that observation. The snapshot, the busy turns and the requests the runtime saw
 refused are memory: they are rebuilt by the adapter after a restart, and a
