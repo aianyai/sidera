@@ -15,6 +15,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -230,7 +231,7 @@ func (d *Daemon) openPackage(dir string) (fsx.Reader, error) {
 // loop exists: damaged files are quarantined, the rules of recovery run until none
 // has work, and the engine builds its view. The periodic tasks are registered
 // here, before the loop starts, and the clock state is the one the loop also runs
-// at once when it finds the clock set back.
+// at once when it finds the clock set back. The loopback is set here as well.
 func (d *Daemon) stepScan(ctx context.Context) error {
 	deps := engine.Deps{
 		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.pause.since,
@@ -245,6 +246,13 @@ func (d *Daemon) stepScan(ctx context.Context) error {
 		return err
 	}
 	d.engine = e
+	// The one transport of a node of one machine is the loopback, and it is made
+	// here with no knobs: they are faults for tests, and the product has none to
+	// arm. Without a transport every send and every session creation would fail
+	// inside the engine. It is set before the loop starts, as the engine requires.
+	if err := e.SetTransport(transport.NewLoopback(d.keys.Node(), e, nil)); err != nil {
+		return err
+	}
 	if err := e.AddClockState(clockStateTask, ClockStateEvery, d.clockTask); err != nil {
 		return err
 	}

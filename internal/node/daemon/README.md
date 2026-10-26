@@ -52,6 +52,11 @@ touches files only through `fsx`, and reads time only through the injected clock
   `fsx.OpenOS` of the directory the owner named, handed over as a reader: the package
   is on the machine's own file system, whatever file system the data directory is on,
   and the engine, which touches no file of its own, asks for a reader and copies from it.
+- **The engine's transport is the loopback, made here with no knobs.** Step 6 sets
+  `transport.NewLoopback(node, engine, nil)` before the loop starts, because the
+  transport needs the engine as its handler and so cannot exist before it. The
+  knobs are faults for tests: the product has no way to arm one. Without this call
+  every send and every session creation would fail inside the engine.
 - **The engine is the single writer; this package writes only what is its own:**
   `init` and the layout rule, both declared here and covered by the crash tests.
 - **The certificate is renewed at step 5 and every hour in the loop, never when the
