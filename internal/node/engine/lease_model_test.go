@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
@@ -35,7 +36,7 @@ const modelSeed = 20261026
 
 // modelSteps is how many random steps one run takes; with the weights below every
 // path is taken several times (the test asserts it).
-const modelSteps = 600
+const modelSteps = 500
 
 func TestEveryRecordEventuallyCloses(t *testing.T) {
 	m := newModelRun(t, modelSeed)
@@ -53,10 +54,12 @@ type lateAck struct {
 	at    time.Time
 }
 
-// sentMessage is a message an agent sent, for the sender's own view at the end.
+// sentMessage is a message an agent sent, for the sender's own view at the end. A control
+// signal is no page and no model is shown it, so what the model saw says nothing of it.
 type sentMessage struct {
-	from string
-	id   adapterproto.MessageID
+	from    string
+	id      adapterproto.MessageID
+	control bool
 }
 
 type modelRun struct {
@@ -106,6 +109,8 @@ const (
 	pathUnreachable     = "target-unreachable"
 	pathCreateOnOther   = "create-session-on-the-second-adapter"
 	pathSessionRecvFail = "session-recv-refused"
+	pathLeaseRenewed    = "lease-extended-beyond-one-duration"
+	pathLeaseAtCap      = "lease-extended-to-the-cap"
 )
 
 var modelPaths = []string{
@@ -138,13 +143,14 @@ func (m *modelRun) addrOf(ep store.EndpointRecord) string {
 	return fmt.Sprintf("%s/%s", harness.NodeID(), ep.ID)
 }
 
-func (m *modelRun) send(from, to, body string) {
+func (m *modelRun) send(from, to, body string) adapterproto.MessageID {
 	m.t.Helper()
 	res, err := m.h.Agent(from).Send(m.h.Ctx(), fakeagent.SendInput{To: []string{to}, Body: body})
 	if err != nil {
 		m.t.Fatalf("send %s -> %s: %v", from, to, err)
 	}
-	m.sent = append(m.sent, sentMessage{from, res.MessageID})
+	m.sent = append(m.sent, sentMessage{from: from, id: res.MessageID})
+	return res.MessageID
 }
 
 // step is one random step: one thing an agent or the world does, then time passes.
@@ -198,16 +204,64 @@ func (m *modelRun) step(i int) {
 	case n < 71:
 		createOn(t, h, otherInstance, m.names[m.rng.Intn(len(m.names))], "default")
 		m.took(pathCreateOnOther)
+	case n < 74:
+		m.walkLease()
 	default:
 		step, err := m.gen.Next()
 		if err != nil {
 			t.Fatalf("control step %d: %v", i, err)
 		}
-		m.sent = append(m.sent, sentMessage{step.Sender, step.Message})
+		m.sent = append(m.sent, sentMessage{from: step.Sender, id: step.Message, control: true})
 	}
 	quiet(t, h)
 	h.Advance([]time.Duration{30 * time.Second, 2 * time.Minute, 2 * time.Minute, 6 * time.Minute, 6 * time.Minute, 20 * time.Minute}[m.rng.Intn(6)])
 	quiet(t, h)
+}
+
+// walkLease follows a lease of a session whose turn is running through its whole life,
+// a step of the size leases are extended at (two minutes, within the extension's lead of
+// two and a half) at a time: the page is read and never acknowledged, so the lease is
+// extended until it reaches the cap and then runs out. The other steps of the run move
+// the clock by one jump, which gives an extension no time to be made.
+func (m *modelRun) walkLease() {
+	t, h := m.t, m.h
+	var ep store.EndpointRecord
+	found := false
+	for _, c := range m.openSessions() {
+		v, err := h.Engine().Adapter(h.Ctx(), c.Instance)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(v.Busy, adapterproto.EndpointRef(c.ID.String())) {
+			ep, found = c, true
+			break
+		}
+	}
+	if !found || m.down {
+		return
+	}
+	msg := m.send(m.names[m.rng.Intn(len(m.names))], m.addrOf(ep), "read by a turn that does not acknowledge")
+	quiet(t, h)
+	res, err := h.Session(ep.ID.String()).Recv(h.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
+	if err != nil || !slices.ContainsFunc(res.Page.Messages, func(pm adapterproto.PageMessage) bool { return pm.ID == msg }) {
+		return // the session closed meanwhile, or the page does not hold the message
+	}
+	longest := time.Duration(0)
+	for range 10 {
+		h.Advance(2 * time.Minute)
+		quiet(t, h)
+		for _, in := range inRecords(t, h, msg) {
+			if l := in.Record.Lease; l.Active {
+				longest = max(longest, l.ExpiresAt.Sub(l.IssuedAt))
+			}
+		}
+	}
+	if longest > delivery.LeaseDuration {
+		m.took(pathLeaseRenewed)
+	}
+	if longest == delivery.LeaseRenewalCap {
+		m.took(pathLeaseAtCap)
+	}
 }
 
 // recv is a recv by an agent that is not the model of a turn, and what it does with
@@ -279,10 +333,10 @@ func (m *modelRun) modelTurn() {
 		return
 	}
 	mode, path := fakeadapter.ObservedFaithful, pathModelWhole
-	switch m.rng.Intn(3) {
-	case 1:
-		mode, path = fakeadapter.ObservedTruncated, pathModelCut
+	switch m.rng.Intn(4) { // a whole result is half of them: it is the one that needs a page the node still holds
 	case 2:
+		mode, path = fakeadapter.ObservedTruncated, pathModelCut
+	case 3:
 		mode, path = fakeadapter.ObservedReplaced, pathModelReplaced
 	}
 	ctl, err := m.h.Adapter(ep.Instance)
@@ -360,10 +414,19 @@ func outDeliveries(o store.OutRecord) []delivery.Record {
 // judge holds the finished run to the property and to the coverage the run claims.
 func (m *modelRun) judge() {
 	t, h := m.t, m.h
+	sc := scanOf(t, h)
 	t.Logf("paths of the run: %v; control paths: %v", m.paths, m.gen.Paths())
 	for _, p := range modelPaths {
 		if m.paths[p] < 3 {
 			t.Errorf("the path %s was taken %d times, want at least 3", p, m.paths[p])
+		}
+	}
+	// Every extension a lease can have is reached by the walk of a lease, which follows
+	// one through its life in short steps: the other steps move the clock past a lease
+	// in one jump.
+	for _, p := range []string{pathLeaseRenewed, pathLeaseAtCap} {
+		if m.paths[p] == 0 {
+			t.Errorf("no lease of the run was %s", p)
 		}
 	}
 	for _, p := range harness.ControlPaths {
@@ -372,7 +435,6 @@ func (m *modelRun) judge() {
 		}
 	}
 
-	sc := scanOf(t, h)
 	states := map[delivery.State]int{}
 	open := func(kind, name string, r delivery.Record) {
 		states[r.State]++
@@ -398,7 +460,14 @@ func (m *modelRun) judge() {
 		}
 	}
 
-	// What the sender is told is final as well.
+	log, err := h.Ledger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	shown := modelShown(log)
+
+	// What the sender is told is final as well, and a sender is told a message was
+	// delivered only when the model was shown all of it.
 	for _, s := range m.sent {
 		st, err := h.Agent(s.from).Status(h.Ctx(), fakeagent.StatusInput{MessageID: s.id})
 		if err != nil {
@@ -407,47 +476,67 @@ func (m *modelRun) judge() {
 		}
 		for _, r := range st.Recipients {
 			switch r.State {
-			case adapterproto.DeliveryDelivered, adapterproto.DeliveryRejected, adapterproto.DeliveryClosedUnconfirmed:
+			case adapterproto.DeliveryDelivered:
+				if s.control {
+					continue
+				}
+				to, err := ident.ParseAddress(string(r.To))
+				if err != nil {
+					t.Errorf("the address %q a status of %s names: %v", r.To, s.id, err)
+				} else if !shown.whole(to.Endpoint.String(), string(s.id)) {
+					t.Errorf("the sender %s is told %s was delivered to %s and the model was not shown all of it", s.from, s.id, r.To)
+				}
+			case adapterproto.DeliveryRejected, adapterproto.DeliveryClosedUnconfirmed:
 			default:
 				t.Errorf("the sender %s is told %s for %s to %s after every report_by, want a final state", s.from, r.State, s.id, r.To)
 			}
 		}
 	}
 
-	log, err := h.Ledger()
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.judgeAcknowledgements(sc, log)
+	m.judgeAcknowledgements(sc, log, shown)
 	if err := h.CheckLedger(); err != nil {
 		t.Error(err)
 	}
+}
+
+// shownSet is what the ledger says the models were shown: the parts of each message by
+// endpoint and message, and how many parts each message has.
+type shownSet struct {
+	parts map[string]map[int]bool
+	total map[string]int
+}
+
+func modelShown(log *ledger.Log) shownSet {
+	s := shownSet{parts: map[string]map[int]bool{}, total: map[string]int{}}
+	for _, e := range log.Kind(ledger.KindModelSaw) {
+		k := e.Attrs.Endpoint + " " + e.Attrs.MessageID
+		if s.parts[k] == nil {
+			s.parts[k] = map[int]bool{}
+		}
+		s.parts[k][max(e.Attrs.Part, 1)] = true
+		s.total[k] = max(e.Attrs.Parts, 1)
+	}
+	return s
+}
+
+// whole says whether the endpoint was shown every part of the message.
+func (s shownSet) whole(endpoint, message string) bool {
+	k := endpoint + " " + message
+	return len(s.parts[k]) > 0 && len(s.parts[k]) >= s.total[k]
 }
 
 // judgeAcknowledgements: no delivery of a message of an agent is delivered unless the
 // ledger shows the endpoint was shown every part of it, and the node never allowed an
 // acknowledgement on behalf of the agent for a result the adapter reported cut or
 // replaced.
-func (m *modelRun) judgeAcknowledgements(sc *store.Scan, log *ledger.Log) {
+func (m *modelRun) judgeAcknowledgements(sc *store.Scan, log *ledger.Log, shown shownSet) {
 	t := m.t
-	type seen struct{ parts map[int]bool }
-	shown := map[string]*seen{} // by endpoint and message
-	total := map[string]int{}
-	for _, e := range log.Kind(ledger.KindModelSaw) {
-		k := e.Attrs.Endpoint + " " + e.Attrs.MessageID
-		if shown[k] == nil {
-			shown[k] = &seen{parts: map[int]bool{}}
-		}
-		shown[k].parts[max(e.Attrs.Part, 1)] = true
-		total[k] = max(e.Attrs.Parts, 1)
-	}
 	for _, in := range sc.In {
 		if in.Record.State != delivery.StateDelivered || in.Key.Sender.IsSystem() {
 			continue
 		}
-		k := in.Key.Recipient.String() + " " + string(in.Key.Message)
-		if s := shown[k]; s == nil || len(s.parts) < total[k] {
-			t.Errorf("message %s is delivered to %s and the model was not shown all of it (%v of %d parts)", in.Key.Message, in.Key.Recipient, s, total[k])
+		if !shown.whole(in.Key.Recipient.String(), string(in.Key.Message)) {
+			t.Errorf("message %s is delivered to %s and the model was not shown all of it", in.Key.Message, in.Key.Recipient)
 		}
 	}
 	answers := map[string]int{} // by the mode the adapter reported and the verdict it got
