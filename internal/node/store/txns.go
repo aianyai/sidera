@@ -89,6 +89,11 @@ var (
 	declBlocked = txn.Decl{Name: "blocked", Kind: txn.Normal, Writes: []txn.Write{
 		rep("attempts"), repDefer("in", many, optional), syncDir("in-dir", optional),
 	}}
+	// lease: the target records of a hand-out are written. The replays of a prompt
+	// and of a block write their followers with this same declaration, and the
+	// replays of a drain and of a feedback notice with endpoint-drain,
+	// instance-drain and feedback-clear: a recovery rule that writes what a normal
+	// transaction writes is that transaction, run again.
 	declLease = txn.Decl{Name: "lease", Kind: txn.Normal, Writes: []txn.Write{
 		repDefer("in", many), syncDir("in-dir"),
 	}}
@@ -137,14 +142,9 @@ var (
 		rep("seq-floor", optional), rep("session", many, optional), rep("alert"),
 		rep("overwrite", optional), rm("record", optional), syncDir("dir", optional),
 	}}
-	declOrphanGC            = txn.Decl{Name: "orphan-gc", Kind: txn.Recovery, Writes: []txn.Write{rm("body", many, optional), syncDir("dir", many)}}
-	declOrphanGCEndpoint    = txn.Decl{Name: "orphan-gc-endpoint", Kind: txn.Recovery, Writes: []txn.Write{rm("endpoint", many, optional), syncDir("dir", many)}}
-	declCtlEffectReplay     = txn.Decl{Name: "ctl-effect-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("endpoint", many, optional), syncDir("endpoint-dir", optional)}}
-	declEndpointDrainReplay = txn.Decl{Name: "endpoint-drain-replay", Kind: txn.Recovery, Writes: drainWrites(nil)}
-	declInstanceDrainReplay = txn.Decl{Name: "instance-drain-replay", Kind: txn.Recovery, Writes: drainWrites(instanceHead())}
-	declPromptReplay        = txn.Decl{Name: "prompt-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("in", many), syncDir("in-dir")}}
-	declBlockedReplay       = txn.Decl{Name: "blocked-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("in", many), syncDir("in-dir")}}
-	declFeedbackReplay      = txn.Decl{Name: "feedback-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("out", many), syncDir("out-dir")}}
+	declOrphanGC         = txn.Decl{Name: "orphan-gc", Kind: txn.Recovery, Writes: []txn.Write{rm("body", many, optional), syncDir("dir", many)}}
+	declOrphanGCEndpoint = txn.Decl{Name: "orphan-gc-endpoint", Kind: txn.Recovery, Writes: []txn.Write{rm("endpoint", many, optional), syncDir("dir", many)}}
+	declCtlEffectReplay  = txn.Decl{Name: "ctl-effect-replay", Kind: txn.Recovery, Writes: []txn.Write{repDefer("endpoint", many, optional), syncDir("endpoint-dir", optional)}}
 )
 
 // instanceHead is the part of instance-drain before the part it shares with
@@ -174,8 +174,6 @@ func Transactions() []*txn.Decl {
 		&declEndpointDrain, &declInstanceDrain, &declFeedbackForm, &declFeedbackClear,
 		&declCheckpointPut, &declAlertRaise, &declArchiveEvents, &declArchiveSweep,
 		&declArchiveExpire, &declAlertAck, &declDaemonStop,
-		&declQuarantine, &declOrphanGC,
-		&declOrphanGCEndpoint, &declCtlEffectReplay, &declEndpointDrainReplay,
-		&declInstanceDrainReplay, &declPromptReplay, &declBlockedReplay, &declFeedbackReplay,
+		&declQuarantine, &declOrphanGC, &declOrphanGCEndpoint, &declCtlEffectReplay,
 	}
 }

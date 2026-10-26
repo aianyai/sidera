@@ -78,9 +78,12 @@ to the workflow.
   read by the store's tests through `raceEnabled`) those batch walks leave the
   seeded power losses out, as the detector adds cost and no coverage there. The
   nested walk crashes again, at every point of its recovery, only the first crash
-  state that reaches each point of a recovery rule, not every crash state; being
-  cheap, it runs under `-race` too, and the assertions that need it apply in every
-  mode. A `-skip` pattern could not express any of this: the kinds of crash are
+  state that reaches each point of a recovery rule (the recovery transactions of the
+  store, the cleanup and the settle of `txn.Recover`), not every crash state; a
+  replay that writes under the declaration of a normal transaction is not such a
+  point, because a crash in the middle of it leaves the disk the walk of that
+  declaration already crashes at. Being cheap, it runs under `-race` too, and the
+  assertions that need it apply in every mode. A `-skip` pattern could not express any of this: the kinds of crash are
   taken inside one test, not as subtests. The reason is the per-package limit:
   `-timeout` covers one test binary, and the store's race run, without any
   narrowing, took 79% of it on the slowest job (the baseline below).

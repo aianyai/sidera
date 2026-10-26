@@ -169,6 +169,11 @@ engine applies the delivery rules and calls the writes.
      bodies, so only after all of them is a body without a reference an orphan.
   7. The sequence book, from a scan taken after all of the above: a quarantine
      raises floors and replaces records, and the book must see both.
+  A rule whose write has the shape of a normal transaction is that transaction, run
+  again, with no declaration of its own: the drains use `endpoint-drain` and
+  `instance-drain`, the prompt and block replays `lease`, the feedback replay
+  `feedback-clear`. Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint` and
+  `ctl-effect-replay` are `Recovery` declarations.
   Each rule's predicate is a function of the scan it is given: a rule run on a scan
   taken before the previous rule wrote would act on records that rule has already
   settled.
@@ -218,7 +223,11 @@ redone.
   state; the first such state in the order of the walks is crashed again at every
   point of its recovery, in both kinds of crash (`runNestedWalks`). The order is
   fixed by the seed of the scenario, so the choice does not depend on which walk
-  finishes first.
+  finishes first. A replay that writes under the declaration of a normal
+  transaction (the drains, the prompt and block replays under `lease`, the feedback
+  replay under `feedback-clear`) is outside that domain: a crash in the middle of
+  it leaves the disk the walk of that declaration crashes at, so that walk already
+  covers it.
 - The coverage assertions derive from the same selection: every declared point is
   crashed at in both kinds by the walk of a workflow, and every point of a
   recovery rule is crashed at during a recovery in both kinds.

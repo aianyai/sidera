@@ -364,14 +364,14 @@ func (s *Store) CtlEffectReplay(eps []EndpointRecord) error {
 // endpoints.
 // It returns the target records as written (the revision one on).
 func (s *Store) EndpointDrainReplay(b DrainBatch) ([]InRecord, error) {
-	return s.drain(&declEndpointDrainReplay, nil, b, false)
+	return s.drain(&declEndpointDrain, nil, b, false)
 }
 
 // InstanceDrainReplay closes the endpoints of disabled instances and writes a
 // chunk of their deliveries.
 // It returns the target records as written (the revision one on).
 func (s *Store) InstanceDrainReplay(closed []EndpointRecord, b DrainBatch) ([]InRecord, error) {
-	return s.drain(&declInstanceDrainReplay, closed, b, true)
+	return s.drain(&declInstanceDrain, closed, b, true)
 }
 
 func (s *Store) followersReplay(decl *txn.Decl, ins []InRecord) ([]InRecord, error) {
@@ -393,13 +393,13 @@ func (s *Store) followersReplay(decl *txn.Decl, ins []InRecord) ([]InRecord, err
 // PromptReplay writes the followers of a prompt, with the event applied.
 // It returns the target records as written (the revision one on).
 func (s *Store) PromptReplay(ins []InRecord) ([]InRecord, error) {
-	return s.followersReplay(&declPromptReplay, ins)
+	return s.followersReplay(&declLease, ins)
 }
 
 // BlockedReplay writes the followers of a block or a recovery.
 // It returns the target records as written (the revision one on).
 func (s *Store) BlockedReplay(ins []InRecord) ([]InRecord, error) {
-	return s.followersReplay(&declBlockedReplay, ins)
+	return s.followersReplay(&declLease, ins)
 }
 
 // FeedbackReplay writes the source records without the feedback a notice covers.
@@ -411,7 +411,7 @@ func (s *Store) FeedbackReplay(outs []OutRecord) error {
 	if err != nil {
 		return err
 	}
-	tx := s.w.Begin(&declFeedbackReplay)
+	tx := s.w.Begin(&declFeedbackClear)
 	defer tx.Close()
 	if err := writeGroup(tx, "out", "out-dir", OutDir, files); err != nil {
 		return err

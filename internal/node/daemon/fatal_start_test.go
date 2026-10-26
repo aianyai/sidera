@@ -208,7 +208,7 @@ func TestAFatalStorageErrorInTheScanOfStateEndsTheStartWithTheExitCodeOfAnIOErro
 		t.Fatal(err)
 	}
 	faulty := fsxtest.NewFaulty(t, n.mem)
-	rule := faulty.Fail(fsxtest.Match{Tx: "instance-drain-replay", Step: fsx.StepSyncDir}, errIO)
+	rule := faulty.Fail(fsxtest.Match{Tx: "instance-drain", Step: fsx.StepSyncDir}, errIO)
 	d, err := daemon.Start(context.Background(), memConfig(n.home, n.clk, faulty))
 	mustHit(t, rule, d)
 	if err != nil && !strings.Contains(err.Error(), "startup step 6") {

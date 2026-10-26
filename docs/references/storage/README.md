@@ -807,6 +807,15 @@ repeats until no rule has work. The test simulator (`sim.pass`, `sim.recoverAll`
 in `internal/node/store/sim_test.go`) is that loop, and the crash walk uses it as
 the recovery of every scenario.
 
+A rule whose write has the shape of a normal transaction is that transaction, run
+again, and has no declaration of its own: the drain rules write with `endpoint-drain`
+and `instance-drain`, the replays of a prompt and of a block with `lease` (their
+followers are written as a hand-out writes its records), and the replay of feedback
+with `feedback-clear`. A second declaration of the same shape would double the crash
+points to walk and could drift from the first. Only the writes no normal transaction
+makes are `Recovery` declarations of the store: `quarantine`, `orphan-gc`,
+`orphan-gc-endpoint` and `ctl-effect-replay`.
+
 **Settle.** The rules above write their followers durably after reading a head
 record that, after a process crash, may be visible and not durable; a power loss
 that followed would leave the followers without their head. The store does not
@@ -872,9 +881,15 @@ The store does not crash again at every point of the recovery that follows each
 crash state (the nested walk). Each point of a recovery rule, which is every point of
 a recovery transaction and of the cleanup and settle of `txn.Recover`, is reached by
 the recovery of some crash state; the first such state in the order of the walks is
-crashed again at every point of its recovery, in both kinds. That redoes every rule
-after a crash in the middle of it, which is what the third property needs, from
-a state where the rule finds half-written work. The assertions are derived from the
+crashed again at every point of its recovery, in both kinds. That redoes the
+recovery transactions, the cleanup and the settle after a crash in the middle of
+them, which is what the third property needs, from a state where the rule finds
+half-written work. A replay that writes under the declaration of a normal
+transaction (the drains, the prompt and block replays under `lease`, the feedback
+replay under `feedback-clear`) is not a point of its own in this domain, and it
+needs no walk of its own: a crash in the middle of it leaves the disk that the walk
+of that declaration crashes at, and the recovery that follows is the one that walk
+already runs and checks. The assertions are derived from the
 same selection: every declared point is crashed at in both kinds by a walk, and
 every point of a recovery rule is crashed at during a recovery in both kinds. The
 nested walk is cheap enough to run under the race detector as well, so its

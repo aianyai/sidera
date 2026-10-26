@@ -81,11 +81,6 @@ var designTable = []struct {
 	{"orphan-gc", txn.Recovery, "body:Remove[MO] dir:SyncDir[M]"},
 	{"orphan-gc-endpoint", txn.Recovery, "endpoint:Remove[MO] dir:SyncDir[M]"},
 	{"ctl-effect-replay", txn.Recovery, "endpoint:ReplaceDefer[MO] endpoint-dir:SyncDir[O]"},
-	{"endpoint-drain-replay", txn.Recovery, drainTail},
-	{"instance-drain-replay", txn.Recovery, "endpoint:ReplaceDefer[M] endpoint-dir:SyncDir " + drainTail},
-	{"prompt-replay", txn.Recovery, "in:ReplaceDefer[M] in-dir:SyncDir"},
-	{"blocked-replay", txn.Recovery, "in:ReplaceDefer[M] in-dir:SyncDir"},
-	{"feedback-replay", txn.Recovery, "out:ReplaceDefer[M] out-dir:SyncDir"},
 }
 
 func TestDeclarationsMatchTheDesignTable(t *testing.T) {
