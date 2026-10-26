@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/hex"
 	"path"
+	"slices"
 	"sort"
 	"time"
 
@@ -143,6 +144,15 @@ func (p SweepPlan) Chunk() SweepChunk {
 // records leaves it, and the next one removes the endpoint with its floor file.
 // An out-lost record of a closed endpoint is swept whatever its item says, so
 // that it does not keep the endpoint for good.
+//
+// Feedback is told before its record goes. A source record that still holds an item
+// is kept while its sender is open, as an out-lost record is, and goes at once when
+// the sender is closed or has no record: it can no longer be told. A sender whose
+// endpoint file is damaged with a key that can be trusted is neither: its status is
+// not known, so it is told first. A notice is kept
+// while a record that stays holds an item it covers: the replay of feedback reads
+// the cover to take the item off the record, and a notice swept first would have
+// the next start tell the item again.
 func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	var plan SweepPlan
 	ready := func(rec Record) bool {
@@ -176,6 +186,43 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 		plan.Summaries = append(plan.Summaries, summarize(rec, now))
 	}
 
+	// What leaves among the source and out-lost records is decided first, because a
+	// notice is kept for the feedback items that the records that stay still hold.
+	// A sender that is closed, or has no record, can no longer be told: closing is
+	// irreversible, so what the record holds for it can never be given and goes with
+	// it. Any other sender is told first.
+	// An endpoint whose file is damaged with a key that can be trusted is not known
+	// to be closed, so it counts as open: its sender may still be owed the feedback.
+	endpointOpen := map[ident.EndpointID]bool{}
+	for _, e := range sc.Endpoints {
+		endpointOpen[e.ID] = e.Status != EndpointClosed
+	}
+	for _, d := range sc.Damaged {
+		if id, ok := d.Key.(ident.EndpointID); ok && d.Dir == EndpointsDir {
+			endpointOpen[id] = true
+		}
+	}
+	outGoes := func(o OutRecord) bool {
+		return ready(o) && (len(o.Feedback) == 0 || !endpointOpen[o.Key.Sender])
+	}
+	outLostGoes := func(o OutLostRecord) bool { return ready(o) || !endpointOpen[o.Key.Sender] }
+	stillHeld := map[CoverRef]bool{} // the items of the records that stay, as a notice covers them
+	holdItems := func(name string, items []delivery.Item) {
+		for _, it := range items {
+			stillHeld[CoverRef{Out: name, Recipient: it.Ref.Recipient, Kind: it.Feedback.Kind}] = true
+		}
+	}
+	for _, o := range sc.Out {
+		if !outGoes(o) {
+			holdItems(o.Name(), o.Feedback)
+		}
+	}
+	for _, o := range sc.OutLost {
+		if !outLostGoes(o) {
+			holdItems(o.Name(), o.Feedback)
+		}
+	}
+
 	for _, c := range sc.Ctl {
 		if ready(c) {
 			add(&plan.Ctl, CtlDir, c.Name())
@@ -184,6 +231,12 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	}
 	for _, in := range sc.In {
 		if !ready(in) {
+			continue
+		}
+		// A notice is what tells the replay of feedback that an item was told: swept
+		// while a record still holds the item, it would have the next start tell it
+		// again.
+		if slices.ContainsFunc(in.Covers, func(c CoverRef) bool { return stillHeld[c] }) {
 			continue
 		}
 		if in.Derived != nil {
@@ -196,20 +249,13 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 		summary(in)
 	}
 	for _, o := range sc.Out {
-		if !ready(o) {
-			continue
+		if outGoes(o) {
+			summary(o)
+			plan.Outs = append(plan.Outs, o)
 		}
-		summary(o)
-		plan.Outs = append(plan.Outs, o)
-	}
-	// An out-lost record is also swept once its sender is closed or gone: the
-	// notice can no longer be handed out, and nothing would clear its item.
-	endpointOpen := map[ident.EndpointID]bool{}
-	for _, e := range sc.Endpoints {
-		endpointOpen[e.ID] = e.Status != EndpointClosed
 	}
 	for _, o := range sc.OutLost {
-		if ready(o) || !endpointOpen[o.Key.Sender] {
+		if outLostGoes(o) {
 			plan.OutLosts = append(plan.OutLosts, o)
 		}
 	}

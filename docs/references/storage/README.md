@@ -933,9 +933,23 @@ the delivery rule as one of the terms so that it holds whatever that window
 becomes), the status report until `report_by` or a
 whole `report_by` window after its creation, and the facts reply permission reads
 until `report_by` plus the clock tolerance plus the reply window. That is about 27
-hours after the delivery deadline. Then a summary goes to the archive and the file
-is removed. An out-lost record is kept
-while its feedback item is pending and goes at once when it is not. A closed session endpoint goes
+hours after the delivery deadline, to the nanosecond (`TestPlanSweepTakesAFinishedTargetRecordAtItsRetentionAndNotBefore`).
+Then a summary goes to the archive and the file
+is removed. A source record whose delivery is still queued or accepted after `report_by`
+is not finished: it waits for the pull the engine makes before closing it, and is never
+planned, however late the sweep runs
+(`TestPlanSweepNeverPlansASourceRecordWaitingForItsFinalPull`). An out-lost record is kept
+while its feedback item is pending and goes at once when it is not. A source record
+that still holds a feedback item is kept the same way while its sender is open, and
+goes when the sender is closed or has no record, which can never be told; a sender whose
+endpoint file is damaged with a key that can be trusted is not known to be closed, so it
+is told first (`TestPlanSweepKeepsTheFeedbackOfASenderWhoseEndpointFileIsDamaged`). A notice
+(a target record of the system endpoint) is kept while a record that stays holds an
+item it covers: the cover is what the replay of feedback reads to take the item off
+the record, so a notice swept first would have the next start tell the item again
+(`TestPlanSweepKeepsANoticeWhileAnItemItCoversIsStillOnItsRecord`,
+`TestPlanSweepTakesASourceRecordThatHoldsFeedbackOnlyWhenItsSenderCanNoLongerReadIt`,
+`TestPlanSweepTakesANoticeWithTheClosedSendersRecordItCovers`). A closed session endpoint goes
 with its attempts, checkpoints and floor file, but not while any source record or
 out-lost record has it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
 a source record writes the floor of its sender, and a floor file written after the

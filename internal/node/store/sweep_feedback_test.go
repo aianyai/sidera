@@ -1,9 +1,12 @@
 package store_test
 
 import (
+	"path"
+	"slices"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 )
 
@@ -158,5 +161,32 @@ func TestPlanSweepTakesANoticeWithTheClosedSendersRecordItCovers(t *testing.T) {
 	plan := store.PlanSweep(r.scan(), base.Add(farAway))
 	if len(plan.Outs) != 1 || !plannedRecord(plan, store.InDir, n.Name()) {
 		t.Errorf("outs %v, notice planned %v; want both", plan.Outs, plannedRecord(plan, store.InDir, n.Name()))
+	}
+}
+
+// A sender whose endpoint file is damaged, with a key that can be trusted, is not
+// known to be closed: the feedback its source and out-lost records hold is kept for
+// it. A sender whose file is not there at all, or is intact and closed, is the case
+// of the rule above and is swept.
+func TestPlanSweepKeepsTheFeedbackOfASenderWhoseEndpointFileIsDamaged(t *testing.T) {
+	late := base.Add(farAway)
+	out := pendingOut(1, true)
+	lost := lostNotice(1, 1, base)
+	r := newRig(t)
+	seed(t, r.mem, session(1, store.EndpointOpen, ctlName(4)), out, lost)
+	damageBody(t, r.mem, path.Join(store.EndpointsDir, session(1, store.EndpointOpen, ctlName(4)).Name()))
+	sc := r.scan()
+	if !slices.ContainsFunc(sc.Damaged, func(d store.DamagedFile) bool {
+		_, trusted := d.Key.(ident.EndpointID)
+		return d.Dir == store.EndpointsDir && trusted
+	}) {
+		t.Fatalf("the scenario has no damaged endpoint file with a key that can be trusted: %+v", sc.Damaged)
+	}
+	plan := store.PlanSweep(sc, late)
+	if len(plan.Outs) != 0 {
+		t.Errorf("a source record that holds feedback is swept: %v", plan.Outs)
+	}
+	if len(plan.OutLosts) != 0 {
+		t.Errorf("an out-lost record that holds feedback is swept: %v", plan.OutLosts)
 	}
 }
