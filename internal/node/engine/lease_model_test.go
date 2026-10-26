@@ -45,11 +45,17 @@ func TestEveryRecordEventuallyCloses(t *testing.T) {
 	}
 	m.finish()
 	m.judge()
+	log, err := m.h.Ledger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.judgeObservedAnswers(log)
 }
 
 // lateAck is an acknowledgement an agent makes after a while.
 type lateAck struct {
 	agent fakeagent.Agent
+	who   ident.EndpointID
 	lease adapterproto.LeaseRef
 	at    time.Time
 }
@@ -63,31 +69,56 @@ type sentMessage struct {
 }
 
 type modelRun struct {
-	t     *testing.T
-	h     *harness.H
-	rng   *rand.Rand
-	gen   *harness.ControlGen
-	names []string // the direct endpoints of the fixture's first instance
-	other string   // a direct endpoint of the second instance
-	sent  []sentMessage
-	late  []lateAck
-	paths map[string]int
-	down  bool // the target of every send is unreachable
+	t   *testing.T
+	h   *harness.H
+	rng *rand.Rand
+	gen *harness.ControlGen
+	// genPaths are the paths of the generators that were replaced, and genSeed counts them.
+	genPaths map[string]int
+	genSeed  int64
+	names    []string // the direct endpoints of the fixture's first instance
+	other    string   // a direct endpoint of the second instance
+	sent     []sentMessage
+	late     []lateAck
+	paths    map[string]int
+	down     bool // the target of every send is unreachable
 
 	leases map[fakeagent.Agent]adapterproto.LeaseRef // the page each agent was last handed
+
+	// acked is what the node answered as done, in the order it was answered.
+	acked ackedLog
+	// states counts how the records of the judgments ended.
+	states map[delivery.State]int
+	// pathFloor is how often each path must have been taken. A run that cuts the power
+	// draws less of the steps it plans, because a cut ends the step it falls in, and which
+	// step that is depends on what the node does at that moment.
+	pathFloor int
+	// pl is set by the run that cuts the power in the middle of it; the run of the
+	// property of closing has none.
+	pl *powerLoss
 }
 
 func newModelRun(t *testing.T, seed int64) *modelRun {
 	t.Helper()
+	return newModelRunWith(t, seed, harness.Options{})
+}
+
+// newModelRunWith is newModelRun on a fixture with the options a run adds: the seed and
+// the second adapter instance are the run's own.
+func newModelRunWith(t *testing.T, seed int64, o harness.Options) *modelRun {
+	t.Helper()
 	names := []string{"a", "b", "c"}
-	h := sessionNode(t, harness.Options{Seed: uint64(seed), Adapter: &harness.AdapterOptions{ExtraInstances: []string{otherInstance}}}, names...)
+	o.Seed = uint64(seed)
+	o.Adapter = &harness.AdapterOptions{ExtraInstances: []string{otherInstance}}
+	h := sessionNode(t, o, names...)
 	other, err := h.DirectOn(otherInstance, "d")
 	if err != nil || other == "" {
 		t.Fatalf("a direct endpoint on the second adapter: %v", err)
 	}
 	quiet(t, h)
 	return &modelRun{
-		t: t, h: h, rng: rand.New(rand.NewSource(seed)), names: names, other: "d", paths: map[string]int{}, leases: map[fakeagent.Agent]adapterproto.LeaseRef{},
+		pathFloor: 3,
+		t:         t, h: h, rng: rand.New(rand.NewSource(seed)), names: names, other: "d", paths: map[string]int{}, leases: map[fakeagent.Agent]adapterproto.LeaseRef{},
 		gen: harness.NewControlGen(h, seed, names, []string{"b", "c", "d"}),
 	}
 }
@@ -145,13 +176,63 @@ func (m *modelRun) addrOf(ep store.EndpointRecord) string {
 
 func (m *modelRun) send(from, to, body string) adapterproto.MessageID {
 	m.t.Helper()
-	res, err := m.h.Agent(from).Send(m.h.Ctx(), fakeagent.SendInput{To: []string{to}, Body: body})
+	var res fakeagent.SendResult
+	var err error
+	agent := m.h.Agent(from)
+	m.pl.flightStart(m.idOf(from))
+	m.inCall(func() { res, err = agent.Send(m.h.Ctx(), fakeagent.SendInput{To: []string{to}, Body: body}) })
+	m.pl.flightEnd()
 	if err != nil {
-		m.t.Fatalf("send %s -> %s: %v", from, to, err)
+		m.failf("send %s -> %s: %v", from, to, err)
 	}
 	m.sent = append(m.sent, sentMessage{from: from, id: res.MessageID})
+	m.acked.sent(m.idOf(from), res.MessageID)
 	return res.MessageID
 }
+
+// idOf is the endpoint a name of the fixture stands for.
+func (m *modelRun) idOf(name string) ident.EndpointID {
+	a, err := ident.ParseAddress(m.h.Addr(name))
+	if err != nil {
+		m.t.Fatalf("the address of %s: %v", name, err)
+	}
+	return a.Endpoint
+}
+
+// inCall runs a call to the node. The run that cuts the power does so only while the
+// test waits for a call, and from the test's own goroutine, so that nothing of the
+// fixture is in use while it does.
+func (m *modelRun) inCall(f func()) {
+	if m.pl != nil {
+		m.pl.call(f)
+		return
+	}
+	f()
+}
+
+// quiet waits for the node to settle, through a cut of the power that comes in the
+// middle of the wait when the run makes them.
+func (m *modelRun) quiet() {
+	m.t.Helper()
+	if m.pl == nil {
+		quiet(m.t, m.h)
+		return
+	}
+	m.pl.quiet()
+}
+
+// failf fails the test, unless the power was cut during the step: what a call that
+// the cut interrupted answers is then the outcome of no step, and the step ends.
+func (m *modelRun) failf(format string, args ...any) {
+	m.t.Helper()
+	if m.pl != nil && m.pl.cutDuringStep() {
+		panic(stepInterrupted{})
+	}
+	m.t.Fatalf(format, args...)
+}
+
+// stepInterrupted ends a step that the cut of the power interrupted.
+type stepInterrupted struct{}
 
 // step is one random step: one thing an agent or the world does, then time passes.
 func (m *modelRun) step(i int) {
@@ -178,10 +259,10 @@ func (m *modelRun) step(i int) {
 		}
 	case n < 37:
 		to := append(slices.Clone(m.names), "d")[m.rng.Intn(len(m.names)+1)]
-		m.recv(h.Agent(to))
+		m.recv(h.Agent(to), m.idOf(to))
 	case n < 45:
 		if ep, ok := m.pickSession(); ok {
-			m.recv(h.Session(ep.ID.String()))
+			m.recv(h.Session(ep.ID.String()), ep.ID)
 		}
 	case n < 59:
 		m.modelTurn()
@@ -202,20 +283,39 @@ func (m *modelRun) step(i int) {
 			m.took(pathUnreachable)
 		}
 	case n < 71:
-		createOn(t, h, otherInstance, m.names[m.rng.Intn(len(m.names))], "default")
+		m.createOnOther(m.names[m.rng.Intn(len(m.names))])
 		m.took(pathCreateOnOther)
 	case n < 74:
 		m.walkLease()
 	default:
+		// The generator makes several calls and reads the fixture between them, so the
+		// power is not cut while it runs; the signals it sends are cut through in the
+		// quiet that follows.
 		step, err := m.gen.Next()
 		if err != nil {
-			t.Fatalf("control step %d: %v", i, err)
+			m.failf("control step %d: %v", i, err)
 		}
 		m.sent = append(m.sent, sentMessage{from: step.Sender, id: step.Message, control: true})
+		m.acked.sent(m.idOf(step.Sender), step.Message)
 	}
-	quiet(t, h)
+	m.quiet()
 	h.Advance([]time.Duration{30 * time.Second, 2 * time.Minute, 2 * time.Minute, 6 * time.Minute, 6 * time.Minute, 20 * time.Minute}[m.rng.Intn(6)])
-	quiet(t, h)
+	m.quiet()
+}
+
+// createOnOther asks the runtime endpoint of the second instance for a session as the
+// agent of from.
+func (m *modelRun) createOnOther(from string) {
+	var res fakeagent.SendResult
+	var err error
+	agent, to := m.h.Agent(from), m.h.RuntimeAddrOf(otherInstance)
+	m.inCall(func() {
+		res, err = agent.Control(m.h.Ctx(), fakeagent.ControlInput{To: to, Signal: adapterproto.SignalSessionCreate, Preset: "default"})
+	})
+	if err != nil {
+		m.failf("session.create with preset %q: %v", "default", err)
+	}
+	m.acked.sent(m.idOf(from), res.MessageID)
 }
 
 // walkLease follows a lease of a session whose turn is running through its whole life,
@@ -241,15 +341,22 @@ func (m *modelRun) walkLease() {
 		return
 	}
 	msg := m.send(m.names[m.rng.Intn(len(m.names))], m.addrOf(ep), "read by a turn that does not acknowledge")
-	quiet(t, h)
-	res, err := h.Session(ep.ID.String()).Recv(h.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
+	m.quiet()
+	var res fakeagent.RecvResult
+	var err error
+	m.inCall(func() {
+		res, err = h.Session(ep.ID.String()).Recv(h.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
+	})
+	if err == nil {
+		m.acked.handedOut(ep.ID, res.Page)
+	}
 	if err != nil || !slices.ContainsFunc(res.Page.Messages, func(pm adapterproto.PageMessage) bool { return pm.ID == msg }) {
 		return // the session closed meanwhile, or the page does not hold the message
 	}
 	longest := time.Duration(0)
 	for range 10 {
 		h.Advance(2 * time.Minute)
-		quiet(t, h)
+		m.quiet()
 		for _, in := range inRecords(t, h, msg) {
 			if l := in.Record.Lease; l.Active {
 				longest = max(longest, l.ExpiresAt.Sub(l.IssuedAt))
@@ -266,16 +373,19 @@ func (m *modelRun) walkLease() {
 
 // recv is a recv by an agent that is not the model of a turn, and what it does with
 // the page.
-func (m *modelRun) recv(a fakeagent.Agent) {
+func (m *modelRun) recv(a fakeagent.Agent, who ident.EndpointID) {
 	in := fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI}
 	if m.rng.Intn(5) == 0 {
 		in.AckLease = m.lastLease(a)
 	}
-	res, err := a.Recv(m.h.Ctx(), in)
+	var res fakeagent.RecvResult
+	var err error
+	m.inCall(func() { res, err = a.Recv(m.h.Ctx(), in) })
 	if err != nil {
 		m.took(pathSessionRecvFail) // a session that closed since it was looked at
 		return
 	}
+	m.acked.handedOut(who, res.Page)
 	if in.AckLease != "" {
 		m.took(pathRecvChained)
 	}
@@ -285,7 +395,7 @@ func (m *modelRun) recv(a fakeagent.Agent) {
 	m.leases[a] = res.Page.Lease
 	switch m.rng.Intn(4) {
 	case 0:
-		m.ack(a, res.Page.Lease)
+		m.ack(a, who, res.Page.Lease)
 		m.took(pathRecvAckAll)
 	case 1:
 		first := res.Page.Messages[0]
@@ -293,12 +403,12 @@ func (m *modelRun) recv(a fakeagent.Agent) {
 		if first.Part != nil {
 			part = first.Part.Index
 		}
-		m.ack(a, res.Page.Lease, adapterproto.PartRef{MessageID: first.ID, Part: part})
+		m.ack(a, who, res.Page.Lease, adapterproto.PartRef{MessageID: first.ID, Part: part})
 		m.took(pathRecvAckOne)
 	case 2:
 		m.took(pathRecvNoAck)
 	default:
-		m.late = append(m.late, lateAck{a, res.Page.Lease, m.h.Clock().Now().Add(time.Duration(6+m.rng.Intn(30)) * time.Minute)})
+		m.late = append(m.late, lateAck{a, who, res.Page.Lease, m.h.Clock().Now().Add(time.Duration(6+m.rng.Intn(30)) * time.Minute)})
 		m.took(pathRecvLateAck)
 	}
 }
@@ -307,8 +417,13 @@ func (m *modelRun) lastLease(a fakeagent.Agent) adapterproto.LeaseRef { return m
 
 // ack acknowledges and ignores what the node answers: a lease whose records were
 // closed meanwhile is refused, which is not what this test judges.
-func (m *modelRun) ack(a fakeagent.Agent, lease adapterproto.LeaseRef, items ...adapterproto.PartRef) {
-	_, _ = a.Ack(m.h.Ctx(), fakeagent.AckInput{Lease: lease, Items: items})
+func (m *modelRun) ack(a fakeagent.Agent, who ident.EndpointID, lease adapterproto.LeaseRef, items ...adapterproto.PartRef) {
+	var res fakeagent.AckResult
+	var err error
+	m.inCall(func() { res, err = a.Ack(m.h.Ctx(), fakeagent.AckInput{Lease: lease, Items: items}) })
+	if err == nil {
+		m.acked.acknowledged(who, res.Items)
+	}
 }
 
 func (m *modelRun) runLate() {
@@ -319,7 +434,7 @@ func (m *modelRun) runLate() {
 			rest = append(rest, l)
 			continue
 		}
-		m.ack(l.agent, l.lease)
+		m.ack(l.agent, l.who, l.lease)
 	}
 	m.late = rest
 }
@@ -364,16 +479,16 @@ func (m *modelRun) finish() {
 	t, h := m.t, m.h
 	h.Unreachable(false)
 	for _, l := range m.late {
-		m.ack(l.agent, l.lease)
+		m.ack(l.agent, l.who, l.lease)
 	}
 	m.late = nil
-	quiet(t, h)
+	m.quiet()
 	for range 600 {
 		if !h.Clock().Now().Before(latestReportBy(scanOf(t, h)).Add(time.Hour)) {
 			return
 		}
 		h.Advance(5 * time.Minute)
-		quiet(t, h)
+		m.quiet()
 	}
 	t.Fatalf("the clock is at %v and some record still has a report_by after it", h.Clock().Now())
 }
@@ -414,28 +529,52 @@ func outDeliveries(o store.OutRecord) []delivery.Record {
 // judge holds the finished run to the property and to the coverage the run claims.
 func (m *modelRun) judge() {
 	t, h := m.t, m.h
-	sc := scanOf(t, h)
-	t.Logf("paths of the run: %v; control paths: %v", m.paths, m.gen.Paths())
+	t.Logf("paths of the run: %v; control paths: %v", m.paths, m.controlPaths())
 	for _, p := range modelPaths {
-		if m.paths[p] < 3 {
-			t.Errorf("the path %s was taken %d times, want at least 3", p, m.paths[p])
+		if m.paths[p] < m.pathFloor {
+			t.Errorf("the path %s was taken %d times, want at least %d", p, m.paths[p], m.pathFloor)
 		}
 	}
 	// Every extension a lease can have is reached by the walk of a lease, which follows
 	// one through its life in short steps: the other steps move the clock past a lease
 	// in one jump.
 	for _, p := range []string{pathLeaseRenewed, pathLeaseAtCap} {
-		if m.paths[p] == 0 {
+		// A run that cuts the power ends the walk of a lease that the cut falls in.
+		if m.paths[p] == 0 && m.pl == nil {
 			t.Errorf("no lease of the run was %s", p)
 		}
 	}
 	for _, p := range harness.ControlPaths {
-		if m.gen.Paths()[p] == 0 {
+		// The run that cuts the power adds up the paths of its seeds instead.
+		if m.controlPaths()[p] == 0 && m.pl == nil {
 			t.Errorf("the control path %s was never taken", p)
 		}
 	}
 
-	states := map[delivery.State]int{}
+	m.judgeClosed()
+	t.Logf("how the records ended: %v", m.states)
+	for _, s := range []delivery.State{delivery.StateDelivered, delivery.StateRejected, delivery.StateClosedUnconfirmed} {
+		if m.states[s] == 0 {
+			t.Errorf("no record ended %s: the run does not reach every way a record closes (%v)", s, m.states)
+		}
+	}
+	if err := h.CheckLedger(); err != nil {
+		t.Error(err)
+	}
+}
+
+// judgeClosed holds the node, once the clock is past every report_by, to the property:
+// every record is closed, the senders are told a final state, and nothing was
+// acknowledged that the model was not shown. The messages the run sent so far are
+// judged and forgotten, so that it can be called again after the records of these
+// messages have left the live files.
+func (m *modelRun) judgeClosed() {
+	t, h := m.t, m.h
+	sc := scanOf(t, h)
+	if m.states == nil {
+		m.states = map[delivery.State]int{}
+	}
+	states := m.states
 	open := func(kind, name string, r delivery.Record) {
 		states[r.State]++
 		if !r.State.IsTerminal() {
@@ -451,12 +590,6 @@ func (m *modelRun) judge() {
 	for _, o := range sc.Out {
 		for _, d := range outDeliveries(o) {
 			open("source record", o.Name(), d)
-		}
-	}
-	t.Logf("how the records ended: %v", states)
-	for _, s := range []delivery.State{delivery.StateDelivered, delivery.StateRejected, delivery.StateClosedUnconfirmed} {
-		if states[s] == 0 {
-			t.Errorf("no record ended %s: the run does not reach every way a record closes (%v)", s, states)
 		}
 	}
 
@@ -493,10 +626,8 @@ func (m *modelRun) judge() {
 		}
 	}
 
+	m.sent = nil
 	m.judgeAcknowledgements(sc, log, shown)
-	if err := h.CheckLedger(); err != nil {
-		t.Error(err)
-	}
 }
 
 // shownSet is what the ledger says the models were shown: the parts of each message by
@@ -539,12 +670,19 @@ func (m *modelRun) judgeAcknowledgements(sc *store.Scan, log *ledger.Log, shown 
 			t.Errorf("message %s is delivered to %s and the model was not shown all of it", in.Key.Message, in.Key.Recipient)
 		}
 	}
-	answers := map[string]int{} // by the mode the adapter reported and the verdict it got
 	for _, e := range log.Kind(ledger.KindObservedSent) {
-		answers[e.Attrs.Mode+" "+e.Attrs.Verdict]++
 		if e.Attrs.Mode != string(fakeadapter.ObservedFaithful) && e.Attrs.Verdict == string(adapterproto.AckAllowed) {
 			t.Errorf("the node allowed an acknowledgement for a result reported as %s (lease %s)", e.Attrs.Mode, e.Attrs.Lease)
 		}
+	}
+}
+
+// judgeObservedAnswers: the run reaches the answers it judges.
+func (m *modelRun) judgeObservedAnswers(log *ledger.Log) map[string]int {
+	t := m.t
+	answers := map[string]int{} // by the mode the adapter reported and the verdict it got
+	for _, e := range log.Kind(ledger.KindObservedSent) {
+		answers[e.Attrs.Mode+" "+e.Attrs.Verdict]++
 	}
 	t.Logf("recv.observed answers: %v", answers)
 	// The run reaches the answers it judges: a whole result is acknowledged, a cut or a
@@ -554,4 +692,32 @@ func (m *modelRun) judgeAcknowledgements(sc *store.Scan, log *ledger.Log, shown 
 			t.Errorf("recv.observed was answered %q %d times, want at least 3 (%v)", want, answers[want], answers)
 		}
 	}
+	return answers
+}
+
+// controlPaths is how many times each control path was taken, by every generator the
+// run had.
+func (m *modelRun) controlPaths() map[string]int {
+	out := map[string]int{}
+	for p, n := range m.genPaths {
+		out[p] += n
+	}
+	for p, n := range m.gen.Paths() {
+		out[p] += n
+	}
+	return out
+}
+
+// newControlGen replaces the generator by one that knows nothing of what came before:
+// a creation whose reply was never read cannot be asked about once the retention took its
+// record out of the live files.
+func (m *modelRun) newControlGen(seed int64) {
+	if m.genPaths == nil {
+		m.genPaths = map[string]int{}
+	}
+	for p, n := range m.gen.Paths() {
+		m.genPaths[p] += n
+	}
+	m.genSeed++
+	m.gen = harness.NewControlGen(m.h, seed+m.genSeed, m.names, []string{"b", "c", "d"})
 }

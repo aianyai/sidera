@@ -1168,7 +1168,8 @@ one group of writes that is not synced yet, a state between those two, so the se
 power losses stay in the property tests, which draw them over random operations
 (`TestPowerLossCloneKeepsAcknowledgedWrites`,
 `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts`, and the engine's
-`TestPowerLossKeepsWhatTheEngineAcknowledged`), and in the walks of the store's
+`TestPowerLossKeepsWhatTheEngineAcknowledged` and
+`TestPowerLossCloneEngineKeepsAcknowledgedWrites`), and in the walks of the store's
 `batch` transactions, whose files are independent single-file transitions, where any
 subset of the written files is a state of its own (not under the race detector, which
 adds cost and no coverage to a single-threaded walk).
