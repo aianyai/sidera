@@ -24,7 +24,7 @@ reasons behind the rules.
 | `Record.Handout`, `Renew`, `Ack`, `NextPart`, `PossibleDuplicate`, `SortForRecv` | The pull lease: hand a chunk of a message out on a page, renew the lease, acknowledge chunks, name the chunk to hand out next, say whether a chunk may be a repeat. |
 | `LeaseID`, `NewLeaseID(io.Reader)`, `ParseLeaseID` | A page's identifier: 16 random bytes from an injected reader, all-zero refused, 32 lowercase hex characters as text (`LeaseIDTextLen`). |
 | `EventNoRecordAtTarget`, `RecordRetainUntil(reportBy)` | The source fact "the target holds no record of this delivery" (an accepted delivery before `ReportBy` becomes `delivery_unknown`, `lost_at_target`; every other state ignores it), and the instant a target may forget a delivery's record. |
-| `KindLostUnknownMessage`, `NewLostUnknownMessageItem(sender, at)`, `MergeLostUnknownBySender`, `LastRecordKind` | The feedback of a message nobody can name: its item (no message, no recipient), its merge by sender endpoint, and the last kind a record can have reported (the new kind is after it: no delivery produces it). |
+| `KindLostUnknownMessage`, `NewLostUnknownMessageItem(sender, source, at)`, `MergeLostUnknownBySender`, `LastRecordKind` | The feedback of a message nobody can name: its item (no message, no recipient, the stored record that holds it as `Item.Source`), its merge by sender endpoint, and the last kind a record can have reported (the new kind is after it: no delivery produces it). |
 | `Record.StatusReport`, `Record.ApplyStatusReport(now, StatusReport)` | What a target reports about a delivery, and the one rule by which the sender applies it. A reported `delivery_unknown` is always a hand-over. |
 | `Intake(now, acceptBefore, traffic, Authorization, Backlog)` | Target-side validation of the delivery deadline, the authorization verdict (kind and, for a denial, the reason) and the endpoint's backlog limit, for a request deduplication found new. Exempt traffic carries no verdict: its `Authorization` is the zero value. |
 | `Backlog`, `Record.OccupiesBacklogSlot()`, `DefaultEndpointBacklogLimit`, `ValidateEndpointBacklogLimit` | The endpoint's backlog limit: the count and limit `Intake` takes, the one rule for which records are counted, the default and its validation. |
@@ -92,7 +92,13 @@ expired_unconfirmed and delivery_unknown. Normal progress and `closed_unconfirme
   reference). It names no cause, because the sender knows only that the record is
   gone. `lost_unknown_message` belongs to no delivery: no transition produces it
   and `Valid` refuses a record that reports it; its item has no message or
-  recipient and merges per sender endpoint.
+  recipient, names the stored record that holds it (`Item.Source`) and merges per
+  sender endpoint. `FeedbackQueue.Add` takes an item in exactly one of two shapes
+  (a message and a recipient and no source, or this kind: no message, no
+  recipient, a source) and refuses any other. It tells an item of this kind from
+  another of the same sender by the source alone, so the notice of two damaged
+  records carries both and the caller clears both; the same source added again
+  is ignored, like any other repeated decision.
 - The two loss notices (`lost_at_sender`, `lost_at_target`) say that the node
   lost what it had stored about the message (the target's wording: no longer holds
   any record of it), that whether it was delivered, or for a control signal

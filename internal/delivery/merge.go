@@ -97,15 +97,21 @@ type Item struct {
 	Feedback Feedback
 	// At is when the decision was made; the merge window counts from it.
 	At time.Time
+	// Source names the stored record that holds the item, for the one kind of
+	// item that names no delivery (KindLostUnknownMessage), and is empty for
+	// every other. Such an item has nothing else to tell it from another of
+	// the same sender, and the notice that carries it must say which records
+	// to clear.
+	Source string
 }
 
 // NewLostUnknownMessageItem returns the item that tells the sender endpoint
 // that its node lost what it had stored about one of the messages the endpoint
-// sent, decided at at. It names no message and no recipient, because the record
-// that said so could not be read. It is the one place that gives the item its
-// shape.
-func NewLostUnknownMessageItem(sender ident.Address, at time.Time) Item {
-	return Item{Ref: DeliveryRef{Sender: sender}, Feedback: Feedback{Kind: KindLostUnknownMessage}, At: at}
+// sent, decided at at and held by the stored record source. It names no message
+// and no recipient, because the record that said so could not be read. It is the
+// one place that gives the item its shape.
+func NewLostUnknownMessageItem(sender ident.Address, source string, at time.Time) Item {
+	return Item{Ref: DeliveryRef{Sender: sender}, Feedback: Feedback{Kind: KindLostUnknownMessage}, At: at, Source: source}
 }
 
 // MergeClass says what a group of notices has in common.
@@ -193,14 +199,31 @@ type FeedbackQueue struct {
 // ErrInvalidItem reports an item that cannot be queued.
 var ErrInvalidItem = errors.New("invalid feedback item")
 
+// valid reports whether the item is one of the two shapes there are. An item
+// names a delivery, by its message and recipient, and no source; a
+// KindLostUnknownMessage item names no delivery and the record that holds it
+// instead (NewLostUnknownMessageItem).
+func (it Item) valid() bool {
+	if !it.Feedback.Kind.valid() || it.Ref.Sender.IsZero() {
+		return false
+	}
+	if it.Feedback.Kind == KindLostUnknownMessage {
+		return it.Ref.Message == "" && it.Ref.Recipient.IsZero() && it.Source != ""
+	}
+	return !it.Ref.Recipient.IsZero() && it.Ref.Message != "" && it.Source == ""
+}
+
 // Add queues an item. An item for a (delivery, kind) pair that is already
-// queued is ignored, so replaying the decision cannot send a notice twice.
+// queued is ignored, so replaying the decision cannot send a notice twice; an
+// item that names no delivery is the same item only when it comes from the same
+// source record, so two records of one sender are two items, and one notice
+// carries them both.
 func (q *FeedbackQueue) Add(it Item) error {
-	if !it.Feedback.Kind.valid() || it.Ref.Sender.IsZero() || it.Ref.Recipient.IsZero() || it.Ref.Message == "" {
+	if !it.valid() {
 		return fmt.Errorf("%w: %+v", ErrInvalidItem, it)
 	}
 	for _, p := range q.Pending {
-		if p.Ref == it.Ref && p.Feedback.Kind == it.Feedback.Kind {
+		if p.Ref == it.Ref && p.Feedback.Kind == it.Feedback.Kind && p.Source == it.Source {
 			return nil
 		}
 	}

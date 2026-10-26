@@ -78,6 +78,9 @@ func toItem(it delivery.Item) (itemJSON, error) {
 	if it.Ref.Sender.IsZero() || it.Ref.Recipient.IsZero() {
 		return itemJSON{}, errors.New("a feedback item without addresses")
 	}
+	if it.Source != "" {
+		return itemJSON{}, errors.New("the feedback item of a delivery names no source record: it is held by the record of that delivery")
+	}
 	if err := envelope.ValidMessageID(it.Ref.Message); err != nil {
 		return itemJSON{}, err
 	}

@@ -30,7 +30,9 @@ func TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry(t *testing.T) {
 		{"delivery.Lease", reflect.TypeOf(delivery.Lease{}), "Handouts IDs Active IssuedAt ExpiresAt Chunks HandedOut Acked"},
 		{"delivery.DedupRecord", reflect.TypeOf(delivery.DedupRecord{}), "Key Digest RetainUntil Reply HasReply"},
 		{"delivery.Authorization", reflect.TypeOf(delivery.Authorization{}), "Kind Reject"},
-		{"delivery.Item", reflect.TypeOf(delivery.Item{}), "Ref Feedback At"},
+		// Source is the record that holds an item of KindLostUnknownMessage, which is no
+		// delivery; a delivery's item has none and is refused with one.
+		{"delivery.Item", reflect.TypeOf(delivery.Item{}), "Ref Feedback At Source"},
 		{"delivery.Feedback", reflect.TypeOf(delivery.Feedback{}), "Kind Cause Reject State"},
 		{"delivery.DeliveryRef", reflect.TypeOf(delivery.DeliveryRef{}), "Sender Message Recipient"},
 		{"envelope.Outbound", reflect.TypeOf(envelope.Outbound{}), "Message From Kind BodyNonEmpty AcceptBefore Recipients ControlReplyDigest Derived"},
@@ -241,5 +243,17 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 	got, dmg = store.DecodeRecord(store.CtlDir, c.Name(), data)
 	if dmg != nil || !equalRecords(got, c) {
 		t.Errorf("a control record's stored reply was dropped: %+v\n got %#v\nwant %#v", dmg, got, c)
+	}
+}
+
+// An item of a delivery is held by the record of that delivery, so it names no
+// source record: Item.Source is for the item of a loss nobody can name, which no
+// source record of a delivery holds. A record whose item has one is refused at
+// encoding, never written with the source dropped.
+func TestAFeedbackItemOfADeliveryNamesNoSourceRecord(t *testing.T) {
+	o := lostOutAt(srcOut(1, false).Key, base)
+	o.Feedback[0].Source = "record-a"
+	if _, err := store.EncodeRecord(o); err == nil {
+		t.Error("a source record whose feedback item names a source was encoded")
 	}
 }
