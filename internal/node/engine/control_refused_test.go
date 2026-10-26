@@ -130,9 +130,12 @@ func controlInput(to string, signal adapterproto.ControlSignal) (in fakeagent.Co
 // The declarations of an endpoint (a pause, a list of the senders it accepts) govern
 // messages and not control signals, so the owner can always reach an endpoint that
 // refuses everything. What refuses a control signal for its sender is the rules of the
-// node, which judge a source on another node.
+// node, which judge a source on another node. A preset that allows local sources
+// opens nothing to a source elsewhere: its statement limits agents of this node,
+// and a request from another node is judged by the rules of the node at intake,
+// which no statement of a preset changes.
 func TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected(t *testing.T) {
-	h := sessionNode(t, harness.Options{}, "a")
+	h := sessionNode(t, harness.Options{Presets: map[string]string{"open": `{"local_sources":"allow"}`}}, "a")
 	other, err := ident.NodeIDFromBytes(bytes.Repeat([]byte{9}, ident.NodeIDLen))
 	if err != nil {
 		t.Fatal(err)
@@ -140,7 +143,7 @@ func TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected(t *testing
 	rt := runtimeEndpoint(t, h)
 	to := ident.Address{Node: harness.NodeID(), Endpoint: rt}
 	sender := endpointOf(t, h, "a")
-	data := forgedControl(t, h, "control-from-afar", to, envelope.KindSessionCreate, "default")
+	data := forgedControl(t, h, "control-from-afar", to, envelope.KindSessionCreate, "open")
 	rc, err := h.Engine().Inbound(h.Ctx(), transport.RemoteOrigin(other), sender, data)
 	if err != nil || len(rc.Reports) != 1 || rc.ControlReply != nil {
 		t.Fatalf("the receipt: %+v, %v, want one report and no reply", rc, err)
