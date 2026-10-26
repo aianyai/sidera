@@ -88,7 +88,46 @@ func (k OutKey) FileName() string {
 	for _, to := range k.Recipients {
 		parts = append(parts, to.String())
 	}
-	return recfile.FileName(string(k.Kind()), []byte(strings.Join(parts, " ")))
+	return outFileName(k.Kind(), []byte(strings.Join(parts, " ")))
+}
+
+// RecordFileName is the name of the file of the record of a kind with a key:
+// the hex SHA-256 of kind, a space and the key, then ".rec" (recfile.FileName),
+// and for a file of out/ the sending endpoint before it. It is the one place the
+// name is made, so the decoder, the scan and every record agree on it.
+func RecordFileName(kind Kind, key []byte) string {
+	if kind.Dir() == OutDir {
+		return outFileName(kind, key)
+	}
+	return recfile.FileName(string(kind), key)
+}
+
+// outFileName is the name of a file of out/: <sender>.<hash>.rec. The sender is
+// the first field of every key of the directory, and is there so that a file
+// whose first line cannot be read still says whose message it held. The hash is
+// the one of the other directories, so the rest of the rule is unchanged: a
+// name is accepted only when the hash is the one of kind and key and the
+// sender is the one the key names.
+func outFileName(kind Kind, key []byte) string {
+	sender, _, _ := strings.Cut(string(key), " ")
+	return sender + "." + recfile.FileName(string(kind), key)
+}
+
+// splitOutName splits the name of a file of out/ into its sender text and its
+// hash, and reports whether it has the shape of one: a sender without a dot, a
+// dot, 64 lowercase hex digits and ".rec". It says nothing of whether the
+// sender is an endpoint; a file that has the shape and a prefix that is none is
+// damaged, and is settled like any other damaged file.
+func splitOutName(name string) (sender, hash string, ok bool) {
+	stem, ok := strings.CutSuffix(name, recordSuffix)
+	if !ok {
+		return "", "", false
+	}
+	i := strings.LastIndexByte(stem, '.')
+	if i <= 0 || strings.Contains(stem[:i], ".") || !isHashName(stem[i+1:]) {
+		return "", "", false
+	}
+	return stem[:i], stem[i+1:], true
 }
 
 // Bytes is the key text.

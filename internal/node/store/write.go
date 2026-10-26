@@ -1027,7 +1027,7 @@ func checkRef(f FileRef) error {
 	if f.Name == "" || path.Base(f.Name) != f.Name || fsx.IsLeftover(f.Name) {
 		return fmt.Errorf("store: %q is not a file name", f.Name)
 	}
-	if !isRecordName(f.Name) {
+	if !isRecordName(f.Dir, f.Name) {
 		return fmt.Errorf("store: %q is not a record file", f.Name)
 	}
 	return nil

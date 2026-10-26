@@ -177,15 +177,15 @@ func TestADamagedSourceRecordWithAnUnreadableFirstLineIsAlertedAndDeleted(t *tes
 	t.Run("all zero", func(t *testing.T) {
 		r := newRig(t)
 		seed(t, r.mem, srcOut(1, false))
-		seedRaw(t, r.mem, store.OutDir, zeroRec, make([]byte, 300))
+		seedRaw(t, r.mem, store.OutDir, zeroOutName(ep(1)), make([]byte, 300))
 		sc := settled(t, r)
-		if present(t, r, store.OutDir, zeroRec) {
+		if present(t, r, store.OutDir, zeroOutName(ep(1))) {
 			t.Error("the all-zero file is still there")
 		}
 		if len(sc.Out) != 1 || len(sc.Seq) != 0 {
 			t.Errorf("no replacement and no floor, got %d source records and floors %v", len(sc.Out), sc.Seq)
 		}
-		oneAlert(t, sc, store.OutDir, zeroRec, "corrupt_record")
+		oneAlert(t, sc, store.OutDir, zeroOutName(ep(1)), "corrupt_record")
 	})
 }
 

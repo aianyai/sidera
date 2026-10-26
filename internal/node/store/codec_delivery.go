@@ -566,15 +566,17 @@ func fromHandout(j *handoutJSON) (HandoutFields, error) {
 	return h, nil
 }
 
-func outFileHash(name string) (string, error) {
-	h, ok := strings.CutSuffix(name, ".rec")
-	if !ok || len(h) != 64 {
-		return "", fmt.Errorf("%q is not the name of a record file", name)
+// coverOutStem is the name of the source file a cover names, without ".rec": a
+// file of out/ whose sender is an endpoint.
+func coverOutStem(name string) (string, error) {
+	sender, _, ok := splitOutName(name)
+	if !ok {
+		return "", fmt.Errorf("%q is not the name of a file of out/", name)
 	}
-	if _, err := hexN(h, 32); err != nil {
-		return "", err
+	if _, err := ident.ParseEndpointID(sender); err != nil {
+		return "", fmt.Errorf("the file %q of a cover: %w", name, err)
 	}
-	return h, nil
+	return strings.TrimSuffix(name, recordSuffix), nil
 }
 
 // checkVerdictParts is the one statement of which verdicts a regular in record
@@ -662,7 +664,7 @@ func encodeIn(r InRecord) ([]byte, error) {
 		j.Derived = &derivedJSON{From: r.Derived.From.String(), AuthRequest: json.RawMessage(r.Derived.AuthRequest)}
 	}
 	for _, c := range r.Covers {
-		h, err := outFileHash(c.Out)
+		stem, err := coverOutStem(c.Out)
 		if err != nil {
 			return nil, err
 		}
@@ -673,7 +675,7 @@ func encodeIn(r InRecord) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		j.Covers = append(j.Covers, coverJSON{Out: h, Recipient: c.Recipient.String(), Kind: kn})
+		j.Covers = append(j.Covers, coverJSON{Out: stem, Recipient: c.Recipient.String(), Kind: kn})
 	}
 	return marshal(j)
 }
@@ -736,7 +738,7 @@ func decodeIn(key TargetKey, body []byte) (InRecord, error) {
 		r.Derived = &DerivedInfo{From: from, AuthRequest: j.Derived.AuthRequest}
 	}
 	for _, c := range j.Covers {
-		if _, err := hexN(c.Out, 32); err != nil {
+		if _, err := coverOutStem(c.Out + recordSuffix); err != nil {
 			return r, err
 		}
 		rcp, err := ident.ParseAddress(c.Recipient)

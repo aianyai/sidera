@@ -81,7 +81,8 @@ func EncodeRecord(rec Record) ([]byte, error) {
 //     (HeaderUnreadable);
 //  2. the kind is one the directory holds (HeaderUnreadable);
 //  3. the key is unpadded base64url and the file name is the hash of kind and
-//     key (HeaderUnreadable);
+//     key, with the sending endpoint before it for a file of out/
+//     (HeaderUnreadable);
 //  4. the key parses as a key of the kind (HeaderUnreadable);
 //  5. the bytes after the first line are exactly the length (BodyDamaged);
 //  6. their CRC32C is the checksum (BodyDamaged);
@@ -115,7 +116,7 @@ func readHeader(dir, name string, data []byte) (h recfile.Header, body []byte, k
 	if !slices.Contains(kindsOf(dir), Kind(h.Kind)) {
 		return h, nil, nil, headerDamage(ReasonKindNotAllowed, "%s does not hold %q", dir, h.Kind)
 	}
-	if want := recfile.FileName(h.Kind, h.Key); name != want {
+	if want := RecordFileName(Kind(h.Kind), h.Key); name != want {
 		return h, nil, nil, headerDamage(ReasonNameMismatch, "the name is %q, kind and key hash to %q", name, want)
 	}
 	key, err := ParseKey(Kind(h.Kind), h.Key)

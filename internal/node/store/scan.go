@@ -73,7 +73,13 @@ func isHashName(s string) bool {
 	return true
 }
 
-func isRecordName(name string) bool {
+// isRecordName reports whether name has the shape of the name of a record file
+// of dir: a hash, and for out/ a sender before it (splitOutName).
+func isRecordName(dir, name string) bool {
+	if dir == OutDir {
+		_, _, ok := splitOutName(name)
+		return ok
+	}
 	h, ok := strings.CutSuffix(name, recordSuffix)
 	return ok && isHashName(h)
 }
@@ -105,7 +111,7 @@ func (s *Store) Scan() (*Scan, error) {
 			switch {
 			case e.IsDir:
 				sc.Unknown = append(sc.Unknown, p)
-			case isRecordName(e.Name):
+			case isRecordName(dir, e.Name):
 				if err := s.scanRecord(sc, dir, e.Name); err != nil {
 					return nil, err
 				}

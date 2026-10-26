@@ -750,9 +750,6 @@ func derivedIn(ctl, session int, rev uint64) store.InRecord {
 	return r
 }
 
-// zeroRec is a record file name no record has.
-const zeroRec = "0000000000000000000000000000000000000000000000000000000000000000.rec"
-
 // fixedLease is the page identifier of every lease a fixture takes.
 var fixedLease = func() delivery.LeaseID {
 	id, err := delivery.ParseLeaseID("00112233445566778899aabbccddeeff")

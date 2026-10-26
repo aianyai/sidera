@@ -461,7 +461,7 @@ every decision of the owner live outside it.
 
 ```
 state/
-  out/<h>.rec          source record: one per message or control signal sent from this node
+  out/<e>.<h>.rec      source record: one per message or control signal sent from this node
   in/<h>.rec           target record: one per message for one endpoint, deduplication included
   ctl/<h>.rec          target control record: deduplication, stored reply, creation intent
   bodies/<sha256>      a body, bare bytes, named by its digest
@@ -478,6 +478,22 @@ state/
 kind is part of it because `out/` holds two kinds (a message and a control
 signal) that share a key text.
 
+`<e>` is the sending endpoint (`ep1` and bech32m, lower case letters and digits, 35
+characters, so a name is about 104 characters, which every platform takes) and is
+only in the names of `out/`. It is there because a file whose first line cannot be
+read, an all-zero one after a power loss included, says nothing of whose message it
+held unless its name does, and the sender is the one thing the node can tell that
+sender with (see the quarantine below). The name is made in one place
+(`store.RecordFileName`; `recfile` keeps the hash and knows nothing of the prefix):
+the hash is the one of every other directory, and the prefix is the first field of
+the key, which is the sender in every key of `out/`. A name is accepted only when
+the hash is that of kind and key and the prefix is the sender the key names, and
+the scan takes a name of `out/` for a record file only in the shape
+`<sender>.<64 hex digits>.rec`; a bare hash in `out/` is a stranger (`Scan.Unknown`)
+and so is any other shape. Nothing migrates: no data directory of the old names was
+ever released (`TestOutFileNamesCarryTheSenderAndTheHashOfKindAndKey`,
+`TestAnOutRecordIsReadUnderItsOwnNameOnly`, `TestScanClassifiesTheNamesOfOut`).
+
 **Record file.** The first line is `sidera-record 1 <kind> <crc32c> <length> <key>`
 (`recfile`), the body follows. The checksum covers the body only; the kind and
 the key of the first line are verified by the file name, which is their hash, so
@@ -492,7 +508,7 @@ validated in seven steps, and each failure has a class:
 | ---- | ----- | ----- |
 | 1 | the first line is at most 8 KiB, ends in a newline, has six fields of single spaces, the magic and the version | first line unreadable |
 | 2 | the kind is one the directory holds | first line unreadable |
-| 3 | the key is unpadded base64url and the file name is the hash of kind and key | first line unreadable |
+| 3 | the key is unpadded base64url and the file name is the hash of kind and key, with the sending endpoint before it for a file of `out/` | first line unreadable |
 | 4 | the key parses as a key of the kind, field by field with the parser of the package that owns the field (a message id with `envelope.ValidMessageID`, so a key accepts exactly the ids a peer can send) | first line unreadable |
 | 5 | the bytes after the first line are as many as the length says (at most 256 KiB) | body damaged |
 | 6 | their CRC32C is the checksum | body damaged |

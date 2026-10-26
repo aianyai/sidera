@@ -174,7 +174,7 @@ func (s *Store) presentOrErr(p string) (bool, error) {
 // Quarantine settles one damaged file; see the type.
 func (s *Store) Quarantine(q Quarantine) error {
 	d := q.File
-	if !slices.Contains(recordDirs, d.Dir) || !isRecordName(d.Name) {
+	if !slices.Contains(recordDirs, d.Dir) || !isRecordName(d.Dir, d.Name) {
 		return fmt.Errorf("store: %s/%s is not a record file", d.Dir, d.Name)
 	}
 	damaged, err := s.r.ReadFile(path.Join(d.Dir, d.Name))
