@@ -1,8 +1,11 @@
 package delivery
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/ident"
 )
 
 var testParams = FeedbackParams{MergeWindow: time.Minute, RateCap: 2, RateWindow: 10 * time.Minute}
@@ -236,6 +239,90 @@ func TestFeedbackQueue(t *testing.T) {
 		b, _ := q.Flush(at(time.Minute), testParams)
 		if len(a) != 1 || len(b) != 0 {
 			t.Errorf("a %d b %d", len(a), len(b))
+		}
+	})
+}
+
+// An item of KindLostUnknownMessage names no message and no recipient, so the
+// record that holds it is the only thing that tells two of them apart. The
+// queue keeps one item per source record and merges them by sender.
+func TestFeedbackQueueTakesLostUnknownMessagesBySourceRecord(t *testing.T) {
+	s1, s2 := addr(100, 1), addr(100, 2)
+	t.Run("an item that names no message and no recipient is queued", func(t *testing.T) {
+		var q FeedbackQueue
+		if err := q.Add(NewLostUnknownMessageItem(s1, "record-a", t0)); err != nil {
+			t.Fatal(err)
+		}
+		if len(q.Pending) != 1 {
+			t.Errorf("pending %d, want 1", len(q.Pending))
+		}
+	})
+	t.Run("two source records of one sender give one notice that holds both", func(t *testing.T) {
+		var q FeedbackQueue
+		// Decided at the same instant, as the damaged files of one start are.
+		for _, src := range []string{"record-a", "record-b"} {
+			if err := q.Add(NewLostUnknownMessageItem(s1, src, t0)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		got, err := q.Flush(at(time.Minute), testParams)
+		if err != nil || len(got) != 1 || len(got[0].Items) != 2 {
+			t.Fatalf("notices %+v, err %v", got, err)
+		}
+		sources := map[string]bool{got[0].Items[0].Source: true, got[0].Items[1].Source: true}
+		if !sources["record-a"] || !sources["record-b"] {
+			t.Errorf("the notice must name both source records, so that both are cleared: %+v", got[0].Items)
+		}
+		if len(q.Pending) != 0 {
+			t.Errorf("%d items left pending", len(q.Pending))
+		}
+	})
+	t.Run("the same source record added again gives no second notice", func(t *testing.T) {
+		var q FeedbackQueue
+		it := NewLostUnknownMessageItem(s1, "record-a", t0)
+		_ = q.Add(it)
+		_ = q.Add(it)
+		got, _ := q.Flush(at(time.Minute), testParams)
+		if len(got) != 1 || len(got[0].Items) != 1 {
+			t.Errorf("notices %+v", got)
+		}
+	})
+	t.Run("two senders give two notices", func(t *testing.T) {
+		var q FeedbackQueue
+		_ = q.Add(NewLostUnknownMessageItem(s1, "record-a", t0))
+		_ = q.Add(NewLostUnknownMessageItem(s2, "record-b", t0))
+		if got, _ := q.Flush(at(time.Minute), testParams); len(got) != 2 {
+			t.Errorf("notices %+v", got)
+		}
+	})
+	t.Run("an item of this kind that is not in the shape is refused", func(t *testing.T) {
+		good := NewLostUnknownMessageItem(s1, "record-a", t0)
+		withMessage, withRecipient, noSource, noSender := good, good, good, good
+		withMessage.Ref.Message = "m1"
+		withRecipient.Ref.Recipient = addr(11, 1)
+		noSource.Source = ""
+		noSender.Ref.Sender = ident.Address{}
+		for name, bad := range map[string]Item{
+			"it names a message":   withMessage,
+			"it names a recipient": withRecipient,
+			"it has no source":     noSource,
+			"it has no sender":     noSender,
+		} {
+			var q FeedbackQueue
+			if err := q.Add(bad); !errors.Is(err, ErrInvalidItem) {
+				t.Errorf("%s: err %v, want ErrInvalidItem", name, err)
+			}
+			if len(q.Pending) != 0 {
+				t.Errorf("%s: queued", name)
+			}
+		}
+	})
+	t.Run("an item of another kind never carries a source", func(t *testing.T) {
+		var q FeedbackQueue
+		it := item("s1", "n11", "m1", KindRejected, 0)
+		it.Source = "record-a"
+		if err := q.Add(it); !errors.Is(err, ErrInvalidItem) {
+			t.Errorf("err %v, want ErrInvalidItem: the delivery names the item, a source would make two of one", err)
 		}
 	})
 }

@@ -296,8 +296,8 @@ func TestLostUnknownMessageKindBelongsToNoRecord(t *testing.T) {
 	}
 
 	sender := addr(7, 3)
-	it := NewLostUnknownMessageItem(sender, at(time.Minute))
-	want := Item{Ref: DeliveryRef{Sender: sender}, Feedback: Feedback{Kind: KindLostUnknownMessage}, At: at(time.Minute)}
+	it := NewLostUnknownMessageItem(sender, "record-a", at(time.Minute))
+	want := Item{Ref: DeliveryRef{Sender: sender}, Feedback: Feedback{Kind: KindLostUnknownMessage}, At: at(time.Minute), Source: "record-a"}
 	if !reflect.DeepEqual(it, want) {
 		t.Errorf("item %+v, want %+v", it, want)
 	}
@@ -311,9 +311,9 @@ func TestLostUnknownMessageKindBelongsToNoRecord(t *testing.T) {
 // the anomalies of a message.
 func TestLostUnknownMessageItemsMergeBySender(t *testing.T) {
 	s1, s2 := addr(100, 1), addr(100, 2)
-	a := NewLostUnknownMessageItem(s1, at(0))
-	b := NewLostUnknownMessageItem(s1, at(30*time.Second))
-	c := NewLostUnknownMessageItem(s2, at(0))
+	a := NewLostUnknownMessageItem(s1, "record-a", at(0))
+	b := NewLostUnknownMessageItem(s1, "record-b", at(30*time.Second))
+	c := NewLostUnknownMessageItem(s2, "record-c", at(0))
 
 	key := MergeKeyOf(a)
 	if key.Class != MergeLostUnknownBySender || key.Sender != s1 || key.Message != "" || !key.Node.IsZero() || !key.Target.IsZero() {
