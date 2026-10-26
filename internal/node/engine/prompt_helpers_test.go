@@ -54,6 +54,22 @@ func endTurn(t testing.TB, h *harness.H, addr string) {
 	quiet(t, h)
 }
 
+// holdBackTurn makes the next prompt into the session of the endpoint reach the runtime
+// without starting a turn, until the test starts it (fakeruntime Runtime.StartTurn). A
+// turn that begins for a prompt is reported with the prompt's attempt and proves that it
+// was delivered, so a test of a prompt whose outcome the node must find out some other way
+// holds the turn back: the runtime has the prompt and the node has heard nothing of a turn.
+func holdBackTurn(t testing.TB, h *harness.H, addr string) {
+	t.Helper()
+	rt, err := h.Runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.SetPlan(nativeRef(t, h, addr), fakeruntime.TurnPlan{ManualStart: true}); err != nil {
+		t.Fatalf("holding back the next turn of %s: %v", addr, err)
+	}
+}
+
 // idleSession is newSession with the first turn of the session ended. The first
 // prompt of a session starts a turn at once, and no prompt goes into a session while
 // a turn runs, so a test of what wakes a session starts from one that is idle.
@@ -135,4 +151,18 @@ func attemptKinds(t testing.TB, h *harness.H, addr string) []handoff.PromptKind 
 		}
 	}
 	return kinds
+}
+
+// runtimeReceived says whether the runtime of the endpoint's native session has the prompt
+// of the attempt.
+func runtimeReceived(t testing.TB, h *harness.H, addr, attempt string) bool {
+	t.Helper()
+	log, err := h.Ledger()
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	writer := "runtime/" + nativeRef(t, h, addr)
+	return len(log.Select(func(e ledger.Entry) bool {
+		return e.Kind == ledger.KindRuntimePromptReceived && e.Writer == writer && e.Attrs.Attempt == attempt
+	})) > 0
 }

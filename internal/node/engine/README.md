@@ -68,7 +68,8 @@ called, and how one whose outcome is not known is asked about at the start.
   `dispatchPrompt` writes the attempt as in flight (`PromptBegin`) and only then spawns the call;
   a result that does not say whether the prompt arrived is asked of the adapter
   (`prompt.reconcile`) and recorded as the verdict says, and step 11 of the start asks about every
-  attempt found in flight. No path calls `prompt.deliver` twice for one attempt.
+  attempt found in flight. No path calls `prompt.deliver` twice for one attempt. A turn that begins
+  for the attempt in flight settles it as delivered, whatever the answer was.
 - **The prompt decision is asked for the whole node, and again whenever its answer may have
   changed.** `servePrompts` runs after each command of the loop once the node serves, and acts
   only when `promptsDirty` says something the decision reads has changed (an arrival, the end of

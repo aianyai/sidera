@@ -158,6 +158,7 @@ func TestFiveArrivalsStartOneTurn(t *testing.T) {
 func TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend(t *testing.T) {
 	h := sessionNode(t, harness.Options{}, "a")
 	_, addr := idleSession(t, h, "a")
+	holdBackTurn(t, h, addr)
 	first := h.AdapterLaunches(harness.Instance)[0]
 	if err := first.Controller().PauseAt(h.Ctx(), fakeadapter.PausePromptAfterForward); err != nil {
 		t.Fatal(err)
@@ -168,10 +169,15 @@ func TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend(t *testing.T)
 	if err := first.Controller().WaitPaused(waitCtx, fakeadapter.PausePromptAfterForward); err != nil {
 		t.Fatalf("no prompt reached the adapter: %v", err)
 	}
-	// The prompt reached the runtime, the adapter has not answered, and the node dies.
+	// The prompt reached the runtime, which has not started a turn for it, the adapter has
+	// not answered, and the node dies: nothing the node has heard says the prompt arrived.
 	wantPrompts(t, h, addr, 1)
-	if n := turnsStarted(t, h, addr); n != 2 {
-		t.Fatalf("the session started %d turns, want 2: the prompt reached the runtime", n)
+	attempt := promptsInto(t, h, addr)[0].Attrs.Attempt
+	if !runtimeReceived(t, h, addr, attempt) {
+		t.Fatal("the prompt did not reach the runtime")
+	}
+	if n := turnsStarted(t, h, addr); n != 1 {
+		t.Fatalf("the session started %d turns, want 1: the turn of the prompt is held back", n)
 	}
 	if a := attemptsOf(t, h, addr); a.InFlight == nil {
 		t.Fatal("the node did not record the prompt as in flight before it called the adapter")
@@ -196,8 +202,8 @@ func TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend(t *testing.T)
 		t.Errorf("the new adapter was asked %d reconciliations and %d prompts, want 1 and 0", reconciles, delivers)
 	}
 	wantPrompts(t, h, addr, 1)
-	if n := turnsStarted(t, h, addr); n != 2 {
-		t.Errorf("the session started %d turns, want 2: the prompt was not delivered again", n)
+	if n := turnsStarted(t, h, addr); n != 1 {
+		t.Errorf("the session started %d turns, want 1: the prompt was not delivered again", n)
 	}
 	a := attemptsOf(t, h, addr)
 	if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
@@ -206,6 +212,15 @@ func TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend(t *testing.T)
 	if in := inOf(t, h, msg); in.Record.Sub != delivery.SubNotified {
 		t.Errorf("the record is %s (%v), want accepted and notified", in.Record.State, in.Record.Sub)
 	}
+	// The turn of the prompt begins now, after the node has found the prompt.
+	rt, err := h.Runtime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.StartTurn(nativeRef(t, h, addr)); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
 	v, err := h.Engine().Adapter(h.Ctx(), harness.Instance)
 	if err != nil {
 		t.Fatal(err)
@@ -375,6 +390,7 @@ func TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain(t *testing.T) {
 		t.Run(c.rule, func(t *testing.T) {
 			h := sessionNode(t, harness.Options{}, "a")
 			_, addr := idleSession(t, h, "a")
+			holdBackTurn(t, h, addr)
 			ctrl, err := h.Adapter(harness.Instance)
 			if err != nil {
 				t.Fatal(err)
@@ -403,12 +419,50 @@ func TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain(t *testing.T) {
 	}
 }
 
+// A turn that begins for the attempt in flight proves the prompt reached the session,
+// whatever the answer of the call was. Without that proof an agent whose prompt got an
+// unknown outcome and who is idle again at every turn end would be sent a new first
+// prompt each time: no delivered record exists for the repeat allowance to count.
+func TestTurnStartedForThePromptInFlightSettlesItDelivered(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	_, addr := idleSession(t, h, "a")
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError, AfterEffect: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestReconcile, fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate, Reason: string(adapterproto.GroundsNativeUnreachable)}); err != nil {
+		t.Fatal(err)
+	}
+	msg := sendToAddr(t, h, "a", addr, "for a prompt whose answer is lost")
+	quiet(t, h)
+	wantPrompts(t, h, addr, 1)
+	a := attemptsOf(t, h, addr)
+	if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+		t.Fatalf("the attempts are %+v, want one delivered and none in flight: the turn it started said so", a)
+	}
+	if in := inOf(t, h, msg); in.Record.Sub != delivery.SubNotified {
+		t.Errorf("the record is %s (%v), want accepted and notified", in.Record.State, in.Record.Sub)
+	}
+
+	// The agent never reads: its turns end, and it is woken once more, not at every end.
+	endTurn(t, h, addr) // the turn of the first prompt
+	endTurn(t, h, addr) // the turn of the repeat
+	wantPrompts(t, h, addr, 1+handoff.MaxReprompts)
+	if got, want := attemptKinds(t, h, addr), []handoff.PromptKind{handoff.PromptKindFirst, handoff.PromptKindReprompt}; !slices.Equal(got, want) {
+		t.Errorf("the prompts delivered were %v, want %v", got, want)
+	}
+}
+
 // The checkpoint an adapter keeps for a prompt attempt is there while the attempt is in
 // flight, so that a reconciliation can be given it, and is gone once the attempt has
 // settled.
 func TestSettledPromptAttemptDropsItsCheckpoint(t *testing.T) {
 	h := sessionNode(t, harness.Options{}, "a")
 	_, addr := idleSession(t, h, "a")
+	holdBackTurn(t, h, addr) // a turn that began would settle the attempt before the checkpoint is put
 	first := h.AdapterLaunches(harness.Instance)[0]
 	if err := first.Controller().PauseAt(h.Ctx(), fakeadapter.PausePromptAfterForward); err != nil {
 		t.Fatal(err)

@@ -580,7 +580,8 @@ func (c *cmdNotified) run(e *Engine, now time.Time) {
 // adapter sent it:
 //
 //   - an availability snapshot replaces the instance's, an empty one clears it;
-//   - a turn that started or ended sets or clears the busy state of its endpoint;
+//   - a turn that started or ended sets or clears the busy state of its endpoint, and a
+//     turn that started for the prompt in flight settles that prompt as delivered;
 //   - a request the runtime made that the preset or the method refused is
 //     remembered for the endpoint;
 //   - a prompt that was persisted is accepted.
@@ -609,6 +610,7 @@ func (e *Engine) notified(now time.Time, instance string, n adapterhost.Notifica
 		}
 	case adapterproto.TurnStartedParams:
 		setFlag(&st.busy, p.Endpoint, true)
+		e.noteTurnStarted(now, p.Endpoint, p.Attempt)
 	case adapterproto.TurnEndedParams:
 		setFlag(&st.busy, p.Endpoint, false)
 		e.interruptTurnEnded(now, p.Endpoint)

@@ -122,6 +122,26 @@ func (e *Engine) noteTurnEnded(id ident.EndpointID) {
 	e.promptsDirty = true
 }
 
+// noteTurnStarted is the event of a turn that began for a prompt attempt: it proves that
+// the prompt reached the session, as a verdict of found would, whatever the answer of
+// the call was or whether one came. If the attempt is the one in flight, it is settled
+// as delivered and the turn counts against the cap. The answer that comes later for
+// the same attempt finds no flight and changes nothing. A turn with no attempt, or for
+// an attempt that is not in flight (the first prompt of a creation, or one settled
+// before), settles nothing.
+func (e *Engine) noteTurnStarted(now time.Time, ref adapterproto.EndpointRef, attempt adapterproto.AttemptID) {
+	id, err := ident.ParseEndpointID(string(ref))
+	if err != nil || attempt == "" {
+		return
+	}
+	p := e.prompts[id]
+	if p == nil || p.flight == nil || p.flight.attempt != attempt {
+		return
+	}
+	p.flight.outcome, p.turn = handoff.AttemptDelivered, true
+	e.settlePrompt(now, id)
+}
+
 // noteInstanceProbed is the event of an adapter whose connection is in service, which
 // its probe having been answered shows: the host puts the connection in service after
 // it has told the node that the adapter started, so a prompt sent on the start would
