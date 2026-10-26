@@ -47,10 +47,10 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 		{"SourceUpdate dropping a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), source)) }, bodyPath(source),
 			func(st *store.Store) error { return st.SourceUpdate(finished()) }},
 		{"Ack dropping a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
-			func(st *store.Store) error { return dropWritten(st.Ack([]store.InRecord{delivered()})) }},
+			func(st *store.Store) error { return st.Ack([]store.InRecord{delivered()}) }},
 		{"Tick dropping a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), source)) }, bodyPath(source),
 			func(st *store.Store) error {
-				return dropWritten(st.Tick(store.TickBatch{Out: []store.OutRecord{finished()}}))
+				return st.Tick(store.TickBatch{Out: []store.OutRecord{finished()}})
 			}},
 		{"ControlResult dropping a body", func(t *testing.T, r *rig) { seedBodyOf(t, r.mem, created(t, 20, 5), bodyBytes(20)) }, bodyPath(created(t, 20, 5)),
 			func(st *store.Store) error {
@@ -60,7 +60,7 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 		{"EndpointDrain dropping a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error {
 				d := rejected(tgtIn(1))
-				return dropWritten(st.EndpointDrain(store.DrainBatch{In: []store.InRecord{d}}))
+				return st.EndpointDrain(store.DrainBatch{In: []store.InRecord{d}})
 			}},
 		{"ArchiveSweep removing the body of a target record", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error {
@@ -74,9 +74,9 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 			func(st *store.Store) error {
 				return st.ArchiveSweep(store.SweepChunk{Now: base, Outs: []store.OutRecord{source}})
 			}},
-		{"ArchiveSweep removing a record", func(t *testing.T, r *rig) { seed(t, r.mem, inRev(1, 1)) }, path.Join(store.InDir, inRev(1, 1).Name()),
+		{"ArchiveSweep removing a record", func(t *testing.T, r *rig) { seed(t, r.mem, tgtIn(1)) }, path.Join(store.InDir, tgtIn(1).Name()),
 			func(st *store.Store) error {
-				return st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.InDir, Name: inRev(1, 1).Name()}}})
+				return st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.InDir, Name: tgtIn(1).Name()}}})
 			}},
 		{"ArchiveSweep removing an endpoint", func(t *testing.T, r *rig) { seed(t, r.mem, endpoint) }, path.Join(store.EndpointsDir, endpoint.Name()),
 			func(st *store.Store) error {

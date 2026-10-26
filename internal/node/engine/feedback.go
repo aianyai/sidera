@@ -214,11 +214,10 @@ func (e *Engine) sendNotice(now time.Time, n delivery.Notice) error {
 		if err != nil {
 			return err
 		}
-		written, err := e.d.Store.FeedbackForm(body, in)
-		if err != nil {
+		if err := e.d.Store.FeedbackForm(body, in); err != nil {
 			return err
 		}
-		e.view.setIn(written)
+		e.view.setIn(in)
 	}
 	return e.clearCovered(now, n.Items)
 }

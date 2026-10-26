@@ -161,11 +161,10 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 	if len(b.In)+len(b.Out) == 0 {
 		return nil
 	}
-	written, err := e.d.Store.Tick(b)
-	if err != nil {
+	if err := e.d.Store.Tick(b); err != nil {
 		return err
 	}
-	for _, in := range written {
+	for _, in := range b.In {
 		e.view.setIn(in)
 	}
 	for _, o := range outs {

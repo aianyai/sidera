@@ -122,7 +122,7 @@ func (s *sim) pass() bool {
 		do("ctl-effect-replay")
 	}
 	if eps := store.InstanceDrainWork(s.scan(), s.enabled); len(eps) > 0 {
-		s.must(dropWritten(s.st.InstanceDrainReplay(eps, s.drainFor(s.scan(), eps))), "InstanceDrainReplay")
+		s.must(s.st.InstanceDrainReplay(eps, s.drainFor(s.scan(), eps)), "InstanceDrainReplay")
 		do("instance-drain-replay")
 	}
 	if eps := store.OrphanEndpoints(s.scan()); len(eps) > 0 {
@@ -130,7 +130,7 @@ func (s *sim) pass() bool {
 		do("orphan-gc-endpoint")
 	}
 	if b := s.drainBatch(s.scan()); len(b.In)+len(b.Ctl) > 0 {
-		s.must(dropWritten(s.st.EndpointDrainReplay(b)), "EndpointDrainReplay")
+		s.must(s.st.EndpointDrainReplay(b), "EndpointDrainReplay")
 		do("endpoint-drain-replay")
 	}
 	if outs := store.FeedbackReplays(s.scan()); len(outs) > 0 {
@@ -195,10 +195,11 @@ func (s *sim) bodyMismatch() {
 		if _, err := s.st.ReadBody(rec.Name(), *ref); !errors.Is(err, store.ErrBodyMismatch) {
 			return
 		}
-		s.must(dropWritten(s.st.QuarantineBody(store.BodyQuarantine{
+		_, err := s.st.QuarantineBody(store.BodyQuarantine{
 			Record: rec, Replacement: replacement, Scan: sc,
 			Alert: s.alert("corrupt_body", dir, rec.Name()),
-		})), "QuarantineBody "+rec.Name())
+		})
+		s.must(err, "QuarantineBody "+rec.Name())
 	}
 	for _, o := range sc.Out {
 		var replacement store.Record

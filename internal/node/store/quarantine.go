@@ -263,10 +263,13 @@ func (s *Store) Quarantine(q Quarantine) error {
 }
 
 // QuarantineBody settles the record whose body is damaged; see BodyQuarantine.
-// It returns the target record as written, nil when none was written.
+// It returns the target record as it stays, without its body reference, and nil
+// when the record was removed: whether a target record still has a reason to
+// exist without its body is the rule of the delivery package that the store
+// applies here, so the caller learns the outcome instead of working it out again.
 func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 	st := &settlement{}
-	var written *InRecord
+	var stays *InRecord
 	var err error
 	// The record settled; with the bytes of its body they identify the damage.
 	var dir, name string
@@ -284,11 +287,11 @@ func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 			break
 		}
 		r.Body = nil
-		w, files, err := inFiles([]InRecord{r})
+		files, err := inFiles([]InRecord{r})
 		if err != nil {
 			return nil, err
 		}
-		written, st.overwrite = &w[0], &files[0]
+		stays, st.overwrite = &r, &files[0]
 	case CtlRecord:
 		dir, name = CtlDir, r.Name()
 		if r.Body == nil {
@@ -341,7 +344,7 @@ func (s *Store) QuarantineBody(q BodyQuarantine) (*InRecord, error) {
 	if err := s.settle(st); err != nil {
 		return nil, err
 	}
-	return written, nil
+	return stays, nil
 }
 
 // replaceOut fills a settlement of a source record whose numbers are lost: the

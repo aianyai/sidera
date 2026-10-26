@@ -49,7 +49,6 @@ type powerLossWorld struct {
 	rng   func(n int) int
 	led   ledger
 	stage map[int]int
-	rev   map[int]uint64
 	cur   *operation
 	// damage and restarts turn on two more kinds of step, for the test that
 	// compares the whole disk with the ledger.
@@ -84,21 +83,21 @@ func (w *powerLossWorld) next() *operation {
 				after:  func() { w.stage[i] = 1 }}
 		case 1:
 			in := tgtIn(i)
-			return &operation{name: "deliver", call: func() error { return dropWritten(r.st.Deliver(bodyBytes(i), []store.InRecord{in})) },
-				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, 1)), bodyPath(in): bodyBytes(i)},
-				after:  func() { w.stage[i], w.rev[i] = 2, 1 }}
+			return &operation{name: "deliver", call: func() error { return r.st.Deliver(bodyBytes(i), []store.InRecord{in}) },
+				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(in), bodyPath(in): bodyBytes(i)},
+				after:  func() { w.stage[i] = 2 }}
 		case 2:
 			in := w.leased(i)
-			return &operation{name: "lease", call: func() error { return dropWritten(r.st.Lease([]store.InRecord{in})) },
-				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, in.Rev+1))},
-				after:  func() { w.stage[i] = 3; w.rev[i]++ }}
+			return &operation{name: "lease", call: func() error { return r.st.Lease([]store.InRecord{in}) },
+				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(in)},
+				after:  func() { w.stage[i] = 3 }}
 		case 3:
 			in := w.leased(i)
 			in.Record, in.Body = deliveredRecord(in.Record), nil
-			return &operation{name: "ack", call: func() error { return dropWritten(r.st.Ack([]store.InRecord{in})) },
-				writes:  map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, in.Rev+1))},
+			return &operation{name: "ack", call: func() error { return r.st.Ack([]store.InRecord{in}) },
+				writes:  map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(in)},
 				removes: []string{bodyPath(in)},
-				after:   func() { w.stage[i] = 4; w.rev[i]++ }}
+				after:   func() { w.stage[i] = 4 }}
 		case 4:
 			out := srcOut(i, true)
 			d, _, err := out.Outbound.Recipients[0].Delivery.Apply(base, delivery.Event{Type: delivery.EventDelivered})
@@ -217,11 +216,9 @@ func (w *powerLossWorld) damageOp() *operation {
 	return nil
 }
 
-func withRev(in store.InRecord, rev uint64) store.InRecord { in.Rev = rev; return in }
-
 // leased is the target record of message i as the ledger holds it, leased.
 func (w *powerLossWorld) leased(i int) store.InRecord {
-	in := inRev(i, w.rev[i])
+	in := tgtIn(i)
 	in.Key.Recipient = ep(2)
 	in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(i), in.Record.ReportBy)
 	in.Record = leasedRecord(in.Record, base)
@@ -412,7 +409,7 @@ func TestPowerLossCloneKeepsAcknowledgedWrites(t *testing.T) {
 			w := &powerLossWorld{
 				t: t, r: r, rng: func(n int) int { return rng.IntN(n) },
 				led:   ledger{files: map[string][]byte{}},
-				stage: map[int]int{}, rev: map[int]uint64{}, counts: counts,
+				stage: map[int]int{}, counts: counts,
 			}
 			// The endpoint the messages are for exists: a record for an endpoint with
 			// no record is work for the drain rule.

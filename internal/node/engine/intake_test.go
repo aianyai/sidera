@@ -215,7 +215,8 @@ func TestForgedReplyToGetsNoPermission(t *testing.T) {
 }
 
 func TestLostReceiptRetryKeepsOneRecord(t *testing.T) {
-	h := nodeWith(t, harness.Options{}, "a", "b")
+	var written inWriteCounter
+	h := nodeWith(t, harness.Options{Observer: &written}, "a", "b")
 	h.DropReceipt(1)
 	msg := send(t, h, "a", "b", "once")
 	quiet(t, h)
@@ -226,6 +227,7 @@ func TestLostReceiptRetryKeepsOneRecord(t *testing.T) {
 		t.Fatalf("the sender's record is %s, want queued: it has no receipt", d.State)
 	}
 
+	writtenBefore := written.writes()
 	h.Advance(resendBackoff)
 	quiet(t, h)
 
@@ -236,9 +238,9 @@ func TestLostReceiptRetryKeepsOneRecord(t *testing.T) {
 	if len(ins) != 1 {
 		t.Fatalf("the target holds %d records of the message, want 1", len(ins))
 	}
-	if ins[0].Rev != first.Rev || !ins[0].AcceptedAt.Equal(first.AcceptedAt) {
-		t.Errorf("the target record was written again (revision %d at %v, was %d at %v): a resend must find the record and leave it",
-			ins[0].Rev, ins[0].AcceptedAt, first.Rev, first.AcceptedAt)
+	if got := written.writes(); got != writtenBefore || !ins[0].AcceptedAt.Equal(first.AcceptedAt) {
+		t.Errorf("the target record was written again (%d writes of target records since the resend, accepted at %v, was %v): a resend must find the record and leave it",
+			got-writtenBefore, ins[0].AcceptedAt, first.AcceptedAt)
 	}
 	if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
 		t.Errorf("the sender's record is %s after the resend, want accepted", d.State)

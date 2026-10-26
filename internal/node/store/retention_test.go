@@ -24,13 +24,13 @@ func TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds(t *testing.T) {
 	// can have been accepted before the loss was found: an hour of delivery
 	// deadline, the clock tolerance and the report offset after the discovery.
 	lostWant := base.Add(time.Hour + 2*time.Minute).Add(3*time.Hour + 2*time.Minute).Add(24*time.Hour + 2*time.Minute)
-	finishedIn := inRev(1, 1)
+	finishedIn := tgtIn(1)
 	finishedIn.Record = deliveredRecord(finishedIn.Record)
-	rejected := inRev(1, 1)
+	rejected := tgtIn(1)
 	rejected.Record.State, rejected.Record.Reject = delivery.StateRejected, delivery.RejectUnauthorized
-	closedUnc := inRev(1, 1)
+	closedUnc := tgtIn(1)
 	closedUnc.Record.State = delivery.StateClosedUnconfirmed
-	deliveryUnknown := inRev(1, 1)
+	deliveryUnknown := tgtIn(1)
 	deliveryUnknown.Record.State = delivery.StateDeliveryUnknown
 	idem := srcOutFinished(1)
 	idem.Idempotency = &store.Idempotency{Key: "k", RetainUntil: want.Add(72 * time.Hour)}
@@ -47,7 +47,7 @@ func TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds(t *testing.T) {
 		{"a delivered target record", finishedIn, want, true},
 		{"a rejected target record", rejected, want, true},
 		{"a closed unconfirmed target record", closedUnc, want, true},
-		{"a target record that is accepted is not finished", inRev(1, 1), want, false},
+		{"a target record that is accepted is not finished", tgtIn(1), want, false},
 		{"a target record whose result is unknown may still be corrected", deliveryUnknown, want, false},
 		{"a finished source record", srcOutFinished(1), want, true},
 		{"a source record waiting for a receipt", queued, want, false},
@@ -69,7 +69,7 @@ func TestRetainUntilIsTheLatestRetentionOfTheFactsARecordHolds(t *testing.T) {
 func TestRetainUntilNeverDecreasesWithReportBy(t *testing.T) {
 	var last time.Time
 	for i := 0; i < 50; i++ {
-		in := inRev(1, 1)
+		in := tgtIn(1)
 		in.Record = deliveredRecord(in.Record)
 		in.Record.ReportBy = base.Add(time.Duration(i) * 7 * time.Minute)
 		in.Dedup.RetainUntil = in.Record.ReportBy
@@ -90,22 +90,22 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 
 	build := func(t *testing.T) *rig {
 		r := newRig(t)
-		done := inRev(1, 2)
+		done := tgtIn(1)
 		done.Record = deliveredRecord(done.Record) // still refers to its body: the release never happened
-		held := inRev(2, 1)                        // accepted: not finished, never swept
+		held := tgtIn(2)                           // accepted: not finished, never swept
 		c := created(t, 4, 5)
 		c.Record = deliveredRecord(c.Record)
 		c.Body = bodyRef(4) // a control record that still refers to its body
-		derived := derivedIn(4, 5, 2)
+		derived := derivedIn(4, 5)
 		derived.Record = deliveredRecord(derived.Record)
-		derived.Body = bodyRef(2)           // same bytes as the body of a record that stays, in a file of its own
-		orphanDerived := derivedIn(6, 9, 2) // its control record is gone: swept by its own retention
+		derived.Body = bodyRef(2)        // same bytes as the body of a record that stays, in a file of its own
+		orphanDerived := derivedIn(6, 9) // its control record is gone: swept by its own retention
 		orphanDerived.Record = deliveredRecord(orphanDerived.Record)
 		orphanDerived.Body = bodyRef(4)
 		lost := lostOutAt(srcOut(7, false).Key, base)
 		closed := session(5, store.EndpointClosed, ctlName(4))
 		open := directEndpoint(7, "chat")
-		stillQueued := inFor(8, 3, 1) // targets a closed endpoint but is not final: the endpoint stays
+		stillQueued := inFor(8, 3) // targets a closed endpoint but is not final: the endpoint stays
 		closedHeld := session(3, store.EndpointClosed, ctlName(77))
 		att5 := store.AttemptsRecord{Endpoint: ep(5)}
 		att7 := store.AttemptsRecord{Endpoint: ep(7)}
@@ -124,7 +124,7 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 			store.SeqRecord{Sender: ep(7), Floors: map[ident.Address]uint64{addr(2, 2): 3}},
 			srcOutFinished(10), srcOut(11, false))
 		seedBodies(t, r.mem, done, held, c, derived, orphanDerived, stillQueued, srcOut(11, false))
-		seedBodyOf(t, r.mem, inRev(9, 1), bodyBytes(9)) // the body of a record that does not exist
+		seedBodyOf(t, r.mem, tgtIn(9), bodyBytes(9)) // the body of a record that does not exist
 		_ = soon
 		return r
 	}
@@ -143,9 +143,9 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	c4 := created(t, 4, 5)
 
 	wantRecords := []string{
-		p(store.InDir, inRev(1, 2)),        // finished, past retention
-		p(store.InDir, derivedIn(4, 5, 2)), // derived of a control record that goes in the same plan
-		p(store.InDir, derivedIn(6, 9, 2)), // derived whose control record is gone
+		p(store.InDir, tgtIn(1)),        // finished, past retention
+		p(store.InDir, derivedIn(4, 5)), // derived of a control record that goes in the same plan
+		p(store.InDir, derivedIn(6, 9)), // derived whose control record is gone
 		p(store.EndpointsDir, session(5, store.EndpointClosed, ctlName(4))),
 		p(store.AttemptsDir, store.AttemptsRecord{Endpoint: ep(5)}),
 		p(store.CheckpointsDir, store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}}),
@@ -166,7 +166,7 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	}
 	// The held ones: accepted, still queued for a closed endpoint, an alert
 	// acknowledged too recently or not at all.
-	held := []string{p(store.InDir, inRev(2, 1)), p(store.InDir, inFor(8, 3, 1)), p(store.EndpointsDir, session(3, store.EndpointClosed, "")),
+	held := []string{p(store.InDir, tgtIn(2)), p(store.InDir, inFor(8, 3)), p(store.EndpointsDir, session(3, store.EndpointClosed, "")),
 		p(store.EndpointsDir, directEndpoint(7, "chat")), p(store.AdminDir, adminResult(2)),
 		p(store.AlertsDir, store.AlertRecord{ID: store.AlertID{3}}), p(store.AlertsDir, store.AlertRecord{ID: store.AlertID{4}}), p(store.OutDir, srcOut(11, false))}
 	var outNames []string
@@ -188,12 +188,12 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 	// and is the business of the orphan rule, not of the sweep.
 	mustDo(t, r.st.ArchiveSweep(plan.Chunk(now)))
 	bodyFiles := snapshot(t, r.mem, store.BodiesDir)
-	for _, swept := range []store.Record{inRev(1, 2), created(t, 4, 5), derivedIn(4, 5, 2), derivedIn(6, 9, 2)} {
+	for _, swept := range []store.Record{tgtIn(1), created(t, 4, 5), derivedIn(4, 5), derivedIn(6, 9)} {
 		if _, there := bodyFiles[bodyPath(swept)]; there {
 			t.Errorf("the body of the swept record %s is still there", swept.Name())
 		}
 	}
-	for _, stays := range []store.Record{inRev(2, 1), inFor(8, 3, 1), srcOut(11, false), inRev(9, 1)} {
+	for _, stays := range []store.Record{tgtIn(2), inFor(8, 3), srcOut(11, false), tgtIn(9)} {
 		if _, there := bodyFiles[bodyPath(stays)]; !there {
 			t.Errorf("the body %s of a record that stays (or of none) was removed", bodyPath(stays))
 		}
@@ -238,7 +238,7 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 func TestPlanSweepKeepsADerivedDeliveryWhileItsControlRecordIsLive(t *testing.T) {
 	r := newRig(t)
 	c := sessionCtl(4, 5) // accepted: not finished
-	derived := derivedIn(4, 5, 2)
+	derived := derivedIn(4, 5)
 	derived.Record = deliveredRecord(derived.Record)
 	derived.Body = nil
 	seed(t, r.mem, c, derived)

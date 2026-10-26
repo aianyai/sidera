@@ -21,8 +21,7 @@ import (
 // write, with its class, never wrapped into another. The caller acknowledges and
 // updates its memory only after nil.
 //
-// A record that replaces another is passed whole. A target record carries the
-// revision it was read with, and is written with the next one.
+// A record that replaces another is passed whole.
 
 // file is one file to write: its path and its bytes.
 type file struct {
@@ -41,22 +40,6 @@ func recordFile(dir string, rec Record) (file, error) {
 	return file{path.Join(dir, rec.Name()), data}, nil
 }
 
-// committed commits tx and returns what the transaction wrote, or nothing when
-// the commit failed.
-func committed[T any](tx *txn.Tx, written T) (T, error) {
-	if err := tx.Commit(); err != nil {
-		var none T
-		return none, err
-	}
-	return written, nil
-}
-
-// bumped is a target record as it is written: one revision on.
-func bumped(in InRecord) InRecord {
-	in.Rev++
-	return in
-}
-
 func outFiles(outs []OutRecord) ([]file, error) {
 	var fs []file
 	for _, o := range outs {
@@ -69,20 +52,17 @@ func outFiles(outs []OutRecord) ([]file, error) {
 	return fs, nil
 }
 
-// inFiles encodes target records as they are written, and returns them as
-// written too, in the order given: the one place that says what a write of a
-// target record produces, so that no caller works it out again.
-func inFiles(ins []InRecord) (written []InRecord, fs []file, err error) {
+// inFiles encodes target records, in the order given.
+func inFiles(ins []InRecord) ([]file, error) {
+	var fs []file
 	for _, in := range ins {
-		in = bumped(in)
 		f, err := recordFile(InDir, in)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		written = append(written, in)
 		fs = append(fs, f)
 	}
-	return written, fs, nil
+	return fs, nil
 }
 
 func ctlFiles(ctls []CtlRecord) ([]file, error) {
@@ -200,82 +180,81 @@ func (s *Store) Intake(body []byte, out OutRecord) error {
 // before the records, so one local delivery to several recipients writes as many
 // bodies as it has records that need one, and no record shares its body with
 // another. A rejected record refers to none, and body is nil when none of them
-// does. It returns the records as written.
-func (s *Store) Deliver(body []byte, ins []InRecord) ([]InRecord, error) {
+// does.
+func (s *Store) Deliver(body []byte, ins []InRecord) error {
 	if len(ins) == 0 {
-		return nil, errors.New("store: Deliver needs a record")
+		return errors.New("store: Deliver needs a record")
 	}
-	written, files, err := inFiles(ins)
+	files, err := inFiles(ins)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	bfs, err := bodyFiles(body, inOwners(ins))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tx := s.w.Begin(&declDeliver)
 	defer tx.Close()
 	for _, bf := range bfs {
 		if err := s.replace(tx, "body", bf); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return nil, err
+		return err
 	}
-	return committed(tx, written)
+	return tx.Commit()
 }
 
 // DeliverReply records a reply that carries evidence: the bodies of its target
 // records, the updated source record of the message it answers, if the evidence
 // changed it, before the target records of the reply, then removes the body of
 // the source record when the update no longer refers to one.
-// It returns the target records as written (the revision one on).
-func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord) ([]InRecord, error) {
+func (s *Store) DeliverReply(body []byte, out *OutRecord, ins []InRecord) error {
 	if len(ins) == 0 {
-		return nil, errors.New("store: DeliverReply needs a record")
+		return errors.New("store: DeliverReply needs a record")
 	}
-	written, files, err := inFiles(ins)
+	files, err := inFiles(ins)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	bfs, err := bodyFiles(body, inOwners(ins))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	var of *file
 	var dropped []FileRef
 	if out != nil {
 		f, err := recordFile(OutDir, *out)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		of = &f
 		dropped = droppedBodies(outOwners(*out))
 	}
 	ex, err := s.exist(dropped)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tx := s.w.Begin(&declDeliverReply)
 	defer tx.Close()
 	for _, bf := range bfs {
 		if err := s.replace(tx, "reply-body", bf); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if of != nil {
 		if err := s.replace(tx, "out", *of); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return nil, err
+		return err
 	}
 	if err := s.removeBodies(tx, dropped, ex); err != nil {
-		return nil, err
+		return err
 	}
-	return committed(tx, written)
+	return tx.Commit()
 }
 
 // SourceUpdate replaces one source record and, when it no longer refers to a
@@ -429,88 +408,84 @@ func (s *Store) PromptBegin(a AttemptsRecord) error {
 // half-done write. A recipient of another endpoint than the head's is refused
 // before anything is written: the head would say that work is done which it does
 // not cover.
-func (s *Store) recipientsThenHead(decl *txn.Decl, head AttemptsRecord, ins []InRecord) ([]InRecord, error) {
+func (s *Store) recipientsThenHead(decl *txn.Decl, head AttemptsRecord, ins []InRecord) error {
 	af, err := recordFile(AttemptsDir, head)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for _, in := range ins {
 		if in.Key.Recipient != head.Endpoint {
-			return nil, fmt.Errorf("store: a target record of %s cannot go with the head of %s: the head says the work for its own endpoint is done", in.Key.Recipient, head.Endpoint)
+			return fmt.Errorf("store: a target record of %s cannot go with the head of %s: the head says the work for its own endpoint is done", in.Key.Recipient, head.Endpoint)
 		}
 	}
-	written, files, err := inFiles(ins)
+	files, err := inFiles(ins)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tx := s.w.Begin(decl)
 	defer tx.Close()
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return nil, err
+		return err
 	}
 	if err := s.replace(tx, "attempts", af); err != nil {
-		return nil, err
+		return err
 	}
-	return committed(tx, written)
+	return tx.Commit()
 }
 
 // PromptEnd writes the target records the prompt notified, then the head record
 // with the result of the prompt.
-// It returns the target records as written (the revision one on).
-func (s *Store) PromptEnd(a AttemptsRecord, ins []InRecord) ([]InRecord, error) {
+func (s *Store) PromptEnd(a AttemptsRecord, ins []InRecord) error {
 	return s.recipientsThenHead(&declPromptEnd, a, ins)
 }
 
 // Blocked writes the target records a block or the recovery from one applies to,
 // then the head record with the blocked report.
-// It returns the target records as written (the revision one on).
-func (s *Store) Blocked(a AttemptsRecord, ins []InRecord) ([]InRecord, error) {
+func (s *Store) Blocked(a AttemptsRecord, ins []InRecord) error {
 	return s.recipientsThenHead(&declBlocked, a, ins)
 }
 
 // Lease records the leases of one page of target records.
-// It returns the target records as written (the revision one on).
-func (s *Store) Lease(ins []InRecord) ([]InRecord, error) {
+func (s *Store) Lease(ins []InRecord) error {
 	if len(ins) == 0 {
-		return nil, errors.New("store: Lease needs a record")
+		return errors.New("store: Lease needs a record")
 	}
-	written, files, err := inFiles(ins)
+	files, err := inFiles(ins)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tx := s.w.Begin(&declLease)
 	defer tx.Close()
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return nil, err
+		return err
 	}
-	return committed(tx, written)
+	return tx.Commit()
 }
 
 // Ack records acknowledgements and removes the body of each record that no longer
 // refers to one.
-// It returns the target records as written (the revision one on).
-func (s *Store) Ack(ins []InRecord) ([]InRecord, error) {
+func (s *Store) Ack(ins []InRecord) error {
 	if len(ins) == 0 {
-		return nil, errors.New("store: Ack needs a record")
+		return errors.New("store: Ack needs a record")
 	}
-	written, files, err := inFiles(ins)
+	files, err := inFiles(ins)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	dropped := droppedBodies(inOwners(ins))
 	ex, err := s.exist(dropped)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tx := s.w.Begin(&declAck)
 	defer tx.Close()
 	if err := writeGroup(tx, "in", "in-dir", InDir, files); err != nil {
-		return nil, err
+		return err
 	}
 	if err := s.removeBodies(tx, dropped, ex); err != nil {
-		return nil, err
+		return err
 	}
-	return committed(tx, written)
+	return tx.Commit()
 }
 
 // TickBatch is the records one Tick moved.
@@ -521,43 +496,42 @@ type TickBatch struct {
 }
 
 // Tick records records moved by the passing of time.
-// It returns the target records as written (the revision one on).
-func (s *Store) Tick(b TickBatch) ([]InRecord, error) {
+func (s *Store) Tick(b TickBatch) error {
 	of, err := outFiles(b.Out)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	written, inf, err := inFiles(b.In)
+	inf, err := inFiles(b.In)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	cf, err := ctlFiles(b.Ctl)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(of)+len(inf)+len(cf) == 0 {
-		return nil, errors.New("store: Tick needs a record")
+		return errors.New("store: Tick needs a record")
 	}
 	dropped := droppedBodies(slices.Concat(outOwners(b.Out...), inOwners(b.In), ctlOwners(b.Ctl)))
 	ex, err := s.exist(dropped)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tx := s.w.Begin(&declTick)
 	defer tx.Close()
 	if err := writeGroup(tx, "out", "out-dir", OutDir, of); err != nil {
-		return nil, err
+		return err
 	}
 	if err := writeGroup(tx, "in", "in-dir", InDir, inf); err != nil {
-		return nil, err
+		return err
 	}
 	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
-		return nil, err
+		return err
 	}
 	if err := s.removeBodies(tx, dropped, ex); err != nil {
-		return nil, err
+		return err
 	}
-	return committed(tx, written)
+	return tx.Commit()
 }
 
 // EndpointUpdate replaces an endpoint record.
@@ -613,97 +587,93 @@ type DrainBatch struct {
 
 // drain writes the endpoint records that close an instance's endpoints, when
 // there are any, and a chunk of closed deliveries.
-func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, withHead bool) ([]InRecord, error) {
+func (s *Store) drain(decl *txn.Decl, closed []EndpointRecord, b DrainBatch, withHead bool) error {
 	var ep []file
 	for _, e := range closed {
 		if e.Status != EndpointClosed {
-			return nil, errors.New("store: an endpoint closed by a drain is closed")
+			return errors.New("store: an endpoint closed by a drain is closed")
 		}
 		f, err := recordFile(EndpointsDir, e)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		ep = append(ep, f)
 	}
-	written, inf, err := inFiles(b.In)
+	inf, err := inFiles(b.In)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	cf, err := ctlFiles(b.Ctl)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if withHead && len(ep) == 0 {
-		return nil, errors.New("store: an instance drain closes an endpoint")
+		return errors.New("store: an instance drain closes an endpoint")
 	}
 	if !withHead && len(inf)+len(cf) == 0 {
-		return nil, errors.New("store: a drain closes a record")
+		return errors.New("store: a drain closes a record")
 	}
 	dropped := droppedBodies(slices.Concat(inOwners(b.In), ctlOwners(b.Ctl)))
 	ex, err := s.exist(dropped)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tx := s.w.Begin(decl)
 	defer tx.Close()
 	if withHead {
 		if err := writeGroup(tx, "endpoint", "endpoint-dir", EndpointsDir, ep); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if err := writeGroup(tx, "in", "in-dir", InDir, inf); err != nil {
-		return nil, err
+		return err
 	}
 	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
-		return nil, err
+		return err
 	}
 	if err := s.removeBodies(tx, dropped, ex); err != nil {
-		return nil, err
+		return err
 	}
-	return committed(tx, written)
+	return tx.Commit()
 }
 
 // EndpointDrain records a chunk of the deliveries closed by an endpoint's
 // closing.
-// It returns the target records as written (the revision one on).
-func (s *Store) EndpointDrain(b DrainBatch) ([]InRecord, error) {
+func (s *Store) EndpointDrain(b DrainBatch) error {
 	return s.drain(&declEndpointDrain, nil, b, false)
 }
 
 // InstanceDrain records the closing of the endpoints of a disabled instance
 // and a chunk of the deliveries closed with them.
-// It returns the target records as written (the revision one on).
-func (s *Store) InstanceDrain(closed []EndpointRecord, b DrainBatch) ([]InRecord, error) {
+func (s *Store) InstanceDrain(closed []EndpointRecord, b DrainBatch) error {
 	return s.drain(&declInstanceDrain, closed, b, true)
 }
 
 // FeedbackForm records a notice to a sender's endpoint and its body.
-// It returns the notice as written (the revision one on).
-func (s *Store) FeedbackForm(body []byte, notice InRecord) (InRecord, error) {
+func (s *Store) FeedbackForm(body []byte, notice InRecord) error {
 	if !notice.Key.Sender.IsSystem() {
-		return InRecord{}, errors.New("store: a notice is sent by the system endpoint")
+		return errors.New("store: a notice is sent by the system endpoint")
 	}
-	written := bumped(notice)
-	nf, err := recordFile(InDir, written)
+	nf, err := recordFile(InDir, notice)
 	if err != nil {
-		return InRecord{}, err
+		return err
 	}
 	if notice.Body == nil {
-		return InRecord{}, errors.New("store: a notice has a body")
+		return errors.New("store: a notice has a body")
 	}
 	bfs, err := bodyFiles(body, inOwners([]InRecord{notice}))
 	if err != nil {
-		return InRecord{}, err
+		return err
 	}
 	tx := s.w.Begin(&declFeedbackForm)
 	defer tx.Close()
 	if err := s.replace(tx, "body", bfs[0]); err != nil {
-		return InRecord{}, err
+		return err
 	}
 	if err := s.replace(tx, "notice", nf); err != nil {
-		return InRecord{}, err
+		return err
 	}
-	return committed(tx, written)
+	return tx.Commit()
 }
 
 // FeedbackClear replaces the source records whose feedback items were covered

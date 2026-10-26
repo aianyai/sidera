@@ -168,11 +168,11 @@ func scenarios() []scenario {
 			durable: "deliver/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return dropWritten(r.st.Deliver(nil, []store.InRecord{rejected(inRev(1, 1)), rejected(inRev(2, 1))}))
+				return r.st.Deliver(nil, []store.InRecord{rejected(tgtIn(1)), rejected(tgtIn(2))})
 			},
 			verify: func(t *testing.T, r *rig) {
-				wantNoBody(t, r, inRev(1, 1))
-				wantNoBody(t, r, inRev(2, 1))
+				wantNoBody(t, r, tgtIn(1))
+				wantNoBody(t, r, tgtIn(2))
 				wantBody(t, r, srcOut(1, true), bodyBytes(1))
 				wantBody(t, r, srcOut(2, true), bodyBytes(2))
 				wantBodyCount(t, r, 2)
@@ -184,10 +184,10 @@ func scenarios() []scenario {
 			durable: "deliver/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return dropWritten(r.st.Deliver(bodyBytes(3), []store.InRecord{inRev(3, 1)}))
+				return r.st.Deliver(bodyBytes(3), []store.InRecord{tgtIn(3)})
 			},
 			verify: func(t *testing.T, r *rig) {
-				wantBody(t, r, inRev(3, 1), bodyBytes(3))
+				wantBody(t, r, tgtIn(3), bodyBytes(3))
 				wantBodyCount(t, r, 1)
 			},
 			bodiesResolve: true,
@@ -202,12 +202,12 @@ func scenarios() []scenario {
 			durable: "deliver/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{inFor(1, 2, 1), inFor(1, 7, 1), inFor(1, 8, 1)}))
+				return r.st.Deliver(bodyBytes(1), []store.InRecord{inFor(1, 2), inFor(1, 7), inFor(1, 8)})
 			},
 			verify: func(t *testing.T, r *rig) {
 				seen := map[string]bool{}
 				for _, e := range []int{2, 7, 8} {
-					in := inFor(1, e, 1)
+					in := inFor(1, e)
 					wantBody(t, r, in, bodyBytes(1))
 					seen[bodyPath(in)] = true
 				}
@@ -228,12 +228,12 @@ func scenarios() []scenario {
 			durable: "deliver/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{inFor(1, 2, 1), rejected(inFor(1, 7, 1)), inFor(1, 8, 1)}))
+				return r.st.Deliver(bodyBytes(1), []store.InRecord{inFor(1, 2), rejected(inFor(1, 7)), inFor(1, 8)})
 			},
 			verify: func(t *testing.T, r *rig) {
-				wantBody(t, r, inFor(1, 2, 1), bodyBytes(1))
-				wantBody(t, r, inFor(1, 8, 1), bodyBytes(1))
-				wantNoBody(t, r, inFor(1, 7, 1))
+				wantBody(t, r, inFor(1, 2), bodyBytes(1))
+				wantBody(t, r, inFor(1, 8), bodyBytes(1))
+				wantNoBody(t, r, inFor(1, 7))
 				wantBodyCount(t, r, 2)
 			},
 			bodiesResolve: true,
@@ -251,11 +251,11 @@ func scenarios() []scenario {
 					Ref:      delivery.DeliveryRef{Sender: addr(local, 1), Message: msgID(1), Recipient: addr(local, 2)},
 					Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: base,
 				}}
-				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}))
+				return r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{tgtIn(9)})
 			},
 			verify: func(t *testing.T, r *rig) {
 				wantBody(t, r, srcOut(1, true), bodyBytes(1))
-				wantBody(t, r, inRev(9, 1), bodyBytes(9))
+				wantBody(t, r, tgtIn(9), bodyBytes(9))
 				wantBodyCount(t, r, 2)
 			},
 			bodiesResolve: true,
@@ -281,18 +281,18 @@ func scenarios() []scenario {
 					Ref:      delivery.DeliveryRef{Sender: addr(local, 1), Message: msgID(1), Recipient: addr(local, 2)},
 					Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: base,
 				}}
-				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}))
+				return r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{tgtIn(9)})
 			},
 			verify: func(t *testing.T, r *rig) {
 				wantNoBody(t, r, srcOut(1, true))
 				wantBody(t, r, srcOut(2, true), bodyBytes(2))
-				wantBody(t, r, inRev(9, 1), bodyBytes(9))
+				wantBody(t, r, tgtIn(9), bodyBytes(9))
 				wantBodyCount(t, r, 2)
 			},
 			bodiesResolve: true,
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
 				// The source record is updated before the target record that depends on it.
-				in := path.Join(store.InDir, inRev(9, 1).Name())
+				in := path.Join(store.InDir, tgtIn(9).Name())
 				out := path.Join(store.OutDir, srcOut(1, true).Name())
 				if _, ok := crashed[in]; ok && crashed[out] == fmt.Sprint(mustEncode(t, srcOut(1, true))) {
 					t.Errorf("%s: the reply is there but the evidence it depends on is not", where)
@@ -391,18 +391,18 @@ func scenarios() []scenario {
 		{
 			name: "lease",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, inRev(1, 1), inRev(2, 1), inRev(3, 1))
+				seedWithBodies(t, mem, tgtIn(1), tgtIn(2), tgtIn(3))
 			},
 			durable: "lease/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				var ins []store.InRecord
 				for i := 1; i <= 3; i++ {
-					in := inRev(i, 1)
+					in := tgtIn(i)
 					in.Record = leasedRecord(in.Record, base)
 					ins = append(ins, in)
 				}
-				return dropWritten(r.st.Lease(ins))
+				return r.st.Lease(ins)
 			},
 			bodiesResolve: true,
 		},
@@ -410,19 +410,19 @@ func scenarios() []scenario {
 			// Each record has a body of its own, and acknowledging both removes both.
 			name: "ack",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, inRev(1, 2), inRev(2, 2))
+				seedWithBodies(t, mem, tgtIn(1), tgtIn(2))
 			},
 			durable: "ack/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				a, b := inRev(1, 2), inRev(2, 2)
+				a, b := tgtIn(1), tgtIn(2)
 				a.Body, b.Body = nil, nil
 				a.Record, b.Record = deliveredRecord(a.Record), deliveredRecord(b.Record)
-				return dropWritten(r.st.Ack([]store.InRecord{a, b}))
+				return r.st.Ack([]store.InRecord{a, b})
 			},
 			verify: func(t *testing.T, r *rig) {
-				wantNoBody(t, r, inRev(1, 2))
-				wantNoBody(t, r, inRev(2, 2))
+				wantNoBody(t, r, tgtIn(1))
+				wantNoBody(t, r, tgtIn(2))
 				wantBodyCount(t, r, 0)
 			},
 			bodiesResolve: true,
@@ -433,20 +433,20 @@ func scenarios() []scenario {
 			// third keeps its record and its body.
 			name: "ack removes only its own body",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, inRev(1, 2), inRev(2, 2), inRev(3, 2))
+				seedWithBodies(t, mem, tgtIn(1), tgtIn(2), tgtIn(3))
 			},
 			durable: "ack/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				a, c := inRev(1, 2), inRev(3, 2)
+				a, c := tgtIn(1), tgtIn(3)
 				a.Body, c.Body = nil, nil
 				a.Record, c.Record = deliveredRecord(a.Record), deliveredRecord(c.Record)
-				return dropWritten(r.st.Ack([]store.InRecord{a, c}))
+				return r.st.Ack([]store.InRecord{a, c})
 			},
 			verify: func(t *testing.T, r *rig) {
-				wantNoBody(t, r, inRev(1, 2))
-				wantNoBody(t, r, inRev(3, 2))
-				wantBody(t, r, inRev(2, 2), bodyBytes(2))
+				wantNoBody(t, r, tgtIn(1))
+				wantNoBody(t, r, tgtIn(3))
+				wantBody(t, r, tgtIn(2), bodyBytes(2))
 				wantBodyCount(t, r, 1)
 			},
 			bodiesResolve: true,
@@ -456,27 +456,27 @@ func scenarios() []scenario {
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				c := sessionCtl(3, 5)
 				c.Body = bodyRef(3)
-				seedWithBodies(t, mem, srcOut(1, false), inRev(2, 1), c, inRev(4, 1))
+				seedWithBodies(t, mem, srcOut(1, false), tgtIn(2), c, tgtIn(4))
 			},
 			durable: "tick/body-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				out := srcOutFinished(1)
-				in := inRev(2, 1)
+				in := tgtIn(2)
 				in.Body = nil
 				in.Record.State, in.Record.Reject = delivery.StateRejected, delivery.RejectBacklogExpired
 				c := sessionCtl(3, 5)
 				c.Body = nil
 				c.Record = applied(t, c.Record, delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectExpired})
-				return dropWritten(r.st.Tick(store.TickBatch{
+				return r.st.Tick(store.TickBatch{
 					Out: []store.OutRecord{out}, In: []store.InRecord{in}, Ctl: []store.CtlRecord{c},
-				}))
+				})
 			},
 			verify: func(t *testing.T, r *rig) {
 				wantNoBody(t, r, srcOut(1, false))
-				wantNoBody(t, r, inRev(2, 1))
+				wantNoBody(t, r, tgtIn(2))
 				wantNoBody(t, r, sessionCtl(3, 5))
-				wantBody(t, r, inRev(4, 1), bodyBytes(4))
+				wantBody(t, r, tgtIn(4), bodyBytes(4))
 				wantBodyCount(t, r, 1)
 			},
 			bodiesResolve: true,
@@ -497,7 +497,7 @@ func scenarios() []scenario {
 		{
 			name: "endpoint-close",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, directEndpoint(7, "chat"), inFor(1, 7, 1), inFor(2, 7, 1), inFor(3, 2, 1), ctlWithBody(4, 7))
+				seedWithBodies(t, mem, directEndpoint(7, "chat"), inFor(1, 7), inFor(2, 7), inFor(3, 2), ctlWithBody(4, 7))
 			},
 			durable:  "endpoint-close/endpoint.sync-dir#1",
 			mode:     atomic,
@@ -509,13 +509,13 @@ func scenarios() []scenario {
 				if err := r.st.EndpointClose(closed, &res); err != nil {
 					return err
 				}
-				return dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan())))
+				return r.st.EndpointDrain(s.drainBatch(r.scan()))
 			},
 			verify: func(t *testing.T, r *rig) {
-				wantNoBody(t, r, inFor(1, 7, 1))
-				wantNoBody(t, r, inFor(2, 7, 1))
+				wantNoBody(t, r, inFor(1, 7))
+				wantNoBody(t, r, inFor(2, 7))
 				wantNoBody(t, r, ctlWithBody(4, 7))
-				wantBody(t, r, inFor(3, 2, 1), bodyBytes(3))
+				wantBody(t, r, inFor(3, 2), bodyBytes(3))
 				wantBodyCount(t, r, 1)
 			},
 			bodiesResolve: true,
@@ -524,8 +524,8 @@ func scenarios() []scenario {
 			name: "instance-drain",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				seed(t, mem, directEndpoint(7, "chat"), directEndpoint(8, "chat"), directEndpoint(9, "other"),
-					inFor(1, 7, 1), inFor(2, 8, 1), inFor(3, 9, 1), ctlWithBody(4, 8))
-				seedBodies(t, mem, inFor(1, 7, 1), inFor(2, 8, 1), inFor(3, 9, 1), ctlWithBody(4, 8))
+					inFor(1, 7), inFor(2, 8), inFor(3, 9), ctlWithBody(4, 8))
+				seedBodies(t, mem, inFor(1, 7), inFor(2, 8), inFor(3, 9), ctlWithBody(4, 8))
 			},
 			mode:         atomic,
 			mustComplete: true,
@@ -540,16 +540,16 @@ func scenarios() []scenario {
 				}
 				// The head and the first chunk in one transaction; what is left of the
 				// drain, if any, is another.
-				if _, err := r.st.InstanceDrain(closed, s.drainFor(r.scan(), closed)); err != nil {
+				if err := r.st.InstanceDrain(closed, s.drainFor(r.scan(), closed)); err != nil {
 					return err
 				}
 				return nil
 			},
 			verify: func(t *testing.T, r *rig) {
-				wantNoBody(t, r, inFor(1, 7, 1))
-				wantNoBody(t, r, inFor(2, 8, 1))
+				wantNoBody(t, r, inFor(1, 7))
+				wantNoBody(t, r, inFor(2, 8))
 				wantNoBody(t, r, ctlWithBody(4, 8))
-				wantBody(t, r, inFor(3, 9, 1), bodyBytes(3))
+				wantBody(t, r, inFor(3, 9), bodyBytes(3))
 				wantBodyCount(t, r, 1)
 			},
 			bodiesResolve: true,
@@ -566,7 +566,7 @@ func scenarios() []scenario {
 			run: func(t *testing.T, r *rig, s *sim) error {
 				o := srcOut(1, false)
 				o.Feedback = []delivery.Item{feedbackItem(1)}
-				if _, err := r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)); err != nil {
+				if err := r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)); err != nil {
 					return err
 				}
 				o.Feedback = nil
@@ -685,7 +685,7 @@ func noticeFor(o store.OutRecord) store.InRecord {
 	if err != nil {
 		panic(err)
 	}
-	n.Rev, n.Record = 1, rec
+	n.Record = rec
 	n.Dedup = delivery.NewDedupRecord(n.Key.Dedup(), digestOf(99), rec.ReportBy)
 	n.AcceptedAt = base
 	n.Handout = store.HandoutFields{ContentType: "text/plain", SentAt: base}
@@ -726,14 +726,12 @@ type headLastWrite struct {
 
 // recipients are the target records of the write before it.
 func (w headLastWrite) recipients(t testing.TB) (a, b store.InRecord) {
-	return w.prior(t, inRev(1, 1)), w.prior(t, inRev(2, 1))
+	return w.prior(t, tgtIn(1)), w.prior(t, tgtIn(2))
 }
 
-// written is a recipient as the event and the write leave it: the event applied,
-// the revision one on.
+// written is a recipient as the event and the write leave it: the event applied.
 func (w headLastWrite) written(t testing.TB, in store.InRecord) store.InRecord {
 	in.Record = applied(t, in.Record, w.event)
-	in.Rev++
 	return in
 }
 
@@ -832,7 +830,7 @@ func promptEndScenario() scenario {
 		}},
 		done: func(h store.AttemptsRecord) bool { return h.InFlight == nil },
 		call: func(st *store.Store, head store.AttemptsRecord, ins []store.InRecord) error {
-			return dropWritten(st.PromptEnd(head, ins))
+			return st.PromptEnd(head, ins)
 		},
 	}.scenario()
 }
@@ -851,7 +849,7 @@ func blockedScenario(recovered bool) scenario {
 		after:  store.AttemptsRecord{Endpoint: ep(2), Blocked: blocked},
 		done:   func(h store.AttemptsRecord) bool { return h.Blocked.Cause != 0 },
 		call: func(st *store.Store, head store.AttemptsRecord, ins []store.InRecord) error {
-			return dropWritten(st.Blocked(head, ins))
+			return st.Blocked(head, ins)
 		},
 	}
 	if recovered {
@@ -872,11 +870,11 @@ func sweepScenario(farFuture time.Time) scenario {
 	world := func(t *testing.T, mem *fsxtest.Mem) {
 		o1 := srcOutFinished(1)                        // a finished source record whose number must be remembered
 		o2 := srcOutFinished(2)                        // another, of the same pair
-		inDone := inRev(3, 2)                          // a finished target record
+		inDone := tgtIn(3)                             // a finished target record
 		inDone.Record = deliveredRecord(inDone.Record) // it still refers to its body: the crash came before it was dropped
 		c := created(t, 4, 5)                          // a control record of a session creation
 		c.Record = deliveredRecord(c.Record)
-		derived := derivedIn(4, 5, 2) // its derived delivery
+		derived := derivedIn(4, 5) // its derived delivery
 		derived.Record = deliveredRecord(derived.Record)
 		derived.Body = nil
 		lost := lostOutAt(srcOut(6, false).Key, base) // a replacement
@@ -917,7 +915,7 @@ func sweepScenario(farFuture time.Time) scenario {
 				t.Errorf("an out-lost record whose notice was given is left: %v", sc.OutLost)
 			}
 			wantNoBody(t, r, srcOutFinished(1))
-			wantNoBody(t, r, inRev(3, 2))
+			wantNoBody(t, r, tgtIn(3))
 			wantBody(t, r, srcOut(8, false), bodyBytes(8))
 			wantBodyCount(t, r, 1)
 		},
@@ -958,7 +956,7 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 	if _, ok := snap[statePath(store.CtlDir, created(t, 4, 5).Name())]; ok {
 		ctlThere = true
 	}
-	if _, derivedThere := snap[statePath(store.InDir, derivedIn(4, 5, 2).Name())]; ctlThere && !derivedThere {
+	if _, derivedThere := snap[statePath(store.InDir, derivedIn(4, 5).Name())]; ctlThere && !derivedThere {
 		t.Errorf("%s: the derived delivery is gone while its control record is still there", where)
 	}
 }

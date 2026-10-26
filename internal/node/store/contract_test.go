@@ -148,7 +148,6 @@ func TestEveryStoredFieldSurvivesTheDisk(t *testing.T) {
 	var dedups []delivery.DedupRecord
 	for n, r := range target {
 		in := tgtIn(20 + n)
-		in.Rev = uint64(n + 1)
 		in.Record = r
 		if r.Control {
 			all = append(all, r)

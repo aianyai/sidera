@@ -716,13 +716,12 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   in the node queue limit. The anomaly it reports would go unheard if a full queue
   refused it, and a notice about a notice is never made, so a refusal would be
   silent; the rate cap is what bounds notices.
-- **The view takes the records the store hands back.** A write of target records
-  returns them as written, the revision included, and the engine stores what comes
-  back instead of working the revision out: the rule has one home, the store.
+- **The view takes the records the engine passed to a write.** A write of target
+  records stores them exactly as given, so the engine puts the same records in its
+  view once the write returns nil, and never after an error.
   `TestViewMatchesAFreshScanAfterWrites` compares the view with a fresh scan after
-  writes made in several chunks, so a view that kept the records it gave fails
-  there. The recovery rules keep no view (it is built from the last scan), so they
-  do not use what a write returns.
+  writes made in several chunks, so a view that drifted from the disk fails there.
+  The recovery rules keep no view (it is built from the last scan).
 - **An accepted control signal is never rejected.** Closing a control record of a
   closed endpoint is what the delivery rules say: `delivery_unknown`.
 

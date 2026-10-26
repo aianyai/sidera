@@ -198,12 +198,11 @@ func (e *Engine) writeArrivals(now time.Time, env envelope.Envelope, arrivals []
 	if len(ins) == 0 {
 		return nil
 	}
-	var written []store.InRecord
 	var err error
 	if out != nil {
-		written, err = e.d.Store.DeliverReply(body, out, ins)
+		err = e.d.Store.DeliverReply(body, out, ins)
 	} else {
-		written, err = e.d.Store.Deliver(body, ins)
+		err = e.d.Store.Deliver(body, ins)
 	}
 	if err != nil {
 		return err
@@ -211,7 +210,7 @@ func (e *Engine) writeArrivals(now time.Time, env envelope.Envelope, arrivals []
 	if out != nil {
 		e.putOut(now, *out)
 	}
-	for _, in := range written {
+	for _, in := range ins {
 		e.view.setIn(in)
 	}
 	return nil

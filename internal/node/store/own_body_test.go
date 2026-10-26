@@ -38,9 +38,9 @@ func wantBodyFiles(recs ...store.Record) []string {
 func TestEveryRecordHasABodyOfItsOwn(t *testing.T) {
 	t.Run("Deliver", func(t *testing.T) {
 		r := newRig(t)
-		accepted := []store.InRecord{inFor(1, 2, 0), inFor(1, 3, 0), inFor(1, 4, 0)}
-		refused := rejected(inFor(1, 5, 0))
-		if _, err := r.st.Deliver(bodyBytes(1), append(slices.Clone(accepted), refused)); err != nil {
+		accepted := []store.InRecord{inFor(1, 2), inFor(1, 3), inFor(1, 4)}
+		refused := rejected(inFor(1, 5))
+		if err := r.st.Deliver(bodyBytes(1), append(slices.Clone(accepted), refused)); err != nil {
 			t.Fatal(err)
 		}
 		var owners []store.Record
@@ -88,12 +88,12 @@ func TestABodyIsRefusedThatItsRecordsDoNotSay(t *testing.T) {
 		{"Deliver", func(st *store.Store, body []byte, ref *store.BodyRef) error {
 			in := tgtIn(1)
 			in.Body = ref
-			return dropWritten(st.Deliver(body, []store.InRecord{in}))
+			return st.Deliver(body, []store.InRecord{in})
 		}},
 		{"DeliverReply", func(st *store.Store, body []byte, ref *store.BodyRef) error {
 			in := tgtIn(1)
 			in.Body = ref
-			return dropWritten(st.DeliverReply(body, nil, []store.InRecord{in}))
+			return st.DeliverReply(body, nil, []store.InRecord{in})
 		}},
 		{"ControlIntake", func(st *store.Store, body []byte, ref *store.BodyRef) error {
 			c := sessionCtl(1, 5)
@@ -105,7 +105,7 @@ func TestABodyIsRefusedThatItsRecordsDoNotSay(t *testing.T) {
 			o.Feedback = []delivery.Item{feedbackItem(1)}
 			notice := noticeFor(o)
 			notice.Body = ref
-			return dropWritten(st.FeedbackForm(body, notice))
+			return st.FeedbackForm(body, notice)
 		}},
 	} {
 		for _, c := range []struct {
@@ -164,7 +164,7 @@ func ownBodyWrites() []ownBodyWrite {
 		return srcOut(i, true)
 	}
 	inOf := func(i int, drop bool) store.InRecord {
-		in := inRev(i, 1)
+		in := tgtIn(i)
 		if drop {
 			in.Record, in.Body = deliveredRecord(in.Record), nil
 		}
@@ -185,7 +185,7 @@ func ownBodyWrites() []ownBodyWrite {
 		{"DeliverReply with an updated out", []store.Record{srcOut(1, true)}, []store.Record{srcOut(2, true)},
 			func(st *store.Store, drop bool) error {
 				out := outOf(1, drop)
-				return dropWritten(st.DeliverReply(bodyBytes(3), &out, []store.InRecord{tgtIn(3)}))
+				return st.DeliverReply(bodyBytes(3), &out, []store.InRecord{tgtIn(3)})
 			}},
 		{"ControlResult", []store.Record{withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{withCtlBody(sessionCtl(2, 6), 2)},
 			func(st *store.Store, drop bool) error { return st.ControlResult(ctlOf(1, 5, drop), nil) }},
@@ -195,29 +195,29 @@ func ownBodyWrites() []ownBodyWrite {
 			func(st *store.Store, drop bool) error { return st.FeedbackClear([]store.OutRecord{outOf(1, drop)}) }},
 		{"FeedbackReplay", []store.Record{srcOut(1, true)}, []store.Record{srcOut(2, true)},
 			func(st *store.Store, drop bool) error { return st.FeedbackReplay([]store.OutRecord{outOf(1, drop)}) }},
-		{"Ack", []store.Record{inRev(1, 1)}, []store.Record{inRev(2, 1)},
-			func(st *store.Store, drop bool) error { return dropWritten(st.Ack([]store.InRecord{inOf(1, drop)})) }},
+		{"Ack", []store.Record{tgtIn(1)}, []store.Record{tgtIn(2)},
+			func(st *store.Store, drop bool) error { return st.Ack([]store.InRecord{inOf(1, drop)}) }},
 		{"Tick with out, in and ctl",
-			[]store.Record{srcOut(1, true), inRev(1, 1), withCtlBody(sessionCtl(1, 5), 1)},
-			[]store.Record{srcOut(2, true), inRev(2, 1), withCtlBody(sessionCtl(2, 6), 2)},
+			[]store.Record{srcOut(1, true), tgtIn(1), withCtlBody(sessionCtl(1, 5), 1)},
+			[]store.Record{srcOut(2, true), tgtIn(2), withCtlBody(sessionCtl(2, 6), 2)},
 			func(st *store.Store, drop bool) error {
-				return dropWritten(st.Tick(store.TickBatch{
+				return st.Tick(store.TickBatch{
 					Out: []store.OutRecord{outOf(1, drop)},
 					In:  []store.InRecord{inOf(1, drop)},
 					Ctl: []store.CtlRecord{ctlOf(1, 5, drop)},
-				}))
+				})
 			}},
-		{"EndpointDrain", []store.Record{inRev(1, 1), withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{inRev(2, 1), withCtlBody(sessionCtl(2, 6), 2)},
+		{"EndpointDrain", []store.Record{tgtIn(1), withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{tgtIn(2), withCtlBody(sessionCtl(2, 6), 2)},
 			func(st *store.Store, drop bool) error {
-				return dropWritten(st.EndpointDrain(store.DrainBatch{
+				return st.EndpointDrain(store.DrainBatch{
 					In: []store.InRecord{inOf(1, drop)}, Ctl: []store.CtlRecord{ctlOf(1, 5, drop)},
-				}))
+				})
 			}},
-		{"InstanceDrain", []store.Record{inRev(1, 1), withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{inRev(2, 1), withCtlBody(sessionCtl(2, 6), 2)},
+		{"InstanceDrain", []store.Record{tgtIn(1), withCtlBody(sessionCtl(1, 5), 1)}, []store.Record{tgtIn(2), withCtlBody(sessionCtl(2, 6), 2)},
 			func(st *store.Store, drop bool) error {
-				return dropWritten(st.InstanceDrain([]store.EndpointRecord{closed}, store.DrainBatch{
+				return st.InstanceDrain([]store.EndpointRecord{closed}, store.DrainBatch{
 					In: []store.InRecord{inOf(1, drop)}, Ctl: []store.CtlRecord{ctlOf(1, 5, drop)},
-				}))
+				})
 			}},
 	}
 }
@@ -331,8 +331,8 @@ func TestABodyIsRemovedAfterTheRecordThatDroppedIt(t *testing.T) {
 // is still there, after the records, and no other body.
 func TestASweepRemovesTheBodiesOfTheRecordsItRemoves(t *testing.T) {
 	r := newRig(t)
-	swept := []store.Record{inRev(1, 1), withCtlBody(sessionCtl(1, 5), 1), srcOut(1, true)}
-	kept := []store.Record{inRev(2, 1), withCtlBody(sessionCtl(2, 6), 2), srcOut(2, true)}
+	swept := []store.Record{tgtIn(1), withCtlBody(sessionCtl(1, 5), 1), srcOut(1, true)}
+	kept := []store.Record{tgtIn(2), withCtlBody(sessionCtl(2, 6), 2), srcOut(2, true)}
 	all := slices.Concat(swept, kept)
 	seed(t, r.mem, all...)
 	seedBodies(t, r.mem, all...)
@@ -381,7 +381,7 @@ func TestARecordThatStillNeedsItsBodyIsRefusedWithoutAReferenceToIt(t *testing.T
 		return o
 	}
 	accepted := func() store.InRecord {
-		in := inRev(1, 1)
+		in := tgtIn(1)
 		in.Body = nil
 		return in
 	}
@@ -391,36 +391,36 @@ func TestARecordThatStillNeedsItsBodyIsRefusedWithoutAReferenceToIt(t *testing.T
 		run  func(st *store.Store) error
 	}{
 		{"Intake", func(st *store.Store) error { return st.Intake(nil, queued()) }},
-		{"Deliver", func(st *store.Store) error { return dropWritten(st.Deliver(nil, []store.InRecord{accepted()})) }},
+		{"Deliver", func(st *store.Store) error { return st.Deliver(nil, []store.InRecord{accepted()}) }},
 		{"DeliverReply with an updated out", func(st *store.Store) error {
 			o := queued()
-			return dropWritten(st.DeliverReply(bodyBytes(3), &o, []store.InRecord{tgtIn(3)}))
+			return st.DeliverReply(bodyBytes(3), &o, []store.InRecord{tgtIn(3)})
 		}},
 		{"DeliverReply with a target record", func(st *store.Store) error {
-			return dropWritten(st.DeliverReply(nil, nil, []store.InRecord{accepted()}))
+			return st.DeliverReply(nil, nil, []store.InRecord{accepted()})
 		}},
 		{"SourceUpdate", func(st *store.Store) error { return st.SourceUpdate(queued()) }},
 		{"ControlReply", func(st *store.Store) error { return st.ControlReply(queued()) }},
 		{"PromptEnd", func(st *store.Store) error {
-			return dropWritten(st.PromptEnd(head, []store.InRecord{accepted()}))
+			return st.PromptEnd(head, []store.InRecord{accepted()})
 		}},
-		{"Lease", func(st *store.Store) error { return dropWritten(st.Lease([]store.InRecord{accepted()})) }},
-		{"Ack", func(st *store.Store) error { return dropWritten(st.Ack([]store.InRecord{accepted()})) }},
+		{"Lease", func(st *store.Store) error { return st.Lease([]store.InRecord{accepted()}) }},
+		{"Ack", func(st *store.Store) error { return st.Ack([]store.InRecord{accepted()}) }},
 		{"Tick with a source record", func(st *store.Store) error {
-			return dropWritten(st.Tick(store.TickBatch{Out: []store.OutRecord{queued()}}))
+			return st.Tick(store.TickBatch{Out: []store.OutRecord{queued()}})
 		}},
 		{"Tick with a target record", func(st *store.Store) error {
-			return dropWritten(st.Tick(store.TickBatch{In: []store.InRecord{accepted()}}))
+			return st.Tick(store.TickBatch{In: []store.InRecord{accepted()}})
 		}},
 		{"EndpointDrain", func(st *store.Store) error {
-			return dropWritten(st.EndpointDrain(store.DrainBatch{In: []store.InRecord{accepted()}}))
+			return st.EndpointDrain(store.DrainBatch{In: []store.InRecord{accepted()}})
 		}},
 		{"FeedbackClear", func(st *store.Store) error { return st.FeedbackClear([]store.OutRecord{queued()}) }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := newRig(t)
-			seed(t, r.mem, srcOut(1, true), inRev(1, 1))
-			seedBodies(t, r.mem, srcOut(1, true), inRev(1, 1))
+			seed(t, r.mem, srcOut(1, true), tgtIn(1))
+			seedBodies(t, r.mem, srcOut(1, true), tgtIn(1))
 			before := snapshot(t, r.mem, ".")
 			r.rec.forget()
 			err := c.run(r.st)

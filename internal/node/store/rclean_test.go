@@ -50,42 +50,38 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 		mustDo(t, r.st.Intake(bodyBytes(i), srcOut(i, true)))
 		check("intake")
 	}
-	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)})))
-	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(2), []store.InRecord{tgtIn(2)})))
+	mustDo(t, r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)}))
+	mustDo(t, r.st.Deliver(bodyBytes(2), []store.InRecord{tgtIn(2)}))
 	check("deliver")
-	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(9), []store.InRecord{tgtIn(9)})))
+	mustDo(t, r.st.Deliver(bodyBytes(9), []store.InRecord{tgtIn(9)}))
 	check("deliver with a body")
 
-	a, b := withRev(tgtIn(1), 1), withRev(tgtIn(2), 1)
+	a, b := tgtIn(1), tgtIn(2)
 	mustDo(t, r.st.PromptBegin(store.AttemptsRecord{Endpoint: ep(2), InFlight: &store.InFlightPrompt{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Kind: 1, Covers: []store.TargetKey{a.Key, b.Key}}}))
 	check("prompt begin")
 	head := store.AttemptsRecord{Endpoint: ep(2), Attempts: []handoff.Attempt{{At: base, Outcome: handoff.AttemptDelivered, Kind: handoff.PromptKindFirst}}}
 	a.Record, b.Record = applied(t, a.Record, delivery.Event{Type: delivery.EventNotified}), applied(t, b.Record, delivery.Event{Type: delivery.EventNotified})
-	mustDo(t, dropWritten(r.st.PromptEnd(head, []store.InRecord{a, b})))
+	mustDo(t, r.st.PromptEnd(head, []store.InRecord{a, b}))
 	check("prompt end")
 
 	head.Blocked = handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: base}
-	a2, b2 := withRev(a, 2), withRev(b, 2)
-	a2.Record = applied(t, a2.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
-	b2.Record = applied(t, b2.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
-	mustDo(t, dropWritten(r.st.Blocked(head, []store.InRecord{a2, b2})))
+	a.Record = applied(t, a.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
+	b.Record = applied(t, b.Record, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
+	mustDo(t, r.st.Blocked(head, []store.InRecord{a, b}))
 	check("blocked")
 	head.Blocked = handoff.BlockedReport{}
-	a3, b3 := withRev(a2, 3), withRev(b2, 3)
-	a3.Record = applied(t, a3.Record, delivery.Event{Type: delivery.EventUnblocked})
-	b3.Record = applied(t, b3.Record, delivery.Event{Type: delivery.EventUnblocked})
-	mustDo(t, dropWritten(r.st.Blocked(head, []store.InRecord{a3, b3})))
+	a.Record = applied(t, a.Record, delivery.Event{Type: delivery.EventUnblocked})
+	b.Record = applied(t, b.Record, delivery.Event{Type: delivery.EventUnblocked})
+	mustDo(t, r.st.Blocked(head, []store.InRecord{a, b}))
 	check("block recovered")
 
 	// Leases and acknowledgements; a record that no longer needs its body takes
 	// its own body file with it.
-	a4 := withRev(a3, 4)
-	a4.Record = leasedRecord(a4.Record, base)
-	mustDo(t, dropWritten(r.st.Lease([]store.InRecord{a4})))
+	a.Record = leasedRecord(a.Record, base)
+	mustDo(t, r.st.Lease([]store.InRecord{a}))
 	check("lease")
-	a5 := withRev(a4, 5)
-	a5.Record, a5.Body = deliveredRecord(a5.Record), nil
-	mustDo(t, dropWritten(r.st.Ack([]store.InRecord{a5})))
+	a.Record, a.Body = deliveredRecord(a.Record), nil
+	mustDo(t, r.st.Ack([]store.InRecord{a}))
 	check("ack")
 	out1 := srcOut(1, true)
 	d, _, _ := out1.Outbound.Recipients[0].Delivery.Apply(base, delivery.Event{Type: delivery.EventDelivered})
@@ -101,40 +97,40 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	cr := created(t, 20, 5)
 	mustDo(t, r.st.ControlResult(cr, ptr(openedBy(cr))))
 	check("session created")
-	derived := derivedIn(20, 5, 0)
-	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(20), []store.InRecord{derived})))
+	derived := derivedIn(20, 5)
+	mustDo(t, r.st.Deliver(bodyBytes(20), []store.InRecord{derived}))
 	check("the initial message delivered to the session")
 	closeCtl := closedBy(21, 5)
 	mustDo(t, r.st.ControlResult(closeCtl, ptr(closedSession(5, ctlName(20)))))
-	mustDo(t, dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan()))))
+	mustDo(t, r.st.EndpointDrain(s.drainBatch(r.scan())))
 	check("session drained")
 
 	// An endpoint is closed by the owner, then an instance disabled.
 	mustDo(t, r.st.EndpointUpdate(directEndpoint(7, "chat")))
 	mustDo(t, r.st.EndpointUpdate(directEndpoint(8, "chat")))
 	// Each queued delivery has its own copy of the one body.
-	second := inFor(31, 8, 0)
+	second := inFor(31, 8)
 	second.Body = bodyRef(30)
-	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(30), []store.InRecord{inFor(30, 7, 0), second})))
+	mustDo(t, r.st.Deliver(bodyBytes(30), []store.InRecord{inFor(30, 7), second}))
 	check("endpoints and queued deliveries")
 	closed7 := directEndpoint(7, "chat")
 	closed7.Status, closed7.Token = store.EndpointClosed, nil
 	res := adminResult(1)
 	mustDo(t, r.st.EndpointClose(closed7, &res))
-	mustDo(t, dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan()))))
+	mustDo(t, r.st.EndpointDrain(s.drainBatch(r.scan())))
 	check("endpoint closed and drained")
 	disabled["chat"] = true
 	closed8 := directEndpoint(8, "chat")
 	closed8.Status, closed8.Token = store.EndpointClosed, nil
-	mustDo(t, dropWritten(r.st.InstanceDrain([]store.EndpointRecord{closed8}, store.DrainBatch{})))
-	mustDo(t, dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan()))))
+	mustDo(t, r.st.InstanceDrain([]store.EndpointRecord{closed8}, store.DrainBatch{}))
+	mustDo(t, r.st.EndpointDrain(s.drainBatch(r.scan())))
 	check("instance disabled and drained")
 
 	// Feedback.
 	o := srcOut(40, false)
 	o.Feedback = []delivery.Item{feedbackItem(40)}
 	mustDo(t, r.st.Intake(bodyBytes(40), o))
-	mustDo(t, dropWritten(r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o))))
+	mustDo(t, r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)))
 	o.Feedback = nil
 	mustDo(t, r.st.FeedbackClear([]store.OutRecord{o}))
 	check("feedback cleared")

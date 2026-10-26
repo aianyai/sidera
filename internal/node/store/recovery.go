@@ -345,15 +345,13 @@ func (s *Store) CtlEffectReplay(eps []EndpointRecord) error {
 
 // EndpointDrainReplay writes a chunk of the closed deliveries of closed
 // endpoints.
-// It returns the target records as written (the revision one on).
-func (s *Store) EndpointDrainReplay(b DrainBatch) ([]InRecord, error) {
+func (s *Store) EndpointDrainReplay(b DrainBatch) error {
 	return s.drain(&declEndpointDrain, nil, b, false)
 }
 
 // InstanceDrainReplay closes the endpoints of disabled instances and writes a
 // chunk of their deliveries.
-// It returns the target records as written (the revision one on).
-func (s *Store) InstanceDrainReplay(closed []EndpointRecord, b DrainBatch) ([]InRecord, error) {
+func (s *Store) InstanceDrainReplay(closed []EndpointRecord, b DrainBatch) error {
 	return s.drain(&declInstanceDrain, closed, b, true)
 }
 

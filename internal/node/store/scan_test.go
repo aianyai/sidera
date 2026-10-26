@@ -18,11 +18,11 @@ import (
 func TestScanReturnsEveryRecordOfEveryKind(t *testing.T) {
 	r := newRig(t)
 	seed(t, r.mem,
-		srcOut(1, false), outCtlRecord(2), inRev(3, 1), sessionCtl(4, 5), directEndpoint(7, "chat"),
+		srcOut(1, false), outCtlRecord(2), tgtIn(3), sessionCtl(4, 5), directEndpoint(7, "chat"),
 		store.AttemptsRecord{Endpoint: ep(2)}, store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{}`)},
 		adminResult(1), store.AlertRecord{ID: store.AlertID{1}, Kind: "k", At: base, Detail: "d"},
 		store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{addr(2, 2): 1}})
-	seedBodies(t, r.mem, srcOut(1, false), inRev(3, 1))
+	seedBodies(t, r.mem, srcOut(1, false), tgtIn(3))
 	seedRaw(t, r.mem, store.ArchiveDir, "2026-10-24.jsonl", []byte("\n"))
 	sc := r.scan()
 	if len(sc.Out) != 2 || len(sc.In) != 1 || len(sc.Ctl) != 1 || len(sc.Endpoints) != 1 || len(sc.Attempts) != 1 ||
@@ -66,7 +66,7 @@ func TestScanClassifiesFileNames(t *testing.T) {
 	seedRaw(t, r.mem, store.OutDir, zeroOutName(ep(1)), []byte("not a record"))
 	seedRaw(t, r.mem, store.OutDir, ".tmp-123", []byte("debris"))
 	seedBodyOf(t, r.mem, good, bodyBytes(1))
-	seedBodyOf(t, r.mem, inRev(2, 1), bodyBytes(2))
+	seedBodyOf(t, r.mem, tgtIn(2), bodyBytes(2))
 	bareDigest := fmt.Sprintf("%x", bodyRef(1).Digest)
 	seedRaw(t, r.mem, store.BodiesDir, bareDigest, bodyBytes(1))
 	seedRaw(t, r.mem, store.BodiesDir, "oddly-named", []byte("x"))
@@ -77,7 +77,7 @@ func TestScanClassifiesFileNames(t *testing.T) {
 	if len(sc.Damaged) != 1 || sc.Damaged[0].Damage.Class != store.HeaderUnreadable || sc.Damaged[0].Key != nil {
 		t.Errorf("damaged: %+v", sc.Damaged)
 	}
-	wantBodies := []string{store.BodyFileName(good.Name()), store.BodyFileName(inRev(2, 1).Name())}
+	wantBodies := []string{store.BodyFileName(good.Name()), store.BodyFileName(tgtIn(2).Name())}
 	gotBodies := append([]string(nil), sc.Bodies...)
 	sort.Strings(wantBodies)
 	sort.Strings(gotBodies)
@@ -97,9 +97,9 @@ func TestScanClassifiesFileNames(t *testing.T) {
 // trusted, and without when it cannot.
 func TestScanReportsTheKeyOfADamagedFileOnlyWhenItCanBeTrusted(t *testing.T) {
 	r := newRig(t)
-	seed(t, r.mem, srcOut(1, false), inRev(2, 1), sessionCtl(3, 5))
+	seed(t, r.mem, srcOut(1, false), tgtIn(2), sessionCtl(3, 5))
 	damageBody(t, r.mem, path.Join(store.OutDir, srcOut(1, false).Name()))
-	damageBody(t, r.mem, path.Join(store.InDir, inRev(2, 1).Name()))
+	damageBody(t, r.mem, path.Join(store.InDir, tgtIn(2).Name()))
 	damageHeader(t, r.mem, path.Join(store.CtlDir, sessionCtl(3, 5).Name()))
 	sc := r.scan()
 	if len(sc.Damaged) != 3 || len(sc.Out)+len(sc.In)+len(sc.Ctl) != 0 {
@@ -178,7 +178,7 @@ func TestAvailableReportsTheVolumeOfState(t *testing.T) {
 
 func TestReadBodyChecksTheOwnersFileAndTheContent(t *testing.T) {
 	r := newRig(t)
-	one, two, three := inRev(1, 1), inRev(2, 1), inRev(3, 1)
+	one, two, three := tgtIn(1), tgtIn(2), tgtIn(3)
 	seedBodies(t, r.mem, one)
 	got, err := r.st.ReadBody(one.Name(), *one.Body)
 	if err != nil || string(got) != string(bodyBytes(1)) {

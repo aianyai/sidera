@@ -531,7 +531,6 @@ type coverJSON struct {
 }
 
 type inJSON struct {
-	Rev        *uint64      `json:"rev,omitempty"`
 	Record     recordJSON   `json:"record"`
 	Dedup      dedupJSON    `json:"dedup"`
 	Auth       *authJSON    `json:"auth,omitempty"`
@@ -635,11 +634,6 @@ func encodeIn(r InRecord) ([]byte, error) {
 	if r.Dedup.HasReply {
 		return nil, errors.New("an in record does not store a control reply")
 	}
-	if r.Rev < 1 {
-		return nil, errors.New("an in record has a revision of at least 1")
-	}
-	rev := r.Rev
-	j.Rev = &rev
 	if err := checkVerdictParts(r.Key, r.Record.Exempt, r.Auth != (delivery.Authorization{}), r.ReplyDecision != (reply.Decision{})); err != nil {
 		return nil, err
 	}
@@ -713,10 +707,6 @@ func decodeIn(key TargetKey, body []byte) (InRecord, error) {
 	if r.Dedup.HasReply {
 		return r, errors.New("an in record does not store a control reply")
 	}
-	if j.Rev == nil || *j.Rev < 1 {
-		return r, errors.New("an in record has a revision of at least 1")
-	}
-	r.Rev = *j.Rev
 	if j.Handout == nil || j.AcceptedAt == nil {
 		return r, errors.New("an in record needs its handout fields and acceptance time")
 	}

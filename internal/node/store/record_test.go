@@ -72,11 +72,9 @@ func goldenWant(t *testing.T, name string) store.Record {
 		return r
 	case "in":
 		r := tgtIn(1)
-		r.Rev = 1
 		return r
 	case "in notice":
 		r := noticeIn(1)
-		r.Rev = 1
 		return r
 	case "out":
 		return srcOut(1, false)
@@ -261,8 +259,7 @@ func TestDecodeRecordBodyRules(t *testing.T) {
 		{"an endpoint description over the bound of the protocol", "endpoint named", `"description":"The front desk line, answered 9 to 5."`, `"description":"` + strings.Repeat("n", adapterproto.MaxDescription+1) + `"`},
 		{"an endpoint display name that is not UTF-8", "endpoint named", `"display_name":"Büro phone"`, `"display_name":"B` + "\xff" + `ro phone"`},
 		{"a session endpoint with created_by that is not a hash", "endpoint", `"created_by":"`, `"created_by":"x`},
-		{"an in record of revision zero", "in", `"rev":1`, `"rev":0`},
-		{"an in record without a revision", "in", `"rev":1,`, ``},
+		{"an in record that still carries the revision it once had", "in", `{"record":`, `{"rev":1,"record":`},
 		{"an in record without its record", "in", `"record":{"side":"target","state":"accepted","state_at":"2026-10-24T09:00:00Z","accept_before":"2026-10-24T09:01:00Z","report_by":"2026-10-24T12:03:00Z","backlog_deadline":"2026-10-24T09:30:00Z"},`, ``},
 		{"a delivery on the source side in an in record", "in", `"side":"target"`, `"side":"source"`},
 		{"an in record without the time it entered its state", "in", `"state_at":"2026-10-24T09:00:00Z",`, ``},
@@ -360,8 +357,8 @@ func TestTargetRecordsHaveNoLostShape(t *testing.T) {
 	}{
 		"in":  {store.InDir, "in", inKey, `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":` + record + `,"dedup":` + dedup + `}`},
 		"ctl": {store.CtlDir, "ctl", ctlKeyText, `{"lost":true,"discovered_at":"2026-10-24T10:00:00Z","record":` + record + `,"dedup":` + dedup + `}`},
-		"in with the marker added to a regular body":  {store.InDir, "in", inKey, strings.Replace(inBody, `{"rev":1,`, `{"rev":1,"lost":true,`, 1)},
-		"in with a discovery added to a regular body": {store.InDir, "in", inKey, strings.Replace(inBody, `{"rev":1,`, `{"rev":1,"discovered_at":"2026-10-24T10:00:00Z",`, 1)},
+		"in with the marker added to a regular body":  {store.InDir, "in", inKey, strings.Replace(inBody, `{"record":`, `{"lost":true,"record":`, 1)},
+		"in with a discovery added to a regular body": {store.InDir, "in", inKey, strings.Replace(inBody, `{"record":`, `{"discovered_at":"2026-10-24T10:00:00Z","record":`, 1)},
 		"in with a digest marked lost":                {store.InDir, "in", inKey, strings.Replace(inBody, `"retain_until"`, `"digest_lost":true,"retain_until"`, 1)},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -535,10 +532,8 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 
 	// Target records.
 	in := tgtIn(1)
-	in.Rev = 1
 	recs["in accepted"] = in
 	leased := tgtIn(2)
-	leased.Rev = 5
 	// Two chunks, the first handed out and acknowledged, then a prompt and a block:
 	// the record the delivery rules make, not one put together field by field.
 	leasing := leased.Record
@@ -560,19 +555,16 @@ func roundTripRecords(t *testing.T) map[string]store.Record {
 	leased.Handout = store.HandoutFields{ContentType: "text/markdown", ReplyTo: msgID(1), Thread: "t", Seq: 12, SentAt: base}
 	recs["in leased, notified and blocked"] = leased
 	rejected := tgtIn(3)
-	rejected.Rev = 1
 	rejected.Body = nil
 	rejected.Auth = delivery.Authorization{Kind: delivery.AuthorizationDeny, Reject: delivery.RejectUnauthorized}
 	rejected.Record.State, rejected.Record.Reject = delivery.StateRejected, delivery.RejectUnauthorized
 	recs["in rejected without a body"] = rejected
 	dv := tgtIn(4)
-	dv.Rev = 2
 	dv.Key.Sender = ep(local) // the notice and the derived delivery have local senders
 	dv.Dedup = delivery.NewDedupRecord(dv.Key.Dedup(), digestOf(4), dv.Record.ReportBy)
 	dv.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{"stage":"intake"}`)}
 	recs["in derived from a session creation"] = dv
 	notice := noticeIn(5)
-	notice.Rev = 1
 	notice.Key = store.TargetKey{SenderNode: node(local), Sender: ident.SystemEndpoint(), Message: msgID(5), Recipient: ep(1)}
 	notice.Dedup = delivery.NewDedupRecord(notice.Key.Dedup(), digestOf(5), notice.Record.ReportBy)
 	notice.Covers = []store.CoverRef{{Out: srcOut(4, false).Name(), Recipient: addr(2, 2), Kind: delivery.KindRejected}}
@@ -667,13 +659,11 @@ func TestFirstLineFlipsNeverGiveATrustedWrongKey(t *testing.T) {
 func TestVerdictPartsFollowTheExemptMarker(t *testing.T) {
 	notice := func(mutate func(*store.InRecord)) store.InRecord {
 		in := noticeIn(5)
-		in.Rev = 1
 		mutate(&in)
 		return in
 	}
 	other := func(mutate func(*store.InRecord)) store.InRecord {
 		in := tgtIn(5)
-		in.Rev = 1
 		mutate(&in)
 		return in
 	}

@@ -759,19 +759,11 @@ func damageHeader(t testing.TB, mem *fsxtest.Mem, p string) {
 	}
 }
 
-// inRev returns a target record as it is on disk at the revision.
-func inRev(i int, rev uint64) store.InRecord {
-	r := tgtIn(i)
-	r.Rev = rev
-	return r
-}
-
 // inFor is a target record for message i addressed to local endpoint e.
-func inFor(i, e int, rev uint64) store.InRecord {
+func inFor(i, e int) store.InRecord {
 	r := tgtIn(i)
 	r.Key.Recipient = ep(e)
 	r.Dedup = delivery.NewDedupRecord(r.Key.Dedup(), digestOf(i), r.Record.ReportBy)
-	r.Rev = rev
 	return r
 }
 
@@ -795,11 +787,10 @@ func applied0(r delivery.Record) delivery.Record {
 // derivedIn is the delivery of the initial message of control signal ctl to the
 // session endpoint it created: same sender and message as the control record,
 // addressed to the session.
-func derivedIn(ctl, session int, rev uint64) store.InRecord {
+func derivedIn(ctl, session int) store.InRecord {
 	r := tgtIn(ctl)
 	r.Key.Recipient = ep(session)
 	r.Dedup = delivery.NewDedupRecord(r.Key.Dedup(), digestOf(ctl), r.Record.ReportBy)
-	r.Rev = rev
 	r.Derived = &store.DerivedInfo{From: ep(4), AuthRequest: []byte(`{"stage":"intake"}`)}
 	return r
 }
@@ -867,7 +858,3 @@ func lostOutAt(k store.OutKey, at time.Time) store.OutRecord {
 	}
 	return rec
 }
-
-// dropWritten keeps the error of a write that also returns the records it wrote,
-// for the callers that have no use for them.
-func dropWritten[T any](_ T, err error) error { return err }

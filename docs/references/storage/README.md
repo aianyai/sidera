@@ -621,14 +621,18 @@ checkpoints and floor file, for good. Such a record is swept at once, and the ne
 sweep takes the endpoint, the same two steps as for a source record
 (`TestPlanSweepTakesTheOutLostRecordOfAClosedEndpoint`).
 
-**Revision.** A regular target record carries `rev`, which the store raises by one
-at each write. No rule of the store reads it. The rule that a write raises the
-revision has one home, the store: every write that does so (`Deliver`,
-`DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`, `Tick`, the drains and their
-replays, `FeedbackForm` and `QuarantineBody`) returns the target records as written, in the order given, and a
-caller that keeps a view takes them from the return value instead of working the
-revision out again. The return value is `nil` when the write failed. `TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`
-compares each returned record with what a new scan reads back.
+**No revision.** A target record carries no revision counter. A counter that no
+rule reads looks like a guard against a lost update and protects nothing, so it
+is not kept, and a body that still carries `rev` is refused like any unknown
+field. A write stores the target records exactly as they are passed, so the write
+methods (`Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
+`Tick`, the drains and their replays, `FeedbackForm`) return only an error, and a
+caller that keeps a view stores the records it passed once the error is nil.
+`QuarantineBody` also returns the record as it stays without its body reference,
+and nil when it removed the record: that outcome is decided by the delivery rules
+inside the store, and the caller learns it from the return value instead of
+deciding it again. `TestWritesStoreTheTargetRecordsAsGiven` compares each record
+passed with what a new scan reads back.
 
 **Attempts record, the head of a prompt and of a block.** One per endpoint: the
 attempts to prompt it, the report that delivery to it is blocked and the prompt in

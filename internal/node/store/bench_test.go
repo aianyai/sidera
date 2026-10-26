@@ -33,7 +33,6 @@ func liveFiles(tb testing.TB, n int) string {
 			rec, dir = srcOut(i, false), store.OutDir
 		} else {
 			in := tgtIn(i)
-			in.Rev = 1
 			rec, dir = in, store.InDir
 		}
 		data, err := store.EncodeRecord(rec)

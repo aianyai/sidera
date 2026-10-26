@@ -71,22 +71,22 @@ func TestADamagedTargetRecordIsAlertedAndDeleted(t *testing.T) {
 	for _, d := range damages {
 		t.Run(d.name, func(t *testing.T) {
 			r := worldRig(t)
-			seed(t, r.mem, inRev(1, 1), inRev(2, 1))
-			seedBodies(t, r.mem, inRev(1, 1), inRev(2, 1))
-			d.do(t, r.mem, path.Join(store.InDir, inRev(1, 1).Name()))
-			healthy := snapshot(t, r.mem, store.InDir)[path.Join(store.InDir, inRev(2, 1).Name())]
+			seed(t, r.mem, tgtIn(1), tgtIn(2))
+			seedBodies(t, r.mem, tgtIn(1), tgtIn(2))
+			d.do(t, r.mem, path.Join(store.InDir, tgtIn(1).Name()))
+			healthy := snapshot(t, r.mem, store.InDir)[path.Join(store.InDir, tgtIn(2).Name())]
 			sc := settled(t, r)
-			if present(t, r, store.InDir, inRev(1, 1).Name()) {
+			if present(t, r, store.InDir, tgtIn(1).Name()) {
 				t.Error("the damaged file is still there")
 			}
-			if got := snapshot(t, r.mem, store.InDir)[path.Join(store.InDir, inRev(2, 1).Name())]; got != healthy {
+			if got := snapshot(t, r.mem, store.InDir)[path.Join(store.InDir, tgtIn(2).Name())]; got != healthy {
 				t.Error("the healthy record was touched")
 			}
-			oneAlert(t, sc, store.InDir, inRev(1, 1).Name(), "corrupt_record")
+			oneAlert(t, sc, store.InDir, tgtIn(1).Name(), "corrupt_record")
 			if len(sc.Seq) != 0 {
 				t.Errorf("a target record raises no floor: %v", sc.Seq)
 			}
-			if len(sc.Bodies) != 1 || sc.Bodies[0] != store.BodyFileName(inRev(2, 1).Name()) {
+			if len(sc.Bodies) != 1 || sc.Bodies[0] != store.BodyFileName(tgtIn(2).Name()) {
 				t.Errorf("the body of the deleted record must go as an orphan and the healthy record's stay: %v", sc.Bodies)
 			}
 		})
@@ -98,7 +98,7 @@ func TestADamagedControlRecordClosesItsCreatingSessionsAlertsAndIsDeleted(t *tes
 		t.Run(d.name, func(t *testing.T) {
 			r := worldRig(t)
 			c := sessionCtl(1, 5)
-			seed(t, r.mem, c, derivedIn(1, 5, 1),
+			seed(t, r.mem, c, derivedIn(1, 5),
 				session(5, store.EndpointCreating, ctlName(1)),
 				session(7, store.EndpointOpen, ctlName(1)))
 			d.do(t, r.mem, path.Join(store.CtlDir, c.Name()))
@@ -112,7 +112,7 @@ func TestADamagedControlRecordClosesItsCreatingSessionsAlertsAndIsDeleted(t *tes
 			if e := endpointOf(sc, ep(7)); e == nil || e.Status != store.EndpointOpen {
 				t.Errorf("an open session must stay open: %#v", e)
 			}
-			if _, in, _ := find(t, sc, derivedIn(1, 5, 1).Name()); in == nil {
+			if _, in, _ := find(t, sc, derivedIn(1, 5).Name()); in == nil {
 				t.Error("the delivery derived from the control record is not deleted with it")
 			}
 			oneAlert(t, sc, store.CtlDir, c.Name(), "control_unknown")
@@ -410,7 +410,7 @@ func TestABodyThatIsNotWhatItsRecordSaysSettlesThatRecordOnly(t *testing.T) {
 	}
 	t.Run("a target record that needs the body is deleted", func(t *testing.T) {
 		r := worldRig(t)
-		in, other := inRev(1, 1), inRev(2, 1)
+		in, other := tgtIn(1), tgtIn(2)
 		seed(t, r.mem, in, other)
 		seedBodies(t, r.mem, other)
 		seedBodyOf(t, r.mem, in, wrong)
@@ -432,18 +432,20 @@ func TestABodyThatIsNotWhatItsRecordSaysSettlesThatRecordOnly(t *testing.T) {
 	})
 	t.Run("a target record that no longer needs the body drops the reference", func(t *testing.T) {
 		r := worldRig(t)
-		in := inRev(1, 1)
+		in := tgtIn(1)
 		in.Record = deliveredRecord(in.Record)
 		seed(t, r.mem, in)
 		seedBodyOf(t, r.mem, in, wrong)
 		written, err := settleBody(t, r, store.BodyQuarantine{Record: in, Alert: newSim(t, r.st).alert("corrupt_body", store.InDir, in.Name())})
 		mustDo(t, err)
-		if written == nil || written.Rev != in.Rev+1 || written.Body != nil {
-			t.Fatalf("written = %+v", written)
+		stays := in
+		stays.Body = nil
+		if written == nil || !equalRecords(*written, stays) {
+			t.Fatalf("written = %+v, want the record without its reference: %+v", written, stays)
 		}
 		sc := settled(t, r)
 		_, got, _ := find(t, sc, in.Name())
-		if got == nil || got.Body != nil || got.Record.State != delivery.StateDelivered || got.Rev != in.Rev+1 || len(sc.Alerts) != 1 || len(sc.Bodies) != 0 {
+		if got == nil || !equalRecords(*got, stays) || got.Record.State != delivery.StateDelivered || len(sc.Alerts) != 1 || len(sc.Bodies) != 0 {
 			t.Errorf("the record keeps its state and drops the reference; the body goes: %#v %v %v", got, sc.Alerts, sc.Bodies)
 		}
 	})
@@ -505,7 +507,7 @@ func TestABodyThatIsNotWhatItsRecordSaysSettlesThatRecordOnly(t *testing.T) {
 			rec  store.Record
 			q    func(r store.Record) store.BodyQuarantine
 		}{
-			{"a target record", inRev(1, 1), nil},
+			{"a target record", tgtIn(1), nil},
 			{"a source record", srcOut(1, false), func(r store.Record) store.BodyQuarantine {
 				return store.BodyQuarantine{Replacement: lostOutAt(r.(store.OutRecord).Key, base)}
 			}},
@@ -514,7 +516,7 @@ func TestABodyThatIsNotWhatItsRecordSaysSettlesThatRecordOnly(t *testing.T) {
 		for _, d := range damaged {
 			t.Run(d.name, func(t *testing.T) {
 				r := worldRig(t)
-				others := []store.Record{inRev(2, 1), srcOut(3, false), func() store.Record { c := sessionCtl(4, 6); c.Body = bodyRef(4); return c }()}
+				others := []store.Record{tgtIn(2), srcOut(3, false), func() store.Record { c := sessionCtl(4, 6); c.Body = bodyRef(4); return c }()}
 				seed(t, r.mem, d.rec, session(5, store.EndpointOpen, ctlName(1)), session(6, store.EndpointOpen, ctlName(4)))
 				seed(t, r.mem, others...)
 				seedBodies(t, r.mem, others...)
@@ -667,11 +669,11 @@ func TestAWriteThatMeetsADamagedFloorFileLeavesItToTheSettlement(t *testing.T) {
 // the same name, as a resent message taken in again would leave, is an alert of its
 // own and never replaces one the owner has acknowledged.
 func TestTheAlertOfASettlementFollowsTheDamageAndNotTheCall(t *testing.T) {
-	name := inRev(1, 1).Name()
+	name := tgtIn(1).Name()
 	file := path.Join(store.InDir, name)
 	damaged := func(t *testing.T, damage func(testing.TB, *fsxtest.Mem, string)) *rig {
 		r := worldRig(t)
-		seed(t, r.mem, inRev(1, 1))
+		seed(t, r.mem, tgtIn(1))
 		damage(t, r.mem, file)
 		return r
 	}
@@ -693,7 +695,7 @@ func TestTheAlertOfASettlementFollowsTheDamageAndNotTheCall(t *testing.T) {
 	t.Run("a different damage of the same name is another alert", func(t *testing.T) {
 		r := damaged(t, damageBody)
 		newSim(t, r.st).recoverAll()
-		seed(t, r.mem, inRev(1, 1))
+		seed(t, r.mem, tgtIn(1))
 		damageHeader(t, r.mem, file)
 		sc := settled(t, r)
 		if len(sc.Alerts) != 2 {
@@ -706,7 +708,7 @@ func TestTheAlertOfASettlementFollowsTheDamageAndNotTheCall(t *testing.T) {
 	t.Run("the same damaged body settled again is the same alert, another one under the same record is another alert", func(t *testing.T) {
 		r := worldRig(t)
 		settle := func(damaged string) {
-			in := inRev(1, 1)
+			in := tgtIn(1)
 			seed(t, r.mem, in)
 			seedBodyOf(t, r.mem, in, []byte(damaged))
 			_, err := r.st.QuarantineBody(store.BodyQuarantine{Record: in, Alert: newSim(t, r.st).alert("corrupt_body", store.InDir, in.Name())})

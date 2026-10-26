@@ -389,7 +389,8 @@ func TestEachRecordOfAMessageHasABodyFileOfItsOwnThatGoesWithItsFinalState(t *te
 }
 
 func TestHeldReportsAreAskedForUntilTheyCome(t *testing.T) {
-	h := nodeWith(t, harness.Options{}, "a", "b")
+	var written inWriteCounter
+	h := nodeWith(t, harness.Options{Observer: &written}, "a", "b")
 	h.Unreachable(true)
 	msg := send(t, h, "a", "b", "x")
 	quiet(t, h)
@@ -408,8 +409,9 @@ func TestHeldReportsAreAskedForUntilTheyCome(t *testing.T) {
 	if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
 		t.Errorf("the sender's record is %s after the report was let through, want accepted", d.State)
 	}
-	if got := inOf(t, h, msg); got.Rev != 1 {
-		t.Errorf("the target record was written again (revision %d)", got.Rev)
+	inOf(t, h, msg)
+	if got := written.writes(); got != 1 {
+		t.Errorf("the target record was written %d times, want once: the asks for the held reports leave it", got)
 	}
 }
 

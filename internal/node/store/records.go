@@ -151,9 +151,6 @@ func (r OutLostRecord) Name() string {
 // holds no record.
 type InRecord struct {
 	Key TargetKey
-	// Rev is the revision of the record as it was read, 0 for a record not
-	// written yet. Writing a record stores Rev+1. No rule of the store reads it.
-	Rev uint64
 
 	Record delivery.Record
 	Dedup  delivery.DedupRecord

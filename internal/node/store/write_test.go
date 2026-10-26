@@ -30,7 +30,7 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 	}{
 		{"intake", nil, func(r *rig) error { return r.st.Intake(bodyBytes(1), srcOut(1, true)) },
 			[]string{path.Join(store.OutDir, srcOut(1, true).Name()), bodyPath(srcOut(1, true))}},
-		{"deliver", nil, func(r *rig) error { return dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)})) },
+		{"deliver", nil, func(r *rig) error { return r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)}) },
 			[]string{path.Join(store.InDir, tgtIn(1).Name()), bodyPath(tgtIn(1))}},
 		{"control-reply", nil, func(r *rig) error { return r.st.ControlReply(outCtlRecord(1)) },
 			[]string{path.Join(store.OutDir, outCtlRecord(1).Name())}},
@@ -53,7 +53,7 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 		{"feedback-form", nil, func(r *rig) error {
 			o := srcOut(1, false)
 			o.Feedback = []delivery.Item{feedbackItem(1)}
-			return dropWritten(r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)))
+			return r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o))
 		}, nil},
 		{"orphan-gc", func(t *testing.T, mem *fsxtest.Mem) { seedBodyOf(t, mem, tgtIn(1), bodyBytes(1)) },
 			func(r *rig) error { return r.st.OrphanGC([]string{store.BodyFileName(tgtIn(1).Name())}) }, nil},
@@ -87,35 +87,6 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 	}
 }
 
-// Target records carry a revision that the store maintains: the first write is
-// revision 1 and each write after a read adds one.
-func TestTargetRecordsAreWrittenWithTheNextRevision(t *testing.T) {
-	r := newRig(t)
-	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)})))
-	sc := r.scan()
-	if len(sc.In) != 1 || sc.In[0].Rev != 1 {
-		t.Fatalf("after Deliver: %+v", sc.In)
-	}
-	in := sc.In[0]
-	in.Record = leasedRecord(in.Record, base)
-	mustDo(t, dropWritten(r.st.Lease([]store.InRecord{in})))
-	in = r.scan().In[0]
-	if in.Rev != 2 || in.Record.Lease.Handouts != 1 {
-		t.Errorf("after Lease: rev %d, handouts %d, want 2 and 1", in.Rev, in.Record.Lease.Handouts)
-	}
-	in.Record = deliveredRecord(in.Record)
-	mustDo(t, dropWritten(r.st.Ack([]store.InRecord{in})))
-	if got := r.scan().In[0].Rev; got != 3 {
-		t.Errorf("after Ack: rev %d, want 3", got)
-	}
-	// A record written again from an older read (revision 2) gets that revision
-	// plus one: the revision tells that a write happened, it does not order writers.
-	mustDo(t, dropWritten(r.st.Lease([]store.InRecord{in})))
-	if got := r.scan().In[0].Rev; got != 3 {
-		t.Errorf("after a write of an older read: rev %d, want 3", got)
-	}
-}
-
 // DeliverReply settles bodies the way the other writes do: the records of the
 // reply get a body file of their own before they are written, and the source
 // record of the message answered, when the evidence ended its last delivery,
@@ -137,7 +108,7 @@ func TestDeliverReplyRemovesTheBodyOfTheSourceRecordThatDroppedItsRef(t *testing
 			seedBodies(t, r.mem, source)
 			reply := tgtIn(2)
 			out := c.out
-			if err := dropWritten(r.st.DeliverReply(bodyBytes(2), &out, []store.InRecord{reply})); err != nil {
+			if err := r.st.DeliverReply(bodyBytes(2), &out, []store.InRecord{reply}); err != nil {
 				t.Fatal(err)
 			}
 			_, err := r.mem.Stat(bodyPath(source))
@@ -147,7 +118,7 @@ func TestDeliverReplyRemovesTheBodyOfTheSourceRecordThatDroppedItsRef(t *testing
 			if got, err := r.mem.ReadFile(bodyPath(reply)); err != nil || string(got) != string(bodyBytes(2)) {
 				t.Errorf("the reply's record has its own body: %q, %v", got, err)
 			}
-			if got := r.scan().In; len(got) != 1 || got[0].Rev != 1 {
+			if got := r.scan().In; len(got) != 1 || got[0].Key != reply.Key {
 				t.Errorf("target records after the call: %+v", got)
 			}
 			// The removal is in the transaction of the reply: its points are the
@@ -214,18 +185,18 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 		"a target record with an empty message id": func(r *rig) error {
 			in := tgtIn(1)
 			in.Key.Message = ""
-			return dropWritten(r.st.Deliver(nil, []store.InRecord{in}))
+			return r.st.Deliver(nil, []store.InRecord{in})
 		},
 		"a target record without the fields of a handout": func(r *rig) error {
 			in := tgtIn(1)
 			in.Handout = store.HandoutFields{}
-			return dropWritten(r.st.Deliver(nil, []store.InRecord{in}))
+			return r.st.Deliver(nil, []store.InRecord{in})
 		},
 		"a prompt whose target record is another endpoint's than its head's": func(r *rig) error {
-			return dropWritten(r.st.PromptEnd(store.AttemptsRecord{Endpoint: ep(4)}, []store.InRecord{inRev(1, 1)}))
+			return r.st.PromptEnd(store.AttemptsRecord{Endpoint: ep(4)}, []store.InRecord{tgtIn(1)})
 		},
 		"a block whose target record is another endpoint's than its head's": func(r *rig) error {
-			return dropWritten(r.st.Blocked(store.AttemptsRecord{Endpoint: ep(4)}, []store.InRecord{inRev(1, 1)}))
+			return r.st.Blocked(store.AttemptsRecord{Endpoint: ep(4)}, []store.InRecord{tgtIn(1)})
 		},
 		"an open endpoint without a token": func(r *rig) error {
 			e := directEndpoint(7, "chat")
@@ -390,18 +361,18 @@ func TestAPromptAndABlockWriteTheirRecipientsBeforeTheirHead(t *testing.T) {
 		want []string // the roles written, a run of one role counted once
 	}{
 		{"a prompt", func(t *testing.T, st *store.Store) error {
-			return dropWritten(st.PromptEnd(store.AttemptsRecord{Endpoint: ep(2)}, event(t, notified, inRev(1, 1), inRev(2, 1))))
+			return st.PromptEnd(store.AttemptsRecord{Endpoint: ep(2)}, event(t, notified, tgtIn(1), tgtIn(2)))
 		}, []string{"in", "in-dir", "attempts"}},
 		{"a block", func(t *testing.T, st *store.Store) error {
-			return dropWritten(st.Blocked(store.AttemptsRecord{Endpoint: ep(2), Blocked: report}, event(t, blocked, inRev(1, 1), inRev(2, 1))))
+			return st.Blocked(store.AttemptsRecord{Endpoint: ep(2), Blocked: report}, event(t, blocked, tgtIn(1), tgtIn(2)))
 		}, []string{"in", "in-dir", "attempts"}},
 		{"a prompt that reached nobody", func(t *testing.T, st *store.Store) error {
-			return dropWritten(st.PromptEnd(store.AttemptsRecord{Endpoint: ep(2)}, nil))
+			return st.PromptEnd(store.AttemptsRecord{Endpoint: ep(2)}, nil)
 		}, []string{"attempts"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := newRig(t)
-			seedWithBodies(t, r.mem, inRev(1, 1), inRev(2, 1))
+			seedWithBodies(t, r.mem, tgtIn(1), tgtIn(2))
 			var got []string
 			r.rec.on = func(p fsx.Point, _ txn.Kind) {
 				if role := p.Tag.Role; role != "" && (len(got) == 0 || got[len(got)-1] != role) {

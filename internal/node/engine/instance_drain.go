@@ -54,7 +54,7 @@ func (e *Engine) drainInstanceChunk(instance string) error {
 		closed = append(closed, rec)
 		ids = append(ids, id)
 	}
-	if _, err := e.d.Store.InstanceDrain(closed, store.DrainBatch{}); err != nil {
+	if err := e.d.Store.InstanceDrain(closed, store.DrainBatch{}); err != nil {
 		return err
 	}
 	for i, id := range ids {

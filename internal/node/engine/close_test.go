@@ -348,15 +348,15 @@ func TestReopeningAnEndpointKeepsItsIdAndGivesItANewToken(t *testing.T) {
 	}
 }
 
-// The view is kept in step with what the store hands back from each write, and
-// must show what a fresh scan of the disk shows: records by their encoding (the
-// revision included), the count of unfinished deliveries and the references to
-// bodies. The expectation is the scan, never the engine's own computation, and
+// The view is kept in step with what the engine passes to each write, and
+// must show what a fresh scan of the disk shows: records by their encoding, the
+// count of unfinished deliveries and the references to bodies. The expectation is the scan, never the engine's own computation, and
 // the closing is run in chunks so that several writes have been applied to the
 // view by the time it is compared.
 func TestViewMatchesAFreshScanAfterWrites(t *testing.T) {
 	noLeaks(t)
-	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 2}))
+	var written inWriteCounter
+	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 2}), withObserver(&written))
 	e := r.start()
 	a := register(t, e, "a")
 	r.restart()
@@ -365,6 +365,7 @@ func TestViewMatchesAFreshScanAfterWrites(t *testing.T) {
 	if diff, err := engine.ViewDiffersFromDisk(context.Background(), e, r.scan()); err != nil || len(diff) != 0 {
 		t.Fatalf("before any write: %v, %v", diff, err)
 	}
+	queued := written.writes()
 	if _, err := e.CloseEndpoint(context.Background(), engine.CloseRequest{Endpoint: a}); err != nil {
 		t.Fatal(err)
 	}
@@ -373,9 +374,13 @@ func TestViewMatchesAFreshScanAfterWrites(t *testing.T) {
 	if err != nil || len(diff) != 0 {
 		t.Errorf("after closing the endpoint: %v, %v", diff, err)
 	}
+	// Each of the five records was written once more, as the closing leaves it.
+	if got := written.writes() - queued; got != 5 {
+		t.Errorf("the closing wrote %d target records, want 5", got)
+	}
 	for _, in := range r.scan().In {
-		if in.Rev != 2 { // the write that queued it, and the write that closed it
-			t.Errorf("record %s has revision %d on disk, want 2", in.Key.Message, in.Rev)
+		if in.Record.State != delivery.StateRejected || in.Record.Reject != delivery.RejectEndpointClosed {
+			t.Errorf("record %s is %s (%s) on disk, want rejected because the endpoint closed", in.Key.Message, in.Record.State, in.Record.Reject)
 		}
 	}
 }

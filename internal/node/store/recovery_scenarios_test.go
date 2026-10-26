@@ -123,25 +123,25 @@ func recoveryScenarios() []scenario {
 		{
 			name: "quarantine of a target record whose body is damaged",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, inRev(1, 1), inRev(2, 1))
-				damageBody(t, mem, path.Join(store.InDir, inRev(1, 1).Name()))
+				seedWithBodies(t, mem, tgtIn(1), tgtIn(2))
+				damageBody(t, mem, path.Join(store.InDir, tgtIn(1).Name()))
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
-				name := inRev(1, 1).Name()
+				name := tgtIn(1).Name()
 				if _, in, _ := find(t, sc, name); in != nil {
 					t.Fatalf("the damaged record is still there: %#v", in)
 				}
 				if !onlyAlert(sc, store.InDir, name, "corrupt_record") || len(sc.Seq) != 0 {
 					t.Errorf("a target record's quarantine has an alert and no sequence floor: %v %v", sc.Alerts, sc.Seq)
 				}
-				if _, other, _ := find(t, sc, inRev(2, 1).Name()); other == nil {
+				if _, other, _ := find(t, sc, tgtIn(2).Name()); other == nil {
 					t.Errorf("the healthy record was touched")
 				}
 				// The body of the record that is gone is an orphan; the other stays.
-				wantNoBody(t, r, inRev(1, 1))
-				wantBody(t, r, inRev(2, 1), bodyBytes(2))
+				wantNoBody(t, r, tgtIn(1))
+				wantBody(t, r, tgtIn(2), bodyBytes(2))
 				wantBodyCount(t, r, 1)
 			},
 		},
@@ -219,11 +219,11 @@ func recoveryScenarios() []scenario {
 					t.Errorf("a source record still waiting for a receipt must become a lost record: %#v", out)
 				}
 				for _, n := range []int{2, 3, 5} {
-					if _, in, _ := find(t, sc, inRev(n, 1).Name()); in == nil || in.Body != nil || in.Record.State != delivery.StateDelivered {
+					if _, in, _ := find(t, sc, tgtIn(n).Name()); in == nil || in.Body != nil || in.Record.State != delivery.StateDelivered {
 						t.Errorf("a delivered message must lose only the reference: %#v", in)
 					}
 				}
-				if _, in, _ := find(t, sc, inRev(6, 1).Name()); in != nil {
+				if _, in, _ := find(t, sc, tgtIn(6).Name()); in != nil {
 					t.Errorf("a target record that needs the body is removed: %#v", in)
 				}
 				if _, _, c := find(t, sc, sessionCtl(4, 5).Name()); c == nil || c.Body != nil {
@@ -265,9 +265,9 @@ func recoveryScenarios() []scenario {
 			// holds none left behind, are collected.
 			name: "orphan bodies",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedWithBodies(t, mem, inRev(2, 1), ctlWithBody(5, 4), srcOut(6, false))
-				seedBodyOf(t, mem, inRev(1, 1), bodyBytes(1)) // no record
-				noRef := rejected(inRev(3, 1))
+				seedWithBodies(t, mem, tgtIn(2), ctlWithBody(5, 4), srcOut(6, false))
+				seedBodyOf(t, mem, tgtIn(1), bodyBytes(1)) // no record
+				noRef := rejected(tgtIn(3))
 				seed(t, mem, noRef, finishedOut(4, false))
 				seedBodyOf(t, mem, noRef, bodyBytes(3))                 // its record holds no reference
 				seedBodyOf(t, mem, finishedOut(4, false), bodyBytes(4)) // nor does this one
@@ -276,7 +276,7 @@ func recoveryScenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
 				var want []string
-				for _, rec := range []store.Record{inRev(2, 1), ctlWithBody(5, 4), srcOut(6, false)} {
+				for _, rec := range []store.Record{tgtIn(2), ctlWithBody(5, 4), srcOut(6, false)} {
 					want = append(want, store.BodyFileName(rec.Name()))
 				}
 				if strings.Join(sortedStrings(sc.Bodies), ",") != strings.Join(sortedStrings(want), ",") {
@@ -354,14 +354,14 @@ func recoveryScenarios() []scenario {
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				closed := directEndpoint(7, "chat")
 				closed.Status, closed.Token = store.EndpointClosed, nil
-				done := inFor(2, 7, 2)
+				done := inFor(2, 7)
 				done.Record = deliveredRecord(done.Record)
 				done.Body = nil
 				c := sessionCtl(3, 5)
 				c.Key.Recipient = ep(7)
 				c.Body = bodyRef(3)
 				c.Dedup = delivery.NewDedupRecord(c.Key.Dedup(), digestOf(3), c.Record.ReportBy)
-				seedWithBodies(t, mem, closed, directEndpoint(8, "chat"), inFor(1, 7, 1), done, c, inFor(4, 9, 1), inFor(5, 8, 1))
+				seedWithBodies(t, mem, closed, directEndpoint(8, "chat"), inFor(1, 7), done, c, inFor(4, 9), inFor(5, 8))
 				seedBodyOf(t, mem, done, bodyBytes(2)) // the file a crash left after the record dropped its reference
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
@@ -381,7 +381,7 @@ func recoveryScenarios() []scenario {
 				if len(sc.Ctl) != 1 || sc.Ctl[0].Record.State != delivery.StateDeliveryUnknown {
 					t.Errorf("the control record for the closed endpoint must be closed as unknown: %#v", sc.Ctl)
 				}
-				if want := store.BodyFileName(inFor(5, 8, 1).Name()); len(sc.Bodies) != 1 || sc.Bodies[0] != want {
+				if want := store.BodyFileName(inFor(5, 8).Name()); len(sc.Bodies) != 1 || sc.Bodies[0] != want {
 					t.Errorf("the bodies of the closed deliveries and of the record that dropped its reference must go, and the other stay: %v, want only %s", sc.Bodies, want)
 				}
 			},
@@ -391,8 +391,8 @@ func recoveryScenarios() []scenario {
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				closed := directEndpoint(8, "chat")
 				closed.Status, closed.Token = store.EndpointClosed, nil
-				seed(t, mem, directEndpoint(7, "chat"), closed, directEndpoint(9, "other"), inFor(1, 7, 1), inFor(2, 9, 1), ctlWithBody(4, 7))
-				seedBodies(t, mem, inFor(1, 7, 1), inFor(2, 9, 1), ctlWithBody(4, 7))
+				seed(t, mem, directEndpoint(7, "chat"), closed, directEndpoint(9, "other"), inFor(1, 7), inFor(2, 9), ctlWithBody(4, 7))
+				seedBodies(t, mem, inFor(1, 7), inFor(2, 9), ctlWithBody(4, 7))
 			},
 			enabled: func(inst string) bool { return inst != "chat" },
 			mode:    atomic, mustComplete: true, run: recoverRun,
@@ -404,10 +404,10 @@ func recoveryScenarios() []scenario {
 						t.Errorf("endpoint %s of %s is %v", e.ID, e.Instance, e.Status)
 					}
 				}
-				if _, in, _ := find(t, sc, inFor(1, 7, 1).Name()); in == nil || in.Record.State != delivery.StateRejected {
+				if _, in, _ := find(t, sc, inFor(1, 7).Name()); in == nil || in.Record.State != delivery.StateRejected {
 					t.Errorf("a delivery queued for a closed endpoint of the instance must be closed")
 				}
-				if want := store.BodyFileName(inFor(2, 9, 1).Name()); len(sc.Bodies) != 1 || sc.Bodies[0] != want {
+				if want := store.BodyFileName(inFor(2, 9).Name()); len(sc.Bodies) != 1 || sc.Bodies[0] != want {
 					t.Errorf("the bodies of the closed deliveries must go and the other stay: %v, want only %s", sc.Bodies, want)
 				}
 			},
@@ -464,9 +464,9 @@ func sortedStrings(s []string) []string {
 func mismatchRecords() (tampered []store.Record, healthy store.InRecord) {
 	ctl := sessionCtl(4, 5)
 	ctl.Body = bodyRef(4)
-	in2, in3, in5 := inRev(2, 1), inRev(3, 1), inRev(5, 1)
+	in2, in3, in5 := tgtIn(2), tgtIn(3), tgtIn(5)
 	in2.Record, in3.Record, in5.Record = deliveredRecord(in2.Record), deliveredRecord(in3.Record), deliveredRecord(in5.Record)
-	return []store.Record{srcOut(1, false), in2, in3, ctl, in5, inRev(6, 1)}, inRev(7, 1)
+	return []store.Record{srcOut(1, false), in2, in3, ctl, in5, tgtIn(6)}, tgtIn(7)
 }
 
 func blockedItem(i int) delivery.Item {
@@ -494,7 +494,7 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 		setup: func(t *testing.T, mem *fsxtest.Mem) {
 			c := sessionCtl(1, 5)
 			c.Body = bodyRef(1)
-			derived := derivedIn(1, 5, 1)
+			derived := derivedIn(1, 5)
 			derived.Body = bodyRef(1)
 			seedWithBodies(t, mem, session(5, store.EndpointCreating, ctlName(1)), c, derived)
 			damage(t, mem, path.Join(store.CtlDir, c.Name()))
@@ -515,7 +515,7 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 			if e := endpointOf(sc, ep(5)); e == nil || e.Status != store.EndpointClosed || e.Token != nil {
 				t.Errorf("the session endpoint still being created must be closed: %#v", e)
 			}
-			if _, d, _ := find(t, sc, derivedIn(1, 5, 1).Name()); d == nil || d.Record.State != delivery.StateRejected || d.Record.Reject != delivery.RejectEndpointClosed {
+			if _, d, _ := find(t, sc, derivedIn(1, 5).Name()); d == nil || d.Record.State != delivery.StateRejected || d.Record.Reject != delivery.RejectEndpointClosed {
 				t.Errorf("the delivery derived from the quarantined control record must be rejected as the endpoint closed: %#v", d)
 			}
 			if len(sc.Bodies) != 0 {

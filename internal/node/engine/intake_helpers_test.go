@@ -2,6 +2,7 @@ package engine_test
 
 import (
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -9,10 +10,12 @@ import (
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
+	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -20,6 +23,21 @@ import (
 // The helpers of the tests of sending and intake. They read what happened from the
 // result of a call, the ledger the fixture wrote, the answers of the loopback and,
 // where the scenario is judged by the records, the records on the disk.
+
+// inWriteCounter is a transaction observer that counts the writes of target
+// records: every file a transaction creates under its "in" role. A test that says
+// a record was not written again compares the count before and after, because a
+// record written again with the content it had cannot be told from the disk.
+type inWriteCounter struct{ n atomic.Int64 }
+
+func (c *inWriteCounter) Reached(p fsx.Point, _ txn.Kind) {
+	if p.Tag.Role == "in" && p.Step == fsx.StepCreate {
+		c.n.Add(1)
+	}
+}
+
+// writes is how many target records have been written so far.
+func (c *inWriteCounter) writes() int { return int(c.n.Load()) }
 
 // nodeWith makes a fixture and registers a direct endpoint under each name.
 func nodeWith(t *testing.T, o harness.Options, names ...string) *harness.H {

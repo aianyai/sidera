@@ -25,7 +25,7 @@ engine applies the delivery rules and calls the writes.
 | `OutRecord`, `OutLostRecord`, `InRecord`, `CtlRecord`, `EndpointRecord`, `AttemptsRecord`, `CheckpointRecord`, `AdminRecord`, `AlertRecord`, `SeqRecord` | The records, in the contract types of the other packages. |
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
-| `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. A write of target records returns them as written. |
+| `Store.Intake`, `Deliver`, `Lease`, `Ack`, `Tick`, `PromptEnd`, ... | One method per transaction of the design; each encodes first, then opens its `Tx`. A write of target records stores them as given and returns only an error. |
 | `PrepareEndpoint`, `PrepareAdminResult`, `PutEndpoint`, `PutAdminResult` | The two halves of a write into a transaction another package opens (roles `RoleEndpoint`, `RoleResult`): the prepare step validates and encodes and runs before `Begin`; the put step writes the prepared value and can fail only as a write of the transaction does. |
 | `OrphanBodies`, `OrphanEndpoints`, `EffectReplays`, `DrainCandidates`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
 | `Store.Quarantine`, `QuarantineBody`, `QuarantineSessions` | Settling a damaged file, or the record whose body is damaged, in one transaction: the effects first, the alert, and the damaged file last. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
@@ -39,20 +39,16 @@ engine applies the delivery rules and calls the writes.
 
 - **Encode before opening a transaction.** A record that cannot be written is an
   error that touches nothing.
-- **A record that replaces another is passed whole; a target record is written
-  with the next revision.** No rule of the store reads the revision.
-- **A write that changes the stored form of a target record returns it as
-  written.** `Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`,
-  `Tick`, `EndpointDrain`, `InstanceDrain`, `EndpointDrainReplay` and
-  `InstanceDrainReplay`
-  return `[]InRecord` (the records given, one revision on, in the same order),
-  `FeedbackForm` returns the `InRecord`, and `QuarantineBody` returns a pointer to
-  the one it wrote, nil when it removed the record. A caller keeping a view stores what comes back and never works the
-  revision out itself: the rule has this one home. After an error nothing is
-  returned, and the caller does not apply the write to its view. The records given
-  are not changed, but the records returned are shallow copies of them: slices,
-  maps and pointers inside a record are shared with the one given, so neither is
-  modified in place. No other write sets a field of a record it is given.
+- **A record that replaces another is passed whole.** A target record carries no
+  revision: no rule would read one.
+- **A write of target records stores them as given and returns only an error.**
+  `Deliver`, `DeliverReply`, `PromptEnd`, `Blocked`, `Lease`, `Ack`, `Tick`, the
+  drains and their replays, and `FeedbackForm` change nothing in the records they
+  are given, so a caller keeping a view stores the records it passed once the
+  error is nil, and does not apply the write to its view after an error.
+  `QuarantineBody` also returns a pointer to the record as it stays without its
+  body reference, nil when it removed the record: whether the record still has a
+  reason to exist is the delivery rules' answer, applied inside the store.
 - **An endpoint's display name and description are the adapter's, held to its
   bounds.** `EndpointRecord.DisplayName` and `Description` are optional, omitted
   when empty, and limited to `adapterproto.MaxDisplayName` and

@@ -110,7 +110,7 @@ func TestAnOutRecordIsReadUnderItsOwnNameOnly(t *testing.T) {
 		}
 	})
 	t.Run("a prefixed name is no name of another directory", func(t *testing.T) {
-		in := inRev(1, 1)
+		in := tgtIn(1)
 		if _, dmg := store.DecodeRecord(store.InDir, ep(3).String()+"."+in.Name(), mustEncode(t, in)); dmg == nil {
 			t.Error("a target record accepted under a prefixed name")
 		}

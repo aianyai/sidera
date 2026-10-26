@@ -24,7 +24,7 @@ func TestRandomOperationsLeaveExactlyTheDiskAModelPredicts(t *testing.T) {
 			w := &powerLossWorld{
 				t: t, r: r, rng: func(n int) int { return rng.IntN(n) }, damage: true,
 				led:   ledger{files: map[string][]byte{}},
-				stage: map[int]int{}, rev: map[int]uint64{}, counts: counts,
+				stage: map[int]int{}, counts: counts,
 			}
 			e2 := directEndpoint(2, "chat")
 			mustDo(t, r.st.EndpointUpdate(e2))

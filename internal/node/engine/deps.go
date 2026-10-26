@@ -22,9 +22,8 @@ import (
 
 // Store is what the engine asks of the durable records of state/: the scan that
 // builds its view, the writes of the transactions it runs, and the writes of the
-// recovery rules. A write of target records returns them as written: a caller that
-// keeps a view stores what comes back and never works the revision out itself.
-// *store.Store is the one implementation; the interface is the seam that keeps
+// recovery rules. A caller that keeps a view stores the records it passed once the
+// write returns nil. *store.Store is the one implementation; the interface is the seam that keeps
 // the engine from reaching the store's other methods before an engine needs them,
 // and the list grows with what the engine does.
 type Store interface {
@@ -33,29 +32,29 @@ type Store interface {
 	ReadBody(owner string, ref store.BodyRef) ([]byte, error)
 
 	Intake(body []byte, out store.OutRecord) error
-	Deliver(body []byte, ins []store.InRecord) ([]store.InRecord, error)
-	DeliverReply(body []byte, out *store.OutRecord, ins []store.InRecord) ([]store.InRecord, error)
+	Deliver(body []byte, ins []store.InRecord) error
+	DeliverReply(body []byte, out *store.OutRecord, ins []store.InRecord) error
 	SourceUpdate(out store.OutRecord) error
 
 	EndpointUpdate(ep store.EndpointRecord) error
 	EndpointClose(ep store.EndpointRecord, result *store.AdminRecord) error
-	EndpointDrain(b store.DrainBatch) ([]store.InRecord, error)
+	EndpointDrain(b store.DrainBatch) error
 	AlertRaise(a store.AlertRecord) error
 	AlertAck(a store.AlertAckInput) error
 	CheckpointPut(c store.CheckpointRecord) error
 	DaemonStop(result store.AdminRecord) error
-	InstanceDrain(closed []store.EndpointRecord, b store.DrainBatch) ([]store.InRecord, error)
+	InstanceDrain(closed []store.EndpointRecord, b store.DrainBatch) error
 
 	CtlEffectReplay(eps []store.EndpointRecord) error
-	InstanceDrainReplay(closed []store.EndpointRecord, b store.DrainBatch) ([]store.InRecord, error)
+	InstanceDrainReplay(closed []store.EndpointRecord, b store.DrainBatch) error
 	OrphanGCEndpoint(eps []store.EndpointRecord) error
-	EndpointDrainReplay(b store.DrainBatch) ([]store.InRecord, error)
+	EndpointDrainReplay(b store.DrainBatch) error
 	OrphanGC(bodies []string) error
 
 	Quarantine(q store.Quarantine) error
 	QuarantineBody(q store.BodyQuarantine) (*store.InRecord, error)
-	Tick(b store.TickBatch) ([]store.InRecord, error)
-	FeedbackForm(body []byte, notice store.InRecord) (store.InRecord, error)
+	Tick(b store.TickBatch) error
+	FeedbackForm(body []byte, notice store.InRecord) error
 	FeedbackClear(outs []store.OutRecord) error
 	FeedbackReplay(outs []store.OutRecord) error
 	OutLostClear(lost []store.OutLostRecord) error

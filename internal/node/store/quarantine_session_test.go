@@ -28,7 +28,7 @@ func seedDoubleFault(t *testing.T, mem *fsxtest.Mem) {
 	seed(t, mem,
 		session(5, store.EndpointCreating, ctlName(1)),
 		session(6, store.EndpointCreating, ctlName(1)),
-		derivedIn(1, 6, 1))
+		derivedIn(1, 6))
 }
 
 // verifyDoubleFault states what the quarantine of the record must have produced.
