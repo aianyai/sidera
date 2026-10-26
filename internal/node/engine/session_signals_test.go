@@ -394,7 +394,14 @@ func TestSignalsWhileTheAdapterIsAwayAreTold(t *testing.T) {
 	engineQuiet(t, h)
 	h.Advance(pullInterval)
 	engineQuiet(t, h)
-	wantClose(t, controlReply(t, h, "a", closing), adapterproto.CloseReplyUnconfirmed, adapterproto.CloseReasonAdapterOffline)
+	// The host starts the adapter again within the time the clock moved, so whether the
+	// last try found it away or found a new process that does not know the session
+	// depends on the order the loop took the two: either way the close was not confirmed.
+	r := controlReply(t, h, "a", closing)
+	if r == nil || r.Close == nil || r.Close.Outcome != adapterproto.CloseReplyUnconfirmed ||
+		(r.Close.Reason != adapterproto.CloseReasonAdapterOffline && r.Close.Reason != adapterproto.CloseReasonNativeUnreachable) {
+		t.Fatalf("the reply to a close is %+v, want close_unconfirmed for the adapter being away or not answering", r)
+	}
 	for _, ep := range sessionEndpoints(t, h) {
 		if ep.ID == id && ep.Status != store.EndpointClosed {
 			t.Errorf("the session endpoint is %v after the unconfirmed close, want closed", ep.Status)
