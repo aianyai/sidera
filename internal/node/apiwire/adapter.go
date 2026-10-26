@@ -99,6 +99,7 @@ var adapterCodes = map[engine.Reason]adapterCode{
 		}
 		return map[string]any{"limit": r.Limit.String()}
 	}},
+	engine.ReasonLeaseUnknown:    {code: adapterproto.CodeLeaseUnknown, message: "the endpoint was handed no page under this lease"},
 	engine.ReasonInvalidArgument: {code: peer.CodeInvalidParams, message: "a value of the request is not acceptable"},
 	engine.ReasonShuttingDown:    {code: peer.CodeShuttingDown, message: "the node is stopping"},
 

@@ -26,6 +26,7 @@ var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonEndpointUnknown:   {1001, ""},
 	engine.ReasonWrongEndpointKind: {1002, ""},
 	engine.ReasonEndpointLimit:     {1007, ""},
+	engine.ReasonLeaseUnknown:      {1010, ""},
 	engine.ReasonInvalidArgument:   {-32602, ""},
 	engine.ReasonShuttingDown:      {-32002, ""},
 

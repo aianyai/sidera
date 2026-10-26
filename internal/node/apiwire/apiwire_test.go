@@ -48,6 +48,7 @@ var engineReasons = map[engine.Reason]want{
 	engine.ReasonIdempotencyConflict: {"conflict", "idempotency_conflict"},
 	engine.ReasonMessageConflict:     {"conflict", "message_conflict"},
 	engine.ReasonMessageUnknown:      {"not_found", "message_unknown"},
+	engine.ReasonLeaseUnknown:        {"not_found", "lease_unknown"},
 	engine.ReasonTooLarge:            {"refused", "too_large"},
 	engine.ReasonAlertUnknown:        {"not_found", "alert_unknown"},
 	engine.ReasonIdentityRetired:     {"unavailable", "identity_retired"},

@@ -89,6 +89,9 @@ const (
 	// of it was done again. The interface says it as ReasonInstallInProgress, with
 	// the words of a request that is still running.
 	ReasonInstallRepeated
+	// ReasonLeaseUnknown: the lease is not one that was handed out to this endpoint,
+	// whoever else it was handed to.
+	ReasonLeaseUnknown
 
 	reasonEnd
 )
@@ -120,6 +123,7 @@ var reasonNames = [reasonEnd]string{
 	ReasonProbeTokenUsed:      "probe_token_used",
 	ReasonProbeTokenExpired:   "probe_token_expired",
 	ReasonInstallRepeated:     "install_repeated",
+	ReasonLeaseUnknown:        "lease_unknown",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

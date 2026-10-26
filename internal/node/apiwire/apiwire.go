@@ -149,6 +149,7 @@ const (
 	CodeInternal          = "internal"
 	CodeEndpointUnknown   = "endpoint_unknown"
 	CodeAlertUnknown      = "alert_unknown"
+	CodeLeaseUnknown      = "lease_unknown"
 	CodeOperationUnknown  = "operation_unknown"
 	CodeOutcomeUnknown    = "outcome_unknown"
 )
@@ -260,6 +261,8 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryConflict, "message_conflict", "a message with this identifier from this sender was taken in before with other content")
 	case engine.ReasonMessageUnknown:
 		return New(CategoryNotFound, "message_unknown", "the endpoint has no such message")
+	case engine.ReasonLeaseUnknown:
+		return New(CategoryNotFound, CodeLeaseUnknown, "the endpoint was handed no page under this lease")
 	case engine.ReasonTooLarge:
 		e := New(CategoryRefused, "too_large", "the body is longer than the protocol allows")
 		if r.Field != "" {
