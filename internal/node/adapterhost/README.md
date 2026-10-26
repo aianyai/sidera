@@ -37,8 +37,10 @@ handle the daemon gives it.
 
 - **One supervisor per instance.** A goroutine launches the adapter, takes it on,
   watches it and starts it again after a backoff. Only it waits on the host's
-  timers. A call that can take long (the adapter's answer, the engine) runs on a
-  helper goroutine while it waits.
+  timers. A call that can take long (the adapter's answer, every call of the engine,
+  the report that an adapter is gone included) runs on a helper goroutine while it
+  waits, so the supervisor blocks nowhere but in its park, where it also answers the
+  question for the counts.
 - **Taking an adapter on** is, in this order: launch; `initialize` (the protocol
   range, the version of the daemon, the instance and the lock path, no
   capabilities of the daemon); `adapterreg.CheckHandshake` and `adapterreg.Admit`
@@ -112,10 +114,10 @@ handle the daemon gives it.
   starts to wait for its answer. `Working` is true while the supervisor does
   anything of its own (launching, handshaking, calling the engine, reporting,
   ending a process) and while a timer of the instance is due and not yet taken;
-  a supervisor parked on its timers with nothing due is not working. `Working` is
-  asked before the counts are read and they are read again if the supervisor moved
-  meanwhile, so "idle" never comes with counts older than the request the host is
-  waiting for. After the test clock moved, a
+  a supervisor parked on its timers with nothing due is not working. The question
+  is answered by the supervisor inside its park, together with the counts, so
+  "idle" never comes with counts older than the request the host is waiting for;
+  the call returns when the supervisor next parks. After the test clock moved, a
   caller that sees `Working` false knows the host has acted on everything the move
   made due. Only a test clock shows a due timer. After `Shutdown`, `Abort` and for
   an unknown instance everything is zero.

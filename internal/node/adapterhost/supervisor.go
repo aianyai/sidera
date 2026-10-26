@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/clock"
@@ -27,9 +25,11 @@ func isEnd(err error) bool { return errors.Is(err, errStopped) || errors.Is(err,
 //
 // One goroutine runs it, and that goroutine is the only one that waits on the
 // host's timers. It never blocks anywhere but in park, so a test that moved the
-// clock can ask (working) whether everything the move made due has been acted on:
-// a call that can take long (the adapter's answer, the engine) runs on a helper
-// goroutine of its own while the supervisor parks.
+// clock can ask (counts) whether everything the move made due has been acted on,
+// and the park it asks in answers: a call that can take long (the adapter's
+// answer, any call of the engine) runs on a helper goroutine of its own while the
+// supervisor parks. What it does without waiting for anyone else (launching the
+// process, killing it, opening its log) is not a wait.
 type supervisor struct {
 	h   *Host
 	id  string
@@ -44,16 +44,10 @@ type supervisor struct {
 	startOnce  sync.Once
 	startTimer clock.Timer // nil once released, and for a supervisor Start did not make
 
-	// busy is the number of things the supervisor is doing; it is one from the
-	// start and the supervisor takes it down only while parked on something that is
-	// not its own work. asks lets working ask a parked supervisor whether
-	// anything is due.
-	busy atomic.Int32
-	asks chan chan bool
-	// moves counts every change of busy, so that a reader that asked whether the
-	// supervisor is working and then read something else can tell whether the
-	// supervisor moved in between.
-	moves atomic.Uint64
+	// asks is how counts asks the supervisor for the counts of the instance: the
+	// answer is made by the supervisor's goroutine, inside the park it is in, so that
+	// whether it is working and what is counted are of one moment.
+	asks chan chan ConnCounts
 
 	// Used by the supervisor's goroutine only.
 	timers   map[clock.Timer]struct{}
@@ -75,10 +69,9 @@ func newSupervisor(h *Host, id string, prev <-chan struct{}, startWait bool) *su
 		done:    make(chan struct{}),
 		prev:    prev,
 		started: make(chan struct{}),
-		asks:    make(chan chan bool),
+		asks:    make(chan chan ConnCounts),
 		timers:  map[clock.Timer]struct{}{},
 	}
-	s.busy.Store(1)
 	if startWait {
 		s.startTimer = s.newTimer(h.params.StartWait)
 	}
@@ -148,7 +141,15 @@ func (s *supervisor) finish() {
 	for t := range s.timers {
 		t.Stop()
 	}
-	s.wg.Wait()
+	// The helpers end by themselves, but one may be a call of the engine, and the
+	// engine may be asking for the counts of this instance: the supervisor keeps
+	// answering while it waits.
+	helpers := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(helpers)
+	}()
+	s.wait(waits{over: helpers})
 	close(s.done)
 	s.h.forget(s)
 }
@@ -174,12 +175,15 @@ func (s *supervisor) startWaitExpired() {
 
 // report tells the engine why the instance has no connection. It is made with
 // the host's context, not the connection's, and not at all once the instance is
-// being stopped or the host ended: those report nothing.
+// being stopped or the host ended: those report nothing. A stop or the end of the
+// host that comes while the engine takes the report ends the wait, and the
+// supervisor waits for the call before it finishes.
 func (s *supervisor) report(cause GoneCause) {
 	if s.h.ctx.Err() != nil || s.stopRequested() {
 		return
 	}
-	if err := s.h.env.Engine.AdapterGone(s.h.ctx, s.id, cause); err != nil {
+	err := s.engine(func(ctx context.Context) error { return s.h.env.Engine.AdapterGone(ctx, s.id, cause) })
+	if err != nil && !isEnd(err) {
 		s.log.Warn("the engine refused the report that the adapter is gone", "cause", cause.String(), "err", err)
 	}
 }
@@ -220,28 +224,33 @@ const (
 )
 
 // waits are the events a park waits for; a nil one is not waited for. A stop
-// request, the end of the host and the start wait are always waited for.
+// request, the end of the host and the start wait are always waited for, unless
+// final is set.
 type waits struct {
 	res    <-chan error
 	limit  <-chan time.Time
 	tick   <-chan time.Time
 	stable <-chan time.Time
 	over   <-chan struct{}
+	// final: neither a stop request nor the end of the host ends the wait, because
+	// what is waited for ends by itself and must have ended before the supervisor
+	// goes on (a helper goroutine whose context was cancelled, the forwarder).
+	final bool
 }
 
 // park waits for one of w, for a stop request (unless a connection is being
-// ended) or for the host to end. An idle park is one where the supervisor waits
-// for something that is not its own work (the adapter, a timer, a request to
-// stop); working reports false only for a supervisor parked idle with nothing
-// due. A park that is not idle is the supervisor waiting on work of its own.
+// ended) or for the host to end, and answers whoever asks for the counts. An idle
+// park is one where the supervisor waits for something that is not its own work
+// (the adapter, a timer, a request to stop): there it is not working unless
+// something is due. A park that is not idle is the supervisor waiting on work of
+// its own, such as a call of the engine, and it is working.
 func (s *supervisor) park(w waits, idle bool) (slot, error) {
-	stop := s.stop
+	stop, ended := s.stop, s.h.ctx.Done()
 	if s.draining {
 		stop = nil
 	}
-	if idle {
-		s.addBusy(-1)
-		defer s.addBusy(1)
+	if w.final {
+		stop, ended = nil, nil
 	}
 	for {
 		var start <-chan time.Time
@@ -261,32 +270,44 @@ func (s *supervisor) park(w waits, idle bool) (slot, error) {
 			return slotOver, nil
 		case <-stop:
 			return slotStop, nil
-		case <-s.h.ctx.Done():
+		case <-ended:
 			return slotAbort, nil
 		case <-start:
-			if idle {
-				s.addBusy(1)
-			}
 			s.startWaitExpired()
-			if idle {
-				s.addBusy(-1)
-			}
 		case reply := <-s.asks:
-			reply <- s.due(w)
+			reply <- s.answer(w, idle)
 		}
 	}
 }
 
-// addBusy changes the number of things the supervisor is doing and notes the move.
-func (s *supervisor) addBusy(d int32) {
-	s.busy.Add(d)
-	s.moves.Add(1)
+// wait waits for what ends by itself (see waits.final) and answers the counts
+// while it does.
+func (s *supervisor) wait(w waits) {
+	w.final = true
+	s.park(w, false)
+}
+
+// answer is the counts of the instance at the moment the supervisor is in a park:
+// the counts of the latest connection, whether a connection is in service, and
+// whether the supervisor is working. It runs on the supervisor's goroutine.
+func (s *supervisor) answer(w waits, idle bool) ConnCounts {
+	s.mu.Lock()
+	cur, service := s.cur, s.service
+	s.mu.Unlock()
+	var out ConnCounts
+	if cur != nil {
+		out = cur.counts()
+	}
+	out.Connected = service != nil
+	out.Working = !idle || s.due(w)
+	return out
 }
 
 // due reports whether anything the supervisor would act on is waiting: a timer
 // of the host that is due and not taken (only a test clock shows that: a real
-// timer's channel is empty until it is read), an answer, or the end of the
-// connection. It runs on the supervisor's goroutine, from park.
+// timer's channel is empty until it is read), an answer, the end of the
+// connection, or a request to stop or the end of the host that the park would
+// return for.
 func (s *supervisor) due(w waits) bool {
 	for t := range s.timers {
 		if len(t.C()) > 0 {
@@ -303,77 +324,27 @@ func (s *supervisor) due(w waits) bool {
 		default:
 		}
 	}
+	if !w.final && (s.h.ctx.Err() != nil || (!s.draining && s.stopRequested())) {
+		return true
+	}
 	return false
 }
 
-// working reports whether the supervisor is doing something of its own or has
-// something due. A supervisor that is parked answers from inside its wait. One
-// that is neither busy nor parked is between two waits, or has just answered an
-// earlier question and is on its way back to waiting: it is asked again a few
-// times, and is counted as working if it is still not there.
-func (s *supervisor) working() bool {
-	reply := make(chan bool, 1)
-	for range askAttempts {
-		select {
-		case <-s.done:
-			return false
-		default:
-		}
-		if s.busy.Load() > 0 {
-			return true
-		}
-		select {
-		case s.asks <- reply:
-			return <-reply
-		default:
-			runtime.Gosched()
-		}
-	}
-	return true
-}
-
-// askAttempts is how many times working asks a supervisor that is on its way back
-// to waiting before it counts it as working.
-const askAttempts = 1000
-
-// counts is what the host counts of the connection of the instance. Whether the
-// supervisor is working is asked before the counts are read, and the answer holds
-// only if the supervisor did not move meanwhile: a supervisor that was parked and
-// idle throughout was idle while the counts were read, and one that moved (it
-// started a request and went on to wait for its answer, say) is asked again, and
-// reported as working if it keeps moving. So a caller never sees "idle" together
-// with counts that were taken before the request the supervisor waits for was
-// counted.
+// counts is what the host counts of the connection of the instance, as the
+// supervisor answers it from the park it is in. The supervisor blocks only in
+// park, so this returns as soon as it reaches one; and a request is counted
+// before the supervisor parks to wait for its answer, so the counts that come with
+// "not working" include every request the supervisor waits for. A supervisor that
+// has finished counts nothing.
 func (s *supervisor) counts() ConnCounts {
-	var out ConnCounts
-	for range countsAttempts {
-		select {
-		case <-s.done:
-			return ConnCounts{}
-		default:
-		}
-		before := s.moves.Load()
-		working := s.working()
-		s.mu.Lock()
-		cur, service := s.cur, s.service
-		s.mu.Unlock()
-		out = ConnCounts{}
-		if cur != nil {
-			out = cur.counts()
-		}
-		out.Connected = service != nil
-		out.Working = working
-		if working || s.moves.Load() == before {
-			return out
-		}
+	reply := make(chan ConnCounts, 1)
+	select {
+	case s.asks <- reply:
+		return <-reply
+	case <-s.done:
+		return ConnCounts{}
 	}
-	out.Working = true
-	return out
 }
-
-// countsAttempts is how many times counts reads again when the supervisor moved
-// while it read.
-const countsAttempts = 100
 
 // rpc sends a request to the adapter and waits for the answer for at most limit
 // on the host's clock. The result is decoded and validated into result.
@@ -406,7 +377,7 @@ func (s *supervisor) rpc(c *conn, method string, params, result adapterproto.Mes
 		c.abortNow()
 	}
 	cancel()
-	<-res
+	s.wait(waits{res: res})
 	return err
 }
 

@@ -166,12 +166,11 @@ func (c *conn) fail(err error) {
 	_ = c.p.Close()
 }
 
-// close ends the connection's own goroutines and returns when the forwarder has
-// returned: the connection's context ends first, so that the forwarder hands the
-// engine nothing more, then the stream is closed, and what is buffered and not yet
-// handed to the engine is dropped. A connection that was drained first has nothing
-// left to drop.
-func (c *conn) close() {
+// end ends the connection's own goroutines without waiting for them: the
+// connection's context ends first, so that the forwarder hands the engine nothing
+// more, then the stream is closed. The supervisor waits for the forwarder
+// (fwdDone) and then drops what is left (dropBuffered): see supervisor.closeConn.
+func (c *conn) end() {
 	c.closeOnce.Do(func() {
 		c.cancel()
 		if c.p != nil {
@@ -179,8 +178,11 @@ func (c *conn) close() {
 		}
 		c.fwdOnce.Do(func() { close(c.fwdDone) })
 	})
-	<-c.fwdDone
-	// Whatever is left was never handed to the engine.
+}
+
+// dropBuffered drops what is buffered and was never handed to the engine. A
+// connection that was drained first has nothing left to drop.
+func (c *conn) dropBuffered() {
 	for {
 		select {
 		case <-c.notes:

@@ -192,7 +192,7 @@ func (s *supervisor) serve(c *conn) (stable bool, err error) {
 		// reached the engine after the report would find the instance offline.
 		// What is still buffered is dropped, and the process is ended after the
 		// report, so that the report does not wait for it.
-		c.close()
+		s.closeConn(c)
 		s.report(GonePingsFailed)
 		s.finishConn(c, modeKill)
 		return stable, nil
@@ -278,7 +278,7 @@ func (s *supervisor) watch(c *conn) (stable bool, out outcome, err error) {
 			// The ping is over: answered, failed, or too slow.
 			if sl == slotLimit {
 				pingCancel()
-				<-pingRes
+				s.wait(waits{res: pingRes})
 				perr = errLimit
 			}
 			pingCancel()
@@ -363,7 +363,7 @@ func (s *supervisor) finishConn(c *conn, m mode) {
 	switch m {
 	case modeAbort:
 		_ = c.proc.Kill()
-		c.close()
+		s.closeConn(c)
 	case modeShutdown:
 		s.draining = true
 		if c.admission.Load() != nil {
@@ -371,11 +371,11 @@ func (s *supervisor) finishConn(c *conn, m mode) {
 			err := s.rpc(c, adapterproto.MethodShutdown, adapterproto.Empty{}, &none, s.h.params.HandshakeTimeout)
 			if errors.Is(err, errAborted) {
 				_ = c.proc.Kill()
-				c.close()
+				s.closeConn(c)
 				return
 			}
 		}
-		c.close()
+		s.closeConn(c)
 		switch err := s.waitExit(c); {
 		case errors.Is(err, errAborted):
 			_ = c.proc.Kill()
@@ -385,7 +385,7 @@ func (s *supervisor) finishConn(c *conn, m mode) {
 		}
 	default:
 		killErr := c.proc.Kill()
-		c.close()
+		s.closeConn(c)
 		if killErr != nil {
 			// A process that cannot be told to end is not waited for: there is nothing
 			// the wait could see. The instance lock keeps a second writer out.
@@ -394,6 +394,16 @@ func (s *supervisor) finishConn(c *conn, m mode) {
 		}
 		_ = s.waitExit(c)
 	}
+}
+
+// closeConn ends the goroutines of a connection and drops what is still buffered
+// for the engine. The supervisor waits for the forwarder in a park: the forwarder
+// may be in a call of the engine, and the engine may be asking this supervisor for
+// its counts.
+func (s *supervisor) closeConn(c *conn) {
+	c.end()
+	s.wait(waits{over: c.fwdDone})
+	c.dropBuffered()
 }
 
 // waitExit waits for the process to end for at most Params.ShutdownWait.

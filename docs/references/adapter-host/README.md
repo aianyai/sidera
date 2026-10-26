@@ -173,7 +173,8 @@ with the effect rule; a result that does not decode is an error that is not a
 the adapter being answered, the methods of the requests the host sent that have no
 answer (one entry each, a ping excluded), whether a connection is in service and
 whether the host is working. `Working` is true while the supervisor does anything of
-its own and while a timer of the instance is due and not yet taken. After the test
+its own and while a timer of the instance is due and not yet taken; the supervisor
+answers from inside its park, so the call returns when it next parks. After the test
 clock moved, a caller that sees it false knows the host has acted on everything the
 move made due. After `Shutdown`, `Abort` and for an unknown instance everything is
 zero. The counts are those of the latest connection until a new one replaces them.
@@ -209,20 +210,26 @@ Everything about Windows and Linux is pending verification by CI on main.
 
 - **A request is counted before it is waited for.** A caller that finds the host
   idle reads the counts to learn whether the adapter is still working on something:
-  a request is counted by the goroutine that starts it, before the supervisor parks,
-  and `Working` is asked before the counts are read, which are read again if the
-  supervisor moved meanwhile (a count of its moves says so), because a request counted
-  by a helper goroutine a moment after the supervisor parked, or counts read before the
-  supervisor reached its wait, both showed an idle host with nothing outstanding while
-  `initialize` was in flight.
-- **One goroutine owns the timers.** The supervisor is the only waiter on the host's
-  timers and never blocks outside one wait, with the adapter's answers and the
-  engine's calls on helper goroutines. That is what lets `Working` be exact: a
-  parked supervisor is asked from inside its wait whether anything is due, so a
-  caller cannot see "idle" between the moment a timer's value was taken and the
-  moment its work began. A flag set around the work would leave that gap. A fake
-  clock fires only timers that exist, so a test must wait for the host to arm what it
-  waits on, and `Working` is how it knows.
+  a request is counted by the goroutine that starts it, before the supervisor parks.
+  The supervisor itself answers the question whether it works, together with the
+  counts, from inside the park it is in, so the two are of one moment: a request
+  counted by a helper goroutine a moment after the supervisor parked, or counts read
+  before the supervisor reached its wait, both showed an idle host with nothing
+  outstanding while `initialize` was in flight.
+- **One goroutine owns the timers, and blocks nowhere but in its park.** The
+  supervisor is the only waiter on the host's timers, with the adapter's answers and
+  every call of the engine on helper goroutines, the report that an adapter is gone
+  included, and the forwarder and the helpers it must wait for are waited for in a
+  park too. That is what lets `Working` be exact without a counter or a retry: the
+  question for the counts is a blocking send to the supervisor, answered inside the
+  park with "working" for a park that waits on work of its own (a call of the
+  engine) and for an idle park with something due (a timer, an answer, the end of the
+  connection, a stop), so a caller cannot see "idle" between the moment a timer's
+  value was taken and the moment its work began. A flag set around the work would
+  leave that gap. It also keeps the engine's loop, which asks for the counts, from
+  waiting on a supervisor that waits on the engine. A fake clock fires only timers
+  that exist, so a test must wait for the host to arm what it waits on, and `Working`
+  is how it knows.
 - **Timers on the injected clock, not elapsed time.** The runtime packages have no
   monotonic reading, so "stable for five minutes" is a timer started when the
   connection came into service, and a limit on a call is a timer too (a context with
