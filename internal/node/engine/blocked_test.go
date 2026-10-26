@@ -440,6 +440,64 @@ func TestAdapterNotYetConnectedIsOfflineOnlySinceTheNodeBeganToServe(t *testing.
 	}
 }
 
+// headOf is the attempts record of the endpoint on the disk.
+func headOf(t *testing.T, r *rig, id ident.EndpointID) store.AttemptsRecord {
+	t.Helper()
+	for _, a := range r.scan().Attempts {
+		if a.Endpoint == id {
+			return a
+		}
+	}
+	return store.AttemptsRecord{Endpoint: id}
+}
+
+// A node that restarts while a block is reported does not know the adapter's cause is
+// gone: the adapter has not connected yet, and "offline since the node began to serve"
+// is only for a block nobody has reported. Telling the sender the block is over at the
+// start would be false, and it would never hear of the block again, since a delivery
+// is told as blocked once. The block goes on until a connection shows the cause gone,
+// and then it is corrected once.
+func TestARestartWhileABlockIsReportedKeepsItUntilTheAdapterShowsTheCauseGone(t *testing.T) {
+	host := &promptRecorder{hostDouble: newHostDouble()}
+	r, session, key := waitingSession(t, host)
+	since := r.clk.Now().Add(-10 * time.Minute)
+	for _, in := range r.scan().In {
+		rec, _, err := in.Record.Apply(since, delivery.Event{Type: delivery.EventBlocked, Cause: delivery.CauseAdapterOffline})
+		if err != nil {
+			t.Fatal(err)
+		}
+		in.Record = rec
+		r.seedRecord(in)
+	}
+	r.seedRecord(store.AttemptsRecord{Endpoint: session, Blocked: handoff.BlockedReport{Cause: handoff.CauseAdapterOffline, Since: since}})
+	written := r.commits("blocked")
+
+	e := r.start()
+	rigQuiet(t, e)
+	r.clk.Advance(handoff.DefaultBlockedThreshold + time.Second)
+	rigQuiet(t, e)
+	if !blockedOn(t, r, key) || headOf(t, r, session).Blocked.Cause != handoff.CauseAdapterOffline {
+		t.Fatal("the block was lifted although the adapter has not connected since the node began to serve")
+	}
+	if n := r.commits("blocked"); n != written {
+		t.Fatalf("%d blocks were written while the cause held, want none", n-written)
+	}
+
+	if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{Sessions: []adapterproto.SessionState{}}); err != nil {
+		t.Fatal(err)
+	}
+	r.clk.Advance(engine.DefaultParams().RetryBackoff)
+	rigQuiet(t, e)
+	waitUntil(t, func() bool { return host.prompts.Load() == 1 })
+	rigQuiet(t, e)
+	if blockedOn(t, r, key) || headOf(t, r, session).Blocked.Cause != 0 {
+		t.Error("the block is still recorded after the adapter connected and the prompt was delivered")
+	}
+	if n := r.commits("blocked"); n != written+1 {
+		t.Errorf("%d writes of a block followed the connection, want the one that lifts it", n-written)
+	}
+}
+
 // The host logs a probe that failed and goes on, with the connection in service. What
 // waited for the adapter is judged once the probe has had time to answer all the same,
 // and not left for an event that may never come.

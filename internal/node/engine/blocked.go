@@ -101,13 +101,18 @@ func (e *Engine) serveBlocked() {
 	}
 }
 
-// blockedSignals are the causes that keep the adapter from working for the endpoint. An
-// adapter that has not been online since the node began to serve is offline since then:
-// before that the node did not look, and a block reported on the node's own start for
-// an adapter that is about to connect would tell senders what is not so.
-func (e *Engine) blockedSignals(st *endpointState) handoff.Signals {
+// blockedSignals are the causes that keep the adapter from working for the endpoint. For
+// an endpoint whose block is not reported, an adapter that has not been online since the
+// node began to serve is offline since then: before that the node did not look, and a block
+// reported on the node's own start for an adapter that is about to connect would tell
+// senders what is not so. For an endpoint whose block is reported the start of the cause
+// is left unknown, which measures from the oldest message that waits: a restart must not
+// shorten the failing run of a block the senders were told of, because a correction
+// would then be false and the block, told once per delivery, would never be told again.
+// The block then goes on until a connection shows the cause gone or a prompt is delivered.
+func (e *Engine) blockedSignals(st *endpointState, reported bool) handoff.Signals {
 	sig := e.adapterSignals(st.rec.Instance, adapterproto.EndpointRef(st.rec.ID.String()))
-	if sig.AdapterOffline && sig.Since.IsZero() {
+	if sig.AdapterOffline && sig.Since.IsZero() && !reported {
 		sig.Since = e.servingSince
 	}
 	return sig
@@ -127,7 +132,7 @@ func (e *Engine) judgeBlocked(now time.Time, id ident.EndpointID) {
 	head := e.view.attempts[id]
 	head.Endpoint = id
 	pending := e.pendingOf(now, st)
-	in := handoff.BlockedInput{Attempts: head.Attempts, Signals: e.blockedSignals(st), Reported: head.Blocked}
+	in := handoff.BlockedInput{Attempts: head.Attempts, Signals: e.blockedSignals(st, head.Blocked.Cause != 0), Reported: head.Blocked}
 	if len(pending) > 0 {
 		in.OldestPendingAt = pending[0].AcceptedAt
 	}

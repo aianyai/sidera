@@ -932,10 +932,16 @@ dropped (an arrival, a lease, an acknowledgement, an expiry), an attempt settled
 snapshot, the adapter's connection ending or its probe being answered, the start of the node and the
 clearing of a wall clock that was set back; and at the instant the rule names for a run that is
 still short (`BlockedVerdict.RetryAt`), since no event marks it. The adapter's signals are those of
-`AdapterSignals`, except that an adapter that has not connected since the node began to serve is
-offline since then and not since an unknown time: the node did not look before, and a message that
-waited while the node was down would otherwise be reported blocked in the moment the node starts,
-for an adapter that is about to connect.
+`AdapterSignals`, except that, for an endpoint whose block is not reported, an adapter that has not
+connected since the node began to serve is offline since then and not since an unknown time: the
+node did not look before, and a message that waited while the node was down would otherwise be
+reported blocked in the moment the node starts, for an adapter that is about to connect. For an
+endpoint whose block is reported (the head says so) the start of the cause is left unknown, which
+measures from the oldest message that waits: counting from the start of the node would shorten the
+failing run below the threshold, the judgment would take the block for over and correct it to the
+sender, and the block that the adapter's absence then reports again would never be told, since a
+delivery is told as blocked once. A reported block therefore goes on across a restart until a
+connection shows the cause gone, or a prompt is delivered.
 
 A verdict is recorded like a prompt: the target records first and the endpoint's attempts record,
 the head, last, in one call (`store.Blocked`). A new block marks every message that waits with the
@@ -1458,7 +1464,7 @@ reproducible).
 | A native process killed during a prompt gives no feedback and the message stays readable | `blocked.go` (`judgeBlocked`; no cause, no block) | `TestNativeKilledDuringPromptGivesNoFeedbackAndKeepsMessage` |
 | A block is written marks first and head last, a failed write is tried again, and marks a crash left are lifted whatever the head says | `blocked.go` (`judgeBlocked`), `store.Blocked` | `TestBlockedReportIsWrittenAgainAfterAFailedWrite`, `TestNoRecordKeepsABlockMarkAfterACrashWhenTheCauseIsGone` |
 | A message that arrives during a block is marked; reading the messages ends the block | `blocked.go` (`judgeBlocked`), `view.go` (`onInChange`) | `TestMessageArrivingDuringABlockIsMarkedBlockedToo`, `TestReadingTheBlockedMessagesEndsTheBlock` |
-| An adapter not connected since the node began to serve is offline since then | `blocked.go` (`blockedSignals`) | `TestAdapterNotYetConnectedIsOfflineOnlySinceTheNodeBeganToServe` |
+| An adapter not connected since the node began to serve is offline since then, unless the block is already reported, which a restart keeps until a connection shows the cause gone | `blocked.go` (`blockedSignals`) | `TestAdapterNotYetConnectedIsOfflineOnlySinceTheNodeBeganToServe`, `TestARestartWhileABlockIsReportedKeepsItUntilTheAdapterShowsTheCauseGone` |
 | The sessions of an adapter whose probe failed are judged after a wait | `adapters.go` (`markStarted`), `blocked.go` (`probeFallback`) | `TestSessionsOfAnAdapterWhoseProbeFailedAreStillPromptedAfterAWait` |
 
 Known gaps, each filled in with the feature it belongs to:
