@@ -13,8 +13,8 @@ the context of the call that brought the request. `Handler` is defined in
 `internal/node/transport`, which consumes it. The engine calls a transport
 through the interface the engine defines for itself, with two methods: `Send`
 takes the node, the sending endpoint and the envelope as the bytes the engine
-encoded, and returns a `Receipt`; `Pull` takes a `PullRequest` (one message) and
-returns a `PullAnswer`. `*Loopback` has both, so it satisfies that interface
+encoded, and returns a `Receipt`; `Pull` takes a `PullRequest` (one message and the recipients the
+source tracks on the target) and returns a `PullAnswer`. `*Loopback` has both, so it satisfies that interface
 without importing the engine, and the engine imports no transport package for
 it; `daemon` hands the one to the other. This is the convention of
 [`internal/node/README.md`](../../../internal/node/README.md): each side of a seam
@@ -22,15 +22,39 @@ defines the interface it needs, and the graph stays acyclic because of it.
 
 **A receipt is the target's signed records.** `Receipt` holds the signed status
 reports, one for each recipient of the envelope on the target node, and the signed
-control reply when the envelope was a control signal that already has one; a
-`PullAnswer` has the same shape. They are `record.Record` values the transport
+control reply when the envelope was a control signal that already has one. A
+`PullAnswer` has the same two fields and a third, `NoRecord`. They are `record.Record` values the transport
 does not read: the sender verifies them with the `envelope` package and applies
 them with its own rules. A receipt may lack the reports of some or all recipients
 and the control reply: what is not in the receipt is pulled later, exactly as for
-a send whose answer never came. A missing record has the meaning of an empty
-answer to a pull: the target has nothing to report yet, not that the delivery does
-not exist. A sender therefore never reads the number of records of a receipt as a
-statement about the recipients.
+a send whose answer never came. A missing record means nothing yet, as a
+recipient that is in neither list of a pull answer does, not that the delivery
+does not exist: a receipt never says that. A sender therefore never reads the
+number of records of a receipt as a statement about the recipients.
+
+**A pull answers for each recipient it is asked about, in one of three ways.** The
+request names the recipients on the target the source tracks a delivery of the
+message to. For each of them the answer holds at most one
+thing: the target's signed report, or the recipient in `NoRecord`, which says the
+target holds no record of a delivery of the message from the asking node to it.
+A recipient in neither list has nothing to report yet; a transport may hold
+reports back, and that must never read as "no record". The source tells the three
+apart without a count: a call that returns an error got no answer (unreachable or
+timed out), a recipient in `NoRecord` has no record at the target, and a
+successful answer that has the recipient in neither list means nothing yet. A
+target that may not sign refuses the whole pull, so that "no record" never comes
+alone while the node cannot vouch for the reports beside it.
+
+`NoRecord` is not signed. The pull answer is the answer of the node the call was
+made to, over a connection the network key of that node authenticates, and it
+goes to the asking node alone: it is never forwarded and is no evidence for a third
+party, which is why a status report is signed (a reply carries it to others) and
+this is not. Whoever could forge it holds the target's network key and could
+forge its signed reports as well. A transport that cannot promise that the answer
+came from that node over such a connection must not hand over a `NoRecord`; the
+loopback is the node itself. A node that stores for others and forwards what it
+stored would have to sign the answer, and the contract is the one place to change
+then.
 
 **Two ways to get no answer.** `ErrUnreachable`: the target did not see the call.
 `ErrTimeout`: the call went out, no answer came back, and the target may have
@@ -66,7 +90,7 @@ observer:
 | ---- | ------ |
 | `DropReceipt(n)` | The target processes the envelope; the receipt is thrown away and the send returns `ErrTimeout`. Spent one per hit. A send the target refused has no receipt and is not counted. |
 | `Unreachable(node, on)` | A send or pull to the node returns `ErrUnreachable` and the target is not called. |
-| `HoldReports(msg)`, `Release(msg)` | The reports of the message are kept from the source: the receipt of its send is empty, with no report and no control reply, and a pull for it is answered empty without asking the target. The target processes the envelope as usual. |
+| `HoldReports(msg)`, `Release(msg)` | The reports of the message are kept from the source: the receipt of its send is empty, with no report and no control reply, and a pull for it is answered empty without asking the target: nothing yet for every recipient, never a `NoRecord`. The target processes the envelope as usual. |
 | `Delay(d)` | Every call that starts afterwards waits `d` on the injected clock before it goes on; a context that ends during the wait ends the call. `Delay(0)` affects only calls that start afterwards: a call already waiting stays. `Waiting()` counts the calls whose time has not come, and panics when the clock was set back below the start of one of them. |
 | `Mutate(msg)` | After the target took the next send of `msg`, the same envelope from the same sender is delivered once more with a changed body (when it has no body, the last character of its thread is changed, or a thread is given to one that has none, so the replay stays valid at the longest thread). The sender sees only its own send. `Mutated(msg)` returns the target's answer to the replay. |
 
@@ -119,12 +143,15 @@ The knobs that name no message have no such window.
 - **A receipt may lack records.** A transport may answer before the report of
   every recipient exists, and a remote one cannot wait for it; the loopback leaves
   records out on purpose when a test holds them. The pull is the one path by which
-  a source gets what it lacks, so a missing record means what an empty pull answer
-  means, and the sender needs one rule for both instead of reading the count of a
-  receipt.
-- **A pull asks for one message.** The sender keeps pulling a message until its
-  deliveries are final, and every pull is about one message's recipients on one
-  node. A list of messages is a wire optimization for a later transport and can be
+  a source gets what it lacks, so a missing record means what a recipient in
+  neither list of a pull answer means, and the sender needs one rule for both
+  instead of reading the count of a receipt.
+- **A pull asks for one message and names its recipients.** The sender keeps
+  pulling a message until its deliveries are final, and every pull is about one
+  message's recipients on one node. The request names them because a target that
+  is only asked for a message cannot tell "I hold no record of the recipient" from
+  "nothing to say": with the recipients named, silence for one means "nothing yet"
+  and the absence of a record is said. A list of messages is a wire optimization for a later transport and can be
   added without changing what a pull means.
 - **Knobs are in the package, with no build tag.** The engine-layer tests run in
   plain `go test`, and a knob that needed a tag would make them a second kind of
@@ -184,6 +211,7 @@ The knobs that name no message have no such window.
 | The local origin: the loopback makes it, a remote transport cannot, and the source scan | `TestLoopbackMakesTheLocalOrigin`, `TestRemoteOriginIsNeverLocal`, `TestNoCallerCanClaimTheLocalOrigin` in `origin_test.go` |
 | What the source scan reports, one synthetic source per rule, and that the legitimate shape passes | `originViolations` and `TestOriginScanCatchesWhatItNames` in `originscan_test.go` |
 | The loopback's own reading of the bytes it carries, with the replay and the hold armed | `FuzzSendWithKnobsArmed` in `fuzz_test.go` |
+| The loopback carries the recipients of a request and a `NoRecord` answer whole, and a held pull is empty, never `NoRecord`, even for a message the target holds none of | `TestLoopbackCarriesTheRecipientsAndTheNoRecordAnswer`, `TestAHeldPullIsEmptyWhateverTheTargetWouldAnswer` in `loopback_test.go` |
 | The constructor's panics, the caller's context reaching the handler and coming back as it is, `Loopback.Waiting` | `TestNewLoopbackRejectsWhatItCannotWorkWith`, `TestLoopbackPassesTheCallersContext`, `TestLoopbackWaitingIsTheKnobsOwn` in `loopback_test.go` |
 | No call left running after a test | `leak_test.go` |
 

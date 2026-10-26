@@ -27,7 +27,9 @@ type Handler interface {
 	// not answer, and the sender may send the same envelope again.
 	Inbound(ctx context.Context, from Origin, sender ident.EndpointID, envelope []byte) (Receipt, error)
 	// Pull answers a source's pull for the current reports of its deliveries of
-	// one message.
+	// one message to the recipients the request names: for each, its signed
+	// report or, when the node holds no record of that delivery, the recipient in
+	// NoRecord. An error means no answer exists.
 	Pull(ctx context.Context, from Origin, req PullRequest) (PullAnswer, error)
 }
 
@@ -38,8 +40,9 @@ type Handler interface {
 // A receipt may carry fewer records than the envelope has recipients, or none,
 // and may lack the control reply: what the sender does not get in the receipt it
 // pulls later, as it would for a send whose answer never came. A missing record
-// therefore has the meaning of an empty [PullAnswer]: nothing yet, not that it
-// does not exist. A transport may leave records out (the loopback does when a
+// therefore means nothing yet, as a recipient that is in neither list of a
+// [PullAnswer] does, not that the record does not exist: a receipt never says
+// that. A transport may leave records out (the loopback does when a
 // test holds the reports of a message); a sender must not read the number of
 // records of a receipt as a statement about the recipients.
 type Receipt struct {
@@ -53,17 +56,37 @@ type Receipt struct {
 }
 
 // PullRequest names what a source pulls: the reports of its deliveries of one
-// message, for every recipient of it on the target. The target knows the sender
+// message to the listed recipients on the target. The target knows the sender
 // from the request's origin, not from the request.
 type PullRequest struct {
 	Message delivery.MessageID
+	// Recipients are the endpoints on the target that the source tracks a
+	// delivery of the message to. A request names at least one: the target
+	// answers for each of them, and for no other.
+	Recipients []ident.EndpointID
 }
 
-// PullAnswer is the answer to a pull and has the shape of a [Receipt]: the
-// current signed reports of the message's deliveries, and its control reply if
-// there is one. An empty answer means the target has nothing to report yet, not
-// that the deliveries do not exist.
-type PullAnswer Receipt
+// PullAnswer is the target's answer to a pull. For each recipient of the request
+// the target gives at most one of: its signed report in Reports, or the
+// recipient in NoRecord. A recipient in neither has nothing to report yet (a
+// transport may hold reports back), and never means "no record".
+//
+// An answer is the one the node the call was made to gave, over a connection
+// that node's network key authenticates. NoRecord is not signed and is no
+// evidence for anyone else, so a transport that cannot promise that the answer
+// came from that node must not hand over a NoRecord.
+type PullAnswer struct {
+	// Reports are the signed status reports of the recipients the target holds a
+	// record of a delivery of the message from the asking node for.
+	Reports []record.Record
+	// ControlReply is the signed control reply, nil unless the message is a
+	// control signal that has one.
+	ControlReply *record.Record
+	// NoRecord lists the recipients of the request for which the target holds no
+	// record of a delivery of the message from the asking node. The sender that
+	// holds the target's receipt reads it as a loss of the record.
+	NoRecord []ident.EndpointID
+}
 
 // The two errors below are the vocabulary of every transport, not of the
 // loopback alone: an implementation of another package returns them, wrapped as

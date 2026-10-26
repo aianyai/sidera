@@ -16,7 +16,7 @@ no clock but the one its knobs were given.
 | ---- | ------- |
 | `Handler` | What a transport calls on the engine: `Inbound` for an envelope, `Pull` for a pull. Both are told the `Origin`. The package defines it because it consumes it; the engine defines the interface it calls (`Send`, `Pull`) and every transport has those two methods. |
 | `Origin`, `RemoteOrigin(node)` | Where a request came from. `Local()` is true only for a request the loopback handed over. |
-| `Receipt`, `PullRequest`, `PullAnswer` | The signed records a target answers with, and what a pull asks for. The transport carries them and never reads them. A receipt may lack the reports of some or all recipients and the control reply; they are pulled later. |
+| `Receipt`, `PullRequest`, `PullAnswer` | The signed records a target answers with, and what a pull asks for: one message and the recipients the source tracks on the target. The answer to a pull lists, for each recipient asked about, its signed report or the recipient in `NoRecord` (the target holds no record of that delivery); a recipient in neither means nothing yet. The transport carries them and never reads them. A receipt may lack the reports of some or all recipients and the control reply; they are pulled later. |
 | `ErrUnreachable`, `ErrTimeout` | The two ways a call gets no answer: the target did not see it, or it may have. Every transport implementation returns them with this meaning. |
 | `NewLoopback(self, handler, knobs)` | The single-node transport, with `Send`, `Pull` and `Waiting`. A nil `knobs` means no faults; a zero `self` or a nil `handler` panics. |
 | `NewKnobs(clock)`, `Knobs` | The fault knobs: `DropReceipt`, `Unreachable`, `HoldReports` and `Release`, `Delay`, `Mutate` and `Mutated`; `Hits`, `Observe`, `Waiting`. Use `NewKnobs`: the zero `Knobs` is not usable. |
@@ -43,8 +43,14 @@ no clock but the one its knobs were given.
   handler runs under the caller's context, and so does a replay.
 - **A receipt may be partial.** It may lack the reports of some or all recipients
   and the control reply, and the missing ones are pulled later: the same meaning
-  as an empty `PullAnswer`, nothing yet. A sender never reads the number of
-  records of a receipt as a statement about the recipients.
+  as a recipient that is in neither list of a `PullAnswer`, nothing yet. A
+  receipt never says "no record". A sender never reads the number of records of a
+  receipt as a statement about the recipients.
+- **`NoRecord` is the answer of the node that was called.** It is not signed: it
+  is believed because it came over the connection the target's network key
+  authenticates, and it is no evidence for anyone else. A transport that cannot
+  promise that the answer came from that node over such a connection must not
+  hand over a `NoRecord`. The loopback is the node itself.
 - **Knobs are faults, not features.** They are all off in a new `Knobs`, are safe
   to set while calls run, count every hit and tell the observer, and exist in
   every build, tagged or not. A test that sets a knob asserts its hit count.
@@ -54,7 +60,8 @@ no clock but the one its knobs were given.
     without calling the target.
   - `HoldReports(msg)` and `Release(msg)`: the receipt of the send of `msg` is
     empty, with no report and no control reply, and a pull for `msg` is answered
-    empty without asking the target. The target processes the envelope as usual.
+    empty without asking the target: nothing yet for every recipient, never a
+    `NoRecord`, which only the handler can give. The target processes the envelope as usual.
     The evidence a reply carries inside its own envelope is not touched: it never
     goes through here.
   - `Delay(d)`: every call that starts from now on waits `d` on the clock of the

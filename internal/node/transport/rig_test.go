@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -97,7 +98,7 @@ func (g *target) Pull(_ context.Context, _ transport.Origin, req transport.PullR
 	defer g.mu.Unlock()
 	g.pulls = append(g.pulls, req)
 	if _, ok := g.held[req.Message]; !ok {
-		return transport.PullAnswer{}, nil
+		return transport.PullAnswer{NoRecord: slices.Clone(req.Recipients)}, nil
 	}
 	return transport.PullAnswer{Reports: []record.Record{reportOf(req.Message)}, ControlReply: g.reply}, nil
 }
@@ -194,8 +195,11 @@ func (r *rig) send(data []byte) (transport.Receipt, error) {
 	return r.loop.Send(context.Background(), r.self, ep(9), data)
 }
 
+// pulled are the recipients every pull of the rig asks about.
+var pulled = []ident.EndpointID{ep(2), ep(3)}
+
 func (r *rig) pull(id string) (transport.PullAnswer, error) {
-	return r.loop.Pull(context.Background(), r.self, transport.PullRequest{Message: delivery.MessageID(id)})
+	return r.loop.Pull(context.Background(), r.self, transport.PullRequest{Message: delivery.MessageID(id), Recipients: pulled})
 }
 
 // hitsSeen returns what the observer was told, per knob.

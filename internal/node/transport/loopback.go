@@ -74,8 +74,11 @@ func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.E
 	return rc, nil
 }
 
-// Pull asks the handler for the reports of a message and returns its answer,
-// unless a knob says otherwise. The context and the errors are those of Send.
+// Pull asks the handler for the reports of a message to the recipients of the
+// request and returns its answer, unless a knob says otherwise. A pull whose
+// reports are held gets an empty answer without the handler being asked: that is
+// "nothing yet" for every recipient, and never a NoRecord, which only the handler
+// can give. The context and the errors are those of Send.
 func (l *Loopback) Pull(ctx context.Context, target ident.NodeID, req PullRequest) (PullAnswer, error) {
 	if err := l.knobs.wait(ctx, CallPull, target); err != nil {
 		return PullAnswer{}, err

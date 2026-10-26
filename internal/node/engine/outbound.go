@@ -43,8 +43,10 @@ type outWork struct {
 	// sender and data are the sending endpoint and the encoded envelope of a send.
 	sender ident.EndpointID
 	data   []byte
-	// message is the message a pull is about.
-	message delivery.MessageID
+	// message is the message a pull is about, and recipients are the endpoints on
+	// the node whose deliveries of it the pull asks about.
+	message    delivery.MessageID
+	recipients []ident.EndpointID
 }
 
 // outbox is the queue of the outbound worker and what the loop remembers about
@@ -123,11 +125,13 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 		res := &cmdOutResult{call: newCall[struct{}](), work: w}
 		switch w.kind {
 		case workSend:
-			res.receipt, res.err = e.tr.Send(ctx, w.node, w.sender, w.data)
+			var rc transport.Receipt
+			rc, res.err = e.tr.Send(ctx, w.node, w.sender, w.data)
+			res.reports = rc.Reports
 		case workPull:
 			var ans transport.PullAnswer
-			ans, res.err = e.tr.Pull(ctx, w.node, transport.PullRequest{Message: w.message})
-			res.receipt = transport.Receipt(ans)
+			ans, res.err = e.tr.Pull(ctx, w.node, transport.PullRequest{Message: w.message, Recipients: w.recipients})
+			res.reports = ans.Reports
 		}
 		if _, err := roundTrip(ctx, e, submitInternal, res, res.call); err != nil && ctx.Err() != nil {
 			return
@@ -157,10 +161,14 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 		return
 	}
 	need := map[ident.NodeID]workKind{}
-	for _, t := range o.Outbound.Recipients {
+	pulled := map[ident.NodeID][]ident.EndpointID{}
+	for _, t := range o.Outbound.Deliveries() {
 		kind := outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node])
 		if kind != 0 && (need[t.Address.Node] == 0 || kind == workSend) {
 			need[t.Address.Node] = kind
+		}
+		if kind == workPull {
+			pulled[t.Address.Node] = append(pulled[t.Address.Node], t.Address.Endpoint)
 		}
 	}
 	if len(need) == 0 {
@@ -173,7 +181,7 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].String() < nodes[j].String() })
 	for _, n := range nodes {
-		w := outWork{kind: need[n], name: name, node: n, message: o.Outbound.Message}
+		w := outWork{kind: need[n], name: name, node: n, message: o.Outbound.Message, recipients: pulled[n]}
 		if w.kind == workSend {
 			data, err := e.encodeFor(now, o, n)
 			if err != nil {
@@ -210,14 +218,15 @@ func outboundNeed(d delivery.Record, acceptBefore, now time.Time, sent bool) wor
 
 type cmdOutResult struct {
 	call[struct{}]
-	work    outWork
-	receipt transport.Receipt
+	work outWork
+	// reports are the signed reports a receipt or an answer to a pull carried.
+	reports []record.Record
 	err     error
 }
 
 func (c *cmdOutResult) gate() gate { return gateLoopback }
 func (c *cmdOutResult) run(e *Engine, now time.Time) {
-	e.outResult(now, c.work, c.receipt, c.err)
+	e.outResult(now, c.work, c.reports, c.err)
 	c.done(struct{}{}, nil)
 }
 
@@ -227,7 +236,7 @@ func (c *cmdOutResult) run(e *Engine, now time.Time) {
 // answers a send it already processed from its record). A call
 // that did is applied: the reports are verified and applied to the source record,
 // which is written with the body released when no delivery needs it any more.
-func (e *Engine) outResult(now time.Time, w outWork, rc transport.Receipt, callErr error) {
+func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, callErr error) {
 	st := e.outbox.state[w.name]
 	if st == nil { // the record was settled or taken away while the call was out
 		return
@@ -251,7 +260,7 @@ func (e *Engine) outResult(now time.Time, w outWork, rc transport.Receipt, callE
 	if w.kind == workSend {
 		st.sent[w.node] = true
 	}
-	if err := e.applyReports(now, w.name, w.node, rc.Reports); err != nil {
+	if err := e.applyReports(now, w.name, w.node, reports); err != nil {
 		e.classify(err) // a fatal error stops the loop after this command
 		if e.fatal == nil {
 			e.log.Warn("reports could not be written; they are asked for again", "message", string(w.message), "error", err.Error())
@@ -275,7 +284,7 @@ func (e *Engine) afterOutbound(name string, now time.Time) {
 		return
 	}
 	var next time.Duration
-	for _, t := range o.Outbound.Recipients {
+	for _, t := range o.Outbound.Deliveries() {
 		switch outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node]) {
 		case workSend:
 			next = e.p.ResendBackoff

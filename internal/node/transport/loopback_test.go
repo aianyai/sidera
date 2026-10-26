@@ -3,6 +3,7 @@ package transport_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -78,7 +79,7 @@ func TestLoopbackPassesTheCallersContext(t *testing.T) {
 	if _, err := l.Send(ctx, r.self, ep(9), r.message(t, "m1", "hello")); err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	if _, err := l.Pull(ctx, r.self, transport.PullRequest{Message: "m1"}); err != nil {
+	if _, err := l.Pull(ctx, r.self, transport.PullRequest{Message: "m1", Recipients: pulled}); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
 	rec.mu.Lock()
@@ -99,7 +100,7 @@ func TestLoopbackPassesTheCallersContext(t *testing.T) {
 	if !errors.Is(err, context.Canceled) || errors.Is(err, transport.ErrTimeout) || errors.Is(err, transport.ErrUnreachable) {
 		t.Errorf("send under an ended context: error %v, want context.Canceled as it is", err)
 	}
-	_, err = l.Pull(ended, r.self, transport.PullRequest{Message: "m1"})
+	_, err = l.Pull(ended, r.self, transport.PullRequest{Message: "m1", Recipients: pulled})
 	if !errors.Is(err, context.Canceled) || errors.Is(err, transport.ErrTimeout) || errors.Is(err, transport.ErrUnreachable) {
 		t.Errorf("pull under an ended context: error %v, want context.Canceled as it is", err)
 	}
@@ -132,5 +133,45 @@ func TestLoopbackWaitingIsTheKnobsOwn(t *testing.T) {
 	bare := transport.NewLoopback(r.self, newTarget(), nil)
 	if got := bare.Waiting(); got != 0 {
 		t.Errorf("a loopback with no knobs waits for %d calls, want 0", got)
+	}
+}
+
+// TestLoopbackCarriesTheRecipientsAndTheNoRecordAnswer pins that the loopback
+// hands the handler the request as the source made it, recipients included, and
+// returns the handler's answer whole: a recipient the handler lists as having no
+// record comes back listed.
+func TestLoopbackCarriesTheRecipientsAndTheNoRecordAnswer(t *testing.T) {
+	r := newRig(t)
+	ans, err := r.pull("never-sent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ans.NoRecord, pulled) || len(ans.Reports) != 0 {
+		t.Errorf("the answer for a message the target holds none of: %+v, want every requested recipient listed as having no record", ans)
+	}
+	if got := r.target.pulls; len(got) != 1 || got[0].Message != "never-sent" || !slices.Equal(got[0].Recipients, pulled) {
+		t.Errorf("the handler was asked %+v, want the request as it was made", got)
+	}
+}
+
+// TestAHeldPullIsEmptyWhateverTheTargetWouldAnswer pins that a pull whose reports
+// are held gets an answer with nothing in it, for a message the target holds no
+// record of too: a held answer is "nothing yet" and must never read as "no
+// record". The handler is not asked while the reports are held, and answers as
+// it would once they are released.
+func TestAHeldPullIsEmptyWhateverTheTargetWouldAnswer(t *testing.T) {
+	r := newRig(t)
+	r.knobs.HoldReports("never-sent")
+	ans, err := r.pull("never-sent")
+	if err != nil || len(ans.Reports) != 0 || len(ans.NoRecord) != 0 || ans.ControlReply != nil {
+		t.Fatalf("the held pull: %+v, %v, want an empty answer", ans, err)
+	}
+	if n := r.target.pulled(); n != 0 {
+		t.Errorf("the held pull reached the target %d times", n)
+	}
+	r.knobs.Release("never-sent")
+	ans, err = r.pull("never-sent")
+	if err != nil || !slices.Equal(ans.NoRecord, pulled) {
+		t.Errorf("the pull after the release: %+v, %v, want the recipients listed as having no record", ans, err)
 	}
 }

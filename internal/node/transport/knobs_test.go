@@ -139,7 +139,7 @@ func TestKnobs(t *testing.T) {
 				if _, err := r.loop.Send(context.Background(), r.other, ep(9), r.message(t, "m1", "hello")); !errors.Is(err, transport.ErrUnreachable) {
 					t.Fatalf("send to another node: error %v, want ErrUnreachable", err)
 				}
-				if _, err := r.loop.Pull(context.Background(), r.other, transport.PullRequest{Message: "m1"}); !errors.Is(err, transport.ErrUnreachable) {
+				if _, err := r.loop.Pull(context.Background(), r.other, transport.PullRequest{Message: "m1", Recipients: pulled}); !errors.Is(err, transport.ErrUnreachable) {
 					t.Fatalf("pull from another node: error %v, want ErrUnreachable", err)
 				}
 				if n, p := len(r.target.inbound()), r.target.pulled(); n != 0 || p != 0 {
@@ -273,7 +273,7 @@ func TestKnobs(t *testing.T) {
 				defer cancel()
 				done := make(chan error, 1)
 				go func() {
-					_, err := r.loop.Pull(ctx, r.self, transport.PullRequest{Message: "m1"})
+					_, err := r.loop.Pull(ctx, r.self, transport.PullRequest{Message: "m1", Recipients: pulled})
 					done <- err
 				}()
 				waitFor(t, "the pull to wait out its delay", func() bool { return r.knobs.Waiting() == 1 })
@@ -500,7 +500,7 @@ func TestWaitingFailsLoudlyWhenTheClockIsSetBack(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.loop.Pull(ctx, r.self, transport.PullRequest{Message: "m1"})
+		_, err := r.loop.Pull(ctx, r.self, transport.PullRequest{Message: "m1", Recipients: pulled})
 		done <- err
 	}()
 	waitFor(t, "the pull to wait out its delay", func() bool { return r.knobs.Waiting() == 1 })
@@ -532,7 +532,7 @@ func TestDelayZeroLeavesACallThatIsAlreadyWaiting(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := r.loop.Pull(ctx, r.self, transport.PullRequest{Message: "m1"})
+		_, err := r.loop.Pull(ctx, r.self, transport.PullRequest{Message: "m1", Recipients: pulled})
 		done <- err
 	}()
 	waitFor(t, "the pull to wait out its delay", func() bool { return r.knobs.Waiting() == 1 })

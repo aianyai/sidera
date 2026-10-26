@@ -24,7 +24,7 @@ func TestLoopbackMakesTheLocalOrigin(t *testing.T) {
 	if _, err := l.Send(context.Background(), r.self, ep(9), r.message(t, "m1", "hello")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.Pull(context.Background(), r.self, transport.PullRequest{Message: "m1"}); err != nil {
+	if _, err := l.Pull(context.Background(), r.self, transport.PullRequest{Message: "m1", Recipients: pulled}); err != nil {
 		t.Fatal(err)
 	}
 	if len(seen) != 2 {
