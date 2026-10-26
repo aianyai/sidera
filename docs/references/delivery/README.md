@@ -465,6 +465,14 @@ references the body keeps its state and drops only the reference. A control reco
 never needs a body and holds none: the initial message of a creation is the body of the
 delivery derived from it, a target record like any other.
 
+`Record.AwaitsHandout()` says whether a `recv` would hand something of a target
+message out: it is `accepted` and was never handed out, a lease that ran out put
+it back in the queue, or it is handed out in parts and some part has not been. A
+message whose parts were all handed out waits for the acknowledgement, not for a
+`recv`, and a control record is never handed out to an agent. It is the delivery
+rules' own definition of a waiting message, so the callers that wake an agent for
+waiting messages ask it and do not keep a copy of the lease's shape.
+
 ### A target that holds no record
 
 The sender pulls a delivery it has a receipt for until `report_by`. If the target
@@ -823,7 +831,7 @@ permission still reads it.
   `TestApplyRefusesEveryOtherWayIntoStorageLoss`,
   `TestSourceLostRecordIgnoresLaterFacts`,
   `TestStatusReportOfAnUnknownResultIsAHandOver`,
-  `TestNeedsBodyByStateAndSide`, `TestTargetNeverHoldsALossCause`,
+  `TestNeedsBodyByStateAndSide`, `TestAwaitsHandoutByStateAndLease`, `TestTargetNeverHoldsALossCause`,
   `TestUnknownCauseAndLostShapeInvariants`, `TestCheckUnknownCauseJudgesTheSideOfALossCause`,
   `TestChangeRefusesACauseThatDoesNotFitTheState`, `TestLostMarkerIsSetByNewLostRecordAndNeverCleared`,
   and `TestPropertyLostRecordLifecycle` (fixed seed, a model written in the test:

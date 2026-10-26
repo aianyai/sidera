@@ -337,6 +337,44 @@ func TestNeedsBodyByStateAndSide(t *testing.T) {
 	}
 }
 
+// A recv would hand something of a record out when it was never handed out, when a
+// lease that ran out put it back in the queue, and when it is handed out in parts of
+// which some have not been; not when every part was handed out and the lease holds
+// them for the acknowledgement, and never for a control record or a record that is
+// no longer accepted.
+func TestAwaitsHandoutByStateAndLease(t *testing.T) {
+	queued := targetRecord(t, t0, time.Hour)
+	leased := handOut(t, queued, at(time.Minute), 1, 1)
+	ranOut, _, err := leased.Tick(leased.Lease.ExpiresAt.Add(time.Second))
+	if err != nil || ranOut.Lease.Active {
+		t.Fatalf("the lease did not run out: active %v, err %v", ranOut.Lease.Active, err)
+	}
+	someParts := handOut(t, queued, at(time.Minute), 3, 1)
+	allParts := handOutAll(t, queued, at(time.Minute), 3)
+	rows := []struct {
+		rule string
+		rec  Record
+		want bool
+	}{
+		{"a message never handed out", queued, true},
+		{"a message a lease that ran out put back", ranOut, true},
+		{"a message handed out whole and leased", leased, false},
+		{"a message handed out in parts that has parts left", someParts, true},
+		{"a message with every part handed out", allParts, false},
+		{"a message that is delivered", deliverBody(t, queued, at(time.Minute)), false},
+		{"an accepted target control record", controlRecord(), false},
+		{"a source record that is queued", NewSourceRecord(t0, at(10*time.Minute)), false},
+		{"the zero record", Record{}, false},
+	}
+	for _, r := range rows {
+		t.Run(r.rule, func(t *testing.T) {
+			if got := r.rec.AwaitsHandout(); got != r.want {
+				t.Errorf("AwaitsHandout = %v, want %v for %+v", got, r.want, r.rec)
+			}
+		})
+	}
+}
+
 func TestStorageLossKindsMergeByMessage(t *testing.T) {
 	for _, kind := range []Kind{KindLostAtSender, KindLostAtTarget} {
 		t.Run(kind.String(), func(t *testing.T) {

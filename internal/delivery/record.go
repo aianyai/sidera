@@ -3,6 +3,7 @@ package delivery
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 )
 
@@ -589,6 +590,18 @@ func (r Record) NeedsBody() bool {
 		return !r.Control && r.State == StateAccepted
 	}
 	return false
+}
+
+// AwaitsHandout reports whether a recv would hand something of the record out: a
+// target message that is accepted and was never handed out, whose lease ran out and
+// put it back in the queue, or that is handed out in parts of which some have not
+// been. A message whose parts were all handed out waits for the acknowledgement and
+// not for a recv, and a control record is never handed out to an agent.
+func (r Record) AwaitsHandout() bool {
+	if r.Side != SideTarget || r.Control || r.State != StateAccepted {
+		return false
+	}
+	return !r.Lease.Active || slices.Contains(r.Lease.HandedOut, false)
 }
 
 // closeForcibly ends a target delivery that cannot go on for a reason other
