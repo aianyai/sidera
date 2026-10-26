@@ -16,6 +16,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
@@ -102,40 +103,31 @@ func ManifestText() string { return manifestText }
 // setupTag tags the writes that lay out a disk before any process mounts it.
 var setupTag = fsx.Tag{Tx: "setup", Role: "f"}
 
-// The transactions that the composition root owns, declared here the way it
-// declares them, so that the table of the program is complete, and the engine's
-// installation, which the fixture runs.
-var (
-	initDecl = &txn.Decl{Name: "init", Kind: txn.Normal, Writes: append(append(keys.InitWrites(), config.InitWrites()...),
-		keys.InitMarkerWrite())}
-	// installDecl is the engine's own declaration of the installation, which the
-	// fixture runs as the engine does when it installs the adapter of the node.
-	installDecl = engineDecl("adapter-install")
-)
+// installDecl is the engine's own declaration of the installation, which the
+// fixture runs as the engine does when it installs the adapter of the node.
+var installDecl = declNamed(engine.Transactions(), "adapter-install")
 
-// engineDecl finds a declaration among the engine's by name.
-func engineDecl(name string) *txn.Decl {
-	for _, d := range engine.Transactions() {
+// initDecl is the daemon's own declaration of init, which the fixture runs as the
+// daemon does when it lays out a node.
+var initDecl = declNamed(daemon.Transactions(), "init")
+
+// declNamed finds a declaration among those of an owner by name.
+func declNamed(decls []*txn.Decl, name string) *txn.Decl {
+	for _, d := range decls {
 		if d.Name == name {
 			return d
 		}
 	}
-	panic("harness: the engine declares no transaction " + name)
+	panic("harness: no declaration named " + name)
 }
 
-// ProgramTable is the table of every transaction of the program: the internal
-// ones, those of the store, the configuration, the keys and the engine, and the
-// two that the composition root owns.
+// ProgramTable is the table of every transaction of the program, as the daemon
+// builds it from the declarations of the transaction layer and of every owner.
 func ProgramTable(t testing.TB) *txn.Table {
 	t.Helper()
-	decls := append(txn.Internal(), store.Transactions()...)
-	decls = append(decls, config.Transactions()...)
-	decls = append(decls, keys.Transactions()...)
-	decls = append(decls, engine.Transactions()...)
-	decls = append(decls, initDecl)
-	tab, err := txn.NewTable(decls...)
+	tab, err := daemon.Table()
 	if err != nil {
-		t.Fatalf("harness: NewTable: %v", err)
+		t.Fatalf("harness: daemon.Table: %v", err)
 	}
 	return tab
 }
@@ -251,17 +243,10 @@ func initConfig(t testing.TB, w *txn.Writer, at time.Time) *config.Config {
 	}
 	tx := w.Begin(initDecl)
 	defer tx.Close()
-	if err := kp.WriteKeys(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err := plan.MakeDirs(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err := plan.WriteFiles(tx); err != nil {
-		t.Fatal(err)
-	}
-	if err := kp.WriteMarker(tx); err != nil {
-		t.Fatal(err)
+	for _, step := range []func(*txn.Tx) error{plan.MakeDirs, kp.WriteKeys, plan.WriteFiles, kp.WriteMarker} {
+		if err := step(tx); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)

@@ -44,9 +44,9 @@ By default the node has one instance, `Instance`, and every accessor without a n
   written by the `init` plan (the keys are real, from a seeded source, so the node
   identifier is the same in every fixture), the adapter installed and enabled through the install and enable
   entries; no file is written by hand, so the fixture and the program cannot
-  disagree about a format. The transaction the composition root owns
-  (`init`) is declared here the way it declares it, and the installation is the
-  engine's own declaration, which the fixture runs. Each
+  disagree about a format. `init` is the daemon's own declaration and the
+  installation the engine's, which the fixture runs, and `ProgramTable` is the daemon's table, so
+  it holds every transaction the program declares. Each
   fixture starts from a copy of one initialised disk per test binary.
 - **There is one clock.** The engine reads it, the ledger and the agents stamp with
   it, and a fake takes its `Now` method value. A crash does not move it.

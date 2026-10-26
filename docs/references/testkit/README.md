@@ -296,9 +296,10 @@ directory and is replaced), is answered with a result the schema accepts.
   acknowledgements on behalf, every record closed, the drain) are not in `scenario`.
 - The engine backend maps the engine's refusals itself, with the codes the interface's
   table does not list taken from the reasons' names; when the interface packages' shared
-  mapping exists it replaces the table here. The fixture declares the transactions of
-  `init` and of the adapter install as the composition root will, and takes them from it
-  when it exists.
+  mapping exists it replaces the table here. The fixture runs the transactions of
+  `init` and of the adapter install with the declarations of the daemon and the engine, and
+  builds its table of transactions from the daemon's, so a transaction the daemon adds is in
+  every table the crash walks and the power-loss run read.
 - The program path of a fake adapter has the extension of an executable of the platform
   (`.exe` on Windows, where a path that names a program is used as it is), written for
   Windows and cross-compiled: pending verification by CI on main.
