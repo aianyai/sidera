@@ -48,14 +48,25 @@ func writtenCases() []writtenCase {
 			}
 		}
 	}
+	// copiesOfBody1 makes every record refer to the one body a call gives: each gets
+	// its own file with a copy of it.
+	copiesOfBody1 := func(ins func() []store.InRecord) func() []store.InRecord {
+		return func() []store.InRecord {
+			recs := ins()
+			for i := range recs {
+				recs[i].Body = bodyRef(1)
+			}
+			return recs
+		}
+	}
 	closed8 := directEndpoint(8, "chat")
 	closed8.Status, closed8.Token = store.EndpointClosed, nil
 	return []writtenCase{
-		{name: "Deliver", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-			return r.st.Deliver(nil, ins)
+		{name: "Deliver", ins: copiesOfBody1(mixed), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+			return r.st.Deliver(bodyBytes(1), ins)
 		}},
-		{name: "DeliverReply", ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-			return r.st.DeliverReply(nil, nil, ins, nil)
+		{name: "DeliverReply", ins: copiesOfBody1(one(1)), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+			return r.st.DeliverReply(bodyBytes(1), nil, ins)
 		}},
 		{name: "PromptEnd", ins: func() []store.InRecord { return []store.InRecord{inRev(1, 2), inRev(2, 5)} },
 			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
@@ -71,7 +82,7 @@ func writtenCases() []writtenCase {
 			return r.st.Lease(ins)
 		}},
 		{name: "Ack", ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-			return r.st.Ack(ins, nil)
+			return r.st.Ack(ins)
 		}},
 		{name: "Tick", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.Tick(store.TickBatch{In: ins})
@@ -98,7 +109,11 @@ func writtenCases() []writtenCase {
 			ins: func() []store.InRecord { return []store.InRecord{deliveredWithBody(1)} },
 			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 				alert := store.QuarantineAlert{Kind: "corrupt_body", At: base, Detail: "d"}
-				return r.st.QuarantineBody(store.BodyQuarantine{Record: ins[0], Alert: alert})
+				got, err := r.st.QuarantineBody(store.BodyQuarantine{Record: ins[0], Alert: alert})
+				if got == nil {
+					return nil, err
+				}
+				return []store.InRecord{*got}, err
 			}},
 		{name: "FeedbackForm", ins: func() []store.InRecord { return []store.InRecord{noticeFor(srcOut(40, false))} },
 			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {

@@ -137,9 +137,6 @@ func (c *cmdViewVsDisk) run(e *Engine, _ time.Time) {
 	if e.view.unfinished != fresh.unfinished {
 		diff = append(diff, fmt.Sprintf("unfinished %d, from the disk %d", e.view.unfinished, fresh.unfinished))
 	}
-	if !reflect.DeepEqual(e.view.bodyRefs, fresh.bodyRefs) {
-		diff = append(diff, fmt.Sprintf("body references %v, from the disk %v", e.view.bodyRefs, fresh.bodyRefs))
-	}
 	if len(e.view.queued) != len(fresh.queued) {
 		diff = append(diff, "the queues differ")
 	}

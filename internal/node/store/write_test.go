@@ -3,6 +3,7 @@ package store_test
 import (
 	"errors"
 	"path"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -28,9 +29,9 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 		files []string // paths that exist afterwards
 	}{
 		{"intake", nil, func(r *rig) error { return r.st.Intake(bodyBytes(1), srcOut(1, true)) },
-			[]string{path.Join(store.OutDir, srcOut(1, true).Name()), path.Join(store.BodiesDir, bodyRef(1).Name())}},
+			[]string{path.Join(store.OutDir, srcOut(1, true).Name()), bodyPath(srcOut(1, true))}},
 		{"deliver", nil, func(r *rig) error { return dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)})) },
-			[]string{path.Join(store.InDir, tgtIn(1).Name()), path.Join(store.BodiesDir, bodyRef(1).Name())}},
+			[]string{path.Join(store.InDir, tgtIn(1).Name()), bodyPath(tgtIn(1))}},
 		{"control-reply", nil, func(r *rig) error { return r.st.ControlReply(outCtlRecord(1)) },
 			[]string{path.Join(store.OutDir, outCtlRecord(1).Name())}},
 		{"prompt-begin", nil, func(r *rig) error { return r.st.PromptBegin(store.AttemptsRecord{Endpoint: ep(2)}) },
@@ -54,8 +55,8 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 			o.Feedback = []delivery.Item{feedbackItem(1)}
 			return dropWritten(r.st.FeedbackForm([]byte("feedback wording"), noticeFor(o)))
 		}, nil},
-		{"orphan-gc", func(t *testing.T, mem *fsxtest.Mem) { seedBodies(t, mem, bodyBytes(1)) },
-			func(r *rig) error { return r.st.OrphanGC([]string{bodyRef(1).Name()}) }, nil},
+		{"orphan-gc", func(t *testing.T, mem *fsxtest.Mem) { seedBodyOf(t, mem, tgtIn(1), bodyBytes(1)) },
+			func(r *rig) error { return r.st.OrphanGC([]string{store.BodyFileName(tgtIn(1).Name())}) }, nil},
 		{"archive-expire", func(t *testing.T, mem *fsxtest.Mem) {
 			seedRaw(t, mem, store.ArchiveDir, "2026-01-01.jsonl", []byte("\n"))
 		},
@@ -90,7 +91,7 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 // revision 1 and each write after a read adds one.
 func TestTargetRecordsAreWrittenWithTheNextRevision(t *testing.T) {
 	r := newRig(t)
-	mustDo(t, dropWritten(r.st.Deliver(nil, []store.InRecord{tgtIn(1)})))
+	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)})))
 	sc := r.scan()
 	if len(sc.In) != 1 || sc.In[0].Rev != 1 {
 		t.Fatalf("after Deliver: %+v", sc.In)
@@ -103,7 +104,7 @@ func TestTargetRecordsAreWrittenWithTheNextRevision(t *testing.T) {
 		t.Errorf("after Lease: rev %d, handouts %d, want 2 and 1", in.Rev, in.Record.Lease.Handouts)
 	}
 	in.Record = deliveredRecord(in.Record)
-	mustDo(t, dropWritten(r.st.Ack([]store.InRecord{in}, nil)))
+	mustDo(t, dropWritten(r.st.Ack([]store.InRecord{in})))
 	if got := r.scan().In[0].Rev; got != 3 {
 		t.Errorf("after Ack: rev %d, want 3", got)
 	}
@@ -115,55 +116,64 @@ func TestTargetRecordsAreWrittenWithTheNextRevision(t *testing.T) {
 	}
 }
 
-// DeliverReply releases a body the way the other writes that drop the last
-// reference do: the file is removed in the same transaction, after the records,
-// and a body that is not released stays.
-func TestDeliverReplyRemovesTheBodiesItReleases(t *testing.T) {
+// DeliverReply settles bodies the way the other writes do: the records of the
+// reply get a body file of their own before they are written, and the source
+// record of the message answered, when the evidence ended its last delivery,
+// loses its own body file in the same transaction, after the records. An update
+// that keeps the reference keeps the file.
+func TestDeliverReplyRemovesTheBodyOfTheSourceRecordThatDroppedItsRef(t *testing.T) {
 	for _, c := range []struct {
-		rule    string
-		release []store.BodyRef
-		want    bool // body 1 is still there
+		rule string
+		out  store.OutRecord
+		want bool // the body of the source record is still there
 	}{
-		{"a body the evidence released is removed", []store.BodyRef{*bodyRef(1)}, false},
-		{"a body nobody released stays", nil, true},
+		{"the body of the source record is removed when the update drops its ref", finishedOut(1, true), false},
+		{"the body of the source record stays when the update keeps its ref", srcOut(1, true), true},
 	} {
 		t.Run(c.rule, func(t *testing.T) {
 			r := newRig(t)
-			seedBodies(t, r.mem, bodyBytes(1))
-			seed(t, r.mem, srcOut(1, true))
-			out := finishedOut(1, true)
-			if err := dropWritten(r.st.DeliverReply(nil, &out, []store.InRecord{inRev(9, 1)}, c.release)); err != nil {
+			source := srcOut(1, true)
+			seed(t, r.mem, source)
+			seedBodies(t, r.mem, source)
+			reply := tgtIn(2)
+			out := c.out
+			if err := dropWritten(r.st.DeliverReply(bodyBytes(2), &out, []store.InRecord{reply})); err != nil {
 				t.Fatal(err)
 			}
-			_, err := r.mem.Stat(path.Join(store.BodiesDir, bodyRef(1).Name()))
+			_, err := r.mem.Stat(bodyPath(source))
 			if (err == nil) != c.want {
-				t.Errorf("body 1 present = %v, want %v", err == nil, c.want)
+				t.Errorf("the body of the source record is present = %v, want %v", err == nil, c.want)
 			}
-			if got := r.scan().In; len(got) != 1 || got[0].Rev != 2 {
+			if got, err := r.mem.ReadFile(bodyPath(reply)); err != nil || string(got) != string(bodyBytes(2)) {
+				t.Errorf("the reply's record has its own body: %q, %v", got, err)
+			}
+			if got := r.scan().In; len(got) != 1 || got[0].Rev != 1 {
 				t.Errorf("target records after the call: %+v", got)
 			}
-			// The body went in the transaction of the reply: its points are the
+			// The removal is in the transaction of the reply: its points are the
 			// removal and the directory sync of that transaction, after the records.
 			var steps []string
 			for _, p := range r.rec.points {
 				steps = append(steps, p.Tag.Tx+"/"+p.Tag.Role)
 			}
-			released := false
+			removed := false
 			for _, s := range steps {
-				released = released || s == "deliver-reply/body-dir"
+				removed = removed || s == "deliver-reply/body-dir"
 			}
-			if released != (len(c.release) > 0) {
-				t.Errorf("the directory of the bodies was synced = %v for %d released bodies (points %v)", released, len(c.release), steps)
+			if removed == c.want {
+				t.Errorf("the directory of the bodies was synced = %v with the source body kept = %v (points %v)", removed, c.want, steps)
 			}
 		})
 	}
 }
 
-func TestReleaseOfABodyThatIsAlreadyGoneIsQuiet(t *testing.T) {
+// A write of a record that holds no reference succeeds when the file of its body
+// is already gone: an earlier, interrupted transaction of the same write removed it.
+func TestTheWriteOfARecordWithNoRefIsQuietWhenItsBodyIsAlreadyGone(t *testing.T) {
 	r := newRig(t)
 	seed(t, r.mem, srcOut(1, false))
-	if err := r.st.SourceUpdate(srcOutFinished(1), []store.BodyRef{*bodyRef(1)}); err != nil {
-		t.Errorf("the body was already removed by an earlier, interrupted release: %v", err)
+	if err := r.st.SourceUpdate(srcOutFinished(1)); err != nil {
+		t.Errorf("the body was already removed by an earlier, interrupted write: %v", err)
 	}
 }
 
@@ -250,7 +260,7 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 		"an archive file name outside the archive": func(r *rig) error {
 			return r.st.ArchiveExpire([]string{"../keys/identity.key"})
 		},
-		"an orphan body name that is not a digest": func(r *rig) error {
+		"an orphan body name that is not the name of a body file": func(r *rig) error {
 			return r.st.OrphanGC([]string{"../config/node.json"})
 		},
 	}
@@ -304,21 +314,42 @@ func TestWriteErrorsKeepTheirClass(t *testing.T) {
 	}
 }
 
-func TestBodiesAreContentAddressed(t *testing.T) {
+// A body file is named after the record it belongs to, and no two records share
+// one: two records that said the same bytes each have a file with a copy.
+func TestBodyFilesAreNamedAfterTheirRecords(t *testing.T) {
 	r := newRig(t)
-	mustDo(t, r.st.Intake(bodyBytes(1), srcOut(1, true)))
-	out2 := srcOut(2, true)
-	out2.Body = bodyRef(1)
-	mustDo(t, r.st.Intake(bodyBytes(1), out2))
-	sc := r.scan()
-	if len(sc.Bodies) != 1 || sc.Bodies[0] != bodyRef(1).Name() {
-		t.Fatalf("bodies = %v, want the one file of the digest", sc.Bodies)
+	first, second := srcOut(1, true), srcOut(2, true)
+	second.Body = bodyRef(1)
+	mustDo(t, r.st.Intake(bodyBytes(1), first))
+	mustDo(t, r.st.Intake(bodyBytes(1), second))
+	want := []string{store.BodyFileName(first.Name()), store.BodyFileName(second.Name())}
+	slices.Sort(want)
+	got := slices.Clone(r.scan().Bodies)
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Fatalf("bodies = %v, want one file for each of the two records: %v", got, want)
 	}
-	if got, _ := r.mem.ReadFile(path.Join(store.BodiesDir, bodyRef(1).Name())); string(got) != string(bodyBytes(1)) {
-		t.Errorf("a body file is the bare content, got %q", got)
+	for _, rec := range []store.Record{first, second} {
+		if b, _ := r.mem.ReadFile(bodyPath(rec)); string(b) != string(bodyBytes(1)) {
+			t.Errorf("the body file of %s is the bare content, got %q", rec.Name(), b)
+		}
 	}
-	if want := "ea8c004183bd3bd33e27907ed5cb35a24808cb99ab2bb41a727d0c675f5bcdfc"; bodyRef(1).Name() != want {
-		t.Errorf("the name of a body is the lowercase hex SHA-256 of its content: %q, want %q", bodyRef(1).Name(), want)
+}
+
+// The name of a body file is the name of its record without the extension, then
+// ".body": the hash of the key for an in/ or ctl/ record, and the sender then the
+// hash of the key for an out/ record. The names are part of the layout on disk.
+func TestTheNameOfABodyFileIsTheNameOfItsRecord(t *testing.T) {
+	for _, c := range []struct {
+		record store.Record
+		want   string
+	}{
+		{tgtIn(1), "9217a562696c0e2029e1e14cca852cea2de0be95435a39f5921d9b797081f128.body"},
+		{srcOut(1, true), "ep1zyg3zyg3zyg3zyg3zyg3zyg3zyj0kcgq.c911b2aa6f9940e8d3baa7c5ac0be241da57642b7a7a0a5b0b3de59a723ff1bc.body"},
+	} {
+		if got := store.BodyFileName(c.record.Name()); got != c.want {
+			t.Errorf("BodyFileName(%s) = %q, want %q", c.record.Name(), got, c.want)
+		}
 	}
 }
 

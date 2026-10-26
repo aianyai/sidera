@@ -95,9 +95,10 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 		held := inRev(2, 1)                        // accepted: not finished, never swept
 		c := created(t, 4, 5)
 		c.Record = deliveredRecord(c.Record)
+		c.Body = bodyRef(4) // a control record that still refers to its body
 		derived := derivedIn(4, 5, 2)
 		derived.Record = deliveredRecord(derived.Record)
-		derived.Body = bodyRef(2)           // shares its body with a record that stays
+		derived.Body = bodyRef(2)           // same bytes as the body of a record that stays, in a file of its own
 		orphanDerived := derivedIn(6, 9, 2) // its control record is gone: swept by its own retention
 		orphanDerived.Record = deliveredRecord(orphanDerived.Record)
 		orphanDerived.Body = bodyRef(4)
@@ -122,7 +123,8 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 			store.SeqRecord{Sender: ep(5), Floors: map[ident.Address]uint64{addr(2, 2): 3}},
 			store.SeqRecord{Sender: ep(7), Floors: map[ident.Address]uint64{addr(2, 2): 3}},
 			srcOutFinished(10), srcOut(11, false))
-		seedBodies(t, r.mem, bodyBytes(1), bodyBytes(2), bodyBytes(4), bodyBytes(9))
+		seedBodies(t, r.mem, done, held, c, derived, orphanDerived, stillQueued, srcOut(11, false))
+		seedBodyOf(t, r.mem, inRev(9, 1), bodyBytes(9)) // the body of a record that does not exist
 		_ = soon
 		return r
 	}
@@ -179,18 +181,25 @@ func TestPlanSweepSelectsByRule(t *testing.T) {
 			}
 		}
 	}
-	// Bodies: those a swept record referred to and no record left refers to. Body 2
-	// is held by an accepted record, body 9 was an orphan before and is the business
-	// of the orphan rule, not of the sweep.
-	var bodies []string
-	for _, b := range plan.Bodies {
-		bodies = append(bodies, b.Name())
+	// Bodies: the plan lists none; the sweep removes the own body file of every
+	// record it removes and no other. The derived delivery and the held record
+	// refer to the same bytes in files of their own, so the first goes and the
+	// second stays; the body of a record that does not exist was an orphan before
+	// and is the business of the orphan rule, not of the sweep.
+	mustDo(t, r.st.ArchiveSweep(plan.Chunk(now)))
+	bodyFiles := snapshot(t, r.mem, store.BodiesDir)
+	for _, swept := range []store.Record{inRev(1, 2), created(t, 4, 5), derivedIn(4, 5, 2), derivedIn(6, 9, 2)} {
+		if _, there := bodyFiles[bodyPath(swept)]; there {
+			t.Errorf("the body of the swept record %s is still there", swept.Name())
+		}
 	}
-	sort.Strings(bodies)
-	wantBodies := []string{bodyRef(1).Name(), bodyRef(4).Name()}
-	sort.Strings(wantBodies)
-	if strings.Join(bodies, ",") != strings.Join(wantBodies, ",") {
-		t.Errorf("bodies = %v, want %v", bodies, wantBodies)
+	for _, stays := range []store.Record{inRev(2, 1), inFor(8, 3, 1), srcOut(11, false), inRev(9, 1)} {
+		if _, there := bodyFiles[bodyPath(stays)]; !there {
+			t.Errorf("the body %s of a record that stays (or of none) was removed", bodyPath(stays))
+		}
+	}
+	if len(bodyFiles) != 4 {
+		t.Errorf("body files after the sweep: %d, want the 4 of the records that stay and the orphan", len(bodyFiles))
 	}
 	// One summary per record of a delivery, none for the rest.
 	var kinds []string

@@ -167,17 +167,22 @@ func checkNoOrphanBody(t *testing.T, sc *store.Scan) {
 	referenced := map[string]bool{}
 	for _, o := range sc.Out {
 		if o.Body != nil {
-			referenced[o.Body.Name()] = true
+			referenced[store.BodyFileName(o.Name())] = true
 		}
 	}
 	for _, in := range sc.In {
 		if in.Body != nil {
-			referenced[in.Body.Name()] = true
+			referenced[store.BodyFileName(in.Name())] = true
+		}
+	}
+	for _, c := range sc.Ctl {
+		if c.Body != nil {
+			referenced[store.BodyFileName(c.Name())] = true
 		}
 	}
 	for _, b := range sc.Bodies {
 		if !referenced[b] {
-			t.Errorf("body %s is referred to by no record after the start", b)
+			t.Errorf("body %s belongs to no record that refers to one after the start", b)
 		}
 	}
 }
@@ -261,9 +266,9 @@ func TestSendingAndIntakeRecoverFromACrashAtEveryPoint(t *testing.T) {
 			checkSettled(t, r, res.MessageID, answer)
 		})
 	})
-	t.Run("an answer whose evidence releases the last reference to a body", func(t *testing.T) {
-		// The question's body is the source's alone, and the transaction that writes
-		// the answer removes it.
+	t.Run("an answer whose evidence drops the body of the source record", func(t *testing.T) {
+		// The question's body belongs to the source record, and the transaction that
+		// writes the answer removes it.
 		taker := newDiskTaker(cov, "deliver-reply")
 		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
 		taker.h = h

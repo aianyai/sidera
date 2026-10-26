@@ -86,6 +86,59 @@ func pendingOf(ev store.PendingEvent, cause delivery.Cause, ins ...store.InRecor
 	return p
 }
 
+// seedWithBodies writes the records and, for each one that holds a reference, the
+// body file it owns.
+func seedWithBodies(t testing.TB, mem *fsxtest.Mem, recs ...store.Record) {
+	t.Helper()
+	seed(t, mem, recs...)
+	seedBodies(t, mem, recs...)
+}
+
+// wantBody fails unless the body file of rec is on the disk with content.
+func wantBody(t testing.TB, r *rig, rec store.Record, content []byte) {
+	t.Helper()
+	got, err := r.mem.ReadFile(bodyPath(rec))
+	if err != nil {
+		t.Errorf("the body of %s: %v", rec.Name(), err)
+		return
+	}
+	if string(got) != string(content) {
+		t.Errorf("the body of %s holds %q, want %q", rec.Name(), got, content)
+	}
+}
+
+// wantNoBody fails when the body file of rec is on the disk.
+func wantNoBody(t testing.TB, r *rig, rec store.Record) {
+	t.Helper()
+	if _, err := r.mem.Stat(bodyPath(rec)); err == nil {
+		t.Errorf("the body of %s is still there", rec.Name())
+	}
+}
+
+// wantBodyCount fails unless bodies/ holds exactly n files: with the checks of
+// each record, that no other body was written or removed.
+func wantBodyCount(t testing.TB, r *rig, n int) {
+	t.Helper()
+	if got := snapshot(t, r.mem, store.BodiesDir); len(got) != n {
+		t.Errorf("bodies/ holds %d files %v, want %d", len(got), keysOf(got), n)
+	}
+}
+
+// rejected is the target record in as the target writes it when it refuses the
+// message: it refers to no body.
+func rejected(in store.InRecord) store.InRecord {
+	in.Body = nil
+	in.Record.State, in.Record.Reject = delivery.StateRejected, delivery.RejectEndpointClosed
+	return in
+}
+
+// ctlWithBody is ctlTo with a body of its own.
+func ctlWithBody(i, e int) store.CtlRecord {
+	c := ctlTo(i, e)
+	c.Body = bodyRef(i)
+	return c
+}
+
 func mustDo(t testing.TB, err error) {
 	t.Helper()
 	if err != nil {
@@ -106,18 +159,30 @@ func scenarios() []scenario {
 			run: func(t *testing.T, r *rig, s *sim) error {
 				return r.st.Intake(bodyBytes(1), srcOut(1, true))
 			},
+			verify: func(t *testing.T, r *rig) {
+				wantBody(t, r, srcOut(1, true), bodyBytes(1))
+				wantBodyCount(t, r, 1)
+			},
 			bodiesResolve: true,
 		},
 		{
+			// Records that refer to no body are written without one, and the bodies
+			// of the source records on this node, which refer to theirs, are left.
 			name: "deliver",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seed(t, mem, srcOut(1, true), srcOut(2, true)) // the source records on this node refer to the bodies
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(2))
+				seedWithBodies(t, mem, srcOut(1, true), srcOut(2, true))
 			},
 			durable: "deliver/in-dir.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return dropWritten(r.st.Deliver(nil, []store.InRecord{inRev(1, 1), inRev(2, 1)}))
+				return dropWritten(r.st.Deliver(nil, []store.InRecord{rejected(inRev(1, 1)), rejected(inRev(2, 1))}))
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, inRev(1, 1))
+				wantNoBody(t, r, inRev(2, 1))
+				wantBody(t, r, srcOut(1, true), bodyBytes(1))
+				wantBody(t, r, srcOut(2, true), bodyBytes(2))
+				wantBodyCount(t, r, 2)
 			},
 			bodiesResolve: true,
 		},
@@ -128,13 +193,62 @@ func scenarios() []scenario {
 			run: func(t *testing.T, r *rig, s *sim) error {
 				return dropWritten(r.st.Deliver(bodyBytes(3), []store.InRecord{inRev(3, 1)}))
 			},
+			verify: func(t *testing.T, r *rig) {
+				wantBody(t, r, inRev(3, 1), bodyBytes(3))
+				wantBodyCount(t, r, 1)
+			},
 			bodiesResolve: true,
 		},
 		{
-			name: "deliver-reply without a release",
+			// One message for three local endpoints: each record has a body file of
+			// its own with a copy, none is shared.
+			name: "deliver to several recipients",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedBodies(t, mem, bodyBytes(1))
-				seed(t, mem, srcOut(1, true))
+				seed(t, mem, directEndpoint(7, "chat"), directEndpoint(8, "chat"))
+			},
+			durable: "deliver/in-dir.sync-dir#1",
+			mode:    batch,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{inFor(1, 2, 1), inFor(1, 7, 1), inFor(1, 8, 1)}))
+			},
+			verify: func(t *testing.T, r *rig) {
+				seen := map[string]bool{}
+				for _, e := range []int{2, 7, 8} {
+					in := inFor(1, e, 1)
+					wantBody(t, r, in, bodyBytes(1))
+					seen[bodyPath(in)] = true
+				}
+				if len(seen) != 3 {
+					t.Errorf("the three records share body files: %v", seen)
+				}
+				wantBodyCount(t, r, 3)
+			},
+			bodiesResolve: true,
+		},
+		{
+			// A refused record among the accepted has no body file; the accepted
+			// ones each have theirs.
+			name: "deliver with a rejected record among the accepted",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seed(t, mem, directEndpoint(7, "chat"), directEndpoint(8, "chat"))
+			},
+			durable: "deliver/in-dir.sync-dir#1",
+			mode:    batch,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				return dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{inFor(1, 2, 1), rejected(inFor(1, 7, 1)), inFor(1, 8, 1)}))
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantBody(t, r, inFor(1, 2, 1), bodyBytes(1))
+				wantBody(t, r, inFor(1, 8, 1), bodyBytes(1))
+				wantNoBody(t, r, inFor(1, 7, 1))
+				wantBodyCount(t, r, 2)
+			},
+			bodiesResolve: true,
+		},
+		{
+			name: "deliver-reply keeping the source body",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seedWithBodies(t, mem, srcOut(1, true))
 			},
 			durable: "deliver-reply/in-dir.sync-dir#1",
 			mode:    batch,
@@ -144,22 +258,26 @@ func scenarios() []scenario {
 					Ref:      delivery.DeliveryRef{Sender: addr(local, 1), Message: msgID(1), Recipient: addr(local, 2)},
 					Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: base,
 				}}
-				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}, nil))
+				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}))
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantBody(t, r, srcOut(1, true), bodyBytes(1))
+				wantBody(t, r, inRev(9, 1), bodyBytes(9))
+				wantBodyCount(t, r, 2)
 			},
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
-				if _, ok := fin[path.Join(store.BodiesDir, bodyRef(1).Name())]; !ok {
+				if _, ok := fin[bodyPath(srcOut(1, true))]; !ok {
 					t.Errorf("%s: the body of the source record, which still refers to it, was removed", where)
 				}
 			},
 		},
 		{
 			// The evidence in the reply finishes the delivery, so the source record
-			// drops its body and the transaction that removes the last reference
-			// deletes the body at its end, after the records are durable.
+			// drops its body and the transaction deletes that file at its end, after
+			// the records are durable. The body of another source record stays.
 			name: "deliver-reply",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedBodies(t, mem, bodyBytes(1))
-				seed(t, mem, srcOut(1, true))
+				seedWithBodies(t, mem, srcOut(1, true), srcOut(2, true))
 			},
 			durable: "deliver-reply/in-dir.sync-dir#1",
 			mode:    batch,
@@ -169,15 +287,13 @@ func scenarios() []scenario {
 					Ref:      delivery.DeliveryRef{Sender: addr(local, 1), Message: msgID(1), Recipient: addr(local, 2)},
 					Feedback: delivery.Feedback{Kind: delivery.KindDeliveryUnknown, State: delivery.StateDeliveryUnknown}, At: base,
 				}}
-				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}, []store.BodyRef{*bodyRef(1)}))
+				return dropWritten(r.st.DeliverReply(bodyBytes(9), &out, []store.InRecord{inRev(9, 1)}))
 			},
 			verify: func(t *testing.T, r *rig) {
-				if _, err := r.mem.Stat(path.Join(store.BodiesDir, bodyRef(1).Name())); err == nil {
-					t.Error("the released body is still there")
-				}
-				if _, err := r.mem.Stat(path.Join(store.BodiesDir, bodyRef(9).Name())); err != nil {
-					t.Errorf("the body of the reply: %v", err)
-				}
+				wantNoBody(t, r, srcOut(1, true))
+				wantBody(t, r, srcOut(2, true), bodyBytes(2))
+				wantBody(t, r, inRev(9, 1), bodyBytes(9))
+				wantBodyCount(t, r, 2)
 			},
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
 				// The source record is updated before the target record that depends on it.
@@ -191,14 +307,19 @@ func scenarios() []scenario {
 		{
 			name: "source-update",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedBodies(t, mem, bodyBytes(1))
-				seed(t, mem, srcOut(1, true))
+				seedWithBodies(t, mem, srcOut(1, true), srcOut(2, true))
 			},
 			durable: "source-update/out.sync-dir#1",
 			mode:    atomic,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				return r.st.SourceUpdate(finishedOut(1, true), []store.BodyRef{*bodyRef(1)})
+				return r.st.SourceUpdate(finishedOut(1, true))
 			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, srcOut(1, true))
+				wantBody(t, r, srcOut(2, true), bodyBytes(2))
+				wantBodyCount(t, r, 1)
+			},
+			bodiesResolve: true,
 		},
 		{
 			name: "control-intake",
@@ -219,21 +340,25 @@ func scenarios() []scenario {
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				c := sessionCtl(1, 5)
 				c.Body = bodyRef(1)
-				seedBodies(t, mem, bodyBytes(1))
-				seed(t, mem, session(5, store.EndpointCreating, ctlName(1)), c)
+				seedWithBodies(t, mem, session(5, store.EndpointCreating, ctlName(1)), c, srcOut(2, true))
 			},
 			durable: "control-result/ctl.sync-dir#1",
 			mode:    atomic,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				c := created(t, 1, 5)
-				return r.st.ControlResult(c, ptr(openedBy(c)), []store.BodyRef{*bodyRef(1)})
+				return r.st.ControlResult(c, ptr(openedBy(c)))
 			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, sessionCtl(1, 5))
+				wantBody(t, r, srcOut(2, true), bodyBytes(2))
+				wantBodyCount(t, r, 1)
+			},
+			bodiesResolve: true,
 		},
 		{
 			name: "control-reply",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedBodies(t, mem, bodyBytes(1))
-				seed(t, mem, outCtlRecord(1))
+				seedWithBodies(t, mem, outCtlRecord(1))
 			},
 			durable: "control-reply/out.sync-dir#1",
 			mode:    atomic,
@@ -259,8 +384,7 @@ func scenarios() []scenario {
 		{
 			name: "lease",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seed(t, mem, inRev(1, 1), inRev(2, 1), inRev(3, 1))
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(2), bodyBytes(3))
+				seedWithBodies(t, mem, inRev(1, 1), inRev(2, 1), inRev(3, 1))
 			},
 			durable: "lease/in-dir.sync-dir#1",
 			mode:    batch,
@@ -276,12 +400,10 @@ func scenarios() []scenario {
 			bodiesResolve: true,
 		},
 		{
+			// Each record has a body of its own, and acknowledging both removes both.
 			name: "ack",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				a, b := inRev(1, 2), inRev(2, 2)
-				b.Body = bodyRef(1) // two records share one body
-				seed(t, mem, a, b)
-				seedBodies(t, mem, bodyBytes(1))
+				seedWithBodies(t, mem, inRev(1, 2), inRev(2, 2))
 			},
 			durable: "ack/in-dir.sync-dir#1",
 			mode:    batch,
@@ -289,7 +411,36 @@ func scenarios() []scenario {
 				a, b := inRev(1, 2), inRev(2, 2)
 				a.Body, b.Body = nil, nil
 				a.Record, b.Record = deliveredRecord(a.Record), deliveredRecord(b.Record)
-				return dropWritten(r.st.Ack([]store.InRecord{a, b}, []store.BodyRef{*bodyRef(1)}))
+				return dropWritten(r.st.Ack([]store.InRecord{a, b}))
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, inRev(1, 2))
+				wantNoBody(t, r, inRev(2, 2))
+				wantBodyCount(t, r, 0)
+			},
+			bodiesResolve: true,
+		},
+		{
+			// Three records with a body each, two acknowledged: only their own bodies
+			// go, in no crash state does a record point to a missing body, and the
+			// third keeps its record and its body.
+			name: "ack removes only its own body",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seedWithBodies(t, mem, inRev(1, 2), inRev(2, 2), inRev(3, 2))
+			},
+			durable: "ack/in-dir.sync-dir#1",
+			mode:    batch,
+			run: func(t *testing.T, r *rig, s *sim) error {
+				a, c := inRev(1, 2), inRev(3, 2)
+				a.Body, c.Body = nil, nil
+				a.Record, c.Record = deliveredRecord(a.Record), deliveredRecord(c.Record)
+				return dropWritten(r.st.Ack([]store.InRecord{a, c}))
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, inRev(1, 2))
+				wantNoBody(t, r, inRev(3, 2))
+				wantBody(t, r, inRev(2, 2), bodyBytes(2))
+				wantBodyCount(t, r, 1)
 			},
 			bodiesResolve: true,
 		},
@@ -298,8 +449,7 @@ func scenarios() []scenario {
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				c := sessionCtl(3, 5)
 				c.Body = bodyRef(3)
-				seed(t, mem, srcOut(1, false), inRev(2, 1), c)
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(2), bodyBytes(3))
+				seedWithBodies(t, mem, srcOut(1, false), inRev(2, 1), c, inRev(4, 1))
 			},
 			durable: "tick/body-dir.sync-dir#1",
 			mode:    batch,
@@ -313,8 +463,14 @@ func scenarios() []scenario {
 				c.Record = applied(t, c.Record, delivery.Event{Type: delivery.EventRejected, Reject: delivery.RejectExpired})
 				return dropWritten(r.st.Tick(store.TickBatch{
 					Out: []store.OutRecord{out}, In: []store.InRecord{in}, Ctl: []store.CtlRecord{c},
-					Release: []store.BodyRef{*bodyRef(1), *bodyRef(2), *bodyRef(3)},
 				}))
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, srcOut(1, false))
+				wantNoBody(t, r, inRev(2, 1))
+				wantNoBody(t, r, sessionCtl(3, 5))
+				wantBody(t, r, inRev(4, 1), bodyBytes(4))
+				wantBodyCount(t, r, 1)
 			},
 		},
 		{
@@ -333,8 +489,7 @@ func scenarios() []scenario {
 		{
 			name: "endpoint-close",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seed(t, mem, directEndpoint(7, "chat"), inFor(1, 7, 1), inFor(2, 7, 1), inFor(3, 2, 1), ctlTo(4, 7))
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(2), bodyBytes(3))
+				seedWithBodies(t, mem, directEndpoint(7, "chat"), inFor(1, 7, 1), inFor(2, 7, 1), inFor(3, 2, 1), ctlWithBody(4, 7))
 			},
 			durable:  "endpoint-close/endpoint.sync-dir#1",
 			mode:     atomic,
@@ -348,13 +503,21 @@ func scenarios() []scenario {
 				}
 				return dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan())))
 			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, inFor(1, 7, 1))
+				wantNoBody(t, r, inFor(2, 7, 1))
+				wantNoBody(t, r, ctlWithBody(4, 7))
+				wantBody(t, r, inFor(3, 2, 1), bodyBytes(3))
+				wantBodyCount(t, r, 1)
+			},
+			bodiesResolve: true,
 		},
 		{
 			name: "instance-drain",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				seed(t, mem, directEndpoint(7, "chat"), directEndpoint(8, "chat"), directEndpoint(9, "other"),
-					inFor(1, 7, 1), inFor(2, 8, 1), inFor(3, 9, 1), ctlTo(4, 8))
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(2), bodyBytes(3))
+					inFor(1, 7, 1), inFor(2, 8, 1), inFor(3, 9, 1), ctlWithBody(4, 8))
+				seedBodies(t, mem, inFor(1, 7, 1), inFor(2, 8, 1), inFor(3, 9, 1), ctlWithBody(4, 8))
 			},
 			mode:         atomic,
 			mustComplete: true,
@@ -374,14 +537,20 @@ func scenarios() []scenario {
 				}
 				return nil
 			},
+			verify: func(t *testing.T, r *rig) {
+				wantNoBody(t, r, inFor(1, 7, 1))
+				wantNoBody(t, r, inFor(2, 8, 1))
+				wantNoBody(t, r, ctlWithBody(4, 8))
+				wantBody(t, r, inFor(3, 9, 1), bodyBytes(3))
+				wantBodyCount(t, r, 1)
+			},
 		},
 		{
 			name: "feedback-form",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				o := srcOut(1, false)
 				o.Feedback = []delivery.Item{feedbackItem(1)}
-				seed(t, mem, o)
-				seedBodies(t, mem, bodyBytes(1))
+				seedWithBodies(t, mem, o)
 			},
 			durable: "feedback-form/notice.sync-dir#1",
 			mode:    atomic,
@@ -393,6 +562,11 @@ func scenarios() []scenario {
 				}
 				o.Feedback = nil
 				return r.st.FeedbackClear([]store.OutRecord{o})
+			},
+			verify: func(t *testing.T, r *rig) {
+				wantBody(t, r, srcOut(1, false), bodyBytes(1))
+				wantBody(t, r, noticeFor(srcOut(1, false)), []byte("feedback wording"))
+				wantBodyCount(t, r, 2)
 			},
 		},
 		single("checkpoint-put", "checkpoint-put/checkpoint.sync-dir#1", func(r *rig) error {
@@ -505,10 +679,9 @@ func promptScenario(name string, ev store.PendingEvent, cause delivery.Cause) sc
 	return scenario{
 		name: name,
 		setup: func(t *testing.T, mem *fsxtest.Mem) {
-			seed(t, mem, inRev(1, 1), inRev(2, 1), store.AttemptsRecord{Endpoint: ep(2), InFlight: &store.InFlightPrompt{
+			seedWithBodies(t, mem, inRev(1, 1), inRev(2, 1), store.AttemptsRecord{Endpoint: ep(2), InFlight: &store.InFlightPrompt{
 				Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Kind: 1, Covers: []store.TargetKey{tgtKey(1), tgtKey(2)},
 			}})
-			seedBodies(t, mem, bodyBytes(1), bodyBytes(2))
 		},
 		durable: name + "/attempts.sync-dir#1",
 		mode:    atomic,
@@ -531,7 +704,7 @@ func sweepScenario(farFuture time.Time) scenario {
 		o1 := srcOutFinished(1)                        // a finished source record whose number must be remembered
 		o2 := srcOutFinished(2)                        // another, of the same pair
 		inDone := inRev(3, 2)                          // a finished target record
-		inDone.Record = deliveredRecord(inDone.Record) // it still refers to its body: the release never happened
+		inDone.Record = deliveredRecord(inDone.Record) // it still refers to its body: the crash came before it was dropped
 		c := created(t, 4, 5)                          // a control record of a session creation
 		c.Record = deliveredRecord(c.Record)
 		derived := derivedIn(4, 5, 2) // its derived delivery
@@ -541,10 +714,13 @@ func sweepScenario(farFuture time.Time) scenario {
 		closed := session(5, store.EndpointClosed, ctlName(4))
 		notified := lostNotice(1, 6, base) // an out-lost record whose notice was given
 		notified.Feedback = nil
-		seed(t, mem, o1, o2, inDone, c, derived, lost, closed, notified,
+		keep := srcOut(8, false) // a queued source record: not finished, never swept
+		seedWithBodies(t, mem, o1, o2, inDone, c, derived, lost, closed, notified, keep,
 			store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "out/x"},
 			adminResult(1))
-		seedBodies(t, mem, bodyBytes(3))
+		// A finished source record that holds no reference still owns the file a
+		// crash left; the sweep removes it with the record.
+		seedBodyOf(t, mem, o1, bodyBytes(1))
 	}
 	return scenario{
 		name:  "archive-sweep",
@@ -562,7 +738,7 @@ func sweepScenario(farFuture time.Time) scenario {
 		},
 		retry: func(t *testing.T, r *rig, s *sim) {
 			plan := store.PlanSweep(r.scan(), farFuture)
-			if len(plan.Records)+len(plan.Ctl)+len(plan.Bodies)+len(plan.Outs)+len(plan.OutLosts)+len(plan.Endpoints) == 0 {
+			if len(plan.Records)+len(plan.Ctl)+len(plan.Outs)+len(plan.OutLosts)+len(plan.Endpoints) == 0 {
 				return
 			}
 			mustDo(t, r.st.ArchiveSweep(plan.Chunk(farFuture)))
@@ -571,6 +747,10 @@ func sweepScenario(farFuture time.Time) scenario {
 			if sc := r.scan(); len(sc.OutLost) != 0 {
 				t.Errorf("an out-lost record whose notice was given is left: %v", sc.OutLost)
 			}
+			wantNoBody(t, r, srcOutFinished(1))
+			wantNoBody(t, r, inRev(3, 2))
+			wantBody(t, r, srcOut(8, false), bodyBytes(8))
+			wantBodyCount(t, r, 1)
 		},
 		crashed: func(t *testing.T, where string, snap map[string]string) {
 			sweepInvariants(t, where, snap)

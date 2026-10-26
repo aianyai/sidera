@@ -304,7 +304,7 @@ func TestFailedAppendLeavesAHalfLineAndLaterTransactionsStayReadable(t *testing.
 func TestFailedSweepAppendRemovesNothing(t *testing.T) {
 	r := newRig(t)
 	rec := srcOutFinished(1)
-	if err := r.st.SourceUpdate(rec, nil); err != nil {
+	if err := r.st.SourceUpdate(rec); err != nil {
 		t.Fatal(err)
 	}
 	r2 := newFaultyRig(t, r.mem)

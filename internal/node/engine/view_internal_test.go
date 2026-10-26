@@ -161,8 +161,8 @@ func ctlRec(t testing.TB, i int, recipient ident.EndpointID, state delivery.Stat
 }
 
 // The view is built from a scan and holds what the loop decides with: the
-// endpoints by id and by token, the number of unfinished deliveries, and how
-// many records refer to each body.
+// endpoints by id and by token, and the number of unfinished deliveries; the
+// records it holds say which of them refer to a body.
 func TestBuildViewCountsWhatTheLoopDecidesWith(t *testing.T) {
 	direct := endpointRec(t, 1, adapterreg.KindDirect, store.EndpointOpen, "chat")
 	openSession := endpointRec(t, 2, adapterreg.KindSession, store.EndpointOpen, "claude")
@@ -235,15 +235,31 @@ func TestBuildViewCountsWhatTheLoopDecidesWith(t *testing.T) {
 	}
 	// Bodies: the three target records that are waiting hold theirs; the one whose
 	// outcome is unknown is a fixture that keeps its reference; a final one holds
-	// none; each source record holds one.
+	// none; each source record holds one. The view keeps the records as they are
+	// stored, so what a record refers to is read off it.
+	holders := func(text string) int {
+		ref := store.BodyRefOf([]byte(text))
+		n := 0
+		for _, in := range v.in {
+			if in.Body != nil && *in.Body == ref {
+				n++
+			}
+		}
+		for _, o := range v.out {
+			if o.Body != nil && *o.Body == ref {
+				n++
+			}
+		}
+		return n
+	}
 	for _, tc := range []struct {
 		body string
 		want int
 	}{
 		{"body 1", 1}, {"body 3", 1}, {"body 4", 0}, {"body 7", 1}, {"out body 1", 1}, {"out body 2", 1}, {"unknown", 0},
 	} {
-		if got := v.BodyRefs(store.BodyRefOf([]byte(tc.body)).Name()); got != tc.want {
-			t.Errorf("BodyRefs(%q) = %d, want %d", tc.body, got, tc.want)
+		if got := holders(tc.body); got != tc.want {
+			t.Errorf("records that refer to %q: %d, want %d", tc.body, got, tc.want)
 		}
 	}
 }

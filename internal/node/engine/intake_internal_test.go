@@ -143,18 +143,21 @@ func TestATargetRecordLetsGoOfItsBodyExactlyWhenItNoLongerNeedsIt(t *testing.T) 
 	} {
 		body := store.BodyRefOf([]byte("kept?"))
 		c.in.Body = &body
-		got, ref := settledIn(c.in)
+		got := settledIn(c.in)
 		switch {
-		case c.drop && (got.Body != nil || ref == nil || *ref != body):
-			t.Errorf("%s: body %v, released %v; want the reference dropped and returned", c.name, got.Body, ref)
-		case !c.drop && (got.Body == nil || ref != nil):
-			t.Errorf("%s: body %v, released %v; want the reference kept", c.name, got.Body, ref)
+		case c.drop && got.Body != nil:
+			t.Errorf("%s: body %v; want the reference dropped", c.name, got.Body)
+		case !c.drop && (got.Body == nil || *got.Body != body):
+			t.Errorf("%s: body %v; want the reference kept", c.name, got.Body)
+		}
+		if c.in.Body == nil || *c.in.Body != body {
+			t.Errorf("%s: settledIn changed the record it was given", c.name)
 		}
 	}
-	none, ref := settledIn(inRec(t, 5, b, delivery.StateRejected))
+	none := inRec(t, 5, b, delivery.StateRejected)
 	none.Body = nil
-	if _, ref = settledIn(none); ref != nil {
-		t.Error("a record without a body released one")
+	if got := settledIn(none); got.Body != nil {
+		t.Error("a record without a body was given one")
 	}
 }
 
@@ -178,41 +181,6 @@ func TestTheRefusalOfAMessageForAnEndpointItCannotBeGiven(t *testing.T) {
 	} {
 		if got := messageRefusal(c.st); got != c.want {
 			t.Errorf("%s: %s, want %s", c.name, got, c.want)
-		}
-	}
-}
-
-func TestUnreferencedAfterCountsTheReferencesATransactionAddsAsWellAsTheOnesItDrops(t *testing.T) {
-	ref := func(s string) *store.BodyRef { r := store.BodyRefOf([]byte(s)); return &r }
-	x, y := ref("x"), ref("y")
-	names := func(rs []store.BodyRef) []string {
-		var out []string
-		for _, r := range rs {
-			out = append(out, r.Name())
-		}
-		return out
-	}
-	for _, c := range []struct {
-		name           string
-		counts         bodyCounts
-		dropped, added []*store.BodyRef
-		want           []*store.BodyRef
-	}{
-		{"the last reference dropped is released", bodyCounts{x.Name(): 1}, []*store.BodyRef{x}, nil, []*store.BodyRef{x}},
-		{"another record still refers to it", bodyCounts{x.Name(): 2}, []*store.BodyRef{x}, nil, nil},
-		{"a record the transaction writes refers to it", bodyCounts{x.Name(): 1}, []*store.BodyRef{x}, []*store.BodyRef{x}, nil},
-		{"one of two records written refers to it", bodyCounts{x.Name(): 1, y.Name(): 1}, []*store.BodyRef{x, y}, []*store.BodyRef{y}, []*store.BodyRef{x}},
-		{"several drops of the last references", bodyCounts{x.Name(): 2}, []*store.BodyRef{x, x}, nil, []*store.BodyRef{x}},
-		{"a body is listed once", bodyCounts{x.Name(): 1}, []*store.BodyRef{x, x}, nil, []*store.BodyRef{x}},
-		{"a reference that is not there changes nothing", bodyCounts{}, []*store.BodyRef{nil}, []*store.BodyRef{nil}, nil},
-	} {
-		got := names(c.counts.unreferencedAfter(c.dropped, c.added))
-		var want []string
-		for _, r := range c.want {
-			want = append(want, r.Name())
-		}
-		if !slices.Equal(got, want) {
-			t.Errorf("%s: %v, want %v", c.name, got, want)
 		}
 	}
 }

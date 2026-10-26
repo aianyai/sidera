@@ -52,8 +52,8 @@ var designTable = []struct {
 	writes string
 }{
 	{"intake", txn.Normal, "body:Replace[OP] out:Replace"},
-	{"deliver", txn.Normal, "body:Replace[OP] in:ReplaceDefer[M] in-dir:SyncDir"},
-	{"deliver-reply", txn.Normal, "reply-body:Replace[OP] out:Replace[O] in:ReplaceDefer[M] in-dir:SyncDir body:Remove[MO] body-dir:SyncDir[O]"},
+	{"deliver", txn.Normal, "body:Replace[MOP] in:ReplaceDefer[M] in-dir:SyncDir"},
+	{"deliver-reply", txn.Normal, "reply-body:Replace[MOP] out:Replace[O] in:ReplaceDefer[M] in-dir:SyncDir body:Remove[MO] body-dir:SyncDir[O]"},
 	{"source-update", txn.Normal, "out:Replace body:Remove[MO] body-dir:SyncDir[O]"},
 	{"control-intake", txn.Normal, "body:Replace[OP] endpoint:Replace[OP] ctl:Replace"},
 	{"control-result", txn.Normal, "ctl:Replace endpoint:Replace[O] body:Remove[MO] body-dir:SyncDir[O]"},

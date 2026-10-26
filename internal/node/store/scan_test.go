@@ -2,7 +2,9 @@ package store_test
 
 import (
 	"errors"
+	"fmt"
 	"path"
+	"sort"
 	"strings"
 	"testing"
 
@@ -20,7 +22,7 @@ func TestScanReturnsEveryRecordOfEveryKind(t *testing.T) {
 		store.AttemptsRecord{Endpoint: ep(2)}, store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{}`)},
 		adminResult(1), store.AlertRecord{ID: store.AlertID{1}, Kind: "k", At: base, Detail: "d"},
 		store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{addr(2, 2): 1}})
-	seedBodies(t, r.mem, bodyBytes(1), bodyBytes(2))
+	seedBodies(t, r.mem, srcOut(1, false), inRev(3, 1))
 	seedRaw(t, r.mem, store.ArchiveDir, "2026-10-24.jsonl", []byte("\n"))
 	sc := r.scan()
 	if len(sc.Out) != 2 || len(sc.In) != 1 || len(sc.Ctl) != 1 || len(sc.Endpoints) != 1 || len(sc.Attempts) != 1 ||
@@ -53,7 +55,9 @@ func TestScanReturnsEveryRecordOfEveryKind(t *testing.T) {
 }
 
 // Names are classified: a record, a body, the debris of an interrupted write,
-// and the rest.
+// and the rest. A body is named after its record: `<sender>.<64 hex>.body` for a
+// source record, `<64 hex>.body` for any other; the bare digest that named a body
+// when bodies were shared by content is no body's name.
 func TestScanClassifiesFileNames(t *testing.T) {
 	r := newRig(t)
 	good := srcOut(1, false)
@@ -61,7 +65,10 @@ func TestScanClassifiesFileNames(t *testing.T) {
 	seedRaw(t, r.mem, store.OutDir, "stray.txt", []byte("x"))
 	seedRaw(t, r.mem, store.OutDir, zeroOutName(ep(1)), []byte("not a record"))
 	seedRaw(t, r.mem, store.OutDir, ".tmp-123", []byte("debris"))
-	seedRaw(t, r.mem, store.BodiesDir, bodyRef(1).Name(), bodyBytes(1))
+	seedBodyOf(t, r.mem, good, bodyBytes(1))
+	seedBodyOf(t, r.mem, inRev(2, 1), bodyBytes(2))
+	bareDigest := fmt.Sprintf("%x", bodyRef(1).Digest)
+	seedRaw(t, r.mem, store.BodiesDir, bareDigest, bodyBytes(1))
 	seedRaw(t, r.mem, store.BodiesDir, "oddly-named", []byte("x"))
 	sc := r.scan()
 	if len(sc.Out) != 1 {
@@ -70,15 +77,19 @@ func TestScanClassifiesFileNames(t *testing.T) {
 	if len(sc.Damaged) != 1 || sc.Damaged[0].Damage.Class != store.HeaderUnreadable || sc.Damaged[0].Key != nil {
 		t.Errorf("damaged: %+v", sc.Damaged)
 	}
-	if len(sc.Bodies) != 1 {
-		t.Errorf("bodies: %v", sc.Bodies)
+	wantBodies := []string{store.BodyFileName(good.Name()), store.BodyFileName(inRev(2, 1).Name())}
+	gotBodies := append([]string(nil), sc.Bodies...)
+	sort.Strings(wantBodies)
+	sort.Strings(gotBodies)
+	if strings.Join(gotBodies, ",") != strings.Join(wantBodies, ",") {
+		t.Errorf("bodies: %v, want %v", gotBodies, wantBodies)
 	}
-	var unknown []string
-	for _, u := range sc.Unknown {
-		unknown = append(unknown, u)
-	}
-	if strings.Join(unknown, ",") != "state/bodies/oddly-named,state/out/stray.txt" {
-		t.Errorf("unknown: %v", unknown)
+	unknown := append([]string(nil), sc.Unknown...)
+	wantUnknown := []string{"state/bodies/" + bareDigest, "state/bodies/oddly-named", "state/out/stray.txt"}
+	sort.Strings(unknown)
+	sort.Strings(wantUnknown)
+	if strings.Join(unknown, ",") != strings.Join(wantUnknown, ",") {
+		t.Errorf("unknown: %v, want %v", unknown, wantUnknown)
 	}
 }
 
@@ -165,21 +176,27 @@ func TestAvailableReportsTheVolumeOfState(t *testing.T) {
 	}
 }
 
-func TestReadBodyChecksTheNameAndTheContent(t *testing.T) {
+func TestReadBodyChecksTheOwnersFileAndTheContent(t *testing.T) {
 	r := newRig(t)
-	seedBodies(t, r.mem, bodyBytes(1))
-	got, err := r.st.ReadBody(*bodyRef(1))
+	one, two, three := inRev(1, 1), inRev(2, 1), inRev(3, 1)
+	seedBodies(t, r.mem, one)
+	got, err := r.st.ReadBody(one.Name(), *one.Body)
 	if err != nil || string(got) != string(bodyBytes(1)) {
 		t.Fatalf("ReadBody = %q, %v", got, err)
 	}
-	if _, err := r.st.ReadBody(*bodyRef(2)); !errors.Is(err, store.ErrBodyMissing) {
+	if _, err := r.st.ReadBody(two.Name(), *two.Body); !errors.Is(err, store.ErrBodyMissing) {
 		t.Errorf("a missing body: %v, want ErrBodyMissing", err)
 	}
-	seedRaw(t, r.mem, store.BodiesDir, bodyRef(3).Name(), []byte("tampered"))
-	if _, err := r.st.ReadBody(*bodyRef(3)); !errors.Is(err, store.ErrBodyMismatch) {
+	// The file is the owner's: the bytes the reference says, under another
+	// record's name, are not found.
+	if _, err := r.st.ReadBody(two.Name(), *one.Body); !errors.Is(err, store.ErrBodyMissing) {
+		t.Errorf("the body of another record: %v, want ErrBodyMissing", err)
+	}
+	seedBodyOf(t, r.mem, three, []byte("tampered"))
+	if _, err := r.st.ReadBody(three.Name(), *three.Body); !errors.Is(err, store.ErrBodyMismatch) {
 		t.Errorf("a tampered body: %v, want ErrBodyMismatch", err)
 	}
-	if _, err := r.st.ReadBody(store.BodyRef{Digest: bodyRef(1).Digest, Len: 3}); !errors.Is(err, store.ErrBodyMismatch) {
+	if _, err := r.st.ReadBody(one.Name(), store.BodyRef{Digest: one.Body.Digest, Len: 3}); !errors.Is(err, store.ErrBodyMismatch) {
 		t.Errorf("a body of another length than the reference says: %v, want ErrBodyMismatch", err)
 	}
 }

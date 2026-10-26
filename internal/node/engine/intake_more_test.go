@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
@@ -298,7 +300,7 @@ func TestTheBodyIsHeldOnlyByWhatStillNeedsIt(t *testing.T) {
 	if o := outOf(t, h, taken); o.Body != nil {
 		t.Error("the source still refers to the body after the receipt")
 	}
-	if in := inOf(t, h, taken); in.Body == nil || len(sc.Bodies) != 1 || sc.Bodies[0] != in.Body.Name() {
+	if in := inOf(t, h, taken); in.Body == nil || len(sc.Bodies) != 1 || sc.Bodies[0] != store.BodyFileName(in.Name()) {
 		t.Errorf("bodies %v, the target's reference %v: the one body must stay for the target that waits for it", sc.Bodies, in.Body)
 	}
 	if err := h.Agent("b").Declare(h.Ctx(), fakeagent.DeclareInput{Paused: boolp(true)}); err != nil {
@@ -311,6 +313,78 @@ func TestTheBodyIsHeldOnlyByWhatStillNeedsIt(t *testing.T) {
 	}
 	if sc := scanOf(t, h); len(sc.Bodies) != 1 {
 		t.Errorf("%d bodies, want only the one of the message that was taken in", len(sc.Bodies))
+	}
+}
+
+// A body file belongs to one record: a message to two endpoints leaves one body
+// file for each target record and one for the source record, each named after
+// its record and each holding the message bytes. A target record that reaches a
+// final state loses its own body file and no other file is touched.
+func TestEachRecordOfAMessageHasABodyFileOfItsOwnThatGoesWithItsFinalState(t *testing.T) {
+	const text = "one message, three body files"
+	h := nodeWith(t, harness.Options{}, "a", "b", "c")
+	for _, name := range []string{"b", "c"} {
+		if err := h.Agent(name).Declare(h.Ctx(), fakeagent.DeclareInput{Paused: boolp(false)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The reports of the targets are held back, so the source record keeps its body.
+	h.Unreachable(true)
+	res, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b"), h.Addr("c")}, Body: text})
+	if err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	h.HoldReports(string(res.MessageID))
+	h.Unreachable(false)
+	h.Advance(resendBackoff)
+	quiet(t, h)
+
+	ins := inRecords(t, h, res.MessageID)
+	if len(ins) != 2 {
+		t.Fatalf("%d target records, want 2", len(ins))
+	}
+	src := outOf(t, h, res.MessageID)
+	want := map[string]bool{store.BodyFileName(src.Name()): true}
+	for _, in := range ins {
+		if in.Record.State != delivery.StateAccepted || in.Body == nil {
+			t.Fatalf("target %s is %s with body %v, want accepted and holding a body", in.Key.Recipient, in.Record.State, in.Body)
+		}
+		want[store.BodyFileName(in.Name())] = true
+	}
+	if src.Body == nil || len(want) != 3 {
+		t.Fatalf("source body %v, %d distinct body file names, want a body and 3 names", src.Body, len(want))
+	}
+	checkBodyFiles := func(when string) {
+		t.Helper()
+		got := scanOf(t, h).Bodies
+		if len(got) != len(want) {
+			t.Errorf("%s: body files %v, want %d of them", when, got, len(want))
+		}
+		for _, name := range got {
+			if !want[name] {
+				t.Errorf("%s: unexpected body file %s", when, name)
+			}
+		}
+		for name := range want {
+			data, err := h.Disk().ReadFile(path.Join(store.BodiesDir, name))
+			if err != nil {
+				t.Errorf("%s: body file %s: %v", when, name, err)
+			} else if string(data) != text {
+				t.Errorf("%s: body file %s holds %q, want the message bytes", when, name, data)
+			}
+		}
+	}
+	checkBodyFiles("after the delivery")
+
+	// Closing an endpoint takes its target record to a final state.
+	for _, in := range ins {
+		if _, err := h.Engine().CloseEndpoint(h.Ctx(), engine.CloseRequest{Endpoint: in.Key.Recipient}); err != nil {
+			t.Fatalf("CloseEndpoint: %v", err)
+		}
+		quiet(t, h)
+		delete(want, store.BodyFileName(in.Name()))
+		checkBodyFiles("after " + in.Key.Recipient.String() + " was closed")
 	}
 }
 
@@ -650,35 +724,12 @@ func bodyHeldBySourceAlone(t *testing.T, h *harness.H, body string) (adapterprot
 	return msg, ans.Reports[0]
 }
 
-// A reply carries the evidence that finishes the delivery it answers, which
-// drops the last reference of the source record to the body of the message. A body
-// is addressed by its content, so a reply that says the same bytes refers to the
-// very body the source let go of, and the body stays.
-func TestAReplyWhoseBodyEqualsTheOriginalKeepsTheBodyTheEvidenceReleased(t *testing.T) {
-	h := nodeWith(t, harness.Options{}, "a", "b")
-	msg, report := bodyHeldBySourceAlone(t, h, "the same bytes")
-	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
-		forged(t, h, "the-reply", addrOf(t, h, "a"), msg, "the same bytes", report)); err != nil {
-		t.Fatal(err)
-	}
-	quiet(t, h)
-	if o := outOf(t, h, msg); o.Body != nil || sourceDelivery(t, h, msg).State != delivery.StateRejected {
-		t.Fatalf("the evidence did not finish the delivery: body %v, state %s", o.Body, sourceDelivery(t, h, msg).State)
-	}
-	in := inOf(t, h, "the-reply")
-	if in.Record.State != delivery.StateAccepted || in.Body == nil {
-		t.Fatalf("the reply is %s with body %v, want accepted and holding its body", in.Record.State, in.Body)
-	}
-	sc := scanOf(t, h)
-	if len(sc.Bodies) != 1 || sc.Bodies[0] != in.Body.Name() {
-		t.Errorf("bodies %v: the body the reply refers to must be on the disk", sc.Bodies)
-	}
-}
-
-// Evidence that drops the last reference to the body of the message it answers
-// removes the body in the transaction that writes the reply, as every other write
-// that drops a last reference does; it does not wait for the sweep at the next start.
-func TestEvidenceThatReleasesTheLastReferenceToABodyRemovesIt(t *testing.T) {
+// Evidence that finishes the delivery it answers drops the source record's
+// reference to the body of the message, and the store removes that body in the
+// transaction that writes the reply; it does not wait for the sweep at the next
+// start. A reply that says the same bytes has a body file of its own, so the
+// body file removed is the source record's, not the reply's.
+func TestEvidenceThatFinishesASourceDeliveryRemovesTheBodyOfTheSourceRecord(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	msg, report := bodyHeldBySourceAlone(t, h, "a question nobody holds after the evidence")
 	if got := len(scanOf(t, h).Bodies); got != 1 {
@@ -691,7 +742,7 @@ func TestEvidenceThatReleasesTheLastReferenceToABodyRemovesIt(t *testing.T) {
 	quiet(t, h)
 	in := inOf(t, h, "the-reply")
 	sc := scanOf(t, h)
-	if in.Body == nil || len(sc.Bodies) != 1 || sc.Bodies[0] != in.Body.Name() {
+	if in.Body == nil || len(sc.Bodies) != 1 || sc.Bodies[0] != store.BodyFileName(in.Name()) {
 		t.Errorf("bodies %v, the reply's reference %v: only the body of the reply may remain", sc.Bodies, in.Body)
 	}
 	if o := outOf(t, h, msg); o.Body != nil {

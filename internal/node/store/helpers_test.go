@@ -658,13 +658,67 @@ func seed(t testing.TB, mem *fsxtest.Mem, recs ...store.Record) {
 	}
 }
 
-// seedBodies writes body files durably.
-func seedBodies(t testing.TB, mem *fsxtest.Mem, bodies ...[]byte) {
+// knownBodies are the contents the fixtures give their records: the body of
+// message i, and the wording of a feedback notice.
+func knownBodies() [][]byte {
+	out := [][]byte{[]byte("feedback wording")}
+	for i := 0; i < 200; i++ {
+		out = append(out, bodyBytes(i))
+	}
+	return out
+}
+
+// bodyPath is the path of the body file of a record: bodies are named after the
+// record they belong to, and no other.
+func bodyPath(rec store.Record) string {
+	return path.Join(store.BodiesDir, store.BodyFileName(rec.Name()))
+}
+
+// bodyHeld is the reference a record holds of its body, nil when it holds none or
+// is not a kind of record that has one.
+func bodyHeld(rec store.Record) *store.BodyRef {
+	switch r := rec.(type) {
+	case store.OutRecord:
+		return r.Body
+	case store.InRecord:
+		return r.Body
+	case store.CtlRecord:
+		return r.Body
+	}
+	return nil
+}
+
+// seedBodies writes the body file of every record that holds a reference to a
+// body, durably, with the content its reference says (one of knownBodies). The
+// records themselves are written by seed.
+func seedBodies(t testing.TB, mem *fsxtest.Mem, recs ...store.Record) {
 	t.Helper()
-	for _, b := range bodies {
-		if err := fsx.Replace(mem, setupTag, path.Join(store.BodiesDir, store.BodyRefOf(b).Name()), b, fsx.ModePrivate); err != nil {
-			t.Fatalf("seed body: %v", err)
+	for _, rec := range recs {
+		ref := bodyHeld(rec)
+		if ref == nil {
+			continue
 		}
+		found := false
+		for _, b := range knownBodies() {
+			if store.BodyRefOf(b) == *ref {
+				seedBodyOf(t, mem, rec, b)
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("seedBodies: %s holds a body that is none of the fixtures'", rec.Name())
+		}
+	}
+}
+
+// seedBodyOf writes a body file for rec with the given content, durably, whether
+// or not rec holds a reference to it: a body without a record, or the damaged one
+// of a record, is made this way.
+func seedBodyOf(t testing.TB, mem *fsxtest.Mem, rec store.Record, content []byte) {
+	t.Helper()
+	if err := fsx.Replace(mem, setupTag, bodyPath(rec), content, fsx.ModePrivate); err != nil {
+		t.Fatalf("seed body of %s: %v", rec.Name(), err)
 	}
 }
 

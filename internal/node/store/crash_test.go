@@ -506,7 +506,8 @@ func runNestedWalks(t *testing.T, sink *coverageSink) int {
 
 // checkBodiesResolve fails when a live record refers to a body that is not on
 // the disk. A body is written before the record that refers to it and removed
-// after the last one that did.
+// after the record that dropped the reference, and it is the record's own: the
+// file is named after the record file.
 func checkBodiesResolve(t *testing.T, where string, snap map[string]string) {
 	t.Helper()
 	for p, content := range snap {
@@ -515,27 +516,16 @@ func checkBodiesResolve(t *testing.T, where string, snap map[string]string) {
 		if !strings.HasSuffix(name, ".rec") {
 			continue
 		}
-		var refs []*store.BodyRef
-		switch rec, dmg := store.DecodeRecord(dir, name, []byte(content)); {
-		case dmg != nil:
+		rec, dmg := store.DecodeRecord(dir, name, []byte(content))
+		if dmg != nil {
 			continue
-		default:
-			switch r := rec.(type) {
-			case store.OutRecord:
-				refs = append(refs, r.Body)
-			case store.InRecord:
-				refs = append(refs, r.Body)
-			case store.CtlRecord:
-				refs = append(refs, r.Body)
-			}
 		}
-		for _, ref := range refs {
-			if ref == nil {
-				continue
-			}
-			if _, ok := snap[path.Join(store.BodiesDir, ref.Name())]; !ok {
-				t.Errorf("%s: %s refers to the body %s, which is not there", where, p, ref.Name())
-			}
+		if bodyHeld(rec) == nil {
+			continue
+		}
+		body := path.Join(store.BodiesDir, store.BodyFileName(name))
+		if _, ok := snap[body]; !ok {
+			t.Errorf("%s: %s refers to a body, and %s is not there", where, p, body)
 		}
 	}
 }

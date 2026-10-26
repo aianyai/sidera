@@ -49,7 +49,8 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 		mustDo(t, r.st.Intake(bodyBytes(i), srcOut(i, true)))
 		check("intake")
 	}
-	mustDo(t, dropWritten(r.st.Deliver(nil, []store.InRecord{tgtIn(1), tgtIn(2)})))
+	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(1), []store.InRecord{tgtIn(1)})))
+	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(2), []store.InRecord{tgtIn(2)})))
 	check("deliver")
 	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(9), []store.InRecord{tgtIn(9)})))
 	check("deliver with a body")
@@ -75,20 +76,21 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	mustDo(t, dropWritten(r.st.Blocked(head, []store.InRecord{a3, b3})))
 	check("block recovered")
 
-	// Leases and acknowledgements; the body goes with the last reference.
+	// Leases and acknowledgements; a record that no longer needs its body takes
+	// its own body file with it.
 	a4 := withRev(a3, 4)
 	a4.Record = leasedRecord(a4.Record, base)
 	mustDo(t, dropWritten(r.st.Lease([]store.InRecord{a4})))
 	check("lease")
 	a5 := withRev(a4, 5)
 	a5.Record, a5.Body = deliveredRecord(a5.Record), nil
-	mustDo(t, dropWritten(r.st.Ack([]store.InRecord{a5}, nil)))
+	mustDo(t, dropWritten(r.st.Ack([]store.InRecord{a5})))
 	check("ack")
 	out1 := srcOut(1, true)
 	d, _, _ := out1.Outbound.Recipients[0].Delivery.Apply(base, delivery.Event{Type: delivery.EventDelivered})
 	out1.Outbound.Recipients[0].Delivery, out1.Body = d, nil
-	mustDo(t, r.st.SourceUpdate(out1, []store.BodyRef{*bodyRef(1)}))
-	check("source update releasing the body")
+	mustDo(t, r.st.SourceUpdate(out1))
+	check("source update dropping the body")
 
 	// A session is created and closed.
 	c := sessionCtl(20, 5)
@@ -96,14 +98,14 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	mustDo(t, r.st.ControlIntake(bodyBytes(20), ptr(session(5, store.EndpointCreating, ctlName(20))), c))
 	check("session creation accepted")
 	cr := created(t, 20, 5)
-	mustDo(t, r.st.ControlResult(cr, ptr(openedBy(cr)), []store.BodyRef{*bodyRef(20)}))
+	mustDo(t, r.st.ControlResult(cr, ptr(openedBy(cr))))
 	check("session created")
 	derived := derivedIn(20, 5, 0)
 	derived.Body = nil
 	mustDo(t, dropWritten(r.st.Deliver(nil, []store.InRecord{derived})))
 	check("the initial message delivered to the session")
 	closeCtl := closedBy(21, 5)
-	mustDo(t, r.st.ControlResult(closeCtl, ptr(closedSession(5, ctlName(20))), nil))
+	mustDo(t, r.st.ControlResult(closeCtl, ptr(closedSession(5, ctlName(20)))))
 	// Between a head record and its followers the disk is not at rest: the check
 	// is made when the chunks are done.
 	mustDo(t, dropWritten(r.st.EndpointDrain(s.drainBatch(r.scan()))))
@@ -112,7 +114,10 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	// An endpoint is closed by the owner, then an instance disabled.
 	mustDo(t, r.st.EndpointUpdate(directEndpoint(7, "chat")))
 	mustDo(t, r.st.EndpointUpdate(directEndpoint(8, "chat")))
-	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(30), []store.InRecord{inFor(30, 7, 0), inFor(31, 8, 0)})))
+	// Each queued delivery has its own copy of the one body.
+	second := inFor(31, 8, 0)
+	second.Body = bodyRef(30)
+	mustDo(t, dropWritten(r.st.Deliver(bodyBytes(30), []store.InRecord{inFor(30, 7, 0), second})))
 	check("endpoints and queued deliveries")
 	closed7 := directEndpoint(7, "chat")
 	closed7.Status, closed7.Token = store.EndpointClosed, nil

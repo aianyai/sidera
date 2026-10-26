@@ -65,8 +65,6 @@ const (
 
 var pairFixture = addr(local, 2)
 
-func bodyPath(i int) string { return path.Join(store.BodiesDir, bodyRef(i).Name()) }
-
 func (w *powerLossWorld) enc(rec store.Record) []byte {
 	w.t.Helper()
 	return mustEncode(w.t, rec)
@@ -82,12 +80,12 @@ func (w *powerLossWorld) next() *operation {
 		case 0:
 			out := srcOut(i, true)
 			return &operation{name: "intake", call: func() error { return r.st.Intake(bodyBytes(i), out) },
-				writes: map[string][]byte{path.Join(store.OutDir, out.Name()): w.enc(out), bodyPath(i): bodyBytes(i)},
+				writes: map[string][]byte{path.Join(store.OutDir, out.Name()): w.enc(out), bodyPath(out): bodyBytes(i)},
 				after:  func() { w.stage[i] = 1 }}
 		case 1:
 			in := tgtIn(i)
-			return &operation{name: "deliver", call: func() error { return dropWritten(r.st.Deliver(nil, []store.InRecord{in})) },
-				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, 1))},
+			return &operation{name: "deliver", call: func() error { return dropWritten(r.st.Deliver(bodyBytes(i), []store.InRecord{in})) },
+				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, 1)), bodyPath(in): bodyBytes(i)},
 				after:  func() { w.stage[i], w.rev[i] = 2, 1 }}
 		case 2:
 			in := w.leased(i)
@@ -97,9 +95,10 @@ func (w *powerLossWorld) next() *operation {
 		case 3:
 			in := w.leased(i)
 			in.Record, in.Body = deliveredRecord(in.Record), nil
-			return &operation{name: "ack", call: func() error { return dropWritten(r.st.Ack([]store.InRecord{in}, nil)) },
-				writes: map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, in.Rev+1))},
-				after:  func() { w.stage[i] = 4; w.rev[i]++ }}
+			return &operation{name: "ack", call: func() error { return dropWritten(r.st.Ack([]store.InRecord{in})) },
+				writes:  map[string][]byte{path.Join(store.InDir, in.Name()): w.enc(withRev(in, in.Rev+1))},
+				removes: []string{bodyPath(in)},
+				after:   func() { w.stage[i] = 4; w.rev[i]++ }}
 		case 4:
 			out := srcOut(i, true)
 			d, _, err := out.Outbound.Recipients[0].Delivery.Apply(base, delivery.Event{Type: delivery.EventDelivered})
@@ -107,9 +106,9 @@ func (w *powerLossWorld) next() *operation {
 				w.t.Fatal(err)
 			}
 			out.Outbound.Recipients[0].Delivery, out.Body = d, nil
-			return &operation{name: "source-update", call: func() error { return r.st.SourceUpdate(out, []store.BodyRef{*bodyRef(i)}) },
+			return &operation{name: "source-update", call: func() error { return r.st.SourceUpdate(out) },
 				writes:  map[string][]byte{path.Join(store.OutDir, out.Name()): w.enc(out)},
-				removes: []string{bodyPath(i)},
+				removes: []string{bodyPath(out)},
 				after:   func() { w.stage[i] = 5 }}
 		}
 	case 3:
@@ -191,6 +190,12 @@ func (w *powerLossWorld) damageOp() *operation {
 		}
 		damaged := append([]byte(nil), w.led.files[p]...)
 		damaged[len(damaged)-2] ^= 1
+		// The record goes with the alert, and the body it still owned is an orphan
+		// the same startup collects; an acknowledged record owns none.
+		removes := []string{p}
+		if w.stage[i] < 4 {
+			removes = append(removes, bodyPath(in))
+		}
 		s := newSim(w.t, r.st)
 		alert := alertOf(s.alert("corrupt_record", store.InDir, name), store.InDir, name, damaged)
 		return &operation{
@@ -205,7 +210,7 @@ func (w *powerLossWorld) damageOp() *operation {
 			writes: map[string][]byte{
 				path.Join(store.AlertsDir, alert.Name()): w.enc(alert),
 			},
-			removes: []string{p},
+			removes: removes,
 			after:   func() { w.stage[i] = 7 },
 		}
 	}
@@ -236,8 +241,8 @@ func (w *powerLossWorld) leased(i int) store.InRecord {
 // until it is acknowledged. A source record is finished once
 // its delivery was reported (stage 5). Administrative
 // results are past their seven days. Nothing else is finished in this world: the
-// alerts are not acknowledged, the endpoints are open, and the bodies a swept
-// record referred to were released by the update that finished it.
+// alerts are not acknowledged, the endpoints are open, and the body of a swept
+// record was removed by the write that finished it.
 func (w *powerLossWorld) sweep() *operation {
 	r := w.r
 	now := base.Add(farAway)
@@ -290,9 +295,6 @@ func (w *powerLossWorld) sweep() *operation {
 		}
 		for _, o := range plan.Outs {
 			planned = append(planned, path.Join(store.OutDir, o.Name()))
-		}
-		for _, b := range plan.Bodies {
-			planned = append(planned, path.Join(store.BodiesDir, b.Name()))
 		}
 		var keys []string
 		for _, sm := range plan.Summaries {

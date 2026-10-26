@@ -12,8 +12,9 @@ import (
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
-// A write that removes files asks the disk which of them exist before it opens
-// its transaction. A read that fails after the commit point would be an
+// A write that removes files, the bodies of the records it writes without a
+// reference included, asks the disk which of them exist before it opens its
+// transaction. A read that fails after the commit point would be an
 // ordinary error on a disk that already changed, and the caller would go on
 // with a view of memory that is no longer the disk. So a failed existence check
 // ends the call before any write: an ordinary failure, nothing on the disk
@@ -33,8 +34,9 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 		in.Record, in.Body = deliveredRecord(in.Record), nil
 		return in
 	}
-	rel := []store.BodyRef{*bodyRef(1)}
-	body := bodyPath(1)
+	source, target := srcOut(1, true), tgtIn(1)
+	ctl := sessionCtl(2, 5)
+	ctl.Body = bodyRef(2)
 	endpoint := directEndpoint(7, "chat")
 	for _, c := range []struct {
 		name  string
@@ -42,30 +44,36 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 		fails string // the path whose existence check fails
 		run   func(st *store.Store) error
 	}{
-		{"SourceUpdate releasing a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), srcOut(1, true))) }, body,
-			func(st *store.Store) error { return st.SourceUpdate(finished(), rel) }},
-		{"Ack releasing a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, bodyBytes(1)) }, body,
-			func(st *store.Store) error { return dropWritten(st.Ack([]store.InRecord{delivered()}, rel)) }},
-		{"Tick releasing a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), srcOut(1, true))) }, body,
+		{"SourceUpdate dropping a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), source)) }, bodyPath(source),
+			func(st *store.Store) error { return st.SourceUpdate(finished()) }},
+		{"Ack dropping a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
+			func(st *store.Store) error { return dropWritten(st.Ack([]store.InRecord{delivered()})) }},
+		{"Tick dropping a body", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), source)) }, bodyPath(source),
 			func(st *store.Store) error {
-				return dropWritten(st.Tick(store.TickBatch{Out: []store.OutRecord{finished()}, Release: rel}))
+				return dropWritten(st.Tick(store.TickBatch{Out: []store.OutRecord{finished()}}))
 			}},
-		{"ControlResult releasing a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, bodyBytes(20)) }, bodyPath(20),
+		{"ControlResult dropping a body", func(t *testing.T, r *rig) { seedBodyOf(t, r.mem, created(t, 20, 5), bodyBytes(20)) }, bodyPath(created(t, 20, 5)),
 			func(st *store.Store) error {
 				cr := created(t, 20, 5)
-				return st.ControlResult(cr, ptr(openedBy(cr)), []store.BodyRef{*bodyRef(20)})
+				return st.ControlResult(cr, ptr(openedBy(cr)))
 			}},
-		{"EndpointDrain releasing a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, bodyBytes(1)) }, body,
+		{"EndpointDrain dropping a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error {
-				d := derivedIn(20, 5, 0)
+				d := tgtIn(1)
 				d.Body = nil
-				return dropWritten(st.EndpointDrain(store.DrainBatch{In: []store.InRecord{d}, Release: rel}))
+				return dropWritten(st.EndpointDrain(store.DrainBatch{In: []store.InRecord{d}}))
 			}},
-		{"ArchiveSweep removing a body", func(t *testing.T, r *rig) { seedBodies(t, r.mem, bodyBytes(1)) }, body,
-			func(st *store.Store) error { return st.ArchiveSweep(store.SweepChunk{Now: base, Bodies: rel}) }},
-		{"ArchiveSweep removing a body after it wrote a floor", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), srcOut(1, true))) }, body,
+		{"ArchiveSweep removing the body of a target record", func(t *testing.T, r *rig) { seedBodies(t, r.mem, target) }, bodyPath(target),
 			func(st *store.Store) error {
-				return st.ArchiveSweep(store.SweepChunk{Now: base, Outs: []store.OutRecord{srcOut(1, true)}, Bodies: rel})
+				return st.ArchiveSweep(store.SweepChunk{Now: base, Records: []store.FileRef{{Dir: store.InDir, Name: target.Name()}}})
+			}},
+		{"ArchiveSweep removing the body of a control record", func(t *testing.T, r *rig) { seedBodies(t, r.mem, ctl) }, bodyPath(ctl),
+			func(st *store.Store) error {
+				return st.ArchiveSweep(store.SweepChunk{Now: base, Ctl: []store.FileRef{{Dir: store.CtlDir, Name: ctl.Name()}}})
+			}},
+		{"ArchiveSweep removing the body of a source record after it wrote a floor", func(t *testing.T, r *rig) { mustDo(t, r.st.Intake(bodyBytes(1), source)) }, bodyPath(source),
+			func(st *store.Store) error {
+				return st.ArchiveSweep(store.SweepChunk{Now: base, Outs: []store.OutRecord{source}})
 			}},
 		{"ArchiveSweep removing a record", func(t *testing.T, r *rig) { seed(t, r.mem, inRev(1, 1)) }, path.Join(store.InDir, inRev(1, 1).Name()),
 			func(st *store.Store) error {
@@ -75,8 +83,8 @@ func TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite(t *testing.T) {
 			func(st *store.Store) error {
 				return st.ArchiveSweep(store.SweepChunk{Now: base, Endpoints: []store.FileRef{{Dir: store.EndpointsDir, Name: endpoint.Name()}}})
 			}},
-		{"OrphanGC", func(t *testing.T, r *rig) { seedBodies(t, r.mem, bodyBytes(1)) }, body,
-			func(st *store.Store) error { return st.OrphanGC([]string{bodyRef(1).Name()}) }},
+		{"OrphanGC", func(t *testing.T, r *rig) { seedBodyOf(t, r.mem, target, bodyBytes(1)) }, bodyPath(target),
+			func(st *store.Store) error { return st.OrphanGC([]string{store.BodyFileName(target.Name())}) }},
 		{"OrphanGCEndpoint", func(t *testing.T, r *rig) { seed(t, r.mem, endpoint) }, path.Join(store.EndpointsDir, endpoint.Name()),
 			func(st *store.Store) error { return st.OrphanGCEndpoint([]store.EndpointRecord{endpoint}) }},
 	} {

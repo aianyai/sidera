@@ -3,6 +3,7 @@ package engine_test
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path"
@@ -27,9 +28,13 @@ func (r *rig) seedFile(dir, name string, data []byte) {
 	}
 }
 
+// seedBody writes the body file of a record that is not on the disk: what a crash
+// leaves between writing a body and the record that owns it. The name is the body
+// file name of a record named after the digest of the content.
 func (r *rig) seedBody(b []byte) string {
 	r.t.Helper()
-	name := store.BodyRefOf(b).Name()
+	digest := store.BodyRefOf(b).Digest
+	name := store.BodyFileName(hex.EncodeToString(digest[:]) + ".rec")
 	r.seedFile(store.BodiesDir, name, b)
 	return name
 }

@@ -18,7 +18,7 @@ import (
 
 // Closing an endpoint is a head record and then the closing of what is queued
 // for it, chunk by chunk, so that the loop is never held for the whole queue.
-func TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies(t *testing.T) {
+func TestCloseRejectsTheQueuedDeliveriesInChunksAndRemovesTheirBodies(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10, withParams(engine.Params{ChunkReplaces: 2}))
 	e := r.start()
@@ -39,6 +39,7 @@ func TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies(t *testin
 
 	sc := r.scan()
 	rejected := 0
+	var keptBodies []string
 	for _, in := range sc.In {
 		switch in.Key.Recipient {
 		case a:
@@ -50,6 +51,7 @@ func TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies(t *testin
 			if in.Record.State != delivery.StateAccepted || in.Body == nil {
 				t.Errorf("delivery %s for the other endpoint changed: state %v", in.Key.Message, in.Record.State)
 			}
+			keptBodies = append(keptBodies, store.BodyFileName(in.Name()))
 		}
 	}
 	if rejected != 5 {
@@ -64,8 +66,8 @@ func TestCloseRejectsTheQueuedDeliveriesInChunksAndReleasesTheirBodies(t *testin
 	if bodies := store.OrphanBodies(sc); len(bodies) != 0 {
 		t.Errorf("orphan bodies %v", bodies)
 	}
-	if len(sc.Bodies) != 1 {
-		t.Errorf("%d bodies left, want only the one of the other endpoint", len(sc.Bodies))
+	if len(sc.Bodies) != 1 || len(keptBodies) != 1 || sc.Bodies[0] != keptBodies[0] {
+		t.Errorf("bodies %v left, want only the body file of the record of the other endpoint, %v", sc.Bodies, keptBodies)
 	}
 	for _, ep := range sc.Endpoints {
 		if ep.ID == a && (ep.Status != store.EndpointClosed || ep.Token != nil) {

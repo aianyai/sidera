@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"errors"
 	"path"
 	"strings"
 	syncatomic "sync/atomic"
@@ -73,7 +74,7 @@ func recoveryScenarios() []scenario {
 			name: "quarantine of a source record whose body is damaged",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				for i := 1; i <= 4; i++ {
-					seed(t, mem, srcOut(i, false))
+					seedWithBodies(t, mem, srcOut(i, false))
 				}
 				seed(t, mem, store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 2}})
 				damageBody(t, mem, path.Join(store.OutDir, srcOut(3, false).Name()))
@@ -103,6 +104,13 @@ func recoveryScenarios() []scenario {
 				if !onlyAlert(sc, store.OutDir, name, "corrupt_record") {
 					t.Errorf("the alert is missing: %v", sc.Alerts)
 				}
+				// The lost record refers to no body, so the body the damaged record
+				// owned is collected; the bodies of the others stay.
+				wantNoBody(t, r, srcOut(3, false))
+				for _, i := range []int{1, 2, 4} {
+					wantBody(t, r, srcOut(i, false), bodyBytes(i))
+				}
+				wantBodyCount(t, r, 3)
 				// m = max(floor 2, highest of the others 4): floor 5.
 				if got := floorOf(t, sc, 1, pair); got != 5 {
 					t.Errorf("floor = %d, want 5", got)
@@ -115,7 +123,7 @@ func recoveryScenarios() []scenario {
 		{
 			name: "quarantine of a target record whose body is damaged",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seed(t, mem, inRev(1, 1), inRev(2, 1))
+				seedWithBodies(t, mem, inRev(1, 1), inRev(2, 1))
 				damageBody(t, mem, path.Join(store.InDir, inRev(1, 1).Name()))
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
@@ -131,6 +139,10 @@ func recoveryScenarios() []scenario {
 				if _, other, _ := find(t, sc, inRev(2, 1).Name()); other == nil {
 					t.Errorf("the healthy record was touched")
 				}
+				// The body of the record that is gone is an orphan; the other stays.
+				wantNoBody(t, r, inRev(1, 1))
+				wantBody(t, r, inRev(2, 1), bodyBytes(2))
+				wantBodyCount(t, r, 1)
 			},
 		},
 		controlQuarantine("quarantine of a control record whose body is damaged", damageBody),
@@ -167,36 +179,40 @@ func recoveryScenarios() []scenario {
 			},
 		},
 		{
-			// A body that does not hash to its name, found by a read: each record that
-			// refers to it is settled by a call of its own, so a crash leaves any
-			// subset of them settled, each file as before or after.
-			name: "quarantine of the records of a body whose content does not match its name",
+			// A body that is not what its record says, found by a read: each record
+			// has a body of its own, and each one whose body does not match is
+			// settled by a call of its own, so a crash leaves any subset of them
+			// settled, each file as before or after. A record with a good body is not
+			// touched.
+			name: "quarantine of the records whose body does not match",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				name := store.BodyRefOf(bodyBytes(1)).Name()
-				seedRaw(t, mem, store.BodiesDir, name, []byte("tampered content"))
-				ctl := sessionCtl(4, 5)
-				ctl.Body = bodyRef(1)
-				// Every record refers to the one body. The target records no longer need it.
-				in2, d3, in5 := inRev(2, 1), inRev(3, 1), inRev(5, 1)
-				in2.Body, d3.Body, in5.Body = bodyRef(1), bodyRef(1), bodyRef(1)
-				in2.Record, d3.Record, in5.Record = deliveredRecord(in2.Record), deliveredRecord(d3.Record), deliveredRecord(in5.Record)
-				queued := inRev(6, 1) // still needs the body: lost with it
-				queued.Body = bodyRef(1)
-				seed(t, mem, srcOut(1, false), in2, d3, ctl, in5, queued)
+				recs, healthy := mismatchRecords()
+				seedWithBodies(t, mem, healthy)
+				for _, rec := range recs {
+					seed(t, mem, rec)
+					seedBodyOf(t, mem, rec, []byte("tampered content"))
+				}
 			},
 			mode: batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
-				if _, err := r.st.ReadBody(*bodyRef(1)); err == nil {
-					t.Fatalf("ReadBody accepted a tampered body")
+				recs, healthy := mismatchRecords()
+				for _, rec := range recs {
+					if _, err := r.st.ReadBody(rec.Name(), *bodyHeld(rec)); !errors.Is(err, store.ErrBodyMismatch) {
+						t.Fatalf("ReadBody of the tampered body of %s: %v, want ErrBodyMismatch", rec.Name(), err)
+					}
 				}
-				s.bodyMismatch(store.BodyRefOf(bodyBytes(1)).Name())
+				if _, err := r.st.ReadBody(healthy.Name(), *bodyHeld(healthy)); err != nil {
+					t.Fatalf("ReadBody of a good body: %v", err)
+				}
+				s.bodyMismatch()
 				s.recoverAll()
 				return nil
 			},
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
-				if len(sc.Alerts) != 6 || len(sc.Bodies) != 0 {
-					t.Errorf("one alert for each record, and the body is an orphan that goes: %d alerts, bodies %v", len(sc.Alerts), sc.Bodies)
+				_, healthy := mismatchRecords()
+				if len(sc.Alerts) != 6 {
+					t.Errorf("one alert for each record with a tampered body: %d alerts", len(sc.Alerts))
 				}
 				out, _, _ := find(t, sc, srcOut(1, false).Name())
 				if out == nil || out.Lost == nil || len(out.Feedback) != 1 {
@@ -213,6 +229,12 @@ func recoveryScenarios() []scenario {
 				if _, _, c := find(t, sc, sessionCtl(4, 5).Name()); c == nil || c.Body != nil {
 					t.Errorf("a control record must lose only the reference: %#v", c)
 				}
+				// Every tampered body is an orphan that goes, and the good one stays.
+				if _, in, _ := find(t, sc, healthy.Name()); in == nil || in.Body == nil {
+					t.Errorf("a record with a good body was settled: %#v", in)
+				}
+				wantBody(t, r, healthy, bodyBytes(7))
+				wantBodyCount(t, r, 1)
 			},
 		},
 		{
@@ -221,8 +243,7 @@ func recoveryScenarios() []scenario {
 			name: "feedback replay of an out-lost record",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				a, b := lostNotice(1, 1, base), lostNotice(1, 2, base)
-				seed(t, mem, a, b, noticeForLost(a))
-				seedBodies(t, mem, []byte("feedback wording"))
+				seedWithBodies(t, mem, a, b, noticeForLost(a))
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
 			verify: func(t *testing.T, r *rig) {
@@ -239,16 +260,27 @@ func recoveryScenarios() []scenario {
 			},
 		},
 		{
+			// A body is kept exactly while the record it is named after holds a
+			// reference to it: a body without a record, and the body a record that
+			// holds none left behind, are collected.
 			name: "orphan bodies",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(2))
-				seed(t, mem, inRev(2, 1))
+				seedWithBodies(t, mem, inRev(2, 1), ctlWithBody(5, 4), srcOut(6, false))
+				seedBodyOf(t, mem, inRev(1, 1), bodyBytes(1)) // no record
+				noRef := rejected(inRev(3, 1))
+				seed(t, mem, noRef, finishedOut(4, false))
+				seedBodyOf(t, mem, noRef, bodyBytes(3))                 // its record holds no reference
+				seedBodyOf(t, mem, finishedOut(4, false), bodyBytes(4)) // nor does this one
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
-				if len(sc.Bodies) != 1 || sc.Bodies[0] != bodyRef(2).Name() {
-					t.Errorf("bodies = %v, want only the one a record refers to", sc.Bodies)
+				var want []string
+				for _, rec := range []store.Record{inRev(2, 1), ctlWithBody(5, 4), srcOut(6, false)} {
+					want = append(want, store.BodyFileName(rec.Name()))
+				}
+				if strings.Join(sortedStrings(sc.Bodies), ",") != strings.Join(sortedStrings(want), ",") {
+					t.Errorf("bodies = %v, want only those of the records that hold a reference: %v", sc.Bodies, want)
 				}
 			},
 		},
@@ -327,9 +359,10 @@ func recoveryScenarios() []scenario {
 				done.Body = nil
 				c := sessionCtl(3, 5)
 				c.Key.Recipient = ep(7)
+				c.Body = bodyRef(3)
 				c.Dedup = delivery.NewDedupRecord(c.Key.Dedup(), digestOf(3), c.Record.ReportBy)
-				seed(t, mem, closed, directEndpoint(8, "chat"), inFor(1, 7, 1), done, c, inFor(4, 9, 1), inFor(5, 8, 1))
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(4), bodyBytes(5))
+				seedWithBodies(t, mem, closed, directEndpoint(8, "chat"), inFor(1, 7, 1), done, c, inFor(4, 9, 1), inFor(5, 8, 1))
+				seedBodyOf(t, mem, done, bodyBytes(2)) // the file a crash left after the record dropped its reference
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
 			verify: func(t *testing.T, r *rig) {
@@ -348,8 +381,8 @@ func recoveryScenarios() []scenario {
 				if len(sc.Ctl) != 1 || sc.Ctl[0].Record.State != delivery.StateDeliveryUnknown {
 					t.Errorf("the control record for the closed endpoint must be closed as unknown: %#v", sc.Ctl)
 				}
-				if len(sc.Bodies) != 1 || sc.Bodies[0] != bodyRef(5).Name() {
-					t.Errorf("the bodies of the closed deliveries must go and the other stay: %v", sc.Bodies)
+				if want := store.BodyFileName(inFor(5, 8, 1).Name()); len(sc.Bodies) != 1 || sc.Bodies[0] != want {
+					t.Errorf("the bodies of the closed deliveries and of the record that dropped its reference must go, and the other stay: %v, want only %s", sc.Bodies, want)
 				}
 			},
 		},
@@ -358,8 +391,8 @@ func recoveryScenarios() []scenario {
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				closed := directEndpoint(8, "chat")
 				closed.Status, closed.Token = store.EndpointClosed, nil
-				seed(t, mem, directEndpoint(7, "chat"), closed, directEndpoint(9, "other"), inFor(1, 7, 1), inFor(2, 9, 1), ctlTo(4, 7))
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(2))
+				seed(t, mem, directEndpoint(7, "chat"), closed, directEndpoint(9, "other"), inFor(1, 7, 1), inFor(2, 9, 1), ctlWithBody(4, 7))
+				seedBodies(t, mem, inFor(1, 7, 1), inFor(2, 9, 1), ctlWithBody(4, 7))
 			},
 			enabled: func(inst string) bool { return inst != "chat" },
 			mode:    atomic, mustComplete: true, run: recoverRun,
@@ -373,6 +406,9 @@ func recoveryScenarios() []scenario {
 				}
 				if _, in, _ := find(t, sc, inFor(1, 7, 1).Name()); in == nil || in.Record.State != delivery.StateRejected {
 					t.Errorf("a delivery queued for a closed endpoint of the instance must be closed")
+				}
+				if want := store.BodyFileName(inFor(2, 9, 1).Name()); len(sc.Bodies) != 1 || sc.Bodies[0] != want {
+					t.Errorf("the bodies of the closed deliveries must go and the other stay: %v, want only %s", sc.Bodies, want)
 				}
 			},
 		},
@@ -391,8 +427,7 @@ func recoveryScenarios() []scenario {
 				cover.Feedback = []delivery.Item{feedbackItem(1)}
 				n := noticeFor(cover)
 				n.Covers = append(n.Covers, store.CoverRef{Out: b.Name(), Recipient: addr(2, 2), Kind: delivery.KindRejected})
-				seed(t, mem, a, b, c, n)
-				seedBodies(t, mem, bodyBytes(1), bodyBytes(2), bodyBytes(3), []byte("feedback wording"))
+				seedWithBodies(t, mem, a, b, c, n)
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
 			verify: func(t *testing.T, r *rig) {
@@ -403,6 +438,9 @@ func recoveryScenarios() []scenario {
 				}
 				if got["msg-0001"] != 1 || got["msg-0002"] != 0 || got["msg-0003"] != 1 {
 					t.Errorf("pending feedback after the replay = %v, want 1, 0, 1: only the covered items go", got)
+				}
+				if len(sc.Bodies) != 4 {
+					t.Errorf("every record still holds its body, so none is collected: %v", sc.Bodies)
 				}
 			},
 		},
@@ -419,6 +457,18 @@ func sortedStrings(s []string) []string {
 		}
 	}
 	return out
+}
+
+// mismatchRecords are the records whose bodies the mismatch scenario tampers
+// with, and one record whose body is good. The target records of 2, 3 and 5 no
+// longer need their bodies, the one of 6 still does, and so does the source
+// record 1, which is seeded apart.
+func mismatchRecords() (tampered []store.Record, healthy store.InRecord) {
+	ctl := sessionCtl(4, 5)
+	ctl.Body = bodyRef(4)
+	in2, in3, in5 := inRev(2, 1), inRev(3, 1), inRev(5, 1)
+	in2.Record, in3.Record, in5.Record = deliveredRecord(in2.Record), deliveredRecord(in3.Record), deliveredRecord(in5.Record)
+	return []store.Record{srcOut(1, false), in2, in3, ctl, in5, inRev(6, 1)}, inRev(7, 1)
 }
 
 func blockedItem(i int) delivery.Item {
@@ -495,8 +545,7 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 			c.Body = bodyRef(1)
 			derived := derivedIn(1, 5, 1)
 			derived.Body = bodyRef(1)
-			seed(t, mem, session(5, store.EndpointCreating, ctlName(1)), c, derived)
-			seedBodies(t, mem, bodyBytes(1))
+			seedWithBodies(t, mem, session(5, store.EndpointCreating, ctlName(1)), c, derived)
 			damage(t, mem, path.Join(store.CtlDir, c.Name()))
 		},
 		mode: atomic, mustComplete: true, run: recoverRun,
@@ -519,7 +568,7 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 				t.Errorf("the delivery derived from the quarantined control record must be rejected as the endpoint closed: %#v", d)
 			}
 			if len(sc.Bodies) != 0 {
-				t.Errorf("no record refers to the body any more: %v", sc.Bodies)
+				t.Errorf("no record refers to a body any more, so both are collected: %v", sc.Bodies)
 			}
 		},
 	}

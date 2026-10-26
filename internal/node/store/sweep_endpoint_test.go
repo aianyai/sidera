@@ -152,7 +152,7 @@ func sweepClosedSessionScenario(farFuture time.Time) scenario {
 	passes := func(r *rig) error {
 		for i := 0; i < 4; i++ {
 			plan := store.PlanSweep(r.scan(), farFuture)
-			if len(plan.Records)+len(plan.Outs)+len(plan.Endpoints)+len(plan.Ctl)+len(plan.Bodies) == 0 {
+			if len(plan.Records)+len(plan.Outs)+len(plan.Endpoints)+len(plan.Ctl) == 0 {
 				return nil
 			}
 			if err := r.st.ArchiveSweep(plan.Chunk(farFuture)); err != nil {
