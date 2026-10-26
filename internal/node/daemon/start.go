@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/manageapi"
@@ -217,6 +218,14 @@ func (d *Daemon) stepCertificate(context.Context) error {
 // two layers meet, and neither imports the other.
 var _ engine.Adapters = (*adapterhost.Host)(nil)
 
+// openPackage opens the directory the owner names as an adapter package, for the
+// engine to read: a reader rooted at it. The package is on the machine's own file
+// system, whatever file system the node's data directory is on, and the engine is
+// given the reading half only.
+func (d *Daemon) openPackage(dir string) (fsx.Reader, error) {
+	return fsx.OpenOS(dir, d.cfg.Rand)
+}
+
 // Step 6: the scan of state/ (the engine's first recovery entry) runs before the
 // loop exists: damaged files are quarantined, the rules of recovery run until none
 // has work, and the engine builds its view. The periodic tasks are registered
@@ -226,6 +235,7 @@ func (d *Daemon) stepScan(ctx context.Context) error {
 	deps := engine.Deps{
 		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.pause.since,
 		Writer: d.w, Store: store.New(d.w), Config: d.cfgd, Keys: d.keys, Rand: d.cfg.Rand, Home: d.home, Log: d.log,
+		OpenPackage: d.openPackage,
 	}
 	if d.cfg.AdapterHost != nil { // never a nil host inside the interface: the engine tests it for nil
 		deps.Adapters = d.cfg.AdapterHost

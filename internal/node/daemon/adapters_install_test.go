@@ -15,12 +15,15 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// relay is the adapter the owner installs in these tests: the fake adapter, under
-// a name no node has installed before.
+// relay is the adapter the owner installs in these tests: the fake adapter of the
+// fixture, which provides direct endpoints, under a name no node has installed
+// before. (An adapter that declares a runtime needs a native runtime to drive, which
+// the launcher of the fixture does not have; the engine's own tests walk the probe of
+// one through its tokens.)
 const relay = "relay"
 
 func relayManifest() fakeadapter.ManifestOptions {
-	o := fakeadapter.DefaultManifestOptions()
+	o := harness.AdapterManifest(adapterproto.MaxDirectEndpoints)
 	o.ID = relay
 	return o
 }
@@ -97,10 +100,8 @@ func (l adaptersListed) instance(name string) (enabled bool, state string, found
 // The owner installs a package and enables an instance of it through the
 // management interface, and the node does the rest: it starts the adapter through
 // the host, the adapter says its tool probes ran, and the node calls the probe
-// passed only when the tokens it issued have been presented to it. Disabling the
-// instance stops the adapter and closes its endpoints. The presenting of the token
-// over the Agent socket is the Agent interface's; the test presents it through the
-// engine method that the interface calls.
+// passed. Disabling the instance stops the adapter and closes its endpoints. The
+// presenting of a probe token over the Agent socket is the Agent interface's.
 func TestAnAdapterInstalledAndEnabledThroughTheManagementInterfaceIsStartedProbedAndStopped(t *testing.T) {
 	noLeaks(t)
 	c, clk := initialized(t)
@@ -153,28 +154,15 @@ func TestAnAdapterInstalledAndEnabledThroughTheManagementInterfaceIsStartedProbe
 	if m := launch.Methods(); len(m) < 3 || m[0] != adapterproto.MethodInitialize || m[1] != adapterproto.MethodAdapterStart {
 		t.Errorf("the daemon wrote %v to the adapter", m)
 	}
-	listed = listAdapters(t, c.Home)
-	if enabled, state, found := listed.instance(relay); !found || !enabled || state != "pending" {
-		t.Errorf("the instance after the adapter reported: enabled %v, probe %q, found %v; want it pending: ran is not enough", enabled, state, found)
-	}
-
-	// the tokens are presented to the node, as the tools the adapter ran would
-	reqs, err := d.Engine().ProbeTokens(ctx, relay)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, q := range reqs {
-		if _, err := d.Engine().PresentProbeToken(ctx, q.Token, q.Frontend); err != nil {
-			t.Fatalf("presenting the token of %s %s: %v", q.Preset, q.Frontend, err)
-		}
-	}
+	// an adapter that provides direct endpoints only has no tool to probe: its probe
+	// passes with its report, and it declares no runtime endpoint
 	listed = listAdapters(t, c.Home)
 	enabledNow, state, _ := listed.instance(relay)
 	if !enabledNow || state != "passed" {
-		t.Fatalf("the instance after the tokens were presented: enabled %v, probe %q; want it passed", enabledNow, state)
+		t.Fatalf("the instance after the adapter reported: enabled %v, probe %q; want it passed", enabledNow, state)
 	}
-	if v, err := d.Engine().Adapter(ctx, relay); err != nil || !v.RuntimeDeclared {
-		t.Errorf("the runtime endpoint is not declared after the probe passed: %+v, %v", v, err)
+	if v, err := d.Engine().Adapter(ctx, relay); err != nil || v.RuntimeDeclared || !v.Probed {
+		t.Errorf("the instance is %+v, %v; want it probed and with no runtime endpoint declared", v, err)
 	}
 
 	// disable: the adapter is stopped and the endpoints of the instance are closed
@@ -307,7 +295,7 @@ func TestPresetsAreAddedListedAndRemovedThroughTheManagementInterface(t *testing
 		return l.Result.Version, string(out)
 	}
 	version, body := list()
-	if !strings.Contains(body, `{"name":"default","local_sources":"allow"}`) {
+	if !strings.Contains(body, `{"name":"default","local_sources":"allow",`) {
 		t.Fatalf("a node that was just made lists %s, want the default preset that allows local sources", body)
 	}
 	status, out := manage(t, c.Home, "presets.add", map[string]any{

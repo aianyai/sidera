@@ -48,6 +48,10 @@ touches files only through `fsx`, and reads time only through the injected clock
   failure of the disk), then runs `StopAdapters`. The host reports nothing to the engine
   at shutdown, so the fatal path writes nothing. The hooks stay for what else starts
   and stops with the adapters.
+- **The engine reads an adapter package through this package.** `Deps.OpenPackage` is
+  `fsx.OpenOS` of the directory the owner named, handed over as a reader: the package
+  is on the machine's own file system, whatever file system the data directory is on,
+  and the engine, which touches no file of its own, asks for a reader and copies from it.
 - **The engine is the single writer; this package writes only what is its own:**
   `init` and the layout rule, both declared here and covered by the crash tests.
 - **The certificate is renewed at step 5 and every hour in the loop, never when the
@@ -109,6 +113,7 @@ the shutdown, the stop through the management interface, `Run` and a fatal failu
 the death of the engine); `interrupt_test.go` the lock kept under an engine that has
 not ended, a stop that races with a failed start, a context or a signal during the
 start; `adapters_test.go` the adapter host at step 10 and step 3, over fake adapters in the test
-process (the launcher is `harness.AdapterLauncher`); `env_test.go` what a hook is given; `logging_test.go` the deferred log handler;
+process (the launcher is `harness.AdapterLauncher`); `adapters_install_test.go` installing, enabling, listing and disabling an adapter, and the presets, through the management interface of a whole daemon;
+`env_test.go` what a hook is given; `logging_test.go` the deferred log handler;
 `periodic_test.go` the clock state's pause; `replay_test.go` a management operation
 resent through the whole daemon.

@@ -82,6 +82,14 @@ places and nowhere else:
 A host is for one run of one daemon: it cannot start again after it ended, so a
 caller that starts the daemon again makes another.
 
+An instance the owner enables while the daemon runs is started the same way: the
+engine asks the host (`EnsureRunning`) once the change of the configuration is on
+disk, and the host reads the instance and its installed adapter from the same
+configuration the engine changed. One the owner disables is stopped (`Stop`), and
+because the host reports nothing when it stops an instance, the engine marks it
+offline itself. The package an owner installs is read through the reader that this
+package opens on the directory named, whatever file system the data directory is on.
+
 ### The shutdown
 
 One path for an orderly stop, for a fatal failure of the disk and for the unwinding
