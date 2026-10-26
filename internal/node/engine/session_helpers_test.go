@@ -37,7 +37,15 @@ func sessionHostParams() adapterhost.Params {
 // direct endpoint for each name.
 func sessionNode(t *testing.T, o harness.Options, names ...string) *harness.H {
 	t.Helper()
-	o.Adapter = &harness.AdapterOptions{Host: sessionHostParams(), Runtime: true}
+	return sessionNodeOf(t, o, sessionHostParams(), names...)
+}
+
+// sessionNodeOf is sessionNode with the tunables of the host a test names, for one
+// that needs the host to start an adapter again later than the usual backoff, or not
+// at all within the time the test moves the clock.
+func sessionNodeOf(t *testing.T, o harness.Options, host adapterhost.Params, names ...string) *harness.H {
+	t.Helper()
+	o.Adapter = &harness.AdapterOptions{Host: host, Runtime: true}
 	h := harness.New(t, o)
 	quiet(t, h)
 	for _, n := range names {

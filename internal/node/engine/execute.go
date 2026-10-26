@@ -37,7 +37,8 @@ import (
 // adapter does, and an interrupt as failed, which stopped nothing and may be asked
 // again. An interrupt is told failed at once when the adapter is not connected: a
 // signal to stop a turn that waits for an adapter to come back is a signal that
-// stops it late.
+// stops it late. A result that could not be written is kept and written again, until
+// it is, and the adapter is not asked a second time for it.
 
 // execution is what the loop remembers of the carrying out of one signal.
 type execution struct {
@@ -51,6 +52,9 @@ type execution struct {
 	// not ended: the signal is settled by the end of the turn, or as requested when
 	// Params.InterruptConfirmWait is over.
 	requested bool
+	// result is what the signal ends with, made and not yet written: the write failed,
+	// and the adapter has done what it was asked, so only the write is tried again.
+	result *envelope.ControlResult
 }
 
 // executable says whether the record is a close or an interrupt that is not settled.
@@ -128,7 +132,7 @@ func (e *Engine) startExecute(now time.Time, key store.TargetKey) {
 	}
 	x := e.executionOf(key)
 	st := e.view.endpoints[c.Key.Recipient]
-	if x.inflight || x.requested || st == nil {
+	if x.inflight || x.requested || x.result != nil || st == nil {
 		return
 	}
 	instance := st.rec.Instance
@@ -206,7 +210,7 @@ func (e *Engine) executeResult(now time.Time, r *cmdExecuteResult) {
 			e.sched.set(schedKey{schedExecuteRetry, r.key.String()}, now.Add(e.p.RetryBackoff))
 			return
 		}
-		e.settleExecution(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionClose, Close: &reply})
+		e.settleExecution(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionClose, Close: &reply}, schedExecuteRetry)
 		return
 	}
 	if r.interrupted.Stage == adapterproto.InterruptRequested && e.turnRunning(c) {
@@ -222,7 +226,7 @@ func (e *Engine) executeResult(now time.Time, r *cmdExecuteResult) {
 		e.sched.set(schedKey{schedExecuteRetry, r.key.String()}, now.Add(e.p.RetryBackoff))
 		return
 	}
-	e.settleExecution(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionInterrupt, Interrupt: &reply})
+	e.settleExecution(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionInterrupt, Interrupt: &reply}, schedExecuteRetry)
 }
 
 // turnRunning says whether the adapter has reported a turn of the session of an
@@ -250,7 +254,15 @@ func (e *Engine) interruptTurnEnded(now time.Time, ref adapterproto.EndpointRef)
 		}
 		e.settleExecution(now, c, envelope.ControlResult{
 			Signal: adapterproto.SignalSessionInterrupt, Interrupt: &adapterproto.ControlInterruptReply{Outcome: adapterproto.InterruptReplyStopped},
-		})
+		}, schedExecuteRetry)
+	}
+}
+
+// requestedResult is the reply of an interrupt whose turn did not end within the wait:
+// the interrupt was requested and not confirmed.
+func requestedResult() envelope.ControlResult {
+	return envelope.ControlResult{
+		Signal: adapterproto.SignalSessionInterrupt, Interrupt: &adapterproto.ControlInterruptReply{Outcome: adapterproto.InterruptReplyRequested},
 	}
 }
 
@@ -261,14 +273,25 @@ func (e *Engine) interruptConfirmDue(now time.Time, key store.TargetKey) {
 	if !ok {
 		return
 	}
-	e.settleExecution(now, c, envelope.ControlResult{
-		Signal: adapterproto.SignalSessionInterrupt, Interrupt: &adapterproto.ControlInterruptReply{Outcome: adapterproto.InterruptReplyRequested},
-	})
+	e.settleExecution(now, c, requestedResult(), schedExecuteRetry)
+}
+
+// executeRetry is the next try of a signal: a result whose write failed is written
+// again and the adapter is not asked, otherwise the adapter is called.
+func (e *Engine) executeRetry(now time.Time, key store.TargetKey) {
+	if c, ok := e.executing(key); ok {
+		if x := e.executions[key]; x != nil && x.result != nil {
+			e.settleExecution(now, c, *x.result, schedExecuteRetry)
+			return
+		}
+	}
+	e.startExecute(now, key)
 }
 
 // executeDeadline settles a signal whose time is up, as its outcome could not be
-// confirmed. While the wall clock is in doubt nothing is judged late, and it is
-// looked at again.
+// confirmed, or with the result it already has when only its write failed. While the
+// wall clock is in doubt nothing is judged late, and it is looked at again; so is a
+// write that fails, because after the deadline nothing else would try it.
 func (e *Engine) executeDeadline(now time.Time, key store.TargetKey) {
 	c, ok := e.executing(key)
 	if !ok {
@@ -279,17 +302,25 @@ func (e *Engine) executeDeadline(now time.Time, key store.TargetKey) {
 		return
 	}
 	x := e.executionOf(key)
-	if x.requested {
-		e.interruptConfirmDue(now, key)
-		return
+	switch {
+	case x.result != nil:
+		e.settleExecution(now, c, *x.result, schedExecuteDeadline)
+	case x.requested:
+		e.settleExecution(now, c, requestedResult(), schedExecuteDeadline)
+	default:
+		e.settleExecution(now, c, e.failedResult(c, x), schedExecuteDeadline)
 	}
-	e.settleFailedExecution(now, c, x)
 }
 
-// settleFailedExecution settles a signal the adapter could not be asked: a close as
+// settleFailedExecution settles a signal the adapter could not be asked, as failedResult says.
+func (e *Engine) settleFailedExecution(now time.Time, c store.CtlRecord, x *execution) {
+	e.settleExecution(now, c, e.failedResult(c, x), schedExecuteRetry)
+}
+
+// failedResult is the reply of a signal the adapter could not be asked: a close as
 // unconfirmed, an interrupt as failed, for the reason the adapter was away or did not
 // answer.
-func (e *Engine) settleFailedExecution(now time.Time, c store.CtlRecord, x *execution) {
+func (e *Engine) failedResult(c store.CtlRecord, x *execution) envelope.ControlResult {
 	st := e.view.endpoints[c.Key.Recipient]
 	offline := x.offline
 	if a := e.adapters[e.instanceOfEndpoint(st)]; a == nil || !a.online {
@@ -300,25 +331,29 @@ func (e *Engine) settleFailedExecution(now time.Time, c store.CtlRecord, x *exec
 		if offline {
 			reason = adapterproto.CloseReasonAdapterOffline
 		}
-		e.settleExecution(now, c, envelope.ControlResult{
+		return envelope.ControlResult{
 			Signal: adapterproto.SignalSessionClose, Close: &adapterproto.ControlCloseReply{Outcome: adapterproto.CloseReplyUnconfirmed, Reason: reason},
-		})
-		return
+		}
 	}
 	reason := adapterproto.InterruptReasonNativeUnreachable
 	if offline {
 		reason = adapterproto.InterruptReasonAdapterOffline
 	}
-	e.settleExecution(now, c, envelope.ControlResult{
+	return envelope.ControlResult{
 		Signal: adapterproto.SignalSessionInterrupt, Interrupt: &adapterproto.ControlInterruptReply{Outcome: adapterproto.InterruptReplyFailed, Reason: reason},
-	})
+	}
 }
 
 // settleExecution ends a signal in one transaction: the reply is made and stored and
 // the delivery of the signal ends, and for a close, whatever its outcome (the
 // channel closes whatever the adapter did), the session endpoint closes with its
 // token dropped. An endpoint the owner closed meanwhile stays as it is.
-func (e *Engine) settleExecution(now time.Time, c store.CtlRecord, result envelope.ControlResult) {
+//
+// A write that fails keeps the result on the execution and is tried again after
+// Params.RetryBackoff by the entry of the schedule that again names: the adapter is
+// not asked again, since it has done what it was asked and an interrupt asked a second
+// time may reach the next turn, or find none and hide that the first one stopped it.
+func (e *Engine) settleExecution(now time.Time, c store.CtlRecord, result envelope.ControlResult, again schedKind) {
 	err := e.writeExecution(now, c, result)
 	if err == nil {
 		return
@@ -326,9 +361,10 @@ func (e *Engine) settleExecution(now time.Time, c store.CtlRecord, result envelo
 	e.classify(err) // a fatal error stops the loop after this command
 	if e.fatal == nil {
 		e.log.Warn("the result of a control signal could not be recorded; it is tried again", "record", c.Key.String(), "error", err.Error())
-		e.sched.set(schedKey{schedExecuteRetry, c.Key.String()}, now.Add(e.p.RetryBackoff))
 		x := e.executionOf(c.Key)
-		x.requested = false
+		x.result, x.requested = &result, false
+		e.sched.remove(schedKey{schedInterruptConfirm, c.Key.String()})
+		e.sched.set(schedKey{again, c.Key.String()}, now.Add(e.p.RetryBackoff))
 	}
 }
 

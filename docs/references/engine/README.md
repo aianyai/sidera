@@ -844,9 +844,13 @@ endpoint closed, and an interrupt as `failed`. An interrupt is told `failed` wit
 that waits for the adapter to return stops it late and may be asked again. When the adapter
 says it asked the runtime to stop the turn, the sender hears `stopped` if the turn ends within
 `InterruptConfirmWait` (the notification of the end of the turn settles it) and `requested`
-if it does not. A start goes on with the signals that were not settled, asking the adapter
-again, which does what it did before idempotently, or settling those past their deadline as
-the deadline does.
+if it does not. A result that could not be written is kept and written again after
+`RetryBackoff`, and the adapter is not asked again for it: it has done what it was asked, and an
+interrupt asked a second time may reach the next turn or answer `not_running`, which hides that
+the first one stopped the turn. Past the deadline the write is tried again at the same pace by
+the deadline itself, so a signal is never left accepted until the next start. A start goes on with the
+signals that were not settled, asking the adapter again, which does what it did before idempotently,
+or settling those past their deadline as the deadline does.
 
 The state an adapter kept for a session (its checkpoint) is removed when the endpoint is
 closed, by whichever of the ways to close one: every place the engine records an endpoint

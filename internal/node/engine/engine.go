@@ -788,7 +788,7 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		case schedExecuteDeadline:
 			e.executeDeadline(now, k)
 		case schedExecuteRetry:
-			e.startExecute(now, k)
+			e.executeRetry(now, k)
 		default:
 			e.interruptConfirmDue(now, k)
 		}
