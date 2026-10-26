@@ -3,6 +3,7 @@ package adapterproto_test
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -147,7 +148,7 @@ func TestApplicationCodeTable(t *testing.T) {
 	want := map[int]string{
 		1001: "unknown_endpoint", 1002: "wrong_endpoint_kind", 1003: "capability_not_declared", 1004: "unknown_attempt",
 		1005: "attempt_conflict", 1006: "checkpoint_too_large", 1007: "endpoint_limit", 1008: "invalid_address",
-		1009: "send_refused", 1010: "lease_unknown", 1011: "instance_locked",
+		1009: "send_refused", 1010: "lease_unknown", 1011: "instance_locked", 1012: "node_busy",
 	}
 	got := map[int]string{}
 	for _, c := range adapterproto.ApplicationCodes() {
@@ -174,7 +175,7 @@ func TestApplicationCodeTable(t *testing.T) {
 		}
 	}
 	// The codes of the peer are not application codes, and nothing else is.
-	for _, code := range append([]int{0, 1, -32000, -32099, 999, 1012, 2001, -32005, -32701}, peer.Codes()...) {
+	for _, code := range append([]int{0, 1, -32000, -32099, 999, 1013, 2001, -32005, -32701}, peer.Codes()...) {
 		if adapterproto.KnownApplicationCode(code) {
 			t.Errorf("KnownApplicationCode(%d) = true", code)
 		}
@@ -184,7 +185,7 @@ func TestApplicationCodeTable(t *testing.T) {
 		adapterproto.CodeUnknownEndpoint: 1001, adapterproto.CodeWrongEndpointKind: 1002, adapterproto.CodeCapabilityNotDeclared: 1003,
 		adapterproto.CodeUnknownAttempt: 1004, adapterproto.CodeAttemptConflict: 1005, adapterproto.CodeCheckpointTooLarge: 1006,
 		adapterproto.CodeEndpointLimit: 1007, adapterproto.CodeInvalidAddress: 1008, adapterproto.CodeSendRefused: 1009,
-		adapterproto.CodeLeaseUnknown: 1010, adapterproto.CodeInstanceLocked: 1011,
+		adapterproto.CodeLeaseUnknown: 1010, adapterproto.CodeInstanceLocked: 1011, adapterproto.CodeNodeBusy: 1012,
 	}
 	for c, w := range consts {
 		if c != w {
@@ -225,6 +226,18 @@ func TestErrorObjectValidate(t *testing.T) {
 		{"send error with data", adapterproto.ErrorObject{Code: 1009, Message: "x", Data: raw(`{"reason":"body_too_large"}`)}, true},
 		{"send error with a reason that is not a word", adapterproto.ErrorObject{Code: 1009, Message: "x", Data: raw(`{"reason":"Body too large"}`)}, false},
 		{"send error with a reason that is too long", adapterproto.ErrorObject{Code: 1009, Message: "x", Data: raw(`{"reason":"` + repeat("a", 65) + `"}`)}, false},
+		{"busy error with a reason", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":"node_queue_full"}`)}, true},
+		{"busy error with the last reason", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":"recovering"}`)}, true},
+		{"busy error without data", adapterproto.ErrorObject{Code: 1012, Message: "x"}, false},
+		{"busy error with null data", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`null`)}, false},
+		{"busy error with empty data", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{}`)}, false},
+		{"busy error with a reason this version does not send", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":"disk_on_fire"}`)}, true},
+		{"busy error with a reason that is not a word", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":"Disk full"}`)}, false},
+		{"busy error with a reason that is too long", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":"` + repeat("a", 65) + `"}`)}, false},
+		{"busy error with an empty reason", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":""}`)}, false},
+		{"busy error with a reason in capitals", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":"Loop_busy"}`)}, false},
+		{"busy error with extra data", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":"loop_busy","retry_after":1}`)}, false},
+		{"busy error with a reason that is not a string", adapterproto.ErrorObject{Code: 1012, Message: "x", Data: raw(`{"reason":1}`)}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -249,6 +262,7 @@ func TestErrorObjectKnowsEveryCode(t *testing.T) {
 	versionData := json.RawMessage(`{"requested":{"min":2,"max":3},"supported":{"min":1,"max":1}}`)
 	addressData := json.RawMessage(`{"field":"to"}`)
 	sendData := json.RawMessage(`{"reason":"too_many_recipients"}`)
+	busyData := json.RawMessage(`{"reason":"storage_full"}`)
 	dataOf := func(code int) json.RawMessage {
 		switch code {
 		case peer.CodeUnsupportedProtocolVersion:
@@ -257,6 +271,8 @@ func TestErrorObjectKnowsEveryCode(t *testing.T) {
 			return addressData
 		case adapterproto.CodeSendRefused:
 			return sendData
+		case adapterproto.CodeNodeBusy:
+			return busyData
 		}
 		return nil
 	}
@@ -274,5 +290,40 @@ func TestErrorObjectKnowsEveryCode(t *testing.T) {
 	e := adapterproto.NewUnsupportedVersionError(&adapterproto.NoCommonVersionError{})
 	if pe := (*peer.Error)(&e); pe.Code != peer.CodeUnsupportedProtocolVersion {
 		t.Errorf("converted code %d", pe.Code)
+	}
+}
+
+// TestBusyReasonTable: the reasons this version of the node sends in a node_busy
+// error, written out in order. The names are those the engine gives its refusals
+// that left no effect, so nothing is translated on the way to the adapter; a name
+// once sent is never renamed or removed, and each one validates as the data of
+// the code. A reader accepts any reason word, so the list constrains the sender
+// only.
+func TestBusyReasonTable(t *testing.T) {
+	want := []string{"node_queue_full", "storage_full", "storage_unavailable", "clock_rollback", "loop_busy", "recovering"}
+	got := adapterproto.BusyReasons()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("BusyReasons() = %v, want %v", got, want)
+	}
+	for _, why := range want {
+		e := adapterproto.ErrorObject{Code: adapterproto.CodeNodeBusy, Message: "m", Data: json.RawMessage(`{"reason":"` + why + `"}`)}
+		if err := e.Validate(); err != nil {
+			t.Errorf("reason %s: %v", why, err)
+		}
+	}
+	// The list handed out is a copy: changing it changes nothing for the next caller.
+	got[0] = "changed"
+	if adapterproto.BusyReasons()[0] != "node_queue_full" {
+		t.Error("BusyReasons shares its backing array with its caller")
+	}
+}
+
+// TestNodeBusyIsNoEffect: the peer's effect rule treats every application code as
+// no effect, which is what node_busy promises: the node refused before anything
+// was recorded, and the request may be sent again later.
+func TestNodeBusyIsNoEffect(t *testing.T) {
+	err := peer.NewError(adapterproto.CodeNodeBusy, "busy").WithData(map[string]string{"reason": "loop_busy"})
+	if !peer.NoEffect(err) || peer.ResultUnknown(err) {
+		t.Errorf("NoEffect = %v, ResultUnknown = %v", peer.NoEffect(err), peer.ResultUnknown(err))
 	}
 }

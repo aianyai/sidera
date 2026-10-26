@@ -386,7 +386,7 @@ func TestSchemaErrorCodesMatchGo(t *testing.T) {
 		-32001: "overloaded", -32002: "shutting_down", -32003: "not_initialized", -32004: "line_too_long", -32022: "unsupported_protocol_version",
 		-32800: "request_cancelled", 1001: "unknown_endpoint", 1002: "wrong_endpoint_kind", 1003: "capability_not_declared",
 		1004: "unknown_attempt", 1005: "attempt_conflict", 1006: "checkpoint_too_large", 1007: "endpoint_limit", 1008: "invalid_address",
-		1009: "send_refused", 1010: "lease_unknown", 1011: "instance_locked",
+		1009: "send_refused", 1010: "lease_unknown", 1011: "instance_locked", 1012: "node_busy",
 	}
 	if !reflect.DeepEqual(want, independent) {
 		t.Errorf("Go error codes differ from the expected table:\n Go       %v\n expected %v", want, independent)
@@ -398,7 +398,7 @@ func TestSchemaErrorCodesMatchGo(t *testing.T) {
 		adapterproto.CodeUnknownEndpoint: 1001, adapterproto.CodeWrongEndpointKind: 1002, adapterproto.CodeCapabilityNotDeclared: 1003,
 		adapterproto.CodeUnknownAttempt: 1004, adapterproto.CodeAttemptConflict: 1005, adapterproto.CodeCheckpointTooLarge: 1006,
 		adapterproto.CodeEndpointLimit: 1007, adapterproto.CodeInvalidAddress: 1008, adapterproto.CodeSendRefused: 1009,
-		adapterproto.CodeLeaseUnknown: 1010, adapterproto.CodeInstanceLocked: 1011,
+		adapterproto.CodeLeaseUnknown: 1010, adapterproto.CodeInstanceLocked: 1011, adapterproto.CodeNodeBusy: 1012,
 	} {
 		if constant != value {
 			t.Errorf("a code constant is %d, want %d", constant, value)
@@ -682,6 +682,32 @@ func TestEveryErrorCodeAppearsInAnExample(t *testing.T) {
 	for _, c := range adapterproto.ApplicationCodes() {
 		if !seen[c.Code] {
 			t.Errorf("no golden error holds code %d (%s)", c.Code, c.Name)
+		}
+	}
+}
+
+// TestEveryBusyReasonAppearsInAnExample: each reason the node sends in a
+// node_busy error is in the data of at least one golden error. The schema takes
+// any reason word and the data of an error is raw, so neither the schema nor the
+// enum test sees the list of the reasons this version sends.
+func TestEveryBusyReasonAppearsInAnExample(t *testing.T) {
+	seen := map[string]bool{}
+	for _, d := range decodePositive(t) {
+		e, ok := d.value.(adapterproto.ErrorObject)
+		if !ok || e.Code != adapterproto.CodeNodeBusy {
+			continue
+		}
+		var data struct {
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(e.Data, &data); err != nil {
+			t.Fatalf("%s: %v", d.Path, err)
+		}
+		seen[data.Reason] = true
+	}
+	for _, why := range adapterproto.BusyReasons() {
+		if !seen[why] {
+			t.Errorf("no golden error holds node_busy with reason %q", why)
 		}
 	}
 }
