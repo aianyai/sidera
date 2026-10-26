@@ -143,6 +143,22 @@ func (a *adapters) launches(t testing.TB, n int) []*harness.AdapterLaunch {
 	}
 }
 
+// probed waits until the adapter of the instance has answered adapter.probe and the
+// engine has been told. A start returns once adapter.start is answered, and the
+// probe follows on the supervisor's own goroutine; a stop that begins before it
+// ends makes the engine refuse the probe, and the host then ends the connection as
+// one the engine cannot use, without sending shutdown. A test of what a stop sends
+// the adapter starts the stop after this.
+func (a *adapters) probed(t testing.TB, d *daemon.Daemon) {
+	t.Helper()
+	if err := waitFor(func() bool {
+		v, err := d.Engine().Adapter(context.Background(), chat)
+		return err == nil && v.Probed
+	}); err != nil {
+		t.Fatalf("the adapter was not probed: %v", err)
+	}
+}
+
 type startResult struct {
 	d   *daemon.Daemon
 	err error
@@ -322,6 +338,7 @@ func TestShutdownStopsTheAdaptersAtStepThree(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := a.launches(t, 1)[0]
+	a.probed(t, d)
 	d.RequestStop("test")
 	if err := d.Wait(); err != nil {
 		t.Fatal(err)
@@ -366,6 +383,7 @@ func TestAFatalFailureStillStopsTheAdapters(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := a.launches(t, 1)[0]
+	a.probed(t, d)
 	status, body := manage(t, n.home, "daemon.stop", map[string]any{"operation_id": strings.Repeat("0", 30) + "01"})
 	if status != 500 || !strings.Contains(string(body), "storage_fatal") {
 		t.Errorf("the request that met the failure answered %d %s", status, body)
