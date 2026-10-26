@@ -701,11 +701,20 @@ func itemAck(v delivery.AckVerdict) adapterproto.ItemAck {
 // serveReady hands a page to the wait of each endpoint that a command made a message
 // ready for, after the command, so that the arrival and the hand-out are not two
 // moments another reader could take the message between.
+//
+// It is a step of the loop like a command or the due entries of the schedule: it reads the
+// clock once and observes it, and a worker may be started from it.
 func (e *Engine) serveReady() {
 	if len(e.ready) == 0 {
 		return
 	}
+	e.inLoop.Store(true)
+	defer e.inLoop.Store(false)
 	now := e.d.Clock.Now()
+	e.observe(now)
+	if e.fatal != nil {
+		return
+	}
 	ready := e.ready
 	e.ready = map[ident.EndpointID]bool{}
 	for id := range ready {

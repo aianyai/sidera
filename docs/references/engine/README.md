@@ -385,7 +385,8 @@ registration. The waiter holds the lease and the budget of its recv, and the emp
 is answered with when nothing wakes it, made when it was registered. A command that makes
 a message of the endpoint ready (a target record taken in that waits with no lease on it)
 marks the endpoint, and the loop hands the page to the waiter when the command is over
-(`serveReady`), in a command of its own, so that an arrival is never handed out in the
+(`serveReady`), as a step of the loop of its own (one reading of the clock, observed like a
+command's, so that a worker may be started from it), so that an arrival is never handed out in the
 middle of the write that took it in. The deadline is a schedule entry on the injected
 clock. At most one recv of an endpoint waits: a newer one ends the older with an
 empty page. Shutdown ends every wait with an empty page: `BeginShutdown` posts the
