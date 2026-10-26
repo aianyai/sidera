@@ -218,13 +218,14 @@ func (r Record) handoutDue(now time.Time) bool {
 	return r.leaseSettleDeadline().reachedBy(now) || r.leaseExpiryDeadline().reachedBy(now) || r.backlogDeadline().reachedBy(now)
 }
 
-// SortForRecv orders records for one recv call: those on which the endpoint
-// holds a live lease come first, so a caller that was cut off mid-call gets
-// them back at once, flagged as possible duplicates. Order within each group is
-// kept.
-func SortForRecv(records []Record, now time.Time) {
-	sort.SliceStable(records, func(i, j int) bool {
-		return records[i].HoldsLiveLease(now) && !records[j].HoldsLiveLease(now)
+// SortForRecv orders the items that hold the records of one recv call: those on
+// which the endpoint holds a live lease come first, so a caller that was cut off
+// mid-call gets them back at once, flagged as possible duplicates. Order within
+// each group is kept. record gives the record an item holds, so the caller sorts
+// the stored records it works with and not copies of what is inside them.
+func SortForRecv[T any](items []T, record func(T) Record, now time.Time) {
+	sort.SliceStable(items, func(i, j int) bool {
+		return record(items[i]).HoldsLiveLease(now) && !record(items[j]).HoldsLiveLease(now)
 	})
 }
 

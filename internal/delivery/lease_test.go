@@ -472,6 +472,8 @@ func TestChunkedAck(t *testing.T) {
 	})
 }
 
+func self(r Record) Record { return r }
+
 func TestSortForRecv(t *testing.T) {
 	mk := func(leased bool) Record {
 		r := targetRecord(t, t0, time.Hour)
@@ -485,7 +487,7 @@ func TestSortForRecv(t *testing.T) {
 	rs[2].Reject = 2 // queued-second
 	rs[1].Reject = 3 // leased-first
 	rs[3].Reject = 4 // leased-second
-	SortForRecv(rs, at(time.Minute))
+	SortForRecv(rs, self, at(time.Minute))
 	var order []RejectReason
 	for _, r := range rs {
 		order = append(order, r.Reject)
@@ -498,7 +500,7 @@ func TestSortForRecv(t *testing.T) {
 	}
 	t.Run("a lease that has run out does not come first", func(t *testing.T) {
 		rs := []Record{mk(false), mk(true)}
-		SortForRecv(rs, at(10*time.Minute))
+		SortForRecv(rs, self, at(10*time.Minute))
 		if rs[0].Lease.Active {
 			t.Error("expired lease sorted first")
 		}
@@ -762,4 +764,20 @@ func TestHandoutExemptRecord(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
+}
+
+// Items that hold a record are ordered by the record they hold, whatever else they
+// carry, so the caller sorts what it works with.
+func TestSortForRecvOrdersItemsByTheRecordTheyHold(t *testing.T) {
+	type item struct {
+		name   string
+		record Record
+	}
+	leased := targetRecord(t, t0, time.Hour)
+	leased, _, _ = leased.Handout(t0, AuthorizationAllow, 1, 1, freshLease())
+	items := []item{{"queued", targetRecord(t, t0, time.Hour)}, {"leased", leased}}
+	SortForRecv(items, func(i item) Record { return i.record }, at(time.Minute))
+	if items[0].name != "leased" || items[1].name != "queued" {
+		t.Errorf("the order is %s, %s, want the leased one first", items[0].name, items[1].name)
+	}
 }
