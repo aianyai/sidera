@@ -19,7 +19,7 @@
         { "x-direction": "adapter_to_daemon", "x-result": "empty", "required": ["id", "method", "params"], "properties": { "method": { "const": "checkpoint.put" }, "params": { "$ref": "#/$defs/checkpoint.put.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "prompt.deliver.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "prompt.deliver" }, "params": { "$ref": "#/$defs/prompt.deliver.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "session.interrupt.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.interrupt" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
-        { "x-direction": "daemon_to_adapter", "x-result": "session.close.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.close" }, "params": { "$ref": "#/$defs/endpoint.only.params" } } },
+        { "x-direction": "daemon_to_adapter", "x-result": "session.close.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "session.close" }, "params": { "$ref": "#/$defs/session.close.params" } } },
         { "x-direction": "daemon_to_adapter", "x-result": "prompt.reconcile.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "prompt.reconcile" }, "params": { "$ref": "#/$defs/prompt.reconcile.params" } } },
         { "x-direction": "adapter_to_daemon", "x-result": "recv.observed.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "recv.observed" }, "params": { "$ref": "#/$defs/recv.observed.params" } } },
         { "x-direction": "adapter_to_daemon", "x-result": "endpoint.register.result", "required": ["id", "method", "params"], "properties": { "method": { "const": "endpoint.register" }, "params": { "$ref": "#/$defs/endpoint.register.params" } } },
@@ -408,6 +408,15 @@
         { "properties": { "stage": { "const": "refused" } }, "required": ["reason"] },
         { "properties": { "stage": { "enum": ["requested", "stopped", "not_running"] }, "reason": false } }
       ]
+    },
+    "session.close.params": {
+      "type": "object",
+      "required": ["endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "endpoint": { "$ref": "types.schema.json#/$defs/EndpointRef" },
+        "native_ref": { "$ref": "types.schema.json#/$defs/NativeRef" }
+      }
     },
     "session.close.result": {
       "type": "object",

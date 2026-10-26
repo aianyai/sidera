@@ -770,6 +770,42 @@ func (a *adapter) sessionInterrupt(ctx context.Context, raw json.RawMessage) (an
 	return answer(adapterproto.InterruptResult{Stage: stage})
 }
 
+// closeTarget finds the native session a close is for: nil when it no longer
+// exists, or is held under another endpoint, which a close answers as closed. An
+// endpoint the adapter holds takes precedence. An endpoint it does not hold is
+// found by the native reference the daemon sent, as an adapter that restarted
+// must; without a reference it is unknown.
+func (a *adapter) closeTarget(p adapterproto.CloseParams) (fakeruntime.Session, error) {
+	ns, err := a.session(p.Endpoint)
+	switch {
+	case err == nil:
+		return ns.sess, nil
+	case p.NativeRef == "":
+		return nil, err
+	}
+	if a.heldUnderAnotherEndpoint(p.NativeRef) {
+		return nil, nil
+	}
+	sess, found := a.cfg.Runtime.Find(string(p.NativeRef))
+	if !found {
+		return nil, nil
+	}
+	return sess, nil
+}
+
+// heldUnderAnotherEndpoint says whether the adapter holds the native session as
+// the session of an endpoint: a close for a different endpoint must not end it.
+func (a *adapter) heldUnderAnotherEndpoint(ref adapterproto.NativeRef) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, s := range a.sessions {
+		if s.sess != nil && s.sess.Ref() == string(ref) {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *adapter) sessionClose(ctx context.Context, raw json.RawMessage) (any, error) {
 	if err := a.runtimeMethod(); err != nil {
 		return nil, err
@@ -778,7 +814,7 @@ func (a *adapter) sessionClose(ctx context.Context, raw json.RawMessage) (any, e
 	if err := decodeParams(raw, &p); err != nil {
 		return nil, err
 	}
-	ns, err := a.session(p.Endpoint)
+	target, err := a.closeTarget(p)
 	if err != nil {
 		return nil, err
 	}
@@ -789,8 +825,8 @@ func (a *adapter) sessionClose(ctx context.Context, raw json.RawMessage) (any, e
 	if err != nil {
 		return nil, err
 	}
-	if ns.sess != nil {
-		if err := ns.sess.Close(ctx); err != nil {
+	if target != nil {
+		if err := target.Close(ctx); err != nil {
 			return nil, err
 		}
 	}

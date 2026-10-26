@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "request",
+  "method": "session.close",
+  "note": "native_ref empty",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "session.close",
+    "params": {
+      "endpoint": "22222222222222222222222222222222",
+      "native_ref": ""
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 72,
+  "method": "session.close",
+  "params": {
+    "endpoint": "22222222222222222222222222222222",
+    "native_ref": "c0ffee00-1111-4222-8333-444455556666"
+  }
+}

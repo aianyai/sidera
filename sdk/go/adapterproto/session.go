@@ -216,12 +216,33 @@ func (r InterruptResult) Validate() error {
 
 // CloseParams asks the adapter to release a session's native resources. A turn
 // that is still running is interrupted first.
+//
+// NativeRef is the native session the endpoint maps to, sent whenever the
+// daemon knows it. An endpoint the adapter holds takes precedence; an adapter
+// that has restarted and no longer holds the endpoint finds the native session
+// by the reference. A reference that names a native session the adapter holds
+// under another, open endpoint is left untouched and answered closed: nothing
+// is left to release for this endpoint. A close is idempotent: for a native
+// session that no longer exists (already released, or gone) the adapter
+// answers closed, because for the node "released" and "already gone" are the
+// same fact. When the adapter cannot tell whether the native session exists
+// (the runtime is unreachable, say) it answers close_unconfirmed with
+// native_unreachable, never closed. Without a reference, an endpoint the
+// adapter does not hold is unknown_endpoint.
 type CloseParams struct {
-	Endpoint EndpointRef `json:"endpoint"`
+	Endpoint  EndpointRef `json:"endpoint"`
+	NativeRef NativeRef   `json:"native_ref,omitempty"`
 }
 
-// Validate checks the endpoint.
-func (p CloseParams) Validate() error { return at("endpoint", p.Endpoint.Validate()) }
+// Validate checks the endpoint and, when present, the native reference.
+func (p CloseParams) Validate() error {
+	var c checker
+	c.field("endpoint", p.Endpoint.Validate())
+	if p.NativeRef != "" {
+		c.field("native_ref", p.NativeRef.Validate())
+	}
+	return c.err
+}
 
 // CloseResult is the adapter's answer to session.close.
 type CloseResult struct {

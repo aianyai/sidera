@@ -128,10 +128,13 @@ func TestInterruptAndCloseRules(t *testing.T) {
 		[]row[adapterproto.InterruptParams]{
 			{"endpoint required", func(p *adapterproto.InterruptParams) { p.Endpoint = "" }, "endpoint", false},
 		})
-	method(t, func() adapterproto.CloseParams { return adapterproto.CloseParams{Endpoint: ep1} },
+	method(t, func() adapterproto.CloseParams { return adapterproto.CloseParams{Endpoint: ep1, NativeRef: "sess_1"} },
 		[]row[adapterproto.CloseParams]{
 			{"endpoint required", func(p *adapterproto.CloseParams) { p.Endpoint = "" }, "endpoint", false},
 			{"endpoint over the limit", func(p *adapterproto.CloseParams) { p.Endpoint = adapterproto.EndpointRef(repeat("e", 129)) }, "endpoint", false},
+			{"native reference is optional", func(p *adapterproto.CloseParams) { p.NativeRef = "" }, "", false},
+			{"native reference of exactly 256 bytes", func(p *adapterproto.CloseParams) { p.NativeRef = adapterproto.NativeRef(repeat("n", 256)) }, "", false},
+			{"native reference over the limit", func(p *adapterproto.CloseParams) { p.NativeRef = adapterproto.NativeRef(repeat("n", 257)) }, "native_ref", false},
 		})
 	method(t, func() adapterproto.InterruptResult {
 		return adapterproto.InterruptResult{Stage: "refused", Reason: "native_error"}

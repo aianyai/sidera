@@ -327,7 +327,7 @@ only says the request was not understood or not allowed.
 | `turn.started` | A to D | notification | `endpoint`, `turn`, `attempt?`, `process?`, `at_ms` | |
 | `turn.ended` | A to D | notification | `endpoint`, `turn`, `final`, `at_ms` | |
 | `session.interrupt` | D to A | request | `endpoint` | `stage` requested, stopped, not_running or refused |
-| `session.close` | D to A | request | `endpoint` | `outcome` closed or close_unconfirmed |
+| `session.close` | D to A | request | `endpoint`, `native_ref?` | `outcome` closed or close_unconfirmed |
 | `prompt.reconcile` | D to A | request | `endpoint`, `attempt`, `checkpoint?` | `verdict`, `turn?`, `grounds` |
 | `recv.observed` | A to D | request | `endpoint`, `lease`, `frontend`, `observed` | `verdict`, `reason`, `items` |
 | `native_request.handled` | A to D | notification | `endpoint`, `method`, `disposition`, `at_ms` | |
@@ -338,6 +338,26 @@ only says the request was not understood or not allowed.
 | `endpoint.ack` | A to D | request | `endpoint`, `lease`, `items` | `items` with the outcome of each |
 | `endpoint.send` | A to D | request | `endpoint`, `to` (one address when `control` is given), `content_type?` (present exactly when `body` is not empty), `body`, optional reply, thread, disclosure, deadline, `control`, idempotency key | `message_id` |
 | `endpoint.message_status` | A to D | request | `endpoint`, `message_id` | `recipients`, `control_reply?` |
+
+**The close of a session.** `session.close` releases the native session, and the
+daemon may ask again at any time: after the endpoint was closed in the channel, after the
+adapter restarted, and again when an earlier answer was lost. It is idempotent, and a native
+session that no longer exists (already released, or gone) is answered `closed`, because for the
+node "released" and "already gone" are the same fact; `close_unconfirmed` is for a session that
+may still exist. The daemon sends `native_ref`, the native session the endpoint maps to,
+whenever it knows it: an adapter that restarted no longer holds a closed endpoint (`adapter.start`
+attaches only the open ones), so the reference is what lets it find the native session and release
+it. An endpoint the adapter holds takes precedence: the reference is used only when the adapter
+does not hold the endpoint. A reference that names a native session the adapter holds under
+another, open endpoint is left untouched and the answer is `closed`, because nothing is left to
+release for the endpoint that was closed. When the adapter cannot tell whether the native session
+exists (the runtime is unreachable, say) it answers `close_unconfirmed` with `native_unreachable`,
+never `closed`: `closed` is a fact the node records and never asks about again. An endpoint the
+adapter does not hold, asked without a reference, is `unknown_endpoint`.
+`CloseParams` and `TestInterruptAndCloseRules` (the rows on the reference), the golden
+messages `session.close/request-with-native-ref.json` and `invalid/session-close--native-ref-*.json`,
+and the fake adapter's `TestCloseByNativeReferenceAfterARestart` and
+`TestCloseTakesTheHeldEndpointBeforeTheNativeReference` hold both sides to it.
 
 **The body of `endpoint.send`.** A message has a body, and the body is not empty:
 the channel carries messages for agents, and an empty message carries nothing.

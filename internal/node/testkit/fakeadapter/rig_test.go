@@ -557,6 +557,14 @@ func (r *rig) closeSession(endpoint string) (adapterproto.CloseResult, error) {
 	return callDecoded[adapterproto.CloseResult](r, adapterproto.MethodSessionClose, adapterproto.CloseParams{Endpoint: adapterproto.EndpointRef(endpoint)})
 }
 
+// closeNative sends session.close for an endpoint together with the native
+// reference the daemon knows it by.
+func (r *rig) closeNative(endpoint, native string) (adapterproto.CloseResult, error) {
+	r.t.Helper()
+	return callDecoded[adapterproto.CloseResult](r, adapterproto.MethodSessionClose,
+		adapterproto.CloseParams{Endpoint: adapterproto.EndpointRef(endpoint), NativeRef: adapterproto.NativeRef(native)})
+}
+
 // ready initializes the adapter and creates session sess-1 through attempt 1,
 // returning its native reference.
 func (r *rig) ready() string {

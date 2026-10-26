@@ -631,6 +631,78 @@ func TestCloseOutcomes(t *testing.T) {
 	}
 }
 
+// A restarted adapter no longer holds the endpoint; the native reference the
+// daemon sends lets it release the session all the same, and a native session
+// that is already released or gone is closed, not unknown.
+func TestCloseByNativeReferenceAfterARestart(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	ref := r.ready()
+	r.disconnect()
+	r.connect()
+	r.initialize()
+	r.start(nil, nil) // the closed endpoint is not attached again
+
+	if _, err := r.closeSession("sess-1"); codeOf(err) != adapterproto.CodeUnknownEndpoint {
+		t.Fatalf("a close with no reference for an endpoint the adapter does not hold: %v", err)
+	}
+	if sess, _ := r.runtime.Find(ref); !sess.Alive() {
+		t.Fatal("the session was released without its reference")
+	}
+	res, err := r.closeNative("sess-1", ref)
+	if err != nil || res.Outcome != adapterproto.CloseClosed {
+		t.Fatalf("close by reference: %+v, %v", res, err)
+	}
+	if sess, _ := r.runtime.Find(ref); sess.Alive() {
+		t.Fatal("the session is alive after a close by reference")
+	}
+	res, err = r.closeNative("sess-1", ref)
+	if err != nil || res.Outcome != adapterproto.CloseClosed {
+		t.Fatalf("a repeated close by reference: %+v, %v", res, err)
+	}
+	res, err = r.closeNative("sess-1", "n-ffffffff")
+	if err != nil || res.Outcome != adapterproto.CloseClosed {
+		t.Fatalf("a close of a native session that is gone: %+v, %v", res, err)
+	}
+}
+
+// An endpoint the adapter holds takes precedence over the native reference, and a
+// reference that names a native session held under another endpoint is left alone:
+// the close is answered closed, because nothing is left to release for the endpoint
+// that was closed. A close the adapter cannot confirm is never answered closed.
+func TestCloseTakesTheHeldEndpointBeforeTheNativeReference(t *testing.T) {
+	r := newRig(t, rigOptions{})
+	first := r.ready()
+	second := string(r.createSession(2, "sess-2").NativeRef)
+	alive := func(ref string) bool {
+		sess, _ := r.runtime.Find(ref)
+		return sess.Alive()
+	}
+
+	// sess-1 is held: its own native session is closed, whatever the reference names.
+	res, err := r.closeNative("sess-1", second)
+	if err != nil || res.Outcome != adapterproto.CloseClosed {
+		t.Fatalf("close of a held endpoint: %+v, %v", res, err)
+	}
+	if alive(first) || !alive(second) {
+		t.Fatalf("a held endpoint was closed by the session its reference names: first alive %v, second alive %v", alive(first), alive(second))
+	}
+
+	// sess-3 is not held and its reference names the session held as sess-2.
+	res, err = r.closeNative("sess-3", second)
+	if err != nil || res.Outcome != adapterproto.CloseClosed {
+		t.Fatalf("close naming a session held under another endpoint: %+v, %v", res, err)
+	}
+	if !alive(second) {
+		t.Fatal("a close for an endpoint ended the native session of another, open endpoint")
+	}
+
+	_ = r.knobs.QueueClose(fakeadapter.Outcome{Kind: fakeadapter.OutcomeUnconfirmed})
+	res, err = r.closeNative("sess-3", "n-ffffffff")
+	if err != nil || res.Outcome != adapterproto.CloseUnconfirmed || res.Reason != adapterproto.CloseNativeUnreachable {
+		t.Fatalf("a close that cannot be confirmed: %+v, %v", res, err)
+	}
+}
+
 // --- adapter.start ---
 
 func TestStartReattachesWhatItCan(t *testing.T) {
