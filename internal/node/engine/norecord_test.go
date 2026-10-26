@@ -3,6 +3,7 @@ package engine_test
 import (
 	"path"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 	"github.com/aianyai/sidera/internal/node/transport"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
@@ -73,6 +75,44 @@ func loseTargetRecords(t *testing.T, h *harness.H, msg adapterproto.MessageID, b
 	}
 	h.Start()
 	quiet(t, h)
+}
+
+// callsOf counts the calls of the kind ("send" or "pull") that the delay knob
+// held, from the ledger. The loopback keeps no count of its calls, and a delay
+// every call waits out makes each one a hit that names its kind: it is how a test
+// shows that the source made a call, or that it made none.
+func callsOf(t testing.TB, h *harness.H, call string) int {
+	t.Helper()
+	log, err := h.Ledger()
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	n := 0
+	for _, e := range log.Kind(ledger.KindKnobHit) {
+		if e.Attrs.Knob == "delay" && strings.Contains(e.Attrs.Detail, "call="+call+" ") {
+			n++
+		}
+	}
+	return n
+}
+
+// letTheCallThrough waits for the one call that waits out the delay, lets the
+// delay pass and returns when the node has settled. A node that does not settle
+// is held by a call the test did not expect, and the failure says which calls
+// were made.
+func letTheCallThrough(t testing.TB, h *harness.H, delay time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for h.Loopback().Waiting() != 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("the source made no call that waits out the delay (%d pulls and %d sends so far)", callsOf(t, h, "pull"), callsOf(t, h, "send"))
+		}
+		time.Sleep(time.Millisecond)
+	}
+	h.Advance(delay)
+	if err := h.Quiesce(); err != nil {
+		t.Fatalf("the node did not settle after a call (%d pulls and %d sends so far): %v", callsOf(t, h, "pull"), callsOf(t, h, "send"), err)
+	}
 }
 
 // feedbackOf are the kinds of the notices the source record of the message holds
@@ -222,6 +262,12 @@ func TestNoRecordIsNotAnsweredWhileTheNodeMayNotSign(t *testing.T) {
 	if len(ans.Reports) != 0 || len(ans.NoRecord) != 0 {
 		t.Errorf("a refused pull gave %+v, want nothing of an answer", ans)
 	}
+	// The recipient whose record is lost needs no signature to be listed, which is
+	// why the refusal has to be the node's and not left to the signing of reports.
+	ans, err = pullFor(h, msg, b)
+	if reason, ok := engine.ReasonOf(err); !ok || reason != engine.ReasonClockRollback || len(ans.NoRecord) != 0 {
+		t.Errorf("a pull for the lost recipient alone while the clock is in doubt: %+v, %v, want the refusal for the clock", ans, err)
+	}
 	// Time moves on past the mark, which does not lift the pause; the source's own
 	// pulls are refused as well and it learns nothing from them.
 	h.Set(mark.Add(2 * time.Hour))
@@ -264,10 +310,22 @@ func TestSourceWithAReceiptGivesLostAtTargetOnce(t *testing.T) {
 		}
 	}
 
-	loseTargetRecords(t, h, msg, nil, "b")
+	// Every call from the restart on waits out a delay, so that the calls the
+	// source makes can be counted: it pulls, and it never sends again.
+	const delay = time.Second
+	removeTargetRecords(t, h, msg, "b")
+	h.Delay(delay)
+	h.Start()
+	// The pull of the start waits out its delay. The node is only quiet once the
+	// call is waiting, and a probe does not see it get there, so the call is waited
+	// for first.
+	letTheCallThrough(t, h, delay)
 	for i := 0; i < 3; i++ {
 		h.Advance(pullInterval)
-		quiet(t, h)
+		letTheCallThrough(t, h, delay)
+	}
+	if pulls, sends := callsOf(t, h, "pull"), callsOf(t, h, "send"); pulls != 4 || sends != 0 {
+		t.Errorf("after the loss the source made %d pulls and %d sends, want 4 and none: it must not send again", pulls, sends)
 	}
 
 	out := outOf(t, h, msg)
@@ -289,6 +347,60 @@ func TestSourceWithAReceiptGivesLostAtTargetOnce(t *testing.T) {
 	}
 	if ins := inRecords(t, h, msg); len(ins) != 1 || ins[0].Key.Recipient != endpointOf(t, h, "c") {
 		t.Errorf("the target holds %d records after the loss, want only c's: the source must not send the message again", len(ins))
+	}
+}
+
+// A target says at most one thing about a recipient: its report or its absence.
+// An answer that says both is a peer breaking the transport's contract, and the
+// source does not know which half to believe, so it keeps the report it can
+// verify and takes nothing of the other: it does not turn the delivery into a
+// loss, which would tell the sender that a record was lost that the target has
+// just reported.
+func TestAnAnswerThatReportsAndListsARecipientIsNotReadAsALoss(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b", "c")
+	res, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b"), h.Addr("c")}, Body: "to two"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := res.MessageID
+	quiet(t, h)
+	b, c := endpointOf(t, h, "b"), endpointOf(t, h, "c")
+	ans, err := pullFor(h, msg, b)
+	if err != nil || len(ans.Reports) != 1 {
+		t.Fatalf("the answer for a held record: %+v, %v", ans, err)
+	}
+	out := outOf(t, h, msg)
+
+	// b is reported and listed; c is only listed, which the source may believe.
+	apply := func() error {
+		var applyErr error
+		if err := engine.InLoop(h.Ctx(), h.Engine(), func(l engine.LoopSide) {
+			applyErr = l.ApplyAnswer(out.Name(), harness.NodeID(), ans.Reports, []ident.EndpointID{b, c})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return applyErr
+	}
+	if err := apply(); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range outOf(t, h, msg).Outbound.Recipients {
+		switch r.Address.Endpoint {
+		case b:
+			if r.Delivery.State != delivery.StateAccepted {
+				t.Errorf("the delivery that was reported and listed is %s (%s), want accepted: its report stands", r.Delivery.State, r.Delivery.Unknown)
+			}
+		case c:
+			if r.Delivery.State != delivery.StateDeliveryUnknown || r.Delivery.Unknown != delivery.UnknownLostAtTarget {
+				t.Errorf("the delivery that was only listed is %s (%s), want lost_at_target", r.Delivery.State, r.Delivery.Unknown)
+			}
+		}
+	}
+	if fb := outOf(t, h, msg).Feedback; len(fb) != 1 || fb[0].Ref.Recipient.Endpoint != c || fb[0].Feedback.Kind != delivery.KindLostAtTarget {
+		t.Errorf("the notices of the sender: %+v, want one lost_at_target, for c alone", fb)
+	}
+	if !slices.ContainsFunc(h.Log().Messages(), func(m string) bool { return strings.Contains(m, "both a report and no record") }) {
+		t.Errorf("the log %q has no word of the answer that broke the contract", h.Log().Messages())
 	}
 }
 
@@ -318,5 +430,47 @@ func TestNoRecordAfterReportByChangesNothing(t *testing.T) {
 	}
 	if d := sourceDelivery(t, h, msg); d.State == delivery.StateDeliveryUnknown || d.Unknown != 0 {
 		t.Errorf("the delivery is %s (%s) after a late answer, want it not a loss", d.State, d.Unknown)
+	}
+}
+
+// A source that holds no receipt cannot tell a target that lost its record from
+// one that never took the message in: it is not told the target lost it, and the
+// delivery is left to the deadline rules, which say "may have been received"
+// without claiming more. After the delivery deadline the source asks a node it
+// never reached instead of sending to it, and that node, which holds nothing,
+// answers that it has no record.
+func TestSourceWithoutAReceiptIsNotToldTheTargetLostTheRecord(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	h.Unreachable(true)
+	msg := send(t, h, "a", "b", "never reached the target")
+	quiet(t, h)
+	h.Advance(delivery.DefaultAcceptBefore + time.Minute)
+	quiet(t, h)
+	h.Unreachable(false)
+	// The answer the source gets to the pull it makes is "no record": the target
+	// holds nothing, and it is asked about the recipient.
+	ans, err := pullFor(h, msg, endpointOf(t, h, "b"))
+	if err != nil || len(ans.Reports) != 0 || !slices.Equal(ans.NoRecord, []ident.EndpointID{endpointOf(t, h, "b")}) {
+		t.Fatalf("the answer to a pull for the recipient: %+v, %v, want it listed in NoRecord", ans, err)
+	}
+	// Every call from here on waits out a delay, so that the pulls of the source can
+	// be counted: it asks the node it never reached, and sends nothing.
+	const delay = time.Second
+	h.Delay(delay)
+	for i := 0; i < 3; i++ {
+		h.Advance(pullInterval)
+		letTheCallThrough(t, h, delay)
+	}
+	if pulls, sends := callsOf(t, h, "pull"), callsOf(t, h, "send"); pulls != 3 || sends != 0 {
+		t.Errorf("the source made %d pulls and %d sends after the deadline, want 3 and none", pulls, sends)
+	}
+	if ins := inRecords(t, h, msg); len(ins) != 0 {
+		t.Fatalf("the target holds %d records: the message was sent after its deadline", len(ins))
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
+		t.Errorf("the delivery is %s after the answer that the target holds no record, want it left queued", d.State)
+	}
+	if got := feedbackOf(t, h, msg); len(got) != 0 {
+		t.Errorf("the sender is told %v by an answer about a delivery with no receipt, want nothing", got)
 	}
 }

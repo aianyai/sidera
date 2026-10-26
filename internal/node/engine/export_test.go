@@ -256,6 +256,13 @@ func (l LoopSide) Submit(fn func()) bool {
 	}
 }
 
+// ApplyAnswer applies what a node answered about a message this node sent, as the
+// outbound worker's result does, to the source record named name: the answer is
+// the caller's to make, so that a test can offer one a transport must never give.
+func (l LoopSide) ApplyAnswer(name string, node ident.NodeID, reports []record.Record, noRecord []ident.EndpointID) error {
+	return l.e.applyAnswer(l.e.d.Clock.Now(), name, node, reports, noRecord)
+}
+
 type cmdHook struct {
 	call[struct{}]
 	fn func(LoopSide)
