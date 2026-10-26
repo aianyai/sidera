@@ -64,7 +64,9 @@ arrived after the report would find the instance offline and mark it busy. The r
 of the adapter that were being answered make no such promise and may complete after
 the report, as they may after a connection that ended by itself. A
 process that `Kill` reports it cannot end (the operating system refuses the signal)
-is not waited for at all: there is nothing the wait could see.
+is not waited for at all: there is nothing the wait could see. The rule is one for
+every kill the host decides on, including the kill of a process that was asked to shut
+down and stayed after `ShutdownWait`.
 An answer starts the count again; an answer that comes after the timeout is dropped
 by the peer and counts for nothing. A connection that ends by itself (the stream
 ends, the process exits) is reported as `GoneConnectionEnded`, after the forwarder
@@ -321,7 +323,7 @@ check on every test):
 | The log of the adapter | `TestTheStderrOfTheAdapterGoesToItsLog` |
 | The lock path and the instance the launcher is given | `TestLockPath`, `TestTheLockPathAndTheInstanceAreWhatTheLauncherAndTheAdapterAreTold` |
 | The exec launcher over a helper process (the test binary started again) | `TestExecLauncherRunsTheProgramOfTheManifestOverStandardStreams` |
-| A process that cannot be ended is not waited for | `TestAProcessThatCannotBeEndedIsNotWaitedFor` |
+| A process that cannot be ended is not waited for | `TestAProcessThatCannotBeEndedIsNotWaitedFor`, `TestAProcessThatDidNotEndAfterShutdownAndCannotBeKilledIsNotWaitedForAgain` |
 | A request counted before the host waits for its answer | `TestARequestIsCountedAsSentBeforeTheHostIsIdleWaitingForItsAnswer` |
 | Defaults of the tunables | `TestParamsZeroFieldsTakeTheirDefaults` |
 | The codes an adapter is told for each refusal of the engine, one row per reason | `TestEveryReasonOfTheEngineHasItsCodeForARequestOfAnAdapter`, `TestARefusalCarriesTheLimitInItsDataAndTheFieldInItsMessage`, `TestTheCauseOfARefusalIsNeverSentToTheAdapter`, `TestAnErrorThatIsNotARefusalReachesTheHostUntouched` (`internal/node/apiwire`); through a real engine: `TestTheEngineBehindTheHostAnswersItsRefusalsWithTheCodesOfTheProtocol` |

@@ -354,8 +354,9 @@ func modeOf(err error) mode {
 
 // finishConn ends a connection and everything of it. A process that Kill
 // reports it cannot end is left at once, and one that was asked to end and does
-// not is waited for at most Params.ShutdownWait and then left: the instance lock
-// keeps a second writer out whatever either does.
+// not is waited for at most Params.ShutdownWait and then killed and, if Kill can
+// end it, waited for once more: the instance lock keeps a second writer out
+// whatever either does.
 func (s *supervisor) finishConn(c *conn, m mode) {
 	s.leaveService(c)
 	c.closing.Store(true)
@@ -380,20 +381,26 @@ func (s *supervisor) finishConn(c *conn, m mode) {
 		case errors.Is(err, errAborted):
 			_ = c.proc.Kill()
 		case errors.Is(err, errLimit):
-			_ = c.proc.Kill()
-			_ = s.waitExit(c)
+			s.waitKilled(c, c.proc.Kill())
 		}
 	default:
 		killErr := c.proc.Kill()
 		s.closeConn(c)
-		if killErr != nil {
-			// A process that cannot be told to end is not waited for: there is nothing
-			// the wait could see. The instance lock keeps a second writer out.
-			s.log.Warn("the adapter process cannot be ended; it is left", "pid", c.proc.PID(), "err", killErr)
-			return
-		}
-		_ = s.waitExit(c)
+		s.waitKilled(c, killErr)
 	}
+}
+
+// waitKilled waits for a process that Kill was just called on, which returned
+// killErr, for at most Params.ShutdownWait. A process that Kill reports it cannot
+// end is not waited for: there is nothing the wait could see, and the instance
+// lock keeps a second writer out. It is the one rule of both ways a process is
+// killed after the host decided it must end.
+func (s *supervisor) waitKilled(c *conn, killErr error) {
+	if killErr != nil {
+		s.log.Warn("the adapter process cannot be ended; it is left", "pid", c.proc.PID(), "err", killErr)
+		return
+	}
+	_ = s.waitExit(c)
 }
 
 // closeConn ends the goroutines of a connection and drops what is still buffered
