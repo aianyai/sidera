@@ -97,8 +97,10 @@ expected and how many notifications the daemon must have handled before the syst
 counts as quiet. `Held` is a multiset of methods (`session.create`, …), one per held
 request, whether an outcome, a pause point or `Hang` holds it (a hung adapter holds every
 request it receives, a ping included): the fixture compares it with
-the multiset of methods the daemon has in flight to the adapter. `HeldPoints` names
-the pause points some of them stopped at.
+the multiset of methods the daemon has in flight to the adapter. A request leaves
+`Held` before `Release` or `ReleaseHeld` returns, so a fixture that asks for quiet
+right after letting it go waits for its answer instead of counting it as still held.
+`HeldPoints` names the pause points some of them stopped at.
 
 Every use of a knob that changes behaviour writes a `knob.hit` entry, so a test can
 assert that its injection point was reached.

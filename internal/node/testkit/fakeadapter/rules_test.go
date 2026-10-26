@@ -24,7 +24,9 @@ import (
 // outcome or at a pause point, and either way it is listed under its method, never
 // under the name of a point. A fixture compares this multiset with the methods of
 // the requests the daemon has in flight to the adapter; a list that mixed methods
-// and points could never be equal to it.
+// and points could never be equal to it. A request leaves the list as it is let go,
+// not when its handler next runs: a fixture that asks for quiet right after a
+// release would otherwise discount a request that is about to be answered.
 func TestHeldIsAMultisetOfMethodsWhateverHoldsTheRequest(t *testing.T) {
 	r := newRig(t, rigOptions{})
 	r.ready()
@@ -54,8 +56,13 @@ func TestHeldIsAMultisetOfMethodsWhateverHoldsTheRequest(t *testing.T) {
 		t.Fatalf("HeldPoints() = %v, want only the point a request stopped at", got)
 	}
 	r.knobs.ReleaseHeld()
+	if held := r.knobs.Held(); !reflect.DeepEqual(held, []string{adapterproto.MethodPromptDeliver}) {
+		t.Fatalf("Held() = %v once the creations were let go, want only the paused prompt", held)
+	}
 	r.knobs.Release(fakeadapter.PausePromptAfterForward)
-	r.waitFor("nothing held", func() bool { return len(r.knobs.Held()) == 0 })
+	if held := r.knobs.Held(); len(held) != 0 {
+		t.Fatalf("Held() = %v once every request was let go, want nothing", held)
+	}
 }
 
 // knobScript is one script against the Controller of a fake adapter, written once

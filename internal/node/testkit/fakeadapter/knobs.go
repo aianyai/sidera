@@ -123,7 +123,7 @@ type Knobs struct {
 	rules    map[string]*outcomeRule
 	pauses   map[string]*pausePoint // armed, nobody has stopped here yet
 	stopped  map[string]*pausePoint // a request is stopped here, waiting for Release
-	holds    []heldRequest
+	holds    []*heldRequest
 	holdOpen chan struct{} // closed by ReleaseHeld, replaced afterwards
 	hang     bool
 	observed ObservedMode
@@ -131,16 +131,19 @@ type Knobs struct {
 }
 
 // heldRequest is a request of the daemon that the adapter is holding on purpose:
-// the method it came with, and the pause point it stopped at, empty when an
-// outcome holds it.
+// the method it came with, the pause point it stopped at (empty otherwise), and
+// whether an outcome holds it. An entry is told apart from an equal one by its
+// address, so removing it twice removes nothing the second time.
 type heldRequest struct {
 	method, point string
+	byOutcome     bool
 }
 
 type pausePoint struct {
 	reached chan struct{} // closed when an adapter has stopped here
 	release chan struct{} // closed to let it go
 	once    sync.Once
+	held    *heldRequest // the request stopped here; guarded by Knobs.mu
 }
 
 func (p *pausePoint) let() { p.once.Do(func() { close(p.release) }) }
@@ -317,7 +320,10 @@ func (k *Knobs) WaitPaused(ctx context.Context, point string) error {
 }
 
 // Release lets the request that stopped at the pause point go on, and disarms the
-// point if nothing has stopped there yet.
+// point if nothing has stopped there yet. The request leaves Held before Release
+// returns: from then on it is at work, and a fixture that asks right away whether
+// the system is quiet must wait for its answer instead of taking it for one still
+// held.
 func (k *Knobs) Release(point string) {
 	k.mu.Lock()
 	pp := k.stopped[point]
@@ -326,6 +332,9 @@ func (k *Knobs) Release(point string) {
 	}
 	delete(k.stopped, point)
 	delete(k.pauses, point)
+	if pp != nil && pp.held != nil {
+		k.removeHeldLocked(pp.held)
+	}
 	k.mu.Unlock()
 	if pp != nil {
 		pp.let()
@@ -339,17 +348,19 @@ func (k *Knobs) pause(ctx context.Context, a *adapter, point string) error {
 	if pp != nil {
 		delete(k.pauses, point)
 		k.stopped[point] = pp
+		// Held in the same step as stopped, so that Release, which takes it out of
+		// both, never finds one without the other.
+		pp.held = &heldRequest{method: pauseMethods[point], point: point}
+		k.holds = append(k.holds, pp.held)
 	}
 	k.mu.Unlock()
 	if pp == nil {
 		return nil
 	}
+	defer k.removeHeld(pp.held)
 	if err := a.hit("pause."+point, ""); err != nil {
 		return err
 	}
-	held := heldRequest{method: pauseMethods[point], point: point}
-	k.addHeld(held)
-	defer k.removeHeld(held)
 	close(pp.reached)
 	k.mu.Lock()
 	hook := k.onPause
@@ -365,18 +376,23 @@ func (k *Knobs) pause(ctx context.Context, a *adapter, point string) error {
 	}
 }
 
-func (k *Knobs) addHeld(h heldRequest) {
+func (k *Knobs) addHeld(h *heldRequest) {
 	k.mu.Lock()
 	k.holds = append(k.holds, h)
 	k.mu.Unlock()
 }
 
-func (k *Knobs) removeHeld(h heldRequest) {
+// removeHeld takes the request out of Held if a release has not already.
+func (k *Knobs) removeHeld(h *heldRequest) {
 	k.mu.Lock()
+	k.removeHeldLocked(h)
+	k.mu.Unlock()
+}
+
+func (k *Knobs) removeHeldLocked(h *heldRequest) {
 	if i := slices.Index(k.holds, h); i >= 0 {
 		k.holds = slices.Delete(k.holds, i, i+1)
 	}
-	k.mu.Unlock()
 }
 
 // Held lists the methods of the requests the adapter is holding on purpose, one
@@ -412,11 +428,13 @@ func (k *Knobs) HeldPoints() []string {
 
 // hold waits for ReleaseHeld or the end of ctx; method labels the request.
 func (k *Knobs) hold(ctx context.Context, method string) error {
+	// The channel is read and the request held in one step, so that a ReleaseHeld
+	// that closes the channel also takes out every request that waits on it.
+	held := &heldRequest{method: method, byOutcome: true}
 	k.mu.Lock()
 	open := k.holdOpen
+	k.holds = append(k.holds, held)
 	k.mu.Unlock()
-	held := heldRequest{method: method}
-	k.addHeld(held)
 	defer k.removeHeld(held)
 	select {
 	case <-open:
@@ -426,11 +444,13 @@ func (k *Knobs) hold(ctx context.Context, method string) error {
 	}
 }
 
-// ReleaseHeld lets every request held by OutcomeHold go on.
+// ReleaseHeld lets every request held by OutcomeHold go on. They leave Held before
+// it returns, as a request let go by Release does.
 func (k *Knobs) ReleaseHeld() {
 	k.mu.Lock()
 	close(k.holdOpen)
 	k.holdOpen = make(chan struct{})
+	k.holds = slices.DeleteFunc(k.holds, func(h *heldRequest) bool { return h.byOutcome })
 	k.mu.Unlock()
 }
 
