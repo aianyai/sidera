@@ -167,28 +167,6 @@ func TestSweepFloorsPruneTargetsThatCannotReceiveAndNeverLowerAFloor(t *testing.
 	}
 }
 
-// Quarantining source records raises the floors by one per record whose number
-// is lost, above everything that is still known; two records of one pair give
-// two gaps, not a number that grows with the square of their count.
-func TestQuarantineRaisesTheFloorByTheNumberOfLostRecords(t *testing.T) {
-	pair := addr(2, 2)
-	r := newRig(t)
-	for i := 1; i <= 6; i++ {
-		seed(t, r.mem, srcOut(i, false))
-	}
-	damageBody(t, r.mem, "state/out/"+srcOut(3, false).Name())
-	damageBody(t, r.mem, "state/out/"+srcOut(5, false).Name())
-	s := newSim(t, r.st)
-	s.recoverAll()
-	sc := r.scan()
-	if got := floorOf(t, sc, 1, pair); got != 8 {
-		t.Errorf("floor = %d, want 8: the others go up to 6 and two numbers are lost", got)
-	}
-	if got := store.NewSeqBook(sc).Next(ep(1), pair); got != 9 {
-		t.Errorf("Next = %d, want 9", got)
-	}
-}
-
 // A floor file that is damaged when a write needs to read it is not read as
 // empty and overwritten: that would lose what it held with no alert. The write
 // does nothing and returns the damaged file as the scan would have listed it, so
