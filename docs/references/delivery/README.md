@@ -438,7 +438,9 @@ The feedback is chosen by `TransitionFeedback` like every other, and each kind i
 still given at most once. A delivery derived from a control signal is accepted
 from its start, so it is lost at the target the same way. `envelope`'s
 `Outbound.ApplyNoRecord` finds the tracked delivery and checks its node before
-calling `Apply`; the rule itself lives only in `Record.Apply`. Tests:
+calling `Apply`; the rule itself lives only in `Record.Apply`. The engine hands it
+each recipient a pull answer lists in `NoRecord` and does not send the message again
+(see the engine reference). Tests:
 `TestNoRecordAtTargetIsLostAtTargetOnlyFromAccepted` (every state, inside and
 outside the window, the replacement, the target's records), `TestLossWordingVectors`,
 `TestLostUnknownMessageKindBelongsToNoRecord`, `TestLostUnknownMessageItemsMergeBySender`,

@@ -224,12 +224,27 @@ commands and add their methods to this list.
   again is made anew from the record, so its evidence is signed anew while the request
   digest, and so the request, is the same. A delivery that is not settled is asked
   about every `PullInterval` until its report deadline, which already holds the
-  tolerance of the clock, and after the delivery deadline a node that never answered is
+  tolerance of the clock (a pull names each delivery of the record on that node that
+  is not settled, and the target answers for those only; a derived delivery, which only a
+  control signal's record has, is not asked about, as the worker takes no control record), and after the delivery deadline a node that never answered is
   asked, not sent to. The evidence of a reply is a signature: while the wall clock
   cannot be trusted the send is put off. Nothing about the sending is persisted: after a restart every unsettled
   source record is looked at again (the start's last step), and the target answers a
   send it already took in from its record. A worker waiting out a delay that the
   transport was asked to make is not work for `Quiesce`.
+- **What a pull brings back is told apart by what it holds.** A call that returns an
+  error got no answer: it is made again after `ResendBackoff`. On a successful answer
+  each report is verified and applied, and each recipient in `NoRecord` is applied by
+  the one rule of `envelope.Outbound.ApplyNoRecord` (an accepted delivery before its
+  report deadline is lost at the target, the sender is told once, and every other
+  state ignores it); a recipient that is in neither list changes nothing and is
+  asked about again. The source does not send the message again on `NoRecord`: it
+  holds a receipt, so the message is not in doubt, only its record at the target.
+  An answer about a recipient the record does not track is dropped, and one about a
+  delivery that is on another node than the answering one is logged as the peer's
+  fault, as is a `NoRecord` for a recipient the same answer reports (the report
+  stands, the listing is left out). Reports and `NoRecord` take the one path that writes the record and its
+  feedback (`applyAnswer`).
 - **The target judges in a fixed order and writes nothing before it has signed.** A
   repeat of a request is answered from its record and another body under the same
   identifier is a conflict that changes nothing; for a new one the reply permission

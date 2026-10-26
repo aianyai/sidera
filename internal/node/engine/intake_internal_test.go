@@ -7,6 +7,8 @@ import (
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/timing"
 )
@@ -43,6 +45,44 @@ func TestOutboundNeedByState(t *testing.T) {
 		if got := outboundNeed(c.d, accept, c.now, c.sent); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
 		}
+	}
+}
+
+// A pull names every delivery on its node that is not settled, the derived one
+// included, and none that is: the target is asked about what the source still
+// waits for. A node that is owed a send is sent to, and the send carries every
+// recipient on it, so no pull is made for it.
+func TestAPullNamesTheDeliveriesOfTheNodeThatAreNotSettled(t *testing.T) {
+	t0 := time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
+	accept := t0.Add(10 * time.Minute)
+	nodeA, nodeB, nodeC := nodeOf(t, 1), nodeOf(t, 2), nodeOf(t, 3)
+	at := func(node ident.NodeID, ep byte, state delivery.State) envelope.Tracked {
+		r := delivery.NewSourceRecord(accept, accept)
+		r.State = state
+		return envelope.Tracked{Address: ident.Address{Node: node, Endpoint: idOf(t, ep)}, Delivery: r}
+	}
+	o := envelope.Outbound{
+		AcceptBefore: accept,
+		Recipients: []envelope.Tracked{
+			at(nodeA, 10, delivery.StateAccepted), at(nodeA, 11, delivery.StateDelivered),
+			at(nodeA, 12, delivery.StateDeliveryUnknown), at(nodeB, 20, delivery.StateQueued),
+			at(nodeC, 30, delivery.StateQueued), at(nodeC, 31, delivery.StateAccepted),
+		},
+	}
+	derived := at(nodeA, 13, delivery.StateAccepted)
+	o.Derived = &derived
+	plan := outboundPlan(o, t0, map[ident.NodeID]bool{nodeA: true, nodeB: false, nodeC: false})
+	if got := plan[nodeA]; got.kind != workPull || !slices.Equal(got.recipients, []ident.EndpointID{idOf(t, 10), idOf(t, 12), idOf(t, 13)}) {
+		t.Errorf("node A: %+v, want a pull naming the accepted, the unknown and the derived delivery, not the delivered one", got)
+	}
+	if got := plan[nodeB]; got.kind != workSend || len(got.recipients) != 0 {
+		t.Errorf("node B: %+v, want a send and no pull", got)
+	}
+	if got := plan[nodeC]; got.kind != workSend || len(got.recipients) != 0 {
+		t.Errorf("node C: %+v, want a send that names no recipient even though one of its deliveries is accepted", got)
+	}
+	if plan = outboundPlan(o, delivery.ReportBy(accept).Add(time.Second), map[ident.NodeID]bool{nodeA: true, nodeB: true, nodeC: true}); len(plan) != 0 {
+		t.Errorf("after the report deadline: %+v, want nothing to do", plan)
 	}
 }
 

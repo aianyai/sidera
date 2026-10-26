@@ -285,7 +285,24 @@ to. A send that carries evidence is put off while the wall clock cannot be trust
 verified with the target's certificate and applied to the source record by the envelope
 package's one rule; the record is written with the feedback the change calls for and with
 the body reference dropped once no delivery needs the body. A report that does not verify
-or that no state can follow is logged and left out. Nothing of the sending is persisted:
+or that no state can follow is logged and left out. A pull names the recipients on the node
+whose deliveries are not settled (`outboundPlan`; the send of a node still owed one carries
+all its recipients, so no pull is made for it). A derived delivery, which only the record of
+a control signal has, would be planned like the others, but the worker takes no control
+record, so none is asked about. The answer to it is read as three different things: an error is no answer and
+the pull is made again after `ResendBackoff`; a recipient in `NoRecord` is applied by the
+envelope package's rule for it, which turns an accepted delivery inside its report window
+into `delivery_unknown` (`lost_at_target`) with one notice, and ignores it for every other
+state or after the window (the answer was slow, and the window the target keeps its
+records for is over); a successful answer that
+has the recipient in neither list is nothing yet, and changes nothing. The source never
+sends the message again because of a `NoRecord`: a message it holds a receipt for is not in
+doubt, only the target's record of it is, and whether to send again is the agents' to decide
+from the notice. The reports and the `NoRecord` entries are applied by one function and
+written in one transaction with the feedback they call for, and a `NoRecord` for a recipient
+the record does not track is dropped. A target says at most one thing about a recipient, so
+a `NoRecord` for a recipient the same answer reports is logged as the peer's fault and left
+out: the report is signed and stands, and the listing is not applied. Nothing of the sending is persisted:
 the last step of the start looks at every unsettled source record again.
 
 **Taking in an envelope.** `Inbound` is the handler of the transport. For each recipient
@@ -575,6 +592,8 @@ reproducible).
 | An answer is made only to a message the endpoint took in | `send.go` (`heldBy`) | `TestNoAnswerIsMadeToAMessageTheEndpointRefusedAtIntake` |
 | A closed endpoint rejects as closed, a missing or runtime one as missing | `inbound.go` (`messageRefusal`) | `TestAMessageToAClosedEndpointIsRejectedAsClosed`, `TestAMessageToAnEndpointThatIsNotThereIsRejectedAsMissing`, `TestTheRefusalOfAMessageForAnEndpointItCannotBeGiven` |
 | What is sent and asked, and when | `outbound.go` | `TestOutboundNeedByState`, `TestAnUnreachableNodeIsSentToUntilTheDeadlineAndAskedAfterIt`, `TestHeldReportsAreAskedForUntilTheyCome`, `TestARestartGoesOnWithAMessageThatWasNotSettled`, `TestANodeThatHasNotAnsweredIsSentToAfterAnotherNodeDid`, `TestTheReportsAreAskedForUntilTheReportDeadlineAndNoLonger` |
+| A pull names the recipients that are not settled; a target answers each with a report or `NoRecord`, refuses the whole answer while it may not sign, and a held answer is never `NoRecord` | `inbound.go` (`answerPull`), `outbound.go` (`outboundPlan`, `applyAnswer`) | `TestPullAnswersNoRecordForARequestedRecipientTheTargetDoesNotHold`, `TestHeldReportsAreNeverNoRecord`, `TestNoRecordIsNotAnsweredWhileTheNodeMayNotSign`, `TestAPullNamesTheDeliveriesOfTheNodeThatAreNotSettled` |
+| A source with a receipt learns of a lost record once and does not send again; an answer after the report deadline changes nothing | `outbound.go` (`applyAnswer`) | `TestSourceWithAReceiptGivesLostAtTargetOnce`, `TestNoRecordAfterReportByChangesNothing` |
 | No evidence is signed while the wall clock cannot be trusted | `signing.go` (`canSign`) | `TestNoEvidenceIsSignedWhileTheWallClockCannotBeTrusted` |
 | An engine does not open with the keys of another node | `engine.go` (`newEngine`) | `TestAnEngineWithTheKeysOfAnotherNodeDoesNotStart` |
 | The body is held by what needs it | `inbound.go` (`settledSource`, `releasedByReply`), `outbound.go`, `drain.go`; the one rule of what a transaction releases is `bodyCounts.unreferencedAfter`: the references it drops, less the ones it writes | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt`, `TestUnreferencedAfterCountsTheReferencesATransactionAddsAsWellAsTheOnesItDrops`, `TestEvidenceThatReleasesTheLastReferenceToABodyRemovesIt`, `TestAReplyWhoseBodyEqualsTheOriginalKeepsTheBodyTheEvidenceReleased` |

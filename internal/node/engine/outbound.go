@@ -131,7 +131,7 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 		case workPull:
 			var ans transport.PullAnswer
 			ans, res.err = e.tr.Pull(ctx, w.node, transport.PullRequest{Message: w.message, Recipients: w.recipients})
-			res.reports = ans.Reports
+			res.reports, res.noRecord = ans.Reports, ans.NoRecord
 		}
 		if _, err := roundTrip(ctx, e, submitInternal, res, res.call); err != nil && ctx.Err() != nil {
 			return
@@ -160,28 +160,18 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	if st.inflight > 0 {
 		return
 	}
-	need := map[ident.NodeID]workKind{}
-	pulled := map[ident.NodeID][]ident.EndpointID{}
-	for _, t := range o.Outbound.Deliveries() {
-		kind := outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node])
-		if kind != 0 && (need[t.Address.Node] == 0 || kind == workSend) {
-			need[t.Address.Node] = kind
-		}
-		if kind == workPull {
-			pulled[t.Address.Node] = append(pulled[t.Address.Node], t.Address.Endpoint)
-		}
-	}
-	if len(need) == 0 {
+	plan := outboundPlan(o.Outbound, now, st.sent)
+	if len(plan) == 0 {
 		delete(e.outbox.state, name)
 		return
 	}
-	nodes := make([]ident.NodeID, 0, len(need))
-	for n := range need {
+	nodes := make([]ident.NodeID, 0, len(plan))
+	for n := range plan {
 		nodes = append(nodes, n)
 	}
 	sort.Slice(nodes, func(i, j int) bool { return nodes[i].String() < nodes[j].String() })
 	for _, n := range nodes {
-		w := outWork{kind: need[n], name: name, node: n, message: o.Outbound.Message, recipients: pulled[n]}
+		w := outWork{kind: plan[n].kind, name: name, node: n, message: o.Outbound.Message, recipients: plan[n].recipients}
 		if w.kind == workSend {
 			data, err := e.encodeFor(now, o, n)
 			if err != nil {
@@ -198,6 +188,43 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 		st.inflight++
 		e.give(w)
 	}
+}
+
+// nodeNeed is the next piece of work a source record has for one node: a send, or
+// a pull that asks about the recipients on it whose deliveries are not settled.
+type nodeNeed struct {
+	kind       workKind
+	recipients []ident.EndpointID
+}
+
+// outboundPlan says what a source record needs next, by node: a send to a node
+// when one of its deliveries needs one (the send carries every recipient on the
+// node), otherwise a pull naming each recipient on the node that still needs one.
+// A node with nothing to do is not in the plan. A derived delivery is planned like
+// the others, but only the record of a control signal has one and the worker does
+// not take control records, so none is asked about.
+func outboundPlan(o envelope.Outbound, now time.Time, sent map[ident.NodeID]bool) map[ident.NodeID]nodeNeed {
+	plan := map[ident.NodeID]nodeNeed{}
+	for _, t := range o.Deliveries() {
+		kind := outboundNeed(t.Delivery, o.AcceptBefore, now, sent[t.Address.Node])
+		if kind == 0 {
+			continue
+		}
+		n := plan[t.Address.Node]
+		if n.kind == 0 || kind == workSend {
+			n.kind = kind
+		}
+		n.recipients = append(n.recipients, t.Address.Endpoint)
+		plan[t.Address.Node] = n
+	}
+	// Recipients are the pull's: a send carries every recipient of the envelope.
+	for node, n := range plan {
+		if n.kind == workSend {
+			n.recipients = nil
+			plan[node] = n
+		}
+	}
+	return plan
 }
 
 // outboundNeed says what a delivery of a source record needs next: a send while
@@ -221,12 +248,15 @@ type cmdOutResult struct {
 	work outWork
 	// reports are the signed reports a receipt or an answer to a pull carried.
 	reports []record.Record
-	err     error
+	// noRecord are the recipients a target answered to a pull that it holds no
+	// record of; a receipt has none.
+	noRecord []ident.EndpointID
+	err      error
 }
 
 func (c *cmdOutResult) gate() gate { return gateLoopback }
 func (c *cmdOutResult) run(e *Engine, now time.Time) {
-	e.outResult(now, c.work, c.reports, c.err)
+	e.outResult(now, c.work, c.reports, c.noRecord, c.err)
 	c.done(struct{}{}, nil)
 }
 
@@ -235,8 +265,11 @@ func (c *cmdOutResult) run(e *Engine, now time.Time) {
 // signed at that moment, but the request digest is the same, so the target
 // answers a send it already processed from its record). A call
 // that did is applied: the reports are verified and applied to the source record,
-// which is written with the body released when no delivery needs it any more.
-func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, callErr error) {
+// and so are the recipients the target says it holds no record of, which is
+// written with the body released when no delivery needs it any more. A successful
+// answer that says nothing of a recipient says nothing yet: it changes nothing and
+// the next pull asks again.
+func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, noRecord []ident.EndpointID, callErr error) {
 	st := e.outbox.state[w.name]
 	if st == nil { // the record was settled or taken away while the call was out
 		return
@@ -260,7 +293,7 @@ func (e *Engine) outResult(now time.Time, w outWork, reports []record.Record, ca
 	if w.kind == workSend {
 		st.sent[w.node] = true
 	}
-	if err := e.applyReports(now, w.name, w.node, reports); err != nil {
+	if err := e.applyAnswer(now, w.name, w.node, reports, noRecord); err != nil {
 		e.classify(err) // a fatal error stops the loop after this command
 		if e.fatal == nil {
 			e.log.Warn("reports could not be written; they are asked for again", "message", string(w.message), "error", err.Error())
@@ -304,31 +337,60 @@ func (e *Engine) afterOutbound(name string, now time.Time) {
 	e.sched.set(schedKey{schedOutbound, name}, now.Add(next))
 }
 
-// applyReports verifies the reports of a node about a message this node sent and
-// applies each to the source record, and writes the record when one changed it. A
-// report that does not verify, or that no state of the delivery can follow, is the
-// peer's fault and is logged and left out: what the others say is still taken.
-func (e *Engine) applyReports(now time.Time, name string, node ident.NodeID, recs []record.Record) error {
+// applyAnswer applies what a node answered about a message this node sent: each
+// report is verified and applied to the source record, and each recipient the node
+// lists as having no record is applied by the rule of the delivery. It writes the
+// record when one of them changed it. Whatever is not applied, a report that does
+// not verify, one that no state of the delivery can follow, an answer about a node
+// that is not the delivery's, is the peer's fault and is logged and left out: what
+// the others say is still taken. A target says at most one thing about a recipient,
+// its report or its absence (transport.PullAnswer); a recipient it both reports and
+// lists is such a fault too, and the listing is the half that is left out, because
+// the report is signed and the listing is not.
+func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs []record.Record, noRecord []ident.EndpointID) error {
 	old := e.view.out[name]
 	o := old
 	changed := false
+	reported := map[ident.EndpointID]bool{}
+	take := func(next envelope.Outbound, recipient ident.EndpointID, outcomes []delivery.Outcome) {
+		o.Outbound = next
+		o = e.withFeedback(now, o, ident.Address{Node: node, Endpoint: recipient}, outcomes)
+		changed = true
+	}
 	for _, rec := range recs {
 		sr, err := e.verifyReport(now, rec, node)
 		if err != nil {
 			e.log.Warn("a report of the target did not verify", "node", node.String(), "error", err.Error())
 			continue
 		}
+		reported[sr.Report().Recipient] = true
 		next, effect, outcomes, err := o.Outbound.ApplyReport(now, sr)
 		if err != nil {
 			e.log.Warn("a report of the target contradicts the delivery", "node", node.String(), "error", err.Error())
 			continue
 		}
-		if effect != envelope.ReportApplied {
+		// A report the delivery ignores can still teach the record when the message
+		// arrived, from which the reply window is counted, so every applied report
+		// is written.
+		if effect == envelope.ReportApplied {
+			take(next, sr.Report().Recipient, outcomes)
+		}
+	}
+	for _, recipient := range noRecord {
+		if reported[recipient] {
+			e.log.Warn("the target answered both a report and no record for a recipient; the no record is left out", "node", node.String(), "message", string(o.Outbound.Message))
 			continue
 		}
-		o.Outbound = next
-		o = e.withFeedback(now, o, ident.Address{Node: node, Endpoint: sr.Report().Recipient}, outcomes)
-		changed = true
+		next, effect, outcome, err := o.Outbound.ApplyNoRecord(now, node, recipient)
+		if err != nil {
+			e.log.Warn("the target says it holds no record of a delivery that is not on it", "node", node.String(), "error", err.Error())
+			continue
+		}
+		// An answer the delivery ignores (no receipt yet, already settled, past
+		// report_by) leaves the record as it is and is not written.
+		if effect == envelope.ReportApplied && outcome.Result == delivery.ResultApplied {
+			take(next, recipient, []delivery.Outcome{outcome})
+		}
 	}
 	if !changed {
 		return nil

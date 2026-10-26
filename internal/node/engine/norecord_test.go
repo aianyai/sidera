@@ -37,12 +37,10 @@ func endpointOf(t testing.TB, h *harness.H, name string) ident.EndpointID {
 	return addrOf(t, h, name).Endpoint
 }
 
-// loseTargetRecords stops the node, removes the target records of the message
-// for the named recipients from its disk and starts it again, unless the test
-// has a step to do while it is down (before, called with the node stopped and
-// the records removed). The records are the node's; the sender's record, and its
-// receipt, stay.
-func loseTargetRecords(t *testing.T, h *harness.H, msg adapterproto.MessageID, before func(), names ...string) {
+// removeTargetRecords stops the node and removes the target records of the
+// message for the named recipients from its disk, and leaves the node down. The
+// records are the node's; the sender's record, and its receipt, stay.
+func removeTargetRecords(t *testing.T, h *harness.H, msg adapterproto.MessageID, names ...string) {
 	t.Helper()
 	var files []string
 	for _, in := range inRecords(t, h, msg) {
@@ -61,6 +59,15 @@ func loseTargetRecords(t *testing.T, h *harness.H, msg adapterproto.MessageID, b
 			t.Fatalf("removing %s: %v", f, err)
 		}
 	}
+}
+
+// loseTargetRecords makes the node lose the target records of the message for the
+// named recipients, the way a deleted file does, and starts it again. The test
+// may do something while the node is down (before, which may be nil). The node
+// pulls what it has not settled as it starts.
+func loseTargetRecords(t *testing.T, h *harness.H, msg adapterproto.MessageID, before func(), names ...string) {
+	t.Helper()
+	removeTargetRecords(t, h, msg, names...)
 	if before != nil {
 		before()
 	}
@@ -295,10 +302,15 @@ func TestNoRecordAfterReportByChangesNothing(t *testing.T) {
 	msg := send(t, h, "a", "b", "its record will be lost")
 	quiet(t, h)
 	reportBy := sourceDelivery(t, h, msg).ReportBy
-	loseTargetRecords(t, h, msg, func() { h.Delay(reportBy.Sub(h.Clock().Now()) + time.Minute) }, "b")
+	removeTargetRecords(t, h, msg, "b")
+	h.Delay(reportBy.Sub(h.Clock().Now()) + time.Minute)
+	h.Start()
+	// The restart's pull waits out its delay. The node is only quiet once the call is
+	// waiting, and a probe does not see it get there, so the test waits for it first.
+	waitUntil(t, func() bool { return h.Loopback().Waiting() == 1 })
+	quiet(t, h)
 
-	// The restart's pull is waiting out its delay; the time moves past report_by
-	// and the answer comes after it.
+	// The time moves past report_by and the answer comes after it.
 	h.Advance(reportBy.Sub(h.Clock().Now()) + time.Minute)
 	quiet(t, h)
 	if got := feedbackOf(t, h, msg); len(got) != 0 {
