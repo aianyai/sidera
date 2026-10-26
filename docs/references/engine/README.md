@@ -135,7 +135,7 @@ wire stay with the interface.
 | `ClearClockRollbackOp` | the mark becomes the clock as it reads and the pause flag is removed, in one replacement of `keys/clock.rec`; memory forgets the pause after the commit | `state/admin/`, the last write of `clock-clear` |
 | `ConfirmRevocationBackupOp` | `config/revocation-backup.json` names the digest of the self-revocation the owner keeps outside the device and the time | `state/admin/`, `backup-confirm` |
 | `RetireIdentityOp` | the self-revocation the keys verified is kept as a revocation under `config/revocations/`; nothing is signed from the commit on; the daemon is asked to stop | `state/admin/`, `identity-retire` |
-| `AcknowledgeAlertOp` | the alert is marked, and the quarantined file it names is removed first when it is not one of a delivery | `state/admin/`, `alert-ack` (the store's) |
+| `AcknowledgeAlertOp` | the alert is marked | `state/admin/`, `alert-ack` (the store's) |
 | `SetNodeSettingsOp`, `SetEndpointSettingsOp` | a patch merged and judged whole by `config`, which checks the version inside the change | the `last_operation` of `node.json` and of `instances.json` |
 
 Each of the first three is one transaction of two owners that the engine opens,
@@ -567,8 +567,9 @@ reproducible).
 
 Known gaps, each filled in with the feature it belongs to:
 
-- The quarantine of damaged files is not wired. The store decides which session
-  endpoints a quarantined control record closes (every creating one that names it,
+- The quarantine of damaged files is not wired, and the scan entry refuses to open
+  while a file is damaged. The store decides which session endpoints a quarantined
+  control record closes (every creating one that names it,
   `store.QuarantineSessions`), so the engine passes the scan and no list;
   `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
   is skipped until the engine wires the quarantine.

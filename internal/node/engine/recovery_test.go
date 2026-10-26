@@ -178,12 +178,6 @@ func TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet(t *testing.T) {
 		check func(t *testing.T, r *rig)
 	}{
 		{"a damaged record", func(r *rig) { r.seedFile(store.InDir, hash+".rec", []byte("not a record")) }, "quarantine", nil},
-		{"a quarantine without its alert", func(r *rig) {
-			r.seedFile(store.InDir, hash+".rec."+strings.Repeat("0c", 16)+".corrupt", []byte("not a record"))
-		}, "quarantine-resume", nil},
-		{"a quarantined body without its alert", func(r *rig) {
-			r.seedFile(store.BodiesDir, hash+"."+strings.Repeat("0c", 16)+".corrupt", []byte("x"))
-		}, "quarantine-body", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t, 10)

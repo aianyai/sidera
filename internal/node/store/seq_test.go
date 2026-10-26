@@ -189,30 +189,10 @@ func TestQuarantineRaisesTheFloorByTheNumberOfLostRecords(t *testing.T) {
 	}
 }
 
-// A floor file that is damaged is quarantined like any other file of its
-// kind, and what it said is lost: the next number follows the records that are
-// left. That is the risk the design accepts for a damaged floor file, and the
-// owner has an alert to see it by.
-func TestDamagedFloorFileIsQuarantinedAndTheNextNumberFollowsTheRecords(t *testing.T) {
-	r := newRig(t)
-	pair := addr(2, 2)
-	seed(t, r.mem, withSeq(1, 3, false), store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 40}})
-	name := store.SeqRecord{Sender: ep(1)}.Name()
-	damageBody(t, r.mem, "state/seq/"+name)
-	newSim(t, r.st).recoverAll()
-	sc := r.scan()
-	if len(sc.Seq) != 0 || !hasCorrupt(sc, store.SeqDir, name, alertFor(store.SeqDir, name)) {
-		t.Fatalf("the damaged floor file was not quarantined: %v %v", sc.Seq, sc.Corrupt)
-	}
-	if got := store.NewSeqBook(sc).Next(ep(1), pair); got != 4 {
-		t.Errorf("Next = %d, want 4", got)
-	}
-}
-
 // A floor file that is damaged when a write needs to read it is not read as
 // empty and overwritten: that would lose what it held with no alert. The write
 // does nothing and returns the damaged file as the scan would have listed it, so
-// that the caller quarantines it by the usual rule and tries again; the scan lists
+// that the caller settles it by the usual rule and tries again; the scan lists
 // the floor files first, so a startup meets none after it began to quarantine
 // source records.
 func TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten(t *testing.T) {
@@ -261,10 +241,10 @@ func TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten(t *testing.T) 
 		}
 		out := sc.Damaged[1]
 		id := alertFor(out.Dir, out.Name)
-		err := r.st.Quarantine(store.Quarantine{File: out, Scan: sc, Alert: newSim(t, r.st).alert(id, "corrupt_record", out.Dir+"/"+out.Name)})
+		err := r.st.Quarantine(store.Quarantine{File: out, Scan: sc, Replacement: lostOutAt(out.Key.(store.OutKey), base), Alert: newSim(t, r.st).alert(id, "corrupt_record", out.Dir+"/"+out.Name)})
 		wantDamaged(t, "Quarantine", err)
 		if diff := equalMaps(snapshot(t, r.mem, "."), before, nil); diff != "" {
-			t.Errorf("a quarantine that could not read the floor file renamed or wrote something: %s", diff)
+			t.Errorf("a quarantine that could not read the floor file wrote something: %s", diff)
 		}
 	})
 
@@ -273,8 +253,8 @@ func TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten(t *testing.T) 
 		damageBody(t, r.mem, path.Join(store.OutDir, srcOutFinished(2).Name()))
 		newSim(t, r.st).recoverAll()
 		sc := r.scan()
-		if len(sc.Damaged) != 0 || !hasCorrupt(sc, store.SeqDir, floorName, alertFor(store.SeqDir, floorName)) {
-			t.Fatalf("the floor file was not quarantined with an alert: damaged %v, quarantined %v", sc.Damaged, sc.Corrupt)
+		if len(sc.Damaged) != 0 || !hasAlert(sc, alertFor(store.SeqDir, floorName), "corrupt_record") {
+			t.Fatalf("the floor file was not settled with an alert: damaged %v, alerts %v", sc.Damaged, sc.Alerts)
 		}
 		if out, _, _ := find(t, sc, srcOutFinished(2).Name()); out == nil || out.Lost == nil {
 			t.Errorf("the damaged source record was not replaced")

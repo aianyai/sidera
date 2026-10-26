@@ -33,7 +33,7 @@ make a write durable are functions over any `FS`, not methods of it:
 | `ReplaceDeferred` | `create`, `write`, `sync`, `rename`; no `sync-dir` | several files of one directory, made durable together by one `SyncDir` after the last of them |
 | `OpenAppend`, `Append` | `open` once, then `write` per call; no sync | appended event and digest files |
 | `SyncFile` | `sync` (on the handle that appended), `sync-dir` | making a batch of appends durable |
-| `RenameFile` | `rename`, `sync-dir` | quarantining a damaged file |
+| `RenameFile` | `rename`, `sync-dir` | no transaction of the store declares it |
 | `Remove` | `remove` | one deletion; a batch of them is followed by one `SyncDir` |
 | `SyncDir` | `sync-dir` | after a batch of removals |
 | `MakeDir` | `mkdir`, `sync-dir` (the parent) | layout and staging directories |
@@ -472,7 +472,6 @@ state/
   alerts/<h>.rec       owner alerts
   seq/<h>.rec          sequence floors of one sending endpoint
   archive/<date>.jsonl summaries and events of records that left the live files
-  <dir>/<name>.<alert id>.corrupt   a quarantined file
 ```
 
 `<h>` is the SHA-256 of the kind, a space and the key, in lowercase hex. The
@@ -501,12 +500,13 @@ validated in seven steps, and each failure has a class:
 
 A first line whose checksum or length field is itself damaged while the body is
 intact fails step 5 or 6 and is treated as a damaged body: a source record is
-then replaced by a lost record, and a target or control record is quarantined with
-no replacement. That reports "lost, outcome unknown" to the sender where the
+then overwritten by a lost record, and a target or control record is alerted and
+removed, with no replacement. That reports "lost, outcome unknown" to the sender where the
 record might have been read; nothing is lost and the failure is visible, so there
 is no separate path for it. This is a damaged
 record file; a body file whose content does not hash to its name is a different
-case, with its own rule for target records (see the quarantine of a body below).
+case, settled through the records that refer to it (see the quarantine of a body
+below).
 
 A body is JSON written by `encoding/json` from structs of the package, with
 times as RFC 3339 in UTC with a `Z` and fractional seconds without trailing
@@ -521,7 +521,7 @@ transitions can produce, and a well-formed record that is impossible (a lease
 whose chunk flags disagree with its chunk count would make a later hand-out index
 out of range) is a damaged body like any other. The same check runs before a
 record is written, so a defect upstream is refused where it happens and not
-written down as a file that would be quarantined when it is read. Besides the
+written down as a file that would be settled as damaged when it is read. Besides the
 fields of a delivery record that every record has, the stored form carries the
 cause of an unknown result and the lost marker (which the sender's replacement
 keeps after it closes, so that it is not judged by the shape of a delivery
@@ -561,9 +561,9 @@ damaged one, the delivery records the delivery package builds for that case, the
 discovery time and the feedback it owes. It has no envelope, no sequence numbers
 and no body reference. A target or control record has one shape: a target that
 loses a record keeps nothing in its place (the sender learns of it when the target
-answers a pull that it holds no record), so a damaged one is quarantined, with its
-alert and, for a control record, the closed session endpoints, and nothing is put
-under its name. A resend of a delivery whose target record was lost is taken in as
+answers a pull that it holds no record), so a damaged one is settled with an alert
+and, for a control record, the closed session endpoints, then removed, and nothing
+is put under its name. A resend of a delivery whose target record was lost is taken in as
 new before the delivery deadline, and may be handed out a second time.
 
 **Revision.** A regular target record carries `rev`, which the store raises by one
@@ -618,14 +618,18 @@ would point at bytes that are gone until someone reads it
 takes a release). What a
 crash leaves between the two is an orphan, removed by the first rule of the next
 start. A body is checked against its name when it is read (a start does not read
-them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch quarantines the body and
-every source record that refers to it either becomes a lost record, if it still
-needs the bytes, or loses the reference. A target record has no replacement, so one
-that still needs the bytes (an accepted message waiting to be handed out) cannot
-lose the reference: the quarantine refuses it with `ErrBodyStillNeeded` before it
-writes anything (`TestABodyQuarantineRefusesATargetRecordThatStillNeedsTheBodyItDrops`), and the caller ends that delivery by the delivery rules first. Any
-other target record, and every control record (which never needs a body), is written
-with the reference dropped.
+them: 10,000 bodies of 64 KiB are 625 MiB); a mismatch affects the records that
+refer to it and nothing else, and each is settled by a call of its own
+(`QuarantineBody`). A record that still needs the bytes is lost with them: a target
+record (an accepted message waiting to be handed out) is alerted and removed, a
+source record is overwritten with its lost record, as a damaged source record is.
+Any other record, and every control record (which never needs a body), keeps its
+state and is written with the reference dropped. The body file is left alone and
+is an orphan once no record refers to it. Whether a record needs the bytes is the
+delivery rules' answer (`delivery.Record.NeedsBody`), asked by the store itself, so
+a target record that needs its body cannot be written without it; a call that gives
+a replacement the record does not call for, or omits the one it does, is refused
+before anything is written (`TestABodyThatDoesNotMatchItsNameSettlesEachRecordThatRefersToIt`).
 
 **Existence is read before the transaction opens.** A call that removes files
 (a release of bodies, a sweep, an orphan collection) asks the disk which of them
@@ -636,20 +640,34 @@ memory that is no longer the disk; a failed read before it ends the call with
 nothing written. A file that is gone is skipped, so a release interrupted by a
 crash can be repeated.
 
-**Quarantine.** A damaged file is renamed `<name>.<alert id>.corrupt`, where the
-alert id is chosen before and never repeats, so a source replacement that is
-damaged in its turn gets a file of its own. The last write of every quarantine is the alert,
-and an alert is deleted only after the file it names. So "a quarantined file with
-no alert" is exactly an unfinished quarantine. The rule that finishes it writes
-what the first pass wrote, in the same order: the replacement of a source record
-(the same name, built by the same rule, so there is one such record and the
-feedback it owes is not formed a second time), the closed session endpoints of a
-control record, and the alert last. The first
-line of a quarantined file is trusted by the same rule as that of a live one,
-against the name the file had (steps 1 to 4): a first line that parses but does not
-hash to that name is handled like an unreadable one, with no replacement and no
-sequence floor raised for the key it claims. Configuration and key files are never
-quarantined: a damaged one stops the start and is named.
+**Quarantine.** A damaged file is settled by one transaction that writes every
+effect first and removes the file, or overwrites it in place, last. Each effect
+can be written again without harm, so a file that is still there after a crash is
+settled again by the next start: nothing records how far a settlement got, and
+there is nothing to resume. What the repetition can add is a floor one higher (a
+gap, never a number given twice) and, when the caller does not derive the alert id
+from the file, a second alert; neither loses anything. The bad bytes are not kept.
+The alert is written after the other effects and before the file goes, each write
+durable before the next, so a file that is gone always has its alert.
+
+| File | Effects, in order | Last |
+| ---- | ----------------- | ---- |
+| `in/`, any damage | alert | file removed |
+| `ctl/`, any damage | the session endpoints being created by it are closed (open ones stay open); alert | file removed; a delivery derived from it stays |
+| `out/`, first line trusted | the sequence floors of every pair of its key raised; alert | file overwritten in place with the sender's lost record and its feedback |
+| `out/`, first line unreadable (all zero included) | alert | file removed |
+| `seq/`, first line trusted | alert | file overwritten with the floors its sender's source records say |
+| `seq/`, first line unreadable | alert | file removed |
+| any other directory | alert | file removed |
+
+The first line of a file is trusted by the same rule as that of a live one
+(steps 1 to 4): a first line that parses but does not hash to the name of the file
+is handled like an unreadable one, with no replacement and no sequence floor raised
+for the key it claims. An `out/` file whose first line is unreadable says nothing
+about what it was, so there is no lost record to put in its place and nobody is
+told but the owner (`TestADamagedSourceRecordWithAnUnreadableFirstLineIsAlertedAndDeleted`).
+The same rule settles the damage a write meets (`DamagedFileError`). Configuration
+and key files are never quarantined: a damaged one stops the start and is named.
 
 A quarantine of a control record closes every session endpoint still being created
 that names the record as its creator, not only the first. A control record accepted
@@ -665,7 +683,7 @@ a wrong one (an open endpoint, another record's) closes a live session and lets 
 drain drop its deliveries, which cannot be undone. A control record is refused
 without the scan. `QuarantineSessions` is exported only so a caller can tell
 whether a session may remain, for the kind of the alert. The crash walk covers
-the quarantine and its resumption with two endpoints
+the quarantine with two endpoints
 (`TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`), and
 its coverage assertion requires that one transaction wrote the session role more
 than once (`maxInTx` of the walk's recorder, not the hits of a whole run, which two
@@ -673,7 +691,7 @@ transactions could add up to). The rule itself is pinned by
 `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen` (an open
 endpoint naming the record and another record's endpoint are not listed) and
 `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan` (the same on a disk,
-for a quarantine and a resumption, and the refusal without a scan).
+and the refusal without a scan).
 
 **Sequence numbers.** The next number of a (sending endpoint, target address)
 pair is the highest of the floor of the pair and the numbers of the source records
@@ -682,16 +700,22 @@ acknowledged, so a crash makes no gap. The sweep writes the floor of every pair 
 is about to remove a record of before it removes anything, and works the floors out
 itself from the source records it is given to remove (the highest number each used
 for each target): a chunk that removes a source record has no way to leave its
-floor out. Quarantining a source
-record whose numbers are lost raises the floor above everything known, by one for
-each lost record of the pair. A damaged floor file, or a source record whose first
-line is damaged, loses what it said, and a number of that pair may then be given
-twice; the owner has an alert. A floor file that is damaged when a write has to read
-it (a sweep, or the quarantine of a source record of the same sender) is not read
-as empty and overwritten, which would lose it without an alert: the write does
-nothing and returns the damaged file as the scan lists it, so that the caller
-quarantines it by the usual rule and tries again. The scan lists floor files first
-for that reason. Deleting `state/` starts every pair at 1.
+floor out. A damaged source record whose first line can be trusted always raises
+the floor of every pair of its key to m+1, where m is the highest of the floor
+now on the disk and the numbers of the source records still there: the lost record
+may have used the next number, and no other that is not below m. Two such records
+of one pair give two gaps (`TestADamagedSourceRecordRaisesTheFloorAboveEverythingKnown`).
+A damaged floor file is treated as missing: it is overwritten with the floors its
+sender's source records say (a first line that is unreadable names no sender, so
+the file only goes), and the owner has an alert. What it said is lost, and a number
+of that pair may then be given twice. A source record whose first line is
+unreadable raises no floor, for nothing says which pairs it belonged to. A floor
+file that is damaged when a write has to read it (a sweep, or the settlement of a
+source record of the same sender) is not read as empty and overwritten by that
+write, which would lose it without an alert: the write does nothing and returns the
+damaged file as the scan lists it, so that the caller settles it by the usual rule
+and tries again. The scan lists floor files first for that reason. Deleting
+`state/` starts every pair at 1.
 
 **Archive.** A line is `{"crc":"<8 hex>","rec":<compact JSON>}` and a newline; the
 checksum covers the record. A transaction that appends starts with a newline, so
@@ -716,15 +740,7 @@ becomes), the status report until `report_by` or a
 whole `report_by` window after its creation, and the facts reply permission reads
 until `report_by` plus the clock tolerance plus the reply window. That is about 27
 hours after the delivery deadline. Then a summary goes to the archive and the file
-is removed, a quarantined file with its replacement (the file first). A quarantined
-file of `out/` whose first line was unreadable (or does not belong to the name the
-file had) has no replacement, and nothing in it says what it was; it stays until
-the retention a lost record would have if it were found at the time of the file's
-alert has passed (the longest delivery deadline, the clock tolerance, the report
-offset and the reply facts window, counted from the discovery), because until then
-a delivery related to it may still be live. The alert goes after it. A quarantined
-file of `in/` or `ctl/` has no replacement and no bound; nothing removes it, and
-its alert stays with it (the sweep keeps an alert while its file is there). A closed session endpoint goes
+is removed. A closed session endpoint goes
 with its attempts, checkpoints and floor file, but not while any source record has
 it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
 a source record writes the floor of its sender, and a floor file written after the
@@ -762,9 +778,7 @@ and the store offers the write that carries it out. The predicates the store own
 orphan bodies; session endpoints being created that no control record creates (the
 record is not there, or it is a regular record whose intent holds no creation of that
 endpoint, as after an intake that failed and a signal accepted again with a new
-endpoint; a quarantined or damaged record keeps the endpoint for its
-quarantine); quarantined
-files with no alert (records, and bodies, which continue in chunks); a session
+endpoint; a damaged record keeps the endpoint for its quarantine); a session
 endpoint whose control record holds the end of its creation or its close; the
 followers a prompt or a block owes; feedback a notice already covers; the endpoints
 of a disabled instance; and the candidates of the drain of records queued for a
@@ -775,10 +789,9 @@ of such a run.
 
 **The order of the rules.** The order is a guarantee of the caller, not of the
 store: every predicate is a function of one scan, and the store cannot know which
-writes the scan it is given has seen. The order is: quarantine of damaged files,
-then the resumption of unfinished quarantines, then of unfinished body
-quarantines (they write replacement records and closed session endpoints, and
-raise sequence floors, which every later rule and the sequence book read);
+writes the scan it is given has seen. The order is: quarantine of damaged files
+(it writes replacement records and closed session endpoints, and raises sequence
+floors, which every later rule and the sequence book read);
 `ctl-effect-replay` and `instance-drain-replay` (they close endpoints);
 `orphan-gc-endpoint`, before `endpoint-drain-replay`, so that a delivery queued
 for an orphan endpoint that a power loss left behind is drained as one for an
@@ -1047,11 +1060,13 @@ so that the double cannot drift from what it stands for.
   crash cannot have caused, so they find no work on a clean disk: "closed" is
   absorbing, a follower that no longer exists is done, and a follower of a head
   record is listed with the revision it had.
-- **The alert is the last write of a quarantine, and the quarantined file goes
-  before the replacement and the alert.** An interrupted quarantine is then
-  recognised by an effect (a quarantined file whose alert does not exist), not by a
-  guess, and a sweep interrupted between the two removals cannot leave a state the
-  rule would repair by building a second replacement and reporting twice.
+- **The damaged file goes last, after every effect that can be written again.**
+  A settlement interrupted anywhere leaves the file where the next start finds it,
+  and writes the same effects once more: nothing has to know how far the first
+  attempt got, so there is no resumption, no marker of an unfinished settlement
+  and no second copy of the bad bytes to expire. The alternative that kept the
+  bytes renamed the file first and wrote its alert last; the state in between had
+  to be recognised, resumed and bounded, for bytes that nobody could use.
 - **The sweep removes a control record before the delivery derived from it.** The
   other order can leave the delivery without the record that explains it, and a
   rule that rebuilds deliveries from control records would give it a second life.
@@ -1070,16 +1085,19 @@ so that the double cannot drift from what it stands for.
   sender, is what the rule reads, because the decision belongs to the delivery
   rules; the sender must still agree (the system endpoint sends exactly the
   exempt records), so a record that lost the marker is damaged too. A notice
-  that was lost is quarantined: a target keeps no replacement.
+  that was lost is settled as a damaged file: a target keeps no replacement.
 - **The kind is hashed into the file name.** One flipped bit would otherwise turn a
   message record into a control record.
-- **Nothing is skipped on a resumption because it seems to be done.** What a
-  crashed process left may be visible and not durable, and the alert, which says the
-  quarantine is finished, must not become durable ahead of the replacement it
-  stands for.
+- **Nothing is skipped in a settlement because it seems to be done.** What a
+  crashed process left may be visible and not durable, so a settlement writes its
+  effects again, and the file that triggers it goes only after they are durable.
 
 ## Known gaps
 
+- **A source file whose first line is unreadable is not reported to its sender.**
+  Nothing in such a file (an all-zero one included) says which message it held or
+  who sent it, so it is alerted to the owner and removed, and no lost record
+  tells the sending endpoint. The owner's alert is the only report.
 - **Symbolic links.** The test that `Stat` does not follow a final symbolic link
   and the tests that a link is not owner-only skip where the platform refuses to
   create one without privilege.
@@ -1142,13 +1160,14 @@ so that the double cannot drift from what it stands for.
 | record framing | `internal/node/recfile/recfile.go` | `TestFrameGoldenVectors`, `TestDecodeFrameDamageByRule`, `TestSingletonRecords`, `TestHeaderDamageNeverEchoesTheFirstLine`, `FuzzDecodeFrame` |
 | keys | `internal/node/store/key.go` (message ids by `envelope.ValidMessageID`) | `TestKeyTextGoldenVectors`, `TestParseKeyRoundTripsEveryKind`, `TestParseKeyRefusals`, `FuzzParseKey` |
 | record codec | `internal/node/store/decode.go`, `codec_*.go`, `wire.go` | `TestVerdictPartsFollowTheExemptMarker`, `TestRecordGoldenVectors`, `TestDecodeRecordStepsAndClasses`, `TestDecodeRecordBodyRules`, `TestTargetRecordsHaveNoLostShape`, `TestStoreRefusesAnInvalidDecodedRecord`, `TestRecordsRoundTrip`, `TestEveryStoredFieldSurvivesTheDisk`, `TestStoredContractTypesHaveNoFieldTheRecordsDoNotCarry`, `FuzzDecodeRecord`, `FuzzDecodeRecordBody`, `TestEndpointTextIsBoundedAsTheRegistrationIs`, `TestEndpointTextThatIsNotUTF8IsRefusedOnRead`, `TestEndpointTextOverTheBoundIsRefusedOnRead` |
-| scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
+| scan, bodies, free space | `internal/node/store/scan.go`, `store.go` | `scan_test.go` (`TestScanTrustsTheKeyOfADamagedFileOnlyWhenItsFirstLineBelongsToItsName` among them), `TestReadBodyChecksTheNameAndTheContent`, `TestAvailableReportsTheVolumeOfState` |
 | declarations of the store | `internal/node/store/txns.go` | `TestDeclarationsMatchTheDesignTable`, `TestTransactionTableIsValid` |
 | the transactions | `internal/node/store/write.go` | `write_test.go`, `written_test.go` (`TestWritesReturnTheTargetRecordsAsAScanReadsThemBack`, `TestAFailedWriteReturnsNoRecords`),  `existence_test.go` (`TestAFailedExistenceCheckEndsTheCallBeforeAnyWrite`), `TestEveryTransactionConvergesFromEveryCrashState` (every point of every workflow, in every kind of crash, with a crash during recovery; and the coverage of every declared point; under `-race` only the two kinds of crash that draw nothing, and no crash during recovery), `TestPowerLossCloneKeepsAcknowledgedWrites`, `TestRandomOperationsLeaveExactlyTheDiskAModelPredicts` |
-| recovery rules and quarantine | `internal/node/store/recovery.go` | `recovery_scenarios_test.go`, `resume_scenarios_test.go` (the resumption of each kind of unfinished quarantine, walked from the state a crash leaves), `quarantine_session_test.go` (the double fault of a session creation, `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen`, `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan`), `TestCleanScenariosLeaveNoRecoveryWork` |
+| recovery rules | `internal/node/store/recovery.go` | `recovery_scenarios_test.go` (each rule, and the settlement of each kind of damaged file, walked from the state a crash leaves), `quarantine_session_test.go` (the double fault of a session creation, `TestQuarantineSessionsAreTheEndpointsCreatedByTheRecordThatAreNotOpen`, `TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan`), `TestCleanScenariosLeaveNoRecoveryWork` |
+| quarantine | `internal/node/store/quarantine.go` | `quarantine_rules_test.go` (one test for each row of the table: the effects, the file gone or overwritten, one alert, a second start with nothing to do), `recovery_scenarios_test.go` and `quarantine_session_test.go` for the crash walks |
 | sequence numbers | `internal/node/store/seq.go`, `write.go` | `seq_test.go` (`TestArchiveSweepWritesTheFloorOfEverySenderAndTargetOfTheRecordsItRemoves`, `TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten`), `sweep_endpoint_test.go` |
 | archive | `internal/node/store/archive.go` | `archive_test.go`, `FuzzParseArchive` |
-| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go` (`TestHeaderUnreadableDeliveryQuarantineIsSweptAfterTheLostReportByBound` (source records; those of target and control records stay), `TestQuarantinedFileWithAFirstLineOfAnotherNameIsSweptAfterTheBoundAndItsAlertReleased` among them), `sweep_endpoint_test.go` (`TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone`, the crash walk of a closed session's sweep) |
+| retention and the sweep | `internal/node/store/retention.go` | `retention_test.go`, `sweep_endpoint_test.go` (`TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone`, the crash walk of a closed session's sweep) |
 | deleting `state/`, the layout rule | `internal/node/store/recovery.go` | `state_deleted_test.go` |
 | cold start | `internal/node/store/bench_test.go` | `BenchmarkColdStartScan`, `TestColdStartFixtureScansBack` |
 

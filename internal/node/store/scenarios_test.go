@@ -442,15 +442,13 @@ func scenarios() []scenario {
 			name: "alert-ack",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				seed(t, mem, store.AlertRecord{ID: store.AlertID{5}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "endpoints/x"})
-				seedRaw(t, mem, store.EndpointsDir, zeroRec+"."+store.AlertID{5}.String()+".corrupt", []byte("junk"))
 			},
 			durable: "alert-ack/result.sync-dir#1",
 			mode:    batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				a := store.AlertRecord{ID: store.AlertID{5}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "endpoints/x",
 					Acked: &store.AlertAcked{At: base.Add(time.Hour), Operation: adminResult(2).Key.ID}}
-				c := store.CorruptFile{Dir: store.EndpointsDir, Name: zeroRec + "." + store.AlertID{5}.String() + ".corrupt"}
-				return r.st.AlertAck(store.AlertAckInput{Alert: a, Result: adminResult(2), Quarantined: &c})
+				return r.st.AlertAck(store.AlertAckInput{Alert: a, Result: adminResult(2)})
 			},
 		},
 	}
@@ -539,12 +537,11 @@ func sweepScenario(farFuture time.Time) scenario {
 		derived := derivedIn(4, 5, 2) // its derived delivery
 		derived.Record = deliveredRecord(derived.Record)
 		derived.Body = nil
-		lost := lostOutAt(srcOut(6, false).Key, base) // a replacement and its quarantined file
+		lost := lostOutAt(srcOut(6, false).Key, base) // a replacement
 		closed := session(5, store.EndpointClosed, ctlName(4))
 		seed(t, mem, o1, o2, inDone, c, derived, lost, closed,
 			store.AlertRecord{ID: store.AlertID{6}, Kind: "corrupt_record", At: base, Detail: "d", Subject: "out/x"},
 			adminResult(1))
-		seedRaw(t, mem, store.OutDir, lost.Name()+"."+store.AlertID{6}.String()+".corrupt", []byte("damaged"))
 		seedBodies(t, mem, bodyBytes(3))
 	}
 	return scenario{
@@ -563,7 +560,7 @@ func sweepScenario(farFuture time.Time) scenario {
 		},
 		retry: func(t *testing.T, r *rig, s *sim) {
 			plan := store.PlanSweep(r.scan(), farFuture)
-			if len(plan.Records)+len(plan.Ctl)+len(plan.Corrupt)+len(plan.Bodies)+len(plan.Outs)+len(plan.Endpoints) == 0 {
+			if len(plan.Records)+len(plan.Ctl)+len(plan.Bodies)+len(plan.Outs)+len(plan.Endpoints) == 0 {
 				return
 			}
 			mustDo(t, r.st.ArchiveSweep(plan.Chunk(farFuture)))
@@ -575,9 +572,8 @@ func sweepScenario(farFuture time.Time) scenario {
 }
 
 // sweepInvariants are what holds in every crash state of a sweep: nothing is
-// removed whose summary and sequence floor are not durable, a quarantined file
-// goes before its replacement, and a control record goes before the delivery
-// derived from it.
+// removed whose summary and sequence floor are not durable, and a control record
+// goes before the delivery derived from it.
 func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 	t.Helper()
 	var summaries []store.ArchiveSummary
@@ -618,13 +614,6 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 			t.Errorf("%s: floor %d for a pair whose record with number %d is gone", where, got, o.Envelope.Seq[o.Key.Recipients[0].Endpoint])
 		}
 	}
-	lostName := srcOut(6, false).Name()
-	corrupt := lostName + "." + store.AlertID{6}.String() + ".corrupt"
-	_, hasCorrupt := snap[statePath(store.OutDir, corrupt)]
-	_, hasLost := snap[statePath(store.OutDir, lostName)]
-	if hasCorrupt && !hasLost {
-		t.Errorf("%s: the replacement is gone while its quarantined file is still there", where)
-	}
 	ctlThere := false
 	if _, ok := snap[statePath(store.CtlDir, created(t, 4, 5).Name())]; ok {
 		ctlThere = true
@@ -643,7 +632,7 @@ func sweepInvariants(t *testing.T, where string, snap map[string]string) {
 // crashed at every crash point the store declares.
 func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	sink := newSink()
-	all := append(append(append(scenarios(), recoveryScenarios()...), resumedQuarantines()...), doubleFaultScenarios()...)
+	all := append(append(scenarios(), recoveryScenarios()...), doubleFaultScenarios()...)
 	total := scenarioStats{}
 	var mu sync.Mutex
 	// The walks are independent: they run side by side, and the coverage is
@@ -686,11 +675,9 @@ func TestEveryTransactionConvergesFromEveryCrashState(t *testing.T) {
 	// once: the quarantine closes every creating endpoint of the damaged control
 	// record, so one quarantine transaction must have written the session role
 	// twice (a count of the hits of a whole run could come from two quarantines).
-	for _, tx := range []string{"quarantine", "quarantine-resume"} {
-		for _, k := range tab {
-			if k.Tag.Tx == tx && k.Tag.Role == "session" && sink.maxInTx[k.Key] < 2 {
-				t.Errorf("%s was reached %d time(s) at most in one transaction: no walk closed two session endpoints in one quarantine", k.Key, sink.maxInTx[k.Key])
-			}
+	for _, k := range tab {
+		if k.Tag.Tx == "quarantine" && k.Tag.Role == "session" && sink.maxInTx[k.Key] < 2 {
+			t.Errorf("%s was reached %d time(s) at most in one transaction: no walk closed two session endpoints in one quarantine", k.Key, sink.maxInTx[k.Key])
 		}
 	}
 	// Reaching a point is not crashing at it: every declared point must have had

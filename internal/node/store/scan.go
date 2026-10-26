@@ -10,22 +10,8 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 )
 
-// CorruptFile is a quarantined file: `<original name>.<alert id>.corrupt`.
-type CorruptFile struct {
-	Dir      string
-	Name     string // the full name
-	Original string // the name the file had
-	Alert    AlertID
-	// Kind and Key are those of the first line, set only when it can be trusted:
-	// it is readable, its kind is one the directory holds, and its kind and key
-	// hash to Original (the rule of DecodeRecord). Key is the parsed key. A file
-	// whose first line does not pass has neither, and is handled like one whose
-	// first line is unreadable.
-	Kind Kind
-	Key  any
-}
-
-// DamagedFile is a file that failed validation and is not quarantined yet.
+// DamagedFile is a file that failed validation and is not settled yet
+// (Store.Quarantine).
 type DamagedFile struct {
 	Dir    string
 	Name   string
@@ -62,14 +48,11 @@ type Scan struct {
 
 	// Bodies are the names of the files of bodies/, none of them read.
 	Bodies []string
-	// Corrupt lists every quarantined file of every directory, bodies/
-	// included.
-	Corrupt []CorruptFile
 	// Damaged lists the files that failed validation, in directory order with the
 	// floor files first (see recordDirs).
 	Damaged []DamagedFile
-	// Unknown lists paths that are neither a record, a body, a quarantined
-	// file nor debris of an interrupted write, sorted.
+	// Unknown lists paths that are neither a record, a body nor debris of an
+	// interrupted write, sorted.
 	Unknown []string
 	// Archive lists the names of the files of archive/.
 	Archive []string
@@ -93,32 +76,6 @@ func isHashName(s string) bool {
 func isRecordName(name string) bool {
 	h, ok := strings.CutSuffix(name, recordSuffix)
 	return ok && isHashName(h)
-}
-
-// corruptParts splits `<original>.<alert id>.corrupt` of a directory. The
-// original is a record name or, in bodies/, a digest.
-func corruptParts(dir, name string) (original string, id AlertID, ok bool) {
-	rest, found := strings.CutSuffix(name, ".corrupt")
-	if !found {
-		return "", AlertID{}, false
-	}
-	i := strings.LastIndexByte(rest, '.')
-	if i < 0 {
-		return "", AlertID{}, false
-	}
-	original = rest[:i]
-	id, err := ParseAlertID(rest[i+1:])
-	if err != nil {
-		return "", AlertID{}, false
-	}
-	if dir == BodiesDir {
-		return original, id, isHashName(original)
-	}
-	return original, id, isRecordName(original)
-}
-
-func corruptName(original string, id AlertID) string {
-	return original + "." + id.String() + ".corrupt"
 }
 
 // readDir lists a directory; a missing one is empty.
@@ -153,15 +110,7 @@ func (s *Store) Scan() (*Scan, error) {
 					return nil, err
 				}
 			default:
-				if original, id, ok := corruptParts(dir, e.Name); ok {
-					c, err := s.scanCorrupt(dir, e.Name, original, id)
-					if err != nil {
-						return nil, err
-					}
-					sc.Corrupt = append(sc.Corrupt, c)
-				} else {
-					sc.Unknown = append(sc.Unknown, p)
-				}
+				sc.Unknown = append(sc.Unknown, p)
 			}
 		}
 	}
@@ -173,11 +122,9 @@ func (s *Store) Scan() (*Scan, error) {
 		if fsx.IsLeftover(e.Name) {
 			continue
 		}
-		switch original, id, ok := corruptParts(BodiesDir, e.Name); {
+		switch {
 		case !e.IsDir && isHashName(e.Name):
 			sc.Bodies = append(sc.Bodies, e.Name)
-		case !e.IsDir && ok:
-			sc.Corrupt = append(sc.Corrupt, CorruptFile{Dir: BodiesDir, Name: e.Name, Original: original, Alert: id})
 		default:
 			sc.Unknown = append(sc.Unknown, path.Join(BodiesDir, e.Name))
 		}
@@ -226,21 +173,4 @@ func (s *Store) scanRecord(sc *Scan, dir, name string) error {
 		sc.Seq = append(sc.Seq, r)
 	}
 	return nil
-}
-
-// scanCorrupt reads the first line of a quarantined file of a directory of
-// records. It is trusted by the rule of a record file (readHeader), against the
-// name the file had: only then are the kind and the key of the file known,
-// which the sequence floor of a source record needs. A first line that
-// parses but does not belong to that name says nothing about the file.
-func (s *Store) scanCorrupt(dir, name, original string, id AlertID) (CorruptFile, error) {
-	c := CorruptFile{Dir: dir, Name: name, Original: original, Alert: id}
-	data, err := s.r.ReadFile(path.Join(dir, name))
-	if err != nil {
-		return c, err
-	}
-	if h, _, key, dmg := readHeader(dir, original, data); dmg == nil {
-		c.Kind, c.Key = Kind(h.Kind), key
-	}
-	return c, nil
 }

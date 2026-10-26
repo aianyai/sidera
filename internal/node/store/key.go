@@ -48,8 +48,9 @@ type CheckpointKey struct {
 	ID    string
 }
 
-// AlertID identifies an owner alert. It is random, 16 bytes, and is also the
-// part of a quarantined file's name that ties it to its alert.
+// AlertID identifies an owner alert: 16 bytes, random or derived by the caller
+// (a settlement of a damaged file derives it from the file, so that repeating the
+// settlement rewrites its alert).
 type AlertID [16]byte
 
 // Kind is the kind of the file of an out key.

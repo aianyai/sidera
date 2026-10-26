@@ -866,11 +866,6 @@ func (s *Store) DaemonStop(result AdminRecord) error {
 type AlertAckInput struct {
 	Alert  AlertRecord // the alert as it was read, Acked set
 	Result AdminRecord
-	// Quarantined is the file the alert names when it is one of a directory
-	// other than the delivery ones: it is removed before the alert is marked.
-	// Nil when there is none or when the file is one of a delivery directory,
-	// which an acknowledgement never removes.
-	Quarantined *CorruptFile
 }
 
 // AlertAck records an acknowledgement.
@@ -886,34 +881,8 @@ func (s *Store) AlertAck(a AlertAckInput) error {
 	if err != nil {
 		return err
 	}
-	var q string
-	if a.Quarantined != nil {
-		if err := checkRef(FileRef{Dir: a.Quarantined.Dir, Name: a.Quarantined.Name}, true); err != nil {
-			return err
-		}
-		if a.Quarantined.Dir == OutDir || a.Quarantined.Dir == InDir || a.Quarantined.Dir == CtlDir {
-			return errors.New("store: an acknowledgement does not remove the quarantined file of a delivery record")
-		}
-		q = path.Join(a.Quarantined.Dir, a.Quarantined.Name)
-	}
-	var there bool
-	if q != "" {
-		if there, err = fsx.Exists(s.r, q); err != nil {
-			return err
-		}
-	}
 	tx := s.w.Begin(&declAlertAck)
 	defer tx.Close()
-	if q != "" {
-		if there {
-			if err := tx.Remove("quarantined", q); err != nil {
-				return err
-			}
-			if err := tx.SyncDir("quarantined-dir", a.Quarantined.Dir); err != nil {
-				return err
-			}
-		}
-	}
 	if err := s.replace(tx, "alert", af); err != nil {
 		return err
 	}
@@ -1050,19 +1019,13 @@ type FileRef struct {
 }
 
 // checkRef refuses a name that would reach outside the directory it names or a
-// file that is not one a sweep removes.
-func checkRef(f FileRef, corrupt bool) error {
+// file that is not a record file.
+func checkRef(f FileRef) error {
 	if !slices.Contains(recordDirs, f.Dir) && f.Dir != BodiesDir {
 		return fmt.Errorf("store: %q is not a directory of records", f.Dir)
 	}
 	if f.Name == "" || path.Base(f.Name) != f.Name || fsx.IsLeftover(f.Name) {
 		return fmt.Errorf("store: %q is not a file name", f.Name)
-	}
-	if corrupt {
-		if _, _, ok := corruptParts(f.Dir, f.Name); !ok {
-			return fmt.Errorf("store: %q is not a quarantined file", f.Name)
-		}
-		return nil
 	}
 	if !isRecordName(f.Name) {
 		return fmt.Errorf("store: %q is not a record file", f.Name)
@@ -1075,9 +1038,9 @@ type SweepChunk struct {
 	// Now is the time of the sweep; its UTC date names the archive file.
 	Now       time.Time
 	Summaries []ArchiveSummary
-	// Corrupt, Ctl, Records and Outs are removed in that order, then Bodies, the
-	// directories of each of Corrupt and Ctl synced after the group and the others
-	// after the last of them; Endpoints go last, after that sync.
+	// Ctl, Records and Outs are removed in that order, then Bodies, the directory
+	// of Ctl synced after the group and the others after the last of them;
+	// Endpoints go last, after that sync.
 	//
 	// A record that depends on a control record (the derived delivery of a
 	// session creation) goes in Records and its control record in Ctl. Records
@@ -1089,7 +1052,6 @@ type SweepChunk struct {
 	// hang on it are durably gone: a crash, or a power loss that kept one removal
 	// and lost the other, must not leave those without the record that says whom
 	// they belong to, since nothing would ever remove them.
-	Corrupt   []FileRef
 	Ctl       []FileRef
 	Records   []FileRef
 	Outs      []OutRecord
@@ -1160,16 +1122,11 @@ func (s *Store) floorFile(sender ident.EndpointID, raises map[ident.Address]uint
 // floors of its sequence numbers are durable. The floors are the store's to
 // work out (floorsOf): a caller cannot remove a source record without them.
 func (s *Store) ArchiveSweep(c SweepChunk) error {
-	for _, f := range c.Corrupt {
-		if err := checkRef(f, true); err != nil {
-			return err
-		}
-	}
 	for _, f := range c.Ctl {
 		if f.Dir != CtlDir {
 			return errors.New("store: the control records of a sweep are in ctl/")
 		}
-		if err := checkRef(f, false); err != nil {
+		if err := checkRef(f); err != nil {
 			return err
 		}
 	}
@@ -1177,7 +1134,7 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		if f.Dir == BodiesDir || f.Dir == OutDir || f.Dir == EndpointsDir {
 			return fmt.Errorf("store: %s is not removed as a record of a sweep: bodies, source records and endpoints have their own groups", f.Dir)
 		}
-		if err := checkRef(f, false); err != nil {
+		if err := checkRef(f); err != nil {
 			return err
 		}
 	}
@@ -1192,7 +1149,7 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		if f.Dir != EndpointsDir {
 			return errors.New("store: the endpoints of a sweep are in endpoints/")
 		}
-		if err := checkRef(f, false); err != nil {
+		if err := checkRef(f); err != nil {
 			return err
 		}
 	}
@@ -1212,11 +1169,11 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		}
 		floors = append(floors, f)
 	}
-	if len(lines)+len(floors)+len(c.Corrupt)+len(c.Ctl)+len(c.Records)+len(outs)+len(c.Endpoints)+len(c.Bodies) == 0 {
+	if len(lines)+len(floors)+len(c.Ctl)+len(c.Records)+len(outs)+len(c.Endpoints)+len(c.Bodies) == 0 {
 		return nil
 	}
 
-	ex, err := s.exist(c.Corrupt, c.Ctl, c.Records, outs, bodyFiles(c.Bodies), c.Endpoints)
+	ex, err := s.exist(c.Ctl, c.Records, outs, bodyFiles(c.Bodies), c.Endpoints)
 	if err != nil {
 		return err
 	}
@@ -1235,9 +1192,6 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 		if err := s.replace(tx, "seq-floor", f); err != nil {
 			return err
 		}
-	}
-	if err := s.removeAll(tx, "corrupt", "corrupt-dir", c.Corrupt, ex); err != nil {
-		return err
 	}
 	if err := s.removeAll(tx, "ctl", "ctl-dir", c.Ctl, ex); err != nil {
 		return err

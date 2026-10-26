@@ -171,7 +171,7 @@ func (w *powerLossWorld) next() *operation {
 
 // damageOp damages the body of a target record that is on the disk, as the
 // disk may while the node is stopped, and runs the startup rules over it: the
-// record is quarantined, with an alert, and nothing replaces it: a target that
+// record is alerted and removed, and nothing replaces it: a target that
 // lost a record keeps none.
 func (w *powerLossWorld) damageOp() *operation {
 	if w.rng(6) != 0 {
@@ -204,8 +204,7 @@ func (w *powerLossWorld) damageOp() *operation {
 				return nil
 			},
 			writes: map[string][]byte{
-				path.Join(store.InDir, corruptName(in, id)): damaged,
-				path.Join(store.AlertsDir, alert.Name()):    w.enc(alert),
+				path.Join(store.AlertsDir, alert.Name()): w.enc(alert),
 			},
 			removes: []string{p},
 			after:   func() { w.stage[i] = 7 },
@@ -234,8 +233,8 @@ func (w *powerLossWorld) leased(i int) store.InRecord {
 // plan is what the call below uses, and the plan is checked against this.
 //
 // A target record is finished once acknowledged (stage 4 and after); one that
-// was quarantined (stage 7) is no longer there, and its quarantined file stays
-// for the owner until the alert is acknowledged. A source record is finished once
+// was quarantined (stage 7) is no longer there, and its alert stays for the owner
+// until it is acknowledged. A source record is finished once
 // its delivery was reported (stage 5). Administrative
 // results are past their seven days. Nothing else is finished in this world: the
 // alerts are not acknowledged, the endpoints are open, and the bodies a swept
@@ -285,7 +284,7 @@ func (w *powerLossWorld) sweep() *operation {
 	op.call = func() error {
 		plan := store.PlanSweep(r.scan(), now)
 		var planned []string
-		for _, group := range [][]store.FileRef{plan.Corrupt, plan.Ctl, plan.Records, plan.Endpoints} {
+		for _, group := range [][]store.FileRef{plan.Ctl, plan.Records, plan.Endpoints} {
 			for _, f := range group {
 				planned = append(planned, path.Join(f.Dir, f.Name))
 			}
@@ -339,8 +338,8 @@ func (w *powerLossWorld) judge(where string, clone *fsxtest.Mem) {
 	w.stats.clones++
 	r := openRig(t, clone)
 	sc := r.scan()
-	if len(sc.Damaged) != 0 || len(sc.Corrupt) != 0 || len(sc.Unknown) != 0 {
-		t.Errorf("%s: a record is half written: damaged %v, quarantined %v, unknown %v", where, sc.Damaged, sc.Corrupt, sc.Unknown)
+	if len(sc.Damaged) != 0 || len(sc.Unknown) != 0 {
+		t.Errorf("%s: a record is half written: damaged %v, unknown %v", where, sc.Damaged, sc.Unknown)
 	}
 	got := snapshot(t, clone, ".")
 	cur := w.cur

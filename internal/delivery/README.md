@@ -227,7 +227,7 @@ can reach: `delivery_unknown`, then `closed_unconfirmed` after `ReportBy`.
   body: a source record that is `queued`, and a target message record that is
   `accepted` (queued or under a lease). When a stored body is found corrupt, a
   source record that needs it is replaced with `NewLostRecord`; a target record has
-  no replacement; every other record that references the body keeps its state
+  no replacement and is removed with an alert; every other record that references the body keeps its state
   unchanged, only dropping the reference.
 
 ## Control signals on the target

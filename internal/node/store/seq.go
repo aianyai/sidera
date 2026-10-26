@@ -40,7 +40,7 @@ func NewSeqBook(sc *Scan) *SeqBook {
 
 // number is the sequence number a regular source record used for the target to.
 // A lost record has none: its numbers are lost, and the floor of its pair was
-// raised above them when it was quarantined.
+// raised above them when it was settled.
 func (o OutRecord) number(to ident.Address) (uint64, bool) {
 	if o.Lost != nil || !slices.Contains(o.Key.Recipients, to) {
 		return 0, false

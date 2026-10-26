@@ -64,10 +64,7 @@ type view struct {
 	bodyRefs   bodyCounts
 	unfinished int
 	alerts     []store.AlertRecord
-	// corrupt are the quarantined files the scan found, for the owner's
-	// acknowledgement of the alert that names one.
-	corrupt []store.CorruptFile
-	seq     *store.SeqBook
+	seq        *store.SeqBook
 }
 
 // idemKey names an idempotency key: the key is the sender's own.
@@ -193,7 +190,6 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		v.setOut(o)
 	}
 	v.alerts = append(v.alerts, sc.Alerts...)
-	v.corrupt = append(v.corrupt, sc.Corrupt...)
 	sort.SliceStable(v.alerts, func(i, j int) bool {
 		if !v.alerts[i].At.Equal(v.alerts[j].At) {
 			return v.alerts[i].At.Before(v.alerts[j].At)

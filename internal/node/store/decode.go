@@ -106,8 +106,7 @@ func DecodeRecord(dir, name string, data []byte) (Record, *Damage) {
 // dir that is, or was, named name may be trusted to say. The kind is one the
 // directory holds, the file name is the hash of kind and key, and the key
 // parses as a key of the kind; only then are the kind and the key those of the
-// file, and the key is returned parsed. It is the one place the rule lives:
-// the scan of a quarantined file asks it too, with the name the file had.
+// file, and the key is returned parsed. It is the one place the rule lives.
 func readHeader(dir, name string, data []byte) (h recfile.Header, body []byte, key any, dmg *Damage) {
 	h, body, dmg = recfile.ParseHeader(data)
 	if dmg != nil {

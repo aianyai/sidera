@@ -211,14 +211,11 @@ func TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop(t *testing.T) {
 }
 
 // An alert is acknowledged by its identifier; one the node does not hold is not
-// found. An alert that names a quarantined file of a directory that is not one of
-// the deliveries takes the file with it; the quarantined files of the deliveries
-// are left for the sweep. A request under another identifier for an alert that is
-// acknowledged is answered like the first.
-func TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames(t *testing.T) {
+// found. A request under another identifier for an alert that is acknowledged is
+// answered like the first.
+func TestAcknowledgingAnAlertMarksIt(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)
-	hash := strings.Repeat("ab", 32) + ".rec"
 	alertEp, alertIn := store.AlertID{0xa1}, store.AlertID{0xa2}
 	for _, a := range []store.AlertRecord{
 		{ID: alertEp, Kind: "corrupt_record", At: t0, Detail: "an endpoint record", Subject: "endpoints/x"},
@@ -226,8 +223,6 @@ func TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames(t *testing.T) {
 	} {
 		r.seedRecord(a)
 	}
-	r.seedFile(store.EndpointsDir, hash+"."+alertEp.String()+".corrupt", []byte("damaged"))
-	r.seedFile(store.InDir, hash+"."+alertIn.String()+".corrupt", []byte("damaged"))
 	e := r.start()
 	ctx := context.Background()
 
@@ -241,14 +236,8 @@ func TestAcknowledgingAnAlertMarksItAndTakesTheFileItNames(t *testing.T) {
 	if err != nil || first.Replayed || string(first.Result) != `{"alert":"`+alertEp.String()+`","acknowledged":true}` {
 		t.Fatalf("the acknowledgement: %+v, %v", first, err)
 	}
-	if _, err := r.mem.Stat(path.Join(store.EndpointsDir, hash+"."+alertEp.String()+".corrupt")); err == nil {
-		t.Error("the quarantined file of the acknowledged alert is still there")
-	}
 	if _, err := e.Execute(ctx, ackCommand(87, "ack the delivery alert", alertIn)); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := r.mem.Stat(path.Join(store.InDir, hash+"."+alertIn.String()+".corrupt")); err != nil {
-		t.Errorf("the quarantined file of a delivery was removed by the acknowledgement: %v", err)
 	}
 
 	alerts, err := e.Alerts(ctx)

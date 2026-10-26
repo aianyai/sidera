@@ -23,14 +23,12 @@ type sim struct {
 	st      *store.Store
 	now     time.Time
 	enabled func(instance string) bool
-	// chunk is the number of records of one chunk of a body quarantine.
-	chunk int
 	// did counts the rules that did work.
 	did map[string]int
 }
 
 func newSim(t testing.TB, st *store.Store) *sim {
-	return &sim{t: t, st: st, now: base.Add(2 * time.Hour), enabled: func(string) bool { return true }, chunk: 2, did: map[string]int{}}
+	return &sim{t: t, st: st, now: base.Add(2 * time.Hour), enabled: func(string) bool { return true }, did: map[string]int{}}
 }
 
 func (s *sim) scan() *store.Scan {
@@ -49,8 +47,8 @@ func (s *sim) must(err error, what string) {
 	}
 }
 
-// alertFor is the alert ID of the quarantine of a file: derived from its name, so
-// that a quarantine repeated after a crash gets the same name.
+// alertFor is the alert ID of the settlement of a file: derived from its name, so
+// that a settlement repeated after a crash writes the same alert.
 func alertFor(dir, name string) store.AlertID {
 	h := sha256.Sum256([]byte(dir + "/" + name))
 	var id store.AlertID
@@ -92,11 +90,10 @@ func (s *sim) pass() bool {
 	worked := false
 	do := func(rule string) { worked = true; s.did[rule]++ }
 
-	// Damaged files are quarantined, a replacement and a closed session endpoint
+	// Damaged files are settled, a replacement and a closed session endpoint
 	// with them.
 	for _, d := range s.scan().Damaged {
 		sc := s.scan()
-		id := alertFor(d.Dir, d.Name)
 		q := store.Quarantine{File: d, Scan: sc}
 		var kindName = "corrupt_record"
 		if d.Damage.Class == store.BodyDamaged {
@@ -108,29 +105,9 @@ func (s *sim) pass() bool {
 				kindName = "control_unknown"
 			}
 		}
-		q.Alert = s.alert(id, kindName, d.Dir+"/"+d.Name)
+		q.Alert = s.alert(alertFor(d.Dir, d.Name), kindName, d.Dir+"/"+d.Name)
 		s.must(s.st.Quarantine(q), "Quarantine "+d.Name)
 		do("quarantine")
-	}
-	for _, c := range store.UnfinishedQuarantines(s.scan()) {
-		sc := s.scan()
-		q := store.QuarantineResume{File: c, Scan: sc}
-		kindName := "corrupt_record"
-		if c.Key != nil {
-			q.Replacement = s.replacement(c.Dir, c.Key)
-		}
-		if c.Dir == store.CtlDir {
-			if len(store.QuarantineSessions(sc, c.Original)) > 0 {
-				kindName = "control_unknown"
-			}
-		}
-		q.Alert = s.alert(c.Alert, kindName, c.Dir+"/"+c.Original)
-		s.must(s.st.QuarantineResume(q), "QuarantineResume "+c.Name)
-		do("quarantine-resume")
-	}
-	for _, c := range store.UnfinishedBodyQuarantines(s.scan()) {
-		s.continueBodyQuarantine(c)
-		do("quarantine-body")
 	}
 
 	if eps := store.EffectReplays(s.scan()); len(eps) > 0 {
@@ -263,87 +240,36 @@ func unreferenced(sc *store.Scan, ins []store.InRecord, ctls []store.CtlRecord) 
 }
 
 // bodyMismatch is what the engine does when a body it reads does not hash to its
-// name: the body is quarantined, and every source record that refers to it is
-// replaced by a lost record when it still needs the body and stripped of the
-// reference when it does not; a target record has no replacement and is only
-// stripped of the reference, in chunks of s.chunk records. The store refuses a
-// target record that still needs the body, so a scenario that runs this has
-// ended such deliveries before, and the model stops on one it finds.
+// name: each record that refers to it is settled by its own call, a source record
+// that still needs the body with the lost record that replaces it. The target
+// records that need it are removed, so the scenario that runs this has no way to
+// ask for a reference to be dropped from one.
 func (s *sim) bodyMismatch(name string) {
 	s.t.Helper()
-	id := alertFor(store.BodiesDir, name)
-	s.quarantineBody(name, id, true)
-}
-
-func (s *sim) continueBodyQuarantine(c store.CorruptFile) {
-	s.quarantineBody(c.Original, c.Alert, false)
-}
-
-func (s *sim) quarantineBody(name string, id store.AlertID, rename bool) {
-	s.t.Helper()
 	sc := s.scan()
-	var outs []store.OutRecord
-	var ins []store.InRecord
-	var ctls []store.CtlRecord
+	settle := func(rec store.Record, dir string, replacement store.Record) {
+		s.must(dropWritten(s.st.QuarantineBody(store.BodyQuarantine{
+			Record: rec, Replacement: replacement, Scan: sc,
+			Alert: s.alert(alertFor(dir, rec.Name()), "corrupt_body", dir+"/"+rec.Name()),
+		})), "QuarantineBody "+rec.Name())
+	}
 	for _, o := range sc.Out {
 		if o.Body != nil && o.Body.Name() == name {
-			o.Body = nil
-			for i, tr := range o.Outbound.Recipients {
-				if tr.Delivery.NeedsBody() {
-					lost, feedback := lostRecord(s.now)
-					o.Outbound.Recipients[i].Delivery = lost
-					for _, f := range feedback {
-						o.Feedback = append(o.Feedback, delivery.Item{
-							Ref:      delivery.DeliveryRef{Sender: ident.Address{Node: node(local), Endpoint: o.Key.Sender}, Message: o.Key.Message, Recipient: tr.Address},
-							Feedback: f, At: s.now,
-						})
-					}
-				}
+			var replacement store.Record
+			if o.NeedsBody() {
+				replacement = s.lostOut(o.Key)
 			}
-			outs = append(outs, o)
+			settle(o, store.OutDir, replacement)
 		}
 	}
 	for _, in := range sc.In {
 		if in.Body != nil && in.Body.Name() == name {
-			if in.Record.NeedsBody() {
-				s.t.Fatalf("the target record %s still needs the body %s: the store refuses to strip it", in.Name(), name)
-			}
-			in.Body = nil // a target keeps no replacement of a record it lost
-			ins = append(ins, in)
+			settle(in, store.InDir, nil)
 		}
 	}
 	for _, c := range sc.Ctl {
 		if c.Body != nil && c.Body.Name() == name {
-			c.Body = nil
-			ctls = append(ctls, c)
-		}
-	}
-	first := rename
-	for {
-		q := store.BodyQuarantine{Name: name, AlertID: id, Rename: first}
-		room := s.chunk
-		take := func(n int) int {
-			if n > room {
-				n = room
-			}
-			room -= n
-			return n
-		}
-		n := take(len(outs))
-		q.Out, outs = outs[:n], outs[n:]
-		n = take(len(ins))
-		q.In, ins = ins[:n], ins[n:]
-		n = take(len(ctls))
-		q.Ctl, ctls = ctls[:n], ctls[n:]
-		last := len(outs)+len(ins)+len(ctls) == 0
-		if last {
-			a := s.alert(id, "corrupt_body", store.BodiesDir+"/"+name)
-			q.Alert = &a
-		}
-		s.must(dropWritten(s.st.QuarantineBody(q)), "QuarantineBody "+name)
-		first = false
-		if last {
-			return
+			settle(c, store.CtlDir, nil)
 		}
 	}
 }
@@ -381,10 +307,6 @@ func work(sc *store.Scan, enabled func(string) bool) []string {
 	add("orphan-gc", len(bodies), func(i int) string { return bodies[i] })
 	eps := store.OrphanEndpoints(sc)
 	add("orphan-gc-endpoint", len(eps), func(i int) string { return eps[i].ID.String() })
-	uq := store.UnfinishedQuarantines(sc)
-	add("quarantine-resume", len(uq), func(i int) string { return uq[i].Name })
-	ub := store.UnfinishedBodyQuarantines(sc)
-	add("quarantine-body", len(ub), func(i int) string { return ub[i].Name })
 	er := store.EffectReplays(sc)
 	add("ctl-effect-replay", len(er), func(i int) string { return er[i].ID.String() })
 	id := store.InstanceDrainWork(sc, enabled)

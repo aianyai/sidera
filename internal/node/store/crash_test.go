@@ -402,11 +402,9 @@ type nestedCase struct {
 
 // recoveryDomain is every crash point of the recovery rules the nested walk has to
 // crash at: the points of the recovery transactions of the store, and of the
-// cleanup and the settle that txn.Recover runs at every start. Two kinds of point
-// are left out because no recovery reaches them: the removal of a discarded
-// directory (the store never discards one, so no disk of its workflows holds one)
-// and the renaming of a damaged body into quarantine, which the read that finds
-// the body damaged does, so that a recovery only continues the chunks after it.
+// cleanup and the settle that txn.Recover runs at every start. The removal of a
+// discarded directory is left out because no recovery reaches it: the store never
+// discards one, so no disk of its workflows holds one.
 var recoveryDomain = sync.OnceValue(func() map[fsx.Key]bool {
 	prog, err := programTable()
 	if err != nil {
@@ -424,7 +422,7 @@ var recoveryDomain = sync.OnceValue(func() map[fsx.Key]bool {
 		switch {
 		case internal[k.Tag.Tx] && k.Tag.Role != "trash":
 			domain[k.Key] = true
-		case mine[k.Tag.Tx] && k.Kind == txn.Recovery && !(k.Tag.Tx == "quarantine-body" && k.Tag.Role == "body"):
+		case mine[k.Tag.Tx] && k.Kind == txn.Recovery:
 			domain[k.Key] = true
 		}
 	}

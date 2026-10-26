@@ -119,37 +119,23 @@ var (
 	declArchiveSweep  = txn.Decl{Name: "archive-sweep", Kind: txn.Normal, Writes: []txn.Write{
 		w("archive", txn.OpAppend, many, optional), w("archive", txn.OpSyncFile, optional),
 		rep("seq-floor", many, optional),
-		rm("corrupt", many, optional), syncDir("corrupt-dir", many, optional),
 		rm("ctl", many, optional), syncDir("ctl-dir", optional),
 		rm("record", many, optional), rm("body", many, optional), syncDir("dir", many, optional),
 		rm("endpoint", many, optional), syncDir("endpoint-dir", optional),
 	}}
 	declArchiveExpire = txn.Decl{Name: "archive-expire", Kind: txn.Normal, Writes: []txn.Write{rm("file", many), syncDir("dir")}}
-	// alert-ack: the corrupt file goes before the alert is marked, so an
-	// acknowledged alert never names a file that is still there.
-	declAlertAck = txn.Decl{Name: "alert-ack", Kind: txn.Normal, Writes: []txn.Write{
-		rm("quarantined", optional), syncDir("quarantined-dir", optional), rep("alert"), rep("result"),
-	}}
-	declDaemonStop = txn.Decl{Name: "daemon-stop", Kind: txn.Normal, Writes: []txn.Write{rep("result")}}
+	declAlertAck      = txn.Decl{Name: "alert-ack", Kind: txn.Normal, Writes: []txn.Write{rep("alert"), rep("result")}}
+	declDaemonStop    = txn.Decl{Name: "daemon-stop", Kind: txn.Normal, Writes: []txn.Write{rep("result")}}
 
-	// The recovery transactions. The alert is the last write of every
-	// quarantine, so that a quarantined file whose alert does not exist is the
-	// sign of an unfinished quarantine.
+	// The recovery transactions.
+	//
+	// quarantine settles one damaged file: the sequence floors it raises, the
+	// session endpoints it closes and the alert come first, and the damaged file
+	// goes last, overwritten in place or removed. A restart that finds it still
+	// there writes the same effects again.
 	declQuarantine = txn.Decl{Name: "quarantine", Kind: txn.Recovery, Writes: []txn.Write{
-		w("record", txn.OpRenameFile), rep("seq-floor", optional), rep("replacement", optional),
-		rep("session", many, optional), rep("alert"),
-	}}
-	declQuarantineResume = txn.Decl{Name: "quarantine-resume", Kind: txn.Recovery, Writes: []txn.Write{
-		rep("seq-floor", optional), rep("replacement", optional), rep("session", many, optional), rep("alert"),
-	}}
-	// quarantine-body is chunked: the renamed body is the head, the alert is
-	// written by the last chunk only.
-	declQuarantineBody = txn.Decl{Name: "quarantine-body", Kind: txn.Recovery, Writes: []txn.Write{
-		w("body", txn.OpRenameFile, optional),
-		repDefer("out", many, optional), syncDir("out-dir", optional),
-		repDefer("in", many, optional), syncDir("in-dir", optional),
-		repDefer("ctl", many, optional), syncDir("ctl-dir", optional),
-		rep("alert", optional),
+		rep("seq-floor", optional), rep("session", many, optional), rep("alert"),
+		rep("overwrite", optional), rm("record", optional), syncDir("dir", optional),
 	}}
 	declOrphanGC            = txn.Decl{Name: "orphan-gc", Kind: txn.Recovery, Writes: []txn.Write{rm("body", many, optional), syncDir("dir", many)}}
 	declOrphanGCEndpoint    = txn.Decl{Name: "orphan-gc-endpoint", Kind: txn.Recovery, Writes: []txn.Write{rm("endpoint", many, optional), syncDir("dir", many)}}
@@ -188,7 +174,7 @@ func Transactions() []*txn.Decl {
 		&declEndpointDrain, &declInstanceDrain, &declFeedbackForm, &declFeedbackClear,
 		&declCheckpointPut, &declAlertRaise, &declArchiveEvents, &declArchiveSweep,
 		&declArchiveExpire, &declAlertAck, &declDaemonStop,
-		&declQuarantine, &declQuarantineResume, &declQuarantineBody, &declOrphanGC,
+		&declQuarantine, &declOrphanGC,
 		&declOrphanGCEndpoint, &declCtlEffectReplay, &declEndpointDrainReplay,
 		&declInstanceDrainReplay, &declPromptReplay, &declBlockedReplay, &declFeedbackReplay,
 	}

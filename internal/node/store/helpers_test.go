@@ -817,18 +817,6 @@ func lostOutAt(k store.OutKey, at time.Time) store.OutRecord {
 	return rec
 }
 
-// misnamed is the content of a quarantined file whose first line parses, is of a
-// kind its directory holds and names a key that is valid, but whose key does not
-// hash to the name the file had: the first line of the record `claimed`, damaged
-// in its body, in the file that `under` had. Nothing in it can be trusted to
-// belong to that file.
-func misnamed(t testing.TB, claimed, under store.Record, id store.AlertID) (name string, data []byte) {
-	t.Helper()
-	data = append([]byte(nil), mustEncode(t, claimed)...)
-	data[len(data)-2] ^= 0x01
-	return corruptName(under, id), data
-}
-
 // dropWritten keeps the error of a write that also returns the records it wrote,
 // for the callers that have no use for them.
 func dropWritten[T any](_ T, err error) error { return err }

@@ -90,7 +90,7 @@ func TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone(t 
 	if len(plan.Outs) != 0 {
 		t.Errorf("source records were swept again: %v", plan.Outs)
 	}
-	if again := store.PlanSweep(r.scan(), outRetention(200)); len(again.Records)+len(again.Outs)+len(again.Endpoints)+len(again.Ctl)+len(again.Corrupt) != 0 {
+	if again := store.PlanSweep(r.scan(), outRetention(200)); len(again.Records)+len(again.Outs)+len(again.Endpoints)+len(again.Ctl) != 0 {
 		t.Errorf("a sweep of nothing has work: %+v", again)
 	}
 }
@@ -152,7 +152,7 @@ func sweepClosedSessionScenario(farFuture time.Time) scenario {
 	passes := func(r *rig) error {
 		for i := 0; i < 4; i++ {
 			plan := store.PlanSweep(r.scan(), farFuture)
-			if len(plan.Records)+len(plan.Outs)+len(plan.Endpoints)+len(plan.Ctl)+len(plan.Corrupt)+len(plan.Bodies) == 0 {
+			if len(plan.Records)+len(plan.Outs)+len(plan.Endpoints)+len(plan.Ctl)+len(plan.Bodies) == 0 {
 				return nil
 			}
 			if err := r.st.ArchiveSweep(plan.Chunk(farFuture)); err != nil {

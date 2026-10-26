@@ -96,26 +96,9 @@ func RetainUntil(rec Record) (until time.Time, finished bool) {
 	return time.Time{}, false
 }
 
-// lostRetention is the instant until which a source record that was lost at the
-// time at, and replaced then, would be kept: the retention of the replacement the
-// delivery package makes for it. It bounds the retention of every source record
-// that was accepted before at, so once it has passed nothing that could be
-// related to the lost file is still live. It is computed with the same function
-// the sweep uses for a replacement that exists. A target record has no
-// replacement, so no such bound exists for the files of in/ and ctl/.
-func lostRetention(at time.Time) (until time.Time, ok bool) {
-	rec, _, err := delivery.NewLostRecord(at)
-	if err != nil {
-		return time.Time{}, false // an alert without a time: nothing says when, so the file stays
-	}
-	until, _ = RetainUntil(OutRecord{Lost: &LostOut{DiscoveredAt: at, Deliveries: []delivery.Record{rec}}})
-	return until, true
-}
-
 // SweepPlan is the work of one pass of the archive sweep.
 type SweepPlan struct {
 	Summaries []ArchiveSummary
-	Corrupt   []FileRef
 	Ctl       []FileRef
 	// Records are the files of every directory but out/ and endpoints/.
 	Records []FileRef
@@ -133,16 +116,15 @@ type SweepPlan struct {
 // record is cut as a record, so its floor goes with it.
 func (p SweepPlan) Chunk(now time.Time) SweepChunk {
 	return SweepChunk{
-		Now: now, Summaries: p.Summaries, Corrupt: p.Corrupt, Ctl: p.Ctl, Records: p.Records,
+		Now: now, Summaries: p.Summaries, Ctl: p.Ctl, Records: p.Records,
 		Outs: p.Outs, Endpoints: p.Endpoints, Bodies: p.Bodies,
 	}
 }
 
 // PlanSweep selects what is ready to leave the live files at now: records that
-// are finished and past their retention, with their quarantined files first and
-// a session's derived delivery after its control record; admin results past
-// theirs; acknowledged alerts whose quarantined file is gone; closed endpoints
-// nothing live points to; and the bodies nothing refers to afterwards.
+// are finished and past their retention, with a session's derived delivery after
+// its control record; admin results past theirs; acknowledged alerts; closed
+// endpoints nothing live points to; and the bodies nothing refers to afterwards.
 //
 // A closed session endpoint is kept while any source record has it as sender,
 // swept or not: the sweep of a source record writes the floor of its sender, and
@@ -221,60 +203,13 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 			bodiesOfSwept = append(bodiesOfSwept, *o.Body)
 		}
 	}
-	// A swept replacement takes its quarantined files with it, before it.
-	for _, c := range sc.Corrupt {
-		if c.Dir == BodiesDir || !swept[path.Join(c.Dir, c.Original)] {
-			continue
-		}
-		plan.Corrupt = append(plan.Corrupt, FileRef{Dir: c.Dir, Name: c.Name})
-	}
-	// A quarantined file of out/ whose first line is unreadable has no
-	// replacement, so no record's retention ends with it. Until a lost record's
-	// own retention from the time the loss was found has passed, the name still
-	// counts as a record that may exist (see lostRetention), and then the file
-	// goes. A quarantined file of in/ or ctl/ has no replacement and no bound:
-	// nothing removes it, and its alert stays with it (an alert is kept while its
-	// file is there).
-	discovered := map[AlertID]time.Time{}
-	for _, a := range sc.Alerts {
-		discovered[a.ID] = a.At
-	}
-	exists := map[string]bool{} // delivery files under their names, whole or damaged
-	for _, o := range sc.Out {
-		exists[path.Join(OutDir, o.Name())] = true
-	}
-	for _, in := range sc.In {
-		exists[path.Join(InDir, in.Name())] = true
-	}
-	for _, c := range sc.Ctl {
-		exists[path.Join(CtlDir, c.Name())] = true
-	}
-	for _, d := range sc.Damaged {
-		exists[path.Join(d.Dir, d.Name)] = true
-	}
-	for _, c := range sc.Corrupt {
-		if c.Key != nil || c.Dir != OutDir || exists[path.Join(c.Dir, c.Original)] {
-			continue // with a file under the name, the file's own retention decides
-		}
-		at, ok := discovered[c.Alert]
-		if !ok {
-			continue // an unfinished quarantine: its alert is not written yet
-		}
-		if until, ok := lostRetention(at); ok && !now.Before(until) {
-			plan.Corrupt = append(plan.Corrupt, FileRef{Dir: c.Dir, Name: c.Name})
-		}
-	}
 	for _, a := range sc.Admin {
 		if ready(a) {
 			add(&plan.Records, AdminDir, a.Name())
 		}
 	}
-	quarantinedBy := map[AlertID]bool{}
-	for _, c := range sc.Corrupt {
-		quarantinedBy[c.Alert] = true
-	}
 	for _, a := range sc.Alerts {
-		if ready(a) && !quarantinedBy[a.ID] {
+		if ready(a) {
 			add(&plan.Records, AlertsDir, a.Name())
 		}
 	}
@@ -349,7 +284,6 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	sortRefs := func(r []FileRef) {
 		sort.Slice(r, func(i, j int) bool { return path.Join(r[i].Dir, r[i].Name) < path.Join(r[j].Dir, r[j].Name) })
 	}
-	sortRefs(plan.Corrupt)
 	sortRefs(plan.Ctl)
 	sortRefs(plan.Records)
 	sortRefs(plan.Endpoints)

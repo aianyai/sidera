@@ -16,7 +16,7 @@ import (
 // created name the record as their creator. When that record is damaged in turn,
 // its quarantine closes both: an endpoint left behind would hold one of the
 // node's endpoint slots for good, because every rule that removes an endpoint
-// leaves a creating one alone while its record is lost, quarantined or damaged.
+// leaves a creating one alone while its record is lost or damaged.
 
 // doubleFaultEndpoints are the two endpoints of the double fault: the one of the
 // failed first acceptance and the one the record holds.
@@ -61,23 +61,13 @@ func doubleFaultScenarios() []scenario {
 			mode: atomic, mustComplete: true, run: recoverRun,
 			verify: verifyDoubleFault,
 		},
-		{
-			name: "resumed quarantine of a control record that created two session endpoints",
-			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				seedDoubleFault(t, mem)
-				quarantinedDamaged(t, mem, store.CtlDir, sessionCtl(1, 6))
-			},
-			mode: atomic, mustComplete: true, run: recoverRun,
-			verify: verifyDoubleFault,
-		},
 	}
 }
 
 // TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord walks
 // every crash point, of every kind of crash, of the quarantine of a control
-// record that two session endpoints still being created name as their creator,
-// and of the resumption of such a quarantine: each ends with both endpoints
-// closed.
+// record that two session endpoints still being created name as their creator:
+// each ends with both endpoints closed.
 func TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord(t *testing.T) {
 	sink := newSink()
 	for i, sc := range doubleFaultScenarios() {
@@ -172,7 +162,7 @@ func verifySessionMix(t *testing.T, r *rig) {
 }
 
 // TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan runs the quarantine
-// of a control record and the resumption of one, with the caller giving no list.
+// of a control record with the caller giving no list.
 func TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan(t *testing.T) {
 	rec := sessionCtl(1, 6)
 	id := alertFor(store.CtlDir, rec.Name())
@@ -186,18 +176,6 @@ func TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan(t *testing.T) {
 			t.Fatalf("damaged = %v, want the control record", sc.Damaged)
 		}
 		mustDo(t, r.st.Quarantine(store.Quarantine{File: sc.Damaged[0], Scan: sc, Alert: newSim(t, r.st).alert(id, "control_unknown", "ctl")}))
-		verifySessionMix(t, r)
-	})
-	t.Run("resumed quarantine", func(t *testing.T) {
-		r := newRig(t)
-		sessionMix(t, r.mem)
-		quarantinedDamaged(t, r.mem, store.CtlDir, rec)
-		sc := r.scan()
-		unfinished := store.UnfinishedQuarantines(sc)
-		if len(unfinished) != 1 {
-			t.Fatalf("unfinished quarantines = %v, want the control record", unfinished)
-		}
-		mustDo(t, r.st.QuarantineResume(store.QuarantineResume{File: unfinished[0], Scan: sc, Alert: newSim(t, r.st).alert(id, "control_unknown", "ctl")}))
 		verifySessionMix(t, r)
 	})
 	t.Run("a control record is not quarantined without the scan that lists its endpoints", func(t *testing.T) {

@@ -18,12 +18,8 @@ import (
 // a test that a disk no crash and no damage touched has no work reads the same
 // plan, so the check cannot drift from the rules.
 type RecoveryPlan struct {
-	// Quarantine, QuarantineResume and QuarantineBody are the damaged files, the
-	// quarantines that were not finished, and the quarantined bodies whose alert
-	// is missing.
-	Quarantine       []store.DamagedFile
-	QuarantineResume []store.CorruptFile
-	QuarantineBody   []store.CorruptFile
+	// Quarantine is the damaged files.
+	Quarantine []store.DamagedFile
 	// CtlEffectReplay are the endpoints whose control record says more than they
 	// do.
 	CtlEffectReplay []store.EndpointRecord
@@ -49,16 +45,14 @@ type RecoveryPlan struct {
 // delivery rules judge the records.
 func PlanRecovery(sc *store.Scan, now time.Time, enabled func(instance string) bool) RecoveryPlan {
 	p := RecoveryPlan{
-		Quarantine:       sc.Damaged,
-		QuarantineResume: store.UnfinishedQuarantines(sc),
-		QuarantineBody:   store.UnfinishedBodyQuarantines(sc),
-		CtlEffectReplay:  store.EffectReplays(sc),
-		InstanceDrain:    store.InstanceDrainWork(sc, enabled),
-		OrphanEndpoints:  store.OrphanEndpoints(sc),
-		PromptReplay:     store.PromptReplays(sc),
-		BlockedReplay:    store.BlockedReplays(sc),
-		FeedbackReplay:   store.FeedbackReplays(sc),
-		OrphanBodies:     store.OrphanBodies(sc),
+		Quarantine:      sc.Damaged,
+		CtlEffectReplay: store.EffectReplays(sc),
+		InstanceDrain:   store.InstanceDrainWork(sc, enabled),
+		OrphanEndpoints: store.OrphanEndpoints(sc),
+		PromptReplay:    store.PromptReplays(sc),
+		BlockedReplay:   store.BlockedReplays(sc),
+		FeedbackReplay:  store.FeedbackReplays(sc),
+		OrphanBodies:    store.OrphanBodies(sc),
 	}
 	ins, ctls := store.DrainCandidates(sc)
 	p.EndpointDrain, _ = closeBatch(countBodies(sc), now, ins, ctls)
@@ -87,12 +81,6 @@ func (p RecoveryPlan) Items() []string {
 	add := func(rule, what string) { out = append(out, rule+": "+what) }
 	for _, d := range p.Quarantine {
 		add("quarantine", d.Dir+"/"+d.Name)
-	}
-	for _, c := range p.QuarantineResume {
-		add("quarantine-resume", c.Dir+"/"+c.Name)
-	}
-	for _, c := range p.QuarantineBody {
-		add("quarantine-body", c.Dir+"/"+c.Name)
 	}
 	for _, ep := range p.CtlEffectReplay {
 		add("ctl-effect-replay", ep.ID.String())
@@ -139,8 +127,6 @@ func (p RecoveryPlan) unwired() (rule string, items int, ok bool) {
 		n    int
 	}{
 		{"quarantine", len(p.Quarantine)},
-		{"quarantine-resume", len(p.QuarantineResume)},
-		{"quarantine-body", len(p.QuarantineBody)},
 		{"prompt-replay", len(p.PromptReplay)},
 		{"blocked-replay", len(p.BlockedReplay)},
 		{"feedback-replay", len(p.FeedbackReplay)},

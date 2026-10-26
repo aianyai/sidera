@@ -73,16 +73,11 @@ var designTable = []struct {
 	{"checkpoint-put", txn.Normal, "checkpoint:Replace"},
 	{"alert-raise", txn.Normal, "alert:Replace"},
 	{"archive-events", txn.Normal, "archive:Append[M]"},
-	{"archive-sweep", txn.Normal, "archive:Append[MO] archive:SyncFile[O] seq-floor:Replace[MO] corrupt:Remove[MO] corrupt-dir:SyncDir[MO] ctl:Remove[MO] ctl-dir:SyncDir[O] record:Remove[MO] body:Remove[MO] dir:SyncDir[MO] endpoint:Remove[MO] endpoint-dir:SyncDir[O]"},
+	{"archive-sweep", txn.Normal, "archive:Append[MO] archive:SyncFile[O] seq-floor:Replace[MO] ctl:Remove[MO] ctl-dir:SyncDir[O] record:Remove[MO] body:Remove[MO] dir:SyncDir[MO] endpoint:Remove[MO] endpoint-dir:SyncDir[O]"},
 	{"archive-expire", txn.Normal, "file:Remove[M] dir:SyncDir"},
-	{"alert-ack", txn.Normal, "quarantined:Remove[O] quarantined-dir:SyncDir[O] alert:Replace result:Replace"},
+	{"alert-ack", txn.Normal, "alert:Replace result:Replace"},
 	{"daemon-stop", txn.Normal, "result:Replace"},
-	{"quarantine", txn.Recovery, "record:RenameFile seq-floor:Replace[O] replacement:Replace[O] session:Replace[MO] alert:Replace"},
-	{"quarantine-resume", txn.Recovery, "seq-floor:Replace[O] replacement:Replace[O] session:Replace[MO] alert:Replace"},
-	// The design lists the body rename and the alert without flags; a body with
-	// more references than one chunk holds is quarantined in chunks, the rename
-	// in the first and the alert in the last.
-	{"quarantine-body", txn.Recovery, "body:RenameFile[O] out:ReplaceDefer[MO] out-dir:SyncDir[O] in:ReplaceDefer[MO] in-dir:SyncDir[O] ctl:ReplaceDefer[MO] ctl-dir:SyncDir[O] alert:Replace[O]"},
+	{"quarantine", txn.Recovery, "seq-floor:Replace[O] session:Replace[MO] alert:Replace overwrite:Replace[O] record:Remove[O] dir:SyncDir[O]"},
 	{"orphan-gc", txn.Recovery, "body:Remove[MO] dir:SyncDir[M]"},
 	{"orphan-gc-endpoint", txn.Recovery, "endpoint:Remove[MO] dir:SyncDir[M]"},
 	{"ctl-effect-replay", txn.Recovery, "endpoint:ReplaceDefer[MO] endpoint-dir:SyncDir[O]"},

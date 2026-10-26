@@ -97,6 +97,21 @@ type Idempotency struct {
 // Name is the file name of the record.
 func (r OutRecord) Name() string { return r.Key.FileName() }
 
+// NeedsBody reports whether the record still needs the bytes of its body: one of
+// its deliveries (a recipient's, or the derived one of a session creation) is
+// still queued. A lost record has no body.
+func (r OutRecord) NeedsBody() bool {
+	if r.Lost != nil {
+		return false
+	}
+	for _, t := range r.Outbound.Recipients {
+		if t.Delivery.NeedsBody() {
+			return true
+		}
+	}
+	return r.Outbound.Derived != nil && r.Outbound.Derived.Delivery.NeedsBody()
+}
+
 // InRecord is the target side record of one message for one endpoint, a
 // deduplication record included. A target keeps no replacement of a damaged
 // record: the sender learns of the loss when the target answers a pull that it

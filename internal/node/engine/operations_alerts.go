@@ -8,14 +8,9 @@ import (
 )
 
 // AcknowledgeAlertOp is the operation that marks an alert as seen by the owner.
-// An alert that names a quarantined file of a directory that is not one of the
-// deliveries has the file removed with the acknowledgement, before the alert is
-// marked, so that an acknowledged alert never names a file that is still there.
-// The quarantined files of deliveries are not removed by an acknowledgement (the
-// store refuses it), and the sweep removes only those of out/ that it bounds. An
-// alert that was acknowledged before is written as it is and the result stored,
-// so that a request under a new identifier is answered like the first. encode
-// makes the result from the alert; it runs in the loop and must not wait.
+// An alert that was acknowledged before is written as it is and the result
+// stored, so that a request under a new identifier is answered like the first.
+// encode makes the result from the alert; it runs in the loop and must not wait.
 func AcknowledgeAlertOp(alert store.AlertID, encode func(store.AlertID) ([]byte, error)) Operation {
 	return &acknowledgeAlertOp{alert: alert, encode: encode}
 }
@@ -42,14 +37,10 @@ func (o *acknowledgeAlertOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("engine: the result of %s: %w", x.name, err)
 	}
-	file := e.view.quarantinedFileOf(o.alert)
-	if err := e.d.Store.AlertAck(store.AlertAckInput{Alert: alert, Result: x.record(result), Quarantined: file}); err != nil {
+	if err := e.d.Store.AlertAck(store.AlertAckInput{Alert: alert, Result: x.record(result)}); err != nil {
 		return nil, err
 	}
 	e.view.alerts[i] = alert
-	if file != nil {
-		e.view.dropQuarantinedFile(*file)
-	}
 	return result, nil
 }
 
@@ -61,30 +52,4 @@ func (v *view) alertIndex(id store.AlertID) int {
 		}
 	}
 	return -1
-}
-
-// quarantinedFileOf is the quarantined file the alert names, when it is one that
-// the acknowledgement removes: not a file of the deliveries, which the sweep
-// removes when it can (a quarantined file of in/ or ctl/ stays).
-func (v *view) quarantinedFileOf(id store.AlertID) *store.CorruptFile {
-	for _, c := range v.corrupt {
-		if c.Alert != id {
-			continue
-		}
-		switch c.Dir {
-		case store.OutDir, store.InDir, store.CtlDir:
-			continue
-		}
-		return &c
-	}
-	return nil
-}
-
-func (v *view) dropQuarantinedFile(f store.CorruptFile) {
-	for i, c := range v.corrupt {
-		if c.Dir == f.Dir && c.Name == f.Name {
-			v.corrupt = append(v.corrupt[:i], v.corrupt[i+1:]...)
-			return
-		}
-	}
 }

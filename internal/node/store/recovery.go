@@ -1,16 +1,13 @@
 package store
 
 import (
-	"errors"
 	"fmt"
-	"path"
 	"slices"
 	"sort"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
-	"github.com/aianyai/sidera/internal/node/recfile"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -39,8 +36,7 @@ func MissingStateDirs(r fsx.Reader) ([]string, error) {
 }
 
 // OrphanBodies is the work of orphan-gc: the bodies no record refers to. A
-// record refers to the body it holds a reference to; a quarantined file refers
-// to nothing.
+// record refers to the body it holds a reference to.
 func OrphanBodies(sc *Scan) []string {
 	refs := map[string]bool{}
 	for _, o := range sc.Out {
@@ -74,8 +70,8 @@ func OrphanBodies(sc *Scan) []string {
 // all, or the creation of another endpoint, which is what a signal accepted again
 // after a failed intake has: the same record name and a new endpoint).
 //
-// A record that is quarantined or damaged keeps the endpoint: the quarantine of
-// the record settles it, as it needs to know it is there.
+// A record that is damaged keeps the endpoint: the quarantine of the record
+// settles it, as it needs to know it is there.
 func OrphanEndpoints(sc *Scan) []EndpointRecord {
 	ctls := map[string]*CtlRecord{}
 	exists := map[string]bool{}
@@ -83,11 +79,6 @@ func OrphanEndpoints(sc *Scan) []EndpointRecord {
 		c := &sc.Ctl[i]
 		exists[c.Name()] = true
 		ctls[c.Name()] = c
-	}
-	for _, c := range sc.Corrupt {
-		if c.Dir == CtlDir {
-			exists[c.Original] = true
-		}
 	}
 	for _, d := range sc.Damaged {
 		if d.Dir == CtlDir {
@@ -118,9 +109,8 @@ func OrphanEndpoints(sc *Scan) []EndpointRecord {
 // closed is listed too, because what an interrupted quarantine wrote may not be
 // durable. An open endpoint is a live session and stays open.
 //
-// Quarantine and QuarantineResume write exactly this list for a control record.
-// A caller asks for it only to learn whether a session may remain (the kind of
-// the alert).
+// Quarantine writes exactly this list for a control record. A caller asks for it
+// only to learn whether a session may remain (the kind of the alert).
 func QuarantineSessions(sc *Scan, ctlName string) []EndpointRecord {
 	var out []EndpointRecord
 	for _, e := range sc.Endpoints {
@@ -129,35 +119,6 @@ func QuarantineSessions(sc *Scan, ctlName string) []EndpointRecord {
 		}
 		e.Status, e.Token = EndpointClosed, nil
 		out = append(out, e)
-	}
-	return out
-}
-
-func alertIDs(sc *Scan) map[AlertID]bool {
-	ids := map[AlertID]bool{}
-	for _, a := range sc.Alerts {
-		ids[a.ID] = true
-	}
-	return ids
-}
-
-// UnfinishedQuarantines is the work of quarantine-resume: the quarantined files
-// of the directories of records whose alert does not exist. The alert is the
-// last write of a quarantine, so a quarantine is finished exactly when it is
-// there.
-func UnfinishedQuarantines(sc *Scan) []CorruptFile { return unfinished(sc, false) }
-
-// UnfinishedBodyQuarantines is the work of the continuation of quarantine-body:
-// the quarantined bodies whose alert does not exist.
-func UnfinishedBodyQuarantines(sc *Scan) []CorruptFile { return unfinished(sc, true) }
-
-func unfinished(sc *Scan, bodies bool) []CorruptFile {
-	ids := alertIDs(sc)
-	var out []CorruptFile
-	for _, c := range sc.Corrupt {
-		if (c.Dir == BodiesDir) == bodies && !ids[c.Alert] {
-			out = append(out, c)
-		}
 	}
 	return out
 }
@@ -319,345 +280,6 @@ func FeedbackReplays(sc *Scan) []OutRecord {
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Name() < out[b].Name() })
 	return out
-}
-
-// Quarantine is the quarantine of one damaged file.
-type Quarantine struct {
-	File DamagedFile
-	// Alert is the alert of the quarantine, its ID chosen before and made part
-	// of the quarantined name.
-	Alert AlertRecord
-	// Replacement is the record to put under the original name, for a damaged
-	// source record whose key can be trusted; nil otherwise, and always nil for a
-	// target or control record, which has none.
-	Replacement Record
-	// Scan is the scan the quarantine is part of: the other source records of a
-	// pair set the sequence floor, and the session endpoints of a control record
-	// are the ones QuarantineSessions finds in it. It is required for a control
-	// record: without it no endpoint could be found, and one left open would hold
-	// its slot for good.
-	Scan *Scan
-}
-
-// QuarantineResume finishes a quarantine whose alert is missing. It writes what
-// the first pass wrote, in the same order and under the same names: the floors
-// raised once more, the replacement, the closed session endpoints of a control
-// record (QuarantineSessions of its scan), and the alert last. Nothing is skipped because it seems to be there: it may not be durable.
-// The replacement has the name the damaged file had, so a resumption rewrites
-// that record and makes no second one; the caller builds it by the same rule as
-// the first pass, and builds none for a file whose first line is not trusted
-// (CorruptFile.Key is nil).
-type QuarantineResume struct {
-	File        CorruptFile
-	Alert       AlertRecord
-	Replacement Record
-	// Scan is the scan the resumption is part of; required for a control record,
-	// as in Quarantine.
-	Scan *Scan
-}
-
-// pendingLost lists the keys of the quarantined source records of the disk,
-// whose alert does not exist yet, but for the file named except.
-func (s *Store) pendingLost(except string) ([]OutKey, error) {
-	entries, err := s.readDir(OutDir)
-	if err != nil {
-		return nil, err
-	}
-	var out []OutKey
-	for _, e := range entries {
-		original, id, ok := corruptParts(OutDir, e.Name)
-		if !ok || original == except {
-			continue
-		}
-		there, err := fsx.Exists(s.r, path.Join(AlertsDir, recfile.FileName(string(KindAlert), AlertKeyBytes(id))))
-		if err != nil {
-			return nil, err
-		}
-		if there {
-			continue
-		}
-		c, err := s.scanCorrupt(OutDir, e.Name, original, id)
-		if err != nil {
-			return nil, err
-		}
-		if k, ok := c.Key.(OutKey); ok {
-			out = append(out, k)
-		}
-	}
-	return out, nil
-}
-
-// raiseFloors is the floor file written when a source record whose numbers are
-// lost is quarantined. For each target of its key the floor becomes m+k: m is
-// the highest of the floor on the disk now and the numbers of the source records
-// still there, k the number of records of the pair whose numbers are lost and
-// not counted in the floor yet (this one, and the quarantines not finished).
-// Numbers above m belong to lost records and are at most k.
-func (s *Store) raiseFloors(key OutKey, scanned *Scan, self string) (*file, error) {
-	pending, err := s.pendingLost(self)
-	if err != nil {
-		return nil, err
-	}
-	current, err := s.readFloors(key.Sender)
-	if err != nil {
-		return nil, err
-	}
-	raises := map[ident.Address]uint64{}
-	for _, to := range key.Recipients {
-		m := current[to]
-		if scanned != nil {
-			for _, o := range scanned.Out {
-				if n, ok := o.number(to); ok && o.Key.Sender == key.Sender && n > m {
-					m = n
-				}
-			}
-		}
-		k := uint64(1)
-		for _, p := range pending {
-			if p.Sender == key.Sender && slices.Contains(p.Recipients, to) {
-				k++
-			}
-		}
-		raises[to] = m + k
-	}
-	f, err := floorRecordFile(key.Sender, current, raises, nil)
-	if err != nil {
-		return nil, err
-	}
-	return &f, nil
-}
-
-// replacementFile encodes the replacement of a damaged source record: a lost
-// record of out/ that has the name the damaged file had. Only a source record has
-// one: a target that lost a record keeps nothing, and the sender learns of it when
-// the target answers a pull that it holds no record.
-func replacementFile(dir, name string, rec Record) (*file, error) {
-	if rec == nil {
-		return nil, nil
-	}
-	out, ok := rec.(OutRecord)
-	if !ok {
-		return nil, errors.New("store: only a source record has a replacement")
-	}
-	if dir != OutDir || out.Name() != name {
-		return nil, fmt.Errorf("store: the replacement must be a record of %s named %s", OutDir, name)
-	}
-	if out.Lost == nil {
-		return nil, errors.New("store: a replacement is a lost record")
-	}
-	f, err := recordFile(dir, rec)
-	if err != nil {
-		return nil, err
-	}
-	return &f, nil
-}
-
-// tail is what follows the rename in a quarantine and in its resumption, all of
-// it encoded: the floors, the replacement, the closed sessions, the alert.
-type tail struct {
-	floors, replacement *file
-	sessions            []file
-	alert               file
-}
-
-// prepareTail works out and encodes the tail before anything is written, so that
-// what cannot be written, or read (a damaged floor file, DamagedFileError), is
-// refused before the file is renamed.
-func (s *Store) prepareTail(dir, name string, key any, scanned *Scan, replacement Record, alert AlertRecord) (*tail, error) {
-	t := &tail{}
-	if k, isOut := key.(OutKey); isOut && dir == OutDir {
-		f, err := s.raiseFloors(k, scanned, name)
-		if err != nil {
-			return nil, err
-		}
-		t.floors = f
-	}
-	rf, err := replacementFile(dir, name, replacement)
-	if err != nil {
-		return nil, err
-	}
-	t.replacement = rf
-	if dir == CtlDir {
-		if scanned == nil {
-			return nil, errors.New("store: the quarantine of a control record is given the scan that lists its session endpoints")
-		}
-		for _, session := range QuarantineSessions(scanned, name) {
-			f, err := recordFile(EndpointsDir, session)
-			if err != nil {
-				return nil, err
-			}
-			t.sessions = append(t.sessions, f)
-		}
-	}
-	if t.alert, err = recordFile(AlertsDir, alert); err != nil {
-		return nil, err
-	}
-	return t, nil
-}
-
-// write writes the tail, the alert last, and commits. Nothing is skipped because
-// it seems to be there already: what a process crash left may not be durable,
-// and the alert, which says the quarantine is finished, must not become durable
-// ahead of the rest.
-func (t *tail) write(s *Store, tx *txn.Tx) error {
-	if t.floors != nil {
-		if err := s.replace(tx, "seq-floor", *t.floors); err != nil {
-			return err
-		}
-	}
-	if t.replacement != nil {
-		if err := s.replace(tx, "replacement", *t.replacement); err != nil {
-			return err
-		}
-	}
-	for _, f := range t.sessions {
-		if err := s.replace(tx, "session", f); err != nil {
-			return err
-		}
-	}
-	if err := s.replace(tx, "alert", t.alert); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// Quarantine renames the damaged file, raises the sequence floors of a source
-// record whose numbers are lost, puts the replacement, closes the session
-// endpoints of a control record (QuarantineSessions of its scan), and writes the
-// alert last.
-func (s *Store) Quarantine(q Quarantine) error {
-	d := q.File
-	if !slices.Contains(recordDirs, d.Dir) || !isRecordName(d.Name) {
-		return fmt.Errorf("store: %s/%s is not a record file", d.Dir, d.Name)
-	}
-	if q.Alert.ID == (AlertID{}) {
-		return errors.New("store: a quarantine has an alert with an id")
-	}
-	var key any
-	if d.Damage.Class == BodyDamaged {
-		key = d.Key
-	}
-	if _, err := s.presentOrErr(path.Join(d.Dir, d.Name)); err != nil {
-		return err
-	}
-	// Everything is encoded before the file is renamed.
-	t, err := s.prepareTail(d.Dir, d.Name, key, q.Scan, q.Replacement, q.Alert)
-	if err != nil {
-		return err
-	}
-	tx := s.w.Begin(&declQuarantine)
-	defer tx.Close()
-	if err := tx.RenameFile("record", path.Join(d.Dir, d.Name), path.Join(d.Dir, corruptName(d.Name, q.Alert.ID))); err != nil {
-		return err
-	}
-	return t.write(s, tx)
-}
-
-func (s *Store) presentOrErr(p string) (bool, error) {
-	there, err := fsx.Exists(s.r, p)
-	if err == nil && !there {
-		err = fmt.Errorf("store: %s is not there", p)
-	}
-	return there, err
-}
-
-// QuarantineResume writes what the interrupted quarantine of the file did not.
-func (s *Store) QuarantineResume(q QuarantineResume) error {
-	c := q.File
-	if c.Dir == BodiesDir || c.Alert != q.Alert.ID {
-		return errors.New("store: a quarantine is resumed with the alert its file names")
-	}
-	t, err := s.prepareTail(c.Dir, c.Original, c.Key, q.Scan, q.Replacement, q.Alert)
-	if err != nil {
-		return err
-	}
-	tx := s.w.Begin(&declQuarantineResume)
-	defer tx.Close()
-	return t.write(s, tx)
-}
-
-// BodyQuarantine is one chunk of the quarantine of a body whose content does
-// not match its name.
-type BodyQuarantine struct {
-	Name    string  // the body file
-	AlertID AlertID // part of the quarantined name
-	// Rename is set on the first chunk: the body is renamed before anything
-	// else, which makes the head record of the transaction.
-	Rename bool
-	// Out, In and Ctl are the records that refer to the body. A source record is
-	// replaced by a lost record when it still needs the body and stripped of the
-	// reference otherwise. A target record has no replacement, so it is only ever
-	// stripped, and one that still needs the body is refused (ErrBodyStillNeeded).
-	// A control record never needs a body (delivery.Record.NeedsBody).
-	Out []OutRecord
-	In  []InRecord
-	Ctl []CtlRecord
-	// Alert is set on the last chunk.
-	Alert *AlertRecord
-}
-
-// QuarantineBody writes a chunk of the quarantine of a body.
-// It returns the target records as written (the revision one on). A target
-// record that still needs its body and no longer refers to it is refused before
-// anything is written.
-func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
-	if !isHashName(q.Name) || q.AlertID == (AlertID{}) {
-		return nil, errors.New("store: a body quarantine names a body and an alert")
-	}
-	for _, in := range q.In {
-		if in.Body == nil && in.Record.NeedsBody() {
-			return nil, fmt.Errorf("%w: %s", ErrBodyStillNeeded, in.Name())
-		}
-	}
-	of, err := outFiles(q.Out)
-	if err != nil {
-		return nil, err
-	}
-	written, inf, err := inFiles(q.In)
-	if err != nil {
-		return nil, err
-	}
-	cf, err := ctlFiles(q.Ctl)
-	if err != nil {
-		return nil, err
-	}
-	var af *file
-	if q.Alert != nil {
-		if q.Alert.ID != q.AlertID {
-			return nil, errors.New("store: the alert of a body quarantine is the one its file names")
-		}
-		f, err := recordFile(AlertsDir, *q.Alert)
-		if err != nil {
-			return nil, err
-		}
-		af = &f
-	}
-	if !q.Rename && len(of)+len(inf)+len(cf) == 0 && af == nil {
-		return nil, nil
-	}
-	tx := s.w.Begin(&declQuarantineBody)
-	defer tx.Close()
-	if q.Rename {
-		from := path.Join(BodiesDir, q.Name)
-		if err := tx.RenameFile("body", from, path.Join(BodiesDir, corruptName(q.Name, q.AlertID))); err != nil {
-			return nil, err
-		}
-	}
-	if err := writeGroup(tx, "out", "out-dir", OutDir, of); err != nil {
-		return nil, err
-	}
-	if err := writeGroup(tx, "in", "in-dir", InDir, inf); err != nil {
-		return nil, err
-	}
-	if err := writeGroup(tx, "ctl", "ctl-dir", CtlDir, cf); err != nil {
-		return nil, err
-	}
-	if af != nil {
-		if err := s.replace(tx, "alert", *af); err != nil {
-			return nil, err
-		}
-	}
-	return committed(tx, written)
 }
 
 // OrphanGC removes the bodies, then syncs the directory.

@@ -31,8 +31,8 @@ func TestScanReturnsEveryRecordOfEveryKind(t *testing.T) {
 	if len(sc.Bodies) != 2 || len(sc.Archive) != 1 || sc.Archive[0] != "2026-10-24.jsonl" {
 		t.Errorf("bodies %v archive %v", sc.Bodies, sc.Archive)
 	}
-	if len(sc.Damaged)+len(sc.Corrupt)+len(sc.Unknown) != 0 {
-		t.Errorf("damaged %v corrupt %v unknown %v", sc.Damaged, sc.Corrupt, sc.Unknown)
+	if len(sc.Damaged)+len(sc.Unknown) != 0 {
+		t.Errorf("damaged %v unknown %v", sc.Damaged, sc.Unknown)
 	}
 	kinds := map[store.Kind]bool{}
 	for _, o := range sc.Out {
@@ -52,37 +52,20 @@ func TestScanReturnsEveryRecordOfEveryKind(t *testing.T) {
 	}
 }
 
-// Names are classified: a record, a body, a quarantined file with its alert,
-// the debris of an interrupted write, and the rest.
+// Names are classified: a record, a body, the debris of an interrupted write,
+// and the rest.
 func TestScanClassifiesFileNames(t *testing.T) {
 	r := newRig(t)
 	good := srcOut(1, false)
 	seed(t, r.mem, good)
-	id := store.AlertID{0xab}
-	seedRaw(t, r.mem, store.OutDir, good.Name()+"."+id.String()+".corrupt", []byte("junk"))
 	seedRaw(t, r.mem, store.OutDir, "stray.txt", []byte("x"))
 	seedRaw(t, r.mem, store.OutDir, strings.Repeat("0", 64)+".rec", []byte("not a record"))
 	seedRaw(t, r.mem, store.OutDir, ".tmp-123", []byte("debris"))
 	seedRaw(t, r.mem, store.BodiesDir, bodyRef(1).Name(), bodyBytes(1))
-	seedRaw(t, r.mem, store.BodiesDir, bodyRef(2).Name()+"."+id.String()+".corrupt", []byte("junk"))
 	seedRaw(t, r.mem, store.BodiesDir, "oddly-named", []byte("x"))
 	sc := r.scan()
 	if len(sc.Out) != 1 {
 		t.Errorf("records: %d", len(sc.Out))
-	}
-	if len(sc.Corrupt) != 2 {
-		t.Fatalf("quarantined files: %v", sc.Corrupt)
-	}
-	for _, c := range sc.Corrupt {
-		if c.Alert != id {
-			t.Errorf("quarantined file %s has alert %v", c.Name, c.Alert)
-		}
-		if c.Dir == store.OutDir && c.Original != good.Name() {
-			t.Errorf("original name %q", c.Original)
-		}
-		if c.Dir == store.BodiesDir && c.Original != bodyRef(2).Name() {
-			t.Errorf("original name of a body %q", c.Original)
-		}
 	}
 	if len(sc.Damaged) != 1 || sc.Damaged[0].Damage.Class != store.HeaderUnreadable || sc.Damaged[0].Key != nil {
 		t.Errorf("damaged: %+v", sc.Damaged)
@@ -129,67 +112,30 @@ func TestScanReportsTheKeyOfADamagedFileOnlyWhenItCanBeTrusted(t *testing.T) {
 	}
 }
 
-// The first line of a quarantined file is read, so that its key is known for
-// the sequence floor of a record that cannot be replaced.
-func TestScanReadsTheKeyOfQuarantinedFiles(t *testing.T) {
+// The first line of a damaged file is trusted by the rule of a live file: a first
+// line that parses but belongs to another name says nothing about the file, so no
+// key is reported for it and nothing is built from the key it claims.
+func TestScanTrustsTheKeyOfADamagedFileOnlyWhenItsFirstLineBelongsToItsName(t *testing.T) {
+	own := mustEncode(t, srcOut(1, false))
 	r := newRig(t)
-	o := srcOut(1, false)
-	data := mustEncode(t, o)
-	id := store.AlertID{1}
-	seedRaw(t, r.mem, store.OutDir, o.Name()+"."+id.String()+".corrupt", data[:len(data)-3]) // cut short: the first line is whole
-	seedRaw(t, r.mem, store.OutDir, zeroRec+"."+store.AlertID{2}.String()+".corrupt", []byte("no first line"))
+	seedRaw(t, r.mem, store.OutDir, srcOut(1, false).Name(), own[:len(own)-3]) // cut short: the first line is whole and the file's own
+	seedRaw(t, r.mem, store.OutDir, srcOut(2, false).Name(), own[:len(own)-3]) // the first line of another record
+	seedRaw(t, r.mem, store.OutDir, srcOut(3, false).Name(), mustEncode(t, directEndpoint(7, "chat")))
 	sc := r.scan()
-	if len(sc.Corrupt) != 2 {
-		t.Fatalf("%v", sc.Corrupt)
+	if len(sc.Damaged) != 3 {
+		t.Fatalf("damaged: %v", sc.Damaged)
 	}
-	for _, c := range sc.Corrupt {
-		switch c.Alert {
-		case id:
-			if k, ok := c.Key.(store.OutKey); !ok || k.Message != msgID(1) || c.Kind != store.KindOut {
-				t.Errorf("a quarantined file with a readable first line: %+v", c)
+	for _, d := range sc.Damaged {
+		switch d.Name {
+		case srcOut(1, false).Name():
+			if k, ok := d.Key.(store.OutKey); !ok || k.Message != msgID(1) || d.Kind != store.KindOut || d.Damage.Class != store.BodyDamaged {
+				t.Errorf("a first line of the file's own name is not trusted: %+v", d)
 			}
 		default:
-			if c.Key != nil || c.Kind != "" {
-				t.Errorf("a quarantined file without one: %+v", c)
+			if d.Key != nil || d.Kind != "" || d.Damage.Class != store.HeaderUnreadable {
+				t.Errorf("%s: a first line that does not belong to the name is trusted: %+v", d.Name, d)
 			}
 		}
-	}
-}
-
-// The first line of a quarantined file is trusted by the rule of a live file,
-// against the name the file had: a first line that parses but belongs to another
-// name, or to a kind the directory does not hold, says nothing about the file.
-func TestScanTrustsTheKeyOfAQuarantinedFileOnlyWhenItsFirstLineBelongsToItsName(t *testing.T) {
-	id := store.AlertID{1}
-	named, ownData := misnamed(t, srcOut(1, false), srcOut(1, false), id)
-	other, otherData := misnamed(t, srcOut(1, false), srcOut(2, false), id)
-	endpointFile := mustEncode(t, directEndpoint(7, "chat"))
-	for _, c := range []struct {
-		rule    string
-		name    string
-		data    []byte
-		trusted bool
-	}{
-		{"a first line that belongs to the name", named, ownData, true},
-		{"a first line that parses but hashes to another name", other, otherData, false},
-		{"a record of a kind the directory does not hold", corruptName(srcOut(3, false), id), endpointFile, false},
-	} {
-		t.Run(c.rule, func(t *testing.T) {
-			r := newRig(t)
-			seedRaw(t, r.mem, store.OutDir, c.name, c.data)
-			sc := r.scan()
-			if len(sc.Corrupt) != 1 {
-				t.Fatalf("quarantined files: %v", sc.Corrupt)
-			}
-			got := sc.Corrupt[0]
-			if c.trusted {
-				if k, ok := got.Key.(store.OutKey); !ok || k.Message != msgID(1) || got.Kind != store.KindOut {
-					t.Errorf("a first line of the file's own name is not trusted: %+v", got)
-				}
-			} else if got.Key != nil || got.Kind != "" {
-				t.Errorf("a first line that does not belong to the name is trusted: %+v", got)
-			}
-		})
 	}
 }
 
@@ -202,7 +148,7 @@ func TestScanOfMissingDirectoriesIsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scan: %v", err)
 	}
-	if len(sc.Out)+len(sc.In)+len(sc.Bodies)+len(sc.Corrupt)+len(sc.Damaged)+len(sc.Archive) != 0 {
+	if len(sc.Out)+len(sc.In)+len(sc.Bodies)+len(sc.Damaged)+len(sc.Archive) != 0 {
 		t.Errorf("a scan of nothing found something: %+v", sc)
 	}
 	if _, err := r.mem.Stat("state"); err == nil {

@@ -17,10 +17,6 @@ func recoverRun(t *testing.T, r *rig, s *sim) error {
 	return nil
 }
 
-func corruptName(rec store.Record, id store.AlertID) string {
-	return rec.Name() + "." + id.String() + ".corrupt"
-}
-
 func find(t *testing.T, sc *store.Scan, name string) (out *store.OutRecord, in *store.InRecord, ctl *store.CtlRecord) {
 	t.Helper()
 	for i := range sc.Out {
@@ -50,15 +46,6 @@ func hasAlert(sc *store.Scan, id store.AlertID, kind string) bool {
 	return false
 }
 
-func hasCorrupt(sc *store.Scan, dir, original string, id store.AlertID) bool {
-	for _, c := range sc.Corrupt {
-		if c.Dir == dir && c.Original == original && c.Alert == id {
-			return true
-		}
-	}
-	return false
-}
-
 func floorOf(t *testing.T, sc *store.Scan, sender int, to ident.Address) uint64 {
 	t.Helper()
 	for _, s := range sc.Seq {
@@ -82,7 +69,7 @@ func recoveryScenarios() []scenario {
 				damageBody(t, mem, path.Join(store.OutDir, srcOut(3, false).Name()))
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
-			// A quarantine resumed after a crash raises the floor once more: a gap
+			// A settlement repeated after a crash raises the floor once more: a gap
 			// grows, a number is never given twice. The floor file is not compared;
 			// its range is.
 			ignore: isIn(store.SeqDir),
@@ -93,7 +80,7 @@ func recoveryScenarios() []scenario {
 					return
 				}
 				if got := rec.(store.SeqRecord).Floors[addr(2, 2)]; got < 5 || got > 9 {
-					t.Errorf("%s: floor %d, want 5 (one quarantine) up to a few more for resumed ones", where, got)
+					t.Errorf("%s: floor %d, want 5 (one settlement) up to a few more for repeated ones", where, got)
 				}
 			},
 			verify: func(t *testing.T, r *rig) {
@@ -102,17 +89,17 @@ func recoveryScenarios() []scenario {
 				id := alertFor(store.OutDir, name)
 				out, _, _ := find(t, sc, name)
 				if out == nil || out.Lost == nil || len(out.Lost.Deliveries) != 1 || len(out.Feedback) != 1 {
-					t.Fatalf("the damaged record was not replaced by a lost record with one delivery and one feedback item: %#v", out)
+					t.Fatalf("the damaged record was not overwritten by a lost record with one delivery and one feedback item: %#v", out)
 				}
-				if !hasCorrupt(sc, store.OutDir, name, id) || !hasAlert(sc, id, "corrupt_record") {
-					t.Errorf("the quarantined file or its alert is missing: %v %v", sc.Corrupt, sc.Alerts)
+				if !hasAlert(sc, id, "corrupt_record") {
+					t.Errorf("the alert is missing: %v", sc.Alerts)
 				}
-				// m = max(floor 2, highest of the others 4), one record lost: floor 5.
+				// m = max(floor 2, highest of the others 4): floor 5.
 				if got := floorOf(t, sc, 1, pair); got != 5 {
 					t.Errorf("floor = %d, want 5", got)
 				}
 				if got := store.NewSeqBook(sc).Next(ep(1), pair); got != 6 {
-					t.Errorf("the next number = %d, want 6: the number 3 and 5 are never given again", got)
+					t.Errorf("the next number = %d, want 6: the numbers 3 and 5 are never given again", got)
 				}
 			},
 		},
@@ -127,10 +114,10 @@ func recoveryScenarios() []scenario {
 				sc := r.scan()
 				name := inRev(1, 1).Name()
 				if _, in, _ := find(t, sc, name); in != nil {
-					t.Fatalf("a target keeps no replacement of a record it lost, yet one is there: %#v", in)
+					t.Fatalf("the damaged record is still there: %#v", in)
 				}
-				if !hasCorrupt(sc, store.InDir, name, alertFor(store.InDir, name)) || !hasAlert(sc, alertFor(store.InDir, name), "corrupt_record") || len(sc.Seq) != 0 {
-					t.Errorf("a target record's quarantine has a file, an alert and no sequence floor: %v %v %v", sc.Corrupt, sc.Alerts, sc.Seq)
+				if !hasAlert(sc, alertFor(store.InDir, name), "corrupt_record") || len(sc.Seq) != 0 {
+					t.Errorf("a target record's quarantine has an alert and no sequence floor: %v %v", sc.Alerts, sc.Seq)
 				}
 				if _, other, _ := find(t, sc, inRev(2, 1).Name()); other == nil {
 					t.Errorf("the healthy record was touched")
@@ -152,8 +139,23 @@ func recoveryScenarios() []scenario {
 				if out, _, _ := find(t, sc, name); out != nil {
 					t.Errorf("a record whose key cannot be trusted was replaced")
 				}
-				if len(sc.Corrupt) != 1 || len(sc.Alerts) != 1 || len(sc.Seq) != 0 {
-					t.Errorf("one file, one alert and no floor expected: %v %v %v", sc.Corrupt, sc.Alerts, sc.Seq)
+				if len(sc.Alerts) != 1 || len(sc.Seq) != 0 {
+					t.Errorf("one alert and no floor expected: %v %v", sc.Alerts, sc.Seq)
+				}
+			},
+		},
+		{
+			name: "quarantine of a floor file whose body is damaged",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				seed(t, mem, srcOut(1, false), srcOut(2, false), store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 9}})
+				damageBody(t, mem, path.Join(store.SeqDir, store.SeqRecord{Sender: ep(1)}.Name()))
+			},
+			mode: atomic, mustComplete: true, run: recoverRun,
+			verify: func(t *testing.T, r *rig) {
+				sc := r.scan()
+				name := store.SeqRecord{Sender: ep(1)}.Name()
+				if got := floorOf(t, sc, 1, pair); got != 2 || !hasAlert(sc, alertFor(store.SeqDir, name), "corrupt_record") {
+					t.Errorf("the floor file is treated as missing and overwritten with the highest number left (2), with an alert: floor %d alerts %v", got, sc.Alerts)
 				}
 			},
 		},
@@ -167,27 +169,30 @@ func recoveryScenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
 				name := directEndpoint(7, "chat").Name()
-				if !hasCorrupt(sc, store.EndpointsDir, name, alertFor(store.EndpointsDir, name)) || hasEndpoint(sc, ep(7)) || len(sc.Checkpoints) != 1 {
-					t.Errorf("the damaged endpoint record must be quarantined without a replacement: %v %v", sc.Corrupt, sc.Endpoints)
+				if !hasAlert(sc, alertFor(store.EndpointsDir, name), "corrupt_record") || hasEndpoint(sc, ep(7)) || len(sc.Checkpoints) != 1 {
+					t.Errorf("the damaged endpoint record must be alerted and gone, without a replacement: %v %v", sc.Alerts, sc.Endpoints)
 				}
 			},
 		},
 		{
-			name: "quarantine of a body whose content does not match its name",
+			// A body that does not hash to its name, found by a read: each record that
+			// refers to it is settled by a call of its own, so a crash leaves any
+			// subset of them settled, each file as before or after.
+			name: "quarantine of the records of a body whose content does not match its name",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				name := store.BodyRefOf(bodyBytes(1)).Name()
 				seedRaw(t, mem, store.BodiesDir, name, []byte("tampered content"))
 				ctl := sessionCtl(4, 5)
 				ctl.Body = bodyRef(1)
-				// Every record refers to the one body. The target records no longer need
-				// it: the store refuses to strip one that does.
+				// Every record refers to the one body. The target records no longer need it.
 				in2, d3, in5 := inRev(2, 1), inRev(3, 1), inRev(5, 1)
 				in2.Body, d3.Body, in5.Body = bodyRef(1), bodyRef(1), bodyRef(1)
 				in2.Record, d3.Record, in5.Record = deliveredRecord(in2.Record), deliveredRecord(d3.Record), deliveredRecord(in5.Record)
-				seed(t, mem, srcOut(1, false), in2, d3, ctl, in5)
+				queued := inRev(6, 1) // still needs the body: lost with it
+				queued.Body = bodyRef(1)
+				seed(t, mem, srcOut(1, false), in2, d3, ctl, in5, queued)
 			},
-			durable: "quarantine-body/body.sync-dir#1",
-			mode:    atomic,
+			mode: batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				if _, err := r.st.ReadBody(*bodyRef(1)); err == nil {
 					t.Fatalf("ReadBody accepted a tampered body")
@@ -198,28 +203,20 @@ func recoveryScenarios() []scenario {
 			},
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
-				name := store.BodyRefOf(bodyBytes(1)).Name()
-				id := alertFor(store.BodiesDir, name)
-				if !hasAlert(sc, id, "corrupt_body") {
-					t.Errorf("no alert of the body quarantine: %v", sc.Alerts)
+				if len(sc.Alerts) != 6 || len(sc.Bodies) != 0 {
+					t.Errorf("one alert for each record, and the body is an orphan that goes: %d alerts, bodies %v", len(sc.Alerts), sc.Bodies)
 				}
-				found := false
-				for _, c := range sc.Corrupt {
-					found = found || (c.Dir == store.BodiesDir && c.Original == name && c.Alert == id)
+				out, _, _ := find(t, sc, srcOut(1, false).Name())
+				if out == nil || out.Lost == nil || len(out.Feedback) != 1 {
+					t.Errorf("a source record still waiting for a receipt must become a lost record: %#v", out)
 				}
-				if !found || len(sc.Bodies) != 0 {
-					t.Errorf("the body was not quarantined: %v bodies %v", sc.Corrupt, sc.Bodies)
+				for _, n := range []int{2, 3, 5} {
+					if _, in, _ := find(t, sc, inRev(n, 1).Name()); in == nil || in.Body != nil || in.Record.State != delivery.StateDelivered {
+						t.Errorf("a delivered message must lose only the reference: %#v", in)
+					}
 				}
-				out, in2, _ := find(t, sc, srcOut(1, false).Name())
-				if out == nil || out.Body != nil || out.Outbound.Recipients[0].Delivery.State != delivery.StateDeliveryUnknown {
-					t.Errorf("a source record still waiting for a receipt was not marked: %#v", out)
-				}
-				_, in2, _ = find(t, sc, inRev(2, 1).Name())
-				if in2 == nil || in2.Body != nil || in2.Record.State != delivery.StateDelivered {
-					t.Errorf("a delivered message must lose only the reference: %#v", in2)
-				}
-				if _, d, _ := find(t, sc, inRev(3, 1).Name()); d == nil || d.Body != nil || d.Record.State != delivery.StateDelivered {
-					t.Errorf("a delivered message must lose only the reference: %#v", d)
+				if _, in, _ := find(t, sc, inRev(6, 1).Name()); in != nil {
+					t.Errorf("a target record that needs the body is removed: %#v", in)
 				}
 				if _, _, c := find(t, sc, sessionCtl(4, 5).Name()); c == nil || c.Body != nil {
 					t.Errorf("a control record must lose only the reference: %#v", c)
@@ -243,20 +240,18 @@ func recoveryScenarios() []scenario {
 		{
 			name: "orphan session endpoints",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
-				quarantined := sessionCtl(3, 7)
 				noIntent := sessionCtl(6, 11)
 				noIntent.Intent = nil
 				seed(t, mem,
 					session(5, store.EndpointCreating, ctlName(1)),                   // no control record: garbage
 					session(6, store.EndpointCreating, ctlName(2)), sessionCtl(2, 6), // a control record: kept
-					session(7, store.EndpointCreating, ctlName(3)), // its control record is quarantined: kept
-					session(8, store.EndpointOpen, ctlName(9)),     // open: never an orphan
+					session(7, store.EndpointCreating, ctlName(3)), sessionCtl(3, 7), // its control record is damaged: kept, and closed with the record's quarantine
+					session(8, store.EndpointOpen, ctlName(9)), // open: never an orphan
 					// a control record that holds the creation of another endpoint, or none
 					// (the intake that prepared these failed, and the signal was accepted again)
 					session(9, store.EndpointCreating, ctlName(5)), sessionCtl(5, 10), session(10, store.EndpointCreating, ctlName(5)),
-					session(11, store.EndpointCreating, ctlName(6)), noIntent,
-					store.AlertRecord{ID: store.AlertID{3}, Kind: "corrupt_record", At: base, Detail: "d"})
-				seedRaw(t, mem, store.CtlDir, corruptName(quarantined, store.AlertID{3}), []byte("x"))
+					session(11, store.EndpointCreating, ctlName(6)), noIntent)
+				damageBody(t, mem, path.Join(store.CtlDir, sessionCtl(3, 7).Name()))
 			},
 			mode: atomic, mustComplete: true, run: recoverRun,
 			verify: func(t *testing.T, r *rig) {
@@ -497,8 +492,8 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 			if !hasAlert(sc, id, "control_unknown") {
 				t.Errorf("the alert must say a native session may remain: %v", sc.Alerts)
 			}
-			if !hasCorrupt(sc, store.CtlDir, name, id) {
-				t.Errorf("the control record was not quarantined")
+			if _, _, c := find(t, sc, name); c != nil {
+				t.Errorf("the damaged control record is still there")
 			}
 			if _, _, c := find(t, sc, name); c != nil {
 				t.Errorf("a control record has no replacement, yet one is there: %#v", c)

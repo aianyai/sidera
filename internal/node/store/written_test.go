@@ -26,6 +26,14 @@ type writtenCase struct {
 	call func(r *rig, ins []store.InRecord) ([]store.InRecord, error)
 }
 
+// deliveredWithBody is a delivered target record that still refers to its body,
+// which a record that no longer needs it drops when the body is damaged.
+func deliveredWithBody(i int) store.InRecord {
+	in := inRev(i, 1)
+	in.Record = deliveredRecord(in.Record)
+	return in
+}
+
 func writtenCases() []writtenCase {
 	one := func(i int) func() []store.InRecord {
 		return func() []store.InRecord { return []store.InRecord{inRev(i, 1), withRev(inRev(i+1, 4), 4)} }
@@ -86,9 +94,12 @@ func writtenCases() []writtenCase {
 		{name: "BlockedReplay", setup: seedIns(1, 2), ins: one(1), call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 			return r.st.BlockedReplay(ins)
 		}},
-		{name: "QuarantineBody", ins: mixed, call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-			return r.st.QuarantineBody(store.BodyQuarantine{Name: store.BodyRefOf(bodyBytes(1)).Name(), AlertID: alertFor(store.BodiesDir, "x"), In: ins})
-		}},
+		{name: "QuarantineBody", setup: func(t *testing.T, mem *fsxtest.Mem) { seed(t, mem, deliveredWithBody(1)) },
+			ins: func() []store.InRecord { return []store.InRecord{deliveredWithBody(1)} },
+			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
+				alert := store.AlertRecord{ID: alertFor(store.InDir, ins[0].Name()), Kind: "corrupt_body", At: base, Detail: "d"}
+				return r.st.QuarantineBody(store.BodyQuarantine{Record: ins[0], Alert: alert})
+			}},
 		{name: "FeedbackForm", ins: func() []store.InRecord { return []store.InRecord{noticeFor(srcOut(40, false))} },
 			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
 				got, err := r.st.FeedbackForm([]byte("feedback wording"), ins[0])
