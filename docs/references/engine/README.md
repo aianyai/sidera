@@ -332,7 +332,12 @@ or not); draws one lease for the page from `Deps.Rand`, also for an empty page, 
 a page always carries one; acknowledges the page named by `AckLease` first, and when
 that fails only says so in the log, because the page that was not acknowledged comes
 back marked as a possible duplicate; ticks the endpoint's own records that are due, so
-a message past a deadline is settled and not handed out behind the agent's back; judges
+a message past a deadline is settled and not handed out behind the agent's back (a fatal
+storage error there ends the recv, and no page is built or written after one; a record the
+tick could not settle, because the clock is in doubt or the write waits to be tried again,
+stays due, and the delivery rules refuse to hand out a message the time has not judged, so
+the recv leaves it out of the page and hands out the rest; a part of it asked for by number
+is the empty page, as for a suspended message, because the message is still queued); judges
 every queued message again with the declarations as they are now (the second check);
 builds the page; and writes what the page changed in one `lease` transaction before it
 answers. The queue is the target records of the endpoint in the order they were taken in
@@ -361,7 +366,9 @@ declares for it (`Admission.RecvWait`; a direct endpoint's to `MaxWaitSeconds`),
 cut is made in one place. Bodies are read through `readBody`, the one reader that settles a
 body that is not what its record says or is gone: such a record is settled and the page is
 built without it, while the other messages go on. Bodies are read as far as the page
-reaches, not for the whole queue. A body that is not text is not handed out and is logged:
+reaches, not for the whole queue. When the settlement of such a body fails for good,
+the error of the recv is that failure alone, because the error that says a body is damaged
+is read as "settled" and the record may not be. A body that is not text is not handed out and is logged:
 a page cannot carry it, and the message ends as a message nobody reads. A message that was
 handed out in some number of parts is not handed out through a front end or a budget that
 cuts it in another number: a part of one cut is not a part of the other. It is logged, left
@@ -1133,6 +1140,8 @@ reproducible).
 | An endpoint cannot acknowledge a lease it was not handed | `pull.go` (`ack`), `view.go` (`leased`) | `TestOtherEndpointTokenCannotAcknowledge` |
 | The second check is made again at the hand-out, and only for what the page reaches | `pull.go` (`tryPage`, `handoutAuthorization`) | `TestADeclarationTightenedAfterIntakeRejectsAtRecv`, `TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck` |
 | A body that is wrong or gone is settled, not handed out, the others go on | `pull.go` (`pack`), `quarantine.go` (`readBody`) | `TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt` |
+| A record that is due is ticked before recv hands out, and one the tick could not settle is left out while the rest of the page is handed out | `pull.go` (`tickEndpoint`, `pack`, `recvPart`) | `TestRecvTicksTheRecordsThatAreDueAndLeavesOutThoseItCouldNotTick` |
+| Nothing is handed out or written by a recv after a fatal storage error, whether it met it ticking or settling a body | `pull.go` (`recv`, `buildPage`), `quarantine.go` (`readBody`) | `TestRecvHandsNothingOutAfterAFatalStorageError` |
 | A lease is on disk: live across a restart, released at the start when it ran out; an acknowledgement comes with the next recv | `pull.go`, `ticks.go` | `TestALeaseAcrossARestart`, `TestRecvAcknowledgesTheEarlierPageFirst` |
 | A recv that waits is served by an arrival, ends at its deadline, is cut to the front end's limit | `pull.go` (`serveReady`), `waiters.go` | `TestARecvThatWaits` |
 | A notice whose body is damaged is told again from what it covered | `feedback.go` (`reissueCovered`), `quarantine.go` | `TestANoticeWhoseBodyIsDamagedIsToldAgainFromWhatItCovered` |

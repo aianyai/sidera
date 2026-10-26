@@ -147,7 +147,9 @@ func (e *Engine) recv(now time.Time, c Caller, r RecvRequest) (recvAnswer, error
 			e.log.Info("the page before this recv was not acknowledged", "error", err.Error())
 		}
 	}
-	e.tickEndpoint(now, st.rec.ID)
+	if err := e.tickEndpoint(now, st.rec.ID); err != nil {
+		return recvAnswer{}, err // fatal: nothing more is built or written
+	}
 	if r.Msg != "" {
 		page, err := e.recvPart(now, st, lease, budget, r)
 		return recvAnswer{page: page}, err
@@ -159,12 +161,12 @@ func (e *Engine) recv(now time.Time, c Caller, r RecvRequest) (recvAnswer, error
 	if handed > 0 || wait <= 0 {
 		return recvAnswer{page: page}, nil
 	}
-	empty, err := handoff.Pack(nil, lease, budget)
+	empty, err := e.emptyPage(lease, budget)
 	if err != nil {
 		return recvAnswer{}, err
 	}
 	w := newWaiter(st.rec.ID, now.Add(wait))
-	w.lease, w.budget, w.empty = lease, budget, empty.Output
+	w.lease, w.budget, w.empty = lease, budget, empty
 	e.waitFor(w)
 	return recvAnswer{w: w}, nil
 }
@@ -197,17 +199,20 @@ func txnFatal(err error) bool {
 }
 
 // tickEndpoint ticks the records of the endpoint that are due, so that what a recv
-// hands out has been judged by the passing of time first.
-func (e *Engine) tickEndpoint(now time.Time, id ident.EndpointID) {
+// hands out has been judged by the passing of time first. Only a fatal storage error
+// is returned (tickRecords); a tick that could not be written is tried again later, and
+// a record that stays due is not handed out.
+func (e *Engine) tickEndpoint(now time.Time, id ident.EndpointID) error {
 	var due []string
 	for _, in := range e.view.queuedIn(id) {
 		if next := in.Record.NextTick(); !next.IsZero() && !next.After(now) {
 			due = append(due, inTick(in.Key))
 		}
 	}
-	if len(due) > 0 {
-		_ = e.tickRecords(now, due) // a fatal error is e.fatal, which the loop reads
+	if len(due) == 0 {
+		return nil
 	}
+	return e.tickRecords(now, due)
 }
 
 // candidate is a queued message of the endpoint, as one recv judges it.
@@ -223,6 +228,9 @@ type candidate struct {
 // The page is built and the records are changed in memory before anything is written;
 // when nothing needs to be written the answer is the empty page.
 func (e *Engine) buildPage(now time.Time, st *endpointState, lease delivery.LeaseID, budget handoff.Budget) ([]byte, int, error) {
+	if e.fatal != nil {
+		return nil, 0, e.fatal // the loop is over: nothing more is handed out or written
+	}
 	skip := map[store.TargetKey]bool{}
 	for {
 		page, handed, retry, err := e.tryPage(now, st, lease, budget, skip)
@@ -233,8 +241,9 @@ func (e *Engine) buildPage(now time.Time, st *endpointState, lease delivery.Leas
 }
 
 // tryPage is one attempt at the page. A record that cannot be handed out (its body is
-// gone, which settles it and so changes the queue, or it was handed out in another
-// number of parts than this budget gives) is left out and the attempt is made again.
+// gone, which settles it and so changes the queue, it was handed out in another
+// number of parts than this budget gives, or it is due and nothing has ticked it) is
+// left out and the attempt is made again.
 func (e *Engine) tryPage(now time.Time, st *endpointState, lease delivery.LeaseID, budget handoff.Budget, skip map[store.TargetKey]bool) (page []byte, handed int, retry bool, err error) {
 	queue := e.view.queuedIn(st.rec.ID)
 	delivery.SortForRecv(queue, func(in store.InRecord) delivery.Record { return in.Record }, now)
@@ -280,11 +289,13 @@ func (e *Engine) tryPage(now time.Time, st *endpointState, lease delivery.LeaseI
 		if d.place > lastAt && lastAt >= 0 {
 			continue
 		}
-		in, err := e.closeRefused(now, d.in, lease)
+		in, closed, err := e.closeRefused(now, d.in, lease)
 		if err != nil {
 			return nil, 0, false, err
 		}
-		writes = append(writes, in)
+		if closed {
+			writes = append(writes, in)
+		}
 	}
 	if err := e.writeLeases(now, st.rec.ID, lease, writes, pageOf); err != nil {
 		return nil, 0, false, err
@@ -372,6 +383,13 @@ func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budg
 				return packed{}, true, nil
 			case err != nil:
 				return packed{}, false, err
+			case res.Action == delivery.HandoutUnavailable:
+				// The message is due and nothing has ticked it (the tick waits for the clock to
+				// be trusted, for a write to be retried or for a lease to be released), so the
+				// time has not judged it yet. It is not on this page; a later recv reaches it.
+				e.log.Info("a queued message is not handed out until it has been ticked", "message", string(c.in.Key.Message), "reason", res.Reason)
+				skip[c.in.Key] = true
+				return packed{}, true, nil
 			case res.Action != delivery.HandoutGranted && res.Action != delivery.HandoutResent:
 				return packed{}, false, fmt.Errorf("engine: message %s was judged to be handed out and the delivery rules say %d", c.in.Key.Message, res.Action)
 			}
@@ -385,18 +403,23 @@ func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budg
 
 // closeRefused ends the delivery of a message the second check refused: rejected when its
 // body was never handed out, unknown when it was, which is what the delivery rules
-// say, and the body goes with the record.
-func (e *Engine) closeRefused(now time.Time, in store.InRecord, lease delivery.LeaseID) (store.InRecord, error) {
+// say, and the body goes with the record. It reports false, and leaves the record as it
+// is, for a message that is due and has not been ticked: the time judges it before the
+// check does, and the next recv reaches it.
+func (e *Engine) closeRefused(now time.Time, in store.InRecord, lease delivery.LeaseID) (store.InRecord, bool, error) {
 	chunks := max(in.Record.Lease.Chunks, 1)
 	rec, res, err := in.Record.Handout(now, delivery.AuthorizationDeny, chunks, 1, lease)
 	if err != nil {
-		return in, fmt.Errorf("engine: closing message %s: %w", in.Key.Message, err)
+		return in, false, fmt.Errorf("engine: closing message %s: %w", in.Key.Message, err)
 	}
-	if res.Action != delivery.HandoutDenied {
-		return in, fmt.Errorf("engine: message %s was refused by the second check and the delivery rules say %d", in.Key.Message, res.Action)
+	switch res.Action {
+	case delivery.HandoutDenied:
+		in.Record = rec
+		return settledIn(in), true, nil
+	case delivery.HandoutUnavailable:
+		return in, false, nil
 	}
-	in.Record = rec
-	return settledIn(in), nil
+	return in, false, fmt.Errorf("engine: message %s was refused by the second check and the delivery rules say %d", in.Key.Message, res.Action)
 }
 
 // writeLeases writes what a recv changed, in one transaction, takes it into the view
@@ -464,7 +487,16 @@ func (e *Engine) handoutAuthorization(now time.Time, st *endpointState, in store
 	return auth, nil
 }
 
-// recvPart hands out one part of one message, by number.
+// emptyPage is the page that holds no message, under the lease of the recv.
+func (e *Engine) emptyPage(lease delivery.LeaseID, budget handoff.Budget) ([]byte, error) {
+	empty, err := handoff.Pack(nil, lease, budget)
+	return empty.Output, err
+}
+
+// recvPart hands out one part of one message, by number. A message that is suspended,
+// or that is due and has not been ticked, is still queued and has no part to give now:
+// the answer is the empty page, and asking again gets the part. A message the endpoint
+// has no longer is message_unknown.
 func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.LeaseID, budget handoff.Budget, r RecvRequest) ([]byte, error) {
 	var in store.InRecord
 	found := false
@@ -482,12 +514,14 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 	}
 	switch auth {
 	case delivery.AuthorizationSuspend:
-		empty, err := handoff.Pack(nil, lease, budget)
-		return empty.Output, err
+		return e.emptyPage(lease, budget)
 	case delivery.AuthorizationDeny:
-		closed, err := e.closeRefused(now, in, lease)
+		closed, ok, err := e.closeRefused(now, in, lease)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return e.emptyPage(lease, budget) // due and not ticked: asked for again, it is judged
 		}
 		if err := e.writeLeases(now, st.rec.ID, lease, []store.InRecord{closed}, packed{}); err != nil {
 			return nil, err
@@ -524,6 +558,9 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 		return nil, invalidArgument("part", fmt.Errorf("the message was handed out in another number of parts: %w", err))
 	case err != nil:
 		return nil, err
+	case res.Action == delivery.HandoutUnavailable:
+		// Due and not ticked, as in a page: the message is still queued and has no part to give now.
+		return e.emptyPage(lease, budget)
 	case res.Action != delivery.HandoutGranted && res.Action != delivery.HandoutResent:
 		return nil, fmt.Errorf("engine: message %s was judged to be handed out and the delivery rules say %d", in.Key.Message, res.Action)
 	}

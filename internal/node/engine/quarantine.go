@@ -206,12 +206,18 @@ func (e *Engine) retryingDamaged(now time.Time, write func() error) error {
 // readBody reads the body of the record owner, which holds ref, for whatever needs
 // its bytes. A body that is not what its record says, and one whose file is gone,
 // are damage: the record is settled before the error is returned, so that whoever
-// asked is told what it found and need not know what was done.
+// asked is told what it found and need not know what was done. When the settlement
+// itself fails the error carries both; a fatal failure of it is returned alone, because
+// an error that says the body is damaged is read as "settled" and the record may not be.
 func (e *Engine) readBody(now time.Time, owner store.Record, ref store.BodyRef) ([]byte, error) {
 	b, err := e.d.Store.ReadBody(owner.Name(), ref)
 	if gone := errors.Is(err, store.ErrBodyMissing); gone || errors.Is(err, store.ErrBodyMismatch) {
 		if qerr := e.quarantineBody(now, owner, gone); qerr != nil {
-			e.classify(qerr) // a fatal error stops the loop after this command
+			if txnFatal(e.classify(qerr)) { // a fatal error stops the loop after this command
+				// Whether the record was settled is not known, and the caller must not take
+				// it for settled, which the error of the body would tell it.
+				return nil, qerr
+			}
 			return nil, errors.Join(err, qerr)
 		}
 	}
