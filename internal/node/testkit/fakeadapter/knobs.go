@@ -383,8 +383,9 @@ func (k *Knobs) removeHeld(h heldRequest) {
 // entry per request, in the order they were stopped: a multiset of methods, which
 // a fixture compares with the multiset of methods of the requests the daemon has
 // in flight to this adapter when it asks whether the system is quiet. A request is
-// held at a pause point or by OutcomeHold; either way it appears here under its
-// method (session.create, prompt.deliver, …) and never under the name of a point.
+// held at a pause point, by OutcomeHold or by Hang; either way it appears here
+// under its method (session.create, prompt.deliver, …) and never under the name of
+// a point.
 func (k *Knobs) Held() []string {
 	k.mu.Lock()
 	defer k.mu.Unlock()

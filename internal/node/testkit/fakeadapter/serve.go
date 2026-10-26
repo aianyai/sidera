@@ -232,6 +232,12 @@ func (a *adapter) handle(method string, h func(context.Context, json.RawMessage)
 					return nil, err
 				}
 			}
+			// A request a hung adapter keeps is held like any other, so that a fixture
+			// that asks whether the system is quiet finds the request the daemon has in
+			// flight among the ones expected.
+			held := heldRequest{method: method}
+			a.knobs.addHeld(held)
+			defer a.knobs.removeHeld(held)
 			<-ctx.Done()
 			return nil, ctx.Err()
 		}

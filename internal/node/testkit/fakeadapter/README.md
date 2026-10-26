@@ -95,7 +95,8 @@ and the direct methods (`Register`, `Recv`, `Ack`, `Send`, `MessageStatus`,
 `NotificationsSent` and `Outstanding` tell a fixture which unanswered requests are
 expected and how many notifications the daemon must have handled before the system
 counts as quiet. `Held` is a multiset of methods (`session.create`, …), one per held
-request, whether an outcome or a pause point holds it: the fixture compares it with
+request, whether an outcome, a pause point or `Hang` holds it (a hung adapter holds every
+request it receives, a ping included): the fixture compares it with
 the multiset of methods the daemon has in flight to the adapter. `HeldPoints` names
 the pause points some of them stopped at.
 
