@@ -20,8 +20,9 @@ and taking in of messages: the acceptance of a message from a local endpoint, th
 outbound worker that carries it through the transport and applies what comes
 back, and the receiving side that judges an envelope and signs the reports, and the
 feedback the sender's node tells its endpoints, and the control signals: their sending,
-their taking in and the creation of sessions they ask for. Prompts, pulling and the
-closing and interrupting of a session join the same loop as further commands and add their
+their taking in and the creation of sessions they ask for, and the pulling of messages: what
+recv hands out under a lease, what ack settles and what a lease that runs out does. Prompts and
+the closing and interrupting of a session join the same loop as further commands and add their
 methods to this list.
 
 ## Entry points
@@ -38,6 +39,7 @@ methods to this list.
 | `Adapter`, `AdapterView`, `AdapterSignals`, `ProbeTokenView` | Reads of what the engine knows of an instance (admission, online or offline since when, probe result, availability, busy turns), and the availability as `handoff.Signals` for one endpoint. |
 | `ProbeTokenEnv`, `TokenEnv`, `HomeEnv`, `ProbeTokenLifetime` | The names of the environment variables that carry a probe token, an endpoint's token and the data directory, and the lifetime of the probe tokens; the Agent interface refers to them. |
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
+| `Recv`, `RecvRequest`, `Ack`, `AckRequest` | Hand the page of the queue of the caller's endpoint out under a lease (the bytes the recv command prints), and acknowledge parts of a page. The second check is made again at the hand-out, the budget and the longest wait are the adapter's declaration for the front end, and a wait is a waiter the loop owns. |
 | `Control`, `ControlRequest` | Accept a control signal (`session.create`, `endpoint.status`) from the endpoint a caller is, as `Send` does; what the target made of it is read from the status of the message. |
 | `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record, and for a control signal its verified reply. Another endpoint's message is unknown to the caller. |
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
@@ -207,12 +209,21 @@ methods to this list.
 - **A recv that waits is a waiter the loop owns.** It is registered in the same
   command that found the queue empty, so no arrival can slip between the check and
   the registration. Any later command that makes a message of the endpoint ready
-  hands the page to the waiter itself. The deadline is an entry of the schedule on
-  the injected clock. An endpoint has at most one waiter: a newer one ends the
-  older with an empty page. Shutdown ends every wait with an empty page, before
-  the interfaces stop; the waiting side watches the shutdown itself, because the
-  command that ends the waits is dropped when the inbox is full. The registry is in place; the command that registers a
-  waiter and the page that wakes it come with the pull of messages.
+  has the page handed to the waiter after it, in a command of its own
+  (`serveReady`). The deadline is an entry of the schedule on the injected
+  clock. An endpoint has at most one waiter, and a newer recv, waiting or not, ends
+  the older with an empty page, which the waiter made when it was registered.
+  Shutdown ends every wait with an empty page, before the interfaces stop; the
+  waiting side watches the shutdown itself, because the command that ends the waits
+  is dropped when the inbox is full.
+- **A recv judges again, hands out only what it reaches, and writes before it answers.**
+  The second check is made at the hand-out with the declarations as they are then; a
+  refused message the page does not reach is left for the next recv; the leases and
+  the closes of a page are one transaction, and an agent that gets no answer holds no
+  page and finds its messages leased, to be handed out again as possible duplicates.
+  Bodies are read through `readBody`, which settles one that is wrong or gone. An
+  acknowledgement is of a lease the endpoint was handed, and a lease of another
+  endpoint is unknown.
 - **The capacity check is in one place.** `checkCapacity`, which only the engine's
   own `admitNewWork` calls, judges the identity, then the clock (both by
   `SignRefusalOf`), then
@@ -483,7 +494,12 @@ judged from the ledger of the fakes, the records and the status of the message;
 `session_recovery_test.go` the control record settled by time, the body lost from one, what
 `adapter.start` carries, and a creation cut off by a crash or overdue at the start;
 `session_crash_test.go` the crash walk of the transactions that make a session;
-`quarantine_test.go` the damaged control record and the endpoints it was creating.
+`quarantine_test.go` the damaged control record and the endpoints it was creating;
+`pull_test.go` the scenarios of recv and ack that the floor names (a delivery that goes well,
+each anomaly, a message never acknowledged, long messages, the token of another endpoint),
+`pull_more_test.go` the second check, a body that is wrong or gone, the lease across a
+restart, the parts of a message and the waits, `pull_notice_test.go` a notice whose body
+is damaged, and `pull_crash_test.go` the crash walk of the writes of a recv and an ack.
 
 `sweep_test.go` the sweep as the node runs it over a node of the harness (the periodic
 task, chunks, a summary that cannot be appended, a notice that is kept for the item it

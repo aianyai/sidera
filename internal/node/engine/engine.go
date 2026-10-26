@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -105,6 +106,8 @@ type Engine struct {
 	fb         feedbackState
 	sweep      *sweepPass // the pass of the archive sweep that is running, nil between passes
 	waits      map[ident.EndpointID]*waiter
+	ready      map[ident.EndpointID]bool        // endpoints with a wait that a command made a message ready for; see serveReady
+	pages      map[delivery.LeaseID]*issuedPage // what each page that was handed out held, for an acknowledgement of the whole page
 	cont       []continuation
 	parked     map[ident.EndpointID][]command   // commands that wait for the drain of an endpoint
 	ran        uint64                           // how many commands the loop has taken from the inbox
@@ -199,6 +202,8 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 		rearm:    make(chan struct{}, 1),
 		periodic: map[string]*periodicTask{},
 		waits:    map[ident.EndpointID]*waiter{},
+		ready:    map[ident.EndpointID]bool{},
+		pages:    map[delivery.LeaseID]*issuedPage{},
 		outbox:   newOutbox(),
 		parked:   map[ident.EndpointID][]command{},
 
@@ -617,6 +622,9 @@ func (e *Engine) loop() {
 			case <-e.stopCh:
 				return
 			}
+		}
+		if e.fatal == nil {
+			e.serveReady()
 		}
 		if e.fatal != nil {
 			e.failLoop()

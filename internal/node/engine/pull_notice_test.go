@@ -66,7 +66,14 @@ func TestANoticeWhoseBodyIsDamagedIsToldAgainFromWhatItCovered(t *testing.T) {
 			if got := pending(t, h, "a"); got != 1 {
 				t.Fatalf("%d items are owed to a after its notice was settled, want the one it covered", got)
 			}
-			toldOnce(t, h, []delivery.Kind{tc.kind})
+			h.Advance(mergeWindow)
+			quiet(t, h)
+			if got := toldKinds(t, h, "a"); !slices.Equal(got, []delivery.Kind{tc.kind}) {
+				t.Fatalf("a was told %v, want %s once more", got, tc.kind)
+			}
+			if got := pending(t, h, "a"); got != 0 {
+				t.Errorf("%d items are still pending", got)
+			}
 			res = recvAs(t, h, h.Agent("a"), fakeagent.RecvInput{})
 			if len(res.Page.Messages) != 1 || string(res.Page.Messages[0].From) != h.Engine().SystemAddress().String() {
 				t.Errorf("a was handed %+v, want the new notice of the system endpoint", res.Page.Messages)

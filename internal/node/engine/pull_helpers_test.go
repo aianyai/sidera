@@ -75,6 +75,8 @@ func newSession(t testing.TB, h *harness.H, from string) (fakeagent.Agent, strin
 	t.Helper()
 	msg := create(t, h, from, "default")
 	quiet(t, h)
+	h.Advance(pullInterval) // the reply reaches its sender by the sender's pull
+	quiet(t, h)
 	r := controlReply(t, h, from, msg)
 	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated || r.Create.SessionEndpoint == "" {
 		t.Fatalf("the creation reply is %+v, want a session", r)

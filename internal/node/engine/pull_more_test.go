@@ -31,6 +31,8 @@ func TestADeclarationTightenedAfterIntakeRejectsAtRecv(t *testing.T) {
 		h := nodeWith(t, harness.Options{}, "a", "b", "c")
 		b := h.Agent("b")
 		fromA := send(t, h, "a", "b", "from a, queued before the declaration changed")
+		quiet(t, h)
+		h.Advance(time.Second) // the queue is in the order of arrival
 		fromC := send(t, h, "c", "b", "from c")
 		quiet(t, h)
 		accept := []string{h.Addr("c")}
@@ -78,6 +80,8 @@ func TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b", "c")
 	b := h.Agent("b")
 	big := send(t, h, "c", "b", bigText("a message that fills the page", 60*1024))
+	quiet(t, h)
+	h.Advance(time.Second) // the queue is in the order of arrival
 	beyond := send(t, h, "a", "b", "queued behind it, from an endpoint the declaration will refuse")
 	quiet(t, h)
 	accept := []string{h.Addr("c")}

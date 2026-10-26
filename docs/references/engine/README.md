@@ -325,10 +325,68 @@ inside a call to an adapter is work until the adapter answers, except for the ca
 caller says the adapter holds on purpose: those are the requests the host's own check
 has just matched with the held list, so the workers that wait for them are not counted.
 
+**Pulling.** `Recv` and `Ack` are commands of the loop; the caller is an open
+session endpoint by its token or an open direct endpoint by its adapter. One recv, in
+this order: ends the wait the endpoint already has (a newer recv wins, whether it waits
+or not); draws one lease for the page from `Deps.Rand`, also for an empty page, because
+a page always carries one; acknowledges the page named by `AckLease` first, and when
+that fails only says so in the log, because the page that was not acknowledged comes
+back marked as a possible duplicate; ticks the endpoint's own records that are due, so
+a message past a deadline is settled and not handed out behind the agent's back; judges
+every queued message again with the declarations as they are now (the second check);
+builds the page; and writes what the page changed in one `lease` transaction before it
+answers. The queue is the target records of the endpoint in the order they were taken in
+(`view.queuedIn`), those under a live lease first, and never a control record, though the
+view's queue of an endpoint holds those too: a control signal is not for an agent.
+
+The second check is the authorization rules asked at the moment the body would be handed
+out (`evaluate`, the one place the engine asks them, for intake as for the hand-out): a
+local sender is judged by the declarations of the endpoint alone and any other by the
+node's rules, which a node elsewhere does not satisfy yet. A message the rules still
+allow is handed out; a suspended one stays queued, with no lease and nobody told; a
+refused one is closed by `delivery.Record.Handout` (rejected as `second_check_failed`
+when its body was never handed out, `delivery_unknown` when it was) and its body goes with
+it. Only what the page reaches is judged: a refused message behind the last one the page
+holds is left, because the declaration may be loosened before it would be handed out and
+a message closed meanwhile would have been lost for a rule never applied to it; the next
+recv reaches it. A notice of the system endpoint is exempt traffic and has no check. What is
+not kept of a message is whether it had several recipients, so the refusal of several
+recipients is made at intake only; a delivery derived from a control signal is not handed
+out until the request it was admitted with is kept, and is logged as an error.
+
+The page is built within the budget of the front end the request names, which is the
+adapter's declaration (`Admission.Budget`; a direct endpoint's is that of the front end
+`direct`, and the default when none is declared), and the wait is cut to what the adapter
+declares for it (`Admission.RecvWait`; a direct endpoint's to `MaxWaitSeconds`), so the
+cut is made in one place. Bodies are read through `readBody`, the one reader that settles a
+body that is not what its record says or is gone: such a record is settled and the page is
+built without it, while the other messages go on. Bodies are read as far as the page
+reaches, not for the whole queue. A body that is not text is not handed out and is logged:
+a page cannot carry it, and the message ends as a message nobody reads. A message that was
+handed out in some number of parts is not handed out through a front end or a budget that
+cuts it in another number: a part of one cut is not a part of the other. It is logged, left
+out, and ends as the message nobody reads does.
+
+`Ack` takes the lease of the page and the parts, or no parts for all the page. A lease no
+record of the caller's endpoint holds is `lease_unknown`, whoever holds it: a record of
+another endpoint with the same lease does not make it this endpoint's. Each part is
+acknowledged by `delivery.Record.Ack` on a working copy, and the records that changed go in
+one `ack` transaction; an acknowledgement is valid after its lease ran out and even after the
+delivery was declared unknown, which it then corrects. A part of a message the endpoint
+holds no record of is `refused_no_handout`. What a whole page held is remembered in memory for
+the longest a lease lives (`pageMemory`); after that or after a restart only a message that
+fits whole is known to have handed out its one part, and the parts of a message that was cut
+are named by the agent, because acknowledging one that was not shown would deliver a body
+nobody saw.
+
 **Waiting.** A recv that finds nothing queued and is asked to wait is registered as
 a waiter in the same command, so no arrival is missed between the check and the
-registration. A command that makes a message of the endpoint ready hands the page
-to the waiter in its own command. The deadline is a schedule entry on the injected
+registration. The waiter holds the lease and the budget of its recv, and the empty page it
+is answered with when nothing wakes it, made when it was registered. A command that makes
+a message of the endpoint ready (a target record taken in that waits with no lease on it)
+marks the endpoint, and the loop hands the page to the waiter when the command is over
+(`serveReady`), in a command of its own, so that an arrival is never handed out in the
+middle of the write that took it in. The deadline is a schedule entry on the injected
 clock. At most one recv of an endpoint waits: a newer one ends the older with an
 empty page. Shutdown ends every wait with an empty page: `BeginShutdown` posts the
 command that does it without waiting, so a full inbox drops it, and the waiting
@@ -482,8 +540,12 @@ at the settle deadline becomes `delivery_unknown`, since the signal was handed t
 and no reply was committed, and one not final after `report_by` is closed. The engine settles
 a creation long before either (see the creation of a session), so what these rules close is a
 signal whose reply a crash lost. A target record under a lease is
-ticked by the same rule as any other; leases are made by the hand-out of messages, which
-the pull of messages adds together with the rule of when an expired lease is released. While the wall clock is in doubt
+ticked by the same rule as any other: a lease that runs out puts its message back in the
+queue as a possible duplicate, up to the third redelivery, and the delivery whose fourth
+lease runs out is `delivery_unknown`, told to the sender once. Whether a lease that ran out
+may be released is asked of `leaseMayRelease`, which says yes for every lease today: nothing
+tells the engine that the agent has a turn running, and the signals of turns that will keep a
+lease alive decide it there, in the one place a release is made. While the wall clock is in doubt
 nothing is ticked and nothing is judged expired: a clock set back and then moved on is
 not one to judge a deadline by until the owner has cleared it, and what the node took in
 before the pause stays as it was.
@@ -1064,6 +1126,17 @@ reproducible).
 | The pause of a clock set back is persisted at once | `engine.go` (`observe`, `AddClockState`) | `TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash`, `TestAFatalErrorWhilePersistingThePauseStopsTheEngine` |
 | Recovery | `recovery.go` | `recovery_test.go` |
 | Waiting | `waiters.go` | `waiters_test.go` (`TestShutdownEndsEveryWaitEvenWhenTheInboxIsFull`, `TestAPageThatIsReadyWinsOverTheShutdown`) |
+| A delivery that goes well tells its sender nothing; each anomaly is told once, in its own kind | `pull.go`, `feedback.go` | `TestNormalDeliveryGivesNoFeedback`, `TestEachAnomalyIsReportedOnce` |
+| A message never acknowledged is handed out four times, each again as a possible duplicate, then is unknown and told once; a late acknowledgement corrects it once | `pull.go` (`recv`, `ack`), `ticks.go` | `TestNeverAcknowledgedStopsAfterThirdRedeliveryAndReportsOnce` |
+| Long messages go whole or in parts within the budget, as many acknowledgements as parts shown, delivered only when the last part is acknowledged; a part can be asked for by number | `pull.go` (`pack`, `recvPart`) | `TestLargeMessagesWholeOrPartsAndAckCountsMatch`, `TestAPartOfAMessageCanBeFetchedByNumber` |
+| An endpoint cannot acknowledge a lease it was not handed | `pull.go` (`ack`), `view.go` (`leased`) | `TestOtherEndpointTokenCannotAcknowledge` |
+| The second check is made again at the hand-out, and only for what the page reaches | `pull.go` (`tryPage`, `handoutAuthorization`) | `TestADeclarationTightenedAfterIntakeRejectsAtRecv`, `TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck` |
+| A body that is wrong or gone is settled, not handed out, the others go on, the sender is told by the pull | `pull.go` (`pack`), `quarantine.go` (`readBody`) | `TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt` |
+| A recv hands out only target records, never a control record | `view.go` (`queuedIn`) | `TestQueuedInHoldsTheTargetRecordsOfAnEndpointInTheOrderTheyArrivedAndNoControlRecord` |
+| A lease is on disk: live across a restart, released at the start when it ran out; an acknowledgement comes with the next recv | `pull.go`, `ticks.go` | `TestALeaseAcrossARestart`, `TestRecvAcknowledgesTheEarlierPageFirst` |
+| A recv that waits is served by an arrival, ends at its deadline, is cut to the front end's limit | `pull.go` (`serveReady`), `waiters.go` | `TestARecvThatWaits` |
+| A notice whose body is damaged is told again from what it covered | `feedback.go` (`reissueCovered`), `quarantine.go` | `TestANoticeWhoseBodyIsDamagedIsToldAgainFromWhatItCovered` |
+| Every write of a recv and an ack survives a crash at every point | `lease`, `ack` (declared by the store) | `TestRecvAndAckRecoverFromACrashAtEveryPoint` |
 | An anomaly is told once, in one notice that waits out the window and the cap; the queue survives a restart; feedback for a closed endpoint is dropped | `feedback.go` (`putOut`, `flushFeedback`, `sendNotice`, `loadFeedback`) | `TestAnAnomalyIsToldToTheSenderOnceInOneNotice`, `TestNoticesOverTheRateCapAreHeldAndNeverDropped`, `TestFeedbackThatFellDueWhileTheNodeWasDownIsSentAtTheStart`, `TestFeedbackForAnEndpointThatWasClosedIsDroppedAndLogged` |
 | A notice goes to an endpoint whose queue is full and takes no place of it | `feedback.go` (`formNotice`) | `TestSystemFeedbackIsNotRefusedByFullBacklog` |
 | A notice formed again is the same record; a notice that failed to be written goes back whole | `feedback.go` (`noticeKey`, `unsend`) | `TestTheKeyOfANoticeFollowsFromItsItemsAlone`, `TestTheKeyOfANoticeNamesItsKindsByTheirNames`, `TestUnsendPutsBackWhatFlushTookOut` |
@@ -1133,7 +1206,7 @@ Known gaps, each filled in with the feature it belongs to:
   does not report); phase 12 ticks the target and source records, phase 13
   sends the feedback that fell due and phase 14 goes on with the outgoing messages. The
   tick of a target record does not yet wait for an active turn before it lets an expired
-  lease go: there are no leases until messages are handed out.
+  lease go: `leaseMayRelease` says yes, and the signals of turns are to decide it there.
 - An empty body is refused: the Agent interface says a body may be empty and an envelope
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
 - Closing a session endpoint does not yet send `session.close` to the adapter: the

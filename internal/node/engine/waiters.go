@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/handoff"
 	"github.com/aianyai/sidera/internal/ident"
 )
 
@@ -19,7 +21,7 @@ import (
 // newer one ends the older with an empty page.
 //
 // The registry is the part of this the loop owns; the page that wakes a waiter
-// is made where messages are handed out.
+// is made where messages are handed out (pull.go).
 
 // waitEnd is why a wait ended.
 type waitEnd uint8
@@ -63,6 +65,13 @@ type waiter struct {
 	endpoint ident.EndpointID
 	deadline time.Time
 	out      chan waitOutcome
+	// lease and budget are those of the recv that waits: the page it is woken with is
+	// built with them. empty is the page it is answered with when it is woken by
+	// nothing, made when it was registered so that the answer needs no randomness of
+	// the loop's after the loop has done with it.
+	lease  delivery.LeaseID
+	budget handoff.Budget
+	empty  []byte
 }
 
 func newWaiter(endpoint ident.EndpointID, deadline time.Time) *waiter {
@@ -78,11 +87,18 @@ func waitKey(endpoint ident.EndpointID) schedKey { return schedKey{schedWait, en
 // have given up (a client killed and retried) than to be a second reader, and a
 // page handed to two waiters would show the agent the same message twice.
 func (e *Engine) waitFor(w *waiter) {
-	if old := e.waits[w.endpoint]; old != nil {
-		old.end(waitSuperseded, nil)
-	}
+	e.supersede(w.endpoint)
 	e.waits[w.endpoint] = w
 	e.sched.set(waitKey(w.endpoint), w.deadline)
+}
+
+// supersede ends the wait the endpoint has, if it has one, with an empty page.
+func (e *Engine) supersede(endpoint ident.EndpointID) {
+	if old := e.waits[endpoint]; old != nil {
+		delete(e.waits, endpoint)
+		e.sched.remove(waitKey(endpoint))
+		old.end(waitSuperseded, nil)
+	}
 }
 
 // wake hands a page to the waiter of the endpoint, if it has one, and takes the

@@ -63,6 +63,11 @@ type view struct {
 	arrived   map[arrivalKey][]store.TargetKey
 	backlog   map[ident.EndpointID]int
 
+	// leased finds the target records on which a page was handed out, by the lease of
+	// the page: an acknowledgement names a page, and may come long after the lease ran
+	// out.
+	leased map[delivery.LeaseID][]store.TargetKey
+
 	unfinished int
 	alerts     []store.AlertRecord
 	seq        *store.SeqBook
@@ -73,6 +78,10 @@ type view struct {
 	// engine keeps its schedule of ticks from it, so the schedule follows the view
 	// and no write has to remember to move it.
 	onTick func(record string, next time.Time)
+
+	// onQueued, when set, is told whenever a target record that waits to be handed out
+	// with no lease on it is taken in: a message has arrived, or a lease has run out.
+	onQueued func(recipient ident.EndpointID)
 }
 
 // idemKey names an idempotency key: the key is the sender's own.
@@ -121,6 +130,7 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		received:  map[msgKey][]store.TargetKey{},
 		arrived:   map[arrivalKey][]store.TargetKey{},
 		backlog:   map[ident.EndpointID]int{},
+		leased:    map[delivery.LeaseID][]store.TargetKey{},
 
 		checkpoints: map[store.CheckpointKey][]byte{},
 		seq:         store.NewSeqBook(sc),
@@ -327,6 +337,16 @@ func (v *view) queue(recipient ident.EndpointID, key store.TargetKey, queued boo
 	v.queued[recipient][key] = true
 }
 
+// queuedIn lists the target records queued for the endpoint in the order they were
+// taken in: what recv has to hand out. The queue view of an endpoint holds its
+// control records too, because a closing endpoint closes them as well, but a control
+// signal is never handed to an agent.
+func (v *view) queuedIn(id ident.EndpointID) []store.InRecord {
+	ins, _ := v.queuedFor(id, 0)
+	sort.SliceStable(ins, func(i, j int) bool { return ins[i].AcceptedAt.Before(ins[j].AcceptedAt) })
+	return ins
+}
+
 // setIn records a target record as it is on disk now, taking the place of the
 // one the view held.
 func (v *view) setIn(in store.InRecord) {
@@ -352,6 +372,14 @@ func (v *view) setIn(in store.InRecord) {
 	}
 	v.queue(in.Key.Recipient, in.Key, in.Record.State == delivery.StateAccepted)
 	v.ticks(inTick(in.Key), in.Record.NextTick())
+	for _, id := range in.Record.Lease.IDs {
+		if !slices.Contains(v.leased[id], in.Key) {
+			v.leased[id] = append(v.leased[id], in.Key)
+		}
+	}
+	if v.onQueued != nil && in.Record.State == delivery.StateAccepted && !in.Record.Lease.Active {
+		v.onQueued(in.Key.Recipient)
+	}
 }
 
 // dropIn takes a target record out of the view, as its file being removed does.
@@ -367,6 +395,11 @@ func (v *view) dropIn(key store.TargetKey) {
 		v.backlog[key.Recipient]--
 	}
 	delete(v.in, key)
+	for _, id := range old.Record.Lease.IDs {
+		if v.leased[id] = slices.DeleteFunc(v.leased[id], func(x store.TargetKey) bool { return x == key }); len(v.leased[id]) == 0 {
+			delete(v.leased, id)
+		}
+	}
 	v.queue(key.Recipient, key, false)
 	k := msgKey{key.Recipient, key.Message}
 	v.received[k] = slices.DeleteFunc(v.received[k], func(x store.TargetKey) bool { return x == key })

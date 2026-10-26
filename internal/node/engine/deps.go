@@ -56,6 +56,8 @@ type Store interface {
 
 	Quarantine(q store.Quarantine) error
 	QuarantineBody(q store.BodyQuarantine) (*store.InRecord, error)
+	Lease(ins []store.InRecord) error
+	Ack(ins []store.InRecord) error
 	Tick(b store.TickBatch) error
 	FeedbackForm(body []byte, notice store.InRecord) error
 	FeedbackClear(outs []store.OutRecord) error
