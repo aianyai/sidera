@@ -151,7 +151,7 @@ func (e *Engine) noteInstanceStarted(instance string, now time.Time) {
 func (e *Engine) pendingOf(now time.Time, st *endpointState) []store.InRecord {
 	var out []store.InRecord
 	for _, in := range e.view.queuedIn(st.rec.ID) {
-		if !awaitsHandout(in.Record) {
+		if !in.Record.AwaitsHandout() {
 			continue
 		}
 		auth, err := e.handoutAuthorization(now, st, in)
@@ -161,16 +161,6 @@ func (e *Engine) pendingOf(now time.Time, st *endpointState) []store.InRecord {
 		out = append(out, in)
 	}
 	return out
-}
-
-// awaitsHandout says whether a recv would hand something of the record out: it was
-// never handed out, a lease that ran out put it back in the queue, or it is handed out
-// in parts and some part has not been.
-func awaitsHandout(r delivery.Record) bool {
-	if r.State != delivery.StateAccepted || r.Control {
-		return false
-	}
-	return !r.Lease.Active || slices.Contains(r.Lease.HandedOut, false)
 }
 
 // promptRound is what one asking of the decision is made of.

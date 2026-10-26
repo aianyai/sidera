@@ -4,41 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
 )
-
-// What waits for an agent is what a recv would hand something out of: a message never
-// handed out, one a lease that ran out put back, and one handed out in parts of which
-// some have not been; not one whose parts were all handed out and wait for the
-// acknowledgement, and not a control signal or a message that is not accepted.
-func TestWhatAwaitsAHandout(t *testing.T) {
-	at := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
-	accepted := delivery.Record{Side: delivery.SideTarget, State: delivery.StateAccepted}
-	with := func(f func(*delivery.Record)) delivery.Record { r := accepted; f(&r); return r }
-	for _, c := range []struct {
-		rule string
-		rec  delivery.Record
-		want bool
-	}{
-		{"a message never handed out", accepted, true},
-		{"a message a lease that ran out put back", with(func(r *delivery.Record) {
-			r.Lease = delivery.Lease{Chunks: 1, HandedOut: []bool{true}, Acked: []bool{false}, IssuedAt: at}
-		}), true},
-		{"a message handed out whole and leased", with(func(r *delivery.Record) {
-			r.Lease = delivery.Lease{Active: true, Chunks: 1, HandedOut: []bool{true}, Acked: []bool{false}, IssuedAt: at, ExpiresAt: at.Add(time.Minute)}
-		}), false},
-		{"a message handed out in parts that has parts left", with(func(r *delivery.Record) {
-			r.Lease = delivery.Lease{Active: true, Chunks: 3, HandedOut: []bool{true, false, false}, Acked: []bool{false, false, false}, IssuedAt: at, ExpiresAt: at.Add(time.Minute)}
-		}), true},
-		{"a control signal", with(func(r *delivery.Record) { r.Control = true }), false},
-		{"a message that is no longer accepted", with(func(r *delivery.Record) { r.State = delivery.StateDelivered }), false},
-	} {
-		if got := awaitsHandout(c.rec); got != c.want {
-			t.Errorf("%s: awaits a hand-out is %v, want %v", c.rule, got, c.want)
-		}
-	}
-}
 
 // The attempts of an endpoint keep what the prompt rules read: the hour of the cap,
 // and the chain of repeats that begins at the newest delivered first prompt, however
