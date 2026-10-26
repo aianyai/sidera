@@ -38,11 +38,12 @@ not import it: the words of the wire never enter the engine.
   and nothing else of the engine, on purpose: the host finds the optional parts of the
   engine (`endpoint.send` and its kin) by asking the value, and a method of the engine
   that was promoted would be answered in the engine's words.
-- **Back pressure has no code of its own on the adapter side yet.** The protocol has no
-  code that fits "not now, nothing was recorded": `1007` is the limit of direct
-  endpoints and `-32001` promises the handler did not run. Until it is decided the five
-  such refusals (node queue full, storage full, storage unavailable, clock rollback,
-  loop busy) are `-32603` with data `{"reason":"<name>"}`.
+- **Refusals with no effect are `node_busy` on the adapter side.** The six that mean
+  "not now, nothing was recorded" (node queue full, storage full, storage unavailable,
+  clock rollback, loop busy, recovering) are `1012` with data `{"reason":"<name>"}`, the
+  engine's own name for the reason; the protocol's design note says why the code exists.
+  A fatal failure of the disk stays `-32603`: whether the request took effect is not
+  known.
 - **The text of an unknown error stays off the wire.** Anything that is none of the
   known errors is `internal/internal` with a fixed message; what it said is for the
   log. A client that is not the author of the code should not be handed a path or a
@@ -83,8 +84,8 @@ not import it: the words of the wire never enter the engine.
 
 `adapter_internal_test.go`: the table of codes for the requests of an adapter (every
 reason of the engine against rows written out by hand, the limit and the field, the
-cause kept off the wire, errors that are no refusal, and the skipped question about
-back pressure); `adapter_test.go`: the three requests through a real engine, a
+cause kept off the wire, errors that are no refusal, and `node_busy` with the
+protocol's own rules, effect rule and list of reasons); `adapter_test.go`: the three requests through a real engine, a
 stopping engine, and the absence of the optional parts. `apiwire_test.go`: every reason of the engine and of `config` against a table
 written out by hand, the listed codes of `invalid_argument`, the outcome that is not
 known (from a fatal failure of the disk, and judged by a client), the answers an

@@ -116,21 +116,21 @@ reason of the engine; the host never maps, it hands a `*peer.Error` on as it is.
 | endpoint limit | `1007` endpoint_limit | `data`: `{"limit":"instance"}` or `{"limit":"node"}`, so that an adapter can tell its own declared limit from the node's |
 | invalid argument | `-32602` invalid_params | the field is in the message |
 | shutting down | `-32002` shutting_down | |
-| instance unknown, unauthenticated, operation identifier reused, recovering, storage fatal | `-32603` internal_error | nothing an adapter could act on; a fatal failure of the disk is a request whose outcome is not known, which is what `-32603` says |
-| node queue full, storage full, storage unavailable, clock rollback, loop busy | `-32603` internal_error | `data`: `{"reason":"<name>"}`; see below |
+| instance unknown, unauthenticated, operation identifier reused, storage fatal | `-32603` internal_error | nothing an adapter could act on; a fatal failure of the disk is a request whose outcome is not known, which is what `-32603` says |
+| node queue full, storage full, storage unavailable, clock rollback, loop busy, recovering | `1012` node_busy | `data`: `{"reason":"<name>"}`, the engine's name for the reason; see below |
 
 The text of a refusal never carries what the engine says about its cause (a path, an
 identifier): that is for the log. An error that is no refusal reaches the host
 untouched and is `-32603` with a fixed text.
 
-The five back-pressure and capacity refusals have no code that fits in the protocol:
-`1007` is the limit of direct endpoints, `-32001` promises that the handler did not run
-(true here, but meant for the peer's own queue), and the other application codes name
-other things. Until the protocol has one they are `-32603` with the reason in `data`,
-which an adapter logs and treats as any failed request. Whether they get a code of
-their own is an open question, kept as a skipped test
-(`TestShouldStorageBackPressureOfAnAdapterRequestHaveACodeOfItsOwn` in
-`internal/node/apiwire`); no protocol change is made without a decision.
+The six refusals that leave no effect and may be tried again later are `1012 node_busy`,
+and the reason in its data is the engine's own name, never translated. Why the protocol
+has a code of its own for them, and why the reason is an open word, is in the design
+notes of the adapter protocol. The engine refuses `recovering` before the command runs
+(there is no loop yet, or the phase is still recovery), so it too has no effect. A fatal
+failure of the disk stays `-32603`: whether the request took effect is not known.
+`TestBackPressureOfAnAdapterRequestIsNodeBusyWithItsReason` (`internal/node/apiwire`)
+holds the mapping to the protocol's list of the reasons this version sends.
 
 ### Notifications and their buffer
 

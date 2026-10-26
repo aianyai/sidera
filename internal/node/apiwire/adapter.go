@@ -74,13 +74,14 @@ type adapterCode struct {
 	data func(*engine.Refusal) map[string]any
 }
 
-// Back pressure and the faults of the disk that mean "not now, nothing was
-// recorded" have no code in the adapter protocol: 1007 is the limit of direct
-// endpoints and -32001 is the peer's own refusal before a handler ran. Until the
-// protocol has one they are an internal error that names the reason, so that an
-// adapter can log what happened and treat it as it treats any failed request.
+// The refusals that mean "not now, nothing was recorded" (back pressure, the
+// faults of the disk a retry may cure, a node that is still starting) are
+// node_busy: the adapter may send the request again later, and the reason, which
+// is the engine's own name for it, is in the data. The protocol lists the reasons
+// this version sends, so a reason of the engine that is added here must be added
+// there too; a test holds the two lists together.
 var backPressure = adapterCode{
-	code:    peer.CodeInternalError,
+	code:    adapterproto.CodeNodeBusy,
 	message: "the node could not take the request now",
 	data:    func(r *engine.Refusal) map[string]any { return map[string]any{"reason": r.Reason.String()} },
 }
@@ -102,13 +103,11 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonShuttingDown:    {code: peer.CodeShuttingDown, message: "the node is stopping"},
 
 	// The adapter is told nothing it could act on: an instance the engine does not
-	// know and a node that is starting are the daemon's to sort out, and a caller
-	// that is not an endpoint or an operation identifier used twice cannot be a
-	// request of an adapter at all.
+	// know is the daemon's to sort out, and a caller that is not an endpoint or an
+	// operation identifier used twice cannot be a request of an adapter at all.
 	engine.ReasonInstanceUnknown:   internalCode,
 	engine.ReasonUnauthenticated:   internalCode,
 	engine.ReasonOperationIDReused: internalCode,
-	engine.ReasonRecovering:        internalCode,
 	// Whether the request took effect is not known, which is what -32603 says.
 	engine.ReasonStorageFatal: internalCode,
 	// The refusals of the messages, of an alert and of a retired identity answer
@@ -127,6 +126,7 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonStorageUnavailable: backPressure,
 	engine.ReasonClockRollback:      backPressure,
 	engine.ReasonLoopBusy:           backPressure,
+	engine.ReasonRecovering:         backPressure,
 }
 
 // adapterError turns a refusal of the engine into the error object an adapter is
