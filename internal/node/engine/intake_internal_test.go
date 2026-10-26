@@ -50,7 +50,7 @@ func TestOutboundNeedByState(t *testing.T) {
 		{"the instant of the report deadline is still asked", rec(delivery.StateAccepted), delivery.ReportBy(accept), true, false, workPull},
 		{"the tolerance is already in the report deadline", rec(delivery.StateAccepted), delivery.ReportBy(accept).Add(-timing.ClockTolerance), true, false, workPull},
 	} {
-		if got := outboundNeed(c.d, accept, c.now, c.sent, c.finalPulled); got != c.want {
+		if got := (&Engine{}).outboundNeed(c.d, accept, c.now, c.sent, c.finalPulled); got != c.want {
 			t.Errorf("%s: %d, want %d", c.name, got, c.want)
 		}
 	}
@@ -79,7 +79,7 @@ func TestAPullNamesTheDeliveriesOfTheNodeThatAreNotSettled(t *testing.T) {
 	}
 	derived := at(nodeA, 13, delivery.StateAccepted)
 	o.Derived = &derived
-	plan := outboundPlan(o, t0, map[ident.NodeID]bool{nodeA: true, nodeB: false, nodeC: false}, nil)
+	plan := (&Engine{}).outboundPlan(o, t0, map[ident.NodeID]bool{nodeA: true, nodeB: false, nodeC: false}, nil)
 	if got := plan[nodeA]; got.kind != workPull || !slices.Equal(got.recipients, []ident.EndpointID{idOf(t, 10), idOf(t, 12), idOf(t, 13)}) {
 		t.Errorf("node A: %+v, want a pull naming the accepted, the unknown and the derived delivery, not the delivered one", got)
 	}
@@ -93,7 +93,7 @@ func TestAPullNamesTheDeliveriesOfTheNodeThatAreNotSettled(t *testing.T) {
 	// deliveries the sender was told nothing of; one already made is not made again.
 	after := delivery.ReportBy(accept).Add(time.Second)
 	sent := map[ident.NodeID]bool{nodeA: true, nodeB: true, nodeC: true}
-	plan = outboundPlan(o, after, sent, nil)
+	plan = (&Engine{}).outboundPlan(o, after, sent, nil)
 	if got := plan[nodeA]; got.kind != workFinalPull || !slices.Equal(got.recipients, []ident.EndpointID{idOf(t, 10), idOf(t, 13)}) {
 		t.Errorf("node A after the report deadline: %+v, want the pull before the close naming the accepted and the derived delivery", got)
 	}
@@ -101,7 +101,7 @@ func TestAPullNamesTheDeliveriesOfTheNodeThatAreNotSettled(t *testing.T) {
 		t.Errorf("node B after the report deadline: %+v, want the pull before the close naming the queued delivery", got)
 	}
 	made := map[ident.EndpointID]bool{idOf(t, 10): true, idOf(t, 13): true, idOf(t, 20): true, idOf(t, 30): true, idOf(t, 31): true}
-	if plan = outboundPlan(o, after, sent, made); len(plan) != 0 {
+	if plan = (&Engine{}).outboundPlan(o, after, sent, made); len(plan) != 0 {
 		t.Errorf("after the report deadline and the pulls before the close: %+v, want nothing to do", plan)
 	}
 }

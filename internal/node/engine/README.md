@@ -240,7 +240,8 @@ signals join the same loop as further commands and add their methods to this lis
   not ticked here. A source delivery that is queued or accepted when `report_by` passes
   is not closed by the tick before the outbound worker has pulled its target one more
   time (`finalPullPending`): at the start step 12 leaves it open and step 14 makes the
-  pull; the close then tells what the pull could not settle.
+  pull; the close then tells what the pull could not settle. No such pull is made while
+  the wall clock is in doubt (`finalPullDue`).
 - **A damaged file is settled first, one at a time, and a lost source record is replaced
   by the sender's.** `quarantineAll` settles the damaged files of the plan but those of
   `ctl/`, each with a scan taken after the one before, giving the store the scan and the

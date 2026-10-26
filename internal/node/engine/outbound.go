@@ -34,7 +34,7 @@ const (
 	// workPull asks the node for the reports of the deliveries of a message.
 	workPull
 	// workFinalPull is the one pull made after report_by, before a delivery that is
-	// still queued or accepted is closed (see finalPullDue). It asks like workPull;
+	// still queued or accepted is closed (see Engine.finalPullDue). It asks like workPull;
 	// the loop treats its end, whatever the answer, as the moment the delivery may
 	// close.
 	workFinalPull
@@ -182,7 +182,7 @@ func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	if st.inflight > 0 {
 		return
 	}
-	plan := outboundPlan(o.Outbound, now, st.sent, e.finalPulledOf(name))
+	plan := e.outboundPlan(o.Outbound, now, st.sent, e.finalPulledOf(name))
 	if len(plan) == 0 {
 		delete(e.outbox.state, name)
 		return
@@ -230,11 +230,14 @@ func finalPullUntil(reportBy time.Time) time.Time { return reply.RetainFactsUnti
 
 // finalPullDue says whether a delivery is waiting for its pull before the close at
 // now: it is queued or accepted, so its sender was told no outcome and the target may
-// hold one; report_by has passed, so the ordinary pulls are over; and the target still
-// keeps its records. A delivery in any other state is closed without it, because the
-// sender holds the notice that says what is known, or it is final.
-func finalPullDue(d delivery.Record, now time.Time) bool {
-	return (d.State == delivery.StateQueued || d.State == delivery.StateAccepted) &&
+// hold one; report_by has passed, so the ordinary pulls are over; the target still
+// keeps its records; and the wall clock is not in doubt, because the pull is the step
+// before a judgement by a deadline and none is made until the owner has cleared the
+// pause (tickBatch holds the close too, and asks again once it is cleared). A delivery
+// in any other state is closed without it, because the sender holds the notice that
+// says what is known, or it is final.
+func (e *Engine) finalPullDue(d delivery.Record, now time.Time) bool {
+	return !e.paused && (d.State == delivery.StateQueued || d.State == delivery.StateAccepted) &&
 		now.After(d.ReportBy) && !now.After(finalPullUntil(d.ReportBy))
 }
 
@@ -245,7 +248,7 @@ func (e *Engine) finalPullPending(o store.OutRecord, recipient ident.EndpointID,
 	if _, done := e.outbox.finalPulled[finalPullKey{o.Name(), recipient}]; done {
 		return false
 	}
-	return e.outboundWorks(o) && finalPullDue(d, now)
+	return e.outboundWorks(o) && e.finalPullDue(d, now)
 }
 
 // nodeNeed is the next piece of work a source record has for one node: a send, or
@@ -261,10 +264,10 @@ type nodeNeed struct {
 // A node with nothing to do is not in the plan. A derived delivery is planned like
 // the others, but only the record of a control signal has one and the worker does
 // not take control records, so none is asked about.
-func outboundPlan(o envelope.Outbound, now time.Time, sent map[ident.NodeID]bool, finalPulled map[ident.EndpointID]bool) map[ident.NodeID]nodeNeed {
+func (e *Engine) outboundPlan(o envelope.Outbound, now time.Time, sent map[ident.NodeID]bool, finalPulled map[ident.EndpointID]bool) map[ident.NodeID]nodeNeed {
 	plan := map[ident.NodeID]nodeNeed{}
 	for _, t := range o.Deliveries() {
-		kind := outboundNeed(t.Delivery, o.AcceptBefore, now, sent[t.Address.Node], finalPulled[t.Address.Endpoint])
+		kind := e.outboundNeed(t.Delivery, o.AcceptBefore, now, sent[t.Address.Node], finalPulled[t.Address.Endpoint])
 		if kind == 0 {
 			continue
 		}
@@ -293,12 +296,12 @@ func outboundPlan(o envelope.Outbound, now time.Time, sent map[ident.NodeID]bool
 // of the clock. After the delivery deadline a target that was never reached is
 // asked, not sent to: whatever it would do with the message, it would refuse it as
 // late.
-func outboundNeed(d delivery.Record, acceptBefore, now time.Time, sent, finalPulled bool) workKind {
+func (e *Engine) outboundNeed(d delivery.Record, acceptBefore, now time.Time, sent, finalPulled bool) workKind {
 	switch {
 	case d.State.IsTerminal():
 		return 0
 	case now.After(d.ReportBy):
-		if finalPulled || !finalPullDue(d, now) {
+		if finalPulled || !e.finalPullDue(d, now) {
 			return 0
 		}
 		return workFinalPull
@@ -438,7 +441,7 @@ func (e *Engine) afterOutbound(name string, now time.Time) {
 	finalPulled := e.finalPulledOf(name)
 	var next time.Duration
 	for _, t := range o.Outbound.Deliveries() {
-		switch outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node], finalPulled[t.Address.Endpoint]) {
+		switch e.outboundNeed(t.Delivery, o.Outbound.AcceptBefore, now, st.sent[t.Address.Node], finalPulled[t.Address.Endpoint]) {
 		case workFinalPull:
 			e.dispatchOutbound(name, now)
 			return

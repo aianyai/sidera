@@ -24,7 +24,7 @@ import (
 //
 // A source delivery that is still queued or accepted when report_by passes is not
 // closed at once: the outbound worker pulls its target one more time while the target
-// still keeps its records (finalPullDue), and the close follows that pull, whatever
+// still keeps its records (Engine.finalPullDue), and the close follows that pull, whatever
 // came of it. At the start the tick comes before the outbound step, so it leaves such
 // a delivery alone and the outbound step makes the pull; while the node runs the tick
 // asks for it.
