@@ -1079,7 +1079,17 @@ of a disabled instance; and the candidates of the drain of records queued for a
 closed endpoint, which the engine narrows with the delivery rules. A run with no
 crash and no damage finds none of them at any quiet point, and a finished recovery
 leaves none; tests evaluate the predicates on a copy of the disk after every step
-of such a run.
+of such a run. At the engine layer the criterion of every owner is evaluated on the
+node of the harness after each step of a run through the events of a node's life
+(messages, pages, sessions made and closed, an endpoint closed with a queue, an adapter
+that ended, an instance disabled and enabled again, an alert, the sweep) and after a
+clean restart that follows each event that leaves state behind: the engine's
+`PlanRecovery`, `txn.CleanupWork`, `config.AdapterGCWork`, `daemon.LayoutWork`,
+`store.MissingStateDirs` and `keys.RecoveryWork`, each the function its rule runs, so
+the test and the rule cannot disagree
+(`TestCleanScenariosLeaveNoRecoveryWork` in the engine). The harness makes the
+directories of the keys and of `state/` and not the runtime directories of the daemon, so
+`daemon.LayoutWork` is required to name exactly those.
 
 **The order of the rules.** The order is a guarantee of the caller, not of the
 store: every predicate is a function of one scan, and the store cannot know which
