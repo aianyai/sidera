@@ -244,7 +244,8 @@ func TestNoRecordIsNotAnsweredWhileTheNodeMayNotSign(t *testing.T) {
 	}
 	msg := res.MessageID
 	quiet(t, h)
-	h.Advance(time.Hour)
+	// Less than the queue time of an endpoint: nothing else touches the records.
+	h.Advance(10 * time.Minute)
 	send(t, h, "a", "b", "raises the mark of the clock") // a command reads the clock and raises the mark
 	quiet(t, h)
 	mark := h.Clock().Now()
@@ -447,17 +448,21 @@ func TestNoRecordAfterReportByChangesNothing(t *testing.T) {
 	if got := feedbackOf(t, h, msg); len(got) != 0 {
 		t.Errorf("the sender is told %v by an answer that came after report_by, want nothing", got)
 	}
-	if d := sourceDelivery(t, h, msg); d.State == delivery.StateDeliveryUnknown || d.Unknown != 0 {
-		t.Errorf("the delivery is %s (%s) after a late answer, want it not a loss", d.State, d.Unknown)
+	// The record is closed by the passing of report_by, as every delivery that is not
+	// final by then is, and not turned into a loss by an answer that came too late: a
+	// delivery that merely "is not a loss" would also be one that nothing closed.
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed || d.Unknown != delivery.UnknownCauseNone {
+		t.Errorf("the delivery is %s (%s) after a late answer, want closed_unconfirmed and no loss", d.State, d.Unknown)
 	}
 }
 
 // A source that holds no receipt cannot tell a target that lost its record from
 // one that never took the message in: it is not told the target lost it, and the
-// delivery is left to the deadline rules, which say "may have been received"
-// without claiming more. After the delivery deadline the source asks a node it
-// never reached instead of sending to it, and that node, which holds nothing,
-// answers that it has no record.
+// delivery is left to the expiry rule, which says "may have been received" without
+// claiming more, once. After the delivery deadline the source asks a node it never
+// reached instead of sending to it, and that node, which holds nothing, answers
+// that it has no record: a query that found no receipt, which is what expiry is
+// judged by.
 func TestSourceWithoutAReceiptIsNotToldTheTargetLostTheRecord(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	h.Unreachable(true)
@@ -486,10 +491,12 @@ func TestSourceWithoutAReceiptIsNotToldTheTargetLostTheRecord(t *testing.T) {
 	if ins := inRecords(t, h, msg); len(ins) != 0 {
 		t.Fatalf("the target holds %d records: the message was sent after its deadline", len(ins))
 	}
-	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
-		t.Errorf("the delivery is %s after the answer that the target holds no record, want it left queued", d.State)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateExpiredUnconfirmed {
+		t.Errorf("the delivery is %s after the answers that the target holds no record, want expired_unconfirmed (never lost at the target)", d.State)
 	}
-	if got := feedbackOf(t, h, msg); len(got) != 0 {
-		t.Errorf("the sender is told %v by an answer about a delivery with no receipt, want nothing", got)
+	h.Advance(mergeWindow)
+	letTheCallThrough(t, h, delay)
+	if got := toldKinds(t, h, "a"); !slices.Equal(got, []delivery.Kind{delivery.KindExpiredUnconfirmed}) {
+		t.Errorf("the sender is told %v about a delivery with no receipt, want the expiry once and no loss", got)
 	}
 }
