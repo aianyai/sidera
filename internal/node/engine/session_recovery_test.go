@@ -12,6 +12,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -281,11 +282,11 @@ func TestCreationCutOffByACrashIsGoneOnWithOneSession(t *testing.T) {
 }
 
 // startAsTheDaemonDoes opens the engine and runs the start in the daemon's order: the
-// adapter is admitted and answers adapter.start (step 10), then the creations, closes and
-// prompts that were not settled are settled or asked again (step 11), then the node
-// serves. rig.start puts the adapter after step 11 instead, which a test of what step 11
+// adapter is admitted and, when connected, answers adapter.start (step 10), then the
+// creations, closes and prompts that were not settled are settled or asked again
+// (step 11), then the node serves. rig.start puts the adapter after step 11 instead, which a test of what step 11
 // finds already connected cannot use.
-func startAsTheDaemonDoes(t *testing.T, r *rig) *engine.Engine {
+func startAsTheDaemonDoes(t *testing.T, r *rig, connected bool) *engine.Engine {
 	t.Helper()
 	e, _, err := r.open()
 	if err != nil {
@@ -297,8 +298,10 @@ func startAsTheDaemonDoes(t *testing.T, r *rig) *engine.Engine {
 	if err := admitOn(context.Background(), e, "chat", r.admit); err != nil {
 		t.Fatalf("AdapterAdmitted: %v", err)
 	}
-	started(t, e, "chat")
-	settle(t, e)
+	if connected {
+		started(t, e, "chat")
+		settle(t, e)
+	}
 	if err := e.RecoverDelivery(context.Background()); err != nil {
 		t.Fatalf("RecoverDelivery: %v", err)
 	}
@@ -342,7 +345,7 @@ func TestCreationWhoseInitialMessageIsLostIsNotAskedOfTheAdapterBeforeItIsChecke
 	}
 	r.seedFile(store.BodiesDir, store.BodyFileName(d.Name()), []byte("not the initial message"))
 
-	startAsTheDaemonDoes(t, r)
+	startAsTheDaemonDoes(t, r, true)
 
 	if n := host.asked.Load(); n != 0 {
 		t.Errorf("the adapter was asked %d times to create a session whose first message is lost, want none", n)
@@ -358,6 +361,66 @@ func TestCreationWhoseInitialMessageIsLostIsNotAskedOfTheAdapterBeforeItIsChecke
 		if e.ID == intent.Endpoint && e.Status != store.EndpointClosed {
 			t.Errorf("the endpoint of the creation is %v, want closed", e.Status)
 		}
+	}
+}
+
+// A close or an interrupt that was not settled when the node went down is settled when
+// it is back as time settles it: a close whose time is not up is asked of the adapter
+// again, and one whose time is up is told as unconfirmed with the endpoint closed (the
+// channel closes whatever the adapter did); an interrupt whose time is up is told as
+// failed, and the adapter is not asked for a signal that may reach a later turn.
+func TestUnsettledCloseAndInterruptAreSettledAtStart(t *testing.T) {
+	deadline := engine.DefaultParams().ControlReplyDeadline
+	for _, tc := range []struct {
+		name string
+		kind envelope.Kind
+		// age is how long before the start the signal was accepted, and connected says the
+		// adapter has answered adapter.start when step 11 runs.
+		age       time.Duration
+		connected bool
+		wantCalls int
+		// released says the native session is recorded released, as a close that the
+		// adapter answered, and not owed, as one told as unconfirmed.
+		released bool
+	}{
+		{"a close whose time is not up", envelope.KindSessionClose, 0, true, 1, true},
+		{"a close whose time is up", envelope.KindSessionClose, 2 * deadline, false, 0, false},
+		{"an interrupt whose time is up", envelope.KindSessionInterrupt, 2 * deadline, false, 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			noLeaks(t)
+			host := newCloseHost(answerClosed)
+			r := newRig(t, 10, withAdapters(host))
+			session := store.EndpointRecord{
+				ID: mustEndpoint(t, 70), Kind: sessionKind, Instance: "chat", Status: store.EndpointOpen, Token: bytes.Repeat([]byte{7}, store.TokenLen), Declaration: []byte("{}"),
+				Session: &store.SessionInfo{Preset: "default", NativeRef: "native-7", ToolAccess: []string{engine.TokenEnv, engine.HomeEnv}},
+			}
+			r.seedRecord(session)
+			c := sessionCtlRecord(t, 5, session.ID)
+			c.Kind, c.Key.Recipient, c.Intent, c.SessionEndpoint, c.Preset = tc.kind, session.ID, nil, ident.EndpointID{}, ""
+			c.Dedup = delivery.NewDedupRecord(c.Key.Dedup(), c.Dedup.Digest, c.Record.ReportBy)
+			c.AcceptedAt = t0.Add(-tc.age)
+			r.seedRecord(c)
+
+			startAsTheDaemonDoes(t, r, tc.connected)
+
+			sc := r.scan()
+			if len(sc.Ctl) != 1 {
+				t.Fatalf("%d control records, want 1", len(sc.Ctl))
+			}
+			if got := sc.Ctl[0]; got.Record.State != delivery.StateDelivered || !got.Dedup.HasReply {
+				t.Fatalf("the signal is %s (reply stored: %v) after the start, want delivered with its reply", got.Record.State, got.Dedup.HasReply)
+			}
+			if got := len(host.calls()); got != tc.wantCalls {
+				t.Errorf("the adapter was asked %d times to close, want %d", got, tc.wantCalls)
+			}
+			got := endpointRecord(t, sc, session.ID)
+			if tc.kind == envelope.KindSessionClose {
+				wantReleased(t, got, tc.released)
+			} else if got.Status != store.EndpointOpen {
+				t.Errorf("the endpoint is %v after an interrupt, want open", got.Status)
+			}
+		})
 	}
 }
 

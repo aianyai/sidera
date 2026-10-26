@@ -514,5 +514,5 @@ func (e *Engine) reconcileCreations(now time.Time) error {
 		e.sched.set(schedKey{schedCreateDeadline, key.String()}, due)
 		e.startCreate(now, key)
 	}
-	return e.recoverExecutions(now)
+	return nil
 }

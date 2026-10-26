@@ -469,6 +469,5 @@ func (e *Engine) recoverExecutions(now time.Time) error {
 		e.sched.set(schedKey{schedExecuteDeadline, key.String()}, due)
 		e.startExecute(now, key)
 	}
-	e.recoverReleases(now)
 	return nil
 }

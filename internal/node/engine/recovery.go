@@ -312,13 +312,20 @@ var recoveryPhases = [...]recoveryPhase{
 	{14, "outbound", (*Engine).recoverOutbound},
 }
 
-// recoverReconcile is step 11 of the start: the creations and the prompts that were
-// not settled when the node went down are settled or asked of their adapters.
+// recoverReconcile is step 11 of the start: what was not settled when the node went
+// down is settled or asked of its adapter again, in this order: the creations, the
+// closes and interrupts, the release of the native sessions of closed endpoints, and the
+// prompts. A close settled here leaves its native session owed, so the releases are
+// asked for after the closes.
 func (e *Engine) recoverReconcile(now time.Time) error {
 	e.reconciling = true
 	if err := e.reconcileCreations(now); err != nil {
 		return err
 	}
+	if err := e.recoverExecutions(now); err != nil {
+		return err
+	}
+	e.recoverReleases(now)
 	e.reconcilePrompts(now)
 	return nil
 }
