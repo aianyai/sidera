@@ -145,6 +145,12 @@ type Engine struct {
 	// adapter, by endpoint; see release.go.
 	releases map[ident.EndpointID]*release
 
+	// leaseDirty are the session endpoints whose leases are to be looked at at the next
+	// step of the loop, and leasesStarted says the node has begun to serve and looked at
+	// every session once; see lease.go.
+	leaseDirty    map[ident.EndpointID]bool
+	leasesStarted bool
+
 	// dueTicks are the records whose entries of the schedule fell due and that are
 	// not ticked yet; tickQueued says a command to tick them is queued.
 	dueTicks   []string
@@ -238,6 +244,7 @@ func newEngine(d Deps, p Params) (*Engine, error) {
 
 		blockedDirty: map[ident.EndpointID]bool{},
 		releases:     map[ident.EndpointID]*release{},
+		leaseDirty:   map[ident.EndpointID]bool{},
 	}
 	e.pendingNotices = map[ident.EndpointID]bool{}
 	if d.RollbackPaused {
@@ -658,6 +665,7 @@ func (e *Engine) loop() {
 			e.serveReady()
 			e.servePending()
 			e.serveBlocked()
+			e.serveLeases()
 			e.servePrompts()
 		}
 		if e.fatal != nil {
@@ -843,6 +851,10 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 	case schedBlocked:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.blockedDirty[id] = true
+		}
+	case schedRenew:
+		if id, err := ident.ParseEndpointID(key.id); err == nil {
+			e.markLeasesFor(id)
 		}
 	case schedProbeFallback:
 		e.probeFallback(now, key.id)

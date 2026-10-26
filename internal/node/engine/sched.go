@@ -67,6 +67,9 @@ const (
 	// blocked that the judgment names (the instant a failing run passes the threshold)
 	// or whose block could not be recorded; the id is the endpoint.
 	schedBlocked
+	// schedRenew is the next instant a lease of a session endpoint with a turn running
+	// is to be extended; the id is the endpoint.
+	schedRenew
 	// schedProbeFallback is the moment an adapter whose connection has been in service
 	// for a while is judged although its probe has not answered; the id is the
 	// instance.

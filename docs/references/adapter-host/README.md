@@ -106,8 +106,10 @@ implements them, and as `-32601` when it does not.
 ### What an adapter is told when the engine refuses
 
 `apiwire.AdapterEngine` puts the engine behind the host's interface and words the
-engine's refusals for the three requests the engine answers itself. One row for each
-reason of the engine; the host never maps, it hands a `*peer.Error` on as it is.
+engine's refusals for the four requests the engine answers itself (`endpoint.register`,
+`endpoint.unregister`, `checkpoint.put` and, through `ObservedCalls`, `recv.observed`).
+One row for each reason of the engine, the same table for all four; the host never maps,
+it hands a `*peer.Error` on as it is.
 
 | Reason of the engine | Code | Notes |
 | -------------------- | ---- | ----- |

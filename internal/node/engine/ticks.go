@@ -43,7 +43,10 @@ func (e *Engine) watchTicks() {
 		e.notePending(recipient)
 		e.noteArrival(recipient)
 	}
-	e.view.onInChange = e.noteBlockedInput
+	e.view.onInChange = func(recipient ident.EndpointID) {
+		e.noteBlockedInput(recipient)
+		e.noteLeasesInput(recipient)
+	}
 	e.view.onTick = func(record string, next time.Time) {
 		key := schedKey{schedTick, record}
 		if next.IsZero() {
@@ -158,10 +161,6 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 			if !ok {
 				continue
 			}
-			if in.Record.Lease.Active && !now.Before(in.Record.Lease.ExpiresAt) && !e.leaseMayRelease(in, now) {
-				e.sched.set(schedKey{schedTick, r}, now.Add(e.p.RetryBackoff))
-				continue
-			}
 			rec, outcomes, err := in.Record.Tick(now)
 			if err != nil {
 				e.log.Error("a target record cannot be ticked", "record", r, "error", err.Error())
@@ -230,13 +229,6 @@ func (e *Engine) tickBatch(now time.Time, records []string) error {
 	e.holdForFinalPulls(now, waiting)
 	return nil
 }
-
-// leaseMayRelease says whether a lease that has run out may be released now, which puts
-// its message back in the queue as a possible duplicate. It always may today: nothing
-// tells the engine that the agent of the endpoint has a turn running, and a lease the
-// agent holds while it works is only extended by the signals of its turns. The call
-// is here, where the release is decided, so that those signals decide it in one place.
-func (e *Engine) leaseMayRelease(store.InRecord, time.Time) bool { return true }
 
 // finalPullWait is a source record, by its entry of the schedule, with a delivery
 // whose close waits for the pull before it, and the instant that waiting ends at the

@@ -152,7 +152,7 @@ func (m *modelRun) step(i int) {
 	t, h := m.t, m.h
 	m.runLate()
 	switch n := m.rng.Intn(100); {
-	case n < 14:
+	case n < 12:
 		from := m.names[m.rng.Intn(len(m.names))]
 		targets := append(slices.Clone(m.names), "d")
 		to := targets[m.rng.Intn(len(targets))]
@@ -160,26 +160,26 @@ func (m *modelRun) step(i int) {
 			m.send(from, h.Addr(to), fmt.Sprintf("direct message %d", i))
 			m.took(pathSendDirect)
 		}
-	case n < 24:
+	case n < 20:
 		if ep, ok := m.pickSession(); ok {
 			m.send(m.names[m.rng.Intn(len(m.names))], m.addrOf(ep), fmt.Sprintf("session message %d", i))
 			m.took(pathSendSession)
 		}
-	case n < 28:
+	case n < 23:
 		if ep, ok := m.pickSession(); ok {
 			m.send(m.names[m.rng.Intn(len(m.names))], m.addrOf(ep), bigText(fmt.Sprintf("long message %d", i), 60*1024))
 			m.took(pathSendLong)
 		}
-	case n < 48:
+	case n < 37:
 		to := append(slices.Clone(m.names), "d")[m.rng.Intn(len(m.names)+1)]
 		m.recv(h.Agent(to))
-	case n < 60:
+	case n < 45:
 		if ep, ok := m.pickSession(); ok {
 			m.recv(h.Session(ep.ID.String()))
 		}
-	case n < 72:
+	case n < 59:
 		m.modelTurn()
-	case n < 80:
+	case n < 65:
 		if ep, ok := m.pickSession(); ok {
 			rt, err := h.RuntimeOf(ep.Instance)
 			if err != nil {
@@ -189,13 +189,13 @@ func (m *modelRun) step(i int) {
 				m.took(pathEndTurn)
 			}
 		}
-	case n < 82:
+	case n < 68:
 		m.down = !m.down
 		h.Unreachable(m.down)
 		if m.down {
 			m.took(pathUnreachable)
 		}
-	case n < 85:
+	case n < 71:
 		createOn(t, h, otherInstance, m.names[m.rng.Intn(len(m.names))], "default")
 		m.took(pathCreateOnOther)
 	default:
@@ -360,6 +360,7 @@ func outDeliveries(o store.OutRecord) []delivery.Record {
 // judge holds the finished run to the property and to the coverage the run claims.
 func (m *modelRun) judge() {
 	t, h := m.t, m.h
+	t.Logf("paths of the run: %v; control paths: %v", m.paths, m.gen.Paths())
 	for _, p := range modelPaths {
 		if m.paths[p] < 3 {
 			t.Errorf("the path %s was taken %d times, want at least 3", p, m.paths[p])
@@ -390,6 +391,7 @@ func (m *modelRun) judge() {
 			open("source record", o.Name(), d)
 		}
 	}
+	t.Logf("how the records ended: %v", states)
 	for _, s := range []delivery.State{delivery.StateDelivered, delivery.StateRejected, delivery.StateClosedUnconfirmed} {
 		if states[s] == 0 {
 			t.Errorf("no record ended %s: the run does not reach every way a record closes (%v)", s, states)
@@ -455,6 +457,7 @@ func (m *modelRun) judgeAcknowledgements(sc *store.Scan, log *ledger.Log) {
 			t.Errorf("the node allowed an acknowledgement for a result reported as %s (lease %s)", e.Attrs.Mode, e.Attrs.Lease)
 		}
 	}
+	t.Logf("recv.observed answers: %v", answers)
 	// The run reaches the answers it judges: a whole result is acknowledged, a cut or a
 	// replaced one is refused.
 	for _, want := range []string{"faithful allowed", "truncated refused", "replaced refused"} {

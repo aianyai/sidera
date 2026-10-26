@@ -42,6 +42,7 @@ delivery to a session: when it is judged and how the verdict is recorded.
 | `ProbeTokenEnv`, `TokenEnv`, `HomeEnv`, `ProbeTokenLifetime` | The names of the environment variables that carry a probe token, an endpoint's token and the data directory, and the lifetime of the probe tokens; the Agent interface refers to them. |
 | `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
 | `Recv`, `RecvRequest`, `Ack`, `AckRequest` | Hand the page of the queue of the caller's endpoint out under a lease (the bytes the recv command prints), and acknowledge parts of a page. The second check is made again at the hand-out, the budget and the longest wait are the adapter's declaration for the front end, and a wait is a waiter the loop owns. |
+| `RecvObserved` | What the adapter host calls for `recv.observed`: acknowledges a page for the agent when the text the adapter read from the runtime's record contains the page the node printed in full, and refuses with the reason otherwise (a cut or replaced result, a page the node does not hold). |
 | `Control`, `ControlRequest` | Accept a control signal (`session.create`, `session.close`, `session.interrupt`, `endpoint.status`) from the endpoint a caller is, as `Send` does; a creation may carry an initial message (`Body`, `ContentType`). What the target made of it is read from the status of the message. |
 | `MessageStatus` | The state of each delivery of a message the caller's endpoint sent, from the sender's record, and for a control signal its verified reply. Another endpoint's message is unknown to the caller. |
 | `SetTransport`, `Transport`, `Keys` | The transport the outbound worker calls (the narrow interface with the signatures of `*transport.Loopback`) and the node's keys, which sign the reports. Both are for the composition root; an engine without them refuses to send and to take in. |
@@ -92,6 +93,15 @@ delivery to a session: when it is judged and how the verdict is recorded.
 - **A turn counts against the cap from the dispatch of its prompt until it ends or the prompt is
   known not to have started one, and only while its adapter is online.** An endpoint whose
   adapter is offline is not judged.
+- **A lease is extended before it runs out, only while the adapter reports a turn running, and
+  one that ran out is always released.** `serveLeases` (`lease.go`) extends what is due with
+  `delivery.Record.Renew`, which refuses an expired lease and one at the cap, so the tick of a record
+  never waits for a turn: there is no state in which an expired lease is held and the record's other
+  deadlines (the queue time, `report_by`) are held with it.
+- **The node acknowledges for an agent only a page it remembers and sees in full in what the model
+  was shown.** `RecvObserved` compares with the page the node printed (`issuedPage.output`); a lease
+  it holds no page for, a cut or replaced result and any text that does not contain the page are
+  refused, and the agent acknowledges by itself or is handed the message again.
 - **Workers start only in the loop.** `spawn` is called from a command or a due
   entry, never from another goroutine: `finish` waits for the workers on the loop's
   goroutine, and a worker started concurrently with that wait could be missed. It

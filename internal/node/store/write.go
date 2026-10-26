@@ -481,7 +481,8 @@ func (s *Store) Blocked(a AttemptsRecord, ins []InRecord) error {
 
 // Lease records one page of a recv: the records that were leased, and those that the
 // second check at the hand-out closed, which no longer refer to a body; the body of
-// each of those is removed.
+// each of those is removed. It records as well the extension of leases the node makes
+// while the agent works.
 func (s *Store) Lease(ins []InRecord) error {
 	if len(ins) == 0 {
 		return errors.New("store: Lease needs a record")

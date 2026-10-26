@@ -400,7 +400,8 @@ another endpoint with the same lease does not make it this endpoint's. Each part
 acknowledged by `delivery.Record.Ack` on a working copy, and the records that changed go in
 one `ack` transaction; an acknowledgement is valid after its lease ran out and even after the
 delivery was declared unknown, which it then corrects. A part of a message the endpoint
-holds no record of is `refused_no_handout`. What a whole page held is remembered in memory for
+holds no record of is `refused_no_handout`. What a whole page held, and the text of the page as it
+was printed, is remembered in memory for
 the longest a lease lives (`pageMemory`); after that or after a restart only a message that
 fits whole is known to have handed out its one part, and the parts of a message that was cut
 are named by the agent, because acknowledging one that was not shown would deliver a body
@@ -570,13 +571,44 @@ a creation long before either (see the creation of a session), so what these rul
 signal whose reply a crash lost. A target record under a lease is
 ticked by the same rule as any other: a lease that runs out puts its message back in the
 queue as a possible duplicate, up to the third redelivery, and the delivery whose fourth
-lease runs out is `delivery_unknown`, told to the sender once. Whether a lease that ran out
-may be released is asked of `leaseMayRelease`, which says yes for every lease today: nothing
-tells the engine that the agent has a turn running, and the signals of turns that will keep a
-lease alive decide it there, in the one place a release is made. While the wall clock is in doubt
+lease runs out is `delivery_unknown`, told to the sender once. A lease that ran out is
+always released: the delivery rules requeue it, and a record cannot hold an expired lease
+without every other rule of its tick (the queue time, `report_by`) being held with it. What keeps a
+lease from running out while the agent works is that it is extended before it does (see Leases
+and acknowledging for the agent). A message that is back in the queue after the endpoint's queue
+time is over is not handed out again: its delivery is unknown, which is why the longest a
+message can be held (a queue time of two hours, a lease issued just before it ends and extended
+to the cap) is settled a quarter of an hour after the queue time, long before `report_by`. While the wall clock is in doubt
 nothing is ticked and nothing is judged expired: a clock set back and then moved on is
 not one to judge a deadline by until the owner has cleared it, and what the node took in
 before the pause stays as it was.
+
+**Leases and acknowledging for the agent.** The leases of an endpoint are extended while the
+adapter reports a turn running for it (`turn.started`, the sessions `adapter.start` lists as
+`turn_active`; a connection that ended makes every turn unknown), by `delivery.Record.Renew`,
+never beyond `LeaseRenewalCap` from the issue. The rules refuse to extend a lease that already ran
+out, so the extension is made `renewLead` (half of `LeaseDuration`) before it would: the schedule
+holds one entry (`schedRenew`) for each session endpoint, at the earliest such instant of its
+leases, and `serveLeases`, a step of the loop like `serveBlocked`, extends what is due in one `lease`
+transaction (the transaction a recv writes its leases with, in chunks of `ChunkReplaces`) and plans
+the entry again. The entry is planned again whenever what it reads changes: a record of the
+endpoint, a turn that began or ended, an adapter that was admitted, started or is gone, and once for
+every session when the node begins to serve. While the wall clock is in doubt nothing is extended,
+as nothing is judged expired. A lease the extension missed (the loop was busy for longer than the
+lead, the node was down) simply runs out and is released; the message comes back as a possible
+duplicate, and an acknowledgement that names the earlier page still counts.
+
+`RecvObserved` is how an adapter whose runtime shows the model what recv printed says what the
+model was shown (`recv.observed`), and it is the one place the node acknowledges for someone else.
+It acknowledges only when `handoff.CheckBeforeAck` finds the page the node printed, in full, in
+the text the adapter read from the runtime's record, with the markers the adapter declared; the page
+is the one remembered for the lease (`issuedPage.output`, kept for `pageMemory`), so a lease the
+endpoint was never handed, the page of another endpoint and every page of an earlier run of the node
+are refused as `unknown_lease`: what cannot be compared is not acknowledged, and the agent
+acknowledges by itself or is handed the message again. A result the runtime cut or replaced is
+refused with its reason and nothing is acknowledged. An allowed answer is the acknowledgement of
+every part of the page by `ack`, one transaction, and carries what became of each part. The host
+calls it through `apiwire.AdapterEngine`, which maps an unknown endpoint to the protocol's code.
 
 **The archive sweep.** What has served its retention leaves the live files in a pass
 that a periodic task (`AddArchiveSweep`, registered by the composition root with the
@@ -1003,7 +1035,7 @@ in the order the node takes them; the engine takes part in these:
 | 8 | Management interface opens; reads answer, changes are refused | `Start` |
 | 10 | Adapter instances start and are admitted | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed` |
 | 11 | Check the creation intents and prompt attempts that were not settled | phase `reconcile` of `RecoverDelivery`: creations past their deadline are settled, the others are asked of the adapter again (a creation whose endpoint or initial message is lost is failed instead), and the same for the closes and interrupts, and for the native sessions of closed endpoints that are still owed; every prompt attempt that was in flight is asked of its adapter (`prompt.reconcile`), and none is sent again |
-| 12 | Run `Tick` on every record, release leases whose turn is not active | phase `tick`: the first time a record is ticked after the start, since the schedule holds the ticks back until then (a source delivery still queued or accepted past `report_by` is left open for the pull of step 14) |
+| 12 | Run `Tick` on every record, release the leases that ran out | phase `tick`: the first time a record is ticked after the start, since the schedule holds the ticks back until then (a source delivery still queued or accepted past `report_by` is left open for the pull of step 14) |
 | 13 | Send the feedback that fell due | phase `feedback` |
 | 14 | Go on with the loopback of outgoing messages | phase `outbound`: every unsettled source record is sent or asked about again, and a delivery past `report_by` that waits for its last pull is pulled and closed |
 | 15 | The Agent interface serves in full | `Serve` |
@@ -1416,6 +1448,12 @@ reproducible).
 | Long messages go whole or in parts within the budget, as many acknowledgements as parts shown, delivered only when the last part is acknowledged; a part can be asked for by number | `pull.go` (`pack`, `recvPart`) | `TestLargeMessagesWholeOrPartsAndAckCountsMatch`, `TestAPartOfAMessageCanBeFetchedByNumber` |
 | A long message is cut in the same parts through every front end of its endpoint, and acknowledged normally across them | `pull.go` (`partBudgets`), `adapterreg` (`PartBudgets`) | `TestALongMessageIsCutTheSameThroughEveryFrontEnd` |
 | An acknowledgement of a whole page that the node no longer remembers (after a restart, or past `pageMemory`) acknowledges the messages that fit whole and never a part of a message that was cut | `pull.go` (`itemsToAck`) | `TestAWholePageAcknowledgementAfterThePageIsForgottenAcknowledgesOnlyWhatFitsWhole` |
+| A lease is extended while the endpoint has a turn running, to the cap and no further, and runs out and is released when the turn is over or the cap is reached; a direct endpoint's never is | `lease.go` (`serveLeases`, `renewLeases`, `renewalAt`, `turnActive`), `adapters.go` (`notified`, `markStarted`, `gone`) | `TestLeaseIsRenewedOnlyWhileTheEndpointHasAnActiveTurn` |
+| A lease is extended when the turn is reported after the lease was taken: a turn that starts before the lease of an earlier one runs out, an adapter connected again that reports the turn still running, a node restarted while the turn runs | `lease.go`, `adapters.go` (`notified`, `markStarted`) | `TestLeaseIsRenewedWhenTheTurnIsReportedAfterTheLease` |
+| The four leases of an unacknowledged message each live to the cap, and its delivery is then unknown, told once | `lease.go` | `TestLeaseRenewalCapEndsInDeliveryUnknownOnce` |
+| The longest held message (queue time at the maximum, leased at its end, extended to the cap) is settled before `report_by` and the sender has it before it stops pulling | `lease.go`, `ticks.go` | `TestLongestQueueThenLeaseToTheCapSettlesBeforeReportBy` |
+| A page is acknowledged for the agent only when it is the endpoint's own, remembered, and shown in full; a cut or replaced result, another endpoint's page and text that is not the page are not | `lease.go` (`observed`), `pull.go` (`issuedPage`) | `TestObservedIsAcknowledgedOnlyForTheEndpointsOwnPageSeenInFull`, `TestTruncatedOrReplacedResultIsNotAcknowledged` |
+| Whatever agents do with their pages, every record is closed in the end, and nothing is delivered, or told to its sender as delivered, that the model was not shown whole; the run also reaches leases extended and extended to the cap | `lease.go`, `ticks.go`, `pull.go` | `TestEveryRecordEventuallyCloses` |
 | An endpoint cannot acknowledge a lease it was not handed | `pull.go` (`ack`), `view.go` (`leased`) | `TestOtherEndpointTokenCannotAcknowledge` |
 | The second check is made again at the hand-out, and only for what the page reaches | `pull.go` (`tryPage`, `handoutAuthorization`) | `TestADeclarationTightenedAfterIntakeRejectsAtRecv`, `TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck` |
 | A body that is wrong or gone is settled, not handed out, the others go on | `pull.go` (`pack`), `quarantine.go` (`readBody`) | `TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt` |
@@ -1527,8 +1565,12 @@ Known gaps, each filled in with the feature it belongs to:
   redo what the head does not say is done (a prompt still in flight in the head, a block the
   records hold and the head does not report); phase 12 ticks the target and source records,
   phase 13 sends the feedback that fell due and phase 14 goes on with the outgoing messages.
-  The tick of a target record does not yet wait for an active turn before it lets an expired
-  lease go: `leaseMayRelease` says yes, and the signals of turns are to decide it there.
+  A lease that ran out while the node was down is released at this step even when the agent's turn
+  is still running: the rules cannot extend it, and the agent's acknowledgement under the old page
+  still counts.
+- The page of a recv is remembered in memory only. After a restart `recv.observed` for an earlier
+  page is refused as `unknown_lease`, so the message is acknowledged by the agent itself or handed
+  out again (at most three times, then its delivery is unknown and the sender is told).
 - Prompts go into session endpoints only; a direct endpoint is told that messages wait with
   `endpoint.pending`, which is a different thing (see Announcing).
 - A prompt the adapter accepted (`accepted`) and never made durable with `prompt.persisted` is

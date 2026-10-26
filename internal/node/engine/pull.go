@@ -72,6 +72,9 @@ type issuedPage struct {
 	endpoint ident.EndpointID
 	at       time.Time
 	items    []pageItem
+	// output is the page as recv printed it: what the model has to be shown for an
+	// acknowledgement on the agent's behalf to be allowed (see RecvObserved).
+	output string
 }
 
 type pageItem struct {
@@ -448,7 +451,7 @@ func (e *Engine) writeLeases(now time.Time, endpoint ident.EndpointID, lease del
 		e.view.setIn(in)
 	}
 	if len(p.handed) > 0 {
-		page := &issuedPage{endpoint: endpoint, at: now}
+		page := &issuedPage{endpoint: endpoint, at: now, output: string(p.out)}
 		for _, h := range p.handed {
 			page.items = append(page.items, pageItem{key: h.in.Key, part: h.part})
 		}
@@ -577,7 +580,7 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 		return nil, fmt.Errorf("engine: message %s was judged to be handed out and the delivery rules say %d", in.Key.Message, res.Action)
 	}
 	in.Record = rec
-	p := packed{handed: []pageEntry{{in: in, part: h.Part}}}
+	p := packed{out: page.Output, handed: []pageEntry{{in: in, part: h.Part}}}
 	if err := e.writeLeases(now, st.rec.ID, lease, []store.InRecord{in}, p); err != nil {
 		return nil, err
 	}

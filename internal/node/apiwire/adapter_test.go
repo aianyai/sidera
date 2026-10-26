@@ -106,7 +106,21 @@ func TestTheEngineBehindTheHostOffersNoOptionalPartThatItDoesNotMap(t *testing.T
 	if _, ok := e.(adapterhost.EndpointCalls); ok {
 		t.Error("the engine behind the host offers EndpointCalls, with no mapping of its refusals")
 	}
-	if _, ok := e.(adapterhost.ObservedCalls); ok {
-		t.Error("the engine behind the host offers ObservedCalls, with no mapping of its refusals")
+}
+
+// recv.observed is the one optional part the wrapper maps: a refusal of the engine
+// reaches the adapter as the code the protocol names for it.
+func TestRecvObservedRefusalsAreMappedForTheAdapter(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	oc, ok := apiwire.AdapterEngine(h.Engine()).(adapterhost.ObservedCalls)
+	if !ok {
+		t.Fatal("the engine behind the host does not offer ObservedCalls")
+	}
+	_, err := oc.RecvObserved(h.Ctx(), harness.Instance, adapterproto.RecvObservedParams{
+		Endpoint: "ep1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", Lease: "00000000000000000000000000000001",
+		Frontend: adapterproto.FrontendCLI, Observed: "text",
+	})
+	if pe := wireError(t, err); pe.Code != adapterproto.CodeUnknownEndpoint {
+		t.Errorf("code %d, want %d", pe.Code, adapterproto.CodeUnknownEndpoint)
 	}
 }

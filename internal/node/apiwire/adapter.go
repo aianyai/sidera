@@ -65,6 +65,11 @@ func (a adapterEngine) CheckpointPut(ctx context.Context, instance string, p ada
 	return adapterError(a.e.CheckpointPut(ctx, instance, p))
 }
 
+func (a adapterEngine) RecvObserved(ctx context.Context, instance string, p adapterproto.RecvObservedParams) (adapterproto.RecvObservedResult, error) {
+	res, err := a.e.RecvObserved(ctx, instance, p)
+	return res, adapterError(err)
+}
+
 // adapterCode is what an adapter is told for one reason of the engine.
 type adapterCode struct {
 	code    int

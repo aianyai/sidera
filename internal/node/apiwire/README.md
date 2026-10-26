@@ -18,7 +18,7 @@ not import it: the words of the wire never enter the engine.
 | Name | Purpose |
 | ---- | ------- |
 | `FromError(err)` | The one mapping: an error of the wire as it is, an `*engine.Refusal` by its reason, a `*config.ChangeError` by its reason, a `*strictjson.Error`, a failure of the way to the daemon (`ipc`), and any other error as an internal one. |
-| `AdapterEngine(engine)` | The engine behind the interface the adapter host asks of it (`adapterhost.Engine`): the three methods that answer a request of an adapter (`RegisterDirect`, `UnregisterDirect`, `CheckpointPut`) turn an `*engine.Refusal` into the `*peer.Error` the adapter is answered with, by one row per reason; every other error is passed on untouched. What each code means is in [docs/references/adapter-host](../../../docs/references/adapter-host/README.md). |
+| `AdapterEngine(engine)` | The engine behind the interface the adapter host asks of it (`adapterhost.Engine`): the four methods that answer a request of an adapter (`RegisterDirect`, `UnregisterDirect`, `CheckpointPut` and `RecvObserved`, the one optional part it offers) turn an `*engine.Refusal` into the `*peer.Error` the adapter is answered with, by one row per reason; every other error is passed on untouched. What each code means is in [docs/references/adapter-host](../../../docs/references/adapter-host/README.md). |
 | `FromAdmin(reason)` | The refusal of a request by the administrative rules. |
 | `Error`, `Body`, `New`, `Malformed` | An error as the wire carries it, `{"error":{"category","code","message","details?"}}`. |
 | `EndpointUnknown()`, `OperationUnknown()` | The answers an interface gives without an error of the engine behind them: an address that is no endpoint of this node, and an operation identifier with no stored result. |
@@ -35,9 +35,9 @@ not import it: the words of the wire never enter the engine.
   of the engine; a test fails when a reason has none. The cause a refusal carries is
   never sent. An error that is no refusal is returned as it is: the host answers it
   `-32603` and keeps its text off the wire. The value it returns has the host's methods
-  and nothing else of the engine, on purpose: the host finds the optional parts of the
-  engine (`endpoint.send` and its kin) by asking the value, and a method of the engine
-  that was promoted would be answered in the engine's words.
+  and `ObservedCalls`, which it maps, and nothing else of the engine, on purpose: the host
+  finds the optional parts of the engine (`endpoint.send` and its kin) by asking the value,
+  and a method of the engine that was promoted would be answered in the engine's words.
 - **Refusals with no effect are `node_busy` on the adapter side.** The six that mean
   "not now, nothing was recorded" (node queue full, storage full, storage unavailable,
   clock rollback, loop busy, recovering) are `1012` with data `{"reason":"<name>"}`, the
@@ -85,8 +85,10 @@ not import it: the words of the wire never enter the engine.
 `adapter_internal_test.go`: the table of codes for the requests of an adapter (every
 reason of the engine against rows written out by hand, the limit and the field, the
 cause kept off the wire, errors that are no refusal, and `node_busy` with the
-protocol's own rules, effect rule and list of reasons); `adapter_test.go`: the three requests through a real engine, a
-stopping engine, and the absence of the optional parts. `apiwire_test.go`: every reason of the engine and of `config` against a table
+protocol's own rules, effect rule and list of reasons); `adapter_test.go`: the three requests that answer a refusal through a real engine, a
+stopping engine, the absence of the optional parts the wrapper does not map
+(`EndpointCalls`), and `recv.observed`, the optional part it offers and maps
+(`ObservedCalls`). `apiwire_test.go`: every reason of the engine and of `config` against a table
 written out by hand, the listed codes of `invalid_argument`, the outcome that is not
 known (from a fatal failure of the disk, and judged by a client), the answers an
 interface gives on its own, the details a refusal carries, the faults

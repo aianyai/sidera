@@ -197,6 +197,7 @@ func (e *Engine) admit(instance string, a adapterreg.Admission, info adapterprot
 	// the host reports nothing when it stops an instance, so no AdapterGone need
 	// have cleared it.
 	st.busy, st.snapshot, st.received = nil, nil, time.Time{}
+	e.noteLeasesOfInstance(instance)
 	return start, nil
 }
 
@@ -367,6 +368,7 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 		}
 		setFlag(&st.busy, s.Endpoint, s.TurnActive)
 	}
+	e.noteLeasesOfInstance(instance) // the turns it reports are the ones that extend leases
 	// What the instance was asked to create before its last connection ended may
 	// or may not have been done: it is asked again, with the same attempt.
 	e.redriveCreates(instance, now)
@@ -565,7 +567,8 @@ func (e *Engine) gone(now time.Time, instance string, cause adapterhost.GoneCaus
 	e.adapter(instance).goOffline(now)
 	e.sched.remove(schedKey{schedProbeFallback, instance})
 	e.noteBlockedInstance(instance) // the adapter being away is a cause that has just begun
-	e.promptsDirty = true           // the turns of its sessions no longer count against the cap
+	e.noteLeasesOfInstance(instance)
+	e.promptsDirty = true // the turns of its sessions no longer count against the cap
 	e.log.Info("adapter gone", "instance", instance, "cause", cause.String())
 	return nil
 }
@@ -620,8 +623,10 @@ func (e *Engine) notified(now time.Time, instance string, n adapterhost.Notifica
 	case adapterproto.TurnStartedParams:
 		setFlag(&st.busy, p.Endpoint, true)
 		e.noteTurnStarted(now, p.Endpoint, p.Attempt)
+		e.noteLeasesOfEndpoint(p.Endpoint)
 	case adapterproto.TurnEndedParams:
 		setFlag(&st.busy, p.Endpoint, false)
+		e.noteLeasesOfEndpoint(p.Endpoint)
 		e.interruptTurnEnded(now, p.Endpoint)
 		if id, err := ident.ParseEndpointID(string(p.Endpoint)); err == nil {
 			e.noteTurnEnded(id)
