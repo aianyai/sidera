@@ -412,6 +412,38 @@ nothing is ticked and nothing is judged expired: a clock set back and then moved
 not one to judge a deadline by until the owner has cleared it, and what the node took in
 before the pause stays as it was.
 
+**Damage.** A file of `state/` that does not check out is settled by the store's
+quarantine at the scan entry, first of the rules and one file at a time, each with a
+scan taken after the one before: every other rule reads what a settlement raised,
+overwrote or wrote. What the engine adds is what the delivery rules say about the
+loss. A source record whose first line can be trusted is overwritten with the
+sender's lost record (`delivery.NewLostRecord` for each recipient: `delivery_unknown`,
+cause `lost_at_sender`), and the feedback it owes goes into the queue with it; a source
+file that is all zeros has no record to replace, and the store writes an out-lost
+record that names the sending endpoint, whose one item (`KindLostUnknownMessage`) is
+loaded into the queue at the start and told by one notice that covers it however many
+files were lost; a target record is removed and nothing replaces it, because a target
+keeps no loss: its source learns it from the next pull, in which the target says it holds
+no record. The alert ids are the store's. A damaged file of `ctl/` is the one thing not
+settled: removing it would remove a control signal's record before the pull of
+control signals answers from `ctl/`, so the scan entry still refuses to open and says
+which rule, before it has written anything in that pass, damaged files beside it
+included.
+
+A body that is not what its record says is found when something reads it
+(`readBody`, which the sending of a message uses and the hand-out of a message will
+use). Every body belongs to one record, so that one record is settled by what it still
+needs: a target record that needs it is removed and leaves the view, a source record
+that needs it is replaced by the lost record, a control record or any other record
+that does not keeps its state without the reference; the settlement has an alert of
+its own. A write that
+meets a damaged floor file while it runs (`DamagedFileError`), which is the one
+damaged file a write can meet, has the file settled and is tried again; a damaged
+file of another directory is not settled while the node runs, and the write fails
+with it, logged. The the book of sequence numbers is built again from the disk
+afterwards: a settlement raises floors, and the numbers of the sender must stay above
+everything a lost record could have used.
+
 **Feedback.** What goes wrong with a delivery is told to the endpoint that sent the
 message, once, by a notice of the system endpoint that the endpoint receives like a
 message. The delivery rules decide that feedback is owed, and the write of the record
@@ -491,10 +523,10 @@ in the order the node takes them; the engine takes part in these:
 
 **Recovery.** `PlanRecovery` is a pure function of a scan: what each recovery rule
 has to do. `Open` runs the rules that have work in the order the store fixes
-(`ctl-effect-replay`, `instance-drain-replay`, `orphan-gc-endpoint`,
-`endpoint-drain-replay`, then the replays of prompts, blocks and feedback, then
-`orphan-gc`), works the plan out again from a fresh scan after each rule that
-wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup steps
+(`quarantine` first, then `ctl-effect-replay`, `instance-drain-replay`,
+`orphan-gc-endpoint`, `endpoint-drain-replay`, then the replays of prompts, blocks and
+feedback, then `orphan-gc`), works the plan out again from a fresh scan after each rule
+that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup steps
 11 to 14 as four commands and logs `startup step N begin` and `startup step N end`.
 
 ## Why
@@ -636,8 +668,8 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   one form, so a re-encoding of what was read is the bytes that were read, and the
   fuzz target can assert it. A text that carries a display name or a description is
   not a declaration and is refused.
-- **Recovery work of an unwired rule stops `Open`.** Opening over a damaged file
-  would leave it out of the view as if it were not there, silently. The refusal
+- **Recovery work of an unwired rule stops `Open`.** Opening over a damaged control
+  record would leave it out of the view as if it were not there, silently. The refusal
   names the rule and happens before any write of that pass.
 - **Time is read from the records, by the schedule the view keeps.** A timer for each
   rule of the delivery package would be a second statement of when a record changes;
@@ -665,6 +697,21 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
   its items so that one formed again is the same record and not a second notice. The
   queue is rebuilt from the disk at each start instead of being stored: it would be a
   second copy of what the records and the notices say.
+- **A damaged file is settled before anything reads it, one at a time, and a lost
+  source record is replaced by the sender's, never a target's.** The settlements raise
+  floors, overwrite records and write notices that the next one reads, so each takes a
+  scan after the one before and the quarantine is first of the rules. The record that
+  stands for a lost one of the sender says its deliveries are unknown and owes the
+  sender a notice; a target that lost a record cannot say so, the answer to a pull is
+  the one place the loss shows, and a replacement there would have to claim something
+  the target does not know. `ctl/` is left alone until the pull answers from it: the
+  start is refused, loudly and before anything is written, instead of removing the
+  record of a signal that may have run.
+- **A body is judged where it is read, and the record that owns it is settled
+  there.** Reading every body at the start would cost the whole disk for a rare event,
+  and the one who reads it is the one who needs it; the settlement does not leave
+  the record for the next reader to find. A body belongs to one record, so no other
+  record is affected.
 - **A notice is the system endpoint's, and exempt.** It takes no endpoint backlog
   and passes no capacity check, but it counts in the node's unfinished records, and so
   in the node queue limit. The anomaly it reports would go unheard if a full queue
@@ -769,6 +816,10 @@ reproducible).
 | Contact that keeps failing is told once; twenty messages are one notice; the delivery ends closed after `report_by` | `outbound.go` (`outResult`, `noteContactFailing`) | `TestTwentyToUnreachableTargetMergeIntoOneNotice`, `TestAnUnreachableTargetIsToldOnceAndTheDeliveryClosesAfterReportBy` |
 | Nothing is ticked or judged while the clock is in doubt | `ticks.go` (`tickBatch`), `outbound.go` (`observe`) | `TestClockRollbackPausesSigningUntilCleared`, `TestNoRecordIsNotAnsweredWhileTheNodeMayNotSign` |
 | The records of time survive a crash at every step | `tick` (declared by the store) | `TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint` |
+| A damaged file is settled by the scan entry first of the rules; a source record becomes the sender's lost record, a file lost unread a notice of its loss, a target record is removed; each tells the sender once and raises one alert | `quarantine.go` (`quarantineAll`, `settleFile`, `lostOut`), `recovery.go` | `TestCorruptDeliveryRecordIsReportedToTheSenderOnce`, `TestOpenQuarantinesADamagedFileAndOpens`, `TestQuarantineRecoversFromACrashAtEveryPoint` |
+| A damaged control record stops the start, and everything damaged beside it waits | `recovery.go` (`unwired`, `damagedControl`) | `TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet` |
+| A body that is not what its record says settles that record by what it needs | `quarantine.go` (`readBody`, `quarantineBody`) | `TestBodyWithWrongHashIsQuarantinedAndRecordsTreatedAsLost` |
+| A damaged floor file met by a write is settled and the write goes on; a damaged file of another directory is not settled while the node runs | `quarantine.go` (`settleLive`, `retryingDamaged`, `syncAfterSettlement`) | `TestADamagedFileOtherThanAFloorFileIsNotSettledWhileTheNodeRuns`, `TestADamagedFloorFileMetWhileTheNodeRunsIsSettledAndTheWriteGoesOn` |
 | The view takes what the store returned and agrees with the disk | `drain.go`, `view.go` | `TestViewMatchesAFreshScanAfterWrites` |
 | No method makes a session endpoint | — | `TestEngineHasNoMethodThatMakesASessionEndpoint` |
 | Node rules do not apply to a local sender, declarations do | `inbound.go` (`judgeAuthz`) | `TestLocalSourcesIgnoreNodeRules`, `TestEndpointDeclarationRestrictsLocalSenders`, `TestARemoteSenderIsJudgedByTheNodeRulesAndALocalOneIsNot` |
@@ -792,12 +843,13 @@ reproducible).
 
 Known gaps, each filled in with the feature it belongs to:
 
-- The quarantine of damaged files is not wired, and the scan entry refuses to open
-  while a file is damaged. The store decides which session endpoints a quarantined
+- The quarantine of a damaged control record is not wired, and the scan entry refuses
+  to open while one is there. The store decides which session endpoints a quarantined
   control record closes (every creating one that names it,
   `store.QuarantineSessions`), so the engine passes the scan and no list;
   `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
-  is skipped until the engine wires the quarantine.
+  is skipped until the pull of control signals answers from `ctl/`, and the quarantine
+  of `ctl/` is wired with it.
 - The prompt and block replays and phase 11 of `RecoverDelivery` are empty until the
   features that own them exist; phase 12 ticks the target and source records, phase 13
   sends the feedback that fell due and phase 14 goes on with the outgoing messages. The

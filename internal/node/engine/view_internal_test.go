@@ -349,3 +349,37 @@ func TestViewKnowsAnEndpointIsDrainingWhileDeliveriesAreStillQueuedForItAfterItC
 		}
 	}
 }
+
+// A target record taken out of the view leaves it as if it had never been there:
+// what the view counts, indexes and schedules is what a view built without it holds.
+func TestDroppingATargetRecordLeavesTheViewAsIfItWereNeverThere(t *testing.T) {
+	node := nodeOf(t, 9)
+	to := idOf(t, 4)
+	kept, dropped := inRec(t, 1, to, delivery.StateAccepted), inRec(t, 2, to, delivery.StateAccepted)
+	scan := func(ins ...store.InRecord) *store.Scan { return &store.Scan{In: ins} }
+	v, err := buildView(node, scan(kept, dropped))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told []string
+	v.onTick = func(record string, next time.Time) {
+		if next.IsZero() {
+			told = append(told, record)
+		}
+	}
+	v.dropIn(dropped.Key)
+	v.dropIn(dropped.Key) // a record that is not there changes nothing
+
+	want, err := buildView(node, scan(kept))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.unfinished != want.unfinished || len(v.in) != len(want.in) ||
+		fmt.Sprint(v.backlog) != fmt.Sprint(want.backlog) || len(v.queued[to]) != len(want.queued[to]) ||
+		fmt.Sprint(v.received) != fmt.Sprint(want.received) || fmt.Sprint(v.arrived) != fmt.Sprint(want.arrived) {
+		t.Errorf("the view after the drop differs from the view without the record:\n%+v\n%+v", v, want)
+	}
+	if len(told) != 1 || told[0] != inTick(dropped.Key) {
+		t.Errorf("the schedule was told %v, want that the record has no entry any more", told)
+	}
+}

@@ -216,9 +216,10 @@ signals join the same loop as further commands and add their methods to this lis
 - **Recovery is a plan, then rules.** `PlanRecovery` is a pure function of a scan.
   `Open` runs the rules in the order the store's README fixes, works the plan out
   again from a fresh scan after a rule has written, and repeats until nothing is
-  left. Work of a rule that is not wired yet (the quarantine of damaged files,
+  left. Work of a rule that is not wired yet (the quarantine of a damaged control record,
   the replay of prompts and blocks) makes `Open` return a
-  `PendingRecoveryError` before it writes anything in that pass. The replay of
+  `PendingRecoveryError` before it writes anything in that pass, damaged files of other
+  directories included. The replay of
   feedback is wired: it takes off the source and out-lost records the items a
   notice already covers, and the scan entry loads the queue of feedback only after
   it has run.
@@ -234,6 +235,17 @@ signals join the same loop as further commands and add their methods to this lis
   in one `tick` transaction with the feedback the changes call for. Nothing is ticked
   and nothing is judged expired while the wall clock is in doubt. Control records are
   not ticked here.
+- **A damaged file is settled first, one at a time, and a lost source record is replaced
+  by the sender's.** `quarantineAll` settles the damaged files of the plan but those of
+  `ctl/`, each with a scan taken after the one before, giving the store the scan and the
+  node; a source record whose first line can be trusted gets the lost record
+  (`lostOut`) and a file lost unread the out-lost record the store writes, whose item the
+  queue of feedback loads. A body that is not what its record says (`readBody`, which
+  takes the record that owns it) settles that one record; a write that meets a damaged
+  floor file (`retryingDamaged`) has it settled and is tried again, and the book of
+  sequence numbers is built again from the disk. A damaged file of any other
+  directory is not settled while the node runs: `settleLive` refuses it and the write
+  fails, with a line in the log.
 - **A query that was answered and found no receipt expires a delivery; a call that was
   not answered is a failing contact.** Both are read in the one place the answers are
   read (`applyAnswer`, `outResult`) and applied through
@@ -420,6 +432,9 @@ requirement kept in sight and skipped until the quarantine is wired.
 `feedback_test.go` has the notices (once, within the window and the cap, at the start,
 for a closed endpoint, a full queue, and the crash walk of the writes that tell an
 endpoint) and `feedback_helpers_test.go` reads them from the disk;
+`quarantine_scenarios_test.go` what a loss of a record or a body tells the sender and
+the owner, what a running node settles and what it leaves for the start, and the crash
+walk of its settlement;
 `feedback_internal_test.go` the key of a notice and the putting back of one that
 could not be written; `expiry_test.go` what the passing of time does to a delivery
 (backlog expiry, the expiry of a delivery with no receipt, failing contact, closing

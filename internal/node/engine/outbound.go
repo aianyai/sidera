@@ -517,7 +517,7 @@ func (e *Engine) encodeFor(now time.Time, o store.OutRecord, node ident.NodeID) 
 	var body []byte
 	if o.Body != nil {
 		var err error
-		if body, err = e.d.Store.ReadBody(o.Name(), *o.Body); err != nil {
+		if body, err = e.readBody(now, o, *o.Body); err != nil {
 			return nil, err
 		}
 	}

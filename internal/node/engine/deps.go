@@ -52,6 +52,8 @@ type Store interface {
 	EndpointDrainReplay(b store.DrainBatch) ([]store.InRecord, error)
 	OrphanGC(bodies []string) error
 
+	Quarantine(q store.Quarantine) error
+	QuarantineBody(q store.BodyQuarantine) (*store.InRecord, error)
 	Tick(b store.TickBatch) ([]store.InRecord, error)
 	FeedbackForm(body []byte, notice store.InRecord) (store.InRecord, error)
 	FeedbackClear(outs []store.OutRecord) error

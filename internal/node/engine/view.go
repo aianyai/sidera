@@ -146,12 +146,7 @@ func buildView(node ident.NodeID, sc *store.Scan) (*view, error) {
 		v.setOut(o)
 	}
 	v.alerts = append(v.alerts, sc.Alerts...)
-	sort.SliceStable(v.alerts, func(i, j int) bool {
-		if !v.alerts[i].At.Equal(v.alerts[j].At) {
-			return v.alerts[i].At.Before(v.alerts[j].At)
-		}
-		return v.alerts[i].ID.String() < v.alerts[j].ID.String()
-	})
+	sortAlerts(v.alerts)
 	return v, nil
 }
 
@@ -165,6 +160,30 @@ func (v *view) putEndpoint(rec store.EndpointRecord, decl authz.Declaration) {
 		return
 	}
 	v.tokens.add(rec.ID, rec.Token)
+}
+
+// noteAlerts takes the alerts of a scan that the view does not hold yet, which a
+// settlement of damage wrote, keeping the order the view lists them in.
+func (v *view) noteAlerts(alerts []store.AlertRecord) {
+	added := false
+	for _, a := range alerts {
+		if !slices.ContainsFunc(v.alerts, func(x store.AlertRecord) bool { return x.ID == a.ID }) {
+			v.alerts = append(v.alerts, a)
+			added = true
+		}
+	}
+	if added {
+		sortAlerts(v.alerts)
+	}
+}
+
+func sortAlerts(alerts []store.AlertRecord) {
+	sort.SliceStable(alerts, func(i, j int) bool {
+		if !alerts[i].At.Equal(alerts[j].At) {
+			return alerts[i].At.Before(alerts[j].At)
+		}
+		return alerts[i].ID.String() < alerts[j].ID.String()
+	})
 }
 
 // putResult records the stored result of an administrative operation as it is on

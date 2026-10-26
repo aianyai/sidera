@@ -108,15 +108,16 @@ func (p RecoveryPlan) Empty() bool { return len(p.Items()) == 0 }
 
 // unwired is the first rule of the plan that has work and that is not
 // wired yet, with how many things it has to do; ok is false when there is none.
-// The quarantine of a damaged file forms the replacement of a lost delivery and
-// the feedback it causes, and the replays of a prompt and of a block belong to the
+// The quarantine of a damaged control record is not wired: it removes the file of a
+// control signal's record, which the pull of control signals must answer from
+// before it may go, and the replays of a prompt and of a block belong to the
 // prompts: each is filled in with the feature that writes what it replays.
 func (p RecoveryPlan) unwired() (rule string, items int, ok bool) {
 	for _, r := range []struct {
 		name string
 		n    int
 	}{
-		{"quarantine", len(p.Quarantine)},
+		{"quarantine", len(p.damagedControl())},
 		{"prompt-replay", len(p.PromptReplay)},
 		{"blocked-replay", len(p.BlockedReplay)},
 	} {
@@ -125,6 +126,17 @@ func (p RecoveryPlan) unwired() (rule string, items int, ok bool) {
 		}
 	}
 	return "", 0, false
+}
+
+// damagedControl is the damaged files of ctl/ in the plan.
+func (p RecoveryPlan) damagedControl() []store.DamagedFile {
+	var out []store.DamagedFile
+	for _, d := range p.Quarantine {
+		if d.Dir == store.CtlDir {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // PendingRecoveryError is the refusal of the scan entry to open over work of a
@@ -222,6 +234,8 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 		work func(RecoveryPlan) int
 		do   func(sc *store.Scan, plan RecoveryPlan, now time.Time) error
 	}{
+		{"quarantine", func(p RecoveryPlan) int { return len(p.Quarantine) - len(p.damagedControl()) },
+			func(_ *store.Scan, p RecoveryPlan, now time.Time) error { return e.quarantineAll(now, p.Quarantine) }},
 		{"ctl-effect-replay", func(p RecoveryPlan) int { return len(p.CtlEffectReplay) },
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
 				return e.d.Store.CtlEffectReplay(p.CtlEffectReplay)
