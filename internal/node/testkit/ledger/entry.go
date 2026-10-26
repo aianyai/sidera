@@ -62,6 +62,7 @@ type Attrs struct {
 	MessageID         string  `json:"message_id,omitempty"`
 	Part              int     `json:"part,omitempty"`
 	Parts             int     `json:"parts,omitempty"`
+	Count             int     `json:"count,omitempty"`
 	PossiblyDuplicate *bool   `json:"possibly_duplicate,omitempty"`
 	BodyDigest        string  `json:"body_digest,omitempty"`
 	From              string  `json:"from,omitempty"`

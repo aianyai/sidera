@@ -5,16 +5,17 @@ import "slices"
 // The kinds of entry. A kind says what happened and who writes it.
 const (
 	// Written by an adapter.
-	KindAdapterStarted        = "adapter.started"
-	KindAdapterLockAcquired   = "adapter.lock.acquired"
-	KindAdapterLockRefused    = "adapter.lock.refused"
-	KindSessionCreateReceived = "session.create.received"
-	KindNativeCreateReturned  = "native.create.returned"
-	KindPromptDeliverReceived = "prompt.deliver.received"
-	KindPromptForwarded       = "prompt.forwarded"
-	KindInterruptReceived     = "interrupt.received"
-	KindCloseReceived         = "close.received"
-	KindObservedSent          = "observed.sent"
+	KindAdapterStarted          = "adapter.started"
+	KindAdapterLockAcquired     = "adapter.lock.acquired"
+	KindAdapterLockRefused      = "adapter.lock.refused"
+	KindSessionCreateReceived   = "session.create.received"
+	KindNativeCreateReturned    = "native.create.returned"
+	KindPromptDeliverReceived   = "prompt.deliver.received"
+	KindPromptForwarded         = "prompt.forwarded"
+	KindInterruptReceived       = "interrupt.received"
+	KindCloseReceived           = "close.received"
+	KindEndpointPendingReceived = "endpoint.pending.received"
+	KindObservedSent            = "observed.sent"
 	// Written by an adapter, a runtime or the fixture when a knob is used.
 	KindKnobHit = "knob.hit"
 	// Written by a runtime.
@@ -47,17 +48,18 @@ func (s kindSpec) allows(name string) bool {
 // kindSpecs is the table of attributes by kind. Bodies of messages are never
 // attributes: a digest stands for a body.
 var kindSpecs = map[string]kindSpec{
-	KindAdapterStarted:        {required: []string{"instance"}},
-	KindAdapterLockAcquired:   {required: []string{"instance", "lock_path"}},
-	KindAdapterLockRefused:    {required: []string{"instance", "lock_path"}},
-	KindSessionCreateReceived: {required: []string{"attempt", "preset"}, optional: []string{"endpoint"}},
-	KindNativeCreateReturned:  {required: []string{"attempt", "outcome"}, optional: []string{"native_ref", "runtime_writer", "runtime_seq"}},
-	KindPromptDeliverReceived: {required: []string{"endpoint", "attempt", "text_digest"}},
-	KindPromptForwarded:       {required: []string{"endpoint", "attempt", "text_digest"}},
-	KindInterruptReceived:     {required: []string{"endpoint"}},
-	KindCloseReceived:         {required: []string{"endpoint"}},
-	KindObservedSent:          {required: []string{"lease", "mode", "verdict"}},
-	KindKnobHit:               {required: []string{"knob"}, optional: []string{"detail"}},
+	KindAdapterStarted:          {required: []string{"instance"}},
+	KindAdapterLockAcquired:     {required: []string{"instance", "lock_path"}},
+	KindAdapterLockRefused:      {required: []string{"instance", "lock_path"}},
+	KindSessionCreateReceived:   {required: []string{"attempt", "preset"}, optional: []string{"endpoint"}},
+	KindNativeCreateReturned:    {required: []string{"attempt", "outcome"}, optional: []string{"native_ref", "runtime_writer", "runtime_seq"}},
+	KindPromptDeliverReceived:   {required: []string{"endpoint", "attempt", "text_digest"}},
+	KindPromptForwarded:         {required: []string{"endpoint", "attempt", "text_digest"}},
+	KindInterruptReceived:       {required: []string{"endpoint"}},
+	KindCloseReceived:           {required: []string{"endpoint"}},
+	KindEndpointPendingReceived: {required: []string{"endpoint", "count"}},
+	KindObservedSent:            {required: []string{"lease", "mode", "verdict"}},
+	KindKnobHit:                 {required: []string{"knob"}, optional: []string{"detail"}},
 
 	KindRuntimeSessionCreated: {required: []string{"attempt", "native_ref"}, optional: []string{"cwd", "pid"}},
 	KindRuntimePromptReceived: {required: []string{"attempt", "text_digest"}},

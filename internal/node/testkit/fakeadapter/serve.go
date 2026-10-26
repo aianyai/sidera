@@ -346,6 +346,9 @@ func (a *adapter) endpointPending(_ context.Context, raw json.RawMessage) {
 	if err := adapterproto.Decode(raw, &p); err != nil {
 		return
 	}
+	// A notification has no answer to carry a failure, and a ledger that cannot be
+	// written fails the test through the next request that writes to it.
+	_ = a.log(ledger.KindEndpointPendingReceived, ledger.Attrs{Endpoint: string(p.Endpoint), Count: p.Count})
 }
 
 // outcome returns the knob outcome for the next request of a kind, if any, after

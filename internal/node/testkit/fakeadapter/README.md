@@ -28,7 +28,7 @@ three operating systems and both tag sets.
 It answers every method the daemon may call: `initialize` (taking the instance lock
 before it answers), `ping`, `shutdown`, `adapter.start`, `adapter.probe`,
 `session.create`, `prompt.deliver`, `prompt.reconcile`, `session.interrupt`,
-`session.close`, and `endpoint.pending`. It calls `checkpoint.put` while it creates a
+`session.close`, and `endpoint.pending`, which it writes to the ledger with its count. It calls `checkpoint.put` while it creates a
 session, sends `turn.started`, `turn.ended` and `adapter.availability`, and, from its
 knobs, `prompt.persisted`, `native_request.handled` and the `endpoint.*` methods of a
 chat bridge. It reports a recv result with `recv.observed` when it declared that it

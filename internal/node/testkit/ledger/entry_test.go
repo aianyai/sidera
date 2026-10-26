@@ -202,7 +202,7 @@ func TestKindTableCoversEveryKind(t *testing.T) {
 	want := []string{
 		"adapter.started", "adapter.lock.acquired", "adapter.lock.refused",
 		"session.create.received", "native.create.returned",
-		"prompt.deliver.received", "prompt.forwarded", "interrupt.received", "close.received",
+		"prompt.deliver.received", "prompt.forwarded", "interrupt.received", "close.received", "endpoint.pending.received",
 		"observed.sent", "knob.hit",
 		"runtime.session.created", "runtime.prompt.received", "runtime.turn.started", "runtime.turn.ended",
 		"runtime.interrupted", "runtime.closed", "runtime.killed",
