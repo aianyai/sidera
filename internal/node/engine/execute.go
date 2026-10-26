@@ -245,7 +245,7 @@ func (e *Engine) instanceOfEndpoint(st *endpointState) string {
 func (e *Engine) interruptTurnEnded(now time.Time, ref adapterproto.EndpointRef) {
 	for _, key := range e.executionKeys() {
 		c, ok := e.executing(key)
-		if !ok || !e.executions[key].requested || adapterproto.EndpointRef(c.Key.Recipient.String()) != ref {
+		if x := e.executions[key]; !ok || x == nil || !x.requested || adapterproto.EndpointRef(c.Key.Recipient.String()) != ref {
 			continue
 		}
 		e.settleExecution(now, c, envelope.ControlResult{
