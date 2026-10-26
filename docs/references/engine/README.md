@@ -187,7 +187,8 @@ enabled instance (`adapter_in_use`: the instance runs the version that is curren
 and commits one transaction, `adapter-install`: discard a leftover directory of the
 version, rename the copy to the version, replace the pointer (the commit point), store
 the result, discard the previous version. A package whose version is already the
-current one stores only its result (`adapter-install-current`). Last, the worker drops
+current one stores only its result (`adapter-install-current`), and `AdapterInstalled.AlreadyCurrent`
+lets the interface say so in that result. Last, the worker drops
 what the commit did not take over (a refusal, a version found current, a resend that was
 answered) and only then is the request answered, so that a refused package leaves
 nothing and the answer never comes with staging still on the disk. A crash before the

@@ -118,6 +118,13 @@ func TestAnAdapterInstalledAndEnabledThroughTheManagementInterfaceIsStartedProbe
 	if want := `{"adapter":{"id":"relay","version":"` + opts.Version + `"}}`; string(installed.Result) != want || installed.Replayed {
 		t.Fatalf("the installation: %s (replayed %v), want %s", installed.Result, installed.Replayed, want)
 	}
+	// the version that is installed, installed again by another request, says that
+	// nothing was replaced; the resend of the first request keeps the result it had
+	status, body = manage(t, c.Home, "adapters.install", map[string]any{"operation_id": opID(4), "params": map[string]any{"source": src}})
+	current := answerOf(t, status, body)
+	if want := `{"adapter":{"id":"relay","version":"` + opts.Version + `"},"already_current":true}`; string(current.Result) != want || current.Replayed {
+		t.Fatalf("the installation of the current version: %s (replayed %v), want %s", current.Result, current.Replayed, want)
+	}
 	if err := os.RemoveAll(src); err != nil {
 		t.Fatal(err)
 	}

@@ -52,18 +52,18 @@ var adaptersInstall = &method{
 			return nil, apiwire.Malformed("the package is named by an absolute path", "params.source")
 		}
 		op := engine.InstallAdapterOp(p.Source, func(a engine.AdapterInstalled) ([]byte, error) {
-			return json.Marshal(struct {
-				Adapter struct {
-					ID      string `json:"id"`
-					Version string `json:"version"`
-				} `json:"adapter"`
-			}{Adapter: struct {
-				ID      string `json:"id"`
-				Version string `json:"version"`
-			}{a.ID, a.Version}})
+			return json.Marshal(installResult{Adapter: installedJSON{ID: a.ID, Version: a.Version}, AlreadyCurrent: a.AlreadyCurrent})
 		})
 		return &plan{canonical: canonical(p), operation: op}, nil
 	},
+}
+
+// installResult is the result of adapters.install: the adapter and version that are
+// installed, and, only when the version was already the current one and nothing
+// was replaced, already_current.
+type installResult struct {
+	Adapter        installedJSON `json:"adapter"`
+	AlreadyCurrent bool          `json:"already_current,omitempty"`
 }
 
 // adapters.list: the installed adapters, the instances and the probe of each enabled
