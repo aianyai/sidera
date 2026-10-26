@@ -1,0 +1,18 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the data holds the reason and nothing else",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": 1012,
+      "message": "busy",
+      "data": {
+        "reason": "loop_busy",
+        "retry_after": 1
+      }
+    }
+  }
+}

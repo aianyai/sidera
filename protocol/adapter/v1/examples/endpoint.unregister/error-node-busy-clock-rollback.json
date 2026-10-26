@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 154,
+  "error": {
+    "code": 1012,
+    "message": "the node's clock was set back",
+    "data": {
+      "reason": "clock_rollback"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 152,
+  "error": {
+    "code": 1012,
+    "message": "the node has no room left to record the request",
+    "data": {
+      "reason": "storage_full"
+    }
+  }
+}

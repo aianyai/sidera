@@ -24,6 +24,7 @@ const (
 	CodeSendRefused           = 1009 // data: {reason}
 	CodeLeaseUnknown          = 1010 // the lease does not belong to the endpoint
 	CodeInstanceLocked        = 1011 // another process holds the instance lock
+	CodeNodeBusy              = 1012 // the node refused the request before any effect and it may be sent again later; data: {reason}
 )
 
 // ErrorCode pairs a code with its name.
@@ -46,6 +47,7 @@ func ApplicationCodes() []ErrorCode {
 		{CodeSendRefused, "send_refused"},
 		{CodeLeaseUnknown, "lease_unknown"},
 		{CodeInstanceLocked, "instance_locked"},
+		{CodeNodeBusy, "node_busy"},
 	}
 }
 
@@ -82,17 +84,56 @@ type SendRefusedData struct {
 }
 
 // Validate checks the data.
-func (d SendRefusedData) Validate() error {
-	if err := strLen(d.Reason, 1, 64); err != nil {
+func (d SendRefusedData) Validate() error { return reasonWordOK(d.Reason) }
+
+// reasonWordOK checks a reason word, the open name of why a node refused: a short
+// snake_case word that a reader takes as it is, known or not.
+func reasonWordOK(s string) error {
+	if err := strLen(s, 1, 64); err != nil {
 		return err
 	}
-	return matches(reasonWordRE, d.Reason)
+	return matches(reasonWordRE, s)
 }
+
+// BusyReason says which refusal made the node answer with CodeNodeBusy. The
+// reason is an open word, as the reason of a send-refused error is: a reader that
+// does not know one treats it as busy with no further hint, because what to do is
+// decided by the code alone (the request had no effect, and sending it again
+// later is safe). The constants are the reasons this version of the node sends;
+// they are the names the engine gives its refusals, so nothing is translated on
+// the way to the adapter. A name once sent is never renamed, removed or reused.
+type BusyReason string
+
+const (
+	BusyNodeQueueFull      BusyReason = "node_queue_full"     // the node holds as many unfinished deliveries as it may
+	BusyStorageFull        BusyReason = "storage_full"        // the volume has no room left for the write
+	BusyStorageUnavailable BusyReason = "storage_unavailable" // a write failed in a way a retry may cure
+	BusyClockRollback      BusyReason = "clock_rollback"      // the node's clock was set back and the owner has not cleared it
+	BusyLoopBusy           BusyReason = "loop_busy"           // the node did not take the request in time
+	BusyRecovering         BusyReason = "recovering"          // the node is still starting
+)
+
+var busyReasons = []BusyReason{BusyNodeQueueFull, BusyStorageFull, BusyStorageUnavailable, BusyClockRollback, BusyLoopBusy, BusyRecovering}
+
+// BusyReasons lists the reasons this version of the node sends in a node_busy
+// error, in order. A reader accepts any reason word, so the list constrains the
+// sender only.
+func BusyReasons() []string { return strs(busyReasons) }
+
+// BusyData is the data of a node-busy error: why the node refused the request.
+// The request had no effect, and sending it again later is safe.
+type BusyData struct {
+	Reason BusyReason `json:"reason"`
+}
+
+// Validate checks that the reason is a word; whether this version sends it is
+// not a reader's concern.
+func (d BusyData) Validate() error { return at("reason", reasonWordOK(string(d.Reason))) }
 
 // ErrorObject is the "error" member of an error response: the JSON-RPC error
 // object of package peer, which owns its shape, with the protocol's rules for
 // it. Data is required, in a defined shape, for the codes that define one:
-// peer.CodeUnsupportedProtocolVersion, CodeInvalidAddress and CodeSendRefused.
+// peer.CodeUnsupportedProtocolVersion, CodeInvalidAddress, CodeSendRefused and CodeNodeBusy.
 // Any other code may carry data, which must be a JSON object: libraries attach
 // details to -32602 and -32603 routinely, and a reader that refused them would
 // turn a useful error into a protocol violation. Convert with (*peer.Error)(&e) to hand one to a peer.
@@ -114,6 +155,8 @@ func (e ErrorObject) Validate() error {
 		data = new(InvalidAddressData)
 	case CodeSendRefused:
 		data = new(SendRefusedData)
+	case CodeNodeBusy:
+		data = new(BusyData)
 	default:
 		if e.Data == nil {
 			return nil

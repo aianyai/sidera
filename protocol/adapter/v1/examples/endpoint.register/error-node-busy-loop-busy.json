@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 151,
+  "error": {
+    "code": 1012,
+    "message": "the node did not take the request in time",
+    "data": {
+      "reason": "loop_busy"
+    }
+  }
+}

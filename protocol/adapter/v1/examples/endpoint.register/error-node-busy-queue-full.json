@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 150,
+  "error": {
+    "code": 1012,
+    "message": "the node holds as many unfinished deliveries as it may",
+    "data": {
+      "reason": "node_queue_full"
+    }
+  }
+}

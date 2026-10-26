@@ -76,11 +76,12 @@
         { "const": 1008, "title": "invalid_address" },
         { "const": 1009, "title": "send_refused" },
         { "const": 1010, "title": "lease_unknown" },
-        { "const": 1011, "title": "instance_locked" }
+        { "const": 1011, "title": "instance_locked" },
+        { "const": 1012, "title": "node_busy" }
       ]
     },
     "ErrorObject": {
-      "description": "Data is an object. Three codes define its shape and require it; any other code may carry an object of the sender's choosing, as JSON-RPC libraries attach details to -32602 and -32603.",
+      "description": "Data is an object. Four codes define its shape and require it; any other code may carry an object of the sender's choosing, as JSON-RPC libraries attach details to -32602 and -32603.",
       "type": "object",
       "required": ["code", "message"],
       "additionalProperties": false,
@@ -101,6 +102,10 @@
         {
           "if": { "properties": { "code": { "const": 1009 } }, "required": ["code"] },
           "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/SendRefusedData" } } }
+        },
+        {
+          "if": { "properties": { "code": { "const": 1012 } }, "required": ["code"] },
+          "then": { "required": ["data"], "properties": { "data": { "$ref": "#/$defs/BusyData" } } }
         }
       ]
     },
@@ -120,6 +125,13 @@
       "properties": { "field": { "type": "string", "minLength": 1, "maxLength": 128 } }
     },
     "SendRefusedData": {
+      "type": "object",
+      "required": ["reason"],
+      "additionalProperties": false,
+      "properties": { "reason": { "$ref": "types.schema.json#/$defs/ReasonWord" } }
+    },
+    "BusyData": {
+      "description": "Why the node refused the request. The request had no effect; sending it again later is safe, whatever the reason: a reader treats a reason it does not know as busy with no further hint.",
       "type": "object",
       "required": ["reason"],
       "additionalProperties": false,

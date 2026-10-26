@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 153,
+  "error": {
+    "code": 1012,
+    "message": "the node could not record the request now",
+    "data": {
+      "reason": "storage_unavailable"
+    }
+  }
+}

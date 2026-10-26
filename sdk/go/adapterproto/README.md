@@ -22,6 +22,7 @@ for what each message means and why the protocol is shaped this way.
 | `CancelRequestParams`, `MethodCancelRequest` | The params and name of `$/cancel_request`, which belong to the `peer` package together with the request id rule; listed here so the method table is complete |
 | `EnumTables()`, `Patterns()`, `ApplicationCodes()` | The vocabularies the schema is compared with |
 | `ErrorObject` | The `error` member of a response: `peer.Error` with the protocol's rules for its code, message and data |
+| `CodeNodeBusy`, `BusyData`, `BusyReasons()` | The code of a request the node refused before any effect and that may be sent again later, its required data `{reason}` (any reason word is accepted) and the reasons this version of the node sends |
 | `ControlReply` and the `Control*` enums | The replies to the control signals, with their numeric codes |
 
 ## Rules

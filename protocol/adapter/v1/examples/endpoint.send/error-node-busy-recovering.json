@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 155,
+  "error": {
+    "code": 1012,
+    "message": "the node is still starting",
+    "data": {
+      "reason": "recovering"
+    }
+  }
+}

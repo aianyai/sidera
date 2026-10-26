@@ -121,7 +121,7 @@ The error codes of the peer layer are constants in `sdk/go/peer/errors.go`
 `-32004` line too long, `-32022` unsupported protocol version, `-32800` request
 cancelled; codes 1001 to 1099 are the application range, whose individual
 meanings belong to the protocol above the peer (`adapterproto` defines 1001 to
-1011). The codes below 1000 and the effect rule are defined here and nowhere
+1012). The codes below 1000 and the effect rule are defined here and nowhere
 else: the message layer and the daemon refer to `peer`.
 
 **The effect rule.** An error response says whether the request did anything.
@@ -394,7 +394,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Two
+reader of an earlier shape is deployed that the change could break. Three
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -402,7 +402,11 @@ have sent to a new version:
   does not know the name, so it refuses the whole result that carries it;
 - the manifest member `recv_wait_limits`, a new member of the manifest object.
   An older daemon decodes the manifest strictly and refuses a manifest that has
-  the member.
+  the member;
+- the application code `node_busy` (`1012`). An older SDK's peer reads it as an
+  application code it has no name for, which the effect rule already treats as
+  no effect; only a reader that checks the error object against its own code
+  table (`ErrorObject.Validate`) refuses it.
 
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,
@@ -490,7 +494,7 @@ schema (`minLength: 1`) and `PageMessage.Validate` refuse a page that holds it
 **Errors.** Codes `-32700` to `-32600` and `-32603` are JSON-RPC's; `-32001`
 to `-32004`, `-32022` and `-32800` are the implementation-defined range; both
 groups are defined by the peer layer (`peer.Code*`) and listed here to be read
-with the rest. `1001` to `1011` are the protocol's own (`adapterproto.Code*`):
+with the rest. `1001` to `1012` are the protocol's own (`adapterproto.Code*`):
 
 | Code | Name | Meaning |
 | ---- | ---- | ------- |
@@ -516,8 +520,9 @@ with the rest. `1001` to `1011` are the protocol's own (`adapterproto.Code*`):
 | 1009 | send_refused | the local intake refused the message; `data`: `{reason}`, a snake_case word |
 | 1010 | lease_unknown | the lease does not belong to the endpoint |
 | 1011 | instance_locked | another process holds the instance lock |
+| 1012 | node_busy | the node refused the request before any effect because it could not take it now (back pressure, a failing volume, a node still starting), and sending it again later is safe; `data`: `{reason}`, a snake_case word; a reader treats a reason it does not know as busy with no further hint, and a name once sent is never renamed, removed or reused (this version sends `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy`, `recovering`) |
 
-An error may carry `data`, always an object. The three codes marked above define
+An error may carry `data`, always an object. The four codes marked above define
 its shape and require it; any other code may carry an object of the sender's
 choosing, which a reader may show or log but must not act on.
 
@@ -560,7 +565,7 @@ is authoritative.
 - **Data is allowed on any error code.** JSON-RPC libraries attach details to
   `-32602` and `-32603` routinely; a reader that refused them would turn a useful
   error into a protocol violation, and the sender of such an error could not
-  tell which of its replies a peer would reject. Only the three codes whose
+  tell which of its replies a peer would reject. Only the four codes whose
   receiver acts on the data fix its shape; the object for any other code is
   for people.
 - **Strictness fails closed, and capabilities are the one open place.** A
@@ -588,6 +593,26 @@ is authoritative.
   where `backlog_expired` means a message that was accepted and then waited too
   long, and `endpoint_declined` means the endpoint refused this sender or
   message, where `backlog_full` means the endpoint's own queue was full.
+- **Back pressure has a code of its own, `node_busy`.** The node says "not now,
+  nothing was recorded" for a full queue, a full or failing volume, a clock set
+  back, a loop that did not take the command in time and a node that is still
+  starting. No existing code says that truthfully. `-32001` is the peer's
+  promise that the request was refused before it was queued and the handler did
+  not run, and the peer's retry argument rests on it; it describes the peer's
+  own queue, and widening it to the node's state would make that promise depend
+  on a daemon-side judgement. `1007` is the direct-endpoint limit: an adapter
+  reads it as a limit it can stop hitting by closing endpoints, which is false
+  for `endpoint.send` and `checkpoint.put`. `-32603` leaves the outcome
+  unknown, which is the reconcile path for a request that certainly did
+  nothing. `node_busy` is an application code, so the effect rule already reads
+  it as no effect. Its `data` is required and carries an open reason word, as
+  `send_refused` does: the action (no effect, retry later) is decided by the
+  code alone, and the reason only tells a person or a log why, so a reader
+  treats a reason it does not know as busy with no further hint and a node can
+  name a new reason without a new protocol version. A name once sent is never
+  renamed, removed or reused, because a sender that stored one must still read
+  it later. A failure whose outcome is not known (a fatal storage error) is not
+  back pressure and stays `-32603`.
 - **Rejected:** per-request version metadata (the connection is long-lived and
   stateful, so one negotiation is enough); streaming the model's output (the
   channel does not read it); forwarding permission requests to the daemon
@@ -611,8 +636,9 @@ is authoritative.
   `TestDecodeTypeErrorPaths`, `TestDecodeRefusalOfATypeThatDecodesItselfHasPath`,
   `FuzzDecodeTypeErrorsHavePaths`.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
-  `TestRejectReasonTable`, `TestEnumNamesMatchContractPackages` (the reasons are
-  the delivery package's own names), `TestErrorObjectKnowsEveryCode`,
+  `TestBusyReasonTable`, `TestNodeBusyIsNoEffect`, `TestRejectReasonTable`,
+  `TestEnumNamesMatchContractPackages` (the reasons are the delivery package's
+  own names), `TestErrorObjectKnowsEveryCode`,
   `TestErrorObjectValidate`, `TestCapabilitiesAreOpen`, `TestDecodeStrictness`,
   the `Test*Rules` tables (one row per rule), `FuzzDecodeMessages`.
 

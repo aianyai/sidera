@@ -1,0 +1,15 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "a node_busy reason is required",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": 1012,
+      "message": "busy",
+      "data": {}
+    }
+  }
+}

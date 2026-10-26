@@ -1,0 +1,17 @@
+{
+  "expect": "both",
+  "kind": "error",
+  "method": "",
+  "note": "the reason of node_busy is a snake_case word, not a sentence",
+  "document": {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "error": {
+      "code": 1012,
+      "message": "busy",
+      "data": {
+        "reason": "Disk full"
+      }
+    }
+  }
+}
