@@ -240,8 +240,7 @@ func TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten(t *testing.T) 
 			t.Fatalf("damaged files = %v, want the floor file first, then the source record", sc.Damaged)
 		}
 		out := sc.Damaged[1]
-		id := alertFor(out.Dir, out.Name)
-		err := r.st.Quarantine(store.Quarantine{File: out, Scan: sc, Replacement: lostOutAt(out.Key.(store.OutKey), base), Alert: newSim(t, r.st).alert(id, "corrupt_record", out.Dir+"/"+out.Name)})
+		err := r.st.Quarantine(store.Quarantine{File: out, Scan: sc, Replacement: lostOutAt(out.Key.(store.OutKey), base), Alert: newSim(t, r.st).alert("corrupt_record", out.Dir, out.Name)})
 		wantDamaged(t, "Quarantine", err)
 		if diff := equalMaps(snapshot(t, r.mem, "."), before, nil); diff != "" {
 			t.Errorf("a quarantine that could not read the floor file wrote something: %s", diff)
@@ -253,7 +252,7 @@ func TestDamagedFloorFileMetByAWriteIsReportedAndNothingIsWritten(t *testing.T) 
 		damageBody(t, r.mem, path.Join(store.OutDir, srcOutFinished(2).Name()))
 		newSim(t, r.st).recoverAll()
 		sc := r.scan()
-		if len(sc.Damaged) != 0 || !hasAlert(sc, alertFor(store.SeqDir, floorName), "corrupt_record") {
+		if len(sc.Damaged) != 0 || !hasAlert(sc, store.SeqDir, floorName, "corrupt_record") {
 			t.Fatalf("the floor file was not settled with an alert: damaged %v, alerts %v", sc.Damaged, sc.Alerts)
 		}
 		if out, _, _ := find(t, sc, srcOutFinished(2).Name()); out == nil || out.Lost == nil {

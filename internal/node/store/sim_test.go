@@ -47,17 +47,23 @@ func (s *sim) must(err error, what string) {
 	}
 }
 
-// alertFor is the alert ID of the settlement of a file: derived from its name, so
-// that a settlement repeated after a crash writes the same alert.
-func alertFor(dir, name string) store.AlertID {
-	h := sha256.Sum256([]byte(dir + "/" + name))
-	var id store.AlertID
-	copy(id[:], h[:16])
-	return id
+// alert is the alert a caller gives the settlement of a file or record of dir.
+func (s *sim) alert(kind, dir, name string) store.QuarantineAlert {
+	subject := dir + "/" + name
+	return store.QuarantineAlert{Kind: kind, At: s.now, Detail: "damaged: " + subject, Subject: subject}
 }
 
-func (s *sim) alert(id store.AlertID, kind, subject string) store.AlertRecord {
-	return store.AlertRecord{ID: id, Kind: kind, At: s.now, Detail: "damaged: " + subject, Subject: subject}
+// alertOf is the alert record the settlement of dir/name writes when what shows
+// the damage is evidence: the bytes of a damaged file, or the name of the body
+// that does not match. It restates how the store derives the id, so that a test
+// can name the alert file a settlement must write.
+func alertOf(a store.QuarantineAlert, dir, name string, evidence []byte) store.AlertRecord {
+	h := sha256.New()
+	h.Write([]byte(dir + "\x00" + name + "\x00"))
+	h.Write(evidence)
+	var id store.AlertID
+	copy(id[:], h.Sum(nil))
+	return store.AlertRecord{ID: id, Kind: a.Kind, At: a.At, Detail: a.Detail, Subject: a.Subject}
 }
 
 func (s *sim) lostOut(k store.OutKey) store.OutRecord { return lostOutAt(k, s.now) }
@@ -105,7 +111,7 @@ func (s *sim) pass() bool {
 				kindName = "control_unknown"
 			}
 		}
-		q.Alert = s.alert(alertFor(d.Dir, d.Name), kindName, d.Dir+"/"+d.Name)
+		q.Alert = s.alert(kindName, d.Dir, d.Name)
 		s.must(s.st.Quarantine(q), "Quarantine "+d.Name)
 		do("quarantine")
 	}
@@ -250,7 +256,7 @@ func (s *sim) bodyMismatch(name string) {
 	settle := func(rec store.Record, dir string, replacement store.Record) {
 		s.must(dropWritten(s.st.QuarantineBody(store.BodyQuarantine{
 			Record: rec, Replacement: replacement, Scan: sc,
-			Alert: s.alert(alertFor(dir, rec.Name()), "corrupt_body", dir+"/"+rec.Name()),
+			Alert: s.alert("corrupt_body", dir, rec.Name()),
 		})), "QuarantineBody "+rec.Name())
 	}
 	for _, o := range sc.Out {

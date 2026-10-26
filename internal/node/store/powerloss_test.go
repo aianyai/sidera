@@ -192,8 +192,7 @@ func (w *powerLossWorld) damageOp() *operation {
 		damaged := append([]byte(nil), w.led.files[p]...)
 		damaged[len(damaged)-2] ^= 1
 		s := newSim(w.t, r.st)
-		id := alertFor(store.InDir, name)
-		alert := s.alert(id, "corrupt_record", store.InDir+"/"+name)
+		alert := alertOf(s.alert("corrupt_record", store.InDir, name), store.InDir, name, damaged)
 		return &operation{
 			name: "damage",
 			call: func() error {

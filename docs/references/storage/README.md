@@ -645,8 +645,15 @@ effect first and removes the file, or overwrites it in place, last. Each effect
 can be written again without harm, so a file that is still there after a crash is
 settled again by the next start: nothing records how far a settlement got, and
 there is nothing to resume. What the repetition can add is a floor one higher (a
-gap, never a number given twice) and, when the caller does not derive the alert id
-from the file, a second alert; neither loses anything. The bad bytes are not kept.
+gap, never a number given twice); neither that nor anything else it repeats loses
+anything. The bad bytes are not kept. The alert id is the store's: the first 16
+bytes of the SHA-256 of the directory, the file name and the bytes of the damaged
+file (for a record whose body does not match its name, the directory and name of
+the record and the name of the body), so the settlement redone after a crash
+rewrites its alert and adds no second, and a later, different damage of a file of
+the same name (a resent message taken in again) is an alert of its own, never one
+that replaces an alert the owner has acknowledged. The caller states the kind, the
+time, the subject and the detail only.
 The alert is written after the other effects and before the file goes, each write
 durable before the next, so a file that is gone always has its alert.
 

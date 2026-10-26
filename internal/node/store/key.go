@@ -48,9 +48,9 @@ type CheckpointKey struct {
 	ID    string
 }
 
-// AlertID identifies an owner alert: 16 bytes, random or derived by the caller
-// (a settlement of a damaged file derives it from the file, so that repeating the
-// settlement rewrites its alert).
+// AlertID identifies an owner alert: 16 bytes, random for an alert the caller
+// raises, and derived by the store for the alert of a settlement of damage (see
+// QuarantineAlert), so that repeating the settlement rewrites its alert.
 type AlertID [16]byte
 
 // Kind is the kind of the file of an out key.

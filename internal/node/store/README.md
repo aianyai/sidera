@@ -10,7 +10,7 @@ it imports `txn`, `recfile` and the contract packages, and from `fsx` and `clock
 only types. Every write is a transaction of `txn`, declared in `Transactions()`;
 every read goes through the reader of the `txn.Writer`. It keeps no index and no
 clock: `Scan` returns every decoded record, times are parameters, and randomness
-(alert ids) is the caller's.
+(the id of an alert the caller raises) is the caller's.
 
 It decides nothing about deliveries. It encodes and decodes, orders the writes of
 each transaction, and offers the predicates of the recovery rules it owns; the
@@ -77,8 +77,12 @@ engine applies the delivery rules and calls the writes.
   floor file with the floors its records say). A file that is still there after a
   crash is settled again by the next start, so nothing records how far a
   settlement got and there is nothing to resume; what the repetition can add is a
-  higher floor (a gap, never a number given twice) and, unless the caller derives
-  the alert id from the file, a second alert. What the file held is not kept.
+  higher floor (a gap, never a number given twice). The alert id is the store's, so
+  the repetition rewrites the alert and adds no second: it is derived in one place
+  (`damageAlert`) from the directory and name of the file and the bytes that show
+  the damage (for `QuarantineBody`, the record and the name of its body), so a
+  later, different damage of a file of the same name is an alert of its own and
+  never replaces one that was acknowledged. What the file held is not kept.
 - **A quarantine closes every creating endpoint of the damaged control record,
   and the store decides which.** A control record accepted again after a failed
   first acceptance has the same name and a new endpoint, so several session
@@ -194,8 +198,8 @@ engine applies the delivery rules and calls the writes.
 - Give `Quarantine` a replacement only for a source record (`out/`) whose first
   line was trusted (`DamagedFile.Key` set), built with the delivery package's
   constructor for a lost record. A target or control record has none: a target
-  keeps no loss, and the store refuses one. Derive the id of the alert from the
-  name of the file, so that a settlement repeated after a crash rewrites its alert.
+  keeps no loss, and the store refuses one. Give the alert as a `QuarantineAlert`,
+  which has no id: the store derives it.
 - On a body that does not hash to its name, call `QuarantineBody` for each record
   that refers to it, with a replacement from `delivery.NewLostRecord` exactly when
   `OutRecord.NeedsBody()` says the source record still needs the bytes. A control

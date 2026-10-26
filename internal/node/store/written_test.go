@@ -97,7 +97,7 @@ func writtenCases() []writtenCase {
 		{name: "QuarantineBody", setup: func(t *testing.T, mem *fsxtest.Mem) { seed(t, mem, deliveredWithBody(1)) },
 			ins: func() []store.InRecord { return []store.InRecord{deliveredWithBody(1)} },
 			call: func(r *rig, ins []store.InRecord) ([]store.InRecord, error) {
-				alert := store.AlertRecord{ID: alertFor(store.InDir, ins[0].Name()), Kind: "corrupt_body", At: base, Detail: "d"}
+				alert := store.QuarantineAlert{Kind: "corrupt_body", At: base, Detail: "d"}
 				return r.st.QuarantineBody(store.BodyQuarantine{Record: ins[0], Alert: alert})
 			}},
 		{name: "FeedbackForm", ins: func() []store.InRecord { return []store.InRecord{noticeFor(srcOut(40, false))} },

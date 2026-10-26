@@ -35,8 +35,7 @@ func seedDoubleFault(t *testing.T, mem *fsxtest.Mem) {
 func verifyDoubleFault(t *testing.T, r *rig) {
 	sc := r.scan()
 	name := sessionCtl(1, 6).Name()
-	id := alertFor(store.CtlDir, name)
-	if !hasAlert(sc, id, "control_unknown") {
+	if !onlyAlert(sc, store.CtlDir, name, "control_unknown") {
 		t.Errorf("the alert must say a native session may remain: %v", sc.Alerts)
 	}
 	if _, _, c := find(t, sc, name); c != nil {
@@ -165,7 +164,6 @@ func verifySessionMix(t *testing.T, r *rig) {
 // of a control record with the caller giving no list.
 func TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan(t *testing.T) {
 	rec := sessionCtl(1, 6)
-	id := alertFor(store.CtlDir, rec.Name())
 	t.Run("quarantine", func(t *testing.T) {
 		r := newRig(t)
 		sessionMix(t, r.mem)
@@ -175,7 +173,7 @@ func TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan(t *testing.T) {
 		if len(sc.Damaged) != 1 {
 			t.Fatalf("damaged = %v, want the control record", sc.Damaged)
 		}
-		mustDo(t, r.st.Quarantine(store.Quarantine{File: sc.Damaged[0], Scan: sc, Alert: newSim(t, r.st).alert(id, "control_unknown", "ctl")}))
+		mustDo(t, r.st.Quarantine(store.Quarantine{File: sc.Damaged[0], Scan: sc, Alert: newSim(t, r.st).alert("control_unknown", store.CtlDir, rec.Name())}))
 		verifySessionMix(t, r)
 	})
 	t.Run("a control record is not quarantined without the scan that lists its endpoints", func(t *testing.T) {
@@ -185,7 +183,7 @@ func TestQuarantineClosesOnlyTheEndpointsTheStoreFindsInTheScan(t *testing.T) {
 		damageBody(t, r.mem, path.Join(store.CtlDir, rec.Name()))
 		sc := r.scan()
 		before := snapshot(t, r.mem, ".")
-		if err := r.st.Quarantine(store.Quarantine{File: sc.Damaged[0], Alert: newSim(t, r.st).alert(id, "control_unknown", "ctl")}); err == nil {
+		if err := r.st.Quarantine(store.Quarantine{File: sc.Damaged[0], Alert: newSim(t, r.st).alert("control_unknown", store.CtlDir, rec.Name())}); err == nil {
 			t.Fatal("Quarantine of a control record without a scan succeeded: its session endpoints would be left open")
 		}
 		if diff := equalMaps(snapshot(t, r.mem, "."), before, nil); diff != "" {

@@ -37,13 +37,21 @@ func find(t *testing.T, sc *store.Scan, name string) (out *store.OutRecord, in *
 	return
 }
 
-func hasAlert(sc *store.Scan, id store.AlertID, kind string) bool {
+// hasAlert reports whether the scan holds an alert of the kind for the file or
+// record dir/name, which the alerts of sim.alert name as their subject.
+func hasAlert(sc *store.Scan, dir, name, kind string) bool {
 	for _, a := range sc.Alerts {
-		if a.ID == id && a.Kind == kind {
+		if a.Subject == dir+"/"+name && a.Kind == kind {
 			return true
 		}
 	}
 	return false
+}
+
+// onlyAlert is hasAlert and no other alert: a settlement redone after a crash
+// rewrites its alert and does not add a second.
+func onlyAlert(sc *store.Scan, dir, name, kind string) bool {
+	return len(sc.Alerts) == 1 && hasAlert(sc, dir, name, kind)
 }
 
 func floorOf(t *testing.T, sc *store.Scan, sender int, to ident.Address) uint64 {
@@ -86,12 +94,11 @@ func recoveryScenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
 				name := srcOut(3, false).Name()
-				id := alertFor(store.OutDir, name)
 				out, _, _ := find(t, sc, name)
 				if out == nil || out.Lost == nil || len(out.Lost.Deliveries) != 1 || len(out.Feedback) != 1 {
 					t.Fatalf("the damaged record was not overwritten by a lost record with one delivery and one feedback item: %#v", out)
 				}
-				if !hasAlert(sc, id, "corrupt_record") {
+				if !onlyAlert(sc, store.OutDir, name, "corrupt_record") {
 					t.Errorf("the alert is missing: %v", sc.Alerts)
 				}
 				// m = max(floor 2, highest of the others 4): floor 5.
@@ -116,7 +123,7 @@ func recoveryScenarios() []scenario {
 				if _, in, _ := find(t, sc, name); in != nil {
 					t.Fatalf("the damaged record is still there: %#v", in)
 				}
-				if !hasAlert(sc, alertFor(store.InDir, name), "corrupt_record") || len(sc.Seq) != 0 {
+				if !onlyAlert(sc, store.InDir, name, "corrupt_record") || len(sc.Seq) != 0 {
 					t.Errorf("a target record's quarantine has an alert and no sequence floor: %v %v", sc.Alerts, sc.Seq)
 				}
 				if _, other, _ := find(t, sc, inRev(2, 1).Name()); other == nil {
@@ -154,7 +161,7 @@ func recoveryScenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
 				name := store.SeqRecord{Sender: ep(1)}.Name()
-				if got := floorOf(t, sc, 1, pair); got != 2 || !hasAlert(sc, alertFor(store.SeqDir, name), "corrupt_record") {
+				if got := floorOf(t, sc, 1, pair); got != 2 || !onlyAlert(sc, store.SeqDir, name, "corrupt_record") {
 					t.Errorf("the floor file is treated as missing and overwritten with the highest number left (2), with an alert: floor %d alerts %v", got, sc.Alerts)
 				}
 			},
@@ -169,7 +176,7 @@ func recoveryScenarios() []scenario {
 			verify: func(t *testing.T, r *rig) {
 				sc := r.scan()
 				name := directEndpoint(7, "chat").Name()
-				if !hasAlert(sc, alertFor(store.EndpointsDir, name), "corrupt_record") || hasEndpoint(sc, ep(7)) || len(sc.Checkpoints) != 1 {
+				if !onlyAlert(sc, store.EndpointsDir, name, "corrupt_record") || hasEndpoint(sc, ep(7)) || len(sc.Checkpoints) != 1 {
 					t.Errorf("the damaged endpoint record must be alerted and gone, without a replacement: %v %v", sc.Alerts, sc.Endpoints)
 				}
 			},
@@ -488,8 +495,7 @@ func controlQuarantine(name string, damage func(testing.TB, *fsxtest.Mem, string
 		verify: func(t *testing.T, r *rig) {
 			sc := r.scan()
 			name := sessionCtl(1, 5).Name()
-			id := alertFor(store.CtlDir, name)
-			if !hasAlert(sc, id, "control_unknown") {
+			if !onlyAlert(sc, store.CtlDir, name, "control_unknown") {
 				t.Errorf("the alert must say a native session may remain: %v", sc.Alerts)
 			}
 			if _, _, c := find(t, sc, name); c != nil {

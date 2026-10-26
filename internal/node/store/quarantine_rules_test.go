@@ -53,7 +53,7 @@ func present(t *testing.T, r *rig, dir, name string) bool {
 
 func oneAlert(t *testing.T, sc *store.Scan, dir, name, kind string) {
 	t.Helper()
-	if len(sc.Alerts) != 1 || !hasAlert(sc, alertFor(dir, name), kind) {
+	if len(sc.Alerts) != 1 || !hasAlert(sc, dir, name, kind) {
 		t.Errorf("want exactly one alert %q for %s/%s, got %v", kind, dir, name, sc.Alerts)
 	}
 }
@@ -215,7 +215,7 @@ func TestABodyThatDoesNotMatchItsNameSettlesEachRecordThatRefersToIt(t *testing.
 		in := inRev(1, 1)
 		seed(t, r.mem, in, inRev(2, 1))
 		seedBodies(t, r.mem, bodyBytes(1), bodyBytes(2))
-		_, err := settleBody(t, r, store.BodyQuarantine{Record: in, Alert: newSim(t, r.st).alert(alertFor(store.InDir, in.Name()), "corrupt_body", "in/x")})
+		_, err := settleBody(t, r, store.BodyQuarantine{Record: in, Alert: newSim(t, r.st).alert("corrupt_body", store.InDir, in.Name())})
 		mustDo(t, err)
 		sc := settled(t, r)
 		if present(t, r, store.InDir, in.Name()) {
@@ -231,7 +231,7 @@ func TestABodyThatDoesNotMatchItsNameSettlesEachRecordThatRefersToIt(t *testing.
 		in.Record = deliveredRecord(in.Record)
 		seed(t, r.mem, in)
 		seedBodies(t, r.mem, bodyBytes(1))
-		written, err := settleBody(t, r, store.BodyQuarantine{Record: in, Alert: newSim(t, r.st).alert(alertFor(store.InDir, in.Name()), "corrupt_body", "in/x")})
+		written, err := settleBody(t, r, store.BodyQuarantine{Record: in, Alert: newSim(t, r.st).alert("corrupt_body", store.InDir, in.Name())})
 		mustDo(t, err)
 		if len(written) != 1 || written[0].Rev != in.Rev+1 || written[0].Body != nil {
 			t.Fatalf("written = %+v", written)
@@ -247,7 +247,7 @@ func TestABodyThatDoesNotMatchItsNameSettlesEachRecordThatRefersToIt(t *testing.
 		out := srcOut(1, false)
 		seed(t, r.mem, out, srcOut(2, false), store.SeqRecord{Sender: ep(1), Floors: map[ident.Address]uint64{pair: 1}})
 		seedBodies(t, r.mem, bodyBytes(1), bodyBytes(2))
-		_, err := settleBody(t, r, store.BodyQuarantine{Record: out, Replacement: lostOutAt(out.Key, base), Alert: newSim(t, r.st).alert(alertFor(store.OutDir, out.Name()), "corrupt_body", "out/x")})
+		_, err := settleBody(t, r, store.BodyQuarantine{Record: out, Replacement: lostOutAt(out.Key, base), Alert: newSim(t, r.st).alert("corrupt_body", store.OutDir, out.Name())})
 		mustDo(t, err)
 		sc := settled(t, r)
 		got, _, _ := find(t, sc, out.Name())
@@ -269,7 +269,7 @@ func TestABodyThatDoesNotMatchItsNameSettlesEachRecordThatRefersToIt(t *testing.
 		out.Body = body
 		seed(t, r.mem, out)
 		seedBodies(t, r.mem, bodyBytes(1))
-		_, err := settleBody(t, r, store.BodyQuarantine{Record: out, Alert: newSim(t, r.st).alert(alertFor(store.OutDir, out.Name()), "corrupt_body", "out/x")})
+		_, err := settleBody(t, r, store.BodyQuarantine{Record: out, Alert: newSim(t, r.st).alert("corrupt_body", store.OutDir, out.Name())})
 		mustDo(t, err)
 		sc := settled(t, r)
 		got, _, _ := find(t, sc, out.Name())
@@ -284,7 +284,7 @@ func TestABodyThatDoesNotMatchItsNameSettlesEachRecordThatRefersToIt(t *testing.
 		c.Body = bodyRef(1)
 		seed(t, r.mem, c, session(5, store.EndpointOpen, ctlName(1)))
 		seedBodies(t, r.mem, bodyBytes(1))
-		_, err := settleBody(t, r, store.BodyQuarantine{Record: c, Alert: newSim(t, r.st).alert(alertFor(store.CtlDir, c.Name()), "corrupt_body", "ctl/x")})
+		_, err := settleBody(t, r, store.BodyQuarantine{Record: c, Alert: newSim(t, r.st).alert("corrupt_body", store.CtlDir, c.Name())})
 		mustDo(t, err)
 		sc := settled(t, r)
 		if _, _, got := find(t, sc, c.Name()); got == nil || got.Body != nil || len(sc.Bodies) != 0 || len(sc.Alerts) != 1 {
@@ -299,8 +299,8 @@ func TestABodyThatDoesNotMatchItsNameSettlesEachRecordThatRefersToIt(t *testing.
 		seed(t, r.mem, needing, finished)
 		seedBodies(t, r.mem, bodyBytes(1), bodyBytes(2))
 		before := snapshot(t, r.mem, ".")
-		alert := func(o store.OutRecord) store.AlertRecord {
-			return newSim(t, r.st).alert(alertFor(store.OutDir, o.Name()), "corrupt_body", "out/x")
+		alert := func(o store.OutRecord) store.QuarantineAlert {
+			return newSim(t, r.st).alert("corrupt_body", store.OutDir, o.Name())
 		}
 		for name, q := range map[string]store.BodyQuarantine{
 			"a source record that needs the body, with no replacement": {Record: needing, Alert: alert(needing)},
@@ -410,10 +410,76 @@ func TestAWriteThatMeetsADamagedFloorFileLeavesItToTheSettlement(t *testing.T) {
 		t.Fatalf("error = %v, want a *DamagedFileError", err)
 	}
 	sc := r.scan()
-	mustDo(t, r.st.Quarantine(store.Quarantine{File: de.File, Scan: sc, Alert: newSim(t, r.st).alert(alertFor(de.File.Dir, de.File.Name), "corrupt_record", "seq/x")}))
+	mustDo(t, r.st.Quarantine(store.Quarantine{File: de.File, Scan: sc, Alert: newSim(t, r.st).alert("corrupt_record", de.File.Dir, de.File.Name)}))
 	plan = store.PlanSweep(r.scan(), base.Add(farAway))
 	mustDo(t, r.st.ArchiveSweep(plan.Chunk(base.Add(farAway))))
 	if sc := r.scan(); len(sc.Out) != 0 || len(sc.Damaged) != 0 || len(sc.Alerts) != 1 {
 		t.Errorf("the sweep must go on after the floor file was settled: %d records, damaged %v, alerts %v", len(sc.Out), sc.Damaged, sc.Alerts)
 	}
+}
+
+// The alert of a settlement is the store's, derived from where the damage is and
+// what shows it. A settlement redone after a crash that wrote the alert and not
+// the removal writes the same alert file; a later, different damage of a file of
+// the same name, as a resent message taken in again would leave, is an alert of its
+// own and never replaces one the owner has acknowledged.
+func TestTheAlertOfASettlementFollowsTheDamageAndNotTheCall(t *testing.T) {
+	name := inRev(1, 1).Name()
+	file := path.Join(store.InDir, name)
+	damaged := func(t *testing.T, damage func(testing.TB, *fsxtest.Mem, string)) *rig {
+		r := worldRig(t)
+		seed(t, r.mem, inRev(1, 1))
+		damage(t, r.mem, file)
+		return r
+	}
+	t.Run("a settlement redone after a crash writes the same alert", func(t *testing.T) {
+		first := damaged(t, damageBody)
+		redo := openRig(t, first.mem.Clone())
+		newSim(t, first.st).recoverAll()
+		if alerts := first.scan().Alerts; len(alerts) != 1 {
+			t.Fatalf("alerts = %v, want one", alerts)
+		}
+		// The crash: the alert is on the disk, the damaged file is too.
+		seed(t, redo.mem, first.scan().Alerts[0])
+		sc := settled(t, redo)
+		oneAlert(t, sc, store.InDir, name, "corrupt_record")
+		if present(t, redo, store.InDir, name) {
+			t.Error("the damaged file is still there")
+		}
+	})
+	t.Run("a different damage of the same name is another alert", func(t *testing.T) {
+		r := damaged(t, damageBody)
+		newSim(t, r.st).recoverAll()
+		seed(t, r.mem, inRev(1, 1))
+		damageHeader(t, r.mem, file)
+		sc := settled(t, r)
+		if len(sc.Alerts) != 2 {
+			t.Errorf("alerts = %v, want one for each damage", sc.Alerts)
+		}
+	})
+	t.Run("a body that is another file under the same record name is another alert", func(t *testing.T) {
+		r := worldRig(t)
+		settle := func(body int) {
+			in := inRev(1, 1)
+			in.Body = bodyRef(body)
+			seed(t, r.mem, in)
+			_, err := r.st.QuarantineBody(store.BodyQuarantine{Record: in, Alert: newSim(t, r.st).alert("corrupt_body", store.InDir, in.Name())})
+			mustDo(t, err)
+		}
+		settle(1)
+		settle(2)
+		if sc := r.scan(); len(sc.Alerts) != 2 {
+			t.Errorf("alerts = %v, want one for each body", sc.Alerts)
+		}
+	})
+	t.Run("the id is what a test that names the alert file restates", func(t *testing.T) {
+		r := damaged(t, damageBody)
+		bad, err := r.mem.ReadFile(file)
+		mustDo(t, err)
+		newSim(t, r.st).recoverAll()
+		want := alertOf(newSim(t, r.st).alert("corrupt_record", store.InDir, name), store.InDir, name, bad)
+		if alerts := r.scan().Alerts; len(alerts) != 1 || alerts[0].ID != want.ID {
+			t.Errorf("alerts = %v, want the alert %s", alerts, want.ID)
+		}
+	})
 }

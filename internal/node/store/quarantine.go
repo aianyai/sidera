@@ -1,10 +1,13 @@
 package store
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"slices"
+	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -38,10 +41,9 @@ import (
 //   - any other directory: the alert; then the file is removed.
 type Quarantine struct {
 	File DamagedFile
-	// Alert is the alert of the settlement. Derive its id from the file, so that a
-	// file settled again after a crash rewrites the alert it wrote and does not add
-	// a second.
-	Alert AlertRecord
+	// Alert is the alert of the settlement; the store gives it its id (see
+	// QuarantineAlert).
+	Alert QuarantineAlert
 	// Replacement is the lost record to overwrite a source record with, and is
 	// given for an out/ file whose first line can be trusted and for no other.
 	Replacement Record
@@ -52,6 +54,33 @@ type Quarantine struct {
 	// first line can be trusted; without it no endpoint could be found and one left
 	// open would hold its slot for good.
 	Scan *Scan
+}
+
+// QuarantineAlert is the alert of a settlement as its caller states it. The id is
+// the store's: it is derived from the place of the damage and from the bytes that
+// show it, so that a settlement repeated after a crash rewrites the alert it
+// wrote and does not add a second, and a later, different damage of a file of the
+// same name, a resent message taken in again, is an alert of its own that never
+// replaces one the owner has already acknowledged.
+type QuarantineAlert struct {
+	// Kind is a name of the form [a-z][a-z0-9_]{0,63}.
+	Kind    string
+	At      time.Time
+	Detail  string
+	Subject string
+}
+
+// damageAlert is the alert record of a settlement. The id is the first 16 bytes
+// of the hash of the directory and name of the file or record settled and the
+// evidence of the damage: the bytes of a damaged file, or the name of the body a
+// record refers to that does not hash to it.
+func damageAlert(a QuarantineAlert, dir, name string, evidence []byte) AlertRecord {
+	h := sha256.New()
+	h.Write([]byte(dir + "\x00" + name + "\x00"))
+	h.Write(evidence)
+	var id AlertID
+	copy(id[:], h.Sum(nil))
+	return AlertRecord{ID: id, Kind: a.Kind, At: a.At, Detail: a.Detail, Subject: a.Subject}
 }
 
 // BodyQuarantine settles a record that refers to a body whose content does not
@@ -70,7 +99,7 @@ type BodyQuarantine struct {
 	// Record is the record as it was read: an OutRecord, an InRecord or a
 	// CtlRecord that refers to the body.
 	Record      Record
-	Alert       AlertRecord
+	Alert       QuarantineAlert
 	Replacement Record
 	// Scan is the scan the settlement is part of, required for a source record
 	// that needs the body (see Quarantine).
@@ -148,14 +177,14 @@ func (s *Store) Quarantine(q Quarantine) error {
 	if !slices.Contains(recordDirs, d.Dir) || !isRecordName(d.Name) {
 		return fmt.Errorf("store: %s/%s is not a record file", d.Dir, d.Name)
 	}
-	if q.Alert.ID == (AlertID{}) {
-		return errors.New("store: a quarantine has an alert with an id")
+	damaged, err := s.r.ReadFile(path.Join(d.Dir, d.Name))
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("store: %s/%s is not there", d.Dir, d.Name)
 	}
-	af, err := recordFile(AlertsDir, q.Alert)
 	if err != nil {
 		return err
 	}
-	st := &settlement{alert: af, remove: FileRef{Dir: d.Dir, Name: d.Name}}
+	st := &settlement{remove: FileRef{Dir: d.Dir, Name: d.Name}}
 	trusted := d.Damage.Class == BodyDamaged
 	if q.Replacement != nil && !(d.Dir == OutDir && trusted) {
 		return errors.New("store: only a source record whose first line can be trusted has a replacement")
@@ -184,23 +213,24 @@ func (s *Store) Quarantine(q Quarantine) error {
 			return err
 		}
 	}
+	if st.alert, err = recordFile(AlertsDir, damageAlert(q.Alert, d.Dir, d.Name, damaged)); err != nil {
+		return err
+	}
 	return s.settle(st)
 }
 
 // QuarantineBody settles one record whose body is damaged; see BodyQuarantine.
 // It returns the target record as written, when it was written.
 func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
-	if q.Alert.ID == (AlertID{}) {
-		return nil, errors.New("store: a quarantine has an alert with an id")
-	}
-	af, err := recordFile(AlertsDir, q.Alert)
-	if err != nil {
-		return nil, err
-	}
-	st := &settlement{alert: af}
+	st := &settlement{}
 	var written []InRecord
+	var err error
+	// The record settled and the body it refers to; they identify the damage.
+	var dir, name string
+	var body *BodyRef
 	switch r := q.Record.(type) {
 	case InRecord:
+		dir, name, body = InDir, r.Name(), r.Body
 		if r.Body == nil {
 			return nil, fmt.Errorf("store: %s refers to no body", r.Name())
 		}
@@ -218,6 +248,7 @@ func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
 		}
 		st.overwrite = &files[0]
 	case CtlRecord:
+		dir, name, body = CtlDir, r.Name(), r.Body
 		if r.Body == nil {
 			return nil, fmt.Errorf("store: %s refers to no body", r.Name())
 		}
@@ -231,6 +262,7 @@ func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
 		}
 		st.overwrite = &f
 	case OutRecord:
+		dir, name, body = OutDir, r.Name(), r.Body
 		if r.Body == nil || r.Lost != nil {
 			return nil, fmt.Errorf("store: %s refers to no body", r.Name())
 		}
@@ -251,6 +283,9 @@ func (s *Store) QuarantineBody(q BodyQuarantine) ([]InRecord, error) {
 		st.overwrite = &f
 	default:
 		return nil, fmt.Errorf("store: %T is not a record that refers to a body", q.Record)
+	}
+	if st.alert, err = recordFile(AlertsDir, damageAlert(q.Alert, dir, name, []byte(body.Name()))); err != nil {
+		return nil, err
 	}
 	if err := s.settle(st); err != nil {
 		return nil, err
