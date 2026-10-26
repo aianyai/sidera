@@ -267,13 +267,11 @@ func TestCreationCutOffByACrashIsGoneOnWithOneSession(t *testing.T) {
 	}
 	h.Crash(harness.ProcessCrash)
 	quiet(t, h)
-	h.Advance(pullInterval)
-	quiet(t, h)
+	r := replyAfterMoving(t, h, "a", msg)
 
 	if n := nativeSessions(t, h); n != 1 {
 		t.Errorf("%d native sessions after the crash and the retry, want 1", n)
 	}
-	r := controlReply(t, h, "a", msg)
 	eps := sessionEndpoints(t, h)
 	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated || len(eps) != 1 || eps[0].Status != store.EndpointOpen {
 		t.Fatalf("after the crash the reply is %+v and the endpoints %+v, want created and one open endpoint", r, eps)

@@ -138,6 +138,25 @@ func controlReply(t testing.TB, h *harness.H, from string, msg adapterproto.Mess
 	return st.ControlReply
 }
 
+// replyAfterMoving moves the clock by the pull interval until the message has a
+// control reply, and returns it, or nil when it has none after a few moves. A node
+// that has just started may ask the adapter for a session before the host has put
+// the connection in service; the creation is then tried again after its backoff,
+// and its reply is pulled one pull interval after it was settled, so how many
+// moves the reply takes depends on whether the first call found the adapter ready.
+func replyAfterMoving(t testing.TB, h *harness.H, from string, msg adapterproto.MessageID) *adapterproto.ControlReply {
+	t.Helper()
+	const moves = 4
+	for range moves {
+		h.Advance(pullInterval)
+		quiet(t, h)
+		if r := controlReply(t, h, from, msg); r != nil {
+			return r
+		}
+	}
+	return nil
+}
+
 // wantFailed fails the test unless the reply is a failed creation for the reason.
 func wantFailed(t testing.TB, r *adapterproto.ControlReply, reason adapterproto.ControlCreateReason) {
 	t.Helper()
