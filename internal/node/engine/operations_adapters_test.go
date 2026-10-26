@@ -736,7 +736,10 @@ func TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints(t *testin
 
 	// enabled again, it is the instance that went offline when it was disabled
 	r.clk.Advance(time.Minute)
-	if _, err := e.Execute(ctx, enableCommand(31, "enable", r.cfg.Instances().Version, "chat", "chat", "")); err != nil {
+	// bounded: an instance whose endpoints were not closed would be waited for, for ever
+	wait, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if _, err := e.Execute(wait, enableCommand(31, "enable", r.cfg.Instances().Version, "chat", "chat", "")); err != nil {
 		t.Fatal(err)
 	}
 	v, err := e.Adapter(ctx, "chat")
