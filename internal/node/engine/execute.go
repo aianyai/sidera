@@ -185,8 +185,12 @@ func (e *Engine) executeResult(now time.Time, r *cmdExecuteResult) {
 		x.inflight = false
 	}
 	c, ok := e.executing(r.key)
-	if !ok || x == nil {
-		return // settled while the call was out: the owner closed the endpoint
+	if !ok {
+		e.forgetExecution(r.key) // settled while the call was out: the owner closed the endpoint
+		return
+	}
+	if x == nil {
+		return
 	}
 	switch {
 	case errors.Is(r.err, context.Canceled):
