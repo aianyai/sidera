@@ -144,11 +144,13 @@ func TestConcurrentCallsInBothDirections(t *testing.T) {
 
 	var runsMu sync.Mutex
 	runs := map[string]int{}
+	release := make(chan struct{}) // holds the handlers of the calls that ask to be held
 	handler := func(ctx context.Context, params json.RawMessage) (any, error) {
 		var in struct {
 			Tag    string `json:"tag"`
 			WorkUS int    `json:"work_us"`
 			Fail   bool   `json:"fail"`
+			Hold   bool   `json:"hold"`
 		}
 		if err := json.Unmarshal(params, &in); err != nil {
 			return nil, peer.NewError(peer.CodeInvalidParams, "bad params")
@@ -156,6 +158,13 @@ func TestConcurrentCallsInBothDirections(t *testing.T) {
 		runsMu.Lock()
 		runs[in.Tag]++
 		runsMu.Unlock()
+		if in.Hold {
+			select {
+			case <-release:
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 		select {
 		case <-time.After(time.Duration(in.WorkUS) * time.Microsecond):
 		case <-ctx.Done():
@@ -215,6 +224,41 @@ func TestConcurrentCallsInBothDirections(t *testing.T) {
 		return outOther
 	}
 
+	// Overload is reached by construction rather than by the random calls: how
+	// many of those find the remote's queue full depends on how the machine
+	// schedules the callers. Calls that ask to be held cannot finish until they
+	// are released, so the remote takes at most MaxConcurrentHandlers of them to
+	// run and MaxPendingRequests to wait, and refuses every other one at once.
+	const held = 30
+	var heldWG sync.WaitGroup
+	var refused atomic.Int64
+	for i := range held {
+		heldWG.Add(1)
+		go func() {
+			defer heldWG.Done()
+			tag := fmt.Sprintf("held-%d", i)
+			var out struct{ Tag string }
+			err := a.Call(context.Background(), "work", map[string]any{"tag": tag, "hold": true}, &out)
+			o := classify(err, false)
+			if o == outOverloadedRemote {
+				refused.Add(1)
+			} else if o != outCompleted {
+				t.Errorf("held call %s ended as %v (%v)", tag, o, err)
+			}
+			record(tag, o)
+		}()
+	}
+	maxTaken := int64(small.MaxConcurrentHandlers + small.MaxPendingRequests)
+	refusalDeadline := time.Now().Add(15 * time.Second)
+	for refused.Load() < held-maxTaken {
+		if time.Now().After(refusalDeadline) {
+			t.Fatalf("only %d of the %d held calls were refused, want %d: the remote took more than it has room for", refused.Load(), held, held-maxTaken)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	close(release)
+	heldWG.Wait()
+
 	var wg sync.WaitGroup
 	for _, side := range []struct {
 		name   string
@@ -263,8 +307,8 @@ func TestConcurrentCallsInBothDirections(t *testing.T) {
 	// Let any last duplicate answer arrive before judging.
 	time.Sleep(50 * time.Millisecond)
 
-	if got := setCount.Load(); got != 2*perDirection {
-		t.Fatalf("%d outcomes recorded for %d calls", got, 2*perDirection)
+	if got := setCount.Load(); got != 2*perDirection+held {
+		t.Fatalf("%d outcomes recorded for %d calls", got, 2*perDirection+held)
 	}
 	requests := model.verify(t)
 
@@ -295,10 +339,11 @@ func TestConcurrentCallsInBothDirections(t *testing.T) {
 	}
 	t.Logf("wire: -32001 responses=%d, -32800 responses=%d", model.codes[peer.CodeOverloaded], model.codes[peer.CodeRequestCancelled])
 	t.Logf("calls=%d requests on the wire=%d completed=%d failed_app=%d overloaded(remote)=%d overloaded(local)=%d cancelled(local)=%d cancelled(remote)=%d cancel notifications=%d",
-		2*perDirection, requests, counts[outCompleted], counts[outFailedApp], counts[outOverloadedRemote], counts[outOverloadedLocal],
+		2*perDirection+held, requests, counts[outCompleted], counts[outFailedApp], counts[outOverloadedRemote], counts[outOverloadedLocal],
 		counts[outCancelledLocal], counts[outCancelledRemote], model.cancels["a"]+model.cancels["b"])
 
 	// Coverage: the run must have exercised each path, or it proves nothing.
+	// Overload is covered by the held calls above.
 	for _, c := range []struct {
 		name string
 		got  int
@@ -306,7 +351,6 @@ func TestConcurrentCallsInBothDirections(t *testing.T) {
 	}{
 		{"completed", counts[outCompleted], 100},
 		{"failed with an application error", counts[outFailedApp], 10},
-		{"overloaded", counts[outOverloadedRemote] + counts[outOverloadedLocal], 20},
 		{"cancelled", counts[outCancelledLocal] + counts[outCancelledRemote], 20},
 	} {
 		if c.got < c.min {
