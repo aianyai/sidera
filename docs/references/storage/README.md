@@ -1034,7 +1034,10 @@ with its attempts, checkpoints and floor file, but not while any source record o
 out-lost record has it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
 a source record writes the floor of its sender, and a floor file written after the
 endpoint's was removed with it would stay forever. The sweep that removes its last
-source record leaves the endpoint, and the next one takes it. Administrative
+source record leaves the endpoint, and the next one takes it. It is kept as well
+while a control record that has not finished is creating it: the answer of the creation is
+recorded on the endpoint, and an owner's close that came first has recorded no native session
+yet, so the endpoint is not owed a release until that answer arrives. Administrative
 results are kept 7 days, acknowledged alerts 7 days after the acknowledgement, and
 archive files for the retention the owner sets (30 days by default; `ExpiredArchiveFiles`
 takes it as a duration and names the files whose date is older, `Store.ArchiveExpire`

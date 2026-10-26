@@ -282,6 +282,11 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	for _, c := range sc.Ctl {
 		if _, finished := RetainUntil(c); !finished {
 			live[c.Key.Recipient] = true
+			if c.Intent != nil {
+				// A creation's recipient is the runtime endpoint; the endpoint it is making
+				// is the one its answer is recorded on.
+				live[c.Intent.Endpoint] = true
+			}
 		}
 	}
 	sends := map[ident.EndpointID]bool{} // senders of a source record, whole or damaged, or of an out-lost record

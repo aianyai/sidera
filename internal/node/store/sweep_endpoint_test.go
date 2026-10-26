@@ -96,8 +96,9 @@ func TestClosedSessionEndpointAndItsFloorFileGoOnceItsLastSourceRecordHasGone(t 
 
 // Whatever has the endpoint as sender keeps it: a record whole, queued, lost or
 // damaged with a key that can be trusted, and so does a native session that is not
-// recorded released, which the node is still to ask its adapter to release. A closed
-// endpoint of another kind is not the case: its floor file is not removed with it.
+// recorded released, which the node is still to ask its adapter to release. So does a
+// creation that has not settled, whose answer is recorded on the endpoint it makes even
+// when the owner closed that endpoint first. A closed endpoint of another kind is not the case: its floor file is not removed with it.
 func TestPlanSweepKeepsAClosedSessionEndpointWhileAnySourceRecordOfItIsThere(t *testing.T) {
 	closedSession := session(5, store.EndpointClosed, ctlName(4))
 	closedDirect := directEndpoint(5, "chat")
@@ -125,6 +126,7 @@ func TestPlanSweepKeepsAClosedSessionEndpointWhileAnySourceRecordOfItIsThere(t *
 			damageBody(t, r.mem, path.Join(store.OutDir, damaged.Name()))
 		}, false},
 		{"a source record of another sender", closedSession, func(t *testing.T, r *rig) { seed(t, r.mem, finishedOutOf(6, 1)) }, true},
+		{"a creation that has not settled", closedSession, func(t *testing.T, r *rig) { seed(t, r.mem, sessionCtl(4, 5)) }, false},
 		{"a native session that is not released", holding, func(t *testing.T, r *rig) {}, false},
 		{"a native session that is released", released, func(t *testing.T, r *rig) {}, true},
 		{"a closed endpoint of another kind", closedDirect, func(t *testing.T, r *rig) { seed(t, r.mem, finishedOutOf(5, 1)) }, true},
