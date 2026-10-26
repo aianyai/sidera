@@ -106,17 +106,23 @@ func engineQuiet(t testing.TB, h *harness.H) {
 // made by a goroutine, so the number is waited for on the real clock.
 func adapterRestarted(t testing.TB, h *harness.H, launches int) {
 	t.Helper()
+	adapterRestartedAfter(t, h, launches, restartAfter)
+}
+
+// adapterRestartedAfter is adapterRestarted for a host whose backoff is step.
+func adapterRestartedAfter(t testing.TB, h *harness.H, launches int, step time.Duration) {
+	t.Helper()
 	// The host arms its backoff timer a moment after it tells the node that the
 	// adapter is gone, so a move of the clock that came first is not the one that
 	// fires it: the clock is moved again, by the same backoff, until it did.
-	h.Advance(restartAfter)
+	h.Advance(step)
 	deadline := time.Now().Add(10 * time.Second)
 	for moved := time.Now(); len(h.AdapterLaunches(harness.Instance)) < launches; {
 		if time.Now().After(deadline) {
 			t.Fatalf("the host started %d adapter processes, want %d", len(h.AdapterLaunches(harness.Instance)), launches)
 		}
 		if time.Since(moved) > 50*time.Millisecond {
-			h.Advance(restartAfter)
+			h.Advance(step)
 			moved = time.Now()
 		}
 		time.Sleep(time.Millisecond)
