@@ -73,6 +73,17 @@ const (
 	// ReasonIdentityRetired: the owner retired the identity of this node, so
 	// nothing is signed in its name any more while the node goes down.
 	ReasonIdentityRetired
+	// ReasonInstallInProgress: another adapter package is being copied; one is
+	// copied at a time, and nothing of this request was done.
+	ReasonInstallInProgress
+	// ReasonPlatformUnsupported: the package does not list the platform of this
+	// machine, so it would be installed and then fail to start.
+	ReasonPlatformUnsupported
+	// ReasonProbeTokenUsed: the probe token was presented before; it is good once.
+	ReasonProbeTokenUsed
+	// ReasonProbeTokenExpired: the probe token was issued more than
+	// ProbeTokenLifetime ago.
+	ReasonProbeTokenExpired
 
 	reasonEnd
 )
@@ -99,6 +110,10 @@ var reasonNames = [reasonEnd]string{
 	ReasonTooLarge:            "too_large",
 	ReasonAlertUnknown:        "alert_unknown",
 	ReasonIdentityRetired:     "identity_retired",
+	ReasonInstallInProgress:   "install_in_progress",
+	ReasonPlatformUnsupported: "platform_unsupported",
+	ReasonProbeTokenUsed:      "probe_token_used",
+	ReasonProbeTokenExpired:   "probe_token_expired",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.
@@ -156,14 +171,22 @@ const (
 	// DetailDigestMismatch: the digest the owner named is not the digest of this
 	// node's statement.
 	DetailDigestMismatch
+	// DetailProbeFrontendMismatch: the front end that presented a probe token is
+	// not the one the token was issued for.
+	DetailProbeFrontendMismatch
+	// DetailSourceUnreadable: the directory the owner named as a package cannot be
+	// read.
+	DetailSourceUnreadable
 
 	detailEnd
 )
 
 var detailNames = [detailEnd]string{
-	DetailEmptyPatch:     "empty_patch",
-	DetailNodeMismatch:   "node_mismatch",
-	DetailDigestMismatch: "digest_mismatch",
+	DetailEmptyPatch:            "empty_patch",
+	DetailNodeMismatch:          "node_mismatch",
+	DetailDigestMismatch:        "digest_mismatch",
+	DetailProbeFrontendMismatch: "probe_frontend_mismatch",
+	DetailSourceUnreadable:      "source_unreadable",
 }
 
 // String returns the name of the detail; the zero value has none.
