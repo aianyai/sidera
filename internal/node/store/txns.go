@@ -135,11 +135,12 @@ var (
 	// The recovery transactions.
 	//
 	// quarantine settles one damaged file: the sequence floors it raises, the
-	// session endpoints it closes and the alert come first, and the damaged file
+	// session endpoints it closes, the out-lost record that tells the sender of a
+	// file lost unread, and the alert come first, and the damaged file
 	// goes last, overwritten in place or removed. A restart that finds it still
 	// there writes the same effects again.
 	declQuarantine = txn.Decl{Name: "quarantine", Kind: txn.Recovery, Writes: []txn.Write{
-		rep("seq-floor", optional), rep("session", many, optional), rep("alert"),
+		rep("seq-floor", optional), rep("session", many, optional), rep("out-lost", optional), rep("alert"),
 		rep("overwrite", optional), rm("record", optional), syncDir("dir", optional),
 	}}
 	declOrphanGC         = txn.Decl{Name: "orphan-gc", Kind: txn.Recovery, Writes: []txn.Write{rm("body", many, optional), syncDir("dir", many)}}

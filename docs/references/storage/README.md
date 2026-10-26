@@ -711,7 +711,9 @@ durable before the next, so a file that is gone always has its alert.
 | `in/`, any damage | alert | file removed |
 | `ctl/`, any damage | the session endpoints being created by it are closed (open ones stay open); alert | file removed; a delivery derived from it stays |
 | `out/`, first line trusted | the sequence floors of every pair of its key raised; alert | file overwritten in place with the sender's lost record and its feedback |
-| `out/`, first line unreadable (all zero included) | alert | file removed |
+| `out/`, first line unreadable (all zero included), the sender in its name is an endpoint of this node, open or closed | the floors of every pair of the sender raised; the out-lost record that tells the sender; alert | file removed |
+| `out/`, first line unreadable, any other name (a prefix that is no endpoint, an endpoint of no record here, one still being created, the system endpoint) | alert | file removed |
+| `out/`, an out-lost record that is damaged | its sender, if an endpoint of this node: the record again, with its item pending; alert | the record written over the file, or, for an endpoint that is gone, the file removed |
 | `seq/`, first line trusted | alert | file overwritten with the floors its sender's source records say |
 | `seq/`, first line unreadable | alert | file removed |
 | any other directory | alert | file removed |
@@ -720,8 +722,36 @@ The first line of a file is trusted by the same rule as that of a live one
 (steps 1 to 4): a first line that parses but does not hash to the name of the file
 is handled like an unreadable one, with no replacement and no sequence floor raised
 for the key it claims. An `out/` file whose first line is unreadable says nothing
-about what it was, so there is no lost record to put in its place and nobody is
-told but the owner (`TestADamagedSourceRecordWithAnUnreadableFirstLineIsAlertedAndDeleted`).
+about what it was, so there is no lost record to put in its place, but its name says
+whose it was: the prefix is the sending endpoint, and the one loss that was silent
+before (the sender of a message lost to an all-zero file after a power loss never
+heard of it) is told. When the prefix is an endpoint of this node, open or closed,
+the settlement writes the out-lost record named after the damaged file (key
+`"<sender> <hash of the damaged name>"`, discovered at the time of the alert), raises
+the floor of every pair of the sender to m+1, since the recipients of the lost message
+are unknown, and raises the alert, in that order; the damaged file goes last. The caller gives the
+node's own id (`Quarantine.Node`, for the address in the feedback item) and the scan;
+a call that needs them and lacks them is refused before anything is written
+(`TestAnUnreadableSourceFileIsNotSettledWithoutWhatTheNoticeNeeds`). A prefix that is
+not an endpoint (the bech32m checksum fails), an endpoint that has no record here, one
+whose creation has not ended or the system endpoint (which sends its notices as target
+records and never from `out/`) cannot be told: alert, then removal, as before
+(`TestADamagedSourceFileThatNamesNoEndpointOfThisNodeIsAlertedAndDeleted`). The name of
+the record comes from the damaged file and nothing else, so a settlement repeated after
+a crash writes the same record, whatever the time or the node, and a crash at any point
+leaves one record and one alert after recovery
+(`TestSettlingTheSameDamagedFileAgainWritesTheSameOutLostRecord`, and the walk of
+`quarantine of a source file whose first line is unreadable`, which gives every run
+and every recovery another time so that a name that depended on it would show as a
+second record). What the engine does with the record (loads its item into the feedback
+queue, tells the endpoint, clears the item) is its own work; a floor raised for a pair the lost
+message belonged to and nobody else knows (only that message ever went from this sender to
+that target, and its record is the damaged one) is the pair the raise cannot reach, and the
+next number of it is 1 again, the repeated value the design accepts. An out-lost record that is itself
+damaged is written again over the file with its item pending, because it is the one place a notice could
+vanish without trace: the endpoint may hear twice that a message was lost, never
+not at all
+(`TestADamagedOutLostRecordIsOverwrittenWithItsNoticePendingOrRemovedWhenNobodyCanBeTold`).
 The same rule settles the damage a write meets (`DamagedFileError`). Configuration
 and key files are never quarantined: a damaged one stops the start and is named.
 
@@ -764,8 +794,9 @@ of one pair give two gaps (`TestADamagedSourceRecordRaisesTheFloorAboveEverythin
 A damaged floor file is treated as missing: it is overwritten with the floors its
 sender's source records say (a first line that is unreadable names no sender, so
 the file only goes), and the owner has an alert. What it said is lost, and a number
-of that pair may then be given twice. A source record whose first line is
-unreadable raises no floor, for nothing says which pairs it belonged to. A floor
+of that pair may then be given twice. A source file whose first line is
+unreadable raises the floor of every pair its sender is known to have (those of its
+floor file and of its source records), for nothing says which one it belonged to. A floor
 file that is damaged when a write has to read it (a sweep, or the settlement of a
 source record of the same sender) is not read as empty and overwritten by that
 write, which would lose it without an alert: the write does nothing and returns the
@@ -1168,10 +1199,6 @@ so that the double cannot drift from what it stands for.
 
 ## Known gaps
 
-- **A source file whose first line is unreadable is not reported to its sender.**
-  Nothing in such a file (an all-zero one included) says which message it held or
-  who sent it, so it is alerted to the owner and removed, and no lost record
-  tells the sending endpoint. The owner's alert is the only report.
 - **Symbolic links.** The test that `Stat` does not follow a final symbolic link
   and the tests that a link is not owner-only skip where the platform refuses to
   create one without privilege.

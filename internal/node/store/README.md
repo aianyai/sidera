@@ -74,7 +74,8 @@ engine applies the delivery rules and calls the writes.
   the endpoint for its quarantine.
 - **The damaged file goes last, and every effect before it can be written
   again.** `Quarantine` writes the floors it raises, the session endpoints it
-  closes and the alert, each durable before the next, and only then removes the
+  closes, the out-lost record that tells the sender of a source file lost unread,
+  and the alert, each durable before the next, and only then removes the
   file or overwrites it in place (a source record with its lost replacement, a
   floor file with the floors its records say). A file that is still there after a
   crash is settled again by the next start, so nothing records how far a
@@ -181,7 +182,8 @@ engine applies the delivery rules and calls the writes.
   `instance-drain`, the prompt and block replays `lease`, the feedback replay
   `feedback-clear`. The feedback
   replay has two predicates, `FeedbackReplays` for source records and
-  `OutLostReplays` for out-lost ones, and the same transaction writes both. Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint` and
+  `OutLostReplays` for out-lost ones, and the same transaction writes both.
+  Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint` and
   `ctl-effect-replay` are `Recovery` declarations.
   Each rule's predicate is a function of the scan it is given: a rule run on a scan
   taken before the previous rule wrote would act on records that rule has already
@@ -205,6 +207,13 @@ engine applies the delivery rules and calls the writes.
   constructor for a lost record. A target or control record has none: a target
   keeps no loss, and the store refuses one. Give the alert as a `QuarantineAlert`,
   which has no id: the store derives it.
+- Give `Quarantine` the scan and `Node`, the node's own id, for every file of
+  `out/`, whatever its damage: the store decides from the name of a file it cannot
+  read, and from the scan, whether its sender is an endpoint of this node to be told
+  by an out-lost record, and a call that needs either and lacks it is refused. The
+  discovery time of that record is the time of the alert. Loading the item of an
+  out-lost record into the feedback queue, giving it to the sender and clearing it
+  with `OutLostClear` is the caller's.
 - On a body that does not hash to its name, call `QuarantineBody` for each record
   that refers to it, with a replacement from `delivery.NewLostRecord` exactly when
   `OutRecord.NeedsBody()` says the source record still needs the bytes. A control

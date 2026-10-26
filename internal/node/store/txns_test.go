@@ -77,7 +77,7 @@ var designTable = []struct {
 	{"archive-expire", txn.Normal, "file:Remove[M] dir:SyncDir"},
 	{"alert-ack", txn.Normal, "alert:Replace result:Replace"},
 	{"daemon-stop", txn.Normal, "result:Replace"},
-	{"quarantine", txn.Recovery, "seq-floor:Replace[O] session:Replace[MO] alert:Replace overwrite:Replace[O] record:Remove[O] dir:SyncDir[O]"},
+	{"quarantine", txn.Recovery, "seq-floor:Replace[O] session:Replace[MO] out-lost:Replace[O] alert:Replace overwrite:Replace[O] record:Remove[O] dir:SyncDir[O]"},
 	{"orphan-gc", txn.Recovery, "body:Remove[MO] dir:SyncDir[M]"},
 	{"orphan-gc-endpoint", txn.Recovery, "endpoint:Remove[MO] dir:SyncDir[M]"},
 	{"ctl-effect-replay", txn.Recovery, "endpoint:ReplaceDefer[MO] endpoint-dir:SyncDir[O]"},
