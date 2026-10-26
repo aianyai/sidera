@@ -53,8 +53,9 @@ const (
 	// after the adapter asked the runtime to stop it; the id is the key of the
 	// control record.
 	schedInterruptConfirm
-	// schedPromptRetry is the next time to judge a session endpoint again that is held
-	// back or whose attempt could not be recorded; the id is the endpoint.
+	// schedPromptRetry is the next time to judge a session endpoint again that the
+	// prompt rules hold back until an instant they name, or whose attempt could not be
+	// recorded; the id is the endpoint.
 	schedPromptRetry
 	// schedPromptReconcile is the next call to the adapter about an attempt in flight
 	// when the adapter was not connected; the id is the endpoint.

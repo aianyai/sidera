@@ -371,7 +371,6 @@ func (e *Engine) markStarted(now time.Time, instance string, r adapterproto.Star
 	// or may not have been done: it is asked again, with the same attempt.
 	e.redriveCreates(instance, now)
 	e.redriveExecutions(instance, now)
-	e.noteInstanceStarted(instance, now)
 	return nil
 }
 
@@ -496,7 +495,7 @@ func (e *Engine) probeResult(now time.Time, instance string, r adapterproto.Prob
 	// the connection not in service yet.
 	e.redriveCreates(instance, now)
 	e.redriveExecutions(instance, now)
-	e.noteInstanceStarted(instance, now)
+	e.noteInstanceProbed(instance, now)
 	return nil
 }
 

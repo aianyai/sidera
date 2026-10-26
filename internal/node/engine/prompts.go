@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -50,9 +51,6 @@ type promptState struct {
 	lastRecv time.Time
 	// flight is the prompt whose outcome is not on disk.
 	flight *promptFlight
-	// again says the endpoint is judged once more at its retry, whether or not an event
-	// of its own came: its prompt found the adapter not in service.
-	again bool
 	// turn says a turn that a prompt started may be running: from the dispatch of the
 	// prompt until its turn ends or the prompt is known not to have started one. It
 	// counts against the cap on the node, and the endpoint is busy while it holds.
@@ -64,6 +62,10 @@ type promptState struct {
 type promptFlight struct {
 	attempt adapterproto.AttemptID
 	kind    handoff.PromptKind
+	// trigger is the event of the endpoint that the prompt answered, restored when the
+	// prompt fails so that the endpoint is judged again with it; zero for one found on
+	// disk at the start.
+	trigger handoff.PromptTrigger
 	// covers are the target records the prompt is for.
 	covers []store.TargetKey
 	// at is when the prompt was dispatched; zero for one found on disk at the start,
@@ -120,11 +122,14 @@ func (e *Engine) noteTurnEnded(id ident.EndpointID) {
 	e.promptsDirty = true
 }
 
-// noteInstanceStarted is the event of an adapter that came online: the turns it
-// reports are those that are running, so a turn that was counted and is not among
-// them is over, and every endpoint of the instance is judged, since what waited for an
+// noteInstanceProbed is the event of an adapter whose connection is in service, which
+// its probe having been answered shows: the host puts the connection in service after
+// it has told the node that the adapter started, so a prompt sent on the start would
+// find nobody to call. The turns the adapter reports are those that are running, so a
+// turn that was counted and is not among them is over, every attempt in flight is
+// asked of it, and every endpoint of the instance is judged, since what waited for an
 // adapter that was away has had no other event to be judged by.
-func (e *Engine) noteInstanceStarted(instance string, now time.Time) {
+func (e *Engine) noteInstanceProbed(instance string, now time.Time) {
 	st := e.adapters[instance]
 	for id, es := range e.view.endpoints {
 		if es.rec.Instance != instance || !promptable(es) {
@@ -309,7 +314,7 @@ func (e *Engine) dispatchPrompt(now time.Time, id ident.EndpointID, d handoff.Pr
 		return
 	}
 	e.view.attempts[id] = head
-	p.flight = &promptFlight{attempt: attempt, kind: d.Kind, covers: covers, at: now}
+	p.flight = &promptFlight{attempt: attempt, kind: d.Kind, trigger: p.trigger, covers: covers, at: now}
 	p.turn, p.trigger = true, 0
 	params := adapterproto.PromptDeliverParams{
 		Endpoint: adapterproto.EndpointRef(id.String()), Attempt: attempt, Text: handoff.PromptText(d.Count),
@@ -354,7 +359,7 @@ func (e *Engine) promptResult(now time.Time, r *cmdPromptResult) {
 		return
 	}
 	p.flight.calling = false
-	outcome, notInService := handoff.AttemptUnknown, false
+	outcome := handoff.AttemptUnknown
 	switch {
 	case r.err == nil:
 		var err error
@@ -365,10 +370,9 @@ func (e *Engine) promptResult(now time.Time, r *cmdPromptResult) {
 	case e.ctx.Err() != nil:
 		return // the node is stopping: the next start finds the attempt in flight and asks
 	case errors.Is(r.err, adapterhost.ErrNotConnected):
-		// Nothing was sent. The adapter has told the node that it started, and the host
-		// puts the connection in service a moment later: the endpoint is judged again
-		// when the adapter has been probed, which is in service, and at the retry.
-		outcome, notInService = handoff.AttemptFailed, true
+		// Nothing was sent: the connection is not in service. The failed attempt holds
+		// the next prompt back for the retry time of the prompt rules, like any other.
+		outcome = handoff.AttemptFailed
 	default:
 		outcome = adapterreg.PromptOutcomeOnError(r.err)
 	}
@@ -378,10 +382,6 @@ func (e *Engine) promptResult(now time.Time, r *cmdPromptResult) {
 	}
 	p.flight.outcome = outcome
 	e.settlePrompt(now, r.endpoint)
-	if notInService && p.flight == nil {
-		p.again = true
-		e.sched.set(promptKey(schedPromptRetry, r.endpoint), now.Add(e.p.CreateRetryBackoff))
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -561,6 +561,11 @@ func (e *Engine) settlePrompt(now time.Time, id ident.EndpointID) {
 	e.sched.remove(promptKey(schedPromptSettle, id))
 	e.sched.remove(promptKey(schedPromptReconcile, id))
 	e.dropAttemptCheckpoint(f.attempt)
+	if f.outcome == handoff.AttemptFailed && p.trigger == 0 {
+		// A failed prompt woke nobody, so the endpoint is judged again with the event
+		// it was prompted for; the rules hold it until their retry time.
+		p.trigger = cmp.Or(f.trigger, handoff.TriggerArrival)
+	}
 	e.promptsDirty = true
 }
 
@@ -576,19 +581,6 @@ func (e *Engine) dropAttemptCheckpoint(attempt adapterproto.AttemptID) {
 		return
 	}
 	delete(e.view.checkpoints, key)
-}
-
-// retryPrompt is the due retry of an endpoint that is held back or whose prompt found
-// the adapter not in service: it is judged again, with the event it has or, for the
-// latter, as if a message had just arrived.
-func (e *Engine) retryPrompt(id ident.EndpointID) {
-	if p := e.prompts[id]; p != nil && p.again {
-		p.again = false
-		if p.trigger == 0 && promptable(e.view.endpoints[id]) {
-			p.trigger = handoff.TriggerArrival
-		}
-	}
-	e.promptsDirty = true
 }
 
 // fireSettle is the retry of an outcome that could not be written.

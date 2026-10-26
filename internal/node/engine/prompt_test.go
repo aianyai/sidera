@@ -461,3 +461,39 @@ func TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack(t *testing.T) {
 	wantPrompts(t, h, addr, 1)
 	wantNoFeedback(t, h, "a", msg)
 }
+
+// A prompt that was refused is sent again, and only once the retry time of the rules has
+// passed: there is a single message and no event of the endpoint to bring it back, so
+// the time the decision names is all that wakes the endpoint, and until then the adapter
+// is not asked again.
+func TestRefusedPromptIsRetriedAfterTheRetryTimeAndDelivered(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	_, addr := idleSession(t, h, "a")
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.QueueOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeRefuse, Reason: string(adapterproto.RefusalBusy)}); err != nil {
+		t.Fatal(err)
+	}
+	msg := sendToAddr(t, h, "a", addr, "for a prompt that is refused once")
+	quiet(t, h)
+	wantPrompts(t, h, addr, 1)
+	if a := attemptsOf(t, h, addr); len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptFailed {
+		t.Fatalf("the attempts are %+v, want the one that failed", a)
+	}
+
+	h.Advance(handoff.DefaultRetryAfterFailure - time.Second)
+	quiet(t, h)
+	wantPrompts(t, h, addr, 1)
+	h.Advance(time.Second)
+	quiet(t, h)
+	wantPrompts(t, h, addr, 2)
+	if got, want := attemptKinds(t, h, addr), []handoff.PromptKind{handoff.PromptKindFirst}; !slices.Equal(got, want) {
+		t.Errorf("the prompts delivered were %v, want %v", got, want)
+	}
+	if in := inOf(t, h, msg); in.Record.Sub != delivery.SubNotified {
+		t.Errorf("the record is %s (%v), want accepted and notified", in.Record.State, in.Record.Sub)
+	}
+	wantNoFeedback(t, h, "a", msg)
+}

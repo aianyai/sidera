@@ -867,10 +867,12 @@ is online is woken by a prompt when messages wait for it. Whether to send one is
 `handoff`, which the engine asks for every waiting endpoint together (`DecideNodePrompts`; a
 `DecidePrompt` of one endpoint never authorizes a send, since the cap on the turns that prompts
 started is the node's) at every moment its answer may have changed: a message that waits for the
-endpoint (an arrival, or a lease that ran out), the end of any turn, an adapter that came online or
-was probed, one that went offline, the owner's change of the cap or the clearing of a wall clock
-that was set back, and the `RetryAt` the decision names for the two holds nothing else brings it
-back from. Each endpoint keeps, in memory, the event that waits to be judged (it stays until a
+endpoint (an arrival, or a lease that ran out), the end of any turn, an adapter whose probe was
+answered (the host puts the connection in service after it has told the node that the adapter
+started, so the start is not the moment a prompt can be sent), one that went offline, the owner's
+change of the cap or the clearing of a wall clock that was set back, and the `RetryAt` the
+decision names for the three holds nothing else brings it back from (the hourly cap, the minimum
+interval, and the retry of a failed prompt). Each endpoint keeps, in memory, the event that waits to be judged (it stays until a
 prompt is sent or nothing waits), when it last called recv, and whether a turn that a prompt
 started may be running: from the dispatch of the prompt until that turn ends or the prompt is
 known not to have started one. That count is what `DecideNodePrompts` is given as running; a turn of
@@ -887,7 +889,10 @@ engine owns, and its result is a command of the loop that records how the attemp
 (`prompt-end`): when the prompt was delivered the covered target records are marked notified first
 and the attempts record last, and the checkpoint of the attempt is dropped after that. The attempts
 the record keeps are cut by `handoff.TrimAttempts` each time one is added. A refusal,
-and a call that found the adapter not connected, is a failure; an answer that does not say whether
+and a call that found the adapter not connected, is a failure; the prompt rules then hold the
+endpoint for a minute (`handoff.DefaultRetryAfterFailure`) and name the instant the retry is
+due, which the engine schedules as it does the other `RetryAt`s, with the event the failed prompt
+answered restored on the endpoint; an answer that does not say whether
 the prompt arrived is asked of the adapter (`prompt.reconcile`, given the stored checkpoint of the
 attempt). The verdict found is a delivery, and counts the turn it started while it runs; provably
 absent is a failure; anything else, a call that got no answer included, is an unknown outcome,
@@ -1360,7 +1365,8 @@ reproducible).
 | The receiving entry under arbitrary bytes | `inbound.go` | `FuzzInbound` |
 | An endpoint is woken once for messages that arrive together, not while its turn runs or its prompt is unread, once more when a turn ends with the prompt unread, and again for a message that arrives after the minimum interval | `prompts.go` (`noteArrival`, `noteTurnEnded`, `servePrompts`, `retryPrompt`) | `TestBusyOrUnreadAgentGetsNoFeedback`, `TestUnreadPromptRepromptedOnce`, `TestNewArrivalAfterMinIntervalWakesOnce`, `TestFiveArrivalsStartOneTurn` |
 | The turns that prompts start are capped for the node, the endpoint that waited longest goes first, a raised cap and a turn that ends free places, and a turn that went on while the adapter was away holds its place | `prompts.go` (`promptRound`, `servePrompts`), `operations_settings.go` | `TestPromptTurnsBeyondNodeCapWaitOldestFirst` |
-| An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceStarted`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
+| An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceProbed`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
+| A prompt that failed is held for the retry time of the rules and then sent again, with nothing else bringing the endpoint back | `prompts.go` (`settlePrompt`, `servePrompts`), `handoff.DecidePrompt` | `TestRefusedPromptIsRetriedAfterTheRetryTimeAndDelivered` |
 | The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
 | A refusal is a failure, a lost answer is a delivery or an unknown outcome as the adapter says, and only a delivery marks the message | `prompts.go` (`promptResult`, `reconcileResult`, `settlePrompt`) | `TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain` |
 | The checkpoint of a prompt attempt is dropped when the attempt settles | `prompts.go` (`dropAttemptCheckpoint`), `store.CheckpointDrop` | `TestSettledPromptAttemptDropsItsCheckpoint` |
@@ -1394,9 +1400,8 @@ Known gaps, each filled in with the feature it belongs to:
   not judged yet: no block is reported and the attempts record's blocked report stays empty.
   A change of the availability an adapter reports does not make the endpoints it names be
   judged again either; the end of a turn, an arrival and a connection of the adapter do.
-- A prompt that failed is not sent again on a timer: the endpoint is judged again by its next
-  event, except when the call found the adapter not in service, which is retried after
-  `CreateRetryBackoff` and when the adapter has been probed.
+- An adapter whose probe failed (the host logs it and goes on) is not judged when it connects:
+  the endpoints of its sessions are judged by the next event of their own.
 - The node does not remember across a restart whether the last prompt was read, so an
   endpoint whose agent had read it may be woken once more by the end of a turn.
 - The checkpoint of the attempt of a session creation is not dropped when the creation

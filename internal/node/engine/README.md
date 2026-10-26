@@ -72,7 +72,8 @@ called, and how one whose outcome is not known is asked about at the start.
 - **The prompt decision is asked for the whole node, and again whenever its answer may have
   changed.** `servePrompts` runs after each command of the loop once the node serves, and acts
   only when `promptsDirty` says something the decision reads has changed (an arrival, the end of
-  a turn, a connection, the cap, the clock). Every event that can change it sets the flag in the
+  a turn, the probe of an adapter being answered, which is when its connection is in service, the
+  cap, the clock, the retry time the decision names after a failed prompt). Every event that can change it sets the flag in the
   place that owns the event; no handler asks the decision itself. A single `DecidePrompt` never
   authorizes a send.
 - **A turn counts against the cap from the dispatch of its prompt until it ends or the prompt is

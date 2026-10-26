@@ -807,9 +807,7 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 			e.later(&cmdDrain{endpoint: id})
 		}
 	case schedPromptRetry:
-		if id, err := ident.ParseEndpointID(key.id); err == nil {
-			e.retryPrompt(id)
-		}
+		e.promptsDirty = true
 	case schedPromptReconcile:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.startReconcile(now, id)
