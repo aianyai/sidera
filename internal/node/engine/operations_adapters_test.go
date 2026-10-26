@@ -595,6 +595,48 @@ func TestUpgradingWhileAnInstanceIsEnabledIsRefusedAndOtherwiseReplacesTheVersio
 	}
 }
 
+// Stopping an instance returns before its process has ended, and the process may
+// hold the files of the version that an upgrade discards: while the host says that
+// a process of a disabled instance is still ending the upgrade is refused as in use,
+// and once it has ended the same request is carried out.
+func TestUpgradingWhileTheProcessOfADisabledInstanceIsStillEndingIsRefused(t *testing.T) {
+	noLeaks(t)
+	host := newHostDouble()
+	r := newRig(t, 10, withAdapters(host), withPackage("/src/relay1", relayPackage(t, "1.0.0")), withPackage("/src/relay2", relayPackage(t, "2.0.0")))
+	e := r.start()
+	if _, err := e.Execute(ctx, installCommand(40, "install 1", "/src/relay1")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Execute(ctx, enableCommand(41, "enable", r.cfg.Instances().Version, "relay", "relay", "")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Execute(ctx, disableCommand(42, "disable", r.cfg.Instances().Version, "relay")); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, e)
+	host.setStopping("relay", true)
+
+	before := r.snapshot()
+	_, err := e.Execute(ctx, installCommand(43, "install 2", "/src/relay2"))
+	if got := changeReason(t, err); got != config.ChangeAdapterInUse {
+		t.Fatalf("the upgrade while the process ends: %v, want it in use", err)
+	}
+	if !reflect.DeepEqual(before, r.snapshot()) {
+		t.Error("the refused upgrade left something on the disk")
+	}
+	if ok, _ := fsx.Exists(r.mem, config.AdapterVersionDir("relay", "1.0.0")); !ok {
+		t.Error("the version the process may hold was discarded")
+	}
+
+	host.setStopping("relay", false)
+	if _, err := e.Execute(ctx, installCommand(43, "install 2", "/src/relay2")); err != nil {
+		t.Fatalf("the upgrade once the process has ended: %v", err)
+	}
+	if v, _ := installedVersion(r.cfg, "relay"); v != "2.0.0" {
+		t.Errorf("version %s is installed, want 2.0.0", v)
+	}
+}
+
 // One package is copied at a time: a second request that arrives while the first
 // is being copied is told so and has changed nothing, and the engine is not quiet
 // while the copy goes on.

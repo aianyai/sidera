@@ -293,6 +293,7 @@ var errDouble = errors.New("the double's own answer")
 
 func (d *adaptersDouble) EnsureRunning(string) { d.note("EnsureRunning") }
 func (d *adaptersDouble) Stop(string)          { d.note("Stop") }
+func (d *adaptersDouble) Stopping(string) bool { return false }
 func (d *adaptersDouble) NotifyPending(string, adapterproto.PendingParams) {
 	d.note("NotifyPending")
 }

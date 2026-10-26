@@ -139,9 +139,12 @@ var _ Beginner = (*txn.Writer)(nil)
 // host's not-connected error.
 type Adapters interface {
 	// EnsureRunning starts the instance if it is enabled and not running;
-	// Stop stops it. Both are idempotent.
+	// Stop stops it. Both are idempotent. Stop returns before the process has
+	// ended, and Stopping says whether a process of the instance still is: the
+	// files it runs from are not removed while it is.
 	EnsureRunning(instance string)
 	Stop(instance string)
+	Stopping(instance string) bool
 
 	CreateSession(ctx context.Context, instance string, p adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error)
 	DeliverPrompt(ctx context.Context, instance string, p adapterproto.PromptDeliverParams) (adapterproto.PromptDeliverResult, error)

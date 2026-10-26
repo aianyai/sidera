@@ -40,7 +40,9 @@ import (
 type hostDouble struct {
 	mu     sync.Mutex
 	counts map[string]adapterhost.ConnCounts
-	asked  atomic.Int64
+	// stopping are the instances whose process is still ending after a Stop.
+	stopping map[string]bool
+	asked    atomic.Int64
 	// calls are the starts and stops the engine asked for, in order, as
 	// "run:<instance>" and "stop:<instance>".
 	calls []string
@@ -67,6 +69,22 @@ func (h *hostDouble) Counts(instance string) adapterhost.ConnCounts {
 
 func (h *hostDouble) EnsureRunning(instance string) { h.record("run:" + instance) }
 func (h *hostDouble) Stop(instance string)          { h.record("stop:" + instance) }
+
+func (h *hostDouble) Stopping(instance string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.stopping[instance]
+}
+
+// setStopping says whether the process of the instance is still ending.
+func (h *hostDouble) setStopping(instance string, stopping bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stopping == nil {
+		h.stopping = map[string]bool{}
+	}
+	h.stopping[instance] = stopping
+}
 
 func (h *hostDouble) record(call string) {
 	h.mu.Lock()

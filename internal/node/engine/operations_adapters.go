@@ -40,8 +40,9 @@ type AdapterInstalled struct {
 // on this platform), so that what is installed is what was checked and not what the
 // source may have become; the loop only renames the copy into place and makes it
 // current. A request that was done before is answered without reading the package.
-// An adapter that has an enabled instance is not upgraded: the instance runs the
-// version that is current. encode makes the result; it runs in the loop and must
+// An adapter that has an enabled instance, or a disabled one whose process is
+// still ending, is not upgraded: the process runs the version that is current and
+// keeps its files. encode makes the result; it runs in the loop and must
 // not wait.
 func InstallAdapterOp(source string, encode func(AdapterInstalled) ([]byte, error)) Operation {
 	return &installAdapterOp{source: source, encode: encode}
@@ -101,11 +102,18 @@ func (e *Engine) unstage(s config.Staged) {
 	}
 }
 
+// instanceStopping says whether the adapter host still has a process of the
+// instance that was stopped, which is what PlanInstall asks before it lets a
+// version be discarded.
+func (e *Engine) instanceStopping(instance string) bool {
+	return e.d.Adapters != nil && e.d.Adapters.Stopping(instance)
+}
+
 func (o *installAdapterOp) run(e *Engine, x *opRun) ([]byte, error) {
 	if o.stageErr != nil {
 		return nil, o.stageErr
 	}
-	plan, err := e.d.Config.PlanInstall(o.staged, nil)
+	plan, err := e.d.Config.PlanInstall(o.staged, e.instanceStopping)
 	if err != nil {
 		return nil, err
 	}

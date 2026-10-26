@@ -407,6 +407,9 @@ func (a *abandonableAdapters) Stop(instance string) {
 	}
 }
 
+// Stopping is a read and passes through, as the counts do.
+func (a *abandonableAdapters) Stopping(instance string) bool { return a.inner.Stopping(instance) }
+
 func (a *abandonableAdapters) NotifyPending(instance string, p adapterproto.PendingParams) {
 	if !a.abandoned.Load() {
 		a.inner.NotifyPending(instance, p)

@@ -183,7 +183,10 @@ detail `source_unreadable` and, in `Refusal.Path`, the place inside the package 
 when the directory the owner named is the fault). It then has
 the loop run the operation as any other, which looks the request up again (an identical
 resend may have arrived meanwhile), refuses an upgrade of an adapter that has an
-enabled instance (`adapter_in_use`: the instance runs the version that is current),
+enabled instance, or a disabled one whose process the host still reports as ending
+(`Adapters.Stopping`), as `adapter_in_use` (the instance runs the version that is
+current, and a process that is ending may still hold its files, which a running
+executable does not allow to be removed on Windows),
 and commits one transaction, `adapter-install`: discard a leftover directory of the
 version, rename the copy to the version, replace the pointer (the commit point), store
 the result, discard the previous version. A package whose version is already the
@@ -650,6 +653,7 @@ reproducible).
 | One installation at a time, counted by `Quiesce` | `manage.go` (`cmdPrepare`) | `TestOnlyOneInstallationRunsAtATime` |
 | An installation, and the store of the result of one that found its version current, recover from a crash at every point | `transactions.go` (`adapter-install`, `adapter-install-current`), `config` (`adapter-stage`, `adapter-unstage`) | `TestAnInstallationRecoversFromACrashAtEveryPoint`, `TestStoringTheResultOfAnInstallationThatFoundItDoneRecoversFromACrash` |
 | Enabling starts the instance through the host; what is refused starts nothing | `operations_adapters.go` (`enableAdapterOp`) | `TestEnablingAnInstanceStartsItThroughTheHost` |
+| An upgrade is refused while the process of a disabled instance is still ending | `operations_adapters.go` (`instanceStopping`), `config` (`PlanInstall`) | `TestUpgradingWhileTheProcessOfADisabledInstanceIsStillEndingIsRefused` |
 | Disabling stops the instance, marks it offline, closes its endpoints | `operations_adapters.go` (`instanceDisabled`), `instance_drain.go` | `TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints` |
 | A request of the adapter after the disabling is refused, and enabling again completes | `operations_adapters.go` (`instanceDisabled`) | `TestAnAdapterRequestAfterTheDisablingIsRefusedAndEnablingAgainCompletes` |
 | Enabling again waits for the closing of the disabling | `operations_adapters.go` (`instanceClosing`), `manage.go` (`waitForDrain`) | `TestEnablingAnInstanceWaitsForTheDrainOfItsDisabling` |
