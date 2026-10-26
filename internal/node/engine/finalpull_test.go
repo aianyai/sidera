@@ -2,14 +2,18 @@ package engine_test
 
 import (
 	"bytes"
+	"context"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 	"github.com/aianyai/sidera/internal/reply"
 	"github.com/aianyai/sidera/internal/timing"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -272,26 +276,166 @@ func TestNoRecordInThePullBeforeTheCloseIsNotALoss(t *testing.T) {
 	toldOnce(t, h, []delivery.Kind{delivery.KindAcceptedUnconfirmed})
 }
 
+// unreachablePulls counts the pulls the node made while the target was unreachable,
+// from the ledger: each call to an unreachable node is a hit that names its kind.
+func unreachablePulls(t testing.TB, h *harness.H) int {
+	t.Helper()
+	log, err := h.Ledger()
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	n := 0
+	for _, e := range log.Kind(ledger.KindKnobHit) {
+		if e.Attrs.Knob == "unreachable" && strings.Contains(e.Attrs.Detail, "call=pull ") {
+			n++
+		}
+	}
+	return n
+}
+
+// inFlightSend puts the source record of the message in the state it is in while its
+// send is under way, and refuses the send as a conflict when the returned function
+// is called, as the target does that holds another request under the identifier.
+// The delivery is no longer in the outbox then, and nothing in the schedule asks for
+// it.
+func inFlightSend(t *testing.T, h *harness.H, msg adapterproto.MessageID) (refuse func()) {
+	t.Helper()
+	name := outOf(t, h, msg).Name()
+	inLoop := func(fn func(engine.LoopSide)) {
+		t.Helper()
+		if err := engine.InLoop(h.Ctx(), h.Engine(), fn); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inLoop(func(l engine.LoopSide) { l.SendInFlight(name) })
+	return func() {
+		t.Helper()
+		inLoop(func(l engine.LoopSide) { l.SendRefusedAsConflict(name, harness.NodeID(), delivery.MessageID(msg)) })
+	}
+}
+
 // A delivery that stays queued because the target answered its send with a conflict
-// is no longer sent, but it is still a delivery the sender was told nothing of: it
-// closes at report_by with the notice of that, and not in silence.
-func TestADeliveryRemovedFromTheOutboxByAConflictStillEndsWithANotice(t *testing.T) {
+// is no longer sent, but it is still a delivery the sender was told nothing of: when
+// the target cannot be asked at report_by, it closes with the notice of that, and not
+// in silence. (What the pull brings when the target holds the conflicting request is
+// that request's report, which the delivery follows; no test here covers it.)
+func TestADeliveryRemovedFromTheOutboxByAConflictIsClosedWithANoticeWhenTheTargetCannotBeAsked(t *testing.T) {
 	h := nodeWith(t, harness.Options{}, "a", "b")
 	h.Unreachable(true)
 	msg := send(t, h, "a", "b", "its identifier is held by another request")
 	quiet(t, h)
 	reportBy := sourceDelivery(t, h, msg).ReportBy
-	name := outOf(t, h, msg).Name()
-	if err := engine.InLoop(h.Ctx(), h.Engine(), func(l engine.LoopSide) {
-		l.SendRefusedAsConflict(name, harness.NodeID(), delivery.MessageID(msg))
-	}); err != nil {
-		t.Fatal(err)
-	}
+	inFlightSend(t, h, msg)()
 	sleepUntilAfter(t, h, reportBy, time.Minute)
 	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed {
 		t.Fatalf("the source record is %s, want closed_unconfirmed", d.State)
 	}
 	toldOnce(t, h, []delivery.Kind{delivery.KindExpiredUnconfirmed})
+}
+
+// The same while the node keeps running: nothing of the outbound schedule is left for
+// a delivery a conflict removed from the outbox, so the tick at report_by is what asks
+// for the one pull before the close. The target is unreachable, so the pull fails and
+// the delivery closes with the notice, once.
+func TestAConflictedDeliveryIsPulledOnceAndClosedWithANoticeWhileTheNodeRuns(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	h.Unreachable(true)
+	msg := send(t, h, "a", "b", "its identifier is held by another request")
+	quiet(t, h)
+	reportBy := sourceDelivery(t, h, msg).ReportBy
+	inFlightSend(t, h, msg)()
+	before := unreachablePulls(t, h)
+
+	h.Advance(reportBy.Sub(h.Clock().Now()) + time.Minute)
+	quiet(t, h)
+
+	if pulls := unreachablePulls(t, h) - before; pulls != 1 {
+		t.Errorf("the node made %d pulls after report_by, want the one before the close", pulls)
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed {
+		t.Fatalf("the source record is %s, want closed_unconfirmed without a restart", d.State)
+	}
+	toldOnce(t, h, []delivery.Kind{delivery.KindExpiredUnconfirmed})
+}
+
+// A delivery whose pull before the close never comes still closes with its notice
+// when the window the target keeps its records for is over, with no restart needed:
+// here the send that was under way when report_by passed is refused as a conflict, so
+// the pull that was asked for found the worker busy and nothing asked again.
+func TestADeliveryWhoseLastPullNeverComesClosesWhenTheTargetsRetentionIsOver(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	h.Unreachable(true)
+	msg := send(t, h, "a", "b", "its send is under way across report_by")
+	quiet(t, h)
+	reportBy := sourceDelivery(t, h, msg).ReportBy
+	refuse := inFlightSend(t, h, msg)
+	before := unreachablePulls(t, h)
+
+	h.Advance(reportBy.Sub(h.Clock().Now()) + time.Minute)
+	quiet(t, h)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
+		t.Fatalf("the source record is %s after report_by with a send under way, want it waiting for the pull before the close", d.State)
+	}
+	refuse()
+	quiet(t, h)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
+		t.Fatalf("the source record is %s, want queued: the worker has nothing to ask the target", d.State)
+	}
+
+	h.Advance(reply.RetainFactsUntil(reportBy).Sub(h.Clock().Now()) + time.Minute)
+	quiet(t, h)
+	if pulls := unreachablePulls(t, h) - before; pulls != 0 {
+		t.Errorf("the node made %d pulls, want none: the target's retention is over", pulls)
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed {
+		t.Fatalf("the source record is %s once the target's retention is over, want closed_unconfirmed without a restart", d.State)
+	}
+	toldOnce(t, h, []delivery.Kind{delivery.KindExpiredUnconfirmed})
+}
+
+// While the wall clock is in doubt the node judges nothing by a deadline, and the pull
+// before a close is a step towards judging one: it is not made. When the owner has
+// cleared the pause the pull is made once and the delivery closes with its notice.
+func TestNoPullBeforeTheCloseIsMadeWhileTheClockIsInDoubt(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	msg := send(t, h, "a", "b", "its report_by comes while the clock is in doubt")
+	quiet(t, h)
+	reportBy := sourceDelivery(t, h, msg).ReportBy
+	h.Unreachable(true)
+	h.Advance(10 * time.Minute)
+	pending(t, h, "a") // a command reads the clock and raises the mark
+	quiet(t, h)
+	mark := h.Clock().Now()
+
+	h.Set(mark.Add(-30 * time.Minute))
+	if _, err := trySend(h, "a", "b", "finds the clock set back", ""); fakeagent.CodeOf(err) != "clock_rollback" {
+		t.Fatalf("send while the clock is behind the mark: %v; want the refusal for the clock", err)
+	}
+	before := unreachablePulls(t, h)
+
+	h.Set(reportBy.Add(time.Minute)) // ahead of the mark again; the owner has cleared nothing
+	quiet(t, h)
+	h.Advance(5 * time.Minute)
+	quiet(t, h)
+	if pulls := unreachablePulls(t, h) - before; pulls != 0 {
+		t.Errorf("the node made %d pulls after report_by while the clock was in doubt, want none", pulls)
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateAccepted {
+		t.Fatalf("the source record is %s while the clock is in doubt, want it untouched (accepted)", d.State)
+	}
+
+	if _, err := h.Engine().Execute(context.Background(), clearCommand(74, "clear")); err != nil {
+		t.Fatal(err)
+	}
+	h.Advance(2 * time.Minute)
+	quiet(t, h)
+	if pulls := unreachablePulls(t, h) - before; pulls != 1 {
+		t.Errorf("the node made %d pulls once the pause was cleared, want the one before the close", pulls)
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateClosedUnconfirmed {
+		t.Fatalf("the source record is %s once the pause was cleared, want closed_unconfirmed", d.State)
+	}
+	toldOnce(t, h, []delivery.Kind{delivery.KindAcceptedUnconfirmed})
 }
 
 // deliverOnDisk makes the target record of the message delivered, as the agent's

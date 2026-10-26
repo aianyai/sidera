@@ -383,17 +383,24 @@ func (l LoopSide) SettleDamaged(dir, name string) error {
 	return fmt.Errorf("no damaged file %s/%s", dir, name)
 }
 
-// SendRefusedAsConflict is the result the outbound worker brings the loop when the
-// target answers the send of a message of the source record named name with a
-// conflict: another request is held under its identifier. The record must have
-// work out, as it has while a send is under way.
-func (l LoopSide) SendRefusedAsConflict(name string, node ident.NodeID, message delivery.MessageID) {
+// SendInFlight puts the loop in the state it is in while the worker makes a send of
+// the source record named name: the send is out, and no entry of the schedule waits
+// for the record, because the entry that dispatched the send was taken.
+func (l LoopSide) SendInFlight(name string) {
 	st := l.e.outbox.state[name]
 	if st == nil {
 		st = &outState{sent: map[ident.NodeID]bool{}, failingSince: map[ident.NodeID]time.Time{}}
 		l.e.outbox.state[name] = st
 	}
 	st.inflight++
+	l.e.sched.remove(schedKey{schedOutbound, name})
+}
+
+// SendRefusedAsConflict is the result the outbound worker brings the loop when the
+// target answers the send of a message of the source record named name with a
+// conflict: another request is held under its identifier. A send must be in flight
+// (SendInFlight).
+func (l LoopSide) SendRefusedAsConflict(name string, node ident.NodeID, message delivery.MessageID) {
 	l.e.outResult(l.e.d.Clock.Now(), outWork{kind: workSend, name: name, node: node, message: message}, nil, nil, &Refusal{Reason: ReasonMessageConflict})
 }
 
