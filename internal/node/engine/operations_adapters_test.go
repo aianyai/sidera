@@ -684,6 +684,7 @@ func TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints(t *testin
 	r.restart()
 	r.queue(1, 4, a)
 	r.queue(5, 3, b)
+	leased := r.seedHandedOut(8, a)
 	e = r.start()
 	if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{}); err != nil {
 		t.Fatal(err)
@@ -711,16 +712,23 @@ func TestDisablingAnInstanceStopsItMarksItOfflineAndClosesItsEndpoints(t *testin
 		t.Errorf("%d endpoints are open after the instance was disabled", got)
 	}
 	sc := r.scan()
-	if len(sc.In) != 7 {
-		t.Fatalf("%d target records, want 7", len(sc.In))
+	if len(sc.In) != 8 {
+		t.Fatalf("%d target records, want 8", len(sc.In))
 	}
 	for _, in := range sc.In {
-		if in.Record.State != delivery.StateRejected {
+		switch {
+		case in.Key == leased:
+			// The agent may have read what was handed out: the sender is not told it
+			// was rejected, and is told the delivery is unknown.
+			if in.Record.State != delivery.StateDeliveryUnknown || in.Record.Unknown != delivery.UnknownHandedOver {
+				t.Errorf("the handed-out record is %v (%v), want delivery_unknown, handed_over", in.Record.State, in.Record.Unknown)
+			}
+		case in.Record.State != delivery.StateRejected:
 			t.Errorf("record %s is %v, want it rejected with its endpoint closed", in.Key.Message, in.Record.State)
 		}
 	}
 	if len(sc.Bodies) != 0 {
-		t.Errorf("%d bodies are kept for rejected records", len(sc.Bodies))
+		t.Errorf("%d bodies are kept for closed records", len(sc.Bodies))
 	}
 	in, ok := r.cfg.Instances().Items["chat"]
 	if !ok || in.Enabled {

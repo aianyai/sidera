@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"bytes"
 	"fmt"
 	"testing"
 	"time"
@@ -61,6 +62,26 @@ func (r *rig) queue(first, n int, recipient ident.EndpointID) {
 			r.t.Fatalf("Deliver %d: %v", i, err)
 		}
 	}
+}
+
+// seedHandedOut writes message i for recipient onto the disk as the engine leaves
+// a delivery whose body was handed out to the endpoint, and returns its key. It is
+// written outside the store's own methods, which only accept a delivery as queued.
+func (r *rig) seedHandedOut(i int, recipient ident.EndpointID) store.TargetKey {
+	r.t.Helper()
+	in := queuedIn(r.t, i, recipient)
+	lease, err := delivery.NewLeaseID(bytes.NewReader(bytes.Repeat([]byte{7}, delivery.LeaseIDLen)))
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	rec, _, err := in.Record.Handout(t0, delivery.AuthorizationAllow, 1, 1, lease)
+	if err != nil {
+		r.t.Fatalf("Handout: %v", err)
+	}
+	in.Record, in.Rev = rec, 1
+	r.seedBody(bodyOf(i))
+	r.seedRecord(in)
+	return in.Key
 }
 
 // scan reads the disk.
