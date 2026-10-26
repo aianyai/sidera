@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -39,6 +40,8 @@ type diskTaker struct {
 type takenDisk struct {
 	where string
 	disk  *fsxtest.Mem
+	// at is the time of the test clock at the instant of the crash.
+	at time.Time
 }
 
 // coverage is every step of the transactions under walk that some scenario reached.
@@ -71,7 +74,7 @@ func (d *diskTaker) Reached(p fsx.Point, _ txn.Kind) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for _, cd := range crashDisks(mem) {
-		d.disks = append(d.disks, takenDisk{fmt.Sprintf("%s (%s)", where, cd.kind), cd.disk})
+		d.disks = append(d.disks, takenDisk{fmt.Sprintf("%s (%s)", where, cd.kind), cd.disk, d.h.Clock().Now()})
 	}
 }
 
