@@ -377,3 +377,65 @@ func TestARecvThatWaits(t *testing.T) {
 		}
 	})
 }
+
+// An acknowledgement of a whole page, with no parts named, is what the agent sends
+// when it has read the page. The node remembers what a page held for as long as a
+// lease lives; after a restart or past that, it knows only that a message that fits
+// whole handed out its one part. A part of a message that was cut cannot be told from
+// the others there, and acknowledging one that was never shown would deliver a body
+// nobody read, so it is left for the agent to name.
+func TestAWholePageAcknowledgementAfterThePageIsForgottenAcknowledgesOnlyWhatFitsWhole(t *testing.T) {
+	restart := func(t *testing.T, h *harness.H, _ fakeagent.Agent) { h.Restart(); quiet(t, h) }
+	pastMemory := func(t *testing.T, h *harness.H, b fakeagent.Agent) {
+		h.Advance(delivery.LeaseRenewalCap + time.Minute)
+		quiet(t, h)
+		// The next page the node remembers makes it forget the older ones.
+		recvAs(t, h, b, fakeagent.RecvInput{})
+	}
+	for _, tc := range []struct {
+		name   string
+		bodies []string
+		// forget makes the node forget the page the agent holds the lease of.
+		forget func(t *testing.T, h *harness.H, b fakeagent.Agent)
+		// completed is how many messages the acknowledgement completes: the ones that fit whole.
+		completed int
+	}{
+		{"whole messages, after a restart", []string{"a short one", "another short one"}, restart, 2},
+		{"whole messages, past the time a page is remembered", []string{"a short one", "another short one"}, pastMemory, 2},
+		{"a message cut in parts, after a restart", []string{bigText("a message that is cut", 60*1024)}, restart, 0},
+		{"a message cut in parts, past the time a page is remembered", []string{bigText("a message that is cut", 60*1024)}, pastMemory, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := nodeWith(t, harness.Options{}, "a", "b")
+			b := h.Agent("b")
+			var sent []adapterproto.MessageID
+			for _, body := range tc.bodies {
+				sent = append(sent, send(t, h, "a", "b", body))
+				h.Advance(time.Second) // the queue is in the order of arrival
+			}
+			quiet(t, h)
+			page := recvAs(t, h, b, fakeagent.RecvInput{})
+			if got := pageIDs(page); !slices.Equal(got, sent) {
+				t.Fatalf("the page holds %v, want %v", got, sent)
+			}
+
+			tc.forget(t, h, b)
+			acks := ackAs(t, h, b, page.Page.Lease)
+			quiet(t, h)
+
+			if len(acks) != tc.completed {
+				t.Fatalf("the acknowledgement is %+v, want %d parts acknowledged", acks, tc.completed)
+			}
+			for i, a := range acks {
+				if a.MessageID != sent[i] || a.Part != 1 || a.Ack != adapterproto.ItemCompleted {
+					t.Errorf("the acknowledgement %d is %+v, want part 1 of %s completed", i, a, sent[i])
+				}
+			}
+			for _, id := range sent[tc.completed:] {
+				if in := inOf(t, h, id); in.Record.State != delivery.StateAccepted || slices.Contains(in.Record.Lease.Acked, true) {
+					t.Errorf("message %s is %s with parts acknowledged %v, want it accepted and no part acknowledged", id, in.Record.State, in.Record.Lease.Acked)
+				}
+			}
+		})
+	}
+}
