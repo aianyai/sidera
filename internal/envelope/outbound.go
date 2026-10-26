@@ -265,6 +265,35 @@ func (o Outbound) ApplyReport(now time.Time, rep SignedReport) (Outbound, Report
 // connection the network key authenticates; it is not signed and is no evidence
 // for a third party.
 func (o Outbound) ApplyNoRecord(now time.Time, node ident.NodeID, recipient ident.EndpointID) (Outbound, ReportEffect, delivery.Outcome, error) {
+	return o.applyFact(now, node, recipient, delivery.Event{Type: delivery.EventNoRecordAtTarget})
+}
+
+// ApplyObservation applies to the delivery of the message to recipient, original
+// or derived, a fact the sender observes itself and no report carries: a query of
+// the target that found no receipt (delivery.EventExpiryQueried), contact with the
+// target that has been failing (delivery.EventContactFailing) or the passing of
+// report_by (delivery.EventReportByPassed). The delivery must be on node, the node
+// the observation is about. An endpoint with no delivery here changes nothing
+// (ReportNotTracked); whether the observation changes the delivery is the rule of
+// delivery.Record.Apply, which may ignore it, and the outcome says which.
+//
+// What the target reports (a receipt, a delivery, a rejection, a loss) is not an
+// observation: it has the one rule of ApplyReport, or of ApplyNoRecord for its
+// answer that it holds no record, and is refused here with ErrObservation, so that
+// no caller reaches the state of a delivery without the checks of a report. On an
+// error nothing changes.
+func (o Outbound) ApplyObservation(now time.Time, node ident.NodeID, recipient ident.EndpointID, ev delivery.Event) (Outbound, ReportEffect, delivery.Outcome, error) {
+	switch ev.Type {
+	case delivery.EventExpiryQueried, delivery.EventContactFailing, delivery.EventReportByPassed:
+	default:
+		return o, ReportNone, delivery.Outcome{}, fmt.Errorf("%w: event type %d", ErrObservation, ev.Type)
+	}
+	return o.applyFact(now, node, recipient, ev)
+}
+
+// applyFact applies a delivery event to the tracked delivery of an endpoint on
+// node: the one place that finds the delivery, checks its node and replaces it.
+func (o Outbound) applyFact(now time.Time, node ident.NodeID, recipient ident.EndpointID, ev delivery.Event) (Outbound, ReportEffect, delivery.Outcome, error) {
 	if err := o.Validate(); err != nil {
 		return o, ReportNone, delivery.Outcome{}, err
 	}
@@ -273,9 +302,9 @@ func (o Outbound) ApplyNoRecord(now time.Time, node ident.NodeID, recipient iden
 		return o, ReportNotTracked, delivery.Outcome{}, nil
 	}
 	if t.Address.Node != node {
-		return o, ReportNone, delivery.Outcome{}, fmt.Errorf("%w: the delivery is on another node than the one that answered", ErrMismatch)
+		return o, ReportNone, delivery.Outcome{}, fmt.Errorf("%w: the delivery is on another node than the one the fact is about", ErrMismatch)
 	}
-	d, out, err := t.Delivery.Apply(now, delivery.Event{Type: delivery.EventNoRecordAtTarget})
+	d, out, err := t.Delivery.Apply(now, ev)
 	if err != nil {
 		return o, ReportNone, delivery.Outcome{}, err
 	}

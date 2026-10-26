@@ -70,4 +70,8 @@ var (
 	// ErrFromFuture: a report claims a time later than now plus the clock
 	// tolerance.
 	ErrFromFuture = errors.New("report is dated in the future")
+	// ErrObservation: the event offered to Outbound.ApplyObservation is not
+	// something a sender observes itself. A fact the target reports reaches the
+	// record through ApplyReport or ApplyNoRecord, never through here.
+	ErrObservation = errors.New("event is not an observation of the sender")
 )

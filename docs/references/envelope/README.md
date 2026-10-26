@@ -196,6 +196,19 @@ sender has no delivery to is `ReportNotTracked`. The answer is not signed: it
 comes only over the connection the network key authenticates and is no evidence
 for a third party, the reason a status report is signed.
 
+`Outbound.ApplyObservation(now, node, recipient, event)` applies the facts the sender
+observes itself and no report carries, to the same tracked delivery and under the
+same node check as `ApplyNoRecord`: a query of the target that found no receipt
+(`delivery.EventExpiryQueried`), contact with it that keeps failing
+(`delivery.EventContactFailing`) and the passing of `report_by`
+(`delivery.EventReportByPassed`). Whether one of them changes the delivery is the
+rule of `delivery.Record.Apply`, which may ignore it. Anything the target reports (a
+receipt, a delivery, a rejection, a loss) is refused with `ErrObservation`: it has
+the one rule of `ApplyReport`, or of `ApplyNoRecord`, and a caller must not reach the
+state of a delivery around the checks of a report. Both methods find and replace the
+delivery in one private function, so the node check and the replacement are written
+once.
+
 `Outbound.Deliveries()` lists every delivery the record tracks, the original ones in
 recipient order and then the derived one, so that a caller that goes through all of
 them cannot leave the derived delivery out.
@@ -464,7 +477,8 @@ which may still admit it.
   `TestReportsAndRepliesAreSignedByTheTargetNodesNetworkKey`, which includes the
   sending-node check); `golden_test.go` (`TestGoldenRequestDigest`);
   `keynine_test.go` (`TestStatusReportRefusesKeyNine`); `norecord_test.go`
-  (`TestApplyNoRecordFindsTheTrackedDeliveryOnItsNode`);
+  (`TestApplyNoRecordFindsTheTrackedDeliveryOnItsNode`); `observation_test.go`
+  (`TestApplyObservationAppliesWhatTheSenderSeesItself`);
   `outbound_test.go` (`TestApplyReport`, `TestHandleControlReply`,
   `TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply`,
   `TestAReportDatedAfterTheDeliverysReportByIsIgnored`);
