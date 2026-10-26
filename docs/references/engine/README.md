@@ -1161,7 +1161,7 @@ reproducible).
 | Contact that keeps failing is told once; twenty messages are one notice; the delivery ends closed after `report_by`, told once more as expired | `outbound.go` (`outResult`, `noteContactFailing`) | `TestTwentyToUnreachableTargetMergeIntoOneNotice`, `TestAnUnreachableTargetIsToldOnceAndTheDeliveryClosesAfterReportBy` |
 | Nothing is ticked or judged while the clock is in doubt | `ticks.go` (`tickBatch`), `outbound.go` (`observe`) | `TestClockRollbackPausesSigningUntilCleared`, `TestNoRecordIsNotAnsweredWhileTheNodeMayNotSign` |
 | The records of time survive a crash at every step | `tick` (declared by the store) | `TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint` |
-| A damaged file is settled by the scan entry first of the rules; a source record becomes the sender's lost record, a file lost unread a notice of its loss, a target record is removed; each tells the sender once and raises one alert | `quarantine.go` (`quarantineAll`, `settleFile`, `lostOut`), `recovery.go` | `TestCorruptDeliveryRecordIsReportedToTheSenderOnce`, `TestOpenQuarantinesADamagedFileAndOpens`, `TestQuarantineRecoversFromACrashAtEveryPoint` |
+| A damaged file is settled by the scan entry first of the rules; a source record becomes the sender's lost record, a file lost unread a notice of its loss, a target record is removed; each of the first three tells the sender once (a notice that is itself a target record tells nobody, see the known gaps) and each raises one alert | `quarantine.go` (`quarantineAll`, `settleFile`, `lostOut`), `recovery.go` | `TestCorruptDeliveryRecordIsReportedToTheSenderOnce`, `TestOpenQuarantinesADamagedFileAndOpens`, `TestQuarantineRecoversFromACrashAtEveryPoint` |
 | A damaged control record is settled with the others, closes the endpoints it was creating, and is a record the node no longer holds | `quarantine.go` (`quarantineAll`, `damagedCtlAlert`) | `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`, `TestControlRecordLostBeforeItsReplyIsTold` |
 | A control signal is sent by the worker, taken in by one order, and answered with its report and reply | `control.go`, `intake_control.go`, `inbound.go`, `outbound.go` | `TestSessionCreateMakesAnEndpointAndTellsItsSender`, `TestControlRequestsAreChecked`, `TestControlSignalIsRefusedWhenTheNodeQueueIsFull`, `FuzzInbound` |
 | A control signal the target refuses at intake is rejected at once with its reason, answered from its record when repeated or asked about, kept like a finished control record, and survives a crash at every write | `intake_control.go` (`controlTarget`, `refuseControl`), `inbound.go` (`answerPull`) | `TestAControlSignalTheTargetRefusesAtIntakeIsRejectedAtOnceWithItsReason`, `TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected`, `TestARefusedControlSignalIsAnsweredFromItsRecordWhenItIsRepeated`, `TestARefusedControlSignalIsKeptWhileASenderCanAskAndSweptAfter`, `TestARefusedControlSignalRecoversFromACrashAtEveryPoint` |
@@ -1200,6 +1200,12 @@ reproducible).
 | The receiving entry under arbitrary bytes | `inbound.go` | `FuzzInbound` |
 
 Known gaps, each filled in with the feature it belongs to:
+
+- A notice of the system endpoint whose `in/` file is itself damaged is removed at the scan
+  like any target record, and cannot say which feedback it covered: the covers are in the
+  file that was lost, and `reissueCovered` reads them from the record. What it told is not
+  told again; the owner has the `corrupt_record` alert. Only a notice whose body file is
+  damaged, which leaves its record readable, is told again.
 
 - The creation carries no initial message: the delivery of the first message to the new
   session, the closing and the interrupting of a session and the execution of those signals
