@@ -122,7 +122,11 @@ func DerivedKey(c CtlRecord) TargetKey {
 // no record, though its body is on the disk. The body is the evidence that the
 // delivery was being written: it is written before the control record, and with
 // no body the delivery is not one the node owes (it was settled and swept, or
-// never made). A delivery whose file is damaged is left to the quarantine.
+// never made). A delivery whose file is damaged is not replayed over: the quarantine
+// settles the file first, removing the record and not the body, and the next scan
+// finds the delivery missing and replays it from the control record. That is right
+// because the endpoint of an unsettled creation has not opened, so the message was
+// never handed out, and the body is checked against its digest when it is read.
 func DerivedReplays(sc *Scan) []CtlRecord {
 	have := map[string]bool{}
 	for _, in := range sc.In {

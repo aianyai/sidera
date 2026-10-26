@@ -621,15 +621,18 @@ and have neither a delivery nor a damaged file under its name, though the body i
 disk) has the engine make the delivery from the control record alone and writes it
 (`DerivedReplay`: `derived`, `in-dir`); the body is the evidence that the delivery was
 being written, and `OrphanBodies` leaves it, whatever order the rules run in, because
-losing it would lose the message with nothing said. A control record that is settled had
-its delivery written first (the adapter is called after the intake commits), so a
+losing it would lose the message with nothing said. A delivery whose file is damaged is first
+settled by the quarantine, which removes the record and leaves the body, and then replayed
+like a missing one: the endpoint of an unsettled creation has not opened, so the message was
+never handed out, and the body is checked against its digest when it is read. A control record
+that is settled had its delivery written first (the adapter is called after the intake commits), so a
 settled record without a delivery is not replayed. The delivery of the message to a
 session that is not made is closed with the endpoint, by the drain, as any record
 queued for a closed endpoint is. The sweep removes the control record before the
 delivery (below), so the rule does not bring back a delivery that was swept.
 Tests: `TestSessionCreationRecoversFromACrashAtEveryPoint` (a creation with a message,
-every step of `control-intake`), the `derived-replay` scenario of the recovery walks
-and `TestOrphanBodiesLeavesTheBodyOfADeliveryYetToBeWritten`.
+every step of `control-intake`), the `derived-replay` scenarios of the recovery walks
+(a delivery left unwritten and one whose file is damaged) and `TestOrphanBodiesLeavesTheBodyOfADeliveryYetToBeWritten`.
 
 **Out-lost record.** A third kind of `out/` file, `out-lost`, tells a sending endpoint
 that one of its messages was lost with a file nothing could be read from, which is

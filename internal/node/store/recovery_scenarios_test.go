@@ -325,6 +325,31 @@ func recoveryScenarios() []scenario {
 			},
 		},
 		{
+			// The delivery of the initial message of a creation that is not settled is
+			// damaged: the quarantine removes the record and leaves the body, and the
+			// delivery is written again from the control record. The endpoint of the
+			// creation was never open, so nothing of the message was handed out.
+			name: "the delivery of an initial message whose file is damaged",
+			setup: func(t *testing.T, mem *fsxtest.Mem) {
+				pending, d := withInitial(sessionCtl(1, 5), 1)
+				seedWithBodies(t, mem, session(5, store.EndpointCreating, ctlName(1)), pending, d)
+				damageBody(t, mem, path.Join(store.InDir, d.Name()))
+			},
+			mode: atomic, mustComplete: true, run: recoverRun,
+			verify: func(t *testing.T, r *rig) {
+				sc := r.scan()
+				_, want := withInitial(sessionCtl(1, 5), 1)
+				if _, got, _ := find(t, sc, want.Name()); got == nil || !equalRecords(*got, want) {
+					t.Errorf("the delivery of the pending creation is %#v, want %#v", got, want)
+				}
+				wantBody(t, r, want, bodyBytes(1))
+				wantBodyCount(t, r, 1)
+				if len(sc.Damaged) != 0 {
+					t.Errorf("%d damaged files remain, want none", len(sc.Damaged))
+				}
+			},
+		},
+		{
 			// The state kept for a session goes when the session is closed, and that of
 			// a session that is open, or of another scope, stays.
 			name: "the checkpoints of closed sessions",
