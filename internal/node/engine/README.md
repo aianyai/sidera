@@ -28,6 +28,7 @@ signals join the same loop as further commands and add their methods to this lis
 | ---- | ------- |
 | `Open(ctx, Deps, Params)` | The scan entry: scans `state/`, runs the recovery rules until none has work, builds the view. Returns a `ScanReport`. |
 | `Start`, `RecoverDelivery`, `Serve`, `BeginShutdown`, `Stop`, `Done`, `Err`, `Phase` | The life of the loop: opened, recovering, running, stopping, stopped or failed. `RecoverDelivery` is the second recovery entry; the table of the start steps is in the reference. |
+| `AddArchiveSweep` | Registers the archive sweep (`sweep.go`) as a periodic task with the period the composition root names, before `Start`. |
 | `AddPeriodic`, `AddClockState`, `Task`, `TaskInput`, `SignRefusalOf` | A task the composition root has the loop run every period, before `Start`. The clock state's task is also run at once by the command that finds the wall clock set back. A task is told whether the node may sign (`TaskInput.SignRefusal`, from `SignRefusalOf`, the one judgement of signing). |
 | `Quiesce`, `Expect`, `AdapterExpect`, `Report` | Returns when no command waits, nothing is due, no goroutine of the engine runs and every adapter named in `Expect.Adapters` is quiet by the host's own counts. |
 | `AdapterAdmitted`, `AdapterStarted`, `ProbeTokens`, `AdapterProbed`, `AdapterGone`, `AdapterNotified` | What the adapter host calls for the life of a connection, in that order: the admission of an instance (which makes its runtime endpoint and returns what `adapter.start` carries), what the adapter answered to `adapter.start` and `adapter.probe`, the probe tokens, the end of the connection, and the notifications. `*Engine` satisfies `adapterhost.Engine`. |
@@ -217,6 +218,21 @@ signals join the same loop as further commands and add their methods to this lis
   leased), accepted control records, and source deliveries no receipt answered;
   a delivery whose outcome is unknown holds no body and is not counted. System feedback, status reports, control
   replies and the local target side of a delivery do not go through it.
+- **The archive sweep is a pass of commands that queue each other.** `beginSweep` (the
+  periodic task) scans and plans with `store.PlanSweep` in the loop, which stalls the loop
+  once for the whole scan (about 3.2 s at 50,000 files, 11 to 13 s at 200,000, warm; callers
+  meanwhile may be told `loop_busy`, which they retry); the commands that follow stall it for
+  one bounded step at a time. They remove the archive files past the retention
+  (`store.ExpiredArchiveFiles` of the same scan, with `config.NodeSettings.ArchiveRetention`,
+  the only reading of it), append the summaries, both in slices of `Params.ChunkRemoves`,
+  then remove chunks of at most that many files cut from `SweepPlan.Chunk` in the store's
+  order, and take what each chunk removed out of the view (`forgetSwept`: the view clears
+  the schedule entry of the records it drops, forgets a session endpoint's pairs in the
+  sequence book), the queue of feedback, the endpoints and the outbox (`forgetOutbound`).
+  Expiring the archive and the summaries are best effort: a failure is logged and the
+  removals go on. Before each chunk the endpoints the plan has yet to remove are looked at,
+  and a pass that finds one open again ends (`planIsStale`): the next one plans from a new
+  scan. Nothing is swept while the clock is in doubt.
 - **Recovery is a plan, then rules.** `PlanRecovery` is a pure function of a scan.
   `Open` runs the rules in the order the store's README fixes, works the plan out
   again from a fresh scan after a rule has written, and repeats until nothing is
@@ -376,7 +392,7 @@ signals join the same loop as further commands and add their methods to this lis
   pause begins, so the pause is on disk before the command that found it goes on.
 - A task that signs reads `TaskInput.SignRefusal` and nothing else to decide
   whether it may; the start, which has no engine yet, asks `SignRefusalOf` the same.
-- Call `AddPeriodic` before `Start`, `RecoverDelivery` between `Start` and
+- Call `AddPeriodic` and `AddArchiveSweep` before `Start`, `RecoverDelivery` between `Start` and
   `Serve`, and `BeginShutdown` before `Stop`.
 - Admit an adapter instance with `AdapterAdmitted` before its endpoints register,
   and only an instance the configuration has enabled; call the methods of one
@@ -438,6 +454,12 @@ the declaration field (`declaration_internal_test.go`), the view and the batches
 `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord` is a
 requirement kept in sight and skipped until the quarantine is wired.
 
+`sweep_test.go` the sweep as the node runs it over a node of the harness (the periodic
+task, chunks, a summary that cannot be appended, a notice that is kept for the item it
+covers, an endpoint registered again between two chunks, a clock in doubt, the archive
+files past the retention, a source record that waits for its last pull) and
+`sweep_internal_test.go` the cutting of a plan, the plan that an endpoint open again makes
+stale and what leaves the view and the outbox;
 `feedback_test.go` has the notices (once, within the window and the cap, at the start,
 for a closed endpoint, a full queue, and the crash walk of the writes that tell an
 endpoint) and `feedback_helpers_test.go` reads them from the disk;

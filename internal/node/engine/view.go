@@ -429,3 +429,63 @@ func (v *view) setOut(o store.OutRecord) {
 	v.unfinished += outUnfinished(o)
 	v.ticks(outTick(o.Name()), outNextTick(o))
 }
+
+// dropCtl is dropIn for a control record.
+func (v *view) dropCtl(key store.TargetKey) {
+	old, ok := v.ctl[key]
+	if !ok {
+		return
+	}
+	if ctlUnfinished(old) {
+		v.unfinished--
+	}
+	delete(v.ctl, key)
+	v.queue(key.Recipient, key, false)
+}
+
+// dropOut is dropIn for a source record, by its file name.
+func (v *view) dropOut(name string) {
+	old, ok := v.out[name]
+	if !ok {
+		return
+	}
+	v.unfinished -= outUnfinished(old)
+	if m := (msgKey{old.Key.Sender, old.Key.Message}); v.byMessage[m] == name {
+		delete(v.byMessage, m)
+	}
+	if old.Idempotency != nil {
+		if k := (idemKey{old.Key.Sender, old.Idempotency.Key}); v.idem[k] == name {
+			delete(v.idem, k)
+		}
+	}
+	delete(v.out, name)
+	v.ticks(outTick(name), time.Time{})
+}
+
+// dropSwept takes a record that the sweep removed out of the view, whatever kind it
+// is. A kind the view holds no picture of (an attempts record, a floor file) leaves
+// nothing to take out, and a source record is dropped by name (dropOut): the sweep
+// is given it whole.
+func (v *view) dropSwept(rec store.Record) {
+	switch r := rec.(type) {
+	case store.InRecord:
+		v.dropIn(r.Key)
+	case store.CtlRecord:
+		v.dropCtl(r.Key)
+	case store.EndpointRecord:
+		v.tokens.remove(r.ID)
+		delete(v.endpoints, r.ID)
+		// The floor file of a session endpoint goes with its record and its identifier
+		// is never used again. A direct endpoint keeps its identifier for ever, and so
+		// its floors: the sweep leaves the file, and the book keeps the pairs.
+		if r.Kind == adapterreg.KindSession {
+			v.seq.Forget(r.ID)
+		}
+	case store.CheckpointRecord:
+		delete(v.checkpoints, r.Key)
+	case store.AdminRecord:
+		delete(v.results, r.Key)
+	case store.AlertRecord:
+		v.alerts = slices.DeleteFunc(v.alerts, func(a store.AlertRecord) bool { return a.ID == r.ID })
+	}
+}

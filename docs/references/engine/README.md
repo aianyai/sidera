@@ -460,6 +460,42 @@ nothing is ticked and nothing is judged expired: a clock set back and then moved
 not one to judge a deadline by until the owner has cleared it, and what the node took in
 before the pause stays as it was.
 
+**The archive sweep.** What has served its retention leaves the live files in a pass
+that a periodic task (`AddArchiveSweep`, registered by the composition root with the
+period) begins: it scans `state/` in the loop, as the settlement of damage does, plans
+with `store.PlanSweep` and queues the pass as commands that queue each other. The scan
+stalls the loop once, as long as a cold start's scan of the same files takes (the storage
+reference measures about 3.2 s for 50,000 files and 11 to 13 s for 200,000, warm), and a
+caller of the loop may be told `loop_busy` meanwhile, which it retries; nothing is lost.
+The same scan names the archive files past the retention the owner set
+(`store.ExpiredArchiveFiles`, the retention read only through
+`config.NodeSettings.ArchiveRetention`). The first commands remove those files
+(`ArchiveExpire`) and append the summaries of what is to go (`ArchiveSummaries`), in slices
+of `ChunkRemoves`; then each removes a chunk of at most `ChunkRemoves` files, cut from the groups of the
+plan (`SweepPlan.Chunk`) in the order the store removes them, so a control record still
+goes before its derived delivery and an endpoint after what hangs on it, and between two
+chunks the loop takes what the inbox holds. The summaries are best effort: a failure to
+append them is logged, the rest of the pass's summaries are given up, and the removals
+go on, because a sweep that waited for them could not free the space of a full disk. A
+chunk that was removed takes each record out of the view by the record it was (the entry
+of the schedule that stood for it is cleared by the view, as for any record it drops),
+an out-lost record out of the queue of feedback, and an endpoint out of the endpoints (a
+session endpoint's pairs also out of the sequence book, since its identifier is never used
+again; a direct endpoint keeps its floors); a source record also leaves the outbox,
+with the entries of the pulls made before the close, which a close by a report does not
+clear; a stored administrative result and an acknowledged alert leave their tables. The
+plan comes from a scan made when the pass began, so before each chunk the endpoints it has
+yet to remove are looked at: a direct or runtime endpoint keeps its identifier for ever, and
+one that has been registered or admitted again since has to keep its record and the
+files that hang on it, which the plan names in chunks of their own. A pass that finds one
+open again ends, and the next one plans from a new scan. A pass that is
+still running is not begun again, a removal that failed ends it with a line in the log and
+the next period plans anew, and nothing is swept while the wall clock is in doubt, since
+retention is judged by it (`TestNoSweepWhileTheClockIsInDoubt`: several periods pass and
+what is due stays, and the first period after the owner clears the pause removes it). What a record that feedback depends on keeps is the store's rule
+(`PlanSweep`): a notice stays while a record still holds an item it covers, and a source record
+that still holds an item stays while its sender is open.
+
 **Damage.** A file of `state/` that does not check out is settled by the store's
 quarantine at the scan entry, first of the rules and one file at a time, each with a
 scan taken after the one before: every other rule reads what a settlement raised,
@@ -725,6 +761,19 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   by a write that forgot it. A record the rules do not change is not looked at again until
   it is written: an entry that fell due and found nothing would otherwise spin the loop.
   Nothing is judged by a clock the owner has not cleared.
+- **The sweep is the engine's, in the loop, in chunks, and it never waits for the
+  archive.** The engine is the single writer and holds the view that has to follow every
+  removal, so a sweep run from outside would remove files under a view that still holds
+  them. A plan is scanned in the loop because a plan made from the view would be a second
+  statement of what is finished, which `store.PlanSweep` says once; the chunks are the
+  bound of the stall after the scan, as for the drains; the scan itself stalls the loop
+  once per pass, which is accepted at the sizes the storage reference measures (a
+  view that kept the scan's inputs up to date would take it out of the loop). The summaries are appended in a
+  transaction the sweep does not wait for, because the one time a sweep is urgent is when
+  the disk is full and an append fails; the store has no log, so the engine logs what the
+  store reports and sweeps on. The plan is older than its chunks and the view is not, so a
+  pass ends when an endpoint it has yet to remove is open again: leaving out that record
+  alone would still remove its attempts, which an earlier chunk holds.
 - **A query that was answered and found no receipt is the only thing that expires a
   delivery, and a failing contact is the only thing that is told for one nobody could
   ask.** Expiry says the target may have the message, which would be false news if the
@@ -859,6 +908,13 @@ reproducible).
 | Capacity | `capacity.go`, `recovery.go` (`admitNewWork`) | `TestCheckCapacityTable` (`capacity_internal_test.go`), `TestAdmitNewWorkReadsTheSettingsTheDiskAndTheViewOfTheEngine` |
 | The loop, inbox, back pressure, fatal | `engine.go` | `loop_test.go` |
 | The schedule | `sched.go`, `engine.go` | `sched_test.go`, `sched_internal_test.go` |
+| The periodic sweep removes what has served its retention, in chunks, and the view agrees with the disk afterwards | `sweep.go` | `TestThePeriodicSweepRemovesWhatHasServedItsRetention`, `TestTheSweepRemovesInChunksOfAtMostChunkRemoves`, `TestCutSweepTakesAtMostTheBoundInTheOrderOfTheStoreAndLosesNothing`, `TestForgetSweptTakesTheRemovedRecordsOutOfTheView` |
+| A summary that cannot be appended, an I/O error or a full disk, does not stop the sweep | `sweep.go` (`appendSummaries`) | `TestASummaryThatCannotBeAppendedDoesNotStopTheSweep` |
+| A notice is not swept while the item it covers is on its record, and the endpoint is told once across a restart | `store` (`PlanSweep`), `sweep.go` | `TestANoticeIsNotSweptWhileTheItemItCoversIsStillOnItsRecord` |
+| A pass ends when an endpoint it has yet to remove is open again, and the files of that endpoint stay | `sweep.go` (`planIsStale`) | `TestAPassEndsWhenAClosedEndpointItWasToRemoveIsRegisteredAgainBetweenChunks`, `TestAPlanWithAnEndpointThatIsOpenAgainIsStale` |
+| Nothing is swept while the clock is in doubt, and the first period after the clear sweeps | `sweep.go` (`beginSweep`) | `TestNoSweepWhileTheClockIsInDoubt` |
+| Archive files past the retention are removed, the others stay | `sweep.go` (`expireArchive`), `store` (`ExpiredArchiveFiles`) | `TestTheSweepRemovesTheArchiveFilesPastTheRetention` |
+| A source record that waits for its last pull is not swept, the tick closes it at the window's end, and it is swept at no period before its retention | `store` (`RetainUntil`), `sweep.go` | `TestASourceRecordWaitingForItsFinalPullIsNotSweptBeforeItClosesNorBeforeItsRetention`, `TestPlanSweepNeverPlansASourceRecordWaitingForItsFinalPull` (store) |
 | The pause of a clock set back is persisted at once | `engine.go` (`observe`, `AddClockState`) | `TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash`, `TestAFatalErrorWhilePersistingThePauseStopsTheEngine` |
 | Recovery | `recovery.go` | `recovery_test.go` |
 | Waiting | `waiters.go` | `waiters_test.go` (`TestShutdownEndsEveryWaitEvenWhenTheInboxIsFull`, `TestAPageThatIsReadyWinsOverTheShutdown`) |
@@ -928,6 +984,5 @@ Known gaps, each filled in with the feature it belongs to:
   adapter protocol each maps to is for the adapter host to decide; if no existing
   code fits, it stops and says so, and the protocol is changed for it, not worked
   around in the host. The cap of the node maps to the protocol's `endpoint_limit`.
-- A stored administrative result is dropped from the engine's table only by a
-  restart. The sweep that deletes results after their retention will have to take
-  them out of the view too, in the same step.
+- A stored administrative result is dropped from the engine's table by the sweep that
+  deletes it after its retention, in the step that removes it, or by a restart.

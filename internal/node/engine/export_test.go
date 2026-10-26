@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -130,6 +131,44 @@ func (c *cmdViewVsDisk) run(e *Engine, _ time.Time) {
 			diff = append(diff, "ctl "+k.String()+" is missing from the view")
 		} else {
 			same("ctl "+k.String(), mine, ctl)
+		}
+	}
+	for name := range fresh.out {
+		if _, ok := e.view.out[name]; !ok {
+			diff = append(diff, "out "+name+" is missing from the view")
+		}
+	}
+	for name := range e.view.out {
+		if _, ok := fresh.out[name]; !ok {
+			diff = append(diff, "out "+name+" is in the view only")
+		}
+	}
+	for id := range fresh.endpoints {
+		if _, ok := e.view.endpoints[id]; !ok {
+			diff = append(diff, "endpoint "+id.String()+" is missing from the view")
+		}
+	}
+	for id := range e.view.endpoints {
+		if _, ok := fresh.endpoints[id]; !ok {
+			diff = append(diff, "endpoint "+id.String()+" is in the view only")
+		}
+	}
+	// Every entry of the schedule for the time-driven change of a record names a
+	// record the disk holds.
+	for k := range e.sched.byKey {
+		if k.kind != schedTick {
+			continue
+		}
+		if name, ok := strings.CutPrefix(k.id, "out/"); ok {
+			if _, there := fresh.out[name]; !there {
+				diff = append(diff, "the schedule has an entry for the source record "+name+", which is not on the disk")
+			}
+		} else if text, ok := strings.CutPrefix(k.id, "in/"); ok {
+			if key, err := store.ParseTargetKey(text); err != nil {
+				diff = append(diff, "the schedule has an entry that names no record: "+k.id)
+			} else if _, there := fresh.in[key]; !there {
+				diff = append(diff, "the schedule has an entry for the target record "+text+", which is not on the disk")
+			}
 		}
 	}
 	if !reflect.DeepEqual(e.view.checkpoints, fresh.checkpoints) {
@@ -407,3 +446,6 @@ func (l LoopSide) SendRefusedAsConflict(name string, node ident.NodeID, message 
 // FinalPullUntil is the last instant at which the engine makes its last pull of a
 // target for a delivery with this report_by.
 func FinalPullUntil(reportBy time.Time) time.Time { return finalPullUntil(reportBy) }
+
+// InboxLen is how many commands wait in the inbox of the loop.
+func InboxLen(e *Engine) int { return len(e.inbox) }

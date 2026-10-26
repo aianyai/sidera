@@ -191,7 +191,8 @@ packages and are not part of them.
   system answers; such a node cannot be crashed or cloned. `Options.DiskFree` stands in
   for the free-space query, `Options.Policy` replaces the rules and `Options.NodeSettings`
   patches the settings through the configuration's own change, both before the first
-  start; `Options.Disk` starts a node on a disk a crash walk took.
+  start; `Options.Disk` starts a node on a disk a crash walk took; `Options.ArchiveSweepEvery`
+  has the node register the archive sweep on that period, as the daemon does.
 - **A crash cuts the process off before it copies the disk.** The fixture closes a layer
   of its own between the process's fault wrapper and its disk, so that every file-system
   call the old process makes afterwards fails, then copies the disk; the copy is the

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"maps"
 	"slices"
 	"sort"
 	"sync"
@@ -170,7 +171,11 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 // its result schedules the next look.
 func (e *Engine) dispatchOutbound(name string, now time.Time) {
 	o, ok := e.view.out[name]
-	if !ok || !e.outboundWorks(o) {
+	if !ok {
+		e.forgetOutbound(name)
+		return
+	}
+	if !e.outboundWorks(o) {
 		delete(e.outbox.state, name)
 		return
 	}
@@ -323,6 +328,16 @@ func (e *Engine) finalPulledOf(name string) map[ident.EndpointID]bool {
 	return done
 }
 
+// forgetOutbound takes the loop's memory of a source record's outbound work out of
+// the outbox: its state and the deliveries whose pull before the close was made. It is
+// for a record that is gone, or swept; an entry of finalPulled goes by itself when its
+// delivery closes in a tick, but one whose delivery became final by a report stays
+// until the record is forgotten.
+func (e *Engine) forgetOutbound(name string) {
+	delete(e.outbox.state, name)
+	maps.DeleteFunc(e.outbox.finalPulled, func(k finalPullKey, _ struct{}) bool { return k.name == name })
+}
+
 type cmdOutResult struct {
 	call[struct{}]
 	work outWork
@@ -434,7 +449,11 @@ func (e *Engine) finalPullMade(now time.Time, w outWork, st *outState) {
 func (e *Engine) afterOutbound(name string, now time.Time) {
 	o, ok := e.view.out[name]
 	st := e.outbox.state[name]
-	if !ok || o.Lost != nil || st == nil {
+	if !ok {
+		e.forgetOutbound(name)
+		return
+	}
+	if o.Lost != nil || st == nil {
 		delete(e.outbox.state, name)
 		return
 	}

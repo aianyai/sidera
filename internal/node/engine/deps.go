@@ -58,6 +58,9 @@ type Store interface {
 	FeedbackClear(outs []store.OutRecord) error
 	FeedbackReplay(outs []store.OutRecord) error
 	OutLostClear(lost []store.OutLostRecord) error
+	ArchiveSummaries(at time.Time, summaries []store.ArchiveSummary) error
+	ArchiveSweep(c store.SweepChunk) error
+	ArchiveExpire(names []string) error
 }
 
 var _ Store = (*store.Store)(nil)

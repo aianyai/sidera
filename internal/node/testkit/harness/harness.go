@@ -77,6 +77,9 @@ type Options struct {
 	// DiskFree stands in for the query of the free space of the volume; nil asks
 	// the file system. The engine's check of the disk reserve reads it.
 	DiskFree func() uint64
+	// ArchiveSweepEvery, when positive, has the node run the archive sweep every
+	// period on the fixture's clock, as the daemon does. Zero runs none.
+	ArchiveSweepEvery time.Duration
 	// RollbackPaused starts the engine as if the persisted state said the wall
 	// clock was set back and not cleared. It applies to every start, restarts
 	// included, because a process has no memory of the last one.
@@ -354,6 +357,11 @@ func (h *H) boot(base fsx.FS, arm func(*fsxtest.Faulty)) *process {
 	p.lb = transport.NewLoopback(NodeID(), p.eng, h.knobs)
 	if err := p.eng.SetTransport(p.lb); err != nil {
 		h.t.Fatalf("harness: SetTransport: %v", err)
+	}
+	if h.opts.ArchiveSweepEvery > 0 {
+		if err := p.eng.AddArchiveSweep(h.opts.ArchiveSweepEvery); err != nil {
+			h.t.Fatalf("harness: AddArchiveSweep: %v", err)
+		}
 	}
 	p.eng.Start()
 	if p.host != nil {

@@ -98,6 +98,7 @@ type Engine struct {
 	tr         Transport // set by SetTransport before Start
 	outbox     *outbox
 	fb         feedbackState
+	sweep      *sweepPass // the pass of the archive sweep that is running, nil between passes
 	waits      map[ident.EndpointID]*waiter
 	cont       []continuation
 	parked     map[ident.EndpointID][]command   // commands that wait for the drain of an endpoint
