@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -141,6 +142,69 @@ func TestTwoUnansweredPingsMakeTheAdapterOfflineAndOneDoesNot(t *testing.T) {
 			t.Fatalf("%d launches, want 1", n)
 		}
 	})
+}
+
+// The engine is told the adapter is gone only after the forwarding of its
+// connection is over: a notification that was still buffered when the second ping
+// failed is dropped, and none reaches the engine once it was told. The engine
+// holds the first notification until it is told the adapter is gone, as an engine
+// that is slow to take the report does, and would take every other one in the
+// meantime if the forwarder still ran.
+func TestNoNotificationReachesTheEngineAfterItWasToldThatTheAdapterIsGone(t *testing.T) {
+	p := testParams()
+	r := newRig(t, rigOptions{})
+	r.eng.notifyGate = make(chan struct{})
+	const sent = 5
+	var a *scripted
+	r.lau.launch = func(n int, inst adapterhost.Instance) (adapterhost.Process, error) {
+		pp, ad := r.scriptedProcess(func(ad *scripted) {
+			ad.ping = func(ctx context.Context, _ int) error { <-ctx.Done(); return ctx.Err() }
+		}, false)
+		a = ad
+		return pp, nil
+	}
+	var release sync.Once
+	r.eng.onEvent = func(kind string) {
+		if kind != "gone" {
+			return
+		}
+		release.Do(func() {
+			close(r.eng.notifyGate)
+			// Long enough for a forwarder that still runs to take what is buffered.
+			deadline := time.Now().Add(100 * time.Millisecond)
+			for len(r.eng.of("notified")) < sent && time.Now().Before(deadline) {
+				time.Sleep(time.Millisecond)
+			}
+		})
+	}
+	r.start()
+	r.ready("chat", 1)
+
+	for range sent {
+		a.notify(adapterproto.MethodAdapterAvailability, adapterproto.AvailabilityParams{Conditions: []adapterproto.Availability{}})
+	}
+	eventually(t, "the engine to hold one notification and the host the rest", func() bool {
+		return len(r.eng.of("notified")) == 1 && r.host.Counts("chat").Buffered == sent
+	})
+
+	for ping := 1; ping <= adapterhost.OfflineAfterPingFailures; ping++ {
+		r.advance(p.PingInterval)
+		waitPings(t, a, ping)
+		r.advance(p.PingTimeout)
+	}
+	r.waitEvents("gone", 1)
+	kinds := r.eng.kinds()
+	for i, k := range kinds {
+		if k != "gone" {
+			continue
+		}
+		if after := slices.Index(kinds[i+1:], "notified"); after >= 0 {
+			t.Fatalf("a notification reached the engine after it was told the adapter is gone: %v", kinds)
+		}
+	}
+	if c := r.host.Counts("chat"); c.Buffered != 0 {
+		t.Fatalf("%d notifications are still counted as held after the connection ended", c.Buffered)
+	}
 }
 
 // The wait before the next pass starts at the minimum, doubles after every failed
