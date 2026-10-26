@@ -1052,9 +1052,12 @@ type SweepChunk struct {
 	// hang on it are durably gone: a crash, or a power loss that kept one removal
 	// and lost the other, must not leave those without the record that says whom
 	// they belong to, since nothing would ever remove them.
-	Ctl       []FileRef
-	Records   []FileRef
-	Outs      []OutRecord
+	Ctl     []FileRef
+	Records []FileRef
+	Outs    []OutRecord
+	// OutLosts are the out-lost records to remove, with the source records: they
+	// hold no sequence number, so no floor is written for them.
+	OutLosts  []OutLostRecord
 	Endpoints []FileRef
 	Bodies    []BodyRef
 	// KeepTarget, when set, prunes from the floor files the sweep writes the
@@ -1144,6 +1147,12 @@ func (s *Store) ArchiveSweep(c SweepChunk) error {
 	for _, o := range c.Outs {
 		if _, err := o.Key.Bytes(); err != nil {
 			return fmt.Errorf("store: a source record of a sweep: %w", err)
+		}
+		outs = append(outs, FileRef{Dir: OutDir, Name: o.Name()})
+	}
+	for _, o := range c.OutLosts {
+		if _, err := o.Key.Bytes(); err != nil {
+			return fmt.Errorf("store: an out-lost record of a sweep: %w", err)
 		}
 		outs = append(outs, FileRef{Dir: OutDir, Name: o.Name()})
 	}

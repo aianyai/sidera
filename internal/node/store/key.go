@@ -33,6 +33,15 @@ type OutKey struct {
 	Control bool
 }
 
+// OutLostKey is the key of an out-lost record: the endpoint whose message was
+// lost, and the hash part of the name of the damaged file that caused it. The
+// record is derived from the damaged file alone, so that settling the same file
+// again writes the same record, never a second one.
+type OutLostKey struct {
+	Sender  ident.EndpointID
+	Damaged string
+}
+
 // TargetKey is the key of a target record, of kind in or ctl: the node and the
 // endpoint that sent the message, the message and the receiving endpoint.
 type TargetKey struct {
@@ -128,6 +137,20 @@ func splitOutName(name string) (sender, hash string, ok bool) {
 		return "", "", false
 	}
 	return stem[:i], stem[i+1:], true
+}
+
+// Kind is the kind of the file of an out-lost key.
+func (OutLostKey) Kind() Kind { return KindOutLost }
+
+// Bytes is the key text.
+func (k OutLostKey) Bytes() ([]byte, error) {
+	if k.Sender.IsZero() {
+		return nil, errors.New("out-lost key without a sending endpoint")
+	}
+	if !isHashName(k.Damaged) {
+		return nil, errors.New("out-lost key without the hash of the damaged file")
+	}
+	return []byte(k.Sender.String() + " " + k.Damaged), nil
 }
 
 // Bytes is the key text.
@@ -279,6 +302,18 @@ func ParseKey(kind Kind, key []byte) (any, error) {
 			k.Recipients = append(k.Recipients, to)
 		}
 		return k, nil
+	case KindOutLost:
+		if err := want(2); err != nil {
+			return nil, err
+		}
+		sender, err := ident.ParseEndpointID(fields[0])
+		if err != nil {
+			return nil, err
+		}
+		if !isHashName(fields[1]) {
+			return nil, errors.New("out-lost key: the damaged file is not a hash")
+		}
+		return OutLostKey{Sender: sender, Damaged: fields[1]}, nil
 	case KindIn, KindCtl:
 		if err := want(4); err != nil {
 			return nil, err

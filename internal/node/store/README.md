@@ -22,7 +22,7 @@ engine applies the delivery rules and calls the writes.
 | ---- | ------- |
 | `New(w)`, `Transactions()` | One `Store` over the program's writer; the declarations the composition root adds to its table. |
 | `EncodeRecord`, `DecodeRecord` | The file of a record, and its validation in seven steps with a class of damage. The seventh step asks the delivery package whether every delivery record in the body is one its rules can produce (`Record.Valid()`), and the same question is asked before a record is written. A message id in a key is judged by `envelope.ValidMessageID`. |
-| `OutRecord`, `InRecord`, `CtlRecord`, `EndpointRecord`, `AttemptsRecord`, `CheckpointRecord`, `AdminRecord`, `AlertRecord`, `SeqRecord` | The records, in the contract types of the other packages. |
+| `OutRecord`, `OutLostRecord`, `InRecord`, `CtlRecord`, `EndpointRecord`, `AttemptsRecord`, `CheckpointRecord`, `AdminRecord`, `AlertRecord`, `SeqRecord` | The records, in the contract types of the other packages. |
 | `OutKey`, `TargetKey`, `ParseKey`, `AlertID` | Keys and their canonical text. |
 | `RecordFileName(kind, key)` | The name of a record file, the one place it is made: the hash of kind and key and, for a file of `out/`, the sender before it (`<sender>.<hash>.rec`). |
 | `Store.Scan` | Every record of every directory, decoded, with the quarantined and the damaged files. |
@@ -31,6 +31,7 @@ engine applies the delivery rules and calls the writes.
 | `OrphanBodies`, `OrphanEndpoints`, `EffectReplays`, `DrainCandidates`, `PromptReplays`, ... | The predicates of the recovery rules, pure functions of a `Scan`. |
 | `Store.Quarantine`, `QuarantineBody`, `QuarantineSessions` | Settling a damaged file, or a record whose body is damaged, in one transaction: the effects first, the alert, and the damaged file last. `QuarantineSessions` is the session endpoints a control record's quarantine closes, so a caller can tell whether a session may remain (the kind of the alert); the store writes the same list itself. |
 | `SeqBook` | The next sequence number of a pair, built from a scan; `Note` after the commit. |
+| `NewOutLostRecord`, `OutLostKey`, `OutLostReplays`, `Store.OutLostClear` | The notice that a file of `out/` was lost unread, built in one place; the work of the replay that clears its feedback item once a notice covers it, and the write that does. |
 | `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves. |
 | `Store.ReadBody`, `Store.Available` | Body reads checked against their names, and free space. |
 | `MissingStateDirs`, `StateDirs` | The directories of `state/`, for the layout rule of the composition root. |
@@ -132,8 +133,8 @@ engine applies the delivery rules and calls the writes.
   merged into the floor file and never lowering it. A caller has no floors to pass
   and none to leave out.
 - **A closed session endpoint waits for its source records.** `PlanSweep` keeps it
-  while any source record (whole, lost, or damaged with a trusted key) has it as
-  sender; the sweep after the one that removed the last takes the endpoint with its
+  while any source record (whole, lost, or damaged with a trusted key) or out-lost
+  record has it as sender; the sweep after the one that removed the last takes the endpoint with its
   attempts, checkpoints and floor file. Its record (`SweepChunk.Endpoints`) is
   removed last, after the directories of the others are durable, so a crash cannot
   leave a file that only the endpoint record would have led a sweep to.
@@ -178,7 +179,9 @@ engine applies the delivery rules and calls the writes.
   A rule whose write has the shape of a normal transaction is that transaction, run
   again, with no declaration of its own: the drains use `endpoint-drain` and
   `instance-drain`, the prompt and block replays `lease`, the feedback replay
-  `feedback-clear`. Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint` and
+  `feedback-clear`. The feedback
+  replay has two predicates, `FeedbackReplays` for source records and
+  `OutLostReplays` for out-lost ones, and the same transaction writes both. Only `quarantine`, `orphan-gc`, `orphan-gc-endpoint` and
   `ctl-effect-replay` are `Recovery` declarations.
   Each rule's predicate is a function of the scan it is given: a rule run on a scan
   taken before the previous rule wrote would act on records that rule has already

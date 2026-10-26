@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -246,34 +247,53 @@ func BlockedReplays(sc *Scan) []PendingWork {
 	return pendingWork(sc, PendingBlocked, PendingUnblocked)
 }
 
+// coversByFile lists the feedback items the notices of a scan already cover, by
+// the name of the file of out/ that holds each: the one place a cover is read,
+// for source records and for out-lost records alike.
+func coversByFile(sc *Scan) map[string][]CoverRef {
+	by := map[string][]CoverRef{}
+	for _, n := range sc.In {
+		for _, c := range n.Covers {
+			by[c.Out] = append(by[c.Out], c)
+		}
+	}
+	return by
+}
+
+// withoutCovered is items without the ones a cover names: an item the cover has
+// the recipient and the kind of.
+func withoutCovered(items []delivery.Item, covers []CoverRef) []delivery.Item {
+	return slices.DeleteFunc(slices.Clone(items), func(it delivery.Item) bool {
+		return slices.ContainsFunc(covers, func(c CoverRef) bool {
+			return it.Ref.Recipient == c.Recipient && it.Feedback.Kind == c.Kind
+		})
+	})
+}
+
 // FeedbackReplays is the work of feedback-replay, as the source records to
 // write: those whose pending feedback holds items a notice already covers,
 // without those items.
 func FeedbackReplays(sc *Scan) []OutRecord {
-	idx := map[string]int{}
-	for i, o := range sc.Out {
-		idx[o.Name()] = i
-	}
-	next := map[int][]delivery.Item{}
-	for _, n := range sc.In {
-		for _, c := range n.Covers {
-			i, ok := idx[c.Out]
-			if !ok {
-				continue
-			}
-			items, seen := next[i]
-			if !seen {
-				items = slices.Clone(sc.Out[i].Feedback)
-			}
-			next[i] = slices.DeleteFunc(items, func(it delivery.Item) bool {
-				return it.Ref.Recipient == c.Recipient && it.Feedback.Kind == c.Kind
-			})
+	covers := coversByFile(sc)
+	var out []OutRecord
+	for _, o := range sc.Out {
+		if items := withoutCovered(o.Feedback, covers[o.Name()]); len(items) != len(o.Feedback) {
+			o.Feedback = items
+			out = append(out, o)
 		}
 	}
-	var out []OutRecord
-	for i, items := range next {
-		if len(items) != len(sc.Out[i].Feedback) {
-			o := sc.Out[i]
+	sort.Slice(out, func(a, b int) bool { return out[a].Name() < out[b].Name() })
+	return out
+}
+
+// OutLostReplays is the work of feedback-replay for the out-lost records: those
+// whose feedback item a notice already covers, without it. The record then has
+// nothing pending and the sweep takes it.
+func OutLostReplays(sc *Scan) []OutLostRecord {
+	covers := coversByFile(sc)
+	var out []OutLostRecord
+	for _, o := range sc.OutLost {
+		if items := withoutCovered(o.Feedback, covers[o.Name()]); len(items) != len(o.Feedback) {
 			o.Feedback = items
 			out = append(out, o)
 		}
@@ -410,6 +430,29 @@ func (s *Store) FeedbackReplay(outs []OutRecord) error {
 	files, err := outFiles(outs)
 	if err != nil {
 		return err
+	}
+	tx := s.w.Begin(&declFeedbackClear)
+	defer tx.Close()
+	if err := writeGroup(tx, "out", "out-dir", OutDir, files); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// OutLostClear writes the out-lost records without the feedback item a notice
+// covers, as FeedbackClear does for source records, and as OutLostReplays asks
+// after a crash.
+func (s *Store) OutLostClear(lost []OutLostRecord) error {
+	if len(lost) == 0 {
+		return errors.New("store: OutLostClear needs a record")
+	}
+	var files []file
+	for _, o := range lost {
+		f, err := recordFile(OutDir, o)
+		if err != nil {
+			return err
+		}
+		files = append(files, f)
 	}
 	tx := s.w.Begin(&declFeedbackClear)
 	defer tx.Close()

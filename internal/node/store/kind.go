@@ -8,12 +8,14 @@ import "path"
 type Kind string
 
 // The kinds of the files of state/. A kind belongs to one directory, except
-// that out/ holds two: a message and a control signal share a key text but are
+// that out/ holds three: a message and a control signal share a key text but are
 // different records, and the kind is in the file name hash so that damage to
-// the kind cannot turn one into the other.
+// the kind cannot turn one into the other. The third is the notice that a file
+// of out/ was lost without a trace of what it held (OutLostRecord).
 const (
 	KindOut        Kind = "out"
 	KindOutCtl     Kind = "out-ctl"
+	KindOutLost    Kind = "out-lost"
 	KindIn         Kind = "in"
 	KindCtl        Kind = "ctl"
 	KindEndpoint   Kind = "endpoint"
@@ -55,7 +57,7 @@ var recordDirs = []string{SeqDir, OutDir, InDir, CtlDir, EndpointsDir, AttemptsD
 
 // kindDir is the directory of each kind.
 var kindDir = map[Kind]string{
-	KindOut: OutDir, KindOutCtl: OutDir, KindIn: InDir, KindCtl: CtlDir,
+	KindOut: OutDir, KindOutCtl: OutDir, KindOutLost: OutDir, KindIn: InDir, KindCtl: CtlDir,
 	KindEndpoint: EndpointsDir, KindAttempts: AttemptsDir, KindCheckpoint: CheckpointsDir,
 	KindAdmin: AdminDir, KindAlert: AlertsDir, KindSeq: SeqDir,
 }
@@ -66,7 +68,7 @@ func (k Kind) Dir() string { return kindDir[k] }
 // kindsOf lists the kinds a directory may hold.
 func kindsOf(dir string) []Kind {
 	var out []Kind
-	for _, k := range []Kind{KindOut, KindOutCtl, KindIn, KindCtl, KindEndpoint, KindAttempts, KindCheckpoint, KindAdmin, KindAlert, KindSeq} {
+	for _, k := range []Kind{KindOut, KindOutCtl, KindOutLost, KindIn, KindCtl, KindEndpoint, KindAttempts, KindCheckpoint, KindAdmin, KindAlert, KindSeq} {
 		if kindDir[k] == dir {
 			out = append(out, k)
 		}

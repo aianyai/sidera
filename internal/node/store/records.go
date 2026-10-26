@@ -112,6 +112,41 @@ func (r OutRecord) NeedsBody() bool {
 	return r.Outbound.Derived != nil && r.Outbound.Derived.Delivery.NeedsBody()
 }
 
+// OutLostRecord is the notice that a file of out/ whose first line could not be
+// read, so that nothing said which message it held, was lost: the one thing that
+// is known is the sending endpoint, from the name of the file. It is written when
+// the damaged file is settled, holds the one feedback item that tells the endpoint
+// until a notice covers it, and is swept once the item is gone.
+type OutLostRecord struct {
+	Key OutLostKey
+	// DiscoveredAt is when the damage was found.
+	DiscoveredAt time.Time
+	// Feedback is empty or the one item delivery.NewLostUnknownMessageItem builds
+	// for the sender, this record and the discovery time: the pending feedback,
+	// cleared by the notice that covers it.
+	Feedback []delivery.Item
+}
+
+// NewOutLostRecord is the out-lost record of the damaged file of key, found at
+// at by the node, with its feedback item pending. It is the one place that gives
+// the record its shape.
+func NewOutLostRecord(key OutLostKey, node ident.NodeID, at time.Time) OutLostRecord {
+	r := OutLostRecord{Key: key, DiscoveredAt: at}
+	r.Feedback = []delivery.Item{newOutLostItem(ident.Address{Node: node, Endpoint: key.Sender}, r.Name(), at)}
+	return r
+}
+
+// newOutLostItem is the feedback item of an out-lost record.
+func newOutLostItem(sender ident.Address, record string, at time.Time) delivery.Item {
+	return delivery.NewLostUnknownMessageItem(sender, record, at)
+}
+
+// Name is the file name of the record.
+func (r OutLostRecord) Name() string {
+	key, _ := r.Key.Bytes()
+	return outFileName(KindOutLost, key)
+}
+
 // InRecord is the target side record of one message for one endpoint, a
 // deduplication record included. A target keeps no replacement of a damaged
 // record: the sender learns of the loss when the target answers a pull that it

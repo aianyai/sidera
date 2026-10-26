@@ -9,7 +9,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 )
 
-// Record is a decoded record of state/: one of OutRecord, InRecord, CtlRecord,
+// Record is a decoded record of state/: one of OutRecord, OutLostRecord, InRecord, CtlRecord,
 // EndpointRecord, AttemptsRecord, CheckpointRecord, AdminRecord, AlertRecord
 // and SeqRecord, as a value.
 type Record interface {
@@ -32,6 +32,11 @@ func EncodeRecord(rec Record) ([]byte, error) {
 		kind = r.Key.Kind()
 		if key, err = r.Key.Bytes(); err == nil {
 			body, err = encodeOut(r)
+		}
+	case OutLostRecord:
+		kind = KindOutLost
+		if key, err = r.Key.Bytes(); err == nil {
+			body, err = encodeOutLost(r)
 		}
 	case InRecord:
 		kind = KindIn
@@ -130,6 +135,8 @@ func decodeBody(kind Kind, key any, body []byte) (Record, error) {
 	switch kind {
 	case KindOut, KindOutCtl:
 		return decodeOut(key.(OutKey), body)
+	case KindOutLost:
+		return decodeOutLost(key.(OutLostKey), body)
 	case KindIn:
 		return decodeIn(key.(TargetKey), body)
 	case KindCtl:

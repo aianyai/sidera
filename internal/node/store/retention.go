@@ -85,6 +85,10 @@ func RetainUntil(rec Record) (until time.Time, finished bool) {
 			until = latest(until, r.Idempotency.RetainUntil)
 		}
 		return until, finished
+	case OutLostRecord:
+		// Nothing waits for a reply to it, so it is kept for as long as its notice
+		// is not given and is swept as soon as that is done.
+		return r.DiscoveredAt, len(r.Feedback) == 0
 	case AdminRecord:
 		return r.RetainUntil, true
 	case AlertRecord:
@@ -105,6 +109,8 @@ type SweepPlan struct {
 	// Outs are the source records to remove, whole: the sweep writes the sequence
 	// floors of their numbers before it removes them.
 	Outs []OutRecord
+	// OutLosts are the out-lost records whose notice has been given.
+	OutLosts []OutLostRecord
 	// Endpoints are the records of the closed endpoints to remove, which go after
 	// the files that hang on them.
 	Endpoints []FileRef
@@ -117,7 +123,7 @@ type SweepPlan struct {
 func (p SweepPlan) Chunk(now time.Time) SweepChunk {
 	return SweepChunk{
 		Now: now, Summaries: p.Summaries, Ctl: p.Ctl, Records: p.Records,
-		Outs: p.Outs, Endpoints: p.Endpoints, Bodies: p.Bodies,
+		Outs: p.Outs, OutLosts: p.OutLosts, Endpoints: p.Endpoints, Bodies: p.Bodies,
 	}
 }
 
@@ -126,8 +132,8 @@ func (p SweepPlan) Chunk(now time.Time) SweepChunk {
 // its control record; admin results past theirs; acknowledged alerts; closed
 // endpoints nothing live points to; and the bodies nothing refers to afterwards.
 //
-// A closed session endpoint is kept while any source record has it as sender,
-// swept or not: the sweep of a source record writes the floor of its sender, and
+// A closed session endpoint is kept while any source record, or out-lost record,
+// has it as sender, swept or not: the sweep of a source record writes the floor of its sender, and
 // a floor file written for an endpoint whose record is gone is one nothing would
 // ever remove. The sweep that removes the last of its source records leaves it,
 // and the next one removes the endpoint with its floor file.
@@ -203,6 +209,12 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 			bodiesOfSwept = append(bodiesOfSwept, *o.Body)
 		}
 	}
+	for _, o := range sc.OutLost {
+		if ready(o) {
+			swept[path.Join(OutDir, o.Name())] = true
+			plan.OutLosts = append(plan.OutLosts, o)
+		}
+	}
 	for _, a := range sc.Admin {
 		if ready(a) {
 			add(&plan.Records, AdminDir, a.Name())
@@ -225,12 +237,21 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 			live[c.Key.Recipient] = true
 		}
 	}
-	sends := map[ident.EndpointID]bool{} // senders of a source record, whole or damaged
+	sends := map[ident.EndpointID]bool{} // senders of a source record, whole or damaged, or of an out-lost record
 	for _, o := range sc.Out {
 		sends[o.Key.Sender] = true
 	}
+	for _, o := range sc.OutLost {
+		sends[o.Key.Sender] = true
+	}
 	for _, d := range sc.Damaged {
-		if k, ok := d.Key.(OutKey); ok && d.Dir == OutDir {
+		if d.Dir != OutDir {
+			continue
+		}
+		switch k := d.Key.(type) {
+		case OutKey:
+			sends[k.Sender] = true
+		case OutLostKey:
 			sends[k.Sender] = true
 		}
 	}

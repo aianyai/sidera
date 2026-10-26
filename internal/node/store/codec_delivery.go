@@ -526,7 +526,7 @@ type derivedJSON struct {
 
 type coverJSON struct {
 	Out       string `json:"out"`
-	Recipient string `json:"recipient"`
+	Recipient string `json:"recipient,omitempty"`
 	Kind      string `json:"kind"`
 }
 
@@ -564,6 +564,16 @@ func fromHandout(j *handoutJSON) (HandoutFields, error) {
 		}
 	}
 	return h, nil
+}
+
+// checkCoverRecipient is the one statement of when a cover has a recipient: the
+// feedback item it names has one, which every item does but the one of a message
+// nobody can name. Encoding and decoding both ask it.
+func checkCoverRecipient(kind delivery.Kind, hasRecipient bool) error {
+	if hasRecipient == (kind == delivery.KindLostUnknownMessage) {
+		return errors.New("a cover has a recipient exactly when the feedback item it names has one")
+	}
+	return nil
 }
 
 // coverOutStem is the name of the source file a cover names, without ".rec": a
@@ -668,14 +678,18 @@ func encodeIn(r InRecord) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		if c.Recipient.IsZero() {
-			return nil, errors.New("a cover without a recipient")
+		if err := checkCoverRecipient(c.Kind, !c.Recipient.IsZero()); err != nil {
+			return nil, err
 		}
 		kn, err := enumName(c.Kind, delivery.Kind.String, "feedback kind")
 		if err != nil {
 			return nil, err
 		}
-		j.Covers = append(j.Covers, coverJSON{Out: stem, Recipient: c.Recipient.String(), Kind: kn})
+		cj := coverJSON{Out: stem, Kind: kn}
+		if !c.Recipient.IsZero() {
+			cj.Recipient = c.Recipient.String()
+		}
+		j.Covers = append(j.Covers, cj)
 	}
 	return marshal(j)
 }
@@ -741,13 +755,18 @@ func decodeIn(key TargetKey, body []byte) (InRecord, error) {
 		if _, err := coverOutStem(c.Out + recordSuffix); err != nil {
 			return r, err
 		}
-		rcp, err := ident.ParseAddress(c.Recipient)
-		if err != nil {
-			return r, err
-		}
 		kind, err := enumValue(c.Kind, delivery.Kind.String, "feedback kind")
 		if err != nil {
 			return r, err
+		}
+		if err := checkCoverRecipient(kind, c.Recipient != ""); err != nil {
+			return r, err
+		}
+		var rcp ident.Address
+		if c.Recipient != "" {
+			if rcp, err = ident.ParseAddress(c.Recipient); err != nil {
+				return r, err
+			}
 		}
 		r.Covers = append(r.Covers, CoverRef{Out: c.Out + ".rec", Recipient: rcp, Kind: kind})
 	}

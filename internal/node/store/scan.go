@@ -37,6 +37,7 @@ func damagedFile(dir, name string, dmg *Damage) DamagedFile {
 // engine builds its view from this.
 type Scan struct {
 	Out         []OutRecord
+	OutLost     []OutLostRecord
 	In          []InRecord
 	Ctl         []CtlRecord
 	Endpoints   []EndpointRecord
@@ -161,6 +162,8 @@ func (s *Store) scanRecord(sc *Scan, dir, name string) error {
 	switch r := rec.(type) {
 	case OutRecord:
 		sc.Out = append(sc.Out, r)
+	case OutLostRecord:
+		sc.OutLost = append(sc.OutLost, r)
 	case InRecord:
 		sc.In = append(sc.In, r)
 	case CtlRecord:

@@ -461,7 +461,8 @@ every decision of the owner live outside it.
 
 ```
 state/
-  out/<e>.<h>.rec      source record: one per message or control signal sent from this node
+  out/<e>.<h>.rec      source record: one per message or control signal sent from this node;
+                       also the out-lost notices of files that were lost unread (below)
   in/<h>.rec           target record: one per message for one endpoint, deduplication included
   ctl/<h>.rec          target control record: deduplication, stored reply, creation intent
   bodies/<sha256>      a body, bare bytes, named by its digest
@@ -581,6 +582,38 @@ answers a pull that it holds no record), so a damaged one is settled with an ale
 and, for a control record, the closed session endpoints, then removed, and nothing
 is put under its name. A resend of a delivery whose target record was lost is taken in as
 new before the delivery deadline, and may be handed out a second time.
+
+**Out-lost record.** A third kind of `out/` file, `out-lost`, tells a sending endpoint
+that one of its messages was lost with a file nothing could be read from, which is
+the one loss no replacement can describe: the first line is gone, so which message
+it held, and to whom, is unknown. The key is `"<e> <h>"`, the sender and the hash
+part of the name of the damaged file, and the name follows the rule of `out/` (the
+hash of `"out-lost " + key`), so it is derived from the damaged file alone: settling
+the same file again after a crash writes the same record, never a second one, and
+therefore never a second notice. The body is the discovery time and, until a notice
+covers it, one feedback item. Only the sender of the item is written; the item
+itself (kind `lost_unknown_message`, no message, no recipient, the record that holds
+it as `delivery.Item.Source`, decided at the discovery time) is what
+`delivery.NewLostUnknownMessageItem` builds, so its shape has one home and a body
+that holds anything else is refused. The record is strict like the others: a second
+item, an item of another endpoint, a missing time or an unknown field is a damaged
+body (`TestRecordGoldenVectors` has a vector of it, `TestDecodeRecordBodyRules`
+the rows, `FuzzDecodeRecordBody` and `FuzzParseKey` seeds of it).
+
+A notice that tells the endpoint covers the item by the name of the file and the
+kind, as it covers the item of a source record (`CoverRef`), with one difference:
+the item has no recipient, so the cover has none, and a cover has a recipient
+exactly when its item has one (`TestACoverHasARecipientExactlyWhenItsItemHasOne`).
+`OutLostReplays` is the work of the replay for these records, `Store.OutLostClear`
+writes the record without the item, and both read the covers with the same two
+functions as the replay of source records (`FeedbackReplays`), so the rule that a
+cover clears an item has one home. A record whose item is gone is finished: it is
+swept as soon as it is, at its discovery time or later, not by the retention of a
+source record, because nothing waits for a reply to it (`RetainUntil`,
+`SweepPlan.OutLosts`, `TestPlanSweepTakesAnOutLostRecordOnlyOnceItsFeedbackIsGone`).
+A closed session endpoint is kept while an out-lost record has it as sender, with or
+without its item, for the same reason as for a source record: the notice is
+addressed to it (`TestAClosedSessionEndpointIsKeptWhileAnOutLostRecordNamesItAsSender`).
 
 **Revision.** A regular target record carries `rev`, which the store raises by one
 at each write. A head record (the prompt or block of an endpoint) lists the
@@ -765,9 +798,10 @@ becomes), the status report until `report_by` or a
 whole `report_by` window after its creation, and the facts reply permission reads
 until `report_by` plus the clock tolerance plus the reply window. That is about 27
 hours after the delivery deadline. Then a summary goes to the archive and the file
-is removed. A closed session endpoint goes
-with its attempts, checkpoints and floor file, but not while any source record has
-it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
+is removed. An out-lost record is kept
+while its feedback item is pending and goes at once when it is not. A closed session endpoint goes
+with its attempts, checkpoints and floor file, but not while any source record or
+out-lost record has it as sender (whole, lost, or damaged with a key that can be trusted): the sweep of
 a source record writes the floor of its sender, and a floor file written after the
 endpoint's was removed with it would stay forever. The sweep that removes its last
 source record leaves the endpoint, and the next one takes it. Administrative
