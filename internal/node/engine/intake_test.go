@@ -445,6 +445,9 @@ func TestNodeQueueFullBackpressuresNewSends(t *testing.T) {
 func TestDiskFullGivesNoFalseAcknowledgement(t *testing.T) {
 	enospc := fsxtest.DiskFull
 	eio := errors.New("fsync: input/output error")
+	// The volume of the test is the machine's own; a machine with less than the
+	// reserve free would refuse the send before the write the fault waits for.
+	roomy := func() uint64 { return 1 << 40 }
 	for _, c := range []struct {
 		name     string
 		arm      func(h *harness.H) *fsxtest.Rule
@@ -453,10 +456,10 @@ func TestDiskFullGivesNoFalseAcknowledgement(t *testing.T) {
 	}{
 		{"a write that finds the disk full", func(h *harness.H) *fsxtest.Rule {
 			return h.Faults().Fail(fsxtest.Match{Tx: "intake", Step: fsx.StepWrite}, enospc)
-		}, nil, "storage_full"},
+		}, roomy, "storage_full"},
 		{"an fsync of the new file that fails", func(h *harness.H) *fsxtest.Rule {
 			return h.Faults().Fail(fsxtest.Match{Tx: "intake", Step: fsx.StepSync}, eio)
-		}, nil, "storage_unavailable"},
+		}, roomy, "storage_unavailable"},
 		{"a volume with less free space than the reserve", nil, func() uint64 { return 1 }, "storage_full"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
