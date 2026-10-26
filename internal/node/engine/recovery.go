@@ -315,6 +315,7 @@ var recoveryPhases = [...]recoveryPhase{
 // recoverReconcile is step 11 of the start: the creations and the prompts that were
 // not settled when the node went down are settled or asked of their adapters.
 func (e *Engine) recoverReconcile(now time.Time) error {
+	e.reconciling = true
 	if err := e.reconcileCreations(now); err != nil {
 		return err
 	}

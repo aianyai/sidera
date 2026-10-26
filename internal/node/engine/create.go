@@ -214,8 +214,13 @@ func (e *Engine) createParams(c store.CtlRecord, ep store.EndpointRecord) (adapt
 
 // redriveCreates calls the adapter again for every creation the instance owes: it
 // has just connected, and what it was asked before its connection ended it may or
-// may not have done.
+// may not have done. While the node starts, the creations wait for step 11, which
+// checks the initial message of each before its call is made: an adapter that
+// answered created sooner would open the endpoint of a creation whose message is gone.
 func (e *Engine) redriveCreates(instance string, now time.Time) {
+	if e.Phase() == PhaseRecovering && !e.reconciling {
+		return
+	}
 	for _, key := range e.creatingKeys() {
 		if c := e.view.ctl[key]; e.instanceOf(c) == instance {
 			e.startCreate(now, key)

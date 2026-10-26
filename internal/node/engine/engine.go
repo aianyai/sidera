@@ -124,6 +124,10 @@ type Engine struct {
 	// key of the control record; see create.go.
 	creations map[store.TargetKey]*creation
 
+	// reconciling says step 11 of the start has begun: until then a connecting adapter is
+	// not asked again for the creations it owes; see redriveCreates.
+	reconciling bool
+
 	// executions are the calls of the close and interrupt signals that are not
 	// settled, by the key of the control record; see execute.go.
 	executions map[store.TargetKey]*execution

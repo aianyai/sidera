@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"path"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -277,6 +278,87 @@ func TestCreationCutOffByACrashIsGoneOnWithOneSession(t *testing.T) {
 		t.Fatalf("after the crash the reply is %+v and the endpoints %+v, want created and one open endpoint", r, eps)
 	}
 	oneSessionPerAttempt(t, h)
+}
+
+// startAsTheDaemonDoes opens the engine and runs the start in the daemon's order: the
+// adapter is admitted and answers adapter.start (step 10), then the creations, closes and
+// prompts that were not settled are settled or asked again (step 11), then the node
+// serves. rig.start puts the adapter after step 11 instead, which a test of what step 11
+// finds already connected cannot use.
+func startAsTheDaemonDoes(t *testing.T, r *rig) *engine.Engine {
+	t.Helper()
+	e, _, err := r.open()
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	r.eng = e
+	t.Cleanup(func() { r.stop(e) })
+	e.Start()
+	if err := admitOn(context.Background(), e, "chat", r.admit); err != nil {
+		t.Fatalf("AdapterAdmitted: %v", err)
+	}
+	started(t, e, "chat")
+	settle(t, e)
+	if err := e.RecoverDelivery(context.Background()); err != nil {
+		t.Fatalf("RecoverDelivery: %v", err)
+	}
+	e.Serve()
+	settle(t, e)
+	return e
+}
+
+// createHost is the adapter host that answers every session.create with a created
+// session and remembers how many it was asked.
+type createHost struct {
+	*hostDouble
+	asked atomic.Int32
+}
+
+func (h *createHost) CreateSession(context.Context, string, adapterproto.SessionCreateParams) (adapterproto.SessionCreateResult, error) {
+	h.asked.Add(1)
+	return adapterproto.SessionCreateResult{Outcome: adapterproto.CreateCreated, NativeRef: "native-made", Frontends: []adapterproto.Frontend{adapterproto.FrontendCLI}}, nil
+}
+
+// A creation whose initial message cannot be read when the node starts is failed before
+// the adapter is asked for anything: the check of the message is step 11 of the start,
+// and the adapter has connected (step 10) before it, so a call made when the adapter
+// connects would make the session, open its endpoint and leave the check with nothing to
+// fail.
+func TestCreationWhoseInitialMessageIsLostIsNotAskedOfTheAdapterBeforeItIsChecked(t *testing.T) {
+	noLeaks(t)
+	host := &createHost{hostDouble: newHostDouble()}
+	r := newRig(t, 10, withAdapters(host))
+	intent := &store.CreateIntent{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Endpoint: mustEndpoint(t, 61), State: store.IntentCreating}
+	c, ep := seedControl(t, r, 2, intent)
+	body := []byte("the initial message")
+	c.Initial = &store.InitialMessage{ContentType: "text/plain", Body: store.BodyRefOf(body)}
+	c.EndpointMaxQueue = delivery.DefaultEndpointMaxQueue
+	d, err := engine.DerivedDeliveryOf(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.st.ControlIntake(body, &ep, c, &d); err != nil {
+		t.Fatalf("ControlIntake: %v", err)
+	}
+	r.seedFile(store.BodiesDir, store.BodyFileName(d.Name()), []byte("not the initial message"))
+
+	startAsTheDaemonDoes(t, r)
+
+	if n := host.asked.Load(); n != 0 {
+		t.Errorf("the adapter was asked %d times to create a session whose first message is lost, want none", n)
+	}
+	sc := r.scan()
+	if len(sc.Ctl) != 1 {
+		t.Fatalf("%d control records, want 1", len(sc.Ctl))
+	}
+	if got := sc.Ctl[0].Intent; got == nil || got.State != store.IntentFailed {
+		t.Fatalf("the intent of the creation is %+v, want failed", got)
+	}
+	for _, e := range sc.Endpoints {
+		if e.ID == intent.Endpoint && e.Status != store.EndpointClosed {
+			t.Errorf("the endpoint of the creation is %v, want closed", e.Status)
+		}
+	}
 }
 
 // A creation whose time was up while the node was down is told as unconfirmed when it
