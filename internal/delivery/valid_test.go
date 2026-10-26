@@ -93,6 +93,12 @@ var (
 	baseSrcExpired = validBase{"source expired_unconfirmed", func(t *testing.T) Record {
 		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), farFuture, Event{Type: EventExpiryQueried, QueriedAt: farFuture})
 	}}
+	baseSrcClosedQueued = validBase{"source closed while queued", func(t *testing.T) Record {
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), farFuture, Event{Type: EventReportByPassed})
+	}}
+	baseSrcClosedAccepted = validBase{"source closed while accepted", func(t *testing.T) Record {
+		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), farFuture, Event{Type: EventReceipt}, Event{Type: EventReportByPassed})
+	}}
 	baseSrcBlocked = validBase{"source accepted and blocked", func(t *testing.T) Record {
 		return applyAll(t, NewSourceRecord(t0, validAcceptBefore), at(time.Minute), Event{Type: EventReceipt}, Event{Type: EventBlocked, Cause: CauseAdapterOffline})
 	}}
@@ -186,7 +192,7 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		{"a control record has no backlog deadline", baseControlRecord, func(r *Record) { r.BacklogDeadline = t0 }, ViolationBacklogDeadline},
 		// produced feedback
 		{"a target record produces no feedback", baseTgt, func(r *Record) { r.Reported = kindSetOf(KindUnreachable) }, ViolationReportedOnTarget},
-		{"the produced feedback holds only existing kinds (beyond the last)", baseQueued, func(r *Record) { r.Reported = KindSet(1 << 12) }, ViolationReportedUnknownKind},
+		{"the produced feedback holds only existing kinds (beyond the last)", baseQueued, func(r *Record) { r.Reported = KindSet(1 << 13) }, ViolationReportedUnknownKind},
 		{"the produced feedback holds only existing kinds (the zero kind)", baseQueued, func(r *Record) { r.Reported = KindSet(1) }, ViolationReportedUnknownKind},
 		{"the rejection notice exists only for a rejected record", baseQueued, func(r *Record) { r.Reported = kindSetOf(KindRejected) }, ViolationReportedRejected},
 		{"a rejected source record reported its rejection", baseSrcRejected, func(r *Record) { r.Reported = 0 }, ViolationReportedRejected},
@@ -201,6 +207,12 @@ func TestRecordValidRefusesImpossibleRecords(t *testing.T) {
 		{"the expiry correction is not produced while expired", baseSrcExpired, func(r *Record) { r.Reported = kindSetOf(KindExpiredUnconfirmed, KindExpiredCorrected) }, ViolationReportedExpiry},
 		{"an accepted record after expiry reported the correction", baseSrcAccepted, func(r *Record) { r.Reported = kindSetOf(KindExpiredUnconfirmed) }, ViolationReportedExpiry},
 		{"a delivered record after expiry reported the correction", baseSrcDelivered, func(r *Record) { r.Reported = kindSetOf(KindExpiredUnconfirmed) }, ViolationReportedExpiry},
+		{"a source record closed while queued told the expiry", baseSrcClosedQueued, func(r *Record) { r.Reported = 0 }, ViolationReportedClosed},
+		{"a source record closed while accepted told that its result could not be learned", baseSrcClosedAccepted, func(r *Record) { r.Reported = 0 }, ViolationReportedClosed},
+		{"the accepted_unconfirmed notice is not produced while accepted", baseSrcAccepted, func(r *Record) { r.Reported = kindSetOf(KindAcceptedUnconfirmed) }, ViolationReportedClosed},
+		{"the accepted_unconfirmed notice is not produced while queued", baseQueued, func(r *Record) { r.Reported = kindSetOf(KindAcceptedUnconfirmed) }, ViolationReportedClosed},
+		{"a delivery that was unknown closes silently, not with accepted_unconfirmed", baseSrcClosedAccepted, func(r *Record) { r.Reported = kindSetOf(KindDeliveryUnknown, KindAcceptedUnconfirmed) }, ViolationReportedClosed},
+		{"an expiry before accepted_unconfirmed was corrected on the way to accepted", baseSrcClosedAccepted, func(r *Record) { r.Reported = kindSetOf(KindExpiredUnconfirmed, KindAcceptedUnconfirmed) }, ViolationReportedClosed},
 		{"the recovery needs the blocked notice", baseSrcAccepted, func(r *Record) { r.Reported = kindSetOf(KindBlockedRecovered) }, ViolationReportedBlocked},
 		{"the blocked notice is not produced while queued", baseQueued, func(r *Record) {
 			r.Reported, r.BlockedCause = kindSetOf(KindDeliveryBlocked), CauseAdapterOffline
@@ -503,7 +515,7 @@ var requiredRecordTags = []string{
 	"source queued", "source accepted", "source delivered", "source rejected", "source expired_unconfirmed",
 	"source delivery_unknown", "source closed_unconfirmed", "source blocked", "source reported unreachable",
 	"source reported delivery_blocked", "source reported blocked_recovered", "source reported expired_corrected",
-	"source reported unknown_corrected", "source reported rejected",
+	"source reported unknown_corrected", "source reported rejected", "source reported accepted_unconfirmed",
 	"target accepted", "target delivered", "target rejected", "target delivery_unknown", "target closed_unconfirmed",
 	"target blocked", "target notified", "target lease active", "target requeued", "target redelivered",
 	"target last lease", "target lease renewed", "target lease at cap", "target several chunks", "target unknown after hand-out", "target several pages",

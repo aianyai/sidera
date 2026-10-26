@@ -215,6 +215,7 @@ func TestLossWordingVectors(t *testing.T) {
 	}{
 		{KindLostAtSender, "lost_at_sender", "this node lost what it had stored about the message to storage corruption, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"},
 		{KindLostAtTarget, "lost_at_target", "the target node no longer holds any record of the message it had accepted, so whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"},
+		{KindAcceptedUnconfirmed, "accepted_unconfirmed", "the target accepted the message, but its result could not be learned before the report deadline; whether it was delivered, or for a control signal executed, is unknown; do not assume it was not delivered"},
 		{KindLostUnknownMessage, "lost_unknown_message", "this node lost what it had stored about one of the messages this endpoint sent, to storage corruption, and cannot tell which one; whether it was delivered is unknown; do not assume it was not delivered"},
 	}
 	for _, v := range vectors {
@@ -233,8 +234,8 @@ func TestLossWordingVectors(t *testing.T) {
 	if strings.Contains(KindLostAtTarget.Summary(), "storage") {
 		t.Error("the source knows only that the target holds no record, not why")
 	}
-	if KindLostAtSender != KindUnknownCorrected+1 || KindLostAtTarget != KindUnknownCorrected+2 || KindLostUnknownMessage != KindLostAtTarget+1 {
-		t.Error("the loss kinds follow the existing ones, in this order")
+	if KindLostAtSender != KindUnknownCorrected+1 || KindLostAtTarget != KindUnknownCorrected+2 || KindAcceptedUnconfirmed != KindLostAtTarget+1 || KindLostUnknownMessage != KindAcceptedUnconfirmed+1 {
+		t.Error("the loss kinds follow the existing ones, in this order, and the kind of a close while accepted comes before the kind that belongs to no delivery")
 	}
 	existing := map[Kind][2]string{
 		KindUnreachable:        {"unreachable", "the target is not reachable; delivery is still being retried until the delivery deadline"},
@@ -266,7 +267,7 @@ func TestLossWordingVectors(t *testing.T) {
 // produces it, no record reports it, and the item that carries it has one
 // constructor and one shape.
 func TestLostUnknownMessageKindBelongsToNoRecord(t *testing.T) {
-	if LastRecordKind != KindLostAtTarget || LastRecordKind.valid() == false || (LastRecordKind+1) != KindLostUnknownMessage {
+	if LastRecordKind != KindAcceptedUnconfirmed || LastRecordKind.valid() == false || (LastRecordKind+1) != KindLostUnknownMessage {
 		t.Errorf("LastRecordKind = %v, want the last kind a record's transitions produce", LastRecordKind)
 	}
 	causes := []UnknownCause{UnknownCauseNone, UnknownHandedOver, UnknownLostAtSender, UnknownLostAtTarget}

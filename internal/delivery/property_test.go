@@ -28,6 +28,7 @@ var requiredPaths = []string{
 	"source expired", "feedback expired_corrected", "feedback unknown_corrected", "feedback blocked_recovered",
 	"delivery_unknown by backlog deadline", "delivery_unknown by denied hand-out", "delivery_unknown by closed endpoint",
 	"rejected by backlog deadline", "delivered", "exempt notice handed out",
+	"closed while queued", "closed while accepted", "final pull", "final pull lost", "final pull settled the delivery",
 }
 
 // TestPropertyEveryDeliveryClosesAndNoFeedbackRepeats drives a source record
@@ -37,7 +38,9 @@ var requiredPaths = []string{
 // final after report_by, the sender never hears of the same anomaly of the
 // same delivery twice, and, checked against the states the source actually
 // went through and not against the code that decides them, the sender hears
-// of every anomaly it went through at least once.
+// of every anomaly it went through at least once, and of every close that
+// came while it was still queued or accepted, which it has never been told an
+// outcome for.
 func TestPropertyEveryDeliveryClosesAndNoFeedbackRepeats(t *testing.T) {
 	paths := map[string]int{}
 	ran := 0
@@ -146,6 +149,14 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 			if out.Result == ResultApplied && out.To == StateExpiredUnconfirmed && out.From != out.To {
 				paths["source expired"]++
 			}
+			if out.Result == ResultApplied && out.To == StateClosedUnconfirmed {
+				switch out.From {
+				case StateQueued:
+					paths["closed while queued"]++
+				case StateAccepted:
+					paths["closed while accepted"]++
+				}
+			}
 			for _, fb := range out.Feedback {
 				paths["feedback "+fb.Kind.String()]++
 				reportedCount[fb.Kind]++
@@ -189,6 +200,26 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 			fail("ApplyStatusReport(%+v) in %s at %v: %v", tgt.StatusReport(), src.State, now.Sub(t0), err)
 		}
 		srcApplied(n, outs...)
+	}
+	// The sender's last look before it closes a delivery that is still queued or
+	// accepted: one pull, made after report_by, which may be lost like any other.
+	// What it learns is applied with its true meaning, though report_by has passed.
+	finalPulled := false
+	finalPull := func(now time.Time) {
+		if finalPulled || !now.After(reportBy) || src.State.IsTerminal() {
+			return
+		}
+		finalPulled = true
+		if rng.Intn(pullLoss) == 0 {
+			paths["final pull lost"]++
+			return
+		}
+		paths["final pull"]++
+		before := src.State
+		srcPull(now)
+		if src.State != before {
+			paths["final pull settled the delivery"]++
+		}
 	}
 	tgtTick := func(now time.Time) {
 		if tgt == nil {
@@ -430,6 +461,7 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 		if tgt != nil {
 			observe(t, *tgt)
 		}
+		finalPull(now)
 		srcApply(now, Event{Type: EventReportByPassed})
 		checkAgreement()
 		if now.After(reportBy) && !src.State.IsTerminal() {
@@ -444,7 +476,7 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 	if tgt != nil {
 		observe(t, *tgt)
 	}
-	srcPull(now)
+	finalPull(now)
 	srcApply(now, Event{Type: EventReportByPassed})
 	checkAgreement()
 	if !src.State.IsTerminal() {
@@ -462,11 +494,22 @@ func runRandomDelivery(t *testing.T, seed int64, paths map[string]int, observe f
 		StateDeliveryUnknown:    KindDeliveryUnknown,
 		StateExpiredUnconfirmed: KindExpiredUnconfirmed,
 	}
+	// A delivery that closed while it was queued or accepted was never told an
+	// outcome, so closing is the news: the expiry for the first, the accepted
+	// delivery whose result could not be learned for the second. One that closed
+	// from a state it had already been told about adds nothing.
+	closedWhile := map[State]Kind{StateQueued: KindExpiredUnconfirmed, StateAccepted: KindAcceptedUnconfirmed}
 	visitedAnomaly := false
 	for i, st := range visits {
 		var next State
 		if i+1 < len(visits) {
 			next = visits[i+1]
+		}
+		if k, ok := closedWhile[st]; ok && next == StateClosedUnconfirmed {
+			visitedAnomaly = true
+			if reportedCount[k] == 0 {
+				fail("the delivery closed while %s without telling %s; visited %v", st, k, visits)
+			}
 		}
 		if k, ok := anomalyKind[st]; ok {
 			visitedAnomaly = true

@@ -460,17 +460,21 @@ func TestHandleControlReply(t *testing.T) {
 			t.Errorf("control %+v derived %v", h.Control, h.Outbound.Derived)
 		}
 		// The derived delivery shares the deadlines that have passed, so it closes
-		// at its next tick without any notice: the sender is told nothing about a
-		// delivery whose report window ended before the reply arrived.
+		// at its next tick, accepted from its start and never told an outcome: the
+		// sender is told, once, that the result could not be learned.
 		closed, outs, err := h.Outbound.Derived.Delivery.Tick(after)
 		requireNoErr(t, err)
 		if closed.State != delivery.StateClosedUnconfirmed {
 			t.Errorf("derived state after the tick: %v", closed.State)
 		}
+		var told []delivery.Kind
 		for _, o := range outs {
-			if len(o.Feedback) != 0 {
-				t.Errorf("the late close gave feedback %+v", o.Feedback)
+			for _, f := range o.Feedback {
+				told = append(told, f.Kind)
 			}
+		}
+		if len(told) != 1 || told[0] != delivery.KindAcceptedUnconfirmed {
+			t.Errorf("the late close told %v, want the one notice that the result could not be learned", told)
 		}
 	})
 	t.Run("a reply for a signal the target rejected is an error", func(t *testing.T) {

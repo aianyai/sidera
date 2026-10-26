@@ -83,8 +83,9 @@ func TestApplyObservationAppliesWhatTheSenderSeesItself(t *testing.T) {
 		ev := delivery.Event{Type: delivery.EventReportByPassed}
 		n, eff, out, err := o.ApplyObservation(after, nodeA, ep(2), ev)
 		requireNoErr(t, err)
-		if eff != ReportApplied || n.Recipients[0].Delivery.State != delivery.StateClosedUnconfirmed || len(out.Feedback) != 0 {
-			t.Fatalf("effect %v state %v outcome %+v, want closed_unconfirmed and no notice", eff, n.Recipients[0].Delivery.State, out)
+		if eff != ReportApplied || n.Recipients[0].Delivery.State != delivery.StateClosedUnconfirmed ||
+			len(out.Feedback) != 1 || out.Feedback[0].Kind != delivery.KindAcceptedUnconfirmed {
+			t.Fatalf("effect %v state %v outcome %+v, want closed_unconfirmed and the notice that the result could not be learned", eff, n.Recipients[0].Delivery.State, out)
 		}
 		n, _, _, err = n.ApplyObservation(after, nodeA, ep(3), ev)
 		requireNoErr(t, err)

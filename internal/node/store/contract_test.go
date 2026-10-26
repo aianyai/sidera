@@ -91,9 +91,17 @@ func deliveryRecordsOfEveryShape(t *testing.T) (source, target []delivery.Record
 	// The sender's own loss.
 	e, _ := lostRecord(base.Add(time.Hour))
 
+	// A delivery that was accepted and closed at report_by without an outcome: the
+	// notice that its result could not be learned.
+	m := applied(t, src(), delivery.Event{Type: delivery.EventReceipt})
+	m, _, err := m.Tick(m.ReportBy.Add(time.Nanosecond))
+	if err != nil || m.State != delivery.StateClosedUnconfirmed {
+		t.Fatalf("closing at report_by: state %s, %v", m.State, err)
+	}
+
 	// A target message with two chunks, the first acknowledged, notified and blocked.
 	f := tgtIn(1).Record
-	f, _, err := f.Handout(base.Add(time.Minute), delivery.AuthorizationAllow, 2, 1, fixedLease)
+	f, _, err = f.Handout(base.Add(time.Minute), delivery.AuthorizationAllow, 2, 1, fixedLease)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +125,7 @@ func deliveryRecordsOfEveryShape(t *testing.T) (source, target []delivery.Record
 	if err != nil {
 		t.Fatal(err)
 	}
-	return []delivery.Record{a, b, c, d, e}, []delivery.Record{f, g, h, k}
+	return []delivery.Record{a, b, c, d, e, m}, []delivery.Record{f, g, h, k}
 }
 
 // Every field of the stored types, set to a value that is not the zero value in

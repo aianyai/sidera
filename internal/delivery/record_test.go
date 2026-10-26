@@ -72,12 +72,27 @@ func TestSourceTransitions(t *testing.T) {
 		{"a delivery after rejection contradicts it", []step{rejectedBy(time.Minute, RejectUnauthorized), delivered(2 * time.Minute)}, StateRejected, []Kind{KindRejected}, IgnoreNone, ErrIllegalTransition},
 		{"a rejection after delivery_unknown contradicts it", []step{unknown(time.Minute), rejectedBy(2*time.Minute, RejectUnauthorized)}, StateDeliveryUnknown, []Kind{KindDeliveryUnknown}, IgnoreNone, ErrIllegalTransition},
 		{"nothing closes a delivery before report_by", []step{reportByPassed(reportAt)}, StateQueued, nil, IgnoreNotDueYet, nil},
-		{"a queued delivery closes silently after report_by", []step{reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, nil, IgnoreNone, nil},
-		{"an expired delivery closes silently after report_by", []step{queried(afterExpiry), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindExpiredUnconfirmed}, IgnoreNone, nil},
-		{"an accepted delivery closes silently after report_by", []step{receipt(time.Minute), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, nil, IgnoreNone, nil},
-		{"a delivery_unknown delivery closes silently after report_by", []step{unknown(time.Minute), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindDeliveryUnknown}, IgnoreNone, nil},
+		{"a queued delivery closes after report_by and the sender is told of the expiry", []step{reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindExpiredUnconfirmed}, IgnoreNone, nil},
+		{"a queued delivery that was told unreachable is told of the expiry when it closes", []step{failing(3*time.Minute, 0, CauseNetwork), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindUnreachable, KindExpiredUnconfirmed}, IgnoreNone, nil},
+		{"an expired delivery closes silently after report_by: the sender was told", []step{queried(afterExpiry), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindExpiredUnconfirmed}, IgnoreNone, nil},
+		{"an accepted delivery closes after report_by and the sender is told the result could not be learned", []step{receipt(time.Minute), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindAcceptedUnconfirmed}, IgnoreNone, nil},
+		{"an accepted delivery that was blocked is told of its close as well", []step{receipt(time.Minute), blocked(2*time.Minute, CauseAdapterOffline), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindDeliveryBlocked, KindAcceptedUnconfirmed}, IgnoreNone, nil},
+		{"a delivery whose expiry was corrected and that is accepted at report_by is told its result is unknown", []step{queried(afterExpiry), receipt(20 * time.Minute), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindExpiredUnconfirmed, KindExpiredCorrected, KindAcceptedUnconfirmed}, IgnoreNone, nil},
+		{"a delivery_unknown delivery closes silently after report_by: the sender was told", []step{unknown(time.Minute), reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindDeliveryUnknown}, IgnoreNone, nil},
+		{"a delivery that was lost at the target closes silently after report_by: the sender was told", []step{receipt(time.Minute), {2 * time.Minute, Event{Type: EventNoRecordAtTarget}}, reportByPassed(reportAt + time.Second)}, StateClosedUnconfirmed, []Kind{KindLostAtTarget}, IgnoreNone, nil},
+		{"the close is told once, however often report_by is found to have passed", []step{receipt(time.Minute), reportByPassed(reportAt + time.Second), reportByPassed(reportAt + time.Minute)}, StateClosedUnconfirmed, []Kind{KindAcceptedUnconfirmed}, IgnoreAlreadyFinal, nil},
+		// A report that reaches the sender after report_by, while the record is not
+		// yet closed, is applied with its true meaning: the sender's last pull comes
+		// after report_by, and the target keeps what it holds for longer.
+		{"a rejection reported after report_by is told as a rejection", []step{receipt(time.Minute), rejectedBy(reportAt+time.Second, RejectBacklogExpired)}, StateRejected, []Kind{KindRejected}, IgnoreNone, nil},
+		{"a rejection reported after report_by to a queued delivery is told as a rejection", []step{rejectedBy(reportAt+time.Second, RejectBacklogExpired)}, StateRejected, []Kind{KindRejected}, IgnoreNone, nil},
+		{"a delivery reported after report_by stays silent", []step{receipt(time.Minute), delivered(reportAt + time.Second)}, StateDelivered, nil, IgnoreNone, nil},
+		{"a delivery reported after report_by to a queued delivery stays silent", []step{delivered(reportAt + time.Second)}, StateDelivered, nil, IgnoreNone, nil},
+		{"a delivery_unknown reported after report_by is told", []step{receipt(time.Minute), unknown(reportAt + time.Second)}, StateDeliveryUnknown, []Kind{KindDeliveryUnknown}, IgnoreNone, nil},
+		{"a receipt reported after report_by is progress, and the close then tells the result is unknown", []step{receipt(reportAt + time.Second), reportByPassed(reportAt + time.Minute)}, StateClosedUnconfirmed, []Kind{KindAcceptedUnconfirmed}, IgnoreNone, nil},
+		{"a report after the close is ignored and tells nothing", []step{receipt(time.Minute), reportByPassed(reportAt + time.Second), rejectedBy(reportAt+time.Minute, RejectBacklogExpired)}, StateClosedUnconfirmed, []Kind{KindAcceptedUnconfirmed}, IgnoreAlreadyFinal, nil},
 		{"a final delivery does not close", []step{delivered(time.Minute), reportByPassed(reportAt + time.Second)}, StateDelivered, nil, IgnoreAlreadyFinal, nil},
-		{"facts after closing are ignored", []step{reportByPassed(reportAt + time.Second), delivered(reportAt + time.Minute)}, StateClosedUnconfirmed, nil, IgnoreAlreadyFinal, nil},
+		{"facts after closing are ignored", []step{reportByPassed(reportAt + time.Second), delivered(reportAt + time.Minute)}, StateClosedUnconfirmed, []Kind{KindExpiredUnconfirmed}, IgnoreAlreadyFinal, nil},
 		{"an unknown event type is malformed", []step{{time.Minute, Event{Type: 99}}}, StateQueued, nil, IgnoreNone, ErrInvalidEvent},
 	}
 	for _, r := range rows {

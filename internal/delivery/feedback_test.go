@@ -26,9 +26,14 @@ func TestTransitionFeedback(t *testing.T) {
 		{"expired_unconfirmed to rejected is the new news, not a correction", StateExpiredUnconfirmed, StateRejected, none, []Kind{KindRejected}},
 		{"expired_unconfirmed to delivery_unknown is the new news", StateExpiredUnconfirmed, StateDeliveryUnknown, none, []Kind{KindDeliveryUnknown}},
 		{"delivery_unknown to delivered is corrected", StateDeliveryUnknown, StateDelivered, none, []Kind{KindUnknownCorrected}},
-		{"closed_unconfirmed from queued is silent", StateQueued, StateClosedUnconfirmed, none, nil},
-		{"closed_unconfirmed from expired is silent", StateExpiredUnconfirmed, StateClosedUnconfirmed, none.With(KindExpiredUnconfirmed), nil},
-		{"closed_unconfirmed from delivery_unknown is silent", StateDeliveryUnknown, StateClosedUnconfirmed, none.With(KindDeliveryUnknown), nil},
+		{"closing from queued reports the expiry the sender was never told", StateQueued, StateClosedUnconfirmed, none, []Kind{KindExpiredUnconfirmed}},
+		{"closing from queued after the unreachable hint still reports the expiry", StateQueued, StateClosedUnconfirmed, none.With(KindUnreachable), []Kind{KindExpiredUnconfirmed}},
+		{"closing from accepted reports that the result could not be learned", StateAccepted, StateClosedUnconfirmed, none, []Kind{KindAcceptedUnconfirmed}},
+		{"closing from accepted while blocked reports it too", StateAccepted, StateClosedUnconfirmed, none.With(KindDeliveryBlocked), []Kind{KindAcceptedUnconfirmed}},
+		{"closing from accepted after a corrected expiry reports it too", StateAccepted, StateClosedUnconfirmed, none.With(KindExpiredUnconfirmed).With(KindExpiredCorrected), []Kind{KindAcceptedUnconfirmed}},
+		{"closing from accepted is not reported twice", StateAccepted, StateClosedUnconfirmed, none.With(KindAcceptedUnconfirmed), nil},
+		{"closing from expired is silent: the sender was told", StateExpiredUnconfirmed, StateClosedUnconfirmed, none.With(KindExpiredUnconfirmed), nil},
+		{"closing from delivery_unknown is silent: the sender was told", StateDeliveryUnknown, StateClosedUnconfirmed, none.With(KindDeliveryUnknown), nil},
 		{"a rejection already reported is not reported again", StateQueued, StateRejected, none.With(KindRejected), nil},
 		{"an expiry already reported is not reported again", StateQueued, StateExpiredUnconfirmed, none.With(KindExpiredUnconfirmed), nil},
 		{"a correction already reported is not reported again", StateExpiredUnconfirmed, StateDelivered, none.With(KindExpiredCorrected), nil},
@@ -48,7 +53,7 @@ func TestTransitionFeedback(t *testing.T) {
 
 func TestSummaries(t *testing.T) {
 	t.Run("every kind has a summary", func(t *testing.T) {
-		for k := KindUnreachable; k <= KindLostAtTarget; k++ {
+		for k := KindUnreachable; k <= LastRecordKind; k++ {
 			if k.Summary() == "" || k.String() == "invalid" {
 				t.Errorf("kind %d has no summary or name", k)
 			}
@@ -63,6 +68,14 @@ func TestSummaries(t *testing.T) {
 	t.Run("delivery_unknown wording holds for a message and a control signal and forbids assuming non-delivery", func(t *testing.T) {
 		s := KindDeliveryUnknown.Summary()
 		for _, want := range []string{"handed it over", "agent", "control signal", "adapter", "seen or executed is unknown", "do not assume it was not delivered"} {
+			if !strings.Contains(s, want) {
+				t.Errorf("summary %q lacks %q", s, want)
+			}
+		}
+	})
+	t.Run("accepted_unconfirmed wording says the target accepted it, that the result is unknown and forbids assuming non-delivery", func(t *testing.T) {
+		s := KindAcceptedUnconfirmed.Summary()
+		for _, want := range []string{"accepted the message", "could not be learned", "unknown", "do not assume it was not delivered"} {
 			if !strings.Contains(s, want) {
 				t.Errorf("summary %q lacks %q", s, want)
 			}
