@@ -297,7 +297,7 @@ func (l LoopSide) Submit(fn func()) bool {
 // outbound worker's result does, to the source record named name: the answer is
 // the caller's to make, so that a test can offer one a transport must never give.
 func (l LoopSide) ApplyAnswer(name string, node ident.NodeID, reports []record.Record, noRecord []ident.EndpointID) error {
-	return l.e.applyAnswer(l.e.d.Clock.Now(), name, node, reports, noRecord, nil)
+	return l.e.applyAnswer(l.e.d.Clock.Now(), name, node, reports, noRecord, nil, nil)
 }
 
 type cmdHook struct {
@@ -449,3 +449,35 @@ func FinalPullUntil(reportBy time.Time) time.Time { return finalPullUntil(report
 
 // InboxLen is how many commands wait in the inbox of the loop.
 func InboxLen(e *Engine) int { return len(e.inbox) }
+
+type cmdReadControlBody struct {
+	call[error]
+	key store.TargetKey
+}
+
+func (c *cmdReadControlBody) gate() gate { return gateAlways }
+func (c *cmdReadControlBody) run(e *Engine, now time.Time) {
+	ctl, ok := e.view.ctl[c.key]
+	if !ok || ctl.Body == nil {
+		c.done(fmt.Errorf("no control record %s that holds a body", c.key), nil)
+		return
+	}
+	_, err := e.readBody(now, ctl, *ctl.Body)
+	c.done(err, nil)
+}
+
+// ReadControlBody reads the body of the control record the way what needs it does,
+// through the one place a body is read from: a body that is not what its record says
+// settles the record before the error is returned.
+func ReadControlBody(ctx context.Context, e *Engine, key store.TargetKey) error {
+	c := &cmdReadControlBody{call: newCall[error](), key: key}
+	return roundTripValue(ctx, e, c)
+}
+
+func roundTripValue(ctx context.Context, e *Engine, c *cmdReadControlBody) error {
+	err, rtErr := roundTrip(ctx, e, submitInternal, c, c.call)
+	if rtErr != nil {
+		return rtErr
+	}
+	return err
+}

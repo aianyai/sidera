@@ -8,7 +8,9 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/timing"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -395,10 +397,39 @@ func TestTheRecordsOfTimeRecoverFromACrashAtEveryPoint(t *testing.T) {
 			}
 		})
 	})
+	t.Run("a control record when the time to settle it comes", func(t *testing.T) {
+		// A signal that was accepted and whose reply no crash left a trace of: the
+		// time settles it, as the delivery rules say.
+		taker := newDiskTaker(cov, "tick")
+		h := nodeWith(t, harness.Options{Observer: taker}, "a", "b")
+		taker.h = h
+		h.Stop()
+		now := h.Clock().Now()
+		accept := now.Add(delivery.DefaultAcceptBefore)
+		k := store.TargetKey{SenderNode: harness.NodeID(), Sender: endpointOf(t, h, "a"), Message: "control-held", Recipient: endpointOf(t, h, "b")}
+		c := store.CtlRecord{
+			Key: k, Record: delivery.NewTargetControlRecord(now, accept, delivery.ReportBy(accept)),
+			Dedup: delivery.NewDedupRecord(k.Dedup(), digestOf(1), delivery.ReportBy(accept)),
+			Kind:  envelope.KindEndpointStatus, AcceptedAt: now, SentAt: now,
+		}
+		data, err := store.EncodeRecord(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		writeOnDisk(t, h, store.CtlDir, c.Name(), data)
+		h.Start()
+		quiet(t, h)
+		h.Advance(c.Record.ReportBy.Sub(h.Clock().Now()) + time.Minute)
+		quiet(t, h)
+		walk(t, taker, func(t *testing.T, r *harness.H) {
+			ctl := ctlRecords(t, r)
+			if len(ctl) != 1 || ctl[0].Record.State != delivery.StateClosedUnconfirmed {
+				t.Errorf("the control records are %+v, want the one, closed_unconfirmed", ctl)
+			}
+		})
+	})
 	for _, k := range harness.ProgramTable(t).Keys() {
-		// Control records are not ticked by the passing of time yet: their steps have no
-		// scenario until a control signal is settled by the engine.
-		if k.Tag.Tx == "tick" && k.Tag.Role != "ctl" && k.Tag.Role != "ctl-dir" && cov.hit[k.Key] == 0 {
+		if k.Tag.Tx == "tick" && cov.hit[k.Key] == 0 {
 			t.Errorf("the step %s %q of transaction tick was never reached", k.Step, k.Tag.Role)
 		}
 	}

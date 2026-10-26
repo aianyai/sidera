@@ -212,3 +212,20 @@ func forged(t testing.TB, h *harness.H, id string, to ident.Address, replyTo ada
 	}
 	return b
 }
+
+// forgedControl is an envelope from a third party that carries a control signal for
+// the endpoint.
+func forgedControl(t testing.TB, h *harness.H, id string, to ident.Address, kind envelope.Kind, preset string) []byte {
+	t.Helper()
+	now := h.Clock().Now().Truncate(time.Second)
+	accept := now.Add(delivery.DefaultAcceptBefore)
+	env := envelope.Envelope{
+		ID: delivery.MessageID(id), To: []ident.Address{to}, Kind: kind, Preset: preset,
+		Seq: map[ident.EndpointID]uint64{to.Endpoint: 1}, SentAt: now, AcceptBefore: accept, ReportBy: delivery.ReportBy(accept),
+	}
+	b, err := env.Encode(envelope.DefaultLimits())
+	if err != nil {
+		t.Fatalf("encode the forged control envelope: %v", err)
+	}
+	return b
+}

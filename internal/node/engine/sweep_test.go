@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -487,5 +488,31 @@ func TestASourceRecordWaitingForItsFinalPullIsNotSweptBeforeItClosesNorBeforeIts
 	}
 	if now := h.Clock().Now(); now.Before(retention) {
 		t.Errorf("the source record was swept at %v, before its retention %v", now, retention)
+	}
+}
+
+// A control record that the sweep removed is a record the node does not hold: a pull
+// for the signal is answered with that, and never with a report made of nothing.
+func TestAPullForASweptControlRecordAnswersNoRecord(t *testing.T) {
+	h := sessionNode(t, harness.Options{ArchiveSweepEvery: sweepEvery}, "a")
+	msg := create(t, h, "a", "no-such-preset")
+	quiet(t, h)
+	wantFailed(t, controlReply(t, h, "a", msg), adapterproto.CreateReasonPresetUnknown)
+	if len(ctlRecords(t, h)) != 1 {
+		t.Fatalf("the node holds %d control records, want the one of the signal", len(ctlRecords(t, h)))
+	}
+	h.Advance(3 * 24 * time.Hour)
+	quiet(t, h)
+	passes(t, h, 3)
+	if n := len(ctlRecords(t, h)); n != 0 {
+		t.Fatalf("%d control records are left after the sweeps, want none", n)
+	}
+	runtime := runtimeEndpoint(t, h)
+	ans, err := pullFor(h, msg, runtime)
+	if err != nil {
+		t.Fatalf("pull: %v", err)
+	}
+	if len(ans.Reports) != 0 || ans.ControlReply != nil || !slices.Equal(ans.NoRecord, []ident.EndpointID{runtime}) {
+		t.Errorf("the pull for the swept signal is answered with reports %d, control reply %v and no record %v, want only the runtime endpoint as no record", len(ans.Reports), ans.ControlReply != nil, ans.NoRecord)
 	}
 }

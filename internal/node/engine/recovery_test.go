@@ -171,28 +171,36 @@ func TestOpenClosesTheEndpointsOfADisabledInstance(t *testing.T) {
 }
 
 // The scan entry never opens over work that a rule that is not wired yet would
-// have to do: it says which rule, and it has changed nothing on the way. A damaged
-// control record is such work: quarantining it removes its file, and a control
-// signal's record must not go before the pull of control signals answers from it, so
-// it is left, and the start is refused, until then. Nothing else damaged is: the
-// quarantine of every other file is wired.
+// have to do: it says which rule, and it has changed nothing on the way. The replay
+// of a prompt and of a block is such work until the prompts are there; what is
+// damaged beside it waits too, for the entry settles nothing before it knows it can
+// open. The quarantine of every damaged file, a control record's included, is wired.
 func TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet(t *testing.T) {
 	noLeaks(t)
-	hash := strings.Repeat("a1", 32)
 	for _, tc := range []struct {
-		name string
-		seed func(r *rig)
-		rule string
+		name  string
+		event store.PendingEvent
+		extra bool
+		rule  string
 	}{
-		{"a damaged control record", func(r *rig) { r.seedFile(store.CtlDir, hash+".rec", []byte("not a record")) }, "quarantine"},
-		{"a damaged control record beside a damaged target record", func(r *rig) {
-			r.seedFile(store.CtlDir, hash+".rec", []byte("not a record"))
-			r.seedFile(store.InDir, strings.Repeat("b2", 32)+".rec", []byte("not a record"))
-		}, "quarantine"},
+		{"a prompt whose followers were not written", store.PendingNotified, false, "prompt-replay"},
+		{"a block whose followers were not written", store.PendingBlocked, false, "blocked-replay"},
+		{"a prompt beside a damaged target record", store.PendingNotified, true, "prompt-replay"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newRig(t, 10)
-			tc.seed(r)
+			e := r.start()
+			a := register(t, e, "a")
+			r.restart()
+			r.queue(1, 1, a)
+			in := r.scan().In[0]
+			r.seedRecord(store.AttemptsRecord{Endpoint: a, Pending: store.Pending{
+				Event: tc.event, Cause: delivery.CauseAdapterOffline,
+				Items: []store.PendingItem{{Key: in.Key, Rev: in.Rev, AcceptedAt: in.AcceptedAt}},
+			}})
+			if tc.extra {
+				r.seedFile(store.InDir, strings.Repeat("b2", 32)+".rec", []byte("not a record"))
+			}
 			before := r.snapshot()
 			_, _, err := r.open()
 			var pe *engine.PendingRecoveryError
@@ -200,7 +208,7 @@ func TestOpenRefusesToOpenOverWorkOfARuleThatIsNotWiredYet(t *testing.T) {
 				t.Fatalf("Open error %v, want a PendingRecoveryError of rule %s", err, tc.rule)
 			}
 			if after := r.snapshot(); fmt.Sprint(after) != fmt.Sprint(before) {
-				t.Errorf("the refused scan entry changed the disk: the damaged file beside the control record must wait for it too")
+				t.Errorf("the refused scan entry changed the disk: what is damaged beside the work of a rule that is not wired must wait for it")
 			}
 		})
 	}

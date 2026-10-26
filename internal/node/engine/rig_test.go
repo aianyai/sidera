@@ -411,6 +411,8 @@ func (r *rig) seedRecord(rec store.Record) {
 		dir = store.OutDir
 	case store.AlertRecord:
 		dir = store.AlertsDir
+	case store.AttemptsRecord:
+		dir = store.AttemptsDir
 	default:
 		r.t.Fatalf("seedRecord: no directory for %T", rec)
 	}

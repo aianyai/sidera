@@ -10,8 +10,9 @@ import (
 // FuzzInbound hands the receiving side of the node arbitrary bytes as an envelope
 // from a local endpoint. Whatever the bytes are, the node does not panic, it
 // answers with an error or with a receipt, and every report in a receipt is one
-// the node signed and the sender verifies: a receipt that cannot be verified would
-// be a record the node wrote without being able to say so.
+// the node signed and the sender verifies, as is the control reply of a control
+// signal: a receipt that cannot be verified would be a record the node wrote without
+// being able to say so.
 func FuzzInbound(f *testing.F) {
 	seedNode := harness.New(f, harness.Options{})
 	seedNode.MustDirect("a")
@@ -20,6 +21,8 @@ func FuzzInbound(f *testing.F) {
 	valid := forged(f, seedNode, "fuzz-seed", b, "", "a body")
 	f.Add(valid)
 	f.Add(forged(f, seedNode, "fuzz-reply", b, "some-message", "an answer"))
+	f.Add(forgedControl(f, seedNode, "fuzz-status", b, envelope.KindEndpointStatus, ""))
+	f.Add(forgedControl(f, seedNode, "fuzz-create", b, envelope.KindSessionCreate, "default"))
 	f.Add(valid[:len(valid)/2])
 	f.Add([]byte{})
 	long := append([]byte(nil), valid...)
@@ -43,6 +46,11 @@ func FuzzInbound(f *testing.F) {
 			}
 			if rep.Sender != harness.NodeID() {
 				t.Fatalf("a report names the sender %s", rep.Sender)
+			}
+		}
+		if rc.ControlReply != nil {
+			if _, err := h.VerifyControlReply(*rc.ControlReply); err != nil {
+				t.Fatalf("the control reply of the receipt does not verify: %v", err)
 			}
 		}
 		if len(rc.Reports) > envelope.MaxRecipients {

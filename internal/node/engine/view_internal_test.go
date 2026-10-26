@@ -383,3 +383,37 @@ func TestDroppingATargetRecordLeavesTheViewAsIfItWereNeverThere(t *testing.T) {
 		t.Errorf("the schedule was told %v, want that the record has no entry any more", told)
 	}
 }
+
+// A control record taken out of the view leaves it as a target record does: what
+// the view counts, indexes by arrival and schedules is what a view built without it
+// holds, so a pull for it finds nothing.
+func TestDroppingAControlRecordLeavesTheViewAsIfItWereNeverThere(t *testing.T) {
+	node := nodeOf(t, 9)
+	to := idOf(t, 4)
+	kept, dropped := ctlRec(t, 1, to, delivery.StateAccepted), ctlRec(t, 2, to, delivery.StateAccepted)
+	scan := func(ctls ...store.CtlRecord) *store.Scan { return &store.Scan{Ctl: ctls} }
+	v, err := buildView(node, scan(kept, dropped))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told []string
+	v.onTick = func(record string, next time.Time) {
+		if next.IsZero() {
+			told = append(told, record)
+		}
+	}
+	v.dropCtl(dropped.Key)
+	v.dropCtl(dropped.Key) // a record that is not there changes nothing
+
+	want, err := buildView(node, scan(kept))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v.unfinished != want.unfinished || len(v.ctl) != len(want.ctl) || len(v.queued[to]) != len(want.queued[to]) ||
+		fmt.Sprint(v.arrived) != fmt.Sprint(want.arrived) {
+		t.Errorf("the view after the drop differs from the view without the record:\n%+v\n%+v", v, want)
+	}
+	if len(told) != 1 || told[0] != ctlTick(dropped.Key) {
+		t.Errorf("the schedule was told %v, want that the record has no entry any more", told)
+	}
+}

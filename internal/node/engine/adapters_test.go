@@ -1509,17 +1509,23 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 		}
 	})
 
-	t.Run("a session checkpoint needs an open session endpoint of the instance", func(t *testing.T) {
-		// Session endpoints come only from a session creation, which the engine
-		// does not do yet, so with none on the node every put in the session scope
-		// is refused. The records below are seeded onto the disk, as a crash of a
-		// creation would leave them.
-		open, closed, foreign := mustEndpoint(t, 80), mustEndpoint(t, 81), mustEndpoint(t, 82)
+	t.Run("a session checkpoint needs a session endpoint of the instance that is open or being created", func(t *testing.T) {
+		// The adapter keeps the state of a session while it creates it, before the
+		// node has been told that the session exists, so an endpoint being created
+		// takes a put as an open one does. The records below are seeded onto the disk,
+		// as a creation would leave them.
+		open, closed, foreign, creating := mustEndpoint(t, 80), mustEndpoint(t, 81), mustEndpoint(t, 82), mustEndpoint(t, 83)
 		r := newRig(t, 10)
 		r.enableInstance("agent", "")
 		r.seedRecord(store.EndpointRecord{ID: open, Kind: sessionKind, Instance: "chat", Status: store.EndpointOpen, Token: bytes.Repeat([]byte{1}, store.TokenLen), Session: &store.SessionInfo{Preset: "default"}})
 		r.seedRecord(store.EndpointRecord{ID: closed, Kind: sessionKind, Instance: "chat", Status: store.EndpointClosed, Session: &store.SessionInfo{Preset: "default"}})
 		r.seedRecord(store.EndpointRecord{ID: foreign, Kind: sessionKind, Instance: "agent", Status: store.EndpointOpen, Token: bytes.Repeat([]byte{2}, store.TokenLen), Session: &store.SessionInfo{Preset: "default"}})
+		// A session endpoint that is being created is made with the control record that
+		// holds the intent, and is garbage without it.
+		making := sessionCtlRecord(t, 50, creating)
+		making.Intent.State, making.Intent.NativeRef = store.IntentCreating, ""
+		r.seedRecord(making)
+		r.seedRecord(store.EndpointRecord{ID: creating, Kind: sessionKind, Instance: "chat", Status: store.EndpointCreating, Token: bytes.Repeat([]byte{3}, store.TokenLen), Session: &store.SessionInfo{Preset: "default"}, CreatedBy: strings.TrimSuffix(making.Name(), ".rec")})
 		e := r.start()
 		direct := register(t, e, "a")
 		put := func(id ident.EndpointID) error {
@@ -1541,6 +1547,9 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 		}
 		if got := checkpoints(t, r); got[store.CheckpointKey{Scope: "session", ID: open.String()}] != `{"n":1}` {
 			t.Errorf("on disk: %v", got)
+		}
+		if err := put(creating); err != nil {
+			t.Fatalf("a session endpoint of the instance whose creation has not ended: %v", err)
 		}
 	})
 

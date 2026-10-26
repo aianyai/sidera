@@ -464,3 +464,52 @@ func deliverOnDisk(t *testing.T, h *harness.H, ins []store.InRecord) {
 		writeOnDisk(t, h, store.InDir, in.Name(), data)
 	}
 }
+
+// A control signal is carried by the same worker as a message, so the pull before the
+// close brings its control reply too. The target took a session creation in and made
+// the session while the sender slept past report_by and never learned it; the one pull
+// on waking brings the signed reply, which ends the signal's delivery with the session
+// endpoint it names, and the sender is told nothing about an outcome that could not be
+// learned.
+func TestAControlSignalWhoseSenderSleptPastReportByLearnsItsReplyFromThePullBeforeTheClose(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	h.Unreachable(true)
+	msg := create(t, h, "a", "default")
+	quiet(t, h)
+	h.HoldReports(string(msg))
+	h.Unreachable(false)
+	h.Advance(resendBackoff)
+	quiet(t, h)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateQueued {
+		t.Fatalf("the source record of the signal is %s, want queued: its receipt and reply are held", d.State)
+	}
+	if n := nativeSessions(t, h); n != 1 {
+		t.Fatalf("%d native sessions were made while the sender was kept from the answer, want 1", n)
+	}
+	if r := controlReply(t, h, "a", msg); r != nil {
+		t.Fatalf("the sender holds the control reply %+v before it woke", *r)
+	}
+	reportBy := sourceDelivery(t, h, msg).ReportBy
+
+	h.Stop()
+	h.Advance(reportBy.Sub(h.Clock().Now()) + time.Minute)
+	h.Release(string(msg))
+	h.Start()
+	quiet(t, h)
+
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateDelivered {
+		t.Fatalf("the source record of the signal is %s at the start after report_by, want delivered: the pull before the close brought the reply", d.State)
+	}
+	r := controlReply(t, h, "a", msg)
+	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated || r.Create.SessionEndpoint == "" {
+		t.Fatalf("the control reply is %+v, want a created session with its endpoint", r)
+	}
+	if n := nativeSessions(t, h); n != 1 {
+		t.Errorf("%d native sessions exist after the wake, want the one the signal made", n)
+	}
+	h.Advance(mergeWindow)
+	quiet(t, h)
+	if got := toldKinds(t, h, "a"); len(got) != 0 {
+		t.Errorf("a was told %v, want nothing: the reply settled the signal", got)
+	}
+}

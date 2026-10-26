@@ -1,0 +1,316 @@
+package engine_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"errors"
+	"path"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/aianyai/sidera/internal/adapterreg"
+	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+)
+
+// The control record is a record of the node like the others: time settles it, a
+// body that is not what it says is a loss that is told, and what it made is what
+// the adapter is asked to take back. A creation that was not settled when the node
+// went down is settled or gone on with when it comes back.
+
+// seedControl writes a control record of a creation, accepted at accepted, onto the
+// disk of the rig, with the endpoints it refers to: the runtime endpoint it is for,
+// open, and when intent is not nil the session endpoint being created.
+func seedControl(t *testing.T, r *rig, i int, intent *store.CreateIntent) (store.CtlRecord, store.EndpointRecord) {
+	t.Helper()
+	runtime := store.EndpointRecord{ID: mustEndpoint(t, 4), Kind: adapterreg.KindRuntime, Instance: "chat", Status: store.EndpointOpen, Token: bytes.Repeat([]byte{4}, store.TokenLen), Declaration: []byte("{}")}
+	r.seedRecord(runtime)
+	c := sessionCtlRecord(t, i, mustEndpoint(t, 60))
+	c.Intent = intent
+	if intent == nil {
+		c.SessionEndpoint = ident.EndpointID{}
+	}
+	var ep store.EndpointRecord
+	if intent != nil {
+		ep = store.EndpointRecord{
+			ID: intent.Endpoint, Kind: sessionKind, Instance: "chat", Status: store.EndpointCreating, Token: bytes.Repeat([]byte{9}, store.TokenLen),
+			Declaration: []byte("{}"), Session: &store.SessionInfo{Preset: "default", ToolAccess: []string{engine.TokenEnv, engine.HomeEnv}}, CreatedBy: strings.TrimSuffix(c.Name(), ".rec"),
+		}
+	}
+	return c, ep
+}
+
+// A control record that is accepted and has no reply is settled by time like a
+// target record: at the settle deadline its outcome is unknown, since the signal was
+// handed to be executed, and after report_by it is closed.
+func TestControlRecordIsSettledByTime(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	c, _ := seedControl(t, r, 1, nil)
+	r.seedRecord(c)
+	e := r.start()
+
+	stateOf := func() delivery.State {
+		t.Helper()
+		sc := r.scan()
+		if len(sc.Ctl) != 1 {
+			t.Fatalf("%d control records, want 1", len(sc.Ctl))
+		}
+		return sc.Ctl[0].Record.State
+	}
+	if got := stateOf(); got != delivery.StateAccepted {
+		t.Fatalf("the control record is %s before its time, want accepted", got)
+	}
+	settleBy := delivery.SettleBy(c.Record.ReportBy)
+	advance(t, r, e, settleBy.Sub(r.clk.Now())-time.Second)
+	if got := stateOf(); got != delivery.StateAccepted {
+		t.Errorf("the control record is %s a second before the settle deadline, want accepted", got)
+	}
+	advance(t, r, e, 2*time.Second)
+	if got := stateOf(); got != delivery.StateDeliveryUnknown {
+		t.Errorf("the control record is %s at the settle deadline, want delivery_unknown", got)
+	}
+	advance(t, r, e, c.Record.ReportBy.Sub(r.clk.Now())+time.Second)
+	if got := stateOf(); got != delivery.StateClosedUnconfirmed {
+		t.Errorf("the control record is %s after report_by, want closed_unconfirmed", got)
+	}
+}
+
+// A body that is not what a control record says settles it: the creation the record
+// still holds, which needed the body, is failed with the reply control_unknown (no
+// session will be attached, but one may remain), and the endpoint it was making is
+// closed, so that nothing is made of a creation whose first message is gone. The owner
+// has an alert of the damage and one of a session nobody may control.
+func TestBodyLostFromAControlRecordFailsItsUnsettledCreation(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	attempt := adapterproto.AttemptID("0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6")
+	intent := &store.CreateIntent{Attempt: attempt, Endpoint: mustEndpoint(t, 61), State: store.IntentCreating}
+	c, ep := seedControl(t, r, 2, intent)
+	body := []byte("the initial message")
+	ref := store.BodyRefOf(body)
+	c.Body = &ref
+	if err := r.st.ControlIntake(body, &ep, c); err != nil {
+		t.Fatalf("ControlIntake: %v", err)
+	}
+	// The body is damaged on the disk.
+	r.seedFile(store.BodiesDir, store.BodyFileName(c.Name()), []byte("not the initial message"))
+	e := r.start()
+
+	err := engine.ReadControlBody(context.Background(), e, c.Key)
+	if !errors.Is(err, store.ErrBodyMismatch) {
+		t.Fatalf("reading the body: %v, want the mismatch", err)
+	}
+	settle(t, e)
+	sc := r.scan()
+	if len(sc.Ctl) != 1 {
+		t.Fatalf("%d control records, want the one that is kept", len(sc.Ctl))
+	}
+	got := sc.Ctl[0]
+	if got.Record.State != delivery.StateDelivered || !got.Dedup.HasReply || got.Body != nil || got.Intent == nil || got.Intent.State != store.IntentFailed {
+		t.Errorf("the control record is %+v: want delivered with a reply, no body and a failed intent", got)
+	}
+	for _, e := range sc.Endpoints {
+		if e.ID == intent.Endpoint && (e.Status != store.EndpointClosed || len(e.Token) != 0) {
+			t.Errorf("the endpoint of the creation is %v with a token, want closed and none", e.Status)
+		}
+	}
+	var corrupt, uncontrolled bool
+	for _, a := range sc.Alerts {
+		corrupt = corrupt || a.Kind == "corrupt_body"
+		uncontrolled = uncontrolled || (a.Kind == "control_unknown" && a.Subject == c.SessionEndpoint.String())
+	}
+	if !corrupt {
+		t.Errorf("alerts %+v, want one of kind corrupt_body", sc.Alerts)
+	}
+	if !uncontrolled {
+		t.Errorf("alerts %+v, want one of kind control_unknown about %s: the creation fails with the reason that says a session may remain", sc.Alerts, c.SessionEndpoint)
+	}
+}
+
+// A control record that was closed while its creation was unsettled can no longer take
+// the reply, and no retry would change that: the creation is not tried again forever in
+// silence. The log says which record, the owner has an alert of a session that may
+// exist, and the work for the creation stops, so that waiting longer says nothing more.
+func TestCreationWhoseControlRecordWasClosedIsReportedOnceAndNotRetried(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	intent := &store.CreateIntent{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Endpoint: mustEndpoint(t, 61), State: store.IntentCreating}
+	c, ep := seedControl(t, r, 3, intent)
+	closed, _, err := c.Record.Tick(c.Record.ReportBy.Add(time.Second))
+	if err != nil || closed.State != delivery.StateClosedUnconfirmed {
+		t.Fatalf("the record is %s after report_by (%v), want closed_unconfirmed", closed.State, err)
+	}
+	c.Record = closed
+	if err := r.st.ControlIntake(nil, &ep, c); err != nil {
+		t.Fatalf("ControlIntake: %v", err)
+	}
+	e := r.start()
+	advance(t, r, e, engine.DefaultParams().CreateReplyDeadline+time.Second)
+	advance(t, r, e, 10*engine.DefaultParams().RetryBackoff)
+
+	reported := 0
+	for _, m := range r.log.Messages() {
+		if strings.Contains(m, "its control record was closed before it") {
+			reported++
+		}
+	}
+	if reported != 1 {
+		t.Errorf("the log says %d times that the creation cannot be settled, want once: %q", reported, r.log.Messages())
+	}
+	var told bool
+	for _, a := range r.scan().Alerts {
+		told = told || (a.Kind == "control_unknown" && a.Subject == c.SessionEndpoint.String())
+	}
+	if !told {
+		t.Errorf("alerts %+v, want one of kind control_unknown about %s", r.scan().Alerts, c.SessionEndpoint)
+	}
+}
+
+// What adapter.start carries for a session is what the adapter needs to take it back:
+// the native session it maps to, the tool access its agent was created with (its own
+// token and the data directory) and the state the adapter kept for it. A session
+// that is not open, one still being created and one of another instance are not
+// listed.
+func TestAdapterStartCarriesTheOpenSessionsWithTheirAccess(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	token := bytes.Repeat([]byte{7}, store.TokenLen)
+	open := store.EndpointRecord{
+		ID: mustEndpoint(t, 70), Kind: sessionKind, Instance: "chat", Status: store.EndpointOpen, Token: token, Declaration: []byte("{}"),
+		Session: &store.SessionInfo{Preset: "default", NativeRef: "native-7", ToolAccess: []string{engine.TokenEnv, engine.HomeEnv}},
+	}
+	creating := store.EndpointRecord{ID: mustEndpoint(t, 71), Kind: sessionKind, Instance: "chat", Status: store.EndpointCreating, Token: token, Declaration: []byte("{}"), Session: &store.SessionInfo{Preset: "default"}}
+	closed := store.EndpointRecord{ID: mustEndpoint(t, 72), Kind: sessionKind, Instance: "chat", Status: store.EndpointClosed, Declaration: []byte("{}"), Session: &store.SessionInfo{Preset: "default", NativeRef: "native-8"}}
+	for _, ep := range []store.EndpointRecord{open, creating, closed} {
+		r.seedRecord(ep)
+	}
+	if err := r.st.CheckpointPut(store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: open.ID.String()}, State: []byte(`{"n":1}`)}); err != nil {
+		t.Fatal(err)
+	}
+	e := r.start()
+	start, err := admitFull(context.Background(), e, "chat", r.admit)
+	if err != nil {
+		t.Fatalf("AdapterAdmitted: %v", err)
+	}
+	if len(start.Sessions) != 1 {
+		t.Fatalf("adapter.start lists %d sessions, want the one that is open: %+v", len(start.Sessions), start.Sessions)
+	}
+	s := start.Sessions[0]
+	wantEnv := map[string]string{engine.TokenEnv: base64.RawURLEncoding.EncodeToString(token), engine.HomeEnv: testHome}
+	if s.Endpoint != adapterproto.EndpointRef(open.ID.String()) || s.Preset != "default" || s.NativeRef != "native-7" || s.TurnActive || string(s.Checkpoint) != `{"n":1}` {
+		t.Errorf("the session entry is %+v", s)
+	}
+	if len(s.ToolAccess.Env) != len(wantEnv) || s.ToolAccess.Env[engine.TokenEnv] != wantEnv[engine.TokenEnv] || s.ToolAccess.Env[engine.HomeEnv] != wantEnv[engine.HomeEnv] {
+		t.Errorf("the tool access is %v, want %v", s.ToolAccess.Env, wantEnv)
+	}
+}
+
+// A creation the node was making when it went down is not forgotten: its intent is
+// on disk, and when the node is back the adapter is asked again with the attempt it
+// was asked with, which the runtime answers with the session it made.
+func TestCreationCutOffByACrashIsGoneOnWithOneSession(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	first := h.AdapterLaunches(harness.Instance)[0]
+	if err := first.Controller().PauseAt(h.Ctx(), fakeadapter.PauseCreateAfterNative); err != nil {
+		t.Fatal(err)
+	}
+	msg := create(t, h, "a", "default")
+	if err := first.Controller().WaitPaused(h.Ctx(), fakeadapter.PauseCreateAfterNative); err != nil {
+		t.Fatal(err)
+	}
+	h.Crash(harness.ProcessCrash)
+	quiet(t, h)
+	h.Advance(pullInterval)
+	quiet(t, h)
+
+	if n := nativeSessions(t, h); n != 1 {
+		t.Errorf("%d native sessions after the crash and the retry, want 1", n)
+	}
+	r := controlReply(t, h, "a", msg)
+	eps := sessionEndpoints(t, h)
+	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyCreated || len(eps) != 1 || eps[0].Status != store.EndpointOpen {
+		t.Fatalf("after the crash the reply is %+v and the endpoints %+v, want created and one open endpoint", r, eps)
+	}
+	oneSessionPerAttempt(t, h)
+}
+
+// A creation whose time was up while the node was down is told as unconfirmed when it
+// comes back, with the endpoint it allocated, instead of being asked for again as if
+// no time had passed.
+func TestCreationOverdueAtStartIsSettledAsUnconfirmed(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeHold}); err != nil {
+		t.Fatal(err)
+	}
+	msg := create(t, h, "a", "default")
+	quiet(t, h)
+	h.Stop()
+	h.Advance(engine.DefaultParams().CreateReplyDeadline + time.Second)
+	h.Start()
+	quiet(t, h)
+	h.Advance(pullInterval)
+	quiet(t, h)
+
+	r := controlReply(t, h, "a", msg)
+	if r == nil || r.Create == nil || r.Create.Outcome != adapterproto.CreateReplyUnconfirmed || r.Create.SessionEndpoint == "" {
+		t.Fatalf("the reply is %+v, want unconfirmed, naming the endpoint", r)
+	}
+	if n := nativeSessions(t, h); n != 0 {
+		t.Errorf("%d native sessions, want none: the node did not ask again", n)
+	}
+	for _, ep := range sessionEndpoints(t, h) {
+		if ep.Status != store.EndpointClosed {
+			t.Errorf("the endpoint is %v, want closed", ep.Status)
+		}
+	}
+}
+
+// A control record the node lost is answered as a record it does not hold, and its
+// sender is told: a signal the node accepted is not answered as one it never saw.
+func TestControlRecordLostBeforeItsReplyIsTold(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}); err != nil {
+		t.Fatal(err)
+	}
+	msg := create(t, h, "a", "default")
+	quiet(t, h)
+	if ans, err := pullFor(h, msg, runtimeEndpoint(t, h)); err != nil || len(ans.Reports) != 1 || len(ans.NoRecord) != 0 {
+		t.Fatalf("before the loss the pull is answered %+v, %v, want the report", ans, err)
+	}
+	ctl := ctlRecords(t, h)
+	if len(ctl) != 1 {
+		t.Fatalf("%d control records, want 1", len(ctl))
+	}
+	h.Stop()
+	if err := h.Disk().Remove(fsx.Tag{Tx: "offline", Role: "f"}, path.Join(store.CtlDir, ctl[0].Name())); err != nil {
+		t.Fatal(err)
+	}
+	h.Start()
+	quiet(t, h)
+	if ans, err := pullFor(h, msg, runtimeEndpoint(t, h)); err != nil || len(ans.Reports) != 0 || len(ans.NoRecord) != 1 {
+		t.Fatalf("after the loss the pull is answered %+v, %v, want the recipient as no record", ans, err)
+	}
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateDeliveryUnknown {
+		t.Errorf("the sender's record is %s, want delivery_unknown: it holds the target's receipt and the target says it has no record", d.State)
+	}
+	if kinds := feedbackOf(t, h, msg); len(kinds) == 0 {
+		t.Error("the sender is owed no feedback for a signal whose record the target lost")
+	}
+}
