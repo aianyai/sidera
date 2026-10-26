@@ -727,25 +727,39 @@ func bodyHeldBySourceAlone(t *testing.T, h *harness.H, body string) (adapterprot
 // Evidence that finishes the delivery it answers drops the source record's
 // reference to the body of the message, and the store removes that body in the
 // transaction that writes the reply; it does not wait for the sweep at the next
-// start. A reply that says the same bytes has a body file of its own, so the
-// body file removed is the source record's, not the reply's.
+// start. A reply has a body file of its own whatever it says, the bytes of the
+// question included, so the body file removed is the source record's and the
+// reply keeps its own.
 func TestEvidenceThatFinishesASourceDeliveryRemovesTheBodyOfTheSourceRecord(t *testing.T) {
-	h := nodeWith(t, harness.Options{}, "a", "b")
-	msg, report := bodyHeldBySourceAlone(t, h, "a question nobody holds after the evidence")
-	if got := len(scanOf(t, h).Bodies); got != 1 {
-		t.Fatalf("%d bodies before the reply, want the one of the question", got)
-	}
-	if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
-		forged(t, h, "the-reply", addrOf(t, h, "a"), msg, "another body", report)); err != nil {
-		t.Fatal(err)
-	}
-	quiet(t, h)
-	in := inOf(t, h, "the-reply")
-	sc := scanOf(t, h)
-	if in.Body == nil || len(sc.Bodies) != 1 || sc.Bodies[0] != store.BodyFileName(in.Name()) {
-		t.Errorf("bodies %v, the reply's reference %v: only the body of the reply may remain", sc.Bodies, in.Body)
-	}
-	if o := outOf(t, h, msg); o.Body != nil {
-		t.Error("the source record still refers to the body of the question")
+	const question = "a question nobody holds after the evidence"
+	for _, c := range []struct{ name, reply string }{
+		{"a reply with another body", "another body"},
+		{"a reply that says the same bytes", question},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := nodeWith(t, harness.Options{}, "a", "b")
+			msg, report := bodyHeldBySourceAlone(t, h, question)
+			out := outOf(t, h, msg)
+			if got := scanOf(t, h).Bodies; len(got) != 1 || got[0] != store.BodyFileName(out.Name()) {
+				t.Fatalf("bodies %v before the reply, want the one of the question", got)
+			}
+			if _, err := h.Loopback().Send(h.Ctx(), harness.NodeID(), addrOf(t, h, "b").Endpoint,
+				forged(t, h, "the-reply", addrOf(t, h, "a"), msg, c.reply, report)); err != nil {
+				t.Fatal(err)
+			}
+			quiet(t, h)
+			in := inOf(t, h, "the-reply")
+			sc := scanOf(t, h)
+			if in.Body == nil || len(sc.Bodies) != 1 || sc.Bodies[0] != store.BodyFileName(in.Name()) {
+				t.Fatalf("bodies %v, the reply's reference %v: only the body of the reply may remain", sc.Bodies, in.Body)
+			}
+			kept, err := h.Disk().ReadFile(path.Join(store.BodiesDir, sc.Bodies[0]))
+			if err != nil || string(kept) != c.reply {
+				t.Errorf("the body of the reply is %q, %v, want %q", kept, err, c.reply)
+			}
+			if o := outOf(t, h, msg); o.Body != nil {
+				t.Error("the source record still refers to the body of the question")
+			}
+		})
 	}
 }
