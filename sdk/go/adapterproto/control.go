@@ -185,9 +185,10 @@ func (v ControlCloseReason) MarshalText() ([]byte, error)  { return closeReasonT
 func (v *ControlCloseReason) UnmarshalText(b []byte) error { return closeReasonText.unmarshal(b, v) }
 
 // ControlCloseReply is the reply to control.session.close, which has no
-// parameters. The daemon closes the endpoint in the channel first (the token is
-// revoked, no more prompts, queued messages are settled), then asks the adapter
-// to release the native session.
+// parameters. The daemon asks the adapter to release the native session first,
+// then makes the reply and closes the endpoint in the channel in one step (the
+// token is revoked, no more prompts, queued messages are settled). The endpoint
+// is closed whatever the adapter answered, close_unconfirmed included.
 type ControlCloseReply struct {
 	Outcome ControlCloseOutcome `json:"outcome"`
 	// Reason is present exactly when the outcome is close_unconfirmed.
