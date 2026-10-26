@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
-	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
@@ -154,9 +153,6 @@ func alertsOfKind(t testing.TB, h *harness.H, kind string) []store.AlertRecord {
 	}
 	return out
 }
-
-// idOf is the endpoint id of the endpoint registered as who.
-func idOf(t testing.TB, h *harness.H, who string) ident.EndpointID { return endpointOf(t, h, who) }
 
 // restartedAt starts a node on a disk a crash left, with the clock where it stood at
 // the instant of the crash, so that what a restart finds due is what was due then.

@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/delivery"
 )
 
 func TestEveryReasonHasItsOwnName(t *testing.T) {
@@ -76,7 +78,8 @@ func TestParamsTakeTheDefaultsForWhatIsNotSet(t *testing.T) {
 	if got := (Params{}).withDefaults(); got != d {
 		t.Errorf("zero Params = %+v, want %+v", got, d)
 	}
-	set := Params{InboxLen: 3, SubmitWait: time.Second, ChunkReplaces: 2, ChunkRemoves: 5, ChunkTickRecords: 7, RetryBackoff: time.Hour, ResendBackoff: time.Minute, PullInterval: time.Hour}
+	set := Params{InboxLen: 3, SubmitWait: time.Second, ChunkReplaces: 2, ChunkRemoves: 5, ChunkTickRecords: 7, RetryBackoff: time.Hour, ResendBackoff: time.Minute, PullInterval: time.Hour,
+		Feedback: delivery.FeedbackParams{MergeWindow: time.Second, RateCap: 3, RateWindow: time.Hour}}
 	if got := set.withDefaults(); got != set {
 		t.Errorf("Params that are set changed: %+v", got)
 	}

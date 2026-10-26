@@ -97,6 +97,7 @@ type Engine struct {
 	clockTask  string    // the periodic task that persists the clock state, if one was added
 	tr         Transport // set by SetTransport before Start
 	outbox     *outbox
+	fb         feedbackState
 	waits      map[ident.EndpointID]*waiter
 	cont       []continuation
 	parked     map[ident.EndpointID][]command   // commands that wait for the drain of an endpoint
@@ -723,6 +724,10 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		}
 	case schedOutbound:
 		e.dispatchOutbound(key.id, now)
+	case schedFeedback:
+		_ = e.runFeedback(now) // a fatal error is e.fatal, which the caller reads
+	case schedFeedbackClear:
+		e.retryClears(now)
 	case schedDrain:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.later(&cmdDrain{endpoint: id})

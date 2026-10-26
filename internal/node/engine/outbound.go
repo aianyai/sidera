@@ -399,7 +399,7 @@ func (e *Engine) applyAnswer(now time.Time, name string, node ident.NodeID, recs
 	if err := e.d.Store.SourceUpdate(o); err != nil {
 		return err
 	}
-	e.view.setOut(o)
+	e.putOut(now, o)
 	return nil
 }
 

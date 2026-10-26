@@ -18,9 +18,9 @@ This package holds the loop, the scheduler, the registration of endpoints, the
 life of an adapter's connection, the capacity check, the storage of alerts, the two recovery entries, and the sending
 and taking in of messages: the acceptance of a message from a local endpoint, the
 outbound worker that carries it through the transport and applies what comes
-back, and the receiving side that judges an envelope and signs the reports.
-Prompts, pulling, control signals and feedback join the same loop as further
-commands and add their methods to this list.
+back, and the receiving side that judges an envelope and signs the reports, and the
+feedback the sender's node tells its endpoints. Prompts, pulling and control
+signals join the same loop as further commands and add their methods to this list.
 
 ## Entry points
 
@@ -217,11 +217,36 @@ commands and add their methods to this list.
   `Open` runs the rules in the order the store's README fixes, works the plan out
   again from a fresh scan after a rule has written, and repeats until nothing is
   left. Work of a rule that is not wired yet (the quarantine of damaged files,
-  the replay of prompts, blocks and feedback) makes `Open` return a
-  `PendingRecoveryError` before it writes anything in that pass.
+  the replay of prompts and blocks) makes `Open` return a
+  `PendingRecoveryError` before it writes anything in that pass. The replay of
+  feedback is wired: it takes off the source and out-lost records the items a
+  notice already covers, and the scan entry loads the queue of feedback only after
+  it has run.
 - **The recovery of deliveries is four phases in the order of the startup
   steps,** each a command of the loop that logs `startup step N begin` and
-  `startup step N end`; each is empty until the feature it belongs to is added.
+  `startup step N end`; each is empty until the feature it belongs to is added,
+  except the thirteenth, which sends the feedback that fell due.
+- **Feedback is queued by the one place that takes a source record into the view,
+  and told by one notice per merged group.** `putOut` replaces a source record in the
+  view and queues the items the record holds that the one it replaces did not, so a
+  decision made by any write (a report, a reply's evidence, a pull's answer) is told
+  and an item that was held already is not queued twice. The queue
+  (`delivery.FeedbackQueue`) is memory: the scan entry builds it from the items the
+  records hold and the notices already on disk (for the rate cap), so a restart
+  neither loses an item nor gives an endpoint a new rate window. An entry of the
+  schedule is due when the queue next has a notice to send; the flush works on a copy
+  of the queue and a notice that could not be written goes back with its items and
+  without the mark of having been sent.
+- **A notice is a record of the system endpoint, and its identifier follows from its
+  items.** It is written by `FeedbackForm` as exempt traffic, so a full queue of the
+  endpoint does not refuse it and it takes no place in it, and it is not asked of the
+  capacity check; its key is made from the items alone (`noticeKey`), so one formed
+  again is the same record. It covers the items by the name of the record that holds
+  each, and only then are the covered items taken off their records (`clearCovered`):
+  a write of that which failed is tried again after `RetryBackoff` (`retryClears`),
+  and a crash between the two is repaired by the replay of feedback. Feedback for an
+  endpoint that is not open is dropped, with a word in the log, and taken off its
+  records: closing ends the endpoint's life for feedback.
 - **A message is accepted once, in one place.** `accept` makes the request into its
   envelope, whose errors are what refuses a request no node would take, answers a
   repeat of an idempotency key with the first message (the same content for the same
@@ -379,3 +404,9 @@ the review holds the engine to; the `_internal_test.go` files the encoding of
 the declaration field (`declaration_internal_test.go`), the view and the batches of a drain.
 `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord` is a
 requirement kept in sight and skipped until the quarantine is wired.
+
+`feedback_test.go` has the notices (once, within the window and the cap, at the start,
+for a closed endpoint, a full queue, and the crash walk of the writes that tell an
+endpoint) and `feedback_helpers_test.go` reads them from the disk;
+`feedback_internal_test.go` the key of a notice and the putting back of one that
+could not be written.

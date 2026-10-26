@@ -194,7 +194,7 @@ func (e *Engine) accept(now time.Time, st *endpointState, m outgoing) (SendResul
 	for _, to := range m.to {
 		e.view.seq.Note(sender, to, env.Seq[to.Endpoint])
 	}
-	e.view.setOut(o)
+	e.putOut(now, o)
 	e.dispatchOutbound(o.Name(), now)
 	return SendResult{Message: id, To: m.to}, nil
 }

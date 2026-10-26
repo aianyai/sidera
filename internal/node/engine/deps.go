@@ -51,6 +51,11 @@ type Store interface {
 	OrphanGCEndpoint(eps []store.EndpointRecord) error
 	EndpointDrainReplay(b store.DrainBatch) ([]store.InRecord, error)
 	OrphanGC(bodies []string) error
+
+	FeedbackForm(body []byte, notice store.InRecord) (store.InRecord, error)
+	FeedbackClear(outs []store.OutRecord) error
+	FeedbackReplay(outs []store.OutRecord) error
+	OutLostClear(lost []store.OutLostRecord) error
 }
 
 var _ Store = (*store.Store)(nil)

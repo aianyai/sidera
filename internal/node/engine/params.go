@@ -1,6 +1,10 @@
 package engine
 
-import "time"
+import (
+	"time"
+
+	"github.com/aianyai/sidera/internal/delivery"
+)
 
 // Params are the tunables of the loop and its batches. A zero field takes the
 // default in DefaultParams: nothing here is security relevant, and zero never
@@ -33,6 +37,9 @@ type Params struct {
 	// PullInterval is how long a sender waits between two pulls of the reports of
 	// a delivery that is not final, until its report deadline.
 	PullInterval time.Duration
+	// Feedback are the merge window and the rate cap of the notices the node tells
+	// its endpoints; delivery.FeedbackParams says what each is for.
+	Feedback delivery.FeedbackParams
 }
 
 // DefaultParams returns the defaults. The chunk sizes keep the longest
@@ -49,6 +56,7 @@ func DefaultParams() Params {
 		RetryBackoff:     time.Minute,
 		ResendBackoff:    30 * time.Second,
 		PullInterval:     time.Minute,
+		Feedback:         delivery.DefaultFeedbackParams(),
 	}
 }
 
@@ -77,6 +85,15 @@ func (p Params) withDefaults() Params {
 	}
 	if p.PullInterval <= 0 {
 		p.PullInterval = d.PullInterval
+	}
+	if p.Feedback.MergeWindow <= 0 {
+		p.Feedback.MergeWindow = d.Feedback.MergeWindow
+	}
+	if p.Feedback.RateCap <= 0 {
+		p.Feedback.RateCap = d.Feedback.RateCap
+	}
+	if p.Feedback.RateWindow <= 0 {
+		p.Feedback.RateWindow = d.Feedback.RateWindow
 	}
 	return p
 }

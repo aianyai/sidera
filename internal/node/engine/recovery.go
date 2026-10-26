@@ -36,6 +36,8 @@ type RecoveryPlan struct {
 	PromptReplay   []store.PendingWork
 	BlockedReplay  []store.PendingWork
 	FeedbackReplay []store.OutRecord
+	// OutLostReplay are the out-lost records whose item a notice already covers.
+	OutLostReplay []store.OutLostRecord
 	// OrphanBodies are the bodies no record refers to.
 	OrphanBodies []string
 }
@@ -52,6 +54,7 @@ func PlanRecovery(sc *store.Scan, now time.Time, enabled func(instance string) b
 		PromptReplay:    store.PromptReplays(sc),
 		BlockedReplay:   store.BlockedReplays(sc),
 		FeedbackReplay:  store.FeedbackReplays(sc),
+		OutLostReplay:   store.OutLostReplays(sc),
 		OrphanBodies:    store.OrphanBodies(sc),
 	}
 	ins, ctls := store.DrainCandidates(sc)
@@ -91,6 +94,9 @@ func (p RecoveryPlan) Items() []string {
 	for _, o := range p.FeedbackReplay {
 		add("feedback-replay", o.Name())
 	}
+	for _, o := range p.OutLostReplay {
+		add("feedback-replay", o.Name())
+	}
 	for _, b := range p.OrphanBodies {
 		add("orphan-gc", b)
 	}
@@ -103,9 +109,8 @@ func (p RecoveryPlan) Empty() bool { return len(p.Items()) == 0 }
 // unwired is the first rule of the plan that has work and that is not
 // wired yet, with how many things it has to do; ok is false when there is none.
 // The quarantine of a damaged file forms the replacement of a lost delivery and
-// the feedback it causes, the replays of a prompt and of a block belong to the
-// prompts, the replay of feedback to the feedback: each is filled in with the
-// feature that writes what it replays.
+// the feedback it causes, and the replays of a prompt and of a block belong to the
+// prompts: each is filled in with the feature that writes what it replays.
 func (p RecoveryPlan) unwired() (rule string, items int, ok bool) {
 	for _, r := range []struct {
 		name string
@@ -114,7 +119,6 @@ func (p RecoveryPlan) unwired() (rule string, items int, ok bool) {
 		{"quarantine", len(p.Quarantine)},
 		{"prompt-replay", len(p.PromptReplay)},
 		{"blocked-replay", len(p.BlockedReplay)},
-		{"feedback-replay", len(p.FeedbackReplay)},
 	} {
 		if r.n > 0 {
 			return r.name, r.n, true
@@ -191,6 +195,9 @@ func Open(ctx context.Context, d Deps, p Params) (*Engine, ScanReport, error) {
 				return nil, rep, err
 			}
 			e.view.addConfigResults(d.Config.LastOperations())
+			if err := e.loadFeedback(sc, d.Clock.Now()); err != nil {
+				return nil, rep, err
+			}
 			rep.Endpoints, rep.Unfinished = e.view.OpenEndpoints(), e.view.Unfinished()
 			return e, rep, nil
 		}
@@ -231,6 +238,18 @@ func (e *Engine) runRules(ctx context.Context, sc *store.Scan, plan RecoveryPlan
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
 				_, err := e.d.Store.EndpointDrainReplay(p.EndpointDrain)
 				return err
+			}},
+		{"feedback-replay", func(p RecoveryPlan) int { return len(p.FeedbackReplay) + len(p.OutLostReplay) },
+			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error {
+				if len(p.FeedbackReplay) > 0 {
+					if err := e.d.Store.FeedbackReplay(p.FeedbackReplay); err != nil {
+						return err
+					}
+				}
+				if len(p.OutLostReplay) > 0 {
+					return e.d.Store.OutLostClear(p.OutLostReplay)
+				}
+				return nil
 			}},
 		{"orphan-gc", func(p RecoveryPlan) int { return len(p.OrphanBodies) },
 			func(_ *store.Scan, p RecoveryPlan, _ time.Time) error { return e.d.Store.OrphanGC(p.OrphanBodies) }},
@@ -321,9 +340,11 @@ func (e *Engine) recoverReconcile(time.Time) error { return nil }
 // (step 12). Filled in with the pull of messages.
 func (e *Engine) recoverTick(time.Time) error { return nil }
 
-// recoverFeedback sends the feedback that fell due, the feedback of the records
-// replaced after a storage loss included (step 13). Filled in with the feedback.
-func (e *Engine) recoverFeedback(time.Time) error { return nil }
+// recoverFeedback sends the feedback that fell due while the node was down, the
+// feedback of the records replaced after a storage loss included (step 13). The
+// queue was loaded from the disk by the scan entry, after the replay of feedback
+// took off it what a notice already covers.
+func (e *Engine) recoverFeedback(now time.Time) error { return e.runFeedback(now) }
 
 type cmdRecoveryPhase struct {
 	call[struct{}]

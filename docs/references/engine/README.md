@@ -385,6 +385,33 @@ a `NoRecord` for a recipient the same answer reports is logged as the peer's fau
 out: the report is signed and stands, and the listing is not applied. Nothing of the sending is persisted:
 the last step of the start looks at every unsettled source record again.
 
+**Feedback.** What goes wrong with a delivery is told to the endpoint that sent the
+message, once, by a notice of the system endpoint that the endpoint receives like a
+message. The delivery rules decide that feedback is owed, and the write of the record
+that made the decision stores the item beside it (`withFeedback`); `putOut` is the one
+place that takes a written source record into the view, and it queues the items the
+record holds that the one before it did not. The queue (`delivery.FeedbackQueue`)
+merges items of one kind of anomaly, waits out the merge window (1 minute) and holds
+back what an endpoint's rate cap (10 notices in 10 minutes) does not let through, to
+send it later. One entry of the schedule is due when the queue next has a notice; a
+notice is written by `FeedbackForm` as a record of the system endpoint that is exempt
+traffic: a full queue of the endpoint does not refuse it, it takes no place of that
+queue, and it does not go through the capacity check, which judges new work. Its key
+is made from its items alone, so a notice formed again after a crash is the same
+record. It covers its items by the name of the record that holds each; once the
+notice is written the items are taken off those records (`FeedbackClear`), a write
+of that which failed is tried again after the retry back-off (`retryClears`), and the
+replay of feedback at the start does it for a crash in between. The words of a
+notice are the summaries of the kinds (`delivery.Kind.Summary`), one line for each
+delivery. Closing ends an endpoint's life for feedback: an endpoint that is not open
+when its notice is due is told nothing, and a direct or runtime endpoint opened again
+with the same id does not hear of what happened before it was closed, as the records
+queued for a closing endpoint are not carried over to the reopened one either; the
+items are taken off their records with a word in the log. The queue is
+memory, built by the scan entry after the replay of feedback from the items the
+records hold and from the notices on disk, so a restart loses no item and gives no
+endpoint a new rate window; step 13 sends what fell due while the node was down.
+
 **Taking in an envelope.** `Inbound` is the handler of the transport. For each recipient
 on this node it finds the record of the request or judges it: a repeat gets the record's
 report, another body under the same message identifier is refused as a conflict and
@@ -585,6 +612,22 @@ wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup s
 - **Recovery work of an unwired rule stops `Open`.** Opening over a damaged file
   would leave it out of the view as if it were not there, silently. The refusal
   names the rule and happens before any write of that pass.
+- **Feedback is queued where the view takes a record, and told by a notice that covers
+  it.** A decision is stored with the record that made it, so a crash cannot mark a
+  delivery reported without its feedback; every write of a source record goes through
+  `putOut`, so no write can decide feedback that the queue never sees. A notice and
+  the removal of the items it covers are two transactions, with the notice first:
+  the other order could lose an item, this one can only leave it on its record until
+  the clearing is tried again, which does not wait for the next start: the notice may
+  be swept by then, and with it the covers the replay of feedback reads. The key of a notice is a function of
+  its items so that one formed again is the same record and not a second notice. The
+  queue is rebuilt from the disk at each start instead of being stored: it would be a
+  second copy of what the records and the notices say.
+- **A notice is the system endpoint's, and exempt.** It takes no endpoint backlog
+  and passes no capacity check, but it counts in the node's unfinished records, and so
+  in the node queue limit. The anomaly it reports would go unheard if a full queue
+  refused it, and a notice about a notice is never made, so a refusal would be
+  silent; the rate cap is what bounds notices.
 - **The view takes the records the store hands back.** A write of target records
   returns them as written, the revision included, and the engine stores what comes
   back instead of working the revision out: the rule has one home, the store.
@@ -673,6 +716,12 @@ reproducible).
 | The pause of a clock set back is persisted at once | `engine.go` (`observe`, `AddClockState`) | `TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash`, `TestAFatalErrorWhilePersistingThePauseStopsTheEngine` |
 | Recovery | `recovery.go` | `recovery_test.go` |
 | Waiting | `waiters.go` | `waiters_test.go` (`TestShutdownEndsEveryWaitEvenWhenTheInboxIsFull`, `TestAPageThatIsReadyWinsOverTheShutdown`) |
+| An anomaly is told once, in one notice that waits out the window and the cap; the queue survives a restart; feedback for a closed endpoint is dropped | `feedback.go` (`putOut`, `flushFeedback`, `sendNotice`, `loadFeedback`) | `TestAnAnomalyIsToldToTheSenderOnceInOneNotice`, `TestNoticesOverTheRateCapAreHeldAndNeverDropped`, `TestFeedbackThatFellDueWhileTheNodeWasDownIsSentAtTheStart`, `TestFeedbackForAnEndpointThatWasClosedIsDroppedAndLogged` |
+| A notice goes to an endpoint whose queue is full and takes no place of it | `feedback.go` (`formNotice`) | `TestSystemFeedbackIsNotRefusedByFullBacklog` |
+| A notice formed again is the same record; a notice that failed to be written goes back whole | `feedback.go` (`noticeKey`, `unsend`) | `TestTheKeyOfANoticeFollowsFromItsItemsAlone`, `TestUnsendPutsBackWhatFlushTookOut` |
+| Every write that tells an endpoint survives a crash | `feedback-form`, `feedback-clear` (declared by the store) | `TestFeedbackRecoversFromACrashAtEveryPoint` |
+| Every source record the loop writes enters the view through `putOut`, which queues the feedback it holds | `feedback.go` (`putOut`) | `TestEverySourceRecordTheLoopWritesEntersTheViewThroughPutOut` |
+| A clearing of the records that failed after a notice is tried again, so a notice swept later cannot cause a second one | `feedback.go` (`clearCovered`, `retryClears`) | `TestANoticeIsNotToldTwiceWhenTheRecordsCouldNotBeCleared` |
 | The view takes what the store returned and agrees with the disk | `drain.go`, `view.go` | `TestViewMatchesAFreshScanAfterWrites` |
 | No method makes a session endpoint | — | `TestEngineHasNoMethodThatMakesASessionEndpoint` |
 | Node rules do not apply to a local sender, declarations do | `inbound.go` (`judgeAuthz`) | `TestLocalSourcesIgnoreNodeRules`, `TestEndpointDeclarationRestrictsLocalSenders`, `TestARemoteSenderIsJudgedByTheNodeRulesAndALocalOneIsNot` |
@@ -702,9 +751,9 @@ Known gaps, each filled in with the feature it belongs to:
   `store.QuarantineSessions`), so the engine passes the scan and no list;
   `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`
   is skipped until the engine wires the quarantine.
-- The prompt, block and feedback replays and phases 11 to 13 of `RecoverDelivery`
-  are empty until the features that own them exist; phase 14 goes on with the outgoing
-  messages.
+- The prompt and block replays and phases 11 and 12 of `RecoverDelivery` are empty
+  until the features that own them exist; phase 13 sends the feedback that fell due and
+  phase 14 goes on with the outgoing messages.
 - An empty body is refused: the Agent interface says a body may be empty and an envelope
   of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
 - The unreachable hint and the expiry of a delivery nobody answered are not applied by the

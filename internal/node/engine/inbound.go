@@ -164,7 +164,7 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 		}
 		rc.Reports = append(rc.Reports, rec)
 	}
-	if err := e.writeArrivals(env, arrivals, updatedOut); err != nil {
+	if err := e.writeArrivals(now, env, arrivals, updatedOut); err != nil {
 		return transport.Receipt{}, err
 	}
 	for _, ee := range evidence {
@@ -183,7 +183,7 @@ func (e *Engine) takeIn(now time.Time, from transport.Origin, sender ident.Endpo
 // written into the view. The message goes with them as the body of every record
 // that holds one: each has a copy of its own, even when the source record on this
 // node holds the same bytes.
-func (e *Engine) writeArrivals(env envelope.Envelope, arrivals []arrival, out *store.OutRecord) error {
+func (e *Engine) writeArrivals(now time.Time, env envelope.Envelope, arrivals []arrival, out *store.OutRecord) error {
 	var ins []store.InRecord
 	var body []byte
 	for _, a := range arrivals {
@@ -209,7 +209,7 @@ func (e *Engine) writeArrivals(env envelope.Envelope, arrivals []arrival, out *s
 		return err
 	}
 	if out != nil {
-		e.view.setOut(*out)
+		e.putOut(now, *out)
 	}
 	for _, in := range written {
 		e.view.setIn(in)

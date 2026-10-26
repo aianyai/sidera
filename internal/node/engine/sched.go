@@ -26,6 +26,12 @@ const (
 	// schedInstanceDrain is the retry of closing the endpoints of a disabled
 	// instance after a write failed; the id is the instance.
 	schedInstanceDrain
+	// schedFeedback is the next time the queue of feedback has a notice to send;
+	// there is one entry, with no id.
+	schedFeedback
+	// schedFeedbackClear is the retry of taking the items a written notice covers off
+	// their records after a write failed; there is one entry, with no id.
+	schedFeedbackClear
 )
 
 // schedKey names an entry. There is at most one entry for a key, so a rule that

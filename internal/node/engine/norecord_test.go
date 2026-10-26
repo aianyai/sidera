@@ -341,9 +341,28 @@ func TestSourceWithAReceiptGivesLostAtTargetOnce(t *testing.T) {
 			}
 		}
 	}
-	if len(out.Feedback) != 1 || out.Feedback[0].Feedback.Kind != delivery.KindLostAtTarget ||
-		out.Feedback[0].Ref.Recipient.Endpoint != endpointOf(t, h, "b") || out.Feedback[0].Ref.Message != delivery.MessageID(msg) {
-		t.Errorf("the notices of the sender: %+v, want one lost_at_target for b", out.Feedback)
+	// The feedback is told once: one notice, which names the message and the recipient
+	// and says the target holds no record, without saying the message was handed over
+	// or that anything was corrupted.
+	h.Advance(mergeWindow)
+	letTheCallThrough(t, h, delay) // the pull that falls due with the window waits out the delay too
+	ns := noticesFor(t, h, "a")
+	if len(ns) != 1 || len(ns[0].in.Covers) != 1 || ns[0].in.Covers[0].Kind != delivery.KindLostAtTarget ||
+		ns[0].in.Covers[0].Recipient.Endpoint != endpointOf(t, h, "b") || ns[0].in.Covers[0].Out != out.Name() {
+		t.Fatalf("the notices of the sender: %v, want one lost_at_target for b", toldKinds(t, h, "a"))
+	}
+	for _, w := range []string{string(msg), addrOf(t, h, "b").String(), "no longer holds any record"} {
+		if !strings.Contains(ns[0].text, w) {
+			t.Errorf("the notice does not say %q:\n%s", w, ns[0].text)
+		}
+	}
+	for _, w := range []string{"handed", "storage corruption"} {
+		if strings.Contains(ns[0].text, w) {
+			t.Errorf("the notice says %q:\n%s", w, ns[0].text)
+		}
+	}
+	if got := pending(t, h, "a"); got != 0 {
+		t.Errorf("%d items are pending after the notice", got)
 	}
 	if ins := inRecords(t, h, msg); len(ins) != 1 || ins[0].Key.Recipient != endpointOf(t, h, "c") {
 		t.Errorf("the target holds %d records after the loss, want only c's: the source must not send the message again", len(ins))
