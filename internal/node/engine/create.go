@@ -414,10 +414,7 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 		}
 	}
 	e.forgetCreation(c.Key)
-	// The checkpoints the adapter kept for the creation and for the first prompt are
-	// what a call made again would be given; none will be made now.
-	e.dropAttemptCheckpoint(intent.Attempt)
-	e.dropAttemptCheckpoint(firstPromptAttempt(intent.Attempt))
+	e.dropCreationCheckpoints(intent.Attempt)
 	if st.rec.Status == store.EndpointClosed && intent.State == store.IntentCreated {
 		e.alertUncontrolled(now, n, "a session was created for an endpoint that had been closed")
 	}
@@ -459,8 +456,17 @@ func (e *Engine) failCreationWithoutEndpoint(now time.Time, c store.CtlRecord) e
 	}
 	e.view.setCtl(n)
 	e.forgetCreation(c.Key)
+	e.dropCreationCheckpoints(intent.Attempt)
 	e.alertUncontrolled(now, n, "the session endpoint of a creation was lost, so no session will be attached and a native session may remain")
 	return nil
+}
+
+// dropCreationCheckpoints removes the checkpoints the adapter kept for a creation that
+// has settled, under its attempt and under the attempt of its first prompt: they are what
+// a call made again would be given, and none will be made now.
+func (e *Engine) dropCreationCheckpoints(attempt adapterproto.AttemptID) {
+	e.dropAttemptCheckpoint(attempt)
+	e.dropAttemptCheckpoint(firstPromptAttempt(attempt))
 }
 
 // forgetCreation stops the work for a creation: its deadline, its retry and the call

@@ -772,7 +772,7 @@ record, the delivery of the signal ends as delivered, and the endpoint opens, ma
 session, when the session was created and is closed with its token dropped when it was not. The
 first prompt's attempt follows from the creation attempt, so a call made again carries what the
 first carried, as the adapter requires, and nothing else is stored for it. Once the intent is settled,
-whatever the outcome, the checkpoints the adapter kept under the creation attempt and under the first
+whatever the outcome (a creation failed because its endpoint was lost included), the checkpoints the adapter kept under the creation attempt and under the first
 prompt's attempt are dropped: no call will be made again. A call that failed, an
 answer of `indeterminate` and an adapter that is not connected are tried again, after
 `CreateRetryBackoff` and at the next connection of the instance, until the reply deadline,
@@ -1379,7 +1379,7 @@ reproducible).
 | The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
 | The attempt is recorded as in flight before the adapter is called, and a write that fails sends nothing and is retried after the backoff | `prompts.go` (`dispatchPrompt`) | `TestPromptIsRecordedBeforeTheAdapterIsCalledAndAFailedWriteIsRetried` |
 | A refusal is a failure, a lost answer is a delivery or an unknown outcome as the adapter says, and only a delivery marks the message | `prompts.go` (`promptResult`, `reconcileResult`, `settlePrompt`) | `TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain` |
-| The checkpoints of the creation attempt and of the first prompt are dropped when the creation settles | `create.go` (`settleCreate`), `prompts.go` (`dropAttemptCheckpoint`) | `TestSettledCreationDropsTheCheckpointsOfItsAttempts` |
+| The checkpoints of the creation attempt and of the first prompt are dropped when the creation settles | `create.go` (`settleCreate`, `failCreationWithoutEndpoint`, `dropCreationCheckpoints`), `prompts.go` (`dropAttemptCheckpoint`) | `TestSettledCreationDropsTheCheckpointsOfItsAttempts` |
 | The checkpoint of a prompt attempt is dropped when the attempt settles | `prompts.go` (`dropAttemptCheckpoint`), `store.CheckpointDrop` | `TestSettledPromptAttemptDropsItsCheckpoint` |
 | A prompt does not make the check at recv pass | `pull.go` (`handoutAuthorization`) | `TestDeclarationTightenedAfterPromptRejectsAtRecv` |
 
