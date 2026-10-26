@@ -140,6 +140,10 @@ commands and add their methods to this list.
   was not online, in which case the earlier time stays (zero for an instance that
   has not been online since the engine started). Going away keeps the endpoints,
   records and admission, and makes the busy states unknown.
+- **A new connection starts from what it reports.** A successful admission forgets
+  the busy states and the availability snapshot of the connection before, and
+  `AdapterStarted` replaces the busy states with the sessions its result lists as
+  `turn_active` instead of merging into the old ones.
 - **Availability, busy and rejected states are memory.** A snapshot replaces the
   last one and is stamped with the engine's time of receiving it; a turn started or
   ended and a refused native request are kept by endpoint reference, whether or not

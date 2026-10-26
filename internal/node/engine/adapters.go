@@ -143,7 +143,8 @@ func (c *cmdAdmit) run(e *Engine, _ time.Time) {
 // runtime gets its runtime endpoint made (or opened again) in the same command;
 // what adapter.start carries is returned. A later admission of the instance
 // replaces the earlier one, and only once everything has succeeded: an admission
-// that is refused leaves the instance as it was.
+// that is refused leaves the instance as it was. An admission that succeeds
+// forgets the busy states and the availability snapshot of the earlier connection.
 //
 // It is the entry the adapter host calls, and the one a test calls to give an
 // instance, as the host does.
@@ -172,6 +173,10 @@ func (e *Engine) admit(instance string, a adapterreg.Admission, info adapterprot
 	}
 	st := e.adapter(instance)
 	st.admitted, st.adm, st.info = true, a, info
+	// What was reported on an earlier connection is not what this one will say:
+	// the host reports nothing when it stops an instance, so no AdapterGone need
+	// have cleared it.
+	st.busy, st.snapshot, st.received = nil, nil, time.Time{}
 	return start, nil
 }
 
@@ -282,8 +287,9 @@ func (c *cmdStarted) run(e *Engine, _ time.Time) {
 }
 
 // AdapterStarted tells the engine what the adapter answered to adapter.start:
-// the instance is online, and the busy state of each session it reports is the
-// turn_active it gave. A session the engine does not know is logged and ignored.
+// the instance is online, and its busy state is the sessions that reported
+// turn_active, replacing what was known before. A session the engine does not
+// know is logged and ignored.
 func (e *Engine) AdapterStarted(ctx context.Context, instance string, r adapterproto.StartResult) error {
 	c := &cmdStarted{call: newCall[struct{}](), instance: instance, result: r}
 	_, err := roundTrip(ctx, e, submitInternal, c, c.call)
@@ -296,6 +302,8 @@ func (e *Engine) markStarted(instance string, r adapterproto.StartResult) error 
 		return err
 	}
 	st.online, st.offlineSince = true, time.Time{}
+	// The busy state is what the result lists, not that and what was known before.
+	st.busy = nil
 	for _, s := range r.Sessions {
 		if _, err := e.view.resolveSession(instance, s.Endpoint); err != nil {
 			e.log.Warn("the adapter reported a session the engine does not know; it is ignored", "instance", instance)
