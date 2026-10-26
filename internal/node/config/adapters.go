@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -20,6 +21,13 @@ import (
 // source of randomness (the engine draws only in its loop, and staging runs
 // outside it) draws this many bytes first and hands them over.
 const StageSuffixBytes = 8
+
+// MaxPackageBytes is the most a package may hold in all, the sizes of its files
+// added up. The whole package is read through a file system the owner points at,
+// one file at a time into memory, so a package without a limit could take the node
+// down by being large; no adapter is anywhere near it, so the limit is a refusal of
+// a mistake (the wrong directory) and never of a package.
+const MaxPackageBytes = 256 << 20
 
 // reservedName reports whether a name inside a package would be taken for the
 // debris of an interrupted operation: the cleanup at start removes the
@@ -157,8 +165,16 @@ func (c *Config) repairAdapters() error {
 // pkg is a package directory read through a Reader rooted at it.
 type pkg struct {
 	manifest manifest.Manifest
-	dirs     []string // relative paths, each after its parent
-	files    []string // relative paths
+	// raw is the manifest as it was read, to compare with the copy's.
+	raw   []byte
+	dirs  []string // relative paths, each after its parent
+	files []string // relative paths
+}
+
+// errPackageTooLarge is the refusal of a package that holds more than
+// MaxPackageBytes; file is the one that went over.
+func errPackageTooLarge(file string) error {
+	return &ChangeError{Reason: ChangeInvalid, Field: file, Err: fmt.Errorf("the package holds more than %d bytes (%d MiB) in all", int64(MaxPackageBytes), MaxPackageBytes>>20)}
 }
 
 func readPackage(src fsx.Reader) (pkg, error) {
@@ -170,6 +186,8 @@ func readPackage(src fsx.Reader) (pkg, error) {
 	if p.manifest, err = manifest.Parse(data); err != nil {
 		return p, &ChangeError{Reason: ChangeInvalid, Field: manifest.FileName, Err: err}
 	}
+	p.raw = data
+	var total int64
 	var walk func(dir string) error
 	walk = func(dir string) error {
 		entries, err := src.ReadDir(dir)
@@ -192,6 +210,16 @@ func readPackage(src fsx.Reader) (pkg, error) {
 				}
 				continue
 			}
+			// The size is what the file system says before anything is read. A file
+			// that says less than it holds (a link to a large file) is caught only by
+			// the count of what the copy reads, after it was read.
+			info, err := src.Stat(rel)
+			if err != nil {
+				return &SourceError{Path: rel, Err: err}
+			}
+			if total += info.Size; total > MaxPackageBytes {
+				return errPackageTooLarge(rel)
+			}
 			p.files = append(p.files, rel)
 		}
 		return nil
@@ -206,14 +234,16 @@ func readPackage(src fsx.Reader) (pkg, error) {
 }
 
 // StageAdapter copies the package that src is rooted at into a staging
-// directory next to the versions of its adapter, and parses the manifest of the
-// copy. Nothing is installed: everything it writes is preparation that the
-// repair of the adapter directory removes after a crash, and that Unstage
-// removes when the installation is refused. The copy is what is checked, not
-// the source, so the package cannot change between the check and the install.
+// directory next to the versions of its adapter, and checks that the manifest of
+// the copy is, byte for byte, the one that was read and judged first. Nothing is
+// installed: everything it writes is preparation that the repair of the adapter
+// directory removes after a crash, and that Unstage removes when the installation
+// is refused. A package that changes between the check and the copy is refused,
+// so what the install runs is what was checked.
 //
 // The package is read before anything is written, so a package that is refused
-// for what is in it leaves nothing. rnd names the staging directory. The
+// for what is in it leaves nothing, and one that holds more than MaxPackageBytes
+// is refused. rnd names the staging directory. The
 // platform the manifest lists is the caller's to check on Staged.Manifest.
 func (c *Config) StageAdapter(src fsx.Reader, rnd io.Reader) (Staged, error) {
 	p, err := readPackage(src)
@@ -241,15 +271,15 @@ func (c *Config) StageAdapter(src fsx.Reader, rnd io.Reader) (Staged, error) {
 	if err != nil {
 		return fail(fmt.Errorf("config: reading the staged manifest: %w", err))
 	}
-	m, err := manifest.Parse(data)
-	if err != nil {
-		return fail(&ChangeError{Reason: ChangeInvalid, Field: manifest.FileName, Err: err})
-	}
-	if m.ID != id || m.Version != version {
+	// The manifest that is parsed and judged is the one that was read first; the
+	// copy must hold those bytes exactly, or what the install runs is not what was
+	// checked (a manifest that kept its id and version and changed its entry
+	// program, its platforms or its declarations is a different package).
+	if !bytes.Equal(data, p.raw) {
 		return fail(&ChangeError{Reason: ChangeInvalid, Field: manifest.FileName,
-			Err: fmt.Errorf("the manifest was %s %s when the package was read and %s %s in the copy: the package changed while it was copied", id, version, m.ID, m.Version)})
+			Err: errors.New("the manifest differs between the read of the package and the copy: the package changed while it was copied")})
 	}
-	staged.Manifest = m
+	staged.Manifest = p.manifest
 	return staged, nil
 }
 
@@ -277,10 +307,14 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) error {
 		}
 	}
 	program := path.Clean(p.manifest.Entry.Program)
+	var total int64
 	for _, f := range p.files {
 		data, err := src.ReadFile(f)
 		if err != nil {
 			return &SourceError{Path: f, Err: err}
+		}
+		if total += int64(len(data)); total > MaxPackageBytes {
+			return errPackageTooLarge(f)
 		}
 		mode := fsx.ModePrivate
 		if f == program {

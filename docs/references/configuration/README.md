@@ -523,7 +523,22 @@ leaves a state with the package missing and needs a rule for it, and for a while
 there is no usable version.
 
 **The copy is checked, not the source.** A package directory can change between
-checking it and installing it; the copy cannot.
+checking it and installing it; the copy cannot. The manifest that is judged is the one
+read first, and the copy must hold exactly those bytes: comparing only the id and the
+version would let a manifest that kept both and changed its entry program, its platforms
+or its declarations be installed after another had been judged.
+
+**A package has a size limit.** `MaxPackageBytes` (256 MiB) is the most a package may hold
+in all, and a package over it is refused as invalid with the file that went over and the
+limit in the error. The package is read one file at a time into memory from a directory the
+owner names, so a mistaken directory (a home, a checkout with a model file in it) would
+otherwise be read until memory ran out. No adapter is near the limit. The sizes are those the
+file system reports before anything is written, and a file that holds more than it
+reports (a link to a large file) is caught by the count of what the copy reads, after it
+was read. A file that is not a regular file (a named pipe, a device) is not refused yet:
+the reader the package is read through cannot tell it apart after following links, and
+reading a named pipe never returns, so the install worker would wait for ever. That needs
+the file layer to refuse it, which is its own change.
 
 **No `current` is not an error.** A first installation that crashed leaves a
 directory with no pointer. Refusing to start for it would let a crash of an

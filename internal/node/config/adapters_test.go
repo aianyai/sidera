@@ -190,6 +190,18 @@ func TestRefusedStageLeavesNothing(t *testing.T) {
 		{"a manifest that changes while the package is copied", func() fsx.Reader {
 			return &flipping{Reader: swapped, path: "sidera-adapter.json", second: manifestOf("other", "0.1.0")}
 		}},
+		{"a manifest that changes while the package is copied and keeps its id and version", func() fsx.Reader {
+			// valid, the same package by id and version, and not the same bytes: it
+			// could as well have named another entry program or platform
+			return &flipping{Reader: swapped, path: "sidera-adapter.json", second: manifestOf("fresh", "0.1.0") + "\n"}
+		}},
+		{"a package larger than the limit by what its files say", func() fsx.Reader {
+			return &sizes{Reader: srcPackage(t, "fresh", "0.1.0", nil), size: map[string]int64{"README": config.MaxPackageBytes + 1}}
+		}},
+		{"a package larger than the limit by what its files hold", func() fsx.Reader {
+			// a file that says it is small and holds more, as a link to a large file does
+			return &holds{Reader: srcPackage(t, "fresh", "0.1.0", nil), path: "README", data: bigFile()}
+		}},
 		{"a program that is not in the package", func() fsx.Reader {
 			m := srcPackage(t, "fresh", "0.1.0", nil)
 			removeFile(t, m, "bin/sidera-adapter-example")
@@ -209,6 +221,65 @@ func TestRefusedStageLeavesNothing(t *testing.T) {
 			}
 			if work, err := config.AdapterGCWork(rg.mem); err != nil || len(work) != 0 {
 				t.Errorf("gc work after a refused stage = %+v, %v", work, err)
+			}
+		})
+	}
+}
+
+// sizes is a package whose files say they are as large as the map says.
+type sizes struct {
+	fsx.Reader
+	size map[string]int64
+}
+
+func (s *sizes) Stat(p string) (fsx.Info, error) {
+	info, err := s.Reader.Stat(p)
+	if n, ok := s.size[p]; ok {
+		info.Size = n
+	}
+	return info, err
+}
+
+// holds is a package one of whose files holds more than it says: Stat shows the
+// size of the original, and ReadFile gives data.
+type holds struct {
+	fsx.Reader
+	path string
+	data []byte
+}
+
+func (h *holds) ReadFile(p string) ([]byte, error) {
+	if p == h.path {
+		return h.data, nil
+	}
+	return h.Reader.ReadFile(p)
+}
+
+// bigFile is one byte more than a package may hold. It is allocated once and never
+// written, so the operating system does not back it with memory.
+var bigFile = sync.OnceValue(func() []byte { return make([]byte, config.MaxPackageBytes+1) })
+
+// A package that holds more than the limit is refused as an invalid package, and
+// the error names the file that went over and the limit, so that the owner who
+// pointed at the wrong directory sees why.
+func TestAPackageOverTheSizeLimitIsRefusedAndTheErrorNamesTheLimit(t *testing.T) {
+	for name, src := range map[string]func() fsx.Reader{
+		"by what its files say": func() fsx.Reader {
+			return &sizes{Reader: srcPackage(t, "fresh", "0.1.0", nil), size: map[string]int64{"README": config.MaxPackageBytes + 1}}
+		},
+		"by what its files hold": func() fsx.Reader {
+			return &holds{Reader: srcPackage(t, "fresh", "0.1.0", nil), path: "README", data: bigFile()}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, c := loaded(t)
+			_, err := c.StageAdapter(src(), suffixReader())
+			var ce *config.ChangeError
+			if !errors.As(err, &ce) || ce.Reason != config.ChangeInvalid || ce.Field != "README" {
+				t.Fatalf("StageAdapter = %v, want an invalid change that names the file README", err)
+			}
+			if want := "256 MiB"; !strings.Contains(err.Error(), want) {
+				t.Errorf("the error %q does not state the limit (%s)", err, want)
 			}
 		})
 	}

@@ -193,9 +193,10 @@ interface words as that installation still being in progress) and draws the rand
 draws randomness only in the loop. The worker, which is a goroutine the engine owns and
 `Quiesce` counts, opens the directory through `Deps.OpenPackage`, copies it next to the
 versions of its adapter with every file and directory synced (`config.StageAdapter`),
-parses the **copy** and checks that the copy lists this machine's platform
-(`adapterreg.RunsOn`); what is judged is what would be installed, and a source that
-changes while it is copied cannot make the check and the install disagree. A directory
+checks that the manifest of the **copy** is, byte for byte, the one it read first, and
+that it lists this machine's platform (`adapterreg.RunsOn`); a source whose manifest
+changes while it is copied is refused as an invalid change (`config_invalid`, with the
+manifest as the field), so the check and the install cannot disagree and nothing is left on the disk. A directory
 or file of the package that cannot be read is refused as `invalid_argument` with the
 detail `source_unreadable` and, in `Refusal.Path`, the place inside the package (empty
 when the directory the owner named is the fault). It then has

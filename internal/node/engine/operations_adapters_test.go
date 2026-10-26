@@ -368,11 +368,13 @@ func TestInstallingACopiedPackageStoresItsResultAndAResendCopiesNothing(t *testi
 	}
 }
 
-// What is judged is the copy that is installed, and not the source it was copied
-// from: a package whose manifest is replaced while it is being read is installed
-// as it was copied, and its platform is that of the copy. A check made on the
-// source would pass the package that is then installed.
-func TestThePlatformIsJudgedOnTheCopyThatWouldBeInstalledAndNotOnTheSource(t *testing.T) {
+// What is judged is what is installed: a package whose manifest is replaced while
+// the package is being copied, here by one that lists another platform, is refused
+// as invalid (the configuration's own refusal, which the interface words as
+// config_invalid), with nothing left on the disk and nothing installed. Were the first
+// read judged and the copy installed, the platform check would pass the package
+// that is then installed.
+func TestAPackageWhoseManifestChangesWhileItIsCopiedIsRefusedAndNothingIsLeft(t *testing.T) {
 	noLeaks(t)
 	good := manifestFile(t, relayOptions("1.0.0"))
 	bad := foreignManifest(t, "1.0.0")
@@ -382,9 +384,12 @@ func TestThePlatformIsJudgedOnTheCopyThatWouldBeInstalledAndNotOnTheSource(t *te
 	before := r.snapshot()
 
 	_, err := e.Execute(ctx, installCommand(2, "install relay", "/src/relay"))
-	wantReason(t, err, engine.ReasonPlatformUnsupported)
+	var ce *config.ChangeError
+	if !errors.As(err, &ce) || ce.Reason != config.ChangeInvalid || ce.Field != "sidera-adapter.json" {
+		t.Fatalf("install = %v, want an invalid change that names the manifest", err)
+	}
 	if !reflect.DeepEqual(before, r.snapshot()) {
-		t.Error("a package the platform does not run left something on the disk")
+		t.Error("a package whose manifest changed while it was copied left something on the disk")
 	}
 	if _, ok := installedVersion(r.cfg, "relay"); ok {
 		t.Error("the package is installed")
