@@ -247,7 +247,12 @@ Everything about Windows and Linux is pending verification by CI on main.
   counts, from inside the park it is in, so the two are of one moment: a request
   counted by a helper goroutine a moment after the supervisor parked, or counts read
   before the supervisor reached its wait, both showed an idle host with nothing
-  outstanding while `initialize` was in flight.
+  outstanding while `initialize` was in flight. For the same reason a request stops
+  being counted on the supervisor's goroutine, once it has taken the answer, and not
+  on the helper that received it: between the two the answer is on its way to a
+  supervisor parked with nothing due, and a caller that found the host quiet then
+  moved the test clock before the next ping's interval was armed, so the move fired
+  nothing.
 - **One goroutine owns the timers, and blocks nowhere but in its park.** The
   supervisor is the only waiter on the host's timers, with the adapter's answers and
   every call of the engine on helper goroutines, the report that an adapter is gone

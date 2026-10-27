@@ -226,6 +226,7 @@ func (s *supervisor) watch(c *conn) (stable bool, out outcome, err error) {
 		limitC     <-chan time.Time
 		pingRes    chan error
 		pingCancel context.CancelFunc
+		pingDone   func() // ends the count of the ping that is out
 		failures   int
 	)
 	defer func() {
@@ -242,6 +243,10 @@ func (s *supervisor) watch(c *conn) (stable bool, out outcome, err error) {
 		s.stopTimer(limitT)
 		if pingCancel != nil {
 			pingCancel()
+		}
+		if pingDone != nil {
+			// The supervisor no longer waits for the ping that is out.
+			pingDone()
 		}
 	}()
 
@@ -273,14 +278,12 @@ func (s *supervisor) watch(c *conn) (stable bool, out outcome, err error) {
 			pingCancel = cancel
 			pingRes = make(chan error, 1)
 			res := pingRes
-			// The ping is counted before the supervisor parks, as rpc counts its
-			// request: a caller that finds the host idle must find it in the counts.
-			done := c.track(adapterproto.MethodPing)
-			s.spawn(func() {
-				err := c.send(ctx, adapterproto.MethodPing, adapterproto.Empty{}, &adapterproto.Empty{})
-				done()
-				res <- err
-			})
+			// The ping is counted from before the supervisor parks until it has
+			// taken the answer, as rpc counts its request: a caller that finds the
+			// host idle with no ping counted knows the supervisor has acted on the
+			// answer, the next interval armed included.
+			pingDone = c.track(adapterproto.MethodPing)
+			s.spawn(func() { res <- c.send(ctx, adapterproto.MethodPing, adapterproto.Empty{}, &adapterproto.Empty{}) })
 		case slotRes, slotLimit:
 			// The ping is over: answered, failed, or too slow.
 			if sl == slotLimit {
@@ -289,8 +292,9 @@ func (s *supervisor) watch(c *conn) (stable bool, out outcome, err error) {
 				perr = errLimit
 			}
 			pingCancel()
+			pingDone()
 			s.stopTimer(limitT)
-			limitT, limitC, pingRes, pingCancel = nil, nil, nil, nil
+			limitT, limitC, pingRes, pingCancel, pingDone = nil, nil, nil, nil, nil
 			select {
 			case <-c.p.Done():
 				// The connection ended while the ping was out: that is the cause.

@@ -102,8 +102,9 @@ func (c *conn) counts() ConnCounts {
 // function is called, a ping included: while one is out the supervisor is parked
 // with its timeout armed, and a caller that found the host quiet then would move
 // the test clock into that timeout. Whoever sends a request on a goroutine of its
-// own and waits for it elsewhere counts it before it starts waiting, so that a
-// caller that finds the host idle finds the request in the counts.
+// own and waits for it elsewhere counts it before it starts waiting and stops
+// counting it once it has taken the answer, so that a caller that finds the host
+// idle finds in the counts every request whose answer the host has not acted on.
 func (c *conn) track(method string) (done func()) {
 	c.mu.Lock()
 	c.calls[method]++

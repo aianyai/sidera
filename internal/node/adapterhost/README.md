@@ -115,7 +115,8 @@ handle the daemon gives it.
 - **Counts** are exact. `Calls` lists the requests the host sent that have no
   answer yet, a ping included: while one is out the host is parked with its timeout
   armed, so a caller that found the host quiet would move the test clock into it.
-  A request is counted before the host starts to wait for its answer. `Working` is true while the supervisor does
+  A request is counted before the host starts to wait for its answer, and until
+  the supervisor has taken that answer. `Working` is true while the supervisor does
   anything of its own (launching, handshaking, calling the engine, reporting,
   ending a process) and while a timer of the instance is due and not yet taken;
   a supervisor parked on its timers with nothing due is not working. The question

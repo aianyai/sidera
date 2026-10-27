@@ -356,14 +356,14 @@ func (s *supervisor) rpc(c *conn, method string, params, result adapterproto.Mes
 	t := s.newTimer(limit)
 	defer s.stopTimer(t)
 	res := make(chan error, 1)
-	// The request is counted here, before the supervisor parks: a caller that finds
-	// the host idle must find the request in the counts.
-	done := c.track(method)
-	s.spawn(func() {
-		err := c.send(ctx, method, params, result)
-		done()
-		res <- err
-	})
+	// The request is counted from here, before the supervisor parks, until rpc
+	// returns, after the supervisor has taken the answer: both ends are on the
+	// supervisor's goroutine, so a caller that finds the host idle with the request
+	// no longer counted knows the supervisor has acted on its answer. A helper that
+	// stopped counting it would leave a moment when the answer is on its way to
+	// the supervisor and the host looks quiet.
+	defer c.track(method)()
+	s.spawn(func() { res <- c.send(ctx, method, params, result) })
 	sl, err := s.park(waits{res: res, limit: t.C()}, true)
 	switch sl {
 	case slotRes:

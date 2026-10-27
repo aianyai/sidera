@@ -944,6 +944,18 @@ func (r *rig) settle(instances ...string) {
 	}
 }
 
+// quiet waits until the host is idle with no request of its own out for the
+// instance: it has taken every answer it waited for and acted on it, the next
+// ping's interval armed included. settle alone would return while an answer is
+// still on its way to a host parked with nothing due.
+func (r *rig) quiet(instance string) {
+	r.t.Helper()
+	eventually(r.t, "the host to be quiet ("+instance+")", func() bool {
+		c := r.host.Counts(instance)
+		return !c.Working && len(c.Calls) == 0
+	})
+}
+
 // advance moves the test clock and waits for the host to act on it.
 func (r *rig) advance(d time.Duration, instances ...string) {
 	r.t.Helper()

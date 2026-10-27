@@ -122,11 +122,11 @@ func TestTwoUnansweredPingsMakeTheAdapterOfflineAndOneDoesNot(t *testing.T) {
 		a.barrier(r.eng)
 		r.settle()
 
-		// Ping 2 is answered: the count starts again.
+		// Ping 2 is answered: the count starts again. The clock moves on only once
+		// the host has taken the answer and armed the next interval.
 		r.advance(p.PingInterval)
 		waitPings(t, a, 2)
-		a.barrier(r.eng)
-		r.settle()
+		r.quiet("chat")
 
 		// Ping 3 fails: one failure since the last answer, so not offline.
 		r.advance(p.PingInterval)

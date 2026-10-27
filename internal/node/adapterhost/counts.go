@@ -14,9 +14,11 @@ type ConnCounts struct {
 	// Requests is how many requests of the adapter are being answered now.
 	Requests int
 	// Calls lists the methods of the requests the host has sent the adapter and has
-	// no answer to, one entry per request, in no particular order. A ping is among
-	// them while it has no answer: the host is then parked with a timeout armed, and
-	// a caller that moved the test clock past it would make the ping fail.
+	// not yet taken the answer to, one entry per request, in no particular order. A
+	// ping is among them while it has no answer: the host is then parked with a
+	// timeout armed, and a caller that moved the test clock past it would make the
+	// ping fail. A request leaves the list only when the host has taken its
+	// answer, so a host that is idle with none listed has acted on every answer.
 	Calls []string
 	// Working is whether the host is in the middle of something it does on its
 	// own: handling the end of a connection, starting an instance, taking one on,
