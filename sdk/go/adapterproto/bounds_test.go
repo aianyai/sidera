@@ -286,7 +286,7 @@ func TestStatusReplyReasonsMustBeKnown(t *testing.T) {
 	if err := (adapterproto.ControlInterruptReply{Outcome: adapterproto.InterruptReplyFailed, Reason: 9}).Validate(); err == nil {
 		t.Error("an unknown interrupt reason was accepted")
 	}
-	if err := (adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: 10}).Validate(); err == nil {
+	if err := (adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: 11}).Validate(); err == nil {
 		t.Error("an unknown create reason was accepted")
 	}
 }

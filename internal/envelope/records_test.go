@@ -389,7 +389,7 @@ func TestControlReplyRules(t *testing.T) {
 		{"a failed creation has a reason", failed, func(w *controlReplyWire) { w.Create.Reason = 0 }},
 		{"a create outcome is known", created, func(w *controlReplyWire) { w.Create.Outcome = 4 }},
 		{"a create outcome fits a byte", created, func(w *controlReplyWire) { w.Create.Outcome = 257 }},
-		{"a create reason is known", failed, func(w *controlReplyWire) { w.Create.Reason = 10 }},
+		{"a create reason is known", failed, func(w *controlReplyWire) { w.Create.Reason = 11 }},
 		{"a close outcome is known", closed, func(w *controlReplyWire) { w.Close.Outcome = 4 }},
 		{"a close reason comes with close_unconfirmed", closed, func(w *controlReplyWire) { w.Close.Outcome = 1 }},
 		{"close_unconfirmed has a reason", closed, func(w *controlReplyWire) { w.Close.Reason = 0 }},

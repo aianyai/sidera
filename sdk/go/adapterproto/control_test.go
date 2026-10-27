@@ -35,7 +35,7 @@ func TestControlEnumCodes(t *testing.T) {
 	check("create outcome", names(func(i uint8) bool { return adapterproto.ControlCreateOutcome(i).Valid() }, func(i uint8) string { return adapterproto.ControlCreateOutcome(i).String() }),
 		map[string]uint8{"created": 1, "unconfirmed": 2, "failed": 3})
 	check("create reason", names(func(i uint8) bool { return adapterproto.ControlCreateReason(i).Valid() }, func(i uint8) string { return adapterproto.ControlCreateReason(i).String() }),
-		map[string]uint8{"preset_unknown": 1, "preset_unavailable": 2, "adapter_offline": 3, "runtime_auth": 4, "native_unavailable": 5, "native_error": 6, "ready_timeout": 7, "adapter_lost": 8, "control_unknown": 9})
+		map[string]uint8{"preset_unknown": 1, "preset_unavailable": 2, "adapter_offline": 3, "runtime_auth": 4, "native_unavailable": 5, "native_error": 6, "ready_timeout": 7, "adapter_lost": 8, "control_unknown": 9, "node_endpoint_limit": 10})
 	check("close outcome", names(func(i uint8) bool { return adapterproto.ControlCloseOutcome(i).Valid() }, func(i uint8) string { return adapterproto.ControlCloseOutcome(i).String() }),
 		map[string]uint8{"closed": 1, "close_unconfirmed": 2, "unsupported": 3})
 	check("close reason", names(func(i uint8) bool { return adapterproto.ControlCloseReason(i).Valid() }, func(i uint8) string { return adapterproto.ControlCloseReason(i).String() }),
@@ -50,7 +50,7 @@ func TestControlEnumCodes(t *testing.T) {
 		map[string]uint8{"adapter_offline": 1, "runtime_auth": 2, "native_unavailable": 3, "server_request_rejected": 4, "control_unknown": 5, "version_untested": 6})
 	// The constants carry those numbers.
 	if adapterproto.CreateReplyCreated != 1 || adapterproto.CreateReplyUnconfirmed != 2 || adapterproto.CreateReplyFailed != 3 ||
-		adapterproto.CreateReasonReadyTimeout != 7 || adapterproto.CreateReasonAdapterLost != 8 || adapterproto.CreateReasonControlUnknown != 9 ||
+		adapterproto.CreateReasonReadyTimeout != 7 || adapterproto.CreateReasonAdapterLost != 8 || adapterproto.CreateReasonControlUnknown != 9 || adapterproto.CreateReasonNodeEndpointLimit != 10 ||
 		adapterproto.CloseReplyUnsupported != 3 || adapterproto.InterruptReplyUnsupported != 5 || adapterproto.ActivityUnknown != 3 ||
 		adapterproto.ControlConditionVersionUntested != 6 {
 		t.Error("a control constant moved")
@@ -116,7 +116,13 @@ func TestControlCreateReplyRules(t *testing.T) {
 		}, "session_endpoint", false},
 		{"outcome unset", func(v *adapterproto.ControlCreateReply) { v.Outcome = 0 }, "outcome", false},
 		{"outcome out of range", func(v *adapterproto.ControlCreateReply) { v.Outcome = 9 }, "outcome", false},
-		{"reason out of range", func(v *adapterproto.ControlCreateReply) { v.Reason = 10 }, "reason", false},
+		{"reason out of range", func(v *adapterproto.ControlCreateReply) { v.Reason = 11 }, "reason", false},
+		{"failed at the node endpoint limit", func(v *adapterproto.ControlCreateReply) {
+			v.Outcome, v.Reason, v.SessionEndpoint = adapterproto.CreateReplyFailed, adapterproto.CreateReasonNodeEndpointLimit, ""
+		}, "", false},
+		{"node endpoint limit cannot be unconfirmed", func(v *adapterproto.ControlCreateReply) {
+			v.Outcome, v.Reason = adapterproto.CreateReplyUnconfirmed, adapterproto.CreateReasonNodeEndpointLimit
+		}, "reason", false},
 		{"failed because control is unknown", func(v *adapterproto.ControlCreateReply) {
 			v.Outcome, v.Reason, v.SessionEndpoint = adapterproto.CreateReplyFailed, adapterproto.CreateReasonControlUnknown, ""
 		}, "", false},

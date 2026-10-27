@@ -2,14 +2,15 @@ package envelope
 
 // Golden vectors. Every byte below was written out by hand from the format
 // description, and the node identifiers, digests and signatures were produced by
-// an independent implementation (Python 3: hashlib for SHA-256, a hand-built
-// CBOR writer, and the cryptography package's Ed25519), never by the code under
-// test. Keys are the RFC 8032 test key 1 (the identity key of node A) and seeds
-// made of one byte repeated 32 times (0x11: A's network key; 0x44: the identity
-// key of node B). Every status report and control reply names node B as the
-// sending node. Endpoint identifiers are one byte repeated 16 times. Times are
-// 1700000000 plus an offset in seconds. report_by is accept_before plus 10920
-// seconds: the 2 h queue cap, four 15 min leases and the 2 min clock tolerance.
+// independent implementations (Python 3: hashlib for SHA-256, a hand-built
+// CBOR writer, and Ed25519 from the cryptography package or OpenSSL), never by
+// the code under test. Keys are the RFC 8032 test key 1 (the identity key of
+// node A) and seeds made of one byte repeated 32 times (0x11: A's network key;
+// 0x44: the identity key of node B). Every status report and control reply
+// names node B as the sending node. Endpoint identifiers are one byte repeated
+// 16 times. Times are 1700000000 plus an offset in seconds. report_by is
+// accept_before plus 10920 seconds: the 2 h queue cap, four 15 min leases and
+// the 2 min clock tolerance.
 // Signed bytes: 0x11 "sidera/record-sig" uvarint(len(type)) type uvarint(len(payload)) payload.
 // Digest: SHA-256 of the same layout with the domain "sidera/record-digest".
 // Request digest: SHA-256 of the fields kind (1 byte), preset, content type, body, reply_to,
@@ -608,3 +609,41 @@ var goldenEnvelopeReply = hexcat(
 
 const goldenSessionCreateRequestDigest = "969d368e36698f0ef78f05632599890299c704a0c66cb26b8f9670c006280d51"
 const goldenReplyRequestDigest = "36b57c2c0c2c23954a786ecb3d22b1c2574f7ca99ba1d413fd147fca60452abe"
+
+// A control reply: ctl-0002 failed because the node endpoint limit was reached.
+var goldenReplyNodeEndpointLimit = hexcat(
+	"a3", // { 3 pairs: the record
+	"01", // 1: type
+	"767369646572612f636f6e74726f6c2d7265706c792f31", // "sidera/control-reply/1"
+	"02",                                 // 2: payload
+	"584c",                               // bstr(76) payload
+	"a5",                                 // embedded { 5 pairs: control reply payload
+	"01",                                 // embedded 1: message
+	"6863746c2d30303032",                 // embedded "ctl-0002"
+	"02",                                 // embedded 2: recipient
+	"5002020202020202020202020202020202", // embedded h'02020202020202020202020202020202'
+	"03",                                 // embedded 3: issued_at
+	"1a6553f11e",                         // embedded 1700000030
+	"04",                                 // embedded 4: sender
+	"582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7", // embedded h'64e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb7' (node B, the sending node)
+	"05", // embedded 5: create result
+	"a2", // embedded { 2 pairs: create result
+	"01", // embedded 1: outcome
+	"03", // embedded 3 (failed)
+	"03", // embedded 3: reason
+	"0a", // embedded 10 (node_endpoint_limit)
+	"03", // 3: signatures
+	"81", // [ 1 signature, sorted by encoded public key
+	"a2", // { 2 pairs: signature item
+	"01", // 1: public key
+	"a2", // { 2 pairs: public key
+	"01", // 1: algorithm
+	"01", // 1 (Ed25519)
+	"02", // 2: key bytes
+	"5820d04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737", // h'd04ab232742bb4ab3a1368bd4615e4e6d0224ab71a016baf8520a332c9778737' (seed 0x11 x32)
+	"02", // 2: signature
+	"58400be60a720cf5c206bbdc5fd27a4050fea21a1d767c41888798f9caad6965b99ec270bc1f7b7c271e7b86899a40e92b93d7cfd8792071591c019f0e6d9156a704", // bstr(64) Ed25519 signature
+)
+
+const goldenReplyNodeEndpointLimitDigest = "41d4800142a55deb71616177225889d3a106d9cecf654f32c01644c1cda0afea"
+const goldenReplyNodeEndpointLimitSignedBytes = "117369646572612f7265636f72642d736967167369646572612f636f6e74726f6c2d7265706c792f314ca5016863746c2d30303032025002020202020202020202020202020202031a6553f11e04582064e53e346d0f70f253eff23689c61f3a14c410aa473c778a95a212e24e131bb705a20103030a"

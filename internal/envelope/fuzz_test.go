@@ -79,7 +79,7 @@ func FuzzVerifyStatusReport(f *testing.F) {
 }
 
 func FuzzVerifyControlReply(f *testing.F) {
-	for _, g := range [][]byte{goldenReplyCreated, goldenReplyFailed, goldenReplyClose, goldenReplyInterrupt, goldenReplyStatus} {
+	for _, g := range [][]byte{goldenReplyCreated, goldenReplyFailed, goldenReplyNodeEndpointLimit, goldenReplyClose, goldenReplyInterrupt, goldenReplyStatus} {
 		f.Add(g)
 	}
 	node := nodeOf(f, keyIdentityA)

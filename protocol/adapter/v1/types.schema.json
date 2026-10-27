@@ -322,7 +322,7 @@
             "signal": { "const": "session.create" },
             "outcome": { "enum": ["created", "unconfirmed", "failed"] },
             "session_endpoint": { "$ref": "#/$defs/EndpointRef" },
-            "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "ready_timeout", "adapter_lost", "control_unknown"] }
+            "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "ready_timeout", "adapter_lost", "control_unknown", "node_endpoint_limit"] }
           },
           "oneOf": [
             {
@@ -337,7 +337,7 @@
               "properties": {
                 "outcome": { "const": "failed" },
                 "session_endpoint": false,
-                "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "control_unknown"] }
+                "reason": { "enum": ["preset_unknown", "preset_unavailable", "adapter_offline", "runtime_auth", "native_unavailable", "native_error", "control_unknown", "node_endpoint_limit"] }
               },
               "required": ["reason"]
             }

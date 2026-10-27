@@ -253,6 +253,7 @@ func FuzzDecodeMessages(f *testing.F) {
 		`{"verdict":"found","turn":{"ref":"t","state":"running"},"grounds":{"code":"attempt_in_record"}}`,
 		`{"protocol":{"min":1,"max":1},"daemon":{"version":"0.1.0"},"instance":{"id":"w","lock_path":"/l"}}`,
 		`{"conditions":[]}`, `{"request_id":3}`, `{"request_id":"x"}`, `{"scope":"session","id":"e","state":{}}`,
+		`{"recipients":[],"control_reply":{"signal":"session.create","outcome":"failed","reason":"node_endpoint_limit"}}`,
 		`{"recipients":[{"to":"a","state":"queued"}],"control_reply":{"signal":"session.close","outcome":"closed"}}`,
 	}
 	for i := range methods {

@@ -33,7 +33,7 @@ not frame, send or store anything.
 | `RunsOn(manifest, goos, goarch)` | Whether the manifest lists the platform: the one judge of whether a package may be installed on this machine. |
 | `RuntimeVersionUntested(manifest, runtime)` | Whether the probed runtime version is outside every tested range of the manifest: the one judge of the status condition `version_untested`. |
 | `CreateReply`, `CreateUnconfirmed`, `InterruptReply`, `CloseReply` | Adapter results as the reply to a control signal. |
-| `DaemonCreateFailure(DaemonCreateReason)` | The reply to a `session.create` the daemon refuses itself, before calling the adapter: preset unknown, preset closed to local sources, adapter offline. |
+| `DaemonCreateFailure(DaemonCreateReason)` | The reply to a `session.create` the daemon refuses itself, before calling the adapter: preset unknown, preset closed to local sources, adapter offline, node endpoint limit. |
 | `ItemAck`, `AckReason`, `ActionOf` | Names of `delivery` and `handoff` values and of authorization actions as the protocol spells them. |
 
 ## Rules

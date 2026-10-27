@@ -414,7 +414,7 @@ three ways, and only these:
 
 **Extending a version in place.** While no implementation exists outside this
 repository, protocol version 1 may still be extended in place, because no
-reader of an earlier shape is deployed that the change could break. Three
+reader of an earlier shape is deployed that the change could break. Four
 additions were made this way, and each is a change that rule 3 would otherwise
 have sent to a new version:
 
@@ -426,7 +426,10 @@ have sent to a new version:
 - the application code `node_busy` (`1012`). An older SDK's peer reads it as an
   application code it has no name for, which the effect rule already treats as
   no effect; only a reader that checks the error object against its own code
-  table (`ErrorObject.Validate`) refuses it.
+  table (`ErrorObject.Validate`) refuses it;
+- the control creation failure reason `node_endpoint_limit` (10). A reader that
+  predates it refuses a control reply that carries the reason, in JSON or a signed
+  record, because the reason set stays closed.
 
 This permission ends when the first implementation outside this repository
 exists. From then on an addition of this kind needs a new protocol version, or,
@@ -800,7 +803,7 @@ except the two that are plain calls (marked "call"):
 | the daemon's own loss of the connection or two failed pings | `Signals.AdapterOffline`, with `Since` the moment it dropped |
 | the cause `handoff.AssessBlocked` names (`AdapterOffline`, `AuthInvalid`, `ServiceUnavailable`) | `delivery.CauseAdapterOffline`, `CauseRuntimeAuth`, `CauseNativeUnavailable` (`BlockedCause`; `HandoffBlockedCause` is its inverse, for a block known only from the marks on target records) |
 | `since_ms` | `Signals.Since`; zero (unknown) when absent or later than the moment the snapshot arrived, or when any condition of the cause lacks one |
-| a `session.create` the daemon refuses itself, before calling the adapter (`DaemonCreateFailure`): preset unknown, preset closed to local sources, adapter offline | control reply failed with `preset_unknown`, `preset_unavailable`, `adapter_offline`, and no session endpoint |
+| a `session.create` the daemon refuses itself, before calling the adapter (`DaemonCreateFailure`): preset unknown, preset closed to local sources, adapter offline, node endpoint limit | control reply failed with `preset_unknown`, `preset_unavailable`, `adapter_offline`, `node_endpoint_limit`, and no session endpoint |
 | `session.create` created, failed, indeterminate | control reply created; failed (`preset_invalid` becomes `preset_unavailable`, `dependency_missing` becomes `native_unavailable`, `control_unknown` stays `control_unknown`, the others keep their names); keep reconciling, then unconfirmed |
 | `session.interrupt` stopped, requested, not_running, refused | reply stopped; stopped if `turn.ended` came in time else requested; not_running; failed |
 | `session.close` closed, close_unconfirmed | reply closed; close_unconfirmed with the same reason |
@@ -861,7 +864,7 @@ the carrying message; an empty body means none. Reply:
 | ----- | ------ | ------- |
 | `outcome` | 1 created (readiness shown), 2 unconfirmed (may exist; no readiness before the deadline), 3 failed (no session will be attached to the channel; certainly not created, except for reason 9) | always |
 | `session_endpoint` | the endpoint allocated for the session | outcome 1 or 2 |
-| `reason` | failed: 1 preset_unknown, 2 preset_unavailable, 3 adapter_offline, 4 runtime_auth, 5 native_unavailable, 6 native_error, 9 control_unknown; unconfirmed: 7 ready_timeout, 8 adapter_lost | outcome 2 or 3, from its group |
+| `reason` | failed: 1 preset_unknown, 2 preset_unavailable, 3 adapter_offline, 4 runtime_auth, 5 native_unavailable, 6 native_error, 9 control_unknown, 10 node_endpoint_limit; unconfirmed: 7 ready_timeout, 8 adapter_lost | outcome 2 or 3, from its group |
 
 `control.session.close` (target: a session endpoint), no parameters. Reply
 `outcome`: 1 closed, 2 close_unconfirmed, 3 unsupported; `reason` only with 2:
@@ -912,6 +915,11 @@ with `signal` beside its fields, and enums are their names.
   instead of renumbering it) and the daemon notifies the local owner on receiving
   it. The adapter does not stop the process: it cannot do so safely when two
   writers hold the session.
+- `node_endpoint_limit` is a failed creation: the signal was accepted, but another
+  endpoint would exceed the node's cap, so no session was created and no session
+  endpoint is returned. It has its own reason because `preset_unavailable` would
+  falsely blame a usable preset in the signed reply. The daemon decides the cap,
+  so the adapter's native `session.create` failure reasons do not include it.
 - One reply per signal, with `requested` and `stopped` as values of the same
   field, because a second report later would need a second record; `status`
   answers the question afterwards.

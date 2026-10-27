@@ -279,6 +279,8 @@ const (
 	// DaemonCreateAdapterOffline: the adapter that owns the runtime is not
 	// connected.
 	DaemonCreateAdapterOffline
+	// DaemonCreateNodeEndpointLimit: another endpoint would exceed the node cap.
+	DaemonCreateNodeEndpointLimit
 )
 
 // DaemonCreateFailure is the reply to a session.create the daemon refuses
@@ -296,6 +298,8 @@ func DaemonCreateFailure(r DaemonCreateReason) adapterproto.ControlCreateReply {
 		reason = adapterproto.CreateReasonPresetUnavailable
 	case DaemonCreateAdapterOffline:
 		reason = adapterproto.CreateReasonAdapterOffline
+	case DaemonCreateNodeEndpointLimit:
+		reason = adapterproto.CreateReasonNodeEndpointLimit
 	default:
 		return adapterproto.ControlCreateReply{}
 	}

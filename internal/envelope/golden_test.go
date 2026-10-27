@@ -97,6 +97,11 @@ func TestGoldenControlReplies(t *testing.T) {
 		Result: ControlResult{Signal: adapterproto.SignalSessionCreate, Create: &CreateResult{
 			Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonPresetUnavailable}},
 	})
+	goldenRecord(t, "create failed at the node endpoint limit", goldenReplyNodeEndpointLimit, goldenReplyNodeEndpointLimitDigest, goldenReplyNodeEndpointLimitSignedBytes, d, ControlReply{
+		Sender: b, Message: "ctl-0002", Recipient: ep(2), IssuedAt: t0.Add(30 * time.Second),
+		Result: ControlResult{Signal: adapterproto.SignalSessionCreate, Create: &CreateResult{
+			Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonNodeEndpointLimit}},
+	})
 	goldenRecord(t, "close unconfirmed", goldenReplyClose, goldenReplyCloseDigest, goldenReplyCloseSignedBytes, d, ControlReply{
 		Sender: b, Message: "ctl-0003", Recipient: ep(3), IssuedAt: t0.Add(40 * time.Second),
 		Result: ControlResult{Signal: adapterproto.SignalSessionClose, Close: &adapterproto.ControlCloseReply{
