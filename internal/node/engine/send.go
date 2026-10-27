@@ -8,11 +8,13 @@ import (
 	"io"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/envelope"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // DefaultContentType is the type of a body whose sender names none, which is what
@@ -36,7 +38,8 @@ type SendRequest struct {
 	// delivery.DefaultAcceptBefore.
 	AcceptBefore time.Duration
 	// IdempotencyKey, when set, makes a repeat of the same request return the
-	// message the first one made instead of making another.
+	// message the first one made instead of making another. It is at most
+	// adapterproto.MaxIdentLen characters.
 	IdempotencyKey string
 }
 
@@ -204,13 +207,20 @@ func (e *Engine) accept(now time.Time, st *endpointState, m outgoing) (SendResul
 	return SendResult{Message: id, To: m.to}, nil
 }
 
-// checkOutgoing refuses what the envelope does not and no node would take. What
+// checkOutgoing refuses what the envelope does not and no node would take: a
+// deadline out of range and an idempotency key that is too long. What
 // the envelope refuses (the recipients, the body and its content type, the
 // identifiers) it refuses itself, in envelopeOf.
 func checkOutgoing(m *outgoing) error {
 	switch {
 	case m.accept < 0 || m.accept > delivery.MaxAcceptBefore:
 		return invalidArgument("accept_before", fmt.Errorf("%v, want up to %v", m.accept, delivery.MaxAcceptBefore))
+	case utf8.RuneCountInString(m.idemKey) > adapterproto.MaxIdentLen:
+		// The key is kept in the source record and in memory for as long as the
+		// delivery's retention; the bound is the adapter protocol's, counted in
+		// characters as it counts them, so a key an adapter may send is never
+		// refused here.
+		return invalidArgument("idempotency_key", fmt.Errorf("%d characters, want up to %d", utf8.RuneCountInString(m.idemKey), adapterproto.MaxIdentLen))
 	}
 	if m.accept == 0 {
 		m.accept = delivery.DefaultAcceptBefore

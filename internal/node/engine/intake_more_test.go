@@ -43,6 +43,15 @@ func TestASendThatNoNodeWouldTakeIsRefusedAndLeavesNothing(t *testing.T) {
 		{"a deadline of the longest", func(in *fakeagent.SendInput) { in.AcceptBeforeS = int64(delivery.MaxAcceptBefore / time.Second) }, "", ""},
 		{"a thread that is not an identifier", func(in *fakeagent.SendInput) { in.Thread = "two words" }, fakeagent.CategoryInvalidArgument, "malformed_request"},
 		{"a content type of control characters", func(in *fakeagent.SendInput) { in.ContentType = "text/\x01" }, fakeagent.CategoryInvalidArgument, "malformed_request"},
+		{"an idempotency key over the identifier limit", func(in *fakeagent.SendInput) {
+			in.IdemKey = strings.Repeat("k", adapterproto.MaxIdentLen+1)
+		}, fakeagent.CategoryInvalidArgument, "malformed_request"},
+		{"an idempotency key of exactly the limit", func(in *fakeagent.SendInput) {
+			in.IdemKey = strings.Repeat("k", adapterproto.MaxIdentLen)
+		}, "", ""},
+		{"an idempotency key of the limit in characters, not bytes", func(in *fakeagent.SendInput) {
+			in.IdemKey = strings.Repeat("\u952e", adapterproto.MaxIdentLen)
+		}, "", ""},
 		{"no recipient", func(in *fakeagent.SendInput) { in.To = nil }, fakeagent.CategoryInvalidArgument, "malformed_request"},
 		{"a recipient that is not an address", func(in *fakeagent.SendInput) { in.To = []string{"nobody"} }, fakeagent.CategoryInvalidArgument, "malformed_request"},
 		{"the system endpoint as a recipient", func(in *fakeagent.SendInput) {

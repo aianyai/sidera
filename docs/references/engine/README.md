@@ -454,7 +454,9 @@ entered through a new-work entry all the same.
 **Accepting a message.** `Send` and `Reply` are the one place new work from a local
 endpoint enters the store. A request that no node would take is refused first: no
 body, a body that is not valid UTF-8, a body over 64 KiB, no content type, a deadline beyond one hour, no recipient or
-the system endpoint as one. A repeat of an
+the system endpoint as one, an idempotency key of more than `adapterproto.MaxIdentLen` (128)
+characters (`invalid_argument` for `idempotency_key`, counted in characters as the adapter
+protocol counts them, so a key an adapter may send is never refused here). A repeat of an
 idempotency key returns the first message when the content is the same and is a
 conflict when it is not; the same content is the request digest the target compares
 with, made with the first request's deadlines because the deadline a repeat gets is its
