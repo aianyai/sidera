@@ -208,12 +208,22 @@ func (l *AdapterLauncher) awaitPredecessor(ctx context.Context, id string) {
 		return
 	}
 	prev := l.c.Order[i-1]
-	deadline := time.Now().Add(predecessorWait)
-	for time.Now().Before(deadline) && ctx.Err() == nil {
+	sys := clock.System()
+	limit := sys.NewTimer(predecessorWait)
+	defer limit.Stop()
+	for ctx.Err() == nil {
 		if ls := l.Launches(prev); len(ls) > 0 && slices.Contains(ls[len(ls)-1].Methods(), adapterproto.MethodAdapterProbe) {
 			return
 		}
-		time.Sleep(time.Millisecond)
+		poll := sys.NewTimer(time.Millisecond)
+		select {
+		case <-poll.C():
+		case <-limit.C():
+			poll.Stop()
+			return
+		case <-ctx.Done():
+			poll.Stop()
+		}
 	}
 }
 
