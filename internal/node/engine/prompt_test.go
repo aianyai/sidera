@@ -456,6 +456,57 @@ func TestTurnStartedForThePromptInFlightSettlesItDelivered(t *testing.T) {
 	}
 }
 
+// The turn a prompt started can be reported after the attempt was settled as unknown:
+// the answer of the call and the adapter's notifications take different paths. The turn
+// is the proof the reconciliation lacked, so the attempt becomes delivered, and the
+// agent that never reads is woken once more and not at every turn end.
+func TestTurnStartedAfterTheAttemptSettledUnknownMakesItDelivered(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	_, addr := idleSession(t, h, "a")
+	holdBackTurn(t, h, addr)
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError, AfterEffect: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestReconcile, fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate, Reason: string(adapterproto.GroundsNativeUnreachable)}); err != nil {
+		t.Fatal(err)
+	}
+	msg := sendToAddr(t, h, "a", addr, "for a prompt whose turn is told late")
+	quiet(t, h)
+	wantPrompts(t, h, addr, 1)
+	a := attemptsOf(t, h, addr)
+	if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptUnknown {
+		t.Fatalf("the attempts are %+v, want one unknown and none in flight: no turn has been told", a)
+	}
+	if in := inOf(t, h, msg); in.Record.Sub == delivery.SubNotified {
+		t.Fatalf("the record is notified before any proof of delivery")
+	}
+
+	// The turn of the prompt is told now, with the attempt the engine has settled.
+	if err := runtimeOfAddr(t, h, addr).StartTurn(nativeRef(t, h, addr)); err != nil {
+		t.Fatal(err)
+	}
+	quiet(t, h)
+	a = attemptsOf(t, h, addr)
+	if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+		t.Fatalf("the attempts are %+v, want one delivered: the turn it started said so", a)
+	}
+	if in := inOf(t, h, msg); in.Record.Sub != delivery.SubNotified {
+		t.Errorf("the record is %s (%v), want accepted and notified", in.Record.State, in.Record.Sub)
+	}
+
+	// The prompt counts as a delivered first one: the repeat allowance is spent as after any.
+	endTurn(t, h, addr) // the turn of the first prompt
+	endTurn(t, h, addr) // the turn of the repeat
+	wantPrompts(t, h, addr, 1+handoff.MaxReprompts)
+	if got, want := attemptKinds(t, h, addr), []handoff.PromptKind{handoff.PromptKindFirst, handoff.PromptKindReprompt}; !slices.Equal(got, want) {
+		t.Errorf("the prompts delivered were %v, want %v", got, want)
+	}
+}
+
 // A restart forgets when the endpoint last called recv, and a prompt it had read would
 // look unread again. The agent that took part of a long message after the repeat was
 // sent has read what it was woken for, so the next turn end must wake it for the rest

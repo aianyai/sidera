@@ -59,6 +59,11 @@ type promptState struct {
 	// prompt until its turn ends or the prompt is known not to have started one. It
 	// counts against the cap on the node, and the endpoint is busy while it holds.
 	turn bool
+	// unknown is the newest attempt that was settled as unknown, kept so that a turn
+	// that began for it after that (noteTurnStarted) can correct the record. Nil: none.
+	// A restart forgets it: the adapter's report of a turn is in the process that is
+	// told of it, and a record a restart finds is what it is.
+	unknown *promptFlight
 }
 
 // promptFlight is a prompt in flight: recorded in the attempts of the endpoint before
@@ -133,20 +138,31 @@ func (e *Engine) noteTurnEnded(id ident.EndpointID) {
 // the prompt reached the session, as a verdict of found would, whatever the answer of
 // the call was or whether one came. If the attempt is the one in flight, it is settled
 // as delivered and the turn counts against the cap. The answer that comes later for
-// the same attempt finds no flight and changes nothing. A turn with no attempt, or for
-// an attempt that is not in flight (the first prompt of a creation, or one settled
-// before), settles nothing.
+// the same attempt finds no flight and changes nothing.
+//
+// The report of a turn comes through the adapter's notifications and the answer of a
+// call through its own path, so the turn may be told after the attempt was settled as
+// unknown (the call failed, and the adapter could not say on reconciliation whether
+// the prompt had arrived). The turn is the proof the reconciliation lacked, so an
+// attempt that is still recorded as unknown becomes delivered (upgradeUnknownPrompt):
+// left as unknown it would count for no repeat, and the agent would be sent a new first
+// prompt at the end of every turn. A turn with no attempt, or for an attempt that is
+// neither in flight nor the one last settled as unknown (the first prompt of a
+// creation, or one settled before), settles nothing.
 func (e *Engine) noteTurnStarted(now time.Time, ref adapterproto.EndpointRef, attempt adapterproto.AttemptID) {
 	id, err := ident.ParseEndpointID(string(ref))
 	if err != nil || attempt == "" {
 		return
 	}
 	p := e.prompts[id]
-	if p == nil || p.flight == nil || p.flight.attempt != attempt {
-		return
+	switch {
+	case p == nil:
+	case p.flight != nil && p.flight.attempt == attempt:
+		p.flight.outcome, p.turn = handoff.AttemptDelivered, true
+		e.settlePrompt(now, id)
+	case p.unknown != nil && p.unknown.attempt == attempt:
+		e.upgradeUnknownPrompt(now, id)
 	}
-	p.flight.outcome, p.turn = handoff.AttemptDelivered, true
-	e.settlePrompt(now, id)
 }
 
 // noteInstanceProbed is the event of an adapter whose connection is in service, which
@@ -599,21 +615,7 @@ func (e *Engine) settlePrompt(now time.Time, id ident.EndpointID) {
 	head.InFlight = nil
 	var ins []store.InRecord
 	if f.outcome == handoff.AttemptDelivered {
-		for _, k := range f.covers {
-			in, ok := e.view.in[k]
-			if !ok {
-				continue
-			}
-			rec, out, err := in.Record.Apply(now, delivery.Event{Type: delivery.EventNotified})
-			if err != nil {
-				e.log.Error("a prompt could not be marked on the message it is for", "message", string(k.Message), "error", err.Error())
-				continue
-			}
-			if out.Result == delivery.ResultApplied {
-				in.Record = rec
-				ins = append(ins, in)
-			}
-		}
+		ins = e.markNotified(now, f.covers)
 	}
 	if err := e.d.Store.PromptEnd(head, ins); err != nil {
 		e.classify(err)
@@ -631,6 +633,9 @@ func (e *Engine) settlePrompt(now time.Time, id ident.EndpointID) {
 	if f.outcome != handoff.AttemptDelivered {
 		p.turn = false
 	}
+	if f.outcome == handoff.AttemptUnknown {
+		f.at, p.unknown = at, f
+	}
 	e.sched.remove(promptKey(schedPromptSettle, id))
 	e.sched.remove(promptKey(schedPromptReconcile, id))
 	e.markBlockedFor(id) // the attempts are what the judgment of a block reads
@@ -640,6 +645,66 @@ func (e *Engine) settlePrompt(now time.Time, id ident.EndpointID) {
 		// it was prompted for; the rules hold it until their retry time.
 		p.trigger = cmp.Or(f.trigger, handoff.TriggerArrival)
 	}
+	e.promptsDirty = true
+}
+
+// markNotified applies the notification of a delivered prompt to the target records it
+// covers and returns those that changed, for the caller to write.
+func (e *Engine) markNotified(now time.Time, covers []store.TargetKey) []store.InRecord {
+	var ins []store.InRecord
+	for _, k := range covers {
+		in, ok := e.view.in[k]
+		if !ok {
+			continue
+		}
+		rec, out, err := in.Record.Apply(now, delivery.Event{Type: delivery.EventNotified})
+		if err != nil {
+			e.log.Error("a prompt could not be marked on the message it is for", "message", string(k.Message), "error", err.Error())
+			continue
+		}
+		if out.Result == delivery.ResultApplied {
+			in.Record = rec
+			ins = append(ins, in)
+		}
+	}
+	return ins
+}
+
+// upgradeUnknownPrompt turns the attempt last settled as unknown into a delivered one,
+// because a turn began for it. It is written as the settlement of a delivered prompt
+// is, the notified target records first and the endpoint's attempts last, so a crash
+// leaves either the unknown outcome or the delivered one with every record written. An
+// attempt that is no longer in the endpoint's attempts, trimmed as too old to be read
+// by any rule, is left; so is one whose write fails, which is logged and not tried
+// again: the turn is reported once, and the outcome stays the more cautious one.
+func (e *Engine) upgradeUnknownPrompt(now time.Time, id ident.EndpointID) {
+	p := e.prompts[id]
+	u := p.unknown
+	p.unknown = nil
+	head := e.view.attempts[id]
+	attempts := slices.Clone(head.Attempts)
+	i := slices.IndexFunc(attempts, func(a handoff.Attempt) bool {
+		return a.Outcome == handoff.AttemptUnknown && a.Kind == u.kind && a.At.Equal(u.at)
+	})
+	if i < 0 {
+		return
+	}
+	attempts[i].Outcome = handoff.AttemptDelivered
+	head.Attempts = handoff.TrimAttempts(attempts, now)
+	ins := e.markNotified(now, u.covers)
+	if err := e.d.Store.PromptEnd(head, ins); err != nil {
+		e.classify(err)
+		if e.fatal == nil {
+			e.log.Warn("a turn began for a prompt recorded as unknown, and the correction could not be recorded", "endpoint", id.String(), "error", err.Error())
+		}
+		return
+	}
+	for _, in := range ins {
+		e.view.setIn(in)
+	}
+	e.view.attempts[id] = head
+	p.turn = true
+	e.markBlockedFor(id)
 	e.promptsDirty = true
 }
 
