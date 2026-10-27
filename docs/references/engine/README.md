@@ -1047,14 +1047,20 @@ attempt). A `turn.started` that names the attempt in flight is the same proof as
 whatever the answer of the call was or whether one came: the attempt is settled as delivered at
 once, the turn counts against the cap, and the answer that arrives later changes nothing. Without
 it an unknown outcome followed by an idle agent would be sent a new first prompt at every turn end,
-since no delivered record exists for the allowance of repeats to count. The report of a turn
-and the answer of a call travel different paths, so the turn may be told after the attempt was
+since no delivered record exists for the allowance of repeats to count. Delivery proof
+and the answer of a call travel different paths, so proof may be told after the attempt was
 settled as unknown (the call failed and the reconciliation could not say whether the prompt
-arrived): the engine keeps the newest attempt it settled as unknown, and a `turn.started` that
-names it turns the attempt into a delivered one, the turn counting against the cap, written as the
-settlement of a delivered prompt is (the covered target records marked notified, the attempts
-record last, `prompt-end`). It does so only while the attempt is still in the attempts record, and
-a write that fails is logged and not tried again; a restart forgets the attempt it kept. The verdict found is a
+arrived): the engine keeps the newest attempt it settled as unknown, and a `prompt.persisted`
+or `turn.started` that names it turns the attempt into a delivered one through the same proof
+handler (`notePromptDelivered`). The prompt again reserves a place against the cap while its
+turn may run. The correction is written as the settlement of a delivered prompt is (the covered
+target records marked notified, the attempts record last, `prompt-end`). It does so only while the attempt is still in the attempts record, and
+a write that fails is logged and not tried again; a restart forgets the attempt it kept.
+A `prompt.persisted` that matches neither an in-flight nor an upgradeable attempt changes
+no delivery state and emits one debug log naming the endpoint and attempt. A late proof
+after settlement is a normal order (for example, `accepted`, `turn.started`, then
+`prompt.persisted`), so a warning would be noise. No failed attempt identifiers are retained
+to classify unmatched proofs. The verdict found is a
 delivery, and counts the turn it started while it runs; provably
 absent is a failure; anything else, a call that got no answer included, is an unknown outcome,
 which counts toward the hourly cap and nothing else. The attempt is never sent again whatever the
@@ -1622,7 +1628,7 @@ reproducible).
 | A session is not prompted while a close or interrupt is being carried out, even when its turn ends before the adapter answers; an interrupt's settlement judges the waiting messages again | `prompts.go` (`promptRound`), `execute.go` (`forgetExecution`) | `TestSessionIsNotPromptedWhileCloseOrInterruptIsBeingCarriedOut` |
 | The endpoints and turns of an adapter that is offline take no place of the node's cap: another adapter's waiting endpoint is prompted in the free place, and a turn that went on while its adapter was away is counted again when the adapter reports it, two adapter instances on one node | `prompts.go` (`promptRound`) | `TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter`, `TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning` |
 | After a restart the time of the last recv is taken from the newest lease of the endpoint's messages, so a prompt the agent had read still looks read | `prompts.go` (`approximateLastRecv`) | `TestARestartDoesNotMakeAReadPromptLookUnread` |
-| A turn that began for the prompt in flight settles it as delivered, so an agent idle at every turn end is woken once more and not every time; one told after the attempt was settled as unknown makes it delivered | `prompts.go` (`noteTurnStarted`, `upgradeUnknownPrompt`), `adapters.go` (`notified`) | `TestTurnStartedForThePromptInFlightSettlesItDelivered`, `TestTurnStartedAfterTheAttemptSettledUnknownMakesItDelivered` |
+| Positive proof settles an in-flight prompt or corrects the newest unknown attempt still held by this process and present in its attempts record; either proof establishes the repeat allowance, and correction failures are logged without retry | `prompts.go` (`notePromptDelivered`, `upgradeUnknownPrompt`), `adapters.go` (`notified`) | `TestTurnStartedForThePromptInFlightSettlesItDelivered`, `TestDeliveryProofAfterTheAttemptSettledUnknownMakesItDelivered`, `TestPersistedAfterTheAttemptFailedDoesNotMakeItDelivered` |
 | A prompt that failed is held for the retry time of the rules and then sent again, with nothing else bringing the endpoint back | `prompts.go` (`settlePrompt`, `servePrompts`), `handoff.DecidePrompt` | `TestRefusedPromptIsRetriedAfterTheRetryTimeAndDelivered` |
 | The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
 | The attempt is recorded as in flight before the adapter is called, and a write that fails sends nothing and is retried after the backoff | `prompts.go` (`dispatchPrompt`) | `TestPromptIsRecordedBeforeTheAdapterIsCalledAndAFailedWriteIsRetried` |

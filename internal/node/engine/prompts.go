@@ -60,7 +60,7 @@ type promptState struct {
 	// counts against the cap on the node, and the endpoint is busy while it holds.
 	turn bool
 	// unknown is the newest attempt that was settled as unknown, kept so that a turn
-	// that began for it after that (noteTurnStarted) can correct the record. Nil: none.
+	// or persistence proof told after that can correct the record. Nil: none.
 	// A restart forgets it: the adapter's report of a turn is in the process that is
 	// told of it, and a record a restart finds is what it is.
 	unknown *promptFlight
@@ -134,49 +134,43 @@ func (e *Engine) noteTurnEnded(id ident.EndpointID) {
 	e.promptsDirty = true
 }
 
-// noteTurnStarted is the event of a turn that began for a prompt attempt: it proves that
-// the prompt reached the session, as a verdict of found would, whatever the answer of
-// the call was or whether one came. If the attempt is the one in flight, it is settled
-// as delivered and the turn counts against the cap. The answer that comes later for
-// the same attempt finds no flight and changes nothing.
-//
-// The report of a turn comes through the adapter's notifications and the answer of a
-// call through its own path, so the turn may be told after the attempt was settled as
-// unknown (the call failed, and the adapter could not say on reconciliation whether
-// the prompt had arrived). The turn is the proof the reconciliation lacked, so an
-// attempt that is still recorded as unknown becomes delivered (upgradeUnknownPrompt):
-// left as unknown it would count for no repeat, and the agent would be sent a new first
-// prompt at the end of every turn. A turn with no attempt, or for an attempt that is
-// neither in flight nor the one last settled as unknown (the first prompt of a
-// creation, or one settled before), settles nothing.
+// noteTurnStarted proves the attempt reached the session and reserves the turn's
+// place against the node cap. The adapter reports its busy state separately.
 func (e *Engine) noteTurnStarted(now time.Time, ref adapterproto.EndpointRef, attempt adapterproto.AttemptID) {
+	e.notePromptDelivered(now, ref, attempt, true)
+}
+
+// notePromptPersisted proves the attempt reached durable native storage. An
+// unmatched late proof is normal after settlement, so it is traced at debug level.
+func (e *Engine) notePromptPersisted(now time.Time, ref adapterproto.EndpointRef, attempt adapterproto.AttemptID) {
+	if !e.notePromptDelivered(now, ref, attempt, false) {
+		e.log.Debug("a persisted notification names neither an in-flight nor an upgradeable attempt; it is ignored", "endpoint", string(ref), "attempt", string(attempt))
+	}
+}
+
+// notePromptDelivered owns both positive proofs. Proof settles the attempt in
+// flight, retaining it through a failed write, or upgrades the newest unknown
+// attempt the process remembers while that attempt remains in the record. The
+// notifications and RPC answers travel different paths, so either proof can
+// precede the answer or follow an unknown reconciliation verdict.
+func (e *Engine) notePromptDelivered(now time.Time, ref adapterproto.EndpointRef, attempt adapterproto.AttemptID, turnStarted bool) bool {
 	id, err := ident.ParseEndpointID(string(ref))
 	if err != nil || attempt == "" {
-		return
+		return false
 	}
 	p := e.prompts[id]
 	switch {
 	case p == nil:
+		return false
 	case p.flight != nil && p.flight.attempt == attempt:
-		p.flight.outcome, p.turn = handoff.AttemptDelivered, true
-		e.settlePrompt(now, id)
-	case p.unknown != nil && p.unknown.attempt == attempt:
-		e.upgradeUnknownPrompt(now, id)
-	}
-}
-
-// notePromptPersisted is proof that the attempt in flight reached durable native
-// storage. It can precede the answer of prompt.deliver; that later answer finds no
-// flight and changes nothing.
-func (e *Engine) notePromptPersisted(now time.Time, ref adapterproto.EndpointRef, attempt adapterproto.AttemptID) {
-	id, err := ident.ParseEndpointID(string(ref))
-	if err != nil || attempt == "" {
-		return
-	}
-	if p := e.prompts[id]; p != nil && p.flight != nil && p.flight.attempt == attempt {
 		p.flight.outcome = handoff.AttemptDelivered
+		p.turn = p.turn || turnStarted
 		e.settlePrompt(now, id)
+		return true
+	case p.unknown != nil && p.unknown.attempt == attempt:
+		return e.upgradeUnknownPrompt(now, id)
 	}
+	return false
 }
 
 // noteInstanceProbed is the event of an adapter whose connection is in service, which
@@ -713,33 +707,34 @@ func (e *Engine) markNotified(now time.Time, covers []store.TargetKey) []store.I
 }
 
 // upgradeUnknownPrompt turns the attempt last settled as unknown into a delivered one,
-// because a turn began for it. It is written as the settlement of a delivered prompt
+// because delivery proof arrived for it. It is written as the settlement of a delivered prompt
 // is, the notified target records first and the endpoint's attempts last, so a crash
 // leaves either the unknown outcome or the delivered one with every record written. An
 // attempt that is no longer in the endpoint's attempts, trimmed as too old to be read
 // by any rule, is left; so is one whose write fails, which is logged and not tried
-// again: the turn is reported once, and the outcome stays the more cautious one.
-func (e *Engine) upgradeUnknownPrompt(now time.Time, id ident.EndpointID) {
+// again: proof is reported once, and the outcome stays the more cautious one.
+func (e *Engine) upgradeUnknownPrompt(now time.Time, id ident.EndpointID) bool {
 	p := e.prompts[id]
 	u := p.unknown
-	p.unknown = nil
 	head := e.view.attempts[id]
 	attempts := slices.Clone(head.Attempts)
 	i := slices.IndexFunc(attempts, func(a handoff.Attempt) bool {
 		return a.Outcome == handoff.AttemptUnknown && a.Kind == u.kind && a.At.Equal(u.at)
 	})
 	if i < 0 {
-		return
+		p.unknown = nil
+		return false
 	}
+	p.unknown = nil
 	attempts[i].Outcome = handoff.AttemptDelivered
 	head.Attempts = handoff.TrimAttempts(attempts, now)
 	ins := e.markNotified(now, u.covers)
 	if err := e.d.Store.PromptEnd(head, ins); err != nil {
 		e.classify(err)
 		if e.fatal == nil {
-			e.log.Warn("a turn began for a prompt recorded as unknown, and the correction could not be recorded", "endpoint", id.String(), "error", err.Error())
+			e.log.Warn("delivery proof arrived for a prompt recorded as unknown, and the correction could not be recorded", "endpoint", id.String(), "error", err.Error())
 		}
-		return
+		return true
 	}
 	for _, in := range ins {
 		e.view.setIn(in)
@@ -748,6 +743,7 @@ func (e *Engine) upgradeUnknownPrompt(now time.Time, id ident.EndpointID) {
 	p.turn = true
 	e.markBlockedFor(id)
 	e.promptsDirty = true
+	return true
 }
 
 // dropAttemptCheckpoint removes the checkpoint of an attempt that has settled. A

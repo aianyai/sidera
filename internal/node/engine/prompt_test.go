@@ -701,54 +701,93 @@ func TestTurnStartedForThePromptInFlightSettlesItDelivered(t *testing.T) {
 	}
 }
 
-// The turn a prompt started can be reported after the attempt was settled as unknown:
-// the answer of the call and the adapter's notifications take different paths. The turn
-// is the proof the reconciliation lacked, so the attempt becomes delivered, and the
+// Delivery proof can be reported after the attempt was settled as unknown: the
+// answer of the call and the adapter's notifications take different paths. Either
+// proof supplies what reconciliation lacked, so the attempt becomes delivered, and the
 // agent that never reads is woken once more and not at every turn end.
-func TestTurnStartedAfterTheAttemptSettledUnknownMakesItDelivered(t *testing.T) {
+func TestDeliveryProofAfterTheAttemptSettledUnknownMakesItDelivered(t *testing.T) {
+	for _, proof := range []string{"persisted", "turn started"} {
+		t.Run(proof, func(t *testing.T) {
+			h := sessionNode(t, harness.Options{}, "a")
+			_, addr := idleSession(t, h, "a")
+			holdBackTurn(t, h, addr)
+			ctrl, err := h.Adapter(harness.Instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError, AfterEffect: true}); err != nil {
+				t.Fatal(err)
+			}
+			if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestReconcile, fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate, Reason: string(adapterproto.GroundsNativeUnreachable)}); err != nil {
+				t.Fatal(err)
+			}
+			msg := sendToAddr(t, h, "a", addr, "for a prompt whose delivery proof is told late")
+			quiet(t, h)
+			wantPrompts(t, h, addr, 1)
+			a := attemptsOf(t, h, addr)
+			if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptUnknown {
+				t.Fatalf("the attempts are %+v, want one unknown and none in flight: no delivery proof has been told", a)
+			}
+			if in := inOf(t, h, msg); in.Record.Sub == delivery.SubNotified {
+				t.Fatalf("the record is notified before any proof of delivery")
+			}
+
+			// Proof is told now, with the attempt the engine has settled.
+			attempt := adapterproto.AttemptID(promptsInto(t, h, addr)[0].Attrs.Attempt)
+			provePrompt(t, h, addr, attempt, proof)
+			quiet(t, h)
+			a = attemptsOf(t, h, addr)
+			if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+				t.Fatalf("the attempts are %+v, want one delivered: delivery proof says so", a)
+			}
+			if in := inOf(t, h, msg); in.Record.Sub != delivery.SubNotified {
+				t.Errorf("the record is %s (%v), want accepted and notified", in.Record.State, in.Record.Sub)
+			}
+
+			// The durable prompt's turn can start later; either proof establishes the
+			// delivered first prompt whose repeat allowance is then spent.
+			if proof == "persisted" {
+				if err := runtimeOfAddr(t, h, addr).StartTurn(nativeRef(t, h, addr)); err != nil {
+					t.Fatal(err)
+				}
+				quiet(t, h)
+			}
+			endTurn(t, h, addr) // the turn of the first prompt
+			endTurn(t, h, addr) // the turn of the repeat
+			wantPrompts(t, h, addr, 1+handoff.MaxReprompts)
+			if got, want := attemptKinds(t, h, addr), []handoff.PromptKind{handoff.PromptKindFirst, handoff.PromptKindReprompt}; !slices.Equal(got, want) {
+				t.Errorf("the prompts delivered were %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// A provably absent prompt can be retried, so a later persistence claim must
+// not turn that failed attempt into a delivery or mark its covered message.
+func TestPersistedAfterTheAttemptFailedDoesNotMakeItDelivered(t *testing.T) {
 	h := sessionNode(t, harness.Options{}, "a")
 	_, addr := idleSession(t, h, "a")
-	holdBackTurn(t, h, addr)
 	ctrl, err := h.Adapter(harness.Instance)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError, AfterEffect: true}); err != nil {
+	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError}); err != nil {
 		t.Fatal(err)
 	}
-	if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestReconcile, fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate, Reason: string(adapterproto.GroundsNativeUnreachable)}); err != nil {
-		t.Fatal(err)
-	}
-	msg := sendToAddr(t, h, "a", addr, "for a prompt whose turn is told late")
+	msg := sendToAddr(t, h, "a", addr, "for a prompt proven absent on reconciliation")
 	quiet(t, h)
-	wantPrompts(t, h, addr, 1)
-	a := attemptsOf(t, h, addr)
-	if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptUnknown {
-		t.Fatalf("the attempts are %+v, want one unknown and none in flight: no turn has been told", a)
+	before := attemptsOf(t, h, addr)
+	if before.InFlight != nil || len(before.Attempts) != 1 || before.Attempts[0].Outcome != handoff.AttemptFailed {
+		t.Fatalf("the attempt is %+v, want one failed after reconciliation", before)
 	}
-	if in := inOf(t, h, msg); in.Record.Sub == delivery.SubNotified {
-		t.Fatalf("the record is notified before any proof of delivery")
-	}
-
-	// The turn of the prompt is told now, with the attempt the engine has settled.
-	if err := runtimeOfAddr(t, h, addr).StartTurn(nativeRef(t, h, addr)); err != nil {
-		t.Fatal(err)
-	}
+	attempt := adapterproto.AttemptID(promptsInto(t, h, addr)[0].Attrs.Attempt)
+	provePrompt(t, h, addr, attempt, "persisted")
 	quiet(t, h)
-	a = attemptsOf(t, h, addr)
-	if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
-		t.Fatalf("the attempts are %+v, want one delivered: the turn it started said so", a)
+	if got := attemptsOf(t, h, addr); got.InFlight != nil || !slices.Equal(got.Attempts, before.Attempts) {
+		t.Fatalf("persistence proof changed a failed attempt: before %+v, after %+v", before, got)
 	}
-	if in := inOf(t, h, msg); in.Record.Sub != delivery.SubNotified {
-		t.Errorf("the record is %s (%v), want accepted and notified", in.Record.State, in.Record.Sub)
-	}
-
-	// The prompt counts as a delivered first one: the repeat allowance is spent as after any.
-	endTurn(t, h, addr) // the turn of the first prompt
-	endTurn(t, h, addr) // the turn of the repeat
-	wantPrompts(t, h, addr, 1+handoff.MaxReprompts)
-	if got, want := attemptKinds(t, h, addr), []handoff.PromptKind{handoff.PromptKindFirst, handoff.PromptKindReprompt}; !slices.Equal(got, want) {
-		t.Errorf("the prompts delivered were %v, want %v", got, want)
+	if inOf(t, h, msg).Record.Sub == delivery.SubNotified {
+		t.Fatal("a failed attempt was marked notified by a contradictory persistence claim")
 	}
 }
 

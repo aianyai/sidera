@@ -457,8 +457,9 @@ then send `prompt.persisted`. Acceptance leaves the attempt in flight and does n
 mark its messages notified: it proves no durable delivery. If neither
 `prompt.persisted` nor `turn.started` with that attempt follows within one minute
 of the accepted answer, the daemon sends `prompt.reconcile`. `refused` means certainly
-nothing was delivered. `turn.started.attempt` also proves the attempt reached the
-session.
+nothing was delivered. `prompt.persisted` and `turn.started.attempt` are equally
+positive proof that the attempt reached the session. Late proof may correct an
+unknown outcome on a best-effort basis.
 
 **Session creation.** `session.create` carries a `first_prompt`: an `attempt`
 identifier and the text of the first prompt. Its record is `handoff`'s (see the
