@@ -390,9 +390,11 @@ cut for every front end the endpoint can be read through, whichever one asks
 the asking front end, which alone bounds the page): the parts are counted and acknowledged
 one by one, so the command line and MCP must cut a message in the same parts, or a part
 shown through one would be no part of the other. A message that was handed out in some
-number of parts is still not handed out in another number, which happens only when an
-adapter's upgrade changed its budgets: it is logged, left out, and ends as the message
-nobody reads does.
+number of parts is never handed out in another number, which happens only when an
+adapter's upgrade changed its budgets: the hand-out, in a page or by part number, logs it and
+closes it at once as `delivery_unknown` (it was handed out, so the sender is told once, as for
+any message that ends so), and a part asked for by number answers `message_unknown`. Left
+queued it would be prompted for at every turn end and read by no one.
 
 `Ack` takes the lease of the page and the parts, or no parts for all the page. A lease no
 record of the caller's endpoint holds is `lease_unknown`, whoever holds it: a record of
@@ -1468,6 +1470,7 @@ reproducible).
 | A node that never crashed has no recovery work after any step, nor after a clean restart that follows an event that leaves state behind: every owner's criterion finds nothing | `recovery.go` (`PlanRecovery`), `txn` (`CleanupWork`), `config` (`AdapterGCWork`), `daemon` (`LayoutWork`), `store` (`MissingStateDirs`), `keys` (`RecoveryWork`) | `TestCleanScenariosLeaveNoRecoveryWork` |
 | An endpoint cannot acknowledge a lease it was not handed | `pull.go` (`ack`), `view.go` (`leased`) | `TestOtherEndpointTokenCannotAcknowledge` |
 | The second check is made again at the hand-out, and only for what the page reaches | `pull.go` (`tryPage`, `handoutAuthorization`) | `TestADeclarationTightenedAfterIntakeRejectsAtRecv`, `TestAMessageBeyondThePageIsNotJudgedByTheSecondCheck` |
+| A message handed out in another number of parts than it is cut into now is closed as `delivery_unknown` at the hand-out and is not prompted for again | `pull.go` (`pack`, `recvPart`, `closeCutDifferently`) | `TestAMessageCutDifferentlyThanItWasHandedOutIsClosedUnknownAndNotPromptedFor` |
 | A body that is wrong or gone is settled, not handed out, the others go on | `pull.go` (`pack`), `quarantine.go` (`readBody`) | `TestRecvOfABodyThatIsWrongOrGoneHandsNothingOutForIt` |
 | A record that is due is ticked before recv hands out, and one the tick could not settle is left out while the rest of the page is handed out | `pull.go` (`tickEndpoint`, `pack`, `recvPart`) | `TestRecvTicksTheRecordsThatAreDueAndLeavesOutThoseItCouldNotTick` |
 | Nothing is handed out or written by a recv after a fatal storage error, whether it met it ticking or settling a body | `pull.go` (`recv`, `buildPage`), `quarantine.go` (`readBody`) | `TestRecvHandsNothingOutAfterAFatalStorageError` |

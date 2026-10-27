@@ -258,8 +258,8 @@ func (e *Engine) buildPage(now time.Time, st *endpointState, lease delivery.Leas
 
 // tryPage is one attempt at the page. A record that cannot be handed out (its body is
 // gone, which settles it and so changes the queue, it was handed out in another
-// number of parts than this budget gives, or it is due and nothing has ticked it) is
-// left out and the attempt is made again.
+// number of parts than this budget gives, which closes it, or it is due and nothing has
+// ticked it) is left out and the attempt is made again.
 func (e *Engine) tryPage(now time.Time, st *endpointState, lease delivery.LeaseID, budget handoff.Budget, skip map[store.TargetKey]bool) (page []byte, handed int, retry bool, err error) {
 	queue := e.view.queuedIn(st.rec.ID)
 	delivery.SortForRecv(queue, func(in store.InRecord) delivery.Record { return in.Record }, now)
@@ -285,7 +285,7 @@ func (e *Engine) tryPage(now time.Time, st *endpointState, lease delivery.LeaseI
 		}
 		judged++
 	}
-	pageOf, retry, err := e.pack(now, lease, budget, e.partBudgets(st), cands, skip)
+	pageOf, retry, err := e.pack(now, st.rec.ID, lease, budget, e.partBudgets(st), cands, skip)
 	if err != nil || retry {
 		return nil, 0, retry, err
 	}
@@ -305,7 +305,7 @@ func (e *Engine) tryPage(now time.Time, st *endpointState, lease delivery.LeaseI
 		if d.place > lastAt && lastAt >= 0 {
 			continue
 		}
-		in, closed, err := e.closeRefused(now, d.in, lease)
+		in, closed, err := e.closeAtHandout(now, d.in, lease)
 		if err != nil {
 			return nil, 0, false, err
 		}
@@ -338,7 +338,7 @@ type packed struct {
 // the page is built from the first few, and from more when it reached the last of
 // them. A message that cannot be handed out is put in skip and the attempt is made
 // again.
-func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budget, cutFor []handoff.Budget, cands []candidate, skip map[store.TargetKey]bool) (packed, bool, error) {
+func (e *Engine) pack(now time.Time, endpoint ident.EndpointID, lease delivery.LeaseID, budget handoff.Budget, cutFor []handoff.Budget, cands []candidate, skip map[store.TargetKey]bool) (packed, bool, error) {
 	bodies := make([]string, len(cands))
 	loaded := 0
 	load := func(upto int) (bool, error) {
@@ -390,11 +390,16 @@ func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budg
 			c := cands[i]
 			rec, res, err := c.in.Record.Handout(now, c.auth, h.Parts, h.Part, lease)
 			switch {
-			case errors.Is(err, delivery.ErrInvalidInput):
-				// The message was handed out before in another number of parts: the budgets
-				// the adapter declares changed since (every front end cuts a message the same
-				// way while they hold), and a part of one cut is not a part of the other.
-				e.log.Error("a queued message was handed out in another number of parts and is not handed out now", "message", string(c.in.Key.Message), "error", err.Error())
+			case errors.Is(err, delivery.ErrInvalidInput) && handedOutInOtherParts(c.in.Record, h.Parts):
+				// The budgets the adapter declares changed since (every front end cuts a
+				// message the same way while they hold), and a part of one cut is not a part
+				// of the other. The message was handed out, so it ends as the message nobody
+				// confirmed, here and now: left queued it would be prompted for at every turn
+				// end and never read.
+				e.log.Error("a queued message was handed out in another number of parts and is closed", "message", string(c.in.Key.Message), "error", err.Error())
+				if err := e.closeCutDifferently(now, endpoint, lease, c.in); err != nil {
+					return packed{}, false, err
+				}
 				skip[c.in.Key] = true
 				return packed{}, true, nil
 			case err != nil:
@@ -417,12 +422,30 @@ func (e *Engine) pack(now time.Time, lease delivery.LeaseID, budget handoff.Budg
 	}
 }
 
-// closeRefused ends the delivery of a message the second check refused: rejected when its
-// body was never handed out, unknown when it was, which is what the delivery rules
-// say, and the body goes with the record. It reports false, and leaves the record as it
-// is, for a message that is due and has not been ticked: the time judges it before the
-// check does, and the next recv reaches it.
-func (e *Engine) closeRefused(now time.Time, in store.InRecord, lease delivery.LeaseID) (store.InRecord, bool, error) {
+// handedOutInOtherParts says whether the message was handed out before in another number
+// of parts than parts: the cut of its body changed since.
+func handedOutInOtherParts(r delivery.Record, parts int) bool {
+	return r.Lease.Chunks != 0 && r.Lease.Chunks != parts
+}
+
+// closeCutDifferently closes a message that was handed out in another number of parts and
+// writes the record, unless it is due and not ticked, which the next recv judges.
+func (e *Engine) closeCutDifferently(now time.Time, endpoint ident.EndpointID, lease delivery.LeaseID, in store.InRecord) error {
+	closed, ok, err := e.closeAtHandout(now, in, lease)
+	if err != nil || !ok {
+		return err
+	}
+	return e.writeLeases(now, endpoint, lease, []store.InRecord{closed}, packed{})
+}
+
+// closeAtHandout ends the delivery of a message that cannot be handed out and never
+// can be, because the second check refused it or because it was handed out before in
+// another number of parts: rejected when its body was never handed out, unknown when it
+// was, which is what the delivery rules say (Handout with a denied check), and the body
+// goes with the record. It reports false, and leaves the record as it is, for a message
+// that is due and has not been ticked: the time judges it before the check does, and the
+// next recv reaches it. The caller writes the record it returns (writeLeases).
+func (e *Engine) closeAtHandout(now time.Time, in store.InRecord, lease delivery.LeaseID) (store.InRecord, bool, error) {
 	chunks := max(in.Record.Lease.Chunks, 1)
 	rec, res, err := in.Record.Handout(now, delivery.AuthorizationDeny, chunks, 1, lease)
 	if err != nil {
@@ -531,7 +554,7 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 	case delivery.AuthorizationSuspend:
 		return e.emptyPage(lease, budget)
 	case delivery.AuthorizationDeny:
-		closed, ok, err := e.closeRefused(now, in, lease)
+		closed, ok, err := e.closeAtHandout(now, in, lease)
 		if err != nil {
 			return nil, err
 		}
@@ -569,8 +592,15 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 	h := page.HandedOut[0]
 	rec, res, err := in.Record.Handout(now, auth, h.Parts, h.Part, lease)
 	switch {
+	case errors.Is(err, delivery.ErrInvalidInput) && handedOutInOtherParts(in.Record, h.Parts):
+		// Closed as in a page: it was handed out and can never be handed out in these parts.
+		e.log.Error("a queued message was handed out in another number of parts and is closed", "message", string(in.Key.Message), "error", err.Error())
+		if err := e.closeCutDifferently(now, st.rec.ID, lease, in); err != nil {
+			return nil, err
+		}
+		return nil, refuse(ReasonMessageUnknown)
 	case errors.Is(err, delivery.ErrInvalidInput):
-		return nil, invalidArgument("part", fmt.Errorf("the message was handed out in another number of parts: %w", err))
+		return nil, invalidArgument("part", err)
 	case err != nil:
 		return nil, err
 	case res.Action == delivery.HandoutUnavailable:

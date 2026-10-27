@@ -1,6 +1,7 @@
 package engine_test
 
 import (
+	"bytes"
 	"context"
 	"slices"
 	"strings"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/handoff"
+	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
@@ -491,5 +494,74 @@ func TestAWholePageAcknowledgementAfterThePageIsForgottenAcknowledgesOnlyWhatFit
 				}
 			}
 		})
+	}
+}
+
+// A message that was handed out before in another number of parts than it is cut into now
+// (the budgets the adapter declares changed) can never be handed out again, and it was
+// handed out: the recv that finds it ends it as unknown at once. Left queued it would be
+// prompted for at every turn end for as long as it lasted, and read by no one.
+func TestAMessageCutDifferentlyThanItWasHandedOutIsClosedUnknownAndNotPromptedFor(t *testing.T) {
+	host := &promptRecorder{hostDouble: newHostDouble()}
+	session := mustEndpoint(t, 80)
+	token := bytes.Repeat([]byte{0x5a}, store.TokenLen)
+	r := newRig(t, 10, withAdapters(host))
+	r.seedRecord(store.EndpointRecord{ID: session, Kind: sessionKind, Instance: "chat", Status: store.EndpointOpen,
+		Token: token, Session: &store.SessionInfo{Preset: "default", NativeRef: "native-1"}})
+	in := queuedIn(t, 1, session)
+	in.Key.SenderNode = r.node
+	in.Dedup = delivery.NewDedupRecord(in.Key.Dedup(), digestOf(1), in.Record.ReportBy)
+	lease, err := delivery.NewLeaseID(bytes.NewReader(bytes.Repeat([]byte{7}, delivery.LeaseIDLen)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The body is short, so it is one part now; it was handed out as the first of three.
+	rec, _, err := in.Record.Handout(t0, delivery.AuthorizationAllow, 3, 1, lease)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.st.Deliver(bodyOf(1), []store.InRecord{in}); err != nil {
+		t.Fatal(err)
+	}
+	in.Record = rec
+	r.seedRecord(in)
+	r.clk.Advance(delivery.LeaseDuration + time.Minute)
+
+	e := r.start()
+	if err := admitOn(ctx, e, "chat", runtimeAdmission(t, 0, adapterproto.FrontendCLI)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.AdapterStarted(ctx, "chat", adapterproto.StartResult{Sessions: []adapterproto.SessionState{}}); err != nil {
+		t.Fatal(err)
+	}
+	r.clk.Advance(engine.DefaultParams().RetryBackoff) // the probe of the adapter has had time to answer
+	rigQuiet(t, e)
+	waitUntil(t, func() bool { return host.prompts.Load() == 1 })
+
+	page, err := e.Recv(ctx, engine.ByToken(adapterproto.Token(tokenText(token))), engine.RecvRequest{Frontend: adapterproto.FrontendCLI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(page), "body of message 1") {
+		t.Errorf("the page holds the message: %s", page)
+	}
+	rigQuiet(t, e)
+	var got []delivery.State
+	for _, rec := range r.scan().In {
+		got = append(got, rec.Record.State)
+	}
+	if !slices.Equal(got, []delivery.State{delivery.StateDeliveryUnknown}) {
+		t.Fatalf("the target records are %v, want the one message closed as delivery_unknown", got)
+	}
+	// The turn the prompt started ends with the message unread: an agent that left a
+	// message waiting is woken once more, and one that has none is not.
+	end := adapterhost.Notification{Method: adapterproto.MethodTurnEnded, Params: adapterproto.TurnEndedParams{Endpoint: adapterproto.EndpointRef(session.String())}}
+	if err := e.AdapterNotified(ctx, "chat", end); err != nil {
+		t.Fatal(err)
+	}
+	r.clk.Advance(handoff.DefaultMinInterval)
+	rigQuiet(t, e)
+	if n := host.prompts.Load(); n != 1 {
+		t.Errorf("%d prompts reached the adapter, want only the first: nothing waits for the agent", n)
 	}
 }
