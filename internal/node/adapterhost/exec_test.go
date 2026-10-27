@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -79,15 +80,20 @@ func (s *syncBuffer) String() string {
 }
 
 // helperInstance is an installed package whose program is the test binary, at the
-// path the manifest names under the directory of the instance.
+// path the manifest names under the directory of the instance. The name carries the
+// extension of an executable of the platform, as a package's program must: Windows
+// starts no file without one.
 func helperInstance(t *testing.T, args []string, stderr io.Writer) adapterhost.Instance {
 	t.Helper()
 	dir := t.TempDir()
 	program := "bin/helper"
+	if runtime.GOOS == "windows" {
+		program += ".exe"
+	}
 	if err := os.MkdirAll(filepath.Join(dir, "bin"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(testBinary(), filepath.Join(dir, "bin", "helper")); err != nil {
+	if err := os.Symlink(testBinary(), filepath.Join(dir, filepath.FromSlash(program))); err != nil {
 		// A file system without symbolic links: start the binary where it is.
 		dir, program = filepath.Dir(testBinary()), filepath.Base(testBinary())
 	}

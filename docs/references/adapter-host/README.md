@@ -224,6 +224,11 @@ reading the process's pipe directly and waiting early can drop output that was n
 yet read. The process is not killed when the context given to `Launch` ends: the
 host decides when. `Kill` is idempotent. Streams that a descendant of the program
 holds open are closed two seconds after the program ends, so that `Wait` returns.
+On Windows the program's file must have the extension of an executable (`.exe`):
+`os/exec` runs a file that has one of the extensions in `PATHEXT` as it is, tries
+those extensions in turn on a path that has none, and never starts a file without
+one, so a package whose `entry.program` names `bin/adapter` must hold
+`bin/adapter.exe` there, and one that names `bin/adapter.exe` runs that file.
 Everything about Windows and Linux is pending verification by CI on main.
 
 ## Why
