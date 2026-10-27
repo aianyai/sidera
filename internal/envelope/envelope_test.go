@@ -696,6 +696,49 @@ func TestATooLargeBodyIsToldApartFromAMalformedOne(t *testing.T) {
 	}
 }
 
+// A body is text: the envelope refuses one that is not valid UTF-8, on the sender's
+// own node when it builds the envelope (Encode) and on the target when it reads one
+// (Decode), as a malformed body and not a too large one.
+func TestABodyMustBeValidUTF8(t *testing.T) {
+	cases := []struct {
+		name string
+		base func(testing.TB) Envelope
+		body string
+		ok   bool
+	}{
+		{"ASCII", baseMessage, "hello", true},
+		{"multi-byte text", baseMessage, "你好, wörld", true},
+		{"a stray continuation byte", baseMessage, "ab\x80cd", false},
+		{"a truncated multi-byte rune", baseMessage, "caf\xc3", false},
+		{"an encoded surrogate", baseMessage, "\xed\xa0\x80", false},
+		{"the initial message of a session.create, valid", baseCreate, "start", true},
+		{"the initial message of a session.create, invalid", baseCreate, "st\xffart", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			e := c.base(t)
+			e.Body = []byte(c.body)
+			b, encErr := e.Encode(testLimits)
+			w := wireOf(t, e)
+			decErr := decodeWire(t, w, testLimits)
+			if c.ok {
+				requireNoErr(t, encErr)
+				requireNoErr(t, decErr)
+				if _, err := Decode(b, testLimits); err != nil {
+					t.Errorf("what Encode wrote does not decode: %v", err)
+				}
+				return
+			}
+			for side, err := range map[string]error{"Encode": encErr, "Decode": decErr} {
+				requireErr(t, err, ErrBody)
+				if errors.Is(err, ErrBodyTooLarge) {
+					t.Errorf("%s: reported as too large: %v", side, err)
+				}
+			}
+		})
+	}
+}
+
 func TestRetryAndDeduplication(t *testing.T) {
 	nodeA, nodeB := nodeOf(t, keyIdentityA), nodeOf(t, keyIdentityB)
 	first := baseCreate(t)

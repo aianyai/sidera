@@ -381,9 +381,9 @@ func (e *Engine) pack(now time.Time, endpoint ident.EndpointID, lease delivery.L
 			case err != nil:
 				return false, err
 			case !utf8.Valid(body):
-				e.log.Error("a queued message is not text and cannot be put on a page; it is not handed out", "message", string(in.Key.Message))
-				skip[in.Key] = true
-				return true, nil
+				// The envelope refuses a body that is not text, at the sender and at
+				// intake, so a queued one is a record the node did not write.
+				return false, fmt.Errorf("engine: message %s is queued with a body that is not valid UTF-8, which no envelope carries", in.Key.Message)
 			}
 			bodies[loaded] = string(body)
 		}
@@ -599,7 +599,7 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 	case err != nil:
 		return nil, err
 	case !utf8.Valid(body):
-		return nil, fmt.Errorf("engine: message %s is not text and cannot be put on a page", in.Key.Message)
+		return nil, fmt.Errorf("engine: message %s is queued with a body that is not valid UTF-8, which no envelope carries", in.Key.Message)
 	}
 	msg := handoff.Message{
 		ID: string(in.Key.Message), From: ident.Address{Node: in.Key.SenderNode, Endpoint: in.Key.Sender},

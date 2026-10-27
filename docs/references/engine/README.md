@@ -387,8 +387,11 @@ body that is not what its record says or is gone: such a record is settled and t
 built without it, while the other messages go on. Bodies are read as far as the page
 reaches, not for the whole queue. When the settlement of such a body fails for good,
 the error of the recv is that failure alone, because the error that says a body is damaged
-is read as "settled" and the record may not be. A body that is not text is not handed out and is logged:
-a page cannot carry it, and the message ends as a message nobody reads. A long message is
+is read as "settled" and the record may not be. A body that is not valid UTF-8 cannot be read from
+a valid record, because the envelope refuses it at the sender and at intake (a send
+with one is refused `invalid_argument` for `body`, a remote envelope as malformed), so
+reaching one is a defect or damage and fails the recv loudly with an error that names
+the message; there is no path that skips it. A long message is
 cut for every front end the endpoint can be read through, whichever one asks
 (`Admission.PartBudgets`, passed to `handoff.Pack` and `handoff.Part` beside the budget of
 the asking front end, which alone bounds the page): the parts are counted and acknowledged
@@ -444,7 +447,7 @@ entered through a new-work entry all the same.
 
 **Accepting a message.** `Send` and `Reply` are the one place new work from a local
 endpoint enters the store. A request that no node would take is refused first: no
-body, a body over 64 KiB, no content type, a deadline beyond one hour, no recipient or
+body, a body that is not valid UTF-8, a body over 64 KiB, no content type, a deadline beyond one hour, no recipient or
 the system endpoint as one. A repeat of an
 idempotency key returns the first message when the content is the same and is a
 conflict when it is not; the same content is the request digest the target compares
@@ -1612,8 +1615,6 @@ Known gaps, each filled in with the feature it belongs to:
   that issued no lease (the queue was empty) or only handed a part out again under a lease that
   still ran is forgotten, and an endpoint whose agent had read its last prompt that way may be
   woken once more by the end of a turn. A prompt that was not read is never taken for read.
-- An empty body is refused: the Agent interface says a body may be empty and an envelope
-  of a message must have one (`TestShouldASendWithAnEmptyBodyBeAccepted`, skipped).
 - A body that is not what the delivery of an initial message says, found when the session
   is already made, loses the message: the delivery is removed with an alert and its sender is
   told by the record the target no longer holds (`lost_at_target`).

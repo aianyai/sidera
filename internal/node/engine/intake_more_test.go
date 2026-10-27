@@ -95,6 +95,7 @@ func TestARequestTheEnvelopeRefusesIsRefusedForTheFieldItNames(t *testing.T) {
 		{"a recipient twice", func(r *engine.SendRequest) { r.To = []ident.Address{good.To[0], good.To[0]} }, engine.ReasonInvalidArgument, "to"},
 		{"no body", func(r *engine.SendRequest) { r.Body = nil }, engine.ReasonInvalidArgument, "body"},
 		{"no content type", func(r *engine.SendRequest) { r.ContentType = "" }, engine.ReasonInvalidArgument, "body"},
+		{"a body that is not valid UTF-8", func(r *engine.SendRequest) { r.Body = []byte("ab\xffcd") }, engine.ReasonInvalidArgument, "body"},
 		{"a body over the limit", func(r *engine.SendRequest) { r.Body = make([]byte, envelope.MaxBody+1) }, engine.ReasonTooLarge, "body"},
 		{"a thread that is not an identifier", func(r *engine.SendRequest) { r.Thread = "two words" }, engine.ReasonInvalidArgument, "thread"},
 		{"a negative deadline", func(r *engine.SendRequest) { r.AcceptBefore = -time.Second }, engine.ReasonInvalidArgument, "accept_before"},

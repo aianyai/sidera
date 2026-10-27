@@ -65,7 +65,7 @@ size derived from the limits is refused before parsing, with `record.ErrOversize
 - **Deadlines.** `report_by` must equal `delivery.ReportBy(accept_before)`. The
   cap on `accept_before` is judged by `delivery.Intake`, not here.
 - **Body.** Content type and body are both present or both absent. A message has
-  a body. A `session.create` may have one: it is the initial message. The other
+  a body, and a body is valid UTF-8 (`ErrBody`). A `session.create` may have one: it is the initial message. The other
   control signals have none. The longest body is `Limits.MaxBody`; the
   endpoint-level size caps of the policy are separate.
 - **Params.** Only `session.create` has params, `{1: preset}`, and it requires

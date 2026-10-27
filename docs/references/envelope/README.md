@@ -33,7 +33,7 @@ is a new type string.
 | 11 | `sent_at` | Unix seconds |
 | 12 | `accept_before` | Unix seconds |
 | 13 | `report_by` | Unix seconds; must be `accept_before` plus the report offset of the delivery rules |
-| 14, 15 | `content_type`, `body` | both present or both absent |
+| 14, 15 | `content_type`, `body` | both present or both absent; the body is valid UTF-8 |
 | 16 | `params` | `{1: preset}`, only for `control.session.create` |
 
 Rules: a message has a body; a `session.create` may have one (the initial
@@ -51,8 +51,11 @@ not in the envelope. Encoding refuses what decoding refuses. The cap on
 longest body and the most recipients are parameters (`Limits`), so a caller may
 tighten them; `DefaultLimits()` returns the protocol values, 64 KiB and 50, and
 a zero value is refused, never read as no limit.
-A body over the longest is `ErrBodyTooLarge`, which wraps `ErrBody` (the content
-type and body are inconsistent or not allowed), so a caller that reports the two
+A body is text: one that is not valid UTF-8 is `ErrBody`, refused by the same check on
+the sender's node (`Encode`, so the engine refuses the send as an invalid `body`) and
+on the target (`Decode`, so a remote envelope that breaks it is refused as malformed,
+with no reason of its own). A body over the longest is `ErrBodyTooLarge`, which wraps
+`ErrBody` (the content type and body are inconsistent, not allowed or not text), so a caller that reports the two
 differently to the sender can tell them apart; an input longer than the size the
 limits allow is refused before parsing, with the record package's oversize error.
 
@@ -338,6 +341,14 @@ which may still admit it.
   store, sign and deliver it. The adapter protocol states the same rule for
   `endpoint.send` (schema and `adapterproto` validation), so an adapter learns
   of it from its own SDK and not from a refusal by the node.
+- **A body is valid UTF-8.** What an agent is handed out is a page of text, and no
+  front end can carry bytes that are not text, so the one place that judges every
+  envelope refuses such a body, rather than a queue holding a message that can never
+  be read. Because the sender runs the same check when it builds the envelope, a
+  node never sends what its target would refuse, and a target tells a peer that
+  breaks the rule only as malformed: the wire has no reason for it, since a correct
+  sender cannot produce one. The adapter protocol needs no rule of its own, because
+  its body is a JSON string.
 - **Control signal: one recipient, no body but for create.** A control signal is
   executed by one adapter and produces one reply; several recipients would bundle
   several results under one id. Body and content type on the other signals would
@@ -489,6 +500,7 @@ which may still admit it.
   `TestAControlSignalsDeliveryEndsOnlyThroughItsControlReply`,
   `TestAReportDatedAfterTheDeliverysReportByIsIgnored`);
   `envelope_test.go` (`TestATooLargeBodyIsToldApartFromAMalformedOne`,
+  `TestABodyMustBeValidUTF8`,
   `TestValidMessageIDIsTheRuleTheDecoderAppliesToIds`, and the
   disclosed-list rows of `TestRequestDigest`); `fuzz_test.go`.
   `internal/reply/reply_test.go` holds the named acceptance scenarios

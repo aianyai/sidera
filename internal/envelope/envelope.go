@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/frame"
@@ -408,6 +409,12 @@ func fromWireContent(e *Envelope, w envelopeWire, lim Limits) error {
 		}
 		if len(w.Body) > lim.MaxBody {
 			return fmt.Errorf("%w: %d bytes, limit %d", ErrBodyTooLarge, len(w.Body), lim.MaxBody)
+		}
+		// A body is text for an agent to read: the pages an agent is handed out
+		// carry text, so a body that is not valid UTF-8 is refused where every
+		// envelope is judged and never reaches a queue.
+		if !utf8.Valid(w.Body) {
+			return fmt.Errorf("%w: the body is not valid UTF-8", ErrBody)
 		}
 	}
 	switch {
