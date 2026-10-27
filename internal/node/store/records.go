@@ -195,6 +195,19 @@ type CoverRef struct {
 	Kind      delivery.Kind
 }
 
+// CoverOf is the cover of a feedback item held by the record of out/ with the
+// given file name: the one way a cover is made.
+func CoverOf(record string, it delivery.Item) CoverRef {
+	return CoverRef{Out: record, Recipient: it.Ref.Recipient, Kind: it.Feedback.Kind}
+}
+
+// Covers reports whether the cover stands for the item as the record of out/ with
+// the given file name holds it: the record, the recipient and the kind are the
+// cover's. It is the one rule by which a cover is matched to an item.
+func (c CoverRef) Covers(record string, it delivery.Item) bool {
+	return c == CoverOf(record, it)
+}
+
 // Name is the file name of the record.
 func (r InRecord) Name() string { return r.Key.FileName(KindIn) }
 

@@ -212,7 +212,7 @@ func PlanSweep(sc *Scan, now time.Time) SweepPlan {
 	stillHeld := map[CoverRef]bool{} // the items of the records that stay, as a notice covers them
 	holdItems := func(name string, items []delivery.Item) {
 		for _, it := range items {
-			stillHeld[CoverRef{Out: name, Recipient: it.Ref.Recipient, Kind: it.Feedback.Kind}] = true
+			stillHeld[CoverOf(name, it)] = true
 		}
 	}
 	for _, o := range sc.Out {

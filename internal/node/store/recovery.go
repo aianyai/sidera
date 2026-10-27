@@ -313,13 +313,11 @@ func coversByFile(sc *Scan) map[string][]CoverRef {
 	return by
 }
 
-// withoutCovered is items without the ones a cover names: an item the cover has
-// the recipient and the kind of.
-func withoutCovered(items []delivery.Item, covers []CoverRef) []delivery.Item {
+// withoutCovered is the items of the record of out/ with the given file name
+// without the ones a cover covers.
+func withoutCovered(record string, items []delivery.Item, covers []CoverRef) []delivery.Item {
 	return slices.DeleteFunc(slices.Clone(items), func(it delivery.Item) bool {
-		return slices.ContainsFunc(covers, func(c CoverRef) bool {
-			return it.Ref.Recipient == c.Recipient && it.Feedback.Kind == c.Kind
-		})
+		return slices.ContainsFunc(covers, func(c CoverRef) bool { return c.Covers(record, it) })
 	})
 }
 
@@ -330,7 +328,7 @@ func FeedbackReplays(sc *Scan) []OutRecord {
 	covers := coversByFile(sc)
 	var out []OutRecord
 	for _, o := range sc.Out {
-		if items := withoutCovered(o.Feedback, covers[o.Name()]); len(items) != len(o.Feedback) {
+		if items := withoutCovered(o.Name(), o.Feedback, covers[o.Name()]); len(items) != len(o.Feedback) {
 			o.Feedback = items
 			out = append(out, o)
 		}
@@ -346,7 +344,7 @@ func OutLostReplays(sc *Scan) []OutLostRecord {
 	covers := coversByFile(sc)
 	var out []OutLostRecord
 	for _, o := range sc.OutLost {
-		if items := withoutCovered(o.Feedback, covers[o.Name()]); len(items) != len(o.Feedback) {
+		if items := withoutCovered(o.Name(), o.Feedback, covers[o.Name()]); len(items) != len(o.Feedback) {
 			o.Feedback = items
 			out = append(out, o)
 		}

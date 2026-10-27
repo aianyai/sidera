@@ -657,8 +657,11 @@ the item has no recipient, so the cover has none, and a cover has a recipient
 exactly when its item has one (`TestACoverHasARecipientExactlyWhenItsItemHasOne`).
 `OutLostReplays` is the work of the replay for these records, `Store.OutLostClear`
 writes the record without the item, and both read the covers with the same two
-functions as the replay of source records (`FeedbackReplays`), so the rule that a
-cover clears an item has one home. A record whose item is gone is finished: it is
+functions as the replay of source records (`FeedbackReplays`). The cover of an item
+is made by `CoverOf` and matched to an item by `CoverRef.Covers`, and the engine,
+which forms the notice and clears the items it covers, the sweep, which keeps a
+notice while a record holds an item it covers, and the replays all call these two,
+so the rule that a cover clears an item has one home. A record whose item is gone is finished: it is
 swept as soon as it is, at its discovery time or later, not by the retention of a
 source record, because nothing waits for a reply to it (`RetainUntil`,
 `SweepPlan.OutLosts`,
