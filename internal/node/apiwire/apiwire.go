@@ -334,7 +334,11 @@ func fromChange(c *config.ChangeError) *Error {
 	case config.ChangeAdapterNotInstalled:
 		return New(CategoryNotFound, "adapter_unknown", "the adapter is not installed").named(c)
 	case config.ChangeAdapterInUse:
-		return New(CategoryConflict, "adapter_in_use", "an instance of the adapter is enabled; disable it first").named(c)
+		e := New(CategoryConflict, "adapter_in_use", "an instance of the adapter is in use; it has to be disabled and its process ended first").named(c)
+		if c.Err != nil {
+			e.with("reason", c.Err.Error())
+		}
+		return e
 	case config.ChangeNothingToChange:
 		return New(CategoryInvalidArgument, "empty_patch", "the patch names no setting")
 	}

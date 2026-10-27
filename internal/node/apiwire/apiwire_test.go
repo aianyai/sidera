@@ -174,6 +174,24 @@ func TestAConflictNamesTheCurrentVersionAndAnInvalidValueItsPath(t *testing.T) {
 	}
 }
 
+// An adapter is refused an upgrade for two reasons that the owner treats
+// differently, an enabled instance and a disabled one whose process is still
+// ending, so the message is true of both and the configuration's own words
+// say which one it was.
+func TestAnAdapterInUseSaysWhichInstanceAndWhy(t *testing.T) {
+	got := apiwire.FromError(&config.ChangeError{
+		Reason: config.ChangeAdapterInUse, Field: "instances.work",
+		Err: errors.New(`the process of the disabled instance "work" is still ending`),
+	})
+	check(t, got, want{"conflict", "adapter_in_use"})
+	if got.Details["name"] != "instances.work" || got.Details["reason"] != `the process of the disabled instance "work" is still ending` {
+		t.Errorf("details %v, want the instance and the reason the configuration gave", got.Details)
+	}
+	if strings.Contains(got.Message, "is enabled") {
+		t.Errorf("the message %q says the instance is enabled, which is not so when its process is only ending", got.Message)
+	}
+}
+
 func TestAMalformedRequestNamesThePositionOfTheFault(t *testing.T) {
 	var v struct {
 		A int `json:"a"`
