@@ -180,32 +180,44 @@ func TestAFailedWriteIsBackpressureAndMemoryKeepsWhatTheDiskHolds(t *testing.T) 
 // A failure after the commit point leaves the disk and memory possibly apart,
 // so the loop stops for good: the command that met it is told the outcome is not
 // known, every later command is refused, and the process is to exit and rescan.
+// A full disk is no exception: past the commit point it is fatal like any other
+// failure, not the back pressure it is before it.
 func TestAFatalWriteStopsTheLoopAndRefusesEveryLaterCommand(t *testing.T) {
 	noLeaks(t)
-	r := newRig(t, 10)
-	e := r.start()
-	id := register(t, e, "a")
-	rule := r.faulty.Fail(failMatch("endpoint-update", fsx.StepSyncDir), syscall.EIO)
-	_, err := e.Declare(context.Background(), engineCaller(id), engine.DeclarationPatch{Paused: ptr(true)})
-	wantReason(t, err, engine.ReasonStorageFatal)
-	if rule.Hits() == 0 {
-		t.Fatal("the fault was not injected")
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"an I/O error", syscall.EIO},
+		{"no space", fsxtest.DiskFull},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, 10)
+			e := r.start()
+			id := register(t, e, "a")
+			rule := r.faulty.Fail(failMatch("endpoint-update", fsx.StepSyncDir), tc.err)
+			_, err := e.Declare(context.Background(), engineCaller(id), engine.DeclarationPatch{Paused: ptr(true)})
+			wantReason(t, err, engine.ReasonStorageFatal)
+			if rule.Hits() == 0 {
+				t.Fatal("the fault was not injected")
+			}
+			select {
+			case <-e.Done():
+			case <-time.After(5 * time.Second):
+				t.Fatal("the engine did not stop")
+			}
+			if !txn.IsFatal(e.Err()) {
+				t.Errorf("Err = %v, want the fatal storage error", e.Err())
+			}
+			if e.Phase() != engine.PhaseFailed {
+				t.Errorf("phase %v, want failed", e.Phase())
+			}
+			_, err = e.Endpoints(context.Background())
+			wantReason(t, err, engine.ReasonShuttingDown)
+			_, err = e.RaiseAlert(context.Background(), "late", "x", "x")
+			wantReason(t, err, engine.ReasonShuttingDown)
+		})
 	}
-	select {
-	case <-e.Done():
-	case <-time.After(5 * time.Second):
-		t.Fatal("the engine did not stop")
-	}
-	if !txn.IsFatal(e.Err()) {
-		t.Errorf("Err = %v, want the fatal storage error", e.Err())
-	}
-	if e.Phase() != engine.PhaseFailed {
-		t.Errorf("phase %v, want failed", e.Phase())
-	}
-	_, err = e.Endpoints(context.Background())
-	wantReason(t, err, engine.ReasonShuttingDown)
-	_, err = e.RaiseAlert(context.Background(), "late", "x", "x")
-	wantReason(t, err, engine.ReasonShuttingDown)
 }
 
 // A start and a stop, with and without work, leave no goroutine behind and move
