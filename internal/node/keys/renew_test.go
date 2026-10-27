@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"reflect"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -18,8 +19,9 @@ import (
 	"github.com/aianyai/sidera/internal/timing"
 )
 
-// A renewal writes the serial first and the certificate second, each durable
-// before the next step: the sequence of points is written out by hand.
+// A renewal writes the serial first, then the mark of the clock, then the
+// certificate, each durable before the next step: the sequence of points is
+// written out by hand.
 func TestRenewWritesTheSerialBeforeTheCertificate(t *testing.T) {
 	r := newRig(t)
 	r.mustInit(1, t0)
@@ -30,11 +32,65 @@ func TestRenewWritesTheSerialBeforeTheCertificate(t *testing.T) {
 	}
 	want := []string{
 		"cert-renew/serial.create#1", "cert-renew/serial.write#1", "cert-renew/serial.sync#1", "cert-renew/serial.rename#1", "cert-renew/serial.sync-dir#1",
+		"cert-renew/clock.create#1", "cert-renew/clock.write#1", "cert-renew/clock.sync#1", "cert-renew/clock.rename#1", "cert-renew/clock.sync-dir#1",
 		"cert-renew/cert.create#1", "cert-renew/cert.write#1", "cert-renew/cert.sync#1", "cert-renew/cert.rename#1", "cert-renew/cert.sync-dir#1",
 		"cert-renew/commit#1",
 	}
 	if got := r.obs.names(); !reflect.DeepEqual(got, want) {
 		t.Errorf("points of a renewal:\n got %v\nwant %v", got, want)
+	}
+}
+
+// A certificate is never issued above the persisted mark of the clock: the
+// renewal raises the mark to the time it signs at, in the same transaction, so a
+// certificate that was signed on a clock that is ahead is always one the next
+// start finds the clock behind, and pauses for. The mark is cut to whole seconds
+// like every time of the record, and is never lowered.
+func TestRenewRaisesTheMarkOfTheClockToTheTimeItSignsAt(t *testing.T) {
+	rows := []struct {
+		name     string
+		mark     time.Time // on disk before the renewal
+		now      time.Time
+		wantMark time.Time
+		wrote    bool
+	}{
+		{"the clock is ahead of the mark", t0, t0.Add(31 * 24 * time.Hour).Add(1500 * time.Millisecond), t0.Add(31*24*time.Hour + time.Second), true},
+		{"the clock is a second ahead", t0, t0.Add(time.Second), t0.Add(time.Second), true},
+		{"the clock reads the mark", t0, t0, t0, false},
+		{"the clock is a little behind the mark, within the tolerance", t0.Add(time.Hour), t0.Add(time.Hour - time.Minute), t0.Add(time.Hour), false},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			r := newRig(t)
+			r.mustInit(1, t0)
+			k := r.mustLoad()
+			if !row.mark.Equal(t0) {
+				if err := k.SaveClock(keys.ClockState{HighWater: row.mark}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			r.obs.points = nil
+			if err := k.Renew(row.now); err != nil {
+				t.Fatal(err)
+			}
+			st, err := keys.ReadClock(r.w.Reader())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !st.HighWater.Equal(row.wantMark) || st.Paused() {
+				t.Errorf("clock.rec after the renewal = %+v, want the mark %v and no pause", st, row.wantMark)
+			}
+			if c := k.Certificate().Payload(); c.NotBefore.Add(timing.ClockTolerance).After(st.HighWater) {
+				t.Errorf("the certificate starts at %v, above the mark %v", c.NotBefore.Add(timing.ClockTolerance), st.HighWater)
+			}
+			wrote := false
+			for _, name := range r.obs.names() {
+				wrote = wrote || strings.HasPrefix(name, "cert-renew/clock.")
+			}
+			if wrote != row.wrote {
+				t.Errorf("the renewal wrote the clock record = %v, want %v (points %v)", wrote, row.wrote, r.obs.names())
+			}
+		})
 	}
 }
 
@@ -119,7 +175,13 @@ func TestRenewalDue(t *testing.T) {
 		{"one second left", at(time.Second), false, keys.RenewDue, keys.RenewReasonExpiring},
 		{"expired", cert.NotAfter, false, keys.RenewDue, keys.RenewReasonExpiring},
 		{"long expired", cert.NotAfter.Add(90 * 24 * time.Hour), false, keys.RenewDue, keys.RenewReasonExpiring},
+		// A certificate that starts after now was signed on a clock that was ahead of
+		// the one the node now trusts; it cannot be used until now catches up.
+		{"valid from this very second", cert.NotBefore, false, keys.RenewNotDue, keys.RenewReasonCurrent},
+		{"not yet valid by a second", cert.NotBefore.Add(-time.Second), false, keys.RenewDue, keys.RenewReasonNotYetValid},
+		{"not yet valid by a year", cert.NotBefore.Add(-365 * 24 * time.Hour), false, keys.RenewDue, keys.RenewReasonNotYetValid},
 		{"interrupted, freshly issued", t0, true, keys.RenewDue, keys.RenewReasonInterrupted},
+		{"interrupted and not yet valid: the interruption is the reason", cert.NotBefore.Add(-time.Hour), true, keys.RenewDue, keys.RenewReasonInterrupted},
 		{"interrupted and expiring: the interruption is the reason", at(time.Hour), true, keys.RenewDue, keys.RenewReasonInterrupted},
 	}
 	for _, row := range rows {

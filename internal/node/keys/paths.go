@@ -66,6 +66,11 @@ var (
 		// The serial is reserved first. It is the commit point, and from then on a
 		// serial is never issued again, whatever happens to the certificate.
 		{Role: RoleSerial, Op: txn.OpReplace},
+		// The mark of the clock is raised to the time the certificate is signed at,
+		// when it is below it, so that no certificate is ever above the mark. It
+		// comes before the certificate: a crash after it leaves a mark that is
+		// only higher than the clock has read, which costs nothing.
+		{Role: RoleClock, Op: txn.OpReplace, Optional: true},
 		{Role: RoleCertificate, Op: txn.OpReplace},
 	}}
 	clockHighWater = &txn.Decl{Name: TxClockHighWater, Kind: txn.Normal, Writes: []txn.Write{

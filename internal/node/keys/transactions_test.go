@@ -24,6 +24,7 @@ func TestTransactionsAreDeclaredAndValid(t *testing.T) {
 	want := map[string][]txn.Write{
 		"cert-renew": {
 			{Role: "serial", Op: txn.OpReplace},
+			{Role: "clock", Op: txn.OpReplace, Optional: true},
 			{Role: "cert", Op: txn.OpReplace},
 		},
 		"clock-high-water": {

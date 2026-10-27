@@ -130,7 +130,7 @@ sees the link and the read follows it
 | `network.cert` | The current network-key certificate, as the record wire bytes. | `init`, each renewal |
 | `network-serial` | The highest certificate serial this node has issued, and the digest of the certificate issued at it. | `init`, each renewal, first |
 | `self-revocation.rec` | The node's statement that its identity key is void, as the record wire bytes. | `init`, once |
-| `clock.rec` | The wall-clock high water mark and, while a rollback pause is in force, since when. | every minute; the owner's clear |
+| `clock.rec` | The wall-clock high water mark and, while a rollback pause is in force, since when. | every minute; each renewal, when it raises the mark; the owner's clear |
 | `init.rec` | The marker that says `init` finished. | `init`, last |
 
 The serial and the clock live here, and not under `state/`, because deleting
@@ -163,16 +163,24 @@ never changes a permission and never repairs a file.
 
 **The certificate and its serial.** A certificate is valid for 30 days from its
 issue (it starts the clock tolerance earlier, see [records](../records/README.md))
-and is renewed when 10 days or less remain, when it has expired, or when an
-earlier renewal was interrupted. A renewal writes the next serial to
-`network-serial` first, durably, and then the certificate. The serial is the
-commit point: it is never issued twice. A crash between the two writes leaves a
+and is renewed when 10 days or less remain, when it has expired, when it starts
+after the current time, or when an earlier renewal was interrupted. A renewal
+writes the next serial to `network-serial` first, durably, then raises the mark
+of `clock.rec` to the time it signs at (when that is above the mark), and then
+writes the certificate. The serial is the commit point: it is never issued twice. A crash between the two writes leaves a
 gap in the serials, which peers accept because they require only that serials
 rise, and a certificate whose serial is below the serial file's, which is an
 *interrupted renewal*: the node starts, reports it, and renews at once, whatever
 the remaining validity, at the serial after the reserved one. The renewal
 refuses to sign during a rollback pause and when the clock reads behind the
 persisted mark by more than the clock tolerance.
+
+A certificate that starts after the current time is what a forward jump of the
+wall clock leaves behind once the owner has cleared the pause of the clock that
+was set right again: it was signed on the fast clock and is not valid for the real
+one, so nothing can be signed under it. It is due at once, whatever the remaining
+validity, so that the renewal that follows the clear replaces it, and signing
+works again within that same pass of the daemon's periodic tasks.
 
 **The clock record.** The periodic write never lowers the mark, never lifts or
 moves the pause, never writes without a mark, and refuses a time the decoder
@@ -441,6 +449,22 @@ under the refusal of a serial file behind the certificate below.
   clock is wrong, and the start is only the alert's "since", so the earliest
   second stands for it. The mark is never clamped
   (`TestSaveClockClampsAPauseThatStartedBeforeTheEarliestSecond`).
+- **A renewal raises the mark with the certificate.** The mark exists to catch a
+  clock that is ahead of what the node has signed under. A certificate signed above
+  the persisted mark defeats it: a daemon stopped within a minute of the renewal
+  never persisted the mark, and after the clock was set back it started without a
+  pause although the certificate was not yet valid. The write of the mark is part
+  of the renewal's transaction, between the serial and the certificate, so no state
+  on disk has a certificate above the mark
+  (`TestRenewRaisesTheMarkOfTheClockToTheTimeItSignsAt`, and the same check in
+  every crash state of `TestRenewalReplaysToAConsistentStateFromEveryCrashState`).
+  It comes after the serial because the serial is the commit point and stays the
+  first write; a crash between the two leaves a mark that is only higher than the
+  clock has read, which costs nothing.
+- **A certificate that is not yet valid is due.** The expiry rule alone looks only
+  at the end of the validity, so a certificate signed on a clock that was ahead and
+  then cleared looked healthy for as long as the fast clock's validity lasted while
+  nothing could be signed under it.
 - **The clock record never goes back through the periodic write.** If it could,
   the in-memory mark's rule (raise only) would be enforced by every caller instead
   of by the file; and lifting the pause by an ordinary write would skip the owner's
@@ -512,7 +536,8 @@ under the refusal of a serial file behind the certificate below.
   `TestSerialNeverGoesBackAcrossRestartsAndCrashes`,
   `TestRenewalAfterAnInterruptionIssuesTheSerialAfterTheReservedOne`,
   `TestInterruptedRenewalIsRecognisedAndRepaired`, `TestRenewalDue` (the serial and
-  renewal); `TestLoadRefusals`, `TestLoadOfTheGoldenFiles`; `TestInitRerunNeverOverwritesAKey`,
+  renewal, the reason of a certificate that is not yet valid),
+  `TestRenewRaisesTheMarkOfTheClockToTheTimeItSignsAt`; `TestLoadRefusals`, `TestLoadOfTheGoldenFiles`; `TestInitRerunNeverOverwritesAKey`,
   `TestInitReusesAValidSelfRevocation`,
   `TestInitRefusesASelfRevocationThatDoesNotVerifyUnderTheCurrentKey`,
   `TestInitReSignsACertificateThatDoesNotMatch` (init); `TestExportFormatGolden` (the

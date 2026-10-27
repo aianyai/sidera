@@ -116,6 +116,8 @@ func renewReasonName(r keys.RenewReason) string {
 		return "an earlier renewal was interrupted"
 	case keys.RenewReasonExpiring:
 		return "ten days or less were left"
+	case keys.RenewReasonNotYetValid:
+		return "the certificate starts after the current time"
 	}
 	return "unknown"
 }

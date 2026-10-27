@@ -19,7 +19,7 @@ transaction of `txn`; nothing here calls an `fsx` write.
 | ---- | ------- |
 | `Load(w)` | Reads and checks every file, the init marker included; returns `*Keys`. Refuses an init that did not finish. Writes nothing, repairs nothing. |
 | `Keys.Node`, `NetworkSigner`, `Certificate`, `CertificateWire`, `SerialSeen` | What the node knows of itself. The identity key never leaves the package: it signs certificates and the self-revocation only. |
-| `Keys.RenewalDue`, `RenewalDue`, `Keys.Renew` | The renewal rule (a pure function with a typed verdict and reason) and the renewal itself, which is also the repair of an interrupted one. |
+| `Keys.RenewalDue`, `RenewalDue`, `Keys.Renew` | The renewal rule (a pure function with a typed verdict and reason: current, interrupted, expiring, not yet valid) and the renewal itself, which is also the repair of an interrupted one and raises the persisted clock mark to the time it signs at. |
 | `Keys.RenewalInterrupted`, `RenewalInterrupted`, `RecoveryWork` | The recovery predicate: the serial file is ahead of the certificate. Pure functions of the disk, for the load, the startup repair and the clean-scenario test. |
 | `ReadClock`, `Keys.SaveClock`, `PrepareClockCleared`, `PutClockCleared` | The clock record. `SaveClock` is the periodic write and never goes back; the owner's clear is for the engine's transaction: `PrepareClockCleared` checks the time and encodes, before `Begin`, and `PutClockCleared` writes the prepared value and fails only as a write of the transaction does. |
 | `Keys.SelfRevocation`, `ReadSelfRevocation`, `FormatRevocationExport` | The statement `Load` verified as this node's, for a running node; the reader of the file for a caller with no loaded keys; the one formatter of the export, which panics on the zero statement. |
@@ -88,6 +88,18 @@ transaction of `txn`; nothing here calls an `fsx` write.
   persisted mark, so the certificate never starts before what the node already
   issued, and leaves `clock.rec` alone. The next renewal after the pause is
   cleared replaces that certificate.
+- **No certificate starts after the mark.** `Renew` raises the persisted mark to
+  the time it signs at, in the transaction of the renewal (`clock` is an optional
+  write between the serial and the certificate; it is skipped when `now`, in whole
+  seconds, is not above the mark, and the mark is never lowered by it). Without
+  this a certificate signed on a clock that is ahead could outlive the mark that
+  was meant to catch that clock: a stop within a minute of the renewal, before the
+  periodic write, left the mark below the certificate, and after the clock was set
+  back no pause happened at all. With it, a clock that is later found behind a
+  certificate is always found behind the mark too, and the pause follows. A
+  certificate that starts after `now` is due at once (`RenewReasonNotYetValid`),
+  because it cannot be signed under: that is what is left when the owner clears
+  the pause of a clock that was ahead.
 - **The clock record never goes back.** `SaveClock` refuses a lower mark, a lifted
   or moved pause flag, and a state without a mark. Only the owner's clear (`PrepareClockCleared`, `PutClockCleared`) resets
   the mark and lifts the pause, in one replacement.

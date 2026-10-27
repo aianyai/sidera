@@ -10,6 +10,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/timing"
 )
 
 // capture runs the transaction and returns the disk a crash would leave before
@@ -71,8 +72,8 @@ func TestRenewalReplaysToAConsistentStateFromEveryCrashState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := 11 * 6; len(states) != want || points != 11 {
-		t.Fatalf("captured %d states at %d points, want %d at 11", len(states), points, want)
+	if want := 16 * 6; len(states) != want || points != 16 {
+		t.Fatalf("captured %d states at %d points, want %d at 16", len(states), points, want)
 	}
 
 	const acked = 2 // the last serial whose renewal was acknowledged
@@ -86,6 +87,11 @@ func TestRenewalReplaysToAConsistentStateFromEveryCrashState(t *testing.T) {
 		cert, seen := k1.Certificate().Payload().Serial, k1.SerialSeen().Serial
 		if (cert != 2 && cert != 3) || (seen != 2 && seen != 3) || seen < cert || (cert == 3 && seen != 3) {
 			t.Fatalf("%s: certificate serial %d, serial seen %d: a state no step of a renewal leaves", s.name, cert, seen)
+		}
+		// no step of a renewal leaves a certificate that starts above the mark
+		if mark, err := keys.ReadClock(r1.mem); err != nil || k1.Certificate().Payload().NotBefore.Add(timing.ClockTolerance).After(mark.HighWater) {
+			t.Errorf("%s: the certificate of serial %d starts at %v, above the mark %v (%v)", s.name, cert,
+				k1.Certificate().Payload().NotBefore.Add(timing.ClockTolerance), mark.HighWater, err)
 		}
 		work, err := keys.RecoveryWork(r1.mem)
 		if err != nil {

@@ -31,19 +31,26 @@ const (
 	// RenewReasonExpiring: RenewBefore or less of the validity remains, or the
 	// certificate has expired, or it has no validity at all.
 	RenewReasonExpiring
+	// RenewReasonNotYetValid: the certificate starts after now. It was signed on
+	// a clock that was ahead of the one the node trusts now, and nothing can be
+	// signed under it until that time comes.
+	RenewReasonNotYetValid
 )
 
 // RenewalDue decides whether the certificate is to be renewed at now: when an
-// earlier renewal was interrupted, and when RenewBefore or less of the validity
+// earlier renewal was interrupted, when RenewBefore or less of the validity
 // remains (the boundary is inclusive), which includes a certificate that has
 // expired or has no validity at all, so that a value nobody filled in is renewed
-// and never trusted.
+// and never trusted, and when the certificate starts after now, which is what a
+// clock that was ahead and then cleared by the owner leaves behind.
 func RenewalDue(cert record.NetworkKeyCertificate, interrupted bool, now time.Time) (RenewVerdict, RenewReason) {
 	switch {
 	case interrupted:
 		return RenewDue, RenewReasonInterrupted
 	case cert.NotAfter.IsZero() || cert.NotAfter.Sub(now) <= RenewBefore:
 		return RenewDue, RenewReasonExpiring
+	case cert.ValidityAt(now) == record.NotYetValid:
+		return RenewDue, RenewReasonNotYetValid
 	}
 	return RenewNotDue, RenewReasonCurrent
 }
@@ -71,7 +78,10 @@ func RenewalInterrupted(seen record.SerialSeen, cert record.Verified[record.Netw
 //
 // It refuses to sign while the rollback pause is in force or while the clock is
 // behind the persisted mark by more than the clock tolerance; it writes nothing
-// then. Memory follows the disk: the serial is remembered when it is durable,
+// then. Otherwise it raises the persisted mark to now in the same transaction,
+// when now is above it, so that a certificate never starts after the mark: the
+// clock that signed it is then one the next start judges, whatever happens to
+// the periodic write of the mark. Memory follows the disk: the serial is remembered when it is durable,
 // the certificate when the transaction has committed.
 func (k *Keys) Renew(now time.Time) error {
 	s := k.s
@@ -94,6 +104,10 @@ func (k *Keys) Renew(now time.Time) error {
 		return fmt.Errorf("keys: the certificate issued does not carry a serial above the one seen")
 	}
 	seen := record.SerialSeenOf(cert.verified)
+	raised, err := raisedMark(clk, now)
+	if err != nil {
+		return err
+	}
 
 	tx := s.w.Begin(certRenew)
 	defer tx.Close()
@@ -101,6 +115,11 @@ func (k *Keys) Renew(now time.Time) error {
 		return err
 	}
 	s.seen = seen // the serial is durable: this process never issues it again
+	if raised != nil {
+		if err := tx.Replace(RoleClock, ClockPath, raised, fsx.ModePrivate); err != nil {
+			return err
+		}
+	}
 	if err := tx.Replace(RoleCertificate, CertificatePath, cert.wire, fsx.ModePrivate); err != nil {
 		return err
 	}
@@ -109,6 +128,21 @@ func (k *Keys) Renew(now time.Time) error {
 	}
 	s.cert, s.certWire = cert.verified, cert.wire
 	return nil
+}
+
+// raisedMark is the encoded clock record that raises the persisted mark to now,
+// or nil when now, in whole seconds, is not above it. The pause flag is not
+// carried: Renew has refused to sign while one is in force. A mark the record
+// cannot hold is an error that touches nothing.
+func raisedMark(cur ClockState, now time.Time) ([]byte, error) {
+	mark := now.UTC().Truncate(time.Second)
+	if !mark.After(cur.HighWater) {
+		return nil, nil
+	}
+	if err := checkRecordTime(mark); err != nil {
+		return nil, fileError(ClockPath, ErrClockRegression, "the record needs a high water mark from 1970-01-01T00:00:01Z on, to the end of year 9999")
+	}
+	return encodeClock(ClockState{HighWater: mark}), nil
 }
 
 // issueCertificate signs the certificate of the network key at the serial, valid
