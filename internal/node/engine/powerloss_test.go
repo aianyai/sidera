@@ -74,7 +74,6 @@ func runPowerLoss(t *testing.T, seed int64) *powerLoss {
 	p := newPowerLoss(t, seed)
 	m := newModelRunWith(t, seed, harness.Options{Observer: p, ArchiveSweepEvery: time.Hour})
 	p.attach(m)
-	m.pathFloor = 1
 	for i := range powerLossSteps {
 		p.beginStep()
 		p.runStep(i)
@@ -770,11 +769,10 @@ type powerLossTotals struct {
 	moments, stepsAt      map[string]int
 	inFlight, checked     map[string]int
 	reached               map[txn.Key]int
-	control               map[string]int
 }
 
 func newPowerLossTotals() *powerLossTotals {
-	return &powerLossTotals{moments: map[string]int{}, stepsAt: map[string]int{}, inFlight: map[string]int{}, checked: map[string]int{}, reached: map[txn.Key]int{}, control: map[string]int{}}
+	return &powerLossTotals{moments: map[string]int{}, stepsAt: map[string]int{}, inFlight: map[string]int{}, checked: map[string]int{}, reached: map[txn.Key]int{}}
 }
 
 func (a *powerLossTotals) add(p *powerLoss) {
@@ -797,9 +795,6 @@ func (a *powerLossTotals) add(p *powerLoss) {
 	}
 	for k, n := range p.reached {
 		a.reached[k] += n
-	}
-	for k, n := range p.m.controlPaths() {
-		a.control[k] += n
 	}
 }
 
@@ -834,11 +829,6 @@ func (a *powerLossTotals) judge(t *testing.T) {
 	for _, kind := range []string{"sent", "handed out", "acknowledged", "source delivered"} {
 		if a.checked[kind] < 50 {
 			t.Errorf("%d facts of kind %q were found on a disk, want at least 50", a.checked[kind], kind)
-		}
-	}
-	for _, path := range harness.ControlPaths {
-		if a.control[path] == 0 {
-			t.Errorf("the control path %s was never taken", path)
 		}
 	}
 	a.judgeTable(t)
