@@ -73,6 +73,15 @@ By default the node has one instance, `Instance`, and every accessor without a n
   way, so a quiet without this condition returns in the gap before the turn's next call
   and the run that follows depends on the speed of that goroutine. A test that holds such
   a turn on purpose cannot wait for quiet until it lets the turn go.
+- **The instances of a first boot are taken on in order.** The adapter host starts every
+  instance at once and their admissions reach the engine in whichever order the processes
+  answer, and the engine draws the identifiers and tokens of each admission from one
+  random source, so one seed gave each instance other identifiers from run to run, and
+  with them another order of the endpoints a model run picks from. `LauncherConfig.Order`
+  (the fixture passes the instances in the order it lists them) makes a launch wait until
+  the latest process of the instance before it has been sent `adapter.probe`, which comes
+  after the engine has admitted the instance and drawn what it needs. A restart starts the
+  instances at once, since the latest process of the one before is then the previous run's.
 - **Quiet is a round in which no count moved.** A condition of the fixture's parts
   answers whether it holds and a count that never goes down (notifications sent, turns
   ended). `Quiesce` looks at the conditions, asks the engine (`engine.Quiesce`, with an

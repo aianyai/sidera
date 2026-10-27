@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -116,6 +117,14 @@ type LauncherConfig struct {
 	// starts, with the number of the launch of the instance (1 is the first): a
 	// knob armed here is in place before the adapter answers anything.
 	Arm func(instance string, n int, k *fakeadapter.Knobs)
+	// Order, which may be nil, is the order the instances of a first boot are taken on
+	// in: a launch of an instance waits until the latest process of the one before it
+	// has been sent adapter.probe, which the engine does after it has admitted the
+	// instance and drawn what the admission needs from its random source. Without an
+	// order the host starts the instances at once and the admissions reach the engine
+	// in whichever order the processes answer, so each instance gets other identifiers
+	// and other tokens from run to run of one seed.
+	Order []string
 }
 
 // LauncherInstance is what the adapters of one instance declare and drive.
@@ -152,6 +161,7 @@ func (l *AdapterLauncher) Launch(ctx context.Context, inst adapterhost.Instance)
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	l.awaitPredecessor(ctx, inst.ID)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	w, ok := l.writers[inst.ID]
@@ -181,6 +191,30 @@ func (l *AdapterLauncher) Launch(ctx context.Context, inst adapterhost.Instance)
 	l.launches[inst.ID] = append(l.launches[inst.ID], launch)
 	go launch.watch()
 	return &launchedProcess{launch}, nil
+}
+
+// predecessorWait is how long, on the real clock, a launch waits for the instance before
+// it in Order; a predecessor that never comes (kept away on purpose) must not hold a
+// node up.
+const predecessorWait = 10 * time.Second
+
+// awaitPredecessor holds the launch of an instance until the latest process of the one
+// before it in Order has been probed. After a restart the latest process of the
+// predecessor is the one of the run before, which was probed long ago, so the restart
+// of a node starts its instances at once.
+func (l *AdapterLauncher) awaitPredecessor(ctx context.Context, id string) {
+	i := slices.Index(l.c.Order, id)
+	if i <= 0 {
+		return
+	}
+	prev := l.c.Order[i-1]
+	deadline := time.Now().Add(predecessorWait)
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		if ls := l.Launches(prev); len(ls) > 0 && slices.Contains(ls[len(ls)-1].Methods(), adapterproto.MethodAdapterProbe) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // Launches are the adapter processes started for the instance, in the order they

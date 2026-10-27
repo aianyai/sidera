@@ -224,7 +224,7 @@ func New(t testing.TB, o Options) *H {
 		h.runtimes = map[string]*fakeruntime.Runtime{}
 		lc := LauncherConfig{
 			T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect),
-			Instances: map[string]LauncherInstance{},
+			Instances: map[string]LauncherInstance{}, Order: h.instances,
 		}
 		for i, name := range h.instances {
 			own := LauncherInstance{Manifest: AdapterManifestOf(name, o.MaxDirect)}
