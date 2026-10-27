@@ -32,7 +32,7 @@ type cmdInbound struct {
 func (c *cmdInbound) gate() gate { return gateLoopback }
 func (c *cmdInbound) run(e *Engine, now time.Time) {
 	rc, err := e.takeIn(now, c.from, c.sender, c.data)
-	c.done(rc, e.classify(err))
+	c.done(rc, e.classifyPeerCall("inbound", c.from, err))
 }
 
 // Inbound takes one envelope for this node, from the endpoint sender of the node
@@ -52,6 +52,20 @@ func (e *Engine) Inbound(ctx context.Context, from transport.Origin, sender iden
 	return roundTrip(ctx, e, submitInternal, c, c.call)
 }
 
+// classifyPeerCall is classify for a call that another node made. What the caller
+// learns of an error that is neither a refusal nor a storage failure is only that
+// no receipt exists, the same it learns of a node it cannot reach, and the source
+// logs it at debug as a node that gave no answer; so the target, which alone knows
+// that the failure is its own, says it here, at error.
+func (e *Engine) classifyPeerCall(call string, from transport.Origin, err error) error {
+	err = e.classify(err)
+	var ref *Refusal
+	if err != nil && !errors.As(err, &ref) {
+		e.log.Error("a call from another node failed for a reason that is no refusal", "call", call, "node", from.Node().String(), "error", err.Error())
+	}
+	return err
+}
+
 type cmdPull struct {
 	call[transport.PullAnswer]
 	from transport.Origin
@@ -61,7 +75,7 @@ type cmdPull struct {
 func (c *cmdPull) gate() gate { return gateLoopback }
 func (c *cmdPull) run(e *Engine, now time.Time) {
 	ans, err := e.answerPull(now, c.from, c.req)
-	c.done(ans, e.classify(err))
+	c.done(ans, e.classifyPeerCall("pull", c.from, err))
 }
 
 // Pull answers a source's pull for the current reports of its deliveries of one

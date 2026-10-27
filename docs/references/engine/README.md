@@ -39,6 +39,12 @@ the operating system codes (pending verification by CI on main for Windows). The
 injects `fsxtest.DiskFull`, the platform's own full-disk error, so it means the
 same on every platform.
 
+A call from another node (an envelope taken in, a pull) that fails for a reason that
+is neither a refusal nor a storage failure is logged at error on the target, with the
+call and the calling node (`classifyPeerCall`): the sender is told only that no
+receipt exists, which it logs at debug as a node that gave no answer, so the target's
+own log is the one place that says the failure is the target's.
+
 **The schedule.** One min-heap of entries keyed by (kind, id), one timer on the
 injected clock. Entries due together run in the order they were set. A periodic
 task is due one period after `Start` and one period after each run; a clock that
@@ -1547,6 +1553,7 @@ reproducible).
 | The body is held by what needs it, and every record has one of its own | `inbound.go` (`settledSource`, `writeArrivals`), `outbound.go`, `drain.go` (`settledIn`); the engine only writes the record without its reference, and the store removes that record's body | `TestTheBodyIsHeldOnlyByWhatStillNeedsIt`, `TestEachRecordOfAMessageHasABodyFileOfItsOwnThatGoesWithItsFinalState`, `TestEvidenceThatFinishesASourceDeliveryRemovesTheBodyOfTheSourceRecord`, `TestCloseBatchClosesRecordsAndDropsTheBodyReferenceOfEachRecordItClosesAndOfNoOther` |
 | Every write of taking a message in survives a crash, and every declared step is crashed at | `intake`, `deliver`, `deliver-reply`, `source-update` (declared by the store) | `TestSendingAndIntakeRecoverFromACrashAtEveryPoint`: a message, a message the target refuses (it holds no body), an envelope and an answer that no source record of this node sent (the target writes the body), an answer with evidence, and an answer whose evidence ends the question's last delivery (the transaction removes the question's own body); a message or an answer that has a source ends handled once, and the test fails when a declared step is reached by no scenario |
 | The receiving entry under arbitrary bytes | `inbound.go` | `FuzzInbound` |
+| A failure of a call from another node that is no refusal and no storage failure is logged at error on the target | `inbound.go` (`classifyPeerCall`) | `TestAFailureOfACallFromAnotherNodeThatIsNoRefusalIsLoggedAsAnError`, `TestTheEntriesOfTheReceivingSideLogWhatIsNoRefusal` |
 | An endpoint is woken once for messages that arrive together, not while its turn runs or its prompt is unread, once more when a turn ends with the prompt unread, and again for a message that arrives after the minimum interval | `prompts.go` (`noteArrival`, `noteTurnEnded`, `servePrompts`, `retryPrompt`) | `TestBusyOrUnreadAgentGetsNoFeedback`, `TestUnreadPromptRepromptedOnce`, `TestNewArrivalAfterMinIntervalWakesOnce`, `TestFiveArrivalsStartOneTurn` |
 | The turns that prompts start are capped for the node, the endpoint that waited longest goes first, a raised cap and a turn that ends free places, and a turn that went on while the adapter was away holds its place | `prompts.go` (`promptRound`, `servePrompts`), `operations_settings.go` | `TestPromptTurnsBeyondNodeCapWaitOldestFirst` |
 | An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceProbed`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
