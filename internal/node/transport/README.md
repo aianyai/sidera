@@ -37,7 +37,9 @@ no clock but the one its knobs were given.
 - **A receipt is the target's.** An error from the `Handler` passes through
   unchanged and means no receipt exists. `ErrTimeout` and `ErrUnreachable` are the
   transport's own: after a timeout the target may have processed the envelope, so
-  the same bytes are sent again and the target deduplicates; after
+  the same request (the same request digest) is sent again and the target
+  deduplicates by sender node, sender endpoint, message id and recipient, comparing the
+  request digest; after
   `ErrUnreachable` it did not see it. The caller's own context error is returned
   as it is, neither of the two: the target may or may not have seen the call. The
   handler runs under the caller's context, and so does a replay.

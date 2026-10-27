@@ -58,8 +58,9 @@ then.
 
 **Two ways to get no answer.** `ErrUnreachable`: the target did not see the call.
 `ErrTimeout`: the call went out, no answer came back, and the target may have
-processed it, so the same bytes are sent again and the target deduplicates by
-message id. Every transport implementation returns these two with this meaning,
+processed it, so the same request (the same request digest, not necessarily the same
+bytes) is sent again and the target deduplicates by sender node, sender endpoint,
+message id and recipient, and compares the request digest. Every transport implementation returns these two with this meaning,
 wrapped as it likes, so that the engine's retry rules do not depend on the
 transport; they live in this package because they are shared by all of them. Any
 other error comes from the target and passes unchanged; it means no receipt

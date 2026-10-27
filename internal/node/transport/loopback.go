@@ -43,8 +43,9 @@ func NewLoopback(self ident.NodeID, h Handler, knobs *Knobs) *Loopback {
 // returns is returned as it is, from the wait of a delay or from the handler: it
 // is neither [ErrTimeout] nor [ErrUnreachable], and the target may or may not
 // have seen the envelope. After ErrTimeout the target may have processed the
-// envelope: send the same bytes again and the target deduplicates. After
-// ErrUnreachable it certainly did not. Any other error is the target's own.
+// envelope: send the same request again and the target deduplicates, by sender
+// node, sender endpoint, message id and recipient, comparing the request digest.
+// After ErrUnreachable it certainly did not. Any other error is the target's own.
 func (l *Loopback) Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, data []byte) (Receipt, error) {
 	if err := l.knobs.wait(ctx, CallSend, target); err != nil {
 		return Receipt{}, err

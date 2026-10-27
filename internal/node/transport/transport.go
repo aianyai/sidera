@@ -100,7 +100,8 @@ var (
 	// target did not see it: it is safe to send again, by the sender's schedule.
 	ErrUnreachable = errors.New("transport: node unreachable")
 	// ErrTimeout means the call went out and no answer came back; the target may
-	// have processed it. The sender sends the same bytes again and the target
-	// deduplicates by message id.
+	// have processed it. The sender sends the same request again (the same
+	// request digest) and the target deduplicates by sender node, sender
+	// endpoint, message id and recipient, and compares the request digest.
 	ErrTimeout = errors.New("transport: no answer in time")
 )

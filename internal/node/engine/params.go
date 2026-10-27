@@ -33,9 +33,10 @@ type Params struct {
 	// may cure waits before it is tried again, on the injected clock.
 	RetryBackoff time.Duration
 	// ResendBackoff is how long a sender waits after a send that got no receipt
-	// before it sends the same bytes again, on the injected clock. A message is
-	// sent again until its delivery deadline; the target deduplicates by message
-	// id, so a send that was processed and whose receipt was lost is harmless.
+	// before it sends the same request again, on the injected clock. A message is
+	// sent again until its delivery deadline; the target deduplicates by sender
+	// node, sender endpoint, message id and recipient and compares the request
+	// digest, so a send that was processed and whose receipt was lost is harmless.
 	ResendBackoff time.Duration
 	// PullInterval is how long a sender waits between two pulls of the reports of
 	// a delivery that is not final, until its report deadline.
