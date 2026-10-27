@@ -77,6 +77,9 @@ type promptFlight struct {
 	at time.Time
 	// calling says a call (the prompt or its reconciliation) is with the adapter.
 	calling bool
+	// cancelCall ends the call that is with the adapter: the end of its deadline
+	// uses it, and so does the answer, to release the context. Nil when none is.
+	cancelCall context.CancelFunc
 	// outcome is how the attempt ended once that is known, and zero until then; an
 	// outcome that could not be written is kept here for the retry.
 	outcome handoff.AttemptOutcome
@@ -361,20 +364,54 @@ func (e *Engine) dispatchPrompt(now time.Time, id ident.EndpointID, d handoff.Pr
 	params := adapterproto.PromptDeliverParams{
 		Endpoint: adapterproto.EndpointRef(id.String()), Attempt: attempt, Text: handoff.PromptText(d.Count),
 	}
-	e.callDeliver(st.rec.Instance, id, params)
+	e.callDeliver(now, st.rec.Instance, id, params)
 }
 
 // callDeliver sends the prompt to the adapter from a worker.
-func (e *Engine) callDeliver(instance string, id ident.EndpointID, params adapterproto.PromptDeliverParams) {
-	e.promptOf(id).flight.calling = true
-	if !e.spawn(func(ctx context.Context) {
-		e.adapterCalls.Add(1)
-		res, err := e.d.Adapters.DeliverPrompt(ctx, instance, params)
+func (e *Engine) callDeliver(now time.Time, instance string, id ident.EndpointID, params adapterproto.PromptDeliverParams) {
+	e.spawnPromptCall(now, id, func(callCtx, ctx context.Context) {
+		res, err := e.d.Adapters.DeliverPrompt(callCtx, instance, params)
 		e.adapterCalls.Add(-1)
 		c := &cmdPromptResult{call: newCall[struct{}](), endpoint: id, attempt: params.Attempt, res: res, err: err}
 		_, _ = roundTrip(ctx, e, submitInternal, c, c.call)
+	})
+}
+
+// spawnPromptCall runs a call to the adapter about the attempt in flight in a worker.
+// The call is bound by PromptCallDeadline on the injected clock: when it ends the
+// call's context is cancelled, the worker's call returns with an error that leaves the
+// outcome unknown, and the result is taken in like any other. The worker gets the
+// context of the call and, to answer the loop, the one of the engine.
+func (e *Engine) spawnPromptCall(now time.Time, id ident.EndpointID, call func(callCtx, ctx context.Context)) {
+	f := e.promptOf(id).flight
+	callCtx, cancel := context.WithCancel(e.ctx)
+	f.calling, f.cancelCall = true, cancel
+	e.sched.set(promptKey(schedPromptCallDeadline, id), now.Add(e.p.PromptCallDeadline))
+	if !e.spawn(func(ctx context.Context) {
+		e.adapterCalls.Add(1)
+		call(callCtx, ctx)
 	}) {
-		e.promptOf(id).flight.calling = false
+		e.endPromptCall(f, id)
+	}
+}
+
+// endPromptCall takes the call of the attempt in flight as over: its answer has come
+// or it could not be started.
+func (e *Engine) endPromptCall(f *promptFlight, id ident.EndpointID) {
+	f.calling = false
+	if f.cancelCall != nil {
+		f.cancelCall()
+		f.cancelCall = nil
+	}
+	e.sched.remove(promptKey(schedPromptCallDeadline, id))
+}
+
+// promptCallDeadline is the end of the time a call about a prompt has: the call is
+// cancelled, and its answer, an error, arrives as a command.
+func (e *Engine) promptCallDeadline(id ident.EndpointID) {
+	if p := e.prompts[id]; p != nil && p.flight != nil && p.flight.cancelCall != nil {
+		e.log.Warn("the adapter did not answer a call about a prompt in time; the call is cancelled", "endpoint", id.String())
+		p.flight.cancelCall()
 	}
 }
 
@@ -400,7 +437,7 @@ func (e *Engine) promptResult(now time.Time, r *cmdPromptResult) {
 	if p == nil || p.flight == nil || p.flight.attempt != r.attempt {
 		return
 	}
-	p.flight.calling = false
+	e.endPromptCall(p.flight, r.endpoint)
 	outcome := handoff.AttemptUnknown
 	switch {
 	case r.err == nil:
@@ -448,16 +485,12 @@ func (e *Engine) startReconcile(now time.Time, id ident.EndpointID) {
 		params.Checkpoint = json.RawMessage(slices.Clone(cp))
 	}
 	instance, attempt := st.rec.Instance, p.flight.attempt
-	p.flight.calling = true
-	if !e.spawn(func(ctx context.Context) {
-		e.adapterCalls.Add(1)
-		res, err := e.d.Adapters.Reconcile(ctx, instance, params)
+	e.spawnPromptCall(now, id, func(callCtx, ctx context.Context) {
+		res, err := e.d.Adapters.Reconcile(callCtx, instance, params)
 		e.adapterCalls.Add(-1)
 		c := &cmdReconcileResult{call: newCall[struct{}](), endpoint: id, attempt: attempt, res: res, err: err}
 		_, _ = roundTrip(ctx, e, submitInternal, c, c.call)
-	}) {
-		p.flight.calling = false
-	}
+	})
 }
 
 type cmdReconcileResult struct {
@@ -485,7 +518,7 @@ func (e *Engine) reconcileResult(now time.Time, r *cmdReconcileResult) {
 	if p == nil || p.flight == nil || p.flight.attempt != r.attempt {
 		return
 	}
-	p.flight.calling = false
+	e.endPromptCall(p.flight, r.endpoint)
 	switch {
 	case r.err != nil && e.ctx.Err() != nil:
 		return

@@ -995,6 +995,14 @@ verdict. Step 11 of the start does the same for every attempt found in flight; a
 not connected is asked when it is. A write that fails keeps the outcome and is tried again after
 `RetryBackoff`.
 
+A call about a prompt (`prompt.deliver` or `prompt.reconcile`) is bound by `PromptCallDeadline`
+(1 minute) on the injected clock, as the adapter host expects of a caller: the engine schedules the end
+of the deadline when it starts the call, and when it falls due it cancels the call's context. A
+cancelled `prompt.deliver` has no answer, which is an unknown outcome and goes to
+`prompt.reconcile`; a cancelled `prompt.reconcile` leaves the outcome unknown, and the attempt settles.
+Without the bound an adapter that hangs would keep the endpoint busy for ever and, with enough hung
+prompts, fill the cap on the turns of the node.
+
 **Blocked delivery.** Delivery to a session endpoint is judged blocked by `handoff.AssessBlocked`
 (prompts failing for longer than 5 minutes because of a cause that holds: the adapter offline, the
 runtime's authentication invalid or its service unavailable). The engine judges an endpoint at

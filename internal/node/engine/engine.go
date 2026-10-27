@@ -865,6 +865,10 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.startReconcile(now, id)
 		}
+	case schedPromptCallDeadline:
+		if id, err := ident.ParseEndpointID(key.id); err == nil {
+			e.promptCallDeadline(id)
+		}
 	case schedPromptSettle:
 		if id, err := ident.ParseEndpointID(key.id); err == nil {
 			e.fireSettle(now, id)

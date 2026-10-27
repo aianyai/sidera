@@ -63,6 +63,9 @@ const (
 	// schedPromptSettle is the retry of recording how an attempt ended after a write
 	// failed; the id is the endpoint.
 	schedPromptSettle
+	// schedPromptCallDeadline is the end of the time a call to an adapter about a prompt
+	// has to be answered; the id is the endpoint.
+	schedPromptCallDeadline
 	// schedBlocked is the next time to judge whether delivery to a session endpoint is
 	// blocked that the judgment names (the instant a failing run passes the threshold)
 	// or whose block could not be recorded; the id is the endpoint.

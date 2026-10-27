@@ -711,3 +711,74 @@ func TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning(t *t
 	readAndEndTurn(t, h, firstAgent, first)
 	wantPrompts(t, h, third, 1)
 }
+
+// An adapter that does not answer a call about a prompt is not waited for for ever: the
+// call ends at its deadline, a prompt that got no answer is an unknown outcome that is
+// asked of the adapter, and a reconciliation that got none leaves the outcome unknown.
+// Either way the attempt settles, so the endpoint can be prompted by the rules again and
+// the place of the node's cap that the attempt held is free.
+func TestACallAboutAPromptThatGetsNoAnswerEndsAtItsDeadline(t *testing.T) {
+	hold := fakeadapter.Outcome{Kind: fakeadapter.OutcomeHold}
+	lostAnswer := fakeadapter.Outcome{Kind: fakeadapter.OutcomeError, Code: peer.CodeInternalError, AfterEffect: true}
+	deadline := engine.DefaultParams().PromptCallDeadline
+	for _, c := range []struct {
+		rule      string
+		prompt    fakeadapter.Outcome
+		reconcile fakeadapter.Outcome
+		// reconcileHit is the knob hit that shows the adapter was asked to reconcile.
+		reconcileHit string
+	}{
+		{"the prompt is not answered", hold, fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate}, "reconcile.indeterminate"},
+		{"the reconciliation is not answered", lostAnswer, hold, "reconcile.hold"},
+	} {
+		t.Run(c.rule, func(t *testing.T) {
+			h := sessionNode(t, harness.Options{NodeSettings: `{"node_prompt_turns":1}`}, "a")
+			_, first := idleSession(t, h, "a")
+			_, second := idleSession(t, h, "a")
+			// A prompt whose answer is lost still reaches the runtime; the turn it would
+			// start is held back, since a turn that began would prove it delivered.
+			holdBackTurn(t, h, first)
+			ctrl, err := h.Adapter(harness.Instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for request, o := range map[string]fakeadapter.Outcome{fakeadapter.RequestPrompt: c.prompt, fakeadapter.RequestReconcile: c.reconcile} {
+				if err := ctrl.SetOutcome(h.Ctx(), request, o); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sendToAddr(t, h, "a", first, "for the session whose adapter does not answer")
+			quiet(t, h)
+			h.Advance(time.Second)
+			sendToAddr(t, h, "a", second, "for the session that waits for the place")
+			quiet(t, h)
+			wantPrompts(t, h, first, 1)
+			wantPrompts(t, h, second, 0)
+
+			// The call is with the adapter until the deadline, counted from the prompt.
+			h.Advance(deadline - 3*time.Second)
+			quiet(t, h)
+			if attemptsOf(t, h, first).InFlight == nil {
+				t.Fatalf("the attempt settled before the deadline of the call: %+v hits %v", attemptsOf(t, h, first), knobHits(t, h))
+			}
+			h.Advance(3 * time.Second)
+			quiet(t, h)
+			if c.reconcileHit == "reconcile.hold" {
+				// The prompt's own answer was lost at once, so the reconciliation began
+				// then and its deadline is a whole one after it.
+				h.Advance(deadline)
+				quiet(t, h)
+			}
+			a := attemptsOf(t, h, first)
+			if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptUnknown {
+				t.Fatalf("the attempts are %+v, want one with an unknown outcome and none in flight", a)
+			}
+			// The prompt that goes to the second session may be reconciled too, so the
+			// count is a lower bound.
+			if n := knobHits(t, h)[c.reconcileHit]; n < 1 {
+				t.Errorf("the adapter was never asked to reconcile (%s)", c.reconcileHit)
+			}
+			wantPrompts(t, h, second, 1)
+		})
+	}
+}

@@ -71,7 +71,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
   a result that does not say whether the prompt arrived is asked of the adapter
   (`prompt.reconcile`) and recorded as the verdict says, and step 11 of the start asks about every
   attempt found in flight. No path calls `prompt.deliver` twice for one attempt. A turn that begins
-  for the attempt in flight settles it as delivered, whatever the answer was.
+  for the attempt in flight settles it as delivered, whatever the answer was. Each of the two
+  calls (`prompt.deliver`, `prompt.reconcile`) ends at `Params.PromptCallDeadline` on the injected
+  clock, by cancelling its context; a call that got no answer is an unknown outcome.
 - **The prompt decision is asked for the whole node, and again whenever its answer may have
   changed.** `servePrompts` runs after each command of the loop once the node serves, and acts
   only when `promptsDirty` says something the decision reads has changed (an arrival, the end of
