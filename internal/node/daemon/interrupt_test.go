@@ -135,8 +135,10 @@ func TestASignalDuringTheStartStopsItBetweenTwoSteps(t *testing.T) {
 	}
 	var signalErr error
 	c.Attach.TrustSync = func(ctx context.Context, _ *daemon.Env) error {
+		// Windows sends a process no signal but Kill: the start is failed so that Run
+		// returns, as it would otherwise run until a signal that never comes.
 		if signalErr = self.Signal(syscall.SIGTERM); signalErr != nil {
-			return nil
+			return signalErr
 		}
 		select {
 		case <-ctx.Done():
