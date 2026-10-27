@@ -1,11 +1,14 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -114,7 +117,7 @@ type Engine struct {
 	fatal      error                            // set by classify; the loop stops after the command that set it
 	probed     bool                             // the command that just ran was a probe of Quiesce
 	installing atomic.Pointer[admin.RequestKey] // the request whose adapter package is being copied: one is at a time, nil when none
-	inLoop     atomic.Bool                      // the loop is running a command or the due entries of the schedule: what spawn asserts
+	loopG      atomic.Uint64                    // the id of the loop's goroutine, set when the loop starts: what spawn asserts
 
 	// pendingNotices are the direct endpoints that a message became ready for since the
 	// last step of the loop, to be told with endpoint.pending; see pending.go.
@@ -454,11 +457,12 @@ func (e *Engine) poke() {
 // schedule. finish waits for the goroutines with WaitGroup.Wait on the same
 // goroutine, and a WaitGroup may not be added to concurrently with a Wait that
 // starts from a zero count; the loop is also what makes "ended" and "starting a
-// worker" exclude each other. It panics when it is called while the loop is not
-// running a command, which is what a call from another goroutine is in all but the
-// rare moment the loop is busy; the flag is a guard against misuse, not a proof.
+// worker" exclude each other. It panics when it is called from any other
+// goroutine. The check is of the goroutine and not of what the loop is doing at
+// the moment: a flag the loop raises while it runs a command would let a call from
+// another goroutine through whenever it came while the loop was busy.
 func (e *Engine) spawn(fn func(ctx context.Context)) bool {
-	if !e.inLoop.Load() {
+	if goroutineID() != e.loopG.Load() {
 		panic("engine: spawn is called only from the loop")
 	}
 	select {
@@ -477,6 +481,24 @@ func (e *Engine) spawn(fn func(ctx context.Context)) bool {
 		fn(e.ctx)
 	}()
 	return true
+}
+
+// goroutineID is the id of the calling goroutine, read from the first line of its
+// stack trace ("goroutine 18 [running]:"). Go keeps the id out of its API on
+// purpose, so that it does not become a key of goroutine-local state; here it only
+// tells the loop's goroutine from the others. The trace is that of the caller
+// alone, which stops nothing else, and spawn is called once per worker, not per
+// message, so the cost of formatting it does not show.
+func goroutineID() uint64 {
+	var buf [64]byte
+	line := buf[:runtime.Stack(buf[:], false)]
+	line, ok := bytes.CutPrefix(line, []byte("goroutine "))
+	if i := bytes.IndexByte(line, ' '); ok && i > 0 {
+		if id, err := strconv.ParseUint(string(line[:i]), 10, 64); err == nil {
+			return id
+		}
+	}
+	panic(fmt.Sprintf("engine: the stack trace does not begin with the goroutine's id: %q", buf[:]))
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +661,7 @@ func (e *Engine) awaitRunning(ctx context.Context) error {
 // The loop
 
 func (e *Engine) loop() {
+	e.loopG.Store(goroutineID())
 	defer e.finish()
 	for {
 		e.armTimer()
@@ -766,8 +789,6 @@ func (e *Engine) clearRollback(now time.Time) {
 // step runs one command: one reading of the clock for all of it, then the phase
 // gate, then the command.
 func (e *Engine) step(c command) {
-	e.inLoop.Store(true)
-	defer e.inLoop.Store(false)
 	now := e.d.Clock.Now()
 	e.observe(now)
 	if e.fatal != nil { // making the pause durable failed for good
@@ -797,8 +818,6 @@ func (e *Engine) step(c command) {
 // fireDue runs every entry of the schedule that is due, as one command: one
 // reading of the clock, the entries in the order of their due times.
 func (e *Engine) fireDue() {
-	e.inLoop.Store(true)
-	defer e.inLoop.Store(false)
 	now := e.d.Clock.Now()
 	e.observe(now)
 	if e.fatal != nil {

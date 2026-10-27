@@ -107,7 +107,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
 - **Workers start only in the loop.** `spawn` is called from a command or a due
   entry, never from another goroutine: `finish` waits for the workers on the loop's
   goroutine, and a worker started concurrently with that wait could be missed. It
-  panics when the loop is not running a command.
+  panics when it is called from any goroutine but the loop's, which it tells by the
+  goroutine's id that the loop records when it starts, not by what the loop is doing
+  at the moment.
 - **One loop, typed commands, the order of the inbox.** Every command is a type
   with a `run`; commands run in the order they entered the inbox. Commands a
   command queues for itself (the chunks of a long batch) run after the commands

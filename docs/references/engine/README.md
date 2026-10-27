@@ -1158,7 +1158,13 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   workers with a `WaitGroup` on the loop's goroutine; adding to a `WaitGroup`
   concurrently with a wait that starts from a zero count is a misuse the library
   documents. Keeping `spawn` to the loop also makes "the engine has ended" and
-  "a worker is starting" exclusive. `TestSpawnOutsideTheLoopPanics` pins the guard.
+  "a worker is starting" exclusive. The guard compares the id of the calling
+  goroutine with the one the loop recorded when it started, read from the first
+  line of the caller's own stack trace since Go keeps the id out of its API; a
+  flag the loop raised while it ran a command let a call from another goroutine
+  through whenever the loop happened to be busy, which is the misuse the guard is
+  there for. `TestSpawnOutsideTheLoopPanics` makes the call while the loop is held
+  inside a command.
 - **An answer channel of capacity one**, as in etcd's raft node, so that the loop
   never blocks on a caller that left.
 - **Two kinds of submitter.** An outside caller that waits for ever would hold a

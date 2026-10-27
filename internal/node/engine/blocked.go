@@ -78,8 +78,6 @@ func (e *Engine) serveBlocked() {
 	if len(e.blockedDirty) == 0 {
 		return
 	}
-	e.inLoop.Store(true)
-	defer e.inLoop.Store(false)
 	now := e.d.Clock.Now()
 	e.observe(now)
 	if e.fatal != nil || e.paused || e.retired {

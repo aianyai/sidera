@@ -457,11 +457,15 @@ func TestAContinuationIsNotStarvedByAnInboxThatIsNeverEmpty(t *testing.T) {
 
 // The engine counts its workers with a WaitGroup that Stop waits for on the loop's
 // goroutine, so a worker may be started only from there; a call from anywhere else
-// would race the wait and is refused loudly.
+// would race the wait and is refused loudly. The loop is held inside a command while
+// the call is made: what is refused is the goroutine, not the moment, so a call that
+// comes while the loop is busy is refused too.
 func TestSpawnOutsideTheLoopPanics(t *testing.T) {
 	noLeaks(t)
 	r := newRig(t, 10)
 	e := r.start()
+	release := engine.StallLoop(t, e)
+	defer release()
 	defer func() {
 		if recover() == nil {
 			t.Error("spawn from a goroutine that is not the loop's did not panic")
