@@ -327,6 +327,12 @@ func TestRepliesAndCreateRepliesPassRestrictedDeclaration(t *testing.T) {
 	if d := sourceDelivery(t, h, res.MessageID); d.State != delivery.StateAccepted {
 		t.Errorf("b's reply is %s (%s), want accepted by a", d.State, d.Reject)
 	}
+	// What was taken in is also handed out: the permission to reply that the
+	// delivery earned is judged again when the endpoint reads, under a declaration
+	// that takes nobody's messages.
+	if page := recvAs(t, h, h.Agent("a"), fakeagent.RecvInput{}); !slices.Contains(pageIDs(page), res.MessageID) {
+		t.Errorf("a's page holds %v, want b's reply %s handed out", pageIDs(page), res.MessageID)
+	}
 
 	// And so is the reply to a creation.
 	msg := create(t, h, "a", "default")
