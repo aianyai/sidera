@@ -21,6 +21,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/reply"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -259,7 +260,6 @@ type powerLoss struct {
 	flight   ident.EndpointID // the sender of a send the test waits on
 	fired    map[string]int   // cuts inside a transaction so far, by class of transaction and by class of step ("step " prefix)
 	stepCuts int32            // the number of cuts when the step began
-	swept    bool             // the retention has passed: a target record may have been swept before its source
 
 	// what the run reached, for the assertions at the end
 	moments   map[string]int // cuts inside a transaction, by class of transaction
@@ -553,9 +553,6 @@ func (p *powerLoss) sweepRetention() {
 	p.m.judgeClosed()
 	p.m.acked.clear()
 	p.m.newControlGen(p.seed)
-	p.mu.Lock()
-	p.swept = true
-	p.mu.Unlock()
 	p.stepCuts = p.cuts.Load()
 	p.aim(sweepClass)
 	for range 2 {
@@ -661,9 +658,7 @@ func (p *powerLoss) judgeFloor(sc *store.Scan, fail func(string, ...any)) {
 	for _, c := range sc.Ctl {
 		ctls[c.Key] = c.Record
 	}
-	p.mu.Lock()
-	swept := p.swept
-	p.mu.Unlock()
+	now := p.h.Clock().Now()
 	for _, o := range sc.Out {
 		if o.Lost != nil {
 			continue
@@ -678,7 +673,9 @@ func (p *powerLoss) judgeFloor(sc *store.Scan, fail func(string, ...any)) {
 				target, ok = ctls[k]
 			}
 			switch {
-			case !ok && swept: // the target's record may have served its retention first
+			case !ok && !now.Before(reply.RetainFactsUntil(tr.Delivery.ReportBy)):
+				// The target's record may have served its retention first: the sweep keeps
+				// a record until the latest of several terms, of which this is the least.
 			case !ok:
 				fail("the source says message %s is delivered to %s and the target holds no record of it", o.Key.Message, tr.Address)
 			case target.State != delivery.StateDelivered:
