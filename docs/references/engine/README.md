@@ -65,9 +65,10 @@ takes the due ticks itself, and steps 13 and 14 do the work of the other two; `S
 hold and wakes the loop, so what fell due after its step and before the switch goes at once.
 Periodic tasks, the deadlines and retries of session creations, drains and the waits of recv
 fire as ever. The reason is the order of the start: a record that fell due while the node was
-down must not be ticked, nor its feedback formed, before the adapters have said which turns
-run (step 10) and the creations were settled (step 11), because the release of a lease on a
-record whose turn still runs is decided by that.
+down must not be ticked, nor its feedback formed, before step 11 has checked the creations,
+closes and interrupts, releases and prompts, which ask the adapters connected at step 10.
+The busy state those adapters reported plays no part in step 11 or 12: it is used to renew
+leases once the node serves.
 
 **The clock.** Every command and every wake of the timer reads the wall clock once
 and observes it against the high water mark. A reading set back beyond the tolerance
@@ -1245,7 +1246,7 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
 - **What fell due while the node was down waits for its step.** The loop runs from step 8,
   and an entry that is due fires as soon as the loop looks at the schedule; for the ticks of
   records, the flush of feedback and the look at a source record that would be before the
-  adapters have reported turn state, which is what the release of a lease depends on. The
+  adapters have connected and step 11 has asked them about what was not settled. The
   hold is in the schedule, by the phase, so that no caller of it and no new kind of timed
   rule has to know about the start; a hold of those entries in the handlers would be one
   more special case in each. The test restarts a node whose record fell due, sees no `tick`

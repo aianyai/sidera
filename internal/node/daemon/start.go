@@ -328,8 +328,10 @@ func (d *Daemon) stepAdapters(ctx context.Context) error {
 // Steps 11 to 14: the engine's second recovery entry: the creation intents and
 // the prompt attempts are checked, every record is ticked, the feedback that fell
 // due goes out, and the loopback goes on. They come after the adapters have
-// reported, so that a lease is not released under a turn that is running. The
-// engine logs the begin and the end of each.
+// reported because step 11 asks the connected adapters about creations, closes and
+// interrupts, releases and prompts; the busy state the adapters reported is used
+// to renew leases once the node serves, not by these steps. The engine logs the
+// begin and the end of each.
 func (d *Daemon) stepRecoverDelivery(ctx context.Context) error { return d.engine.RecoverDelivery(ctx) }
 
 // Step 15: the engine serves, and the Agent interface switches to full service.

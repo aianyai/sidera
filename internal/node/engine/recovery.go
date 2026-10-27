@@ -302,9 +302,10 @@ type recoveryPhase struct {
 
 // The phases of RecoverDelivery, in the order of the startup steps. The feature
 // that owns a phase fills in its function; until then it is empty. The order is a
-// fact of the start: the leases are only released after the adapters have said
-// which turns are running, and the feedback goes out after the leases were
-// judged.
+// fact of the start: step 11 asks the connected adapters about creations, closes
+// and interrupts, releases and prompts, so it comes after they have connected (the
+// busy state they reported is used for renewal after serving), and the feedback
+// goes out after the leases were judged.
 var recoveryPhases = [...]recoveryPhase{
 	{11, "reconcile", (*Engine).recoverReconcile},
 	{12, "tick", (*Engine).recoverTick},

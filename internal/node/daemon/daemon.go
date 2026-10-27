@@ -202,8 +202,9 @@ type Attachments struct {
 	// Adapters is step 10, after Config.AdapterHost has started the adapter
 	// instances the owner enabled: what else starts at that step. The host returns
 	// when each instance has answered adapter.start or been judged offline, because
-	// the recovery of deliveries that follows releases a lease only when no turn is
-	// running and has to be told which turns run first; this hook runs after it.
+	// step 11 of the recovery of deliveries asks the connected adapters about
+	// creations, closes and interrupts, releases and prompts; the busy state they
+	// reported is used for renewal after serving. This hook runs after it.
 	Adapters func(context.Context, *Env) error
 	// AgentServe is step 15: the Agent interface serves everything.
 	AgentServe func(context.Context, *Env) error

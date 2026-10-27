@@ -165,9 +165,9 @@ type startResult struct {
 }
 
 // The adapters that the owner enabled are started at step 10, and the step does
-// not end before each has answered adapter.start: the recovery of deliveries that
-// follows releases a lease only when no turn is running, and cannot know that from
-// an adapter that has not said so. The adapter is held just before its answer, so
+// not end before each has answered adapter.start: step 11 of the recovery of
+// deliveries asks the connected adapters about creations, closes and interrupts,
+// releases and prompts, and cannot ask one that has not connected. The adapter is held just before its answer, so
 // that the step has to wait, and what the step saw is read from the ledger the
 // adapter wrote and from the log of the daemon.
 func TestEnabledAdapterInstancesAreStartedAtStepTenAndTheStepWaitsForThem(t *testing.T) {
