@@ -139,6 +139,21 @@ func BlockedCause(c handoff.Cause) (delivery.Cause, error) {
 	return 0, unmapped("blocked cause", int(c))
 }
 
+// HandoffBlockedCause is the inverse of BlockedCause: the cause handoff judges a block
+// by, for the cause a target record carries. It lets the engine know what was reported
+// from the records alone when the head record that holds it was not written.
+func HandoffBlockedCause(c delivery.Cause) (handoff.Cause, error) {
+	switch c {
+	case delivery.CauseAdapterOffline:
+		return handoff.CauseAdapterOffline, nil
+	case delivery.CauseRuntimeAuth:
+		return handoff.CauseAuthInvalid, nil
+	case delivery.CauseNativeUnavailable:
+		return handoff.CauseServiceUnavailable, nil
+	}
+	return 0, unmapped("recorded blocked cause", c)
+}
+
 func appliesTo(c adapterproto.Availability, endpoint adapterproto.EndpointRef) bool {
 	return len(c.Endpoints) == 0 || slices.Contains(c.Endpoints, endpoint)
 }

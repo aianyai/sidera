@@ -102,30 +102,38 @@ func (e *Engine) serveBlocked() {
 	}
 }
 
-// blockedSignals are the causes that keep the adapter from working for the endpoint. For
-// an endpoint whose block is not reported, an adapter that has not been online since the
-// node began to serve is offline since then: before that the node did not look, and a block
-// reported on the node's own start for an adapter that is about to connect would tell
-// senders what is not so. For an endpoint whose block is reported the start of the cause
-// is left unknown, which measures from the oldest message that waits: a restart must not
-// shorten the failing run of a block the senders were told of, because a correction
-// would then be false and the block, told once per delivery, would never be told again.
-// The block then goes on until a connection shows the cause gone or a prompt is delivered.
-// A block is reported when the head says so or when a message that waits carries the mark:
-// a crash between the writes of the marks and of the head leaves senders that may already
-// have been told.
-func (e *Engine) blockedSignals(st *endpointState, head store.AttemptsRecord, pending []store.InRecord) handoff.Signals {
+// blockedSignals are the causes that keep the adapter from working for the endpoint. An
+// adapter that has not been online since the node began to serve is offline since then:
+// before that the node did not look, and a block reported on the node's own start for an
+// adapter that is about to connect would tell senders what is not so. A restart does not
+// end a block that was reported by shortening the failing run, because handoff keeps a
+// reported block while its cause holds.
+func (e *Engine) blockedSignals(st *endpointState) handoff.Signals {
 	sig := e.adapterSignals(st.rec.Instance, adapterproto.EndpointRef(st.rec.ID.String()))
-	if sig.AdapterOffline && sig.Since.IsZero() && !blockedReported(head, pending) {
+	if sig.AdapterOffline && sig.Since.IsZero() {
 		sig.Since = e.servingSince
 	}
 	return sig
 }
 
-// blockedReported says whether senders may have been told that delivery to the endpoint is
-// blocked.
-func blockedReported(head store.AttemptsRecord, pending []store.InRecord) bool {
-	return head.Blocked.Cause != 0 || slices.ContainsFunc(pending, func(in store.InRecord) bool { return in.Record.Blocked })
+// blockedReport is the block that senders may have been told of: the one the head
+// records, or, when a crash between the writes of the marks and of the head left a message
+// that waits marked and the head not, the cause on the first such mark, counted from the
+// oldest message that waits. Zero means nothing was reported.
+func (e *Engine) blockedReport(head store.AttemptsRecord, pending []store.InRecord) handoff.BlockedReport {
+	if head.Blocked.Cause != 0 {
+		return head.Blocked
+	}
+	i := slices.IndexFunc(pending, func(in store.InRecord) bool { return in.Record.Blocked })
+	if i < 0 {
+		return handoff.BlockedReport{}
+	}
+	cause, err := adapterreg.HandoffBlockedCause(pending[i].Record.BlockedCause)
+	if err != nil {
+		e.log.Error("a message is marked blocked for a cause the judgment has no name for; the mark is not taken for a report", "message", string(pending[i].Key.Message), "error", err.Error())
+		return handoff.BlockedReport{}
+	}
+	return handoff.BlockedReport{Cause: cause, Since: pending[0].AcceptedAt}
 }
 
 // judgeBlocked asks whether delivery to the endpoint is blocked and writes what the
@@ -142,7 +150,7 @@ func (e *Engine) judgeBlocked(now time.Time, id ident.EndpointID) {
 	head := e.view.attempts[id]
 	head.Endpoint = id
 	pending := e.pendingOf(now, st)
-	in := handoff.BlockedInput{Attempts: head.Attempts, Signals: e.blockedSignals(st, head, pending), Reported: head.Blocked}
+	in := handoff.BlockedInput{Attempts: head.Attempts, Signals: e.blockedSignals(st), Reported: e.blockedReport(head, pending)}
 	if len(pending) > 0 {
 		in.OldestPendingAt = pending[0].AcceptedAt
 	}
@@ -159,9 +167,9 @@ func (e *Engine) judgeBlocked(now time.Time, id ident.EndpointID) {
 		}
 		event = delivery.Event{Type: delivery.EventBlocked, Cause: cause}
 		targets = pending
-		if v.Status == handoff.BlockedNew {
-			head.Blocked = handoff.BlockedReport{Cause: v.Cause, Since: v.Since}
-		}
+		// An ongoing block carries what was reported, so this also writes the head
+		// that a crash left unwritten.
+		head.Blocked = handoff.BlockedReport{Cause: v.Cause, Since: v.Since}
 	case handoff.BlockedRecovered:
 		head.Blocked = handoff.BlockedReport{}
 	}

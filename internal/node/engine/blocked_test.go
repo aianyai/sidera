@@ -678,3 +678,24 @@ func TestReadingTheBlockedMessagesEndsTheBlock(t *testing.T) {
 		t.Errorf("a was told %v, want each block and each recovery once", got)
 	}
 }
+
+// A block that was reported lasts while its cause does, whatever the failing run measures
+// afterwards: the oldest message that waited expires and the next one arrived recently, yet
+// the adapter has been away all the time. The senders were told of a block that is not over
+// and are not told that it is.
+func TestABlockStaysWhenTheOldestWaitingMessageExpiresWhileTheCauseHolds(t *testing.T) {
+	h, _, addr, sent := blockedSession(t, 1)
+	settle := func() { engineQuiet(t, h) }
+	step(h, settle, delivery.DefaultEndpointMaxQueue-handoff.DefaultBlockedThreshold-3*time.Minute)
+	late := sendToAddr(t, h, "a", addr, "sent when the first is about to expire")
+	settle()
+	step(h, settle, 4*time.Minute)
+	if in := inOf(t, h, sent[0]); in.Record.State != delivery.StateRejected {
+		t.Fatalf("the first message is %s, want it expired", in.Record.State)
+	}
+	// The message that is left has waited less than the threshold.
+	wantBlockFacts(t, h, addr, true, delivery.CauseAdapterOffline, handoff.CauseAdapterOffline, late)
+	if got := told(t, h, "a"); got[delivery.KindBlockedRecovered] != 0 {
+		t.Errorf("a was told %v, want no recovery while the adapter is away", got)
+	}
+}

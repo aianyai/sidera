@@ -579,6 +579,14 @@ func TestBlockedCause(t *testing.T) {
 		if got, err := adapterreg.BlockedCause(c); err != nil || got != want {
 			t.Errorf("BlockedCause(%d) = %v, %v, want %v", c, got, err, want)
 		}
+		if back, err := adapterreg.HandoffBlockedCause(want); err != nil || back != c {
+			t.Errorf("HandoffBlockedCause(%v) = %v, %v, want %v", want, back, err, c)
+		}
+	}
+	for _, c := range []delivery.Cause{0, delivery.CauseNetwork} {
+		if _, err := adapterreg.HandoffBlockedCause(c); !errors.Is(err, adapterreg.ErrUnmapped) {
+			t.Errorf("HandoffBlockedCause(%v) = %v", c, err)
+		}
 	}
 	for _, c := range []handoff.Cause{0, 99} {
 		if _, err := adapterreg.BlockedCause(c); !errors.Is(err, adapterreg.ErrUnmapped) {

@@ -1003,17 +1003,16 @@ dropped (an arrival, a lease, an acknowledgement, an expiry), an attempt settled
 snapshot, the adapter's connection ending or its probe being answered, the start of the node and the
 clearing of a wall clock that was set back; and at the instant the rule names for a run that is
 still short (`BlockedVerdict.RetryAt`), since no event marks it. The adapter's signals are those of
-`AdapterSignals`, except that, for an endpoint whose block is not reported, an adapter that has not
-connected since the node began to serve is offline since then and not since an unknown time: the
-node did not look before, and a message that waited while the node was down would otherwise be
-reported blocked in the moment the node starts, for an adapter that is about to connect. For an
-endpoint whose block is reported (the head says so, or a message that waits carries the mark, which
-a crash between the writes of the marks and of the head leaves) the start of the cause is left unknown, which
-measures from the oldest message that waits: counting from the start of the node would shorten the
-failing run below the threshold, the judgment would take the block for over and correct it to the
-sender, and the block that the adapter's absence then reports again would never be told, since a
-delivery is told as blocked once. A reported block therefore goes on across a restart until a
-connection shows the cause gone, or a prompt is delivered.
+`AdapterSignals`, except that an adapter that has not connected since the node began to serve is
+offline since then and not since an unknown time: the node did not look before, and a message that
+waited while the node was down would otherwise be reported blocked in the moment the node starts,
+for an adapter that is about to connect. What the senders may have been told is what the head says,
+or, when a crash between the writes of the marks and of the head left a message that waits marked
+and the head not, the cause on that mark, counted from the oldest message that waits; the first
+judgment writes the head. `handoff.AssessBlocked` keeps a reported block while a cause holds, so a
+restart, an expired oldest message or an adapter that comes back with another cause cannot shorten
+the failing run into a false correction; the block ends when a connection shows the cause gone, a
+prompt is delivered after the report, or nothing waits.
 
 A verdict is recorded like a prompt: the target records first and the endpoint's attempts record,
 the head, last, in one call (`store.Blocked`). A new block marks every message that waits with the
