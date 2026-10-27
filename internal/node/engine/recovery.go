@@ -348,6 +348,8 @@ func (c *cmdRecoveryPhase) run(e *Engine, now time.Time) {
 	err := c.phase.run(e, now)
 	if err == nil {
 		e.log.Info(fmt.Sprintf("startup step %d end", c.phase.step), "name", c.phase.name)
+	} else {
+		e.log.Error(fmt.Sprintf("startup step %d failed", c.phase.step), "name", c.phase.name, "error", err.Error())
 	}
 	c.done(struct{}{}, e.classify(err))
 }

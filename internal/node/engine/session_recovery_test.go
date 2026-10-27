@@ -7,6 +7,7 @@ import (
 	"path"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -531,5 +533,67 @@ func TestCreationWhoseEndpointWasDamagedIsFailed(t *testing.T) {
 	}
 	if !uncontrolled {
 		t.Errorf("alerts %+v, want one of kind control_unknown about %s", sc.Alerts, c.SessionEndpoint)
+	}
+}
+
+// A storage error that is not fatal, met when step 11 settles a creation that cannot go
+// on (its endpoint or its initial message is lost), does not end the start: the creation
+// is looked at again after RetryBackoff and settled then, as a creation whose
+// unconfirmed reply could not be written is.
+func TestACreationThatCannotBeSettledAtStartIsRetriedNotLeftToAbortTheStart(t *testing.T) {
+	noLeaks(t)
+	for _, tc := range []struct {
+		name string
+		// failing lists the writes of a control result that fail: the settlement of
+		// a lost message is met twice before the start is over, by the quarantine of
+		// the damaged body and by the check of the creation that follows it.
+		failing []int
+		lose    func(t *testing.T, r *rig, c store.CtlRecord, ep store.EndpointRecord)
+	}{
+		{"the endpoint is lost", []int{1}, func(t *testing.T, r *rig, c store.CtlRecord, ep store.EndpointRecord) {
+			if err := r.st.ControlIntake(nil, &ep, c, nil); err != nil {
+				t.Fatalf("ControlIntake: %v", err)
+			}
+			r.seedFile(store.EndpointsDir, ep.Name(), []byte("not a record"))
+		}},
+		{"the initial message is lost", []int{1, 2}, func(t *testing.T, r *rig, c store.CtlRecord, ep store.EndpointRecord) {
+			body := []byte("the initial message")
+			c.Initial = &store.InitialMessage{ContentType: "text/plain", Body: store.BodyRefOf(body)}
+			c.EndpointMaxQueue = delivery.DefaultEndpointMaxQueue
+			d, err := engine.DerivedDeliveryOf(c)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := r.st.ControlIntake(body, &ep, c, &d); err != nil {
+				t.Fatalf("ControlIntake: %v", err)
+			}
+			r.seedFile(store.BodiesDir, store.BodyFileName(d.Name()), []byte("not the initial message"))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newRig(t, 10)
+			intent := &store.CreateIntent{Attempt: "0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6", Endpoint: mustEndpoint(t, 61), State: store.IntentCreating}
+			c, ep := seedControl(t, r, 4, intent)
+			tc.lose(t, r, c, ep)
+			for _, hit := range tc.failing {
+				r.faulty.Fail(fsxtest.Match{Tx: "control-result", Role: "ctl", Step: fsx.StepWrite, Hit: hit}, syscall.EIO)
+			}
+
+			e := r.start()
+			settle(t, e)
+			if e.Phase() != engine.PhaseRunning {
+				t.Fatalf("phase %v, want the start to have completed", e.Phase())
+			}
+			if sc := r.scan(); len(sc.Ctl) != 1 || sc.Ctl[0].Intent == nil || sc.Ctl[0].Intent.State != store.IntentCreating {
+				t.Fatalf("the creation is %+v before the retry, want it unsettled", sc.Ctl)
+			}
+
+			r.clk.Advance(engine.DefaultParams().RetryBackoff)
+			settle(t, e)
+			sc := r.scan()
+			if len(sc.Ctl) != 1 || sc.Ctl[0].Intent == nil || sc.Ctl[0].Intent.State != store.IntentFailed || !sc.Ctl[0].Dedup.HasReply {
+				t.Errorf("the creation is %+v after the retry, want a failed intent with a reply", sc.Ctl)
+			}
+		})
 	}
 }

@@ -307,7 +307,7 @@ delivery to a session: when it is judged and how the verdict is recorded.
   it has run.
 - **The recovery of deliveries is four phases in the order of the startup
   steps,** each a command of the loop that logs `startup step N begin` and
-  `startup step N end`; each is empty until the feature it belongs to is added,
+  `startup step N end` (`startup step N failed` with the error when it returns one); each is empty until the feature it belongs to is added,
   except the eleventh, which settles the session creations whose time is up and asks the
   adapter again for the others, and does the same for the closes and interrupts (the
   prompts of that step are not there yet), the twelfth,

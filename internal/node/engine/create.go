@@ -336,10 +336,20 @@ func (e *Engine) alertUncontrolled(now time.Time, c store.CtlRecord, why string)
 // createDeadline settles a creation whose reply deadline has come as unconfirmed: a
 // session may exist, and the sender is told so with the endpoint the node
 // allocated. While the wall clock is in doubt nothing is judged late, and it is
-// looked at again.
+// looked at again. It is also what looks again at a creation whose settlement
+// could not be recorded (retrySettlement), so a creation whose endpoint or initial
+// message is lost is failed again here, not judged late.
 func (e *Engine) createDeadline(now time.Time, key store.TargetKey) {
 	c, ok := e.creatingIntent(key)
 	if !ok {
+		return
+	}
+	switch {
+	case e.view.endpoints[c.Intent.Endpoint] == nil:
+		_ = e.failCreationWithoutEndpoint(now, c) // a fatal error is e.fatal, which the caller reads
+		return
+	case e.initialMessageLost(c):
+		_ = e.failCreationWithoutMessage(now, key)
 		return
 	}
 	if e.paused {
@@ -349,12 +359,24 @@ func (e *Engine) createDeadline(now time.Time, key store.TargetKey) {
 	a := e.adapters[e.instanceOf(c)]
 	reply := adapterreg.CreateUnconfirmed(adapterproto.EndpointRef(c.Intent.Endpoint.String()), a == nil || !a.online)
 	if err := e.settleCreate(now, c, reply, nil); err != nil {
-		e.classify(err)
-		if e.fatal == nil {
-			e.log.Warn("an unconfirmed creation could not be recorded; it is tried again", "record", key.String(), "error", err.Error())
-			e.sched.set(schedKey{schedCreateDeadline, key.String()}, now.Add(e.p.RetryBackoff))
-		}
+		_ = e.retrySettlement(now, key, "an unconfirmed creation", err)
 	}
+}
+
+// retrySettlement is what follows a settlement of a creation that could not be
+// recorded. A fatal error stops the loop after the command and is returned. Any
+// other leaves the creation as it was and has createDeadline look at it again after
+// RetryBackoff, so that a storage error that passes does not abort the start or
+// leave the creation without anyone looking at it. what names the settlement in
+// the log.
+func (e *Engine) retrySettlement(now time.Time, key store.TargetKey, what string, err error) error {
+	e.classify(err)
+	if e.fatal != nil {
+		return err
+	}
+	e.log.Warn(what+" could not be recorded; it is tried again", "record", key.String(), "error", err.Error())
+	e.sched.set(schedKey{schedCreateDeadline, key.String()}, now.Add(e.p.RetryBackoff))
+	return nil
 }
 
 // settleCreate ends a creation in one transaction: the reply is made and stored and
@@ -442,7 +464,8 @@ func (e *Engine) settleCreate(now time.Time, c store.CtlRecord, reply adapterpro
 // removed the file. The creation cannot go on, since no token would open the session,
 // and the sender must not wait for one: the reply says `failed` with control_unknown (no
 // session will be attached, but a call already out may have made one that nobody
-// controls), and the owner is told of it.
+// controls), and the owner is told of it. A settlement that could not be recorded is
+// retried (retrySettlement), so the error returned is the fatal one only.
 func (e *Engine) failCreationWithoutEndpoint(now time.Time, c store.CtlRecord) error {
 	failed := adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonControlUnknown}
 	n, err := e.withReply(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionCreate, Create: createResultOf(failed)})
@@ -453,13 +476,13 @@ func (e *Engine) failCreationWithoutEndpoint(now time.Time, c store.CtlRecord) e
 		return nil
 	}
 	if err != nil {
-		return err
+		return e.retrySettlement(now, c.Key, "a creation whose endpoint is lost", err)
 	}
 	intent := *n.Intent
 	intent.State = store.IntentFailed
 	n.Intent = &intent
 	if err := e.d.Store.ControlResult(n, nil); err != nil {
-		return err
+		return e.retrySettlement(now, c.Key, "a creation whose endpoint is lost", err)
 	}
 	e.view.setCtl(n)
 	e.forgetCreation(c.Key)
@@ -500,8 +523,8 @@ func (e *Engine) reconcileCreations(now time.Time) error {
 		if err := e.reconcileInitialMessage(now, c); err != nil {
 			return err
 		}
-		if _, ok := e.creatingIntent(key); !ok {
-			continue // failed: its initial message is gone
+		if _, ok := e.creatingIntent(key); !ok || e.initialMessageLost(e.view.ctl[key]) {
+			continue // failed, or waiting for the retry of its failure: its initial message is gone
 		}
 		due := c.AcceptedAt.Add(e.p.CreateReplyDeadline)
 		if !now.Before(due) && !e.paused {

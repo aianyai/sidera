@@ -122,17 +122,28 @@ func (e *Engine) derivedHandoutAuthorization(now time.Time, in store.InRecord) (
 // accepted, would wait for a message that is lost; so the reply says `failed` with
 // control_unknown (no session will be attached, but a call already out may still make one
 // that nobody controls, which is why the owner gets that alert when it is settled), and
-// the endpoint being made is closed.
+// the endpoint being made is closed. A settlement that could not be recorded is
+// retried (retrySettlement), so the error returned is the fatal one only.
 func (e *Engine) failCreationWithoutMessage(now time.Time, key store.TargetKey) error {
 	c, ok := e.creatingIntent(key)
-	if !ok || c.Initial == nil {
-		return nil
-	}
-	if _, held := e.view.in[store.DerivedKey(c)]; held {
+	if !ok || !e.initialMessageLost(c) {
 		return nil
 	}
 	failed := adapterproto.ControlCreateReply{Outcome: adapterproto.CreateReplyFailed, Reason: adapterproto.CreateReasonControlUnknown}
-	return e.settleCreate(now, c, failed, nil)
+	if err := e.settleCreate(now, c, failed, nil); err != nil {
+		return e.retrySettlement(now, key, "a creation whose initial message is lost", err)
+	}
+	return nil
+}
+
+// initialMessageLost says whether the creation carries an initial message whose
+// delivery the node does not hold.
+func (e *Engine) initialMessageLost(c store.CtlRecord) bool {
+	if c.Initial == nil {
+		return false
+	}
+	_, held := e.view.in[store.DerivedKey(c)]
+	return !held
 }
 
 // reconcileInitialMessage is what the start asks of a creation that is not settled and

@@ -852,7 +852,10 @@ answer of `indeterminate` and an adapter that is not connected are tried again, 
 settled as unconfirmed: the reply says a session may exist and names the endpoint, the endpoint is
 closed, and the owner gets an alert of kind `control_unknown`, because a native session may exist
 that nobody controls. A creation the adapter reports as failed for `control_unknown` has the same
-alert. Whatever the adapter answers after a creation was settled changes nothing, except that a
+alert. A settlement whose write fails with an error that is not fatal (one that settles a
+creation as unconfirmed, or fails one whose endpoint or initial message is lost) leaves the
+creation as it was and has the deadline entry look at it again after `RetryBackoff`, which
+settles whatever the creation has become; the start does not abort for it. Whatever the adapter answers after a creation was settled changes nothing, except that a
 session reported as created for an endpoint the owner closed meanwhile is recorded on the closed
 endpoint and released (see releasing the native session). A control record that was
 closed while its creation was unsettled can take no reply, and a retry would fail every time: the engine
@@ -1093,7 +1096,8 @@ has to do. `Open` runs the rules that have work in the order the store fixes
 `orphan-gc-endpoint`, `endpoint-drain-replay`, then the removal of the state of closed sessions and the replay of feedback, then `orphan-gc`;
 the write of an initial message's delivery that a crash left comes after `ctl-effect-replay`), works the plan out again from a fresh scan after each rule
 that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the startup steps
-11 to 14 as four commands and logs `startup step N begin` and `startup step N end`.
+11 to 14 as four commands and logs `startup step N begin` and `startup step N end`, or
+`startup step N failed` with the error when the phase returns one (the start is then aborted).
 
 ## Why
 
@@ -1541,7 +1545,7 @@ reproducible).
 | An initial message is delivered to the session as any message is, and judged again as the creation when handed out | `initial.go`, `intake_control.go` (`takeInCreate`), `pull.go` (`handoutAuthorization`) | `TestLocalEndpointsExchangeMessagesAndControlSignals`, `TestForgedHeaderInInitialMessageDoesNotChangeFrom` |
 | The reply of the new session carries the creation's reply, and the sender takes the session from it | `outbound.go` (`evidenceFor`, `encodeFor`, `withControlReply`) | `TestReplyFromNewSessionBeforeControlReplyIsAdmitted` |
 | The initial message of a creation that makes no session is told, not lost | `create.go` (`settleCreate`), `drain.go` | `TestInitialMessageOfACreationThatMakesNoSessionIsTold` |
-| A creation whose initial message or endpoint is lost while it is not settled is failed | `initial.go` (`failCreationWithoutMessage`, `reconcileInitialMessage`), `create.go` (`failCreationWithoutEndpoint`) | `TestBodyLostFromTheInitialMessageFailsItsUnsettledCreation`, `TestCreationWhoseInitialMessageIsLostIsNotAskedOfTheAdapterBeforeItIsChecked`, `TestCreationWhoseEndpointWasDamagedIsFailed` |
+| A creation whose initial message or endpoint is lost while it is not settled is failed | `initial.go` (`failCreationWithoutMessage`, `reconcileInitialMessage`), `create.go` (`failCreationWithoutEndpoint`) | `TestBodyLostFromTheInitialMessageFailsItsUnsettledCreation`, `TestCreationWhoseInitialMessageIsLostIsNotAskedOfTheAdapterBeforeItIsChecked`, `TestCreationWhoseEndpointWasDamagedIsFailed`; a settlement that cannot be recorded is retried: `TestACreationThatCannotBeSettledAtStartIsRetriedNotLeftToAbortTheStart` |
 | An interrupt is carried out when accepted and is not behind the messages of the session | `execute.go`, `view.go` (`queuedIn`) | `TestInterruptIsNotQueuedBehindMessages` |
 | A closed session endpoint owes its native session to the adapter until the adapter answers `closed`: asked at once, after the retry backoff and at every connection; the answer is recorded; an owner close, a close signal that was not confirmed and a session made for a closed endpoint are released | `release.go`, `execute.go` (`writeExecution`), `create.go` (`settleCreate`), `endpoints.go` (`putEndpoint`) | `TestOwnerClosingASessionReleasesItsNativeSession`, `TestAClosedAnswerToACloseSignalIsRecordedAsTheRelease`, `TestAnUnconfirmedCloseSignalIsFollowedByARelease`, `TestAReleaseThatCouldNotBeSentIsSentWhenTheAdapterConnects`, `TestASessionCreatedForAnEndpointThatWasClosedMeanwhileIsReleased`, `TestOnlyAClosedAnswerRecordsTheRelease`, `TestAReleasedNativeSessionIsNeverAskedAboutAgain`, `TestAReleaseIsAskedAgainAtEveryConnectionOfItsAdapter`, `TestAReleaseIsAskedAgainAfterACrashBetweenTheAnswerAndTheRecord` |
 | A native session that stays owed for the reply deadline is told to the owner once, across restarts | `release.go` (`releaseDeadline`) | `TestAReleaseThatIsNeverConfirmedRaisesOneAlertAfterTheDeadline`, `TestAReleaseThatSucceedsBeforeTheDeadlineRaisesNoAlert` |
