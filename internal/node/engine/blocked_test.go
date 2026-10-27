@@ -684,8 +684,17 @@ func TestReadingTheBlockedMessagesEndsTheBlock(t *testing.T) {
 // the adapter has been away all the time. The senders were told of a block that is not over
 // and are not told that it is.
 func TestABlockStaysWhenTheOldestWaitingMessageExpiresWhileTheCauseHolds(t *testing.T) {
-	h, _, addr, sent := blockedSession(t, 1)
+	// The host does not start the adapter again within the time the test moves the clock.
+	host := sessionHostParams()
+	host.RestartBackoffMin, host.RestartBackoffMax = 2*delivery.DefaultEndpointMaxQueue, 2*delivery.DefaultEndpointMaxQueue
+	h := sessionNodeOf(t, harness.Options{}, host, "a")
+	_, addr := idleSession(t, h, "a")
+	adapterEnded(t, h, h.AdapterLaunches(harness.Instance)[0])
+	sent := []adapterproto.MessageID{sendToAddr(t, h, "a", addr, "sent before the adapter went away")}
 	settle := func() { engineQuiet(t, h) }
+	settle()
+	step(h, settle, handoff.DefaultBlockedThreshold+time.Second)
+	wantBlockFacts(t, h, addr, true, delivery.CauseAdapterOffline, handoff.CauseAdapterOffline, sent...)
 	step(h, settle, delivery.DefaultEndpointMaxQueue-handoff.DefaultBlockedThreshold-3*time.Minute)
 	late := sendToAddr(t, h, "a", addr, "sent when the first is about to expire")
 	settle()
