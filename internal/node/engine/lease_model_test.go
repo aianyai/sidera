@@ -262,6 +262,7 @@ func (m *modelRun) step(i int) {
 		m.recv(h.Agent(to), m.idOf(to))
 	case n < 45:
 		if ep, ok := m.pickSession(); ok {
+			m.awaitAdmitted(ep.Instance)
 			m.recv(h.Session(ep.ID.String()), ep.ID)
 		}
 	case n < 59:
@@ -410,6 +411,21 @@ func (m *modelRun) recv(a fakeagent.Agent, who ident.EndpointID) {
 	default:
 		m.late = append(m.late, lateAck{a, who, res.Page.Lease, m.h.Clock().Now().Add(time.Duration(6+m.rng.Intn(30)) * time.Minute)})
 		m.took(pathRecvLateAck)
+	}
+}
+
+// awaitAdmitted waits, on the real clock, until the adapter of the instance has been
+// admitted since the node last started: the host starts its process a moment after the
+// node, and a recv of a session is refused until then, which would leave the run without
+// the recvs it is there to make. An adapter that does not come within the wait is left
+// to the recv, which fails as it would for a session that closed.
+func (m *modelRun) awaitAdmitted(instance string) {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if v, err := m.h.Engine().Adapter(m.h.Ctx(), instance); err == nil && v.Admitted {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
