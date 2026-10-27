@@ -96,11 +96,12 @@ func wantBlockNotice(t testing.TB, n notice, kind delivery.Kind, cause string, m
 func TestBlockedReportedOnceWithCauseAndRecoveredOnce(t *testing.T) {
 	cases := []struct {
 		name string
-		// begin starts the cause after the session is idle; end ends it and returns when
-		// prompts can reach the session again. settle waits for the node while the cause
-		// holds: an adapter that is away leaves the fixture's own counts unsettled.
+		// begin starts the cause after the session is idle; end ends the cause that began
+		// at began and returns when prompts can reach the session again. settle waits
+		// for the node while the cause holds: an adapter that is away leaves the
+		// fixture's own counts unsettled.
 		begin  func(t *testing.T, h *harness.H) (settle func())
-		end    func(t *testing.T, h *harness.H)
+		end    func(t *testing.T, h *harness.H, began time.Time)
 		cause  delivery.Cause
 		hcause handoff.Cause
 		text   string
@@ -110,7 +111,20 @@ func TestBlockedReportedOnceWithCauseAndRecoveredOnce(t *testing.T) {
 				adapterEnded(t, h, h.AdapterLaunches(harness.Instance)[0])
 				return func() { engineQuiet(t, h) }
 			},
-			func(t *testing.T, h *harness.H) { adapterRestartedAfter(t, h, 2, time.Minute) },
+			// The adapter comes back at the end of the host's backoff and not a moment
+			// later. The sender's records are pulled once a minute, and since the step of
+			// one second the pulls fall a second after the instants the backoff counts
+			// on, so the move that ends the backoff makes no pull due. A longer move would
+			// make a round of pulls due with the adapter's return, and a round the return
+			// cuts in two learns some corrections a pull interval after the others: at the
+			// edge of the merge window, where they are told in a notice of their own.
+			func(t *testing.T, h *harness.H, began time.Time) {
+				left := began.Add(blockedBackoff).Sub(h.Clock().Now())
+				if left <= 0 || left >= pullInterval {
+					t.Fatalf("the adapter comes back %v from now, want a move shorter than the pull interval", left)
+				}
+				adapterRestartedAfter(t, h, 2, left)
+			},
 			delivery.CauseAdapterOffline, handoff.CauseAdapterOffline, "adapter_offline"},
 		{"the runtime refuses the credentials",
 			func(t *testing.T, h *harness.H) func() {
@@ -128,7 +142,7 @@ func TestBlockedReportedOnceWithCauseAndRecoveredOnce(t *testing.T) {
 				}
 				return func() { quiet(t, h) }
 			},
-			func(t *testing.T, h *harness.H) {
+			func(t *testing.T, h *harness.H, _ time.Time) {
 				ctrl, err := h.Adapter(harness.Instance)
 				if err != nil {
 					t.Fatal(err)
@@ -150,6 +164,7 @@ func TestBlockedReportedOnceWithCauseAndRecoveredOnce(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := sessionNodeOf(t, harness.Options{}, blockedHost(), "a")
 			_, addr := idleSession(t, h, "a")
+			began := h.Clock().Now()
 			settle := tc.begin(t, h)
 			settle()
 
@@ -193,7 +208,7 @@ func TestBlockedReportedOnceWithCauseAndRecoveredOnce(t *testing.T) {
 
 			// The cause is gone: the marks come off, the prompt reaches the session, and
 			// the correction is one notice, merged the same way.
-			tc.end(t, h)
+			tc.end(t, h, began)
 			wantBlockFacts(t, h, addr, false, 0, 0, msgs...)
 			for i := 0; i < 3; i++ {
 				step(h, func() { quiet(t, h) }, time.Minute)
