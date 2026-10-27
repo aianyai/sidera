@@ -228,7 +228,11 @@ packages and are not part of them.
   quiet check adds the fakes' own numbers: with a host, the engine is asked against the
   notifications the latest launch has sent and the requests it holds, made again each
   round, and the fixture waits for that launch to have no request of its own that is not
-  answered.
+  answered. With a runtime it also waits for the runtime to have no turn whose actions are
+  not finished, and counts how often such a turn began or finished: what a turn does after
+  its start (a receive through the engine, the report of what the model read, its end)
+  runs in a goroutine of the runtime that nothing else shows while it is on its way, so a
+  quiet that did not wait for it would depend on how quickly that goroutine runs.
 - **The back end answers a method the engine lacks as an unknown method.** The agent
   interface has no category for "not yet", and adding one would change its table; an
   unknown method is what the server would say, and the scripts already handle it. The

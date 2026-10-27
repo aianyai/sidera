@@ -29,7 +29,7 @@ A session is driven through `Session`, and sessions are made and found through a
 
 | Name | Purpose |
 | ---- | ------- |
-| `New(Config)`, `Runtime` | The in-process runtime. `Create`, `Find`, `SetPlan`, `SetFirstTurn`, `StartTurn`, `EndTurn`, `KillNative`, `Idle`, `Close`. `Config.FirstTurn` is the plan of the first turn of every session. |
+| `New(Config)`, `Runtime` | The in-process runtime. `Create`, `Find`, `SetPlan`, `SetFirstTurn`, `StartTurn`, `EndTurn`, `KillNative`, `Idle`, `Activity` (idle with a count of how often a turn's actions began or finished, read together, for a fixture's quiet), `Close`. `Config.FirstTurn` is the plan of the first turn of every session. |
 | `Session`, `Launcher`, `Controller`, `Watcher` | The interfaces. A watcher gets `TurnStarted`, `TurnEnded` and `ToolResult` one at a time and in order. `Session.Created` names the runtime's own ledger entry for the session. |
 | `TurnPlan`, `TurnAction`, `ActionRunner`, `ActionResult`, `SessionInfo` | What the model does inside a turn, and who does it. |
 | `ExecRunner` | An `ActionRunner` that runs a real command with the session's tool access. An `exec` action that names a `frontend` in its arguments is a receive: its output is the page the command printed, and it is recorded like the page of a `recv` action. With a `Seed` every command gets `SIDERA_TEST_SEED=<seed>/<native ref>/<n>`, so a client that draws its message numbers from it makes the same ones when a crash walk reruns a scenario. |
@@ -110,7 +110,7 @@ A session is driven through `Session`, and sessions are made and found through a
 ## Tests
 
 `runtime_test.go` (turns, prompts, plans, the first turn, the record, receives that
-print no page, kill, close, reconcile),
+print no page, kill, close, reconcile, the activity count of a fixture's quiet),
 `record_test.go` (golden record lines, the decoder's rules, `FuzzDecodeEvent`,
 `FuzzReadRecord`), `process_test.go` (a real runtime process: creation, the clock of
 the fixture, a restarted adapter taking the session back, a process that is not the

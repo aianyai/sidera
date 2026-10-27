@@ -63,6 +63,16 @@ By default the node has one instance, `Instance`, and every accessor without a n
   stay where the process left them, so the fixture's quiet does not return while any
   instance's adapter is away: a test that keeps one away waits with the engine's own
   `Quiesce` until the host has started another.
+- **With a fake runtime, quiet also means no turn of it has actions in progress.** The
+  fixture adds a condition for the runtime of each instance made with
+  `AdapterOptions.Runtime`: `fakeruntime.Runtime.Activity` says it is idle (no turn has
+  actions running or waiting to run) and counts how often a turn's actions began or
+  finished. What a turn does after it started (a receive through the engine, the report
+  of what the model read, its end when its plan says `EndAfter`) runs in a goroutine of
+  the runtime that neither the adapter's counts nor the engine's show while it is on its
+  way, so a quiet without this condition returns in the gap before the turn's next call
+  and the run that follows depends on the speed of that goroutine. A test that holds such
+  a turn on purpose cannot wait for quiet until it lets the turn go.
 - **Quiet is a round in which no count moved.** A condition of the fixture's parts
   answers whether it holds and a count that never goes down (notifications sent, turns
   ended). `Quiesce` looks at the conditions, asks the engine (`engine.Quiesce`, with an
@@ -157,11 +167,9 @@ By default the node has one instance, `Instance`, and every accessor without a n
 
 ## What later parts add, and where they attach
 
-The loopback with its knobs, the real file system, the free-space stand-in and the adapter host are in. Each
-later part adds to this package the capability its stream needs:
-
-- the idle condition of the fake runtime in `addQuiet`, when a stream needs the fixture to
-  wait for a turn;
+The loopback with its knobs, the real file system, the free-space stand-in, the adapter host and
+the idle condition of the fake runtime are in. Each later part adds to this package the capability
+its stream needs.
 
 ## Tests
 

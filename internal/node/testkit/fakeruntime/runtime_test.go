@@ -406,6 +406,46 @@ func TestActionsRunInOrderAndIdleMeansNoneIsUnfinished(t *testing.T) {
 	}
 }
 
+// A fixture's quiet compares the count between two looks, so a turn whose actions began
+// and finished in between must change it even though the runtime is idle on both.
+func TestActivityCountsTheBeginAndEndOfATurnsActions(t *testing.T) {
+	e := newEnv(t, nil)
+	e.runner.started = make(chan string)
+	e.runner.gate = make(chan struct{})
+	s, w := e.create(1, "sess-1")
+	if err := e.rt.SetPlan(s.Ref(), fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{{Kind: fakeruntime.ActionAck}}}); err != nil {
+		t.Fatal(err)
+	}
+	idle, before := e.rt.Activity()
+	if !idle {
+		t.Fatal("not idle before anything was asked")
+	}
+	if err := e.deliver(s, 2, "go"); err != nil {
+		t.Fatal(err)
+	}
+	w.waitFor(t, "turn.started", func() bool { return len(w.started) == 1 })
+	<-e.runner.started
+	if idle, moves := e.rt.Activity(); idle || moves <= before {
+		t.Fatalf("Activity() = %v, %d while an action runs, want not idle and a count above %d", idle, moves, before)
+	}
+	_, running := e.rt.Activity()
+	e.runner.gate <- struct{}{}
+	deadline := time.Now().Add(limit)
+	for {
+		idle, moves := e.rt.Activity()
+		if idle {
+			if moves <= running {
+				t.Fatalf("the count is %d after the actions finished, want it above %d", moves, running)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("never idle after the last action")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestEndAfterEndsTheTurnWhenTheLastActionIsDone(t *testing.T) {
 	e := newEnv(t, nil)
 	s, w := e.create(1, "sess-1")

@@ -244,6 +244,9 @@ func New(t testing.TB, o Options) *H {
 				lc.Instances[name] = own
 			}
 			h.addAdapterQuiet(name)
+			if rt := h.runtimes[name]; rt != nil {
+				h.addRuntimeQuiet(name, rt)
+			}
 		}
 		h.launcher = NewAdapterLauncher(lc)
 	}
@@ -906,6 +909,18 @@ func (h *H) addAdapterQuiet(instance string) {
 		}
 		return st.Outstanding == 0, uint64(st.NotificationsSent)
 	})
+}
+
+// addRuntimeQuiet registers what the fixture asks of the fake runtime of an instance for
+// the system to be quiet: no turn of it has actions that are running or waiting to run.
+// What such a turn does, a receive through the engine, the report of what the model was
+// shown, the end of the turn, happens in a goroutine of the runtime that neither the
+// adapter's requests nor the engine's own counts show while it is on its way, so a quiet
+// that did not wait for it would return in the gap before the turn's next call and
+// the run would depend on how fast that goroutine is. Its progress is how often a
+// turn's actions began or finished.
+func (h *H) addRuntimeQuiet(instance string, rt *fakeruntime.Runtime) {
+	h.addQuiet("the runtime of "+instance+" has a turn whose actions are not finished", rt.Activity)
 }
 
 // latestAdapterStats is what the latest process of the instance reports of itself.

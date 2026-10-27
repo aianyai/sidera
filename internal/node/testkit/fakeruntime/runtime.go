@@ -26,7 +26,8 @@ type Runtime struct {
 	sessions  map[string]*session
 	byAttempt map[string]*session
 	nextPID   int64
-	busy      int // turns with actions that are not finished
+	busy      int    // turns with actions that are not finished
+	moves     uint64 // how many times busy changed; never goes down
 	firstTurn TurnPlan
 }
 
@@ -217,9 +218,21 @@ func (r *Runtime) Idle() bool {
 	return r.busy == 0
 }
 
+// Activity is Idle with a count of how many times a turn's actions began or finished,
+// read together. A fixture that asks for quiet compares the count between two looks: a
+// turn that began and finished in between leaves the runtime idle on both and has
+// still told the adapter, and through it the daemon, things the fixture has not waited
+// for.
+func (r *Runtime) Activity() (idle bool, moves uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.busy == 0, r.moves
+}
+
 func (r *Runtime) addBusy(n int) {
 	r.mu.Lock()
 	r.busy += n
+	r.moves++
 	r.mu.Unlock()
 }
 
