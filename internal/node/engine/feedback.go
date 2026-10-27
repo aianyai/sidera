@@ -252,7 +252,7 @@ func (e *Engine) formNotice(now time.Time, st *endpointState, n delivery.Notice,
 			e.log.Warn("an item of feedback names a record this node does not hold; the notice does not cover it", "message", string(it.Ref.Message))
 			continue
 		}
-		in.Covers = append(in.Covers, store.CoverRef{Out: name, Recipient: it.Ref.Recipient, Kind: it.Feedback.Kind})
+		in.Covers = append(in.Covers, store.CoverOf(name, it))
 	}
 	return in, body, nil
 }
@@ -278,11 +278,8 @@ func (e *Engine) reissueCovered(now time.Time, notice store.InRecord) error {
 			}
 		}
 		it := e.coveredItem(now, o, c)
-		// An item a failed clearing left on the record is the one the cover names: a cover
-		// clears by the recipient and the kind (withoutItem).
-		if slices.ContainsFunc(o.Feedback, func(x delivery.Item) bool {
-			return x.Ref.Recipient == it.Ref.Recipient && x.Feedback.Kind == it.Feedback.Kind
-		}) {
+		// An item a failed clearing left on the record is the one the cover names.
+		if slices.ContainsFunc(o.Feedback, func(x delivery.Item) bool { return c.Covers(c.Out, x) }) {
 			continue
 		}
 		o.Feedback = append(slices.Clone(o.Feedback), it)
@@ -347,7 +344,7 @@ func (e *Engine) clearCovered(now time.Time, items []delivery.Item) error {
 			if !seen {
 				l = e.fb.outLost[name]
 			}
-			l.Feedback = withoutItem(l.Feedback, it)
+			l.Feedback = withoutItem(name, l.Feedback, it)
 			lost[name] = l
 			ofLost = append(ofLost, it)
 			continue
@@ -356,7 +353,7 @@ func (e *Engine) clearCovered(now time.Time, items []delivery.Item) error {
 		if !seen {
 			o = e.view.out[name]
 		}
-		o.Feedback = withoutItem(o.Feedback, it)
+		o.Feedback = withoutItem(name, o.Feedback, it)
 		outs[name] = o
 		ofOuts = append(ofOuts, it)
 	}
@@ -409,13 +406,12 @@ func (e *Engine) retryClears(now time.Time) {
 	}
 }
 
-// withoutItem is the items without the one that the delivery and the kind of it
-// name: the rule by which a cover clears an item, as the replay of feedback reads
-// it.
-func withoutItem(items []delivery.Item, it delivery.Item) []delivery.Item {
-	return slices.DeleteFunc(slices.Clone(items), func(x delivery.Item) bool {
-		return x.Ref.Recipient == it.Ref.Recipient && x.Feedback.Kind == it.Feedback.Kind
-	})
+// withoutItem is the items of the record of out/ with the given file name without
+// the one the cover of it names: a cover clears an item by the store's rule, the one
+// the replay of feedback reads.
+func withoutItem(record string, items []delivery.Item, it delivery.Item) []delivery.Item {
+	cover := store.CoverOf(record, it)
+	return slices.DeleteFunc(slices.Clone(items), func(x delivery.Item) bool { return cover.Covers(record, x) })
 }
 
 func sortedOuts(m map[string]store.OutRecord) []store.OutRecord {
