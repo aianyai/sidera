@@ -146,9 +146,8 @@ func TestLeaseIsRenewedWhenTheTurnIsReportedAfterTheLease(t *testing.T) {
 			if err := ctl.Disconnect(h.Ctx()); err != nil {
 				t.Fatal(err)
 			}
-			awaitAdapterOffline(t, h)
-			h.Advance(leaseStep) // the host starts the instance again when its backoff is over
-			quiet(t, h)
+			adapterGone(t, h)
+			adapterRestarted(t, h, len(h.AdapterLaunches(harness.Instance))+1)
 			return msg
 		}},
 		{"the node restarts while the turn runs", func(t *testing.T, h *harness.H) adapterproto.MessageID {
@@ -169,23 +168,6 @@ func TestLeaseIsRenewedWhenTheTurnIsReportedAfterTheLease(t *testing.T) {
 			}
 		})
 	}
-}
-
-// awaitAdapterOffline waits, on the real clock, until the engine has been told the
-// connection of the adapter ended. The host learns of it on its own goroutine, and a node
-// that is asked to settle before then is waiting for an adapter that is about to go.
-func awaitAdapterOffline(t testing.TB, h *harness.H) {
-	t.Helper()
-	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(time.Millisecond) {
-		v, err := h.Engine().Adapter(h.Ctx(), harness.Instance)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !v.Online {
-			return
-		}
-	}
-	t.Fatal("the adapter is still online ten seconds after its connection was closed")
 }
 
 // A message that is never acknowledged is handed out under four leases, each of which

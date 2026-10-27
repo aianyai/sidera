@@ -69,11 +69,20 @@ func sessionNodeOf(t *testing.T, o harness.Options, host adapterhost.Params, nam
 }
 
 // adapterEnded ends the adapter process and returns when the node knows its adapter
-// is gone and the host has done with the end of the process, so that the next move
-// of the clock is the one that makes the host start another.
+// is gone (see adapterGone).
 func adapterEnded(t testing.TB, h *harness.H, l *harness.AdapterLaunch) {
 	t.Helper()
 	l.End()
+	adapterGone(t, h)
+}
+
+// adapterGone returns when the node knows that the connection of its adapter ended and
+// the engine has done what that makes it do. The host learns of the end on its own
+// goroutine and arms its backoff timer only after it has told the node, so the clock is
+// moved past the backoff with adapterRestarted, which allows for a move that came
+// before the timer.
+func adapterGone(t testing.TB, h *harness.H) {
+	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		v, err := h.Engine().Adapter(h.Ctx(), harness.Instance)
@@ -81,7 +90,7 @@ func adapterEnded(t testing.TB, h *harness.H, l *harness.AdapterLaunch) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the node still holds the adapter online after its process ended (%v)", err)
+			t.Fatalf("the node still holds the adapter online after its connection ended (%v)", err)
 		}
 		time.Sleep(time.Millisecond)
 	}
