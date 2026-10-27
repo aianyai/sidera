@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io/fs"
+	"math"
 	"path"
 	"reflect"
 	"slices"
@@ -249,10 +250,17 @@ type holds struct {
 }
 
 func (h *holds) ReadFile(p string) ([]byte, error) {
+	return h.ReadFileLimit(p, math.MaxInt64)
+}
+
+func (h *holds) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
 	if p == h.path {
+		if int64(len(h.data)) > maxBytes {
+			return nil, fsx.ErrTooLarge
+		}
 		return h.data, nil
 	}
-	return h.Reader.ReadFile(p)
+	return h.Reader.ReadFileLimit(p, maxBytes)
 }
 
 // bigFile is one byte more than a package may hold. It is allocated once and never
@@ -292,10 +300,14 @@ type unreadable struct {
 }
 
 func (u *unreadable) ReadFile(p string) ([]byte, error) {
+	return u.ReadFileLimit(p, math.MaxInt64)
+}
+
+func (u *unreadable) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
 	if slices.Contains(u.files, p) {
 		return nil, &fs.PathError{Op: "read", Path: p, Err: fs.ErrPermission}
 	}
-	return u.Reader.ReadFile(p)
+	return u.Reader.ReadFileLimit(p, maxBytes)
 }
 
 func (u *unreadable) ReadDir(d string) ([]fsx.Entry, error) {
@@ -354,16 +366,23 @@ type flipping struct {
 }
 
 func (f *flipping) ReadFile(p string) ([]byte, error) {
+	return f.ReadFileLimit(p, math.MaxInt64)
+}
+
+func (f *flipping) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
 	if p == f.path {
 		f.mu.Lock()
 		f.reads++
 		n := f.reads
 		f.mu.Unlock()
 		if n > 1 {
+			if int64(len(f.second)) > maxBytes {
+				return nil, fsx.ErrTooLarge
+			}
 			return []byte(f.second), nil
 		}
 	}
-	return f.Reader.ReadFile(p)
+	return f.Reader.ReadFileLimit(p, maxBytes)
 }
 
 func diffKeys(a, b map[string]string) []string {
@@ -702,11 +721,15 @@ type blockingSource struct {
 }
 
 func (b *blockingSource) ReadFile(p string) ([]byte, error) {
+	return b.ReadFileLimit(p, math.MaxInt64)
+}
+
+func (b *blockingSource) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
 	if p == b.file {
 		b.once.Do(func() { close(b.entered) })
 		<-b.release
 	}
-	return b.Reader.ReadFile(p)
+	return b.Reader.ReadFileLimit(p, maxBytes)
 }
 
 // Copying a package can take as long as the package is big, and it touches only
@@ -903,5 +926,46 @@ func TestAdaptersReturnsCopiesOfTheManifests(t *testing.T) {
 	staged.Manifest.Budgets[0].Limit = 1
 	if got := find(); !reflect.DeepEqual(got, want) {
 		t.Errorf("a change to the staged manifest reached the installed one:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// boundedSource is a package source that permits reads only within the remaining
+// package budget.
+type boundedSource struct {
+	fsx.Reader
+	remaining int64
+	first     bool
+}
+
+func (b *boundedSource) ReadFile(p string) ([]byte, error) {
+	return nil, errors.New("this source requires bounded reads")
+}
+
+func (b *boundedSource) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
+	// The manifest is read once for judgement before the copy starts.
+	if !b.first {
+		b.first = true
+		if p != manifest.FileName || maxBytes < 0 || maxBytes > config.MaxPackageBytes {
+			return nil, errors.New("manifest read exceeds its budget")
+		}
+		return b.Reader.ReadFileLimit(p, maxBytes)
+	}
+	if maxBytes < 0 || maxBytes > b.remaining {
+		return nil, errors.New("read exceeds the remaining package budget")
+	}
+	data, err := b.Reader.ReadFileLimit(p, maxBytes)
+	b.remaining -= int64(len(data))
+	return data, err
+}
+
+func TestStagingReadsTheManifestAndEveryFileWithinThePackageBudget(t *testing.T) {
+	_, c := loaded(t)
+	src := &boundedSource{Reader: srcPackage(t, "fresh", "0.1.0", nil), remaining: config.MaxPackageBytes}
+	staged, err := c.StageAdapter(src, suffixReader())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Unstage(staged); err != nil {
+		t.Fatal(err)
 	}
 }

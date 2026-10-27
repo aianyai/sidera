@@ -11,14 +11,15 @@ import (
 )
 
 // config writes only through the transactions of txn: it holds no writable file
-// system. Of fsx it uses the read side and the types a write call needs, and
-// nothing that creates, replaces, renames or removes a file. The scan reads the
+// system. Of fsx it uses the read side, its errors and the types a write call
+// needs, and nothing that creates, replaces, renames or removes a file. The scan reads the
 // source of the package, so a write that slipped in through any path fails here
 // and not only when a crash test happens to walk it.
 func TestConfigHoldsNoWritableFileSystem(t *testing.T) {
 	allowed := map[string]bool{
 		"Reader": true, "Exists": true, "Mode": true, "ModePrivate": true, "ModePrivateExec": true,
 		"Entry": true, "Info": true, "IsLeftover": true, "TempPrefix": true, "TrashPrefix": true,
+		"ErrTooLarge": true,
 	}
 	files, err := filepath.Glob("*.go")
 	if err != nil || len(files) == 0 {

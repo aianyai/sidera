@@ -179,7 +179,10 @@ func errPackageTooLarge(file string) error {
 
 func readPackage(src fsx.Reader) (pkg, error) {
 	var p pkg
-	data, err := src.ReadFile(manifest.FileName)
+	data, err := src.ReadFileLimit(manifest.FileName, MaxPackageBytes)
+	if errors.Is(err, fsx.ErrTooLarge) {
+		return p, errPackageTooLarge(manifest.FileName)
+	}
 	if err != nil {
 		return p, &ChangeError{Reason: ChangeInvalid, Field: manifest.FileName, Err: fmt.Errorf("the package has no readable manifest: %w", err)}
 	}
@@ -210,15 +213,16 @@ func readPackage(src fsx.Reader) (pkg, error) {
 				}
 				continue
 			}
-			// The size is what the file system says before anything is read. A file
-			// that says less than it holds (a link to a large file) is caught only by
-			// the count of what the copy reads, after it was read.
-			info, err := src.Stat(rel)
-			if err != nil {
-				return &SourceError{Path: rel, Err: err}
-			}
-			if total += info.Size; total > MaxPackageBytes {
-				return errPackageTooLarge(rel)
+			// Stat describes a link itself, whose length says nothing about the
+			// target's bytes. Those are counted by the bounded read of the copy.
+			if !e.IsSymlink {
+				info, err := src.Stat(rel)
+				if err != nil {
+					return &SourceError{Path: rel, Err: err}
+				}
+				if total += info.Size; total > MaxPackageBytes {
+					return errPackageTooLarge(rel)
+				}
 			}
 			p.files = append(p.files, rel)
 		}
@@ -241,10 +245,11 @@ func readPackage(src fsx.Reader) (pkg, error) {
 // is refused. A package that changes between the check and the copy is refused,
 // so what the install runs is what was checked.
 //
-// The package is read before anything is written, so a package that is refused
-// for what is in it leaves nothing, and one that holds more than MaxPackageBytes
-// is refused. rnd names the staging directory. The
-// platform the manifest lists is the caller's to check on Staged.Manifest.
+// After preflight, the package is copied one entry at a time. Link targets are
+// judged during the copy, and a failed copy cleans up what was written to the
+// staging directory. A package over MaxPackageBytes is refused. rnd names the
+// staging directory. The platform the manifest lists is the caller's to check
+// on Staged.Manifest.
 func (c *Config) StageAdapter(src fsx.Reader, rnd io.Reader) (Staged, error) {
 	p, err := readPackage(src)
 	if err != nil {
@@ -309,13 +314,14 @@ func (c *Config) copyPackage(src fsx.Reader, p pkg, staged Staged) error {
 	program := path.Clean(p.manifest.Entry.Program)
 	var total int64
 	for _, f := range p.files {
-		data, err := src.ReadFile(f)
+		data, err := src.ReadFileLimit(f, MaxPackageBytes-total)
+		if errors.Is(err, fsx.ErrTooLarge) {
+			return errPackageTooLarge(f)
+		}
 		if err != nil {
 			return &SourceError{Path: f, Err: err}
 		}
-		if total += int64(len(data)); total > MaxPackageBytes {
-			return errPackageTooLarge(f)
-		}
+		total += int64(len(data))
 		mode := fsx.ModePrivate
 		if f == program {
 			mode = fsx.ModePrivateExec

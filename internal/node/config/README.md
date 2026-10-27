@@ -170,8 +170,13 @@ The prompt turns and the endpoint defaults are not here: they are
   staging directory, and check the platform in `Staged.Manifest`
   (`adapterreg.RunsOn`). A directory or file of the package that cannot be read
   is a `*SourceError` naming its path inside the package, and is not a failure of
-  the node's own storage. A package over `MaxPackageBytes` is refused as invalid,
-  and the manifest of the copy must be the bytes that were judged. `StageAdapter` and `Unstage` are
+  the node's own storage. The manifest and each copied file are read through
+  `ReadFileLimit`, using the package's remaining `MaxPackageBytes` budget;
+  overflow is refused as invalid without reading an oversized file whole.
+  Reads follow symbolic links only when their targets are regular files:
+  target bytes count against the budget, while directories, FIFOs and devices
+  are unreadable sources. The manifest of the copy must be the bytes that were
+  judged. `StageAdapter` and `Unstage` are
   called only by the single install worker, one at a time, and may run
   concurrently with the writer loop: they take no lock of `Config` and touch
   only staging and version directories that no change reads.

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"math"
 	"path"
 	"reflect"
 	"regexp"
@@ -119,8 +120,12 @@ type countingReader struct {
 }
 
 func (c *countingReader) ReadFile(p string) ([]byte, error) {
+	return c.ReadFileLimit(p, math.MaxInt64)
+}
+
+func (c *countingReader) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
 	c.n.Add(1)
-	return c.Reader.ReadFile(p)
+	return c.Reader.ReadFileLimit(p, maxBytes)
 }
 
 func (c *countingReader) ReadDir(p string) ([]fsx.Entry, error) {
@@ -142,14 +147,24 @@ type swappingReader struct {
 }
 
 func (s *swappingReader) ReadFile(p string) ([]byte, error) {
+	return s.ReadFileLimit(p, math.MaxInt64)
+}
+
+func (s *swappingReader) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
 	if p != s.name {
-		return s.Reader.ReadFile(p)
+		return s.Reader.ReadFileLimit(p, maxBytes)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reads++
 	if s.reads == 1 {
+		if int64(len(s.first)) > maxBytes {
+			return nil, fsx.ErrTooLarge
+		}
 		return []byte(s.first), nil
+	}
+	if int64(len(s.later)) > maxBytes {
+		return nil, fsx.ErrTooLarge
 	}
 	return []byte(s.later), nil
 }
@@ -168,11 +183,15 @@ func newGatedReader(r fsx.Reader) *gatedReader {
 }
 
 func (g *gatedReader) ReadFile(p string) ([]byte, error) {
+	return g.ReadFileLimit(p, math.MaxInt64)
+}
+
+func (g *gatedReader) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
 	g.once.Do(func() {
 		close(g.entered)
 		<-g.release
 	})
-	return g.Reader.ReadFile(p)
+	return g.Reader.ReadFileLimit(p, maxBytes)
 }
 
 // ---------------------------------------------------------------------------
@@ -483,10 +502,14 @@ type unreadablePackage struct {
 }
 
 func (u *unreadablePackage) ReadFile(p string) ([]byte, error) {
+	return u.ReadFileLimit(p, math.MaxInt64)
+}
+
+func (u *unreadablePackage) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
 	if p == u.file {
 		return nil, &fs.PathError{Op: "read", Path: p, Err: fs.ErrPermission}
 	}
-	return u.Reader.ReadFile(p)
+	return u.Reader.ReadFileLimit(p, maxBytes)
 }
 
 func (u *unreadablePackage) ReadDir(d string) ([]fsx.Entry, error) {

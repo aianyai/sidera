@@ -532,13 +532,26 @@ or its declarations be installed after another had been judged.
 in all, and a package over it is refused as invalid with the file that went over and the
 limit in the error. The package is read one file at a time into memory from a directory the
 owner names, so a mistaken directory (a home, a checkout with a model file in it) would
-otherwise be read until memory ran out. No adapter is near the limit. The sizes are those the
-file system reports before anything is written, and a file that holds more than it
-reports (a link to a large file) is caught by the count of what the copy reads, after it
-was read. A file that is not a regular file (a named pipe, a device) is not refused yet:
-the reader the package is read through cannot tell it apart after following links, and
-reading a named pipe never returns, so the install worker would wait for ever. That needs
-the file layer to refuse it, which is its own change.
+otherwise be read until memory ran out. No adapter is near the limit. The manifest
+is read with `fsx.Reader.ReadFileLimit` before parsing, and the copy reads each file
+with the remaining package budget. Overflow is an invalid package, naming the file
+and the limit, without returning a truncated file or first reading the oversized
+content whole. The preflight refuses an ordinary file whose reported size
+puts the package over the limit; it does not count a symbolic link's own length,
+which says nothing about the content copied. The bounded reads count target bytes,
+are authoritative on package size and remain bounded if a file grows between the
+size check and the read.
+
+Symbolic links to regular files are copied by content, like `cp -L`: the owner
+names a package on the same machine, so following such a link introduces no new
+authority. A link to a directory is an unreadable source, as are FIFOs and devices,
+whether reached directly or through a link. The file layer checks the opened
+handle before reading and opens FIFOs without waiting for a writer, so installing
+one cannot strand the worker. These are `SourceError`s naming the package path;
+the source manifest has an invalid-manifest classification. Link tests run on
+every platform and skip when the account cannot create links. FIFO tests run only
+on Unix because Windows has no FIFO in a package directory. A refused or unreadable
+copy leaves no staging work after cleanup.
 
 **No `current` is not an error.** A first installation that crashed leaves a
 directory with no pointer. Refusing to start for it would let a crash of an
