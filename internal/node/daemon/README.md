@@ -68,7 +68,9 @@ touches files only through `fsx`, and reads time only through the injected clock
   while the node is paused waits for the owner, and the log says so. The keys are not
   safe for concurrent use, and the loop changes the certificate, the serial seen and
   the state of a renewal every hour, so `KeysView` holds only what no renewal
-  changes (`Node`, `NetworkSigner`, `SelfRevocation`); a hook that needs the
+  changes (`Node`, `SelfRevocation`) and no signer: every signature is the
+  engine's, which refuses it while the clock is in doubt or the identity is
+  retired, and a signer in a hook would bypass that refusal. A hook that needs the
   certificate or the serial reads it through the engine.
 - **The actor of the local owner is not made here.** The management interface is
   `manageapi`, and a scan keeps the actor out of this package.

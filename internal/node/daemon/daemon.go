@@ -26,7 +26,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/logfile"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/txn"
-	"github.com/aianyai/sidera/internal/record"
 	"github.com/aianyai/sidera/internal/revocation"
 )
 
@@ -157,7 +156,9 @@ type Env struct {
 }
 
 // KeysView is what a hook may do with the keys: read the identity and the
-// self-revocation, and sign with the network key. It holds only what no renewal of
+// self-revocation. It holds no signer: every signature is made by the engine,
+// which refuses it while the clock is in doubt or the identity is retired, and a
+// signer handed out here would bypass that refusal. It holds only what no renewal of
 // the certificate changes. The certificate, its wire form, the serial seen and the
 // state of a renewal are changed by the loop every hour and the keys are not safe
 // for concurrent use, so a hook, which runs beside the loop, does not read them
@@ -165,7 +166,6 @@ type Env struct {
 // and renewing the certificate are the daemon's and the engine's.
 type KeysView interface {
 	Node() ident.NodeID
-	NetworkSigner() record.Signer
 	SelfRevocation() keys.SelfRevocation
 }
 
