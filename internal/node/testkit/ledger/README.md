@@ -94,6 +94,9 @@ would let two readers of one ledger disagree.
 - Open each (writer, pid) once per process. `Memory` continues the sequence of a
   stream that exists, which is how a restarted in-process writer behaves.
 - Announce the step with `SetStep` before the action it names.
+- Close a writer of a `Dir` that lives in the test process before its directory is
+  removed: Windows removes no file that is still open, so a writer left open fails
+  the cleanup of the test's temporary directory there.
 
 ## Tests
 

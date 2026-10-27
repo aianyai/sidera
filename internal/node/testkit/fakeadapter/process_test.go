@@ -362,6 +362,7 @@ func TestProcessAdapterDrivesARuntimeProcessAndTakesItBackAfterARestart(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer fixtureLedger.Close() // Windows removes no file that is still open
 	if err := fixtureLedger.Append(ledger.KindFixtureKill, ledger.Attrs{PIDs: []int64{int64(a1.cmd.Process.Pid)}}); err != nil {
 		t.Fatal(err)
 	}

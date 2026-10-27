@@ -17,12 +17,15 @@ var start = time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)
 
 func fixedNow() time.Time { return start }
 
+// mustOpen opens a writer that is closed when the test ends, before its temporary
+// directory is removed: Windows removes no file that is still open.
 func mustOpen(t *testing.T, f ledger.Factory, writer string, pid int, now func() time.Time) *ledger.Writer {
 	t.Helper()
 	w, err := f.Open(writer, pid, now)
 	if err != nil {
 		t.Fatalf("Open(%s): %v", writer, err)
 	}
+	t.Cleanup(func() { _ = w.Close() })
 	return w
 }
 
@@ -199,9 +202,11 @@ func TestDirRefusesASecondWriterOnTheSameFile(t *testing.T) {
 	if _, err := d.Open("fixture", 7, fixedNow); err == nil {
 		t.Fatal("a second writer on the same file was accepted")
 	}
-	if _, err := d.Open("fixture", 8, fixedNow); err != nil {
+	other, err := d.Open("fixture", 8, fixedNow)
+	if err != nil {
 		t.Fatalf("a writer with another pid was refused: %v", err)
 	}
+	_ = other.Close()
 }
 
 func TestReadDirMergesWritersAndRestartsOfOneWriter(t *testing.T) {
