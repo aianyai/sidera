@@ -96,8 +96,12 @@ checks that the model saw it before acknowledging for the agent.
   oldest waiting message if that came later (a cause whose start is unknown is
   measured from that message), unless a prompt was delivered since; so an agent that was busy, and so never prompted, is still blocked when its
   adapter goes offline and stays offline.
-- Recovered: the cause cleared, a prompt was delivered, or nothing waits any
-  more.
+- Recovered: the cause cleared, a prompt was delivered after the report, or
+  nothing waits any more. Nothing else ends a reported block: while a cause is
+  present the report stands however short the failing run measures again, for
+  instance when the oldest waiting message has expired and the next one arrived
+  recently, or when the adapter reconnects reporting a new cause that began just
+  now. The verdict is then "ongoing" with the cause and start that were reported.
 - A busy agent whose adapter is online, or an agent that leaves a delivered
   prompt unread, is never blocked.
 - A run that is below the threshold while a cause is active carries `RetryAt`, the

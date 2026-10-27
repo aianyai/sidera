@@ -163,6 +163,21 @@ func TestAssessBlocked(t *testing.T) {
 				Reported: BlockedReport{Cause: CauseAdapterOffline, Since: after(time.Minute)}},
 			after(time.Hour),
 			BlockedVerdict{Status: BlockedOngoing, Reason: ReasonPersistentFailure, Cause: CauseAdapterOffline, Since: after(time.Minute)}},
+		{"oldest waiting message expired and the next arrived recently: the report stands while the cause holds",
+			BlockedInput{OldestPendingAt: after(30 * time.Minute), Signals: offline, Attempts: []Attempt{failed(time.Minute)},
+				Reported: BlockedReport{Cause: CauseAdapterOffline, Since: after(time.Minute)}},
+			after(31 * time.Minute),
+			BlockedVerdict{Status: BlockedOngoing, Reason: ReasonPersistentFailure, Cause: CauseAdapterOffline, Since: after(time.Minute)}},
+		{"adapter reconnects reporting a new cause that began just now: the report stands",
+			BlockedInput{OldestPendingAt: after(0), Signals: Signals{AuthInvalid: true, Since: after(59 * time.Minute)},
+				Reported: BlockedReport{Cause: CauseAdapterOffline, Since: after(time.Minute)}},
+			after(time.Hour),
+			BlockedVerdict{Status: BlockedOngoing, Reason: ReasonPersistentFailure, Cause: CauseAdapterOffline, Since: after(time.Minute)}},
+		{"a prompt delivered before the report does not end it while the cause holds",
+			BlockedInput{OldestPendingAt: after(0), Signals: offline, Attempts: []Attempt{delivered(2*time.Minute, PromptKindFirst)},
+				Reported: BlockedReport{Cause: CauseAdapterOffline, Since: after(10 * time.Minute)}},
+			after(time.Hour),
+			BlockedVerdict{Status: BlockedOngoing, Reason: ReasonPersistentFailure, Cause: CauseAdapterOffline, Since: after(10 * time.Minute)}},
 		{"cause cleared after a report: recovered",
 			BlockedInput{OldestPendingAt: after(0), Attempts: []Attempt{failed(time.Minute)},
 				Reported: BlockedReport{Cause: CauseAdapterOffline, Since: after(time.Minute)}},
@@ -241,10 +256,9 @@ func TestAssessBlockedReportsOnceAndRecoversOnce(t *testing.T) {
 // instant before, it is not. Without a cause there is nothing to wait for.
 func TestAssessBlockedRetryAtIsWhenTheRunPassesTheThreshold(t *testing.T) {
 	ins := map[string]BlockedInput{
-		"a failed prompt and the cause":      {OldestPendingAt: after(0), Signals: Signals{AdapterOffline: true, Since: after(time.Minute)}, Attempts: []Attempt{failed(time.Minute)}},
-		"a cause of unknown start":           {OldestPendingAt: after(3 * time.Minute), Signals: Signals{AuthInvalid: true}},
-		"a cause that began after the wait":  {OldestPendingAt: after(0), Signals: Signals{ServiceUnavailable: true, Since: after(9 * time.Minute)}},
-		"the report of an earlier block run": {OldestPendingAt: after(0), Signals: Signals{AdapterOffline: true, Since: after(9 * time.Minute)}, Reported: BlockedReport{Cause: CauseAuthInvalid, Since: after(time.Minute)}},
+		"a failed prompt and the cause":     {OldestPendingAt: after(0), Signals: Signals{AdapterOffline: true, Since: after(time.Minute)}, Attempts: []Attempt{failed(time.Minute)}},
+		"a cause of unknown start":          {OldestPendingAt: after(3 * time.Minute), Signals: Signals{AuthInvalid: true}},
+		"a cause that began after the wait": {OldestPendingAt: after(0), Signals: Signals{ServiceUnavailable: true, Since: after(9 * time.Minute)}},
 	}
 	for name, in := range ins {
 		t.Run(name, func(t *testing.T) {

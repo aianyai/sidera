@@ -1,6 +1,9 @@
 package handoff
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // DefaultBlockedThreshold is how long prompts must have been failing to reach
 // a session before delivery counts as blocked. Messages move between agents
@@ -159,7 +162,10 @@ type BlockedVerdict struct {
 // since; a failed attempt earlier than that starts it earlier.
 //
 // The status is edge-triggered through input.Reported, so a blocked period is
-// reported once and its recovery once, however often this is evaluated.
+// reported once and its recovery once, however often this is evaluated. Once a
+// block is reported it lasts while a cause is present, however short the failing
+// run measures again, until a prompt is delivered after the report; the cause
+// being gone, or no message waiting, ends it as well.
 func AssessBlocked(in BlockedInput, p BlockedParams, now time.Time) BlockedVerdict {
 	since, reason := failingSince(in, p, now)
 	cause, hasCause := in.Signals.cause()
@@ -179,10 +185,23 @@ func AssessBlocked(in BlockedInput, p BlockedParams, now time.Time) BlockedVerdi
 		return BlockedVerdict{Status: BlockedNew, Reason: ReasonPersistentFailure, Cause: cause, Since: since}
 	}
 	if in.Reported.reported() {
+		if hasCause && !in.deliveredSince(in.Reported.Since) && reason != ReasonNothingPending {
+			// A report ends when the cause is gone, a prompt was delivered or nothing
+			// waits. A run that has grown short again does not end it: the oldest waiting
+			// message may have expired, or the adapter may have come back reporting a
+			// new cause, and the senders were told of a block that has not been lifted.
+			return BlockedVerdict{Status: BlockedOngoing, Reason: ReasonPersistentFailure,
+				Cause: in.Reported.Cause, Since: in.Reported.Since}
+		}
 		return BlockedVerdict{Status: BlockedRecovered, Reason: reason,
 			Cause: in.Reported.Cause, Since: in.Reported.Since, RetryAt: retryAt}
 	}
 	return BlockedVerdict{Status: NotBlocked, Reason: reason, RetryAt: retryAt}
+}
+
+// deliveredSince says whether a prompt was delivered after t.
+func (in BlockedInput) deliveredSince(t time.Time) bool {
+	return slices.ContainsFunc(in.Attempts, func(a Attempt) bool { return a.Outcome == AttemptDelivered && a.At.After(t) })
 }
 
 // failingSince returns when the current run of failed prompts began. A
