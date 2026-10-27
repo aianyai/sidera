@@ -178,13 +178,17 @@ type periodicTask struct {
 
 // TaskInput is what a periodic task is told: the time of the command that runs
 // it, the high water mark of the wall clock as the loop holds it, whether the
-// clock is paused, and whether the node may sign. A task that writes the mark and
-// the pause to disk writes HighWater and RollbackPaused; a task that signs reads
-// only SignRefusal.
+// clock is paused and since when, and whether the node may sign. A task that
+// writes the mark and the pause to disk writes HighWater, RollbackPaused and
+// PausedSince; a task that signs reads only SignRefusal.
 type TaskInput struct {
 	Now            time.Time
 	HighWater      time.Time
 	RollbackPaused bool
+	// PausedSince is when the pause began: the persisted start for a node that
+	// started paused, otherwise the time of the command that found the clock set
+	// back. It is zero when the clock is not paused.
+	PausedSince time.Time
 	// SignRefusal is why the node may not sign now (SignRefusalOf), zero when it
 	// may. It covers the retirement of the identity, which the pause alone does
 	// not: between the retirement and the end of the daemon the loop goes on
@@ -739,9 +743,22 @@ func (e *Engine) observe(now time.Time) {
 // looked at is the one the high water mark follows from now on. The management
 // operation that asks for it persists the same change in the same transaction;
 // this is the part that the loop owns.
+//
+// The periodic tasks are due again at once. They were scheduled from readings of
+// the clock while it was wrong, and the clock was ahead for as long as the pause
+// lasted may have been days: one period after such a reading is not one period
+// from the clock the owner accepted, and the tasks that keep the node healthy (the
+// check of the certificate, the sweep of the archive) would not run until then. A
+// periodic task may run at any time, so running them now is harmless. The entries
+// of the other kinds are not moved: most are deadlines of records, which are not
+// relative to the reading they were made on, and the few that are relative
+// backoffs have no mark that says so (see the engine reference).
 func (e *Engine) clearRollback(now time.Time) {
 	e.hw.Reset(now)
 	e.paused, e.pausedSince = false, time.Time{}
+	for _, name := range e.order {
+		e.sched.set(schedKey{schedPeriodic, name}, now)
+	}
 	e.promptsDirty = true
 	e.noteBlockedAll()
 }
@@ -877,7 +894,7 @@ func (e *Engine) fire(key schedKey, now time.Time) {
 		e.later(&cmdInstanceDrain{instance: key.id})
 	case schedPeriodic:
 		p := e.periodic[key.id]
-		err := p.task(TaskInput{Now: now, HighWater: e.hw.Value(), RollbackPaused: e.paused, SignRefusal: e.signRefusal()})
+		err := p.task(TaskInput{Now: now, HighWater: e.hw.Value(), RollbackPaused: e.paused, PausedSince: e.pausedSince, SignRefusal: e.signRefusal()})
 		switch {
 		case err == nil:
 			e.sched.set(key, now.Add(p.every))

@@ -235,7 +235,10 @@ is due (step 5), before anything is signed, and then every hour in the loop, whe
 everything that signs runs, so the renewal replaces the certificate the engine signs
 the node's reports under without two goroutines touching it. A node that may not sign
 renews nothing and says so, by the one judgement of signing the engine hands the
-check: a paused node waits, and the hour after the owner clears the pause renews; an
+check: a paused node waits, and the owner's clear makes the check due at once, so the
+renewal follows it in the same pass, on the clock the owner accepted (a certificate
+signed on a clock that was ahead is not yet valid for the real one and is due at
+once; `TestAClockThatJumpedForwardAndWasPutRightLeavesACertificateTheClearRenews`); an
 identity retired by the owner signs nothing from the commit on, so the check made in
 the time before the daemon is down finds nothing to do
 (`TestACertificateThatFallsDueAfterTheRetirementIsNotSigned`). A node whose identity
@@ -569,6 +572,7 @@ under the refusal of a serial file behind the certificate below.
   `TestStatusRemindsUntilRevocationBackupConfirmed`,
   `TestAFailureRenewingTheCertificateAtTheStartEndsTheStartAsAnyFailureOfTheDiskDoes`,
   `TestAFailureRenewingTheCertificateInTheLoopIsRetriedOrEndsTheDaemon`,
+  `TestAClockThatJumpedForwardAndWasPutRightLeavesACertificateTheClearRenews`,
   `TestACrashAnywhereInTheRenewalLeavesKeysTheNextStartAcceptsAndRepairs`; the code is
   `internal/node/daemon` (`start.go`, `periodic.go`) and the operations are in the
   [engine](../engine/README.md) reference.

@@ -64,6 +64,8 @@ type rig struct {
 	params      engine.Params
 	admit       adapterreg.Admission
 	paused      bool
+	// pausedSince is when the persisted pause began, for a rig that starts paused.
+	pausedSince time.Time
 	obs         txn.Observer
 	// keys are the node's keys, loaded from its disk, for a rig made withKeys; nil
 	// otherwise, as for an engine that is not told to sign.
@@ -181,7 +183,7 @@ func (r *rig) deps() engine.Deps {
 		clk = r.engineClock
 	}
 	d := engine.Deps{
-		Node: r.node, Clock: clk, HighWater: r.hw, RollbackPaused: r.paused,
+		Node: r.node, Clock: clk, HighWater: r.hw, RollbackPaused: r.paused, RollbackPausedSince: r.pausedSince,
 		Writer: r.w, Store: r.st, Config: r.engineConfig(), Rand: harness.RandReader(r.seed),
 		Adapters: r.adapters, Home: r.home, Log: slog.New(r.log), OpenPackage: r.openPackage,
 	}

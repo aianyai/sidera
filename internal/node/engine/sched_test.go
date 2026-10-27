@@ -231,15 +231,23 @@ type clockDisk struct {
 	mu     sync.Mutex
 	hw     time.Time
 	paused bool
+	since  time.Time
 	writes int
 }
 
 func (c *clockDisk) task(in engine.TaskInput) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.hw, c.paused = in.HighWater, in.RollbackPaused
+	c.hw, c.paused, c.since = in.HighWater, in.RollbackPaused, in.PausedSince
 	c.writes++
 	return nil
+}
+
+// pauseStart is the start of the pause the last write was told of.
+func (c *clockDisk) pauseStart() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.since
 }
 
 func (c *clockDisk) state() (hw time.Time, paused bool, writes int) {
@@ -290,6 +298,121 @@ func TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash(t *testin
 	r.paused, r.hw = paused, clock.NewHighWater(hw)
 	e = r.start()
 	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
+}
+
+// The task of the clock state is told when the pause began, so that the one place
+// that knows (the loop, which also reports it as the alert's "since") is the only
+// place: the time of the command that found the clock set back, kept while the
+// pause lasts, the persisted start when the node started paused, and forgotten when
+// the owner clears the pause so that a later pause begins at its own time.
+func TestTheTaskOfTheClockStateIsToldWhenThePauseBegan(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	var disk clockDisk
+	e := openWith(t, r, func(e *engine.Engine) {
+		if err := e.AddClockState("clock-state", time.Minute, disk.task); err != nil {
+			t.Fatal(err)
+		}
+	})
+	ctx := context.Background()
+	since := disk.pauseStart
+
+	advance(t, r, e, time.Hour) // the mark is at the hour
+	if !since().IsZero() {
+		t.Errorf("a clock that was never set back has a pause since %v", since())
+	}
+	first := t0.Add(30 * time.Minute)
+	r.clk.Set(first)
+	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
+	if got := since(); !got.Equal(first) {
+		t.Errorf("the pause began at %v, the task was told %v", first, got)
+	}
+	advance(t, r, e, 5*time.Minute) // the period passes: the same start, not the time of this run
+	if got := since(); !got.Equal(first) {
+		t.Errorf("a pause that lasts: the task was told %v, want the start %v", got, first)
+	}
+	if _, err := e.Execute(ctx, clearCommand(81, "clear")); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, e)
+	if got := since(); !got.IsZero() {
+		t.Errorf("after the owner cleared the pause the task was told %v, want none", got)
+	}
+	second := r.clk.Now().Add(-30 * time.Minute)
+	r.clk.Set(second)
+	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
+	if got := since(); !got.Equal(second) {
+		t.Errorf("a later pause began at %v, the task was told %v", second, got)
+	}
+}
+
+// A node that starts paused is told the start that was persisted.
+func TestTheTaskOfTheClockStateIsToldThePersistedStartOfAPauseTheNodeStartedIn(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	r.paused, r.pausedSince = true, t0.Add(-time.Hour)
+	var disk clockDisk
+	e := openWith(t, r, func(e *engine.Engine) {
+		if err := e.AddClockState("clock-state", time.Minute, disk.task); err != nil {
+			t.Fatal(err)
+		}
+	})
+	advance(t, r, e, time.Minute)
+	if _, paused, _ := disk.state(); !paused {
+		t.Fatal("the task was not told of the pause")
+	}
+	if got, want := disk.pauseStart(), t0.Add(-time.Hour); !got.Equal(want) {
+		t.Errorf("the task was told the pause began at %v, want the persisted %v", got, want)
+	}
+}
+
+// What the owner accepted when clearing the pause is the clock as it reads, so
+// the tasks that were scheduled from the clock that was ahead are due from that
+// clock: a task due one period after a reading that was days in the future would
+// otherwise not run for those days, among them the check of the certificate that
+// the clear is meant to let renew.
+func TestClearingThePauseSchedulesThePeriodicTasksFromTheClockTheOwnerAccepted(t *testing.T) {
+	noLeaks(t)
+	r := newRig(t, 10)
+	rs := newRuns()
+	e := openWith(t, r, func(e *engine.Engine) {
+		if err := e.AddPeriodic("hourly", time.Hour, rs.task("hourly", nil)); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.AddPeriodic("daily", 24*time.Hour, rs.task("daily", nil)); err != nil {
+			t.Fatal(err)
+		}
+	})
+	ctx := context.Background()
+	advance(t, r, e, 3*24*time.Hour) // the clock jumps ahead; both tasks run once, on the fast clock
+	if rs.count("hourly") != 1 || rs.count("daily") != 1 {
+		t.Fatalf("runs after the jump: hourly %d, daily %d; want 1 and 1", rs.count("hourly"), rs.count("daily"))
+	}
+	r.clk.Set(t0.Add(time.Hour)) // the clock is put right again
+	wantReason(t, engine.AdmitNewWork(ctx, e, 1), engine.ReasonClockRollback)
+	settle(t, e)
+	if rs.count("hourly") != 1 {
+		t.Fatalf("a task ran while the clock was in doubt: hourly %d", rs.count("hourly"))
+	}
+
+	if _, err := e.Execute(ctx, clearCommand(82, "clear")); err != nil {
+		t.Fatal(err)
+	}
+	settle(t, e)
+	cleared := t0.Add(time.Hour)
+	for _, name := range []string{"hourly", "daily"} {
+		if n := rs.count(name); n != 2 {
+			t.Errorf("%s ran %d times after the clear, want it run at once", name, n)
+			continue
+		}
+		if got := rs.at[name][1]; !got.Equal(cleared) {
+			t.Errorf("%s ran at %v after the clear, want the clock the owner accepted, %v", name, got, cleared)
+		}
+	}
+	advance(t, r, e, time.Hour)
+	if rs.count("hourly") != 3 || rs.count("daily") != 2 {
+		t.Errorf("one period after the clear: hourly %d, daily %d; want 3 and 2", rs.count("hourly"), rs.count("daily"))
+	}
 }
 
 // A pause that cannot be made durable for good stops the engine, like any other

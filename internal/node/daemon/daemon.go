@@ -238,9 +238,10 @@ type Daemon struct {
 	manage *manageapi.Server
 	served chan error // Serve of the management interface has returned
 
-	pause       pauseClock // for the clock task, which runs in the loop
-	clockHW     clock.HighWater
-	clockPaused bool
+	// what step 4 found of the clock, for the engine to start from
+	clockHW          clock.HighWater
+	clockPaused      bool
+	clockPausedSince time.Time
 
 	// what the shutdown has to undo: the hooks that began
 	agentBegan, adaptersBegan bool

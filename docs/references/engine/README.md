@@ -73,7 +73,20 @@ task registered with `AddClockState` before it goes on, so the pause is on disk
 before anything else happens: a pause kept only in memory until the next period
 would be lost by a crash, and the clock that was set back trusted again after the
 restart. A fatal error of that write stops the engine, a retryable one is retried
-after `RetryBackoff` while the pause already holds in memory.
+after `RetryBackoff` while the pause already holds in memory. The task is told the
+pause with the time it began (`TaskInput.PausedSince`): the loop alone keeps that
+time, which is also the alert's "since", so the composition root holds no copy to
+disagree with it. It is the persisted start for a node that started paused, the time
+of the command that found the clock set back otherwise, kept while the pause lasts
+and forgotten when the owner clears it.
+
+The owner's clear makes every periodic task due at once, at the clock the owner has
+accepted. They were scheduled from readings taken while the clock was wrong, and a
+clock that was days ahead leaves them due days from the clock the owner accepted: the
+check of the certificate, which has to replace a certificate signed on the fast clock,
+the sweep of the archive and the tasks the composition root attached would not run
+until then. A periodic task is repeatable, so running it early is harmless
+(`TestClearingThePauseSchedulesThePeriodicTasksFromTheClockTheOwnerAccepted`).
 
 **Endpoints.** `RegisterDirect` gives an adapter instance the same endpoint for the
 same key, for ever: the id is minted once and kept in `config/endpoint-ids/`, in
@@ -659,7 +672,7 @@ open again ends, and the next one plans from a new scan. A pass that is
 still running is not begun again, a removal that failed ends it with a line in the log and
 the next period plans anew, and nothing is swept while the wall clock is in doubt, since
 retention is judged by it (`TestNoSweepWhileTheClockIsInDoubt`: several periods pass and
-what is due stays, and the first period after the owner clears the pause removes it). What a record that feedback depends on keeps is the store's rule
+what is due stays, and the owner's clear makes the sweep due at once, so the next pass removes it). What a record that feedback depends on keeps is the store's rule
 (`PlanSweep`): a notice stays while a record still holds an item it covers, and a source record
 that still holds an item stays while its sender is open.
 
@@ -1431,7 +1444,7 @@ reproducible).
 | A stored result is read by its request key, from both places, and by no other key | `manage.go` (`OperationResult`) | `TestTheStoredResultOfAnOperationIsReadByItsRequestKey`, `TestAStoredResultIsReadWhileRecoveringAndNotWhileStopping` |
 | The door is closed while the node starts and while it stops; what is not a change does not come through it | `manage.go`, `engine.go` (`step`) | `TestExecuteIsRefusedWhileRecoveringAndWhileStopping`, `TestExecuteRefusesAnOperationThatChangesNothing` |
 | A request that stops the daemon says so, resent or not | `manage.go` (`StopDaemonOp`, `StoredResult.Stop`) | `TestStopFollowsTheOperationOfTheRequest` |
-| The owner's clear of the pause is one replacement and the loop forgets the pause after the commit | `operations_clock.go`, `transactions.go` (`clock-clear`), `engine.go` (`clearRollback`) | `TestClockRollbackPausesSigningUntilCleared`, `TestARestartedNodeThatWasPausedIsClearedByTheOwnerAlone`, `TestAWallClockSetBackPausesNewWorkUntilTheOwnerClearsIt` |
+| The owner's clear of the pause is one replacement and the loop forgets the pause after the commit, then makes the periodic tasks due at once | `operations_clock.go`, `transactions.go` (`clock-clear`), `engine.go` (`clearRollback`) | `TestClockRollbackPausesSigningUntilCleared`, `TestARestartedNodeThatWasPausedIsClearedByTheOwnerAlone`, `TestAWallClockSetBackPausesNewWorkUntilTheOwnerClearsIt`, `TestClearingThePauseSchedulesThePeriodicTasksFromTheClockTheOwnerAccepted` |
 | The backup is confirmed only for the statement the node holds; the reminder is derived | `operations_identity.go`, `nodestatus.go` | `TestTheBackupIsConfirmedOnlyForTheStatementTheNodeHolds`, `TestAConfirmationOfAnotherStatementDoesNotPutTheReminderOut` |
 | The retirement keeps the statement, asks for the stop, and nothing is signed after it | `operations_identity.go`, `signing.go` (`canSign`) | `TestRetiringTheIdentityKeepsTheStatementAndAsksForTheStop`, `TestAfterTheIdentityIsRetiredNothingIsSigned` |
 | After the retirement a send is refused and nothing is recorded; a periodic task is told that the node may not sign | `capacity.go`, `signing.go` (`SignRefusalOf`), `engine.go` (`fire`) | `TestAfterTheIdentityIsRetiredASendIsRefusedAndNothingIsRecorded`, `TestCheckCapacityTable`, `TestAPeriodicTaskIsToldWhetherTheNodeMaySign` |
@@ -1464,10 +1477,10 @@ reproducible).
 | A summary that cannot be appended, an I/O error or a full disk, does not stop the sweep | `sweep.go` (`appendSummaries`) | `TestASummaryThatCannotBeAppendedDoesNotStopTheSweep` |
 | A notice is not swept while the item it covers is on its record, and the endpoint is told once across a restart | `store` (`PlanSweep`), `sweep.go` | `TestANoticeIsNotSweptWhileTheItemItCoversIsStillOnItsRecord` |
 | A pass ends when an endpoint it has yet to remove is open again, and the files of that endpoint stay | `sweep.go` (`planIsStale`) | `TestAPassEndsWhenAClosedEndpointItWasToRemoveIsRegisteredAgainBetweenChunks`, `TestAPlanWithAnEndpointThatIsOpenAgainIsStale` |
-| Nothing is swept while the clock is in doubt, and the first period after the clear sweeps | `sweep.go` (`beginSweep`) | `TestNoSweepWhileTheClockIsInDoubt` |
+| Nothing is swept while the clock is in doubt, and the clear makes the sweep due at once | `sweep.go` (`beginSweep`) | `TestNoSweepWhileTheClockIsInDoubt` |
 | Archive files past the retention are removed, the others stay | `sweep.go` (`expireArchive`), `store` (`ExpiredArchiveFiles`) | `TestTheSweepRemovesTheArchiveFilesPastTheRetention` |
 | A source record that waits for its last pull is not swept, the tick closes it at the window's end, and it is swept at no period before its retention | `store` (`RetainUntil`), `sweep.go` | `TestASourceRecordWaitingForItsFinalPullIsNotSweptBeforeItClosesNorBeforeItsRetention`, `TestPlanSweepNeverPlansASourceRecordWaitingForItsFinalPull` (store) |
-| The pause of a clock set back is persisted at once | `engine.go` (`observe`, `AddClockState`) | `TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash`, `TestAFatalErrorWhilePersistingThePauseStopsTheEngine` |
+| The pause of a clock set back is persisted at once, with the time it began | `engine.go` (`observe`, `AddClockState`, `TaskInput.PausedSince`) | `TestThePauseOfAWallClockSetBackIsPersistedAtOnceAndSurvivesACrash`, `TestAFatalErrorWhilePersistingThePauseStopsTheEngine`, `TestTheTaskOfTheClockStateIsToldWhenThePauseBegan`, `TestTheTaskOfTheClockStateIsToldThePersistedStartOfAPauseTheNodeStartedIn` |
 | Recovery | `recovery.go` | `recovery_test.go` |
 | Waiting | `waiters.go` | `waiters_test.go` (`TestShutdownEndsEveryWaitEvenWhenTheInboxIsFull`, `TestAPageThatIsReadyWinsOverTheShutdown`) |
 | A delivery that goes well tells its sender nothing; each anomaly is told once, in its own kind | `pull.go`, `feedback.go` | `TestNormalDeliveryGivesNoFeedback`, `TestEachAnomalyIsReportedOnce` |
@@ -1578,6 +1591,15 @@ reproducible).
 | The sessions of an adapter whose probe failed are judged after a wait | `adapters.go` (`markStarted`), `blocked.go` (`probeFallback`) | `TestSessionsOfAnAdapterWhoseProbeFailedAreStillPromptedAfterAWait` |
 
 Known gaps, each filled in with the feature it belongs to:
+
+- The owner's clear moves the periodic tasks only. The other entries of the schedule that
+  were made from a reading of a clock that was ahead and are still waiting when the
+  clock is put right (the retries and backoffs of the creations, the signals, the
+  releases, the prompts, the outbound worker and the drains, each set one backoff after
+  the reading) stay due days from the clock the owner accepted, until the event that
+  would move them comes first. The scheduler does not know which of its entries are
+  relative to a reading and which are deadlines taken from a record, which must not be
+  moved, so a rule for them would need a mark on every call that sets one.
 
 - A notice of the system endpoint whose `in/` file is itself damaged is removed at the scan
   like any target record, and cannot say which feedback it covered: the covers are in the

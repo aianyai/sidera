@@ -44,33 +44,16 @@ const certificateTask = "certificate-renewal"
 // that meet the stall are told loop_busy and retry.
 const ArchiveSweepEvery = time.Hour
 
-// pauseClock remembers when the pause of a clock set back began. It is read and
-// written only in the loop (the clock task) and, before the loop exists, by the
-// start.
-type pauseClock struct{ since time.Time }
-
-// state is the clock state to make durable for what the loop reports. A pause
-// keeps the time it began, which is the first the node saw: a state with another
-// start time is a different state. When the owner clears the pause the time is
-// forgotten, so that a pause that comes later begins at its own time and not at
-// the one of a pause that is over.
-func (p *pauseClock) state(in engine.TaskInput) keys.ClockState {
-	st := keys.ClockState{HighWater: in.HighWater}
-	if !in.RollbackPaused {
-		p.since = time.Time{}
-		return st
-	}
-	if p.since.IsZero() {
-		p.since = in.Now
-	}
-	st.RollbackPausedSince = p.since
-	return st
-}
-
-// clockTask makes the high water mark and the pause durable. The owner's clearing
-// of the pause is the only thing that lifts it.
+// clockTask makes the high water mark and the pause durable, as the engine
+// reports them: the engine alone knows when a pause began, and it keeps that time
+// while the pause lasts, so a state with another start is never made. The owner's
+// clearing of the pause is the only thing that lifts it.
 func (d *Daemon) clockTask(in engine.TaskInput) error {
-	return d.keys.SaveClock(d.pause.state(in))
+	st := keys.ClockState{HighWater: in.HighWater}
+	if in.RollbackPaused {
+		st.RollbackPausedSince = in.PausedSince
+	}
+	return d.keys.SaveClock(st)
 }
 
 // certificateTask is the hourly look at the certificate. It runs in the loop, as

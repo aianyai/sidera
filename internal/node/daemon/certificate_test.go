@@ -2,16 +2,20 @@ package daemon_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/daemon"
+	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/keys"
 	"github.com/aianyai/sidera/internal/node/txn"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 // certificateInMemory is the serial of the certificate of a node on a disk in
@@ -226,5 +230,107 @@ func TestACrashAnywhereInTheRenewalLeavesKeysTheNextStartAcceptsAndRepairs(t *te
 	}
 	if interrupted == 0 {
 		t.Error("no crash state was an interrupted renewal: the serial was never reserved and the certificate lost")
+	}
+}
+
+// certificateWindowInMemory is the window of the certificate of a node on a disk in
+// memory, read with the record package alone.
+func certificateWindowInMemory(t testing.TB, n *memNode) record.NetworkKeyCertificate {
+	t.Helper()
+	data, err := n.mem.ReadFile("keys/network.cert")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := record.Decode(data, record.DefaultMaxInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, err := record.Verify(record.NetworkKeyCertificateDescriptor, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v.Payload()
+}
+
+// A wall clock that jumped forward by more than the 20 days after which a certificate
+// looks due makes the node renew on the fast clock, so the certificate starts in the
+// future of the real time. The node is stopped at once, the clock is put right, and
+// the next start finds it behind the mark and pauses, because the renewal raised the
+// mark with the certificate (it would not have if the node had been stopped within a
+// minute of the renewal, before the periodic write of the mark). The owner then
+// clears the pause, and in that same pass of the loop the periodic checks run on the
+// clock the owner accepted: the certificate is not yet valid, so it is due, and it
+// is renewed and valid for the real time, with no wait of the days the fast clock
+// had scheduled the check for. A periodic task of the composition root runs then
+// too.
+func TestAClockThatJumpedForwardAndWasPutRightLeavesACertificateTheClearRenews(t *testing.T) {
+	noLeaks(t)
+	n := newMemNode(t)
+	real := n.clk.Now()
+	var mu sync.Mutex
+	var attached []time.Time
+	cfg := func() daemon.Config {
+		c := memConfig(n.home, n.clk, n.mem)
+		c.Attach.Periodic = []daemon.PeriodicTask{{Name: "attached", Every: time.Hour, Run: func(in engine.TaskInput) error {
+			mu.Lock()
+			defer mu.Unlock()
+			attached = append(attached, in.Now)
+			return nil
+		}}}
+		return c
+	}
+
+	n.clk.Set(real.Add(25 * 24 * time.Hour)) // the certificate looks due at the start
+	d, err := daemon.Start(context.Background(), cfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.RequestStop("the clock is wrong")
+	if err := d.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	fast := certificateWindowInMemory(t, n)
+	if fast.Serial != 2 || !fast.NotBefore.After(real.Add(24*24*time.Hour)) {
+		t.Fatalf("setting up: the certificate is serial %d from %v, want the renewal made on the fast clock", fast.Serial, fast.NotBefore)
+	}
+
+	n.clk.Set(real.Add(time.Hour)) // the clock is put right
+	d, err = daemon.Start(context.Background(), cfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { d.RequestStop("test over"); d.Wait() }()
+	status, body := manage(t, n.home, "status", map[string]any{})
+	if status != 200 || !strings.Contains(string(body), `"rollback_paused":true`) {
+		t.Fatalf("status after the clock was put right: %d %s; want the pause, because the mark follows the certificate", status, body)
+	}
+
+	status, body = manage(t, n.home, "clock.clear_rollback", map[string]any{"operation_id": opID(1), "params": map[string]any{}})
+	if answerOf(t, status, body); !strings.Contains(string(body), `"cleared":true`) {
+		t.Fatalf("the clear: %d %s", status, body)
+	}
+	settled(t, d) // the same pass: the clock has not moved since the clear
+
+	now := n.clk.Now()
+	c := certificateWindowInMemory(t, n)
+	if c.Serial != 3 || c.ValidityAt(now) != record.Valid || !c.NotAfter.Equal(now.Truncate(time.Second).Add(30*24*time.Hour)) {
+		t.Errorf("after the clear the certificate is serial %d, %v at now, until %v; want serial 3, valid, thirty days from now", c.Serial, c.ValidityAt(now), c.NotAfter)
+	}
+	status, body = manage(t, n.home, "status", map[string]any{})
+	var st struct {
+		Result struct {
+			Certificate struct {
+				RemainingS int64 `json:"remaining_s"`
+			} `json:"certificate"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &st); err != nil || status != 200 || st.Result.Certificate.RemainingS != 30*24*3600 {
+		t.Errorf("status after the clear: %d %s (%v); want thirty days of certificate", status, body, err)
+	}
+	mu.Lock()
+	ran := append([]time.Time(nil), attached...)
+	mu.Unlock()
+	if len(ran) == 0 || !ran[len(ran)-1].Equal(now) {
+		t.Errorf("the attached periodic task ran at %v; want a run at the clock the owner accepted, %v", ran, now)
 	}
 }

@@ -189,20 +189,19 @@ func (d *Daemon) stepClock(context.Context) error {
 		return err
 	}
 	hw := clock.NewHighWater(st.HighWater)
-	paused := st.Paused()
-	d.pause.since = st.RollbackPausedSince
+	paused, since := st.Paused(), st.RollbackPausedSince
 	now := d.cfg.Clock.Now()
 	if v, _ := hw.Observe(now); v == clock.WallRolledBack {
 		d.log.Warn("the wall clock was set back; new work that depends on a deadline is refused until the owner clears it",
 			"now", now, "high_water", hw.Value())
 		if !paused {
-			paused, d.pause.since = true, now
+			paused, since = true, now
 			if err := d.keys.SaveClock(keys.ClockState{HighWater: hw.Value(), RollbackPausedSince: now}); err != nil {
 				return fmt.Errorf("making the pause durable: %w", err)
 			}
 		}
 	}
-	d.clockHW, d.clockPaused = hw, paused
+	d.clockHW, d.clockPaused, d.clockPausedSince = hw, paused, since
 	return nil
 }
 
@@ -234,7 +233,7 @@ func (d *Daemon) openPackage(dir string) (fsx.Reader, error) {
 // at once when it finds the clock set back. The loopback is set here as well.
 func (d *Daemon) stepScan(ctx context.Context) error {
 	deps := engine.Deps{
-		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.pause.since,
+		Node: d.keys.Node(), Clock: d.cfg.Clock, HighWater: d.clockHW, RollbackPaused: d.clockPaused, RollbackPausedSince: d.clockPausedSince,
 		Writer: d.w, Store: store.New(d.w), Config: d.cfgd, Keys: d.keys, Rand: d.cfg.Rand, Home: d.home, Log: d.log,
 		OpenPackage: d.openPackage,
 	}

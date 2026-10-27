@@ -443,7 +443,8 @@ func TestARollbackPauseIsKeptOnDiskAcrossARestartUntilTheOwnerClearsIt(t *testin
 		t.Errorf("a clear when no pause is in force: %s; want cleared false", body)
 	}
 
-	// With the clock trusted again the next hourly check signs the certificate.
+	// With the clock trusted again the check, due at once by the clear, signs the
+	// certificate; the hour that passes then finds nothing more to do.
 	clk.Advance(time.Hour)
 	settled(t, d)
 	if got, _ := certificateOnDisk(t, c.Home); got != serial+1 {

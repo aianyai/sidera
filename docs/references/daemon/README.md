@@ -43,9 +43,10 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 A hook runs inside its step, in the state of the engine the step needs (before the
 loop exists at step 7, recovering at 9 and 10, running at 15) and is given an `Env`:
 the data directory, the clock, the randomness, the log, read-only views of the
-configuration and of the keys (the identity, the self-revocation and the network
-signer: what no renewal of the certificate changes, because a hook runs beside the
-loop; the certificate and the serial are read through the engine), the engine, the assertion that the instance lock is
+configuration and of the keys (the identity and the self-revocation: what no renewal
+of the certificate changes, because a hook runs beside the loop, and no signer, because
+every signature is the engine's and the engine refuses it while the clock is in doubt or
+the identity is retired; the certificate and the serial are read through the engine), the engine, the assertion that the instance lock is
 held (what `ipc.Listen` asks of whoever listens on an address of this home), the
 handle for adapter logs, and `RequestStop`. It holds no transaction writer: the
 engine is the single writer, and a hook that changes state asks it.
@@ -185,14 +186,18 @@ small part of the margin, and a node that was down is brought up to date by the
 start, not by waiting for the next hour. It runs in the loop, as everything that
 signs does. A node that may not sign does not renew, and the check reads only the
 judgement the engine hands the task (`TaskInput.SignRefusal`, the one rule of signing):
-a paused node waits, and the check after the owner clears the pause renews; a node
+a paused node waits, and the owner's clear makes the check due at once, on the clock the owner accepted, so it renews in
+the same pass (a certificate signed on a clock that was ahead and is not yet valid for the real one is due whatever
+its validity, so a forward jump of the wall clock is mended by that clear and not days later); a node
 whose identity was retired signs nothing in the time before the daemon is down,
 because the loop goes on running its tasks until the engine stops. A failure that a retry may cure is tried again after the engine's backoff, a
 fatal one ends the daemon as any other. The other is the clock state, every minute (`ClockStateEvery`):
 the high water mark and the pause are made durable, and a crash loses at most a
-minute of a mark, which only makes the next start trust the clock less. The pause
-keeps the time it began while it lasts and forgets it when the owner clears it, so
-a later pause begins at its own time. The engine
+minute of a mark, which only makes the next start trust the clock less (a renewal of
+the certificate raises the mark with the certificate, so a certificate is never above
+the mark whatever the periodic write did). The pause is persisted with the time the
+engine says it began, which the engine keeps while the pause lasts and forgets when the
+owner clears it, so a later pause begins at its own time and the daemon holds no copy. The engine
 also runs it at once when it finds the clock set back. The third is the archive sweep,
 every hour (`ArchiveSweepEvery`): the daemon names the period and the engine owns
 the sweep (`engine.AddArchiveSweep`), because the engine is the single writer and holds the
@@ -206,7 +211,7 @@ callers that meet the stall are told `loop_busy`, which they retry. It runs on t
 injected clock like the others and waits while the clock is in doubt
 (`TestTheDaemonSweepsTheArchiveEveryPeriodOnTheInjectedClock` for the period;
 engine's `TestNoSweepWhileTheClockIsInDoubt` for the wait: several periods pass with the
-pause in force and what is due stays, then the first period after the owner clears it
+pause in force and what is due stays, then the owner's clear makes the sweep due at once and the next pass
 removes it). Other
 features add theirs in `Attachments.Periodic`.
 

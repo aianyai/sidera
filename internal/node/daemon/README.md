@@ -112,7 +112,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 `second_test.go` has `TestSecondDaemonOnSameHomeRefused`; `init_test.go` init, its
 crash states and the declared crash points; `permissions_test.go` and
 `permissions_windows_test.go` the checks of the data directory and of `keys/`;
-`identity_test.go` the retirement, the renewal of the certificate, the reminder and the rollback pause through the whole daemon; `certificate_test.go` the failures of the renewal and its crash states; `owner_test.go` the settings, the alerts and the status through the management interface; `startup_test.go` the order of the start, the hooks, the layout, the log, the share
+`identity_test.go` the retirement, the renewal of the certificate, the reminder and the rollback pause through the whole daemon; `certificate_test.go` the failures of the renewal and its crash states, and the certificate a clock that jumped ahead leaves for the owner's clear to renew; `owner_test.go` the settings, the alerts and the status through the management interface; `startup_test.go` the order of the start, the hooks, the layout, the log, the share
 of the log budget, the periodic tasks and the clock; `shutdown_test.go` the order of
 the shutdown, the stop through the management interface, `Run` and a fatal failure;
 `fatal_start_test.go` a fatal failure in each step of the start that can be injected
@@ -122,5 +122,5 @@ not ended, a stop that races with a failed start, a context or a signal during t
 start; `adapters_test.go` the adapter host at step 10 and step 3, over fake adapters in the test
 process (the launcher is `harness.AdapterLauncher`); `adapters_install_test.go` installing, enabling, listing and disabling an adapter, and the presets, through the management interface of a whole daemon;
 `env_test.go` what a hook is given; `logging_test.go` the deferred log handler;
-`periodic_test.go` the clock state's pause; `sweep_test.go` the archive sweep on its period; `replay_test.go` a management operation
+`sweep_test.go` the archive sweep on its period; `replay_test.go` a management operation
 resent through the whole daemon.

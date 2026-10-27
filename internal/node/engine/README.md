@@ -157,7 +157,11 @@ delivery to a session: when it is judged and how the verdict is recorded.
   removes the pause flag in the one replacement of `keys/clock.rec` that
   `keys.PutClockCleared` makes, in the transaction that stores the result, and
   only after the commit does the loop forget the pause. A request that finds no
-  pause writes no clock record and stores its result.
+  pause writes no clock record and stores its result. The same step makes every
+  periodic task due at once: they were scheduled from readings of a clock that was
+  wrong, and a clock that was ahead would leave them due days from the clock the
+  owner accepted. The entries of the other kinds are not moved (see the known gaps
+  of the reference).
 - **A retired identity signs nothing, from the commit on.** `RetireIdentityOp` keeps the
   statement the keys verified at load as a verified revocation under `config/`, and
   `canSign` then refuses with `ReasonIdentityRetired`, before the daemon is down. The
@@ -506,8 +510,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
   `Open`; load the configuration after `Recover`. `Open` reads what a power loss
   cannot take back only because the transaction layer settled it.
 - Pass the persisted high water mark and the persisted pause in `Deps`, and add
-  the task that persists them with `AddClockState`: it writes `TaskInput.HighWater`
-  and `TaskInput.RollbackPaused`, and it is the loop that runs it at once when the
+  the task that persists them with `AddClockState`: it writes `TaskInput.HighWater`,
+  `TaskInput.RollbackPaused` and `TaskInput.PausedSince` (pass the persisted start in
+  `Deps.RollbackPausedSince`; the loop is the only keeper of the time), and it is the loop that runs it at once when the
   pause begins, so the pause is on disk before the command that found it goes on.
 - A task that signs reads `TaskInput.SignRefusal` and nothing else to decide
   whether it may; the start, which has no engine yet, asks `SignRefusalOf` the same.
