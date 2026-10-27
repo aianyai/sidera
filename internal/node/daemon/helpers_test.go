@@ -185,6 +185,11 @@ func snapshot(t testing.TB, root string) map[string]string {
 			out[rel] = info.Mode().String() + " -> " + target
 		case info.Mode()&fs.ModeSocket != 0:
 			out[rel] = info.Mode().String()
+		case rel == "daemon.lock":
+			// The instance lock is never written, and on Windows a running daemon's
+			// lock (LockFileEx on its first byte) is mandatory: another handle cannot
+			// read the file, so its presence and mode are what there is to compare.
+			out[rel] = info.Mode().String()
 		default:
 			b, err := os.ReadFile(p)
 			if err != nil {
@@ -315,23 +320,60 @@ func mkSocketDirs(t testing.TB, home string) {
 // end: the daemon owns every goroutine it starts and stops it on shutdown.
 func noLeaks(t testing.TB) {
 	t.Helper()
-	before := runtime.NumGoroutine()
+	before, _ := ownGoroutines()
 	t.Cleanup(func() {
 		deadline := time.Now().Add(10 * time.Second)
 		for {
-			n := runtime.NumGoroutine()
+			n, stacks := ownGoroutines()
 			if n <= before {
 				return
 			}
 			if time.Now().After(deadline) {
-				buf := make([]byte, 1<<16)
-				buf = buf[:runtime.Stack(buf, true)]
-				t.Errorf("%d goroutines running, %d before the test:\n%s", n, before, buf)
+				t.Errorf("%d goroutines running, %d before the test:\n%s", n, before, stacks)
 				return
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
 	})
+}
+
+// processGoroutines are the functions of goroutines that a library starts once for
+// the whole process, the first time it is used, and never ends. The first test that
+// uses the library would otherwise be blamed for them. go-winio, which carries the
+// named pipes of the management interface on Windows, waits on its I/O completion
+// port in one such goroutine.
+var processGoroutines = []string{
+	"github.com/Microsoft/go-winio.ioCompletionProcessor(",
+}
+
+// ownGoroutines counts the running goroutines that are not the process's own (see
+// processGoroutines) and returns the stacks of every goroutine, for the report.
+func ownGoroutines() (int, []byte) {
+	buf := make([]byte, 1<<16)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			buf = buf[:n]
+			break
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+	count := 0
+	for _, g := range bytes.Split(buf, []byte("\n\n")) {
+		if !processGoroutine(g) {
+			count++
+		}
+	}
+	return count, buf
+}
+
+func processGoroutine(stack []byte) bool {
+	for _, f := range processGoroutines {
+		if bytes.Contains(stack, []byte(f)) {
+			return true
+		}
+	}
+	return false
 }
 
 // nodeOf is the identifier of the node of an initialized home, as init said it.
