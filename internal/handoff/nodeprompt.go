@@ -77,7 +77,7 @@ type NodePromptDecision struct {
 //
 // Nothing of the endpoint's own brings it back from a hold with PromptNodeFull:
 // a freed slot is not an event of the waiting endpoint, and RetryAt covers only
-// the hourly cap and the minimum interval. The principle is that whenever free
+// the hourly cap, the minimum interval and the retry after a failed prompt. The principle is that whenever free
 // slots may have grown, that is, when running falls or MaxConcurrentTurns rises,
 // the caller calls DecideNodePrompts again for all waiting endpoints. That
 // happens when
