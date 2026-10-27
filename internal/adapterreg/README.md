@@ -26,7 +26,7 @@ not frame, send or store anything.
 | `MethodAllowed(kind, method)`, `RequirementOf` | The method requirement matrix: forbidden, optional or required per kind. |
 | `Admission.Check(kind, method)` | The error code to answer a call the adapter made with (`0` when it is acceptable): method not found (unknown, or a method only the daemon may call), wrong endpoint kind, or a capability not declared. |
 | `CheckHandshake(sent, result, manifest)` | That the adapter reports the manifest's id and version, and a protocol version in both ranges. |
-| `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, the error a `prompt.deliver` call returned and a reconciliation verdict as `handoff.AttemptOutcome`. |
+| `PromptOutcome`, `PromptOutcomeOnError`, `ReconcileOutcome` | A prompt's stage, the error a `prompt.deliver` call returned and a reconciliation verdict as `handoff.AttemptOutcome`; `accepted` returns zero because the attempt has no outcome yet. |
 | `Signals(conditions, endpoint, received, offline, offlineSince)` | An availability snapshot as `handoff.Signals`, with `Since`. |
 | `BlockedCause(handoff.Cause)` | The cause of a blocked delivery as the delivery rules record and tell it. |
 | `StatusConditions(...)` | The `conditions` of a status reply, from the snapshot and the daemon's own observations, `version_untested` among them. |

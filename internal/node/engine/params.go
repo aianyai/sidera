@@ -65,6 +65,9 @@ type Params struct {
 	// no answer, so that an adapter that hangs cannot keep an endpoint busy, and a turn
 	// that never started cannot hold a place of the node's cap, for ever.
 	PromptCallDeadline time.Duration
+	// PromptConfirmWait is how long an accepted prompt waits for prompt.persisted
+	// or turn.started before the node asks prompt.reconcile, on the injected clock.
+	PromptConfirmWait time.Duration
 	// Feedback are the merge window and the rate cap of the notices the node tells
 	// its endpoints; delivery.FeedbackParams says what each is for.
 	Feedback delivery.FeedbackParams
@@ -91,6 +94,7 @@ func DefaultParams() Params {
 		ControlReplyDeadline: 2 * time.Minute,
 		InterruptConfirmWait: 30 * time.Second,
 		PromptCallDeadline:   time.Minute,
+		PromptConfirmWait:    time.Minute,
 		Feedback:             delivery.DefaultFeedbackParams(),
 	}
 }
@@ -132,6 +136,9 @@ func (p Params) withDefaults() Params {
 	}
 	if p.PromptCallDeadline <= 0 {
 		p.PromptCallDeadline = d.PromptCallDeadline
+	}
+	if p.PromptConfirmWait <= 0 {
+		p.PromptConfirmWait = d.PromptConfirmWait
 	}
 	if p.InterruptConfirmWait <= 0 {
 		p.InterruptConfirmWait = d.InterruptConfirmWait

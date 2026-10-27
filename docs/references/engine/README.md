@@ -1029,7 +1029,15 @@ records it covers, so that a node that dies in between finds it. The call runs i
 engine owns, and its result is a command of the loop that records how the attempt ended
 (`prompt-end`): when the prompt was delivered the covered target records are marked notified first
 and the attempts record last, and the checkpoint of the attempt is dropped after that. The attempts
-the record keeps are cut by `handoff.TrimAttempts` each time one is added. A refusal,
+the record keeps are cut by `handoff.TrimAttempts` each time one is added. An `accepted`
+answer is no delivery proof: the attempt stays in flight and no covered message is marked
+notified. A `prompt.persisted` naming the attempt in flight settles it as delivered. If
+neither that notification nor a `turn.started` naming the attempt follows within
+`Params.PromptConfirmWait` (one minute from the accepted answer), the reconciliation
+entry of the schedule (`schedPromptReconcile`) asks the adapter. Confirmation removes that
+entry, and can arrive before the answer of `prompt.deliver`: the later answer finds no flight
+and changes nothing. A restart finds the same attempt in flight and reconciles immediately,
+since the confirmation timer is memory. A refusal,
 and a call that found the adapter not connected, is a failure; the prompt rules then hold the
 endpoint for a minute (`handoff.DefaultRetryAfterFailure`) and name the instant the retry is
 due, which the engine schedules as it does the other `RetryAt`s, with the event the failed prompt
@@ -1615,6 +1623,8 @@ reproducible).
 | A prompt that failed is held for the retry time of the rules and then sent again, with nothing else bringing the endpoint back | `prompts.go` (`settlePrompt`, `servePrompts`), `handoff.DecidePrompt` | `TestRefusedPromptIsRetriedAfterTheRetryTimeAndDelivered` |
 | The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
 | The attempt is recorded as in flight before the adapter is called, and a write that fails sends nothing and is retried after the backoff | `prompts.go` (`dispatchPrompt`) | `TestPromptIsRecordedBeforeTheAdapterIsCalledAndAFailedWriteIsRetried` |
+| An accepted prompt remains in flight and marks no message until persisted or a turn proves delivery, before or after the deliver answer; no proof within the confirmation window makes reconciliation due | `prompts.go` (`promptResult`, `notePromptPersisted`), `adapters.go` (`notified`), `Params.PromptConfirmWait` | `TestAcceptedPromptWaitsForDeliveryProof`, `TestAcceptedPromptWithoutConfirmationIsReconciledAfterItsWindow` |
+| A restart after acceptance reconciles the same in-flight attempt immediately and sends no second prompt, after a process crash or power loss | `prompts.go` (`reconcilePrompts`) | `TestAcceptedPromptIsReconciledAfterARestartWithoutResend` |
 | A refusal is a failure, a lost answer is a delivery or an unknown outcome as the adapter says, and only a delivery marks the message | `prompts.go` (`promptResult`, `reconcileResult`, `settlePrompt`) | `TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain` |
 | The checkpoints of the creation attempt and of the first prompt are dropped when the creation settles | `create.go` (`settleCreate`, `failCreationWithoutEndpoint`, `dropCreationCheckpoints`), `prompts.go` (`dropAttemptCheckpoint`) | `TestSettledCreationDropsTheCheckpointsOfItsAttempts` |
 | The checkpoint of a prompt attempt is dropped when the attempt settles | `prompts.go` (`dropAttemptCheckpoint`), `store.CheckpointDrop` | `TestSettledPromptAttemptDropsItsCheckpoint` |
@@ -1658,10 +1668,6 @@ Known gaps, each filled in with the feature it belongs to:
   out again (at most three times, then its delivery is unknown and the sender is told).
 - Prompts go into session endpoints only; a direct endpoint is told that messages wait with
   `endpoint.pending`, which is a different thing (see Announcing).
-- A prompt the adapter accepted (`accepted`) and never made durable with `prompt.persisted` is
-  taken for delivered at once. The adapter protocol says the node reconciles it when no
-  `prompt.persisted` follows but gives no time to wait, and a window is a timing of the protocol,
-  so it is not invented here.
 - After an adapter reconnects and before its first availability snapshot, the engine sees no cause
   for its sessions: the probe result's authentication and dependency findings are not mapped into
   the signals of `adapterreg`, so a block whose cause is one of those is taken for over (and

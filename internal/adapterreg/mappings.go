@@ -21,11 +21,13 @@ var ErrUnmapped = errors.New("adapterreg: value has no mapping")
 func unmapped(what string, v any) error { return fmt.Errorf("%w: %s %v", ErrUnmapped, what, v) }
 
 // PromptOutcome maps the stage a prompt.deliver result reports onto what handoff
-// records for the attempt: accepted and persisted both mean the prompt reached
-// the session; refused means certainly not.
+// records for the attempt: accepted has no outcome yet (zero), persisted means
+// the prompt reached the session, and refused means certainly not.
 func PromptOutcome(r adapterproto.PromptDeliverResult) (handoff.AttemptOutcome, error) {
 	switch r.Stage {
-	case adapterproto.PromptAccepted, adapterproto.PromptPersisted:
+	case adapterproto.PromptAccepted:
+		return 0, nil
+	case adapterproto.PromptPersisted:
 		return handoff.AttemptDelivered, nil
 	case adapterproto.PromptRefused:
 		return handoff.AttemptFailed, nil

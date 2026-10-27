@@ -453,7 +453,10 @@ dies with the process. Before `initialize` only `initialize`, `ping` and
 sends `prompt.deliver`. The adapter delivers `text` unchanged (it may append one
 line with the attempt identifier as a fallback for reconciliation). `accepted`
 means the runtime took the prompt but has not made it durable; the adapter must
-then send `prompt.persisted`, or the daemon reconciles. `refused` means certainly
+then send `prompt.persisted`. Acceptance leaves the attempt in flight and does not
+mark its messages notified: it proves no durable delivery. If neither
+`prompt.persisted` nor `turn.started` with that attempt follows within one minute
+of the accepted answer, the daemon sends `prompt.reconcile`. `refused` means certainly
 nothing was delivered. `turn.started.attempt` also proves the attempt reached the
 session.
 
@@ -787,15 +790,17 @@ and version and a protocol version in both the requested and the manifest range.
 
 **Mappings.** The daemon turns what an adapter reports into the values the
 contract packages take. `internal/adapterreg` holds the mapping for every row
-except the two that are plain calls (marked "call"):
+except the observations that are plain calls (marked "call"):
 
 | Observation | Becomes |
 | ----------- | ------- |
-| `prompt.deliver` returns `accepted` or `persisted` | `handoff.AttemptDelivered` |
+| `prompt.deliver` returns `accepted` | no outcome yet (`PromptOutcome` returns zero); keep the attempt in flight until confirmation or reconciliation |
+| `prompt.deliver` returns `persisted` | `handoff.AttemptDelivered` |
 | `prompt.deliver` returns `refused` | `AttemptFailed` |
 | an error response with a code of the effect rule's no-effect list (`-32700`, `-32600`, `-32601`, `-32602`, `-32001` to `-32004`, `-32022`, and any code in the application range 1001 to 1099 except `1005`) | `AttemptFailed` (the request had no effect) |
 | no response, a timeout, `-32603`, `-32800`, `1005 attempt_conflict`, a closed connection, and an error response with any other code, a code of no package's table included | `AttemptUnknown`, then `prompt.reconcile` |
 | reconcile `found`, `provably_absent`, `indeterminate` | `AttemptDelivered`, `AttemptFailed`, `AttemptUnknown` |
+| `prompt.persisted` with an attempt | call: proof the attempt was delivered, handled by the engine |
 | `turn.started` with an attempt | call: proof the attempt was delivered, as a `found` verdict |
 | availability `runtime_auth` | `Signals.AuthInvalid` |
 | availability `native_unavailable`, `dependency_missing` | `Signals.ServiceUnavailable` |

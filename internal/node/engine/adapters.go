@@ -595,7 +595,7 @@ func (c *cmdNotified) run(e *Engine, now time.Time) {
 //     turn that started for the prompt in flight settles that prompt as delivered;
 //   - a request the runtime made that the preset or the method refused is
 //     remembered for the endpoint;
-//   - a prompt that was persisted is accepted.
+//   - a prompt that was persisted proves delivery of the matching attempt.
 //
 // About an endpoint the engine does not know it is not an error and writes
 // nothing: a session may report a turn before its creation has returned, and the
@@ -632,6 +632,7 @@ func (e *Engine) notified(now time.Time, instance string, n adapterhost.Notifica
 			e.noteTurnEnded(id)
 		}
 	case adapterproto.PromptPersistedParams:
+		e.notePromptPersisted(now, p.Endpoint, p.Attempt)
 	default:
 		return fmt.Errorf("engine: notification %q has parameters of type %T, which is not one an adapter sends", n.Method, n.Params)
 	}

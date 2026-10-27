@@ -70,14 +70,13 @@ delivery to a session: when it is judged and how the verdict is recorded.
   `dispatchPrompt` writes the attempt as in flight (`PromptBegin`) and only then spawns the call;
   a result that does not say whether the prompt arrived is asked of the adapter
   (`prompt.reconcile`) and recorded as the verdict says, and step 11 of the start asks about every
-  attempt found in flight. No path calls `prompt.deliver` twice for one attempt. A turn that begins
-  for the attempt in flight settles it as delivered, whatever the answer was; one told after
-  the attempt was settled as unknown (the adapter's notifications and the answer of a call take
-  different paths) turns that attempt into a delivered one, through the same write as a
-  settlement (`upgradeUnknownPrompt`), for as long as the attempt is the newest unknown one the
-  process holds and is still in the attempts record. Each of the two
-  calls (`prompt.deliver`, `prompt.reconcile`) ends at `Params.PromptCallDeadline` on the injected
-  clock, by cancelling its context; a call that got no answer is an unknown outcome.
+  attempt found in flight. No path calls `prompt.deliver` twice for one attempt. An `accepted`
+  answer leaves the attempt in flight until delivery proof arrives (`prompt.persisted` or a
+  `turn.started` naming it), or until `Params.PromptConfirmWait` elapses and reconciliation begins.
+  Each call (`prompt.deliver`, `prompt.reconcile`) ends at `Params.PromptCallDeadline` on the
+  injected clock, by cancelling its context; a call that got no answer is an unknown outcome.
+  The engine reference's [Prompting description](../../../docs/references/engine/README.md#what)
+  covers delivery proof and late corrections.
 - **The prompt decision is asked for the whole node, and again whenever its answer may have
   changed.** `servePrompts` runs after each command of the loop once the node serves, and acts
   only when `promptsDirty` says something the decision reads has changed (an arrival, the end of

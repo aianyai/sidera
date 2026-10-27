@@ -57,8 +57,8 @@ const (
 	// prompt rules hold back until an instant they name, or whose attempt could not be
 	// recorded; the id is the endpoint.
 	schedPromptRetry
-	// schedPromptReconcile is the next call to the adapter about an attempt in flight
-	// when the adapter was not connected; the id is the endpoint.
+	// schedPromptReconcile is the next reconciliation of an attempt in flight after
+	// its confirmation window or a disconnected adapter; the id is the endpoint.
 	schedPromptReconcile
 	// schedPromptSettle is the retry of recording how an attempt ended after a write
 	// failed; the id is the endpoint.

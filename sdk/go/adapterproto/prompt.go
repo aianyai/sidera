@@ -25,7 +25,8 @@ func (p PromptDeliverParams) Validate() error {
 // PromptDeliverResult is the adapter's answer to prompt.deliver.
 //
 //   - Accepted: the runtime accepted the prompt but has not made it durable; the
-//     adapter must send prompt.persisted later, or the daemon reconciles.
+//     adapter must send prompt.persisted later. Without delivery proof for one
+//     minute, the daemon reconciles.
 //   - Persisted: the prompt is in the runtime's durable record.
 //   - Refused: certainly nothing was delivered; Reason says why.
 //

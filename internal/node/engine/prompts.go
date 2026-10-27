@@ -165,6 +165,20 @@ func (e *Engine) noteTurnStarted(now time.Time, ref adapterproto.EndpointRef, at
 	}
 }
 
+// notePromptPersisted is proof that the attempt in flight reached durable native
+// storage. It can precede the answer of prompt.deliver; that later answer finds no
+// flight and changes nothing.
+func (e *Engine) notePromptPersisted(now time.Time, ref adapterproto.EndpointRef, attempt adapterproto.AttemptID) {
+	id, err := ident.ParseEndpointID(string(ref))
+	if err != nil || attempt == "" {
+		return
+	}
+	if p := e.prompts[id]; p != nil && p.flight != nil && p.flight.attempt == attempt {
+		p.flight.outcome = handoff.AttemptDelivered
+		e.settlePrompt(now, id)
+	}
+}
+
 // noteInstanceProbed is the event of an adapter whose connection is in service, which
 // its probe having been answered shows: the host puts the connection in service after
 // it has told the node that the adapter started, so a prompt sent on the start would
@@ -451,9 +465,9 @@ func (c *cmdPromptResult) run(e *Engine, now time.Time) {
 	c.done(struct{}{}, nil)
 }
 
-// promptResult takes in what the call of a prompt brought. A prompt the adapter took
-// is delivered and one it refused certainly is not. An outcome that is not known is
-// asked of the adapter, and never sent again.
+// promptResult takes in what the call of a prompt brought. A persisted prompt is
+// delivered, acceptance waits for proof, and a refusal certainly delivered nothing.
+// An outcome that is not known is asked of the adapter, and never sent again.
 func (e *Engine) promptResult(now time.Time, r *cmdPromptResult) {
 	p := e.prompts[r.endpoint]
 	if p == nil || p.flight == nil || p.flight.attempt != r.attempt {
@@ -476,6 +490,10 @@ func (e *Engine) promptResult(now time.Time, r *cmdPromptResult) {
 		outcome = handoff.AttemptFailed
 	default:
 		outcome = adapterreg.PromptOutcomeOnError(r.err)
+	}
+	if outcome == 0 {
+		e.sched.set(promptKey(schedPromptReconcile, r.endpoint), now.Add(e.p.PromptConfirmWait))
+		return // accepted: still in flight until proof of delivery or reconciliation
 	}
 	if outcome == handoff.AttemptUnknown {
 		e.startReconcile(now, r.endpoint)

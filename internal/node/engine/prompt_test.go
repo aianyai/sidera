@@ -419,6 +419,189 @@ func TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain(t *testing.T) {
 	}
 }
 
+// Acceptance is not proof of delivery: the attempt stays in flight and its
+// messages stay unmarked until the prompt is durable or starts a turn. Either
+// proof may arrive before the answer of prompt.deliver, which settles nothing twice.
+func TestAcceptedPromptWaitsForDeliveryProof(t *testing.T) {
+	for _, c := range []struct {
+		proof        string
+		beforeAnswer bool
+	}{
+		{"persisted", false},
+		{"turn started", false},
+		{"persisted", true},
+		{"turn started", true},
+	} {
+		t.Run(fmt.Sprintf("%s/before_answer=%v", c.proof, c.beforeAnswer), func(t *testing.T) {
+			h := sessionNode(t, harness.Options{}, "a")
+			_, addr := idleSession(t, h, "a")
+			holdBackTurn(t, h, addr)
+			ctrl, err := h.Adapter(harness.Instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeAccepted}); err != nil {
+				t.Fatal(err)
+			}
+			if c.beforeAnswer {
+				if err := ctrl.PauseAt(h.Ctx(), fakeadapter.PausePromptAfterForward); err != nil {
+					t.Fatal(err)
+				}
+			}
+			msg := sendToAddr(t, h, "a", addr, "for a prompt awaiting confirmation")
+			quiet(t, h)
+			attempt := adapterproto.AttemptID(promptsInto(t, h, addr)[0].Attrs.Attempt)
+			a := attemptsOf(t, h, addr)
+			if a.InFlight == nil || a.InFlight.Attempt != attempt || len(a.Attempts) != 0 {
+				t.Fatalf("the accepted attempt is %+v, want still in flight and no settled attempt", a)
+			}
+			if inOf(t, h, msg).Record.Sub == delivery.SubNotified {
+				t.Fatal("acceptance marked the message notified before proof of delivery")
+			}
+			if c.proof == "persisted" {
+				if err := ctrl.Persist(h.Ctx(), adapterproto.EndpointRef(a.Endpoint.String()), attempt); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := runtimeOfAddr(t, h, addr).StartTurn(nativeRef(t, h, addr)); err != nil {
+				t.Fatal(err)
+			}
+			if c.beforeAnswer {
+				quiet(t, h) // the proof settles the flight while its call is still held
+				if err := ctrl.Release(h.Ctx(), fakeadapter.PausePromptAfterForward); err != nil {
+					t.Fatal(err)
+				}
+			}
+			quiet(t, h)
+			a = attemptsOf(t, h, addr)
+			if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+				t.Fatalf("the confirmed attempt is %+v, want one delivered and none in flight", a)
+			}
+			if inOf(t, h, msg).Record.Sub != delivery.SubNotified {
+				t.Fatal("the confirmed prompt did not mark its message notified")
+			}
+			wantPrompts(t, h, addr, 1)
+			h.Advance(time.Minute)
+			quiet(t, h)
+			for _, method := range h.AdapterLaunches(harness.Instance)[0].Methods() {
+				if method == adapterproto.MethodPromptReconcile {
+					t.Fatal("a confirmed attempt was reconciled")
+				}
+			}
+		})
+	}
+}
+
+func TestAcceptedPromptWithoutConfirmationIsReconciledAfterItsWindow(t *testing.T) {
+	for _, c := range []struct {
+		name       string
+		configured time.Duration
+		wait       time.Duration
+	}{
+		{"the default window is one minute", 0, time.Minute},
+		{"the configured window is respected", 7 * time.Second, 7 * time.Second},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			h := sessionNode(t, harness.Options{Params: engine.Params{PromptConfirmWait: c.configured}}, "a")
+			_, addr := idleSession(t, h, "a")
+			holdBackTurn(t, h, addr)
+			ctrl, err := h.Adapter(harness.Instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeAccepted}); err != nil {
+				t.Fatal(err)
+			}
+			msg := sendToAddr(t, h, "a", addr, "for a prompt whose confirmation never comes")
+			quiet(t, h)
+			h.Advance(c.wait - time.Nanosecond)
+			quiet(t, h)
+			if a := attemptsOf(t, h, addr); a.InFlight == nil || len(a.Attempts) != 0 {
+				t.Fatalf("the attempt settled before its confirmation window ended: %+v", a)
+			}
+			for _, method := range h.AdapterLaunches(harness.Instance)[0].Methods() {
+				if method == adapterproto.MethodPromptReconcile {
+					t.Fatal("the adapter was asked to reconcile before the confirmation window ended")
+				}
+			}
+			if inOf(t, h, msg).Record.Sub == delivery.SubNotified {
+				t.Fatal("the unconfirmed prompt marked its message notified")
+			}
+			h.Advance(time.Nanosecond)
+			quiet(t, h)
+			a := attemptsOf(t, h, addr)
+			if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+				t.Fatalf("the attempts are %+v, want one delivered by reconciliation", a)
+			}
+			var reconciles int
+			for _, method := range h.AdapterLaunches(harness.Instance)[0].Methods() {
+				if method == adapterproto.MethodPromptReconcile {
+					reconciles++
+				}
+			}
+			if reconciles != 1 {
+				t.Fatalf("the adapter was asked %d reconciliations, want one", reconciles)
+			}
+			if inOf(t, h, msg).Record.Sub != delivery.SubNotified {
+				t.Fatal("the reconciliation did not mark its message notified")
+			}
+			wantPrompts(t, h, addr, 1)
+		})
+	}
+}
+
+// The accepted answer is not a settlement on disk. Recovery asks about the same
+// attempt at once, without waiting for the old process's confirmation timer.
+func TestAcceptedPromptIsReconciledAfterARestartWithoutResend(t *testing.T) {
+	for _, crash := range []struct {
+		name string
+		mode harness.CrashMode
+	}{
+		{"process crash", harness.ProcessCrash},
+		{"power loss", harness.PowerLoss(7)},
+	} {
+		t.Run(crash.name, func(t *testing.T) {
+			h := sessionNode(t, harness.Options{}, "a")
+			_, addr := idleSession(t, h, "a")
+			holdBackTurn(t, h, addr)
+			ctrl, err := h.Adapter(harness.Instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeAccepted}); err != nil {
+				t.Fatal(err)
+			}
+			msg := sendToAddr(t, h, "a", addr, "for an accepted prompt whose node restarts")
+			quiet(t, h)
+			attempt := adapterproto.AttemptID(promptsInto(t, h, addr)[0].Attrs.Attempt)
+			if a := attemptsOf(t, h, addr); a.InFlight == nil || a.InFlight.Attempt != attempt || len(a.Attempts) != 0 {
+				t.Fatalf("the accepted attempt is %+v, want still in flight", a)
+			}
+			h.Crash(crash.mode)
+			quiet(t, h)
+			var reconciles int
+			for _, method := range h.AdapterLaunches(harness.Instance)[1].Methods() {
+				switch method {
+				case adapterproto.MethodPromptReconcile:
+					reconciles++
+				case adapterproto.MethodPromptDeliver:
+					t.Fatal("recovery sent a second prompt for the accepted attempt")
+				}
+			}
+			if reconciles != 1 {
+				t.Fatalf("recovery asked %d reconciliations, want one before the confirmation window ends", reconciles)
+			}
+			a := attemptsOf(t, h, addr)
+			if a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+				t.Fatalf("the recovered attempts are %+v, want one delivered by reconciliation", a)
+			}
+			if inOf(t, h, msg).Record.Sub != delivery.SubNotified {
+				t.Fatal("the recovered prompt did not mark its message notified")
+			}
+			wantPrompts(t, h, addr, 1)
+		})
+	}
+}
+
 // A turn that begins for the attempt in flight proves the prompt reached the session,
 // whatever the answer of the call was. Without that proof an agent whose prompt got an
 // unknown outcome and who is idle again at every turn end would be sent a new first

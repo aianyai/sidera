@@ -24,7 +24,7 @@ func TestPromptOutcome(t *testing.T) {
 		want  handoff.AttemptOutcome
 		err   bool
 	}{
-		{"accepted counts as delivered", "accepted", handoff.AttemptDelivered, false},
+		{"accepted has no outcome yet", "accepted", 0, false},
 		{"persisted counts as delivered", "persisted", handoff.AttemptDelivered, false},
 		{"refused is a certain failure", "refused", handoff.AttemptFailed, false},
 		{"no stage", "", 0, true},
