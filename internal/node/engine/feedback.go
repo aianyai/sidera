@@ -266,7 +266,8 @@ func (e *Engine) formNotice(now time.Time, st *endpointState, n delivery.Notice,
 // or lost and replaced by another) is left out with a word in the log, and so is the
 // cover of an out-lost record, whose item is built from the name of a file that
 // cannot be read again once the record is swept; the owner holds the alerts of both
-// losses.
+// losses. An item a failed clearing left on its record is owed again where it is: it
+// leaves the items waiting to be cleared (retryClears) and is queued again.
 func (e *Engine) reissueCovered(now time.Time, notice store.InRecord) error {
 	outs := map[string]store.OutRecord{}
 	for _, c := range notice.Covers {
@@ -278,8 +279,11 @@ func (e *Engine) reissueCovered(now time.Time, notice store.InRecord) error {
 			}
 		}
 		it := e.coveredItem(now, o, c)
-		// An item a failed clearing left on the record is the one the cover names.
-		if slices.ContainsFunc(o.Feedback, func(x delivery.Item) bool { return c.Covers(c.Out, x) }) {
+		// An item a failed clearing left on the record is the one the cover names: it
+		// is already owed again, and no longer told, so what waits to clear it must not
+		// strip it, and it is queued for a new notice.
+		if i := slices.IndexFunc(o.Feedback, func(x delivery.Item) bool { return c.Covers(c.Out, x) }); i >= 0 {
+			e.owedAgain(now, c, o.Feedback[i])
 			continue
 		}
 		o.Feedback = append(slices.Clone(o.Feedback), it)
@@ -292,6 +296,20 @@ func (e *Engine) reissueCovered(now time.Time, notice store.InRecord) error {
 		e.putOut(now, o)
 	}
 	return nil
+}
+
+// owedAgain takes an item that a lost notice covered and that is still on its
+// record out of what waits to be cleared, and queues it for a new notice.
+func (e *Engine) owedAgain(now time.Time, c store.CoverRef, it delivery.Item) {
+	e.fb.uncleared = slices.DeleteFunc(e.fb.uncleared, func(u delivery.Item) bool {
+		name, ok := e.recordOfItem(u)
+		return ok && c.Covers(name, u)
+	})
+	if err := e.fb.q.Add(it); err != nil {
+		e.log.Error("an item of feedback that is owed again is not one the queue takes; the sender is not told", "error", err.Error())
+		return
+	}
+	e.armFeedback(now)
 }
 
 // coveredItem is the item that a cover stands for, as the delivery rules made it as

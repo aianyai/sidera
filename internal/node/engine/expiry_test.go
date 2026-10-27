@@ -92,6 +92,54 @@ func TestExpiredUnconfirmedCorrectedOnce(t *testing.T) {
 	}
 }
 
+// A control signal that is closed as expired without a receipt is corrected by its
+// control reply when a later pull brings it, as a message is by its receipt: the
+// sender is told the expiry and then the correction, once each. The reply is the only
+// word of the signal's outcome, so the correction is owed by the place that applies it.
+func TestAnExpiredControlSignalIsCorrectedOnceByItsControlReply(t *testing.T) {
+	h := sessionNode(t, harness.Options{}, "a")
+	h.Unreachable(true)
+	msg := create(t, h, "a", "default")
+	quiet(t, h)
+	h.HoldReports(string(msg))
+	h.Unreachable(false)
+	h.Advance(resendBackoff)
+	quiet(t, h)
+	h.Advance(delivery.DefaultAcceptBefore)
+	quiet(t, h)
+	h.Advance(timing.ClockTolerance + pullInterval)
+	quiet(t, h)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateExpiredUnconfirmed {
+		t.Fatalf("the source record of the signal is %s after the tolerance and a query, want expired_unconfirmed", d.State)
+	}
+	h.Advance(mergeWindow)
+	quiet(t, h)
+	if got := toldKinds(t, h, "a"); !slices.Equal(got, []delivery.Kind{delivery.KindExpiredUnconfirmed}) {
+		t.Fatalf("a was told %v, want the expiry", got)
+	}
+
+	// The reply is let through: the target did carry the signal out.
+	h.Release(string(msg))
+	h.Advance(pullInterval)
+	quiet(t, h)
+	if d := sourceDelivery(t, h, msg); d.State != delivery.StateDelivered {
+		t.Fatalf("the source record of the signal is %s once the reply comes, want delivered", d.State)
+	}
+	h.Advance(mergeWindow)
+	quiet(t, h)
+	want := []delivery.Kind{delivery.KindExpiredUnconfirmed, delivery.KindExpiredCorrected}
+	if got := toldKinds(t, h, "a"); !slices.Equal(got, want) {
+		t.Fatalf("a was told %v, want the expiry and then its correction", got)
+	}
+	h.Restart()
+	quiet(t, h)
+	h.Advance(2 * pullInterval)
+	quiet(t, h)
+	if got := toldKinds(t, h, "a"); !slices.Equal(got, want) {
+		t.Errorf("a was told %v after more pulls and a restart, want the same two", got)
+	}
+}
+
 // A message nobody reads is rejected by its target when the endpoint's longest
 // queue time has run out. The source learns it from a pull and the sender is told
 // once, with the reason.

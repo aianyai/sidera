@@ -6,7 +6,9 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 )
@@ -139,5 +141,40 @@ func TestADamagedNoticeIsToldAgainOnceWhereverTheNodeDiesSettlingIt(t *testing.T
 				t.Errorf("%d items are still pending", got)
 			}
 		})
+	}
+}
+
+// The clearing of the items a notice covers failed and is queued to be tried again,
+// and then the notice's body is found damaged: the items still on their source
+// record are owed again, and the queued clearing must not strip them afterwards, or
+// the sender is never told. It is told once, by a new notice.
+func TestADamagedNoticeWhoseItemsAreStillQueuedToBeClearedIsToldAgainOnce(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	declineAll(t, h, "b")
+	send(t, h, "a", "b", "to an endpoint that takes nothing")
+	quiet(t, h)
+	rule := h.Faults().Fail(fsxtest.Match{Tx: "feedback-clear", Step: fsx.StepWrite, Hit: 1}, fsxtest.DiskFull)
+	h.Advance(mergeWindow)
+	quiet(t, h)
+	if rule.Hits() == 0 {
+		t.Fatal("the fault was not injected")
+	}
+	ns := noticesFor(t, h, "a")
+	if len(ns) != 1 || pending(t, h, "a") != 1 {
+		t.Fatalf("a holds %d notices and %d items are pending, want one notice and the item its failed clearing left", len(ns), pending(t, h, "a"))
+	}
+	// The body is damaged before the clearing is tried again, and the agent's recv
+	// finds it.
+	flipBodyFile(t, h, ns[0].in)
+	wantEmpty(t, recvAs(t, h, h.Agent("a"), fakeagent.RecvInput{}))
+	quiet(t, h)
+	// The queued clearing and the new notice are both due within this time.
+	h.Advance(max(engine.DefaultParams().RetryBackoff, mergeWindow))
+	quiet(t, h)
+	if got := toldKinds(t, h, "a"); !slices.Equal(got, []delivery.Kind{delivery.KindRejected}) {
+		t.Fatalf("a was told %v, want the rejection once more", got)
+	}
+	if got := pending(t, h, "a"); got != 0 {
+		t.Errorf("%d items are still pending", got)
 	}
 }
