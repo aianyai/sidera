@@ -83,7 +83,7 @@ type promptFlight struct {
 	// calling says a call (the prompt or its reconciliation) is with the adapter.
 	calling bool
 	// cancelCall ends the call that is with the adapter: the end of its deadline
-	// uses it, and so does the answer, to release the context. Nil when none is.
+	// uses it, and so do the answer and settlement, to release the context. Nil when none is.
 	cancelCall context.CancelFunc
 	// outcome is how the attempt ended once that is known, and zero until then; an
 	// outcome that could not be written is kept here for the retry.
@@ -442,6 +442,22 @@ func (e *Engine) endPromptCall(f *promptFlight, id ident.EndpointID) {
 	e.sched.remove(promptKey(schedPromptCallDeadline, id))
 }
 
+// takePromptCallResult ends a call and returns the flight whose outcome it may
+// still decide. A known outcome waiting for its write is retained: an answer that
+// arrives after delivery proof cannot undo that proof while settlement is retried.
+func (e *Engine) takePromptCallResult(id ident.EndpointID, attempt adapterproto.AttemptID) *promptFlight {
+	p := e.prompts[id]
+	if p == nil || p.flight == nil || p.flight.attempt != attempt {
+		return nil
+	}
+	f := p.flight
+	e.endPromptCall(f, id)
+	if f.outcome != 0 {
+		return nil
+	}
+	return f
+}
+
 // promptCallDeadline is the end of the time a call about a prompt has: the call is
 // cancelled, and its answer, an error, arrives as a command.
 func (e *Engine) promptCallDeadline(id ident.EndpointID) {
@@ -469,11 +485,10 @@ func (c *cmdPromptResult) run(e *Engine, now time.Time) {
 // delivered, acceptance waits for proof, and a refusal certainly delivered nothing.
 // An outcome that is not known is asked of the adapter, and never sent again.
 func (e *Engine) promptResult(now time.Time, r *cmdPromptResult) {
-	p := e.prompts[r.endpoint]
-	if p == nil || p.flight == nil || p.flight.attempt != r.attempt {
+	f := e.takePromptCallResult(r.endpoint, r.attempt)
+	if f == nil {
 		return
 	}
-	e.endPromptCall(p.flight, r.endpoint)
 	outcome := handoff.AttemptUnknown
 	switch {
 	case r.err == nil:
@@ -499,7 +514,7 @@ func (e *Engine) promptResult(now time.Time, r *cmdPromptResult) {
 		e.startReconcile(now, r.endpoint)
 		return
 	}
-	p.flight.outcome = outcome
+	f.outcome = outcome
 	e.settlePrompt(now, r.endpoint)
 }
 
@@ -554,11 +569,11 @@ func (c *cmdReconcileResult) run(e *Engine, now time.Time) {
 // attempt is not sent again whatever the verdict: a prompt that may have started a turn
 // is never sent a second time.
 func (e *Engine) reconcileResult(now time.Time, r *cmdReconcileResult) {
-	p := e.prompts[r.endpoint]
-	if p == nil || p.flight == nil || p.flight.attempt != r.attempt {
+	f := e.takePromptCallResult(r.endpoint, r.attempt)
+	if f == nil {
 		return
 	}
-	e.endPromptCall(p.flight, r.endpoint)
+	p := e.prompts[r.endpoint]
 	switch {
 	case r.err != nil && e.ctx.Err() != nil:
 		return
@@ -632,6 +647,7 @@ func (e *Engine) reconcilePrompts(now time.Time) {
 func (e *Engine) settlePrompt(now time.Time, id ident.EndpointID) {
 	p := e.prompts[id]
 	f := p.flight
+	e.endPromptCall(f, id)
 	at := f.at
 	if at.IsZero() {
 		at = now

@@ -491,6 +491,68 @@ func TestAcceptedPromptWaitsForDeliveryProof(t *testing.T) {
 	}
 }
 
+// Delivery proof makes an unanswered prompt call unnecessary, whether it is the
+// original delivery or a reconciliation. The adapter remains connected and answers
+// pings, so only the owner of the prompt can release its worker.
+func TestPromptDeliveryProofEndsTheOutstandingCall(t *testing.T) {
+	for _, method := range []string{adapterproto.MethodPromptDeliver, adapterproto.MethodPromptReconcile} {
+		t.Run(method, func(t *testing.T) {
+			h := sessionNode(t, harness.Options{}, "a")
+			_, addr := idleSession(t, h, "a")
+			holdBackTurn(t, h, addr)
+			ctrl, err := h.Adapter(harness.Instance)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeAccepted}); err != nil {
+				t.Fatal(err)
+			}
+			if method == adapterproto.MethodPromptDeliver {
+				if err := ctrl.PauseAt(h.Ctx(), fakeadapter.PausePromptAfterForward); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := ctrl.SetOutcome(h.Ctx(), fakeadapter.RequestReconcile, fakeadapter.Outcome{Kind: fakeadapter.OutcomeHold}); err != nil {
+				t.Fatal(err)
+			}
+			msg := sendToAddr(t, h, "a", addr, "for a prompt whose call never answers")
+			quiet(t, h)
+			if method == adapterproto.MethodPromptReconcile {
+				h.Advance(time.Minute)
+				quiet(t, h)
+			}
+			attempt := attemptsOf(t, h, addr).InFlight.Attempt
+			provePrompt(t, h, addr, attempt, "persisted")
+			// No expected held request: proof must end the worker before either
+			// the adapter releases its answer or the injected deadline passes.
+			engineQuiet(t, h)
+			quiet(t, h)
+			if a := attemptsOf(t, h, addr); a.InFlight != nil || len(a.Attempts) != 1 || a.Attempts[0].Outcome != handoff.AttemptDelivered {
+				t.Fatalf("the proven attempt is %+v, want one delivered", a)
+			}
+			if inOf(t, h, msg).Record.Sub != delivery.SubNotified {
+				t.Fatal("delivery proof did not mark the message notified")
+			}
+		})
+	}
+}
+
+func provePrompt(t testing.TB, h *harness.H, addr string, attempt adapterproto.AttemptID, proof string) {
+	t.Helper()
+	if proof == "turn started" {
+		if err := runtimeOfAddr(t, h, addr).StartTurn(nativeRef(t, h, addr)); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	ctrl, err := h.Adapter(harness.Instance)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ctrl.Persist(h.Ctx(), adapterproto.EndpointRef(endpointOfAddr(t, addr).String()), attempt); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAcceptedPromptWithoutConfirmationIsReconciledAfterItsWindow(t *testing.T) {
 	for _, c := range []struct {
 		name       string

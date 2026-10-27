@@ -1060,7 +1060,10 @@ absent is a failure; anything else, a call that got no answer included, is an un
 which counts toward the hourly cap and nothing else. The attempt is never sent again whatever the
 verdict. Step 11 of the start does the same for every attempt found in flight; an adapter that is
 not connected is asked when it is. A write that fails keeps the outcome and is tried again after
-`RetryBackoff`.
+`RetryBackoff`. Settlement ends any outstanding call immediately, including when
+proof arrives before the answer. Both asynchronous result handlers retain an outcome
+already waiting for its write, so a late error or reconciliation verdict cannot revoke
+proof of delivery during that retry.
 
 A call about a prompt (`prompt.deliver` or `prompt.reconcile`) is bound by `PromptCallDeadline`
 (1 minute) on the injected clock, as the adapter host expects of a caller: the engine schedules the end
@@ -1624,6 +1627,7 @@ reproducible).
 | The attempt is on disk before the adapter is called; one that was in flight at a restart is asked of the adapter and not sent again | `prompts.go` (`dispatchPrompt`, `startReconcile`, `reconcilePrompts`), `recovery.go` (`recoverReconcile`) | `TestDaemonKilledNativeTurnContinuesAndReconcilesWithoutResend`, `TestAPromptIsSettledOnceAfterACrashAtEveryPoint` |
 | The attempt is recorded as in flight before the adapter is called, and a write that fails sends nothing and is retried after the backoff | `prompts.go` (`dispatchPrompt`) | `TestPromptIsRecordedBeforeTheAdapterIsCalledAndAFailedWriteIsRetried` |
 | An accepted prompt remains in flight and marks no message until persisted or a turn proves delivery, before or after the deliver answer; no proof within the confirmation window makes reconciliation due | `prompts.go` (`promptResult`, `notePromptPersisted`), `adapters.go` (`notified`), `Params.PromptConfirmWait` | `TestAcceptedPromptWaitsForDeliveryProof`, `TestAcceptedPromptWithoutConfirmationIsReconciledAfterItsWindow` |
+| Delivery proof ends an outstanding deliver or reconcile call immediately, and survives a late negative reconciliation result while its settlement write is retried | `prompts.go` (`settlePrompt`, `takePromptCallResult`) | `TestPromptDeliveryProofEndsTheOutstandingCall`, `TestPromptDeliveryProofSurvivesALateReconcileResultWhileItsWriteIsRetried` |
 | A restart after acceptance reconciles the same in-flight attempt immediately and sends no second prompt, after a process crash or power loss | `prompts.go` (`reconcilePrompts`) | `TestAcceptedPromptIsReconciledAfterARestartWithoutResend` |
 | A refusal is a failure, a lost answer is a delivery or an unknown outcome as the adapter says, and only a delivery marks the message | `prompts.go` (`promptResult`, `reconcileResult`, `settlePrompt`) | `TestPromptOutcomesAreRecordedAndAnUnknownOneIsNotSentAgain` |
 | The checkpoints of the creation attempt and of the first prompt are dropped when the creation settles | `create.go` (`settleCreate`, `failCreationWithoutEndpoint`, `dropCreationCheckpoints`), `prompts.go` (`dropAttemptCheckpoint`) | `TestSettledCreationDropsTheCheckpointsOfItsAttempts` |
