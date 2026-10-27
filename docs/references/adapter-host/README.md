@@ -222,7 +222,14 @@ writer. Standard output is read through a pipe the launcher closes after the pro
 has been waited for, so every byte the program wrote is read before the stream ends;
 reading the process's pipe directly and waiting early can drop output that was not
 yet read. The process is not killed when the context given to `Launch` ends: the
-host decides when. `Kill` is idempotent. Streams that a descendant of the program
+host decides when. `Kill` is idempotent and does nothing once the process has
+ended, waited for or not. On Windows `os.Process.Kill` reports such a process as an
+error, which `Kill` takes as the end it is: `TerminateProcess` refuses a process
+that has terminated with access denied (the daemon holds its child's handle with
+every access right, so the refusal means nothing else), and after `Wait` package
+`os` has released the handle and answers `EINVAL`. Without this an adapter that
+had already ended when the host killed it would be logged as one that cannot be
+ended and left without the wait for its end. Streams that a descendant of the program
 holds open are closed two seconds after the program ends, so that `Wait` returns.
 On Windows the program's file must have the extension of an executable (`.exe`):
 `os/exec` runs a file that has one of the extensions in `PATHEXT` as it is, tries

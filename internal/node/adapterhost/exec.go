@@ -70,9 +70,10 @@ func (p *execProcess) Stream() (io.Reader, io.WriteCloser) { return p.stdout, p.
 
 func (p *execProcess) PID() int { return p.cmd.Process.Pid }
 
-// Kill ends the process; it does nothing once the process has ended.
+// Kill ends the process; it does nothing once the process has ended, whether or
+// not it has been waited for.
 func (p *execProcess) Kill() error {
-	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := p.cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) && !killFoundItEnded(err) {
 		return err
 	}
 	return nil
