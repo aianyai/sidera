@@ -51,15 +51,17 @@ func withRetryWhile(mayRetry func(error) bool, do func() error) error {
 // readFile reads and closes at once: Go opens files without FILE_SHARE_DELETE,
 // so a handle that stays open makes replacing the file fail. A read that fails
 // transiently is retried, except when the file is not found.
-func readFile(abs string) ([]byte, error) {
+func readFile(abs string, maxBytes int64) ([]byte, error) {
 	var data []byte
 	err := withRetryWhile(retryableRead, func() error {
 		var err error
-		data, err = os.ReadFile(abs)
+		data, err = readRegularFile(abs, maxBytes)
 		return err
 	})
 	return data, err
 }
+
+func openRead(abs string) (*os.File, error) { return os.Open(abs) }
 
 // openAppend opens with GENERIC_WRITE and moves to the end of the file. It does
 // not use Go's O_APPEND, which on Windows drops GENERIC_WRITE and keeps only

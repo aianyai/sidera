@@ -221,7 +221,16 @@ func (m *Mem) resolveParent(op, p string) (*node, string, error) {
 
 // --- Reader ---
 
-func (m *Mem) ReadFile(p string) ([]byte, error) {
+func (m *Mem) ReadFile(p string) ([]byte, error) { return m.readFile(p, -1) }
+
+func (m *Mem) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
+	if maxBytes < 0 {
+		return nil, pathErr("read", p, fs.ErrInvalid)
+	}
+	return m.readFile(p, maxBytes)
+}
+
+func (m *Mem) readFile(p string, maxBytes int64) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	n, err := m.resolve("read", p)
@@ -229,7 +238,10 @@ func (m *Mem) ReadFile(p string) ([]byte, error) {
 		return nil, err
 	}
 	if n.dir {
-		return nil, pathErr("read", p, syscall.EISDIR)
+		return nil, pathErr("read", p, fsx.ErrNotRegular)
+	}
+	if maxBytes >= 0 && int64(len(n.data)) > maxBytes {
+		return nil, pathErr("read", p, fsx.ErrTooLarge)
 	}
 	return bytes.Clone(n.data), nil
 }

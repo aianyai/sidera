@@ -53,8 +53,13 @@ const (
 
 // Reader is the read side. Reads are not crash points.
 type Reader interface {
-	// ReadFile returns the whole file; the handle is closed before it returns.
+	// ReadFile follows links and reads a regular file only; the handle is
+	// closed before it returns. A non-regular file wraps ErrNotRegular.
 	ReadFile(path string) ([]byte, error)
+	// ReadFileLimit is ReadFile with a nonnegative byte limit. A larger file
+	// returns nil and an error wrapping ErrTooLarge, never a truncated success.
+	// A negative limit returns an error wrapping fs.ErrInvalid.
+	ReadFileLimit(path string, maxBytes int64) ([]byte, error)
 	// ReadDir lists a directory sorted by name.
 	ReadDir(dir string) ([]Entry, error)
 	// Stat does not follow a final symbolic link.
@@ -80,8 +85,9 @@ func Exists(r Reader, p string) (bool, error) {
 
 // Entry is one name in a directory.
 type Entry struct {
-	Name  string
-	IsDir bool
+	Name      string
+	IsDir     bool // does not follow a symbolic link
+	IsSymlink bool
 }
 
 // Info describes one file or directory.
@@ -144,6 +150,12 @@ type File interface {
 	Sync() error
 	Close() error
 }
+
+// ErrNotRegular is returned by reads of a directory, device or other non-regular file.
+var ErrNotRegular = errors.New("fsx: not a regular file")
+
+// ErrTooLarge is returned by ReadFileLimit when the file exceeds its limit.
+var ErrTooLarge = errors.New("fsx: file exceeds the byte limit")
 
 // ErrLocked is returned by FS.Lock when another holder has the lock.
 var ErrLocked = errors.New("fsx: locked by another process")

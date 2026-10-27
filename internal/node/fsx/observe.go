@@ -41,7 +41,10 @@ func stamp(p Point, observed bool, err error) error {
 	return &stepError{point: p, err: err}
 }
 
-func (o *observed) ReadFile(p string) ([]byte, error)    { return o.base.ReadFile(p) }
+func (o *observed) ReadFile(p string) ([]byte, error) { return o.base.ReadFile(p) }
+func (o *observed) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
+	return o.base.ReadFileLimit(p, maxBytes)
+}
 func (o *observed) ReadDir(dir string) ([]Entry, error)  { return o.base.ReadDir(dir) }
 func (o *observed) Stat(p string) (Info, error)          { return o.base.Stat(p) }
 func (o *observed) Available(dir string) (uint64, error) { return o.base.Available(dir) }

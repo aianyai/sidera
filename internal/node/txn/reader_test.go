@@ -57,6 +57,7 @@ func TestReadsReachNoPoint(t *testing.T) {
 	put(t, r.mem, map[string]string{"a/x": "content"})
 	reader := r.w.Reader()
 	reader.ReadFile("a/x")
+	reader.ReadFileLimit("a/x", 7)
 	reader.ReadDir("a")
 	reader.Stat("a/x")
 	reader.Available("a")

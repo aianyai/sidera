@@ -236,6 +236,9 @@ func TestFaultyReaderCallsAreSelectedByPathAlone(t *testing.T) {
 	if _, err := faulty.ReadFile("f"); !errors.Is(err, syscall.EIO) {
 		t.Errorf("ReadFile(f) = %v, want EIO", err)
 	}
+	if _, err := faulty.ReadFileLimit("f", 1); !errors.Is(err, syscall.EIO) {
+		t.Errorf("ReadFileLimit(f) = %v, want EIO", err)
+	}
 	if _, err := faulty.Stat("f"); !errors.Is(err, syscall.EIO) {
 		t.Errorf("Stat(f) = %v, want EIO", err)
 	}
@@ -248,8 +251,8 @@ func TestFaultyReaderCallsAreSelectedByPathAlone(t *testing.T) {
 	if got, err := faulty.ReadFile("g"); err != nil || string(got) != "y" {
 		t.Errorf("ReadFile(g) = %q, %v; want it untouched", got, err)
 	}
-	if readFile.Hits() != 4 {
-		t.Errorf("rule hits = %d, want 4", readFile.Hits())
+	if readFile.Hits() != 5 {
+		t.Errorf("rule hits = %d, want 5", readFile.Hits())
 	}
 
 	// A rule that also names a step does not select reads.

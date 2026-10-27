@@ -19,7 +19,7 @@ import (
 // on: for a file, the name it was opened with; for a rename, either the source
 // or the target.
 //
-// Reader calls (ReadFile, ReadDir, Stat, Available) have no tag or step: a
+// Reader calls (ReadFile, ReadFileLimit, ReadDir, Stat, Available) have no tag or step: a
 // rule selects them only if it names a Path and no other field. Such a rule
 // also selects the write steps on that path.
 //
@@ -163,6 +163,13 @@ func (f *Faulty) ReadFile(p string) ([]byte, error) {
 		return nil, err
 	}
 	return f.base.ReadFile(p)
+}
+
+func (f *Faulty) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
+	if err := f.checkRead(p); err != nil {
+		return nil, err
+	}
+	return f.base.ReadFileLimit(p, maxBytes)
 }
 
 func (f *Faulty) ReadDir(dir string) ([]fsx.Entry, error) {

@@ -69,6 +69,44 @@ skip, and `Stat` of the link returned `OwnerOnly` false and no error. Creating a
 link needs a privilege that the runner's administrator account has; an account
 without it skips that test.
 
+`ReadFile` and `ReadFileLimit` follow links but read only regular files; a
+non-regular handle returns an error wrapping `fsx.ErrNotRegular`. The check is
+`File.Stat` on the opened handle, so it describes what will be read rather than
+a name that can change before opening. On Unix the open includes
+`O_NONBLOCK`: a FIFO must not wait for a writer before its type can be refused.
+`O_NOCTTY` prevents a linked terminal from becoming the controlling terminal
+before the type check.
+Windows uses its normal file open with the existing transient-error retry; Unix
+FIFOs have no counterpart among files inside a Windows package directory.
+Directory listings expose `Entry.IsSymlink` and do not treat a link to a directory
+as a directory. This reports the link without deciding a caller's link policy.
+
+`ReadFileLimit(path, maxBytes)` accepts a nonnegative limit. A larger file gives
+an error wrapping `fsx.ErrTooLarge` and no data, never a successful prefix; a
+negative limit wraps `fs.ErrInvalid`. The opened handle's size is checked before
+allocating for its content. The read itself is bounded with the standard
+[`io.LimitReader`](https://pkg.go.dev/io#LimitReader), followed by a one-byte
+probe, so a file that grows after the check still cannot be read without a bound.
+The checked size supplies the allocation hint, with one extra byte for EOF;
+it does not substitute for reading to EOF.
+Using the opened handle avoids the race of checking a path before opening it;
+[`open(2)`](https://man7.org/linux/man-pages/man2/open.2.html) describes why
+`O_NONBLOCK` prevents a FIFO open from waiting and does not change regular-file
+I/O. These primitives need no dependency beyond the standard library and the
+already-used `golang.org/x/sys/unix`.
+
+The shared conformance suite checks exact byte limits, empty files, missing files
+and overflow without partial results against both `Mem` and the real file system.
+`TestOSDirectoryEntriesIdentifyLinksAndReadsFollowRegularTargets` checks links on
+every platform (skipping when the account cannot create one).
+`TestOSUnixReadsRefuseAFIFOWithoutWaitingForAWriter` covers both read methods and
+a FIFO reached directly or through a link;
+`TestOSUnixReadsRefuseALinkToADevice` checks a link to `/dev/null`. Link tests run
+on every platform and skip when the account cannot create links. FIFO tests run
+only on Unix because Windows has no FIFO in a package directory. A Linux test
+links to a regular procfs file whose reported size is zero and verifies that
+content beyond the limit is refused without returning a prefix.
+
 There is no overwrite in place, no truncate, no rename across directories, no
 replacing a directory, no chmod, and no long-held read handle. Each is left out
 for a reason in the Why section.

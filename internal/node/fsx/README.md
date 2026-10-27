@@ -15,7 +15,7 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 
 | Name | Purpose |
 | ---- | ------- |
-| `FS`, `Reader`, `File` | The interface. Each write method is one step; a read is not a step. |
+| `FS`, `Reader`, `File` | The interface. Each write method is one step; a read is not a step. `Reader.ReadFileLimit` reads a regular file within a byte limit, returning `ErrTooLarge` without partial data on overflow. |
 | `OpenOS(root, rand)` | The real `FS` rooted at an existing directory; `rand` names temporary files. |
 | `MakeRoot(path)` | Creates the data directory owner-only, once, at `init`. |
 | `Replace`, `ReplaceDeferred`, `OpenAppend`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | The durable operations: fixed step sequences over any `FS`. |
@@ -68,8 +68,16 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
   returned but the directory is already gone from its name; the `.trash-*`
   leftover is removed at startup.
 - **`RenameDir` never replaces.** The target must not exist on any platform.
-- **Reads are not steps and hold nothing.** `ReadFile` reads and closes at once,
-  so a reader never blocks a replacement on Windows.
+- **Reads are not steps and hold nothing.** `ReadFile` and `ReadFileLimit`
+  follow links, refuse a non-regular opened handle with `ErrNotRegular`, and close
+  before they return, so a reader never blocks a replacement on Windows. Unix opens with
+  `O_NONBLOCK` before the check: opening a FIFO must not wait for a writer.
+  `ReadFileLimit` takes a nonnegative limit, refuses larger files with
+  `ErrTooLarge` and no data, and bounds the read even if the file grows after
+  the handle's size was checked. A negative limit wraps `fs.ErrInvalid`.
+- **Directory entries describe the name itself.** `Entry.IsSymlink` marks a
+  symbolic link, and `IsDir` does not follow it. A link to a regular file can
+  still be read; a link to a directory, device or FIFO cannot.
 - **A Windows read does not retry `file not found`.** The file may genuinely not
   exist; renames and removals do retry it.
 - **Retries on Windows happen below `Observe`.** One logical step reaches the

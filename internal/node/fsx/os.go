@@ -71,7 +71,18 @@ func (o *osFS) ReadFile(p string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return readFile(a)
+	return readFile(a, -1)
+}
+
+func (o *osFS) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
+	if maxBytes < 0 {
+		return nil, &fs.PathError{Op: "read", Path: p, Err: fs.ErrInvalid}
+	}
+	a, err := o.abs(p)
+	if err != nil {
+		return nil, err
+	}
+	return readFile(a, maxBytes)
 }
 
 func (o *osFS) ReadDir(dir string) ([]Entry, error) {
@@ -85,7 +96,7 @@ func (o *osFS) ReadDir(dir string) ([]Entry, error) {
 	}
 	entries := make([]Entry, len(des))
 	for i, de := range des {
-		entries[i] = Entry{Name: de.Name(), IsDir: de.IsDir()}
+		entries[i] = Entry{Name: de.Name(), IsDir: de.IsDir(), IsSymlink: de.Type()&fs.ModeSymlink != 0}
 	}
 	return entries, nil
 }
@@ -270,3 +281,63 @@ type osFile struct {
 }
 
 func (f *osFile) Name() string { return f.name }
+
+// readRegularFile checks the opened object, so following a link or replacing a
+// name between the open and the check cannot turn the read into a device read.
+func readRegularFile(abs string, maxBytes int64) ([]byte, error) {
+	f, err := openRead(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, &fs.PathError{Op: "read", Path: abs, Err: ErrNotRegular}
+	}
+	if maxBytes < 0 {
+		return readAllWithSize(f, info.Size())
+	}
+	tooLarge := &fs.PathError{Op: "read", Path: abs, Err: ErrTooLarge}
+	if info.Size() > maxBytes {
+		return nil, tooLarge
+	}
+	data, err := readAllWithSize(io.LimitReader(f, maxBytes), info.Size())
+	if err != nil {
+		return nil, err
+	}
+	// The file may grow after fstat. Probe once beyond the limit, without
+	// overflowing maxBytes or reading the rest of a growing file into memory.
+	var extra [1]byte
+	n, err := f.Read(extra[:])
+	if n != 0 {
+		return nil, tooLarge
+	}
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return data, nil
+}
+
+// readAllWithSize uses the opened handle's size as a hint, never an EOF check.
+func readAllWithSize(r io.Reader, size int64) ([]byte, error) {
+	capacity := int(size) + 1 // leave room to observe EOF for an unchanged file
+	if int64(int(size)) != size || capacity <= 0 {
+		capacity = 0 // a size that cannot fit in an int is not an allocation hint
+	}
+	data := make([]byte, capacity)
+	n, err := io.ReadFull(r, data)
+	data = data[:n]
+	switch err {
+	case io.EOF, io.ErrUnexpectedEOF:
+		return data, nil
+	case nil:
+		// A zero reported size or growth can fill the hint before EOF.
+		tail, err := io.ReadAll(r)
+		return append(data, tail...), err
+	default:
+		return data, err
+	}
+}

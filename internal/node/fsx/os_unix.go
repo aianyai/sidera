@@ -18,7 +18,13 @@ import (
 // only where the file system does not support it): a plain fsync on macOS
 // hands the data to the drive, which may reorder or delay it.
 
-func readFile(abs string) ([]byte, error) { return os.ReadFile(abs) }
+func readFile(abs string, maxBytes int64) ([]byte, error) { return readRegularFile(abs, maxBytes) }
+
+func openRead(abs string) (*os.File, error) {
+	// A blocking open of a FIFO would wait before fstat can reject it.
+	// A tty must not become the controlling terminal before it is refused.
+	return os.OpenFile(abs, os.O_RDONLY|unix.O_NONBLOCK|unix.O_NOCTTY, 0)
+}
 
 // openAppend opens for writing at the end, creating the file 0600. Under the
 // instance lock there is one writer, so O_APPEND positioning is exact.

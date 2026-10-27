@@ -21,6 +21,11 @@ func (c *readCounter) ReadFile(p string) ([]byte, error) {
 	return c.Reader.ReadFile(p)
 }
 
+func (c *readCounter) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
+	c.reads++
+	return c.Reader.ReadFileLimit(p, maxBytes)
+}
+
 // A file of keys/ is no larger than the largest record file, so one that is
 // larger is damaged, and it is refused by its size, before it is read into
 // memory: a file the owner or a full disk left there must not be able to make a

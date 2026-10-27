@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
 )
@@ -154,5 +157,57 @@ func TestOSUnixOwnerOnlyIsFalseForASymbolicLink(t *testing.T) {
 	}
 	if info, err := fsys.Stat("link"); err != nil || info.OwnerOnly {
 		t.Errorf("Stat(link) = %+v, %v; want OwnerOnly false for a symbolic link", info, err)
+	}
+}
+
+// A package can contain a FIFO, including through a symbolic link. Opening it
+// must not wait for a writer before the reader can refuse its file type.
+func TestOSUnixReadsRefuseAFIFOWithoutWaitingForAWriter(t *testing.T) {
+	fsys, root := openTemp(t)
+	fifo := filepath.Join(root, "pipe")
+	if err := unix.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("pipe", filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"pipe", "link"} {
+		for method, read := range map[string]func(string) ([]byte, error){
+			"ReadFile":      fsys.ReadFile,
+			"ReadFileLimit": func(p string) ([]byte, error) { return fsys.ReadFileLimit(p, 4) },
+		} {
+			t.Run(name+"/"+method, func(t *testing.T) {
+				done := make(chan error, 1)
+				go func() { _, err := read(name); done <- err }()
+				select {
+				case err := <-done:
+					if !errors.Is(err, fsx.ErrNotRegular) {
+						t.Fatalf("read(FIFO) = %v, want ErrNotRegular", err)
+					}
+				case <-time.After(time.Second):
+					// Release a reader with a broken blocking open before ending the test.
+					f, err := os.OpenFile(fifo, os.O_RDWR|unix.O_NONBLOCK, 0)
+					if err != nil {
+						t.Fatal(err)
+					}
+					f.Close()
+					<-done
+					t.Fatal("read waited for a FIFO writer")
+				}
+			})
+		}
+	}
+}
+
+func TestOSUnixReadsRefuseALinkToADevice(t *testing.T) {
+	fsys, root := openTemp(t)
+	if err := os.Symlink("/dev/null", filepath.Join(root, "device")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fsys.ReadFile("device"); !errors.Is(err, fsx.ErrNotRegular) {
+		t.Errorf("ReadFile(device) = %v, want ErrNotRegular", err)
+	}
+	if _, err := fsys.ReadFileLimit("device", 4); !errors.Is(err, fsx.ErrNotRegular) {
+		t.Errorf("ReadFileLimit(device) = %v, want ErrNotRegular", err)
 	}
 }

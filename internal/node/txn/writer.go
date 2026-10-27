@@ -68,7 +68,10 @@ func (w *Writer) Reader() fsx.Reader { return reader{w.base} }
 // neither an assertion nor a selector gets from it to the writable file system.
 type reader struct{ r fsx.Reader }
 
-func (r reader) ReadFile(p string) ([]byte, error)       { return r.r.ReadFile(p) }
+func (r reader) ReadFile(p string) ([]byte, error) { return r.r.ReadFile(p) }
+func (r reader) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
+	return r.r.ReadFileLimit(p, maxBytes)
+}
 func (r reader) ReadDir(dir string) ([]fsx.Entry, error) { return r.r.ReadDir(dir) }
 func (r reader) Stat(p string) (fsx.Info, error)         { return r.r.Stat(p) }
 func (r reader) Available(dir string) (uint64, error)    { return r.r.Available(dir) }

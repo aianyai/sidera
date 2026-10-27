@@ -62,7 +62,11 @@ for the crash model, its sources and what it can and cannot prove.
 - **Cleanup is not selected by accident.** Steps tagged with the reserved
   transactions (`log`, `cleanup`) are selected only by a rule naming that
   transaction, so a rule for "any remove" does not fire on failure-path cleanup.
-- **Reader calls have no tag or step.** A rule selects them by path only.
+- **Reader calls have no tag or step.** A rule selects them by path only,
+  including `ReadFileLimit`. `Mem` implements the same byte limit, overflow error
+  and `ErrNotRegular` for directory reads as the real file system; it models
+  only directories and regular files, so its `Entry.IsSymlink` is always false.
+  Link and special-file behaviour is tested on the real file system.
 - **`Mem` names temporary files with a counter**, so the same seed gives the same
   clone; the real file system uses random names.
 - **The tests state outcomes from the model's rules**, written out in the tests,

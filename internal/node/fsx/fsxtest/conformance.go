@@ -248,10 +248,52 @@ func RunConformance(t *testing.T, newFS func(t *testing.T) fsx.FS) {
 				t.Error("OpenAppend of a directory succeeded")
 			}
 		}},
+		{"read-file-limit-refuses-overflow-without-returning-a-prefix", func(t *testing.T, fsys fsx.FS) {
+			if err := fsx.Replace(fsys, tag, "bounded", []byte("four"), fsx.ModePrivate); err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range []struct {
+				name    string
+				limit   int64
+				wantErr error
+			}{
+				{"less than the file", 3, fsx.ErrTooLarge},
+				{"exactly the file", 4, nil},
+				{"more than the file", 5, nil},
+				{"zero", 0, fsx.ErrTooLarge},
+				{"negative", -1, fs.ErrInvalid},
+			} {
+				t.Run(row.name, func(t *testing.T) {
+					data, err := fsys.ReadFileLimit("bounded", row.limit)
+					if !errors.Is(err, row.wantErr) {
+						t.Fatalf("ReadFileLimit = %q, %v; want %v", data, err, row.wantErr)
+					}
+					if row.wantErr != nil && data != nil {
+						t.Errorf("a refused read returned %q", data)
+					}
+					if row.wantErr == nil && string(data) != "four" {
+						t.Errorf("ReadFileLimit = %q, want four", data)
+					}
+				})
+			}
+			if err := fsx.Replace(fsys, tag, "empty", nil, fsx.ModePrivate); err != nil {
+				t.Fatal(err)
+			}
+			if data, err := fsys.ReadFileLimit("empty", 0); err != nil || len(data) != 0 {
+				t.Errorf("empty file at zero = %q, %v", data, err)
+			}
+			mustMkdir(t, fsys, tag, "d")
+			if _, err := fsys.ReadFileLimit("d", 4); !errors.Is(err, fsx.ErrNotRegular) {
+				t.Errorf("ReadFileLimit(directory) = %v, want ErrNotRegular", err)
+			}
+			if _, err := fsys.ReadFileLimit("missing", 4); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("missing = %v", err)
+			}
+		}},
 		{"read-file-of-a-directory-or-a-missing-file-fails", func(t *testing.T, fsys fsx.FS) {
 			mustMkdir(t, fsys, tag, "d")
-			if _, err := fsys.ReadFile("d"); err == nil {
-				t.Error("ReadFile of a directory succeeded")
+			if _, err := fsys.ReadFile("d"); !errors.Is(err, fsx.ErrNotRegular) {
+				t.Errorf("ReadFile(directory) = %v, want ErrNotRegular", err)
 			}
 			if _, err := fsys.ReadFile("missing"); !errors.Is(err, fs.ErrNotExist) {
 				t.Errorf("ReadFile of a missing file = %v, want fs.ErrNotExist", err)
@@ -399,19 +441,20 @@ func assertRefusedByEveryMethod(t *testing.T, fsys fsx.FS, tag fsx.Tag, paths ..
 	t.Helper()
 	for _, p := range paths {
 		calls := map[string]error{
-			"ReadFile":   second(fsys.ReadFile(p)),
-			"ReadDir":    second(fsys.ReadDir(p)),
-			"Stat":       second(fsys.Stat(p)),
-			"Available":  second(fsys.Available(p)),
-			"CreateTemp": second(fsys.CreateTemp(tag, p, fsx.ModePrivate)),
-			"OpenAppend": second(fsys.OpenAppend(tag, p)),
-			"Rename":     fsys.Rename(tag, p, "x"),
-			"SyncDir":    fsys.SyncDir(tag, p),
-			"Remove":     fsys.Remove(tag, p),
-			"RemoveAll":  fsys.RemoveAll(tag, p),
-			"Mkdir":      fsys.Mkdir(tag, p),
-			"RenameDir":  fsys.RenameDir(tag, "x", p),
-			"Lock":       second(fsys.Lock(p)),
+			"ReadFile":      second(fsys.ReadFile(p)),
+			"ReadFileLimit": second(fsys.ReadFileLimit(p, 10)),
+			"ReadDir":       second(fsys.ReadDir(p)),
+			"Stat":          second(fsys.Stat(p)),
+			"Available":     second(fsys.Available(p)),
+			"CreateTemp":    second(fsys.CreateTemp(tag, p, fsx.ModePrivate)),
+			"OpenAppend":    second(fsys.OpenAppend(tag, p)),
+			"Rename":        fsys.Rename(tag, p, "x"),
+			"SyncDir":       fsys.SyncDir(tag, p),
+			"Remove":        fsys.Remove(tag, p),
+			"RemoveAll":     fsys.RemoveAll(tag, p),
+			"Mkdir":         fsys.Mkdir(tag, p),
+			"RenameDir":     fsys.RenameDir(tag, "x", p),
+			"Lock":          second(fsys.Lock(p)),
 		}
 		for name, err := range calls {
 			if !errors.Is(err, fs.ErrInvalid) {

@@ -235,3 +235,39 @@ func TestOSDoesNotFollowASymlinkInStat(t *testing.T) {
 		t.Errorf("Name = %q, want the link's own name", info.Name)
 	}
 }
+
+func TestOSDirectoryEntriesIdentifyLinksAndReadsFollowRegularTargets(t *testing.T) {
+	fsys, root := openTemp(t)
+	if err := fsx.Replace(fsys, tx, "target", []byte("four"), fsx.ModePrivate); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("target", filepath.Join(root, "link")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+	entries, err := fsys.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 || entries[0] != (fsx.Entry{Name: "link", IsSymlink: true}) || entries[1] != (fsx.Entry{Name: "target"}) {
+		t.Fatalf("ReadDir = %+v", entries)
+	}
+	data, err := fsys.ReadFile("link")
+	if err != nil || string(data) != "four" {
+		t.Errorf("ReadFile(link) = %q, %v", data, err)
+	}
+	if data, err := fsys.ReadFileLimit("link", 3); !errors.Is(err, fsx.ErrTooLarge) || data != nil {
+		t.Errorf("ReadFileLimit(link, 3) = %q, %v", data, err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("dir", filepath.Join(root, "dir-link")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fsys.ReadFile("dir-link"); !errors.Is(err, fsx.ErrNotRegular) {
+		t.Errorf("ReadFile(directory link) = %v, want ErrNotRegular", err)
+	}
+	if _, err := fsys.ReadFileLimit("dir-link", 4); !errors.Is(err, fsx.ErrNotRegular) {
+		t.Errorf("ReadFileLimit(directory link) = %v, want ErrNotRegular", err)
+	}
+}

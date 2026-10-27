@@ -58,6 +58,14 @@ func (c *cutoff) ReadFile(p string) ([]byte, error) {
 	return c.base.ReadFile(p)
 }
 
+func (c *cutoff) ReadFileLimit(p string, maxBytes int64) ([]byte, error) {
+	if err := c.enter(); err != nil {
+		return nil, err
+	}
+	defer c.mu.RUnlock()
+	return c.base.ReadFileLimit(p, maxBytes)
+}
+
 func (c *cutoff) ReadDir(dir string) ([]fsx.Entry, error) {
 	if err := c.enter(); err != nil {
 		return nil, err

@@ -50,6 +50,9 @@ func TestObserveDoesNotCountReadsAndLocks(t *testing.T) {
 	if _, err := r.fs.ReadFile("f"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := r.fs.ReadFileLimit("f", 1); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := r.fs.ReadDir("."); err != nil {
 		t.Fatal(err)
 	}
