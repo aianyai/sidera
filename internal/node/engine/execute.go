@@ -423,6 +423,7 @@ func (e *Engine) forgetExecution(key store.TargetKey) {
 	e.sched.remove(schedKey{schedExecuteRetry, key.String()})
 	e.sched.remove(schedKey{schedInterruptConfirm, key.String()})
 	delete(e.executions, key)
+	e.promptsDirty = true // a session held busy by the signal may now be prompted
 }
 
 // executionKeys are the keys of the signals that are not settled and have work, in

@@ -983,9 +983,17 @@ started is the node's) at every moment its answer may have changed: a message th
 endpoint (an arrival, or a lease that ran out), the end of any turn, an adapter whose probe was
 answered (the host puts the connection in service after it has told the node that the adapter
 started, so the start is not the moment a prompt can be sent), one that went offline, the owner's
-change of the cap or the clearing of a wall clock that was set back, and the `RetryAt` the
+change of the cap or the clearing of a wall clock that was set back, the `RetryAt` the
 decision names for the three holds nothing else brings it back from (the hourly cap, the minimum
-interval, and the retry of a failed prompt). Each endpoint keeps, in memory, the event that waits to be judged (it stays until a
+interval, and the retry of a failed prompt), and the settlement of a close or interrupt.
+For prompting, a session with an accepted close or interrupt is busy until that signal is
+settled, including while a call is out, a retry is due, an interrupt waits for its turn to end,
+or the result waits to be written. The prompt input reads this from the control records in
+`promptRound`: a `turn.ended` notification can arrive before the adapter's answer, and must not
+wake a session whose close or interrupt is still being carried out. This adds no running turn
+to the node's cap. Ending the execution marks the prompt input changed, so an interrupt's
+settlement judges the still-open session and its waiting event again.
+Each endpoint keeps, in memory, the event that waits to be judged (it stays until a
 prompt is sent or nothing waits), when it last called recv, and whether a turn that a prompt
 started may be running: from the dispatch of the prompt until that turn ends or the prompt is
 known not to have started one. That count is what `DecideNodePrompts` is given as running; a turn of
@@ -1596,6 +1604,7 @@ reproducible).
 | An endpoint is woken once for messages that arrive together, not while its turn runs or its prompt is unread, once more when a turn ends with the prompt unread, and again for a message that arrives after the minimum interval | `prompts.go` (`noteArrival`, `noteTurnEnded`, `servePrompts`, `retryPrompt`) | `TestBusyOrUnreadAgentGetsNoFeedback`, `TestUnreadPromptRepromptedOnce`, `TestNewArrivalAfterMinIntervalWakesOnce`, `TestFiveArrivalsStartOneTurn` |
 | The turns that prompts start are capped for the node, the endpoint that waited longest goes first, a raised cap and a turn that ends free places, and a turn that went on while the adapter was away holds its place | `prompts.go` (`promptRound`, `servePrompts`), `operations_settings.go` | `TestPromptTurnsBeyondNodeCapWaitOldestFirst` |
 | An endpoint whose adapter is away is not prompted, and is when the adapter is back | `prompts.go` (`promptRound`, `noteInstanceProbed`) | `TestMessageForAnOfflineAdapterWaitsAndPromptsWhenItIsBack` |
+| A session is not prompted while a close or interrupt is being carried out, even when its turn ends before the adapter answers; an interrupt's settlement judges the waiting messages again | `prompts.go` (`promptRound`), `execute.go` (`forgetExecution`) | `TestSessionIsNotPromptedWhileCloseOrInterruptIsBeingCarriedOut` |
 | The endpoints and turns of an adapter that is offline take no place of the node's cap: another adapter's waiting endpoint is prompted in the free place, and a turn that went on while its adapter was away is counted again when the adapter reports it, two adapter instances on one node | `prompts.go` (`promptRound`) | `TestEndpointOfAnOfflineAdapterLeavesTheFreePlaceToAnotherAdapter`, `TestTurnOfAnAdapterThatWentOfflineIsCountedAgainWhenItReportsItRunning` |
 | After a restart the time of the last recv is taken from the newest lease of the endpoint's messages, so a prompt the agent had read still looks read | `prompts.go` (`approximateLastRecv`) | `TestARestartDoesNotMakeAReadPromptLookUnread` |
 | A turn that began for the prompt in flight settles it as delivered, so an agent idle at every turn end is woken once more and not every time; one told after the attempt was settled as unknown makes it delivered | `prompts.go` (`noteTurnStarted`, `upgradeUnknownPrompt`), `adapters.go` (`notified`) | `TestTurnStartedForThePromptInFlightSettlesItDelivered`, `TestTurnStartedAfterTheAttemptSettledUnknownMakesItDelivered` |

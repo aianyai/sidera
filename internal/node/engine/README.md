@@ -82,9 +82,16 @@ delivery to a session: when it is judged and how the verdict is recorded.
   changed.** `servePrompts` runs after each command of the loop once the node serves, and acts
   only when `promptsDirty` says something the decision reads has changed (an arrival, the end of
   a turn, the probe of an adapter being answered, which is when its connection is in service, the
-  cap, the clock, the retry time the decision names after a failed prompt). Every event that can change it sets the flag in the
-  place that owns the event; no handler asks the decision itself. A single `DecidePrompt` never
+  cap, the clock, the end of a close or interrupt execution, the retry time the decision names
+  after a failed prompt). Every event that can change it sets the flag in the place that owns
+  the event; no handler asks the decision itself. A single `DecidePrompt` never
   authorizes a send.
+- **A session with an accepted close or interrupt is busy for prompting until the signal
+  settles.** `promptRound` reads the control records, so a turn ending before the adapter's
+  answer cannot start another turn while the signal is being carried out. This holds during
+  retries and while a result waits to be written too. The event that waited is kept, and ending
+  the execution marks the prompt input changed, so an interrupt's settlement judges the
+  still-open session again. Only actual prompt-started turns count against the node's cap.
 - **Blocked delivery is judged by the endpoint, whenever its input may have changed, and a
   verdict that changes nothing writes nothing.** `serveBlocked` (`blocked.go`) judges the
   endpoints marked since the last step: a record of the endpoint taken in or dropped

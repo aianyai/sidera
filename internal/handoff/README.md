@@ -185,7 +185,8 @@ Before acknowledging:
   and would hold back the first real message by `MinInterval`. There is one per
   created session, already bounded by the authorization and the rate of session
   creation.
-- `Busy` is true from the moment a prompt is dispatched until its turn ends.
+- `Busy` is true from the moment a prompt is dispatched until its turn ends,
+  and while the caller holds the session, such as during a close or interrupt.
 - The caller records every prompt attempt, with the `Kind` that `DecidePrompt`
   returned, and stores the `BlockedReport` of each `BlockedNew`. It evaluates
   `AssessBlocked` whenever an attempt, a signal or the waiting messages change, and
@@ -196,7 +197,7 @@ Before acknowledging:
   each with the `Trigger` it has pending; a `PromptSend` from `DecidePrompt` alone
   never authorizes a prompt.
 - `running` is the number of turns that prompts started on the node, counted
-  from dispatch (the moment `Busy` becomes true, above) until the turn ends or
+  from dispatch until the turn ends or
   the prompt is confirmed not to have started one. Only prompt-started turns of
   online adapters count. The caller derives it; this package cannot tell an
   offline adapter's turn from a running one.

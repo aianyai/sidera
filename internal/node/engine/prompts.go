@@ -235,6 +235,14 @@ func (e *Engine) promptParams() handoff.PromptParams {
 // to be judged by.
 func (e *Engine) promptRound(now time.Time) promptRound {
 	r := promptRound{covers: map[ident.EndpointID][]store.TargetKey{}}
+	// A turn can end before the adapter answers a close or interrupt. Until the
+	// signal settles the session is still busy for prompting, even without a turn.
+	executing := map[ident.EndpointID]bool{}
+	for _, c := range e.view.ctl {
+		if executable(c) {
+			executing[c.Key.Recipient] = true
+		}
+	}
 	for id, p := range e.prompts {
 		st := e.view.endpoints[id]
 		if st == nil {
@@ -260,7 +268,7 @@ func (e *Engine) promptRound(now time.Time) promptRound {
 		}
 		in := handoff.PromptInput{
 			Trigger: p.trigger, Pending: len(pending), LastArrivalAt: pending[len(pending)-1].AcceptedAt,
-			LastRecvAt: p.lastRecv, Busy: flying || a.busy[adapterproto.EndpointRef(id.String())],
+			LastRecvAt: p.lastRecv, Busy: flying || a.busy[adapterproto.EndpointRef(id.String())] || executing[id],
 		}
 		if head := e.view.attempts[id]; head.Attempts != nil {
 			in.Attempts = head.Attempts

@@ -184,9 +184,8 @@ type PromptInput struct {
 	LastArrivalAt time.Time
 	// LastRecvAt is when the endpoint last called recv; zero if never.
 	LastRecvAt time.Time
-	// Busy reports that the session has a turn running, including the turn a
-	// delivered prompt has started. Callers set it from dispatch until the
-	// turn has ended.
+	// Busy reports that the session must not be prompted now: a turn is
+	// running, or the caller holds it. The caller asks again when that ends.
 	Busy bool
 	// Attempts is the endpoint's prompt attempts in ascending time order.
 	// Attempts older than the hourly window and older than the last first
@@ -210,7 +209,8 @@ type PromptReason int
 const (
 	// PromptNothingPending: no message waits, so there is nothing to wake for.
 	PromptNothingPending PromptReason = iota + 1
-	// PromptSessionBusy: a turn is running. The caller asks again when it ends.
+	// PromptSessionBusy: the session must not be prompted now. The caller asks
+	// again when the turn or hold ends.
 	PromptSessionBusy
 	// PromptFirst: the endpoint has no unread prompt.
 	PromptFirst
