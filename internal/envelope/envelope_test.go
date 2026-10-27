@@ -707,7 +707,7 @@ func TestABodyMustBeValidUTF8(t *testing.T) {
 		ok   bool
 	}{
 		{"ASCII", baseMessage, "hello", true},
-		{"multi-byte text", baseMessage, "你好, wörld", true},
+		{"multi-byte text", baseMessage, "w\u00f6rld \u2603", true},
 		{"a stray continuation byte", baseMessage, "ab\x80cd", false},
 		{"a truncated multi-byte rune", baseMessage, "caf\xc3", false},
 		{"an encoded surrogate", baseMessage, "\xed\xa0\x80", false},
