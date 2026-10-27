@@ -472,9 +472,9 @@ delivery to a session: when it is judged and how the verdict is recorded.
   control record born rejected with the reason and a receipt that carries its report and no
   control reply (`delivery.NewRejectedTargetControlRecord`; an accepted record is never
   rejected afterwards), and what the node answers itself (a status, a creation it refuses for
-  the preset or the adapter) is answered in the transaction that accepts the signal. A
-  creation that would exceed the node's endpoint limit is still refused with a call error and
-  no record: no reason of a failed creation says it (see the reference).
+  the preset, the adapter or the node endpoint cap) is answered in the transaction that accepts
+  the signal. The cap gives a failed creation with `node_endpoint_limit`, no session endpoint
+  or initial-message delivery, and its stored reply is kept even after room becomes available.
 - **A creation's intent is on disk before the adapter is called, and is settled in one
   transaction.** The call is made again with the same attempt until the reply deadline; then
   the creation is unconfirmed, its endpoint is closed and the owner is alerted. The reply of a

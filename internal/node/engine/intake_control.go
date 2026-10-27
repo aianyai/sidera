@@ -37,8 +37,9 @@ import (
 //     transaction as the acceptance: endpoint.status from what the engine knows,
 //     and a creation it refuses before it calls the adapter (the preset is not
 //     defined, the preset is closed to sources on this node, the adapter is not
-//     connected), with the reply that adapterreg.DaemonCreateFailure gives. No
-//     session endpoint is made for these and no intent is recorded.
+//     connected, or the node has no room for another endpoint), with the reply
+//     that adapterreg.DaemonCreateFailure gives. No session endpoint is made for
+//     these and no intent is recorded.
 //  4. Otherwise a creation makes the session endpoint, with its token, and the
 //     intent to create, on disk before the adapter hears of it (see create.go). A
 //     creation that carries an initial message also makes the delivery of the message
@@ -280,21 +281,15 @@ func containsAnyCondition(have []adapterproto.ControlCondition, want ...adapterp
 
 // takeInCreate takes in a session creation: the checks the node makes before it
 // calls the adapter, in the order the reasons are told to the sender (the preset is
-// defined, the preset is open to a source on this node, the adapter is connected),
-// then the session endpoint with its token and the creation intent, written before
-// the adapter hears of it, and the delivery of the initial message the signal
-// carries, if it carries one. A creation the node refuses holds no message: the
-// reply that refuses it says the message did not arrive.
+// defined, the preset is open to a source on this node, the adapter is connected,
+// and the node has room for another endpoint), then the session endpoint with
+// its token and the creation intent, written before the adapter hears of it, and
+// the delivery of the initial message the signal carries, if it carries one.
+// A creation the node refuses holds no message: the reply that refuses it says
+// the message did not arrive.
 func (e *Engine) takeInCreate(now time.Time, env envelope.Envelope, from transport.Origin, st *endpointState, c store.CtlRecord) error {
 	if reason, refused := e.createRefusal(env.Preset, from, st); refused {
 		return e.answerControl(now, c, envelope.ControlResult{Signal: adapterproto.SignalSessionCreate, Create: createResultOf(adapterreg.DaemonCreateFailure(reason))})
-	}
-	if e.view.OpenEndpoints() >= publication.MaxEndpointsPerNode {
-		// The signal is acceptable and no session is made, which the reply of a failed
-		// creation could say, but none of its reasons does: they name the preset, the
-		// adapter and the native runtime. Until the protocol has one, the call is
-		// refused and nothing is recorded.
-		return &Refusal{Reason: ReasonEndpointLimit, Limit: LimitNode}
 	}
 	ep, err := e.newSessionEndpoint(st, c)
 	if err != nil {
@@ -350,6 +345,9 @@ func (e *Engine) createRefusal(preset string, from transport.Origin, st *endpoin
 	}
 	if a := e.adapters[st.rec.Instance]; a == nil || !a.online || e.d.Adapters == nil {
 		return adapterreg.DaemonCreateAdapterOffline, true
+	}
+	if e.view.OpenEndpoints() >= publication.MaxEndpointsPerNode {
+		return adapterreg.DaemonCreateNodeEndpointLimit, true
 	}
 	return 0, false
 }

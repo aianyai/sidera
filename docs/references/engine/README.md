@@ -831,7 +831,11 @@ used), and a creation it refuses before it calls the adapter, with the reply
 `adapterreg.DaemonCreateFailure` gives and no session endpoint and no intent: the preset is not
 defined (`preset_unknown`), the preset says it is closed to endpoints on this node and the
 signal came from one (`preset_unavailable`, by `authz.LocalCreate`, after the record is accepted
-so that the answer is a control reply), or the adapter is not connected (`adapter_offline`).
+so that the answer is a control reply), the adapter is not connected (`adapter_offline`), or
+another endpoint would exceed the node cap (`node_endpoint_limit`). These checks run in that
+order. The endpoint limit is a failed creation after acceptance, so the stored reply says no
+session was created, with no initial-message delivery, and a repeat keeps that answer even
+if room becomes available.
 
 **The creation of a session.** A creation the node does not refuse makes, in `control-intake`,
 the control record with its creation intent and the session endpoint with its token, being
@@ -1366,8 +1370,8 @@ that wrote, and repeats until the plan is empty. `RecoverDelivery` runs the star
   refused it, and after about 12.5 minutes `expired_unconfirmed`, which says the signal may have
   been received. The declarations of an endpoint do not refuse a control signal (they govern
   messages), so the owner can always reach an endpoint that takes nothing. A creation the node
-  refuses for what it knows (preset, adapter) is the other case, and is answered with a control
-  reply, since the signal was accepted.
+  refuses for what it knows (preset, adapter, node endpoint cap) is the other case, and is
+  answered with a control reply, since the signal was accepted.
 - **A creation refused for an adapter that is not connected is answered at once.** Keeping the
   signal until the adapter returns would make the sender wait for a reply that the next restart
   may not bring; the reply `adapter_offline` is the protocol's, and the agent that wants a
@@ -1555,7 +1559,7 @@ reproducible).
 | A damaged control record is settled with the others, closes the endpoints it was creating, and is a record the node no longer holds | `quarantine.go` (`quarantineAll`, `damagedCtlAlert`) | `TestQuarantineClosesEveryCreatingSessionEndpointOfTheDamagedControlRecord`, `TestControlRecordLostBeforeItsReplyIsTold` |
 | A control signal is sent by the worker, taken in by one order, and answered with its report and reply | `control.go`, `intake_control.go`, `inbound.go`, `outbound.go` | `TestSessionCreateMakesAnEndpointAndTellsItsSender`, `TestControlRequestsAreChecked`, `TestControlSignalIsRefusedWhenTheNodeQueueIsFull`, `FuzzInbound` |
 | A control signal the target refuses at intake is rejected at once with its reason, answered from its record when repeated or asked about, kept like a finished control record, and survives a crash at every write | `intake_control.go` (`controlTarget`, `refuseControl`), `inbound.go` (`answerPull`) | `TestAControlSignalTheTargetRefusesAtIntakeIsRejectedAtOnceWithItsReason`, `TestAControlSignalFromANodeElsewhereThatTheRulesRefuseIsRejected`, `TestARefusedControlSignalIsAnsweredFromItsRecordWhenItIsRepeated`, `TestARefusedControlSignalIsKeptWhileASenderCanAskAndSweptAfter`, `TestARefusedControlSignalRecoversFromACrashAtEveryPoint` |
-| A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline` |
+| A creation the node refuses itself is answered with the receipt, makes no endpoint and calls no adapter | `intake_control.go` (`createRefusal`) | `TestSessionCreateWithUnknownPresetIsRefused`, `TestSessionCreateWithPresetClosedToLocalSourcesIsRefused`, `TestSessionCreateIsRefusedWhileTheAdapterIsOffline`, `TestSessionCreateAtNodeEndpointLimitFailsAtOnce`, `TestSessionCreateAtNodeEndpointLimitKeepsItsReplyAfterRoomIsFreedAndRestart` |
 | What the adapter refuses is told, the endpoint is closed and no session is made | `create.go` (`createResult`, `settleCreate`) | `TestSessionCreateWithParamsBeyondPresetIsRefused`, `TestSessionCreateFailedAsControlUnknownAlertsTheOwner` |
 | A native session made and an adapter lost are one session | `create.go` (`startCreate`, `redriveCreates`, `reconcileCreations`) | `TestAdapterKilledAfterNativeCreateYieldsOneSession`, `TestCreationCutOffByACrashIsGoneOnWithOneSession` |
 | A creation that is not ready by its deadline is unconfirmed, closes its endpoint and alerts the owner; one past its deadline at the start is settled the same way | `create.go` (`createDeadline`, `reconcileCreations`) | `TestSessionCreateNotReadyByItsDeadlineIsUnconfirmedAndALateSessionIsAlerted`, `TestCreationOverdueAtStartIsSettledAsUnconfirmed` |
@@ -1640,12 +1644,6 @@ Known gaps, each filled in with the feature it belongs to:
   told again; the owner has the `corrupt_record` alert. Only a notice whose body file is
   damaged, which leaves its record readable, is told again.
 
-- A creation that would make the node hold more endpoints than a node may have is refused
-  with a call error and no record, so its sender reads the refusal as a failed send (the
-  unreachable notice after about two minutes, `expired_unconfirmed` after about 12.5). The signal
-  was accepted and no session was made, which is what the reply of a failed creation says, but
-  none of its reasons fits (they name the preset, the adapter and the native runtime), and a new
-  reason is a change of the protocol.
 - Phase 11 of `RecoverDelivery` settles the creations that were not settled and asks the
   adapters about the prompts that were in flight. A prompt and a block have no replay: the
   store writes their target records first and the head last, and phase 11 and the prompt logic
