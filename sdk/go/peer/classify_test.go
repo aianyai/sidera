@@ -73,6 +73,9 @@ func oracleClassify(line []byte) verdict {
 // anything with the code under test.
 func repeatsTopLevelMember(line []byte) bool {
 	dec := json.NewDecoder(bytes.NewReader(line))
+	// Numbers stay text: as float64, a valid number beyond its range (1e400)
+	// makes Token fail, and the members after it would go unchecked.
+	dec.UseNumber()
 	depth := 0
 	seen := map[string]bool{}
 	expectKey := false
