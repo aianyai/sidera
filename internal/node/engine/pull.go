@@ -188,14 +188,30 @@ func (e *Engine) recvLimits(st *endpointState, r RecvRequest) (handoff.Budget, t
 	case r.Msg != "" && r.Wait > 0:
 		return handoff.Budget{}, 0, invalidArgument("wait", errors.New("a part of a message is fetched at once"))
 	}
-	adm, _ := e.admission(st.rec.Instance) // an adapter not admitted declares nothing: the defaults
+	adm, err := e.recvAdmission(st)
+	if err != nil {
+		return handoff.Budget{}, 0, err
+	}
 	if st.rec.Kind == adapterreg.KindDirect {
 		return adm.Budget(manifest.FrontendDirect), min(r.Wait, adapterproto.MaxWaitSeconds*time.Second), nil
 	}
-	if !r.Frontend.Valid() {
-		return handoff.Budget{}, 0, invalidArgument("frontend", errors.New("not a front end of the Agent interface"))
+	if !r.Frontend.Valid() || !adm.DeclaresFrontend(r.Frontend) {
+		return handoff.Budget{}, 0, invalidArgument("frontend", errors.New("not a front end the adapter's runtime declares"))
 	}
 	return adm.Budget(manifest.Frontend(r.Frontend)), min(r.Wait, adm.RecvWait(r.Frontend)), nil
+}
+
+// recvAdmission is what the endpoint's adapter was admitted with, which owns the budgets
+// that pages and parts are cut for and the front ends that read. An instance that has not
+// been admitted since the node started has declared neither, and cutting by defaults
+// would hand a message out in parts that the declared budgets later cut otherwise, so
+// the recv is refused until the adapter connects.
+func (e *Engine) recvAdmission(st *endpointState) (adapterreg.Admission, error) {
+	adm, ok := e.admission(st.rec.Instance)
+	if !ok {
+		return adm, refuse(ReasonInstanceUnknown)
+	}
+	return adm, nil
 }
 
 // partBudgets are the budgets that the parts of a long message are cut for on the
@@ -203,9 +219,12 @@ func (e *Engine) recvLimits(st *endpointState, r RecvRequest) (handoff.Budget, t
 // are, and what each one's budget is, is the admission's to say; the cut is then the
 // same whichever front end asks, so that the parts a message was handed out in are the
 // parts it is handed out in through any other.
-func (e *Engine) partBudgets(st *endpointState) []handoff.Budget {
-	adm, _ := e.admission(st.rec.Instance) // an adapter not admitted declares nothing: the defaults
-	return adm.PartBudgets(st.rec.Kind)
+func (e *Engine) partBudgets(st *endpointState) ([]handoff.Budget, error) {
+	adm, err := e.recvAdmission(st)
+	if err != nil {
+		return nil, err
+	}
+	return adm.PartBudgets(st.rec.Kind), nil
 }
 
 // txnFatal says whether the engine will stop after the command that met the error.
@@ -285,7 +304,11 @@ func (e *Engine) tryPage(now time.Time, st *endpointState, lease delivery.LeaseI
 		}
 		judged++
 	}
-	pageOf, retry, err := e.pack(now, st.rec.ID, lease, budget, e.partBudgets(st), cands, skip)
+	cutFor, err := e.partBudgets(st)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	pageOf, retry, err := e.pack(now, st.rec.ID, lease, budget, cutFor, cands, skip)
 	if err != nil || retry {
 		return nil, 0, retry, err
 	}
@@ -582,7 +605,11 @@ func (e *Engine) recvPart(now time.Time, st *endpointState, lease delivery.Lease
 		ID: string(in.Key.Message), From: ident.Address{Node: in.Key.SenderNode, Endpoint: in.Key.Sender},
 		Body: string(body), PossiblyDuplicate: in.Record.PossibleDuplicate(r.Part), NextPart: in.Record.NextPart(),
 	}
-	page, err := handoff.Part(msg, r.Part, lease, budget, e.partBudgets(st)...)
+	cutFor, err := e.partBudgets(st)
+	if err != nil {
+		return nil, err
+	}
+	page, err := handoff.Part(msg, r.Part, lease, budget, cutFor...)
 	if errors.Is(err, handoff.ErrNoSuchPart) {
 		return nil, invalidArgument("part", err)
 	}

@@ -261,6 +261,14 @@ func (a Admission) Budget(f manifest.Frontend) handoff.Budget {
 	return handoff.DefaultBudget()
 }
 
+// DeclaresFrontend reports whether an agent front end reads the endpoints of the
+// adapter: a runtime that lists it declared it. A front end the adapter did not declare
+// has no budget of its own, so a page is never cut for it, and a message must not be cut
+// in parts that only an undeclared front end would show.
+func (a Admission) DeclaresFrontend(f adapterproto.Frontend) bool {
+	return declaresFrontend(a.caps, manifest.Frontend(f))
+}
+
 // PartBudgets are the budgets that a long message is cut for on an endpoint of kind k,
 // which handoff.Pack and handoff.Part take beside the budget of the front end that
 // reads: the budget of every front end the endpoint can be read through, each as

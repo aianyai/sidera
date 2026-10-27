@@ -378,7 +378,11 @@ The page is built within the budget of the front end the request names, which is
 adapter's declaration (`Admission.Budget`; a direct endpoint's is that of the front end
 `direct`, and the default when none is declared), and the wait is cut to what the adapter
 declares for it (`Admission.RecvWait`; a direct endpoint's to `MaxWaitSeconds`), so the
-cut is made in one place. Bodies are read through `readBody`, the one reader that settles a
+cut is made in one place. That declaration is what a recv needs: before the adapter of the
+endpoint has been admitted since the node started it is refused as `instance_unknown`, since a
+message cut by defaults could be handed out in parts that the declared budgets later cut
+otherwise, and a front end that the adapter's runtime did not declare is `invalid_argument`
+(`Admission.DeclaresFrontend`). Bodies are read through `readBody`, the one reader that settles a
 body that is not what its record says or is gone: such a record is settled and the page is
 built without it, while the other messages go on. Bodies are read as far as the page
 reaches, not for the whole queue. When the settlement of such a body fails for good,

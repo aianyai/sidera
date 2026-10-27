@@ -565,3 +565,38 @@ func TestAMessageCutDifferentlyThanItWasHandedOutIsClosedUnknownAndNotPromptedFo
 		t.Errorf("%d prompts reached the adapter, want only the first: nothing waits for the agent", n)
 	}
 }
+
+// Pages and parts are cut for the budgets the adapter declared, and read through the front
+// ends its runtime declared: a recv before the adapter is admitted, or through a front end
+// it did not declare, is refused, and no message is handed out in parts cut by defaults.
+func TestRecvIsRefusedWithoutTheAdmissionThatSaysHowToCut(t *testing.T) {
+	session := mustEndpoint(t, 80)
+	token := bytes.Repeat([]byte{0x5a}, store.TokenLen)
+	r := newRig(t, 10)
+	r.seedRecord(store.EndpointRecord{ID: session, Kind: sessionKind, Instance: "chat", Status: store.EndpointOpen,
+		Token: token, Session: &store.SessionInfo{Preset: "default", NativeRef: "native-1"}})
+	e, _, err := r.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.Start()
+	if err := e.RecoverDelivery(ctx); err != nil {
+		t.Fatal(err)
+	}
+	e.Serve()
+	t.Cleanup(func() { r.stop(e) })
+	caller := engine.ByToken(adapterproto.Token(tokenText(token)))
+	recv := func(f adapterproto.Frontend) error {
+		_, err := e.Recv(ctx, caller, engine.RecvRequest{Frontend: f})
+		return err
+	}
+
+	wantReason(t, recv(adapterproto.FrontendCLI), engine.ReasonInstanceUnknown)
+	if err := admitOn(ctx, e, "chat", runtimeAdmission(t, 0, adapterproto.FrontendCLI)); err != nil {
+		t.Fatal(err)
+	}
+	wantReason(t, recv(adapterproto.FrontendMCP), engine.ReasonInvalidArgument)
+	if err := recv(adapterproto.FrontendCLI); err != nil {
+		t.Errorf("a recv through the front end the runtime declares: %v", err)
+	}
+}

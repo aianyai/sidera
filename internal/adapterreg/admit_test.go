@@ -320,6 +320,24 @@ func TestPartBudgets(t *testing.T) {
 	}
 }
 
+// TestDeclaresFrontend: an agent front end reads the adapter's endpoints only when its
+// runtime listed it, and an admission that declares no runtime lists none.
+func TestDeclaresFrontend(t *testing.T) {
+	caps := adapterproto.Capabilities{Runtime: runtimeCaps(true, true, true, "cli").Runtime, Direct: directCaps(5)}
+	a, err := adapterreg.Admit(caps, man())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for f, want := range map[adapterproto.Frontend]bool{adapterproto.FrontendCLI: true, adapterproto.FrontendMCP: false, "nonsense": false} {
+		if got := a.DeclaresFrontend(f); got != want {
+			t.Errorf("DeclaresFrontend(%q) = %v, want %v", f, got, want)
+		}
+	}
+	if (adapterreg.Admission{}).DeclaresFrontend(adapterproto.FrontendCLI) {
+		t.Error("the zero admission declares a front end")
+	}
+}
+
 // TestRecvWait: the wait limit of a front end is the one the manifest declares,
 // and the default for a front end it does not name.
 func TestRecvWait(t *testing.T) {
