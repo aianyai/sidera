@@ -420,8 +420,15 @@ func TestEndpointBacklogFullIsRejectedWithReason(t *testing.T) {
 
 func TestNodeQueueFullBackpressuresNewSends(t *testing.T) {
 	h := nodeWith(t, harness.Options{NodeSettings: `{"node_queue_limit": 3}`}, "a", "b")
+	var keyed adapterproto.MessageID
 	for i := 0; i < 3; i++ {
-		send(t, h, "a", "b", fmt.Sprintf("message %d", i))
+		res, err := trySend(h, "a", "b", fmt.Sprintf("message %d", i), fmt.Sprintf("key-%d", i))
+		if err != nil {
+			t.Fatalf("send %d: %v", i, err)
+		}
+		if i == 0 {
+			keyed = res.MessageID
+		}
 		quiet(t, h)
 	}
 	before := scanOf(t, h)
@@ -439,6 +446,13 @@ func TestNodeQueueFullBackpressuresNewSends(t *testing.T) {
 	results := clientResults(t, h, "a")
 	if last := results[len(results)-1]; last.Attrs.Category != "backpressure" || last.Attrs.Code != "node_queue_full" {
 		t.Errorf("the ledger holds %s/%s for the refused send", last.Attrs.Category, last.Attrs.Code)
+	}
+
+	// A resend of a request already accepted takes in no new work, so a full
+	// queue does not refuse it: it is answered with the first message.
+	again, err := trySend(h, "a", "b", "message 0", "key-0")
+	if err != nil || !again.Replayed || again.MessageID != keyed {
+		t.Errorf("a resend of an accepted request while the queue is full: %+v, %v; want the first message, replayed", again, err)
 	}
 }
 

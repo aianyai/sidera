@@ -535,6 +535,11 @@ func TestAnIdempotencyKeyIsRememberedUntilItsRetentionEnds(t *testing.T) {
 		t.Fatal(err)
 	}
 	quiet(t, h)
+	// The repeat comes later than the first request, so its own deadlines are not
+	// the first request's: it is the same request because the digest is made with
+	// the deadlines the first one had.
+	h.Advance(time.Minute)
+	quiet(t, h)
 	again, err := trySend(h, "a", "b", "x", "k")
 	if err != nil || !again.Replayed || again.MessageID != first.MessageID {
 		t.Fatalf("a repeat inside the retention: %+v, %v", again, err)
