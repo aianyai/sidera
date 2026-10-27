@@ -4,10 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 )
 
 func TestEveryReasonHasItsOwnName(t *testing.T) {
@@ -86,5 +89,30 @@ func TestParamsTakeTheDefaultsForWhatIsNotSet(t *testing.T) {
 	}
 	if d.InboxLen < 1 || d.ChunkReplaces < 1 || d.ChunkRemoves < 1 || d.ChunkTickRecords < 1 || d.SubmitWait <= 0 || d.RetryBackoff <= 0 || d.ResendBackoff <= 0 || d.PullInterval <= 0 || d.CreateReplyDeadline <= 0 || d.CreateRetryBackoff <= 0 || d.ControlReplyDeadline <= 0 || d.InterruptConfirmWait <= 0 || d.PromptCallDeadline <= 0 {
 		t.Errorf("a default is not usable: %+v", d)
+	}
+}
+
+// A failed operation of the file layer that no transaction wrapped is told as the
+// storage being unavailable, or full, and not as an internal error; an error that
+// is none of the storage's stays what it is.
+func TestClassifyTellsAFailedFileOperationFromAnUnexpectedError(t *testing.T) {
+	unexpected := errors.New("not the storage's")
+	for _, tc := range []struct {
+		name string
+		err  error
+		want Reason
+	}{
+		{"an I/O error of the file layer", &fsx.Error{Class: fsx.Failed, Err: syscall.EIO}, ReasonStorageUnavailable},
+		{"a full disk of the file layer", &fsx.Error{Class: fsx.Failed, Err: fsxtest.DiskFull}, ReasonStorageFull},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ReasonOf((&Engine{}).classify(tc.err))
+			if !ok || got != tc.want {
+				t.Errorf("classified as %v (%v), want %v", got, ok, tc.want)
+			}
+		})
+	}
+	if err := (&Engine{}).classify(unexpected); err != unexpected {
+		t.Errorf("an unexpected error became %v", err)
 	}
 }

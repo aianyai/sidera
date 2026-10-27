@@ -208,8 +208,13 @@ func (e *Engine) retryingDamaged(now time.Time, write func() error) error {
 // asked is told what it found and need not know what was done. When the settlement
 // itself fails the error carries both; a fatal failure of it is returned alone, because
 // an error that says the body is damaged is read as "settled" and the record may not be.
+// A read that failed for another reason says nothing of the body: it is a refusal for
+// the storage being unavailable, which a retry may cure, and the record is left as it is.
 func (e *Engine) readBody(now time.Time, owner store.Record, ref store.BodyRef) ([]byte, error) {
 	b, err := e.d.Store.ReadBody(owner.Name(), ref)
+	if err != nil && !errors.Is(err, store.ErrBodyMissing) && !errors.Is(err, store.ErrBodyMismatch) {
+		return nil, &Refusal{Reason: ReasonStorageUnavailable, Err: err}
+	}
 	if gone := errors.Is(err, store.ErrBodyMissing); gone || errors.Is(err, store.ErrBodyMismatch) {
 		if qerr := e.quarantineBody(now, owner, gone); qerr != nil {
 			if txnFatal(e.classify(qerr)) { // a fatal error stops the loop after this command

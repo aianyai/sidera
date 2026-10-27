@@ -2,13 +2,17 @@ package engine_test
 
 import (
 	"fmt"
+	"path"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/handoff"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
+	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -340,5 +344,24 @@ func TestOtherEndpointTokenCannotAcknowledge(t *testing.T) {
 	quiet(t, h)
 	if in := inOf(t, h, m2); in.Record.State != delivery.StateAccepted {
 		t.Errorf("the record of the second session is %s, want accepted: it did not acknowledge", in.Record.State)
+	}
+}
+
+// A message whose body cannot be read for an error of the disk is not handed out and
+// not settled as damaged: the agent is told to try again, as for a write that
+// failed, not that the node broke.
+func TestARecvThatCannotReadABodyIsToldTheStorageIsUnavailable(t *testing.T) {
+	h := nodeWith(t, harness.Options{}, "a", "b")
+	msg := send(t, h, "a", "b", "the disk will not give this back")
+	quiet(t, h)
+	in := inOf(t, h, msg)
+	rule := h.Faults().Fail(fsxtest.Match{Path: path.Join(store.BodiesDir, store.BodyFileName(in.Name()))}, syscall.EIO)
+
+	_, err := h.Agent("b").Recv(h.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
+	if fakeagent.CategoryOf(err) != fakeagent.CategoryBackpressure || fakeagent.CodeOf(err) != "storage_unavailable" {
+		t.Fatalf("recv: %v, want backpressure/storage_unavailable", err)
+	}
+	if rule.Hits() == 0 {
+		t.Fatal("the fault was not injected")
 	}
 }

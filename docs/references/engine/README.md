@@ -37,7 +37,10 @@ whether a failed write was for lack of space is `fsx.IsNoSpace`, which alone kno
 the operating system codes (pending verification by CI on main for Windows). The
 "no space" case of `TestAFailedWriteIsBackpressureAndMemoryKeepsWhatTheDiskHolds`
 injects `fsxtest.DiskFull`, the platform's own full-disk error, so it means the
-same on every platform. A full disk past the commit point is fatal like any other failure
+same on every platform. A failed operation of the file layer that no transaction wrapped is
+`storage_unavailable` too, and so is a read of a message body that failed for a reason other than
+the body being damaged (`TestARecvThatCannotReadABodyIsToldTheStorageIsUnavailable`): the record is
+left as it is and a retry may cure it. A full disk past the commit point is fatal like any other failure
 there: `classify` tests `txn.IsFatal` before `fsx.IsNoSpace`, and
 `TestAFatalWriteStopsTheLoopAndRefusesEveryLaterCommand` injects both an I/O error and
 `fsxtest.DiskFull` at the sync of the directory after the commit.

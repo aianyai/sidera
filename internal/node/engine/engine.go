@@ -921,10 +921,12 @@ func (e *Engine) failLoop() {
 // stays as it is. A failure that is fatal stops the loop after the command and
 // is answered as an outcome that is not known. A write that failed before its
 // commit point is back pressure, with the cause: nothing was acknowledged.
-// Anything else is an unexpected failure and is returned as it is.
+// A failed operation of the file layer that no transaction wrapped is the same
+// back pressure. Anything else is an unexpected failure and is returned as it is.
 func (e *Engine) classify(err error) error {
 	var ref *Refusal
 	var te *txn.Error
+	var fe *fsx.Error
 	switch {
 	case err == nil:
 		return nil
@@ -937,7 +939,7 @@ func (e *Engine) classify(err error) error {
 		return &Refusal{Reason: ReasonStorageFatal, Err: err}
 	case fsx.IsNoSpace(err):
 		return &Refusal{Reason: ReasonStorageFull, Err: err}
-	case errors.As(err, &te):
+	case errors.As(err, &te), errors.As(err, &fe):
 		return &Refusal{Reason: ReasonStorageUnavailable, Err: err}
 	}
 	return err
