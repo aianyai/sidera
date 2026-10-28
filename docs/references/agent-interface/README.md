@@ -62,6 +62,10 @@ expired probe `probe_token_expired`; these are `unauthenticated`. A mismatched
 front end is `invalid_argument/probe_frontend_mismatch`. Human messages are
 diagnostic, not stable identifiers, and carry no credentials or message bodies.
 
+Output-budget units use their existing manifest names, `chars` and `tokens`.
+`apiwire.BudgetUnitName` is their shared presentation rule; the calculation type
+does not acquire an implicit formatter just to provide these protocol names.
+
 The shared mapping also defines these stable directory errors:
 
 | Category | Code | Meaning |

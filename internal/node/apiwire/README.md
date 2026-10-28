@@ -18,6 +18,7 @@ not import it: the words of the wire never enter the engine.
 | Name | Purpose |
 | ---- | ------- |
 | `FromError(err)` | The one mapping: an error of the wire as it is, an `*engine.Refusal` by its reason, a `*config.ChangeError` by its reason, a `*strictjson.Error`, a failure of the way to the daemon (`ipc`), and any other error as an internal one. |
+| `BudgetUnitName(unit)` | A calculated output-budget unit as its existing wire name, `chars` or `tokens`; an unknown unit is an error. |
 | `AdapterEngine(engine)` | The engine behind the interface the adapter host asks of it (`adapterhost.Engine`): the four methods that answer a request of an adapter (`RegisterDirect`, `UnregisterDirect`, `CheckpointPut` and `RecvObserved`, the one optional part it offers) turn an `*engine.Refusal` into the `*peer.Error` the adapter is answered with, by one row per reason; every other error is passed on untouched. What each code means is in [docs/references/adapter-host](../../../docs/references/adapter-host/README.md). |
 | `FromAdmin(reason)` | The refusal of a request by the administrative rules. |
 | `Error`, `Body`, `New`, `Malformed` | An error as the wire carries it, `{"error":{"category","code","message","details?"}}`. |
@@ -27,6 +28,10 @@ not import it: the words of the wire never enter the engine.
 
 ## Rules
 
+- **Output units have one wire spelling.** The Agent facade and the process-local
+  test backend use `BudgetUnitName`, which takes its names from the SDK manifest
+  constants. The calculation type has no implicit formatter: changing every
+  diagnostic use of that value is not needed to present a budget on the wire.
 - **One mapping.** A reason of the engine, a refused change and a failure of the way
   to the daemon each have one pair of words, written here and nowhere else. A test
   walks every reason the engine and `config` have, so one added without a row fails.
