@@ -12,3 +12,8 @@ receive text is preserved byte for byte, including its newline, and `isError`
 becomes the Agent category and code. Input omission follows the scenario types:
 for example a nil acknowledgement list means the whole page, while an explicit
 empty list is still sent to the server. The server owns whether it is valid.
+
+A receive's nonzero wait is preserved even when a part is requested, so the Agent
+boundary can reject incompatible inputs rather than the driver silently changing
+the request. `Recv` and `Probe` accept only the MCP front end (or an unspecified
+front end); an explicit different front end returns an error before sending.

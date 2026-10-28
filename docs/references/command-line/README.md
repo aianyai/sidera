@@ -31,6 +31,7 @@ arguments, purpose and one example.
 | `status [<message-id>]` | Read node status, or the named message's delivery state and eventual control reply. |
 | `control <addr> <signal> [--preset <name>] [--body <text> \| --body-file <file>] [--content-type <type>] [--accept-before <seconds>] [--key <key>]` | Send a control signal, optionally with an initial message for session creation. |
 | `probe` | Present `SIDERA_PROBE_TOKEN` with front end `cli`. |
+| `mcp` | Serve the Agent tools over stdio MCP; see [the MCP reference](../mcp/README.md). |
 | `daemon stop` | Ask the running daemon to shut down after returning the accepted result. |
 | `alerts list [--all]` / `alerts ack <id>` | List alerts, optionally including acknowledged ones, or acknowledge an alert. |
 | `preset list` / `preset add <name> --file <file> [--expected-version <n>]` / `preset remove <name> [--expected-version <n>]` | Read or change the preset collection. A file of `-` reads stdin. |
@@ -129,6 +130,13 @@ a diagnostic to stderr and return 2 before any method call, in every mode,
 including `--json`; no error body is emitted for usage errors.
 Initialization and foreground-daemon diagnostics retain the daemon's original
 explanation on stderr.
+
+`mcp` reserves stdout for MCP messages even when `--json` is set. Process failures
+are diagnostics on stderr with the shared category exit code; a normal stdin
+EOF exits zero. Tool and RPC failures remain in MCP responses and do not terminate
+the process. The dispatcher owns and closes its local Agent client; the MCP peer
+owns and closes stdin/stdout. A separate probe credential enables the connection
+probe without granting access to endpoint methods.
 
 With `--json`, Agent success is its response object, management success is the
 complete response including `operation_id` and `replayed`, and method errors are

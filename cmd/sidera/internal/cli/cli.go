@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/aianyai/sidera/cmd/sidera/internal/mcp"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/daemon"
@@ -77,7 +78,7 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 		return daemon.ExitCode(d.err)
 	}
 	e := apiwire.FromError(err)
-	if c.json {
+	if c.json && c.arguments.flags.Name() != "mcp" {
 		_ = c.encode(apiwire.Body{Error: *e})
 	} else {
 		fmt.Fprintln(c.Stderr, "error:", e)
@@ -199,12 +200,25 @@ func (c *command) run(ctx context.Context, args []string) error {
 			return c.manage(ctx, args)
 		}
 	}
-	client, err := agentapi.NewClient(agentapi.ClientConfig{Home: c.home, Token: adapterproto.Token(c.Getenv("SIDERA_TOKEN")), ProbeToken: adapterproto.Token(c.Getenv("SIDERA_PROBE_TOKEN"))})
+	probeToken := adapterproto.Token(c.Getenv("SIDERA_PROBE_TOKEN"))
+	client, err := agentapi.NewClient(agentapi.ClientConfig{Home: c.home, Token: adapterproto.Token(c.Getenv("SIDERA_TOKEN")), ProbeToken: probeToken})
 	if err != nil {
 		return err
 	}
 	defer client.Close()
 	switch args[0] {
+	case "mcp":
+		p, err := parse(c.arguments.flags, args[1:])
+		if err != nil {
+			return err
+		}
+		if len(p) != 0 {
+			return usage("mcp takes no positional arguments")
+		}
+		return mcp.Run(ctx, mcp.Config{
+			Stdin: c.Stdin, Stdout: c.Stdout, Stderr: c.Stderr,
+			Agent: client, Version: c.Version, ProbeOnConnect: probeToken != "",
+		})
 	case "status":
 		p, err := parse(c.arguments.flags, args[1:])
 		if err != nil {

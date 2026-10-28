@@ -8,6 +8,7 @@ import (
 type helpEntry struct{ usage, purpose, example string }
 
 var helpEntries = map[string]helpEntry{
+	"mcp":                        {"mcp", "Serve Agent tools over MCP stdio; stdout contains protocol messages only, including with --json.", "sidera mcp"},
 	"daemon stop":                {"daemon stop", "Ask the running node to stop after acknowledging the request.", "sidera daemon stop --json"},
 	"alerts list":                {"alerts list [--all]", "List open alerts, optionally including acknowledged alerts.", "sidera alerts list --all --json"},
 	"alerts ack":                 {"alerts ack <id>", "Acknowledge an alert.", "sidera alerts ack <id>"},
@@ -42,7 +43,7 @@ var helpEntries = map[string]helpEntry{
 	"probe":                      {"probe", "Present SIDERA_PROBE_TOKEN for the CLI front end.", "sidera probe --json"},
 }
 
-var helpOrder = []string{"init", "daemon", "daemon stop", "me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe", "alerts list", "alerts ack", "preset list", "preset add", "preset remove", "adapter install", "adapter list", "adapter enable", "adapter disable", "endpoint list", "endpoint close", "endpoint set", "node show", "node set", "identity export-revocation", "identity confirm-backup", "identity retire", "clock clear-rollback"}
+var helpOrder = []string{"init", "daemon", "daemon stop", "me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe", "mcp", "alerts list", "alerts ack", "preset list", "preset add", "preset remove", "adapter install", "adapter list", "adapter enable", "adapter disable", "endpoint list", "endpoint close", "endpoint set", "node show", "node set", "identity export-revocation", "identity confirm-backup", "identity retire", "clock clear-rollback"}
 
 func (c *command) printHelp(args []string) error {
 	if len(args) == 0 {
