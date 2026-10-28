@@ -157,9 +157,14 @@ func TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface(t *testing.T
 // written out from the interface specification; here every reason must come out
 // of the fake agent as that mapping gives it.
 func TestEveryEngineReasonMapsToACategoryAndCode(t *testing.T) {
+	// These reasons answer only adapter requests and have no Agent wire words.
+	adapterOnlyReasons := map[engine.Reason]bool{engine.ReasonAttemptUnknown: true}
 	for _, r := range engine.Reasons() {
 		refusal := &engine.Refusal{Reason: r}
 		want := apiwire.FromError(refusal)
+		if want.Category == apiwire.CategoryInternal && !adapterOnlyReasons[r] {
+			t.Errorf("%s has no words of its own on the wire: it would reach an agent as an internal error", r)
+		}
 		err := engineagent.MapError(refusal)
 		if got := fakeagent.CategoryOf(err); string(got) != string(want.Category) || !got.Valid() {
 			t.Errorf("%s: category %q, want %q", r, got, want.Category)
