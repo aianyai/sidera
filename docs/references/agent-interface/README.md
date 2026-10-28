@@ -205,8 +205,9 @@ producers must keep request bodies, credentials and private keys out of them.
 An emitted stable code is never renamed, removed or reused for another meaning.
 Directory timeout is a known unavailable result, not an unknown message outcome.
 Existing state refusals keep their codes; `loop_busy` is the inbox submission
-wait. Success, including a received message or an empty receive page, exits zero;
-command usage errors have exit code 2.
+wait. Success, including a received message or an empty receive page, exits zero.
+Command-line usage errors always write diagnostics to stderr and exit with code 2,
+including with `--json`. They do not produce an API error body on stdout.
 
 The [shared local HTTP boundary](../local-http/README.md) owns routing, body
 limits, response encoding, logging and shutdown. The server reads headers within

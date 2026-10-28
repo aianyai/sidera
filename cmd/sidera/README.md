@@ -1,0 +1,30 @@
+# sidera
+
+The node's command-line program. `main.go` supplies the process streams and
+environment to [`internal/cli`](internal/cli/README.md), and is the only place
+that calls `os.Exit`. Build it with `go build ./cmd/sidera`.
+
+[`command-line`](../../docs/references/command-line/README.md) describes the
+commands, output and exit codes. Agent commands use the checked local Agent
+client; management commands use the management client; `init` and the foreground
+`daemon` use the daemon composition root.
+The name `siderad` (also `siderad.exe`) selects `daemon`.
+
+[`internal/acceptance`](internal/acceptance/README.md) contains test support
+that drives the executable. The external tests in `cli_test.go` build the real
+program, connect it to the real Agent handler on checked local IPC, and use
+the engine fixture to create sessions through `session.create`. Every CLI
+process has its own token and runs in the same directory as the other sessions.
+The fixture reads the created endpoint's stored token; it never invents a
+session endpoint or credential.
+
+The receive interruption test pauses an actual HTTP response after its first
+byte, kills its CLI process, and reads the unacknowledged message again. It
+does not depend on pipe capacity or a process winning a timing race.
+
+Management integration tests run against the real management server and also
+start and stop the actual foreground daemon process. A checked-IPC HTTP fault
+peer drops management responses to verify the CLI's one resend keeps the
+operation identifier, version and body unchanged. The decoder and settings
+argument fuzz tests live in `internal/cli`, alongside a parser fuzz target that
+checks local/global arities, preserved values and unchanged argv.

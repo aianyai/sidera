@@ -1,0 +1,43 @@
+# cli
+
+`Run(context.Context, argv, Config)` is the executable's dispatcher; `argv`
+includes the executable name. The owner supplies standard streams, an environment
+lookup and a version. The dispatcher returns an exit code and never exits the
+process itself. It borrows the streams, owns and closes the Agent client, and
+waits for a foreground daemon to finish before returning.
+
+Global flags are removed before dispatch. Command discovery registers the local
+flags once; global scanning reads their arity through `FlagSet.Lookup` and the
+standard-library `IsBoolFlag` convention, then local parsing uses that same set
+and its bound values. A local value stays attached, including a body spelled
+`--json`. Parsing accepts flags after positional arguments and honors `--`.
+
+- `arguments.go`: command discovery and registration before global scanning.
+- `cli.go`: global parsing, dispatch, receive and acknowledgement arguments.
+- `message.go`: message and control flags; one body source for send and reply.
+- `query.go`: identity, declaration patch presence, directory, peers and probe.
+- `output.go`: human results; structured results use the shared JSON encoder.
+- `local.go`: initialization and foreground daemon composition.
+- `manage.go`: management arguments, expected versions and one retained request
+  for a single resend after an unknown outcome.
+- `manage_output.go`: complete JSON responses and human settings and lists.
+- `export.go`: online export and the precise missing-daemon offline fallback.
+- `help.go`: usage, purpose and example for every command.
+
+Agent flags are assembled into presence-preserving objects for `Client.Call`;
+explicit empty strings and zeroes reach the existing interface validation rather
+than disappearing through typed optional fields. Business rules stay in the
+Agent interface and engine. The dispatcher sends
+comma-separated `send --to` values as a list so the Agent boundary alone owns
+the one-recipient rule. A receive writes the client's page unchanged, adds no
+newline and does not acknowledge it. Errors use `apiwire` and its exit table;
+daemon failures retain `daemon.ExitCode`, including fatal storage code 74.
+
+Management commands parse their inputs once, read an omitted collection version
+once, and choose an operation identifier once. Only a change with an unknown
+outcome is sent again, at most once, with the same request. A version conflict is
+reported to the caller. `--json` writes the complete response, preserving
+`operation_id` and `replayed`; human change output also lists those fields.
+A human unknown-outcome error prints the retained identifier from its error
+details. Human adapter-enable output explains that probing continues in the
+background and directs the owner to `sidera adapter list`.

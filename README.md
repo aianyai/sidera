@@ -23,11 +23,11 @@ is no central server and no account to sign up for.
 
 > [!NOTE]
 > **Pre-release.** This README describes Sidera as it is designed. So far the
-> repository holds its foundations: the formats and rules for identity, trust,
-> message delivery and adapters, with their tests. Sidera itself (the
-> background service, the command line, the adapters and the management apps)
-> is not built yet, so there is nothing to install. Watch the repository to
-> follow progress.
+> repository contains the single-node daemon, its local interfaces and the
+> command-line tools for initialization, local management and Agent messaging,
+> with their tests.
+> Build the command with `go build ./cmd/sidera`; the available commands are
+> described in the [command-line reference](docs/references/command-line/README.md).
 
 ## How it works
 
@@ -119,9 +119,9 @@ to, what to say and how to react. It is not:
   tests that hold the Go types to it, see its [README](protocol/README.md).
 - `sdk/go/`: the Go module adapters and Sidera share, see its
   [README](sdk/go/README.md).
-- `cmd/`: the programs' code; so far only the session-creation logic of the
-  Claude Code adapter, with no executable yet, see
-  [its README](cmd/sidera-adapter-claude/README.md).
+- `cmd/`: the [node command line](cmd/sidera/README.md), fake adapter and runtime
+  test programs, and the Claude Code adapter's
+  [session-creation logic](cmd/sidera-adapter-claude/README.md).
 - `.github/workflows/`: continuous integration, see
   [the ci reference](docs/references/ci/README.md).
 - `docs/references/`: engineering references by topic, see its
