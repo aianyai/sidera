@@ -66,9 +66,7 @@ func Run(ctx context.Context, cfg Config) error {
 		return err
 	}
 	defer p.Close()
-	for _, method := range []string{"initialize", "ping", "server/discover", "tools/list", "tools/call"} {
-		p.Handle(method, func(ctx context.Context, raw json.RawMessage) (any, error) { return s.handle(ctx, method, raw) })
-	}
+	p.HandleDefault(s.handle)
 	p.HandleNotification("notifications/initialized", func(context.Context, json.RawMessage) {})
 	p.Start()
 	select {

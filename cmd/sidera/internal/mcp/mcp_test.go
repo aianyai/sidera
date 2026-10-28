@@ -63,6 +63,7 @@ func TestLegacyInitializeGolden(t *testing.T) {
 	s.exchange(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"sidera","version":"test"},"instructions":"Use me to inspect your endpoint and receive limits. Receive pages must be read before acknowledging them."}}`)
 	s.exchange(t, `{"jsonrpc":"2.0","id":2,"method":"ping"}`, `{"jsonrpc":"2.0","id":2,"result":{}}`)
 	s.exchange(t, `{"jsonrpc":"2.0","id":3,"method":"server/discover"}`, `{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"method not found"}}`)
+	s.exchange(t, `{"jsonrpc":"2.0","id":4,"method":"unknown"}`, `{"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"method not found"}}`)
 }
 
 func TestModernDiscoveryGolden(t *testing.T) {
