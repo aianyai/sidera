@@ -1,5 +1,7 @@
 # Agent interface
 
+The MCP stdio boundary is described in [the MCP reference](../mcp/README.md).
+
 The local HTTP interface through which an Agent tool reaches its node. Transport
 and peer checks belong to [local IPC](../local-ipc/README.md). The implementation
 is [`internal/node/agentapi`](../../../internal/node/agentapi/README.md), whose
