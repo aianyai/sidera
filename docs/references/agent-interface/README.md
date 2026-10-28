@@ -1,98 +1,232 @@
 # Agent interface
 
 The local HTTP interface through which an Agent tool reaches its node. Transport
-and peer checks are [local IPC](../local-ipc/README.md)'s; the interface is
-[`internal/node/agentapi`](../../../internal/node/agentapi/README.md), and its only
-engine dependency is `engine.AgentService`.
+and peer checks belong to [local IPC](../local-ipc/README.md). The implementation
+is [`internal/node/agentapi`](../../../internal/node/agentapi/README.md), whose
+only engine dependency is `engine.AgentService`.
 
 ## What
 
-The probe-only service listens on `<SIDERA_HOME>/run/agent.sock` on Unix or the
-Agent named pipe on Windows. It accepts `POST /v1/agent/probe`, with
-`Content-Type: application/json`, `Authorization: Bearer <probe token>` and this
-body:
+### Transport and credentials
 
-```json
-{"frontend":"cli"}
-```
+The interface uses HTTP/1.1 on `<SIDERA_HOME>/run/agent.sock` on Unix or the Agent
+named pipe on Windows. Methods are `POST /v1/agent/<method>`, with
+`Content-Type: application/json` and `Authorization: Bearer <token>`. The endpoint
+is resolved from the token inside the engine command that acts for it, so a
+credential revoked between requests never retains authority.
 
-`frontend` is required and is `cli` or `mcp`. A successful response is:
+The environment names are `SIDERA_HOME` (an absolute data directory),
+`SIDERA_TOKEN` (the credential of a session endpoint), and `SIDERA_PROBE_TOKEN`
+(the separate credential for a tool probe). Endpoint tokens are stored with their
+endpoints so the node can attach a session again; closing a session revokes its
+token. Probe tokens can call only `probe`, and endpoint tokens cannot call it.
 
-```json
-{"ok":true,"preset":"default","frontend":"cli"}
-```
+Both credentials contain 32 random bytes in unpadded base64url. The HTTP boundary
+calls `adapterproto.Token.Validate` before constructing the caller; the engine
+owns lookup, constant-time comparison, expiry and revocation. Tokens are never
+logged. Only open session endpoints can act through this interface; adapters
+read and write direct endpoints through the adapter protocol.
 
-The preset and front end are those bound to the token. The engine records that
-front end as reached and consumes the token before answering. The adapter's
-report that the tool ran alone does not establish reachability: the token has to
-be presented to this interface. It proves connectivity, not the honesty of an
-adapter that knows the token.
+A new server accepts only probes. Every other known method answers
+`503 unavailable/probe_only` before credentials or body are examined. After the
+engine finishes recovery, the composition root calls `Server.EnableMethods`.
+That transition is one-way and safe to repeat. The engine still owns its phase
+checks, including shutdown and clock rollback.
 
-Probe tokens contain 32 random bytes in unpadded base64url. `Token.Validate` owns
-their one canonical spelling. They are bound to an instance, preset and front
-end, kept only in memory, valid for five minutes from issuance on the injected
-clock, and consumed by the first successful probe. A restart or a new probe round
-invalidates the earlier tokens. A mismatched front end does not consume a token.
-The engine compares candidates in constant time. Tokens are never logged.
-
-The environment names issued by the engine are `SIDERA_HOME` (an absolute data
-directory), `SIDERA_PROBE_TOKEN` (a probe token) and `SIDERA_TOKEN` (the distinct
-credential of a session endpoint). Endpoint tokens are stored with the endpoint
-so the node can attach the session again; closing the endpoint revokes them.
-
-While only probes are accepted, `me`, `declare`, `peers`, `directory`, `send`,
-`reply`, `recv`, `ack`, `status` and `control` answer `503 unavailable/probe_only`
-before credentials or body are examined. An unknown path answers
-`404 not_found/method_unknown`; a known method called without POST answers 405
-`invalid_argument/method_not_allowed`, with `Allow: POST`.
-
+An unknown path answers `404 not_found/method_unknown`; a known method called
+without POST answers `405 invalid_argument/method_not_allowed` with `Allow: POST`.
 Requests are at most 1 MiB. JSON is strict: unknown or repeated members, `null`,
-wrong member case, missing required members, wrong types and trailing values are
-`400 invalid_argument/malformed_request`, with the fault's path when known. An
-oversized request is `invalid_argument/request_too_large`. Errors have this shape:
+wrong member case, missing required members, wrong types, invalid UTF-8 and
+trailing values are `400 invalid_argument/malformed_request`. An oversized request
+is `invalid_argument/request_too_large`. Optional members are omitted instead of
+sent as an empty string, zero, list or object, except where a legitimate zero is
+explicitly accepted below. A declaration's pointer fields distinguish absence
+from `false` or an empty `accept_from` list.
+
+### Methods
+
+Every method except `probe` uses the endpoint credential. Identifiers and
+addresses are strings; addresses use `<node>/<endpoint>`. Times are UTC and
+request durations are integer seconds.
+
+| Method | Request | Successful result |
+| --- | --- | --- |
+| `me` | `{}` | The endpoint's `address`, `node`, `kind`, `display_name`, `declaration` and `frontends` |
+| `declare` | A declaration patch | `{"declaration":{...}}` after applying the patch |
+| `peers` | `{}` | `{"nodes":[{"node":"...","self":true}]}` |
+| `directory` | Optional `node`, `cursor`, `limit` | `{"endpoints":[...],"next_cursor":"..."}` |
+| `send` | Required `to` array and `body`; optional message fields below | `{"message_id":"...","to":["..."],"replayed":false}` |
+| `reply` | Required `message_id`, `body`; optional message fields below | The same shape as `send` |
+| `recv` | Required `frontend`; optional receive fields below | The page bytes, including their newline |
+| `ack` | Required `lease`; optional `items` | `{"items":[PartAck...]}` |
+| `status` | `{"message_id":"..."}` | `adapterproto.MessageStatusResult` |
+| `control` | Required `to` string, `signal`; optional control fields below | `{"message_id":"...","to":"...","replayed":false}` |
+| `probe` | `{"frontend":"cli"}` or `{"frontend":"mcp"}` | `{"ok":true,"preset":"...","frontend":"cli"}` |
+
+**Identity and declaration.** `me.declaration` has the five snake-case fields
+`paused`, `refuse_multi_recipient`, `restrict_senders`, `accept_from` (an array of
+addresses), and `hidden_from_directory`. The `declare` request is a patch with
+those same fields directly in the request object, not inside `declaration`.
+Omitted fields stay unchanged; `accept_from` replaces its entire list, and an
+explicit empty list clears it. An empty patch is `invalid_argument/empty_patch`.
+The engine owns declaration validity and its sender-list bound.
+
+`me.frontends` contains only `cli` and/or `mcp` actually declared by the adapter;
+an instance not yet admitted has an empty object. Each value is
+`{"recv_wait_max_s":20,"budget":{"unit":"chars","limit":27000}}`, with the
+adapter's limits and their engine-owned defaults. Output budget unit names are
+shared through `apiwire.BudgetUnitName`: `chars` and `tokens`; an unknown unit is
+an internal error rather than a fabricated usable limit. `peers.self` compares
+each visible node with this endpoint's node. With the current local transport,
+the only visible node is the node itself.
+
+**Directory.** `limit` is 1 through 256, default 100. Entries contain `address`,
+`kind`, `display_name`, `description` and `accepts` (action names such as
+`message.send` and `session.create`). Only visible open endpoints appear, in
+endpoint ID order. Creating, closed and system endpoints do not appear. An open
+endpoint whose adapter has not been admitted still appears; only signals known
+for its kind are advertised, and interrupt requires a confirming admission.
+
+The target re-reads and authorizes the live view on every page. The opaque cursor
+is a position, not permission; it binds the full source address and the daemon
+instance. A changed source, modified cursor or restart is
+`invalid_argument/cursor_invalid`. `next_cursor` is an empty string at the end.
+Queries use the engine's transport seam, including for this node, and have a
+five-second default budget after successful inbox entry, covering queuing,
+transport and the result. Timeout and an unreachable target are
+`unavailable/directory_unavailable`. See [the engine reference](../engine/README.md)
+for authorization, cancellation and the outbound worker's FIFO limitation.
+
+**Messages.** `send.to` must contain exactly one address. The HTTP boundary alone
+owns `invalid_argument/single_recipient_only`; other front ends pass the list
+through. The engine retains a multi-recipient contract. `body` must be non-empty
+and valid UTF-8. `content_type` defaults to `text/plain`; other optional send
+fields are `thread`, `disclose_recipients`, `accept_before_s` and
+`idempotency_key`. The deadline's bound is `delivery.MaxAcceptBefore`, checked
+before converting seconds to a duration so multiplication cannot overflow.
+
+`reply` accepts optional `content_type`, `thread` and `idempotency_key`. Its
+recipient and reply evidence come from the message the endpoint received; the
+caller cannot choose another recipient. The engine owns body, envelope,
+capacity, reply-permission and idempotency validation. A successful send or reply
+means the source accepted it durably. The target's later intake decision is read
+through `status` and channel feedback.
+
+An explicit idempotency key reused with identical content returns the original
+message and `replayed:true`; another content under the key is
+`conflict/idempotency_conflict`. The client never generates a key or retries a
+request automatically. `replayed` says only that the key replayed a request.
+
+**Control.** `to` is a single address. `signal` is the existing
+`adapterproto.ControlSignal`; the engine calls the protocol's `Control.Validate`
+for its field constraints. `preset` is required exactly for `session.create`.
+A creation can omit its initial `body` altogether; a present body must be
+non-empty. Only a creation accepts `body` and `content_type`. Other optional
+fields are `idempotency_key` and `accept_before_s`. Acceptance returns the three
+fields in the method table, with no control reply. Poll `status.control_reply`
+for the eventual answer; the response reuses `adapterproto.MessageStatusResult`
+and `ControlReply`, including a created session endpoint when one was created.
+
+**Receiving.** `frontend` is required and is `cli` or `mcp`. Optional `wait_s` is a
+non-negative integer, at most 86400 to bound conversion; an explicit zero means
+no wait. The engine alone clamps it to the selected front end's declared limit.
+Optional `msg` and `part` go together, using the page's `next` pointer and
+`adapterproto.PageNext` validation. A part request cannot include `wait_s`, even
+zero, and never waits. Optional `ack_lease` asks the engine to acknowledge the
+entire earlier page before receiving this one. Failure of that acknowledgement
+is logged and does not block the receive. The HTTP boundary passes its string
+to the engine without validating lease syntax: a malformed earlier lease is
+also a failed acknowledgement and must not prevent the current receive. The
+independent `ack` method still requires a valid lease identifier.
+
+The response is exactly the bytes of `handoff.Pack` or `handoff.Part`, with no
+wrapper, re-encoding or added newline. The client also returns those exact bytes.
+An empty queue returns a valid empty page with a new lease. Concurrent receives,
+cancellation, possible duplicates, the second authorization check, and writing a
+lease before handing out belong to the engine. One endpoint has at most one
+waiting receive; a newer receive ends the earlier one with an empty page. If a
+connection ends after a page was leased, the next receive can return the message
+marked possibly duplicate. A system endpoint sender identifies this node's own
+channel feedback; other endpoints and nodes cannot send as that endpoint.
+
+**Acknowledgements.** Omit `items` to acknowledge the whole page, or provide 1
+through `adapterproto.MaxAckItems` (1024) `PartRef` values, each with `message_id`
+and `part`. An explicit empty `items` list is invalid. `PartAck` and `ItemAck`
+are the protocol's existing types and values. A lease not held by the caller's
+endpoint is `not_found/lease_unknown`; another endpoint's token cannot
+acknowledge it.
+
+The engine remembers a page's parts in memory for `pageMemory`. After a daemon
+restart or that memory expires, whole-page acknowledgement confirms only
+messages known to fit whole on one page. It does not confirm any part of a
+message that was split; the caller must explicitly name the parts it saw.
+Acknowledging unseen parts would falsely report a body delivered.
+
+**Probing.** A probe token is bound to an instance, preset and front end, valid
+for five minutes on the injected clock and consumed by its first successful
+presentation. A mismatch does not consume it. A restart or new probe round
+invalidates earlier tokens. The adapter reporting that a tool ran is not enough:
+the token must reach this interface. It proves connectivity, not the honesty of
+an adapter that knows the token.
+
+### Errors, deadlines and clients
+
+Errors have this shape:
 
 ```json
 {"error":{"category":"unauthenticated","code":"token_unknown","message":"the token is not known to this node or has been revoked"}}
 ```
 
-`apiwire` owns categories, codes, HTTP statuses and command exit codes. A missing
-credential is `token_missing`, a noncanonical credential `token_malformed`, an
-unknown credential `token_unknown`, a consumed probe `probe_token_used`, an
-expired probe `probe_token_expired`; these are `unauthenticated`. A mismatched
-front end is `invalid_argument/probe_frontend_mismatch`. Human messages are
-diagnostic, not stable identifiers, and carry no credentials or message bodies.
+`apiwire` alone owns categories, stable codes, HTTP statuses, exit codes and human
+messages. Diagnostic messages are not stable identifiers and carry no request
+body, credential or private key.
 
-Output-budget units use their existing manifest names, `chars` and `tokens`.
-`apiwire.BudgetUnitName` is their shared presentation rule; the calculation type
-does not acquire an implicit formatter just to provide these protocol names.
-
-The shared mapping also defines these stable directory errors:
-
-| Category | Code | Meaning |
-| --- | --- | --- |
-| `unavailable` | `directory_unavailable` | The target is unreachable or the directory query exceeded its default five-second budget after entering the engine inbox. A later query may succeed. |
-| `invalid_argument` | `cursor_invalid` | A continuation is malformed, was modified, belongs to another full source address or came from a previous daemon instance. |
+| Category | HTTP | Command exit | Representative codes |
+| --- | --- | --- | --- |
+| `invalid_argument` | 400 | 3 | `malformed_request`, `request_too_large`, `single_recipient_only`, `empty_patch`, `cursor_invalid`, `probe_frontend_mismatch` |
+| `unauthenticated` | 401 | 4 | `token_missing`, `token_malformed`, `token_unknown`, `probe_token_used`, `probe_token_expired` |
+| `not_found` | 404 | 5 | `method_unknown`, `message_unknown`, `lease_unknown`, `endpoint_unknown`, `instance_unknown` |
+| `conflict` | 409 | 6 | `idempotency_conflict` |
+| `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind`, `reply_not_permitted` |
+| `backpressure` | 429 | 8 | `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy` |
+| `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable` |
+| `internal` | 500 | 1 | `internal` |
+| `outcome_unknown` | 500 | 10 | `outcome_unknown`, `storage_fatal` |
 
 An emitted stable code is never renamed, removed or reused for another meaning.
-Directory errors do not make the client automatically resend a request. Existing
-state refusals remain `recovering`, `clock_rollback`, `shutting_down` and
-`loop_busy` (the inbox submission wait alone).
+Directory timeout is a known unavailable result, not an unknown message outcome.
+Existing state refusals keep their codes; `loop_busy` is the inbox submission
+wait. Success, including a received message or an empty receive page, exits zero;
+command usage errors have exit code 2.
 
-The server reads headers within 10 seconds and the request within 30 seconds,
-keeps an idle connection for 60 seconds, and limits headers to 8 KiB. It has no
-global write timeout; the handler follows the request context. Shutdown stops
-taking requests, waits within the owner's grace, then closes remaining requests.
+The server reads headers within 10 seconds and requests within 30 seconds, keeps
+an idle connection for 60 seconds, and limits headers to 8 KiB. It has no global
+write timeout. Shutdown stops accepting requests, waits within the owner's
+grace, then closes remaining requests. The owner ends engine waiters before
+waiting on HTTP shutdown.
 
-The client connects only through `ipc.Dial`, with the data directory made absolute
-and clean. It uses no proxy, follows no redirect and never automatically retries
-an Agent request. Ordinary calls have a 60-second deadline, also bounded by the
-caller's context. If a request was written and its response was lost or cut, the
-client reports `outcome_unknown` (exit code 10): the caller cannot assume that the
-probe was not consumed. No operation identifier means no advice to resend.
+The client connects only through `ipc.Dial`, with an absolute, clean data
+directory. It uses no proxy, follows no redirect and sets no HTTP idempotency
+header. Before encoding or connecting, it rejects invalid UTF-8 in request text
+with `invalid_argument/malformed_request`. Go's JSON encoder would otherwise
+replace invalid bytes, changing message content or merging distinct idempotency
+keys. Ordinary calls have a 60-second deadline; receives have
+`min(requested wait_s, manifest.MaxRecvWaitSeconds) + 30` seconds, bounded also by
+the caller's context. The protocol's maximum is 120 seconds. A written request
+without a complete, valid answer is `outcome_unknown`; the caller cannot assume
+it had no effect. No operation identifier means no advice to resend.
+
+The default undeclared wait limit is eight seconds. A shell tool with a
+ten-second foreground window may end its process at the deadline or let it
+continue in the background while returning a process identifier first. In either
+case a longer receive can leave the page outside the model's immediate result,
+so the default leaves time for connecting and printing. An adapter can declare a
+larger limit for a front end with a larger usable foreground window; `me`
+reports the actual limits instead of tools hard-coding them.
 
 Sandboxes must deny reading and writing the data directory and allow only
 connecting to the Agent socket; they must not write its directory or connect to
-the management interface. The reasons and platform-specific limitations are in
+the management interface. The reasons and platform-specific limits are in
 [the local IPC reference](../local-ipc/README.md#sandboxes-and-the-rest-of-the-data-directory).
 
 ## Why
@@ -107,9 +241,15 @@ cannot treat an Agent call as an idempotent request to retry. See the
 [standard-library transport documentation](https://pkg.go.dev/net/http#Transport)
 and [request trace documentation](https://pkg.go.dev/net/http/httptrace#ClientTrace).
 
+Value vocabularies, body and envelope rules, declarations, authorization,
+receive scheduling and acknowledgement safety stay with their existing owners.
+The HTTP boundary adds only its wire shape, presence rules and the one-recipient
+limit. Returning a receive page unchanged keeps the bytes checked before an
+adapter acknowledges on the model's behalf identical across tool front ends.
+
 ## Where
 
-`agentapi.go` owns routing, probe-only refusal, Bearer syntax, strict request
-reading and JSON responses; `client.go` owns checked dialing, the probe call and
-the distinction between failure to connect and an unknown outcome. The engine's
-probe state and token rules are described in [the engine reference](../engine/README.md).
+`agentapi.go` owns routing, enabling, Bearer syntax, bounded request reading and
+responses. `methods.go` owns endpoint request/result types and conversion to the
+engine service. `client.go` owns checked dialing, probing and unknown outcomes;
+`client_methods.go` adds the typed endpoint methods and receive deadlines.

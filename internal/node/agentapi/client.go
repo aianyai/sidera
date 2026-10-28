@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/http/httptrace"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/ipc"
@@ -86,6 +88,9 @@ func (c *Client) Probe(ctx context.Context, frontend adapterproto.Frontend) (Pro
 }
 
 func (c *Client) call(ctx context.Context, method string, in any, timeout time.Duration) ([]byte, error) {
+	if !validRequestText(reflect.ValueOf(in)) {
+		return nil, apiwire.Malformed("request text is not valid UTF-8", "")
+	}
 	var body bytes.Buffer
 	enc := json.NewEncoder(&body)
 	enc.SetEscapeHTML(false)
@@ -130,4 +135,32 @@ func (c *Client) call(ctx context.Context, method string, in any, timeout time.D
 		return nil, &answer.Error
 	}
 	return raw, nil
+}
+
+// The client's fixed request types contain only structs, slices, pointers and
+// scalar fields, with no custom marshalers. Check their text before encoding/json
+// can silently replace invalid UTF-8, including text used as an idempotency key.
+func validRequestText(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.String:
+		return utf8.ValidString(v.String())
+	case reflect.Pointer:
+		return v.IsNil() || validRequestText(v.Elem())
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if !validRequestText(v.Field(i)) {
+				return false
+			}
+		}
+	case reflect.Slice:
+		for i := range v.Len() {
+			if !validRequestText(v.Index(i)) {
+				return false
+			}
+		}
+	case reflect.Bool, reflect.Int, reflect.Int64:
+	default:
+		panic("agentapi: unsupported request field kind " + v.Kind().String())
+	}
+	return true
 }

@@ -574,6 +574,11 @@ random source with the building blocks of
 written once; what is the engine's own (phases, forks of a disk, seeded records) stays
 in the rig.
 
+`agentapi_boundary_test.go` keeps the HTTP receive check with this fixture so its
+existing test-only waiter observation can synchronize the request without a
+production hook. It checks propagation of the selected front end and seconds
+against the declared receive limit.
+
 `endpoints_test.go` has `TestEndpointBeyondNodeCapRefused` and the cap counted over
 other kinds of endpoint; `close_test.go` the
 closing and its chunks; `execute_test.go` and `execute_crash_test.go` the door of the administrative operations and its crash points; `declare_test.go` the declaration and who may make it;

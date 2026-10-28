@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
@@ -26,19 +27,24 @@ import (
 const pathPrefix = "/v1/agent/"
 const maxBody = 1 << 20
 
-// Config gives the probe interface its engine and diagnostic log.
+// Config gives the Agent interface its engine and diagnostic log.
 type Config struct {
 	Service engine.AgentService
 	Log     *slog.Logger
 }
 
-// Server serves the Agent interface in probe-only mode, so an adapter can verify
-// its tools while the engine is recovering. Other Agent methods are unavailable.
+// Server starts in probe-only mode so an adapter can verify its tools while the
+// engine recovers. EnableMethods opens endpoint methods after recovery.
 type Server struct {
-	svc  engine.AgentService
-	log  *slog.Logger
-	http *http.Server
+	svc     engine.AgentService
+	log     *slog.Logger
+	http    *http.Server
+	enabled atomic.Bool
 }
+
+// EnableMethods opens the full interface after the engine has finished recovery.
+// The transition is one-way and safe to repeat.
+func (s *Server) EnableMethods() { s.enabled.Store(true) }
 
 // New makes a server without opening a listener.
 func New(c Config) (*Server, error) {
@@ -120,7 +126,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeMethodNotAllowed, "a method is called with POST"), http.StatusMethodNotAllowed)
 		return
 	}
-	if name != "probe" {
+	if name != "probe" && !s.enabled.Load() {
 		s.fail(w, apiwire.New(apiwire.CategoryUnavailable, "probe_only", "the node is recovering and accepts only tool probes"), 0)
 		return
 	}
@@ -164,7 +170,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}{true, target.Preset, target.Frontend})
 		return
 	}
-	s.fail(w, apiwire.New(apiwire.CategoryNotFound, apiwire.CodeMethodUnknown, "there is no such method"), 0)
+	out, err := s.method(r.Context(), engine.ByToken(token), name, body)
+	if err != nil {
+		s.fail(w, err, 0)
+		return
+	}
+	if name == "recv" {
+		s.write(w, http.StatusOK, out.([]byte))
+		return
+	}
+	s.send(w, http.StatusOK, out)
 }
 
 func bearerToken(h http.Header) (adapterproto.Token, error) {

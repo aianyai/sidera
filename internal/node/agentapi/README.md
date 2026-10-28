@@ -10,8 +10,10 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
 | Name | Purpose |
 | ---- | ------- |
 | `Listen`, `Listener` | Open an Agent address through `ipc`, under the node's instance lock. The underlying listener is private. |
-| `New`, `Config`, `Server.Serve`, `ServeHTTP`, `Shutdown`, `Close` | Serve the probe-only interface; other known Agent methods answer `unavailable/probe_only`. |
+| `New`, `Config`, `Server.Serve`, `ServeHTTP`, `Shutdown`, `Close` | Serve the interface, initially accepting only probes. `Server.EnableMethods` opens the endpoint methods after recovery. |
 | `NewClient`, `ClientConfig`, `Client.Probe`, `Client.Close` | Present the separate probe credential through `ipc.Dial` and release idle connections. |
+| `Client.Me`, `Declare`, `Peers`, `Directory`, `Send`, `Reply`, `Recv`, `Ack`, `Status`, `Control` | Call the endpoint methods; receive returns unchanged page bytes. |
+| Request and result types in `methods.go` | The snake-case Agent wire shapes; value vocabularies and validation stay with their existing owners. |
 | `ProbeResult` | The successful probe's preset and front end, with `ok: true`. |
 
 ## Rules
@@ -20,9 +22,17 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
   and a strict JSON object with `frontend`. The SDK owns token spelling and the
   front-end vocabulary; the engine owns issuance, expiry, one-use consumption,
   constant-time comparison and the probe's reached state.
-- Every other known Agent method is refused before credentials or body are read.
+- Until `EnableMethods`, every other known Agent method is refused before
+  credentials or body are read.
   An adapter can prove tool reachability while delivery recovery is running,
   without opening other operations during that interval.
+- Full-service methods construct `engine.ByToken` only after the SDK validates
+  credential spelling. The engine resolves the caller in the command that acts.
+  This boundary owns the one-recipient limit, JSON presence rules, parsing
+  identifiers and safe conversion of seconds; the engine owns message validation,
+  receive clamping and acknowledgement safety.
+- Receive responses are the engine page bytes, including their existing newline.
+  Neither the server nor the client wraps or re-encodes a page.
 - Requests have a 1 MiB limit and use `strictjson`. Responses are JSON with HTML
   escaping disabled. Errors are mapped by `apiwire` once. Logs never contain
   credentials or request bodies, including after a failed response write.
@@ -32,6 +42,8 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
   local endpoint whose peer `ipc` checks. It never automatically retries a call,
   and sets no HTTP idempotency header. A missing or failed peer is mapped by
   `apiwire`; a written request with no complete answer is `outcome_unknown`.
+  It rejects invalid UTF-8 in request text before JSON encoding or connecting,
+  returning `invalid_argument/malformed_request` instead of replacing bytes.
 
 ## Caller guarantees
 
@@ -41,10 +53,15 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
 - Give the client an explicit data directory. Resolve environment variables in
   the calling front end; `ProbeToken` is the probe credential, separate from
   `Token`, the endpoint credential.
+- Call `EnableMethods` only after engine recovery finishes. End the engine
+  waiters before waiting for HTTP shutdown.
 - Close the server and the client when their owner ends. The client gives an
-  ordinary call 60 seconds, bounded also by the caller's context.
+  ordinary call 60 seconds, or a receive the requested wait capped at the
+  protocol maximum plus 30 seconds, bounded also by the caller's context.
 
 The contract tests exercise a real Agent socket and engine, probe-only refusal,
 strict input and authentication, and an interrupted response without a retry.
-The request fuzz target keeps the token well formed but unissued, so no body may
-authenticate it or panic.
+The probe and endpoint-dispatcher fuzz targets keep the token well formed but
+unissued, so no body may authenticate it or panic.
+The client-text fuzz target checks its fixed request containers without a daemon,
+so invalid text cannot reach the transport or be silently rewritten.
