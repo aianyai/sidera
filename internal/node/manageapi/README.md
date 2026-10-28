@@ -20,6 +20,8 @@ reading a body.
 | ---- | ------- |
 | `Listen(addr, lock, opts)`, `Listener` | Listens on the address of the management interface and on no other: it refuses the address of the Agent interface. Only it makes a `Listener`. |
 | `New(Config)`, `Server.Serve`, `Shutdown`, `Close` | The server over a `Listener`. `Shutdown` waits for the requests being served and then closes what is left. |
+| `NewClient(ClientConfig)`, `Client.Call`, `Client.Close` | Call one node as its local owner; return the complete management response without retrying. |
+| `Request` | The caller's operation identifier, optional expected version and params; zero identifier and nil members are omitted. |
 | `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop entry of the composition root, the version of the program for the status, and the log. |
 
 The methods are a table in `methods.go`, one row each: the name on the wire, the
@@ -96,6 +98,33 @@ test clock, quiescence, the crash points) are added by the streams that own them
 - **No write timeout.** A request is the client's connection: it ends when the
   client goes away, and a context that ends cancels the call to the engine.
 
+## Client
+
+`ClientConfig.Home` selects the management address through the shared
+`localhttp.Client`; no Bearer credential is used. The shared layer owns checked
+IPC, safe JSON encoding, POST, send progress, complete reads and transport errors.
+This package owns the management request and response envelopes. It converts a
+nonzero `admin.OperationID` to its 32 lower-case hexadecimal digits, preserves an
+explicit expected version of zero, and leaves validation of methods and params to
+the server's existing table. `Params` accepts the JSON values described by
+`localhttp.Request.Body`; it is not encoded separately or inspected by another
+reflection boundary.
+
+`Call` has a 60-second timeout, extended to five minutes for `adapters.install`,
+and the caller's context may end it earlier. Successful responses are strictly
+checked as read or change envelopes; a change must answer with the same operation
+identifier and a `replayed` boolean. The complete `json.RawMessage`, including
+those fields and its original whitespace, is returned for the caller's output.
+Method-specific results remain JSON for the caller to interpret.
+
+A damaged or incomplete response is `outcome_unknown`. An unknown outcome carries
+the request's operation identifier in `details.operation_id`, whether detected
+locally or reported by the server; a server reason such as `storage_fatal` is
+retained. The client never resends. A caller that resends retains one identifier,
+expected version and exact request: creating new values could execute another
+operation or ask for a different change. Closing the client releases idle
+connections; contexts own in-flight calls.
+
 ## What the caller must guarantee
 
 - Hold `daemon.lock` before `Listen`, as `ipc.Listen` asks, and create `manage/`
@@ -128,3 +157,8 @@ removed as narrowing), the strict reading of their params (a package named by a
 path that is not absolute, a member that is empty or null), what the engine is asked
 (an enabling that leaves out the instance is the request that names it after the
 adapter), and the golden answers of the two lists.
+
+`client_test.go` checks request envelopes, complete unchanged responses, read and
+change metadata, explicit version presence, unknown outcomes with their operation
+identifiers, malformed and incomplete answers, and no automatic resend over
+checked IPC. Its response fuzz target exercises strict envelope decoding.

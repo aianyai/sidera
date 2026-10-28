@@ -256,6 +256,26 @@ HTTP/1.1 over `manage/manage.sock` (a named pipe on Windows), `POST
    version check and the storing of the result are the engine's and `config`'s; the
    interface does none of them.
 
+The owner's in-process client is `manageapi.NewClient(ClientConfig{Home})`.
+`Call(ctx, method, Request{OperationID, ExpectedVersion, Params})` uses the shared
+[local HTTP client](../local-http/README.md#client-requests-and-answers) for checked
+IPC, JSON encoding and transport errors; it supplies no Bearer credential. A zero
+operation identifier is omitted, a nil version is omitted, and a non-nil version
+retains its presence even when zero. Nil params are omitted. Method and params
+validation remain with the server's table. Ordinary calls have a 60-second timeout;
+`adapters.install` has five minutes, also bounded by the caller's context.
+
+The client strictly checks the successful response envelope and, for a change,
+requires the same operation identifier and the presence of `replayed`. It returns
+the complete unchanged `json.RawMessage`, including the metadata, for the caller
+to print or interpret. A malformed success, incomplete answer or malformed error
+answer has an unknown outcome. Every unknown outcome for a request with an
+identifier retains it in `details.operation_id`; server codes and details such as
+`storage_fatal` are preserved. The client performs no resend. The caller owns the
+one operation identifier, version and exact request to retain for a resend, since
+changing them can execute another operation or ask for a different change.
+`Close` releases idle connections; the caller's context owns an in-flight call.
+
 The fingerprint is `SHA-256("sidera-manage-v1" NUL method NUL canonical params NUL
 decimal expected version)`; the canonical params are the decoded params encoded again
 with the fields of their type in declared order, so a resend written with another
@@ -478,6 +498,9 @@ interface: a sandbox must deny the socket to an agent.
   `TestWindowsADataDirectoryThatEveryoneCanReadIsRefused`,
   `TestWindowsASymbolicLinkAsTheDataDirectoryIsRefused`.
 - Tests of the management interface (`internal/node/manageapi`):
+  `client_test.go` covers envelopes, unchanged full responses, unknown outcomes
+  retaining operation identifiers, damaged answers and no automatic resend;
+  `FuzzClientResponse` exercises successful-response envelope decoding.
   `TestAMalformedRequestIsRefusedNamingThePositionOfTheFault`,
   `TestTheOperationIdentifierOfARequestThatChangesSomething`,
   `TestAnExpectedVersionIsRefusedWhereNoneIsCarried`,
