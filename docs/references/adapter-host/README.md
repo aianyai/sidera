@@ -114,6 +114,7 @@ it hands a `*peer.Error` on as it is.
 | Reason of the engine | Code | Notes |
 | -------------------- | ---- | ----- |
 | endpoint unknown | `1001` unknown_endpoint | the endpoint does not exist or is not one of the instance |
+| attempt unknown | `1004` unknown_attempt | the attempt is not in flight for a session of the instance; an unknown, settled or foreign attempt is indistinguishable |
 | wrong endpoint kind | `1002` wrong_endpoint_kind | |
 | endpoint limit | `1007` endpoint_limit | `data`: `{"limit":"instance"}` or `{"limit":"node"}`, so that an adapter can tell its own declared limit from the node's |
 | invalid argument | `-32602` invalid_params | the field is in the message |

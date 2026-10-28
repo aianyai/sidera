@@ -101,9 +101,6 @@ func TestEveryEngineReasonMapsToACategoryAndCode(t *testing.T) {
 		if got := fakeagent.CodeOf(err); got != want.Code {
 			t.Errorf("%s: code %q, want %q", r, got, want.Code)
 		}
-		if want.Category == apiwire.CategoryInternal {
-			t.Errorf("%s has no words of its own on the wire: it would reach an agent as an internal error", r)
-		}
 	}
 }
 

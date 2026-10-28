@@ -34,9 +34,9 @@ over).
   a model sees and what the acknowledgement on its behalf compares; `Page` is the same bytes decoded with unknown
   fields refused and validated by the protocol's own rules, so a page of another shape fails in the agent that read it.
 - **A refusal is mapped by `apiwire`, not here.** `TestEveryEngineReasonMapsToACategoryAndCode`
-  holds every reason the engine has to come out as `apiwire.FromError` gives it, and to
-  have words of its own (never the internal error); the table written out from the
-  interface's categories is `apiwire`'s test.
+  holds every reason the engine has to come out as `apiwire.FromError` gives it;
+  the table written out from the interface's categories, including the internal
+  fallback for reasons only an adapter request can reach, is `apiwire`'s test.
 - **A patch field that is nil changes nothing;** `AcceptFrom` replaces the whole list,
   and an address that does not parse is `invalid_argument/malformed_request`.
 

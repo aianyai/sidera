@@ -1615,7 +1615,7 @@ func TestCheckpointPutIsOnDiskBeforeItIsAnsweredAndALaterPutReplacesIt(t *testin
 			"a prompt attempt of another instance":        promptForeign,
 			"a prompt attempt that has settled":           promptSettled,
 		} {
-			wantReason(t, e.CheckpointPut(ctx, "chat", attemptPut(id, `{"n":1}`)), engine.ReasonEndpointUnknown)
+			wantReason(t, e.CheckpointPut(ctx, "chat", attemptPut(id, `{"n":1}`)), engine.ReasonAttemptUnknown)
 			if got := checkpoints(t, r); len(got) != 0 {
 				t.Errorf("%s: a refused put left %v on disk", name, got)
 			}

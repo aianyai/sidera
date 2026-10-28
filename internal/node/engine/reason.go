@@ -92,6 +92,9 @@ const (
 	// ReasonLeaseUnknown: the lease is not one that was handed out to this endpoint,
 	// whoever else it was handed to.
 	ReasonLeaseUnknown
+	// ReasonAttemptUnknown: the attempt is not in flight for a session of the
+	// adapter instance. It may belong to another instance or have settled.
+	ReasonAttemptUnknown
 
 	reasonEnd
 )
@@ -124,6 +127,7 @@ var reasonNames = [reasonEnd]string{
 	ReasonProbeTokenExpired:   "probe_token_expired",
 	ReasonInstallRepeated:     "install_repeated",
 	ReasonLeaseUnknown:        "lease_unknown",
+	ReasonAttemptUnknown:      "attempt_unknown",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

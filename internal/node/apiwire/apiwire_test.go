@@ -29,6 +29,7 @@ type want struct {
 var engineReasons = map[engine.Reason]want{
 	engine.ReasonUnauthenticated:    {"unauthenticated", "token_unknown"},
 	engine.ReasonEndpointUnknown:    {"not_found", "endpoint_unknown"},
+	engine.ReasonAttemptUnknown:     {"internal", "internal"},
 	engine.ReasonInstanceUnknown:    {"not_found", "instance_unknown"},
 	engine.ReasonWrongEndpointKind:  {"refused", "endpoint_kind"},
 	engine.ReasonEndpointLimit:      {"refused", "endpoint_limit"},

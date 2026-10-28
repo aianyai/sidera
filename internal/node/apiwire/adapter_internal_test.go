@@ -24,6 +24,7 @@ type adapterRow struct {
 
 var adapterRows = map[engine.Reason]adapterRow{
 	engine.ReasonEndpointUnknown:   {1001, ""},
+	engine.ReasonAttemptUnknown:    {1004, ""},
 	engine.ReasonWrongEndpointKind: {1002, ""},
 	engine.ReasonEndpointLimit:     {1007, ""},
 	engine.ReasonLeaseUnknown:      {1010, ""},

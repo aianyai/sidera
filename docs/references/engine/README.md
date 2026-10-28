@@ -351,8 +351,10 @@ prompt that follows from it, or the prompt in flight of an open session of the i
 state a reconciliation of that prompt is given). The creation reads the state back by attempt,
 so an adapter that could put one under an attempt of another instance would write what that
 instance's creation believes it saved itself. An attempt that no session of the instance has is
-refused as `endpoint_unknown`, as a session of another instance is; so is a prompt attempt that
+refused as `ReasonAttemptUnknown`, as an attempt of another instance is; so is a prompt attempt that
 has settled, whose checkpoint is already dropped and which a late put would leave behind.
+The adapter mapping answers that refusal with `1004 unknown_attempt`; a session-scope
+checkpoint still answers `1001 unknown_endpoint` when its endpoint is unknown.
 
 `Quiesce` judges, in the same loop command as its other conditions, each instance
 named in `Expect.Adapters` against the host's counts: the notifications handled

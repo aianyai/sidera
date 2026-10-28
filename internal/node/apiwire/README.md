@@ -44,6 +44,10 @@ not import it: the words of the wire never enter the engine.
   engine's own name for the reason; the protocol's design note says why the code exists.
   A fatal failure of the disk stays `-32603`: whether the request took effect is not
   known.
+- **An unknown attempt is not an unknown endpoint.** An attempt checkpoint the
+  instance does not own is `1004 unknown_attempt`; session checkpoints keep
+  `1001 endpoint_unknown`. No Agent method takes an attempt, so that reason has
+  only the generic internal-error fallback on the HTTP interfaces.
 - **The text of an unknown error stays off the wire.** Anything that is none of the
   known errors is `internal/internal` with a fixed message; what it said is for the
   log. A client that is not the author of the code should not be handed a path or a

@@ -316,21 +316,29 @@ func (v *view) resolveSessionIn(instance string, ref adapterproto.EndpointRef, s
 // being created, and the prompt in flight of an open session endpoint of the
 // instance. An attempt that has settled is no longer anyone's: a put for it would
 // leave a file that nobody deletes. Any other attempt, a made-up one included,
-// belongs to nobody and is refused as the unknown endpoint is, so that no attempt
+// belongs to nobody and is refused as an unknown attempt, so that no attempt
 // escapes the instance that owns it.
 func (v *view) resolveAttemptBeingMade(instance string, attempt adapterproto.AttemptID) (*endpointState, error) {
 	for _, c := range v.ctl {
 		if c.Intent == nil || (c.Intent.Attempt != attempt && firstPromptAttempt(c.Intent.Attempt) != attempt) {
 			continue
 		}
-		return v.resolveSessionBeingMade(instance, adapterproto.EndpointRef(c.Intent.Endpoint.String()))
+		st, err := v.resolveSessionBeingMade(instance, adapterproto.EndpointRef(c.Intent.Endpoint.String()))
+		if err != nil {
+			return nil, refuse(ReasonAttemptUnknown)
+		}
+		return st, nil
 	}
 	for id, head := range v.attempts {
 		if head.InFlight != nil && head.InFlight.Attempt == attempt {
-			return v.resolveSession(instance, adapterproto.EndpointRef(id.String()))
+			st, err := v.resolveSession(instance, adapterproto.EndpointRef(id.String()))
+			if err != nil {
+				return nil, refuse(ReasonAttemptUnknown)
+			}
+			return st, nil
 		}
 	}
-	return nil, refuse(ReasonEndpointUnknown)
+	return nil, refuse(ReasonAttemptUnknown)
 }
 
 // What counts as an unfinished delivery is what still has work behind it that the

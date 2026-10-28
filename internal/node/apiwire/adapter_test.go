@@ -65,6 +65,9 @@ func TestTheEngineBehindTheHostAnswersItsRefusalsWithTheCodesOfTheProtocol(t *te
 		{"a checkpoint that is not valid",
 			e.CheckpointPut(ctx, harness.Instance, adapterproto.CheckpointPutParams{
 				Scope: adapterproto.ScopeAttempt, ID: "not an attempt", State: json.RawMessage(`{}`)}), -32602, ""},
+		{"a checkpoint of an attempt that does not exist",
+			e.CheckpointPut(ctx, harness.Instance, adapterproto.CheckpointPutParams{
+				Scope: adapterproto.ScopeAttempt, ID: "11111111-2222-4333-8444-555555555555", State: json.RawMessage(`{}`)}), 1004, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pe := wireError(t, tc.err)

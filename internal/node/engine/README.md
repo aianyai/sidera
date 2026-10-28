@@ -247,6 +247,8 @@ delivery to a session: when it is judged and how the verdict is recorded.
   every phase the loop runs in, stores the state compact, one value for each
   (scope, id), and refuses a session scope that is not an open session endpoint of
   the instance.
+  An attempt scope needs an in-flight creation or prompt attempt of a session of
+  that instance; an unknown, foreign or settled attempt is `ReasonAttemptUnknown`.
 - **The same key is the same endpoint.** The id is kept in `config/` before the
   record is written, in one transaction; a crash between the two leaves an id that
   no record uses, which takes no place and is given back for the same key.

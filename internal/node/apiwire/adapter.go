@@ -97,6 +97,7 @@ var internalCode = adapterCode{code: peer.CodeInternalError, message: "internal 
 // reason has none.
 var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonEndpointUnknown:   {code: adapterproto.CodeUnknownEndpoint, message: "the endpoint does not exist or is not one of this instance"},
+	engine.ReasonAttemptUnknown:    {code: adapterproto.CodeUnknownAttempt, message: "the attempt is not in flight for this instance"},
 	engine.ReasonWrongEndpointKind: {code: adapterproto.CodeWrongEndpointKind, message: "the endpoint's kind cannot be used with this method"},
 	engine.ReasonEndpointLimit: {code: adapterproto.CodeEndpointLimit, message: "no more endpoints can be opened", data: func(r *engine.Refusal) map[string]any {
 		if r.Limit == 0 {
