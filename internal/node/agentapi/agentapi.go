@@ -163,11 +163,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			s.fail(w, err, 0)
 			return
 		}
-		s.send(w, 200, struct {
-			OK       bool                  `json:"ok"`
-			Preset   string                `json:"preset"`
-			Frontend adapterproto.Frontend `json:"frontend"`
-		}{true, target.Preset, target.Frontend})
+		s.send(w, 200, ProbeResult{OK: true, Preset: target.Preset, Frontend: target.Frontend})
 		return
 	}
 	out, err := s.method(r.Context(), engine.ByToken(token), name, body)

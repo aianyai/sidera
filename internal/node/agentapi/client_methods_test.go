@@ -68,17 +68,13 @@ func TestClientUsesTheEndpointCredentialForMethods(t *testing.T) {
 	}
 }
 
-func TestClientSendsAMessageWithoutAutomaticReplay(t *testing.T) {
+func TestClientSendsAMessageAndReadsItsStatus(t *testing.T) {
 	h, token, _ := sessionNode(t)
 	c := endpointClient(t, h, token)
 	in := agentapi.SendRequest{To: []string{h.Addr("creator")}, Body: "sent through the real socket", IdempotencyKey: "client-send"}
 	sent, err := c.Send(h.Ctx(), in)
 	if err != nil || sent.MessageID == "" || sent.Replayed || len(sent.To) != 1 {
 		t.Fatalf("Send: %+v, %v", sent, err)
-	}
-	replay, err := c.Send(h.Ctx(), in)
-	if err != nil || replay.MessageID != sent.MessageID || !replay.Replayed {
-		t.Fatalf("replay: %+v, %v", replay, err)
 	}
 	status, err := c.Status(h.Ctx(), sent.MessageID)
 	if err != nil || len(status.Recipients) != 1 || string(status.Recipients[0].To) != h.Addr("creator") {

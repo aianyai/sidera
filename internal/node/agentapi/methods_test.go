@@ -11,6 +11,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/agentapi"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
@@ -362,26 +363,30 @@ func TestMethodInputIsStrictAndReceiveNumbersKeepTheirMeaning(t *testing.T) {
 	h, token, _ := sessionNode(t)
 	s, _ := agentapi.New(agentapi.Config{Service: h.Engine()})
 	s.EnableMethods()
-	for _, tc := range []struct{ name, method, body string }{
-		{"unknown member", "me", `{"unknown":true}`},
-		{"repeated member", "declare", `{"paused":true,"paused":false}`},
-		{"wrong case", "recv", `{"Frontend":"cli"}`},
-		{"missing required field", "status", `{}`},
-		{"null", "declare", `{"paused":null}`},
-		{"trailing document", "peers", `{} {}`},
-		{"wrong type", "directory", `{"limit":"1"}`},
-		{"negative wait", "recv", `{"frontend":"cli","wait_s":-1}`},
-		{"fractional wait", "recv", `{"frontend":"cli","wait_s":1.5}`},
-		{"wait overflow", "recv", `{"frontend":"cli","wait_s":9223372036854775807}`},
-		{"part with explicit zero wait", "recv", `{"frontend":"cli","msg":"message","part":1,"wait_s":0}`},
-		{"negative part", "recv", `{"frontend":"cli","msg":"message","part":-1}`},
-		{"unpaired part", "recv", `{"frontend":"cli","part":1}`},
-		{"empty explicit items", "ack", `{"lease":"11111111111111111111111111111111","items":[]}`},
+	for _, tc := range []struct{ name, method, body, path string }{
+		{"unknown member", "me", `{"unknown":true}`, "unknown"},
+		{"repeated member", "declare", `{"paused":true,"paused":false}`, "paused"},
+		{"wrong case", "recv", `{"Frontend":"cli"}`, "Frontend"},
+		{"missing required field", "status", `{}`, "message_id"},
+		{"null", "declare", `{"paused":null}`, "paused"},
+		{"trailing document", "peers", `{} {}`, ""},
+		{"wrong type", "directory", `{"limit":"1"}`, "limit"},
+		{"negative wait", "recv", `{"frontend":"cli","wait_s":-1}`, "wait_s"},
+		{"fractional wait", "recv", `{"frontend":"cli","wait_s":1.5}`, "wait_s"},
+		{"wait overflow", "recv", `{"frontend":"cli","wait_s":9223372036854775807}`, "wait_s"},
+		{"part with explicit zero wait", "recv", `{"frontend":"cli","msg":"message","part":1,"wait_s":0}`, "wait_s"},
+		{"negative part", "recv", `{"frontend":"cli","msg":"message","part":-1}`, "part"},
+		{"unpaired part", "recv", `{"frontend":"cli","part":1}`, "part"},
+		{"empty explicit items", "ack", `{"lease":"11111111111111111111111111111111","items":[]}`, "items"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := request(s, token, tc.method, tc.body)
-			if w.Code != 400 {
-				t.Fatalf("HTTP %d, %s; want invalid_argument", w.Code, w.Body)
+			var got apiwire.Body
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatal(err)
+			}
+			if w.Code != 400 || got.Error.Category != apiwire.CategoryInvalidArgument || got.Error.Code != apiwire.CodeMalformedRequest || (tc.path != "" && got.Error.Details["path"] != tc.path) {
+				t.Fatalf("HTTP %d, %s; want invalid_argument/malformed_request with path %q", w.Code, w.Body, tc.path)
 			}
 		})
 	}

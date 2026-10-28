@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -178,9 +179,15 @@ func TestAProbeWithAnIncompleteAnswerHasAnUnknownOutcomeAndIsNotRetried(t *testi
 			}
 			var calls atomic.Int32
 			s := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls.Add(1)
+				call := calls.Add(1)
 				if r.Method != "POST" || r.Header.Get("Idempotency-Key") != "" || r.Header.Get("X-Idempotency-Key") != "" {
 					t.Error("an Agent request was made retryable by the HTTP transport")
+				}
+				if call == 1 {
+					io.Copy(io.Discard, r.Body)
+					w.Header().Set("Content-Type", "application/json")
+					io.WriteString(w, `{"ok":true,"preset":"default","frontend":"cli"}`)
+					return
 				}
 				conn, rw, err := w.(http.Hijacker).Hijack()
 				if err != nil {
@@ -201,13 +208,16 @@ func TestAProbeWithAnIncompleteAnswerHasAnUnknownOutcomeAndIsNotRetried(t *testi
 				t.Fatal(err)
 			}
 			t.Cleanup(c.Close)
+			if _, err := c.Probe(context.Background(), adapterproto.FrontendCLI); err != nil {
+				t.Fatalf("establishing the keep-alive connection: %v", err)
+			}
 			_, err = c.Probe(context.Background(), adapterproto.FrontendCLI)
 			e := apiwire.FromError(err)
 			if e == nil || e.Category != apiwire.CategoryOutcomeUnknown || e.Code != apiwire.CodeOutcomeUnknown {
 				t.Fatalf("an incomplete answer returned %v; want outcome_unknown", err)
 			}
-			if n := calls.Load(); n != 1 {
-				t.Fatalf("%d requests; want exactly one", n)
+			if n := calls.Load(); n != 2 {
+				t.Fatalf("%d requests; want the successful request and one interrupted request", n)
 			}
 		})
 	}
