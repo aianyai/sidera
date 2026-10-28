@@ -1,5 +1,5 @@
-// Package localhttp serves the shared HTTP boundary of the node's local
-// interfaces. Interface-specific authorization and decoding stay in the handler.
+// Package localhttp implements the shared HTTP transport of the node's local
+// interfaces. Interface-specific authorization and decoding stay in the facade.
 package localhttp
 
 import (

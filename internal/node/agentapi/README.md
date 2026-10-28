@@ -11,7 +11,7 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
 | ---- | ------- |
 | `Listen`, `Listener` | Open an Agent address through `ipc`, under the node's instance lock. The underlying listener is private. |
 | `New`, `Config`, `Server.Serve`, `ServeHTTP`, `Shutdown`, `Close` | Serve the interface, initially accepting only probes. `Server.EnableMethods` opens the endpoint methods after recovery. |
-| `NewClient`, `ClientConfig`, `Client.Probe`, `Client.Close` | Present the separate probe credential through `ipc.Dial` and release idle connections. |
+| `NewClient`, `ClientConfig`, `Client.Probe`, `Client.Close` | Present the separate probe credential through the shared checked transport and release idle connections. |
 | `Client.Me`, `Declare`, `Peers`, `Directory`, `Send`, `Reply`, `Recv`, `Ack`, `Status`, `Control` | Call the endpoint methods; receive returns unchanged page bytes. |
 | Request and result types in `methods.go` | The snake-case Agent wire shapes; value vocabularies and validation stay with their existing owners. |
 | `ProbeResult` | The successful probe's preset and front end, with `ok: true`. |
@@ -42,7 +42,8 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
   diagnostics are logged whole by `localhttp`; error producers and handlers must
   keep request data out of diagnostic text and panic values.
 - The [shared local HTTP boundary](../localhttp/README.md) owns exact routing,
-  POST checks, body limits, JSON responses, diagnostic logging and shutdown.
+  POST checks, body limits, JSON responses, diagnostic logging and shutdown,
+  plus client dialing, request encoding and transport errors.
   The server has no global write timeout. Header, request-read and idle timeouts
   belong to `net/http`, and a handler's context ends with the client's connection.
 - The client uses no HTTP proxy and follows no redirect: a token goes only to the

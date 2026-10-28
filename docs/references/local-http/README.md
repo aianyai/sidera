@@ -54,6 +54,38 @@ closes remaining connections and returns the original shutdown error. `Serve`
 returns nil after shutdown or immediate `Close`. The owner ends domain waiters
 first and joins the serving goroutine.
 
+### Client requests and answers
+
+`NewClient(ClientConfig{Home, Kind, PathPrefix})` binds a client to one node and
+interface. `ipc.Locate` makes the home absolute and clean, and `ipc.Dial` performs
+the existing peer checks. `Call` takes a method name, body, Bearer token and
+timeout from its facade; it sends a POST with JSON content type to that method.
+No proxy or redirect can carry credentials elsewhere. No HTTP idempotency header
+is set, and there is no automatic resend. Facades own method selection,
+credentials, timeout policy and successful-result decoding.
+
+The shared encoding boundary accepts structs, string-key maps, interfaces,
+pointers, slices and JSON scalars, including unsigned numbers. They must form a
+finite JSON value. Arbitrary custom JSON and text marshalers and other field
+kinds are programming errors; the boundary does not run an extensible marshaler
+framework. `json.RawMessage` alone retains its standard encoding support after
+`strictjson` validates its document-level UTF-8, surrogate escapes, duplicate keys
+and single-value framing. This check applies at any nesting depth. Other string
+values and map keys are checked before `encoding/json` can replace invalid UTF-8.
+Unsafe text, malformed raw documents and JSON encoding failures return fixed
+`invalid_argument/malformed_request` errors without request data. Field presence,
+nullability and domain rules remain with the facade.
+
+A call's context lasts through response-body reading and is bounded by the
+supplied timeout and caller context. `httptrace.WroteRequest` records send
+progress: a transport failure before writing uses `apiwire.FromError`; after
+writing it is `outcome_unknown`. An incomplete response body or malformed error
+answer also has an unknown outcome. A complete non-200 response is decoded as
+`apiwire.Body`. A 200 response returns the exact bytes for domain validation.
+The request-body limit does not limit responses: clients read the complete
+answer, including receive pages. Closing a client releases idle connections;
+in-flight calls remain owned by their contexts.
+
 ## Why
 
 The standard library supplies [HTTP framing and lifecycle](https://pkg.go.dev/net/http#Server),
@@ -65,10 +97,21 @@ reads before facade gates or obscure raw receive bytes and stop-after-flush
 ordering. Handlers therefore retain control of those steps while sharing the
 transport mechanics.
 
+The client uses standard-library [HTTP transport](https://pkg.go.dev/net/http#Transport)
+and [send-progress tracing](https://pkg.go.dev/net/http/httptrace#ClientTrace).
+POST without an HTTP idempotency header prevents the transport from classifying
+an application call as idempotent for automatic retries. The existing
+[JSON encoder](https://pkg.go.dev/encoding/json#Marshal) supplies encoding after
+text checks; a new dependency would add no required capability.
+
 ## Where
 
 - `internal/node/localhttp/localhttp.go`: checked listeners, server lifecycle,
   exact routing, bounded reads and responses.
+- `internal/node/localhttp/client.go`: checked client dialing, one request
+  encoding boundary, send progress, complete answers and shared error mapping.
+- `internal/node/localhttp/client_test.go`: nested request text and raw documents,
+  fixed errors, unchanged full answers, redirect refusal and request fuzzing.
 - `internal/node/localhttp/localhttp_test.go`: public HTTP request and response
   behavior, encoding failure and internal diagnostics.
 - `internal/node/localhttp/lifecycle_test.go`: real IPC listener isolation,

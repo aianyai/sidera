@@ -12,6 +12,7 @@ credentials, strict domain decoding and execution.
 
 | Entry | Purpose |
 | --- | --- |
+| `NewClient(ClientConfig)`, `Client.Call`, `Client.Close` | Post JSON to one checked IPC interface and read its complete response without retrying. |
 | `New(Config)` | Bind a server to an IPC kind, exact path prefix, method lookup and diagnostic logger. |
 | `Listen(kind, address, lock, options)`, `Listener.Close` | Open a matching IPC address under the instance lock; keep the underlying listener private. |
 | `Server.Serve`, `Shutdown`, `Close` | Own a matching listener, wait within the shutdown context, and close remaining connections on expiry. |
@@ -39,6 +40,32 @@ credentials, strict domain decoding and execution.
 - The owner ends domain waiters before waiting for HTTP shutdown and joins the
   goroutine running `Serve`.
 
+## Client boundary
+
+The client resolves an absolute, clean home through `ipc.Locate` and opens only
+that address through `ipc.Dial`. It uses no proxy, follows no redirect and sends
+only POST requests without HTTP idempotency headers. Facades choose the method,
+Bearer credential and timeout for each request; the shared client never chooses
+authority or domain policy.
+
+`Request.Body` accepts structs, string-key maps, interfaces, pointers, slices and
+JSON scalars, including unsigned numbers. Containers must form a finite JSON
+value; arbitrary JSON or text marshalers and other field kinds are unsupported
+programming errors. `json.RawMessage` is the exception: document-level
+`strictjson` checks reject invalid UTF-8, unpaired surrogate escapes, duplicate
+keys and trailing values before encoding or connecting. Ordinary request text,
+including map keys, is checked before the standard encoder can replace invalid
+bytes. Unsafe documents and encoding failures return fixed
+`invalid_argument/malformed_request` errors without including request data.
+The client leaves field presence and domain validation to the facade.
+
+Calls use the supplied timeout, also bounded by the caller's context. A failure
+before writing is mapped through `apiwire`; a written request without a complete
+answer has `outcome_unknown`. Complete non-200 answers decode as `apiwire.Body`;
+malformed error answers have unknown outcomes. Success returns the original
+response bytes for the facade to validate, without a response size limit or
+re-encoding. `Close` releases idle connections; contexts own in-flight calls.
+
 ## Tests
 
 `localhttp_test.go` tests routing and POST priority, bounded reads and read
@@ -48,3 +75,9 @@ unencodable error details), and internal causes confined to the log.
 shutdown with an active request, expiry and cancellation, the end of `Serve`, and
 net/http diagnostics reaching the configured logger. `timeouts_test.go` keeps the
 transport configuration check beside its private owner.
+
+`client_test.go` checks safe request containers and raw documents, fixed encoding
+errors, unchanged complete responses larger than the request limit, and redirect
+refusal. Its fuzz target covers raw documents and nested request text. Agent
+client tests retain the real-service checks for credentials, no automatic resend,
+cancellation, incomplete answers and unchanged receive pages.

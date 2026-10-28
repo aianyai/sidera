@@ -267,5 +267,6 @@ adapter acknowledges on the model's behalf identical across tool front ends.
 `agentapi.go` delegates HTTP transport and response mechanics to `localhttp`,
 while retaining enabling, Bearer syntax and the ordering of body reads.
 `methods.go` owns endpoint request/result types and conversion to the
-engine service. `client.go` owns checked dialing, probing and unknown outcomes;
+engine service. `client.go` owns probing and credential selection, using the
+shared `localhttp` client for checked dialing, encoding and transport outcomes;
 `client_methods.go` adds the typed endpoint methods and receive deadlines.

@@ -29,7 +29,7 @@ type socketServer struct {
 	done    chan error
 }
 
-func socketHome(t *testing.T) string {
+func socketHome(t testing.TB) string {
 	t.Helper()
 	home, err := os.MkdirTemp("", "lh")
 	if err != nil {
