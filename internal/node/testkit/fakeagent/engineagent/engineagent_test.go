@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
@@ -12,9 +13,74 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 func ptr[T any](v T) *T { return &v }
+
+func TestPeersReturnsTheVisibleNodeInTheSharedResultShape(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	h.MustDirect("reader")
+	got, err := h.Agent("reader").Peers(h.Ctx())
+	if err != nil || len(got.Nodes) != 1 || got.Nodes[0].Node != harness.NodeID().String() || !got.Nodes[0].Self {
+		t.Fatalf("Peers = %+v, %v, want the visible node marked as self", got, err)
+	}
+}
+
+func TestMePresentsTheCallersDeclarationAndFrontendValues(t *testing.T) {
+	h := harness.New(t, harness.Options{Adapter: &harness.AdapterOptions{Runtime: true}})
+	h.MustDirect("reader")
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
+	a := h.Agent("reader")
+	if err := a.Declare(h.Ctx(), fakeagent.DeclareInput{Paused: ptr(true), AcceptFrom: ptr([]string{h.Addr("reader")})}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.Me(h.Ctx())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Address != h.Addr("reader") || got.Node != harness.NodeID().String() || got.Kind != "direct" || got.DisplayName != "Name of reader" || !got.Declaration.Paused || len(got.Declaration.AcceptFrom) != 1 || got.Declaration.AcceptFrom[0] != h.Addr("reader") {
+		t.Errorf("Me = %+v, want the reader and its declaration", got)
+	}
+	want := map[adapterproto.Frontend]fakeagent.FrontendLimits{
+		adapterproto.FrontendCLI: {RecvWaitMaxS: 20, Budget: fakeagent.Budget{Unit: "chars", Limit: 27000}},
+		adapterproto.FrontendMCP: {RecvWaitMaxS: 45, Budget: fakeagent.Budget{Unit: "tokens", Limit: 22500}},
+	}
+	if len(got.Frontends) != len(want) {
+		t.Fatalf("frontends = %+v, want cli and mcp only", got.Frontends)
+	}
+	for frontend, limits := range want {
+		if got.Frontends[frontend] != limits {
+			t.Errorf("%s = %+v, want %+v", frontend, got.Frontends[frontend], limits)
+		}
+	}
+}
+
+func TestDirectoryPresentsEndpointValuesAndPassesTheContinuation(t *testing.T) {
+	h := harness.New(t, harness.Options{})
+	h.MustDirect("reader")
+	h.MustDirect("other")
+	a := h.Agent("reader")
+	first, err := a.Directory(h.Ctx(), fakeagent.DirectoryInput{Node: harness.NodeID().String(), Limit: 1})
+	if err != nil || len(first.Endpoints) != 1 || first.NextCursor == "" {
+		t.Fatalf("first directory page = %+v, %v", first, err)
+	}
+	want := []string{h.Addr("reader"), h.Addr("other")}
+	slices.Sort(want)
+	if first.Endpoints[0].Address != want[0] || first.Endpoints[0].Kind != "direct" || !slices.Equal(first.Endpoints[0].Accepts, []string{"message.send", "endpoint.status"}) {
+		t.Errorf("first directory entry = %+v, want the endpoint's shared values", first.Endpoints[0])
+	}
+	second, err := a.Directory(h.Ctx(), fakeagent.DirectoryInput{Limit: 1, Cursor: first.NextCursor})
+	if err != nil || len(second.Endpoints) != 1 || second.Endpoints[0].Address != want[1] || second.NextCursor != "" {
+		t.Errorf("directory continuation = %+v, %v, want the other endpoint", second, err)
+	}
+	_, err = a.Directory(h.Ctx(), fakeagent.DirectoryInput{Node: "invalid"})
+	if fakeagent.CategoryOf(err) != fakeagent.CategoryInvalidArgument || fakeagent.CodeOf(err) != "malformed_request" {
+		t.Errorf("invalid directory node = %v", err)
+	}
+}
 
 func TestDeclarePatchReachesTheEngineForTheCallersOwnEndpoint(t *testing.T) {
 	h := harness.New(t, harness.Options{})
@@ -134,19 +200,16 @@ func TestACallToANodeThatIsDownIsUnavailable(t *testing.T) {
 	}
 }
 
-func TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError(t *testing.T) {
+func TestProbeNeedsCredentialsThisCallerBoundBackendDoesNotHold(t *testing.T) {
 	h := harness.New(t, harness.Options{})
 	h.MustDirect("a")
 	a := h.Agent("a")
 	ctx := context.Background()
 	calls := map[string]func() error{
-		"Me":        func() error { _, err := a.Me(ctx); return err },
-		"Peers":     func() error { _, err := a.Peers(ctx); return err },
-		"Directory": func() error { _, err := a.Directory(ctx, fakeagent.DirectoryInput{}); return err },
-		"Probe":     func() error { _, err := a.Probe(ctx, fakeagent.ProbeInput{}); return err },
+		"Probe": func() error { _, err := a.Probe(ctx, fakeagent.ProbeInput{}); return err },
 	}
-	if len(calls) != 4 {
-		t.Fatalf("%d calls listed: the agent has eleven methods and Declare, Send, Reply, Recv, Ack, Status and Control are the ones the engine offers", len(calls))
+	if len(calls) != 1 {
+		t.Fatalf("%d calls listed: only Probe needs credentials this caller-bound backend does not have", len(calls))
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
@@ -177,19 +240,11 @@ func TestOtherErrorsAreNotTakenForNotSupported(t *testing.T) {
 		&fakeagent.Error{Category: fakeagent.CategoryNotFound, Code: "message_unknown"},
 		&fakeagent.Error{Category: fakeagent.CategoryInternal, Code: "method_unknown"},
 		// The answer of a server that does not know the method is not a method the
-		// engine layer lacks.
+		// caller-bound backend cannot offer.
 		&fakeagent.Error{Category: fakeagent.CategoryNotFound, Code: "method_unknown"},
 	} {
 		if engineagent.IsNotSupported(err) {
 			t.Errorf("%v is taken for not supported", err)
 		}
 	}
-}
-
-// The agent interface has no category for "the server does not do this yet"; a
-// method the engine has not learned is answered as a method the server does not
-// know. Whether a dedicated category or code would serve scripts better is a
-// question for the owner of the interface's table, not for this backend.
-func TestShouldAMethodTheEngineDoesNotOfferYetHaveItsOwnCategory(t *testing.T) {
-	t.Skip("question for the owner of the error categories: the fake agent has no 'not supported' category, so the backend answers not_found/method_unknown")
 }

@@ -15,21 +15,23 @@ over).
 | ---- | ------- |
 | `New(svc, caller)` | The agent of one endpoint. |
 | `MapError(err)` | An error of the engine as the error of the fake agent: `apiwire.FromError` says its category and code (the one place the words of the wire are written), and the two failures of the fixture's own (`ErrNodeNotRunning`, `ErrProcessEnded`) are mapped here. |
-| `NotSupported(method)`, `IsNotSupported(err)` | The error of a method the engine does not offer yet: `not_found/method_unknown` that is also `fakeagent.ErrNotAvailable` (the same value as `scenario.ErrNotAvailable`), and its test. |
+| `NotSupported(method)`, `IsNotSupported(err)` | The error of a capability this caller-bound backend cannot offer: `not_found/method_unknown` that is also `fakeagent.ErrNotAvailable` (the same value as `scenario.ErrNotAvailable`), and its test. |
 | `ErrNodeNotRunning` | What a call to a node that is down carries; `MapError` turns it into `unavailable/daemon_not_running`. |
 | `ErrProcessEnded` | What a call carries when the process it was made to ended before it returned; `MapError` turns it into `outcome_unknown/connection_lost`. |
 
 ## Rules
 
-- **All eleven methods exist.** `Declare`, `Send`, `Reply`, `Recv`, `Ack`, `Status` and `Control` call the engine (a content type left empty is
-  `engine.DefaultContentType`, as the front ends of the interface take it; the body of a control signal is the
-  initial message of a session creation). The others (`Me`, `Peers`,
-  `Directory`, `Probe`) answer
-  `not_found/method_unknown`, which is how the agent interface answers a method the
-  server does not know; the error is also `scenario.ErrNotAvailable`, so that a test
-  written before the method exists cannot pass on an answer the server never gave. When the engine learns a method it replaces the line here; the
-  interface and the scripts do not change. There is no category of its own for "not
-  yet": the interface's table has none, and a new category would be a change to it.
+- **Ten methods call the engine.** `Me`, `Declare`, `Peers`, `Directory`, `Send`,
+  `Reply`, `Recv`, `Ack`, `Status` and `Control` use its service interface. An empty
+  content type means `engine.DefaultContentType`, and a control body is the initial
+  message of a session creation. `Me` presents the declaration and frontend limits;
+  `Peers` marks the caller's own node; `Directory` preserves continuation cursors.
+- **Probe needs a credential this backend does not hold.** `New` binds an opaque
+  `engine.Caller`, not a raw probe token. `Probe` therefore retains
+  `not_found/method_unknown` with `fakeagent.ErrNotAvailable`; the real local HTTP
+  interface supports probes with their separate credentials. No endpoint caller is
+  treated as a probe token, and this test-backend limitation does not describe the
+  engine's capabilities.
 - **A page is kept as printed and decoded strictly.** `RecvResult.Raw` is what the engine printed, which is what
   a model sees and what the acknowledgement on its behalf compares; `Page` is the same bytes decoded with unknown
   fields refused and validated by the protocol's own rules, so a page of another shape fails in the agent that read it.
@@ -47,7 +49,8 @@ over).
 `TestDeclareRefusalsAreMappedToTheCategoryAndCodeOfTheInterface`,
 `TestEveryEngineReasonMapsToACategoryAndCode`, `TestAnErrorThatIsNotARefusalIsInternal`,
 `TestACallWhoseProcessEndedIsOutcomeUnknown`, `TestACallToANodeThatIsDownIsUnavailable`,
-`TestCallsTheEngineDoesNotOfferYetReturnTheNotSupportedError`,
-`TestOtherErrorsAreNotTakenForNotSupported` (a real server's own `not_found/method_unknown` among them); the skipped
-`TestShouldAMethodTheEngineDoesNotOfferYetHaveItsOwnCategory` keeps the question about
-a dedicated category in sight.
+`TestMePresentsTheCallersDeclarationAndFrontendValues`,
+`TestPeersReturnsTheVisibleNodeInTheSharedResultShape`,
+`TestDirectoryPresentsEndpointValuesAndPassesTheContinuation`,
+`TestProbeNeedsCredentialsThisCallerBoundBackendDoesNotHold`,
+`TestOtherErrorsAreNotTakenForNotSupported` (a real server's own `not_found/method_unknown` among them).

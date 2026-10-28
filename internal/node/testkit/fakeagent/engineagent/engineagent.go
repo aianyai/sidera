@@ -30,8 +30,8 @@ type agent struct {
 
 var _ fakeagent.Agent = (*agent)(nil)
 
-// Declare is the one method the engine's service interface offers. A patch field
-// that is nil changes nothing; AcceptFrom, when set, replaces the whole list.
+// Declare changes the caller's declaration. A patch field that is nil changes
+// nothing; AcceptFrom, when set, replaces the whole list.
 func (a *agent) Declare(ctx context.Context, in fakeagent.DeclareInput) error {
 	p := engine.DeclarationPatch{
 		Paused: in.Paused, RefuseMultiRecipient: in.RefuseMultiRecipient,
@@ -156,30 +156,91 @@ func sendResult(res engine.SendResult, err error) (fakeagent.SendResult, error) 
 	return out, nil
 }
 
-// The methods below are not offered by the engine yet. Each answers as the agent
-// interface answers a method the server does not know.
+func (a *agent) Me(ctx context.Context) (fakeagent.MeResult, error) {
+	v, err := a.svc.Me(ctx, a.caller)
+	if err != nil {
+		return fakeagent.MeResult{}, MapError(err)
+	}
+	d := v.Declaration
+	out := fakeagent.MeResult{
+		Address: v.Address.String(), Node: v.Address.Node.String(), Kind: v.Kind.String(), DisplayName: v.DisplayName,
+		Declaration: fakeagent.Declaration{
+			Paused: d.Paused, RefuseMultiRecipient: d.RefuseMultiRecipient, RestrictSenders: d.RestrictSenders,
+			HiddenFromDirectory: d.HiddenFromDirectory, AcceptFrom: make([]string, 0, len(d.AcceptFrom)),
+		},
+		Frontends: make(map[adapterproto.Frontend]fakeagent.FrontendLimits, len(v.Frontends)),
+	}
+	for _, from := range d.AcceptFrom {
+		out.Declaration.AcceptFrom = append(out.Declaration.AcceptFrom, from.String())
+	}
+	for frontend, limits := range v.Frontends {
+		unit, err := apiwire.BudgetUnitName(limits.Budget.Unit)
+		if err != nil {
+			return fakeagent.MeResult{}, MapError(err)
+		}
+		out.Frontends[frontend] = fakeagent.FrontendLimits{
+			RecvWaitMaxS: int(limits.RecvWaitMax / time.Second), Budget: fakeagent.Budget{Unit: unit, Limit: limits.Budget.Limit},
+		}
+	}
+	return out, nil
+}
+func (a *agent) Peers(ctx context.Context) (fakeagent.PeersResult, error) {
+	me, err := a.svc.Me(ctx, a.caller)
+	if err != nil {
+		return fakeagent.PeersResult{}, MapError(err)
+	}
+	nodes, err := a.svc.Peers(ctx, a.caller)
+	if err != nil {
+		return fakeagent.PeersResult{}, MapError(err)
+	}
+	out := fakeagent.PeersResult{Nodes: make([]fakeagent.PeerNode, 0, len(nodes))}
+	for _, node := range nodes {
+		out.Nodes = append(out.Nodes, fakeagent.PeerNode{Node: node.String(), Self: node == me.Address.Node})
+	}
+	return out, nil
+}
+func (a *agent) Directory(ctx context.Context, in fakeagent.DirectoryInput) (fakeagent.DirectoryResult, error) {
+	q := engine.DirectoryQuery{Cursor: in.Cursor, Limit: in.Limit}
+	if in.Node != "" {
+		node, err := ident.ParseNodeID(in.Node)
+		if err != nil {
+			return fakeagent.DirectoryResult{}, &fakeagent.Error{Category: fakeagent.CategoryInvalidArgument, Code: apiwire.CodeMalformedRequest, Message: "node: " + err.Error()}
+		}
+		q.Node = node
+	}
+	page, err := a.svc.Directory(ctx, a.caller, q)
+	if err != nil {
+		return fakeagent.DirectoryResult{}, MapError(err)
+	}
+	out := fakeagent.DirectoryResult{NextCursor: page.NextCursor, Endpoints: make([]fakeagent.DirectoryEndpoint, 0, len(page.Endpoints))}
+	for _, ep := range page.Endpoints {
+		entry := fakeagent.DirectoryEndpoint{
+			Address: ep.Address.String(), Kind: ep.Kind.String(), DisplayName: ep.DisplayName,
+			Description: ep.Description, Accepts: make([]string, 0, len(ep.Accepts)),
+		}
+		for _, action := range ep.Accepts {
+			entry.Accepts = append(entry.Accepts, action.String())
+		}
+		out.Endpoints = append(out.Endpoints, entry)
+	}
+	return out, nil
+}
 
-func (a *agent) Me(context.Context) (fakeagent.MeResult, error) {
-	return fakeagent.MeResult{}, NotSupported("me")
-}
-func (a *agent) Peers(context.Context) (fakeagent.PeersResult, error) {
-	return fakeagent.PeersResult{}, NotSupported("peers")
-}
-func (a *agent) Directory(context.Context, fakeagent.DirectoryInput) (fakeagent.DirectoryResult, error) {
-	return fakeagent.DirectoryResult{}, NotSupported("directory")
-}
+// Probe is unavailable in this caller-bound backend: Caller intentionally
+// exposes no credential, and a tool probe needs its separate raw probe token.
+// The HTTP backend exercises that credential path instead.
 func (a *agent) Probe(context.Context, fakeagent.ProbeInput) (fakeagent.ProbeResult, error) {
 	return fakeagent.ProbeResult{}, NotSupported("probe")
 }
 
-// NotSupported is the error of a method the engine does not offer yet. Its category
-// and code are those the agent interface gives a method the server does not know,
+// NotSupported is the error of a capability this backend does not offer. Its category
+// and code are those the Agent interface gives a method the server does not know,
 // which is what the ledger records; it is also fakeagent.ErrNotAvailable, which
 // tells it from the answer of a real server that does not know the method.
 func NotSupported(method string) error {
 	return &notSupported{answer: &fakeagent.Error{
 		Category: fakeagent.CategoryNotFound, Code: apiwire.CodeMethodUnknown,
-		Message: "the engine does not offer " + method + " yet",
+		Message: "the caller-bound engine backend does not offer " + method,
 	}}
 }
 
