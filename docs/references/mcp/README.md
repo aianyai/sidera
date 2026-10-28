@@ -24,7 +24,10 @@ is accepted there. An unsupported version returns `-32022` with `supported` and
 `requested` in `data`; missing or malformed required metadata returns `-32602`.
 This selection is per request, so a modern request can share a legacy process.
 Without modern metadata, requests other than `initialize` and `ping` require
-legacy initialization.
+legacy initialization. MCP registers one default peer request handler so unknown
+methods pass through the same era validation before method dispatch. Framing,
+ambiguity checks, in-flight id checks, overload and cancellation remain the
+peer's acceptance boundaries and can reject a request before this validation.
 
 `server/discover` advertises the modern version and tools capability, with
 `resultType: "complete"`, `ttlMs: 3600000`, `cacheScope: "public"`, and server
@@ -33,7 +36,11 @@ because discovery contains no endpoint data. Without modern version metadata,
 `server/discover` follows the process's legacy initialization state: before
 `initialize` it returns `-32602`; after legacy initialization it is an unknown
 legacy method and returns `-32601`. A modern discovery request does not initialize
-the legacy process. Other unknown methods return `-32601`.
+the legacy process. An unknown method with unsupported modern version metadata
+returns `-32022` with the same `supported` and `requested` data; one with the
+supported version but missing required client capabilities returns `-32602`.
+Valid modern requests and initialized legacy requests for unknown methods return
+`-32601`; an uninitialized request without modern metadata returns `-32602`.
 
 Only fields the server uses are interpreted. Unknown input members, including
 extra metadata, are ignored. MCP explicitly enables the peer dialect's

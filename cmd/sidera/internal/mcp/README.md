@@ -7,7 +7,9 @@ only process-level failures. The caller resolves environment, home and credentia
 The peer package owns framing, queues, cancellation and transport closure. This
 package selects the MCP dialect, including whole-frame duplicate-key and Unicode
 checks, and owns request-era selection, protocol results and the Agent tool
-catalogue. The catalogue schemas also validate and project
+catalogue. Its default request handler routes every accepted request through the
+same era validation before method dispatch, including unknown methods. The
+catalogue schemas also validate and project
 known arguments; projected JSON retains explicit member presence through
 `agentapi.Client.Call`. The Agent interface owns semantic validation and the
 single-recipient limit. It never opens the management interface. Read

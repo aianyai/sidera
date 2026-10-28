@@ -1,9 +1,14 @@
 package main_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -73,6 +78,61 @@ func TestMCPCommandUsesTheRealProgramInBothEras(t *testing.T) {
 				t.Fatalf("MCP me: %+v %v", me, err)
 			}
 		})
+	}
+}
+
+func TestMCPUnknownMethodsValidateEraThroughTheRealProgram(t *testing.T) {
+	program := binary(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	t.Cleanup(cancel)
+	home, err := os.MkdirTemp("", "mu-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(home) })
+	cmd := exec.CommandContext(ctx, program, "--home", home, "mcp")
+	cmd.Env = append(os.Environ(), "SIDERA_TOKEN=", "SIDERA_PROBE_TOKEN=")
+	input, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var diag bytes.Buffer
+	cmd.Stderr = &diag
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		input.Close()
+		if err := cmd.Wait(); err != nil {
+			t.Errorf("MCP exit: %v; stderr %s", err, diag.String())
+		}
+	})
+	reader := bufio.NewReader(output)
+	for _, tc := range []struct{ request, response string }{
+		{`{"jsonrpc":"2.0","id":1,"method":"unknown","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01","io.modelcontextprotocol/clientCapabilities":{}}}}`, `{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"unsupported protocol version","data":{"supported":["2026-07-28"],"requested":"2099-01-01"}}}`},
+		{`{"jsonrpc":"2.0","id":2,"method":"unknown"}`, `{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"send initialize first, or carry io.modelcontextprotocol/protocolVersion in _meta"}}`},
+	} {
+		if _, err := fmt.Fprintln(input, tc.request); err != nil {
+			t.Fatal(err)
+		}
+		line, err := reader.ReadBytes('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got, want any
+		if err := json.Unmarshal(line, &got); err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal([]byte(tc.response), &want); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("response:\n%s\nwant:\n%s", line, tc.response)
+		}
 	}
 }
 
