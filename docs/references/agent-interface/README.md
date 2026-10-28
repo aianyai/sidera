@@ -231,6 +231,44 @@ to `unavailable/request_canceled` or `unavailable/request_timeout` through
 errors take precedence over that mapping. No operation identifier means no
 advice to resend.
 
+The Go client exposes `Call(ctx, method, in any) (any, error)` for front ends
+that already know which JSON members were supplied. It accepts `json.RawMessage`
+or ordinary structs, string-key maps, slices, pointers, interfaces and JSON
+scalars through the shared safe encoder; arbitrary custom marshalers are
+unsupported. Raw documents receive document-level checks, without decoding and
+re-encoding through method request types. For receive deadlines, the client
+reads the original object's exact `wait_s` as int64 after safe encoding. Missing
+or unreadable values use zero for the budget; server validation remains
+authoritative. Unknown method names return `not_found/method_unknown` locally,
+before building a URL. `Call` and typed methods share credential selection,
+deadlines and strict successful-result decoding.
+
+Struct encoding follows its JSON tags. Existing typed optional scalar fields
+still use zero for omission, including an empty typed control body. Callers
+that need explicit emptiness use raw JSON, a map with that member, or their own
+struct fields and tags that preserve it. The typed `Ack` method alone uses a
+private encoding where nil `Items` omits the member and a non-nil empty slice
+sends `[]`; the server rejects the latter without confirming any messages.
+The server's request DTOs and strict presence rules are unchanged.
+
+`Call` returns the following concrete Go result types after complete strict
+decoding. `recv` is validated as a page but returned as the original `[]byte`,
+including its newline. Invalid successful responses have `outcome_unknown`.
+
+| Method | Concrete Go result |
+| --- | --- |
+| `me` | `agentapi.MeResult` |
+| `declare` | `agentapi.DeclareResult` |
+| `peers` | `agentapi.PeersResult` |
+| `directory` | `agentapi.DirectoryResult` |
+| `send` | `agentapi.SendResult` |
+| `reply` | `agentapi.SendResult` |
+| `recv` | `[]byte` |
+| `ack` | `agentapi.AckResult` |
+| `status` | `adapterproto.MessageStatusResult` |
+| `control` | `agentapi.ControlResult` |
+| `probe` | `agentapi.ProbeResult` |
+
 The default undeclared wait limit is eight seconds. A shell tool with a
 ten-second foreground window may end its process at the deadline or let it
 continue in the background while returning a process identifier first. In either
@@ -267,6 +305,7 @@ adapter acknowledges on the model's behalf identical across tool front ends.
 `agentapi.go` delegates HTTP transport and response mechanics to `localhttp`,
 while retaining enabling, Bearer syntax and the ordering of body reads.
 `methods.go` owns endpoint request/result types and conversion to the
-engine service. `client.go` owns probing and credential selection, using the
-shared `localhttp` client for checked dialing, encoding and transport outcomes;
-`client_methods.go` adds the typed endpoint methods and receive deadlines.
+engine service. `client.go` owns the shared method dispatch, credential selection,
+receive deadlines and result decoding, using `localhttp` for safe encoding,
+checked dialing and transport outcomes. `client_methods.go` supplies the typed
+endpoint wrappers, including the private acknowledgement encoding.

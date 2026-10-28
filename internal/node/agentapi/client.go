@@ -2,12 +2,14 @@ package agentapi
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/localhttp"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
@@ -48,23 +50,93 @@ type ProbeResult struct {
 
 // Probe presents the probe credential, including while the node recovers.
 func (c *Client) Probe(ctx context.Context, frontend adapterproto.Frontend) (ProbeResult, error) {
-	var out ProbeResult
-	raw, err := c.call(ctx, "probe", struct {
+	return clientResult[ProbeResult](c, ctx, "probe", struct {
 		Frontend adapterproto.Frontend `json:"frontend"`
-	}{frontend}, 60*time.Second)
-	if err != nil {
-		return out, err
+	}{frontend})
+}
+
+// Call preserves the supplied JSON members, including explicit empty values.
+// Input supports json.RawMessage or ordinary structs, string-key maps, slices,
+// pointers, interfaces and JSON scalars; other custom marshalers are unsupported.
+// The method determines credentials, deadline and concrete result type, as listed
+// in the package README. A recv result is the original validated page []byte.
+func (c *Client) Call(ctx context.Context, method string, in any) (any, error) {
+	return c.call(ctx, method, in)
+}
+
+func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
+	token := c.cfg.Token
+	timeout := 60 * time.Second
+	var decode func([]byte) (any, error)
+	switch method {
+	case "probe":
+		token = c.cfg.ProbeToken
+		decode = clientDecode[ProbeResult]
+	case "me":
+		decode = clientDecode[MeResult]
+	case "declare":
+		decode = clientDecode[DeclareResult]
+	case "peers":
+		decode = clientDecode[PeersResult]
+	case "directory":
+		decode = clientDecode[DirectoryResult]
+	case "send", "reply":
+		decode = clientDecode[SendResult]
+	case "recv":
+		decode = clientDecodePage
+	case "ack":
+		decode = clientDecode[AckResult]
+	case "status":
+		decode = clientDecode[adapterproto.MessageStatusResult]
+	case "control":
+		decode = clientDecode[ControlResult]
+	default:
+		return nil, &apiwire.Error{Category: apiwire.CategoryNotFound, Code: "method_unknown", Message: "the Agent method is not known"}
 	}
+	body, err := localhttp.EncodeRequest(in)
+	if err != nil {
+		return nil, err
+	}
+	if method == "recv" {
+		// Read only the deadline hint from the safely encoded original object.
+		// The unchanged document still reaches the server for all domain rules.
+		var members map[string]json.RawMessage
+		var seconds int64
+		if json.Unmarshal(body, &members) == nil {
+			if err := json.Unmarshal(members["wait_s"], &seconds); err != nil {
+				seconds = 0
+			}
+		}
+		seconds = max(0, min(seconds, int64(manifest.MaxRecvWaitSeconds)))
+		timeout = (time.Duration(seconds) + 30) * time.Second
+	}
+	raw, err := c.transport.Call(ctx, localhttp.Request{Method: method, Body: body, BearerToken: string(token), Timeout: timeout})
+	if err != nil {
+		return nil, err
+	}
+	return decode(raw)
+}
+
+func clientDecode[T any](raw []byte) (any, error) {
+	var out T
 	if err := strictjson.Decode(raw, &out); err != nil {
-		return out, apiwire.OutcomeUnknown("")
+		return nil, apiwire.OutcomeUnknown("")
 	}
 	return out, nil
 }
 
-func (c *Client) call(ctx context.Context, method string, in any, timeout time.Duration) ([]byte, error) {
-	token := c.cfg.Token
-	if method == "probe" {
-		token = c.cfg.ProbeToken
+func clientDecodePage(raw []byte) (any, error) {
+	if _, err := clientDecode[adapterproto.RecvPage](raw); err != nil {
+		return nil, err
 	}
-	return c.transport.Call(ctx, localhttp.Request{Method: method, Body: in, BearerToken: string(token), Timeout: timeout})
+	return raw, nil
+}
+
+func clientResult[T any](c *Client, ctx context.Context, method string, in any) (T, error) {
+	out, err := c.call(ctx, method, in)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return out.(T), nil
 }

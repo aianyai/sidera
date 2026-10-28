@@ -136,6 +136,66 @@ func TestClientReceivesThePageBytesIncludingTheNewline(t *testing.T) {
 	}
 }
 
+func TestClientRejectsInvalidAckItemsWithoutAcknowledgingThePage(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		items string
+	}{
+		{"typed empty", ""},
+		{"raw empty", `[]`},
+		{"raw null", `null`},
+		{"raw empty item", `[{}]`},
+		{"raw invalid item after valid item", `[{"message_id":"%s","part":1},{"message_id":"%s","part":0}]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, token, address := sessionNode(t)
+			c := endpointClient(t, h, token)
+			sent, err := h.Agent("creator").Send(h.Ctx(), fakeagent.SendInput{To: []string{address}, Body: "must survive the invalid acknowledgement"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.Quiesce()
+			read := func() adapterproto.RecvPage {
+				t.Helper()
+				raw, err := c.Recv(h.Ctx(), agentapi.RecvRequest{Frontend: adapterproto.FrontendCLI})
+				if err != nil {
+					t.Fatal(err)
+				}
+				var page adapterproto.RecvPage
+				if err := json.Unmarshal(raw, &page); err != nil {
+					t.Fatal(err)
+				}
+				return page
+			}
+			page := read()
+			if len(page.Messages) != 1 || page.Messages[0].ID != sent.MessageID {
+				t.Fatalf("initial page: %+v", page)
+			}
+			if tc.items == "" {
+				_, err = c.Ack(h.Ctx(), agentapi.AckRequest{Lease: page.Lease, Items: []adapterproto.PartRef{}})
+			} else {
+				items := strings.ReplaceAll(tc.items, "%s", string(sent.MessageID))
+				_, err = c.Call(h.Ctx(), "ack", json.RawMessage(`{"lease":"`+string(page.Lease)+`","items":`+items+`}`))
+			}
+			if e := apiwire.FromError(err); e == nil || e.Category != apiwire.CategoryInvalidArgument || e.Code != "malformed_request" {
+				t.Errorf("invalid items: %v; want invalid_argument/malformed_request", err)
+			}
+			again := read()
+			if len(again.Messages) != 1 || again.Messages[0].ID != sent.MessageID || !again.Messages[0].PossiblyDuplicate {
+				t.Fatalf("page after invalid acknowledgement: %+v; want the unacknowledged message", again)
+			}
+			result, err := c.Call(h.Ctx(), "ack", json.RawMessage(`{"lease":"`+string(again.Lease)+`"}`))
+			acked, _ := result.(agentapi.AckResult)
+			if err != nil || len(acked.Items) != 1 || acked.Items[0].MessageID != sent.MessageID || acked.Items[0].Ack != adapterproto.ItemCompleted {
+				t.Fatalf("valid whole-page acknowledgement: %+v, %v", acked, err)
+			}
+			if final := read(); len(final.Messages) != 0 {
+				t.Fatalf("page after valid acknowledgement: %+v; want an empty queue", final)
+			}
+		})
+	}
+}
+
 func TestClientControlReturnsAcceptanceAndStatusCarriesTheReply(t *testing.T) {
 	h, token, _ := sessionNode(t)
 	c := endpointClient(t, h, token)

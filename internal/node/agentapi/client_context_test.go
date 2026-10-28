@@ -2,6 +2,7 @@ package agentapi_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -34,10 +35,18 @@ func TestClientMapsContextsThatEndBeforeWriting(t *testing.T) {
 			defer c.Close()
 			ctx, cancel := tc.newContext()
 			defer cancel()
-			_, err = c.Probe(ctx, adapterproto.FrontendCLI)
-			e := apiwire.FromError(err)
-			if e == nil || e.Category != apiwire.CategoryUnavailable || e.Code != tc.code {
-				t.Fatalf("Probe returned %v; want unavailable/%s", err, tc.code)
+			for _, call := range []struct {
+				name   string
+				invoke func() error
+			}{
+				{"Probe", func() error { _, err := c.Probe(ctx, adapterproto.FrontendCLI); return err }},
+				{"Call", func() error { _, err := c.Call(ctx, "probe", json.RawMessage(`{"frontend":"cli"}`)); return err }},
+			} {
+				err := call.invoke()
+				e := apiwire.FromError(err)
+				if e == nil || e.Category != apiwire.CategoryUnavailable || e.Code != tc.code {
+					t.Fatalf("%s returned %v; want unavailable/%s", call.name, err, tc.code)
+				}
 			}
 		})
 	}

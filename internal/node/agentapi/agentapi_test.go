@@ -173,8 +173,16 @@ func TestProbeRequestsEnforceAuthenticationAndStrictInput(t *testing.T) {
 }
 
 func TestAProbeWithAnIncompleteAnswerHasAnUnknownOutcomeAndIsNotRetried(t *testing.T) {
-	for _, partial := range []bool{false, true} {
-		t.Run(map[bool]string{false: "no answer", true: "a cut answer"}[partial], func(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		partial, raw bool
+	}{
+		{"typed no answer", false, false},
+		{"typed cut answer", true, false},
+		{"raw no answer", false, true},
+		{"raw cut answer", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			home := socketHome(t)
 			addr, err := ipc.Locate(home, ipc.KindAgent)
 			if err != nil {
@@ -201,7 +209,7 @@ func TestAProbeWithAnIncompleteAnswerHasAnUnknownOutcomeAndIsNotRetried(t *testi
 					t.Error(err)
 					return
 				}
-				if partial {
+				if tc.partial {
 					rw.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{\"ok\":")
 					rw.Flush()
 				}
@@ -215,10 +223,18 @@ func TestAProbeWithAnIncompleteAnswerHasAnUnknownOutcomeAndIsNotRetried(t *testi
 				t.Fatal(err)
 			}
 			t.Cleanup(c.Close)
-			if _, err := c.Probe(context.Background(), adapterproto.FrontendCLI); err != nil {
+			probe := func() error {
+				if tc.raw {
+					_, err := c.Call(context.Background(), "probe", json.RawMessage(`{"frontend":"cli"}`))
+					return err
+				}
+				_, err := c.Probe(context.Background(), adapterproto.FrontendCLI)
+				return err
+			}
+			if err := probe(); err != nil {
 				t.Fatalf("establishing the keep-alive connection: %v", err)
 			}
-			_, err = c.Probe(context.Background(), adapterproto.FrontendCLI)
+			err = probe()
 			e := apiwire.FromError(err)
 			if e == nil || e.Category != apiwire.CategoryOutcomeUnknown || e.Code != apiwire.CodeOutcomeUnknown {
 				t.Fatalf("an incomplete answer returned %v; want outcome_unknown", err)

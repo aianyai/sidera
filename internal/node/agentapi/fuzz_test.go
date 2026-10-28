@@ -14,6 +14,30 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
+// FuzzClientRawCall keeps arbitrary JSON at the public presence-preserving
+// boundary. Unsafe text must never reach even an absent daemon.
+func FuzzClientRawCall(f *testing.F) {
+	for _, seed := range []string{`{}`, `{"items":[]}`, `{"body":""}`, `{"wait_s":0}`, `{"wait_s":9223372036854775808}`, `{"body":"\ud800"}`, `{"body":"a","body":"b"}`, "{\"body\":\"bad\xfftext\"}", `{} {}`} {
+		f.Add(uint8(0), seed)
+	}
+	c, err := agentapi.NewClient(agentapi.ClientConfig{Home: socketHome(f)})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Cleanup(c.Close)
+	methods := []string{"me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control", "probe"}
+	f.Fuzz(func(t *testing.T, selector uint8, body string) {
+		_, err := c.Call(context.Background(), methods[int(selector)%len(methods)], json.RawMessage(body))
+		e := apiwire.FromError(err)
+		if e == nil || !((e.Category == apiwire.CategoryInvalidArgument && e.Code == "malformed_request") || (e.Category == apiwire.CategoryUnavailable && e.Code == "daemon_not_running")) {
+			t.Fatalf("raw call: %v; want malformed_request or daemon_not_running", err)
+		}
+		if !utf8.ValidString(body) && e.Code != "malformed_request" {
+			t.Fatalf("invalid UTF-8 reached transport: %v", err)
+		}
+	})
+}
+
 // FuzzClientRequestText checks the request containers through public methods.
 // Invalid text must fail locally, even when no daemon is listening.
 func FuzzClientRequestText(f *testing.F) {

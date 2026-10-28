@@ -13,6 +13,7 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
 | `New`, `Config`, `Server.Serve`, `ServeHTTP`, `Shutdown`, `Close` | Serve the interface, initially accepting only probes. `Server.EnableMethods` opens the endpoint methods after recovery. |
 | `NewClient`, `ClientConfig`, `Client.Probe`, `Client.Close` | Present the separate probe credential through the shared checked transport and release idle connections. |
 | `Client.Me`, `Declare`, `Peers`, `Directory`, `Send`, `Reply`, `Recv`, `Ack`, `Status`, `Control` | Call the endpoint methods; receive returns unchanged page bytes. |
+| `Client.Call(ctx, method, in)` | Send JSON with explicit member presence and receive the method's validated concrete result. |
 | Request and result types in `methods.go` | The snake-case Agent wire shapes; value vocabularies and validation stay with their existing owners. |
 | `ProbeResult` | The successful probe's preset and front end, with `ok: true`. |
 
@@ -68,9 +69,47 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
   ordinary call 60 seconds, or a receive the requested wait capped at the
   protocol maximum plus 30 seconds, bounded also by the caller's context.
 
+## Client request presence and results
+
+`Call` accepts `json.RawMessage` or ordinary structs, string-key maps, slices,
+pointers, interfaces and JSON scalars. It uses the shared checked encoder before
+inspecting receive `wait_s` for its deadline. Missing or non-int64 waits use zero
+for that budget; the original JSON still goes to the server for validation.
+Unknown methods fail locally with `not_found/method_unknown`. Only `probe` uses
+`ProbeToken`; all other methods use `Token`.
+
+Object encoding follows its JSON tags. Existing typed requests keep their
+optional scalar zero-as-omitted behavior, including an empty `ControlRequest.Body`.
+To express presence, use `Call` with raw JSON, a map containing the member, or a
+caller-owned struct whose fields and tags retain it. The typed `Ack` method
+distinguishes nil `Items` (whole page) from a non-nil empty slice (explicit `[]`,
+rejected by the server without acknowledgement). Its private encoding leaves
+the server's request type and presence rules unchanged.
+
+Successful `Call` results have these concrete Go types. Every response is
+strictly decoded before success; `recv` returns its original bytes after that
+check. An incomplete or invalid response is `outcome_unknown` for both APIs.
+
+| Method | Concrete result |
+| --- | --- |
+| `me` | `MeResult` |
+| `declare` | `DeclareResult` |
+| `peers` | `PeersResult` |
+| `directory` | `DirectoryResult` |
+| `send` | `SendResult` |
+| `reply` | `SendResult` |
+| `recv` | `[]byte` |
+| `ack` | `AckResult` |
+| `status` | `adapterproto.MessageStatusResult` |
+| `control` | `ControlResult` |
+| `probe` | `ProbeResult` |
+
 The contract tests exercise a real Agent socket and engine, probe-only refusal,
 strict input and authentication, and an interrupted response without a retry.
 The probe and endpoint-dispatcher fuzz targets keep the token well formed but
 unissued, so no body may authenticate it or panic.
 The client-text fuzz target checks its fixed request containers without a daemon,
 so invalid text cannot reach the transport or be silently rewritten.
+The raw-call fuzz target exercises the presence-preserving entry point without
+a listener. Real-service regressions prove invalid acknowledgements have no
+confirmation effect and explicit empty request values reach server validation.
