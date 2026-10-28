@@ -76,6 +76,13 @@ Unsafe text, malformed raw documents and JSON encoding failures return fixed
 `invalid_argument/malformed_request` errors without request data. Field presence,
 nullability and domain rules remain with the facade.
 
+`EncodeRequest` exposes that same checked encoding as `json.RawMessage`, with
+HTML escaping disabled and a final newline. A facade can inspect safe JSON when
+choosing method policy, such as a receive deadline, and then supply that raw
+document to `Call`. Ordinary objects are encoded only after the shared text
+checks; facades never need a second safety walk or unchecked preliminary
+encoding. `Call` applies the same document check to a supplied raw message.
+
 A call's context lasts through response-body reading and is bounded by the
 supplied timeout and caller context. `httptrace.WroteRequest` records send
 progress: a transport failure before writing uses `apiwire.FromError`; after

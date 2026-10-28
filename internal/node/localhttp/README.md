@@ -13,6 +13,7 @@ credentials, strict domain decoding and execution.
 | Entry | Purpose |
 | --- | --- |
 | `NewClient(ClientConfig)`, `Client.Call`, `Client.Close` | Post JSON to one checked IPC interface and read its complete response without retrying. |
+| `EncodeRequest` | Check and encode a request before a facade inspects its JSON for method policy. |
 | `New(Config)` | Bind a server to an IPC kind, exact path prefix, method lookup and diagnostic logger. |
 | `Listen(kind, address, lock, options)`, `Listener.Close` | Open a matching IPC address under the instance lock; keep the underlying listener private. |
 | `Server.Serve`, `Shutdown`, `Close` | Own a matching listener, wait within the shutdown context, and close remaining connections on expiry. |
@@ -58,6 +59,12 @@ including map keys, is checked before the standard encoder can replace invalid
 bytes. Unsafe documents and encoding failures return fixed
 `invalid_argument/malformed_request` errors without including request data.
 The client leaves field presence and domain validation to the facade.
+
+`EncodeRequest` is the same safe encoding boundary used by `Client.Call`. It
+returns `json.RawMessage`, with HTML escaping disabled and a final newline. A
+facade that needs JSON fields for its timeout policy can encode once, inspect
+those bytes and pass the raw document to `Call`; it must not encode unchecked
+objects first or repeat the text-safety rules itself.
 
 Calls use the supplied timeout, also bounded by the caller's context. A failure
 before writing is mapped through `apiwire`; a written request without a complete

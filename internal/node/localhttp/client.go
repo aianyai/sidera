@@ -71,14 +71,9 @@ func (c *Client) Close() { c.transport.CloseIdleConnections() }
 // Call posts one JSON request and reads its complete answer without re-encoding
 // it. A missing or incomplete answer after writing has an unknown outcome.
 func (c *Client) Call(ctx context.Context, in Request) ([]byte, error) {
-	if !validRequestText(reflect.ValueOf(in.Body)) {
-		return nil, apiwire.Malformed("request JSON contains invalid text or a malformed document", "")
-	}
-	var body bytes.Buffer
-	enc := json.NewEncoder(&body)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(in.Body); err != nil {
-		return nil, apiwire.Malformed("request cannot be encoded as JSON", "")
+	body, err := EncodeRequest(in.Body)
+	if err != nil {
+		return nil, err
 	}
 	ctx, cancel := context.WithTimeout(ctx, in.Timeout)
 	defer cancel()
@@ -86,7 +81,7 @@ func (c *Client) Call(ctx context.Context, in Request) ([]byte, error) {
 	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
 		WroteRequest: func(httptrace.WroteRequestInfo) { wrote.Store(true) },
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://sidera"+c.pathPrefix+in.Method, &body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://sidera"+c.pathPrefix+in.Method, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +109,23 @@ func (c *Client) Call(ctx context.Context, in Request) ([]byte, error) {
 		return nil, &answer.Error
 	}
 	return raw, nil
+}
+
+// EncodeRequest checks request text before encoding can replace invalid bytes.
+// It returns JSON with HTML escaping disabled and a final newline. Facades may
+// inspect that representation for method policy, then pass it to Client.Call as
+// json.RawMessage. Input follows the same supported-container contract as Body.
+func EncodeRequest(in any) (json.RawMessage, error) {
+	if !validRequestText(reflect.ValueOf(in)) {
+		return nil, apiwire.Malformed("request JSON contains invalid text or a malformed document", "")
+	}
+	var body bytes.Buffer
+	enc := json.NewEncoder(&body)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(in); err != nil {
+		return nil, apiwire.Malformed("request cannot be encoded as JSON", "")
+	}
+	return body.Bytes(), nil
 }
 
 // Check text before encoding/json can silently replace invalid UTF-8, including
