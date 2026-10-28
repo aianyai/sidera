@@ -52,8 +52,15 @@ func Run(ctx context.Context, cfg Config) error {
 	logger := slog.New(slog.NewTextHandler(cfg.Stderr, nil))
 	s := &server{cfg: cfg, ctx: ctx, log: logger}
 	p, err := peer.New(cfg.Stdin, cfg.Stdout, peer.Config{
-		Logger:  logger,
-		Dialect: peer.Dialect{CancelMethod: "notifications/cancelled", CancelTarget: cancelTarget, SilentOnCancel: true, OverloadedCode: -32603, LineTooLongCode: -32600},
+		Logger: logger,
+		Dialect: peer.Dialect{
+			RejectDuplicateKeysAndInvalidUnicode: true,
+			CancelMethod:                         "notifications/cancelled",
+			CancelTarget:                         cancelTarget,
+			SilentOnCancel:                       true,
+			OverloadedCode:                       -32603,
+			LineTooLongCode:                      -32600,
+		},
 	})
 	if err != nil {
 		return err
@@ -142,8 +149,8 @@ func (s *server) decorate(result map[string]any, modern, cache bool) map[string]
 	return result
 }
 
-// Decode the object once to reject ambiguous keys at every depth. Unknown
-// values remain opaque: only the fields the server uses are interpreted.
+// Read the parameter object without imposing a schema on unknown values.
+// The peer has already checked the whole frame for ambiguous JSON.
 func (s *server) era(method string, raw json.RawMessage) (bool, map[string]json.RawMessage, error) {
 	if len(raw) == 0 {
 		raw = json.RawMessage("{}")

@@ -12,7 +12,7 @@ import (
 // handleLine classifies one inbound line and acts on it. It runs on the read
 // loop and never runs application code.
 func (p *Peer) handleLine(line []byte) {
-	msg, cerr := classify(line)
+	msg, cerr := p.dialect.classify(line)
 	if cerr != nil {
 		p.log.Warn("invalid message", "code", cerr.err.Code, "reason", cerr.err.Message)
 		p.send(errorLine(cerr.id, cerr.err))

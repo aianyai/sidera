@@ -42,7 +42,7 @@ Starting values of its limits (`peer.DefaultParams`), all configurable:
 | `MaxOutbound` | 256 lines | Outbound queue |
 | `WriteTimeout` | 10 s | Longest a single line may take to write |
 
-Behaviour, each point pinned by the tests named in "Where":
+Behaviour under the default dialect, each point pinned by the tests named in "Where":
 
 - **Framing.** A message is one JSON object plus `\n`. A line over
   `MaxLineBytes` is answered `-32004` with a null id and the connection is
@@ -65,11 +65,11 @@ Behaviour, each point pinned by the tests named in "Where":
   the params of every method, so a cancel with an unknown or repeated member
   cancels nothing. The request is still answered exactly
   once: with its result, or with `-32800`.
-- **Dialect.** `peer.Config.Dialect` sets the three conventions that another
+- **Dialect.** `peer.Config.Dialect` sets the conventions that another
   JSON-RPC protocol on the same line rules may do differently, and nothing
   else: the cancel notification (name, how its params name the request, what
-  `Call` sends), `SilentOnCancel`, and replacement codes for the peer's own
-  `-32001` and `-32004`. The zero value is this protocol's, so the adapter
+  `Call` sends), `SilentOnCancel`, opt-in document checks, and replacement codes
+  for the peer's own `-32001` and `-32004`. The zero value is this protocol's, so the adapter
   protocol and its dependents never name a dialect. Under `SilentOnCancel` the
   request answer is *at most once*: a request whose cancellation found it in
   flight before its answer was queued is not answered, and its id is released;
@@ -82,7 +82,14 @@ Behaviour, each point pinned by the tests named in "Where":
   the responsibility of the protocol that uses the dialect; the schema covers
   neither. `CancelTarget` runs on the read loop on input from the other side
   and the read loop does not recover, so it must be fast, must not block and
-  must not panic.
+  must not panic. `RejectDuplicateKeysAndInvalidUnicode` is off by default:
+  enabling it rejects duplicate members and unpaired UTF-16 surrogate escapes
+  anywhere in the frame before dispatch or overload, with `-32600` and a fixed
+  message. Unknown members and their values stay accepted. The rejection keeps
+  the connection, runs no handler or cancel target, and echoes a unique valid
+  top-level id (including on rejected responses), otherwise null. JSON syntax
+  and UTF-8 errors remain `-32700`. The adapter protocol leaves this option off;
+  its nested content remains the responsibility of the decoding layer.
 - **Write timeout.** A timer per write closes the transport when a line is not
   written within `WriteTimeout`.
 - **Backpressure.** When the outbound queue is full, local `Call` and `Notify`
@@ -170,7 +177,8 @@ anything not listed, including unknown codes, counts as unknown.
   to stop, so a handler that finishes anyway has its real result delivered.
 - **A dialect instead of a second message layer.** Another protocol that needs
   this peer's framing, classification, bounded queues, in-flight table and write
-  timeout differs from it only in the cancel convention and in two error codes.
+  timeout can also require document ambiguity checks, another cancel convention
+  and different error codes.
   Writing it a message layer of its own would give the queue, concurrency and
   write-timeout rules a second home; exporting framing and classification as
   public API would leave them a second home as well and commit the SDK to a
@@ -229,7 +237,10 @@ anything not listed, including unknown codes, counts as unknown.
   one that is handled. The line is answered with a null id because its id
   cannot be trusted. Repeats inside params and results are left to the layer
   that decodes them (`strictjson`), so the peer does not scan what it does not
-  interpret.
+  interpret under the default dialect. The opt-in document check instead uses
+  `strictjson.Decode` into `map[string]json.RawMessage`, which rejects ambiguous
+  JSON at every depth without imposing a schema on unknown members. This keeps
+  the frame boundary in one place for protocols that require the stronger rule.
 - **A response with a valid id but an invalid body fails its call.** Dropping
   it would leave the caller waiting for its timeout on a counterpart that
   already answered.
@@ -272,6 +283,7 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 | The rules of what the peer sends | `TestNilParamsAreSentAsAnEmptyObject`, `TestParamsThatAreNotAnObjectAreRefused`, `TestMethodNameLength`, `TestHandlerResultMustBeAnObject`, `TestTypedNilErrorIsAnInternalError`, `TestErrorRepliesFitTheSchema`, `TestWithDataKeepsOnlyObjects`, `TestErrorReplyTooLargeIsAnInternalError` |
 | Invalid JSON, invalid UTF-8 | `TestInvalidJSONKeepsConnection`, `TestInvalidUTF8IsParseError` |
 | Missing or wrong `jsonrpc`, bad shapes | `TestMissingOrWrongVersionIsInvalidRequest` |
+| The document-check dialect rejects deep repeats and invalid Unicode before dispatch or overload, recovers only a unique valid id, and keeps unknown values open | `TestDialectDocumentClassification`, `TestDialectDocumentRejectionHasNoSideEffects`, `TestDialectDocumentValidationBeforeOverload`, `FuzzDialectDocumentClassification` |
 | A repeated frame member is refused; a repeat inside params is not the frame's business | `TestRepeatedFrameMemberIsInvalidRequest`, `TestNoDuplicateTopLevelKeys`, `TestClassify` |
 | A malformed response-like line is never answered with its id, even when both sides have that id in flight | `TestMalformedResponseIsNeverAnsweredWithItsID`, `TestClassifyDetails` |
 | Batch rejected, connection kept | `TestBatchIsRejectedAndConnectionContinues` |

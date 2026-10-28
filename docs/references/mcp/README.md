@@ -30,9 +30,17 @@ legacy method and returns `-32601`. A modern discovery request does not initiali
 the legacy process. Other unknown methods return `-32601`.
 
 Only fields the server uses are interpreted. Unknown input members, including
-extra metadata, are ignored. The peer refuses repeated top-level message
-members; MCP refuses repeated members at any depth within `params`, preventing
-ambiguous interpretations there. Output follows the selected version's schema.
+extra metadata, are ignored. MCP explicitly enables the peer dialect's
+`RejectDuplicateKeysAndInvalidUnicode`: repeated member names and unpaired
+UTF-16 surrogate escapes anywhere in a frame are `-32600`, including unknown
+extensions, unknown methods, notifications and responses. This check precedes
+method and parameter validation, overload and cancellation. The error message
+is fixed (`duplicate member or invalid Unicode`), without paths or input values;
+no handler or cancel target runs and the connection stays open. A unique legal
+top-level id is echoed exactly as received; a duplicated, absent or invalid id
+becomes null. JSON syntax and UTF-8 errors stay `-32700`, and ordinary parameter
+errors stay `-32602`. Unknown fields and values remain accepted. Output follows
+the selected version's schema.
 
 `notifications/cancelled` reads `requestId`, ignores invalid or unknown targets
 and cancels the matching handler without answering it. The peer supplies this
