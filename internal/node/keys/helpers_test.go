@@ -35,7 +35,9 @@ type hook struct {
 	on     func(p fsx.Point)
 }
 
-func (h *hook) Reached(p fsx.Point, _ txn.Kind) {
+func (h *hook) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+
 	h.mu.Lock()
 	h.points = append(h.points, p)
 	on := h.on

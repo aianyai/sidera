@@ -23,7 +23,9 @@ type recorder struct {
 	on     func(p fsx.Point, k txn.Kind)
 }
 
-func (r *recorder) Reached(p fsx.Point, k txn.Kind) {
+func (r *recorder) Reached(observation fsx.Observation, k txn.Kind) {
+	p := observation.Point
+
 	r.mu.Lock()
 	r.points = append(r.points, p)
 	r.kinds = append(r.kinds, k)

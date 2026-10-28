@@ -254,7 +254,10 @@ func runInitCapturing(t testing.TB, mem *fsxtest.Mem, home string, rng *rand.Ran
 // observerFunc is a txn.Observer made of a function.
 type observerFunc func(fsx.Point, txn.Kind)
 
-func (f observerFunc) Reached(p fsx.Point, k txn.Kind) { f(p, k) }
+func (f observerFunc) Reached(observation fsx.Observation, k txn.Kind) {
+	p := observation.Point
+	f(p, k)
+}
 
 func initRerun(t testing.TB, mem *fsxtest.Mem, home string, seed byte) error {
 	t.Helper()

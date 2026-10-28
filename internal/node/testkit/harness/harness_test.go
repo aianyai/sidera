@@ -44,7 +44,9 @@ func newGate(tx string, step fsx.Step) *gate {
 
 func (g *gate) arm() { g.armed.Store(true) }
 
-func (g *gate) Reached(p fsx.Point, _ txn.Kind) {
+func (g *gate) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+
 	if !g.armed.Load() || p.Tag.Tx != g.tx || (g.step != 0 && p.Step != g.step) {
 		return
 	}

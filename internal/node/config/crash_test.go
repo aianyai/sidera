@@ -58,7 +58,9 @@ func recordCrash(p fsx.Point, model string) {
 	crashed.taken[p.Key][model]++
 }
 
-func (w *walker) Reached(p fsx.Point, _ txn.Kind) {
+func (w *walker) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+
 	if w.paused {
 		return
 	}

@@ -85,8 +85,10 @@ type Count struct {
 // once, so it must be safe for concurrent use. It must not write through the
 // Writer. The commit point of a transaction is reported after its last step
 // has completed and before Commit returns: nothing has been acknowledged yet.
+// Each observation retains the file layer's actual operands. Only the logical
+// commit has empty Path and From: it has no single filesystem operation.
 type Observer interface {
-	Reached(p fsx.Point, kind Kind)
+	Reached(observation fsx.Observation, kind Kind)
 }
 
 // Error is what a failed write of a Tx returns. Its Class is the one to act

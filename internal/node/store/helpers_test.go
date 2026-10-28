@@ -166,7 +166,9 @@ func (r *recorder) countInTx(p fsx.Point) int {
 	return n
 }
 
-func (r *recorder) Reached(p fsx.Point, k txn.Kind) {
+func (r *recorder) Reached(observation fsx.Observation, k txn.Kind) {
+	p := observation.Point
+
 	if r.sink != nil {
 		r.sink.add(p, k, r.countInTx(p))
 	}

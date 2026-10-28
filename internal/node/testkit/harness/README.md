@@ -172,6 +172,9 @@ By default the node has one instance, `Instance`, and every accessor without a n
   recovery ends at its next stage boundary, and a held custom observer must still be
   released by its test. `CrashAt` is disabled when the attempt ends, while the original
   `Options.Observer` continues to see all program steps, including cleanup steps.
+  It receives the complete `fsx.Observation`, with the actual path operands and
+  the declaration's kind, during serving and startup alike; `CrashAt` still
+  selects by `observation.Point` and kind.
 - **A seed is a disk.** The power-loss source is `rand.NewPCG(seed, 0x5ce)`: the same
   seed on the same history leaves the same disk.
 - **Faults go through the file layer.** `Faults()` is the `fsxtest.Faulty` the running

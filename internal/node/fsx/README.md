@@ -20,7 +20,7 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 | `MakeRoot(path)` | Creates the data directory owner-only, once, at `init`. |
 | `CreatePrivateFile(path)` | Exclusively creates an empty owner-only writable file at an OS path, verifies its security before returning `*os.File`, and removes it if verification fails. The caller owns writing, syncing, closing and subsequent cleanup. |
 | `Replace`, `ReplaceDeferred`, `OpenAppend`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | The durable operations: fixed step sequences over any `FS`. |
-| `Observe(fs, counter, hook)` | Numbers every write step and calls the hook before it runs. |
+| `Observation`, `Observe(fs, counter, hook)` | Numbers every write step and passes its point and actual path operands together to the hook before it runs. |
 | `Tag`, `Step`, `Key`, `Point`, `Counter`, `ParseKey`, `ParsePoint` | Crash point identity: `intake/out.rename#2`. |
 | `Error`, `Class` (`Failed`, `Fatal`), `IsFatal`, `PointOf` | What a failed operation returns and what the caller must do. |
 | `IsNoSpace` | Whether an error means the volume or the quota is full (`ENOSPC`, `EDQUOT`; `ERROR_DISK_FULL`, `ERROR_HANDLE_DISK_FULL`, `ERROR_DISK_QUOTA_EXCEEDED`), and nothing a platform does not return: a test injects `fsxtest.DiskFull`. The Windows codes are pending verification by CI on main. The one place that knows the codes. |
@@ -97,6 +97,14 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
   still be read; a link to a directory, device or FIFO cannot.
 - **A Windows read does not retry `file not found`.** The file may genuinely not
   exist; renames and removals do retry it.
+- **An observation binds identity to operands before the primitive.** `Path` is
+  the actual primitive path; for `Rename` and `RenameDir` it is the target and
+  `From` is the source. `CreateTemp` reports its parent directory, since the
+  temporary name does not exist yet. File `Write` and `Sync` retain the
+  `File.Name` obtained on opening. The root directory is `.`. Metadata does
+  not change `Point`, keys, numbering, error stamping or the skip on hook error.
+  Callbacks may interleave, including for the same key: each call carries its
+  own point and operands; no separate path callback has to be paired with it.
 - **Retries on Windows happen below `Observe`.** One logical step reaches the
   hook once, however many times the rename was retried.
 - **`.tmp-*` and `.trash-*` are debris.** Anything starting with one of the

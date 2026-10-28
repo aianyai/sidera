@@ -21,13 +21,15 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-type startupObserverFunc func(fsx.Point, txn.Kind)
+type startupObserverFunc func(fsx.Observation, txn.Kind)
 
-func (f startupObserverFunc) Reached(p fsx.Point, kind txn.Kind) { f(p, kind) }
+func (f startupObserverFunc) Reached(observation fsx.Observation, kind txn.Kind) {
+	f(observation, kind)
+}
 
 func TestAControlledStartStopsSelectingWhenItBeginsServing(t *testing.T) {
 	var observed atomic.Int64
-	h := harness.NewStopped(t, harness.Options{Observer: startupObserverFunc(func(fsx.Point, txn.Kind) {
+	h := harness.NewStopped(t, harness.Options{Observer: startupObserverFunc(func(fsx.Observation, txn.Kind) {
 		observed.Add(1)
 	})})
 	ctx, cancel := context.WithCancel(bg())

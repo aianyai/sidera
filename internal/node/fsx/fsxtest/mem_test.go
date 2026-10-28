@@ -873,7 +873,8 @@ func TestAppendAndRenameDirResultTable(t *testing.T) {
 			durable(t, mem, fmt.Sprintf("pkg/f%d", i), "x")
 		}
 		var atRemoveAll *fsxtest.Mem
-		observed := fsx.Observe(mem, new(fsx.Counter), func(p fsx.Point) error {
+		observed := fsx.Observe(mem, new(fsx.Counter), func(observation fsx.Observation) error {
+			p := observation.Point
 			if p.Step == fsx.StepRemoveAll {
 				atRemoveAll = mem.Clone() // the crash point is before the whole step
 			}

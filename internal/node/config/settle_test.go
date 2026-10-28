@@ -104,4 +104,7 @@ func TestPowerLossCloneAdapterGCAfterAnInstallCrashedBeforeTheDirectorySync(t *t
 // pointFunc is an Observer that calls a function for every point.
 type pointFunc func(p fsx.Point)
 
-func (f pointFunc) Reached(p fsx.Point, _ txn.Kind) { f(p) }
+func (f pointFunc) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+	f(p)
+}

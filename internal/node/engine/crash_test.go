@@ -70,7 +70,9 @@ func (w *crashWalker) note(p fsx.Point, model string) {
 	w.taken[p.Key][model]++
 }
 
-func (w *crashWalker) Reached(p fsx.Point, _ txn.Kind) {
+func (w *crashWalker) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+
 	if w.rig == nil || !w.txs[p.Tag.Tx] {
 		return
 	}

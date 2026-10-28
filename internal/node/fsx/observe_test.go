@@ -76,7 +76,8 @@ func TestObserveCallsTheHookBeforeTheStepAndASkipsItOnError(t *testing.T) {
 	mem := fsxtest.NewMem()
 	var seenBefore []bool
 	hookErr := errors.New("stop here")
-	observed := fsx.Observe(mem, new(fsx.Counter), func(p fsx.Point) error {
+	observed := fsx.Observe(mem, new(fsx.Counter), func(observation fsx.Observation) error {
+		p := observation.Point
 		_, err := mem.Stat("rec")
 		seenBefore = append(seenBefore, err == nil)
 		if p.Step == fsx.StepRename {

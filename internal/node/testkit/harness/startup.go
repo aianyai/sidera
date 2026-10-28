@@ -105,9 +105,10 @@ type startAttempt struct {
 	crashErr error
 }
 
-func (a *startAttempt) Reached(p fsx.Point, kind txn.Kind) {
+func (a *startAttempt) Reached(observation fsx.Observation, kind txn.Kind) {
+	p := observation.Point
 	if obs := a.h.opts.Observer; obs != nil {
-		obs.Reached(p, kind)
+		obs.Reached(observation, kind)
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()

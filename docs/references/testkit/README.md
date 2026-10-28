@@ -208,8 +208,12 @@ packages and are not part of them.
   stage boundaries; synchronous transaction recovery and custom observers are not
   interrupted by a background startup goroutine. A held observer must be released by
   the test. The startup selector ends with its attempt; `Options.Observer` retains
-  its raw observation of every generation's steps, including cleanup. The caller's
-  context bounds startup alone, not a successfully serving generation's lifetime.
+  its raw observation of every generation's steps, including cleanup. Each callback
+  receives the complete `fsx.Observation` and declaration kind: actual paths stay
+  bound to their point during startup and serving, with empty operands only for
+  logical commits. The startup selector still takes `observation.Point` and kind.
+  The caller's context bounds startup alone, not a successfully serving generation's
+  lifetime.
 - **The loopback and its knobs belong to the fixture.** One set of knobs lives as long as
   the fixture and each process gets a loopback made over it, so a knob set before a
   restart is still set after it. Every hit is written to the ledger as a `knob.hit` entry

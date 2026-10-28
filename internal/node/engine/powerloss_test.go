@@ -302,7 +302,9 @@ func (p *powerLoss) attach(m *modelRun) {
 // aimed at cuts the power: the disk is taken before the step, the old process is
 // abandoned and a new one starts on it, and the old loop goes on, cut off from its disk,
 // as a process that was killed at that instant would not.
-func (p *powerLoss) Reached(pt fsx.Point, kind txn.Kind) {
+func (p *powerLoss) Reached(observation fsx.Observation, kind txn.Kind) {
+	pt := observation.Point
+
 	p.mu.Lock()
 	p.reached[txn.Key{Key: pt.Key, Kind: kind}]++
 	p.mu.Unlock()

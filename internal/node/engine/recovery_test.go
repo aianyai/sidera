@@ -478,7 +478,9 @@ func (c *commitLog) watch() {
 	c.got, c.seen12 = nil, c.step12Begun()
 }
 
-func (c *commitLog) Reached(p fsx.Point, _ txn.Kind) {
+func (c *commitLog) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+
 	if p.Step != fsx.StepCommit {
 		return
 	}

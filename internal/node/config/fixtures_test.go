@@ -463,9 +463,9 @@ type afterRecover struct {
 	live atomic.Bool
 }
 
-func (a *afterRecover) Reached(p fsx.Point, k txn.Kind) {
+func (a *afterRecover) Reached(observation fsx.Observation, k txn.Kind) {
 	if a.live.Load() && a.obs != nil {
-		a.obs.Reached(p, k)
+		a.obs.Reached(observation, k)
 	}
 }
 

@@ -64,7 +64,9 @@ func newDiskTaker(cov *coverage, txs ...string) *diskTaker {
 	return &diskTaker{txs: set, cov: cov}
 }
 
-func (d *diskTaker) Reached(p fsx.Point, _ txn.Kind) {
+func (d *diskTaker) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+
 	if d.h == nil || !d.txs[p.Tag.Tx] {
 		return
 	}

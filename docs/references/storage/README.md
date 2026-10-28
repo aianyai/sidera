@@ -175,6 +175,17 @@ the ordinal of the arrival, counted from 1 per key by an `fsx.Counter`:
 hook error skips the step. Reads and locks are not steps. The point of an
 observed failure travels in the error (`fsx.PointOf`).
 
+The hook receives an `fsx.Observation`: `Point` is the step identity and
+ordinal, while `Path` and `From` belong to this arrival. `Path` is the actual
+primitive path, or the target of `Rename` and `RenameDir`, whose source is
+`From`. `CreateTemp` reports its real parent directory before a temporary name
+is allocated. `Write` and `Sync` retain the `File.Name` obtained when their
+handle was opened; directory steps use their actual directory, with `.` for
+the root. `From` is empty except for renames. The same callback binds the point
+to its operands even when calls for one key interleave; a second callback or
+counter cannot safely reconstruct that association. No path is inferred from
+transaction names, and no normalization changes production paths.
+
 Two transaction names are reserved for writes that are not crash points:
 `log` (diagnostic logs, whose loss is harmless) and `cleanup` (the removal of
 the temporary file of an operation that failed). `Observe` neither numbers nor
@@ -531,6 +542,12 @@ to the `Writer`: one per process, one per test.
 the commit point after the last step completed and before `Commit` returns, when
 nothing has been acknowledged. A test takes `Mem.Clone()` (process crash) or
 `CrashClone` (power loss) in it and restarts on the clone.
+`Observer.Reached(fsx.Observation, Kind)` forwards the file layer's complete
+event and its declaration's classification. Only the logical commit has empty
+`Path` and `From`, since it represents no single filesystem operation; the
+root directory remains `.`. The writer counts every arrival without an
+observer. Observations pass string headers by value, without path copying,
+normalization or additional file operations.
 
 **Contract with callers.** Acknowledge, and update memory, only after `Commit`
 returns nil; do not read back a path written in the same `Tx`; an append that no
@@ -1577,7 +1594,7 @@ so that the double cannot drift from what it stands for.
 | classes and the classification table | `internal/node/fsx/error.go`, `classify.go` | `TestFsyncFailureBeforeRenameFailsOperation`, `TestDirSyncFailureAfterRenameIsFatal`, `TestFailureClassOfEveryStep` |
 | composite operations | `internal/node/fsx/ops.go` | `TestCompositeOperationsRunTheirFixedSteps`, `TestReplaceLeavesNoTemporaryAndKeepsTheTargetWhenAnyStepBeforeTheRenameFails`, `TestCleanupAfterAFailureIsNotAStep`, `TestAppendShortWriteIsAFailureThatLeavesAPartialTail`, `TestSyncFileStepsCarryTheTagTheFileWasOpenedWith`, `TestEachCompositeOperationIsDurableWhenItReturns`, `TestDiscardRenamesToAGarbageNameBeforeDeleting` and the `RenameDir`, path and root tests in `ops_test.go` |
 | a full volume | `internal/node/fsx/nospace.go`, `nospace_unix.go`, `nospace_windows.go`; the injected fault `internal/node/fsx/fsxtest/diskfull_unix.go`, `diskfull_windows.go` | `nospace_test.go` (`TestIsNoSpaceRecognisesTheInjectedFullDisk`, `TestIsNoSpaceSeesThroughTheErrorOfAFailedOperation`), `nospace_unix_test.go`, `nospace_windows_test.go` (pending verification by CI on main) |
-| `Observe`, `PointOf` | `internal/node/fsx/observe.go`, `error.go` | `observe_test.go` |
+| `Observation`, `Observe`, `PointOf` | `internal/node/fsx/observe.go`, `error.go` | `observe_test.go` |
 | leftovers | `internal/node/fsx/leftovers.go` | `leftovers_test.go` |
 | `Exists` | `internal/node/fsx/fsx.go` | `exists_test.go` |
 | retry | `internal/node/fsx/retry.go`, `os_windows.go` | `retry_internal_test.go`, `retry_windows_test.go` |

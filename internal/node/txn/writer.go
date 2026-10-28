@@ -41,7 +41,8 @@ func New(fs fsx.FS, table *Table, obs Observer) *Writer {
 // reach counts a point and tells the observer. A point whose key the table does
 // not hold means a step ran that no declaration expands to; that is a defect in
 // the layer, not in a caller, and it must be loud.
-func (w *Writer) reach(p fsx.Point) error {
+func (w *Writer) reach(observation fsx.Observation) error {
+	p := observation.Point
 	i, ok := w.table.index[p.Key]
 	if !ok {
 		panic(fmt.Sprintf("txn: the step %v is not in the table: a declaration and the steps its operation runs disagree", p))
@@ -50,14 +51,14 @@ func (w *Writer) reach(p fsx.Point) error {
 	w.hits[i]++
 	w.mu.Unlock()
 	if w.obs != nil {
-		w.obs.Reached(p, w.table.keys[i].Kind)
+		w.obs.Reached(observation, w.table.keys[i].Kind)
 	}
 	return nil
 }
 
-// commitPoint reaches the commit point of a transaction.
+// commitPoint reaches the logical commit with no filesystem operands.
 func (w *Writer) commitPoint(tx string) {
-	w.reach(w.counter.Next(fsx.Key{Tag: fsx.Tag{Tx: tx}, Step: fsx.StepCommit}))
+	w.reach(fsx.Observation{Point: w.counter.Next(fsx.Key{Tag: fsx.Tag{Tx: tx}, Step: fsx.StepCommit})})
 }
 
 // Reader returns the read side of the file system, and nothing else: a type

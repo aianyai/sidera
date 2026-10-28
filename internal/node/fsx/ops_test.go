@@ -24,7 +24,8 @@ type recorded struct {
 func newRecorded() recorded {
 	steps := new([]string)
 	mem := fsxtest.NewMem()
-	fs := fsx.Observe(mem, new(fsx.Counter), func(p fsx.Point) error {
+	fs := fsx.Observe(mem, new(fsx.Counter), func(observation fsx.Observation) error {
+		p := observation.Point
 		*steps = append(*steps, p.String())
 		return nil
 	})
@@ -328,7 +329,8 @@ func TestCleanupAfterAFailureIsNotAStep(t *testing.T) {
 	faulty := fsxtest.NewFaulty(t, mem)
 	faulty.Fail(fsxtest.Match{Tx: tx.Tx, Step: fsx.StepSync}, syscall.EIO)
 	cleanup := faulty.Fail(fsxtest.Match{Tx: fsx.TxCleanup, Step: fsx.StepRemove}, syscall.EIO)
-	observed := fsx.Observe(faulty, new(fsx.Counter), func(p fsx.Point) error {
+	observed := fsx.Observe(faulty, new(fsx.Counter), func(observation fsx.Observation) error {
+		p := observation.Point
 		steps = append(steps, p.String())
 		return nil
 	})
@@ -487,7 +489,8 @@ func TestDiscardRenamesToAGarbageNameBeforeDeleting(t *testing.T) {
 	mustMkdir(t, mem, "pkg")
 	mustWrite(t, mem, "pkg/a", "a")
 	mustWrite(t, mem, "pkg/b", "b")
-	observed := fsx.Observe(mem, new(fsx.Counter), func(p fsx.Point) error {
+	observed := fsx.Observe(mem, new(fsx.Counter), func(observation fsx.Observation) error {
+		p := observation.Point
 		if p.Step == fsx.StepRemoveAll {
 			cloneAtRemoveAll = mem.Clone() // a process crash right before the deletion
 		}
@@ -519,7 +522,8 @@ func TestDiscardNeverReusesALeftoverGarbageName(t *testing.T) {
 	mustMkdir(t, mem, ".trash-2")
 	mustMkdir(t, mem, "pkg")
 	var renamedTo string
-	observed := fsx.Observe(mem, new(fsx.Counter), func(p fsx.Point) error {
+	observed := fsx.Observe(mem, new(fsx.Counter), func(observation fsx.Observation) error {
+		p := observation.Point
 		if p.Step == fsx.StepSyncDir {
 			entries, _ := mem.ReadDir(".")
 			for _, e := range entries {

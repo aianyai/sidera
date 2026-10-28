@@ -32,7 +32,7 @@ func newDisk(t testing.TB) *disk {
 			t.Fatal(err)
 		}
 	}
-	d.fs = fsx.Observe(d.mem, &fsx.Counter{}, func(fsx.Point) error { d.points++; return nil })
+	d.fs = fsx.Observe(d.mem, &fsx.Counter{}, func(fsx.Observation) error { d.points++; return nil })
 	return d
 }
 

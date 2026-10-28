@@ -29,7 +29,7 @@ declaration of its own.
 | `Writer.Reader()` | The read side, as an `fsx.Reader` that offers nothing else. |
 | `Writer.Recover()`, `CleanupWork(reader)` | Make every directory durable, then remove every `.tmp-*` file and `.trash-*` directory; and the list of what the removal would remove, which a test evaluates on a copy of the disk. |
 | `Writer.Coverage()` | Every key of the table with its hit count, zeros included, each key carrying its transaction's kind. |
-| `Observer` | Told of every point before its step runs; the hook of a crash test. |
+| `Observer.Reached(fsx.Observation, Kind)` | Receives each point and its actual file operands together before the step runs; the hook of a crash test. |
 | `Error`, `IsFatal` | What a failed write returns, and the one question a caller asks of it. |
 
 ## Rules
@@ -107,6 +107,11 @@ declaration of its own.
   a role that made its `SyncFile` also appended to a path that sync did not
   cover: the other paths would be lost without a sign. A failed append or sync
   closes the handle at once; handles never outlive their `Tx`.
+- **Observations keep the file layer's operands.** The writer forwards the
+  complete `fsx.Observation` with its declaration's `Kind`, without guessing a
+  path from a role or maintaining another counter. Only the logical commit
+  observation has empty `Path` and `From`: it has no single filesystem
+  operation. A directory step at the root uses `.`, never an empty path.
 - **Reserved names.** `log` and `cleanup` are not valid transaction or role
   names (`fsx.ValidName`): `fsx` uses them for steps that are not crash points.
 - **A `Tx` that made no write commits nothing.** `Commit` returns nil and

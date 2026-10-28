@@ -159,7 +159,9 @@ type holdFirst struct {
 	once    sync.Once
 }
 
-func (o *holdFirst) Reached(p fsx.Point, _ txn.Kind) {
+func (o *holdFirst) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+
 	if p.Tag.Tx != o.tx {
 		return
 	}

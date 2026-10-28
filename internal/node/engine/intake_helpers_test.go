@@ -30,7 +30,9 @@ import (
 // record written again with the content it had cannot be told from the disk.
 type inWriteCounter struct{ n atomic.Int64 }
 
-func (c *inWriteCounter) Reached(p fsx.Point, _ txn.Kind) {
+func (c *inWriteCounter) Reached(observation fsx.Observation, _ txn.Kind) {
+	p := observation.Point
+
 	if p.Tag.Role == "in" && p.Step == fsx.StepCreate {
 		c.n.Add(1)
 	}
