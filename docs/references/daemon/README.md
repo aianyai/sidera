@@ -263,6 +263,8 @@ order or spacing is still a resend. The answer to a request that changes state i
 `{"operation_id","replayed","result"}`, the result being the one stored; a read
 answers `{"result"}`. When an operation stops the daemon the answer is flushed and
 then the stop is requested, once: the client has its answer before the daemon goes.
+The [shared local HTTP boundary](../local-http/README.md) owns exact method and
+POST routing, the body limit, response encoding, diagnostic logging and shutdown.
 The server has no write timeout, because a request is the client's connection and
 ends with it; a request whose client goes away has its context cancelled.
 
@@ -472,7 +474,6 @@ interface: a sandbox must deny the socket to an agent.
   `TestWindowsADataDirectoryThatEveryoneCanReadIsRefused`,
   `TestWindowsASymbolicLinkAsTheDataDirectoryIsRefused`.
 - Tests of the management interface (`internal/node/manageapi`):
-  `TestOnlyAPostToAKnownMethodIsTaken`, `TestARequestOverTheLimitIsRefused`,
   `TestAMalformedRequestIsRefusedNamingThePositionOfTheFault`,
   `TestTheOperationIdentifierOfARequestThatChangesSomething`,
   `TestAnExpectedVersionIsRefusedWhereNoneIsCarried`,
@@ -481,10 +482,8 @@ interface: a sandbox must deny the socket to an agent.
   `TestEqualRequestsHaveOneFingerprintAndDifferentOnesDoNot`,
   `TestTheAnswerOfARequestThatChangesSomething`, `TestAReadAnswersItsResult`,
   `TestStopIsRequestedAfterTheAnswerIsWrittenAndOnlyForAnOperationThatStops`,
-  `TestRefusalsAreAnsweredInTheWordsOfTheWireAndUnknownErrorsStayInTheLog`,
   `TestAClientThatGoesAwayCancelsTheRequest`,
   `TestListenRefusesTheAddressOfTheAgentInterface`,
-  `TestShutdownWaitsForARequestAndLeavesNoGoroutine`, `TestTheServerTimeouts`,
   `TestConcurrentRequestsAreAnsweredEachItsOwn`, `FuzzDecodeRequest`,
   `TestAnExplicitZeroVersionOfAVersionedChangeIsMissing`,
   `TestOperationResultAnswersTheResultStoredForTheOwnersIdentifier`,
@@ -493,6 +492,8 @@ interface: a sandbox must deny the socket to an agent.
   `TestATestRowIsOutsideTheCatalogueAndIsNotAuthorized`,
   `TestARowIsAnOperationOrATestRowAndItsNameSaysWhich`,
   `TestATaggedBuildHasItsTestRows`, `TestAnUntaggedBuildHasNoTestRow`.
+- Tests of shared HTTP routing, size limits, encoding, raw bytes, diagnostics,
+  listener kinds and shutdown live in `internal/node/localhttp`; see its README.
 - Tests of the words of the wire (`internal/node/apiwire`) and of the log
   (`internal/node/logfile`): see their READMEs. The scans that keep the local owner
   and the local source where they belong: `internal/node/layout_test.go`.

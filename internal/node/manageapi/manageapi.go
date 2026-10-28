@@ -6,20 +6,15 @@
 package manageapi
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/ident"
@@ -27,15 +22,13 @@ import (
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/ipc"
+	"github.com/aianyai/sidera/internal/node/localhttp"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 const (
 	// pathPrefix is where the methods are: POST /v1/manage/<method>.
 	pathPrefix = "/v1/manage/"
-	// maxBody is the largest request: params are small, and an adapter package is
-	// named by a path, never uploaded.
-	maxBody = 1 << 20
 	// fingerprintDomain begins every fingerprint, so that one made for another
 	// purpose or another version of the rule is never the same.
 	fingerprintDomain = "sidera-manage-v1"
@@ -67,10 +60,9 @@ type Config struct {
 // for every row.
 type Server struct {
 	cfg     Config
-	log     *slog.Logger
 	list    admin.List
 	methods map[string]*method
-	http    *http.Server
+	http    *localhttp.Server
 }
 
 // New builds the server. It listens on nothing until Serve.
@@ -87,22 +79,16 @@ func New(c Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{cfg: c, log: c.Log, methods: methods}
-	if s.log == nil {
-		s.log = slog.New(slog.DiscardHandler)
-	}
+	s := &Server{cfg: c, methods: methods}
 	// The management interface is the local owner's alone in this stage: the list
 	// of authorized persons is empty, and Authorize still decides by the
 	// catalogue, which denies an operation it does not know to everyone.
 	s.list, _ = admin.NewList(nil)
-	s.http = &http.Server{
-		Handler:           http.HandlerFunc(s.serve),
-		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
-		// No write timeout: a request may be a wait, and the context of each
-		// request is the client's connection.
-		IdleTimeout:    60 * time.Second,
-		MaxHeaderBytes: 8 << 10,
+	s.http, err = localhttp.New(localhttp.Config{
+		Kind: ipc.KindManage, PathPrefix: pathPrefix, Lookup: s.lookup, Log: c.Log,
+	})
+	if err != nil {
+		return nil, err
 	}
 	return s, nil
 }
@@ -110,15 +96,12 @@ func New(c Config) (*Server, error) {
 // Listener is a listener of the management interface. Only Listen makes one, and
 // Listen refuses the address of the Agent interface: a connection that this
 // server accepts is the local owner, so the server may serve no other listener.
-type Listener struct{ l net.Listener }
+type Listener struct{ l *localhttp.Listener }
 
 // Listen listens on the address of the management interface. The caller holds the
 // instance lock, as ipc.Listen asks.
 func Listen(addr ipc.Address, lock ipc.InstanceLock, opts ipc.Options) (*Listener, error) {
-	if addr.Kind() != ipc.KindManage {
-		return nil, fmt.Errorf("manageapi: %q is not the address of the management interface", addr.Kind())
-	}
-	l, err := ipc.Listen(addr, lock, opts)
+	l, err := localhttp.Listen(ipc.KindManage, addr, lock, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -131,24 +114,14 @@ func (l *Listener) Close() error { return l.l.Close() }
 // Serve answers the requests of the listener until Shutdown or Close, and returns
 // nil then. It closes the listener.
 func (s *Server) Serve(l *Listener) error {
-	if l == nil || l.l == nil {
-		return errors.New("manageapi: no listener")
+	if l == nil {
+		return s.http.Serve(nil)
 	}
-	if err := s.http.Serve(l.l); !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
+	return s.http.Serve(l.l)
 }
 
-// Shutdown stops taking connections and waits for the requests being served to
-// end; when ctx ends first it closes what is left and returns the error of ctx.
-func (s *Server) Shutdown(ctx context.Context) error {
-	err := s.http.Shutdown(ctx)
-	if err != nil {
-		s.http.Close()
-	}
-	return err
-}
+// Shutdown stops accepting requests and waits within ctx, closing what remains.
+func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ctx) }
 
 // Close ends the serving at once.
 func (s *Server) Close() error { return s.http.Close() }
@@ -159,19 +132,15 @@ func (s *Server) Close() error { return s.http.Close() }
 // owner by that alone.
 func (s *Server) actor() admin.Actor { return admin.LocalOwner() }
 
-func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
-	name, ok := strings.CutPrefix(r.URL.Path, pathPrefix)
+func (s *Server) lookup(name string) http.HandlerFunc {
 	m := s.methods[name]
-	if !ok || m == nil {
-		s.fail(w, apiwire.New(apiwire.CategoryNotFound, apiwire.CodeMethodUnknown, "there is no such method"), 0)
-		return
+	if m == nil {
+		return nil
 	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		s.fail(w, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeMethodNotAllowed, "a method is called with POST"), http.StatusMethodNotAllowed)
-		return
-	}
+	return func(w http.ResponseWriter, r *http.Request) { s.serve(w, r, name, m) }
+}
 
+func (s *Server) serve(w http.ResponseWriter, r *http.Request, name string, m *method) {
 	// Authorize comes first, by the catalogue: the local owner is denied only an
 	// operation the catalogue does not know, which is a defect of the program. A
 	// test row is no operation of the catalogue and is not authorized by it (see
@@ -179,19 +148,14 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	actor := s.actor()
 	if m.test == nil {
 		if v := admin.Authorize(s.list, actor, m.op, s.cfg.Clock.Now()); !v.Allowed {
-			s.fail(w, apiwire.FromAdmin(v.Reason), 0)
+			s.http.Fail(w, apiwire.FromAdmin(v.Reason))
 			return
 		}
 	}
 
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	body, err := localhttp.ReadBody(w, r)
 	if err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			s.fail(w, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeRequestTooLarge, "the request is larger than a method takes"), 0)
-		} else {
-			s.fail(w, apiwire.Malformed("the request could not be read", ""), 0)
-		}
+		s.http.Fail(w, err)
 		return
 	}
 	if m.test != nil {
@@ -200,18 +164,18 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	d, err := s.decode(name, body)
 	if err != nil {
-		s.fail(w, err, 0)
+		s.http.Fail(w, err)
 		return
 	}
 	if err := m.checkPlan(d.plan); err != nil {
-		s.fail(w, err, 0)
+		s.http.Fail(w, err)
 		return
 	}
 
 	if d.plan.read != nil {
 		result, err := d.plan.read(r.Context(), s.cfg.Service)
 		if err != nil {
-			s.fail(w, err, 0)
+			s.http.Fail(w, err)
 			return
 		}
 		s.write(w, struct {
@@ -226,7 +190,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		Name: name, Operation: d.plan.operation,
 	})
 	if err != nil {
-		s.fail(w, err, 0)
+		s.http.Fail(w, err)
 		return
 	}
 	s.write(w, struct {
@@ -250,7 +214,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 func (s *Server) serveTest(w http.ResponseWriter, r *http.Request, m *method, body []byte) {
 	var env readEnvelope
 	if err := strictjson.Decode(body, &env); err != nil {
-		s.fail(w, err, 0)
+		s.http.Fail(w, err)
 		return
 	}
 	params := env.Params
@@ -259,7 +223,7 @@ func (s *Server) serveTest(w http.ResponseWriter, r *http.Request, m *method, bo
 	}
 	result, err := m.test(r.Context(), params)
 	if err != nil {
-		s.fail(w, err, 0)
+		s.http.Fail(w, err)
 		return
 	}
 	s.write(w, struct {
@@ -383,39 +347,4 @@ func fingerprint(method string, canonicalParams []byte, expected admin.Version) 
 }
 
 // write answers 200 with the value as JSON.
-func (s *Server) write(w http.ResponseWriter, v any) { s.send(w, http.StatusOK, v) }
-
-func (s *Server) send(w http.ResponseWriter, status int, v any) {
-	var b bytes.Buffer
-	enc := json.NewEncoder(&b)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		s.log.Error("management answer could not be encoded", "error", err.Error())
-		status = http.StatusInternalServerError
-		b.Reset()
-		b.WriteString(`{"error":{"category":"internal","code":"internal","message":"internal error"}}` + "\n")
-	}
-	w.Header().Set("Content-Type", "application/json")
-	// The answer is whole as soon as it is written: a client reads exactly this many
-	// bytes and does not wait for the handler to return.
-	w.Header().Set("Content-Length", strconv.Itoa(b.Len()))
-	w.WriteHeader(status)
-	if _, err := w.Write(b.Bytes()); err != nil {
-		s.log.Debug("management answer was not delivered", "error", err.Error())
-	}
-}
-
-// fail answers an error in the words of the wire. status 0 is the one the
-// category gives.
-func (s *Server) fail(w http.ResponseWriter, err error, status int) {
-	e := apiwire.FromError(err)
-	if e.Category == apiwire.CategoryInternal {
-		// What an unexpected error said is for the log of the daemon, not for the
-		// client.
-		s.log.Error("management request failed", "code", e.Code, "error", err.Error())
-	}
-	if status == 0 {
-		status = e.Category.HTTPStatus()
-	}
-	s.send(w, status, apiwire.Body{Error: *e})
-}
+func (s *Server) write(w http.ResponseWriter, v any) { s.http.JSON(w, http.StatusOK, v) }

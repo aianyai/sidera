@@ -6,10 +6,13 @@ pipe on Windows) that the owner's commands talk to. Read
 for the wire, the reasons, and how the interface relates to the engine and to the
 administrative rules.
 
-This is a runtime package of layer 6 of [`internal/node/README.md`](../README.md):
-it imports `engine` (through the service interface), `ipc`, `apiwire` and the
+This is a runtime package of layer 8 of [`internal/node/README.md`](../README.md):
+it imports `engine` (through the service interface), `ipc`, `apiwire`, `localhttp` and the
 contract packages. It starts no goroutine of its own: `net/http` runs one for each
-connection, and `Shutdown` ends them.
+connection, and `Shutdown` ends them. The shared [local HTTP boundary](../localhttp/README.md)
+owns transport limits, exact method routing, bounded body reads, responses and
+diagnostic logging; this package owns the point at which authorization permits
+reading a body.
 
 ## Entry points
 
@@ -105,14 +108,14 @@ test clock, quiescence, the crash points) are added by the streams that own them
 
 ## Where the tests are
 
-`manageapi_test.go`: routing and verbs, the size limit, malformed requests with
+`manageapi_test.go`: malformed requests with
 their paths, the operation identifier, the expected version (present or not), the
 catalogue, `operation.result`, test rows and the rule for a row's name, what
 the engine is asked (key, fingerprint worked out by hand, name, kind), the
 fingerprint of equal and different requests, the shape of the answers, the stop
-after the answer, the mapping of refusals, the client that goes away, the listener
-that takes only the management address, shutdown with a request in flight, the
-timeouts, and concurrent requests. `testmethods_test.go` and
+after the answer, the client that goes away, the listener
+that takes only the management address, and concurrent requests. Shared HTTP
+routing, size, response, logging and shutdown tests live in `localhttp`. `testmethods_test.go` and
 `testmethods_off_test.go` (build-constrained) say that a tagged build has its test
 rows and an untagged one has none. `methods_owner_test.go` the rows of the owner (the
 operation each is authorized as, the strict reading of their params, the commands and

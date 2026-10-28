@@ -1,14 +1,14 @@
 package manageapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"io"
 	"net/http"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -39,60 +39,6 @@ var ownNode = func() ident.NodeID {
 }()
 
 func addressOf(b byte) string { return ident.Address{Node: ownNode, Endpoint: endpointOf(b)}.String() }
-
-// Only a POST to a method that exists is taken. The other verbs and the other
-// paths are answered, and the service is asked nothing.
-func TestOnlyAPostToAKnownMethodIsTaken(t *testing.T) {
-	r := newRig(t)
-	c := r.client()
-	defer c.CloseIdleConnections()
-	for _, tc := range []struct {
-		name, verb, url string
-		status          int
-		category, code  string
-	}{
-		{"a GET of a method", http.MethodGet, "http://sidera/v1/manage/endpoints.list", 405, "invalid_argument", "method_not_allowed"},
-		{"a PUT of a method", http.MethodPut, "http://sidera/v1/manage/endpoints.list", 405, "invalid_argument", "method_not_allowed"},
-		{"a method nobody has", http.MethodPost, "http://sidera/v1/manage/nothing.here", 404, "not_found", "method_unknown"},
-		{"a method of the other interface", http.MethodPost, "http://sidera/v1/agent/endpoints.list", 404, "not_found", "method_unknown"},
-		{"the version is not v1", http.MethodPost, "http://sidera/v2/manage/endpoints.list", 404, "not_found", "method_unknown"},
-		{"no method", http.MethodPost, "http://sidera/v1/manage/", 404, "not_found", "method_unknown"},
-		{"a method with a path below it", http.MethodPost, "http://sidera/v1/manage/endpoints.list/x", 404, "not_found", "method_unknown"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			req, _ := http.NewRequest(tc.verb, tc.url, strings.NewReader(`{}`))
-			resp, err := c.Do(req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer resp.Body.Close()
-			var buf strings.Builder
-			var b [512]byte
-			for {
-				n, err := resp.Body.Read(b[:])
-				buf.Write(b[:n])
-				if err != nil {
-					break
-				}
-			}
-			r.wantError(tc.status, tc.category, tc.code, resp.StatusCode, []byte(buf.String()))
-			if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
-				t.Errorf("Content-Type %q", ct)
-			}
-		})
-	}
-	if n := len(r.svc.calls()); n != 0 {
-		t.Errorf("the service was asked %d times", n)
-	}
-}
-
-// A body over the limit is refused without being read to the end.
-func TestARequestOverTheLimitIsRefused(t *testing.T) {
-	r := newRig(t)
-	body := `{"params":{"instance":"` + strings.Repeat("a", maxBody) + `"}}`
-	status, out := r.post("endpoints.list", body)
-	r.wantError(400, "invalid_argument", "request_too_large", status, out)
-}
 
 // A request that is not what the method takes is refused as malformed, with the
 // position of the fault when the decoder can place it: the strict rules of the
@@ -228,6 +174,39 @@ func TestAnOperationOutsideTheCatalogueIsNeverRun(t *testing.T) {
 	if n := len(r.svc.calls()); n != 0 {
 		t.Errorf("the engine was asked %d times", n)
 	}
+}
+
+// An unauthorized method must answer without waiting for a body. A large
+// declared body also prevents net/http from draining it before the answer.
+func TestAuthorizationPrecedesReadingTheBody(t *testing.T) {
+	r := newRig(t, extraMethods)
+	addr, err := ipc.Locate(r.home, ipc.KindManage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := ipc.Dial(ctx, addr, ipc.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(conn, "POST /v1/manage/test.unknown HTTP/1.1\r\nHost: sidera\r\nContent-Length: 2097152\r\n\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatalf("authorization waited for the body: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.wantError(500, "internal", "unknown_operation", resp.StatusCode, body)
 }
 
 // A request is authorized by the row's op before its params are read and carried
@@ -441,42 +420,6 @@ func TestStopIsRequestedAfterTheAnswerIsWrittenAndOnlyForAnOperationThatStops(t 
 	}
 }
 
-// What the engine refuses for is answered in the words of the wire, once, by the
-// one mapping; an error that nobody expected is an internal error whose text is in
-// the log of the daemon and not in the answer.
-func TestRefusalsAreAnsweredInTheWordsOfTheWireAndUnknownErrorsStayInTheLog(t *testing.T) {
-	r := newRig(t)
-	for _, tc := range []struct {
-		name     string
-		err      error
-		status   int
-		cat, cod string
-	}{
-		{"recovering", &engine.Refusal{Reason: engine.ReasonRecovering}, 503, "unavailable", "recovering"},
-		{"shutting down", &engine.Refusal{Reason: engine.ReasonShuttingDown}, 503, "unavailable", "shutting_down"},
-		{"the identifier reused", &engine.Refusal{Reason: engine.ReasonOperationIDReused}, 409, "conflict", "operation_id_reused"},
-		{"an unknown endpoint", &engine.Refusal{Reason: engine.ReasonEndpointUnknown}, 404, "not_found", "endpoint_unknown"},
-		{"a runtime endpoint", &engine.Refusal{Reason: engine.ReasonWrongEndpointKind}, 422, "refused", "endpoint_kind"},
-		{"the disk is full", &engine.Refusal{Reason: engine.ReasonStorageFull}, 429, "backpressure", "storage_full"},
-		{"a fatal failure", &engine.Refusal{Reason: engine.ReasonStorageFatal}, 500, "outcome_unknown", "storage_fatal"},
-		{"an unexpected error", errors.New("open /h/.sidera/keys/x: secret-token-abc"), 500, "internal", "internal"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r.svc.execute = func(context.Context, engine.ManagementCommand) (engine.StoredResult, error) {
-				return engine.StoredResult{}, tc.err
-			}
-			status, out := r.post("daemon.stop", `{"operation_id":"`+opID(7)+`"}`)
-			r.wantError(tc.status, tc.cat, tc.cod, status, out)
-			if strings.Contains(string(out), "secret-token-abc") {
-				t.Error("the text of an unexpected error is in the answer")
-			}
-		})
-	}
-	if !strings.Contains(r.log.String(), "secret-token-abc") {
-		t.Error("the text of the unexpected error is not in the log of the daemon")
-	}
-}
-
 // A client that goes away cancels the request: the context the engine is asked
 // with ends, so a call that waits is not left waiting for a reader that is gone.
 func TestAClientThatGoesAwayCancelsTheRequest(t *testing.T) {
@@ -528,77 +471,6 @@ func TestListenRefusesTheAddressOfTheAgentInterface(t *testing.T) {
 	}
 	if _, err := Listen(ipc.Address{}, held{}, ipc.Options{}); err == nil {
 		t.Error("Listen took the zero address")
-	}
-}
-
-// Shutdown waits for a request that is being served and ends the serving; nothing
-// of the server runs afterwards.
-func TestShutdownWaitsForARequestAndLeavesNoGoroutine(t *testing.T) {
-	before := runtime.NumGoroutine()
-	r := newRig(t)
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	r.svc.execute = func(context.Context, engine.ManagementCommand) (engine.StoredResult, error) {
-		close(entered)
-		<-release
-		return engine.StoredResult{Result: []byte(`{"stopping":true}`)}, nil
-	}
-	got := make(chan int, 1)
-	go func() {
-		status, _ := r.post("daemon.stop", `{"operation_id":"`+opID(1)+`"}`)
-		got <- status
-	}()
-	<-entered
-	shut := make(chan error, 1)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		shut <- r.srv.Shutdown(ctx)
-	}()
-	select {
-	case err := <-shut:
-		t.Fatalf("Shutdown returned %v while a request was being served", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(release)
-	if status := <-got; status != 200 {
-		t.Errorf("the request in flight was answered %d", status)
-	}
-	if err := <-shut; err != nil {
-		t.Errorf("Shutdown: %v", err)
-	}
-	if status, _ := func() (int, error) {
-		c := r.client()
-		defer c.CloseIdleConnections()
-		resp, err := c.Post("http://sidera/v1/manage/endpoints.list", "application/json", strings.NewReader(`{}`))
-		if err != nil {
-			return 0, err
-		}
-		resp.Body.Close()
-		return resp.StatusCode, nil
-	}(); status == 200 {
-		t.Error("the interface answered after Shutdown")
-	}
-	deadline := time.Now().Add(5 * time.Second)
-	for runtime.NumGoroutine() > before+1 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if n := runtime.NumGoroutine(); n > before+1 { // +1: the cleanup's own Shutdown wait
-		buf := make([]byte, 1<<16)
-		t.Errorf("%d goroutines, %d before:\n%s", n, before, buf[:runtime.Stack(buf, true)])
-	}
-}
-
-// The limits of the server: a slow header is cut, there is no deadline on the
-// write (a request may be a wait), connections do not sit idle for ever.
-func TestTheServerTimeouts(t *testing.T) {
-	r := newRig(t)
-	h := r.srv.http
-	if h.ReadHeaderTimeout != 10*time.Second || h.ReadTimeout != 30*time.Second || h.IdleTimeout != 60*time.Second || h.MaxHeaderBytes != 8<<10 {
-		t.Errorf("limits: header %v, read %v, idle %v, header bytes %d", h.ReadHeaderTimeout, h.ReadTimeout, h.IdleTimeout, h.MaxHeaderBytes)
-	}
-	if h.WriteTimeout != 0 {
-		t.Errorf("a write timeout of %v would cut a request that waits", h.WriteTimeout)
 	}
 }
 

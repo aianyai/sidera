@@ -8,7 +8,7 @@ a data directory writes the files of every owner. Read
 [../../../docs/references/daemon/README.md](../../../docs/references/daemon/README.md)
 for the steps, the reasons and what the tests prove.
 
-This is a runtime package of layer 7 of [`internal/node/README.md`](../README.md): it
+This is a runtime package of layer 9 of [`internal/node/README.md`](../README.md): it
 imports every package below it and is the only one that connects across layers. It
 is the one runtime package that reads `crypto/rand`, to hand the reader down. It
 touches files only through `fsx`, and reads time only through the injected clock.
