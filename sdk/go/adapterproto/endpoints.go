@@ -117,7 +117,7 @@ func (p AckParams) Validate() error {
 	var c checker
 	c.field("endpoint", p.Endpoint.Validate())
 	c.field("lease", p.Lease.Validate())
-	c.ok(len(p.Items) >= 1 && len(p.Items) <= maxAckItems, "items: %d entries, need 1..%d", len(p.Items), maxAckItems)
+	c.ok(len(p.Items) >= 1 && len(p.Items) <= MaxAckItems, "items: %d entries, need 1..%d", len(p.Items), MaxAckItems)
 	list(&c, "items", p.Items)
 	return c.err
 }
@@ -130,7 +130,7 @@ type AckResult struct {
 // Validate checks the entries.
 func (r AckResult) Validate() error {
 	var c checker
-	c.ok(len(r.Items) >= 1 && len(r.Items) <= maxAckItems, "items: %d entries, need 1..%d", len(r.Items), maxAckItems)
+	c.ok(len(r.Items) >= 1 && len(r.Items) <= MaxAckItems, "items: %d entries, need 1..%d", len(r.Items), MaxAckItems)
 	list(&c, "items", r.Items)
 	return c.err
 }

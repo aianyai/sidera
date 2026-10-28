@@ -8,8 +8,8 @@ import (
 // MaxPart bounds a part number.
 const MaxPart = 1_000_000
 
-// maxAckItems bounds the entries of one acknowledgement.
-const maxAckItems = 1024
+// MaxAckItems bounds the entries of one acknowledgement.
+const MaxAckItems = 1024
 
 var partLabelRE = regexp.MustCompile(partLabelPattern)
 
@@ -176,7 +176,7 @@ func (r RecvObservedResult) Validate() error {
 	c.field("verdict", enumOK(r.Verdict, ackVerdicts))
 	c.field("reason", enumOK(r.Reason, ackReasons))
 	c.field("items", present(r.Items))
-	c.ok(len(r.Items) <= maxAckItems, "items: %d entries, at most %d", len(r.Items), maxAckItems)
+	c.ok(len(r.Items) <= MaxAckItems, "items: %d entries, at most %d", len(r.Items), MaxAckItems)
 	list(&c, "items", r.Items)
 	if c.err != nil {
 		return c.err

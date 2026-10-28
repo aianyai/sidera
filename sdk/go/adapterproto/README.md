@@ -24,6 +24,7 @@ for what each message means and why the protocol is shaped this way.
 | `ErrorObject` | The `error` member of a response: `peer.Error` with the protocol's rules for its code, message and data |
 | `CodeNodeBusy`, `BusyData`, `BusyReasons()` | The code of a request the node refused before any effect and that may be sent again later, its required data `{reason}` (any reason word is accepted) and the reasons this version of the node sends |
 | `ControlReply` and the `Control*` enums | The replies to the control signals, with their numeric codes |
+| `MaxAckItems` | The existing limit of 1024 entries in an acknowledgement, shared with other readers of the same protocol values |
 
 ## Rules
 

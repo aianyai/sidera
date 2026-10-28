@@ -383,6 +383,11 @@ character is a Unicode code point, not a byte. The two constants are exported so
 that whoever stores or shows a name applies the bound the protocol states instead
 of copying the number.
 
+`MaxAckItems` exports the existing acknowledgement limit of 1024 entries. The
+adapter request and result validators, the observed-receive result, and other
+interfaces accepting these acknowledgement values use the same bound; exposing
+it does not change the accepted protocol values or their format.
+
 Identifiers: `EndpointRef` and `Address` are opaque strings of 1 to 128
 characters, handed out by the daemon and returned unchanged; the SDK never parses
 them. `AttemptID` is a lowercase UUID version 4. `LeaseRef` is 32 lowercase hex
