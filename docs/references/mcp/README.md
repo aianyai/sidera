@@ -56,9 +56,11 @@ then closes. End of input cancels in-flight requests and normally returns succes
 a broken transport is a process failure. A caller's ended context closes both
 streams.
 
-When requested by the caller, the first compliant request starts one independent
-Agent probe. It uses the client's separate probe credential, reports only on
-standard error, and does not delay or alter an MCP response.
+When requested by the caller, the first valid legacy `initialize` or modern
+request (including `server/discover`) starts one independent Agent probe. A legacy
+`ping` does not establish initialization and leaves the probe available. The probe
+uses the client's separate probe credential, reports only on standard error, and
+does not delay or alter an MCP response.
 
 ## Agent tools
 

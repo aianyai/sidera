@@ -102,18 +102,20 @@ func (s *server) handle(ctx context.Context, method string, raw json.RawMessage)
 		}
 		s.initialized.Store(true)
 	}
-	s.probe.Do(func() {
-		if s.cfg.ProbeOnConnect && s.cfg.Agent != nil {
-			go func() {
-				result, err := s.cfg.Agent.Probe(s.ctx, adapterproto.FrontendMCP)
-				if err != nil {
-					s.log.Warn("MCP probe failed", "error", err)
-					return
-				}
-				s.log.Info("MCP probe succeeded", "preset", result.Preset, "frontend", result.Frontend)
-			}()
-		}
-	})
+	if method == "initialize" || modern {
+		s.probe.Do(func() {
+			if s.cfg.ProbeOnConnect && s.cfg.Agent != nil {
+				go func() {
+					result, err := s.cfg.Agent.Probe(s.ctx, adapterproto.FrontendMCP)
+					if err != nil {
+						s.log.Warn("MCP probe failed", "error", err)
+						return
+					}
+					s.log.Info("MCP probe succeeded", "preset", result.Preset, "frontend", result.Frontend)
+				}()
+			}
+		})
+	}
 	switch method {
 	case "ping":
 		return struct{}{}, nil
