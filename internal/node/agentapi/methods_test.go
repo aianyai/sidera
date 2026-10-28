@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
@@ -363,29 +365,41 @@ func TestMethodInputIsStrictAndReceiveNumbersKeepTheirMeaning(t *testing.T) {
 	h, token, _ := sessionNode(t)
 	s, _ := agentapi.New(agentapi.Config{Service: h.Engine()})
 	s.EnableMethods()
-	for _, tc := range []struct{ name, method, body, path string }{
-		{"unknown member", "me", `{"unknown":true}`, "unknown"},
-		{"repeated member", "declare", `{"paused":true,"paused":false}`, "paused"},
-		{"wrong case", "recv", `{"Frontend":"cli"}`, "Frontend"},
-		{"missing required field", "status", `{}`, "message_id"},
-		{"null", "declare", `{"paused":null}`, "paused"},
-		{"trailing document", "peers", `{} {}`, ""},
-		{"wrong type", "directory", `{"limit":"1"}`, "limit"},
-		{"negative wait", "recv", `{"frontend":"cli","wait_s":-1}`, "wait_s"},
-		{"fractional wait", "recv", `{"frontend":"cli","wait_s":1.5}`, "wait_s"},
-		{"wait overflow", "recv", `{"frontend":"cli","wait_s":9223372036854775807}`, "wait_s"},
-		{"part with explicit zero wait", "recv", `{"frontend":"cli","msg":"message","part":1,"wait_s":0}`, "wait_s"},
-		{"negative part", "recv", `{"frontend":"cli","msg":"message","part":-1}`, "part"},
-		{"unpaired part", "recv", `{"frontend":"cli","part":1}`, "part"},
-		{"empty explicit items", "ack", `{"lease":"11111111111111111111111111111111","items":[]}`, "items"},
+	maxAcceptBefore := int64(delivery.MaxAcceptBefore / time.Second)
+	for _, tc := range []struct {
+		name, method, body, path string
+		status                   int
+	}{
+		{"unknown member", "me", `{"unknown":true}`, "unknown", 400},
+		{"repeated member", "declare", `{"paused":true,"paused":false}`, "paused", 400},
+		{"wrong case", "recv", `{"Frontend":"cli"}`, "Frontend", 400},
+		{"missing required field", "status", `{}`, "message_id", 400},
+		{"null", "declare", `{"paused":null}`, "paused", 400},
+		{"trailing document", "peers", `{} {}`, "", 400},
+		{"wrong type", "directory", `{"limit":"1"}`, "limit", 400},
+		{"negative wait", "recv", `{"frontend":"cli","wait_s":-1}`, "wait_s", 400},
+		{"fractional wait", "recv", `{"frontend":"cli","wait_s":1.5}`, "wait_s", 400},
+		{"wait overflow", "recv", `{"frontend":"cli","wait_s":9223372036854775807}`, "wait_s", 400},
+		{"part with explicit zero wait", "recv", `{"frontend":"cli","msg":"message","part":1,"wait_s":0}`, "wait_s", 400},
+		{"negative part", "recv", `{"frontend":"cli","msg":"message","part":-1}`, "part", 400},
+		{"unpaired part", "recv", `{"frontend":"cli","part":1}`, "part", 400},
+		{"empty explicit items", "ack", `{"lease":"11111111111111111111111111111111","items":[]}`, "items", 400},
+		{"maximum delivery deadline", "send", fmt.Sprintf(`{"to":[%q],"body":"hello","accept_before_s":%d}`, h.Addr("creator"), maxAcceptBefore), "", 200},
+		{"delivery deadline beyond maximum", "send", fmt.Sprintf(`{"to":[%q],"body":"hello","accept_before_s":%d}`, h.Addr("creator"), maxAcceptBefore+1), "accept_before_s", 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := request(s, token, tc.method, tc.body)
+			if w.Code != tc.status {
+				t.Fatalf("HTTP %d, %s; want HTTP %d", w.Code, w.Body, tc.status)
+			}
+			if tc.status == 200 {
+				return
+			}
 			var got apiwire.Body
 			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 				t.Fatal(err)
 			}
-			if w.Code != 400 || got.Error.Category != apiwire.CategoryInvalidArgument || got.Error.Code != apiwire.CodeMalformedRequest || (tc.path != "" && got.Error.Details["path"] != tc.path) {
+			if got.Error.Category != apiwire.CategoryInvalidArgument || got.Error.Code != apiwire.CodeMalformedRequest || (tc.path != "" && got.Error.Details["path"] != tc.path) {
 				t.Fatalf("HTTP %d, %s; want invalid_argument/malformed_request with path %q", w.Code, w.Body, tc.path)
 			}
 		})
