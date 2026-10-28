@@ -63,8 +63,14 @@ func (e *Engine) Me(ctx context.Context, caller Caller) (MeView, error) {
 	return roundTrip(ctx, e, submitExternal, c, c.call)
 }
 
+// PeerView names one visible node. Self identifies the node serving this caller.
+type PeerView struct {
+	Node ident.NodeID
+	Self bool
+}
+
 type cmdPeers struct {
-	call[[]ident.NodeID]
+	call[[]PeerView]
 	caller Caller
 }
 
@@ -74,12 +80,12 @@ func (c *cmdPeers) run(e *Engine, _ time.Time) {
 		c.done(nil, err)
 		return
 	}
-	c.done([]ident.NodeID{e.d.Node}, nil)
+	c.done([]PeerView{{Node: e.d.Node, Self: true}}, nil)
 }
 
 // Peers returns the nodes visible to this caller. Until a network transport is
 // connected, the node itself is the only one known.
-func (e *Engine) Peers(ctx context.Context, caller Caller) ([]ident.NodeID, error) {
-	c := &cmdPeers{call: newCall[[]ident.NodeID](), caller: caller}
+func (e *Engine) Peers(ctx context.Context, caller Caller) ([]PeerView, error) {
+	c := &cmdPeers{call: newCall[[]PeerView](), caller: caller}
 	return roundTrip(ctx, e, submitExternal, c, c.call)
 }

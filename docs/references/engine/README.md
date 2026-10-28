@@ -110,7 +110,9 @@ agent front ends declared by the adapter's current admission; an instance that
 has not been admitted gives an empty map. Each listed front end carries its
 `Admission.Budget` and `Admission.RecvWait`, including their defaults. `Peers`
 also resolves the caller before answering; the only visible node while there is
-no network transport is this node itself. Neither read exposes an endpoint token.
+no network transport is this node itself. Its `PeerView` carries both the node
+and the engine-owned `Self` marker; interface backends only map the view. Neither
+read exposes an endpoint token.
 
 **Directory reads.** `Directory` resolves the caller in a `gateRead` command,
 normalizes its limit and queues a typed directory task in the same outbound FIFO
@@ -158,6 +160,9 @@ unreachable transport are `ReasonDirectoryUnavailable`.
 The single worker is a known limit: a slow target holds every outbound call behind
 it. A directory timeout cancels its own work, never another call ahead of it.
 Transports must honor their contexts; concurrency per target is not implemented.
+A full inbox can also delay any method, including directory, for `SubmitWait`
+(10 seconds) before `loop_busy`. This rare common submission delay is outside the
+directory budget and can exceed a front end's ten-second shell limit.
 
 Closing an endpoint is a head record (closed, token gone), then chunks of at most
 `ChunkReplaces` (16) records queued for it, each closed by the delivery rules and

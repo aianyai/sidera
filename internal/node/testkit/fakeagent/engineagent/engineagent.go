@@ -185,17 +185,13 @@ func (a *agent) Me(ctx context.Context) (fakeagent.MeResult, error) {
 	return out, nil
 }
 func (a *agent) Peers(ctx context.Context) (fakeagent.PeersResult, error) {
-	me, err := a.svc.Me(ctx, a.caller)
-	if err != nil {
-		return fakeagent.PeersResult{}, MapError(err)
-	}
 	nodes, err := a.svc.Peers(ctx, a.caller)
 	if err != nil {
 		return fakeagent.PeersResult{}, MapError(err)
 	}
 	out := fakeagent.PeersResult{Nodes: make([]fakeagent.PeerNode, 0, len(nodes))}
 	for _, node := range nodes {
-		out.Nodes = append(out.Nodes, fakeagent.PeerNode{Node: node.String(), Self: node == me.Address.Node})
+		out.Nodes = append(out.Nodes, fakeagent.PeerNode{Node: node.Node.String(), Self: node.Self})
 	}
 	return out, nil
 }

@@ -25,7 +25,7 @@ over).
   `Reply`, `Recv`, `Ack`, `Status` and `Control` use its service interface. An empty
   content type means `engine.DefaultContentType`, and a control body is the initial
   message of a session creation. `Me` presents the declaration and frontend limits;
-  `Peers` marks the caller's own node; `Directory` preserves continuation cursors.
+  `Peers` maps the engine's node and self marker; `Directory` preserves continuation cursors.
 - **Probe needs a credential this backend does not hold.** `New` binds an opaque
   `engine.Caller`, not a raw probe token. `Probe` therefore retains
   `not_found/method_unknown` with `fakeagent.ErrNotAvailable`; the real local HTTP

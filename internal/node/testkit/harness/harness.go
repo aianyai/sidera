@@ -713,8 +713,8 @@ func (c currentEngine) Me(ctx context.Context, caller engine.Caller) (engine.MeV
 	return onProcess(c.h, func(e *engine.Engine) (engine.MeView, error) { return e.Me(ctx, caller) })
 }
 
-func (c currentEngine) Peers(ctx context.Context, caller engine.Caller) ([]ident.NodeID, error) {
-	return onProcess(c.h, func(e *engine.Engine) ([]ident.NodeID, error) { return e.Peers(ctx, caller) })
+func (c currentEngine) Peers(ctx context.Context, caller engine.Caller) ([]engine.PeerView, error) {
+	return onProcess(c.h, func(e *engine.Engine) ([]engine.PeerView, error) { return e.Peers(ctx, caller) })
 }
 
 func (c currentEngine) Directory(ctx context.Context, caller engine.Caller, q engine.DirectoryQuery) (engine.DirectoryPage, error) {

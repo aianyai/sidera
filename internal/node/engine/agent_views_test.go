@@ -2,7 +2,6 @@ package engine_test
 
 import (
 	"context"
-	"slices"
 	"testing"
 	"time"
 
@@ -63,7 +62,7 @@ func TestPeersShowsOnlyThisNodeForAResolvedCaller(t *testing.T) {
 	id := register(t, e, "own")
 	caller := engine.ByAdapter("chat", adapterproto.EndpointRef(id.String()))
 	got, err := e.Peers(context.Background(), caller)
-	if err != nil || !slices.Equal(got, []ident.NodeID{r.node}) {
+	if err != nil || len(got) != 1 || got[0].Node != r.node || !got[0].Self {
 		t.Fatalf("Peers = %v, %v, want only this node", got, err)
 	}
 }

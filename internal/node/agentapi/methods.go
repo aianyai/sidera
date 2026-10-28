@@ -252,17 +252,13 @@ func (s *Server) method(ctx context.Context, caller engine.Caller, name string, 
 		if err := strictjson.Decode(body, &in); err != nil {
 			return nil, err
 		}
-		me, err := s.svc.Me(ctx, caller)
-		if err != nil {
-			return nil, err
-		}
 		nodes, err := s.svc.Peers(ctx, caller)
 		if err != nil {
 			return nil, err
 		}
 		out := PeersResult{Nodes: make([]Peer, len(nodes))}
 		for i, node := range nodes {
-			out.Nodes[i] = Peer{Node: node.String(), Self: node == me.Address.Node}
+			out.Nodes[i] = Peer{Node: node.Node.String(), Self: node.Self}
 		}
 		return out, nil
 	case "me":
