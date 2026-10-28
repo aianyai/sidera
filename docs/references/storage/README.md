@@ -111,6 +111,54 @@ There is no overwrite in place, no truncate, no rename across directories, no
 replacing a directory, no chmod, and no long-held read handle. Each is left out
 for a reason in the Why section.
 
+### Private files outside the data directory
+
+`fsx.CreatePrivateFile(path)` is an OS boundary, like `MakeRoot`, for a private
+export outside the node's rooted file system. It exclusively creates an empty
+writable file and verifies its security before returning `*os.File`; it adds no
+`FS` method, transaction or crash point. The parent must exist. Existing final
+names, including dangling symbolic links, are never replaced. Parent links follow
+the OS's normal resolution. After success the caller owns writing, syncing,
+closing and cleanup on a later failure; creation alone promises no power-loss
+durability.
+
+Unix uses `O_WRONLY|O_CREATE|O_EXCL` and 0600, then checks the opened handle for a
+regular file, the effective user's ownership and no group or other permission
+bits, by the same owner-only rule as `Stat`. Windows uses
+[`CreateFile`](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)
+with `CREATE_NEW`, `FILE_FLAG_OPEN_REPARSE_POINT`, a non-inheritable handle and the
+same protected current-user DACL as `MakeRoot`. Go's Windows permission argument
+controls only the read-only attribute; setting a DACL after creation would leave
+the file exposed until then. The security descriptor must accompany creation.
+
+Before a Windows handle is returned, it must be an ordinary disk file. Its volume
+must preserve and enforce ACLs (`FILE_PERSISTENT_ACLS`), checked only through
+[`GetVolumeInformationByHandle`](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getvolumeinformationbyhandlew).
+A failed query or a volume without that capability, such as FAT or exFAT, is
+refused. Windows network shares are currently unsupported; no path-based fallback
+is attempted. The actual owner and DACL are read from the opened handle with
+[`GetSecurityInfo`](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo)
+and judged by the existing owner-only descriptor rule under Permissions below.
+A descriptor alone cannot prove that the volume enforces it. These calls use
+the existing `golang.org/x/sys/windows`; no additional dependency is needed.
+
+Before creation, an error removes nothing. After creation, a failed security
+check closes and removes the new empty file, including any cleanup failures in
+the error; no secret bytes have been written. A device or a handle whose ordinary
+disk-file type cannot be established is only closed, never removed by its device
+path. Volume and permission errors suggest exporting to stdout without `--out`.
+This cleanup does not promise atomic removal of the created object against a
+hostile process replacing names in its parent directory.
+
+`TestCreatePrivateFileIsPrivateBeforeTheFirstWrite` checks actual permissions in a
+parent that permits other users; `TestCreatePrivateFileNeverReplacesAnExistingName`
+covers existing files, directories and live or dangling links. Verification and
+cleanup fault tests check that a rejected file yields no writable handle and is
+removed before secret writes. Windows tests cover an inherited broad DACL,
+failure to query the volume or its security descriptor, a volume without
+persistent ACLs, and a device path. These tests execute on Windows; macOS runs
+and cross-compilation do not exercise Windows behavior.
+
 ### Steps, tags and crash points
 
 Every write step carries a tag, a transaction name and a role. A step is named
@@ -1528,6 +1576,7 @@ so that the double cannot drift from what it stands for.
 | `Exists` | `internal/node/fsx/fsx.go` | `exists_test.go` |
 | retry | `internal/node/fsx/retry.go`, `os_windows.go` | `retry_internal_test.go`, `retry_windows_test.go` |
 | real file system | `internal/node/fsx/os.go`, `os_unix.go`, `os_windows.go` | `os_test.go`, `os_unix_test.go`, `os_windows_test.go`, `retry_windows_test.go` |
+| private files outside the root | `internal/node/fsx/private.go`, `private_unix.go`, `private_windows.go`; the shared Windows DACL builder and descriptor rule in `os_windows.go` | `TestCreatePrivateFileIsPrivateBeforeTheFirstWrite`, `TestCreatePrivateFileNeverReplacesAnExistingName`, verification and cleanup fault tests, Windows volume capability and descriptor tests |
 | crash model | `internal/node/fsx/fsxtest/mem.go`, `crash.go` | `mem_test.go` (each rule above, and the append and directory-rename result table `TestAppendAndRenameDirResultTable`), `counterexample_test.go` |
 | fault injection | `internal/node/fsx/fsxtest/faulty.go` | `faulty_test.go` |
 | conformance | `internal/node/fsx/fsxtest/conformance.go` | `TestMemConformsToTheFSContract`, `TestOSFSConformsToTheFSContract` |

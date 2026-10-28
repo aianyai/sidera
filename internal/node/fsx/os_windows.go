@@ -250,6 +250,10 @@ func ownerOnly(abs string, _ fs.FileInfo) bool {
 	if err != nil {
 		return false
 	}
+	return ownerOnlyDescriptor(sd)
+}
+
+func ownerOnlyDescriptor(sd *windows.SECURITY_DESCRIPTOR) bool {
 	defer runtime.KeepAlive(sd) // owner and dacl point into the descriptor
 	owner, _, err := sd.Owner()
 	if err != nil || owner == nil {
@@ -286,11 +290,7 @@ func ownerOnly(abs string, _ fs.FileInfo) bool {
 // inherited by every file and directory created inside. SYSTEM and
 // Administrators are not listed: the data directory is the user's own.
 func makeRoot(p string) error {
-	tu, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
-		return err
-	}
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + tu.User.Sid.String() + ")")
+	sd, err := privateSecurityDescriptor()
 	if err != nil {
 		return err
 	}
@@ -302,8 +302,21 @@ func makeRoot(p string) error {
 	if err != nil {
 		return &fs.PathError{Op: "mkdir", Path: p, Err: err}
 	}
-	if err := windows.CreateDirectory(name, sa); err != nil {
+	err = windows.CreateDirectory(name, sa)
+	runtime.KeepAlive(sd)
+	if err != nil {
 		return &fs.PathError{Op: "mkdir", Path: p, Err: err}
 	}
 	return nil
+}
+
+// privateSecurityDescriptor protects the object from parent inheritance and
+// grants only the current user full access. OICI also protects descendants
+// when the object being created is the data directory.
+func privateSecurityDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
+	tu, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		return nil, err
+	}
+	return windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;" + tu.User.Sid.String() + ")")
 }

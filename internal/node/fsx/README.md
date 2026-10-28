@@ -18,6 +18,7 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 | `FS`, `Reader`, `File` | The interface. Each write method is one step; a read is not a step. `Reader.ReadFileLimit` reads a regular file within a byte limit, returning `ErrTooLarge` without partial data on overflow. |
 | `OpenOS(root, rand)` | The real `FS` rooted at an existing directory; `rand` names temporary files. |
 | `MakeRoot(path)` | Creates the data directory owner-only, once, at `init`. |
+| `CreatePrivateFile(path)` | Exclusively creates an empty owner-only writable file at an OS path, verifies its security before returning `*os.File`, and removes it if verification fails. The caller owns writing, syncing, closing and subsequent cleanup. |
 | `Replace`, `ReplaceDeferred`, `OpenAppend`, `Append`, `SyncFile`, `RenameFile`, `Remove`, `SyncDir`, `MakeDir`, `RenameDir`, `RemoveAll`, `Discard` | The durable operations: fixed step sequences over any `FS`. |
 | `Observe(fs, counter, hook)` | Numbers every write step and calls the hook before it runs. |
 | `Tag`, `Step`, `Key`, `Point`, `Counter`, `ParseKey`, `ParsePoint` | Crash point identity: `intake/out.rename#2`. |
@@ -58,6 +59,22 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 - **Files are 0600, or 0700 for adapter executables; directories are 0700.** On
   Windows the data directory root carries a protected DACL for the current user
   and everything created inside inherits it.
+- **`CreatePrivateFile` is an OS boundary outside the rooted `FS`.** It accepts
+  an ordinary OS path with an existing parent, like `MakeRoot`; it adds no
+  transaction, step or crash point. It never replaces an existing final name,
+  including a dangling symbolic link. Unix creates with `O_EXCL` and 0600, then
+  checks the opened handle's type and owner-only permissions. Windows creates
+  with the same protected current-user DACL as `MakeRoot`, an uninheritable
+  handle, `CREATE_NEW` and `FILE_FLAG_OPEN_REPARSE_POINT`. Before returning it checks
+  an ordinary disk file, the opened handle's volume for `FILE_PERSISTENT_ACLS`,
+  and the actual owner and DACL by the same rule as `Info.OwnerOnly`. A failed
+  volume query or a volume that discards ACLs is refused; the error suggests
+  stdout without `--out`. Windows network shares are currently unsupported.
+  Verification failures close and remove the new empty file and report cleanup
+  failures too. A device or a handle whose ordinary disk-file type cannot be
+  established is closed without removing its path. Parent links follow OS
+  resolution; this is not an atomic cleanup guarantee against a hostile process
+  replacing names in the parent directory. No power-loss durability is promised.
 - **`Info.OwnerOnly` is true only for a regular file or a directory.** A symbolic
   link, a socket, a device or a Windows junction is never owner-only: `Stat` does
   not follow a link and `ReadFile` does, so the permission bits of a link (macOS
