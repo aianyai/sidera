@@ -15,6 +15,7 @@ import (
 // resolved in the command that does it. The interface packages depend on this
 // and not on Engine. The methods are added as the engine learns to do them.
 type AgentService interface {
+	PresentProbeToken(ctx context.Context, token adapterproto.Token, frontend adapterproto.Frontend) (ProbeTarget, error)
 	Declare(ctx context.Context, c Caller, p DeclarationPatch) (authz.Declaration, error)
 	Send(ctx context.Context, c Caller, r SendRequest) (SendResult, error)
 	Reply(ctx context.Context, c Caller, r ReplyRequest) (SendResult, error)

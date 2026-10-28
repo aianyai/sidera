@@ -270,7 +270,7 @@ enabled.
 
 **The probe of an instance.** The adapter's report that its tool probes ran is
 necessary and not enough: the node believes it only for the tokens it has seen
-presented. `PresentProbeToken(token, front end)` is what the Agent interface calls: a
+presented. `AgentService.PresentProbeToken(token, front end)` is what the Agent interface calls: a
 token no instance holds is not authenticated, a token presented before is
 `probe_token_used`, one older than five minutes `probe_token_expired`, and a front end
 other than the token's is refused (`invalid_argument`, `probe_frontend_mismatch`) and

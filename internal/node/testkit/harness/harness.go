@@ -709,6 +709,12 @@ func (h *H) Session(endpointID string) fakeagent.Agent {
 // agent made before a restart acts on the one after it.
 type currentEngine struct{ h *H }
 
+func (c currentEngine) PresentProbeToken(ctx context.Context, token adapterproto.Token, frontend adapterproto.Frontend) (engine.ProbeTarget, error) {
+	return onProcess(c.h, func(e *engine.Engine) (engine.ProbeTarget, error) {
+		return e.PresentProbeToken(ctx, token, frontend)
+	})
+}
+
 func (c currentEngine) Declare(ctx context.Context, caller engine.Caller, p engine.DeclarationPatch) (authz.Declaration, error) {
 	return onProcess(c.h, func(e *engine.Engine) (authz.Declaration, error) { return e.Declare(ctx, caller, p) })
 }
