@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/agentapi"
@@ -120,6 +121,7 @@ func TestSendUsesOneRecipientAndExplicitIdempotency(t *testing.T) {
 	s.EnableMethods()
 	to := h.Addr("creator")
 	body := `{"to":["` + to + `"],"body":"hello <world>","idempotency_key":"same-request","accept_before_s":600}`
+	sentAt := h.Clock().Now()
 	w := request(s, token, "send", body)
 	var first struct {
 		MessageID string   `json:"message_id"`
@@ -131,6 +133,23 @@ func TestSendUsesOneRecipientAndExplicitIdempotency(t *testing.T) {
 	}
 	if w.Code != 200 || first.MessageID == "" || len(first.To) != 1 || first.To[0] != to || first.Replayed {
 		t.Fatalf("HTTP %d: %s", w.Code, w.Body)
+	}
+	h.Quiesce()
+	scan, err := h.Records()
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, out := range scan.Out {
+		if string(out.Key.Message) == first.MessageID {
+			found = true
+			if got := out.Outbound.AcceptBefore.Sub(sentAt); got != 600*time.Second {
+				t.Fatalf("delivery deadline = %v; want 600 seconds", got)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("the accepted message has no durable outbound record")
 	}
 	w = request(s, token, "send", body)
 	var replay struct {

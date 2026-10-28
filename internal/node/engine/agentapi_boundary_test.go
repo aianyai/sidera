@@ -81,51 +81,63 @@ func TestRecvWaitClampedToFrontendDeclaration(t *testing.T) {
 	if err != nil || me.Frontends[adapterproto.FrontendCLI].RecvWaitMaxS != 20 {
 		t.Fatalf("Me: %+v, %v", me, err)
 	}
-	ctx, cancel := context.WithTimeout(h.Ctx(), 5*time.Second)
-	defer cancel()
-	type answer struct {
-		raw []byte
-		err error
-	}
-	result := make(chan answer, 1)
-	go func() {
-		seconds := int64(86400)
-		raw, err := c.Recv(ctx, agentapi.RecvRequest{Frontend: adapterproto.FrontendCLI, WaitS: &seconds})
-		result <- answer{raw, err}
-	}()
-	for engine.Waiting(h.Engine()) != 1 {
-		select {
-		case out := <-result:
-			t.Fatalf("recv ended before waiting: %s, %v", out.raw, out.err)
-		case <-ctx.Done():
-			t.Fatal("the HTTP receive did not register a waiter")
-		default:
-		}
-		h.Quiesce()
-		runtime.Gosched()
-	}
-	h.Advance(19 * time.Second)
-	h.Quiesce()
-	if engine.Waiting(h.Engine()) != 1 {
-		t.Fatal("the receive stopped waiting before the declared CLI limit")
-	}
-	select {
-	case out := <-result:
-		t.Fatalf("the HTTP receive ended before the declared CLI limit: %s, %v", out.raw, out.err)
-	default:
-	}
-	h.Advance(time.Second)
-	h.Quiesce()
-	select {
-	case out := <-result:
-		var page adapterproto.RecvPage
-		if err := json.Unmarshal(out.raw, &page); err != nil {
-			t.Fatalf("recv: %s, %v, decode: %v", out.raw, out.err, err)
-		}
-		if out.err != nil || len(page.Messages) != 0 || page.Lease == "" {
-			t.Fatalf("recv: %s, %v; want an empty page at the declared CLI limit", out.raw, out.err)
-		}
-	case <-ctx.Done():
-		t.Fatal("the HTTP receive did not end at the declared CLI limit")
+	for _, tc := range []struct {
+		name      string
+		requested int64
+		wait      time.Duration
+	}{
+		{"clamped to the declaration", 86400, 20 * time.Second},
+		{"below the declaration", 10, 10 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(h.Ctx(), 5*time.Second)
+			defer cancel()
+			type answer struct {
+				raw []byte
+				err error
+			}
+			result := make(chan answer, 1)
+			go func() {
+				seconds := tc.requested
+				raw, err := c.Recv(ctx, agentapi.RecvRequest{Frontend: adapterproto.FrontendCLI, WaitS: &seconds})
+				result <- answer{raw, err}
+			}()
+			for engine.Waiting(h.Engine()) != 1 {
+				select {
+				case out := <-result:
+					t.Fatalf("recv ended before waiting: %s, %v", out.raw, out.err)
+				case <-ctx.Done():
+					t.Fatal("the HTTP receive did not register a waiter")
+				default:
+				}
+				h.Quiesce()
+				runtime.Gosched()
+			}
+			h.Advance(tc.wait - time.Second)
+			h.Quiesce()
+			if engine.Waiting(h.Engine()) != 1 {
+				t.Fatal("the receive stopped waiting before the expected wait")
+			}
+			select {
+			case out := <-result:
+				t.Fatalf("the HTTP receive ended before the expected wait: %s, %v", out.raw, out.err)
+			default:
+			}
+			h.Advance(time.Second)
+			h.Quiesce()
+			select {
+			case out := <-result:
+				var page adapterproto.RecvPage
+				if err := json.Unmarshal(out.raw, &page); err != nil {
+					t.Fatalf("recv: %s, %v, decode: %v", out.raw, out.err, err)
+				}
+				if out.err != nil || len(page.Messages) != 0 || page.Lease == "" {
+					t.Fatalf("recv: %s, %v; want an empty page at the expected wait", out.raw, out.err)
+				}
+			case <-ctx.Done():
+				t.Fatal("the HTTP receive did not end at the expected wait")
+			}
+
+		})
 	}
 }
