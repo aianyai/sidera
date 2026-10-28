@@ -30,8 +30,8 @@ not import it: the words of the wire never enter the engine.
 
 - **Output units have one wire spelling.** The Agent facade and the process-local
   test backend use `BudgetUnitName`, which takes its names from the SDK manifest
-  constants. The calculation type has no implicit formatter: changing every
-  diagnostic use of that value is not needed to present a budget on the wire.
+  constants. Budget calculation values are formatted explicitly at a presentation
+  boundary; they have no implicit formatter.
 - **One mapping.** A reason of the engine, a refused change and a failure of the way
   to the daemon each have one pair of words, written here and nowhere else. A test
   walks every reason the engine and `config` have, so one added without a row fails.

@@ -190,7 +190,7 @@ body, credential or private key.
 | `unauthenticated` | 401 | 4 | `token_missing`, `token_malformed`, `token_unknown`, `probe_token_used`, `probe_token_expired` |
 | `not_found` | 404 | 5 | `method_unknown`, `message_unknown`, `lease_unknown`, `endpoint_unknown`, `instance_unknown` |
 | `conflict` | 409 | 6 | `idempotency_conflict` |
-| `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind`, `reply_not_permitted` |
+| `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind` |
 | `backpressure` | 429 | 8 | `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy` |
 | `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable` |
 | `internal` | 500 | 1 | `internal` |
