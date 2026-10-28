@@ -284,6 +284,8 @@ func fromRefusal(r *engine.Refusal) *Error {
 		return New(CategoryBackpressure, "loop_busy", "the node is busy; try again")
 	case engine.ReasonRecovering:
 		return New(CategoryUnavailable, "recovering", "the node is starting; it does not take this yet")
+	case engine.ReasonDirectoryUnavailable:
+		return New(CategoryUnavailable, "directory_unavailable", "the directory could not be reached in time; try again later")
 	case engine.ReasonShuttingDown:
 		return New(CategoryUnavailable, "shutting_down", "the node is stopping")
 	case engine.ReasonAlertUnknown:

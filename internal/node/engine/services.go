@@ -19,6 +19,7 @@ type AgentService interface {
 	PresentProbeToken(ctx context.Context, token adapterproto.Token, frontend adapterproto.Frontend) (ProbeTarget, error)
 	Me(ctx context.Context, c Caller) (MeView, error)
 	Peers(ctx context.Context, c Caller) ([]ident.NodeID, error)
+	Directory(ctx context.Context, c Caller, q DirectoryQuery) (DirectoryPage, error)
 	Declare(ctx context.Context, c Caller, p DeclarationPatch) (authz.Declaration, error)
 	Send(ctx context.Context, c Caller, r SendRequest) (SendResult, error)
 	Reply(ctx context.Context, c Caller, r ReplyRequest) (SendResult, error)

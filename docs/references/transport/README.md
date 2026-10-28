@@ -89,7 +89,7 @@ including every continuation, through the same evaluator as message intake. The
 transport carries the entries and opaque cursor without interpreting them. Only
 `Unreachable` and `Delay`, which name no message, apply; dropping receipts,
 holding reports and replaying changed messages do not affect a directory query.
-The engine owns the authorization and pagination rules; see
+The engine owns the overall wait budget and error mapping; see
 [its directory description](../engine/README.md#what).
 
 **The knobs.** A `Knobs` value is made with `NewKnobs` and the clock a delay is

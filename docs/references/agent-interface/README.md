@@ -62,6 +62,18 @@ expired probe `probe_token_expired`; these are `unauthenticated`. A mismatched
 front end is `invalid_argument/probe_frontend_mismatch`. Human messages are
 diagnostic, not stable identifiers, and carry no credentials or message bodies.
 
+The shared mapping also defines these stable directory errors:
+
+| Category | Code | Meaning |
+| --- | --- | --- |
+| `unavailable` | `directory_unavailable` | The target is unreachable or the directory query exceeded its default five-second budget after entering the engine inbox. A later query may succeed. |
+| `invalid_argument` | `cursor_invalid` | A continuation is malformed, was modified, belongs to another full source address or came from a previous daemon instance. |
+
+An emitted stable code is never renamed, removed or reused for another meaning.
+Directory errors do not make the client automatically resend a request. Existing
+state refusals remain `recovering`, `clock_rollback`, `shutting_down` and
+`loop_busy` (the inbox submission wait alone).
+
 The server reads headers within 10 seconds and the request within 30 seconds,
 keeps an idle connection for 60 seconds, and limits headers to 8 KiB. It has no
 global write timeout; the handler follows the request context. Shutdown stops

@@ -48,6 +48,10 @@ not import it: the words of the wire never enter the engine.
   instance does not own is `1004 unknown_attempt`; session checkpoints keep
   `1001 endpoint_unknown`. No Agent method takes an attempt, so that reason has
   only the generic internal-error fallback on the HTTP interfaces.
+- **A directory that cannot answer in time is unavailable.** A directory timeout
+  and an unreachable target map to `unavailable/directory_unavailable`. This
+  stable code means try again later; it is never renamed, removed or reused for
+  another meaning. It is not an uncertain message outcome, nor an inbox timeout.
 - **The text of an unknown error stays off the wire.** Anything that is none of the
   known errors is `internal/internal` with a fixed message; what it said is for the
   log. A client that is not the author of the code should not be handed a path or a

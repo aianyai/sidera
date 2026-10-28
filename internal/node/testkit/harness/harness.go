@@ -717,6 +717,10 @@ func (c currentEngine) Peers(ctx context.Context, caller engine.Caller) ([]ident
 	return onProcess(c.h, func(e *engine.Engine) ([]ident.NodeID, error) { return e.Peers(ctx, caller) })
 }
 
+func (c currentEngine) Directory(ctx context.Context, caller engine.Caller, q engine.DirectoryQuery) (engine.DirectoryPage, error) {
+	return onProcess(c.h, func(e *engine.Engine) (engine.DirectoryPage, error) { return e.Directory(ctx, caller, q) })
+}
+
 func (c currentEngine) PresentProbeToken(ctx context.Context, token adapterproto.Token, frontend adapterproto.Frontend) (engine.ProbeTarget, error) {
 	return onProcess(c.h, func(e *engine.Engine) (engine.ProbeTarget, error) {
 		return e.PresentProbeToken(ctx, token, frontend)

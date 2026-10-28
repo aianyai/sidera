@@ -112,12 +112,15 @@ has not been admitted gives an empty map. Each listed front end carries its
 also resolves the caller before answering; the only visible node while there is
 no network transport is this node itself. Neither read exposes an endpoint token.
 
-**Directory targets.** `QueryDirectory` submits an internal `gateLoopback`
+**Directory reads.** `Directory` resolves the caller in a `gateRead` command,
+normalizes its limit and queues a typed directory task in the same outbound FIFO
+as sends and pulls. Only `pumpOutbox` calls `Transport.QueryDirectory`; the
+transport gives the target the source node and endpoint, and the loopback alone
+gives a local `Origin`. `QueryDirectory` submits an internal `gateLoopback`
 command, reads the current endpoint view there and calls the intake evaluator
 with `see` for each open endpoint. The authorization package alone decides
 visibility, including hiding; an origin claiming this node's ID is still remote
-unless the transport attests that it is local. A target already recovering,
-paused or stopping refuses with the existing typed state reason.
+unless the transport attests that it is local.
 
 Only `EndpointOpen` entries appear, in endpoint ID order. Creating and closed
 endpoints do not appear, and the system endpoint has no record to list. An open
@@ -139,6 +142,22 @@ cursor is a position, never permission, and no page snapshot is retained.
 The authentication uses Go's [standard HMAC implementation](https://pkg.go.dev/crypto/hmac),
 including its constant-time `Equal`. A separate token library would add a general
 format and dependency for a fixed cursor that needs only this authentication.
+
+`Params.DirectoryWait` defaults to five seconds (zero takes the default), from
+successful inbox entry through queuing, transport and the result command. Its
+duration timer is on the injected clock and waited on by the calling goroutine,
+outside the schedule that a wall-clock rollback can pause. A timeout abandons
+the task, cancels its transport context and removes it if still queued; completing
+an abandoned task silently drops the answer. Finishing, abandoning and queuing
+share the outbox mutex, so nothing can deliver or requeue a task after abandonment.
+The result returns through a typed command. A source or target already recovering,
+paused or stopping refuses with the existing typed state reason. A query held
+behind unrelated outbound work still ends at its own budget; timeout and an
+unreachable transport are `ReasonDirectoryUnavailable`.
+
+The single worker is a known limit: a slow target holds every outbound call behind
+it. A directory timeout cancels its own work, never another call ahead of it.
+Transports must honor their contexts; concurrency per target is not implemented.
 
 Closing an endpoint is a head record (closed, token gone), then chunks of at most
 `ChunkReplaces` (16) records queued for it, each closed by the delivery rules and

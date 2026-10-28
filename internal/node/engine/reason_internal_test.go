@@ -81,11 +81,14 @@ func TestParamsTakeTheDefaultsForWhatIsNotSet(t *testing.T) {
 	if got := (Params{}).withDefaults(); got != d {
 		t.Errorf("zero Params = %+v, want %+v", got, d)
 	}
-	set := Params{InboxLen: 3, SubmitWait: time.Second, ChunkReplaces: 2, ChunkRemoves: 5, ChunkTickRecords: 7, RetryBackoff: time.Hour, ResendBackoff: time.Minute, PullInterval: time.Hour,
+	set := Params{InboxLen: 3, SubmitWait: time.Second, DirectoryWait: 2 * time.Second, ChunkReplaces: 2, ChunkRemoves: 5, ChunkTickRecords: 7, RetryBackoff: time.Hour, ResendBackoff: time.Minute, PullInterval: time.Hour,
 		CreateReplyDeadline: 2 * time.Minute, CreateRetryBackoff: time.Second, ControlReplyDeadline: time.Minute, InterruptConfirmWait: time.Second, PromptCallDeadline: time.Hour, PromptConfirmWait: time.Second,
 		Feedback: delivery.FeedbackParams{MergeWindow: time.Second, RateCap: 3, RateWindow: time.Hour}}
 	if got := set.withDefaults(); got != set {
 		t.Errorf("Params that are set changed: %+v", got)
+	}
+	if d.DirectoryWait != 5*time.Second {
+		t.Errorf("default DirectoryWait = %v, want 5s", d.DirectoryWait)
 	}
 	if d.InboxLen < 1 || d.ChunkReplaces < 1 || d.ChunkRemoves < 1 || d.ChunkTickRecords < 1 || d.SubmitWait <= 0 || d.RetryBackoff <= 0 || d.ResendBackoff <= 0 || d.PullInterval <= 0 || d.CreateReplyDeadline <= 0 || d.CreateRetryBackoff <= 0 || d.ControlReplyDeadline <= 0 || d.InterruptConfirmWait <= 0 || d.PromptCallDeadline <= 0 || d.PromptConfirmWait <= 0 {
 		t.Errorf("a default is not usable: %+v", d)

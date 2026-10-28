@@ -95,39 +95,43 @@ const (
 	// ReasonAttemptUnknown: the attempt is not in flight for a session of the
 	// adapter instance. It may belong to another instance or have settled.
 	ReasonAttemptUnknown
+	// ReasonDirectoryUnavailable: a directory query got no answer within its
+	// budget or could not reach its target. A later query may succeed.
+	ReasonDirectoryUnavailable
 
 	reasonEnd
 )
 
 var reasonNames = [reasonEnd]string{
-	ReasonUnauthenticated:     "unauthenticated",
-	ReasonEndpointUnknown:     "endpoint_unknown",
-	ReasonInstanceUnknown:     "instance_unknown",
-	ReasonWrongEndpointKind:   "wrong_endpoint_kind",
-	ReasonEndpointLimit:       "endpoint_limit",
-	ReasonInvalidArgument:     "invalid_argument",
-	ReasonOperationIDReused:   "operation_id_reused",
-	ReasonNodeQueueFull:       "node_queue_full",
-	ReasonStorageFull:         "storage_full",
-	ReasonStorageUnavailable:  "storage_unavailable",
-	ReasonClockRollback:       "clock_rollback",
-	ReasonLoopBusy:            "loop_busy",
-	ReasonRecovering:          "recovering",
-	ReasonShuttingDown:        "shutting_down",
-	ReasonStorageFatal:        "storage_fatal",
-	ReasonIdempotencyConflict: "idempotency_conflict",
-	ReasonMessageConflict:     "message_conflict",
-	ReasonMessageUnknown:      "message_unknown",
-	ReasonTooLarge:            "too_large",
-	ReasonAlertUnknown:        "alert_unknown",
-	ReasonIdentityRetired:     "identity_retired",
-	ReasonInstallInProgress:   "install_in_progress",
-	ReasonPlatformUnsupported: "platform_unsupported",
-	ReasonProbeTokenUsed:      "probe_token_used",
-	ReasonProbeTokenExpired:   "probe_token_expired",
-	ReasonInstallRepeated:     "install_repeated",
-	ReasonLeaseUnknown:        "lease_unknown",
-	ReasonAttemptUnknown:      "attempt_unknown",
+	ReasonUnauthenticated:      "unauthenticated",
+	ReasonEndpointUnknown:      "endpoint_unknown",
+	ReasonInstanceUnknown:      "instance_unknown",
+	ReasonWrongEndpointKind:    "wrong_endpoint_kind",
+	ReasonEndpointLimit:        "endpoint_limit",
+	ReasonInvalidArgument:      "invalid_argument",
+	ReasonOperationIDReused:    "operation_id_reused",
+	ReasonNodeQueueFull:        "node_queue_full",
+	ReasonStorageFull:          "storage_full",
+	ReasonStorageUnavailable:   "storage_unavailable",
+	ReasonClockRollback:        "clock_rollback",
+	ReasonLoopBusy:             "loop_busy",
+	ReasonRecovering:           "recovering",
+	ReasonShuttingDown:         "shutting_down",
+	ReasonStorageFatal:         "storage_fatal",
+	ReasonIdempotencyConflict:  "idempotency_conflict",
+	ReasonMessageConflict:      "message_conflict",
+	ReasonMessageUnknown:       "message_unknown",
+	ReasonTooLarge:             "too_large",
+	ReasonAlertUnknown:         "alert_unknown",
+	ReasonIdentityRetired:      "identity_retired",
+	ReasonInstallInProgress:    "install_in_progress",
+	ReasonPlatformUnsupported:  "platform_unsupported",
+	ReasonProbeTokenUsed:       "probe_token_used",
+	ReasonProbeTokenExpired:    "probe_token_expired",
+	ReasonInstallRepeated:      "install_repeated",
+	ReasonLeaseUnknown:         "lease_unknown",
+	ReasonAttemptUnknown:       "attempt_unknown",
+	ReasonDirectoryUnavailable: "directory_unavailable",
 }
 
 // String returns the name of the reason; a value that is not a reason has none.

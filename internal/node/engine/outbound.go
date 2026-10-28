@@ -39,6 +39,8 @@ const (
 	// the loop treats its end, whatever the answer, as the moment the delivery may
 	// close.
 	workFinalPull
+	// workDirectory is a bounded read in the same FIFO as message work.
+	workDirectory
 )
 
 // outWork is one call to the transport.
@@ -52,8 +54,10 @@ type outWork struct {
 	data   []byte
 	// message is the message a pull is about, and recipients are the endpoints on
 	// the node whose deliveries of it the pull asks about.
-	message    delivery.MessageID
-	recipients []ident.EndpointID
+	message          delivery.MessageID
+	recipients       []ident.EndpointID
+	directory        *directoryTask
+	directoryRequest transport.DirectoryRequest
 }
 
 // outbox is the queue of the outbound worker and what the loop remembers about
@@ -117,6 +121,10 @@ func (b *outbox) next() (outWork, bool) {
 func (e *Engine) give(w outWork) {
 	b := e.outbox
 	b.mu.Lock()
+	if w.directory != nil && (w.directory.finished || w.directory.ctx.Err() != nil) {
+		b.mu.Unlock()
+		return
+	}
 	b.queue = append(b.queue, w)
 	start := !b.active
 	b.active = true
@@ -150,6 +158,17 @@ func (e *Engine) pumpOutbox(ctx context.Context) {
 		w, ok := e.outbox.next()
 		if !ok {
 			return
+		}
+		if w.kind == workDirectory {
+			if w.directory.ctx.Err() != nil {
+				continue
+			}
+			page, err := e.tr.QueryDirectory(w.directory.ctx, w.node, w.sender, w.directoryRequest)
+			res := &cmdDirectoryResult{call: newCall[struct{}](), task: w.directory, page: page, err: err}
+			if _, err := roundTrip(ctx, e, submitInternal, res, res.call); err != nil && ctx.Err() != nil {
+				return
+			}
+			continue
 		}
 		res := &cmdOutResult{call: newCall[struct{}](), work: w}
 		switch w.kind {

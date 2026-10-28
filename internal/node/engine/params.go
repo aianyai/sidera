@@ -18,6 +18,9 @@ type Params struct {
 	// SubmitWait is how long an external submitter waits for room in the inbox,
 	// on the real clock, before it gets ReasonLoopBusy.
 	SubmitWait time.Duration
+	// DirectoryWait bounds a directory read from successful inbox entry through
+	// outbound queuing, transport and the result command, on the injected clock.
+	DirectoryWait time.Duration
 	// ChunkReplaces is the most records one transaction of a long batch
 	// replaces, and so the most the loop is held for by one chunk: closing the
 	// queued deliveries of a closed endpoint is the case that needs it. The
@@ -81,6 +84,7 @@ func DefaultParams() Params {
 	return Params{
 		InboxLen:         1024,
 		SubmitWait:       10 * time.Second,
+		DirectoryWait:    5 * time.Second,
 		ChunkReplaces:    16,
 		ChunkRemoves:     256,
 		ChunkTickRecords: 512,
@@ -106,6 +110,9 @@ func (p Params) withDefaults() Params {
 	}
 	if p.SubmitWait <= 0 {
 		p.SubmitWait = d.SubmitWait
+	}
+	if p.DirectoryWait <= 0 {
+		p.DirectoryWait = d.DirectoryWait
 	}
 	if p.ChunkReplaces <= 0 {
 		p.ChunkReplaces = d.ChunkReplaces

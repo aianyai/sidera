@@ -56,11 +56,12 @@ var engineReasons = map[engine.Reason]want{
 	// One installation is copied at a time; a package for a platform this node does
 	// not run on is refused by the rules; a probe token is refused as used or as
 	// expired the way a token the node does not know is refused, as not authenticated.
-	engine.ReasonInstallInProgress:   {"conflict", "install_in_progress"},
-	engine.ReasonInstallRepeated:     {"conflict", "install_in_progress"},
-	engine.ReasonPlatformUnsupported: {"refused", "platform_unsupported"},
-	engine.ReasonProbeTokenUsed:      {"unauthenticated", "probe_token_used"},
-	engine.ReasonProbeTokenExpired:   {"unauthenticated", "probe_token_expired"},
+	engine.ReasonInstallInProgress:    {"conflict", "install_in_progress"},
+	engine.ReasonInstallRepeated:      {"conflict", "install_in_progress"},
+	engine.ReasonPlatformUnsupported:  {"refused", "platform_unsupported"},
+	engine.ReasonProbeTokenUsed:       {"unauthenticated", "probe_token_used"},
+	engine.ReasonProbeTokenExpired:    {"unauthenticated", "probe_token_expired"},
+	engine.ReasonDirectoryUnavailable: {"unavailable", "directory_unavailable"},
 }
 
 func check(t *testing.T, got *apiwire.Error, w want) {

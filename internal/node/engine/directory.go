@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"io"
+	"slices"
 	"sort"
 	"time"
 
@@ -23,8 +24,113 @@ import (
 // to request the node's whole endpoint cap in one page.
 const DefaultDirectoryLimit = 100
 
+// DirectoryQuery names the node and the live page to read. A zero Node means
+// this node, and a zero Limit takes the default page size.
+type DirectoryQuery struct {
+	Node   ident.NodeID
+	Cursor string
+	Limit  int
+}
+
 // DirectoryPage is the page authorized by its target node.
 type DirectoryPage = transport.DirectoryPage
+
+// directoryTask has one answer and one lifetime. The outbox mutex serializes
+// answering, abandoning and queuing it, so an abandoned task is never answered
+// or queued again. The transport runs with its context, independently of the
+// context that owns the worker and the other work ahead of it.
+type directoryTask struct {
+	ctx      context.Context
+	cancel   context.CancelFunc
+	answer   call[DirectoryPage]
+	finished bool
+}
+
+func (e *Engine) finishDirectory(t *directoryTask, page DirectoryPage, err error) {
+	e.outbox.mu.Lock()
+	defer e.outbox.mu.Unlock()
+	if t.finished || t.ctx.Err() != nil {
+		return
+	}
+	t.finished = true
+	t.answer.done(page, err)
+}
+
+func (e *Engine) abandonDirectory(t *directoryTask) {
+	e.outbox.mu.Lock()
+	defer e.outbox.mu.Unlock()
+	t.finished = true
+	t.cancel()
+	e.outbox.queue = slices.DeleteFunc(e.outbox.queue, func(w outWork) bool { return w.directory == t })
+}
+
+type cmdDirectory struct {
+	e      *Engine
+	task   *directoryTask
+	caller Caller
+	query  DirectoryQuery
+}
+
+func (c *cmdDirectory) gate() gate     { return gateRead }
+func (c *cmdDirectory) fail(err error) { c.e.finishDirectory(c.task, DirectoryPage{}, err) }
+func (c *cmdDirectory) run(e *Engine, _ time.Time) {
+	if c.task.ctx.Err() != nil {
+		return
+	}
+	st, err := e.view.resolve(c.caller)
+	if err == nil {
+		err = e.directoryState()
+	}
+	req, requestErr := normalizeDirectoryRequest(transport.DirectoryRequest{Cursor: c.query.Cursor, Limit: c.query.Limit})
+	if err == nil {
+		err = requestErr
+	}
+	if err == nil && e.tr == nil {
+		err = refuse(ReasonDirectoryUnavailable)
+	}
+	if err != nil {
+		c.fail(err)
+		return
+	}
+	node := c.query.Node
+	if node == (ident.NodeID{}) {
+		node = e.d.Node
+	}
+	e.give(outWork{kind: workDirectory, node: node, sender: st.rec.ID, directory: c.task,
+		directoryRequest: req})
+}
+
+// Directory reads through the outbound FIFO, using only the caller resolved by
+// its source command. Its independent timer also bounds a queue held by a call
+// ahead of it or a loop whose time-driven work is paused.
+func (e *Engine) Directory(ctx context.Context, caller Caller, query DirectoryQuery) (DirectoryPage, error) {
+	if err := ctx.Err(); err != nil {
+		return DirectoryPage{}, err
+	}
+	taskCtx, cancel := context.WithCancel(ctx)
+	t := &directoryTask{ctx: taskCtx, cancel: cancel, answer: newCall[DirectoryPage]()}
+	defer e.abandonDirectory(t)
+	c := &cmdDirectory{e: e, task: t, caller: caller, query: query}
+	if err := e.enqueue(ctx, submitExternal, c); err != nil {
+		return DirectoryPage{}, err
+	}
+	timer := e.d.Clock.NewTimer(e.p.DirectoryWait)
+	defer timer.Stop()
+	select {
+	case result := <-t.answer.ch:
+		return result.v, result.err
+	case <-timer.C():
+		return DirectoryPage{}, refuse(ReasonDirectoryUnavailable)
+	case <-e.shutdown:
+		return DirectoryPage{}, refuse(ReasonShuttingDown)
+	case <-e.done:
+		return DirectoryPage{}, refuse(ReasonShuttingDown)
+	case <-e.ctx.Done():
+		return DirectoryPage{}, refuse(ReasonShuttingDown)
+	case <-ctx.Done():
+		return DirectoryPage{}, ctx.Err()
+	}
+}
 
 func (e *Engine) directoryState() error {
 	switch {
@@ -36,6 +142,26 @@ func (e *Engine) directoryState() error {
 		return refuse(ReasonClockRollback)
 	}
 	return nil
+}
+
+type cmdDirectoryResult struct {
+	call[struct{}]
+	task *directoryTask
+	page DirectoryPage
+	err  error
+}
+
+func (c *cmdDirectoryResult) gate() gate { return gateLoopback }
+func (c *cmdDirectoryResult) run(e *Engine, _ time.Time) {
+	err := e.directoryState()
+	if err == nil {
+		err = c.err
+		if errors.Is(err, transport.ErrUnreachable) || errors.Is(err, transport.ErrTimeout) {
+			err = refuse(ReasonDirectoryUnavailable)
+		}
+	}
+	e.finishDirectory(c.task, c.page, err)
+	c.done(struct{}{}, nil)
 }
 
 type cmdQueryDirectory struct {
