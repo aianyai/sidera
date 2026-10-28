@@ -26,6 +26,9 @@ func directoryCaller(t testing.TB, h *harness.H, name string) engine.Caller {
 	return engine.ByAdapter(harness.Instance, adapterproto.EndpointRef(a.Endpoint.String()))
 }
 
+// A distinct duration separates the directory timer from adapter and loop timers.
+const directoryTestWait = 7*time.Second + 13*time.Millisecond
+
 type directoryWaitClock struct {
 	clock.Clock
 	armed chan struct{}
@@ -33,7 +36,7 @@ type directoryWaitClock struct {
 
 func (c *directoryWaitClock) NewTimer(d time.Duration) clock.Timer {
 	timer := c.Clock.NewTimer(d)
-	if d == 5*time.Second {
+	if d == directoryTestWait {
 		c.armed <- struct{}{}
 	}
 	return timer
@@ -63,6 +66,7 @@ func directoryRig(t *testing.T) (*rig, *engine.Engine, engine.Caller, *directory
 	t.Helper()
 	noLeaks(t)
 	r := newRig(t, 10)
+	r.params.DirectoryWait = directoryTestWait
 	c := &directoryWaitClock{Clock: r.clk, armed: make(chan struct{}, 8)}
 	r.engineClock = c
 	e, _, err := r.open()
@@ -88,9 +92,17 @@ func directoryRig(t *testing.T) (*rig, *engine.Engine, engine.Caller, *directory
 	return r, e, engineCaller(id), c, tr, release
 }
 
-func directoryAsync(e *engine.Engine, caller engine.Caller) <-chan error {
-	done := make(chan error, 1)
-	go func() { _, err := e.Directory(context.Background(), caller, engine.DirectoryQuery{}); done <- err }()
+type directoryAnswer struct {
+	page engine.DirectoryPage
+	err  error
+}
+
+func directoryAsync(e *engine.Engine, caller engine.Caller) <-chan directoryAnswer {
+	done := make(chan directoryAnswer, 1)
+	go func() {
+		page, err := e.Directory(context.Background(), caller, engine.DirectoryQuery{})
+		done <- directoryAnswer{page, err}
+	}()
 	return done
 }
 
@@ -103,14 +115,14 @@ func directoryArmed(t testing.TB, c *directoryWaitClock) {
 	}
 }
 
-func directoryResult(t testing.TB, done <-chan error) error {
+func directoryResult(t testing.TB, done <-chan directoryAnswer) directoryAnswer {
 	t.Helper()
 	select {
 	case err := <-done:
 		return err
 	case <-time.After(10 * time.Second):
 		t.Fatal("directory did not return within its budget")
-		return nil
+		return directoryAnswer{}
 	}
 }
 
@@ -134,9 +146,10 @@ func TestDirectoryClockRollbackAfterQueuingStillEndsAtTheBudget(t *testing.T) {
 	if _, err := e.NodeSettings(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	r.clk.Advance(5 * time.Second)
-	wantReason(t, directoryResult(t, queued), engine.ReasonDirectoryUnavailable)
-	wantReason(t, directoryResult(t, first), engine.ReasonDirectoryUnavailable)
+	wantReason(t, directoryResult(t, directoryAsync(e, caller)).err, engine.ReasonClockRollback)
+	r.clk.Advance(directoryTestWait)
+	wantReason(t, directoryResult(t, queued).err, engine.ReasonDirectoryUnavailable)
+	wantReason(t, directoryResult(t, first).err, engine.ReasonDirectoryUnavailable)
 	release()
 }
 
@@ -149,12 +162,12 @@ func TestDirectoryTimeoutIgnoresALateTransportResultAndKeepsServing(t *testing.T
 	case <-time.After(10 * time.Second):
 		t.Fatal("query did not reach the transport")
 	}
-	r.clk.Advance(5 * time.Second)
-	wantReason(t, directoryResult(t, done), engine.ReasonDirectoryUnavailable)
+	r.clk.Advance(directoryTestWait)
+	wantReason(t, directoryResult(t, done).err, engine.ReasonDirectoryUnavailable)
 	release()
-	page, err := e.Directory(context.Background(), caller, engine.DirectoryQuery{})
-	if err != nil || len(page.Endpoints) != 1 {
-		t.Fatalf("query after the late result = %+v, %v, want the reader's open endpoint", page, err)
+	result := directoryResult(t, directoryAsync(e, caller))
+	if result.err != nil || len(result.page.Endpoints) != 1 {
+		t.Fatalf("query after the late result = %+v, %v, want the reader's open endpoint", result.page, result.err)
 	}
 }
 

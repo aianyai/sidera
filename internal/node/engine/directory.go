@@ -185,7 +185,7 @@ func (c *cmdQueryDirectory) run(e *Engine, now time.Time) {
 	if e.directoryKey == nil {
 		key := make([]byte, sha256.Size)
 		if _, err := io.ReadFull(e.randomReader(), key); err != nil {
-			c.fail(e.classifyPeerCall("directory", c.from, err))
+			c.fail(e.classify(err))
 			return
 		}
 		e.directoryKey = key
