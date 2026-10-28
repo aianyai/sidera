@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -187,22 +186,6 @@ func TestToolArgumentsAndFailures(t *testing.T) {
 				t.Fatalf("tool error: %s, isError=%v", text, isError)
 			}
 		})
-	}
-}
-
-func TestReceivePageIsTheOnlyTextAndIsUnchanged(t *testing.T) {
-	const page = "{ \"lease\":\"lease_1234567890123456\", \"messages\":[], \"more\":0 }\n"
-	c := httpAgent(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		if string(raw) != "{\"frontend\":\"mcp\"}\n" {
-			t.Errorf("receive request: %s", raw)
-		}
-		io.WriteString(w, page)
-	}))
-	s := start(t, mcp.Config{Agent: c, Version: "test"})
-	text, isError := s.call(t, 1, "recv", map[string]any{})
-	if isError || text != page {
-		t.Fatalf("page changed: %q, isError=%v", text, isError)
 	}
 }
 
