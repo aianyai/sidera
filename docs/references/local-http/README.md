@@ -76,3 +76,7 @@ transport mechanics.
 - `internal/node/localhttp/timeouts_test.go`: private transport configuration.
 - `internal/node/manageapi`: administrative authorization and execution, including
   fingerprints, stored results and stop after the response is flushed.
+
+- `internal/node/agentapi`: probe-only recovery gate, Bearer syntax, strict method
+  decoding and raw receive pages; HTTP transport and response mechanics use the
+  shared boundary.

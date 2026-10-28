@@ -23,8 +23,12 @@ token. Probe tokens can call only `probe`, and endpoint tokens cannot call it.
 
 Both credentials contain 32 random bytes in unpadded base64url. The HTTP boundary
 calls `adapterproto.Token.Validate` before constructing the caller; the engine
-owns lookup, constant-time comparison, expiry and revocation. Tokens are never
-logged. Only open session endpoints can act through this interface; adapters
+owns lookup, constant-time comparison, expiry and revocation. Normal request
+handling does not proactively log tokens. Diagnostic producers
+must keep credentials and request bodies out of error text and panic values;
+internal causes and standard HTTP diagnostics are logged whole, as described in
+[the shared local HTTP boundary](../local-http/README.md). Only open session
+endpoints can act through this interface; adapters
 read and write direct endpoints through the adapter protocol.
 
 A new server accepts only probes. Every other known method answers
@@ -180,9 +184,11 @@ Errors have this shape:
 {"error":{"category":"unauthenticated","code":"token_unknown","message":"the token is not known to this node or has been revoked"}}
 ```
 
-`apiwire` alone owns categories, stable codes, HTTP statuses, exit codes and human
-messages. Diagnostic messages are not stable identifiers and carry no request
-body, credential or private key.
+`apiwire` owns categories, HTTP statuses, exit codes and the shared error
+mapping. The Agent facade additionally owns its boundary-specific codes and
+messages: `probe_only`, `token_missing`, `token_malformed` and
+`single_recipient_only`. Diagnostic messages are not stable identifiers; their
+producers must keep request bodies, credentials and private keys out of them.
 
 | Category | HTTP | Command exit | Representative codes |
 | --- | --- | --- | --- |
@@ -202,7 +208,9 @@ Existing state refusals keep their codes; `loop_busy` is the inbox submission
 wait. Success, including a received message or an empty receive page, exits zero;
 command usage errors have exit code 2.
 
-The server reads headers within 10 seconds and requests within 30 seconds, keeps
+The [shared local HTTP boundary](../local-http/README.md) owns routing, body
+limits, response encoding, logging and shutdown. The server reads headers within
+10 seconds and requests within 30 seconds, keeps
 an idle connection for 60 seconds, and limits headers to 8 KiB. It has no global
 write timeout. Shutdown stops accepting requests, waits within the owner's
 grace, then closes remaining requests. The owner ends engine waiters before
@@ -252,7 +260,8 @@ adapter acknowledges on the model's behalf identical across tool front ends.
 
 ## Where
 
-`agentapi.go` owns routing, enabling, Bearer syntax, bounded request reading and
-responses. `methods.go` owns endpoint request/result types and conversion to the
+`agentapi.go` delegates HTTP transport and response mechanics to `localhttp`,
+while retaining enabling, Bearer syntax and the ordering of body reads.
+`methods.go` owns endpoint request/result types and conversion to the
 engine service. `client.go` owns checked dialing, probing and unknown outcomes;
 `client_methods.go` adds the typed endpoint methods and receive deadlines.

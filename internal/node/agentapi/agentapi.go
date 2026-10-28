@@ -3,29 +3,22 @@
 package agentapi
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"log/slog"
-	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/ipc"
+	"github.com/aianyai/sidera/internal/node/localhttp"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
 )
 
 const pathPrefix = "/v1/agent/"
-const maxBody = 1 << 20
 
 // Config gives the Agent interface its engine and diagnostic log.
 type Config struct {
@@ -37,8 +30,7 @@ type Config struct {
 // engine recovers. EnableMethods opens endpoint methods after recovery.
 type Server struct {
 	svc     engine.AgentService
-	log     *slog.Logger
-	http    *http.Server
+	http    *localhttp.Server
 	enabled atomic.Bool
 }
 
@@ -51,31 +43,24 @@ func New(c Config) (*Server, error) {
 	if c.Service == nil {
 		return nil, errors.New("agentapi: no service")
 	}
-	s := &Server{svc: c.Service, log: c.Log}
-	if s.log == nil {
-		s.log = slog.New(slog.DiscardHandler)
-	}
-	s.http = &http.Server{
-		Handler: s, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
-		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 8 << 10,
-		// A recv may wait longer than an ordinary response, so it has no global
-		// write timeout. Its context ends when its client disconnects.
+	s := &Server{svc: c.Service}
+	var err error
+	s.http, err = localhttp.New(localhttp.Config{Kind: ipc.KindAgent, PathPrefix: pathPrefix, Lookup: s.lookup, Log: c.Log})
+	if err != nil {
+		return nil, err
 	}
 	return s, nil
 }
 
 // Listener is an Agent listener that Listen checked and opened through ipc.
-type Listener struct{ l net.Listener }
+type Listener struct{ l *localhttp.Listener }
 
 // Close closes a listener that no server took.
 func (l *Listener) Close() error { return l.l.Close() }
 
 // Listen opens only an Agent address. The caller holds the node's instance lock.
 func Listen(addr ipc.Address, lock ipc.InstanceLock, opts ipc.Options) (*Listener, error) {
-	if addr.Kind() != ipc.KindAgent {
-		return nil, fmt.Errorf("agentapi: %q is not an Agent address", addr.Kind())
-	}
-	l, err := ipc.Listen(addr, lock, opts)
+	l, err := localhttp.Listen(ipc.KindAgent, addr, lock, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -84,23 +69,14 @@ func Listen(addr ipc.Address, lock ipc.InstanceLock, opts ipc.Options) (*Listene
 
 // Serve owns the listener until Shutdown or Close.
 func (s *Server) Serve(l *Listener) error {
-	if l == nil || l.l == nil {
-		return errors.New("agentapi: no listener")
+	if l == nil {
+		return s.http.Serve(nil)
 	}
-	if err := s.http.Serve(l.l); !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-	return nil
+	return s.http.Serve(l.l)
 }
 
 // Shutdown stops accepting requests and waits within ctx, closing what remains.
-func (s *Server) Shutdown(ctx context.Context) error {
-	err := s.http.Shutdown(ctx)
-	if err != nil {
-		s.http.Close()
-	}
-	return err
-}
+func (s *Server) Shutdown(ctx context.Context) error { return s.http.Shutdown(ctx) }
 
 // Close ends serving immediately.
 func (s *Server) Close() error { return s.http.Close() }
@@ -113,37 +89,31 @@ func knownMethod(name string) bool {
 	return false
 }
 
-// ServeHTTP reads one request and leaves the endpoint's authentication and action
-// in one engine command. No value received from the client is written to the log.
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	name, ok := strings.CutPrefix(r.URL.Path, pathPrefix)
-	if !ok || !knownMethod(name) {
-		s.fail(w, apiwire.New(apiwire.CategoryNotFound, apiwire.CodeMethodUnknown, "there is no such method"), 0)
-		return
+// ServeHTTP routes one request through the shared local HTTP boundary.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.http.ServeHTTP(w, r) }
+
+func (s *Server) lookup(name string) http.HandlerFunc {
+	if !knownMethod(name) {
+		return nil
 	}
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		s.fail(w, apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeMethodNotAllowed, "a method is called with POST"), http.StatusMethodNotAllowed)
-		return
-	}
+	return func(w http.ResponseWriter, r *http.Request) { s.serve(w, r, name) }
+}
+
+// serve keeps recovery and credential checks ahead of reading the body. The
+// engine authenticates the endpoint in the same command that acts for it.
+func (s *Server) serve(w http.ResponseWriter, r *http.Request, name string) {
 	if name != "probe" && !s.enabled.Load() {
-		s.fail(w, apiwire.New(apiwire.CategoryUnavailable, "probe_only", "the node is recovering and accepts only tool probes"), 0)
+		s.http.Fail(w, apiwire.New(apiwire.CategoryUnavailable, "probe_only", "the node is recovering and accepts only tool probes"))
 		return
 	}
 	token, err := bearerToken(r.Header)
 	if err != nil {
-		s.fail(w, err, 0)
+		s.http.Fail(w, err)
 		return
 	}
-	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	body, err := localhttp.ReadBody(w, r)
 	if err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
-			err = apiwire.New(apiwire.CategoryInvalidArgument, apiwire.CodeRequestTooLarge, "the request is larger than a method takes")
-		} else {
-			err = apiwire.Malformed("the request could not be read", "")
-		}
-		s.fail(w, err, 0)
+		s.http.Fail(w, err)
 		return
 	}
 	if name == "probe" {
@@ -151,31 +121,31 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Frontend adapterproto.Frontend `json:"frontend"`
 		}
 		if err := strictjson.Decode(body, &in); err != nil {
-			s.fail(w, err, 0)
+			s.http.Fail(w, err)
 			return
 		}
 		if !in.Frontend.Valid() {
-			s.fail(w, apiwire.Malformed("the front end is not cli or mcp", "frontend"), 0)
+			s.http.Fail(w, apiwire.Malformed("the front end is not cli or mcp", "frontend"))
 			return
 		}
 		target, err := s.svc.PresentProbeToken(r.Context(), token, in.Frontend)
 		if err != nil {
-			s.fail(w, err, 0)
+			s.http.Fail(w, err)
 			return
 		}
-		s.send(w, 200, ProbeResult{OK: true, Preset: target.Preset, Frontend: target.Frontend})
+		s.http.JSON(w, 200, ProbeResult{OK: true, Preset: target.Preset, Frontend: target.Frontend})
 		return
 	}
 	out, err := s.method(r.Context(), engine.ByToken(token), name, body)
 	if err != nil {
-		s.fail(w, err, 0)
+		s.http.Fail(w, err)
 		return
 	}
 	if name == "recv" {
-		s.write(w, http.StatusOK, out.([]byte))
+		s.http.RawJSON(w, http.StatusOK, out.([]byte))
 		return
 	}
-	s.send(w, http.StatusOK, out)
+	s.http.JSON(w, http.StatusOK, out)
 }
 
 func bearerToken(h http.Header) (adapterproto.Token, error) {
@@ -189,35 +159,4 @@ func bearerToken(h http.Header) (adapterproto.Token, error) {
 		return "", apiwire.New(apiwire.CategoryUnauthenticated, "token_malformed", "the token is not in its required form")
 	}
 	return t, nil
-}
-
-func (s *Server) send(w http.ResponseWriter, status int, v any) {
-	var out bytes.Buffer
-	enc := json.NewEncoder(&out)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(v); err != nil {
-		s.fail(w, err, 0)
-		return
-	}
-	s.write(w, status, out.Bytes())
-}
-
-func (s *Server) write(w http.ResponseWriter, status int, out []byte) {
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Content-Length", strconv.Itoa(len(out)))
-	w.WriteHeader(status)
-	if _, err := w.Write(out); err != nil {
-		s.log.Debug("an Agent answer was not delivered")
-	}
-}
-
-func (s *Server) fail(w http.ResponseWriter, err error, status int) {
-	e := apiwire.FromError(err)
-	if e.Category == apiwire.CategoryInternal {
-		s.log.Error("an Agent request failed", "code", e.Code)
-	}
-	if status == 0 {
-		status = e.Category.HTTPStatus()
-	}
-	s.send(w, status, apiwire.Body{Error: *e})
 }

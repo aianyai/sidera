@@ -37,9 +37,13 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
 - Receive responses are the engine page bytes, including their existing newline.
   Neither the server nor the client wraps or re-encodes a page.
 - Requests have a 1 MiB limit and use `strictjson`. Responses are JSON with HTML
-  escaping disabled. Errors are mapped by `apiwire` once. Logs never contain
-  credentials or request bodies, including after a failed response write.
-- The server has no global write timeout. Header, request-read and idle timeouts
+  escaping disabled. Errors are mapped by `apiwire` once. Normal handling does not proactively log
+  credentials, bodies or request objects. Internal causes and standard HTTP
+  diagnostics are logged whole by `localhttp`; error producers and handlers must
+  keep request data out of diagnostic text and panic values.
+- The [shared local HTTP boundary](../localhttp/README.md) owns exact routing,
+  POST checks, body limits, JSON responses, diagnostic logging and shutdown.
+  The server has no global write timeout. Header, request-read and idle timeouts
   belong to `net/http`, and a handler's context ends with the client's connection.
 - The client uses no HTTP proxy and follows no redirect: a token goes only to the
   local endpoint whose peer `ipc` checks. It never automatically retries a call,

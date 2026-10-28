@@ -30,12 +30,16 @@ func TestProbeOnlyModeRefusesOtherMethods(t *testing.T) {
 	for _, name := range []string{"me", "declare", "peers", "directory", "send", "reply", "recv", "ack", "status", "control"} {
 		t.Run(name, func(t *testing.T) {
 			for _, token := range []string{"", "not a token", strings.Repeat("A", 43)} {
-				r := httptest.NewRequest(http.MethodPost, "/v1/agent/"+name, strings.NewReader(`{}`))
+				body := &countedBody{Reader: strings.NewReader(`{}`)}
+				r := httptest.NewRequest(http.MethodPost, "/v1/agent/"+name, body)
 				if token != "" {
 					r.Header.Set("Authorization", "Bearer "+token)
 				}
 				w := httptest.NewRecorder()
 				s.ServeHTTP(w, r)
+				if body.reads != 0 {
+					t.Fatal("probe-only refusal read the request body")
+				}
 				var answer apiwire.Body
 				if err := json.Unmarshal(w.Body.Bytes(), &answer); err != nil {
 					t.Fatal(err)
@@ -142,15 +146,18 @@ func TestProbeRequestsEnforceAuthenticationAndStrictInput(t *testing.T) {
 		{"wrong front end type", valid, `{"frontend":1}`, "invalid_argument", "malformed_request"},
 		{"another front end", valid, `{"frontend":"direct"}`, "invalid_argument", "malformed_request"},
 		{"two values", valid, `{"frontend":"cli"}{}`, "invalid_argument", "malformed_request"},
-		{"request over the limit", valid, `{"frontend":"` + strings.Repeat("x", 1<<20) + `"}`, "invalid_argument", "request_too_large"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest("POST", "/v1/agent/probe", strings.NewReader(tc.body))
+			body := &countedBody{Reader: strings.NewReader(tc.body)}
+			r := httptest.NewRequest("POST", "/v1/agent/probe", body)
 			if tc.authorization != "" {
 				r.Header.Set("Authorization", tc.authorization)
 			}
 			w := httptest.NewRecorder()
 			s.ServeHTTP(w, r)
+			if (tc.code == "token_missing" || tc.code == "token_malformed") && body.reads != 0 {
+				t.Fatal("credential refusal read the request body")
+			}
 			var out apiwire.Body
 			if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
 				t.Fatal(err)
@@ -222,3 +229,11 @@ func TestAProbeWithAnIncompleteAnswerHasAnUnknownOutcomeAndIsNotRetried(t *testi
 		})
 	}
 }
+
+// Count reads without changing the request text or the transport boundary.
+type countedBody struct {
+	*strings.Reader
+	reads int
+}
+
+func (b *countedBody) Read(p []byte) (int, error) { b.reads++; return b.Reader.Read(p) }
