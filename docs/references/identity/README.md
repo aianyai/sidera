@@ -224,8 +224,15 @@ hand could pass): an export of nothing would read as a backup that succeeded
 ```
 
 with a trailing newline, and the digest returned apart from the armor, because the
-record digest is what identifies the statement. Where an export is written and
-with which permissions are the caller's. The package writes nothing into `keys/`
+record digest is what identifies the statement. `ParseRevocationExport` is its
+inverse: it decodes with `encoding/pem`, verifies the record as a node
+self-revocation signed by the identity key of the node it names, then formats
+the verified statement again. The entire input must match that canonical text
+byte for byte, with the final LF optional. Text before or after the block,
+multiple blocks, headers, other line endings and non-canonical base64 are refused
+with `keys.ErrCorrupt` and a zero statement. A successful result holds the wire
+bytes, digest and node of the same verified statement. Where an export is written
+and with which permissions are the caller's. The package writes nothing into `keys/`
 for a retirement; `CheckNotRetired` refuses to run a node whose identity is among
 the loaded revocations, because a retired identity cannot become valid again.
 
@@ -506,6 +513,13 @@ under the refusal of a serial file behind the certificate below.
   the markers say what it is. Standard base64 with padding is what every tool
   decodes. The digest is the record digest rather than a hash of the armor so that
   the same statement has one name wherever it is held.
+- **The export parser checks by re-encoding.** `pem.Decode` searches for a block
+  and returns any trailing input; it also accepts spellings the formatter does
+  not write. Decoding alone could therefore accept a damaged or concatenated
+  backup, a failure that stays hidden until the owner needs to retire the
+  identity. Verifying the statement and comparing the complete text with the
+  existing formatter's output keeps the armor rules in one place and refuses
+  a false success without another parser or dependency.
 
 ## Where
 
@@ -545,7 +559,10 @@ under the refusal of a serial file behind the certificate below.
   `TestInitRefusesASelfRevocationThatDoesNotVerifyUnderTheCurrentKey`,
   `TestInitReSignsACertificateThatDoesNotMatch` (init); `TestExportFormatGolden` (the
   export, against a vector made by an independent implementation, with the digest
-  computed by hand); `TestSaveClockNeverGoesBack`,
+  computed by hand); `TestParseRevocationExportReturnsTheVerifiedStatement` and
+  `TestParseRevocationExportRefusesMalformedBackups` (the strict inverse, including
+  signature damage and a valid signature by another identity);
+  `TestSaveClockNeverGoesBack`,
   `TestClearingTheRollbackResetsTheMarkAndTheFlagInOneReplacement` (the clock);
   the crash-state tests `TestRenewalReplaysToAConsistentStateFromEveryCrashState`,
   `TestInitReplaysToAConsistentStateFromEveryCrashState`,
@@ -562,6 +579,9 @@ under the refusal of a serial file behind the certificate below.
   `TestKeysSourceNeverReachesAGlobalRandomSource`,
   `TestPrivateKeysNeverPrintThemselves`; fuzz targets `FuzzDecodeKeyFile`,
   `FuzzDecodeClock`, `FuzzDecodeSerial`, `FuzzDecodeInit` in `codec_internal_test.go`.
+  `FuzzParseRevocationExport` checks canonical text,
+  verified wire bytes, digest and node, and round trips from valid and malformed
+  inputs.
   The Windows test is the only one that cannot run on a developer's macOS machine;
   none is skipped.
 - Tests (`internal/node/daemon`) for what the daemon does with the keys:

@@ -1,7 +1,10 @@
 package keys
 
 import (
+	"bytes"
 	"encoding/base64"
+	"encoding/pem"
+	"errors"
 	"strings"
 
 	"github.com/aianyai/sidera/internal/record"
@@ -44,4 +47,27 @@ func FormatRevocationExport(sr SelfRevocation) (text []byte, digest record.Diges
 	b.WriteString(exportEnd)
 	b.WriteByte('\n')
 	return []byte(b.String()), sr.digest
+}
+
+// ParseRevocationExport parses the text produced by FormatRevocationExport,
+// with or without its final newline, and verifies that the statement is signed
+// by the identity key of the node it names. All other spellings, extra text and
+// invalid statements are refused with ErrCorrupt and a zero SelfRevocation.
+func ParseRevocationExport(text []byte) (SelfRevocation, error) {
+	block, _ := pem.Decode(text)
+	if block == nil {
+		return SelfRevocation{}, corrupt(SelfRevocationPath, errors.New("invalid self-revocation export"))
+	}
+	sr, err := verifySelfRevocation(block.Bytes)
+	if err != nil {
+		return SelfRevocation{}, err
+	}
+	// Decode can skip leading text and accept other spellings. Comparing the
+	// whole input with the formatter's output keeps the format's rules in one
+	// place and refuses anything before or after the one canonical block.
+	canonical, _ := FormatRevocationExport(sr)
+	if !bytes.Equal(bytes.TrimSuffix(text, []byte{'\n'}), bytes.TrimSuffix(canonical, []byte{'\n'})) {
+		return SelfRevocation{}, corrupt(SelfRevocationPath, errors.New("non-canonical self-revocation export"))
+	}
+	return sr, nil
 }

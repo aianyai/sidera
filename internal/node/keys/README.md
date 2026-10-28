@@ -23,6 +23,7 @@ transaction of `txn`; nothing here calls an `fsx` write.
 | `Keys.RenewalInterrupted`, `RenewalInterrupted`, `RecoveryWork` | The recovery predicate: the serial file is ahead of the certificate. Pure functions of the disk, for the load, the startup repair and the clean-scenario test. |
 | `ReadClock`, `Keys.SaveClock`, `PrepareClockCleared`, `PutClockCleared` | The clock record. `SaveClock` is the periodic write and never goes back; the owner's clear is for the engine's transaction: `PrepareClockCleared` checks the time and encodes, before `Begin`, and `PutClockCleared` writes the prepared value and fails only as a write of the transaction does. |
 | `Keys.SelfRevocation`, `ReadSelfRevocation`, `FormatRevocationExport` | The statement `Load` verified as this node's, for a running node; the reader of the file for a caller with no loaded keys; the one formatter of the export, which panics on the zero statement. |
+| `ParseRevocationExport` | The inverse of the formatter: strictly parses the armor and verifies the statement, returning its wire bytes, digest and node together. The formatter's final LF is optional; every other spelling is refused with `ErrCorrupt` and a zero statement. |
 | `Keys.CheckNotRetired` | The refusal to run a node whose identity is among the loaded revocations. |
 | `PlanInit`, `InitPlan.WriteKeys`, `WriteMarker`, `Initialized` | The key side of `init`, and the marker. |
 | `CheckPermissions` | The permission sweep of `keys/`, for a caller that checks before it loads. |
@@ -135,8 +136,13 @@ transaction of `txn`; nothing here calls an `fsx` write.
   itself and exports with it, so no caller compares a node of its own. `ReadSelfRevocation`
   reads and verifies the file for a caller that has not loaded the keys (an export
   while the node is stopped). Its fields are not exported, so a statement whose
-  bytes and digest disagree cannot be built outside the package. Nothing here
-  writes into `keys/` for a retirement; `CheckNotRetired` refuses to run a node whose
+  bytes and digest disagree cannot be built outside the package.
+  `ParseRevocationExport` verifies the same record from armored text, then compares
+  the whole input with `FormatRevocationExport`'s output, allowing only the omission
+  of its final LF. This refuses text before or after a block, multiple blocks,
+  headers and non-canonical base64 or line endings without defining a second
+  set of formatting rules. Nothing here writes into `keys/` for a retirement;
+  `CheckNotRetired` refuses to run a node whose
   identity is among the loaded revocations.
 
 ## What the caller must guarantee
@@ -195,7 +201,8 @@ The named tests of the row: `TestPermissionsTooBroadAreRefusedNamingTheFile`
 `TestInitReusesAValidSelfRevocation`, `TestInitSignsNoEarlierThanTheHighWaterMark`,
 `TestSaveClockClampsAPauseThatStartedBeforeTheEarliestSecond`,
 `TestInitRefusesASelfRevocationThatDoesNotVerifyUnderTheCurrentKey`,
-`TestExportFormatGolden`, the crash-state tests
+`TestExportFormatGolden`, `TestParseRevocationExportReturnsTheVerifiedStatement`,
+`TestParseRevocationExportRefusesMalformedBackups`, the crash-state tests
 (`TestRenewalReplaysToAConsistentStateFromEveryCrashState`,
 `TestInitReplaysToAConsistentStateFromEveryCrashState`,
 `TestClockHighWaterIsOldOrNewAfterEveryCrashState`,
@@ -209,4 +216,5 @@ The named tests of the row: `TestPermissionsTooBroadAreRefusedNamingTheFile`
 `TestAFileOverTheLargestRecordIsRefusedWithoutBeingRead`), and the randomness tests
 (`TestKeyGenerationWithAnInjectedReaderIsReproducible`,
 `TestKeysSourceNeverReachesAGlobalRandomSource`). Fuzz targets for the decoders
-are in `codec_internal_test.go`.
+are in `codec_internal_test.go`; `FuzzParseRevocationExport` in
+`export_parse_test.go` checks the strict export parser and verified round trips.
