@@ -17,6 +17,8 @@
 //     always accepted for a bool.
 //   - The input is one valid UTF-8 JSON value with nothing after it, and unknown
 //     fields are errors, except in a value decoded with DecodeOpen.
+//   - String escapes encode Unicode scalar values: a UTF-16 surrogate must
+//     belong to a valid pair, including in keys and opaque positions.
 //   - No object has the same key twice, at any depth. Parsers disagree about
 //     which duplicate wins, and a message must mean one thing to every reader.
 //
@@ -26,7 +28,8 @@
 // Positions typed json.RawMessage or any are opaque: they keep whatever JSON
 // the sender wrote, null included, and the owner validates them. A type with its
 // own UnmarshalJSON or UnmarshalText is opaque as well and is responsible for
-// its own strictness (it may call Decode).
+// its own strictness (it may call Decode). The document-level UTF-8, surrogate
+// pair and duplicate-key checks still apply to opaque positions.
 //
 // What the caller must guarantee: every exported field of a struct that a
 // document is decoded into carries a json tag (the tag "-" leaves it out) and is
@@ -55,7 +58,8 @@
 // secret does not show these.
 //
 // Path is empty when the document as a whole is at fault (input that is not
-// valid UTF-8 or JSON, data after the value, a root of the wrong JSON type) and
+// valid UTF-8 or JSON, an unpaired surrogate escape, data after the value,
+// a root of the wrong JSON type) and
 // where strictjson cannot place a failure: a member whose key is the empty
 // string, whose path element the syntax cannot show; a field with the "string"
 // option; a json.Number given a string that does not spell a number; a refusal by a type that decodes itself
@@ -104,7 +108,7 @@ func Decode(data []byte, v any) error {
 	if !utf8.Valid(data) {
 		return &Error{Msg: "input is not valid UTF-8"}
 	}
-	if err := noDuplicateKeys(data); err != nil {
+	if err := checkDocumentTokens(data); err != nil {
 		return err
 	}
 	tree, err := parseTree(data)
@@ -148,7 +152,7 @@ func DecodeOpen(data []byte, v any) error {
 	if !utf8.Valid(data) {
 		return &Error{Msg: "input is not valid UTF-8"}
 	}
-	if err := noDuplicateKeys(data); err != nil {
+	if err := checkDocumentTokens(data); err != nil {
 		return err
 	}
 	var members map[string]json.RawMessage
@@ -169,26 +173,32 @@ func DecodeOpen(data []byte, v any) error {
 	return Decode(kept, v)
 }
 
-// noDuplicateKeys reports the first object that has a key twice, at any depth.
-func noDuplicateKeys(data []byte) error { return scanKeys(data, true) }
+// checkDocumentTokens rejects unpaired surrogate escapes and repeated object
+// keys, at any depth, before decoding can lose their original spelling.
+func checkDocumentTokens(data []byte) error { return scanTokens(data, true) }
 
 // NoDuplicateTopLevelKeys reports an error when the object that data holds has a
 // key twice. Objects nested inside it are not looked at, for a caller that
 // interprets only the outer object and leaves the rest to a layer that decodes
 // it with Decode. data must be one valid JSON object.
-func NoDuplicateTopLevelKeys(data []byte) error { return scanKeys(data, false) }
+func NoDuplicateTopLevelKeys(data []byte) error { return scanTokens(data, false) }
 
-// scanKeys walks data and reports the first object with a repeated key; with
-// deep unset it looks at the keys of the outermost object only.
-func scanKeys(data []byte, deep bool) error {
+// scanTokens walks data and reports the first object with a repeated key. A
+// deep scan also checks every string's surrogate escapes; with deep unset it
+// checks only the outermost object's keys, leaving strict decoding to its owner.
+func scanTokens(data []byte, deep bool) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	// Numbers stay text: only the keys matter here, and a number that does not
 	// fit a float64 is valid JSON that the scan must not trip over.
 	dec.UseNumber()
 	token := func() (json.Token, error) {
+		start := dec.InputOffset()
 		tok, err := dec.Token()
 		if err != nil {
 			return nil, &Error{Msg: err.Error()}
+		}
+		if _, ok := tok.(string); ok && deep && hasUnpairedSurrogate(data[start:dec.InputOffset()]) {
+			return nil, &Error{Msg: "unpaired surrogate in a JSON string"}
 		}
 		return tok, nil
 	}
@@ -253,6 +263,38 @@ func scanKeys(data []byte, deep bool) error {
 		return err
 	}
 	return scan("", true)
+}
+
+// hasUnpairedSurrogate checks the original spelling of a string token after
+// encoding/json has validated its syntax. Token replaces unpaired surrogates
+// with U+FFFD, which would make different inputs indistinguishable. The span
+// may start with whitespace or the comma or colon before the string.
+func hasUnpairedSurrogate(raw []byte) bool {
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' {
+			continue
+		}
+		i++
+		if raw[i] != 'u' {
+			continue // Includes an escaped backslash, which starts no escape.
+		}
+		unit, _ := strconv.ParseUint(string(raw[i+1:i+5]), 16, 16)
+		i += 4
+		switch {
+		case unit >= 0xdc00 && unit <= 0xdfff:
+			return true
+		case unit >= 0xd800 && unit <= 0xdbff:
+			if i+6 >= len(raw) || raw[i+1] != '\\' || raw[i+2] != 'u' {
+				return true
+			}
+			low, _ := strconv.ParseUint(string(raw[i+3:i+7]), 16, 16)
+			if low < 0xdc00 || low > 0xdfff {
+				return true
+			}
+			i += 6
+		}
+	}
+	return false
 }
 
 func parseTree(data []byte) (any, error) {

@@ -35,6 +35,11 @@ for how the protocol layers use it.
   value of its type, and `false` is always accepted for a bool.
 - **One document.** The input is one valid UTF-8 JSON value with nothing after it.
   Unknown fields are errors, except in the object given to `DecodeOpen`.
+- **Unicode strings.** A UTF-16 surrogate escape must belong to a valid pair,
+  including in object keys, opaque positions and ignored members of an open
+  object. `encoding/json` replaces unpaired surrogates with U+FFFD, which would
+  silently turn different messages or idempotency keys into the same value.
+  A real U+FFFD, its `\ufffd` escape and an escaped backslash remain legal.
 - **No repeated key**, at any depth (ignored members of an open object included),
   because parsers disagree about which duplicate wins.
 - **The right type.** A value must have the JSON type of its Go field: a string,
@@ -51,8 +56,9 @@ for how the protocol layers use it.
   number, is checked by `encoding/json` alone and carries its message. A caller
   that must keep values secret does not show these.
   `Path` is empty when the whole document is at fault (input that is not valid
-  UTF-8 or JSON, data after the value, a root of the wrong type) and where the
-  failure cannot be placed: a member whose key is the empty string, whose path
+  UTF-8 or JSON, an unpaired surrogate escape, data after the value, a root of
+  the wrong type) and where the failure cannot be placed: a member whose key is
+  the empty string, whose path
   element the syntax cannot show; a field with the `string` option; a
   `json.Number` given a string that does not spell a number; a refusal by a type
   that decodes itself that offering its value again does not reproduce, because
@@ -64,7 +70,8 @@ for how the protocol layers use it.
   nested structs, slices, Go arrays included, and map values alike.
 - **Opaque positions.** `json.RawMessage`, `any` and a type with its own
   `UnmarshalJSON` or `UnmarshalText` keep or decode their value themselves and
-  answer for its strictness; such a type may call `Decode`. When one refuses its
+  answer for its strictness; such a type may call `Decode`. Document-level UTF-8,
+  surrogate-pair and duplicate-key checks still apply. When one refuses its
   value, the error carries the path of that value, and the path of the error the
   type itself raised through `Decode` or `DecodeOpen` continues from there, for
   example `inner.open.m`. The refusal is located only after decoding has failed,

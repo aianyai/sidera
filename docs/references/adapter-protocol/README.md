@@ -447,6 +447,12 @@ repeated key and an explicit empty value for an optional field errors: they
 would otherwise let two implementations read one message two ways. The known
 members of a capability object are decoded as strictly as any other, and a key
 repeated anywhere in it is still an error, ignored members included.
+String escapes must encode Unicode scalar values: a UTF-16 surrogate belongs to
+a valid high/low pair, in object keys and values alike, including opaque values
+and ignored capability members. An unpaired surrogate is refused rather than
+accepting `encoding/json`'s U+FFFD replacement, which would silently give
+different messages or idempotency keys the same content. A real U+FFFD and its
+escape stay valid.
 
 **Instance lock.** The adapter takes an exclusive lock on `instance.lock_path`
 before it answers `initialize`, and answers `1011` when it cannot. A hung old
@@ -700,6 +706,7 @@ is authoritative.
   few failures that cannot be placed have no path, and the rules, those cases and
   what a type that decodes itself must guarantee are in its README. Tests:
   `TestDecodeTypeErrorPaths`, `TestDecodeRefusalOfATypeThatDecodesItselfHasPath`,
+  `TestDecodeRejectsUnpairedSurrogates`, `TestDecodePreservesUnicodeStrings`,
   `FuzzDecodeTypeErrorsHavePaths`.
 - Tests: `TestNegotiate`, `TestMethodTable`, `TestApplicationCodeTable`,
   `TestBusyReasonTable`, `TestNodeBusyIsNoEffect`, `TestRejectReasonTable`,

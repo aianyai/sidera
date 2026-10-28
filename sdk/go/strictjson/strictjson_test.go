@@ -2,6 +2,7 @@ package strictjson_test
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -39,6 +40,47 @@ type doc struct {
 }
 
 const base = `{"name":"a","count":0,"items":[]`
+
+func TestDecodeRejectsUnpairedSurrogates(t *testing.T) {
+	for _, input := range []string{
+		`"x\ud800"`, `"x\udc00"`, `"k\udfff"`,
+		`"\udbff"`, `"\ud800x"`, `"\ud800\u0041"`,
+		`"\ud800\ud800"`, `"\udc00\ud800"`,
+		`"\ud800\\udc00"`, `"\ud800\udc00\udfff"`,
+		`{"\ud800":1}`, `{"value":["\udfff"]}`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			var value any
+			err := strictjson.Decode([]byte(input), &value)
+			var strictErr *strictjson.Error
+			if !errors.As(err, &strictErr) {
+				t.Fatalf("Decode(%s) = %v, value = %#v; want *strictjson.Error", input, err, value)
+			}
+		})
+	}
+}
+
+func TestDecodePreservesUnicodeStrings(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{`"\ud800\udc00"`, "𐀀"},
+		{`"\udbff\udfff"`, "\U0010ffff"},
+		{`"\uD83d\uDE00"`, "😀"},
+		{`"\ud7ff\ue000"`, "\ud7ff\ue000"},
+		{`"x�"`, "x�"},
+		{`"x\ufffd"`, "x�"},
+		{`"\\ud800"`, `\ud800`},
+		{`"\\\\udfff"`, `\\udfff`},
+		{`"\u005cud800"`, `\ud800`},
+		{`"\"\\\/\b\f\n\r\t"`, "\"\\/\b\f\n\r\t"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			var got string
+			if err := strictjson.Decode([]byte(tc.input), &got); err != nil || got != tc.want {
+				t.Fatalf("Decode(%s) = %q, %v; want %q", tc.input, got, err, tc.want)
+			}
+		})
+	}
+}
 
 func TestDecode(t *testing.T) {
 	tests := []struct {
@@ -127,7 +169,12 @@ func TestDecodeUntaggedFieldPanics(t *testing.T) {
 }
 
 func FuzzDecode(f *testing.F) {
-	for _, s := range []string{base + `}`, base + `,"sub":{"n":3},"raw":[1,2]}`, `{`, `null`, `[]`} {
+	for _, s := range []string{
+		base + `}`, base + `,"sub":{"n":3},"raw":[1,2]}`, `{`, `null`, `[]`,
+		`{"name":"\ud800","count":0,"items":[]}`,
+		`{"name":"\\ud800","count":0,"items":[]}`,
+		`{"name":"\ud83d\ude00�","count":0,"items":[]}`,
+	} {
 		f.Add([]byte(s))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
