@@ -21,7 +21,8 @@ and its bound values. A local value stays attached, including a body spelled
 - `manage.go`: management arguments, expected versions and one retained request
   for a single resend after an unknown outcome.
 - `manage_output.go`: complete JSON responses and human settings and lists.
-- `export.go`: online export and the precise missing-daemon offline fallback.
+- `export.go`: verified online export, the precise missing-daemon offline
+  fallback, and writing a new private copy through `fsx.CreatePrivateFile`.
 - `help.go`: usage, purpose and example for every command.
 
 Agent flags are assembled into presence-preserving objects for `Client.Call`;
@@ -41,3 +42,14 @@ reported to the caller. `--json` writes the complete response, preserving
 A human unknown-outcome error prints the retained identifier from its error
 details. Human adapter-enable output explains that probing continues in the
 background and directs the owner to `sidera adapter list`.
+
+An export's armor is parsed only by `keys.ParseRevocationExport`, and its verified
+digest must match the response before an output file is created. The shared
+private-file boundary owns exclusive creation and platform permission checks;
+the command owns writing, syncing, closing, and cleanup after that returns a
+file. Cleanup is registered only after creation succeeds, including for returned
+stdout/stderr errors. Existing names are never removed. Local file failures
+keep the OS explanation, the stdout alternative when privacy cannot be verified,
+and any cleanup failure in the error message. Only these local failures use
+`exportFileFailure`; remote errors and armor or digest validation never enter
+that wrapper and retain the shared error mapping.

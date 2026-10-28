@@ -39,7 +39,7 @@ arguments, purpose and one example.
 | `endpoint list [--instance <name>]` / `endpoint close <addr>` | Read endpoints, including closed ones, or close an endpoint. |
 | `endpoint set <addr> <field>=<json> ... [--expected-version <n>]` | Change the endpoint's settings. |
 | `node show` / `node set <field>=<json> ... [--expected-version <n>]` | Read or change node settings. |
-| `identity export-revocation` | Export the self-revocation and the digest that identifies the backup. |
+| `identity export-revocation [--out <new-file>]` | Export the self-revocation and its digest; optionally write the verified raw record to a new private file. |
 | `identity confirm-backup <digest>` | Confirm an offline backup by the digest printed on export. |
 | `identity retire --node <id> --yes` | Retire this identity permanently and stop the daemon; omitting `--yes` is usage error 2. |
 | `clock clear-rollback` | Accept the current wall clock and clear the rollback pause. |
@@ -92,6 +92,33 @@ and `keys.FormatRevocationExport`; peer-check failures and unknown outcomes are
 reported without an offline read. Human export writes the armored statement to
 stdout. Both modes print the digest and offline-backup instructions to stderr;
 JSON export has the same complete `result` shape online and offline.
+
+Before reporting an export, `keys.ParseRevocationExport` verifies the armor and
+the CLI compares the verified record digest with the response's digest. Invalid
+armor or a mismatch is an invalid answer (`outcome_unknown`, exit 10), and no
+output file is created. The armor format and signature rules stay in
+[identity](../identity/README.md).
+
+`--out` calls `fsx.CreatePrivateFile`: the final name must not exist, and the
+file is private when it is created. Unix uses exclusive creation at 0600 and
+checks the opened file; Windows uses a protected current-user DACL and verifies
+the opened file's volume supports persistent ACLs before any bytes are written.
+Windows FAT/exFAT volumes and network shares are unsupported; when privacy
+cannot be established, the error suggests stdout without `--out` instead.
+The complete boundary is described in [storage](../storage/README.md).
+
+The CLI writes the raw verified record, syncs and closes it before output. A
+returned error, including an output-stream error, causes cleanup of the copy
+this invocation created; cleanup failures are reported too. Local file errors
+retain the OS cause and the stdout alternative when privacy cannot be verified;
+remote failures and invalid export responses keep the shared error mapping.
+A pre-existing file is never overwritten or removed. Direct process termination cannot run cleanup;
+no power-loss durability is promised. The source statement in the node is kept.
+
+Human `--out` prints only the digest to stdout. `--json`, with or without
+`--out`, always prints the complete management response, including both
+`armored` and `digest`; the flag adds the file write without removing response
+fields. Backup instructions remain on stderr in both modes.
 
 ## Output and errors
 

@@ -256,9 +256,9 @@ interface, all held to the local owner:
 
 | Command | What it does |
 | ------- | ------------ |
-| `identity export-revocation` | Prints the armored statement and its digest. The statement is the one the keys verified at load, and the export is not stored under `state/`. |
+| `identity export-revocation [--out <new-file>]` | Prints the armored statement and its digest, or writes a verified private raw copy. The statement is the one the keys verified at load, and the export is not stored under `state/`. The [command-line reference](../command-line/README.md) specifies digest checks, exclusive creation, cleanup and JSON output. |
 | `identity confirm-backup <digest>` | Records, in `config/revocation-backup.json`, that the owner keeps a copy outside this device. The digest must be that of the statement the node holds; the file names it, so a confirmation made for an earlier identity says nothing about a node made again over the same data directory. |
-| `identity retire --node <id>` | Keeps the statement as a verified revocation in `config/revocations/` and stops the daemon. From the commit nothing is signed in the node's name, even before the daemon is down, and every later start refuses to run. The node is named so that a retirement meant for another data directory is refused. |
+| `identity retire --node <id> --yes` | Keeps the statement as a verified revocation in `config/revocations/` and stops the daemon. From the commit nothing is signed in the node's name, even before the daemon is down, and every later start refuses to run. The node is named so that a retirement meant for another data directory is refused; the CLI requires explicit `--yes`. |
 | `clock clear-rollback` | Lifts the pause of a wall clock that was set back: the mark becomes the clock as it reads and the flag is removed, in one replacement of `clock.rec`. |
 
 A retirement is for good, so the deliveries the node has not settled when it is

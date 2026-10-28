@@ -23,7 +23,7 @@ var helpEntries = map[string]helpEntry{
 	"endpoint set":               {"endpoint set <address> <field>=<json> ... [--expected-version <n>]", "Change endpoint settings using the instances collection version.", "sidera endpoint set <address> max_queue_s=1800 backlog_limit=200"},
 	"node show":                  {"node show", "Show node settings and their version.", "sidera node show --json"},
 	"node set":                   {"node set <field>=<json> ... [--expected-version <n>]", "Change node settings; non-JSON assignment values are strings.", "sidera node set node_queue_limit=20000 reply_permission=false"},
-	"identity export-revocation": {"identity export-revocation", "Export the self-revocation for offline backup.", "sidera identity export-revocation"},
+	"identity export-revocation": {"identity export-revocation [--out <new-file>]", "Export the self-revocation for offline backup; --out writes the verified raw record privately.", "sidera identity export-revocation --out self-revocation.rec"},
 	"identity confirm-backup":    {"identity confirm-backup <digest>", "Confirm that the exported statement is kept outside this device.", "sidera identity confirm-backup <digest>"},
 	"identity retire":            {"identity retire --node <id> --yes", "Permanently retire this node's identity and stop the daemon.", "sidera identity retire --node <id> --yes"},
 	"clock clear-rollback":       {"clock clear-rollback", "Accept the current wall clock and clear the rollback pause.", "sidera clock clear-rollback"},

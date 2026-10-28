@@ -208,6 +208,11 @@ Existing state refusals keep their codes; `loop_busy` is the inbox submission
 wait. Success, including a received message or an empty receive page, exits zero.
 Command-line usage errors always write diagnostics to stderr and exit with code 2,
 including with `--json`. They do not produce an API error body on stdout.
+The CLI preserves every explicitly supplied Agent flag, including empty strings,
+zero and false, through `Client.Call`; the interface's existing presence rules
+decide validity. Command syntax, output and owner-only management commands
+(including verified private-file export) are described in the
+[command-line reference](../command-line/README.md).
 
 The [shared local HTTP boundary](../local-http/README.md) owns routing, body
 limits, response encoding, logging and shutdown. The server reads headers within

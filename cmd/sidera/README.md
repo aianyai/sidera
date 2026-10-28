@@ -28,3 +28,9 @@ peer drops management responses to verify the CLI's one resend keeps the
 operation identifier, version and body unchanged. The decoder and settings
 argument fuzz tests live in `internal/cli`, alongside a parser fuzz target that
 checks local/global arities, preserved values and unchanged argv.
+
+Export tests compare online and offline raw copies with the source record,
+refuse invalid armor and mismatched digests before file creation, protect
+pre-existing files, and make the child's own stdout/stderr writes fail to check
+that its newly created copy is cleaned up. Private-file creation and Windows ACL
+checks are tested at their owner, `fsx`.

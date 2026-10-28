@@ -1087,3 +1087,188 @@ func TestIdentityExportDoesNotFallBackAfterPeerCheckFailure(t *testing.T) {
 		t.Fatalf("unverified peer export: %d %q %q", code, out, diag)
 	}
 }
+
+func TestRevocationExportWritesVerifiedRecords(t *testing.T) {
+	home, done := startDaemon(t)
+	online := filepath.Join(home, "online.rec")
+	code, out, diag := runHome(t, home, "identity", "export-revocation", "--out", online, "--json")
+	var response struct {
+		Result struct {
+			Armored string `json:"armored"`
+			Digest  string `json:"digest"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &response); code != 0 || err != nil || response.Result.Armored == "" || len(response.Result.Digest) != 64 || !strings.Contains(diag, response.Result.Digest) {
+		t.Fatalf("online file export: %d %q %q %v", code, out, diag, err)
+	}
+	before, err := os.ReadFile(online)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(online)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
+		t.Fatalf("export mode %o, want 600", info.Mode().Perm())
+	}
+	human := filepath.Join(home, "human.rec")
+	code, out, diag = runHome(t, home, "identity", "export-revocation", "--out", human)
+	if code != 0 || out != response.Result.Digest+"\n" || !strings.Contains(diag, response.Result.Digest) {
+		t.Fatalf("human file export: %d %q %q", code, out, diag)
+	}
+	code, out, diag = runHome(t, home, "identity", "export-revocation", "--out", online, "--json")
+	after, err := os.ReadFile(online)
+	if code != 1 || err != nil || !bytes.Equal(before, after) || strings.Contains(out, `"result"`) {
+		t.Fatalf("existing file protection: exit %d, read %v, changed %v, stdout %q, stderr %q", code, err, !bytes.Equal(before, after), out, diag)
+	}
+	if !strings.Contains(out, filepath.Base(online)) {
+		t.Fatalf("file failure lost its cause: %q", out)
+	}
+	code, out, diag = runHome(t, home, "identity", "export-revocation", "--out=", "--json")
+	if code != 1 || strings.Contains(out, `"result"`) {
+		t.Fatalf("empty output path disappeared: %d %q %q", code, out, diag)
+	}
+	if code, out, diag := runHome(t, home, "daemon", "stop", "--json"); code != 0 {
+		t.Fatalf("stop: %d %q %q", code, out, diag)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("daemon did not stop")
+	}
+	source, err := os.ReadFile(filepath.Join(home, "keys", "self-revocation.rec"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	offline := filepath.Join(home, "offline.rec")
+	code, out, diag = runHome(t, home, "identity", "export-revocation", "--out", offline, "--json")
+	var stopped struct {
+		Result struct {
+			Armored string `json:"armored"`
+			Digest  string `json:"digest"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(out), &stopped); code != 0 || err != nil || stopped != response {
+		t.Fatalf("offline file export: %d %q %q %v", code, out, diag, err)
+	}
+	for _, path := range []string{online, human, offline} {
+		data, err := os.ReadFile(path)
+		if err != nil || !bytes.Equal(data, source) {
+			t.Fatalf("export %s differs from the source record: %v", filepath.Base(path), err)
+		}
+	}
+}
+
+func TestRevocationExportRejectsAnInvalidBackupBeforeCreatingAFile(t *testing.T) {
+	for _, mismatch := range []bool{false, true} {
+		t.Run(fmt.Sprint(mismatch), func(t *testing.T) {
+			home, err := os.MkdirTemp("", "ce-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(home) })
+			if code, out, diag := runHome(t, home, "init", "--json"); code != 0 {
+				t.Fatalf("init: %d %q %q", code, out, diag)
+			}
+			code, out, diag := runHome(t, home, "identity", "export-revocation", "--json")
+			if code != 0 {
+				t.Fatalf("seed export: %d %q %q", code, out, diag)
+			}
+			var response struct {
+				Result struct {
+					Armored string `json:"armored"`
+					Digest  string `json:"digest"`
+				} `json:"result"`
+			}
+			if err := json.Unmarshal([]byte(out), &response); err != nil {
+				t.Fatal(err)
+			}
+			if mismatch {
+				response.Result.Digest = strings.Repeat("0", 64)
+			} else {
+				response.Result.Armored = "not a verified self-revocation"
+			}
+			addr, err := ipc.Locate(home, ipc.KindManage)
+			if err != nil {
+				t.Fatal(err)
+			}
+			l, err := ipc.Listen(addr, held{}, ipc.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					t.Error(err)
+				}
+			})}
+			ended := make(chan error, 1)
+			go func() { ended <- server.Serve(l) }()
+			t.Cleanup(func() {
+				server.Close()
+				if err := <-ended; err != http.ErrServerClosed {
+					t.Error(err)
+				}
+			})
+			target := filepath.Join(home, "invalid.rec")
+			code, out, diag = runHome(t, home, "identity", "export-revocation", "--out", target, "--json")
+			if code != 10 || !strings.Contains(out, `"category":"outcome_unknown"`) || strings.Contains(out, `"result"`) {
+				t.Fatalf("invalid export: %d %q %q", code, out, diag)
+			}
+			if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Fatalf("invalid backup created a file: %v", err)
+			}
+		})
+	}
+}
+
+func TestRevocationExportCleansItsNewFileWhenOutputReturnsAnError(t *testing.T) {
+	for _, stream := range []string{"stdout", "stderr"} {
+		t.Run(stream, func(t *testing.T) {
+			home, err := os.MkdirTemp("", "co-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(home) })
+			if code, out, diag := runHome(t, home, "init", "--json"); code != 0 {
+				t.Fatalf("init: %d %q %q", code, out, diag)
+			}
+			path := filepath.Join(home, "read-only-stream")
+			if err := os.WriteFile(path, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			readOnly, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer readOnly.Close()
+			target := filepath.Join(home, "incomplete.rec")
+			cmd := exec.Command(binary(t), "--home", home, "identity", "export-revocation", "--out", target, "--json")
+			var out, diag bytes.Buffer
+			cmd.Stdout = &out
+			cmd.Stderr = &diag
+			// Passing the read-only handle to the child makes its own Write return
+			// an error, rather than a parent-side pipe copy or a SIGPIPE race.
+			if stream == "stdout" {
+				cmd.Stdout = readOnly
+			} else {
+				cmd.Stderr = readOnly
+			}
+			err = cmd.Run()
+			exit, ok := err.(*exec.ExitError)
+			if !ok || exit.ExitCode() != 1 {
+				t.Fatalf("output failure: %v, stdout %q, stderr %q", err, &out, &diag)
+			}
+			if _, err := os.Stat(target); !os.IsNotExist(err) {
+				t.Fatalf("failed export left its new file: %v", err)
+			}
+			if _, err := os.Stat(filepath.Join(home, "keys", "self-revocation.rec")); err != nil {
+				t.Fatalf("source statement changed: %v", err)
+			}
+		})
+	}
+}

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -21,7 +23,7 @@ type exportResponse struct {
 	Result revocationExport `json:"result"`
 }
 
-func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client) error {
+func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client, output *string) (err error) {
 	raw, err := client.Call(ctx, "identity.export_revocation", manageapi.Request{})
 	if err != nil {
 		if apiwire.FromError(err).Code != "daemon_not_running" {
@@ -45,14 +47,50 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 	if err := json.Unmarshal(raw, &response); err != nil || response.Result.Armored == "" || response.Result.Digest == "" {
 		return apiwire.OutcomeUnknown("")
 	}
+	statement, err := keys.ParseRevocationExport([]byte(response.Result.Armored))
+	if err != nil || statement.Digest().String() != response.Result.Digest {
+		return apiwire.OutcomeUnknown("")
+	}
+	if output != nil {
+		file, openErr := fsx.CreatePrivateFile(*output)
+		if openErr != nil {
+			return exportFileFailure(openErr)
+		}
+		// This defer is registered only after our exclusive create succeeded.
+		// It never removes a file that already existed, including on output errors.
+		defer func() {
+			if err != nil {
+				if removeErr := os.Remove(*output); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+					err = errors.Join(err, removeErr)
+				}
+				err = exportFileFailure(err)
+			}
+		}()
+		_, writeErr := file.Write(statement.Wire())
+		if writeErr == nil {
+			writeErr = file.Sync()
+		}
+		closeErr := file.Close()
+		if writeErr != nil || closeErr != nil {
+			return errors.Join(writeErr, closeErr)
+		}
+	}
+	if _, err = fmt.Fprintf(c.Stderr, "Keep this self-revocation outside this device, then run `sidera identity confirm-backup %s`.\n", response.Result.Digest); err != nil {
+		return err
+	}
 	if c.json {
 		_, err = c.Stdout.Write(raw)
+	} else if output != nil {
+		_, err = fmt.Fprintln(c.Stdout, response.Result.Digest)
 	} else {
 		_, err = fmt.Fprint(c.Stdout, response.Result.Armored)
 	}
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(c.Stderr, "Keep this self-revocation outside this device, then run `sidera identity confirm-backup %s`.\n", response.Result.Digest)
 	return err
+}
+
+// Only local file and stream errors enter here. Their path and OS failure
+// explain what the owner can fix, including private-volume refusal; no response
+// content, token or statement is included. Keep joined cleanup failures visible.
+func exportFileFailure(err error) error {
+	return apiwire.New(apiwire.CategoryInternal, apiwire.CodeInternal, err.Error())
 }

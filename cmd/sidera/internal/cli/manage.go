@@ -22,6 +22,7 @@ type managementPlan struct {
 	change        bool
 	versionMethod string
 	expected      *admin.Version
+	exportOut     *string
 }
 
 func (c *command) manage(ctx context.Context, args []string) error {
@@ -35,7 +36,7 @@ func (c *command) manage(ctx context.Context, args []string) error {
 	}
 	defer client.Close()
 	if plan.method == "identity.export_revocation" {
-		return c.exportRevocation(ctx, client)
+		return c.exportRevocation(ctx, client, plan.exportOut)
 	}
 	req := manageapi.Request{Params: plan.params, ExpectedVersion: plan.expected}
 	if plan.versionMethod != "" && req.ExpectedVersion == nil {
@@ -171,6 +172,9 @@ func (c *command) managementPlan(args []string) (managementPlan, error) {
 	if err != nil {
 		return plan, err
 	}
+	if present(f, "out") {
+		plan.exportOut = &o.output
+	}
 	if versioned && present(f, "expected-version") {
 		v := admin.Version(o.version)
 		plan.expected = &v
@@ -290,9 +294,9 @@ func assignments(args []string) (map[string]any, error) {
 }
 
 type managementFlags struct {
-	file, instance, node string
-	all, yes             bool
-	version              uint64
+	file, instance, node, output string
+	all, yes                     bool
+	version                      uint64
 }
 
 func (o *managementFlags) add(f *flag.FlagSet, name string) {
@@ -306,6 +310,8 @@ func (o *managementFlags) add(f *flag.FlagSet, name string) {
 		f.StringVar(&o.file, "config", "", "instance JSON file, or - for stdin")
 	case "endpoint list":
 		f.StringVar(&o.instance, "instance", "", "filter by instance")
+	case "identity export-revocation":
+		f.StringVar(&o.output, "out", "", "write the verified raw record to a new private file")
 	case "identity retire":
 		f.StringVar(&o.node, "node", "", "node to retire")
 		f.BoolVar(&o.yes, "yes", false, "confirm permanent retirement")
