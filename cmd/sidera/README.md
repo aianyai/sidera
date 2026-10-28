@@ -8,6 +8,11 @@ that calls `os.Exit`. Build it with `go build ./cmd/sidera`.
 commands, output and exit codes. Agent commands use the checked local Agent
 client; management commands use the management client; `init` and the foreground
 `daemon` use the daemon composition root.
+`sidera mcp` serves the same Agent tools through
+[`internal/mcp`](internal/mcp/README.md). The dispatcher owns the Agent client;
+the MCP peer takes ownership of stdin/stdout and reserves stdout for protocol
+messages even with `--json`. Its wire contract and manual client check are in
+[the MCP reference](../../docs/references/mcp/README.md).
 The name `siderad` (also `siderad.exe`) selects `daemon`.
 
 [`internal/acceptance`](internal/acceptance/README.md) contains test support
@@ -34,3 +39,9 @@ refuse invalid armor and mismatched digests before file creation, protect
 pre-existing files, and make the child's own stdout/stderr writes fail to check
 that its newly created copy is cleaned up. Private-file creation and Windows ACL
 checks are tested at their owner, `fsx`.
+
+MCP binary tests use an independent handwritten JSON-RPC driver to launch the
+built executable in both supported protocol eras. They exercise all Agent tools,
+probe-only credentials, process errors, and five 60 KiB messages in Chinese and
+English, reconstructing each body and acknowledging only visible parts. The
+built child follows the outer test's race build.

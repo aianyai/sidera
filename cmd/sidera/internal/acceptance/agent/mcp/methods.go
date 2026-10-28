@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -48,10 +49,14 @@ func (c *Client) sent(ctx context.Context, name string, args map[string]any) (fa
 	return fakeagent.SendResult{MessageID: wire.MessageID, To: wire.To, Replayed: wire.Replayed}, err
 }
 func (c *Client) Recv(ctx context.Context, in fakeagent.RecvInput) (fakeagent.RecvResult, error) {
+	if in.Frontend != "" && in.Frontend != adapterproto.FrontendMCP {
+		return fakeagent.RecvResult{}, fmt.Errorf("mcp test client: recv supports only the mcp front end")
+	}
 	args := map[string]any{}
 	if in.Msg != "" || in.Part != 0 {
 		args["msg"], args["part"] = in.Msg, in.Part
-	} else {
+	}
+	if in.WaitS != 0 || (in.Msg == "" && in.Part == 0) {
 		args["wait_s"] = in.WaitS
 	}
 	optional(args, "ack_lease", in.AckLease, in.AckLease != "")
@@ -83,7 +88,10 @@ func (c *Client) Declare(ctx context.Context, in fakeagent.DeclareInput) error {
 	_, err := c.call(ctx, "declare", args, nil)
 	return err
 }
-func (c *Client) Probe(ctx context.Context, _ fakeagent.ProbeInput) (fakeagent.ProbeResult, error) {
+func (c *Client) Probe(ctx context.Context, in fakeagent.ProbeInput) (fakeagent.ProbeResult, error) {
+	if in.Frontend != "" && in.Frontend != adapterproto.FrontendMCP {
+		return fakeagent.ProbeResult{}, fmt.Errorf("mcp test client: probe supports only the mcp front end")
+	}
 	var wire struct {
 		OK       bool                  `json:"ok"`
 		Preset   string                `json:"preset"`

@@ -1,5 +1,11 @@
 # MCP
 
+Run `sidera mcp` to serve the Agent tools on stdin/stdout. Global `--home`
+selects the node as it does for other commands. `SIDERA_TOKEN` authenticates
+endpoint tools; `SIDERA_PROBE_TOKEN` is the independent one-use probe credential.
+`--json` does not change MCP framing or redirect process diagnostics to stdout.
+The command never starts a daemon or opens the management interface.
+
 The stdio boundary supports precisely `2025-06-18` and `2026-07-28`. It reuses
 [the peer transport](../../../sdk/go/peer/README.md), including bounded queues
 and writes. It never sends server requests or progress notifications. Standard
@@ -50,9 +56,11 @@ then closes. End of input cancels in-flight requests and normally returns succes
 a broken transport is a process failure. A caller's ended context closes both
 streams.
 
-When requested by the caller, the first compliant request starts one independent
-Agent probe. It uses the client's separate probe credential, reports only on
-standard error, and does not delay or alter an MCP response.
+When requested by the caller, the first valid legacy `initialize` or modern
+request (including `server/discover`) starts one independent Agent probe. A legacy
+`ping` does not establish initialization and leaves the probe available. The probe
+uses the client's separate probe credential, reports only on standard error, and
+does not delay or alter an MCP response.
 
 ## Agent tools
 
@@ -93,13 +101,14 @@ Install and authenticate the local Claude Code and Codex CLIs first. From the
 repository root, run this opt-in check once against the completed executable:
 
 ```sh
-SIDERA_REALCLIENT=1 go test -tags realclient -run '^TestRealClientsAcceptMCPResponses$' -count=1 -timeout 15m ./cmd/sidera/internal/mcp
+SIDERA_REALCLIENT=1 go test -v -tags realclient -run '^TestRealClientsAcceptMCPResponses$' -count=1 -timeout 15m ./cmd/sidera/internal/mcp
 ```
 
 The check builds `sidera`, creates a temporary Agent socket backed by the test
 node, and starts each real client in a separate empty directory. It uses private,
 one-process MCP settings and leaves the user's persistent MCP configuration
-untouched. Claude uses `--mcp-config` and `--strict-mcp-config`; Codex uses
+untouched. If the outer test uses `-race`, the MCP executable is also built with
+`-race`. Claude uses `--mcp-config` and `--strict-mcp-config`; Codex uses
 `exec --ignore-user-config`, `--ephemeral` and inline `-c` settings while retaining
 its existing authentication. Its inline
 `mcp_servers.sidera.tools.recv.approval_mode="approve"` setting adds an explicit
@@ -107,7 +116,9 @@ approval override only for the fixture's `recv` tool in that process; the server
 default remains `auto` and the sandbox remains read-only. `recv` has no read-only
 hint because it can change receive state. These sessions consume the user's normal client
 quota. The `realclient` build tag and explicit environment flag exclude the check
-from ordinary tests and CI. On Unix, the temporary directory must fit the local
+from ordinary tests and CI. The user runs it after the built-binary contract
+tests pass; a passing scripted MCP driver is not a substitute for this check.
+On Unix, the temporary directory must fit the local
 socket path limit; `TMPDIR` can name a shorter private directory if needed.
 
 Both client subtests must pass: each client must accept the tool catalogue, call

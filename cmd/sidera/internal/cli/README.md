@@ -4,7 +4,10 @@
 includes the executable name. The owner supplies standard streams, an environment
 lookup and a version. The dispatcher returns an exit code and never exits the
 process itself. It borrows the streams, owns and closes the Agent client, and
-waits for a foreground daemon to finish before returning.
+waits for a foreground daemon to finish before returning. For `mcp`, it passes
+stdin/stdout ownership to the MCP peer and borrows stderr for diagnostics. MCP
+process failures always use stderr, including with `--json`; tool and RPC failures
+remain protocol messages.
 
 Global flags are removed before dispatch. Command discovery registers the local
 flags once; global scanning reads their arity through `FlagSet.Lookup` and the
@@ -33,6 +36,9 @@ comma-separated `send --to` values as a list so the Agent boundary alone owns
 the one-recipient rule. A receive writes the client's page unchanged, adds no
 newline and does not acknowledge it. Errors use `apiwire` and its exit table;
 daemon failures retain `daemon.ExitCode`, including fatal storage code 74.
+The `mcp` command parses its empty local flag set, then calls `mcp.Run` directly
+with the existing client and build version. A non-empty probe credential enables
+the MCP package's automatic connection probe; ordinary credentials stay separate.
 
 Management commands parse their inputs once, read an omitted collection version
 once, and choose an operation identifier once. Only a change with an unknown

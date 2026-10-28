@@ -37,7 +37,11 @@ func TestRealClientsAcceptMCPResponses(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		binary += ".exe"
 	}
-	build := exec.Command("go", "build", "-o", binary, "./cmd/sidera")
+	buildArgs := []string{"build", "-o", binary}
+	if realClientRace {
+		buildArgs = append(buildArgs, "-race")
+	}
+	build := exec.Command("go", append(buildArgs, "./cmd/sidera")...)
 	build.Dir = root
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build sidera: %v\n%s", err, output)
