@@ -82,13 +82,17 @@ func (p *probe) attachments() daemon.Attachments {
 // the daemon. The wall clock is judged (step 4) before anything is signed (step
 // 5); the scan of state/ (6) precedes the management interface (8); the
 // adapters (10) have started before the recovery of deliveries (11 to 14) goes
-// on, so that a lease is released only after the adapters said which turns run;
+// on, because reconciliation asks the connected adapters about pending attempts;
 // and the Agent interface serves everything last (15).
-func TestStartupStepsRunInTheirFixedOrder(t *testing.T) {
+func TestStartupStepsRunInSpecifiedOrder(t *testing.T) {
 	noLeaks(t)
-	c, _ := initialized(t)
-	c.Attach = newProbe(t, c.Home).attachments()
-	started(t, c)
+	c, clk := initialized(t)
+	installed := installedChat()
+	installChat(t, openHome(t, c), installed)
+	a := newAdapters(t, clk, installed, nil)
+	c.AdapterHost = a.host
+	d := started(t, c)
+	a.probed(t, d)
 	var want []string
 	for i := 1; i <= 15; i++ {
 		want = append(want, "startup "+itoa(i)+" begin", "startup "+itoa(i)+" end")

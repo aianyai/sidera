@@ -123,7 +123,7 @@ mapping stays in `apiwire`, and process exit policy stays here.
 `second_test.go` has `TestSecondDaemonOnSameHomeRefused`; `init_test.go` init, its
 crash states and the declared crash points; `permissions_test.go` and
 `permissions_windows_test.go` the checks of the data directory and of `keys/`;
-`identity_test.go` the retirement, the renewal of the certificate, the reminder and the rollback pause through the whole daemon; `certificate_test.go` the failures of the renewal and its crash states, and the certificate a clock that jumped ahead leaves for the owner's clear to renew; `owner_test.go` the settings, the alerts and the status through the management interface; `startup_test.go` the order of the start, the hooks, the layout, the log, the share
+`identity_test.go` the retirement, the renewal of the certificate, the reminder and the rollback pause through the whole daemon; `certificate_test.go` the failures of the renewal and its crash states, and the certificate a clock that jumped ahead leaves for the owner's clear to renew; `owner_test.go` the settings, the alerts and the status through the management interface; `startup_test.go` the order of the complete start with an enabled adapter host, the hooks, the layout, the log, the share
 of the log budget, the periodic tasks and the clock; `shutdown_test.go` the order of
 the shutdown, the stop through the management interface, `Run` and a fatal failure;
 `fatal_start_test.go` a fatal failure in each step of the start that can be injected

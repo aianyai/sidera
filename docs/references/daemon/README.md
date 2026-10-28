@@ -495,7 +495,7 @@ interface: a sandbox must deny the socket to an agent.
   started by the one launcher the engine-layer fixture also uses (`harness`).
 - Tests of the daemon: `TestSecondDaemonOnSameHomeRefused`,
   `TestInitOnTheHomeOfARunningDaemonIsRefused`,
-  `TestStartupStepsRunInTheirFixedOrder`,
+  `TestStartupStepsRunInSpecifiedOrder`,
   `TestEachHookRunsInsideItsStepWithTheEngineInTheStateTheStepNeeds`,
   `TestTheManagementInterfaceReadsAndRefusesChangesWhileTheNodeStarts`,
   `TestAgentListenerStartsWithProbesAndEnablesMethodsOnlyWhenServing`,
