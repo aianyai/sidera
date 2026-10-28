@@ -23,7 +23,11 @@ legacy initialization.
 `server/discover` advertises the modern version and tools capability, with
 `resultType: "complete"`, `ttlMs: 3600000`, `cacheScope: "public"`, and server
 identity in `_meta.io.modelcontextprotocol/serverInfo`. The public cache is safe
-because discovery contains no endpoint data. Unknown methods return `-32601`.
+because discovery contains no endpoint data. Without modern version metadata,
+`server/discover` follows the process's legacy initialization state: before
+`initialize` it returns `-32602`; after legacy initialization it is an unknown
+legacy method and returns `-32601`. A modern discovery request does not initialize
+the legacy process. Other unknown methods return `-32601`.
 
 Only fields the server uses are interpreted. Unknown input members, including
 extra metadata, are ignored; repeated keys at any depth are refused to prevent

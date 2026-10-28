@@ -62,9 +62,12 @@ func TestLegacyInitializeGolden(t *testing.T) {
 	s := start(t, mcp.Config{Version: "test"})
 	s.exchange(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1"}}}`, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"tools":{}},"serverInfo":{"name":"sidera","version":"test"},"instructions":"Use me to inspect your endpoint and receive limits. Receive pages must be read before acknowledging them."}}`)
 	s.exchange(t, `{"jsonrpc":"2.0","id":2,"method":"ping"}`, `{"jsonrpc":"2.0","id":2,"result":{}}`)
+	s.exchange(t, `{"jsonrpc":"2.0","id":3,"method":"server/discover"}`, `{"jsonrpc":"2.0","id":3,"error":{"code":-32601,"message":"method not found"}}`)
 }
 
 func TestModernDiscoveryGolden(t *testing.T) {
 	s := start(t, mcp.Config{Version: "test"})
+	s.exchange(t, `{"jsonrpc":"2.0","id":"before","method":"server/discover"}`, `{"jsonrpc":"2.0","id":"before","error":{"code":-32602,"message":"send initialize first, or carry io.modelcontextprotocol/protocolVersion in _meta"}}`)
 	s.exchange(t, `{"jsonrpc":"2.0","id":"discover","method":"server/discover","extension":true,"params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{},"extension":[1]},"extension":false}}`, `{"jsonrpc":"2.0","id":"discover","result":{"resultType":"complete","supportedVersions":["2026-07-28"],"capabilities":{"tools":{}},"instructions":"Use me to inspect your endpoint and receive limits. Receive pages must be read before acknowledging them.","ttlMs":3600000,"cacheScope":"public","_meta":{"io.modelcontextprotocol/serverInfo":{"name":"sidera","version":"test"}}}}`)
+	s.exchange(t, `{"jsonrpc":"2.0","id":"after","method":"server/discover"}`, `{"jsonrpc":"2.0","id":"after","error":{"code":-32602,"message":"send initialize first, or carry io.modelcontextprotocol/protocolVersion in _meta"}}`)
 }
