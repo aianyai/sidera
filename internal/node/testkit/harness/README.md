@@ -19,6 +19,7 @@ layer.
 | `NewStopped(t, Options)` | Prepares the same initialized disk, clock, ledger and fakes as `New`, leaving the node down so the first generation can use controlled startup. |
 | `H.TryStart(ctx, StartOptions)` | Synchronously starts a down node or reclaims everything that startup acquired before returning `(crashed, err)`. `Arm` installs ordinary fault rules before transaction recovery; `CrashAt` selects a startup point and crash mode while the fixture owns the cutoff and cleanup. |
 | `NewWalkBackend(t)`, `WalkScenario` | Runs a script for `crashwalk.Backend` on a fresh in-memory fixture, with per-generation observations, process crashes, recovery triggers, a repeatable drain and ledger judgements. `WalkScenario.Options` configures the fixture; `Damage` interprets an offline trigger on its stopped disk, and `Check` adds a final judgement. |
+| `StartupWalkScenario`, `StartupOperation` | Runs actual `daemon.Init` from an empty disk (`StartupInit`) or actual `daemon.Start` after an unobserved Init (`StartupStart`). Names, budgets, recovery cases, offline damage and read-only checks are scenario data. `StartAfter` advances the same fixed clock between Init and the first observed Start; default zero, non-negative and only valid for Start. |
 | `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, the presets the node has besides the one `init` makes (`Presets`, by name, each the JSON `presets add` takes, added through the configuration's own change), and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
 | `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport`, `H.VerifyControlReply` | The loopback of the running process, its knobs, and the check of a report or a control reply the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
 | `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. `AdapterOptions.Runtime` makes the adapter declare a runtime beside its direct endpoints and drive one fake runtime that the fixture owns and that outlives every process of the adapter (the manifest installed is `RuntimeAdapterManifest`, so the node makes the runtime endpoint of the instance). `AdapterOptions.ExtraInstances` names further instances, each installed, enabled and run like `Instance` with an adapter, controller, presets and (with `Runtime`) runtime and runtime endpoint of its own (below). Nil: no host, and the fixture admits the instance itself through the engine's entry. |
@@ -61,6 +62,25 @@ By default the node has one instance, `Instance`, and every accessor without a n
   provided `Options.Disk`, preserving the initial disk for recording and replay,
   and reclaims its fixture before the next run. Ledger judgements and `Check`
   failures become `Violations`.
+- **Startup walks use the daemon's own entry points.** `WalkBackend` dispatches
+  `WalkScenario` to the engine fixture and `StartupWalkScenario` to actual Init or
+  Start. The private run state owns plan validation, per-generation target
+  selection, recorders, trigger accounting and trace results for both. A startup
+  generation opens its window before its one writer exists. Start's preparatory
+  Init is unobserved, so two writers never share one generation's counters.
+  `complete` is the one step boundary, after Init returns or Start has quiesced
+  and stopped. Start's ordinary shutdown stays inside the observation window.
+  Selection uses the same recorder and `NewHit` conversion as engine scripts;
+  the startup callback only cuts off access, clones the disk and cancels startup
+  waits. Failed Start reclaims its own resources; successful Start is stopped with
+  RequestStop/Wait before the generation advances. A selected logical commit
+  counts as a crash even if the entry point returns nil. After an interrupted
+  Init, an unfinished marker means actual Init runs again; a completed marker
+  means verification with an empty next trace, with no synthetic Init events.
+  Existing keys, self-revocation, clock and owner configuration must survive
+  retries unchanged. Each run has its own short private socket home and in-memory
+  disk, fixed clock and synchronized seeded random source. Damage runs only on
+  the stopped disk after the window closes; final checks read without a writer.
 - **The node is made by the program's own code.** The keys and the configuration are
   written by the `init` plan (the keys are real, from a seeded source, so the node
   identifier is the same in every fixture), the adapter installed and enabled through the install and enable
@@ -233,6 +253,12 @@ the idle condition of the fake runtime are in. Each later part adds to this pack
 its stream needs.
 
 ## Tests
+
+`walk_startup_test.go` and its internal tests check real Init and Start targets,
+completed-marker retries, preservation, layout repair across three generations,
+cutoff snapshots, old callbacks, deterministic recordings and read-only oracles.
+These are representative backend contracts, not the complete transaction coverage
+suite.
 
 `startup_test.go` checks cutoff snapshots, generation seeds and unpublished starts
 across transaction recovery, scan recovery and delivery recovery, including commit

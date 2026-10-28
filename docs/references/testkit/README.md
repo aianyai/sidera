@@ -199,6 +199,29 @@ these packages and are not part of them.
   restart and a crash are those two in a row. The in-memory state a process starts with
   (the clock's high-water mark, the rollback pause an option asks for) is applied from
   zero at each start, because a process has no memory of the last one.
+- **A startup trace comes from actual Init or Start.** The in-process backend
+  dispatches engine scripts and startup scenarios to their concrete runners;
+  private run state owns their common plan, target, trigger and trace rules. Init
+  starts from an empty in-memory disk. Start prepares its disk through an
+  unobserved actual Init, then observes its own writer: combining both writers
+  in one generation would repeat transaction ordinals. The window opens before
+  the observed writer exists and includes ordinary shutdown. A startup callback
+  selects through the same recorder and `NewHit`, cuts off filesystem access,
+  clones the disk and cancels startup waits; cleanup belongs to the runner.
+  Failed Start unwinds itself; successful Start is quiesced and stopped with
+  RequestStop/Wait before the next generation. Selection still means a crash if
+  a logical commit lets Init return nil. A completed Init marker is verified
+  without creating another writer or inventing observations; otherwise actual
+  Init finishes the interrupted disk. Retry checks preserve the existing keys,
+  self-revocation, clock record and owner configuration. Offline damage is applied
+  after shutdown and window closure, and final checks read without a writer.
+  A fixed clock and synchronized seeded reader keep recordings reproducible;
+  `StartAfter` optionally advances that clock after preparation and before
+  observation, so a scenario can make certificate renewal due at Start. The
+  default is zero; negative values or use with Init are refused. Socket homes
+  are separate short private temporary directories and daemon data stays in
+  memory. Representative Init, renewal and layout replays verify this capability;
+  they do not assert complete transaction-table coverage.
 - **The node is made by the program's own code,** through the `init` plan (the keys and
   the configuration) and the install and enable entries, on a disk copied from one made
   per test binary. A hand-written disk would let the fixture and the program disagree
