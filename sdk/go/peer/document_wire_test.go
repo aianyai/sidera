@@ -71,14 +71,22 @@ func TestDialectDocumentRejectionHasNoSideEffects(t *testing.T) {
 
 func TestDialectDocumentValidationBeforeOverload(t *testing.T) {
 	leakGuard(t)
-	for _, reject := range []bool{false, true} {
-		t.Run(map[bool]string{false: "default", true: "whole document"}[reject], func(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		reject, defaultRoute bool
+	}{
+		{"default document checks", false, false},
+		{"whole document", true, false},
+		{"whole document with default handler", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reject := tc.reject
 			started := make(chan struct{}, 1)
 			release := make(chan struct{})
 			d := testDialect()
 			d.RejectDuplicateKeysAndInvalidUnicode = reject
 			_, r, _ := newDialectRaw(t, peer.Config{Dialect: d, Params: peer.Params{MaxConcurrentHandlers: 1, MaxPendingRequests: 1}}, func(p *peer.Peer) {
-				p.Handle("slow", func(ctx context.Context, _ json.RawMessage) (any, error) {
+				h := func(ctx context.Context, _ json.RawMessage) (any, error) {
 					select {
 					case started <- struct{}{}:
 					default:
@@ -88,7 +96,12 @@ func TestDialectDocumentValidationBeforeOverload(t *testing.T) {
 					case <-ctx.Done():
 					}
 					return struct{}{}, nil
-				})
+				}
+				if tc.defaultRoute {
+					p.HandleDefault(func(ctx context.Context, _ string, params json.RawMessage) (any, error) { return h(ctx, params) })
+				} else {
+					p.Handle("slow", h)
+				}
 			}, true)
 			r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
 			awaitSignal(t, started, "the busy handler")

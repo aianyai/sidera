@@ -102,6 +102,11 @@ type Config struct {
 // never sent. A panic is recovered and treated the same way.
 type RequestHandler func(ctx context.Context, params json.RawMessage) (result any, err error)
 
+// DefaultRequestHandler answers a request whose method has no registered
+// RequestHandler. It receives the method name and otherwise has the same
+// params, context, result and error contract as RequestHandler.
+type DefaultRequestHandler func(ctx context.Context, method string, params json.RawMessage) (result any, err error)
+
 // NotificationHandler handles one inbound notification. Notifications are
 // delivered one at a time in arrival order, so a slow handler delays the ones
 // behind it and can overflow the queue.
@@ -154,9 +159,10 @@ type Peer struct {
 	baseCtx    context.Context
 	cancelBase context.CancelFunc
 
-	handlersMu           sync.RWMutex
-	requestHandlers      map[string]RequestHandler
-	notificationHandlers map[string]NotificationHandler
+	handlersMu            sync.RWMutex
+	requestHandlers       map[string]RequestHandler
+	defaultRequestHandler DefaultRequestHandler
+	notificationHandlers  map[string]NotificationHandler
 
 	nextID atomic.Int64
 	ended  atomic.Bool // set once the connection has begun to end
@@ -227,13 +233,30 @@ func New(r io.Reader, w io.WriteCloser, cfg Config) (*Peer, error) {
 // Handle registers the handler for a request method, replacing any earlier
 // one. It panics on an empty method, a nil handler or the dialect's cancel
 // notification (MethodCancelRequest by default), which the peer handles
-// itself. Requests for methods without a handler are answered with
-// CodeMethodNotFound.
+// itself. Requests for methods without a handler use HandleDefault's handler,
+// or are answered with CodeMethodNotFound when none is registered.
 func (p *Peer) Handle(method string, h RequestHandler) {
 	p.checkRegistration(method, h == nil)
 	p.handlersMu.Lock()
 	defer p.handlersMu.Unlock()
 	p.requestHandlers[method] = h
+}
+
+// HandleDefault registers the handler for requests without a named handler,
+// replacing any earlier default. It panics on a nil handler. A named handler
+// always takes priority, even when it returns CodeMethodNotFound.
+//
+// Like Handle, it may be called before or after Start. Selection is fixed when
+// a request is accepted: replacement does not change already queued requests.
+// The default shares the named handlers' queue, concurrency and cancellation
+// rules; it is never called on the read loop or for notifications or responses.
+func (p *Peer) HandleDefault(h DefaultRequestHandler) {
+	if h == nil {
+		panic("peer: nil default request handler")
+	}
+	p.handlersMu.Lock()
+	defer p.handlersMu.Unlock()
+	p.defaultRequestHandler = h
 }
 
 // HandleNotification registers the handler for a notification method. The
