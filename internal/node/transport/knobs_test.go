@@ -27,6 +27,38 @@ func waitFor(t testing.TB, what string, cond func() bool) {
 	}
 }
 
+func TestDirectoryUsesOnlyTheNodeFaultKnobs(t *testing.T) {
+	r := newRig(t)
+	r.knobs.Unreachable(r.self, true)
+	if _, err := r.loop.QueryDirectory(context.Background(), r.self, ep(9), transport.DirectoryRequest{}); !errors.Is(err, transport.ErrUnreachable) {
+		t.Fatalf("unreachable directory = %v", err)
+	}
+	r.knobs.Unreachable(r.self, false)
+	r.knobs.DropReceipt(1)
+	r.knobs.HoldReports("m1")
+	r.knobs.Mutate("m1")
+	r.knobs.Delay(time.Minute)
+	done := make(chan error, 1)
+	go func() {
+		_, err := r.loop.QueryDirectory(context.Background(), r.self, ep(9), transport.DirectoryRequest{})
+		done <- err
+	}()
+	waitFor(t, "directory delay", func() bool { return r.knobs.Waiting() == 1 })
+	r.clk.Advance(time.Minute)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("directory after the delay = %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("directory did not return after its delay")
+	}
+	r.wantHits(t, map[transport.Knob]int{transport.KnobUnreachable: 1, transport.KnobDelay: 1})
+	r.wantObserved(t,
+		transport.Hit{Knob: transport.KnobUnreachable, Call: transport.CallDirectory, Node: r.self},
+		transport.Hit{Knob: transport.KnobDelay, Call: transport.CallDirectory, Node: r.self})
+}
+
 // TestKnobs has one row per fault knob and one row for no knob at all. Every
 // row asserts the effect of the knob and, through wantHits, that the knob was
 // hit as often as the row says and that no other knob was.
@@ -559,10 +591,11 @@ func TestDelayZeroLeavesACallThatIsAlreadyWaiting(t *testing.T) {
 // unknown one visible.
 func TestCallKindNames(t *testing.T) {
 	for kind, want := range map[transport.CallKind]string{
-		transport.CallSend:     "send",
-		transport.CallPull:     "pull",
-		transport.CallKind(0):  "invalid(0)",
-		transport.CallKind(77): "invalid(77)",
+		transport.CallSend:      "send",
+		transport.CallPull:      "pull",
+		transport.CallDirectory: "directory",
+		transport.CallKind(0):   "invalid(0)",
+		transport.CallKind(77):  "invalid(77)",
 	} {
 		if got := kind.String(); got != want {
 			t.Errorf("CallKind(%d).String() = %q, want %q", uint8(kind), got, want)

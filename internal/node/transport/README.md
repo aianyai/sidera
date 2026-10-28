@@ -6,7 +6,7 @@ for, and the loopback that carries it when that node is this one. Read
 for the reasons and for what the tests prove.
 
 This is a runtime package of layer 4 of [`internal/node/README.md`](../README.md).
-It imports the contract packages `delivery`, `envelope`, `ident` and `record`, and
+It imports the contract packages `adapterreg`, `authz`, `delivery`, `envelope`, `ident` and `record`, and
 `clock` for the injected time. It starts no goroutine, touches no file and reads
 no clock but the one its knobs were given.
 
@@ -14,11 +14,12 @@ no clock but the one its knobs were given.
 
 | Name | Purpose |
 | ---- | ------- |
-| `Handler` | What a transport calls on the engine: `Inbound` for an envelope, `Pull` for a pull. Both are told the `Origin`. The package defines it because it consumes it; the engine defines the interface it calls (`Send`, `Pull`) and every transport has those two methods. |
+| `Handler` | What a transport calls on the engine: `Inbound` for an envelope, `Pull` for a pull and `QueryDirectory` for visible endpoints. All are told the `Origin`. The package defines it because it consumes it; the engine defines the interface it calls (`Send`, `Pull`, `QueryDirectory`) and every transport has those methods. |
+| `DirectoryRequest`, `DirectoryEntry`, `DirectoryPage` | A live directory request and the open endpoints the target authorized its full source address to see. The cursor is opaque to the transport. |
 | `Origin`, `RemoteOrigin(node)` | Where a request came from. `Local()` is true only for a request the loopback handed over. |
 | `Receipt`, `PullRequest`, `PullAnswer` | The signed records a target answers with, and what a pull asks for: one message and the recipients the source tracks on the target. The answer to a pull lists, for each recipient asked about, its signed report or the recipient in `NoRecord` (the target holds no record of that delivery); a recipient in neither means nothing yet. The transport carries them and never reads them. A receipt may lack the reports of some or all recipients and the control reply; they are pulled later. |
 | `ErrUnreachable`, `ErrTimeout` | The two ways a call gets no answer: the target did not see it, or it may have. Every transport implementation returns them with this meaning. |
-| `NewLoopback(self, handler, knobs)` | The single-node transport, with `Send`, `Pull` and `Waiting`. A nil `knobs` means no faults; a zero `self` or a nil `handler` panics. |
+| `NewLoopback(self, handler, knobs)` | The single-node transport, with `Send`, `Pull`, `QueryDirectory` and `Waiting`. A nil `knobs` means no faults; a zero `self` or a nil `handler` panics. |
 | `NewKnobs(clock)`, `Knobs` | The fault knobs: `DropReceipt`, `Unreachable`, `HoldReports` and `Release`, `Delay`, `Mutate` and `Mutated`; `Hits`, `Observe`, `Waiting`. Use `NewKnobs`: the zero `Knobs` is not usable. |
 
 ## Rules
@@ -29,7 +30,7 @@ no clock but the one its knobs were given.
   `Origin`. A transport of another package can make `RemoteOrigin` only, which is
   never local, whatever node it names. A test reads the package source to keep
   this true: `localOrigin` is mentioned nowhere outside `loopback.go` and there
-  only as a direct argument of the handler's `Inbound` or `Pull`, and no literal
+  only as a direct argument of the handler's `Inbound`, `Pull` or `QueryDirectory`, and no literal
   of `Origin` with elements, conversion to it or other name for it exists outside
   `origin.go`. The scan reads syntax; it does not police `unsafe` or reflection.
 - **The loopback reaches only its own node.** A call to another node is
@@ -43,6 +44,10 @@ no clock but the one its knobs were given.
   `ErrUnreachable` it did not see it. The caller's own context error is returned
   as it is, neither of the two: the target may or may not have seen the call. The
   handler runs under the caller's context, and so does a replay.
+- **Directory queries use the same transport boundary.** The target receives the
+  source node in `Origin` and the source endpoint separately, judges `see` on each
+  current open endpoint, and returns a live page. Only node-wide faults
+  (`Unreachable` and `Delay`) apply; message-specific faults never alter it.
 - **A receipt may be partial.** It may lack the reports of some or all recipients
   and the control reply, and the missing ones are pulled later: the same meaning
   as a recipient that is in neither list of a `PullAnswer`, nothing yet. A
@@ -81,8 +86,7 @@ no clock but the one its knobs were given.
   after the send may be armed late, and nothing orders it against the worker. Hold
   the worker first with `Delay` or `Unreachable(self, true)`, arm the knob, then
   release the worker. The knobs that name no message have no such window.
-- **A hit says which call it was.** `Hit` has the knob, the call (`CallSend` or
-  `CallPull`), the node and, for the knobs about one message, the message, so a
+- **A hit says which call it was.** `Hit` has the knob, the call (`CallSend`, `CallPull` or `CallDirectory`), the node and, for the knobs about one message, the message, so a
   test can assert that a fault was reached by the call it meant.
 - **Time is the injected clock's.** A delay is a timer of the clock the knobs were
   made with; a test advances the clock and never sleeps. `Waiting()` panics when
@@ -91,7 +95,7 @@ no clock but the one its knobs were given.
 
 ## What the caller must guarantee
 
-- Call `Send` and `Pull` outside the engine's loop, from one worker that takes
+- Call `Send`, `Pull` and `QueryDirectory` outside the engine's loop, from one worker that takes
   its work in order, and never from the loop itself: the `Handler` runs in the
   caller's goroutine and may submit a command to the loop and wait for it.
 - Treat `ErrUnreachable` and `ErrTimeout` as "no answer" and `errors.Is` them;
@@ -100,7 +104,7 @@ no clock but the one its knobs were given.
   that waits out a delay not yet due is not work, and one whose delay is due is.
   The engine's quiescence condition reads this one number from the loopback it
   holds, and it needs no knowledge of the knobs.
-- Define, on the engine's side, the narrow interface it calls (`Send` and `Pull`
+- Define, on the engine's side, the narrow interface it calls (`Send`, `Pull` and `QueryDirectory`
   with the signatures of the loopback); this package does not name it.
 - Give a `Knobs` a clock before any test sets a delay (`NewKnobs(nil)` panics on
   `Delay`).

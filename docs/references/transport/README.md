@@ -8,13 +8,14 @@ a test break the loopback on purpose.
 
 **The seam has two sides, and each is defined by the side that consumes it.** A
 transport calls the engine through a `Handler`: `Inbound` for an envelope and
-`Pull` for a pull, each told the `Origin` of the request, and each running under
+`Pull` for a pull and `QueryDirectory` for visible endpoints, each told the `Origin` of the request, and each running under
 the context of the call that brought the request. `Handler` is defined in
 `internal/node/transport`, which consumes it. The engine calls a transport
-through the interface the engine defines for itself, with two methods: `Send`
+through the interface the engine defines for itself, with three methods: `Send`
 takes the node, the sending endpoint and the envelope as the bytes the engine
 encoded, and returns a `Receipt`; `Pull` takes a `PullRequest` (one message and the recipients the
-source tracks on the target) and returns a `PullAnswer`. `*Loopback` has both, so it satisfies that interface
+source tracks on the target) and returns a `PullAnswer`; `QueryDirectory` takes a source endpoint and a
+`DirectoryRequest` and returns a `DirectoryPage`. `*Loopback` has all three, so it satisfies that interface
 without importing the engine, and the engine imports no transport package for
 it; `daemon` hands the one to the other. This is the convention of
 [`internal/node/README.md`](../../../internal/node/README.md): each side of a seam
@@ -74,7 +75,7 @@ The engine's rules for local sources (judged by endpoint declarations and resour
 limits alone) rest on this value and on nothing the request says about itself.
 
 **The loopback.** `NewLoopback(self, handler, knobs)` carries what leaves the
-sender's side to the receiving side of the same node through the same two calls a
+sender's side to the receiving side of the same node through the same three calls a
 remote transport would use. It starts no goroutine: a call runs in the caller's
 goroutine, which for the engine is its one outbound worker. A call to another node
 is `ErrUnreachable`. `Waiting()` is the knobs' count of calls waiting out a delay
@@ -82,21 +83,29 @@ that is not yet due, zero with no knobs. `NewLoopback` panics on a zero node id 
 a nil handler: it would make local origins that name nobody, or fail on its first
 call.
 
+**Directory queries.** The target receives the full source identity as the
+origin node and the explicit sender endpoint. It authorizes the live page,
+including every continuation, through the same evaluator as message intake. The
+transport carries the entries and opaque cursor without interpreting them. Only
+`Unreachable` and `Delay`, which name no message, apply; dropping receipts,
+holding reports and replaying changed messages do not affect a directory query.
+The engine owns the authorization and pagination rules; see
+[its directory description](../engine/README.md#what).
+
 **The knobs.** A `Knobs` value is made with `NewKnobs` and the clock a delay is
 waited on, and is off until a test sets something; the zero `Knobs` has no maps and
 is not usable. Each knob counts its hits and tells an optional
 observer:
 
-| Knob | Effect |
-| ---- | ------ |
-| `DropReceipt(n)` | The target processes the envelope; the receipt is thrown away and the send returns `ErrTimeout`. Spent one per hit. A send the target refused has no receipt and is not counted. |
-| `Unreachable(node, on)` | A send or pull to the node returns `ErrUnreachable` and the target is not called. |
-| `HoldReports(msg)`, `Release(msg)` | The reports of the message are kept from the source: the receipt of its send is empty, with no report and no control reply, and a pull for it is answered empty without asking the target: nothing yet for every recipient, never a `NoRecord`. The target processes the envelope as usual. |
-| `Delay(d)` | Every call that starts afterwards waits `d` on the injected clock before it goes on; a context that ends during the wait ends the call. `Delay(0)` affects only calls that start afterwards: a call already waiting stays. `Waiting()` counts the calls whose time has not come, and panics when the clock was set back below the start of one of them. |
-| `Mutate(msg)` | After the target took the next send of `msg`, the same envelope from the same sender is delivered once more with a changed body (when it has no body, the last character of its thread is changed, or a thread is given to one that has none, so the replay stays valid at the longest thread). The sender sees only its own send. `Mutated(msg)` returns the target's answer to the replay. |
+| Knob | Calls | Effect |
+| ---- | ----- | ------ |
+| `DropReceipt(n)` | `Send` | The target processes the envelope; the receipt is thrown away and the send returns `ErrTimeout`. Spent one per hit. A send the target refused has no receipt and is not counted. |
+| `Unreachable(node, on)` | `Send`, `Pull`, `QueryDirectory` | A send, pull or directory query to the node returns `ErrUnreachable` and the target is not called. |
+| `HoldReports(msg)`, `Release(msg)` | `Send`, `Pull` | The reports of the message are kept from the source: the receipt of its send is empty, with no report and no control reply, and a pull for it is answered empty without asking the target: nothing yet for every recipient, never a `NoRecord`. The target processes the envelope as usual. |
+| `Delay(d)` | `Send`, `Pull`, `QueryDirectory` | Every call that starts afterwards waits `d` on the injected clock before it goes on; a context that ends during the wait ends the call. `Delay(0)` affects only calls that start afterwards: a call already waiting stays. `Waiting()` counts the calls whose time has not come, and panics when the clock was set back below the start of one of them. |
+| `Mutate(msg)` | `Send` | After the target took the next send of `msg`, the same envelope from the same sender is delivered once more with a changed body (when it has no body, the last character of its thread is changed, or a thread is given to one that has none, so the replay stays valid at the longest thread). The sender sees only its own send. `Mutated(msg)` returns the target's answer to the replay. |
 
-**Hits.** A `Hit` names the knob, the call it acted on (`CallSend` or
-`CallPull`), the node and, for the knobs about one message, the message. The
+**Hits.** A `Hit` names the knob, the call it acted on (`CallSend`, `CallPull` or `CallDirectory`), the node and, for the knobs about one message, the message. The
 observer sees each hit in the goroutine of the call, so a test can assert that a
 fault was reached by the call and for the message it meant, not only how often.
 
@@ -124,7 +133,7 @@ The knobs that name no message have no such window.
   because the compiler cannot see a second call site inside the package. The scan
   fails on: any mention of `localOrigin` outside `loopback.go`, called or used as
   a value; inside `loopback.go`, any use of it but as a direct argument of the
-  handler's `Inbound` or `Pull` call, so it is never kept, returned or handed to
+  handler's `Inbound`, `Pull` or `QueryDirectory` call, so it is never kept, returned or handed to
   another handler; outside `origin.go`, any composite literal of `Origin` with
   elements (keyed, unkeyed or with its type left out in a slice or map), any
   conversion to `Origin` and any other name declared for it; any assignment to
@@ -196,13 +205,13 @@ The knobs that name no message have no such window.
   consumer of it, and a package that defines the interface for its caller makes
   the caller import it for the shape of its own dependency. The convention is that
   the consumer defines what it needs; the loopback and any later transport have
-  the two methods, and the engine's fixtures can pass a `*Loopback` directly.
+  the three methods, and the engine's fixtures can pass a `*Loopback` directly.
 
 ## Where
 
 | What | Where |
 | ---- | ----- |
-| `Handler`, `Receipt`, `PullRequest`, `PullAnswer`, the two errors | `internal/node/transport/transport.go` |
+| `Handler`, `Receipt`, `PullRequest`, `PullAnswer`, `DirectoryRequest`, `DirectoryEntry`, `DirectoryPage`, the two errors | `internal/node/transport/transport.go` |
 | `Origin`, `RemoteOrigin`, the unexported constructor of a local origin | `internal/node/transport/origin.go` |
 | `Loopback`, `NewLoopback`, `Waiting`, the replay | `internal/node/transport/loopback.go` |
 | `Knobs`, `Hit` and `CallKind`, the hit counts, the observer, `Waiting` | `internal/node/transport/knobs.go` |
@@ -218,10 +227,6 @@ The knobs that name no message have no such window.
 
 ## Known gaps
 
-- The engine does not call the seam yet: the send and receive features define the
-  interface the engine calls, wire `Loopback.Waiting()` into its quiescence
-  condition, and the engine-layer fixture attaches the knobs. Until then the tests
-  use a fake `Handler`.
 - A second node, and with it a remote transport and a choice of transport per
   target node, is not built. The seam is shaped so that a remote implementation
   adds a package and changes nothing here.

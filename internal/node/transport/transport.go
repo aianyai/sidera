@@ -4,13 +4,15 @@ import (
 	"context"
 	"errors"
 
+	"github.com/aianyai/sidera/internal/adapterreg"
+	"github.com/aianyai/sidera/internal/authz"
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/record"
 )
 
 // Handler is the engine's side of every transport: what an implementation calls
-// when something arrives for this node. Both methods are told where the request
+// when something arrives for this node. Every method is told where the request
 // came from; whether it is a local source is that origin's to say. The context
 // is the one of the call that brought the request, so ending it ends the
 // handler's work too.
@@ -31,6 +33,32 @@ type Handler interface {
 	// report or, when the node holds no record of that delivery, the recipient in
 	// NoRecord. An error means no answer exists.
 	Pull(ctx context.Context, from Origin, req PullRequest) (PullAnswer, error)
+	// QueryDirectory returns the visible open endpoints for this source. The
+	// target re-reads its view and authorizes every page under the given origin.
+	QueryDirectory(ctx context.Context, from Origin, sender ident.EndpointID, req DirectoryRequest) (DirectoryPage, error)
+}
+
+// DirectoryRequest asks for a live page after the opaque cursor. Zero Limit
+// takes the target's default page size.
+type DirectoryRequest struct {
+	Cursor string
+	Limit  int
+}
+
+// DirectoryEntry is an open endpoint the target authorized the source to see.
+type DirectoryEntry struct {
+	Address     ident.Address
+	Kind        adapterreg.EndpointKind
+	DisplayName string
+	Description string
+	Accepts     []authz.Action
+}
+
+// DirectoryPage is a live page. NextCursor is empty when nothing follows it.
+// Each request re-reads the endpoints and re-authorizes their visibility.
+type DirectoryPage struct {
+	Endpoints  []DirectoryEntry
+	NextCursor string
 }
 
 // Receipt is a target's answer to one envelope: the signed records, as the

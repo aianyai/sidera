@@ -112,6 +112,34 @@ has not been admitted gives an empty map. Each listed front end carries its
 also resolves the caller before answering; the only visible node while there is
 no network transport is this node itself. Neither read exposes an endpoint token.
 
+**Directory targets.** `QueryDirectory` submits an internal `gateLoopback`
+command, reads the current endpoint view there and calls the intake evaluator
+with `see` for each open endpoint. The authorization package alone decides
+visibility, including hiding; an origin claiming this node's ID is still remote
+unless the transport attests that it is local. A target already recovering,
+paused or stopping refuses with the existing typed state reason.
+
+Only `EndpointOpen` entries appear, in endpoint ID order. Creating and closed
+endpoints do not appear, and the system endpoint has no record to list. An open
+endpoint whose instance has not been admitted still appears with
+`adapterreg.KindSignals`; an admission adds only capabilities it confirms, through
+`Admission.Signals`. In particular an interrupt is advertised only after the
+adapter has declared it. This description does not change execution: a session
+whose adapter has not connected is still asked to execute a signal it may support.
+
+The page limit defaults to `DefaultDirectoryLimit` (100) and is at most
+`publication.MaxEndpointsPerNode` (256). Every page re-reads and authorizes the
+live view; endpoints opened, closed or hidden between pages may appear or not.
+The opaque cursor carries the last endpoint ID and the full source address
+(`Origin.Node()` and sender endpoint). HMAC-SHA256 with a random process-only key
+binds its contents and lifetime. The key is drawn from the injected random reader
+on the first directory query and is never persisted. Another caller, a modified
+cursor or a restart gives `invalid_argument` with `DetailCursorInvalid`. The
+cursor is a position, never permission, and no page snapshot is retained.
+The authentication uses Go's [standard HMAC implementation](https://pkg.go.dev/crypto/hmac),
+including its constant-time `Equal`. A separate token library would add a general
+format and dependency for a fixed cursor that needs only this authentication.
+
 Closing an endpoint is a head record (closed, token gone), then chunks of at most
 `ChunkReplaces` (16) records queued for it, each closed by the delivery rules and
 stripped of its body reference, whose own body file the store removes in the same

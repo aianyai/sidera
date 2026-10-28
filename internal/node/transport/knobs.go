@@ -48,7 +48,7 @@ func (k Knob) String() string {
 	return fmt.Sprintf("invalid(%d)", uint8(k))
 }
 
-// CallKind says which of the two calls of a [Loopback] a knob acted on.
+// CallKind says which of the three calls of a [Loopback] a knob acted on.
 type CallKind uint8
 
 const (
@@ -56,6 +56,8 @@ const (
 	CallSend CallKind = iota + 1
 	// CallPull is a pull of the reports of a message.
 	CallPull
+	// CallDirectory is a query for visible endpoints.
+	CallDirectory
 )
 
 // String returns the name of the call as the ledger of a test writes it.
@@ -65,6 +67,8 @@ func (c CallKind) String() string {
 		return "send"
 	case CallPull:
 		return "pull"
+	case CallDirectory:
+		return "directory"
 	}
 	return fmt.Sprintf("invalid(%d)", uint8(c))
 }
@@ -72,8 +76,9 @@ func (c CallKind) String() string {
 // Hit is one time a knob changed what a call did.
 type Hit struct {
 	Knob Knob
-	// Call is the call the knob acted on. Drop-receipt and mutate act on a send
-	// only; the others act on either.
+	// Call is the call the knob acted on. Drop-receipt and mutate act only on
+	// sends; hold-reports acts on sends and pulls; unreachable and delay act on
+	// sends, pulls and directory queries.
 	Call CallKind
 	// Node is the node the call was for.
 	Node ident.NodeID

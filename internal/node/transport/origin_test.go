@@ -27,8 +27,11 @@ func TestLoopbackMakesTheLocalOrigin(t *testing.T) {
 	if _, err := l.Pull(context.Background(), r.self, transport.PullRequest{Message: "m1", Recipients: pulled}); err != nil {
 		t.Fatal(err)
 	}
-	if len(seen) != 2 {
-		t.Fatalf("handler saw %d requests, want 2", len(seen))
+	if _, err := l.QueryDirectory(context.Background(), r.self, ep(9), transport.DirectoryRequest{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("handler saw %d requests, want 3", len(seen))
 	}
 	for i, o := range seen {
 		if !o.Local() || o.Node() != r.self {
@@ -50,6 +53,11 @@ func (o *originRecorder) Inbound(ctx context.Context, from transport.Origin, sen
 func (o *originRecorder) Pull(ctx context.Context, from transport.Origin, req transport.PullRequest) (transport.PullAnswer, error) {
 	*o.seen = append(*o.seen, from)
 	return o.target.Pull(ctx, from, req)
+}
+
+func (o *originRecorder) QueryDirectory(ctx context.Context, from transport.Origin, sender ident.EndpointID, req transport.DirectoryRequest) (transport.DirectoryPage, error) {
+	*o.seen = append(*o.seen, from)
+	return o.target.QueryDirectory(ctx, from, sender, req)
 }
 
 // TestRemoteOriginIsNeverLocal is the negative half for every other transport:

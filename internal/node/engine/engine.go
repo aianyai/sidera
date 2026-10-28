@@ -96,28 +96,31 @@ type Engine struct {
 	pausedSince time.Time
 	// retired: the owner retired the identity of the node. Nothing is signed in its
 	// name from then on, and the node is going down.
-	retired    bool
-	startedAt  time.Time                // the time Start was called
-	adapters   map[string]*adapterState // by instance; see adapters.go
-	sched      *scheduler
-	timer      clock.Timer
-	periodic   map[string]*periodicTask
-	order      []string  // names of the periodic tasks, in the order they were added
-	clockTask  string    // the periodic task that persists the clock state, if one was added
-	tr         Transport // set by SetTransport before Start
-	outbox     *outbox
-	fb         feedbackState
-	sweep      *sweepPass // the pass of the archive sweep that is running, nil between passes
-	waits      map[ident.EndpointID]*waiter
-	ready      map[ident.EndpointID]bool        // endpoints with a wait that a command made a message ready for; see serveReady
-	pages      map[delivery.LeaseID]*issuedPage // what each page that was handed out held, for an acknowledgement of the whole page
-	cont       []continuation
-	parked     map[ident.EndpointID][]command   // commands that wait for the drain of an endpoint
-	ran        uint64                           // how many commands the loop has taken from the inbox
-	fatal      error                            // set by classify; the loop stops after the command that set it
-	probed     bool                             // the command that just ran was a probe of Quiesce
-	installing atomic.Pointer[admin.RequestKey] // the request whose adapter package is being copied: one is at a time, nil when none
-	loopG      atomic.Uint64                    // the id of the loop's goroutine, set when the loop starts: what spawn asserts
+	retired   bool
+	startedAt time.Time                // the time Start was called
+	adapters  map[string]*adapterState // by instance; see adapters.go
+	sched     *scheduler
+	timer     clock.Timer
+	periodic  map[string]*periodicTask
+	order     []string  // names of the periodic tasks, in the order they were added
+	clockTask string    // the periodic task that persists the clock state, if one was added
+	tr        Transport // set by SetTransport before Start
+	outbox    *outbox
+	// directoryKey authenticates cursors for this process only, minted on its
+	// first directory query and never persisted.
+	directoryKey []byte
+	fb           feedbackState
+	sweep        *sweepPass // the pass of the archive sweep that is running, nil between passes
+	waits        map[ident.EndpointID]*waiter
+	ready        map[ident.EndpointID]bool        // endpoints with a wait that a command made a message ready for; see serveReady
+	pages        map[delivery.LeaseID]*issuedPage // what each page that was handed out held, for an acknowledgement of the whole page
+	cont         []continuation
+	parked       map[ident.EndpointID][]command   // commands that wait for the drain of an endpoint
+	ran          uint64                           // how many commands the loop has taken from the inbox
+	fatal        error                            // set by classify; the loop stops after the command that set it
+	probed       bool                             // the command that just ran was a probe of Quiesce
+	installing   atomic.Pointer[admin.RequestKey] // the request whose adapter package is being copied: one is at a time, nil when none
+	loopG        atomic.Uint64                    // the id of the loop's goroutine, set when the loop starts: what spawn asserts
 
 	// pendingNotices are the direct endpoints that a message became ready for since the
 	// last step of the loop, to be told with endpoint.pending; see pending.go.

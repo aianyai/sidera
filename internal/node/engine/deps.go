@@ -139,6 +139,7 @@ var _ Keys = (*nodekeys.Keys)(nil)
 type Transport interface {
 	Send(ctx context.Context, target ident.NodeID, sender ident.EndpointID, envelope []byte) (transport.Receipt, error)
 	Pull(ctx context.Context, target ident.NodeID, req transport.PullRequest) (transport.PullAnswer, error)
+	QueryDirectory(ctx context.Context, target ident.NodeID, sender ident.EndpointID, req transport.DirectoryRequest) (transport.DirectoryPage, error)
 	Waiting() int
 }
 

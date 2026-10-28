@@ -25,7 +25,7 @@ import (
 //     whole outside surface.
 //   - Outside loopback.go no code refers to localOrigin at all, called or not.
 //     Inside loopback.go it appears only as a direct argument of a call of the
-//     handler's Inbound or Pull, so it is never kept, returned or passed on.
+//     handler's Inbound, Pull or QueryDirectory, so it is never kept, returned or passed on.
 //   - Outside origin.go no composite literal of type Origin has elements, keyed
 //     or not, nothing converts to Origin and no type is declared as another name
 //     for it. The only literals that remain are the empty Origin{} and the ones
@@ -80,9 +80,9 @@ func originViolations(files map[string]*ast.File) []string {
 					break
 				}
 				if name == "loopback.go" {
-					report("%s: localOrigin is used other than as a direct argument of the handler's Inbound or Pull call", name)
+					report("%s: localOrigin is used other than as a direct argument of the handler's Inbound, Pull or QueryDirectory call", name)
 				} else {
-					report("%s: refers to localOrigin; only loopback.go may, as a direct argument of the handler's Inbound or Pull call", name)
+					report("%s: refers to localOrigin; only loopback.go may, as a direct argument of the handler's Inbound, Pull or QueryDirectory call", name)
 				}
 			case *ast.CompositeLit:
 				if name == "origin.go" {
@@ -178,11 +178,11 @@ func surfaceViolations(name string, d ast.Decl, report func(string, ...any)) {
 	}
 }
 
-// callsHandler reports whether c is a call of the Inbound or Pull of the
+// callsHandler reports whether c is a call of the Inbound, Pull or QueryDirectory of the
 // loopback's handler field, l.h.
 func callsHandler(c *ast.CallExpr) bool {
 	sel, ok := c.Fun.(*ast.SelectorExpr)
-	if !ok || (sel.Sel.Name != "Inbound" && sel.Sel.Name != "Pull") {
+	if !ok || (sel.Sel.Name != "Inbound" && sel.Sel.Name != "Pull" && sel.Sel.Name != "QueryDirectory") {
 		return false
 	}
 	recv, ok := sel.X.(*ast.SelectorExpr)
@@ -254,6 +254,9 @@ func (l *Loopback) Send(ctx context.Context) {
 }
 func (l *Loopback) Pull(ctx context.Context) {
 	l.h.Pull(ctx, localOrigin(l.self), r)
+}
+func (l *Loopback) QueryDirectory(ctx context.Context) {
+	l.h.QueryDirectory(ctx, localOrigin(l.self), s, r)
 }
 `
 )

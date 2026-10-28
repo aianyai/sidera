@@ -103,6 +103,10 @@ func (g *target) Pull(_ context.Context, _ transport.Origin, req transport.PullR
 	return transport.PullAnswer{Reports: []record.Record{reportOf(req.Message)}, ControlReply: g.reply}, nil
 }
 
+func (g *target) QueryDirectory(context.Context, transport.Origin, ident.EndpointID, transport.DirectoryRequest) (transport.DirectoryPage, error) {
+	return transport.DirectoryPage{}, nil
+}
+
 // replyWith makes the target give a control reply with every receipt and answer.
 func (g *target) replyWith(rec record.Record) {
 	g.mu.Lock()

@@ -191,6 +191,9 @@ const (
 	// DetailSourceUnreadable: the directory the owner named as a package, or a
 	// directory or file inside it, cannot be read.
 	DetailSourceUnreadable
+	// DetailCursorInvalid: a directory continuation is malformed, belongs to
+	// another source endpoint, or was issued by another process instance.
+	DetailCursorInvalid
 
 	detailEnd
 )
@@ -201,6 +204,7 @@ var detailNames = [detailEnd]string{
 	DetailDigestMismatch:        "digest_mismatch",
 	DetailProbeFrontendMismatch: "probe_frontend_mismatch",
 	DetailSourceUnreadable:      "source_unreadable",
+	DetailCursorInvalid:         "cursor_invalid",
 }
 
 // String returns the name of the detail; the zero value has none.

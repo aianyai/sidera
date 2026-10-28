@@ -65,6 +65,14 @@ func (c *ctxRecorder) Pull(ctx context.Context, from transport.Origin, req trans
 	return c.target.Pull(ctx, from, req)
 }
 
+func (c *ctxRecorder) QueryDirectory(ctx context.Context, from transport.Origin, sender ident.EndpointID, req transport.DirectoryRequest) (transport.DirectoryPage, error) {
+	c.note(ctx)
+	if err := ctx.Err(); err != nil {
+		return transport.DirectoryPage{}, err
+	}
+	return c.target.QueryDirectory(ctx, from, sender, req)
+}
+
 // TestLoopbackPassesTheCallersContext pins that the handler works under the
 // context of the call that brought the request, a replay included, and that an
 // ended context comes back as itself: neither ErrTimeout nor ErrUnreachable,
@@ -82,11 +90,14 @@ func TestLoopbackPassesTheCallersContext(t *testing.T) {
 	if _, err := l.Pull(ctx, r.self, transport.PullRequest{Message: "m1", Recipients: pulled}); err != nil {
 		t.Fatalf("pull: %v", err)
 	}
+	if _, err := l.QueryDirectory(ctx, r.self, ep(9), transport.DirectoryRequest{}); err != nil {
+		t.Fatalf("directory: %v", err)
+	}
 	rec.mu.Lock()
 	values := append([]any(nil), rec.values...)
 	rec.mu.Unlock()
-	if len(values) != 3 {
-		t.Fatalf("the handler was called %d times, want the send, its replay and the pull", len(values))
+	if len(values) != 4 {
+		t.Fatalf("the handler was called %d times, want the send, its replay, pull and directory query", len(values))
 	}
 	for i, v := range values {
 		if v != "caller" {
@@ -103,6 +114,10 @@ func TestLoopbackPassesTheCallersContext(t *testing.T) {
 	_, err = l.Pull(ended, r.self, transport.PullRequest{Message: "m1", Recipients: pulled})
 	if !errors.Is(err, context.Canceled) || errors.Is(err, transport.ErrTimeout) || errors.Is(err, transport.ErrUnreachable) {
 		t.Errorf("pull under an ended context: error %v, want context.Canceled as it is", err)
+	}
+	_, err = l.QueryDirectory(ended, r.self, ep(9), transport.DirectoryRequest{})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("directory under an ended context: error %v, want context.Canceled", err)
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 )
 
 // Loopback is the transport of a single node: it carries what leaves the
-// sender's side to the receiving side of the same node, through the same two
+// sender's side to the receiving side of the same node, through the same three
 // calls of the [Handler] that a remote transport would use, and makes every
 // request it hands over a local origin. A call to any other node is
 // unreachable.
@@ -91,6 +91,18 @@ func (l *Loopback) Pull(ctx context.Context, target ident.NodeID, req PullReques
 		return PullAnswer{}, nil
 	}
 	return l.h.Pull(ctx, localOrigin(l.self), req)
+}
+
+// QueryDirectory carries a directory query under the caller's context and the
+// local origin. Only [Knobs.Unreachable] and [Knobs.Delay] apply to it.
+func (l *Loopback) QueryDirectory(ctx context.Context, target ident.NodeID, sender ident.EndpointID, req DirectoryRequest) (DirectoryPage, error) {
+	if err := l.knobs.wait(ctx, CallDirectory, target); err != nil {
+		return DirectoryPage{}, err
+	}
+	if err := l.reach(CallDirectory, target); err != nil {
+		return DirectoryPage{}, err
+	}
+	return l.h.QueryDirectory(ctx, localOrigin(l.self), sender, req)
 }
 
 // Waiting returns how many calls are waiting out a delay whose time has not
