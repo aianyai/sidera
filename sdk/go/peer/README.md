@@ -20,7 +20,7 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
 | API | Purpose |
 | --- | ------- |
 | `New(r io.Reader, w io.WriteCloser, Config)`, `Start()` | Create a peer over the streams, register handlers, then start it. Nothing is read or written before `Start`. |
-| `Config.Dialect`, `Dialect` | The few conventions a protocol built on the peer may set differently: the cancel notification (its name, how its params name the request, what `Call` sends), whether a cancelled request is answered, and the codes of the peer's own overload and line-too-long errors. The zero value is the adapter protocol's. `New` fails when `CancelMethod` is not a valid method name (1 to 128 characters) or `CancelParams` does not build a JSON object. |
+| `Config.Dialect`, `Dialect` | The few conventions a protocol built on the peer may set differently: the cancel notification (its name, how its params name the request, what `Call` sends), whether a cancelled request is answered, document ambiguity checks, and the codes of the peer's own overload and line-too-long errors. The zero value is the adapter protocol's. `New` fails when `CancelMethod` is not a valid method name (1 to 128 characters) or `CancelParams` does not build a JSON object. |
 | `Params`, `DefaultParams()` | The limits. A zero field means "use the default"; a negative field is an error from `New`. |
 | `Handle(method, RequestHandler)`, `HandleNotification(method, NotificationHandler)` | Register what the other side may call. Requests for unregistered methods get `-32601`; unregistered notifications are logged and dropped. |
 | `Call(ctx, method, params, result)`, `Notify(ctx, method, params)` | Send a request and wait, or send a notification. `params` must marshal to an object, or be nil (sent as `{}`). The method name is 1 to 128 characters. |
@@ -35,8 +35,8 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   `MaxLineBytes` is answered with `-32004` and a null id and the connection is
   closed; the reader never skips ahead to the next newline. A stream that ends
   inside a line is treated as an error, never as a message.
-- **Classification.** A line must be valid UTF-8 (checked explicitly, because
-  `encoding/json` silently replaces bad bytes) and valid JSON (`-32700`, the
+- **Classification (default dialect).** A line must be valid UTF-8 (checked
+  explicitly, because `encoding/json` silently replaces bad bytes) and valid JSON (`-32700`, the
   connection continues). It must be an object with `"jsonrpc":"2.0"`; batches
   and non-objects are `-32600` and the connection continues. Member names are
   matched exactly. An `id` is an integer of at most 2^53-1 in absolute value or a
@@ -50,11 +50,23 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   has a `method` and a valid id; any other malformed line, which may have been
   meant as a response, is answered with a null id, so the error can never be
   taken for the answer to a call of the other side.
-- **Overload is decided first.** The read loop classifies a request, finds its
-  handler and checks its id; if the request queue (`MaxPendingRequests`) is
-  full it answers `-32001` (`Dialect.OverloadedCode`) immediately. Parameters
-  are not examined and no handler runs, so a caller that gets `-32001` may retry
-  safely.
+- **Document checks are opt-in.** `RejectDuplicateKeysAndInvalidUnicode` rejects
+  duplicate member names and unpaired UTF-16 surrogate escapes anywhere in a
+  frame, including unknown extensions, params, results and ignored notifications.
+  It uses `strictjson.Decode` into raw members, so unknown names and values remain
+  accepted. A refusal is `-32600` with the fixed message `duplicate member or
+  invalid Unicode`; it neither logs input paths or values nor closes the connection.
+  The reply echoes the raw top-level id only when it occurs exactly once and is
+  valid, even in a rejected response; otherwise the id is null. These document
+  checks precede method lookup, overload, handlers and cancellation. Invalid
+  JSON or UTF-8 stays `-32700`; parameter shape and meaning stay with the layers
+  that interpret them. The zero-value dialect keeps the classification and
+  response rules above.
+- **Overload precedes parameter interpretation.** The read loop classifies a
+  request, finds its handler and checks its id; if the request queue
+  (`MaxPendingRequests`) is full it answers `-32001` (`Dialect.OverloadedCode`) immediately. Parameters
+  are not interpreted and no handler runs, so a caller that gets `-32001` may
+  retry safely.
 - **Handlers.** `MaxConcurrentHandlers` request handlers run at once. Each
   request is answered exactly once, with a result, an `*Error`, or `-32603`
   (any other error, a typed-nil `*Error`, a panic, a result that is not a JSON
@@ -100,7 +112,8 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   and `-32004` in what the peer sends on its own, with the same message and the
   same behaviour (the overload refusal is still decided before anything runs,
   the line-too-long reply still carries a null id and is followed by the close).
-  Nothing else the peer sends or accepts depends on a dialect.
+  Document checks and cancellation are the other dialect conventions described
+  above.
 - **Ids in flight.** A request whose id is already in flight gets `-32600`. The
   id is released before its answer is queued, so the other side can reuse it as
   soon as it has read the answer.

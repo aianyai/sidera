@@ -181,7 +181,7 @@ var classifyCorpus = []struct {
 func TestClassify(t *testing.T) {
 	for _, tc := range classifyCorpus {
 		t.Run(tc.name, func(t *testing.T) {
-			msg, cerr := classify([]byte(tc.line))
+			msg, cerr := (Dialect{}).classify([]byte(tc.line))
 			want := oracleClassify([]byte(tc.line))
 			got := verdict{kind: msg.kind}
 			if cerr != nil {
@@ -216,7 +216,7 @@ func TestClassifyDetails(t *testing.T) {
 			`not json`: "",
 			`[{"jsonrpc":"2.0","id":3,"method":"m"}]`: "",
 		} {
-			_, cerr := classify([]byte(line))
+			_, cerr := (Dialect{}).classify([]byte(line))
 			if cerr == nil {
 				t.Fatalf("%s classified as a message", line)
 			}
@@ -226,11 +226,11 @@ func TestClassifyDetails(t *testing.T) {
 		}
 	})
 	t.Run("equal ids share a key", func(t *testing.T) {
-		a, _ := classify([]byte(`{"jsonrpc":"2.0","id":"a","method":"m"}`))
-		b, _ := classify([]byte(`{"jsonrpc":"2.0","id":"a","method":"m"}`))
-		c, _ := classify([]byte(`{"jsonrpc":"2.0","id":-0,"method":"m"}`))
-		d, _ := classify([]byte(`{"jsonrpc":"2.0","id":0,"method":"m"}`))
-		e, _ := classify([]byte(`{"jsonrpc":"2.0","id":"0","method":"m"}`))
+		a, _ := (Dialect{}).classify([]byte(`{"jsonrpc":"2.0","id":"a","method":"m"}`))
+		b, _ := (Dialect{}).classify([]byte(`{"jsonrpc":"2.0","id":"a","method":"m"}`))
+		c, _ := (Dialect{}).classify([]byte(`{"jsonrpc":"2.0","id":-0,"method":"m"}`))
+		d, _ := (Dialect{}).classify([]byte(`{"jsonrpc":"2.0","id":0,"method":"m"}`))
+		e, _ := (Dialect{}).classify([]byte(`{"jsonrpc":"2.0","id":"0","method":"m"}`))
 		if a.key != b.key || c.key != d.key || d.key == e.key || a.key == "" {
 			t.Fatalf("keys: %q %q %q %q %q", a.key, b.key, c.key, d.key, e.key)
 		}
@@ -239,7 +239,7 @@ func TestClassifyDetails(t *testing.T) {
 		}
 	})
 	t.Run("null params are absent", func(t *testing.T) {
-		m, _ := classify([]byte(`{"jsonrpc":"2.0","method":"m","params":null}`))
+		m, _ := (Dialect{}).classify([]byte(`{"jsonrpc":"2.0","method":"m","params":null}`))
 		if m.params != nil {
 			t.Fatalf("params = %q", m.params)
 		}
@@ -250,12 +250,12 @@ func TestClassifyDetails(t *testing.T) {
 			`{"jsonrpc":"2.0","id":4,"error":"nope"}`,
 			`{"jsonrpc":"2.0","id":4,"error":{"code":"x"}}`,
 		} {
-			m, cerr := classify([]byte(line))
+			m, cerr := (Dialect{}).classify([]byte(line))
 			if cerr != nil || m.kind != kindResponse || !m.malformed || m.key != "n4" {
 				t.Errorf("%s: %+v %v", line, m, cerr)
 			}
 		}
-		m, _ := classify([]byte(`{"jsonrpc":"2.0","id":null,"result":{}}`))
+		m, _ := (Dialect{}).classify([]byte(`{"jsonrpc":"2.0","id":null,"result":{}}`))
 		if !m.malformed || m.key != "" {
 			t.Errorf("a result with a null id: %+v", m)
 		}
@@ -267,7 +267,7 @@ func FuzzClassify(f *testing.F) {
 		f.Add([]byte(tc.line))
 	}
 	f.Fuzz(func(t *testing.T, line []byte) {
-		msg, cerr := classify(line)
+		msg, cerr := (Dialect{}).classify(line)
 		want := oracleClassify(line)
 		if cerr != nil {
 			if msg.kind != 0 {

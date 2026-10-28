@@ -9,9 +9,16 @@ import (
 
 // Dialect is the protocol convention the peer itself applies: which
 // notification cancels a request, whether a cancelled request is answered, and
-// the codes the peer sends on its own. The zero value is the adapter protocol's
-// convention, so existing owners are unchanged.
+// the document checks and codes the peer applies on its own. The zero value is
+// the adapter protocol's convention, so existing owners are unchanged.
 type Dialect struct {
+	// RejectDuplicateKeysAndInvalidUnicode refuses duplicate member names and
+	// unpaired UTF-16 surrogate escapes anywhere in an inbound frame, before
+	// method lookup, overload or cancellation. Unknown members stay accepted.
+	// A refused frame gets CodeInvalidRequest with its id only when that member
+	// occurs exactly once and is valid. False checks duplicates only at the top
+	// level and leaves nested values to the layer that interprets them.
+	RejectDuplicateKeysAndInvalidUnicode bool
 	// CancelMethod is the notification that cancels an inbound request and that
 	// Call sends when its context ends. Empty means MethodCancelRequest.
 	CancelMethod string

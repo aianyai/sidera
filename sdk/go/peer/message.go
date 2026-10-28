@@ -47,8 +47,8 @@ type message struct {
 }
 
 // classifyError is a line that is not a valid message, together with the
-// error response it earns. id is the id of a message that has "method" and a
-// valid id, otherwise nil (answered with a null id).
+// error response it earns. id is nil when no id can be echoed safely; the
+// document-check dialect recovers a unique valid id even on rejected responses.
 type classifyError struct {
 	id  json.RawMessage
 	err *Error
@@ -61,9 +61,9 @@ func invalidRequest(id json.RawMessage, reason string) *classifyError {
 // classify turns one line into exactly one message, or into the error
 // response the line deserves. It never panics, whatever the bytes.
 //
-// Parameters are not interpreted here beyond being carried along: the
-// decision to refuse a request for overload is made before they are examined.
-func classify(line []byte) (message, *classifyError) {
+// Parameters are carried along for interpretation after the overload check.
+// A dialect may first check the entire document for ambiguous JSON.
+func (d Dialect) classify(line []byte) (message, *classifyError) {
 	if !utf8.Valid(line) {
 		return message{}, &classifyError{err: NewError(CodeParseError, "invalid UTF-8")}
 	}
@@ -77,18 +77,22 @@ func classify(line []byte) (message, *classifyError) {
 	default:
 		return message{}, invalidRequest(nil, "a message must be a JSON object")
 	}
-	// A repeated member would be read as the first by one implementation and as
-	// the last by another, so a frame with one is refused. Only the frame's own
-	// members are looked at; the layer that interprets params and results
-	// refuses repeats inside them.
-	if strictjson.NoDuplicateTopLevelKeys(line) != nil {
-		return message{}, invalidRequest(nil, "a member name occurs twice")
-	}
 	// Exact key names: encoding/json struct decoding would also accept
-	// "Method" or "JSONRPC".
+	// "Method" or "JSONRPC". Raw values keep unknown members schema-free.
 	var top map[string]json.RawMessage
-	if err := json.Unmarshal(line, &top); err != nil {
-		return message{}, &classifyError{err: NewError(CodeParseError, "invalid JSON")}
+	if d.RejectDuplicateKeysAndInvalidUnicode {
+		if strictjson.Decode(line, &top) != nil {
+			return message{}, invalidRequest(unambiguousID(line), "duplicate member or invalid Unicode")
+		}
+	} else {
+		// The adapter convention checks only the frame's own members. The
+		// layer interpreting params and results is responsible for those values.
+		if strictjson.NoDuplicateTopLevelKeys(line) != nil {
+			return message{}, invalidRequest(nil, "a member name occurs twice")
+		}
+		if err := json.Unmarshal(line, &top); err != nil {
+			return message{}, &classifyError{err: NewError(CodeParseError, "invalid JSON")}
+		}
 	}
 
 	idRaw, hasID := top["id"]
@@ -161,6 +165,41 @@ func classify(line []byte) (message, *classifyError) {
 		m.malformed = m.err == nil
 	}
 	return m, nil
+}
+
+// unambiguousID recovers the reply id of a syntactically valid object whose
+// document checks failed. Walk every top-level member: an earlier duplicate in
+// an unrelated extension must not hide a later duplicate id. Decode whole raw
+// values so nested id members and large unknown numbers do not affect the count.
+func unambiguousID(line []byte) json.RawMessage {
+	dec := json.NewDecoder(bytes.NewReader(line))
+	if _, err := dec.Token(); err != nil {
+		return nil
+	}
+	var id json.RawMessage
+	for dec.More() {
+		name, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		var value json.RawMessage
+		if dec.Decode(&value) != nil {
+			return nil
+		}
+		if name == "id" {
+			if id != nil {
+				return nil
+			}
+			id = value
+		}
+	}
+	// RequestID owns the id rule; strict decoding also prevents Go's tolerant
+	// string decoder from replacing an invalid surrogate in an otherwise legal id.
+	var parsed RequestID
+	if strictjson.Decode(id, &parsed) != nil {
+		return nil
+	}
+	return id
 }
 
 // parseErrorObject decodes an error member. It requires an integer "code" and
