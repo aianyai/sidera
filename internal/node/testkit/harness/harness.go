@@ -78,6 +78,10 @@ type Options struct {
 	// DiskFree stands in for the query of the free space of the volume; nil asks
 	// the file system. The engine's check of the disk reserve reads it.
 	DiskFree func() uint64
+	// OpenPackage opens an adapter package as a reader rooted at its source.
+	// Every generation passes it unchanged to the engine; nil leaves installation
+	// without a package reader.
+	OpenPackage func(string) (fsx.Reader, error)
 	// ArchiveSweepEvery, when positive, has the node run the archive sweep every
 	// period on the fixture's clock, as the daemon does. Zero runs none.
 	ArchiveSweepEvery time.Duration
@@ -431,7 +435,7 @@ func (h *H) boot(ctx context.Context, p *process, check func() error) error {
 	deps := engine.Deps{
 		Node: NodeID(), Clock: h.clk, HighWater: clock.NewHighWater(time.Time{}), RollbackPaused: h.opts.RollbackPaused,
 		Writer: m.Writer, Store: st, Config: cfg, Keys: k, Rand: RandReader(h.opts.Seed + uint64(h.gen)),
-		Log: slog.New(p.log),
+		OpenPackage: h.opts.OpenPackage, Log: slog.New(p.log),
 	}
 	if h.launcher != nil {
 		// The host runs on the test clock: its pings, its backoff and its waits for a

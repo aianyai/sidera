@@ -229,6 +229,13 @@ these packages and are not part of them.
   identifier is the one its identity key derives and is the same in every fixture; a
   test that makes an envelope another node's endpoint would send verifies what comes
   back with the node's own certificate (`VerifyReport`).
+- **Package sources are injected without another reader or validator.**
+  `harness.Options.OpenPackage` is the caller's function that opens a named package
+  as a read-only `fsx.Reader` rooted there. Every generation passes that function
+  unchanged to `engine.Deps.OpenPackage`, including after a restart; the fixture
+  caches no package reader. Tests can supply an in-memory package while the engine
+  and configuration retain their own staging, validation and install rules. Nil
+  retains the engine's refusal to install without a package reader.
 - **Startup has process ownership before its first recovery write.** `NewStopped`
   prepares the same disk, clock, ledger and fakes as `New` without booting a hidden
   first generation. `TryStart(ctx, StartOptions)` synchronously runs one down node's

@@ -22,6 +22,7 @@ layer.
 | `StartupWalkScenario`, `StartupOperation` | Runs actual `daemon.Init` from an empty disk (`StartupInit`) or actual `daemon.Start` after an unobserved Init (`StartupStart`). Names, budgets, recovery cases, offline damage and read-only checks are scenario data. `StartAfter` advances the same fixed clock between Init and the first observed Start; default zero, non-negative and only valid for Start. |
 | `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, the presets the node has besides the one `init` makes (`Presets`, by name, each the JSON `presets add` takes, added through the configuration's own change), and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
 | `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport`, `H.VerifyControlReply` | The loopback of the running process, its knobs, and the check of a report or a control reply the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
+| `Options.OpenPackage` | Opens a named adapter package as an `fsx.Reader` rooted at its source. Each generation receives the same callback through `engine.Deps.OpenPackage`; nil leaves installation without a package reader. |
 | `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. `AdapterOptions.Runtime` makes the adapter declare a runtime beside its direct endpoints and drive one fake runtime that the fixture owns and that outlives every process of the adapter (the manifest installed is `RuntimeAdapterManifest`, so the node makes the runtime endpoint of the instance). `AdapterOptions.ExtraInstances` names further instances, each installed, enabled and run like `Instance` with an adapter, controller, presets and (with `Runtime`) runtime and runtime endpoint of its own (below). Nil: no host, and the fixture admits the instance itself through the engine's entry. |
 | `H.Adapter(instance)`, `H.AdapterLaunches(instance)`, `AdapterLaunch` | The controller of the latest fake adapter process (`scenario.ErrNotAvailable` without a host or before a launch), and every process the host started, in order, across restarts of the node: `Methods()` (what the daemon wrote to it), `Controller()`, `Survive()`, `End()`, `Ended()`. Both take the name of any instance of the fixture. |
 | `AdapterLauncher`, `NewAdapterLauncher`, `LauncherConfig`, `LauncherInstance`, `AdapterManifest`, `AdapterManifestOf`, `RuntimeAdapterManifestOf` | The one launcher the fixture and a test of the daemon share (`daemon`'s tests start fake adapters with it), and the declaration of the fake adapter, from which both the installed manifest and the capabilities the fake answers `initialize` with are made. `LauncherConfig.Instances` gives an instance a manifest and runtime other than the default pair. |
@@ -91,6 +92,10 @@ By default the node has one instance, `Instance`, and every accessor without a n
   fixture starts from a copy of one initialised disk per test binary.
 - **There is one clock.** The engine reads it, the ledger and the agents stamp with
   it, and a fake takes its `Now` method value. A crash does not move it.
+- **Package sources belong to the caller.** `Options.OpenPackage` passes unchanged
+  to the engine on every start, including restarts. The fixture neither opens nor
+  validates packages and caches no reader: the engine and configuration still own
+  staging, validation and installation.
 - **With an adapter host, quiet also means the adapter is.** The fixture adds a condition
   for the latest launch of each instance: it has no request of its own that the daemon
   has not answered (`Controller.Stats().Outstanding` is zero), and its progress is the
@@ -263,6 +268,10 @@ suite.
 `startup_test.go` checks cutoff snapshots, generation seeds and unpublished starts
 across transaction recovery, scan recovery and delivery recovery, including commit
 points, host cleanup, ordinary errors and cooperative cancellation.
+
+`install_test.go`: `TestPackageSourceCanInstallAndUpgradeAfterRestart` installs a
+package through the engine's management entry and upgrades it after a restart using
+the same source callback with a new package reader.
 
 `harness_test.go`: `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`,
 `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`,
