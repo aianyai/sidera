@@ -440,7 +440,7 @@ func TestPatternsRefuseATrailingNewline(t *testing.T) {
 		"AdapterID":  "example",
 		"PresetName": "review.readonly",
 		"ConfigKey":  "project_dir",
-		"EnvName":    "SIDERA_ENDPOINT_TOKEN",
+		"EnvName":    "SIDERA_TOKEN",
 		"ReasonWord": "too_many_recipients",
 		"SemVer":     "2.1.307-rc.1+build.5",
 	}

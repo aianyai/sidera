@@ -19,7 +19,7 @@
           "turn_active": false,
           "tool_access": {
             "env": {
-              "SIDERA_ENDPOINT_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
+              "SIDERA_TOKEN": "pU3KGCUwux1tEyze1iN7LtkeP3IfyxlxF0SU1kk8nVw"
             }
           },
           "process": {

@@ -78,5 +78,5 @@ func proc() *adapterproto.ProcessIdentity {
 }
 
 func toolAccess() adapterproto.ToolAccess {
-	return adapterproto.ToolAccess{Env: map[string]string{"SIDERA_ENDPOINT_TOKEN": token1}}
+	return adapterproto.ToolAccess{Env: map[string]string{"SIDERA_TOKEN": token1}}
 }
