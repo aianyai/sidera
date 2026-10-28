@@ -18,6 +18,7 @@ document gives the reasons and says where the tests are.
 | `fakeagent/engineagent` | The engine-layer backend of the fake agent: the engine's service interface called in process. Ten methods call the engine; Probe needs a credential this caller-bound backend does not hold. |
 | `scenario` | The language of test scripts, the same in every layer: scripts, the driver, the environment interface a fixture implements, and the judgements that read the ledger. |
 | `harness` | The engine-layer fixture: the engine on the real store, configuration and transaction layer over the in-memory file system, one test clock, the ledger, the agents, quiet, process and power-loss crashes and restarts, fault injection, and the generator of control signals for model tests. |
+| `acceptance/agent/mcp` | The MCP backend of the fake agent: independently encoded exchanges for both supported revisions, exact receive text, and tool errors mapped to the scenario categories. It takes process pipes and imports neither the production MCP server nor an MCP SDK. |
 | `crashwalk` | The core of the crash-point walk: which points to kill at in each mode, how a rerun is held to its recording, scenario budgets, coverage of the declared writes, and the crashing of recovery itself. |
 
 The first four, with the two programs, are the **third-party side**: they import the
@@ -286,8 +287,9 @@ directory and is replaced), is answered with a result the schema accepts.
 - A recv result a fake runtime hands its model and a node's own notice cannot be told
   apart by the fake: the classifier that names a notice is supplied by whoever knows the
   format.
-- The binary-layer fixture and the backends of the fake agent that run the command-line
-  client and speak MCP, and the backends of the crash walk, are not in this tree yet.
+- The MCP backend lives in `cmd/sidera/internal/acceptance/agent/mcp`. The binary-layer
+  fixture, the command-line backend and the backends of the crash walk are separate
+  from the engine fixture.
 - The engine-layer fixture runs one adapter instance, `Instance`, unless it is made with
   `Options.Adapter.ExtraInstances`, which adds instances that have each an adapter process, a
   controller and, with `Runtime`, a runtime of their own, reached by name (`Adapter`,
