@@ -39,12 +39,19 @@ func (d *Divergence) Error() string {
 		d.Target.Point, d.Tag.Tx, d.Tag.Role, d.Index, d.Reason, d.Want, d.Got)
 }
 
-func describe(h Hit) string { return h.Point.String() + " " + h.Path }
+func describe(h Hit) string {
+	description := h.Point.String() + " " + h.Path
+	if h.From != "" {
+		description += " from " + h.From
+	}
+	return description
+}
 
 // CompareRuns checks a rerun against the recording, up to the target. Each pair of
-// transaction and role must have written the same steps, in the same order, to the
-// same files. The order across pairs is not compared: writes outside the loop may
-// interleave with writes inside it, which changes no pair's own order and no file
+// transaction and role must have written the same steps, in the same order, with
+// the same path operands, including both ends of a rename. The order across pairs
+// is not compared: writes outside the loop may interleave with writes inside it,
+// which changes no pair's own order and no file
 // a point names. The rerun must also have ended at the target, the point it was
 // to be killed at.
 func CompareRuns(recorded, rerun []Hit, upTo Target) error {
@@ -95,8 +102,8 @@ func CompareRuns(recorded, rerun []Hit, upTo Target) error {
 			}
 		}
 		for i := 0; i < n; i++ {
-			if w[i].Point != g[i].Point || w[i].Path != g[i].Path {
-				return &Divergence{Target: upTo, Tag: tag, Index: i, Want: describe(w[i]), Got: describe(g[i]), Reason: "another step or another file"}
+			if w[i].Point != g[i].Point || w[i].Path != g[i].Path || w[i].From != g[i].From {
+				return &Divergence{Target: upTo, Tag: tag, Index: i, Want: describe(w[i]), Got: describe(g[i]), Reason: "another step or another path operand"}
 			}
 		}
 	}

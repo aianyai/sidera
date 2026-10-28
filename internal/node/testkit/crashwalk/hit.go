@@ -1,6 +1,7 @@
 package crashwalk
 
 import (
+	"path"
 	"strings"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -13,12 +14,33 @@ type Hit struct {
 	Gen int
 	// Point is the step and which time it was reached.
 	Point fsx.Point
-	// Path is the file the step worked on, relative to the data directory, with
-	// the random part of a temporary name replaced (see NormalizePath).
+	// Path is the step's primary path relative to the data directory, with
+	// temporary suffixes normalized. For renames it is the target. A logical
+	// commit has no path; the root directory is ".".
 	Path string
+	// From is the normalized source of Rename or RenameDir, empty otherwise.
+	From string
 	// Setup marks a hit made while the scenario was being set up, before its first
 	// step. The startup scenario covers what the setup writes.
 	Setup bool
+}
+
+// NewHit converts one complete observation into a trace fingerprint. Gen and
+// setup belong to the backend's recording window. CreateTemp reports its parent
+// before a name exists, so its fingerprint names that parent's future temporary
+// file; later steps already carry the opened file's actual name.
+func NewHit(gen int, observation fsx.Observation, setup bool) Hit {
+	p := observation.Path
+	if observation.Point.Step == fsx.StepCreate {
+		p = path.Join(p, fsx.TempPrefix+"*")
+	}
+	return Hit{
+		Gen:   gen,
+		Point: observation.Point,
+		Path:  NormalizePath(p),
+		From:  NormalizePath(observation.From),
+		Setup: setup,
+	}
 }
 
 // NormalizePath replaces the random suffix of a temporary file or of a discarded

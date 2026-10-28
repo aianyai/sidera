@@ -184,7 +184,12 @@ handle was opened; directory steps use their actual directory, with `.` for
 the root. `From` is empty except for renames. The same callback binds the point
 to its operands even when calls for one key interleave; a second callback or
 counter cannot safely reconstruct that association. No path is inferred from
-transaction names, and no normalization changes production paths.
+transaction names, and no normalization changes production paths. Test traces
+convert the complete event through `crashwalk.NewHit`, which normalizes both
+rename operands and maps a temporary creation's parent to `parent/.tmp-*`
+(`.tmp-*` at the root). Both operands participate in rerun comparison, so an
+unchanged target cannot hide a changed rename source; see the
+[testkit reference](../testkit/README.md).
 
 Two transaction names are reserved for writes that are not crash points:
 `log` (diagnostic logs, whose loss is harmless) and `cleanup` (the removal of

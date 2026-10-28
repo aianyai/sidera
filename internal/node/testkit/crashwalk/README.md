@@ -22,7 +22,7 @@ the runs through `Options.Observe`.
 | `Plan`, `PlanRecovery` | The targets of a mode, in the canonical order that sharding numbers by. |
 | `CheckBudget`, `CompareRuns`, `Assess`, `CheckRecoveryCases` | The individual checks, usable alone. |
 | `Mode`, `Shard`, `ParseMode`, `ParseShard`, `EnvMode`, `EnvShard` | `full` or `smoke`, and the part of the walk a CI job takes. |
-| `Hit`, `NormalizePath`, `IsSync` | A crash point a run reached, the path fingerprint, and the sync steps. |
+| `Hit`, `NewHit`, `NormalizePath`, `IsSync` | A reached crash point, the shared conversion from an observation to normalized path fingerprints, and the sync steps. |
 
 ## The rules
 
@@ -31,6 +31,14 @@ the runs through `Options.Observe`.
   ordinal the transaction layer counted. The same names serve the in-process walk
   and the binary walk, because the counting is done once, in the layer that owns
   the steps.
+- **An observation becomes a fingerprint in one place.** `NewHit(gen,
+  observation, setup)` preserves the observation's point and the backend's
+  generation and setup window, and normalizes both `Path` and `From`. A
+  `CreateTemp` observation carries its parent before any file was created;
+  `NewHit` gives it the fingerprint `parent/.tmp-*` (`.tmp-*` at the root).
+  A rename's `Path` is its target and `From` its source. File writes and syncs
+  already carry their opened name. Only logical commits have empty operands;
+  a root directory step has `Path="."`.
 - **The setup is not in the window.** What a scenario writes before its first step
   is covered by the startup scenario; repeating it in every scenario would only
   repeat it.
@@ -50,8 +58,9 @@ the runs through `Options.Observe`.
   away.
 - **A rerun is compared with its recording per pair of transaction and role.** The
   rerun must end at its target, and each pair must have written the same steps in
-  the same order to the same files, up to it. The order across pairs is not
-  compared: a write outside the loop may interleave with one inside it, which
+  the same order with the same path operands, up to it. Both ends of a rename
+  must agree: the same target with a different source is a different operation.
+  The order across pairs is not compared: a write outside the loop may interleave with one inside it, which
   changes no pair's order and no file a point names. A rerun that differs is not
   deterministic, and a crash at point n of a run that is not the recorded run proves
   nothing about the recording.
@@ -90,7 +99,7 @@ the runs through `Options.Observe`.
 ## What the caller must guarantee
 
 - A backend answers one `Reached` per target, ends a killed generation at its
-  target, normalises temporary names with `NormalizePath`, and reports an invariant
+  target, converts complete observations through `NewHit`, and reports an invariant
   that failed as a sentence in `Violations`.
 - A backend counts crash points with the same counter as the transaction layer
   (`fsx.Counter` through `fsx.Observe`), so that the ordinal means the same in the
@@ -107,7 +116,9 @@ the runs through `Options.Observe`.
 `TestWalkSmokeCrashesARecoveryTransactionOnceWhateverScenarioListsItsWrites`,
 `TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites`,
 `TestWalkReportsCoverageOfNormalAndRecoveryPathsApart`, `TestCompareRuns`, `TestCheckBudget`,
-`TestAssessCoverage`, `TestCheckRecoveryCasesUnion`, and the `TestWalk…` tests
+`TestAssessCoverage`, `TestCheckRecoveryCasesUnion`,
+`TestNewHitConvertsObservationOperandsToStableFingerprints`,
+`TestCompareRunsRejectsAChangedRenameSource`, and the `TestWalk…` tests
 (`…FailsWhenATargetIsNotReached`, `…FailsWhenARerunDivergesFromTheRecording`,
 `…FailsWhenACleanRunWritesARecoveryPath`, `…FailsOnAWriteNoDeclarationLists`,
 `…FailsWhenADeclaredNormalWriteIsNeverReached`, `…FailsWhenTheScenarioOutgrowsItsBudget`,

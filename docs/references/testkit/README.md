@@ -120,9 +120,15 @@ packages and are not part of them.
   still need its own definition.
 - **A walk records first and compares every rerun with the recording.** A crash at the
   n-th write of a run proves something about the recorded run only if the rerun is that
-  run, so each pair of transaction and role must have written the same steps to the same
-  files; a target that was not reached, a scenario that grew past its budget, a declared
-  write nothing reaches and a write no declaration lists all fail the walk instead of
+  run, so each pair of transaction and role must have written the same steps with the
+  same path operands, including both source and target of a rename; the same target with
+  another source is another operation. `crashwalk.NewHit` converts each complete
+  `fsx.Observation` into one `Hit`, preserving its point and the backend's generation
+  and setup flag, and normalizing `Path` and `From` with `NormalizePath`. A temporary
+  creation reports its parent before a file exists, so the conversion gives it the
+  fingerprint `parent/.tmp-*` (`.tmp-*` at the root); a logical commit keeps empty
+  operands and a root directory step keeps `.`. A target that was not reached,
+  a scenario that grew past its budget, a declared write nothing reaches and a write no declaration lists all fail the walk instead of
   being skipped. Sync steps are not kill points for a process kill, since the page cache
   survives it; the power-loss model on the in-memory file system is what they are for.
   Recovery is crashed too, because a recovery that is only correct when it is not
