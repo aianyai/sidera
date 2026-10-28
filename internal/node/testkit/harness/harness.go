@@ -709,6 +709,14 @@ func (h *H) Session(endpointID string) fakeagent.Agent {
 // agent made before a restart acts on the one after it.
 type currentEngine struct{ h *H }
 
+func (c currentEngine) Me(ctx context.Context, caller engine.Caller) (engine.MeView, error) {
+	return onProcess(c.h, func(e *engine.Engine) (engine.MeView, error) { return e.Me(ctx, caller) })
+}
+
+func (c currentEngine) Peers(ctx context.Context, caller engine.Caller) ([]ident.NodeID, error) {
+	return onProcess(c.h, func(e *engine.Engine) ([]ident.NodeID, error) { return e.Peers(ctx, caller) })
+}
+
 func (c currentEngine) PresentProbeToken(ctx context.Context, token adapterproto.Token, frontend adapterproto.Frontend) (engine.ProbeTarget, error) {
 	return onProcess(c.h, func(e *engine.Engine) (engine.ProbeTarget, error) {
 		return e.PresentProbeToken(ctx, token, frontend)

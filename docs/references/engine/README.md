@@ -104,6 +104,14 @@ instance (`Admission.MaxDirectEndpoints`) and the cap of the node
 being created, whatever its kind. The refusal is `endpoint_limit` and says which.
 The system endpoint is not registered, counted, listed or closable.
 
+`Me` resolves the caller in its read command and returns its address, kind,
+display name and a copy of its declaration. Its front-end map lists only the
+agent front ends declared by the adapter's current admission; an instance that
+has not been admitted gives an empty map. Each listed front end carries its
+`Admission.Budget` and `Admission.RecvWait`, including their defaults. `Peers`
+also resolves the caller before answering; the only visible node while there is
+no network transport is this node itself. Neither read exposes an endpoint token.
+
 Closing an endpoint is a head record (closed, token gone), then chunks of at most
 `ChunkReplaces` (16) records queued for it, each closed by the delivery rules and
 stripped of its body reference, whose own body file the store removes in the same

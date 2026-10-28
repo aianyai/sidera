@@ -5,6 +5,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/authz"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
@@ -16,6 +17,8 @@ import (
 // and not on Engine. The methods are added as the engine learns to do them.
 type AgentService interface {
 	PresentProbeToken(ctx context.Context, token adapterproto.Token, frontend adapterproto.Frontend) (ProbeTarget, error)
+	Me(ctx context.Context, c Caller) (MeView, error)
+	Peers(ctx context.Context, c Caller) ([]ident.NodeID, error)
 	Declare(ctx context.Context, c Caller, p DeclarationPatch) (authz.Declaration, error)
 	Send(ctx context.Context, c Caller, r SendRequest) (SendResult, error)
 	Reply(ctx context.Context, c Caller, r ReplyRequest) (SendResult, error)
