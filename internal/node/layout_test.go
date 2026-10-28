@@ -561,26 +561,29 @@ func TestRuntimeScanWalksTree(t *testing.T) {
 
 // --- test tooling stays out of production ---
 
-// testkitImporters lists the fake programs that are built from the test tooling and
-// never installed.
-var testkitImporters = []string{
-	"cmd/sidera-fake-adapter",
-	"cmd/sidera-fake-runtime",
-}
-
 // isUnder reports whether dir is base or below it.
 func isUnder(dir, base string) bool {
 	return dir == base || strings.HasPrefix(dir, base+"/")
 }
 
+// isTestTooling classifies module-relative directories for both sides of an
+// import. The testkit and acceptance trees share helpers; the fake programs
+// are exact directories, not subtrees, and are never installed.
+func isTestTooling(dir string) bool {
+	return isUnder(dir, testkitDir) ||
+		isUnder(dir, "cmd/sidera/internal/acceptance") ||
+		dir == "cmd/sidera-fake-adapter" ||
+		dir == "cmd/sidera-fake-runtime"
+}
+
 // TestTestToolingReachesNoProductionBinary fails when a non-test file outside the test
-// tooling and the two fake programs imports a package below internal/node/testkit. The
-// tooling builds test homes and plays the owner and the outside world; were a production
-// package to import it, that would be shipped in the daemon or the command line.
+// tooling imports any test tooling. The tooling builds test homes and plays the owner
+// and the outside world; were a production package to import it, that would be shipped
+// in the daemon or the command line.
 func TestTestToolingReachesNoProductionBinary(t *testing.T) {
 	root := moduleRoot(t)
 	module := modulePath(t, root)
-	violations, err := scanTree(root, root, testkitImportCheck(module))
+	violations, err := scanTree(root, root, testToolingImportCheck(module))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,17 +592,21 @@ func TestTestToolingReachesNoProductionBinary(t *testing.T) {
 	}
 }
 
-// testkitImportCheck reports every import of a package below the test tooling in a
-// directory that is neither the tooling nor one of the fake programs.
-func testkitImportCheck(module string) dirCheck {
+// testToolingImportCheck reports every import of test tooling from a directory
+// outside the test tooling, even if no executable imports that directory yet.
+func testToolingImportCheck(module string) dirCheck {
 	return func(dir string, fset *token.FileSet, f *ast.File) []string {
-		if isUnder(dir, testkitDir) || slices.Contains(testkitImporters, dir) {
+		if isTestTooling(dir) {
 			return nil
 		}
 		var out []string
 		for _, spec := range f.Imports {
 			importPath, err := strconv.Unquote(spec.Path.Value)
-			if err == nil && isUnder(importPath, module+"/"+testkitDir) {
+			if err != nil {
+				continue
+			}
+			importDir, inModule := strings.CutPrefix(importPath, module+"/")
+			if inModule && isTestTooling(importDir) {
 				out = append(out, fmt.Sprintf("%s: import of %s is not allowed here: test tooling never reaches a production binary", fset.Position(spec.Pos()), importPath))
 			}
 		}
@@ -609,7 +616,7 @@ func testkitImportCheck(module string) dirCheck {
 
 func TestTestToolingImportCheckDetectsViolations(t *testing.T) {
 	const m = "example.com/m"
-	check := testkitImportCheck(m)
+	check := testToolingImportCheck(m)
 	for _, r := range []struct {
 		name string
 		dir  string
@@ -618,6 +625,9 @@ func TestTestToolingImportCheckDetectsViolations(t *testing.T) {
 	}{
 		{"a daemon package importing the harness", "internal/node/daemon", `package p; import _ "example.com/m/internal/node/testkit/harness"`, 1},
 		{"the command line importing a fake", "cmd/sidera", `package p; import _ "example.com/m/internal/node/testkit/fakeadapter"`, 1},
+		{"acceptance importing a fake agent", "cmd/sidera/internal/acceptance/agent/cli", `package p; import _ "example.com/m/internal/node/testkit/fakeagent"`, 0},
+		{"the command line importing acceptance", "cmd/sidera", `package p; import _ "example.com/m/cmd/sidera/internal/acceptance/agent/cli"`, 1},
+		{"a production package unreachable from main importing acceptance", "internal/node/unlinked", `package p; import _ "example.com/m/cmd/sidera/internal/acceptance/agent/cli"`, 1},
 		{"a contract package importing the ledger", "internal/admin", `package p; import "example.com/m/internal/node/testkit/ledger"; var _ = ledger.X`, 1},
 		{"the test tooling importing itself", "internal/node/testkit/harness", `package p; import _ "example.com/m/internal/node/testkit/ledger"`, 0},
 		{"a fake program", "cmd/sidera-fake-adapter", `package p; import _ "example.com/m/internal/node/testkit/fakeadapter"`, 0},

@@ -77,13 +77,19 @@ Three rules bind every runtime package:
   other, as a real third party would, so they cannot reach `fsx`; their files are
   not daemon state; and the ledger is a test oracle that must stay independent of
   the `fsx` under test (see [testkit](../testkit/README.md)).
-- **Test tooling never reaches a production binary.** `internal/node/testkit/...`
-  seeds test homes through the real `config` write functions, which take the
-  owner's request key, so it makes the actor of the local owner; the local-owner
-  scan exempts it for that reason. The exemption is safe only because no non-test
-  file outside the testkit and the two fake programs (`cmd/sidera-fake-adapter`,
-  `cmd/sidera-fake-runtime`) imports a package below it, which a separate scan
-  enforces.
+- **Test tooling never reaches a production binary.** Tooling consists of the
+  `internal/node/testkit` and `cmd/sidera/internal/acceptance` subtrees, plus the
+  exact program directories `cmd/sidera-fake-adapter` and
+  `cmd/sidera-fake-runtime`. Tooling may import tooling, so acceptance drivers
+  share the testkit's fake agents. No other package's non-test source may import
+  any tooling. A source scan covers the whole module regardless of platform or
+  build constraints, including packages no executable imports yet; checking only
+  executable dependency graphs would leave those packages unprotected.
+  `internal/node/testkit/...` seeds test homes through the real `config` write
+  functions, which take the owner's request key, so it makes the actor of the
+  local owner. Only that subtree is exempt from the local-owner scan; acceptance
+  receives no such privilege. Keeping all tooling out of production makes that
+  exemption safe.
 - **Pure scans, not a linter dependency.** `go/parser` and `go list` are in the
   standard toolchain; a linter would add a dependency for rules this small.
 
@@ -111,9 +117,10 @@ Three rules bind every runtime package:
     `TestTheLocalOwnerAndLocalSourceScansDetectViolations` checks both scans on
     inline sources.
   - `TestTestToolingReachesNoProductionBinary`: no non-test file of the module
-    outside `internal/node/testkit/...` and the two fake programs imports a package
-    below `internal/node/testkit/`; `TestTestToolingImportCheckDetectsViolations`
-    checks the scan on inline sources.
+    outside the two tooling subtrees and the two exact fake program directories
+    imports any tooling package; `isTestTooling` classifies both importers and
+    imports. `TestTestToolingImportCheckDetectsViolations` checks the scan on
+    inline sources.
   - `TestRuntimeImportersDetectViolations` and
     `TestRuntimeScansDetectViolations`: check, on inline sources, that each
     check reports what its rule forbids and passes what it allows, so a clean
