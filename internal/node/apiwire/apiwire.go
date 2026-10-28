@@ -174,8 +174,11 @@ func OperationUnknown() *Error {
 // runs it if it did not. This is the one definition the command line, the MCP front
 // end and the test fixture share.
 func OutcomeUnknown(operationID string) *Error {
-	e := New(CategoryOutcomeUnknown, CodeOutcomeUnknown,
-		"the request was sent and no complete answer was read; whether it took effect is not known: send it again with the same operation identifier")
+	message := "the request was sent and no complete answer was read; whether it took effect is not known"
+	if operationID != "" {
+		message += ": send it again with the same operation identifier"
+	}
+	e := New(CategoryOutcomeUnknown, CodeOutcomeUnknown, message)
 	if operationID != "" {
 		e.with("operation_id", operationID)
 	}
@@ -225,7 +228,7 @@ func FromError(err error) *Error {
 func fromRefusal(r *engine.Refusal) *Error {
 	switch r.Reason {
 	case engine.ReasonUnauthenticated:
-		return New(CategoryUnauthenticated, "token_unknown", "the token is not one of an open endpoint")
+		return New(CategoryUnauthenticated, "token_unknown", "the token is not known to this node or has been revoked")
 	case engine.ReasonEndpointUnknown:
 		return EndpointUnknown()
 	case engine.ReasonInstanceUnknown:

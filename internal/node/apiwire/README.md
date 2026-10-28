@@ -59,6 +59,9 @@ not import it: the words of the wire never enter the engine.
   has to be told to send the request again with the same operation identifier,
   exactly as when an answer is lost. The category is also the one a client judges
   itself (`OutcomeUnknown`), so both come to the same place.
+- **A resend is suggested only with an operation identifier.** `OutcomeUnknown`
+  without one reports the uncertainty alone: an Agent send without an explicit
+  idempotency key may create another message if it is sent again.
 - **A message identifier taken before with other content is `conflict/message_conflict`.**
   It is what a target says to the node that sent it, and the interface specification
   lists no code of the category for it; it is worded as the engine names it until the

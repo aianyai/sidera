@@ -312,7 +312,10 @@ request that may or may not have taken effect: a client judges it itself when it
 wrote a request and did not read the answer whole, and the daemon says it
 (`storage_fatal`) when a failure of the disk stopped the node while the request was
 in flight; either way the request is sent again with the same operation identifier,
-which returns the stored result if it ran and runs it if it did not. A refusal for an
+which returns the stored result if it ran and runs it if it did not. The client's
+`OutcomeUnknown` suggests that resend only when given an operation identifier;
+without one it reports the uncertainty alone, because an Agent send without an
+explicit idempotency key may create another message. A refusal for an
 invalid argument with no detail is `malformed_request`. The text of an error nobody
 expected is logged and never sent. Some words belong to the owner's operations alone:
 `not_found/alert_unknown`; `invalid_argument/empty_patch`, `node_mismatch`,

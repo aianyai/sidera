@@ -437,6 +437,9 @@ func TestAnOutcomeThatIsNotKnownIsOneDefinitionForEveryClient(t *testing.T) {
 	if bare := apiwire.OutcomeUnknown(""); len(bare.Details) != 0 {
 		t.Errorf("a request with no operation identifier has details %v", bare.Details)
 	}
+	if bare := apiwire.OutcomeUnknown(""); strings.Contains(bare.Message, "send it again") || strings.Contains(bare.Message, "operation identifier") {
+		t.Errorf("a request with no operation identifier is told %q; no safe resend is known", bare.Message)
+	}
 	b, _ := json.Marshal(apiwire.Body{Error: *apiwire.OutcomeUnknown("ab")})
 	want := `{"error":{"category":"outcome_unknown","code":"outcome_unknown","message":"` + apiwire.OutcomeUnknown("ab").Message + `","details":{"operation_id":"ab"}}}`
 	if string(b) != want {
