@@ -160,7 +160,10 @@ The engine remembers a page's parts in memory for `pageMemory`. After a daemon
 restart or that memory expires, whole-page acknowledgement confirms only
 messages known to fit whole on one page. It does not confirm any part of a
 message that was split; the caller must explicitly name the parts it saw.
-Acknowledging unseen parts would falsely report a body delivered.
+The successful result always lists exactly the acknowledged parts as `items`,
+including `200 {"items":[]}` when none can be acknowledged. Unacknowledged
+messages are handed out again later marked as possible duplicates; they are never
+lost. Acknowledging unseen parts would falsely report a body delivered.
 
 **Probing.** A probe token is bound to an instance, preset and front end, valid
 for five minutes on the injected clock and consumed by its first successful

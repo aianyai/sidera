@@ -134,6 +134,12 @@ type AckRequest struct {
 	Items []adapterproto.PartRef `json:"items,omitempty"`
 }
 
+// AckResult lists exactly the parts acknowledged. Items is non-nil on success
+// and may be empty when a forgotten page contains only chunked messages.
+type AckResult struct {
+	Items []adapterproto.PartAck `json:"items"`
+}
+
 // DirectoryRequest selects a node and a live continuation. Zero Limit takes the
 // engine's default page size; the cursor is opaque and never grants permission.
 type DirectoryRequest struct {
@@ -327,7 +333,9 @@ func (s *Server) method(ctx context.Context, caller engine.Caller, name string, 
 		if err != nil {
 			return nil, err
 		}
-		return adapterproto.AckResult{Items: items}, nil
+		out := AckResult{Items: make([]adapterproto.PartAck, len(items))}
+		copy(out.Items, items)
+		return out, nil
 	case "reply":
 		var in ReplyRequest
 		if err := strictjson.Decode(body, &in); err != nil {

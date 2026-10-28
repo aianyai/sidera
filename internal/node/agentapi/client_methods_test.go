@@ -182,3 +182,46 @@ func TestRecvWithMalformedEarlierLeaseStillHandsOutThePage(t *testing.T) {
 		t.Fatalf("recv: %s; want the queued message after the failed acknowledgement", raw)
 	}
 }
+
+func TestWholePageAckAfterRestartReturnsAnEmptyListForAChunkedPage(t *testing.T) {
+	h, token, address := sessionNode(t)
+	s, _ := agentapi.New(agentapi.Config{Service: h.Engine()})
+	s.EnableMethods()
+	_, err := h.Agent("creator").Send(h.Ctx(), fakeagent.SendInput{To: []string{address}, Body: strings.Repeat("a long message ", 4000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.Quiesce()
+	w := request(s, token, "recv", `{"frontend":"cli"}`)
+	var page adapterproto.RecvPage
+	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || len(page.Messages) != 1 || page.Messages[0].Part == nil || page.Messages[0].Part.Total < 2 {
+		t.Fatalf("recv: HTTP %d, %s; want a chunked page", w.Code, w.Body)
+	}
+	h.Restart()
+	h.Quiesce()
+	s, _ = agentapi.New(agentapi.Config{Service: h.Engine()})
+	s.EnableMethods()
+	w = request(s, token, "ack", `{"lease":"`+string(page.Lease)+`"}`)
+	if w.Code != 200 || w.Body.String() != "{\"items\":[]}\n" {
+		t.Fatalf("ack: HTTP %d, %s; want an empty JSON array", w.Code, w.Body)
+	}
+	c := endpointClient(t, h, token)
+	acked, err := c.Ack(h.Ctx(), agentapi.AckRequest{Lease: page.Lease})
+	if err != nil || acked.Items == nil || len(acked.Items) != 0 {
+		t.Fatalf("Ack: %+v, %v; want a successful empty list", acked, err)
+	}
+	raw, err := c.Recv(h.Ctx(), agentapi.RecvRequest{Frontend: adapterproto.FrontendCLI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var again adapterproto.RecvPage
+	if err := json.Unmarshal(raw, &again); err != nil {
+		t.Fatal(err)
+	}
+	if len(again.Messages) != 1 || again.Messages[0].ID != page.Messages[0].ID || !again.Messages[0].PossiblyDuplicate {
+		t.Fatalf("recv after the empty acknowledgement: %s; want the message as a possible duplicate", raw)
+	}
+}

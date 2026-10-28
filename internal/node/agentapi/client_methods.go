@@ -75,8 +75,8 @@ func (c *Client) Recv(ctx context.Context, in RecvRequest) ([]byte, error) {
 }
 
 // Ack acknowledges this endpoint's page or the explicitly named parts.
-func (c *Client) Ack(ctx context.Context, in AckRequest) (adapterproto.AckResult, error) {
-	var out adapterproto.AckResult
+func (c *Client) Ack(ctx context.Context, in AckRequest) (AckResult, error) {
+	var out AckResult
 	err := c.result(ctx, "ack", in, &out)
 	return out, err
 }

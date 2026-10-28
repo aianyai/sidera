@@ -31,6 +31,9 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
   This boundary owns the one-recipient limit, JSON presence rules, parsing
   identifiers and safe conversion of seconds; the engine owns message validation,
   receive clamping and acknowledgement safety.
+- `AckResult.Items` lists exactly the parts acknowledged and is always a JSON
+  array, including an empty array when a forgotten page has no whole messages.
+  This Agent result is independent of the adapter protocol result and its bounds.
 - Receive responses are the engine page bytes, including their existing newline.
   Neither the server nor the client wraps or re-encodes a page.
 - Requests have a 1 MiB limit and use `strictjson`. Responses are JSON with HTML
