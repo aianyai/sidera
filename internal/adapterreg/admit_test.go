@@ -205,6 +205,26 @@ func equalActions(a, b []authz.Action) bool {
 	return true
 }
 
+func TestKindSignalsWithoutAnAdmission(t *testing.T) {
+	for _, tc := range []struct {
+		kind adapterreg.EndpointKind
+		want []authz.Action
+	}{
+		{adapterreg.KindRuntime, []authz.Action{authz.ActionSessionCreate, authz.ActionEndpointStatus}},
+		{adapterreg.KindSession, []authz.Action{authz.ActionMessageSend, authz.ActionSessionClose, authz.ActionEndpointStatus}},
+		{adapterreg.KindDirect, []authz.Action{authz.ActionMessageSend, authz.ActionEndpointStatus}},
+		{0, nil},
+		{4, nil},
+		{255, nil},
+	} {
+		t.Run(tc.kind.String(), func(t *testing.T) {
+			if got := adapterreg.KindSignals(tc.kind); !slices.Equal(got, tc.want) {
+				t.Errorf("KindSignals(%v) = %v, want %v", tc.kind, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestSignalsForInvalidKinds(t *testing.T) {
 	a, _ := adapterreg.Admit(runtimeCaps(true, true, true, "cli"), man())
 	for _, k := range []adapterreg.EndpointKind{0, 4, 255} {

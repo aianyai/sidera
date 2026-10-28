@@ -20,6 +20,7 @@ not frame, send or store anything.
 | ---- | ------- |
 | `Admit(capabilities, manifest)` | Whether an adapter is admitted, and the `Admission` that records what it may do. Refusals are an `*AdmitError` with a typed `AdmitReason`. |
 | `Admission.Declares`, `DeclaredKinds`, `Signals(kind)`, `AcceptsSignal` | The endpoint kinds the adapter may own and the control signals each accepts. |
+| `KindSignals(kind)` | The signals guaranteed by an endpoint's kind alone, without an adapter admission; session interrupt still requires a declaration. |
 | `Admission.Budget(frontend)`, `Markers()` | The output budget of `recv` per front end (the default when the manifest gives none) and the compiled acknowledgement markers. |
 | `Admission.PartBudgets(kind)` | The budgets a long message is cut for on an endpoint of that kind, whichever front end reads it: those of every front end the endpoint can be read through, so that every front end cuts it in the same parts. |
 | `Admission.RecvWait(frontend)`, `DefaultRecvWait` | The longest an agent's `recv` may wait through an agent front end (`cli` or `mcp`): the manifest's limit, or `DefaultRecvWait` (8 seconds) when it gives none. It does not apply to direct endpoints. |
@@ -52,6 +53,10 @@ not frame, send or store anything.
   direct: `message.send`, `endpoint.status`. A signal that authorization allows
   but the endpoint does not accept is answered by the daemon as unsupported,
   without calling the adapter.
+  `KindSignals` owns the kind-only table. `Admission.Signals` requires a declared
+  kind and adds the declared session interrupt capability. A directory can use
+  the kind-only signals for an open endpoint whose adapter has not connected;
+  the absence of an admission does not prove that the endpoint is closed.
 - **Budgets.** A manifest budget for `cli` or `mcp` needs a runtime that declares
   that front end, and one for `direct` needs direct endpoints; otherwise the
   adapter is refused. A front end without a budget uses `handoff.DefaultBudget()`. A

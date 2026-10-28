@@ -231,15 +231,25 @@ func (a Admission) Signals(k EndpointKind) []authz.Action {
 	if !a.Declares(k) {
 		return nil
 	}
+	out := KindSignals(k)
+	if k == KindSession && a.caps.Runtime.Interrupt {
+		out = append(out, authz.ActionSessionInterrupt)
+		slices.Sort(out)
+	}
+	return out
+}
+
+// KindSignals lists the signals guaranteed by an endpoint's kind alone, in the
+// order of authz.Actions. It does not require an admitted adapter, so a directory
+// can describe an open endpoint before its adapter connects. Session interrupt
+// is absent: only an Admission can confirm that capability. An unknown kind
+// accepts nothing.
+func KindSignals(k EndpointKind) []authz.Action {
 	switch k {
 	case KindRuntime:
 		return []authz.Action{authz.ActionSessionCreate, authz.ActionEndpointStatus}
 	case KindSession:
-		out := []authz.Action{authz.ActionMessageSend, authz.ActionSessionClose}
-		if a.caps.Runtime.Interrupt {
-			out = append(out, authz.ActionSessionInterrupt)
-		}
-		return append(out, authz.ActionEndpointStatus)
+		return []authz.Action{authz.ActionMessageSend, authz.ActionSessionClose, authz.ActionEndpointStatus}
 	case KindDirect:
 		return []authz.Action{authz.ActionMessageSend, authz.ActionEndpointStatus}
 	}
