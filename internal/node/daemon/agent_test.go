@@ -1,7 +1,9 @@
 package daemon_test
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/ipc"
 )
@@ -57,4 +60,60 @@ func callAgent(home string) (int, []byte, error) {
 	defer res.Body.Close()
 	body, err := io.ReadAll(res.Body)
 	return res.StatusCode, body, err
+}
+
+// A request still uploading its body keeps management shutdown waiting, but must
+// not keep the Agent listener open for the rest of the shared grace.
+func TestAgentListenerStopsWhileAManagementRequestIsStillInFlight(t *testing.T) {
+	noLeaks(t)
+	c, _ := initialized(t)
+	c.ShutdownGrace = 30 * time.Second
+	d := started(t, c)
+	addr, err := ipc.Locate(c.Home, ipc.KindManage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn, err := ipc.Dial(ctx, addr, ipc.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(clock.System().Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_, err = fmt.Fprint(conn, "POST /v1/manage/endpoints.list HTTP/1.1\r\nHost: sidera\r\nContent-Length: 2\r\nExpect: 100-continue\r\n\r\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(reader, nil)
+	if err != nil || resp.StatusCode != http.StatusContinue {
+		t.Fatalf("management has not begun reading the body: %v, %v", resp, err)
+	}
+	d.RequestStop("test concurrent interface shutdown")
+	// Successful requests return immediately. Once shutdown closes the listener,
+	// dial fails; the bounded context fails this test before the management grace.
+	for {
+		if _, _, err := callAgent(c.Home); err != nil {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("the Agent listener stayed open behind management shutdown")
+		default:
+		}
+	}
+	if _, err := fmt.Fprint(conn, "{}"); err != nil {
+		t.Fatal(err)
+	}
+	resp, err = http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if err := d.Wait(); err != nil {
+		t.Fatal(err)
+	}
 }

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -64,14 +65,20 @@ func (d *Daemon) shutdown(fatal bool) {
 		}
 	})
 	step(2, "interfaces", func(ctx context.Context) {
+		var interfaces sync.WaitGroup
 		if d.manage != nil {
-			warn("the management interface did not stop in time", d.manage.Shutdown(ctx))
-			warn("the management interface ended", <-d.served)
+			interfaces.Go(func() {
+				warn("the management interface did not stop in time", d.manage.Shutdown(ctx))
+				warn("the management interface ended", <-d.served)
+			})
 		}
 		if d.agent != nil {
-			warn("the Agent interface did not stop in time", d.agent.Shutdown(ctx))
-			warn("the Agent interface ended", <-d.agentServed)
+			interfaces.Go(func() {
+				warn("the Agent interface did not stop in time", d.agent.Shutdown(ctx))
+				warn("the Agent interface ended", <-d.agentServed)
+			})
 		}
+		interfaces.Wait()
 		if d.agentBegan && d.cfg.Attach.StopInterfaces != nil {
 			warn("the Agent interface", d.cfg.Attach.StopInterfaces(ctx))
 		}

@@ -376,7 +376,8 @@ interface: a sandbox must deny the socket to an agent.
   is the injected clock's, which tests control and production does not distinguish.
 - **The composition root owns the built-in interfaces.** It opens the Agent
   listener before adapters can probe tools, enables endpoint methods after recovery,
-  and joins serving goroutines during shutdown. It uses the standard library's
+  and shuts both HTTP servers down concurrently under one grace, joining their
+  serving goroutines during shutdown. It uses the standard library's
   [HTTP shutdown](https://pkg.go.dev/net/http#Server.Shutdown): stop accepting, wait
   within the grace, then close remaining connections. The engine ends receive
   waiters first. No extra server or lifecycle dependency is needed for these steps.

@@ -51,7 +51,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 - **The Agent listener opens before adapters start.** Step 9 opens the checked
   local Agent address in probe-only mode. Step 15 enables endpoint methods only
   after the engine serves. Shutdown step 1 ends engine waiters; step 2 shuts both
-  HTTP servers down within the grace and waits for their serving goroutines before
+  HTTP servers down concurrently within the shared grace and waits for their serving goroutines before
   releasing the instance lock. Hooks run after each built-in action.
 - **The engine reads an adapter package through this package.** `Deps.OpenPackage` is
   `fsx.OpenOS` of the directory the owner named, handed over as a reader: the package
