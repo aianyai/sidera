@@ -198,7 +198,7 @@ producers must keep request bodies, credentials and private keys out of them.
 | `conflict` | 409 | 6 | `idempotency_conflict` |
 | `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind` |
 | `backpressure` | 429 | 8 | `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy` |
-| `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable` |
+| `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable`, `request_canceled`, `request_timeout` |
 | `internal` | 500 | 1 | `internal` |
 | `outcome_unknown` | 500 | 10 | `outcome_unknown`, `storage_fatal` |
 
@@ -225,7 +225,11 @@ keys. Ordinary calls have a 60-second deadline; receives have
 `min(requested wait_s, manifest.MaxRecvWaitSeconds) + 30` seconds, bounded also by
 the caller's context. The protocol's maximum is 120 seconds. A written request
 without a complete, valid answer is `outcome_unknown`; the caller cannot assume
-it had no effect. No operation identifier means no advice to resend.
+it had no effect. If the request was not written, an ended caller context maps
+to `unavailable/request_canceled` or `unavailable/request_timeout` through
+`apiwire`, with fixed messages describing only the ended context. Existing typed
+errors take precedence over that mapping. No operation identifier means no
+advice to resend.
 
 The default undeclared wait limit is eight seconds. A shell tool with a
 ten-second foreground window may end its process at the deadline or let it

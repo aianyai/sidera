@@ -17,7 +17,7 @@ not import it: the words of the wire never enter the engine.
 
 | Name | Purpose |
 | ---- | ------- |
-| `FromError(err)` | The one mapping: an error of the wire as it is, an `*engine.Refusal` by its reason, a `*config.ChangeError` by its reason, a `*strictjson.Error`, a failure of the way to the daemon (`ipc`), and any other error as an internal one. |
+| `FromError(err)` | The one mapping: an error of the wire as it is, an `*engine.Refusal` by its reason, a `*config.ChangeError` by its reason, a `*strictjson.Error`, a failure of the way to the daemon (`ipc`), an ended request context, and any other error as an internal one. |
 | `BudgetUnitName(unit)` | A calculated output-budget unit as its existing wire name, `chars` or `tokens`; an unknown unit is an error. |
 | `AdapterEngine(engine)` | The engine behind the interface the adapter host asks of it (`adapterhost.Engine`): the four methods that answer a request of an adapter (`RegisterDirect`, `UnregisterDirect`, `CheckpointPut` and `RecvObserved`, the one optional part it offers) turn an `*engine.Refusal` into the `*peer.Error` the adapter is answered with, by one row per reason; every other error is passed on untouched. What each code means is in [docs/references/adapter-host](../../../docs/references/adapter-host/README.md). |
 | `FromAdmin(reason)` | The refusal of a request by the administrative rules. |
@@ -57,6 +57,13 @@ not import it: the words of the wire never enter the engine.
   and an unreachable target map to `unavailable/directory_unavailable`. This
   stable code means try again later; it is never renamed, removed or reused for
   another meaning. It is not an uncertain message outcome, nor an inbox timeout.
+- **An ended request context is unavailable.** After typed wire, engine, config,
+  strict-JSON and IPC errors, `context.Canceled` maps to
+  `unavailable/request_canceled`, and `context.DeadlineExceeded` to
+  `unavailable/request_timeout`, including wrapped errors. Their messages are
+  fixed and describe only the ended context. They make no claim about effects.
+  A client that already wrote a request still reports `outcome_unknown` before
+  applying this mapping when its answer is incomplete.
 - **The text of an unknown error stays off the wire.** Anything that is none of the
   known errors is `internal/internal` with a fixed message; what it said is for the
   log. A client that is not the author of the code should not be handed a path or a
@@ -108,6 +115,6 @@ stopping engine, the absence of the optional parts the wrapper does not map
 written out by hand, the listed codes of `invalid_argument`, the outcome that is not
 known (from a fatal failure of the disk, and judged by a client), the answers an
 interface gives on its own, the details a refusal carries, the faults
-in a request and the failures of the way to the daemon, the text of an unknown error
-kept off the wire, the golden body of an error, and the status and exit code of each
+in a request, failures of the way to the daemon, ended contexts and typed-error
+precedence, the text of an unknown error kept off the wire, the golden body of an error, and the status and exit code of each
 category.

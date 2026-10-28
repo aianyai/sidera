@@ -48,7 +48,8 @@ for the wire and the reasons, and [the parent](../README.md) for runtime rules.
 - The client uses no HTTP proxy and follows no redirect: a token goes only to the
   local endpoint whose peer `ipc` checks. It never automatically retries a call,
   and sets no HTTP idempotency header. A missing or failed peer is mapped by
-  `apiwire`; a written request with no complete answer is `outcome_unknown`.
+  `apiwire`, including ended contexts as `request_canceled` or `request_timeout`;
+  a written request with no complete answer remains `outcome_unknown`.
   It rejects invalid UTF-8 in request text before JSON encoding or connecting,
   returning `invalid_argument/malformed_request` instead of replacing bytes.
 

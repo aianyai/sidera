@@ -8,6 +8,7 @@
 package apiwire
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -197,8 +198,9 @@ func Malformed(message, path string) *Error {
 
 // FromError maps an error to its words on the wire: the error of the wire itself
 // as it is, a refusal of the engine, a refused change of the configuration, a
-// fault in a request, a failure of the way to the daemon, and everything else as
-// an internal error whose text stays out of the answer. nil is nil.
+// fault in a request, a failure of the way to the daemon, an ended request
+// context, and everything else as an internal error whose text stays out of the
+// answer. nil is nil.
 func FromError(err error) *Error {
 	if err == nil {
 		return nil
@@ -221,6 +223,10 @@ func FromError(err error) *Error {
 		return New(CategoryUnavailable, "peer_check_failed", pe.Error())
 	case errors.Is(err, ipc.ErrDaemonNotRunning):
 		return New(CategoryUnavailable, "daemon_not_running", "the daemon is not running; start it with `sidera daemon`")
+	case errors.Is(err, context.Canceled):
+		return New(CategoryUnavailable, "request_canceled", "the request context was canceled")
+	case errors.Is(err, context.DeadlineExceeded):
+		return New(CategoryUnavailable, "request_timeout", "the request context deadline was exceeded")
 	}
 	return New(CategoryInternal, CodeInternal, "internal error")
 }

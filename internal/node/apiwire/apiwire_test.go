@@ -257,7 +257,6 @@ func TestAnUnknownErrorIsInternalAndKeepsItsTextOffTheWire(t *testing.T) {
 	if strings.Contains(got.Message, "secret-token-abc") || strings.Contains(got.Message, ".sidera") {
 		t.Errorf("the message %q carries the text of the error", got.Message)
 	}
-	check(t, apiwire.FromError(context.DeadlineExceeded), want{"internal", "internal"})
 	if apiwire.FromError(nil) != nil {
 		t.Error("no error is not an error")
 	}
@@ -472,5 +471,29 @@ func TestAResendOfTheInstallationBeingCopiedSaysItIsStillInProgress(t *testing.T
 	}
 	if other.Message == same.Message || !strings.Contains(same.Message, "this installation is still in progress") {
 		t.Errorf("messages %q and %q", other.Message, same.Message)
+	}
+}
+
+func TestContextErrorsAreUnavailableAfterTypedErrorsAreMapped(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		err           error
+		category      apiwire.Category
+		code, message string
+	}{
+		{"canceled", context.Canceled, apiwire.CategoryUnavailable, "request_canceled", "the request context was canceled"},
+		{"wrapped canceled", fmt.Errorf("private diagnostic: %w", context.Canceled), apiwire.CategoryUnavailable, "request_canceled", "the request context was canceled"},
+		{"deadline", context.DeadlineExceeded, apiwire.CategoryUnavailable, "request_timeout", "the request context deadline was exceeded"},
+		{"wrapped deadline", fmt.Errorf("private diagnostic: %w", context.DeadlineExceeded), apiwire.CategoryUnavailable, "request_timeout", "the request context deadline was exceeded"},
+		{"refusal before context", &engine.Refusal{Reason: engine.ReasonStorageFatal, Err: context.DeadlineExceeded}, apiwire.CategoryOutcomeUnknown, "storage_fatal", ""},
+		{"wire error before context", errors.Join(apiwire.New(apiwire.CategoryRefused, "boundary_refusal", "the typed refusal"), context.Canceled), apiwire.CategoryRefused, "boundary_refusal", "the typed refusal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := apiwire.FromError(tc.err)
+			check(t, got, want{tc.category, tc.code})
+			if tc.message != "" && got.Message != tc.message {
+				t.Fatalf("message %q, want %q", got.Message, tc.message)
+			}
+		})
 	}
 }
