@@ -32,6 +32,12 @@ type StartOptions struct {
 // Cancellation is cooperative: an observer that holds a step must be released
 // by its caller. A crash requires an in-memory disk.
 func (h *H) TryStart(ctx context.Context, o StartOptions) (crashed bool, err error) {
+	return h.tryStart(ctx, o, h.opts.Observer)
+}
+
+// tryStart binds the observer to the writer's lifetime. A walk gives each
+// generation a window of its own, including callbacks made after its cutoff.
+func (h *H) tryStart(ctx context.Context, o StartOptions, observer txn.Observer) (crashed bool, err error) {
 	if h.current() != nil {
 		return false, errors.New("harness: the node is already running")
 	}
@@ -50,7 +56,7 @@ func (h *H) TryStart(ctx context.Context, o StartOptions) (crashed bool, err err
 	stopCancel := context.AfterFunc(ctx, cancel)
 	defer stopCancel()
 	p := &process{cancel: cancel, log: &LogCapture{}}
-	a := &startAttempt{h: h, p: p, ctx: startCtx, caller: ctx, options: o, active: true}
+	a := &startAttempt{h: h, p: p, ctx: startCtx, caller: ctx, options: o, observer: observer, active: true}
 	p.mounted = newMounted(h.t, h.tab, base, a, o.Arm)
 	if mem, ok := base.(*fsxtest.Mem); ok {
 		p.mounted.Mem = mem
@@ -101,13 +107,14 @@ type startAttempt struct {
 	ctx      context.Context
 	caller   context.Context
 	options  StartOptions
+	observer txn.Observer
 	active   bool
 	crashErr error
 }
 
 func (a *startAttempt) Reached(observation fsx.Observation, kind txn.Kind) {
 	p := observation.Point
-	if obs := a.h.opts.Observer; obs != nil {
+	if obs := a.observer; obs != nil {
 		obs.Reached(observation, kind)
 	}
 	a.mu.Lock()

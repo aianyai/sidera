@@ -18,6 +18,7 @@ layer.
 | `New(t, Options)` | Makes the node, starts the engine through the startup steps it has (scan, start, admission of the adapter, recovery of deliveries, serve) and stops everything when the test ends. |
 | `NewStopped(t, Options)` | Prepares the same initialized disk, clock, ledger and fakes as `New`, leaving the node down so the first generation can use controlled startup. |
 | `H.TryStart(ctx, StartOptions)` | Synchronously starts a down node or reclaims everything that startup acquired before returning `(crashed, err)`. `Arm` installs ordinary fault rules before transaction recovery; `CrashAt` selects a startup point and crash mode while the fixture owns the cutoff and cleanup. |
+| `NewWalkBackend(t)`, `WalkScenario` | Runs a script for `crashwalk.Backend` on a fresh in-memory fixture, with per-generation observations, process crashes, recovery triggers, a repeatable drain and ledger judgements. `WalkScenario.Options` configures the fixture; `Damage` interprets an offline trigger on its stopped disk, and `Check` adds a final judgement. |
 | `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, the presets the node has besides the one `init` makes (`Presets`, by name, each the JSON `presets add` takes, added through the configuration's own change), and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
 | `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport`, `H.VerifyControlReply` | The loopback of the running process, its knobs, and the check of a report or a control reply the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
 | `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. `AdapterOptions.Runtime` makes the adapter declare a runtime beside its direct endpoints and drive one fake runtime that the fixture owns and that outlives every process of the adapter (the manifest installed is `RuntimeAdapterManifest`, so the node makes the runtime endpoint of the instance). `AdapterOptions.ExtraInstances` names further instances, each installed, enabled and run like `Instance` with an adapter, controller, presets and (with `Runtime`) runtime and runtime endpoint of its own (below). Nil: no host, and the fixture admits the instance itself through the engine's entry. |
@@ -42,6 +43,24 @@ By default the node has one instance, `Instance`, and every accessor without a n
 
 ## Rules
 
+- **A walk's trace belongs to one generation.** Its observer is bound before the
+  writer exists, converts complete observations through `crashwalk.NewHit`, and
+  marks first-generation startup and direct-endpoint setup outside the main crash
+  window. Recovery starts inside its own window. The selected target is recorded
+  before the window closes; callbacks after it still reach `Options.Observer` but
+  enter neither that trace nor a later generation's. A runtime target holds its
+  program callback while the runner calls `Kill` from outside, then releases and
+  joins the interrupted script operation. If that operation has already returned
+  an error while another program callback is held, the same cutoff and release
+  happen before the error returns; closing the error window prevents later claims.
+  Startup targets use controlled startup and its ordinary error unwinding,
+  including logical commits with no following filesystem call. A crash abandons the rest of the script and runs its drain on
+  the recovered disk; a drain interrupted by another target runs again. Offline
+  damage runs only after a clean stop. A recovery crash trigger may select a point
+  in the script or its first drain, just as a main target can. Each run clones any
+  provided `Options.Disk`, preserving the initial disk for recording and replay,
+  and reclaims its fixture before the next run. Ledger judgements and `Check`
+  failures become `Violations`.
 - **The node is made by the program's own code.** The keys and the configuration are
   written by the `init` plan (the keys are real, from a seeded source, so the node
   identifier is the same in every fixture), the adapter installed and enabled through the install and enable

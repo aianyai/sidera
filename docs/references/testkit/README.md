@@ -17,7 +17,7 @@ document gives the reasons and says where the tests are.
 | `fakeagent` | The interface of the fake agent (send, reply, receive, acknowledge, control, declare, status), its results and errors, and a wrapper that writes the ledger entries around every call. |
 | `fakeagent/engineagent` | The engine-layer backend of the fake agent: the engine's service interface called in process. Ten methods call the engine; Probe needs a credential this caller-bound backend does not hold. |
 | `scenario` | The language of test scripts, the same in every layer: scripts, the driver, the environment interface a fixture implements, and the judgements that read the ledger. |
-| `harness` | The engine-layer fixture: the engine on the real store, configuration and transaction layer over the in-memory file system, one test clock, the ledger, the agents, quiet, process and power-loss crashes and restarts, fault injection, and the generator of control signals for model tests. |
+| `harness` | The engine-layer fixture: the engine on the real store, configuration and transaction layer over the in-memory file system, one test clock, the ledger, the agents, quiet, process and power-loss crashes and restarts, fault injection, the in-process crash-walk backend, and the generator of control signals for model tests. |
 | `acceptance/agent/mcp` | The MCP backend of the fake agent: independently encoded exchanges for both supported revisions, exact receive text, and tool errors mapped to the scenario categories. It takes process pipes and imports neither the production MCP server nor an MCP SDK. |
 | `crashwalk` | The core of the crash-point walk: which points to kill at in each mode, how a rerun is held to its recording, scenario budgets, coverage of the declared writes, and the crashing of recovery itself. |
 
@@ -28,8 +28,8 @@ import any runtime or contract package; `scenario` alone imports neither the eng
 nor a fixture.
 
 The backends of the fake agent that run the command-line client and speak to the MCP
-server, the binary-layer fixture and the backends of the crash walk build on these
-packages and are not part of them.
+server, the binary-layer fixture and the binary backend of the crash walk build on
+these packages and are not part of them.
 
 ## Why
 
@@ -141,6 +141,28 @@ packages and are not part of them.
   twice and another never, silently. The order is therefore the scenarios by name and,
   inside one, the points sorted by key and hit number, then the step boundaries, then the
   recovery cases by the write they name.
+- **The in-process backend binds a trace to its writer's generation.**
+  `harness.WalkScenario` holds a script, fixture options, a repeatable drain, an
+  offline damage callback and a final judgement. `WalkBackend` creates a fresh
+  fixture for each run, cloning any supplied initial disk so recordings and
+  replays cannot change their baseline, and binds its observer before each writer
+  exists. It converts actual observations through `NewHit`; first-generation startup
+  and direct-endpoint setup are marked outside the main window, and recovery begins
+  inside a new window. Recording the selected target closes that generation's
+  window before cutoff. Raw observations still reach `Options.Observer`, including
+  late attempts through an abandoned writer, but cannot enter a later trace.
+  During serving the selected callback waits while the runner calls `Kill` from
+  outside it, then returns normally through the cutoff's filesystem error; calling
+  `Kill` inside the callback could wait for the goroutine making that callback.
+  A step or drain error closes the window against later claims and handles an
+  already held callback through the same cutoff and release before returning.
+  Startup uses `TryStart`'s controlled cutoff, including logical commit points.
+  After a crash the remaining script steps are abandoned and the drain runs on
+  the recovered disk; it runs again if another target interrupts it. The first
+  drain remains in the main window, so its points can also trigger recovery.
+  Offline damage runs between a clean stop and the next generation. Each run
+  reclaims its fixture before the next, checks the script's ledger judgements, and reports
+  these and the final judgement as `Violations`.
 - **One script runs in both layers.** The environment a step uses is an interface in a
   package that imports no engine, and results and errors are the types of `fakeagent`,
   so the binary-layer fixture can implement the same interface over the built program
@@ -330,7 +352,7 @@ directory and is replaced), is answered with a result the schema accepts.
   apart by the fake: the classifier that names a notice is supplied by whoever knows the
   format.
 - The MCP backend lives in `cmd/sidera/internal/acceptance/agent/mcp`. The binary-layer
-  fixture, the command-line backend and the backends of the crash walk are separate
+  fixture, the command-line backend and the binary backend of the crash walk are separate
   from the engine fixture.
 - The engine-layer fixture runs one adapter instance, `Instance`, unless it is made with
   `Options.Adapter.ExtraInstances`, which adds instances that have each an adapter process, a

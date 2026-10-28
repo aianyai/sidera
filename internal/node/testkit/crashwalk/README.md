@@ -7,7 +7,8 @@ and how the recovery of a crash is itself crashed. Read
 
 It is independent of how a scenario runs. The system under test is behind a
 `Backend`: the engine in process on a crashable in-memory file system, or the built
-binary killed from outside. Neither backend is here. The package imports the
+binary killed from outside. The in-process implementation is
+`harness.WalkBackend`; backend implementations live outside this package. The package imports the
 transaction layer's declarations (`txn.Table`) and the crash point types of the file
 layer (`fsx.Point`) and runs nothing; it reads no clock, so whoever calls it times
 the runs through `Options.Observe`.
