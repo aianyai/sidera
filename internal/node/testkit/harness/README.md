@@ -16,6 +16,8 @@ layer.
 | Name | Purpose |
 | ---- | ------- |
 | `New(t, Options)` | Makes the node, starts the engine through the startup steps it has (scan, start, admission of the adapter, recovery of deliveries, serve) and stops everything when the test ends. |
+| `NewStopped(t, Options)` | Prepares the same initialized disk, clock, ledger and fakes as `New`, leaving the node down so the first generation can use controlled startup. |
+| `H.TryStart(ctx, StartOptions)` | Synchronously starts a down node or reclaims everything that startup acquired before returning `(crashed, err)`. `Arm` installs ordinary fault rules before transaction recovery; `CrashAt` selects a startup point and crash mode while the fixture owns the cutoff and cleanup. |
 | `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, the presets the node has besides the one `init` makes (`Presets`, by name, each the JSON `presets add` takes, added through the configuration's own change), and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
 | `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport`, `H.VerifyControlReply` | The loopback of the running process, its knobs, and the check of a report or a control reply the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
 | `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. `AdapterOptions.Runtime` makes the adapter declare a runtime beside its direct endpoints and drive one fake runtime that the fixture owns and that outlives every process of the adapter (the manifest installed is `RuntimeAdapterManifest`, so the node makes the runtime endpoint of the instance). `AdapterOptions.ExtraInstances` names further instances, each installed, enabled and run like `Instance` with an adapter, controller, presets and (with `Runtime`) runtime and runtime endpoint of its own (below). Nil: no host, and the fixture admits the instance itself through the engine's entry. |
@@ -142,6 +144,34 @@ By default the node has one instance, `Instance`, and every accessor without a n
   clock's high-water mark are applied from zero at every start, as a daemon that was
   just launched has no memory of the last run: a restart does not carry the high-water
   mark over, and a node made to start paused starts paused every time.
+- **A starting generation owns its disk before recovery writes.** `TryStart` allocates
+  the generation and its cutoff before transaction recovery, then runs startup on the
+  caller's goroutine until serving or cleanup completes. The generation number is
+  consumed even if recovery fails before an engine exists. The node remains down to
+  agents until the complete start succeeds. `New`, `Start` and `StartWith` use this
+  implementation and still fail the test on an unexpected startup error; the public
+  mount helpers still return only after transaction recovery succeeds.
+- **Startup crash selection does no cleanup in a program callback.** `CrashAt` is
+  serialized across program goroutines and accepts at most one decision per attempt.
+  It must only select a point and mode: it must not block, call `Kill`, or reclaim
+  resources. The fixture marks the generation abandoned, cuts it off, installs the
+  `Clone` or seeded `CrashClone` snapshot and writes one `fixture.crash` before
+  cancelling startup waits. The callback then returns normally, so the production
+  filesystem error unwinds its transactions. Startup checks the cutoff between stages
+  and before serving, including at a commit with no subsequent filesystem call.
+  The outer call aborts any host, cuts adapter pipes and waits for the engine to stop
+  before returning; a cleanup timeout is an error and prevents another start.
+- **Controlled startup distinguishes a crash from a failure.** `TryStart` returns
+  `(false, nil)` when serving, `(true, nil)` for an accepted crash with successful
+  cleanup, `(false, err)` for an ordinary error or cancellation, and `(true, err)` if
+  taking the selected crash or cleaning up failed. A selector that never matches may
+  still return normal success; the caller asserts that its target was reached.
+  Ordinary failures retain the current disk without rolling back writes, cut off
+  the unpublished generation and reclaim its resources. The caller's context bounds
+  startup cooperatively, not the lifetime of a serving node; synchronous transaction
+  recovery ends at its next stage boundary, and a held custom observer must still be
+  released by its test. `CrashAt` is disabled when the attempt ends, while the original
+  `Options.Observer` continues to see all program steps, including cleanup steps.
 - **A seed is a disk.** The power-loss source is `rand.NewPCG(seed, 0x5ce)`: the same
   seed on the same history leaves the same disk.
 - **Faults go through the file layer.** `Faults()` is the `fsxtest.Faulty` the running
@@ -181,6 +211,10 @@ the idle condition of the fake runtime are in. Each later part adds to this pack
 its stream needs.
 
 ## Tests
+
+`startup_test.go` checks cutoff snapshots, generation seeds and unpublished starts
+across transaction recovery, scan recovery and delivery recovery, including commit
+points, host cleanup, ordinary errors and cooperative cancellation.
 
 `harness_test.go`: `TestOneClockIsTheSourceOfTimeForTheEngineAndTheFakes`,
 `TestADirectEndpointRegisteredThroughTheFixtureAppearsInTheEnginesList`,

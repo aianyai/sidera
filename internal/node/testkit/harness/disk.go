@@ -192,15 +192,21 @@ func MountWithFaults(t testing.TB, tab *txn.Table, disk *fsxtest.Mem, obs txn.Ob
 // Mounted has no Mem: a disk that is not in memory cannot be cloned for a crash.
 func MountOn(t testing.TB, tab *txn.Table, base fsx.FS, obs txn.Observer, arm func(*fsxtest.Faulty)) *Mounted {
 	t.Helper()
+	m := newMounted(t, tab, base, obs, arm)
+	if err := m.Writer.Recover(); err != nil {
+		t.Fatalf("harness: Recover: %v", err)
+	}
+	return m
+}
+
+// newMounted gives a generation its disk boundary before recovery can write.
+func newMounted(t testing.TB, tab *txn.Table, base fsx.FS, obs txn.Observer, arm func(*fsxtest.Faulty)) *Mounted {
 	cut := newCutoff(base)
 	faulty := fsxtest.NewFaulty(t, cut)
 	if arm != nil {
 		arm(faulty)
 	}
 	w := txn.New(faulty, tab, obs)
-	if err := w.Recover(); err != nil {
-		t.Fatalf("harness: Recover: %v", err)
-	}
 	return &Mounted{Faulty: faulty, Writer: w, Store: store.New(w), cut: cut}
 }
 

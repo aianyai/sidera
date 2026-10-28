@@ -178,6 +178,38 @@ packages and are not part of them.
   identifier is the one its identity key derives and is the same in every fixture; a
   test that makes an envelope another node's endpoint would send verifies what comes
   back with the node's own certificate (`VerifyReport`).
+- **Startup has process ownership before its first recovery write.** `NewStopped`
+  prepares the same disk, clock, ledger and fakes as `New` without booting a hidden
+  first generation. `TryStart(ctx, StartOptions)` synchronously runs one down node's
+  start, with `Arm` installing fault rules before transaction recovery and `CrashAt`
+  selecting a startup crash point. Every attempt consumes a generation number,
+  including one that dies before an engine exists. Agents see the node as down until
+  the complete start succeeds. `New`, `Start` and `StartWith` remain fail-loud wrappers;
+  the mount helpers retain their recover-before-return contract.
+- **A startup observer selects the cutoff; its caller reclaims the process.** The
+  fixture serializes `CrashAt` calls from program goroutines and accepts one decision
+  at most. The callback must not block, call `Kill`, or do cleanup. Its decision uses
+  the same crash barrier as `Kill`: abandon, cutoff, snapshot, then one crash ledger
+  entry. Only after the snapshot is installed are startup waits cancelled. The
+  observer returns normally so filesystem errors unwind production transactions;
+  panic and `Goexit` would bypass that behavior. Stage boundaries and publication
+  check the cutoff even when a commit has no following filesystem call. The outer
+  startup call aborts the host and cuts adapter pipes, waits for any engine to stop,
+  and releases its context before returning a failed attempt. No next generation
+  starts until these resources are reclaimed; a cleanup timeout returns an error
+  and prevents another attempt.
+- **An interrupted start is not always a crash.** `TryStart` returns `(false, nil)`
+  for serving, `(true, nil)` for a selected crash with successful cleanup,
+  `(false, err)` for ordinary errors or cancellation, and `(true, err)` for a selected
+  crash whose snapshot/ledger or cleanup failed. Missing a selected target can still
+  start normally, so the caller must assert target coverage. Ordinary failures retain
+  disk effects, without a snapshot or crash entry, and cut off and reclaim the failed
+  process. Cancellation is cooperative through existing context-taking calls and
+  stage boundaries; synchronous transaction recovery and custom observers are not
+  interrupted by a background startup goroutine. A held observer must be released by
+  the test. The startup selector ends with its attempt; `Options.Observer` retains
+  its raw observation of every generation's steps, including cleanup. The caller's
+  context bounds startup alone, not a successfully serving generation's lifetime.
 - **The loopback and its knobs belong to the fixture.** One set of knobs lives as long as
   the fixture and each process gets a loopback made over it, so a knob set before a
   restart is still set after it. Every hit is written to the ledger as a `knob.hit` entry

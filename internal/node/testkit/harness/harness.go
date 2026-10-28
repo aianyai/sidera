@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"math/rand/v2"
 	"path/filepath"
 	"slices"
 	"sync"
@@ -152,17 +151,20 @@ type H struct {
 	// proc is the running process, nil while the node is down. disk is the disk
 	// the running process writes to, or while the node is down the one the next
 	// Start runs on.
-	proc  *process
-	disk  *fsxtest.Mem
-	gen   int
-	names map[string]endpoint
-	agent map[string]fakeagent.Agent
-	steps map[string]bool
-	quiet []quietCondition
+	proc *process
+	// unreaped prevents another start after cleanup exceeded its limit.
+	unreaped *process
+	disk     *fsxtest.Mem
+	gen      int
+	names    map[string]endpoint
+	agent    map[string]fakeagent.Agent
+	steps    map[string]bool
+	quiet    []quietCondition
 }
 
 // process is one run of the node over a disk.
 type process struct {
+	cancel  context.CancelFunc
 	mounted *Mounted
 	cfg     *config.Config
 	log     *LogCapture
@@ -191,6 +193,15 @@ var _ scenario.Env = (*H)(nil)
 // running. Everything it starts is stopped when the test ends, and the test
 // fails if a goroutine of the fixture's packages is left.
 func New(t testing.TB, o Options) *H {
+	t.Helper()
+	h := NewStopped(t, o)
+	h.Start()
+	return h
+}
+
+// NewStopped prepares the same node as New, including its initialized disk and
+// fakes, but leaves it down so its first start can be controlled with TryStart.
+func NewStopped(t testing.TB, o Options) *H {
 	t.Helper()
 	NoLeaks(t)
 	if o.Start.IsZero() {
@@ -265,7 +276,6 @@ func New(t testing.TB, o Options) *H {
 	if o.Disk == nil {
 		h.prepare(base)
 	}
-	h.proc = h.boot(base, nil)
 	return h
 }
 
@@ -391,22 +401,29 @@ func (h *H) loopbackQuiet() (bool, uint64) {
 // as a daemon that was just launched has no memory of the last run: a restart does not
 // carry the high-water mark over, and a node that Options made start paused starts
 // paused every time.
-func (h *H) boot(base fsx.FS, arm func(*fsxtest.Faulty)) *process {
-	h.t.Helper()
-	m := MountOn(h.t, h.tab, base, h.opts.Observer, arm)
-	if mem, ok := base.(*fsxtest.Mem); ok {
-		m.Mem = mem
+func (h *H) boot(ctx context.Context, p *process, check func() error) error {
+	m := p.mounted
+	if err := check(); err != nil {
+		return err
+	}
+	if err := m.Writer.Recover(); err != nil {
+		return fmt.Errorf("Recover: %w", err)
+	}
+	if err := check(); err != nil {
+		return err
 	}
 	cfg, err := config.Load(m.Writer)
 	if err != nil {
-		h.t.Fatalf("harness: Load: %v", err)
+		return fmt.Errorf("Load: %w", err)
 	}
 	k, err := keys.Load(m.Writer)
 	if err != nil {
-		h.t.Fatalf("harness: keys.Load: %v", err)
+		return fmt.Errorf("keys.Load: %w", err)
 	}
-	h.gen++
-	p := &process{mounted: m, cfg: cfg, log: &LogCapture{}}
+	p.cfg = cfg
+	if err := check(); err != nil {
+		return err
+	}
 	var st engine.Store = m.Store
 	if h.opts.DiskFree != nil {
 		st = freeSpace{Store: m.Store, free: h.opts.DiskFree}
@@ -423,29 +440,32 @@ func (h *H) boot(base fsx.FS, arm func(*fsxtest.Faulty)) *process {
 			Launcher: h.launcher, Params: h.opts.Adapter.Host, Clock: h.clk, Log: slog.New(p.log),
 		})
 		if err != nil {
-			h.t.Fatalf("harness: adapterhost.New: %v", err)
+			return fmt.Errorf("adapterhost.New: %w", err)
 		}
 		deps.Adapters = abandonable(p.host, &p.abandoned)
 		deps.Home = h.adapterHome
 	}
-	p.eng, _, err = engine.Open(h.ctx, deps, h.opts.Params)
+	p.eng, _, err = engine.Open(ctx, deps, h.opts.Params)
 	if err != nil {
-		h.t.Fatalf("harness: engine.Open: %v", err)
+		return fmt.Errorf("engine.Open: %w", err)
+	}
+	if err := check(); err != nil {
+		return err
 	}
 	p.lb = transport.NewLoopback(NodeID(), p.eng, h.knobs)
 	if err := p.eng.SetTransport(p.lb); err != nil {
-		h.t.Fatalf("harness: SetTransport: %v", err)
+		return fmt.Errorf("SetTransport: %w", err)
 	}
 	if h.opts.ArchiveSweepEvery > 0 {
 		if err := p.eng.AddArchiveSweep(h.opts.ArchiveSweepEvery); err != nil {
-			h.t.Fatalf("harness: AddArchiveSweep: %v", err)
+			return fmt.Errorf("AddArchiveSweep: %w", err)
 		}
 	}
 	p.eng.Start()
 	if p.host != nil {
 		env := adapterhost.Env{Home: h.adapterHome, Source: cfg, Logs: newLogs(h.t), Engine: apiwire.AdapterEngine(p.eng)}
-		if err := p.host.Start(h.ctx, env); err != nil {
-			h.t.Fatalf("harness: starting the adapter host: %v", err)
+		if err := p.host.Start(ctx, env); err != nil {
+			return fmt.Errorf("starting the adapter host: %w", err)
 		}
 	} else {
 		info := adapterproto.InitializeResult{
@@ -453,15 +473,17 @@ func (h *H) boot(base fsx.FS, arm func(*fsxtest.Faulty)) *process {
 			Adapter:         adapterproto.AdapterInfo{ID: Instance, Version: "1.0.0"}, // the manifest the fixture installs
 			Capabilities:    h.admit.Capabilities(),
 		}
-		if _, err := p.eng.AdapterAdmitted(h.ctx, Instance, h.admit, info); err != nil {
-			h.t.Fatalf("harness: AdapterAdmitted: %v", err)
+		if _, err := p.eng.AdapterAdmitted(ctx, Instance, h.admit, info); err != nil {
+			return fmt.Errorf("AdapterAdmitted: %w", err)
 		}
 	}
-	if err := p.eng.RecoverDelivery(h.ctx); err != nil {
-		h.t.Fatalf("harness: RecoverDelivery: %v", err)
+	if err := check(); err != nil {
+		return err
 	}
-	p.eng.Serve()
-	return p
+	if err := p.eng.RecoverDelivery(ctx); err != nil {
+		return fmt.Errorf("RecoverDelivery: %w", err)
+	}
+	return check()
 }
 
 // freeSpace is the store with the free space the test says: the stand-in for the
@@ -481,6 +503,7 @@ const stopLimit = 20 * time.Second
 // host is stopped on the real clock's limit, as the engine is: a process that will
 // not end (a surviving one) is the test's to end first.
 func stop(p *process) error {
+	defer p.cancel()
 	ctx, cancel := context.WithTimeout(context.Background(), stopLimit)
 	defer cancel()
 	p.eng.BeginShutdown()
@@ -503,6 +526,11 @@ func (h *H) close() {
 		}
 	}
 	h.dying.Wait()
+	if h.unreaped != nil {
+		if err := h.reapStart(h.unreaped); err != nil {
+			h.t.Errorf("harness: reaping a failed start: %v", err)
+		}
+	}
 	if h.launcher != nil {
 		h.launcher.Close()
 	}
@@ -1054,13 +1082,8 @@ func (h *H) Kill(mode CrashMode) {
 		h.t.Fatal("harness: a node on the real file system cannot be crashed: its disk cannot be cloned")
 	}
 	old := h.running()
-	old.abandoned.Store(true)
-	old.mounted.cutOff() // the disk below is now what the crash leaves
-	var disk *fsxtest.Mem
-	if mode.power {
-		disk = old.mounted.Mem.CrashClone(rand.New(rand.NewPCG(mode.seed, 0x5ce)))
-	} else {
-		disk = old.mounted.Mem.Clone()
+	if err := h.cutCrash(old, mode); err != nil {
+		h.t.Fatalf("harness: crash: %v", err)
 	}
 	if old.host != nil {
 		// The host is aborted, not shut down, and the pipes are cut: a process that
@@ -1075,11 +1098,8 @@ func (h *H) Kill(mode CrashMode) {
 		_ = stop(old) // a dying process: how it ends is no one's business
 	}()
 	h.mu.Lock()
-	h.proc, h.disk = nil, disk
+	h.proc = nil
 	h.mu.Unlock()
-	if err := h.fixture.Append(ledger.KindFixtureCrash, ledger.Attrs{CrashPoint: mode.describe()}); err != nil {
-		h.t.Fatalf("harness: ledger: %v", err)
-	}
 }
 
 // Restart is Stop followed by Start.
@@ -1116,17 +1136,9 @@ func (h *H) Start() {
 // fails the test, as always.
 func (h *H) StartWith(arm func(*fsxtest.Faulty)) {
 	h.t.Helper()
-	if h.current() != nil {
-		h.t.Fatal("harness: the node is already running")
+	if _, err := h.TryStart(h.ctx, StartOptions{Arm: arm}); err != nil {
+		h.t.Fatalf("harness: starting the node: %v", err)
 	}
-	var base fsx.FS = h.real
-	if base == nil {
-		base = h.Disk()
-	}
-	p := h.boot(base, arm)
-	h.mu.Lock()
-	h.proc = p
-	h.mu.Unlock()
 }
 
 // The conditions of quiet that the fixture's own parts answer, besides the
