@@ -6,6 +6,7 @@ import (
 	"log/slog"
 
 	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
@@ -302,6 +303,22 @@ func (d *Daemon) stepManage(context.Context) error {
 
 // Step 9: the Agent interface opens so that it takes only the one-use probe token.
 func (d *Daemon) stepAgentProbe(ctx context.Context) error {
+	addr, err := ipc.Locate(d.home, ipc.KindAgent)
+	if err != nil {
+		return err
+	}
+	l, err := agentapi.Listen(addr, d.lock, ipc.Options{Logger: d.log})
+	if err != nil {
+		return err
+	}
+	srv, err := agentapi.New(agentapi.Config{Service: d.engine, Log: d.log})
+	if err != nil {
+		l.Close()
+		return err
+	}
+	d.agent = srv
+	d.agentServed = make(chan error, 1)
+	go func() { d.agentServed <- srv.Serve(l) }()
 	d.agentBegan = true
 	return run(ctx, d.cfg.Attach.AgentProbeOnly, d)
 }
@@ -337,6 +354,7 @@ func (d *Daemon) stepRecoverDelivery(ctx context.Context) error { return d.engin
 // Step 15: the engine serves, and the Agent interface switches to full service.
 func (d *Daemon) stepServe(ctx context.Context) error {
 	d.engine.Serve()
+	d.agent.EnableMethods()
 	return run(ctx, d.cfg.Attach.AgentServe, d)
 }
 

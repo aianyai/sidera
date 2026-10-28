@@ -35,10 +35,10 @@ disk, in whichever step it met it, ends as a fatal failure does (see the shutdow
 | 6 | scan | The engine's first recovery entry: `state/` is scanned, damaged files are quarantined, the recovery rules run until none has work, the view is built. The loopback is set as the engine's transport, with no knobs, before the loop starts. The periodic tasks are registered. | `engine`, `transport` |
 | 7 | trust | Hook `TrustSync`: synchronisation of revocations and the trust graph, the gate of vouchers. Empty for a node of one machine. | later stage |
 | 8 | manage | The loop starts in the phase of recovery and the management interface opens: reads answer, anything that changes state is refused as `unavailable/recovering`. | this package |
-| 9 | agent-probe | Hook `AgentProbeOnly`: the Agent interface opens so that it takes only the one-use probe token. | the Agent interface |
+| 9 | agent-probe | Open the Agent listener in probe-only mode, accepting only the one-use probe credential; then run hook `AgentProbeOnly`. | this package, `agentapi` |
 | 10 | adapters | The adapter host (`Config.AdapterHost`, when set) starts the enabled adapter instances and the step waits until each has answered `adapter.start` or been judged offline; then hook `Adapters` runs, for what else starts here. | `adapterhost`, `apiwire` |
 | 11 to 14 | | The engine's second recovery entry: creation intents and prompt attempts are checked, every record is ticked, feedback that fell due goes out, the outbound worker goes on over the loopback. After step 10 on purpose: step 11 asks the connected adapters about creations, closes and interrupts, releases and prompts, and the busy state they reported is used to renew leases after serving. Until step 12 the engine's schedule holds back the ticks, the feedback and the looks at source records that fell due, so none of them runs before the adapters have reported. | `engine` |
-| 15 | serve | The engine serves; hook `AgentServe`: the Agent interface switches to full service. | the Agent interface |
+| 15 | serve | The engine serves, then the Agent server enables endpoint methods; hook `AgentServe` runs afterward. | this package, `agentapi` |
 
 A hook runs inside its step, in the state of the engine the step needs (before the
 loop exists at step 7, recovering at 9 and 10, running at 15) and is given an `Env`:
@@ -99,7 +99,7 @@ of a start that failed; a step with nothing to stop is logged and does nothing.
 | Step | Name | What happens |
 | ---- | ---- | ------------ |
 | 1 | refuse | The engine refuses what comes from outside (`unavailable/shutting_down`). |
-| 2 | interfaces | The management interface stops taking connections and waits for the requests being served, within 10 seconds; hook `StopInterfaces` stops the Agent interface. |
+| 2 | interfaces | Both management and Agent HTTP servers stop taking connections and wait for active requests within the grace; remaining connections close on expiry. Their serving goroutines are joined, then hook `StopInterfaces` stops other interfaces. |
 | 3 | adapters | The adapter host shuts the adapters down (`Config.AdapterHost`, when set), within the grace; then hook `StopAdapters`. Native sessions are separate processes and are not affected. |
 | 4 | engine | The loop ends after its command, and every goroutine of the engine is waited for. |
 | 5 | release | The last line is logged, the log is closed and the lock is let go: the lock goes last, because while it is held no other daemon starts over state this one is still writing. If the engine has not ended within the grace, it may still be writing: the lock and the log are kept until the process exits, the line says so, and `Wait` returns `ErrEngineNotStopped`. |
@@ -335,7 +335,7 @@ interface: a sandbox must deny the socket to an agent.
 | Hook | Step | Attached by |
 | ---- | ---- | ----------- |
 | `TrustSync` | 7 | trust synchronisation |
-| `AgentProbeOnly`, `AgentServe`, `StopInterfaces` | 9, 15, shutdown 2 | the Agent interface |
+| `AgentProbeOnly`, `AgentServe`, `StopInterfaces` | 9, 15, shutdown 2 | extensions after the built-in Agent server opens, enables endpoint methods and stops |
 | `Adapters`, `StopAdapters` | 10, shutdown 3 | what else starts and stops with the adapters; the adapter host itself is `Config.AdapterHost`, wired by this package, and is not a hook |
 | `Periodic` | 6 | any feature with a task on a period (disk polling); the daemon's own tasks, the clock state, the hourly certificate check and the archive sweep, are not among them |
 | a row of `manageapi`'s method table, and a type of `engine.Operation` | | the owner of an operation |
@@ -374,11 +374,15 @@ interface: a sandbox must deny the socket to an agent.
   numbering of the real writes depend on how much was logged. The handle has no
   operation but a log's, so the exception cannot be used for state. The time in a log
   is the injected clock's, which tests control and production does not distinguish.
-- **Hooks are functions with an `Env`, not interfaces,** because the later features
-  differ in shape (an interface that serves, a host that starts processes, a task)
-  and each needs only the part of the node that is up at its step. Rejected: the
-  composition root knowing each feature's types, which would make every feature a
-  change to it.
+- **The composition root owns the built-in interfaces.** It opens the Agent
+  listener before adapters can probe tools, enables endpoint methods after recovery,
+  and joins serving goroutines during shutdown. It uses the standard library's
+  [HTTP shutdown](https://pkg.go.dev/net/http#Server.Shutdown): stop accepting, wait
+  within the grace, then close remaining connections. The engine ends receive
+  waiters first. No extra server or lifecycle dependency is needed for these steps.
+- **Extension hooks are functions with an `Env`,** because an extension needs only
+  the part of the node already up at its step. Built-in interface and adapter
+  lifecycles remain explicit fields owned by this package.
 - **A hook gets views, not the writer or the stores.** The engine is the single
   writer of the data directory and one declaration has one open transaction at a
   time; a hook that held `*txn.Writer`, or `*keys.Keys` or `*config.Config` whole
@@ -426,6 +430,7 @@ interface: a sandbox must deny the socket to an agent.
   `TestStartupStepsRunInTheirFixedOrder`,
   `TestEachHookRunsInsideItsStepWithTheEngineInTheStateTheStepNeeds`,
   `TestTheManagementInterfaceReadsAndRefusesChangesWhileTheNodeStarts`,
+  `TestAgentListenerStartsWithProbesAndEnablesMethodsOnlyWhenServing`,
   `TestAHookThatFailsStopsTheStartAndLeavesNothingRunning`,
   `TestTheStartMakesTheLayoutTheOwnerRemovedAgain`,
   `TestTheDaemonLogsToTheFileUnderLogsWithTheTimeOfItsClock`,

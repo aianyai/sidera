@@ -57,27 +57,24 @@ func TestAHookIsGivenNoWriterAndOnlyReadsOfTheKeysAndTheConfiguration(t *testing
 	}
 }
 
-// What the Agent interface needs to listen on this home: the address, which comes
+// What an interface needs to listen on this home: the address, which comes
 // from the data directory, and the assertion that the instance lock is held, which
-// ipc.Listen asks for. A hook listens with them while the daemon holds the lock.
+// ipc.Listen asks for. A hook can use them before the built-in interfaces start.
 func TestAHookCanListenOnAnAddressOfThisHomeWithTheLockItIsGiven(t *testing.T) {
 	noLeaks(t)
 	c, _ := initialized(t)
 	var l net.Listener
 	var listenErr error
 	var heldInHook bool
-	c.Attach.AgentProbeOnly = func(_ context.Context, env *daemon.Env) error {
+	c.Attach.TrustSync = func(_ context.Context, env *daemon.Env) error {
 		heldInHook = env.Lock != nil && env.Lock.Held()
 		addr, err := ipc.Locate(env.Home, ipc.KindAgent)
 		if err != nil {
 			return err
 		}
 		l, listenErr = ipc.Listen(addr, env.Lock, ipc.Options{Logger: env.Log})
-		return listenErr
-	}
-	c.Attach.StopInterfaces = func(context.Context) error {
-		if l == nil {
-			return nil
+		if listenErr != nil {
+			return listenErr
 		}
 		return l.Close()
 	}

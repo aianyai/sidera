@@ -68,6 +68,10 @@ func (d *Daemon) shutdown(fatal bool) {
 			warn("the management interface did not stop in time", d.manage.Shutdown(ctx))
 			warn("the management interface ended", <-d.served)
 		}
+		if d.agent != nil {
+			warn("the Agent interface did not stop in time", d.agent.Shutdown(ctx))
+			warn("the Agent interface ended", <-d.agentServed)
+		}
 		if d.agentBegan && d.cfg.Attach.StopInterfaces != nil {
 			warn("the Agent interface", d.cfg.Attach.StopInterfaces(ctx))
 		}

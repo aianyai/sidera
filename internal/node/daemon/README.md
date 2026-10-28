@@ -2,7 +2,7 @@
 
 The composition root of the node. It takes the instance lock, checks the data
 directory, loads the layers in the order of the start, wires them to one another,
-opens the management interface, runs the periodic tasks, and shuts everything down
+opens the management and Agent interfaces, runs the periodic tasks, and shuts everything down
 in the order of the shutdown; `init` is here too, because the transaction that makes
 a data directory writes the files of every owner. Read
 [../../../docs/references/daemon/README.md](../../../docs/references/daemon/README.md)
@@ -48,6 +48,11 @@ touches files only through `fsx`, and reads time only through the injected clock
   failure of the disk), then runs `StopAdapters`. The host reports nothing to the engine
   at shutdown, so the fatal path writes nothing. The hooks stay for what else starts
   and stops with the adapters.
+- **The Agent listener opens before adapters start.** Step 9 opens the checked
+  local Agent address in probe-only mode. Step 15 enables endpoint methods only
+  after the engine serves. Shutdown step 1 ends engine waiters; step 2 shuts both
+  HTTP servers down within the grace and waits for their serving goroutines before
+  releasing the instance lock. Hooks run after each built-in action.
 - **The engine reads an adapter package through this package.** `Deps.OpenPackage` is
   `fsx.OpenOS` of the directory the owner named, handed over as a reader: the package
   is on the machine's own file system, whatever file system the data directory is on,
@@ -121,6 +126,6 @@ the death of the engine); `interrupt_test.go` the lock kept under an engine that
 not ended, a stop that races with a failed start, a context or a signal during the
 start; `adapters_test.go` the adapter host at step 10 and step 3, over fake adapters in the test
 process (the launcher is `harness.AdapterLauncher`); `adapters_install_test.go` installing, enabling, listing and disabling an adapter, and the presets, through the management interface of a whole daemon;
-`env_test.go` what a hook is given; `logging_test.go` the deferred log handler;
+`env_test.go` what a hook is given; `agent_test.go` the real Agent listener in probe-only and full-service startup, and its removal at shutdown; `logging_test.go` the deferred log handler;
 `sweep_test.go` the archive sweep on its period; `replay_test.go` a management operation
 resent through the whole daemon.

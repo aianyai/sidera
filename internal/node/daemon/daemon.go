@@ -17,6 +17,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
+	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
@@ -196,8 +197,8 @@ type Attachments struct {
 	// TrustSync is step 7: the synchronisation of revocations and the trust graph,
 	// and the gate of vouchers, which a node of one machine has no use for.
 	TrustSync func(context.Context, *Env) error
-	// AgentProbeOnly is step 9: open the Agent interface so that it takes only the
-	// one-use probe token and answers anything else as unavailable.
+	// AgentProbeOnly runs at step 9 after the Agent listener opens in probe-only
+	// mode: what else starts while only one-use probe tokens are accepted.
 	AgentProbeOnly func(context.Context, *Env) error
 	// Adapters is step 10, after Config.AdapterHost has started the adapter
 	// instances the owner enabled: what else starts at that step. The host returns
@@ -206,10 +207,10 @@ type Attachments struct {
 	// creations, closes and interrupts, releases and prompts; the busy state they
 	// reported is used for renewal after serving. This hook runs after it.
 	Adapters func(context.Context, *Env) error
-	// AgentServe is step 15: the Agent interface serves everything.
+	// AgentServe runs at step 15 after the Agent interface begins full service.
 	AgentServe func(context.Context, *Env) error
-	// StopInterfaces is shutdown step 2, beside the management interface: stop
-	// taking requests of the Agent interface, within the context's deadline.
+	// StopInterfaces runs at shutdown step 2 after the built-in interfaces stop:
+	// stop any other interfaces within the context's deadline.
 	StopInterfaces func(context.Context) error
 	// StopAdapters is shutdown step 3, after Config.AdapterHost has shut the
 	// adapters down: stop what else the step stops, within the deadline. Native
@@ -232,12 +233,14 @@ type Daemon struct {
 	logOut *logfile.Log
 	defer_ *deferredHandler
 
-	loaded atomic.Pointer[config.Config] // set once the configuration is loaded
-	cfgd   *config.Config
-	keys   *keys.Keys
-	engine *engine.Engine
-	manage *manageapi.Server
-	served chan error // Serve of the management interface has returned
+	loaded      atomic.Pointer[config.Config] // set once the configuration is loaded
+	cfgd        *config.Config
+	keys        *keys.Keys
+	engine      *engine.Engine
+	manage      *manageapi.Server
+	served      chan error // Serve of the management interface has returned
+	agent       *agentapi.Server
+	agentServed chan error // Serve of the Agent interface has returned
 
 	// what step 4 found of the clock, for the engine to start from
 	clockHW          clock.HighWater
