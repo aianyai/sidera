@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -39,6 +38,7 @@ type server struct {
 	initialized atomic.Bool
 	probe       sync.Once
 	ctx         context.Context
+	log         *slog.Logger
 }
 
 // Run serves until stdin closes, the context ends or a transport fails.
@@ -49,16 +49,17 @@ func Run(ctx context.Context, cfg Config) error {
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	s := &server{cfg: cfg, ctx: ctx}
+	logger := slog.New(slog.NewTextHandler(cfg.Stderr, nil))
+	s := &server{cfg: cfg, ctx: ctx, log: logger}
 	p, err := peer.New(cfg.Stdin, cfg.Stdout, peer.Config{
-		Logger:  slog.New(slog.NewTextHandler(cfg.Stderr, nil)),
+		Logger:  logger,
 		Dialect: peer.Dialect{CancelMethod: "notifications/cancelled", CancelTarget: cancelTarget, SilentOnCancel: true, OverloadedCode: -32603, LineTooLongCode: -32600},
 	})
 	if err != nil {
 		return err
 	}
 	defer p.Close()
-	for _, method := range []string{"initialize", "ping", "server/discover"} {
+	for _, method := range []string{"initialize", "ping", "server/discover", "tools/list", "tools/call"} {
 		p.Handle(method, func(ctx context.Context, raw json.RawMessage) (any, error) { return s.handle(ctx, method, raw) })
 	}
 	p.HandleNotification("notifications/initialized", func(context.Context, json.RawMessage) {})
@@ -80,6 +81,9 @@ func (s *server) handle(ctx context.Context, method string, raw json.RawMessage)
 	if err != nil {
 		return nil, err
 	}
+	if method == "initialize" && modern {
+		return nil, peer.NewError(-32601, "method not found")
+	}
 	if method == "initialize" {
 		var in struct {
 			ProtocolVersion string                     `json:"protocolVersion"`
@@ -96,10 +100,10 @@ func (s *server) handle(ctx context.Context, method string, raw json.RawMessage)
 			go func() {
 				result, err := s.cfg.Agent.Probe(s.ctx, adapterproto.FrontendMCP)
 				if err != nil {
-					fmt.Fprintln(s.cfg.Stderr, "mcp probe:", err)
+					s.log.Warn("MCP probe failed", "error", err)
 					return
 				}
-				fmt.Fprintf(s.cfg.Stderr, "mcp probe: ok preset=%s frontend=%s\n", result.Preset, result.Frontend)
+				s.log.Info("MCP probe succeeded", "preset", result.Preset, "frontend", result.Frontend)
 			}()
 		}
 	})
@@ -114,7 +118,12 @@ func (s *server) handle(ctx context.Context, method string, raw json.RawMessage)
 		}
 		return s.decorate(map[string]any{"supportedVersions": []string{modernVersion}, "capabilities": map[string]any{"tools": struct{}{}}, "instructions": instructions}, true, true), nil
 	}
-	_ = fields
+	if method == "tools/list" {
+		return s.decorate(map[string]any{"tools": catalogue}, modern, true), nil
+	}
+	if method == "tools/call" {
+		return s.callTool(ctx, fields, modern)
+	}
 	return nil, peer.NewError(-32601, "method not found")
 }
 
