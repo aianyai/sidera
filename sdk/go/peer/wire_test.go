@@ -14,6 +14,19 @@ import (
 	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
+// requestRoutes exercises the same request contract through both registration APIs.
+var requestRoutes = []struct {
+	name     string
+	register func(*peer.Peer, string, peer.RequestHandler)
+}{
+	{"named", func(p *peer.Peer, method string, h peer.RequestHandler) { p.Handle(method, h) }},
+	{"default", func(p *peer.Peer, _ string, h peer.RequestHandler) {
+		p.HandleDefault(func(ctx context.Context, _ string, params json.RawMessage) (any, error) {
+			return h(ctx, params)
+		})
+	}},
+}
+
 // echoCounter registers "echo" and "ping" on p; echo counts its invocations.
 func echoCounter(ran *atomic.Int32) func(*peer.Peer) {
 	return func(p *peer.Peer) {
@@ -185,160 +198,175 @@ func TestBatchIsRejectedAndConnectionContinues(t *testing.T) {
 
 func TestOverloadedIsDecidedBeforeParamsAndHandler(t *testing.T) {
 	leakGuard(t)
-	started := make(chan struct{}, 8)
-	release := make(chan struct{})
-	var ran atomic.Int32
-	_, r, _ := newRaw(t, peer.Params{MaxPendingRequests: 2, MaxConcurrentHandlers: 1}, func(p *peer.Peer) {
-		p.Handle("slow", func(ctx context.Context, _ json.RawMessage) (any, error) {
-			ran.Add(1)
-			started <- struct{}{}
-			select {
-			case <-release:
-			case <-ctx.Done():
+	for _, route := range requestRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			started := make(chan struct{}, 8)
+			release := make(chan struct{})
+			var ran atomic.Int32
+			_, r, _ := newRaw(t, peer.Params{MaxPendingRequests: 2, MaxConcurrentHandlers: 1}, func(p *peer.Peer) {
+				route.register(p, "slow", func(ctx context.Context, _ json.RawMessage) (any, error) {
+					ran.Add(1)
+					started <- struct{}{}
+					select {
+					case <-release:
+					case <-ctx.Done():
+					}
+					return struct{}{}, nil
+				})
+			})
+
+			r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
+			<-started // the only handler is busy
+			r.send(`{"jsonrpc":"2.0","id":2,"method":"slow"}`)
+			r.send(`{"jsonrpc":"2.0","id":3,"method":"slow"}`) // the queue (2) is now full
+
+			// Params that would be -32602 if anything looked at them.
+			r.send(`{"jsonrpc":"2.0","id":4,"method":"slow","params":"not structured"}`)
+			f := r.recv()
+			if string(f.ID) != "4" || f.errCode() != peer.CodeOverloaded {
+				t.Fatalf("got %+v, want id 4 refused with -32001 before its params were examined", f)
 			}
-			return struct{}{}, nil
+			if got := ran.Load(); got != 1 {
+				t.Fatalf("handler ran %d times when the fourth request was refused, want 1", got)
+			}
+
+			if route.name == "named" {
+				r.send(`{"jsonrpc":"2.0","id":1,"method":"unknown","params":42}`)
+				if f := r.recv(); f.errCode() != peer.CodeMethodNotFound || f.Error.Message != "method not found" {
+					t.Fatalf("unknown method lost priority over duplicate id, overload or params: %+v", f)
+				}
+			}
+
+			close(release)
+			answered := map[string]bool{}
+			for range 3 {
+				f := r.recv()
+				if f.Error != nil {
+					t.Fatalf("queued request failed: %+v", f)
+				}
+				answered[string(f.ID)] = true
+			}
+			if len(answered) != 3 || answered["4"] {
+				t.Fatalf("answers for %v, want exactly 1, 2 and 3", answered)
+			}
+			if got := ran.Load(); got != 3 {
+				t.Fatalf("handler ran %d times in total, want 3 (never for the refused request)", got)
+			}
 		})
-	})
-
-	r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
-	<-started // the only handler is busy
-	r.send(`{"jsonrpc":"2.0","id":2,"method":"slow"}`)
-	r.send(`{"jsonrpc":"2.0","id":3,"method":"slow"}`) // the queue (2) is now full
-
-	// Params that would be -32602 if anything looked at them.
-	r.send(`{"jsonrpc":"2.0","id":4,"method":"slow","params":"not structured"}`)
-	f := r.recv()
-	if string(f.ID) != "4" || f.errCode() != peer.CodeOverloaded {
-		t.Fatalf("got %+v, want id 4 refused with -32001 before its params were examined", f)
-	}
-	if got := ran.Load(); got != 1 {
-		t.Fatalf("handler ran %d times when the fourth request was refused, want 1", got)
-	}
-
-	close(release)
-	answered := map[string]bool{}
-	for range 3 {
-		f := r.recv()
-		if f.Error != nil {
-			t.Fatalf("queued request failed: %+v", f)
-		}
-		answered[string(f.ID)] = true
-	}
-	if len(answered) != 3 || answered["4"] {
-		t.Fatalf("answers for %v, want exactly 1, 2 and 3", answered)
-	}
-	if got := ran.Load(); got != 3 {
-		t.Fatalf("handler ran %d times in total, want 3 (never for the refused request)", got)
 	}
 }
 
 func TestCancellation(t *testing.T) {
 	leakGuard(t)
-	const cancel1 = `{"jsonrpc":"2.0","method":"$/cancel_request","params":{"request_id":1}}`
+	for _, route := range requestRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			const cancel1 = `{"jsonrpc":"2.0","method":"$/cancel_request","params":{"request_id":1}}`
 
-	t.Run("a handler that honours the cancel gets one -32800 reply", func(t *testing.T) {
-		started := make(chan struct{}, 1)
-		_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
-			p.Handle("wait", func(ctx context.Context, _ json.RawMessage) (any, error) {
-				started <- struct{}{}
-				<-ctx.Done()
-				return nil, ctx.Err()
+			t.Run("a handler that honours the cancel gets one -32800 reply", func(t *testing.T) {
+				started := make(chan struct{}, 1)
+				_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
+					route.register(p, "wait", func(ctx context.Context, _ json.RawMessage) (any, error) {
+						started <- struct{}{}
+						<-ctx.Done()
+						return nil, ctx.Err()
+					})
+					p.Handle("ping", pingHandler)
+				})
+				r.send(`{"jsonrpc":"2.0","id":1,"method":"wait"}`)
+				<-started
+				r.send(cancel1)
+				if f := r.recv(); string(f.ID) != "1" || f.errCode() != peer.CodeRequestCancelled {
+					t.Fatalf("got %+v, want id 1 answered with -32800", f)
+				}
+				// Anything extra for id 1 would arrive before the ping's answer.
+				r.send(`{"jsonrpc":"2.0","id":2,"method":"ping"}`)
+				if f := r.recv(); string(f.ID) != "2" {
+					t.Fatalf("got %+v, want the answer to the ping: id 1 was answered twice", f)
+				}
 			})
-			p.Handle("ping", pingHandler)
-		})
-		r.send(`{"jsonrpc":"2.0","id":1,"method":"wait"}`)
-		<-started
-		r.send(cancel1)
-		if f := r.recv(); string(f.ID) != "1" || f.errCode() != peer.CodeRequestCancelled {
-			t.Fatalf("got %+v, want id 1 answered with -32800", f)
-		}
-		// Anything extra for id 1 would arrive before the ping's answer.
-		r.send(`{"jsonrpc":"2.0","id":2,"method":"ping"}`)
-		if f := r.recv(); string(f.ID) != "2" {
-			t.Fatalf("got %+v, want the answer to the ping: id 1 was answered twice", f)
-		}
-	})
 
-	t.Run("a handler that ignores the cancel still gets exactly one reply", func(t *testing.T) {
-		started := make(chan struct{}, 1)
-		release := make(chan struct{})
-		_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
-			p.Handle("stubborn", func(context.Context, json.RawMessage) (any, error) {
-				started <- struct{}{}
-				<-release
-				return map[string]string{"done": "yes"}, nil
+			t.Run("a handler that ignores the cancel still gets exactly one reply", func(t *testing.T) {
+				started := make(chan struct{}, 1)
+				release := make(chan struct{})
+				_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
+					route.register(p, "stubborn", func(context.Context, json.RawMessage) (any, error) {
+						started <- struct{}{}
+						<-release
+						return map[string]string{"done": "yes"}, nil
+					})
+					p.Handle("ping", pingHandler)
+				})
+				r.send(`{"jsonrpc":"2.0","id":1,"method":"stubborn"}`)
+				<-started
+				r.send(cancel1)
+				r.expectNoLineFor(50 * time.Millisecond)
+				close(release)
+				f := r.recv()
+				if string(f.ID) != "1" || f.Error != nil || !strings.Contains(string(f.Result), "yes") {
+					t.Fatalf("got %+v, want the handler's own result", f)
+				}
+				r.send(`{"jsonrpc":"2.0","id":2,"method":"ping"}`)
+				if f := r.recv(); string(f.ID) != "2" {
+					t.Fatalf("got %+v: id 1 was answered twice", f)
+				}
 			})
-			p.Handle("ping", pingHandler)
-		})
-		r.send(`{"jsonrpc":"2.0","id":1,"method":"stubborn"}`)
-		<-started
-		r.send(cancel1)
-		r.expectNoLineFor(50 * time.Millisecond)
-		close(release)
-		f := r.recv()
-		if string(f.ID) != "1" || f.Error != nil || !strings.Contains(string(f.Result), "yes") {
-			t.Fatalf("got %+v, want the handler's own result", f)
-		}
-		r.send(`{"jsonrpc":"2.0","id":2,"method":"ping"}`)
-		if f := r.recv(); string(f.ID) != "2" {
-			t.Fatalf("got %+v: id 1 was answered twice", f)
-		}
-	})
 
-	t.Run("a request cancelled while queued never starts its handler but is answered", func(t *testing.T) {
-		started := make(chan struct{}, 4)
-		release := make(chan struct{})
-		var ran atomic.Int32
-		_, r, _ := newRaw(t, peer.Params{MaxConcurrentHandlers: 1}, func(p *peer.Peer) {
-			p.Handle("slow", func(context.Context, json.RawMessage) (any, error) {
-				ran.Add(1)
-				started <- struct{}{}
-				<-release
-				return struct{}{}, nil
+			t.Run("a request cancelled while queued never starts its handler but is answered", func(t *testing.T) {
+				started := make(chan struct{}, 4)
+				release := make(chan struct{})
+				var ran atomic.Int32
+				_, r, _ := newRaw(t, peer.Params{MaxConcurrentHandlers: 1}, func(p *peer.Peer) {
+					route.register(p, "slow", func(context.Context, json.RawMessage) (any, error) {
+						ran.Add(1)
+						started <- struct{}{}
+						<-release
+						return struct{}{}, nil
+					})
+				})
+				r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
+				<-started
+				r.send(`{"jsonrpc":"2.0","id":2,"method":"slow"}`)
+				r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":{"request_id":2}}`)
+				// The read loop answers this on its own, so once the reply is here the cancel was processed.
+				r.send(`bad`)
+				if f := r.recv(); f.errCode() != peer.CodeParseError {
+					t.Fatalf("got %+v", f)
+				}
+				close(release)
+				got := map[string]int{}
+				for range 2 {
+					f := r.recv()
+					got[string(f.ID)] = f.errCode()
+				}
+				if got["1"] != 0 || got["2"] != peer.CodeRequestCancelled || len(got) != 2 {
+					t.Fatalf("answers %v, want id 1 ok and id 2 -32800", got)
+				}
+				if ran.Load() != 1 {
+					t.Fatalf("handler ran %d times, want 1", ran.Load())
+				}
 			})
-		})
-		r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
-		<-started
-		r.send(`{"jsonrpc":"2.0","id":2,"method":"slow"}`)
-		r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":{"request_id":2}}`)
-		// The read loop answers this on its own, so once the reply is here the cancel was processed.
-		r.send(`{"jsonrpc":"2.0","id":3,"method":"no.such.method"}`)
-		if f := r.recv(); string(f.ID) != "3" {
-			t.Fatalf("got %+v", f)
-		}
-		close(release)
-		got := map[string]int{}
-		for range 2 {
-			f := r.recv()
-			got[string(f.ID)] = f.errCode()
-		}
-		if got["1"] != 0 || got["2"] != peer.CodeRequestCancelled || len(got) != 2 {
-			t.Fatalf("answers %v, want id 1 ok and id 2 -32800", got)
-		}
-		if ran.Load() != 1 {
-			t.Fatalf("handler ran %d times, want 1", ran.Load())
-		}
-	})
 
-	t.Run("string ids can be cancelled and unknown ids are ignored", func(t *testing.T) {
-		started := make(chan struct{}, 1)
-		_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
-			p.Handle("wait", func(ctx context.Context, _ json.RawMessage) (any, error) {
-				started <- struct{}{}
-				<-ctx.Done()
-				return nil, ctx.Err()
+			t.Run("string ids can be cancelled and unknown ids are ignored", func(t *testing.T) {
+				started := make(chan struct{}, 1)
+				_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
+					route.register(p, "wait", func(ctx context.Context, _ json.RawMessage) (any, error) {
+						started <- struct{}{}
+						<-ctx.Done()
+						return nil, ctx.Err()
+					})
+				})
+				r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":{"request_id":99}}`)
+				r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":"junk"}`)
+				r.send(`{"jsonrpc":"2.0","id":"abc","method":"wait"}`)
+				<-started
+				r.expectNoLineFor(50 * time.Millisecond)
+				r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":{"request_id":"abc"}}`)
+				if f := r.recv(); string(f.ID) != `"abc"` || f.errCode() != peer.CodeRequestCancelled {
+					t.Fatalf("got %+v", f)
+				}
 			})
 		})
-		r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":{"request_id":99}}`)
-		r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":"junk"}`)
-		r.send(`{"jsonrpc":"2.0","id":"abc","method":"wait"}`)
-		<-started
-		r.expectNoLineFor(50 * time.Millisecond)
-		r.send(`{"jsonrpc":"2.0","method":"$/cancel_request","params":{"request_id":"abc"}}`)
-		if f := r.recv(); string(f.ID) != `"abc"` || f.errCode() != peer.CodeRequestCancelled {
-			t.Fatalf("got %+v", f)
-		}
-	})
+	}
 }
 
 func TestCancelWithoutAUsableRequestIDCancelsNothing(t *testing.T) {
@@ -599,45 +627,49 @@ func TestOutboundQueueFullReturnsErrOverloadedAndWritesNothing(t *testing.T) {
 
 func TestDuplicateInFlightIDIsInvalidRequest(t *testing.T) {
 	leakGuard(t)
-	started := make(chan struct{}, 4)
-	release := make(chan struct{})
-	var ran atomic.Int32
-	_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
-		p.Handle("slow", func(context.Context, json.RawMessage) (any, error) {
-			ran.Add(1)
-			started <- struct{}{}
-			<-release
-			return struct{}{}, nil
+	for _, route := range requestRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			started := make(chan struct{}, 4)
+			release := make(chan struct{})
+			var ran atomic.Int32
+			_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
+				route.register(p, "slow", func(context.Context, json.RawMessage) (any, error) {
+					ran.Add(1)
+					started <- struct{}{}
+					<-release
+					return struct{}{}, nil
+				})
+			})
+			r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
+			<-started
+			r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
+			if f := r.recv(); string(f.ID) != "1" || f.errCode() != peer.CodeInvalidRequest {
+				t.Fatalf("got %+v, want -32600 for the reused in-flight id", f)
+			}
+			r.send(`{"jsonrpc":"2.0","id":"1","method":"slow"}`) // the string "1" is a different id
+			<-started
+			close(release)
+			got := map[string]bool{}
+			for range 2 {
+				f := r.recv()
+				if f.Error != nil {
+					t.Fatalf("got %+v", f)
+				}
+				got[string(f.ID)] = true
+			}
+			if !got["1"] || !got[`"1"`] {
+				t.Fatalf("answers for %v, want 1 and \"1\"", got)
+			}
+			// Once answered, the id is free again.
+			r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
+			<-started
+			if f := r.recv(); string(f.ID) != "1" || f.Error != nil {
+				t.Fatalf("reuse after completion refused: %+v", f)
+			}
+			if ran.Load() != 3 {
+				t.Fatalf("handler ran %d times, want 3", ran.Load())
+			}
 		})
-	})
-	r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
-	<-started
-	r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
-	if f := r.recv(); string(f.ID) != "1" || f.errCode() != peer.CodeInvalidRequest {
-		t.Fatalf("got %+v, want -32600 for the reused in-flight id", f)
-	}
-	r.send(`{"jsonrpc":"2.0","id":"1","method":"slow"}`) // the string "1" is a different id
-	<-started
-	close(release)
-	got := map[string]bool{}
-	for range 2 {
-		f := r.recv()
-		if f.Error != nil {
-			t.Fatalf("got %+v", f)
-		}
-		got[string(f.ID)] = true
-	}
-	if !got["1"] || !got[`"1"`] {
-		t.Fatalf("answers for %v, want 1 and \"1\"", got)
-	}
-	// Once answered, the id is free again.
-	r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
-	<-started
-	if f := r.recv(); string(f.ID) != "1" || f.Error != nil {
-		t.Fatalf("reuse after completion refused: %+v", f)
-	}
-	if ran.Load() != 3 {
-		t.Fatalf("handler ran %d times, want 3", ran.Load())
 	}
 }
 
@@ -738,6 +770,100 @@ func TestUnknownMethodIsMethodNotFound(t *testing.T) {
 	}
 }
 
+func TestDefaultRequestRouting(t *testing.T) {
+	leakGuard(t)
+	var ran atomic.Int32
+	seen := make(chan string, 2)
+	_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
+		p.HandleDefault(func(_ context.Context, method string, params json.RawMessage) (any, error) {
+			ran.Add(1)
+			seen <- method + ":" + string(params)
+			return map[string]any{"method": method, "params": params}, nil
+		})
+		p.Handle("named", pingHandler)
+		p.Handle("missing", func(context.Context, json.RawMessage) (any, error) {
+			return nil, peer.NewError(peer.CodeMethodNotFound, "named refusal")
+		})
+	})
+	for _, tc := range []struct {
+		method, params, result string
+		code                   int
+	}{
+		{"unknown", `{"extension": [1, true]}`, `{"method":"unknown","params":{"extension":[1,true]}}`, 0},
+		{peer.MethodCancelRequest, `{"request_id":1}`, `{"method":"$/cancel_request","params":{"request_id":1}}`, 0},
+		{"named", `{}`, `{}`, 0},
+		{"missing", `{}`, ``, peer.CodeMethodNotFound},
+	} {
+		r.send(`{"jsonrpc":"2.0","id":1,"method":"` + tc.method + `","params":` + tc.params + `}`)
+		f := r.recv()
+		if f.errCode() != tc.code || (tc.code == 0 && string(f.Result) != tc.result) {
+			t.Fatalf("method %q answered with %+v, want code %d and result %s", tc.method, f, tc.code, tc.result)
+		}
+		if tc.method == "missing" && f.Error.Message != "named refusal" {
+			t.Fatalf("named handler's error changed: %+v", f)
+		}
+		if tc.method == "unknown" || tc.method == peer.MethodCancelRequest {
+			if got := <-seen; got != tc.method+":"+tc.params {
+				t.Fatalf("default handler saw %s, want unchanged method and params", got)
+			}
+		}
+	}
+	// Neither notifications nor unsolicited responses enter the default handler.
+	r.send(`{"jsonrpc":"2.0","method":"unknown"}`)
+	r.send(`{"jsonrpc":"2.0","id":99,"result":{}}`)
+	r.send(`{"jsonrpc":"2.0","id":2,"method":"named"}`)
+	if f := r.recv(); string(f.ID) != "2" || f.Error != nil {
+		t.Fatalf("unexpected reply before the named handler: %+v", f)
+	}
+	if got := ran.Load(); got != 2 {
+		t.Fatalf("default handler ran %d times, want only the two unmatched requests", got)
+	}
+}
+
+func TestDefaultHandlerReplacementKeepsQueuedSelection(t *testing.T) {
+	leakGuard(t)
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	accepted := make(chan struct{}, 1)
+	handler := func(label string) peer.DefaultRequestHandler {
+		return func(_ context.Context, method string, _ json.RawMessage) (any, error) {
+			return map[string]string{"handler": label, "method": method}, nil
+		}
+	}
+	p, r, _ := newRaw(t, peer.Params{MaxConcurrentHandlers: 1}, func(p *peer.Peer) {
+		p.HandleDefault(handler("replaced before Start"))
+		p.HandleDefault(handler("selected"))
+		p.Handle("slow", func(context.Context, json.RawMessage) (any, error) {
+			started <- struct{}{}
+			<-release
+			return struct{}{}, nil
+		})
+		p.HandleNotification("barrier", func(context.Context, json.RawMessage) { accepted <- struct{}{} })
+	})
+	r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
+	awaitSignal(t, started, "the busy handler")
+	r.send(`{"jsonrpc":"2.0","id":2,"method":"queued"}`)
+	r.send(`{"jsonrpc":"2.0","method":"barrier"}`)
+	awaitSignal(t, accepted, "the queued request to be accepted")
+	p.HandleDefault(handler("replacement"))
+	p.Handle("queued", pingHandler)
+	close(release)
+	if f := r.recv(); string(f.ID) != "1" || f.Error != nil {
+		t.Fatalf("busy request failed: %+v", f)
+	}
+	if f := r.recv(); string(f.Result) != `{"handler":"selected","method":"queued"}` {
+		t.Fatalf("queued request lost its selected handler or method: %+v", f)
+	}
+	r.send(`{"jsonrpc":"2.0","id":3,"method":"later"}`)
+	if f := r.recv(); string(f.Result) != `{"handler":"replacement","method":"later"}` {
+		t.Fatalf("later request did not use replacement: %+v", f)
+	}
+	r.send(`{"jsonrpc":"2.0","id":4,"method":"queued"}`)
+	if f := r.recv(); string(f.Result) != `{}` {
+		t.Fatalf("later named registration did not take priority: %+v", f)
+	}
+}
+
 func TestUnknownNotificationIsLoggedAndDropped(t *testing.T) {
 	leakGuard(t)
 	_, r, logs := newRaw(t, peer.Params{}, func(p *peer.Peer) { p.Handle("ping", pingHandler) })
@@ -753,28 +879,34 @@ func TestUnknownNotificationIsLoggedAndDropped(t *testing.T) {
 
 func TestParamsMustBeStructuredAndNullMeansAbsent(t *testing.T) {
 	leakGuard(t)
-	seen := make(chan string, 4)
-	_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
-		p.Handle("m", func(_ context.Context, params json.RawMessage) (any, error) {
-			seen <- fmt.Sprintf("%q", params)
-			return struct{}{}, nil
+	for _, route := range requestRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			seen := make(chan string, 4)
+			_, r, _ := newRaw(t, peer.Params{}, func(p *peer.Peer) {
+				route.register(p, "m", func(_ context.Context, params json.RawMessage) (any, error) {
+					seen <- fmt.Sprintf("%q", params)
+					return struct{}{}, nil
+				})
+			})
+			r.send(`{"jsonrpc":"2.0","id":1,"method":"m","params":"text"}`)
+			if f := r.recv(); f.errCode() != peer.CodeInvalidParams {
+				t.Fatalf("got %+v, want -32602", f)
+			}
+			r.send(`{"jsonrpc":"2.0","id":2,"method":"m","params":null}`)
+			r.recv()
+			r.send(`{"jsonrpc":"2.0","id":3,"method":"m"}`)
+			r.recv()
+			r.send(`{"jsonrpc":"2.0","id":4,"method":"m","params":[1]}`)
+			r.recv()
+			r.send(`{"jsonrpc":"2.0","id":5,"method":"m","params":{}}`)
+			r.recv()
+			want := []string{`""`, `""`, `"[1]"`, `"{}"`}
+			for _, w := range want {
+				if got := <-seen; got != w {
+					t.Fatalf("handler saw params %s, want %s", got, w)
+				}
+			}
 		})
-	})
-	r.send(`{"jsonrpc":"2.0","id":1,"method":"m","params":"text"}`)
-	if f := r.recv(); f.errCode() != peer.CodeInvalidParams {
-		t.Fatalf("got %+v, want -32602", f)
-	}
-	r.send(`{"jsonrpc":"2.0","id":2,"method":"m","params":null}`)
-	r.recv()
-	r.send(`{"jsonrpc":"2.0","id":3,"method":"m"}`)
-	r.recv()
-	r.send(`{"jsonrpc":"2.0","id":4,"method":"m","params":[1]}`)
-	r.recv()
-	want := []string{`""`, `""`, `"[1]"`}
-	for _, w := range want {
-		if got := <-seen; got != w {
-			t.Fatalf("handler saw params %s, want %s", got, w)
-		}
 	}
 }
 

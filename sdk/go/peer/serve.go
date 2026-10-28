@@ -35,6 +35,13 @@ func (p *Peer) handleLine(line []byte) {
 func (p *Peer) acceptRequest(msg message) {
 	p.handlersMu.RLock()
 	h := p.requestHandlers[msg.method]
+	if h == nil && p.defaultRequestHandler != nil {
+		fallback := p.defaultRequestHandler
+		method := msg.method
+		h = func(ctx context.Context, params json.RawMessage) (any, error) {
+			return fallback(ctx, method, params)
+		}
+	}
 	p.handlersMu.RUnlock()
 	if h == nil {
 		p.log.Warn("request for unknown method", "method", clip(msg.method, 64))

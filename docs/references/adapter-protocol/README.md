@@ -54,6 +54,20 @@ Behaviour under the default dialect, each point pinned by the tests named in "Wh
   `method` and a valid id, that is, when it is recognisably a request; every
   other malformed line, which may have been meant as a response, is answered
   with a null id.
+- **Request routing.** `Handle` registers a named handler; `HandleDefault`
+  optionally registers one `DefaultRequestHandler(ctx, method, params)` for
+  requests whose named lookup misses. Named handlers always win, including when
+  they return `CodeMethodNotFound`. With no default, unknown requests retain
+  their immediate `-32601`, before the in-flight id, queue and params checks.
+  With a default, they share the same queue, in-flight ids, cancellation,
+  concurrency and reply path as named requests. Selection runs under the handler
+  lock on acceptance, and only workers invoke handlers. Both registration APIs
+  work before and after `Start`; a replacement affects later selections, never
+  queued requests. `HandleDefault` replaces the earlier default and panics on
+  nil. Its raw params are nil when absent or null, otherwise an object or array;
+  the application interprets their schema. Notifications and responses never
+  enter the default request handler. A frame with an id and the cancel method
+  name is a request and follows this routing without cancelling anything.
 - **Overload.** A request that finds the request queue full is answered
   `-32001` before its params are examined and before any handler is started, so
   a `-32001` always means the handler did not run.
@@ -159,6 +173,14 @@ anything not listed, including unknown codes, counts as unknown.
   there is one framing and message layer, not two. The repository root `go.work`
   ties the modules together for development; there is no `replace` directive,
   because a module with one cannot be installed with `go install ...@version`.
+- **Default dispatch is application routing.** Dynamic method availability and
+  protocol admission belong to the application. An optional fallback beside
+  named registration gives it that responsibility without changing existing
+  owners or adding a second scheduling path. It is not a dialect convention or
+  a middleware hook: only a lookup miss chooses it, and a named handler's error
+  never triggers another handler. Binding the selected function and method to
+  the existing request handler keeps queueing, cancellation and replies in one
+  place.
 - **An overlong line closes the connection instead of being skipped.** Skipping
   to the next newline would resynchronize in the middle of an oversized message
   and let its tail be read as a message. The reader also refuses an
@@ -278,6 +300,8 @@ connection, API behaviour between two peers over `io.Pipe`, always with `-race`;
 
 | Behaviour | Tests |
 | --------- | ----- |
+| Optional default dispatch, named priority, unchanged raw method/params and fixed queued selection | `TestDefaultRequestRouting`, `TestDefaultHandlerReplacementKeepsQueuedSelection`, `TestParamsMustBeStructuredAndNullMeansAbsent` |
+| Named and default routes share overload, in-flight ids, cancellation and document checks | `TestOverloadedIsDecidedBeforeParamsAndHandler`, `TestDuplicateInFlightIDIsInvalidRequest`, `TestCancellation`, `TestDialectCancelledRequestIsNotAnswered`, `TestDialectDocumentValidationBeforeOverload` |
 | Overlong line closes; exactly-max accepted; nothing after is read | `TestOverlongLineClosesConnection` |
 | Every line the peer writes in its own tests is a frame of the schema | `TestPeerOutputMatchesSchema` (root module `protocol`, running the peer tests with the writers recorded) |
 | The rules of what the peer sends | `TestNilParamsAreSentAsAnEmptyObject`, `TestParamsThatAreNotAnObjectAreRefused`, `TestMethodNameLength`, `TestHandlerResultMustBeAnObject`, `TestTypedNilErrorIsAnInternalError`, `TestErrorRepliesFitTheSchema`, `TestWithDataKeepsOnlyObjects`, `TestErrorReplyTooLargeIsAnInternalError` |

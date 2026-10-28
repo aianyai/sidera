@@ -11,7 +11,7 @@ The package depends on the standard library and on the strict JSON scanner
 of its own module (`sdk/go/strictjson`). Method names, parameter schemas and
 the meaning of results belong to the layer above (`adapterproto`); `initialize`,
 `ping`, `shutdown` and the rest of that layer's methods are registered by the
-owner with `Handle`, never special-cased here. The one method the peer handles
+owner with `Handle` or `HandleDefault`, never special-cased here. The one method the peer handles
 itself is the cancel notification: `$/cancel_request` unless the owner's
 `Dialect` names another.
 
@@ -22,7 +22,8 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
 | `New(r io.Reader, w io.WriteCloser, Config)`, `Start()` | Create a peer over the streams, register handlers, then start it. Nothing is read or written before `Start`. |
 | `Config.Dialect`, `Dialect` | The few conventions a protocol built on the peer may set differently: the cancel notification (its name, how its params name the request, what `Call` sends), whether a cancelled request is answered, document ambiguity checks, and the codes of the peer's own overload and line-too-long errors. The zero value is the adapter protocol's. `New` fails when `CancelMethod` is not a valid method name (1 to 128 characters) or `CancelParams` does not build a JSON object. |
 | `Params`, `DefaultParams()` | The limits. A zero field means "use the default"; a negative field is an error from `New`. |
-| `Handle(method, RequestHandler)`, `HandleNotification(method, NotificationHandler)` | Register what the other side may call. Requests for unregistered methods get `-32601`; unregistered notifications are logged and dropped. |
+| `Handle(method, RequestHandler)`, `HandleNotification(method, NotificationHandler)` | Register what the other side may call. Requests for unregistered methods use the default request handler, or get `-32601` when none is registered; unregistered notifications are logged and dropped. |
+| `HandleDefault(DefaultRequestHandler)` | Register the handler for requests without a named handler. It receives the method name and raw params and shares the named handlers' execution rules. |
 | `Call(ctx, method, params, result)`, `Notify(ctx, method, params)` | Send a request and wait, or send a notification. `params` must marshal to an object, or be nil (sent as `{}`). The method name is 1 to 128 characters. |
 | `NoEffect(err)`, `ResultUnknown(err)` | The effect rule: after an error from `Call`, did the request definitely do nothing, or is the outcome unknown? |
 | `Done()`, `Err()`, `Close()` | Learn that and why the connection ended; end it. |
@@ -62,6 +63,17 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   JSON or UTF-8 stays `-32700`; parameter shape and meaning stay with the layers
   that interpret them. The zero-value dialect keeps the classification and
   response rules above.
+- **Request routing.** A named handler takes priority over the optional default
+  handler, even when the named handler returns `CodeMethodNotFound`. The default
+  runs only on a lookup miss, never for notifications or responses. Without one,
+  unknown requests are immediately answered `-32601`, before the in-flight id,
+  queue or params checks. With one, they share the named requests' queue,
+  concurrency, cancellation and reply path; the read loop only selects a handler
+  and never invokes it. `HandleDefault` replaces the earlier default and panics
+  on nil. Both request registration APIs work before and after `Start`; handler
+  selection is fixed at acceptance, so replacement affects only later selections.
+  Raw params are nil when absent or null, otherwise an object or array;
+  their schema belongs to the owner.
 - **Overload precedes parameter interpretation.** The read loop classifies a
   request, finds its handler and checks its id; if the request queue
   (`MaxPendingRequests`) is full it answers `-32001` (`Dialect.OverloadedCode`) immediately. Parameters
@@ -108,6 +120,8 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   ignored it or never started; the id is released as always. A cancellation
   that arrives after the answer was queued finds nothing in flight and changes
   nothing, so that answer is still sent: at most once, never twice.
+  A frame with an id and the cancel method name is a request: it follows request
+  routing, including the optional default handler, and does not cancel anything.
 - **Dialect codes.** `OverloadedCode` and `LineTooLongCode` replace `-32001`
   and `-32004` in what the peer sends on its own, with the same message and the
   same behaviour (the overload refusal is still decided before anything runs,

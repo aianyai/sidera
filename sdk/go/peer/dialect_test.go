@@ -112,91 +112,95 @@ func answerAfterRelease(t *testing.T, r *raw, id string) frame {
 
 func TestDialectCancelledRequestIsNotAnswered(t *testing.T) {
 	leakGuard(t)
-	cfg := peer.Config{Dialect: testDialect()}
+	for _, route := range requestRoutes {
+		t.Run(route.name, func(t *testing.T) {
+			cfg := peer.Config{Dialect: testDialect()}
 
-	t.Run("a handler that honours the cancel leaves nothing on the wire and its id is released", func(t *testing.T) {
-		started := make(chan struct{}, 1)
-		returned := make(chan struct{}, 1)
-		_, r, _ := newDialectRaw(t, cfg, func(p *peer.Peer) {
-			p.Handle("wait", func(ctx context.Context, _ json.RawMessage) (any, error) {
-				started <- struct{}{}
-				<-ctx.Done()
-				returned <- struct{}{}
-				return nil, ctx.Err()
+			t.Run("a handler that honours the cancel leaves nothing on the wire and its id is released", func(t *testing.T) {
+				started := make(chan struct{}, 1)
+				returned := make(chan struct{}, 1)
+				_, r, _ := newDialectRaw(t, cfg, func(p *peer.Peer) {
+					route.register(p, "wait", func(ctx context.Context, _ json.RawMessage) (any, error) {
+						started <- struct{}{}
+						<-ctx.Done()
+						returned <- struct{}{}
+						return nil, ctx.Err()
+					})
+					p.Handle("ping", pingHandler)
+				}, true)
+				r.send(`{"jsonrpc":"2.0","id":1,"method":"wait"}`)
+				<-started
+				r.send(cancelNote(`{"requestId":1}`))
+				awaitSignal(t, returned, "the handler to return after the cancel")
+				// The answer, if one were owed, is queued right after the handler returns.
+				r.expectNoLineFor(100 * time.Millisecond)
+				if f := answerAfterRelease(t, r, "1"); string(f.ID) != "1" || f.Error != nil {
+					t.Fatalf("got %+v, want the id 1 to be reusable and answered normally", f)
+				}
 			})
-			p.Handle("ping", pingHandler)
-		}, true)
-		r.send(`{"jsonrpc":"2.0","id":1,"method":"wait"}`)
-		<-started
-		r.send(cancelNote(`{"requestId":1}`))
-		awaitSignal(t, returned, "the handler to return after the cancel")
-		// The answer, if one were owed, is queued right after the handler returns.
-		r.expectNoLineFor(100 * time.Millisecond)
-		if f := answerAfterRelease(t, r, "1"); string(f.ID) != "1" || f.Error != nil {
-			t.Fatalf("got %+v, want the id 1 to be reusable and answered normally", f)
-		}
-	})
 
-	t.Run("a handler that ignores the cancel is not answered either", func(t *testing.T) {
-		started := make(chan struct{}, 1)
-		release := make(chan struct{})
-		_, r, _ := newDialectRaw(t, cfg, func(p *peer.Peer) {
-			p.Handle("stubborn", func(context.Context, json.RawMessage) (any, error) {
-				started <- struct{}{}
-				<-release
-				return map[string]string{"done": "yes"}, nil
+			t.Run("a handler that ignores the cancel is not answered either", func(t *testing.T) {
+				started := make(chan struct{}, 1)
+				release := make(chan struct{})
+				_, r, _ := newDialectRaw(t, cfg, func(p *peer.Peer) {
+					route.register(p, "stubborn", func(context.Context, json.RawMessage) (any, error) {
+						started <- struct{}{}
+						<-release
+						return map[string]string{"done": "yes"}, nil
+					})
+					p.Handle("ping", pingHandler)
+				}, true)
+				r.send(`{"jsonrpc":"2.0","id":"abc","method":"stubborn"}`)
+				<-started
+				r.send(cancelNote(`{"requestId":"abc"}`))
+				// The read loop answers this on its own, so once the reply is here the cancel was processed.
+				r.send(`bad`)
+				if f := r.recv(); f.errCode() != peer.CodeParseError {
+					t.Fatalf("got %+v", f)
+				}
+				close(release)
+				r.expectNoLineFor(100 * time.Millisecond)
+				if f := answerAfterRelease(t, r, `"abc"`); string(f.ID) != `"abc"` || f.Error != nil {
+					t.Fatalf("got %+v, want the string id to be reusable", f)
+				}
 			})
-			p.Handle("ping", pingHandler)
-		}, true)
-		r.send(`{"jsonrpc":"2.0","id":"abc","method":"stubborn"}`)
-		<-started
-		r.send(cancelNote(`{"requestId":"abc"}`))
-		// The read loop answers this on its own, so once the reply is here the cancel was processed.
-		r.send(`{"jsonrpc":"2.0","id":7,"method":"no.such.method"}`)
-		if f := r.recv(); string(f.ID) != "7" {
-			t.Fatalf("got %+v", f)
-		}
-		close(release)
-		r.expectNoLineFor(100 * time.Millisecond)
-		if f := answerAfterRelease(t, r, `"abc"`); string(f.ID) != `"abc"` || f.Error != nil {
-			t.Fatalf("got %+v, want the string id to be reusable", f)
-		}
-	})
 
-	t.Run("a request cancelled while queued never starts its handler and is not answered", func(t *testing.T) {
-		started := make(chan struct{}, 4)
-		release := make(chan struct{})
-		var ran atomic.Int32
-		_, r, _ := newDialectRaw(t, peer.Config{Params: peer.Params{MaxConcurrentHandlers: 1}, Dialect: testDialect()}, func(p *peer.Peer) {
-			p.Handle("slow", func(context.Context, json.RawMessage) (any, error) {
-				ran.Add(1)
-				started <- struct{}{}
-				<-release
-				return struct{}{}, nil
+			t.Run("a request cancelled while queued never starts its handler and is not answered", func(t *testing.T) {
+				started := make(chan struct{}, 4)
+				release := make(chan struct{})
+				var ran atomic.Int32
+				_, r, _ := newDialectRaw(t, peer.Config{Params: peer.Params{MaxConcurrentHandlers: 1}, Dialect: testDialect()}, func(p *peer.Peer) {
+					route.register(p, "slow", func(context.Context, json.RawMessage) (any, error) {
+						ran.Add(1)
+						started <- struct{}{}
+						<-release
+						return struct{}{}, nil
+					})
+					p.Handle("ping", pingHandler)
+				}, true)
+				r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
+				<-started
+				r.send(`{"jsonrpc":"2.0","id":2,"method":"slow"}`)
+				r.send(cancelNote(`{"requestId":2}`))
+				// The read loop answers this on its own, so once the reply is here the cancel was processed.
+				r.send(`bad`)
+				if f := r.recv(); f.errCode() != peer.CodeParseError {
+					t.Fatalf("got %+v", f)
+				}
+				close(release)
+				if f := r.recv(); string(f.ID) != "1" || f.Error != nil {
+					t.Fatalf("got %+v, want only the answer to request 1", f)
+				}
+				r.expectNoLineFor(100 * time.Millisecond)
+				if ran.Load() != 1 {
+					t.Fatalf("handler ran %d times, want 1: request 2 was cancelled before it started", ran.Load())
+				}
+				if f := answerAfterRelease(t, r, "2"); string(f.ID) != "2" || f.Error != nil {
+					t.Fatalf("got %+v, want the id 2 to be reusable", f)
+				}
 			})
-			p.Handle("ping", pingHandler)
-		}, true)
-		r.send(`{"jsonrpc":"2.0","id":1,"method":"slow"}`)
-		<-started
-		r.send(`{"jsonrpc":"2.0","id":2,"method":"slow"}`)
-		r.send(cancelNote(`{"requestId":2}`))
-		// The read loop answers this on its own, so once the reply is here the cancel was processed.
-		r.send(`{"jsonrpc":"2.0","id":3,"method":"no.such.method"}`)
-		if f := r.recv(); string(f.ID) != "3" {
-			t.Fatalf("got %+v", f)
-		}
-		close(release)
-		if f := r.recv(); string(f.ID) != "1" || f.Error != nil {
-			t.Fatalf("got %+v, want only the answer to request 1", f)
-		}
-		r.expectNoLineFor(100 * time.Millisecond)
-		if ran.Load() != 1 {
-			t.Fatalf("handler ran %d times, want 1: request 2 was cancelled before it started", ran.Load())
-		}
-		if f := answerAfterRelease(t, r, "2"); string(f.ID) != "2" || f.Error != nil {
-			t.Fatalf("got %+v, want the id 2 to be reusable", f)
-		}
-	})
+		})
+	}
 }
 
 func TestDialectCancelTargetReadsTheParamsItIsGiven(t *testing.T) {

@@ -439,10 +439,11 @@ func TestRegistrationPanicsOnMisuse(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, f := range map[string]func(){
-		"empty method":       func() { p.Handle("", pingHandler) },
-		"nil handler":        func() { p.Handle("m", nil) },
-		"cancel as request":  func() { p.Handle(peer.MethodCancelRequest, pingHandler) },
-		"cancel as notified": func() { p.HandleNotification(peer.MethodCancelRequest, func(context.Context, json.RawMessage) {}) },
+		"empty method":        func() { p.Handle("", pingHandler) },
+		"nil handler":         func() { p.Handle("m", nil) },
+		"nil default handler": func() { p.HandleDefault(nil) },
+		"cancel as request":   func() { p.Handle(peer.MethodCancelRequest, pingHandler) },
+		"cancel as notified":  func() { p.HandleNotification(peer.MethodCancelRequest, func(context.Context, json.RawMessage) {}) },
 	} {
 		func() {
 			defer func() {
