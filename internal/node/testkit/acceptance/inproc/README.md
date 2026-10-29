@@ -65,3 +65,8 @@ management result and feedback.
 `configureLifecycleStartup` binds the periodic-clock recipe's final read-only
 clock-record audit. It checks the daemon's persisted state after shutdown; no
 recipe calls the clock writer or reproduces the daemon's periodic task.
+
+`newDeliveryOps` arms the current process's existing filesystem-fault wrapper
+at the first source-update create, before any visible source-record replacement.
+The recipe checks the sender's real queued status, then completes receive and
+reply through the ordinary Agent entry points without transport controls.

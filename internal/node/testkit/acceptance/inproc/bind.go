@@ -49,7 +49,7 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 }
 
 func newBindings() recipes.Bindings {
-	return recipes.Bindings{Sessions: newSessionOps(), Installation: newInstallOps(), Management: newManagementOps(), Recovery: recoveryBindings()}
+	return recipes.Bindings{Delivery: newDeliveryOps(), Sessions: newSessionOps(), Installation: newInstallOps(), Management: newManagementOps(), Recovery: recoveryBindings()}
 }
 
 func freshScenario(t testing.TB, name string) crashwalk.Scenario {

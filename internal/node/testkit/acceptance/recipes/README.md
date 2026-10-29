@@ -93,3 +93,10 @@ The periodic-clock startup advances one minute while the actual daemon serves,
 then waits for its own periodic task and stops. Its final read-only check requires
 the persisted high-water mark to retain that advance without a rollback pause.
 The recording has five main points and a fixed budget of eight.
+
+The reply-after-write-failure variant uses one recoverable source-record create
+failure before its visible replacement. The target has really accepted and read
+the body while the sender still reports it queued; a real reply then carries the
+evidence that releases the sender's retained body. `DeliveryOps` names this
+preparation fault without exposing a file system or a transport to the recipe.
+Its 60-point recording has a fixed budget of 90.

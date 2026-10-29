@@ -532,3 +532,10 @@ phases `recovery-record` and `recovery-normal` carry the source `Trigger` for ru
 timing. Smoke emits one `Skipped` notification with the planned count; it is not
 a run start/end pair and cannot count as execution. Diagnostic `Triggers` after
 main crashes remain useful for writing cases but cannot supply coverage evidence.
+
+A reply acceptance variant fails a source-record create before its visible
+replacement, using the existing filesystem-fault facility. The engine continues
+serving with a queued source and retained body after the target accepted it.
+A real target receive and reply carries the arrival evidence that releases the
+source body in the reply transaction. The recipe uses no transport fault or
+raw-envelope callback, and judges the received bodies and final closure.

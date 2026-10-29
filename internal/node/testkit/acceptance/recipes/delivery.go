@@ -1,6 +1,7 @@
 package recipes
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,8 +11,8 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-func deliveryRecipes(_ Bindings) []ScriptRecipe {
-	return []ScriptRecipe{sendRecipe(), replyRecipe(), registrationRecipe(), secondCheckRecipe(), expiryRecipe(), redeliveryRecipe()}
+func deliveryRecipes(b Bindings) []ScriptRecipe {
+	return []ScriptRecipe{sendRecipe(), replyRecipe(), registrationRecipe(), secondCheckRecipe(), expiryRecipe(), redeliveryRecipe(), replyAfterFailureRecipe(b)}
 }
 
 func sendRecipe() ScriptRecipe {
@@ -150,4 +151,56 @@ func drainFeedback(e scenario.Env, facts *DeliveryEvidence, sender string) error
 		}
 	}
 	return facts.RecvAndAck(e, e.Agent(sender))
+}
+
+// DeliveryOps names the recoverable preparation fault of the reply recipe.
+type DeliveryOps struct{ FailSourceUpdate func(scenario.Env) error }
+
+var ErrSourceAlreadyConfirmed = errors.New("acceptance: source receipt already committed")
+
+func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
+	facts := &DeliveryEvidence{}
+	var original adapterproto.MessageID
+	return ScriptRecipe{Script: scenario.Script{Name: "delivery-reply-after-write-failure", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 90}, Steps: []scenario.Step{
+		{Name: "fail-receipt-write", Do: b.Delivery.FailSourceUpdate},
+		{Name: "send", Do: func(e scenario.Env) error {
+			r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("receiver")}, Body: "The reply must prove this body arrived."})
+			if err == nil {
+				original = r.MessageID
+				facts.Accepted(r, "The reply must prove this body arrived.")
+			}
+			return err
+		}},
+		{Name: "read", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, e.Agent("receiver")) }},
+		{Name: "pending-source", Do: func(e scenario.Env) error {
+			status, err := e.Agent("sender").Status(e.Ctx(), fakeagent.StatusInput{MessageID: original})
+			if err != nil {
+				return err
+			}
+			if len(status.Recipients) != 1 || status.Recipients[0].State != adapterproto.DeliveryQueued {
+				return fmt.Errorf("%w: %+v", ErrSourceAlreadyConfirmed, status)
+			}
+			return nil
+		}},
+		{Name: "reply", Do: func(e scenario.Env) error {
+			r, err := e.Agent("receiver").Reply(e.Ctx(), fakeagent.ReplyInput{MessageID: original, Body: "This is evidence from a real received message."})
+			if err == nil {
+				facts.Accepted(r, "This is evidence from a real received message.")
+			}
+			return err
+		}},
+	}}, Drain: func(e scenario.Env) error {
+		if err := facts.RecvAndAck(e, e.Agent("receiver")); err != nil {
+			return err
+		}
+		if err := facts.RecvAndAck(e, e.Agent("sender")); err != nil {
+			return err
+		}
+		return drainFeedback(e, facts, "sender")
+	}, Check: func(e scenario.Env) error {
+		if err := facts.Check(e); err != nil {
+			return err
+		}
+		return b.Recovery.CheckClosedRecords(e)
+	}}
 }
