@@ -50,6 +50,16 @@ Fixed budgets give half a recording of growth allowance; they
 are never enlarged dynamically. The catalog and its bindings add no generic
 driver or shared environment capability.
 
+The installation acceptance recipe exercises a real first installation, an
+upgrade, reinstalling the current version, platform refusal, and recoverable
+pointer and cleanup failures. Its package inputs pass through the fixture's
+package-source callback. The engine remains responsible for every node write.
+Each successful result is replayed and read back from the operation-result entry;
+the current pointer and actual version directories must agree with it. Failed
+pointer updates leave no successful stored result, keep the old current version,
+and either remove or retain the prepared version as the observed cleanup permits.
+A retained version is discarded by the next real installation before promotion.
+
 ## Why
 
 - **The fakes are third parties.** The point of testing against a fake adapter is to

@@ -15,6 +15,9 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 	var out []crashwalk.Scenario
 	for _, r := range catalog.Scripts {
 		s := &harness.WalkScenario{Script: r.Script, Options: sessionOptions(r.Script.Name)}
+		if r.Script.Name == "installation-rollback" {
+			s.Options = installationOptions()
+		}
 		if r.Drain != nil {
 			s.Drain = func(h *harness.H) error { return r.Drain(h) }
 		}
@@ -42,7 +45,7 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 }
 
 func newBindings() recipes.Bindings {
-	return recipes.Bindings{Sessions: newSessionOps(), Recovery: recoveryBindings()}
+	return recipes.Bindings{Sessions: newSessionOps(), Installation: newInstallOps(), Recovery: recoveryBindings()}
 }
 
 func freshScenario(t testing.TB, name string) crashwalk.Scenario {

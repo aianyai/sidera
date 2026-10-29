@@ -32,3 +32,9 @@ Offline damage reads the stopped disk directly and changes only records the
 product wrote. The stopped creating endpoint is checked before its real control
 record is damaged. Final recovery work uses the owners' existing predicates, and
 closed-session checks share the session binding's audit.
+Installation uses `Options.OpenPackage` to build a fresh read-only package reader
+from each recipe's package specification. Only package input files are prepared;
+the engine owns staging, validation, installation and cleanup. The binding injects
+ordinary current-pointer failures and a version-cleanup failure through the current
+process's existing `Faults` wrapper. Result lookup, current-pointer decoding and
+version-directory inspection hold the installation result to its durable effect.

@@ -50,3 +50,10 @@ requests and associate real creation requests with native creation confirmations
 by attempt, then receive through the resulting session agent. Final disk audits
 check recovery work, terminal deliveries and control records, and the original
 quarantined creating session's closed state and cleared token.
+The installation recipe installs a package, observes two recoverable pointer
+failures with successful and failed version cleanup, and retries through the real
+stale-version discard. It also reinstalls the current version and rejects a
+package for another platform. Every observed success is replayed and checked
+against its stored result and the installed current pointer and version directories.
+Package specifications describe caller-owned input files; no recipe writes node
+state. Its fixed budget is 162 from 108 recorded main points.
