@@ -36,6 +36,7 @@ const (
 
 // Config is what the composition root gives the server.
 type Config struct {
+	TestConfig
 	// Service is the engine, as far as the management interface may ask of it.
 	Service engine.ManageService
 	// Node is this node's identifier: an address of another node is not one of
@@ -221,7 +222,7 @@ func (s *Server) serveTest(w http.ResponseWriter, r *http.Request, m *method, bo
 	if len(params) == 0 {
 		params = json.RawMessage(`{}`)
 	}
-	result, err := m.test(r.Context(), params)
+	result, err := m.test(s, r.Context(), params)
 	if err != nil {
 		s.http.Fail(w, err)
 		return

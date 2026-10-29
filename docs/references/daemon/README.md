@@ -362,8 +362,18 @@ operations and not judged by `admin.Authorize`: they have no catalogue entry, ca
 no operation identifier and store no result, and they exist only in a binary built
 with the `testclock` or `crashtest` tag, which is never shipped; without the tag the
 request is `method_unknown`, which is how a test asserts that the way in is missing.
-The rows themselves belong to the streams that own the harness; the table has the
-shape and one row that proves it.
+`test.ping` exists with either tag. `testclock` adds `test.clock.set` with
+`{to_ms}` (absolute Unix milliseconds, including rollback) and `test.quiesce`
+with `{expect: {instance: {notifications, held}}, timeout_ms}`. `held` is a
+multiset of request method names. A positive timeout is required. Quiescence
+returns `inbox_len`, `continuations`, `due_entries`, `parked`, `workers`,
+`adapters_pending`, `satisfied`, and an `error` string when it fails; a failure
+keeps the counters in a successful HTTP response for the fixture to explain.
+`crashtest` adds `test.crashpoints`, whose `{points: [{key, kind}]}` is the
+complete validated daemon table, sync points included, with `normal` or
+`recovery` kinds. The composition root supplies it through the tagged
+`manageapi.TestConfig`. The tags are independent: `crashtest` alone enables
+neither clock method.
 
 Errors are `{"error":{"category","code","message","details"?}}` in the words of
 `apiwire`, which is the one mapping from what the engine, `config`, `ipc` and the

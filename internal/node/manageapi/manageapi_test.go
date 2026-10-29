@@ -585,7 +585,7 @@ func TestOperationResultAnswersAnEngineThatCannotAnswer(t *testing.T) {
 // no catalogue entry, in the same table, is denied.
 func TestATestRowIsOutsideTheCatalogueAndIsNotAuthorized(t *testing.T) {
 	r := newRig(t, extraMethods, func(s *Server) {
-		s.methods["test.echo"] = &method{name: "test.echo", test: func(_ context.Context, raw json.RawMessage) (any, error) {
+		s.methods["test.echo"] = &method{name: "test.echo", test: func(_ *Server, _ context.Context, raw json.RawMessage) (any, error) {
 			var p struct {
 				Say string `json:"say"`
 			}
@@ -623,7 +623,7 @@ func TestATestRowIsOutsideTheCatalogueAndIsNotAuthorized(t *testing.T) {
 // never neither, and the name says which: a test row is called test.something and
 // nothing else is.
 func TestARowIsAnOperationOrATestRowAndItsNameSaysWhich(t *testing.T) {
-	test := func(context.Context, json.RawMessage) (any, error) { return nil, nil }
+	test := func(*Server, context.Context, json.RawMessage) (any, error) { return nil, nil }
 	plan := func(*Server, json.RawMessage) (*plan, error) { return nil, nil }
 	for _, tc := range []struct {
 		name string

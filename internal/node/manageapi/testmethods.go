@@ -7,18 +7,16 @@ import (
 	"encoding/json"
 )
 
-// testMethods are the test rows of a binary built with a test tag: the door of the
-// test harness to the node it runs in. The methods of the harness (the test clock,
-// quiescence, the crash points) are added here by the streams that own them, each
-// in a file of its own tag; the one row below is only there to show the shape and
-// that a tagged build has it.
-func testMethods() []*method { return []*method{testPing} }
+// testMethods combines only the rows enabled by their own build tags.
+func testMethods() []*method {
+	return append(append([]*method{testPing}, clockMethods()...), crashMethods()...)
+}
 
 // test.ping answers an empty object with {"pong": true}: a row that proves the
 // table has its test rows, and takes no params.
 var testPing = &method{
 	name: "test.ping",
-	test: func(_ context.Context, raw json.RawMessage) (any, error) {
+	test: func(_ *Server, _ context.Context, raw json.RawMessage) (any, error) {
 		var p struct{}
 		if err := decodeParams(raw, &p); err != nil {
 			return nil, err

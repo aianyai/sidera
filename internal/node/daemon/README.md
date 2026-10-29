@@ -33,6 +33,11 @@ identities, original text and unwrap chains are preserved. This lets `apiwire`
 recognize lifecycle failures without importing this composition root; all wire
 mapping stays in `apiwire`, and process exit policy stays here.
 
+The management listener supplies the complete validated transaction table to
+`test.crashpoints` only in `crashtest` builds. The `testclock` clock and quiescence
+methods use the already-injected clock and engine; the daemon reads no test
+process environment.
+
 ## Rules
 
 - **The order of the start is the log.** Every step logs `startup step N begin` and

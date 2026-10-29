@@ -289,9 +289,14 @@ func (d *Daemon) stepManage(context.Context) error {
 	if err != nil {
 		return err
 	}
-	srv, err := manageapi.New(manageapi.Config{
+	cfg := manageapi.Config{
 		Service: d.engine, Node: d.keys.Node(), Clock: d.cfg.Clock, Stop: d.RequestStop, Version: d.cfg.Version, Log: d.log,
-	})
+	}
+	if err := configureManagementTests(&cfg); err != nil {
+		l.Close()
+		return err
+	}
+	srv, err := manageapi.New(cfg)
 	if err != nil {
 		l.Close()
 		return err

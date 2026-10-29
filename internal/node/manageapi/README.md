@@ -52,8 +52,20 @@ tag (`testmethods.go`) and none otherwise (`testmethods_off.go`), so a shipped b
 answers `method_unknown` for them. A test row is outside the catalogue of
 administrative operations and is not judged by `admin.Authorize`: it is no operation
 of the owner's, has no catalogue entry (the shipped catalogue must have none),
-carries no operation identifier and stores no result. The rows of the harness (the
-test clock, quiescence, the crash points) are added by the streams that own them.
+carries no operation identifier and stores no result.
+
+- `testclock` alone enables `test.clock.set` with `{to_ms}` (absolute Unix
+  milliseconds, rollback allowed) and `test.quiesce` with
+  `{expect: {instance: {notifications, held}}, timeout_ms}`. Held entries are
+  request methods, including repetitions for multiple held requests. A positive
+  timeout is required. Quiescence returns the engine counters, `satisfied` and,
+  on failure, `error`, so the caller retains the report that explains a timeout.
+- `crashtest` alone enables `test.crashpoints`, returning
+  `{points: [{key, kind}]}` from the complete table supplied by the daemon through
+  the tagged `TestConfig.CrashPoints`; kinds are `normal` or `recovery` and sync
+  points are included. `TestConfig` is empty in builds without `crashtest`.
+- Either tag enables `test.ping`. A crash-test build does not enable clock methods
+  unless it also has `testclock`.
 
 ## Rules
 

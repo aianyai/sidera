@@ -37,7 +37,7 @@ type method struct {
 	// binary built with a test tag (testMethods), which is never shipped, and the
 	// socket it is on is the user's own, as for every method. Its name begins with
 	// "test.".
-	test func(ctx context.Context, params json.RawMessage) (any, error)
+	test func(s *Server, ctx context.Context, params json.RawMessage) (any, error)
 }
 
 // testPrefix begins the name of every test row, so that a test row is never
