@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -51,7 +50,7 @@ func (c *command) manage(ctx context.Context, args []string) error {
 		req.ExpectedVersion = &version
 	}
 	if plan.change {
-		req.OperationID, err = admin.NewOperationID(rand.Reader)
+		req.OperationID, err = admin.NewOperationID(c.random)
 		if err != nil {
 			return err
 		}

@@ -38,6 +38,13 @@ The management listener supplies the complete validated transaction table to
 methods use the already-injected clock and engine; the daemon reads no test
 process environment.
 
+With `crashtest`, `NewCrashObserver(CrashConfig)` takes a record writer, canonical
+target and positive generation. The caller owns the append-only writer. The
+observer serializes raw observations and records a matching crash marker before
+SIGKILL on Unix or `TerminateProcess` with code 3 on Windows. `RecvResponse`
+provides the one CLI process point outside the transaction table. No environment
+is read here and no test tooling is imported.
+
 ## Rules
 
 - **The order of the start is the log.** Every step logs `startup step N begin` and

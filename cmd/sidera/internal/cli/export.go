@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,7 +24,7 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 		if apiwire.FromError(err).Code != "daemon_not_running" {
 			return err
 		}
-		reader, err := fsx.OpenOS(c.home, rand.Reader)
+		reader, err := fsx.OpenOS(c.home, c.random)
 		if err != nil {
 			return err
 		}

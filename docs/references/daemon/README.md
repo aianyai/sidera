@@ -579,3 +579,25 @@ interface: a sandbox must deny the socket to an agent.
   the access list of the data directory and needs the CI's account; the second needs
   the privilege to make a symbolic link), and everything of the management interface
   on a Windows named pipe; this machine runs the Unix paths only.
+
+## Tagged process crash records
+
+`crashtest` adds `daemon.NewCrashObserver(CrashConfig)`. The caller supplies an
+append-only writer, positive generation, and optional canonical point target;
+the daemon library never reads process environment. Each process owns its record
+file. Each raw observation is written as one JSON line before its primitive:
+`{"gen":1,"point":"sample/file.rename#1","path":"state/new.rec","from":"state/.tmp-raw","kind":"normal"}`.
+`kind` is `normal` or `recovery`. `Path` and `From` keep the actual filesystem
+operands; normalization belongs to the crash-walk consumer. A matching target
+adds a second otherwise identical line with `"crash":true`, then sends SIGKILL
+on Unix or calls `TerminateProcess` with exit code 3 on Windows. A mutex covers
+both lines and termination, so no concurrent observation can split them.
+Recording failures panic before the primitive; a missing marker or a normal
+exit is never evidence of reaching a crash target. The record is appended
+without syncing: process termination preserves the kernel page cache.
+
+The CLI process point `proc/cli.recv-after-response` uses `kind:"proc"` and empty
+path operands. It is after the complete HTTP receive page and before stdout,
+and is deliberately outside the transaction table. `init` and `daemon` install
+the same transaction observer through their existing `Config.Observer` seam.
+The CLI owns opening and closing the file, and all test environment parsing.

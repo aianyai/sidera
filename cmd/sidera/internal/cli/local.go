@@ -21,8 +21,13 @@ func (c *command) local(ctx context.Context, args []string) error {
 	if len(p) != 0 {
 		return usage(args[0] + " takes no positional arguments")
 	}
+	clk, err := c.testClock()
+	if err != nil {
+		return err
+	}
+	cfg := daemon.Config{Home: c.home, Clock: clk, Rand: c.random, Observer: c.observer, Version: c.Version}
 	if args[0] == "init" {
-		r, err := daemon.Init(ctx, daemon.Config{Home: c.home})
+		r, err := daemon.Init(ctx, cfg)
 		if err != nil {
 			return &daemonError{err}
 		}
@@ -37,11 +42,12 @@ func (c *command) local(ctx context.Context, args []string) error {
 		_, err = fmt.Fprintf(c.Stdout, "Back up your self-revocation outside this device.\nnode %s\nhome %s\nRun `sidera identity export-revocation` to export it.\n", r.Node.String(), r.Home)
 		return err
 	}
-	host, err := adapterhost.New(adapterhost.Config{Launcher: adapterhost.ExecLauncher{}})
+	host, err := adapterhost.New(adapterhost.Config{Launcher: adapterhost.ExecLauncher{}, Clock: clk})
 	if err != nil {
 		return err
 	}
-	if err := daemon.Run(ctx, daemon.Config{Home: c.home, AdapterHost: host, Version: c.Version}); err != nil {
+	cfg.AdapterHost = host
+	if err := daemon.Run(ctx, cfg); err != nil {
 		return &daemonError{err}
 	}
 	return nil

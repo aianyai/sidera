@@ -21,6 +21,8 @@ and its bound values. A local value stays attached, including a body spelled
 - `query.go`: identity, declaration patch presence, directory, peers and probe.
 - `output.go`: human results; structured results use the shared JSON encoder.
 - `local.go`: initialization and foreground daemon composition.
+- `crashtest*.go`, `testclock*.go`: independently tagged process controls, their
+  explicit environment inputs, and ordinary-build defaults.
 - `manage.go`: management arguments, expected versions and one retained request
   for a single resend after an unknown outcome.
 - `manage_output.go`: complete JSON responses and human settings and lists.
@@ -64,3 +66,20 @@ keep the OS explanation, the stdout alternative when privacy cannot be verified,
 and any cleanup failure in the error message. Only these local failures use
 `exportFileFailure`; remote errors and armor or digest validation never enter
 that wrapper and retain the shared error mapping.
+
+Only a `crashtest` build reads `SIDERA_TEST_SEED`, `SIDERA_CRASH_GEN`,
+`SIDERA_CRASH_AT` and `SIDERA_CRASH_RECORD`. The seed selects a locked ChaCha8
+reader derived with a SHA-256 domain containing the seed, command role
+(`init`, `daemon`, `cli`) and positive generation (default 1). Fixtures supply
+call-specific seeds; the fake runtime already derives `<base>/<native-ref>/<n>`
+for its CLI calls. Empty seeds retain system randomness. The command opens the
+record with `O_APPEND`, installs the daemon's observer explicitly, and closes the
+record after completion. Each process owns a separate record file. Invalid
+explicit generation or target values fail before the command runs; a target
+requires a record. A receive reaches `proc/cli.recv-after-response` after the
+complete HTTP page arrives and before its first stdout write.
+
+Only a `testclock` build reads `SIDERA_TEST_CLOCK_START_MS`, a signed Unix
+millisecond origin. It injects one fake clock into the daemon and adapter host.
+An absent origin leaves system time in place. Ordinary builds ignore every test
+variable and install neither a crash observer nor a process hook.

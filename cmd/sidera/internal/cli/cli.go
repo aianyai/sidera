@@ -17,6 +17,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/daemon"
+	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
@@ -34,6 +35,9 @@ type command struct {
 	home      string
 	json      bool
 	help      bool
+	random    io.Reader
+	observer  txn.Observer
+	afterRecv func()
 	arguments *commandArguments
 }
 type usageError struct{ message string }
@@ -57,7 +61,17 @@ func Run(ctx context.Context, argv []string, cfg Config) int {
 		} else if len(args) == 0 {
 			err = usage("a command is required; use --help")
 		} else {
-			err = c.run(ctx, args)
+			role := "cli"
+			if args[0] == "init" || (args[0] == "daemon" && (len(args) == 1 || args[1] != "stop")) {
+				role = args[0]
+			}
+			close, setupErr := c.configureTestProcess(role)
+			if setupErr != nil {
+				err = setupErr
+			} else {
+				err = c.run(ctx, args)
+				err = errors.Join(err, close())
+			}
 		}
 	}
 	if err == nil {
@@ -253,6 +267,9 @@ func (c *command) run(ctx context.Context, args []string) error {
 		out, err := client.Call(ctx, "recv", in)
 		if err != nil {
 			return err
+		}
+		if c.afterRecv != nil {
+			c.afterRecv()
 		}
 		_, err = c.Stdout.Write(out.([]byte))
 		return err

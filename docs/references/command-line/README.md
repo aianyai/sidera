@@ -181,3 +181,22 @@ an interrupted receive followed by a possibly-duplicate retry, two separately
 created sessions in one directory, and five 60 KiB messages in English and
 Chinese, checking visible parts against acknowledgement counts. The CLI Agent
 driver is in [`acceptance/agent/cli`](../../../cmd/sidera/internal/acceptance/agent/cli/README.md).
+
+## Tagged test process controls
+
+Only `crashtest` builds read `SIDERA_TEST_SEED`, `SIDERA_CRASH_GEN`,
+`SIDERA_CRASH_AT` and `SIDERA_CRASH_RECORD`. The seed is hashed with a versioned
+domain, command role (`init`, `daemon`, or `cli`) and process generation, then
+feeds a locked standard-library ChaCha8 reader. Empty seeds use system randomness;
+fixtures give individual CLI calls distinct seeds. Generation defaults to 1 and
+must be positive. A target requires a record file. Each process owns a separate
+file opened with `O_APPEND`; raw hit and crash-marker JSON lines are described in
+[the daemon reference](../daemon/README.md#tagged-process-crash-records). A receive
+reaches `proc/cli.recv-after-response` only after the HTTP page is complete and
+before any model stdout.
+
+Only `testclock` builds read `SIDERA_TEST_CLOCK_START_MS`. A supplied signed Unix
+millisecond origin selects one fake clock shared by the daemon and adapter host;
+without it they use system time. Management `test.clock.set` changes this clock
+by absolute milliseconds and permits rollback. The tags are independent and
+ordinary builds ignore all these variables.
