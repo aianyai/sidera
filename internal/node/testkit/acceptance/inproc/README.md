@@ -8,9 +8,10 @@ Constructing a catalog allocates no fixture.
 Tests call `harness.NewWalkBackend(t).Run` directly and sequentially. A normal
 recording must have one generation, no violations, no undeclared writes and no
 Recovery writes, and stay within its fixed budget. Coverage diagnostics compare
-actual hits, including real setup, with the complete daemon declaration table;
-missing keys remain explicit. These recordings describe the implemented recipes,
-without asserting that every declared family is represented.
+actual hits, including real setup, with the complete daemon declaration table.
+The combined clean and complete second-generation evidence must leave no missing
+Normal or Recovery declaration and no undeclared write; the declaration table,
+rather than fixed counts, determines completeness.
 
 `TestSendJudgementRejectsAnAcceptedBodyThatWasNotRead` removes the real receive
 and acknowledgement drain and requires the domain judgement to reject the run.

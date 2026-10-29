@@ -529,7 +529,9 @@ first-crash comparison and diagnostics. Its cost is the clean catalog plus uniqu
 complete recovery triggers, static Recovery interruptions and derived Normal
 interruptions; it does not run every clean main point. The source key sets and
 actual interruption targets therefore have one owner across bounded acceptance
-and whole walks.
+and whole walks. The bounded runner requires the resulting missing Normal,
+missing Recovery and undeclared key sets to be empty against the complete daemon
+table; logging those sets alone does not establish completeness.
 
 `Report.Sources`, `Normal` and `Recovery` describe observations;
 `RecoveryRecordings` counts complete trigger-only runs. `RecoveryRuns` remains the

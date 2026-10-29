@@ -145,9 +145,8 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult, cleanH
 	if count != expectedTargets {
 		t.Errorf("Recovery targets completed=%d expected=%d", count, expectedTargets)
 	}
-	coverage := analysis.Coverage
-	if len(coverage.MissingRecovery) != 0 {
-		t.Errorf("incomplete second-generation recovery evidence: %v", coverage.MissingRecovery)
+	if len(c.MissingNormal) != 0 || len(c.MissingRecovery) != 0 || len(c.Undeclared) != 0 {
+		t.Errorf("incomplete catalog evidence: missing_normal=%v missing_recovery=%v undeclared=%v", c.MissingNormal, c.MissingRecovery, c.Undeclared)
 	}
 	t.Logf("recovery completed=%d records=%d", count, len(recordings))
 	t.Logf("runs record=%d recovery_record=%d recovery_crash=%d recovery_normal_crash=%d total=%d", len(clean), len(recordings), count, derivedCount, len(clean)+len(recordings)+count+derivedCount)
