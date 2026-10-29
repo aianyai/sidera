@@ -5,8 +5,13 @@ catalog into existing `harness.WalkScenario` and `harness.StartupWalkScenario`
 values. `freshScenario` selects a name from another fresh catalog before each run.
 Constructing a catalog allocates no fixture.
 
-Tests call `harness.NewWalkBackend(t).Run` directly and sequentially. A normal
-recording must have one generation, no violations, no undeclared writes and no
+`RecordCatalog(t testing.TB) (CatalogEvidence, error)` records the complete
+catalog directly and sequentially through `harness.NewWalkBackend(t).Run`.
+It returns only clean hits by recipe name and complete recovery records; no
+fixture, engine or filesystem handle escapes. Collection and evidence validation
+return errors; existing harness failures may still terminate the owning test.
+Recipe names must be unique, and each catalog entry is recorded exactly once.
+A normal recording must have one generation, no violations, no undeclared writes and no
 Recovery writes, and stay within its fixed budget. Coverage diagnostics compare
 actual hits, including real setup, with the complete daemon declaration table.
 The combined clean and complete second-generation evidence must leave no missing
@@ -21,8 +26,9 @@ and acknowledgement drain and requires the domain judgement to reject the run.
 token and absent session checkpoint. Session recipes run with the real adapter
 host and its fake native runtime; callbacks do not cache an engine across restarts.
 
-Recovery evidence is recorded once per recipe and complete trigger. The finite
-runner uses `crashwalk.CheckRecoveryRecord` to establish complete two-generation
+Recovery evidence is recorded once per recipe and complete trigger, deduplicating
+static responsibilities together with extra recipe recovery triggers. The collector
+uses `crashwalk.CheckRecoveryRecord` to establish complete two-generation
 evidence, empty target results, domain invariants and the crash trigger's
 first-generation prefix, then supplies all clean hits
 and the complete second generations to `crashwalk.AnalyzeSources`. That shared
@@ -45,10 +51,12 @@ ordinary current-pointer failures and a version-cleanup failure through the curr
 process's existing `Faults` wrapper. Result lookup, current-pointer decoding and
 version-directory inspection hold the installation result to its durable effect.
 
-`TestCatalogEvidence` runs one clean recording per catalog entry, the deduplicated
-complete recoveries, all owned recovery interruptions and the derived Normal
-interruptions in one sequence. It logs the first real observation of each key with
-scenario, trigger, generation, point and both path operands. The three coverage
+`TestCatalogEvidence` calls `RecordCatalog` once, then reuses its evidence for
+all owned recovery interruptions and the derived Normal interruptions in one
+sequence. The collector validates complete-table coverage before returning; it
+does not execute second-generation interruptions. Collection logs the first real
+observation of each key with scenario, trigger, generation, point and both path
+operands. The three coverage
 columns remain separate, and run totals include the derived interruptions. The
 cost is one clean run per catalog entry, one complete run per unique trigger,
 one interruption per static Recovery responsibility and one per derived Normal
@@ -143,3 +151,10 @@ provide none.
 report both execution layers. It verifies the reachable/in-process-only partition
 of the full table. The shared catalog analysis computes keys and actual derived
 target sources from declarations; the binding keeps no handwritten exclusion list.
+
+Only an external binary acceptance test's orchestration may consume the pure
+`CatalogEvidence` value with `Catalog.AnalyzeLayer` to define coverage duties.
+Binary fixtures, backends, environments and domain bindings must not import this
+binding or the harness, retain their handles, or count these observations as
+binary execution evidence. Each test binary collects fresh evidence from its
+current source; there is no evidence file format or cache.

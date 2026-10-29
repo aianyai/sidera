@@ -577,9 +577,20 @@ Both kinds of interruption also pass `CheckRecoveryTrigger` against their clean
 recording. This keeps the first crash reproducible independently of the second
 generation's own prefix comparison.
 
-The bounded in-process acceptance runner uses these same source and target
-checks directly. It owns only catalog execution and diagnostics. Its cost is the
-clean catalog plus unique complete recovery triggers, static Recovery
+`acceptance/inproc.RecordCatalog(t)` provides the complete catalog's clean hits
+by recipe name and complete recovery records as `CatalogEvidence`. It records
+each unique recipe once and each `(recipe, complete trigger)` once, combining
+static recovery responsibilities and extra recipe triggers. Before returning it
+checks clean generation 1, budgets, declared writes in every generation,
+`CheckRecoveryRecord` for every recovery run, and complete Normal and Recovery
+coverage through `AnalyzeSources`. Collection and validation errors return no
+partial evidence; harness failures may still terminate the owning `testing.TB`.
+The value contains observations only, with no fixture or engine handles.
+
+The bounded in-process acceptance test calls this collector once and reuses the
+records for all static Recovery and derived Normal interruptions. It uses the
+same source and target checks directly and owns only execution and diagnostics.
+Its cost is the clean catalog plus unique complete recovery triggers, static Recovery
 interruptions and derived Normal interruptions; it does not run every clean main
 point. The source key sets and
 actual interruption targets therefore have one owner across bounded acceptance
@@ -700,6 +711,15 @@ runtime adapters, extra instances, archive sweep period, package input, offline
 damage kind and named filesystem faults. Bindings select through capabilities
 before executing callbacks. Binary capabilities include stopped-disk damage but
 no filesystem fault injection.
+
+A binary acceptance test's external orchestration may independently call
+`RecordCatalog` once and supply its pure return value to `Catalog.AnalyzeLayer`
+to define execution-layer duties. Binary fixtures, backends, environments and
+domain bindings import neither the in-process binding nor the harness and hold
+none of their handles. In-process observations remain separately identified and
+never count as binary execution evidence. The binary layer derives interruption
+ordinals from its own actual complete second-generation records. Each test
+binary collects from its current source; no evidence file or cache is used.
 
 `Catalog.AnalyzeLayer` uses the complete clean and second-generation recordings
 for supported recipes. Reachable keys are their observed union; in-process-only

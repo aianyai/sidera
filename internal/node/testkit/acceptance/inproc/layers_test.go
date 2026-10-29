@@ -4,22 +4,17 @@ import (
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
-	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 )
 
-func reportLayerEvidence(t *testing.T, clean map[string]crashwalk.RunResult, recovered []crashwalk.RecoveryRecord) {
+func reportLayerEvidence(t *testing.T, recorded CatalogEvidence) {
 	t.Helper()
-	recordings := map[string][]crashwalk.Hit{}
-	for name, result := range clean {
-		recordings[name] = result.Hits[0]
-	}
 	catalog := recipes.New(newBindings())
 	for _, layer := range []struct {
 		name         string
 		capabilities recipes.Capabilities
 	}{{"inproc", inProcessCapabilities()}, {"binary", recipes.BinaryCapabilities()}} {
-		evidence, err := catalog.AnalyzeLayer(harness.ProgramTable(t), layer.capabilities, recordings, recovered)
+		evidence, err := catalog.AnalyzeLayer(harness.ProgramTable(t), layer.capabilities, recorded.Clean, recorded.Recovery)
 		if err != nil {
 			t.Fatal(err)
 		}

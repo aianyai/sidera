@@ -2,30 +2,27 @@ package inproc
 
 import (
 	"context"
-	"github.com/aianyai/sidera/internal/node/clock"
 	"strings"
 	"testing"
 
+	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 )
 
 func TestCatalogEvidence(t *testing.T) {
 	started := clock.System().Now()
-	records := recordCatalog(t)
-	if t.Failed() {
-		return
+	evidence, err := RecordCatalog(t)
+	if err != nil {
+		t.Fatal(err)
 	}
 	var all []crashwalk.Hit
 	for _, listed := range bindCatalog(t) {
-		recorded, ok := records[listed.Name()]
-		if !ok {
-			t.Fatalf("missing clean recording for %s", listed.Name())
-		}
-		all = append(all, recorded.Hits[0]...)
+		all = append(all, evidence.Clean[listed.Name()]...)
 	}
 	reportCoverage(t, "clean-gen1", all)
-	recoveryEvidence(t, records, all)
+	reportLayerEvidence(t, evidence)
+	recoveryEvidence(t, evidence, all)
 	t.Logf("runs elapsed=%s", clock.System().Now().Sub(started))
 }
 
