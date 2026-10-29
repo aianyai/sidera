@@ -953,7 +953,8 @@ Real protocol errors and incomplete runtime probes continue to fail the run.
 
 An environment clock change uses the fixture's retained logical target and real
 clock RPC. The first RPC failure is retained because `scenario.Env.Set` and
-`Advance` cannot return it; quiet and subsequent operations return that error.
+`Advance` cannot return it; quiet and subsequent operations return that error. Further clock changes are
+ignored in that failed generation rather than advancing recovery time.
 The backend alone resets this per-generation failure, after validating an actual
 exit and selecting a distinct daemon process. No successful RPC silently clears
 an earlier failure or serves as evidence of a crash target.

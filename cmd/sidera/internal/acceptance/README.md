@@ -90,7 +90,7 @@ The private `environment` implements the unchanged `scenario.Env` contract.
 `envFrom` gives domain bindings access to the same current fixture. Logical
 `Advance` and `Set` use `Fixture.SetTime`; because those methods return no error,
 the environment retains the first clock failure and returns it from subsequent
-operations. Only the backend may call `resetGeneration`, after judging the prior
+operations. Further clock changes in that failed generation do not advance time. Only the backend may call `resetGeneration`, after judging the prior
 process's trace and actual exit and starting a distinct daemon generation.
 Neither quiet nor a successful later RPC clears the error.
 

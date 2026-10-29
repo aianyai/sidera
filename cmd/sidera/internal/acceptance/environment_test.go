@@ -3,9 +3,11 @@ package acceptance
 import (
 	"context"
 	"encoding/json"
-	"github.com/aianyai/sidera/internal/node/manageapi"
 	"testing"
 	"time"
+
+	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 )
 
 func TestUnobservedPreparationLeavesGenerationOneForDaemon(t *testing.T) {
@@ -40,6 +42,9 @@ func TestEnvironmentRetainsClockFailureUntilNewGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := newEnvironment(ctx, f)
+	if _, err := e.Direct("sender"); err != nil {
+		t.Fatal(err)
+	}
 	if err := f.Kill(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -54,6 +59,9 @@ func TestEnvironmentRetainsClockFailureUntilNewGeneration(t *testing.T) {
 	}
 	if _, err := e.Adapter("fake"); err != failure {
 		t.Fatalf("operation did not retain clock failure: %v", err)
+	}
+	if _, err := e.Agent("sender").Send(ctx, fakeagent.SendInput{To: []string{e.Addr("sender")}, Body: "The retained clock error must be returned."}); err != failure {
+		t.Fatalf("first agent call did not return clock failure: %v", err)
 	}
 	if err := e.resetGeneration(ctx); err == nil {
 		t.Fatal("same generation cleared failure")

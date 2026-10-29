@@ -171,11 +171,9 @@ func (e *environment) Agent(name string) fakeagent.Agent {
 		panic(err)
 	}
 	e.fixture.agentWriters = append(e.fixture.agentWriters, w)
-	node, err := e.localNode()
-	if err != nil {
-		panic(err)
-	}
-	system := ident.Address{Node: node, Endpoint: ident.SystemEndpoint()}.String()
+	// Registration already resolved the node identity. Creating a recording
+	// wrapper must not turn a retained RPC failure into a panic before its call.
+	system := ident.Address{Node: e.node, Endpoint: ident.SystemEndpoint()}.String()
 	a := fakeagent.Recording(&directAgent{env: e, endpoint: ep, routes: map[adapterproto.MessageID]adapterproto.Address{}, leases: map[adapterproto.LeaseRef][]adapterproto.PartRef{}}, w, string(ep.ref), fakeagent.RecordingOptions{ModelSaw: true, Feedback: func(from, _ string) (string, bool) { return "notice", from == system }})
 	e.agents[name] = a
 	return a

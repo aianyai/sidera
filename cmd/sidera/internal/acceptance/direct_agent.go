@@ -61,6 +61,9 @@ func contentType(value, body string) string {
 	return value
 }
 func (a *directAgent) send(ctx context.Context, p adapterproto.SendParams) (fakeagent.SendResult, error) {
+	if err := a.env.check(); err != nil {
+		return fakeagent.SendResult{}, err
+	}
 	if p.IdempotencyKey != "" {
 		return fakeagent.SendResult{}, scenario.NotAvailable("direct protocol replay result")
 	}
@@ -94,6 +97,9 @@ func (a *directAgent) Control(ctx context.Context, in fakeagent.ControlInput) (f
 	return a.send(ctx, adapterproto.SendParams{Endpoint: a.endpoint.ref, To: []adapterproto.Address{adapterproto.Address(in.To)}, Body: in.Body, ContentType: contentType("", in.Body), Control: control, IdempotencyKey: in.IdemKey})
 }
 func (a *directAgent) Reply(ctx context.Context, in fakeagent.ReplyInput) (fakeagent.SendResult, error) {
+	if err := a.env.check(); err != nil {
+		return fakeagent.SendResult{}, err
+	}
 	from, ok := a.routes[in.MessageID]
 	if !ok {
 		return fakeagent.SendResult{}, &fakeagent.Error{Category: fakeagent.CategoryNotFound, Code: "message_unknown", Message: "this direct endpoint has not received that message"}
@@ -101,6 +107,9 @@ func (a *directAgent) Reply(ctx context.Context, in fakeagent.ReplyInput) (fakea
 	return a.send(ctx, adapterproto.SendParams{Endpoint: a.endpoint.ref, To: []adapterproto.Address{from}, ReplyTo: in.MessageID, Body: in.Body, ContentType: contentType(in.ContentType, in.Body), Thread: in.Thread, IdempotencyKey: in.IdemKey})
 }
 func (a *directAgent) Recv(ctx context.Context, in fakeagent.RecvInput) (fakeagent.RecvResult, error) {
+	if err := a.env.check(); err != nil {
+		return fakeagent.RecvResult{}, err
+	}
 	// Direct endpoints always use their direct budget, as the daemon also does
 	// for a direct caller of the engine. CLI names the shared script's reader;
 	// it does not select a runtime budget for a chat bridge.
@@ -137,15 +146,15 @@ func (a *directAgent) Recv(ctx context.Context, in fakeagent.RecvInput) (fakeage
 }
 
 func (a *directAgent) Ack(ctx context.Context, in fakeagent.AckInput) (fakeagent.AckResult, error) {
+	if err := a.env.check(); err != nil {
+		return fakeagent.AckResult{}, err
+	}
 	items := in.Items
 	if len(items) == 0 {
 		var ok bool
 		items, ok = a.leases[in.Lease]
 		if !ok {
 			return fakeagent.AckResult{}, &fakeagent.Error{Category: fakeagent.CategoryNotFound, Code: "lease_unknown", Message: "this direct endpoint has not received that lease"}
-		}
-		if len(items) == 0 {
-			return fakeagent.AckResult{Items: []adapterproto.PartAck{}}, nil
 		}
 	}
 	ctl, err := a.controller(ctx)
