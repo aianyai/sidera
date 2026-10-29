@@ -20,7 +20,12 @@ import (
 
 // Config identifies the built program and one endpoint's injected environment.
 // Dir lets two sessions run in the same project directory with distinct tokens.
-type Config struct{ Binary, Home, Dir, Token, ProbeToken string }
+type Config struct {
+	Binary, Home, Dir, Token, ProbeToken string
+	// Env supplies overrides for one call. It is called once before starting
+	// that call's process; nil preserves the inherited environment.
+	Env func() []string
+}
 
 // Agent starts one CLI process per call. It never retries or changes credentials.
 type Agent struct{ cfg Config }
@@ -32,13 +37,23 @@ func New(cfg Config) *Agent { return &Agent{cfg} }
 func (a *Agent) call(ctx context.Context, args []string, body *string, out any) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, a.cfg.Binary, append([]string{"--json", "--home", a.cfg.Home}, args...)...)
 	cmd.Dir = a.cfg.Dir
+	var overrides []string
+	if a.cfg.Env != nil {
+		overrides = a.cfg.Env()
+	}
+	replaced := map[string]bool{"SIDERA_HOME": true, "SIDERA_TOKEN": true, "SIDERA_PROBE_TOKEN": true}
+	for _, entry := range overrides {
+		name, _, _ := strings.Cut(entry, "=")
+		replaced[name] = true
+	}
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
-		if name != "SIDERA_HOME" && name != "SIDERA_TOKEN" && name != "SIDERA_PROBE_TOKEN" {
+		if !replaced[name] {
 			cmd.Env = append(cmd.Env, entry)
 		}
 	}
 	cmd.Env = append(cmd.Env, "SIDERA_HOME="+a.cfg.Home, "SIDERA_TOKEN="+a.cfg.Token, "SIDERA_PROBE_TOKEN="+a.cfg.ProbeToken)
+	cmd.Env = append(cmd.Env, overrides...)
 	if body != nil {
 		cmd.Stdin = strings.NewReader(*body)
 	}
@@ -54,7 +69,7 @@ func (a *Agent) call(ctx context.Context, args []string, body *string, out any) 
 		}
 		var failure apiwire.Body
 		if decode := strictjson.Decode(raw, &failure); decode != nil {
-			return nil, fmt.Errorf("cliagent: CLI exited %d without a wire error: %w", exit.ExitCode(), decode)
+			return nil, fmt.Errorf("cliagent: CLI exited %d without a wire error: %w", exit.ExitCode(), errors.Join(err, decode))
 		}
 		if exit.ExitCode() != failure.Error.Category.ExitCode() {
 			return nil, fmt.Errorf("cliagent: exit %d disagrees with category %s", exit.ExitCode(), failure.Error.Category)

@@ -32,6 +32,12 @@ The backends of the fake agent that run the command-line client and speak to the
 server, the binary-layer fixture and the binary backend of the crash walk build on
 these packages and are not part of them.
 
+The CLI Agent driver takes optional per-call `KEY=value` environment overrides.
+It replaces matching inherited values, so each call can have a seed or process
+crash target without changing the fixture's global environment. Calls use
+`Cmd.Run`, which waits for each started child. An abnormal exit without a wire
+error preserves `*exec.ExitError` for verification alongside the crash record.
+
 The acceptance catalog describes actual Init, certificate-renewing Start, a
 serving daemon whose clock advances to its periodic persistence task, and direct
 send/receive/acknowledgement. The periodic-clock recipe reads the final clock

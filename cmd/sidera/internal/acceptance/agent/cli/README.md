@@ -6,6 +6,13 @@ project directory; distinct sessions can use the same directory because their
 node-issued tokens identify them. Inherited Sidera home and credential variables
 are removed before the supplied values are installed.
 
+`Config.Env`, when supplied, returns `KEY=value` overrides once per call. The
+driver removes matching inherited names before adding them. A fixture can give
+each process its own deterministic seed and crash target without changing the
+test process's environment. An abnormal exit without a wire error retains the
+`*exec.ExitError` in its error chain, so the fixture can check the process exit
+alongside its crash marker. Every started call is reaped by `Cmd.Run`.
+
 Each call starts one process with `--json`, decodes the existing Agent response
 type with `strictjson`, and maps it to the layer-neutral type. A nonzero process
 exit must contain a wire error whose category agrees with that exit code.
