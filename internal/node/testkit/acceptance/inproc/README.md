@@ -21,6 +21,11 @@ rather than fixed counts, determines completeness.
 `TestSendJudgementRejectsAnAcceptedBodyThatWasNotRead` removes the real receive
 and acknowledgement drain and requires the domain judgement to reject the run.
 
+`bindingsWithRecovery` injects the fixture's actual fixed `harness.NodeID` once
+through `Bindings.LocalNode`; evidence resolves it on its first receive and
+retains only the value across restarts. Direct agents need no `Me` for notice
+validation.
+
 `newSessionOps` binds session callbacks to the current fixture process.
 `checkClosedSession` is the final read-only audit of a closed endpoint, its cleared
 token and absent session checkpoint. Session recipes run with the real adapter
@@ -121,7 +126,8 @@ existing fault wrapper; it does not hold transport reports or manufacture state.
 A negative test moves the real periodic sweep beyond the bounded drain and
 requires the domain audit to reject the retained body and records.
 
-Partial-progress regression checks interrupt registration, a session send before
+Partial-progress regression checks interrupt direct registration, real session
+creation and declaration narrowing, a session send before
 blocking, and a lifecycle send before its prompt interval. They use the existing
 backend's actual step boundaries and retain every successful send's body
 obligation. Recovery creation also judges the successful control's initial body
@@ -158,3 +164,8 @@ Binary fixtures, backends, environments and domain bindings must not import this
 binding or the harness, retain their handles, or count these observations as
 binary execution evidence. Each test binary collects fresh evidence from its
 current source; there is no evidence file format or cache.
+
+The feedback counterexamples retain the real message, recipient, header and
+non-system-source checks and also reject another node's system endpoint. Their
+receive wrapper refuses `Me`; repeated drains require exactly one binding identity
+resolution, so a direct endpoint never acquires a fabricated Agent identity.

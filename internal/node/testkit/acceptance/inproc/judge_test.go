@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
@@ -31,8 +32,12 @@ func (a alteredRecv) Recv(ctx context.Context, in fakeagent.RecvInput) (fakeagen
 	return r, err
 }
 
+func (a alteredRecv) Me(context.Context) (fakeagent.MeResult, error) {
+	return fakeagent.MeResult{}, fmt.Errorf("direct agent identity is unavailable")
+}
+
 func TestFeedbackJudgementRequiresTheRealMessageRecipientAndSystemSource(t *testing.T) {
-	for _, name := range []string{"unchanged", "wrong-message", "wrong-recipient", "non-system-source", "bad-header"} {
+	for _, name := range []string{"unchanged", "wrong-message", "wrong-recipient", "non-system-source", "foreign-system-source", "bad-header"} {
 		t.Run(name, func(t *testing.T) {
 			h := harness.New(t, harness.Options{})
 			h.MustDirect("sender")
@@ -52,7 +57,11 @@ func TestFeedbackJudgementRequiresTheRealMessageRecipientAndSystemSource(t *test
 					t.Fatal(err)
 				}
 			}
-			facts := &recipes.DeliveryEvidence{}
+			resolutions := 0
+			facts := recipes.NewDeliveryEvidence(func(e scenario.Env) (ident.NodeID, error) {
+				resolutions++
+				return localNode(e)
+			})
 			facts.Accepted(r, body)
 			a := alteredRecv{Agent: h.Agent("sender"), change: func(m *adapterproto.PageMessage) {
 				switch name {
@@ -62,11 +71,25 @@ func TestFeedbackJudgementRequiresTheRealMessageRecipientAndSystemSource(t *test
 					m.Body = strings.ReplaceAll(m.Body, h.Addr("receiver"), h.Addr("sender"))
 				case "non-system-source":
 					m.From = adapterproto.Address(h.Addr("receiver"))
+				case "foreign-system-source":
+					nodeBytes := harness.NodeID().Bytes()
+					nodeBytes[0] ^= 0x80
+					node, err := ident.NodeIDFromBytes(nodeBytes)
+					if err != nil {
+						t.Fatal(err)
+					}
+					m.From = adapterproto.Address(ident.Address{Node: node, Endpoint: ident.SystemEndpoint()}.String())
 				case "bad-header":
 					m.Body = "A notice without a channel header."
 				}
 			}}
 			err = facts.RecvAndAck(h, a)
+			if err == nil {
+				err = facts.RecvAndAck(h, a)
+			}
+			if resolutions != 1 {
+				t.Fatalf("local identity resolved %d times", resolutions)
+			}
 			if err == nil {
 				err = facts.Check(h)
 			}
@@ -91,7 +114,7 @@ func TestCreationJudgementRequiresTheRequestedInitialBody(t *testing.T) {
 		{"different-body", "The requested initial body was different.", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			facts := &recipes.DeliveryEvidence{}
+			facts := recipes.NewDeliveryEvidence(localNode)
 			var message adapterproto.MessageID
 			s := &harness.WalkScenario{
 				Options: harness.Options{Adapter: &harness.AdapterOptions{Runtime: true}},

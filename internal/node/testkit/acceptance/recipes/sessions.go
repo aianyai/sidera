@@ -65,6 +65,28 @@ func (s *createdSession) resolve(b Bindings, body string, facts *DeliveryEvidenc
 	}}
 }
 
+// drain resolves a returned creation and receives from its actual session. It
+// also finishes creation when a crash interrupted the script before resolution.
+func (s *createdSession) drain(b Bindings, body string, facts *DeliveryEvidence) func(scenario.Env) error {
+	return func(e scenario.Env) error {
+		if s.control == "" {
+			return nil
+		}
+		if s.endpoint == "" {
+			if err := drainFeedback(e, facts, "sender"); err != nil {
+				return err
+			}
+			if err := s.resolve(b, body, facts).Do(e); err != nil {
+				return err
+			}
+		}
+		if err := facts.RecvAndAck(e, b.Sessions.Session(e, s.endpoint)); err != nil {
+			return err
+		}
+		return drainFeedback(e, facts, "sender")
+	}
+}
+
 func runtimePlan(plan fakeruntime.TurnPlan) scenario.Step {
 	return scenario.Step{Name: "first-turn-plan", Do: func(e scenario.Env) error {
 		runtime, err := e.Runtime()
@@ -78,7 +100,7 @@ func runtimePlan(plan fakeruntime.TurnPlan) scenario.Step {
 func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 	const initial = "Start by reading this initial body."
 	session := &createdSession{}
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	var interrupt, closeID adapterproto.MessageID
 	var closeAttempted bool
 	steps := []scenario.Step{
@@ -163,7 +185,7 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 }
 
 func failedCreationRecipe(b Bindings, name, preset string, failure *fakeadapter.Outcome, pointBudget int) ScriptRecipe {
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	var message adapterproto.MessageID
 	var steps []scenario.Step
 	if failure != nil {
@@ -214,7 +236,7 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 	var result fakeagent.SendResult
 	var deadlineAdvanced, creationPulled, createdBeforeDeadline bool
 	session := &createdSession{}
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	const body = "An expired control must not claim a successful creation."
 	deadline := scenario.Step{Name: "control-deadline", Do: func(e scenario.Env) error {
 		if !deadlineAdvanced {
@@ -324,7 +346,7 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 func blockedRecipe(b Bindings) ScriptRecipe {
 	var blocking, blocked bool
 	session := &createdSession{}
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	var message adapterproto.MessageID
 	return ScriptRecipe{Script: scenario.Script{Name: "session-blocked-recovered", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 249}, Steps: []scenario.Step{
 		runtimePlan(fakeruntime.TurnPlan{EndAfter: true}), session.create(b, ""), scenario.Advance("creation-pull", time.Minute), session.resolve(b, "", facts),

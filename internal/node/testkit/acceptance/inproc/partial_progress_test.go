@@ -12,7 +12,11 @@ import (
 
 func TestRecipeDrainPreservesCompletedPrefixObligations(t *testing.T) {
 	for _, tc := range []struct{ name, after string }{
-		{"delivery-register-declare", "register"},
+		{"delivery-register-direct", "register"},
+		{"delivery-register-declare", "create"},
+		{"delivery-register-declare", "created-reply"},
+		{"delivery-second-check", "send"},
+		{"delivery-second-check", "narrow"},
 		{"session-blocked-recovered", "send"},
 		{"session-lifecycle", "send-for-prompt"},
 		{"session-create-expiry", "create"},

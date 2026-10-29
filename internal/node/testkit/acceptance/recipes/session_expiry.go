@@ -19,7 +19,7 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 	var result fakeagent.SendResult
 	var endpoint, native string
 	var deadlineAdvanced, deadlineCompleted, creationPulled, createdBeforeDeadline, closeRequested bool
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	advanceDeadline := func(e scenario.Env) error {
 		if !deadlineAdvanced {
 			deadlineAdvanced = true

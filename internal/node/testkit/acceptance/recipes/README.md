@@ -29,6 +29,22 @@ summaries, and exact original message and target references. Repeated reads of o
 notice identifier are one logical notification; another identifier for the same
 message, target and kind is a duplicate. Acknowledgements name only the parts just
 returned by that receive, and their real outcomes must accept those parts.
+`Bindings.LocalNode` supplies the actual node identity. `newDeliveryEvidence`
+constructs every recipe's evidence object; `NewDeliveryEvidence` also permits
+independent counterexamples. The first receive resolves and caches the identity.
+Neither direct-agent `Me` nor the notice being checked supplies that identity.
+
+`delivery-register-direct` registers through `Env.Direct` and repeats the same key
+to require the same address. `delivery-register-declare` creates a real session
+through its direct sender, resolves the public creation reply against external
+native creation evidence, and checks `Declare(hidden)` through that session's
+`Me`. `delivery-second-check` keeps a direct sender and creates its receiver the
+same way. Its message is queued before the session narrows its accepted senders;
+a completed narrowing requires the exact rejection notice. A cut before narrowing
+still owes the accepted body. Both session drains finish a returned creation
+before receiving, without declaring an operation the interrupted script never
+reached. Their fresh main-point counts are 7, 40 and 88 respectively, with fixed
+budgets of 11, 60 and 132.
 
 Session recipes bind `SessionOps` for runtime addresses by explicit instance,
 session agents, checkpoint writes and final closed-session checks. They exercise
@@ -207,8 +223,8 @@ checks precede the additional disk-convergence audit. The shared creation-result
 reader also serves the ordinary session resolver; resolved body evidence remains
 valid after retention removes the source record.
 
-An interrupted script owes only operations it actually reached. Registration
-checks a declaration only after its successful call. The blocked-session drain
+An interrupted script owes only operations it actually reached. The session
+declaration is checked only after its successful call. The blocked-session drain
 finishes a blocking period only when that phase began, then restores delivery;
 both blocked notices remain mandatory for a completed blocking phase. A send
 before that phase still owes its accepted body. The lifecycle drain receives and

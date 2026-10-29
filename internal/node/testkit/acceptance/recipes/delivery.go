@@ -8,17 +8,18 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeruntime"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 func deliveryRecipes(b Bindings) []ScriptRecipe {
-	return []ScriptRecipe{sendRecipe(), replyRecipe(), registrationRecipe(), secondCheckRecipe(), expiryRecipe(), redeliveryRecipe(), replyAfterFailureRecipe(b), unreachableRecipe()}
+	return []ScriptRecipe{sendRecipe(b), replyRecipe(b), directRegistrationRecipe(), registrationRecipe(b), secondCheckRecipe(b), expiryRecipe(b), redeliveryRecipe(b), replyAfterFailureRecipe(b), unreachableRecipe(b)}
 }
 
-func sendRecipe() ScriptRecipe {
+func sendRecipe(b Bindings) ScriptRecipe {
 	const body = "A real body must survive acceptance."
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	return ScriptRecipe{
 		Script: scenario.Script{Name: "delivery-send", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 42}, Steps: []scenario.Step{
 			{Name: "send", Do: sendBody(facts, "sender", "receiver", body)},
@@ -38,37 +39,59 @@ func sendBody(facts *DeliveryEvidence, from, to, body string) func(scenario.Env)
 	}
 }
 
-func registrationRecipe() ScriptRecipe {
-	var registered, declared bool
-	return ScriptRecipe{Script: scenario.Script{Name: "delivery-register-declare", Crash: scenario.CrashPlan{MaxPoints: 17}, Steps: []scenario.Step{
+func directRegistrationRecipe() ScriptRecipe {
+	var address string
+	return ScriptRecipe{Script: scenario.Script{Name: "delivery-register-direct", Crash: scenario.CrashPlan{MaxPoints: 11}, Steps: []scenario.Step{
 		{Name: "register", Do: func(e scenario.Env) error {
-			_, err := e.Direct("declared")
-			registered = err == nil
+			var err error
+			address, err = e.Direct("registered")
 			return err
 		}},
+		{Name: "register-same-key", Do: func(e scenario.Env) error {
+			again, err := e.Direct("registered")
+			if err != nil {
+				return err
+			}
+			if again != address {
+				return fmt.Errorf("repeated direct registration changed address from %s to %s", address, again)
+			}
+			return nil
+		}},
+	}}}
+}
+
+func registrationRecipe(b Bindings) ScriptRecipe {
+	facts := newDeliveryEvidence(b)
+	session := &createdSession{}
+	var declared bool
+	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true}, Script: scenario.Script{Name: "delivery-register-declare", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 60}, Steps: []scenario.Step{
+		session.create(b, ""), scenario.Advance("creation-pull", time.Minute), session.resolve(b, "", facts),
 		{Name: "declare", Do: func(e scenario.Env) error {
 			hidden := true
-			err := e.Agent("declared").Declare(e.Ctx(), fakeagent.DeclareInput{HiddenFromDirectory: &hidden})
+			err := b.Sessions.Session(e, session.endpoint).Declare(e.Ctx(), fakeagent.DeclareInput{HiddenFromDirectory: &hidden})
 			declared = err == nil
 			return err
 		}},
-	}}, Check: func(e scenario.Env) error {
-		if !registered {
+	}}, Drain: session.drain(b, "", facts), Check: func(e scenario.Env) error {
+		if err := facts.Check(e); err != nil {
+			return err
+		}
+		if !declared {
 			return nil
 		}
-		me, err := e.Agent("declared").Me(e.Ctx())
+		me, err := b.Sessions.Session(e, session.endpoint).Me(e.Ctx())
 		if err != nil {
 			return err
 		}
-		if declared && !me.Declaration.HiddenFromDirectory {
-			return fmt.Errorf("declaration was not applied")
+		if me.Address != session.address || !me.Declaration.HiddenFromDirectory {
+			return fmt.Errorf("session declaration was not applied: %+v", me)
 		}
 		return nil
 	}}
 }
 
-func replyRecipe() ScriptRecipe {
-	facts := &DeliveryEvidence{}
+func replyRecipe(b Bindings) ScriptRecipe {
+	facts := newDeliveryEvidence(b)
 	var original adapterproto.MessageID
 	return ScriptRecipe{Script: scenario.Script{Name: "delivery-reply", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 95}, Steps: []scenario.Step{
 		{Name: "send", Do: func(e scenario.Env) error {
@@ -104,26 +127,36 @@ func replyRecipe() ScriptRecipe {
 	}, Check: facts.Check}
 }
 
-func secondCheckRecipe() ScriptRecipe {
-	facts := &DeliveryEvidence{}
-	return ScriptRecipe{Script: scenario.Script{Name: "delivery-second-check", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 78}, Steps: []scenario.Step{
-		{Name: "send", Do: sendBody(facts, "sender", "receiver", "Queued before the declaration narrows.")},
+func secondCheckRecipe(b Bindings) ScriptRecipe {
+	facts := newDeliveryEvidence(b)
+	session := &createdSession{}
+	var message adapterproto.MessageID
+	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true}, Script: scenario.Script{Name: "delivery-second-check", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 132}, Steps: []scenario.Step{
+		runtimePlan(fakeruntime.TurnPlan{}), session.create(b, ""), scenario.Advance("creation-pull", time.Minute), session.resolve(b, "", facts),
+		{Name: "send", Do: func(e scenario.Env) error {
+			const body = "Queued before the declaration narrows."
+			r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{session.address}, Body: body})
+			if err == nil {
+				message = r.MessageID
+				facts.Accepted(r, body)
+			}
+			return err
+		}},
 		{Name: "narrow", Do: func(e scenario.Env) error {
 			restrict := true
-			allowed := []string{e.Addr("receiver")}
-			return e.Agent("receiver").Declare(e.Ctx(), fakeagent.DeclareInput{RestrictSenders: &restrict, AcceptFrom: &allowed})
-		}},
-		{Name: "second-check", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, e.Agent("receiver")) }},
-	}}, Drain: func(e scenario.Env) error {
-		if err := facts.RecvAndAck(e, e.Agent("receiver")); err != nil {
+			allowed := []string{session.address}
+			err := b.Sessions.Session(e, session.endpoint).Declare(e.Ctx(), fakeagent.DeclareInput{RestrictSenders: &restrict, AcceptFrom: &allowed})
+			if err == nil {
+				facts.RequireFeedback(message, session.address, delivery.KindRejected)
+			}
 			return err
-		}
-		return drainFeedback(e, facts, "sender")
-	}, Check: facts.Check}
+		}},
+		{Name: "second-check", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)) }},
+	}}, Drain: session.drain(b, "", facts), Check: facts.Check}
 }
 
-func expiryRecipe() ScriptRecipe {
-	facts := &DeliveryEvidence{}
+func expiryRecipe(b Bindings) ScriptRecipe {
+	facts := newDeliveryEvidence(b)
 	return ScriptRecipe{Script: scenario.Script{Name: "delivery-expiry", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 72}, Steps: []scenario.Step{
 		{Name: "send", Do: sendBody(facts, "sender", "receiver", "The queue deadline must not silently discard this body.")},
 		scenario.Advance("queue-deadline", delivery.DefaultEndpointMaxQueue+time.Minute),
@@ -135,8 +168,8 @@ func expiryRecipe() ScriptRecipe {
 	}, Check: facts.Check}
 }
 
-func redeliveryRecipe() ScriptRecipe {
-	facts := &DeliveryEvidence{}
+func redeliveryRecipe(b Bindings) ScriptRecipe {
+	facts := newDeliveryEvidence(b)
 	steps := []scenario.Step{{Name: "send", Do: sendBody(facts, "sender", "receiver", "A lease expires without acknowledgement.")}}
 	for i := 0; i < delivery.MaxLeases; i++ {
 		steps = append(steps, scenario.Step{Name: fmt.Sprintf("handout-%d", i+1), Do: func(e scenario.Env) error {
@@ -173,7 +206,7 @@ type DeliveryOps struct {
 var ErrSourceAlreadyConfirmed = errors.New("acceptance: source receipt already committed")
 
 func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	var original adapterproto.MessageID
 	return ScriptRecipe{Needs: Needs{FSFaults: []FSFault{FaultSourceUpdate}}, Script: scenario.Script{Name: "delivery-reply-after-write-failure", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 90}, Steps: []scenario.Step{
 		{Name: "fail-receipt-write", Do: b.Delivery.FailSourceUpdate},
@@ -219,8 +252,8 @@ func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
 	}}
 }
 
-func unreachableRecipe() ScriptRecipe {
-	facts := &DeliveryEvidence{}
+func unreachableRecipe(b Bindings) ScriptRecipe {
+	facts := newDeliveryEvidence(b)
 	var sent, advanced bool
 	deadline := scenario.Step{Name: "report-deadline", Do: func(e scenario.Env) error {
 		if !advanced {

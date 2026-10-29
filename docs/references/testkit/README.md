@@ -740,7 +740,13 @@ An absent reply requires both a terminal control result and actual feedback for
 the runtime target. Final disk convergence remains an additional audit.
 
 Interrupted acceptance scripts distinguish completed calls from future steps.
-A successful registration does not imply a declaration was requested. A session
+Direct registration is a separate recipe: repeating its actual registration key
+must return the same address. Declaration recipes use real `session.create`
+controls from direct senders, then associate the public reply with external
+native creation through the shared session resolver. These two delivery recipes
+request session setup explicitly: hiding is checked by the created session's real `Me`, and
+second-receive narrowing must reject the previously queued body with its exact
+feedback. A successful creation does not imply a declaration was requested. A session
 send owes its body immediately, while blocked/recovered feedback is required
 only for a blocking phase that began; an interrupted blocking phase is finished
 before delivery is restored. Lifecycle drains receive and acknowledge pending
@@ -787,3 +793,12 @@ Ordinary interrupted staging reaches adapter garbage collection; current-version
 unstaging reaches transaction trash cleanup without a filesystem fault. Keeping
 those recovery responsibilities on the normal recipe prevents an unrelated fault
 later in a combined script from hiding binary-reachable writes.
+
+Acceptance delivery evidence receives the binding's actual node identifier
+through `recipes.Bindings.LocalNode`. The common constructor resolves and caches
+that value on the first receive, without retaining process handles. Notice checks
+use this independent identity, never direct-agent `Me` or the message's claimed
+sender. Another node's system endpoint therefore cannot discharge a local delivery
+obligation; existing header, message, recipient and duplicate checks remain the
+same. The direct-registration, session-declaration and second-receive recordings
+contain 7, 40 and 88 main points, with fixed budgets 11, 60 and 132.

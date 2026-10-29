@@ -28,12 +28,25 @@ type creationObligation struct {
 }
 
 // DeliveryEvidence relates successful calls to externally visible bodies and
-// actual system notices. The zero value belongs to one backend run only.
+// actual system notices. Construct one with NewDeliveryEvidence for each backend run.
 type DeliveryEvidence struct {
-	accepted  []deliveryObligation
-	notices   map[feedbackRef]adapterproto.MessageID
-	required  []feedbackRef
-	creations []creationObligation
+	resolveLocalNode  func(scenario.Env) (ident.NodeID, error)
+	localNode         ident.NodeID
+	localNodeResolved bool
+	accepted          []deliveryObligation
+	notices           map[feedbackRef]adapterproto.MessageID
+	required          []feedbackRef
+	creations         []creationObligation
+}
+
+// NewDeliveryEvidence supplies the binding's actual identity, resolved and cached
+// on the first receive. The resolver must not infer identity from notice contents.
+func NewDeliveryEvidence(localNode func(scenario.Env) (ident.NodeID, error)) *DeliveryEvidence {
+	return &DeliveryEvidence{resolveLocalNode: localNode}
+}
+
+func newDeliveryEvidence(b Bindings) *DeliveryEvidence {
+	return NewDeliveryEvidence(b.LocalNode)
 }
 
 // Accepted records only a call that returned success, never a guessed identifier
@@ -116,13 +129,16 @@ func (d *DeliveryEvidence) RequireFeedback(message adapterproto.MessageID, recip
 // RecvAndAck drains at most 64 pages. Every acknowledged part comes from the
 // page just returned by the real agent, including partial oversized messages.
 func (d *DeliveryEvidence) RecvAndAck(e scenario.Env, a fakeagent.Agent) error {
-	me, err := a.Me(e.Ctx())
-	if err != nil {
-		return err
-	}
-	local, err := ident.ParseAddress(me.Address)
-	if err != nil {
-		return err
+	if !d.localNodeResolved {
+		if d.resolveLocalNode == nil {
+			return fmt.Errorf("delivery evidence requires a local node resolver")
+		}
+		local, err := d.resolveLocalNode(e)
+		if err != nil {
+			return err
+		}
+		d.localNode, d.localNodeResolved = local, true
+		d.resolveLocalNode = nil
 	}
 	for n := 0; n < 64; n++ {
 		r, err := a.Recv(e.Ctx(), fakeagent.RecvInput{Frontend: adapterproto.FrontendCLI})
@@ -134,7 +150,7 @@ func (d *DeliveryEvidence) RecvAndAck(e scenario.Env, a fakeagent.Agent) error {
 		}
 		items := make([]adapterproto.PartRef, 0, len(r.Page.Messages))
 		for _, m := range r.Page.Messages {
-			if err := d.observeNotice(m, local.Node); err != nil {
+			if err := d.observeNotice(m, d.localNode); err != nil {
 				return err
 			}
 			part := 1

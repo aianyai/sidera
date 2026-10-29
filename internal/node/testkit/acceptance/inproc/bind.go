@@ -4,6 +4,9 @@ package inproc
 import (
 	"testing"
 
+	"github.com/aianyai/sidera/internal/ident"
+	"github.com/aianyai/sidera/internal/node/testkit/scenario"
+
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -53,8 +56,10 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 func newBindings() recipes.Bindings { return bindingsWithRecovery(&damageState{}) }
 
 func bindingsWithRecovery(state *damageState) recipes.Bindings {
-	return recipes.Bindings{Delivery: newDeliveryOps(), Sessions: newSessionOps(), Installation: newInstallOps(), Management: newManagementOps(), Maintenance: newMaintenanceOps(), Recovery: recoveryBindings(state)}
+	return recipes.Bindings{LocalNode: localNode, Delivery: newDeliveryOps(), Sessions: newSessionOps(), Installation: newInstallOps(), Management: newManagementOps(), Maintenance: newMaintenanceOps(), Recovery: recoveryBindings(state)}
 }
+
+func localNode(scenario.Env) (ident.NodeID, error) { return harness.NodeID(), nil }
 
 func freshScenario(t testing.TB, name string) crashwalk.Scenario {
 	t.Helper()

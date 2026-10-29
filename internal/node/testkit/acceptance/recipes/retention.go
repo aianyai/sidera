@@ -23,7 +23,7 @@ func maintenanceRecipes(b Bindings) []ScriptRecipe { return []ScriptRecipe{reten
 
 func retentionRecipe(b Bindings) ScriptRecipe {
 	session := &createdSession{}
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	var closing adapterproto.MessageID
 	summarized := false
 	// A clock move takes effect before its resulting writes can be interrupted.

@@ -23,7 +23,7 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 		name = "recovery-body-archive"
 		budget = 74
 	}
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	var message adapterproto.MessageID
 	var target string
 	classified, accepted, lost, closed, advanced := false, false, false, false, false

@@ -310,7 +310,7 @@ func managementTerminal(b Bindings, retire bool) ScriptRecipe {
 func managementClose(b Bindings) ScriptRecipe {
 	ops := b.Management
 	r := &managementRun{}
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	var target string
 	close := func(e scenario.Env, q ManagementRequest) (ManagementOutcome, error) {
 		return ops.CloseEndpoint(e, q, target)
@@ -358,7 +358,7 @@ func managementInstance(b Bindings) ScriptRecipe {
 	const instance = "management-target"
 	ops := b.Management
 	r := &managementRun{}
-	facts := &DeliveryEvidence{}
+	facts := newDeliveryEvidence(b)
 	var target string
 	checkDisabled := func(e scenario.Env, o ManagementOutcome) error {
 		f, err := ops.InspectInstance(e, instance)

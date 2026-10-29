@@ -92,14 +92,14 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 		{"recovery-source-unreadable", DamageSource, recoveryCases(crashwalk.CorruptOffline("source", "unreadable"), "quarantine/out-lost.create", "quarantine/out-lost.write", "quarantine/out-lost.rename")},
 		{"recovery-target", DamageTarget, recoveryCases(crashwalk.CorruptOffline("target", "unreadable"), "quarantine/record.remove")},
 	} {
-		var evidence DeliveryEvidence
+		evidence := newDeliveryEvidence(b)
 		out = append(out, ScriptRecipe{Needs: Needs{Damage: variant.damage}, Script: scenario.Script{Name: variant.name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 54, Recovery: variant.cases}, Steps: []scenario.Step{{Name: "send", Do: func(e scenario.Env) error {
 			result, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("receiver")}, Body: "Recovery must retain a real delivery obligation."})
 			if err == nil {
 				evidence.Accepted(result, "Recovery must retain a real delivery obligation.")
 			}
 			return err
-		}}}}, Drain: recoveryDrain(b, false, &evidence), Check: func(e scenario.Env) error {
+		}}}}, Drain: recoveryDrain(b, false, evidence), Check: func(e scenario.Env) error {
 			if err := evidence.Check(e); err != nil {
 				return err
 			}
@@ -119,7 +119,7 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 			budget = 111
 			cases = recoveryCases(crashwalk.CorruptOffline("creating-control", "unreadable"), "quarantine/session.create", "quarantine/session.write", "quarantine/session.rename")
 		}
-		facts := &DeliveryEvidence{}
+		facts := newDeliveryEvidence(b)
 		needs := Needs{RuntimeAdapter: true}
 		if held {
 			needs.Damage = DamageCreatingControl
