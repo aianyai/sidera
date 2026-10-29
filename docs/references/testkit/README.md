@@ -763,6 +763,13 @@ and clear the feedback before the next drain. Reinstalling its old rules would
 then require feedback clearing that no longer exists. The next process performs
 ordinary recovery, while the uninterrupted prepared process still has to hit its
 strict fault rules and leave body removal to the real archive sweep.
+The archive drain also remembers completed receipt, acknowledgement and validation
+of its required feedback before requesting close. An unanswered close is retried
+with the same request identifier without another receive on the closed sender.
+A real code-free `closed` or `already_closed` response is required before closing
+is complete. The latter can be a fresh result when the effect survived a crash
+before its original result was stored; replay is not required. Final feedback,
+corruption, summary, live-record, body and closed-record checks still apply.
 
 Recovery-creation acceptance retains actual successful control results and reads
 their public status. A validated creation reply supplies the initial message's

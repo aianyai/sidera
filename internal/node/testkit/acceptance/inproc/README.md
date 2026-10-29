@@ -138,6 +138,11 @@ uninterrupted prepared process must still exercise both fault rules and the real
 archive body removal; strict unused-rule cleanup remains in force.
 A negative test moves the real periodic sweep beyond the bounded drain and
 requires the domain audit to reject the retained body and records.
+Body-cut regressions interrupt every main write and the complete recovery clock
+recordings, retaining actual cutoffs, trace prefixes and final domain checks.
+Close-response counterexamples reject invalid values and error codes after real
+closure; an unanswered close must propagate its error and resend the identical
+request before the final retention and closed-record audits can pass.
 
 Partial-progress regression checks interrupt direct registration, real session
 creation and declaration narrowing, a session send before

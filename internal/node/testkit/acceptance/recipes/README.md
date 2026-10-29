@@ -228,7 +228,12 @@ One variant lets feedback clearing remove the retained body. The other uses
 source creates before replacement, preserving the real lost record for the
 periodic archive sweep. It reads and acknowledges the loss notice before closing
 its sender through management, then requires intact summaries and no live records
-or bodies after retention. Successful fault preparation is remembered across
+or bodies after retention. Successful receive/acknowledgement and its feedback
+judgement complete a separate reporting phase before closing. An interrupted
+close repeats the same request without reading the now-closed endpoint again.
+Only a real response with no error code and `closed` or `already_closed` completes
+closing: the durable effect can precede its stored result, so the retry need not
+be a replay. Successful fault preparation is remembered across
 drains: these faults belong to the process in which they were installed. After a
 crash, startup may already replay and clear the feedback before the drain resumes,
 so installing the old rules again would require an action that no longer exists.
@@ -237,7 +242,7 @@ completed clock advances so a second crash cannot advance past the unread notice
 lifetime. These are complete
 recovery recordings; their Normal observations remain separate from clean ones
 and supply actual additional interruption targets. The clean recordings have
-32 and 49 main points, with fixed budgets of 48 and 74.
+44 and 65 main points, with fixed budgets of 66 and 98.
 A send interrupted before returning creates no guessed message or summary
 obligation. Its bounded drain still receives actual feedback, closes the sender
 and requires all live records and bodies to be gone. Summary presence is required

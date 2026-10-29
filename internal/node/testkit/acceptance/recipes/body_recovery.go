@@ -28,6 +28,7 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 	var target string
 	classified, accepted, lost, closed, advanced := false, false, false, false, false
 	retentionPrepared := false
+	feedbackCompleted := false
 	const body = "A damaged source must be reported before its retained bytes disappear."
 	needs := Needs{Damage: DamageSourceBody, ArchiveSweepEvery: time.Hour}
 	if archive {
@@ -86,7 +87,7 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 				}
 				retentionPrepared = true
 			}
-			if !closed {
+			if !feedbackCompleted {
 				if !advanced {
 					e.Advance(4 * time.Hour)
 					advanced = true
@@ -101,15 +102,20 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 					if err := facts.Check(e); err != nil {
 						return err
 					}
-					r, err := b.Management.CloseEndpoint(e, ManagementRequest{ID: admin.OperationID{91}}, e.Addr("sender"))
-					if err != nil {
-						return err
-					}
-					if r.Code != "" || r.Value != "closed" {
-						return fmt.Errorf("reported source sender did not close: %+v", r)
-					}
-					closed = true
+					feedbackCompleted = true
 				}
+			}
+			if archive && !closed {
+				// The close may commit before its response is recorded. Retry the
+				// same request without receiving again from the closed endpoint.
+				r, err := b.Management.CloseEndpoint(e, ManagementRequest{ID: admin.OperationID{91}}, e.Addr("sender"))
+				if err != nil {
+					return err
+				}
+				if r.Code != "" || r.Value != "closed" && r.Value != "already_closed" {
+					return fmt.Errorf("reported source sender did not close: %+v", r)
+				}
+				closed = true
 			}
 			if archive {
 				e.Advance(3*24*time.Hour + time.Hour)
