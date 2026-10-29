@@ -46,6 +46,10 @@ the runs through `Options.Observe`.
 - **The setup is not in the window.** What a scenario writes before its first step
   is covered by the startup scenario; repeating it in every scenario would only
   repeat it.
+- **Step boundaries require a live process.** `Scenario.Steps` declares only
+  post-action points at which the backend can actually interrupt the process.
+  Init and terminal operations have no after-return boundary; startup Start
+  keeps `complete` while serving. Natural exit never counts as Reached.
 - **Full** takes every point of the window except the sync steps, a kill after
   every script step, every recovery case, and each dynamically derived
   recovery-only Normal target. A killed process leaves its page

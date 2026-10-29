@@ -1,8 +1,8 @@
 # In-process acceptance
 
 Read the parent [README](../README.md) first. `bindCatalog` converts a fresh recipe
-catalog into existing `harness.WalkScenario` and `harness.StartupWalkScenario`
-values. `freshScenario` selects a name from another fresh catalog before each run.
+catalog into `harness.WalkScenario`, `harness.StartupWalkScenario` and
+`harness.TerminalWalkScenario` values. `freshScenario` selects a name from another fresh catalog before each run.
 Constructing a catalog allocates no fixture.
 
 `RecordCatalog(t testing.TB) (CatalogEvidence, error)` records the complete
@@ -171,3 +171,13 @@ The feedback counterexamples retain the real message, recipient, header and
 non-system-source checks and also reject another node's system endpoint. Their
 receive wrapper refuses `Me`; repeated drains require exactly one binding identity
 resolution, so a direct endpoint never acquires a fabricated Agent identity.
+
+`bindTerminal` maps the harness's actual lifecycle facts to the shared terminal
+recipe judgement. Ordinary management callbacks no longer contain stop or
+retirement. Terminal requests use real daemon startup and the management HTTP
+interface, not an engine-only operation that pretends service continues. The
+collector records these explicit catalog entries under the same name, budget,
+full-table and source checks as other entries. Full terminal regressions cut
+every writing point and compare the actual first-generation cutoff and path
+prefix, retain the real recovery generation, and reject invented responses at
+irreversible retirement cuts with no durable operation result.

@@ -108,14 +108,6 @@ func newManagementOps() recipes.ManagementOps {
 				return json.Marshal(recipes.ManagementOutcome{Value: strconv.FormatBool(v.Cleared), At: v.HighWater})
 			}))
 		},
-		RetireIdentity: func(e scenario.Env, q recipes.ManagementRequest) (recipes.ManagementOutcome, error) {
-			node := e.(*harness.H).Engine()
-			return runManagement(e, node, q, "identity.retire", harness.NodeID().String(), engine.RetireIdentityOp(harness.NodeID(), func() ([]byte, error) { return json.Marshal(recipes.ManagementOutcome{Value: "retired"}) }))
-		},
-		StopDaemon: func(e scenario.Env, q recipes.ManagementRequest) (recipes.ManagementOutcome, error) {
-			node := e.(*harness.H).Engine()
-			return runManagement(e, node, q, "daemon.stop", "", engine.StopDaemonOp(func() ([]byte, error) { return json.Marshal(recipes.ManagementOutcome{Value: "stopping"}) }))
-		},
 		InspectNode: inspectManagedNode,
 		InspectPreset: func(e scenario.Env, name string) (bool, error) {
 			p, err := readManagementFile(e, config.PresetsPath, config.DecodePresets)

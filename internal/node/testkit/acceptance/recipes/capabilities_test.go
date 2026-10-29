@@ -59,3 +59,10 @@ func TestLayerEvidenceUsesAnyReachableSourceAndKeepsTargetProvenance(t *testing.
 		t.Fatalf("target lost reachable provenance: %+v", evidence.Analysis.Targets)
 	}
 }
+
+func TestTerminalDescriptionsParticipateInSelection(t *testing.T) {
+	catalog := recipes.Catalog{Terminals: []recipes.TerminalRecipe{{Name: "terminal", Needs: recipes.Needs{RuntimeAdapter: true}}}}
+	if len(catalog.Select(recipes.Capabilities{}).Terminals) != 0 || len(catalog.Select(recipes.BinaryCapabilities()).Terminals) != 1 {
+		t.Fatal("terminal capability selection was skipped")
+	}
+}

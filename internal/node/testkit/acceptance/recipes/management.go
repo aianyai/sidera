@@ -58,8 +58,6 @@ type ManagementOps struct {
 	AcknowledgeAlert func(scenario.Env, ManagementRequest, string) (ManagementOutcome, error)
 	ConfirmBackup    func(scenario.Env, ManagementRequest) (ManagementOutcome, error)
 	ClearClock       func(scenario.Env, ManagementRequest) (ManagementOutcome, error)
-	RetireIdentity   func(scenario.Env, ManagementRequest) (ManagementOutcome, error)
-	StopDaemon       func(scenario.Env, ManagementRequest) (ManagementOutcome, error)
 	InspectNode      func(scenario.Env) (NodeFacts, error)
 	InspectPreset    func(scenario.Env, string) (bool, error)
 	InspectEndpoint  func(scenario.Env, string) (EndpointFacts, error)
@@ -134,7 +132,7 @@ func (r *managementRun) check(e scenario.Env) error {
 }
 
 func managementRecipes(b Bindings) []ScriptRecipe {
-	return []ScriptRecipe{managementSettings(b), managementMaintenance(b), managementTerminal(b, false), managementTerminal(b, true), managementClose(b), managementInstance(b)}
+	return []ScriptRecipe{managementSettings(b), managementMaintenance(b), managementClose(b), managementInstance(b)}
 }
 
 func managementSettings(b Bindings) ScriptRecipe {
@@ -274,37 +272,6 @@ func managementMaintenance(b Bindings) ScriptRecipe {
 			}),
 	}
 	return ScriptRecipe{Script: scenario.Script{Name: "management-maintenance", Crash: scenario.CrashPlan{MaxPoints: 38}, Steps: steps}, Drain: r.drain, Check: r.check}
-}
-
-func managementTerminal(b Bindings, retire bool) ScriptRecipe {
-	ops := b.Management
-	r := &managementRun{}
-	name := "management-stop"
-	operation := ops.StopDaemon
-	value := "stopping"
-	id := byte(61)
-	budget := 6
-	if retire {
-		name = "management-retire"
-		operation = ops.RetireIdentity
-		value = "retired"
-		id = 62
-		budget = 11
-	}
-	step := r.step("terminal", "request-termination", id, nil, ops, operation, func(e scenario.Env, o ManagementOutcome) error {
-		if !o.Stop || o.Value != value {
-			return fmt.Errorf("%w: terminal request returned %+v", ErrManagementEffect, o)
-		}
-		f, err := ops.InspectNode(e)
-		if err != nil {
-			return err
-		}
-		if f.Retired != retire {
-			return fmt.Errorf("%w: identity retirement=%v want=%v", ErrManagementEffect, f.Retired, retire)
-		}
-		return nil
-	})
-	return ScriptRecipe{Script: scenario.Script{Name: name, Crash: scenario.CrashPlan{MaxPoints: budget}, Steps: []scenario.Step{step}}, Drain: r.drain, Check: r.check}
 }
 
 func managementClose(b Bindings) ScriptRecipe {

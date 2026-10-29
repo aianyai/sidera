@@ -33,7 +33,7 @@ const (
 
 // StartupWalkScenario observes actual Init or Start, independently of the engine
 // fixture. Each generation has one writer. Start is prepared by an unobserved
-// actual Init; Init starts from an empty disk. Both finish at the complete step.
+// actual Init; Init starts from an empty disk. Only a serving Start has a complete boundary.
 type StartupWalkScenario struct {
 	Label     string
 	Operation StartupOperation
@@ -54,8 +54,13 @@ type StartupWalkScenario struct {
 	Check func(fsx.Reader) error
 }
 
-func (s *StartupWalkScenario) Name() string                       { return s.Label }
-func (s *StartupWalkScenario) Steps() []string                    { return []string{"complete"} }
+func (s *StartupWalkScenario) Name() string { return s.Label }
+func (s *StartupWalkScenario) Steps() []string {
+	if s.Operation == StartupStart {
+		return []string{"complete"}
+	}
+	return nil
+}
 func (s *StartupWalkScenario) MaxPoints() int                     { return s.PointBudget }
 func (s *StartupWalkScenario) Recovery() []crashwalk.RecoveryCase { return s.RecoveryCases }
 func (s *StartupWalkScenario) validate() error {
@@ -115,7 +120,11 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 			var d *daemon.Daemon
 			d, err = daemon.Start(startCtx, cfg)
 			if err == nil {
-				err = finishStartup(startCtx, d, clk, s.AdvanceAfterStart)
+				err = finishStartup(startCtx, d, clk, s.AdvanceAfterStart, func() {
+					if g.boundary("complete") {
+						a.crash()
+					}
+				})
 			}
 		}
 		cancel()
@@ -129,11 +138,6 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 		}
 		if crashed {
 			disk = snapshot
-		}
-		if !crashed && g.boundary("complete") {
-			a.crash()
-			disk = a.snapshot()
-			crashed = true
 		}
 		r.finishGeneration()
 		if s.Operation == StartupInit {
@@ -174,7 +178,7 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 
 // finishStartup owns a serving generation through its last quiescence and stop,
 // including when the caller is canceled or a selected point cuts off its disk.
-func finishStartup(ctx context.Context, d *daemon.Daemon, clk *clocktest.Fake, advance time.Duration) (err error) {
+func finishStartup(ctx context.Context, d *daemon.Daemon, clk *clocktest.Fake, advance time.Duration, complete func()) (err error) {
 	defer func() {
 		d.RequestStop("startup walk complete")
 		err = errors.Join(err, d.Wait())
@@ -191,6 +195,9 @@ func finishStartup(ctx context.Context, d *daemon.Daemon, clk *clocktest.Fake, a
 		if err == nil {
 			err = ctx.Err()
 		}
+	}
+	if err == nil && complete != nil {
+		complete()
 	}
 	return err
 }

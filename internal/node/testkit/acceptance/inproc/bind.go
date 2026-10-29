@@ -50,6 +50,12 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 		configureLifecycleStartup(s)
 		out = append(out, s)
 	}
+	for _, r := range catalog.Terminals {
+		if !capabilities.Supports(r.Needs) {
+			t.Fatalf("unsupported in-process terminal %q: %+v", r.Name, r.Needs)
+		}
+		out = append(out, bindTerminal(r))
+	}
 	return out
 }
 

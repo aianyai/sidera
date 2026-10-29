@@ -62,6 +62,9 @@ type RecoveryCase struct {
 
 // Scenario is what the walk needs to know of a script. The script itself is the
 // backend's.
+// Scenario.Steps names only post-action boundaries with a live process that
+// the backend can actually interrupt. Completed commands and terminal operations
+// have no after-return boundary.
 type Scenario interface {
 	// Name identifies the scenario in reports.
 	Name() string

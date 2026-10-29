@@ -378,3 +378,14 @@ func TestStartupWalkRecoversAndAdvancesAfterAPeriodicClockCrash(t *testing.T) {
 		})
 	}
 }
+
+func TestInitNaturalExitDoesNotClaimALiveBoundary(t *testing.T) {
+	s := startupWalk(harness.StartupInit)
+	if len(s.Steps()) != 0 {
+		t.Fatal("Init declared a live after-return boundary")
+	}
+	out := startupResult(t, harness.NewWalkBackend(t), s, crashwalk.RunPlan{Targets: []crashwalk.Target{{Gen: 1, AfterStep: "complete"}}})
+	if out.Reached[0] || len(out.Hits) != 1 {
+		t.Fatalf("natural Init exit claimed a kill: %+v", out)
+	}
+}

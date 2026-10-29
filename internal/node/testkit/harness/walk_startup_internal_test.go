@@ -89,7 +89,7 @@ func TestAStartupWalkCanceledDuringPeriodicWorkReclaimsItsDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { d.RequestStop("test cleanup"); d.Wait() }()
-	if err := finishStartup(ctx, d, clk, daemon.ClockStateEvery); !errors.Is(err, context.Canceled) {
+	if err := finishStartup(ctx, d, clk, daemon.ClockStateEvery, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("post-start cancellation = %v, want context.Canceled", err)
 	}
 	if !canceled {

@@ -73,9 +73,9 @@ By default the node has one instance, `Instance`, and every accessor without a n
   selection, recorders, trigger accounting and trace results for both. A startup
   generation opens its window before its one writer exists. Start's preparatory
   Init is unobserved, so two writers never share one generation's counters.
-  `complete` is the one step boundary, after Init returns or Start has quiesced
-  and stopped. With `AdvanceAfterStart`, each successful Start first quiesces,
-  advances the shared clock once, quiesces its due work, and stops through
+  Only Start has a `complete` step boundary, after it has quiesced while
+  its daemon is still alive. Init has no after-return boundary. With `AdvanceAfterStart`, each successful Start first quiesces,
+  advances the shared clock once, quiesces its due work, exposes its live boundary, and stops through
   RequestStop/Wait even after cancellation. The jump uses the daemon's real
   periodic tasks; it does not replay each crossed tick. Every successful later
   generation advances again from the current clock, including after a crash in

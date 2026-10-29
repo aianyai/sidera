@@ -12,8 +12,9 @@ import (
 
 // Catalog separates scripts from the daemon's actual lifecycle entry points.
 type Catalog struct {
-	Scripts  []ScriptRecipe
-	Startups []StartupRecipe
+	Scripts   []ScriptRecipe
+	Startups  []StartupRecipe
+	Terminals []TerminalRecipe
 }
 
 // ScriptRecipe adds a repeatable drain and a domain judgement to a script.
@@ -33,7 +34,7 @@ const (
 	Start
 )
 
-// StartupRecipe describes actual Init or Start, ending at the complete boundary.
+// StartupRecipe describes actual Init or Start; only Start has a live complete boundary.
 type StartupRecipe struct {
 	Needs             Needs
 	Name              string
@@ -42,6 +43,14 @@ type StartupRecipe struct {
 	AdvanceAfterStart time.Duration
 	MaxPoints         int
 	Recovery          []crashwalk.RecoveryCase
+}
+
+// Steps names only boundaries at which the action has left a live process.
+func (r StartupRecipe) Steps() []string {
+	if r.Kind == Start {
+		return []string{"complete"}
+	}
+	return nil
 }
 
 // New constructs closures without invoking bindings or creating resources.
@@ -53,5 +62,5 @@ func New(b Bindings) Catalog {
 	scripts = append(scripts, maintenanceRecipes(b)...)
 	scripts = append(scripts, recoveryRecipes(b)...)
 	scripts = append(scripts, bodyRecoveryRecipes(b)...)
-	return Catalog{Scripts: scripts, Startups: append(startupRecipes(), recoveryStartupRecipes()...)}
+	return Catalog{Scripts: scripts, Startups: append(startupRecipes(), recoveryStartupRecipes()...), Terminals: terminalRecipes()}
 }

@@ -844,3 +844,20 @@ files. Audit traces are checked against the complete table and logged with
 `phase=audit`, but never supply walk coverage, targets or additional walk
 generations. Audit and domain failures become violations. An actual recovery
 refusal is never reclassified as an audit to hide a generation.
+
+
+Acceptance stop and retirement descriptions live in `Catalog.Terminals` as
+`TerminalRecipe`, outside the ordinary script/replay contract. Their shared
+`Check(TerminalFacts)` requires actual exit and an original matching persistent
+result for every confirmed response. The persistent result is captured before
+the additional audit can replay anything. An unanswered retirement interrupted
+after its irreversible record may retain no operation result; it needs verified
+node-bound retirement, an actual identity-retired recovery refusal and unchanged
+signing files. Missing responses and results stay absent. Both execution layers
+consume this judgement rather than interpreting startup failure themselves.
+
+`Scenario.Steps` names only post-action boundaries with a live process to kill.
+Init and terminal operations have no after-return boundary. Start's `complete`
+boundary occurs after quiescence while the daemon is still serving, before
+shutdown. Full still selects every recorded non-sync writing point; this removes
+only nonexistent process boundaries, never writing-point coverage.

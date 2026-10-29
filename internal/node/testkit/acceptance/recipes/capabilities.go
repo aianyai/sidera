@@ -81,6 +81,12 @@ func (c Catalog) Select(capabilities Capabilities) Catalog {
 			selected.Startups = append(selected.Startups, r)
 		}
 	}
+	for _, r := range c.Terminals {
+		if capabilities.Supports(r.Needs) {
+			selected.Terminals = append(selected.Terminals, r)
+		}
+	}
+
 	return selected
 }
 
@@ -116,6 +122,12 @@ func (c Catalog) AnalyzeLayer(table *txn.Table, capabilities Capabilities, clean
 			return out, err
 		}
 	}
+	for _, r := range c.Terminals {
+		if err := add(r.Name, r.Needs); err != nil {
+			return out, err
+		}
+	}
+
 	var allClean, selectedClean []crashwalk.Hit
 	var selectedRecovery []crashwalk.RecoveryRecord
 	allKeys, selectedKeys := map[fsx.Key]bool{}, map[fsx.Key]bool{}

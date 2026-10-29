@@ -5,8 +5,10 @@ without creating resources or invoking callbacks. Construct it before every run:
 closures remember returned message identifiers only for that run.
 
 `ScriptRecipe` owns the ordinary `scenario.Script`, its repeatable `Drain` and
-its final domain `Check`. `StartupRecipe` describes actual Init or Start, including
-optional advances before Start and after each successful Start has quiesced. Names, steps, budgets and recovery responsibilities
+its final domain `Check`. `TerminalRecipe` owns stop and retirement lifecycle
+judgements outside ordinary scripts. `StartupRecipe` describes actual Init or Start, including
+optional advances before Start and after each successful Start has quiesced. Only a successful Start leaves the live `complete` boundary; Init and terminal
+requests have no after-return boundary. Names, steps, budgets and recovery responsibilities
 have one source in these descriptions. Bindings contain named, typed operations
 only for capabilities absent from `scenario.Env`; there is no generic dispatcher.
 
@@ -87,9 +89,24 @@ work. Named callbacks return real results after checking the same request's
 persistent replay. The recipe then compares the result with the requested effect.
 An interrupted request is retried with its original identifier and expected version.
 
-Stop and identity retirement check the returned stop request and its replay.
-The script does not stop the fixture: shutdown belongs to the composition root.
-Retirement additionally requires the verified self-revocation on disk.
+`Catalog.Terminals` contains stop and identity retirement, with stable request
+identifiers and fixed budgets. Bindings execute the real management request and
+observe actual exit. `TerminalRecipe.Check` consumes pure `TerminalFacts`,
+including the original response, independently read original durable result,
+verified node-bound retirement, and actual restart outcomes. A confirmed answer
+requires its original matching durable result; later replay cannot repair that
+evidence. An unanswered interrupted retirement may have no operation result:
+only verified irreversible retirement plus an actual identity-retired recovery
+refusal and unchanged signing files can discharge that case. No response or
+result is inferred from the retirement effect.
+
+A restart after a selected crash remains a real walk generation, including a
+retirement refusal. Once the chain is terminal, `TerminalAudit` records an
+additional verification attempt separately. Stop requires successful startup,
+`operation.result` and the same request's actual persistent replay. Retirement
+requires identity-retired rejection without signing changes. Audit trace and
+exit facts are logged and checked against the full table, and failures become
+violations; audit hits supply no coverage or targets.
 The instance recipe keeps its sender in another instance, drains actual loss
 feedback, and checks that disabled endpoints are closed with empty tokens.
 Its normal record writes the instance head; recovery may also write normal
