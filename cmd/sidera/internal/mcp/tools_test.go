@@ -32,17 +32,23 @@ func agentNode(t testing.TB) (*harness.H, *agentapi.Client, string) {
 func agentNodeDetails(t testing.TB, observers ...func(string, int)) (*harness.H, *agentapi.Client, string, string, adapterproto.Token) {
 	t.Helper()
 	h := harness.New(t, harness.Options{Adapter: &harness.AdapterOptions{Runtime: true}})
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	h.MustDirect("creator")
 	created, err := h.Agent("creator").Control(h.Ctx(), fakeagent.ControlInput{To: h.RuntimeAddr(), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 4 {
-		h.Quiesce()
+		if err := h.Quiesce(); err != nil {
+			t.Fatal(err)
+		}
 		h.Advance(engine.DefaultParams().PullInterval)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	status, err := h.Agent("creator").Status(h.Ctx(), fakeagent.StatusInput{MessageID: created.MessageID})
 	if err != nil || status.ControlReply == nil || status.ControlReply.Create == nil {
 		t.Fatalf("creation: %+v %v", status, err)

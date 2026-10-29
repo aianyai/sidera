@@ -55,6 +55,9 @@ By default the node has one instance, `Instance`, and every accessor without a n
   joins the interrupted script operation. If that operation has already returned
   an error while another program callback is held, the same cutoff and release
   happen before the error returns; closing the error window prevents later claims.
+  The worker publishes completion from a defer even if it exits without returning.
+  That abnormal exit is an error from `WalkBackend.Run`, including after a selected
+  cutoff; only a normal return can supply the operation's result. Panics are not recovered.
   Startup targets use controlled startup and its ordinary error unwinding,
   including logical commits with no following filesystem call. A crash abandons the rest of the script and runs its drain on
   the recovered disk; a drain interrupted by another target runs again. Offline
@@ -244,6 +247,14 @@ By default the node has one instance, `Instance`, and every accessor without a n
 - **No stand-in for what is missing.** `Adapter` (without `Options.Adapter`) and
   `Runtime` (without `AdapterOptions.Runtime`) return an error that is `scenario.ErrNotAvailable`; a script that needs them
   fails with that and says what is missing.
+- **Fallible process operations report a down node.** `Records`, `VerifyReport`,
+  `VerifyControlReply` and `Direct` return `engineagent.ErrNodeNotRunning` when no
+  process is running, including before the first Start and after Stop or Kill.
+  Agent calls map it to `unavailable/daemon_not_running`; `Quiesce` wraps it in
+  its report. These operations do not fail the test internally or
+  return empty success. Each operation selects its process once; quiet probes keep
+  using that process's engine if a concurrent cutoff removes it. Accessors without
+  an error result, such as `Engine`, remain strict and fail the test when down.
 - **Records are read, not written.** `Records` is the store's scan, for the scenarios
   whose judgement is the records; everything else is judged from the ledger. It reads
   what the engine has written by now, so read it after `Quiesce`.
@@ -272,6 +283,12 @@ the idle condition of the fake runtime are in. Each later part adds to this pack
 its stream needs.
 
 ## Tests
+
+`walk_internal_test.go` checks that a selected runtime cutoff releases and joins
+residual record reads, and that abnormal script-worker exits reach the backend's
+error result both with and without a held target. `harness_test.go` covers down-node
+errors for record reads and signature verification before Start and after Stop/Kill;
+existing stopped-node and controlled-start tests cover `Quiesce`.
 
 `walk_startup_test.go` and its internal tests check real Init and Start targets,
 completed-marker retries, preservation, layout repair across three generations,

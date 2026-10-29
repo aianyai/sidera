@@ -341,6 +341,8 @@ func (g *walkGeneration) boundary(name string) bool {
 	return true
 }
 
+var errWalkWorkerExited = errors.New("harness: worker exited without returning")
+
 // work keeps Kill outside the program callback. Only the selected callback is
 // held; the cutoff takes its snapshot before that callback is released to unwind
 // through the ordinary filesystem errors. The work goroutine is always joined.
@@ -349,7 +351,13 @@ func (g *walkGeneration) work(ctx context.Context, h *H, do func() error) (bool,
 		return g.finishWork(h, nil, true, err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- do() }()
+	go func() {
+		// Goexit runs defers but never returns from do. Publish an error in
+		// that case so the owner can join it without accepting an aborted step.
+		err := errWalkWorkerExited
+		defer func() { done <- err }()
+		err = do()
+	}()
 	select {
 	case <-g.hold:
 		return g.finishWork(h, done, false, nil)
@@ -380,7 +388,11 @@ func (g *walkGeneration) finishWork(h *H, done <-chan error, completed bool, err
 		close(g.release)
 	}
 	if !completed {
-		<-done
+		// Filesystem errors are expected after the selected cutoff. An exited
+		// worker, however, did not finish its script and must fail the run.
+		if workErr := <-done; errors.Is(workErr, errWalkWorkerExited) {
+			err = workErr
+		}
 	}
 	return held, err
 }

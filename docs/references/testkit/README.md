@@ -204,6 +204,12 @@ coverage dimensions.
   `Kill` inside the callback could wait for the goroutine making that callback.
   A step or drain error closes the window against later claims and handles an
   already held callback through the same cutoff and release before returning.
+  The worker sends completion from a defer, starting with an abnormal-exit error
+  that only normal return replaces. `runtime.Goexit` therefore cannot strand its
+  owner waiting for completion or silently pass an aborted script, even when a
+  selected cutoff normally discards filesystem errors. The error reaches
+  `WalkBackend.Run`; panics are not recovered. `testing.FailNow` belongs only in the
+  test goroutine, so fallible fixture calls return errors from program workers.
   Startup uses `TryStart`'s controlled cutoff, including logical commit points.
   After a crash the remaining script steps are abandoned and the drain runs on
   the recovered disk; it runs again if another target interrupts it. The first
@@ -247,6 +253,15 @@ coverage dimensions.
   restart and a crash are those two in a row. The in-memory state a process starts with
   (the clock's high-water mark, the rollback pause an option asks for) is applied from
   zero at each start, because a process has no memory of the last one.
+- **Fallible fixture calls share one current-process lookup.** `onProcess`,
+  `Records`, `VerifyReport`, `VerifyControlReply` and `quiesce` return
+  `engineagent.ErrNodeNotRunning` when there is no running process, before the
+  first Start or after Stop/Kill. `Quiesce` retains its diagnostic wrapper. A
+  missing process is never an empty successful scan or verification. Quiescence
+  captures the process once and probes that engine throughout the wait, so a
+  concurrent cutoff cannot turn a later lookup into `Fatal`. Accessors with no
+  error result retain their strict test-failing behavior. Tests that require
+  quiet check its returned error before judging subsequent evidence.
 - **A startup trace comes from actual Init or Start.** The in-process backend
   dispatches engine scripts and startup scenarios to their concrete runners;
   private run state owns their common plan, target, trigger and trace rules. Init

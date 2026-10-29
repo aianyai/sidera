@@ -38,7 +38,9 @@ func TestIndependentDriverUsesBothProtocolEras(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			h.Quiesce()
+			if err := h.Quiesce(); err != nil {
+				t.Fatal(err)
+			}
 			page, err := a.Recv(h.Ctx(), fakeagent.RecvInput{})
 			if err != nil || len(page.Page.Messages) != 1 || len(page.Raw) == 0 {
 				t.Fatalf("receive: %+v %v", page, err)

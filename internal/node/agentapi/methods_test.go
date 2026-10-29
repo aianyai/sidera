@@ -24,17 +24,23 @@ import (
 func sessionNode(t testing.TB) (*harness.H, adapterproto.Token, string) {
 	t.Helper()
 	h := harness.New(t, harness.Options{Adapter: &harness.AdapterOptions{Runtime: true}})
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	h.MustDirect("creator")
 	created, err := h.Agent("creator").Control(h.Ctx(), fakeagent.ControlInput{To: h.RuntimeAddr(), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	for range 4 {
-		h.Quiesce()
+		if err := h.Quiesce(); err != nil {
+			t.Fatal(err)
+		}
 		h.Advance(engine.DefaultParams().PullInterval)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	status, err := h.Agent("creator").Status(h.Ctx(), fakeagent.StatusInput{MessageID: created.MessageID})
 	if err != nil || status.ControlReply == nil || status.ControlReply.Create == nil || status.ControlReply.Create.Outcome != adapterproto.CreateReplyCreated {
 		t.Fatalf("creation: %+v, %v", status, err)
@@ -137,7 +143,9 @@ func TestSendUsesOneRecipientAndExplicitIdempotency(t *testing.T) {
 	if w.Code != 200 || first.MessageID == "" || len(first.To) != 1 || first.To[0] != to || first.Replayed {
 		t.Fatalf("HTTP %d: %s", w.Code, w.Body)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	scan, err := h.Records()
 	if err != nil {
 		t.Fatal(err)
@@ -179,7 +187,9 @@ func TestRecvReturnsTheUnwrappedPageAndAcknowledgesTheEarlierLease(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	w := request(s, token, "recv", `{"frontend":"cli","wait_s":0}`)
 	var page adapterproto.RecvPage
 	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
@@ -247,10 +257,14 @@ func TestStatusCarriesTheEventualControlReply(t *testing.T) {
 		t.Fatalf("create: HTTP %d, %s", w.Code, w.Body)
 	}
 	for range 4 {
-		h.Quiesce()
+		if err := h.Quiesce(); err != nil {
+			t.Fatal(err)
+		}
 		h.Advance(engine.DefaultParams().PullInterval)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	w = request(s, token, "status", `{"message_id":"`+sent.MessageID+`"}`)
 	var got adapterproto.MessageStatusResult
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
@@ -269,7 +283,9 @@ func TestReplyGetsItsRecipientFromTheReceivedMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	w := request(s, token, "reply", `{"message_id":"`+string(sent.MessageID)+`","body":"an answer","idempotency_key":"answer"}`)
 	var got struct {
 		MessageID string   `json:"message_id"`
@@ -289,7 +305,9 @@ func TestAckReturnsPartAcknowledgementsAndRejectsAnUnknownLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	w := request(s, token, "recv", `{"frontend":"cli"}`)
 	var page adapterproto.RecvPage
 	json.Unmarshal(w.Body.Bytes(), &page)

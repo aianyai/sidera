@@ -19,7 +19,9 @@ func TestExplicitInvalidAcknowledgementCannotConfirmThePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	s := start(t, mcp.Config{Agent: c, Version: "test"})
 	for i, items := range []any{[]any{}, nil, []any{map[string]any{"message_id": sent.MessageID, "part": 1}, map[string]any{"message_id": sent.MessageID, "part": 0}}} {
 		text, isError := s.call(t, 10*i+1, "recv", map[string]any{})

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -14,6 +16,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent/engineagent"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/internal/node/txn"
@@ -164,5 +167,91 @@ func TestWalkBackendReleasesAClaimedCallbackWhenWorkAlreadyFailed(t *testing.T) 
 	}
 	if !crashed || h.current() != nil {
 		t.Error("the claimed generation was not taken down")
+	}
+}
+
+// The engine can select a crash while the script is finishing an earlier call.
+// Its remaining read starts only after the selected callback has been released,
+// which means Kill has removed the process and fenced its disk.
+func TestWalkJoinsResidualRecordsAfterCutoff(t *testing.T) {
+	g := newWalkGeneration(1, nil)
+	point, err := fsx.ParsePoint("intake/out.rename#1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g.target = crashwalk.Target{Gen: 1, Point: point}
+	h := NewStopped(t, Options{})
+	if crashed, err := h.tryStart(context.Background(), StartOptions{}, g); crashed || err != nil {
+		t.Fatalf("start: %v, %v", crashed, err)
+	}
+	g.serving()
+	h.MustDirect("a")
+	h.MustDirect("b")
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
+	g.openWindow()
+	sent := make(chan error, 1)
+	go func() {
+		_, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b")}, Body: "concurrent write"})
+		sent <- err
+	}()
+	read := make(chan error, 1)
+	crashed, err := g.work(context.Background(), h, func() error {
+		<-g.release
+		_, err := h.Records()
+		read <- err
+		return err
+	})
+	if sendErr := <-sent; fakeagent.CodeOf(sendErr) != "connection_lost" {
+		t.Errorf("the interrupted send returned %v, want connection_lost", sendErr)
+	}
+	if !crashed || err != nil {
+		t.Fatalf("work: crashed=%v err=%v", crashed, err)
+	}
+	if err := <-read; !errors.Is(err, engineagent.ErrNodeNotRunning) {
+		t.Fatalf("residual Records: %v, want ErrNodeNotRunning", err)
+	}
+	if h.current() != nil || !g.reached() {
+		t.Fatal("the selected crash did not leave the node down")
+	}
+}
+
+func TestWalkBackendReportsAbnormalWorkerExit(t *testing.T) {
+	point, err := fsx.ParsePoint("intake/out.rename#1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, held := range []bool{false, true} {
+		t.Run(fmt.Sprintf("held=%v", held), func(t *testing.T) {
+			s := &WalkScenario{Script: scenario.Script{
+				Name: "abnormal worker exit", Setup: scenario.Setup{Direct: []string{"a", "b"}},
+				Steps: []scenario.Step{{Name: "exit", Do: func(e scenario.Env) error {
+					if held {
+						// Send returns only after the selected callback is released.
+						// Exit the script worker after that real cutoff, so its
+						// result must cross the join rather than the initial select.
+						sent := make(chan error, 1)
+						go func() {
+							_, err := e.Agent("a").Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("b")}, Body: "cut before worker exit"})
+							sent <- err
+						}()
+						if err := <-sent; fakeagent.CodeOf(err) != "connection_lost" {
+							return fmt.Errorf("the selected send returned %v, want connection_lost", err)
+						}
+					}
+					runtime.Goexit()
+					return nil
+				}}},
+			}}
+			plan := crashwalk.RunPlan{Record: true}
+			if held {
+				plan = crashwalk.RunPlan{Targets: []crashwalk.Target{{Gen: 1, Point: point}}}
+			}
+			_, err := NewWalkBackend(t).Run(context.Background(), s, plan)
+			if err == nil || !strings.Contains(err.Error(), "worker exited without returning") {
+				t.Fatalf("Run returned %v, want an abnormal-worker error", err)
+			}
+		})
 	}
 }

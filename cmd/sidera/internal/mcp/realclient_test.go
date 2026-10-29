@@ -64,7 +64,9 @@ func TestRealClientsAcceptMCPResponses(t *testing.T) {
 			if _, err := h.Agent("creator").Send(h.Ctx(), fakeagent.SendInput{To: []string{address}, Body: marker}); err != nil {
 				t.Fatal(err)
 			}
-			h.Quiesce()
+			if err := h.Quiesce(); err != nil {
+				t.Fatal(err)
+			}
 			dir := t.TempDir()
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()

@@ -114,7 +114,9 @@ func TestClientReceivesThePageBytesIncludingTheNewline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	raw, err := c.Recv(h.Ctx(), agentapi.RecvRequest{Frontend: adapterproto.FrontendMCP})
 	if err != nil {
 		t.Fatal(err)
@@ -156,7 +158,9 @@ func TestClientRejectsInvalidAckItemsWithoutAcknowledgingThePage(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			h.Quiesce()
+			if err := h.Quiesce(); err != nil {
+				t.Fatal(err)
+			}
 			read := func() adapterproto.RecvPage {
 				t.Helper()
 				raw, err := c.Recv(h.Ctx(), agentapi.RecvRequest{Frontend: adapterproto.FrontendCLI})
@@ -211,10 +215,14 @@ func TestClientControlReturnsAcceptanceAndStatusCarriesTheReply(t *testing.T) {
 		t.Fatalf("Control: %+v, %v", sent, err)
 	}
 	for range 4 {
-		h.Quiesce()
+		if err := h.Quiesce(); err != nil {
+			t.Fatal(err)
+		}
 		h.Advance(engine.DefaultParams().PullInterval)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	status, err := c.Status(h.Ctx(), sent.MessageID)
 	if err != nil || status.ControlReply == nil || status.ControlReply.Create == nil || status.ControlReply.Create.Outcome != adapterproto.CreateReplyCreated {
 		t.Fatalf("Status: %+v, %v", status, err)
@@ -230,7 +238,9 @@ func TestRecvWithMalformedEarlierLeaseStillHandsOutThePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	raw, err := c.Recv(h.Ctx(), agentapi.RecvRequest{
 		Frontend: adapterproto.FrontendCLI, AckLease: "not-a-lease",
 	})
@@ -254,7 +264,9 @@ func TestWholePageAckAfterRestartReturnsAnEmptyListForAChunkedPage(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	w := request(s, token, "recv", `{"frontend":"cli"}`)
 	var page adapterproto.RecvPage
 	if err := json.Unmarshal(w.Body.Bytes(), &page); err != nil {
@@ -264,7 +276,9 @@ func TestWholePageAckAfterRestartReturnsAnEmptyListForAChunkedPage(t *testing.T)
 		t.Fatalf("recv: HTTP %d, %s; want a chunked page", w.Code, w.Body)
 	}
 	h.Restart()
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	s, _ = agentapi.New(agentapi.Config{Service: h.Engine()})
 	s.EnableMethods()
 	w = request(s, token, "ack", `{"lease":"`+string(page.Lease)+`"}`)

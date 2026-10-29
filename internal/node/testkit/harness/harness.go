@@ -555,12 +555,21 @@ func (h *H) current() *process {
 	return h.proc
 }
 
+// currentProcess selects the process once for an operation that can fail.
+func (h *H) currentProcess() (*process, error) {
+	p := h.current()
+	if p == nil {
+		return nil, engineagent.ErrNodeNotRunning
+	}
+	return p, nil
+}
+
 // running is the running process; it fails the test when the node is down, for the
 // accessors that have nothing to return then.
 func (h *H) running() *process {
 	h.t.Helper()
-	p := h.current()
-	if p == nil {
+	p, err := h.currentProcess()
+	if err != nil {
 		h.t.Fatal("harness: the node is not running: Start it first")
 	}
 	return p
@@ -795,10 +804,10 @@ func (c currentEngine) MessageStatus(ctx context.Context, caller engine.Caller, 
 // the old engine made of it: a client of a dead process sees a connection that
 // ended, not a success.
 func onProcess[T any](h *H, call func(*engine.Engine) (T, error)) (T, error) {
-	p := h.current()
-	if p == nil {
+	p, err := h.currentProcess()
+	if err != nil {
 		var zero T
-		return zero, engineagent.ErrNodeNotRunning
+		return zero, err
 	}
 	return unlessAbandoned(&p.abandoned, func() (T, error) { return call(p.eng) })
 }
@@ -848,9 +857,12 @@ func (h *H) Mutated(message string) (transport.Replay, bool) {
 
 // VerifyReport verifies a status report the node signed about a message the node
 // itself sent, as a sender verifies what a receipt carries, with the keys on the
-// disk.
+// disk. A down node returns engineagent.ErrNodeNotRunning.
 func (h *H) VerifyReport(rec record.Record) (envelope.StatusReport, error) {
-	p := h.running()
+	p, err := h.currentProcess()
+	if err != nil {
+		return envelope.StatusReport{}, err
+	}
 	k, err := keys.Load(p.mounted.Writer)
 	if err != nil {
 		return envelope.StatusReport{}, err
@@ -864,9 +876,12 @@ func (h *H) VerifyReport(rec record.Record) (envelope.StatusReport, error) {
 }
 
 // VerifyControlReply is VerifyReport for the control reply of a signal the node
-// itself sent.
+// itself sent. A down node returns engineagent.ErrNodeNotRunning.
 func (h *H) VerifyControlReply(rec record.Record) (envelope.ControlReply, error) {
-	p := h.running()
+	p, err := h.currentProcess()
+	if err != nil {
+		return envelope.ControlReply{}, err
+	}
 	k, err := keys.Load(p.mounted.Writer)
 	if err != nil {
 		return envelope.ControlReply{}, err
@@ -918,8 +933,14 @@ func (h *H) CheckLedger() error {
 // store's scan. It is the one place a test may look at the node's own records, and
 // only where the scenario it belongs to is judged by them. The records are what
 // the engine has written by now, so read them after Quiesce: before it, work the
-// engine has not finished is missing.
-func (h *H) Records() (*store.Scan, error) { return h.running().mounted.Store.Scan() }
+// engine has not finished is missing. A down node returns engineagent.ErrNodeNotRunning.
+func (h *H) Records() (*store.Scan, error) {
+	p, err := h.currentProcess()
+	if err != nil {
+		return nil, err
+	}
+	return p.mounted.Store.Scan()
+}
 
 // Adapter is the controller of the fake adapter process that was started last for
 // the instance, the one the host is talking to now or the last it talked to. A
@@ -1286,8 +1307,9 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 	if err := ctx.Err(); err != nil {
 		return fail(false, engine.Report{}, nil, err)
 	}
-	if h.current() == nil {
-		return fail(false, engine.Report{}, nil, engineagent.ErrNodeNotRunning)
+	p, err := h.currentProcess()
+	if err != nil {
+		return fail(false, engine.Report{}, nil, err)
 	}
 	var unmet []string
 	for {
@@ -1309,7 +1331,7 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 			// again with the numbers of now.
 			round, endRound = context.WithTimeout(ctx, adapterRound)
 		}
-		rep, err := h.Engine().Quiesce(round, h.expect())
+		rep, err := p.eng.Quiesce(round, h.expect())
 		roundOver := round.Err() != nil // before endRound, which ends it too
 		endRound()
 		if err != nil {

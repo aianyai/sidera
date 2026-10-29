@@ -21,6 +21,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"github.com/aianyai/sidera/internal/publication"
+	"github.com/aianyai/sidera/internal/record"
 )
 
 func bg() context.Context { return context.Background() }
@@ -717,5 +718,35 @@ func TestACrashThatNamesItsPointIsWrittenWithThePoint(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("the crash is recorded as %q, which lacks %q", got, want)
 		}
+	}
+}
+
+func TestFallibleFixtureReadsReportADownNode(t *testing.T) {
+	for _, state := range []string{"before start", "stopped", "killed"} {
+		t.Run(state, func(t *testing.T) {
+			h := harness.NewStopped(t, harness.Options{})
+			switch state {
+			case "stopped":
+				h.Start()
+				h.Stop()
+			case "killed":
+				h.Start()
+				h.Kill(harness.ProcessCrash)
+			}
+			for _, operation := range []struct {
+				name string
+				call func() error
+			}{
+				{"Records", func() error { _, err := h.Records(); return err }},
+				{"VerifyReport", func() error { _, err := h.VerifyReport(record.Record{}); return err }},
+				{"VerifyControlReply", func() error { _, err := h.VerifyControlReply(record.Record{}); return err }},
+			} {
+				t.Run(operation.name, func(t *testing.T) {
+					if err := operation.call(); !errors.Is(err, engineagent.ErrNodeNotRunning) {
+						t.Fatalf("returned %v, want ErrNodeNotRunning", err)
+					}
+				})
+			}
+		})
 	}
 }

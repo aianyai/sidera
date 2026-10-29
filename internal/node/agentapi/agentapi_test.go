@@ -54,7 +54,9 @@ func TestProbeOnlyModeRefusesOtherMethods(t *testing.T) {
 
 func TestProbeTokenOverAgentSocketMarksFrontendReachable(t *testing.T) {
 	h := harness.New(t, harness.Options{Adapter: &harness.AdapterOptions{Runtime: true}})
-	h.Quiesce()
+	if err := h.Quiesce(); err != nil {
+		t.Fatal(err)
+	}
 	probes, err := h.Engine().ProbeTokens(context.Background(), harness.Instance)
 	if err != nil || len(probes) == 0 {
 		t.Fatalf("ProbeTokens: %+v, %v", probes, err)

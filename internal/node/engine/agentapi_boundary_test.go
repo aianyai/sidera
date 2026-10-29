@@ -110,11 +110,15 @@ func TestRecvWaitClampedToFrontendDeclaration(t *testing.T) {
 					t.Fatal("the HTTP receive did not register a waiter")
 				default:
 				}
-				h.Quiesce()
+				if err := h.Quiesce(); err != nil {
+					t.Fatal(err)
+				}
 				runtime.Gosched()
 			}
 			h.Advance(tc.wait - time.Second)
-			h.Quiesce()
+			if err := h.Quiesce(); err != nil {
+				t.Fatal(err)
+			}
 			if engine.Waiting(h.Engine()) != 1 {
 				t.Fatal("the receive stopped waiting before the expected wait")
 			}
@@ -124,7 +128,9 @@ func TestRecvWaitClampedToFrontendDeclaration(t *testing.T) {
 			default:
 			}
 			h.Advance(time.Second)
-			h.Quiesce()
+			if err := h.Quiesce(); err != nil {
+				t.Fatal(err)
+			}
 			select {
 			case out := <-result:
 				var page adapterproto.RecvPage
