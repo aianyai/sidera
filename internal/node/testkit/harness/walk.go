@@ -69,13 +69,17 @@ func (b *WalkBackend) Run(ctx context.Context, script crashwalk.Scenario, plan c
 			return crashwalk.RunResult{}, errors.New("harness: a walk requires an in-memory disk")
 		}
 		damage = s.Damage != nil
+	case *TerminalWalkScenario:
+		if err := s.validate(); err != nil {
+			return crashwalk.RunResult{}, err
+		}
 	case *StartupWalkScenario:
 		if err := s.validate(); err != nil {
 			return crashwalk.RunResult{}, err
 		}
 		damage = s.Damage != nil
 	default:
-		return crashwalk.RunResult{}, errors.New("harness: the walk backend requires a WalkScenario or StartupWalkScenario")
+		return crashwalk.RunResult{}, errors.New("harness: the walk backend requires a WalkScenario, StartupWalkScenario or TerminalWalkScenario")
 	}
 	r, err := newWalkRun(ctx, plan, damage)
 	if err != nil {
@@ -89,6 +93,8 @@ func (b *WalkBackend) Run(ctx context.Context, script crashwalk.Scenario, plan c
 		err = runScript(ctx, t, s, r)
 	case *StartupWalkScenario:
 		err = runStartup(ctx, t, s, r)
+	case *TerminalWalkScenario:
+		err = runTerminal(ctx, t, s, r)
 	}
 	return r.result, err
 }

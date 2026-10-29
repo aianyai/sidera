@@ -20,6 +20,7 @@ layer.
 | `H.TryStart(ctx, StartOptions)` | Synchronously starts a down node or reclaims everything that startup acquired before returning `(crashed, err)`. `Arm` installs ordinary fault rules before transaction recovery; `CrashAt` selects a startup point and crash mode while the fixture owns the cutoff and cleanup. |
 | `NewWalkBackend(t)`, `WalkScenario` | Runs a script for `crashwalk.Backend` on a fresh in-memory fixture, with per-generation observations, process crashes, recovery triggers, a repeatable drain and ledger judgements. `WalkScenario.Options` configures the fixture; `Damage` interprets an offline trigger on its stopped disk, and `Check` adds a final judgement. |
 | `StartupWalkScenario`, `StartupOperation` | Runs actual `daemon.Init` from an empty disk (`StartupInit`) or actual `daemon.Start` after an unobserved Init (`StartupStart`). Names, budgets, recovery cases, offline damage and read-only checks are scenario data. `StartAfter` advances the same fixed clock between Init and the first observed Start. `AdvanceAfterStart` advances it once after each successful Start has quiesced, then quiesces again before stopping. Both default to zero, are non-negative and are only valid for Start. |
+| `TerminalWalkScenario`, `TerminalOperation`, `TerminalFacts`, `TerminalAudit` | Runs real stop or retirement management requests through the daemon, observes exit and recovery, and returns stopped-disk facts plus a separate final restart audit to the domain judge. |
 | `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, the presets the node has besides the one `init` makes (`Presets`, by name, each the JSON `presets add` takes, added through the configuration's own change), and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
 | `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport`, `H.VerifyControlReply` | The loopback of the running process, its knobs, and the check of a report or a control reply the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
 | `Options.OpenPackage` | Opens a named adapter package as an `fsx.Reader` rooted at its source. Each generation receives the same callback through `engine.Deps.OpenPackage`; nil leaves installation without a package reader. |
@@ -375,3 +376,20 @@ fixture's own quiet conditions
 `TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer`), the leak check
 (`TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages`) and
 `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`.
+
+Terminal walks use actual daemon Start and the management HTTP client. Their
+first startup is setup; the request opens the main window. Every selected cutoff
+snapshots the disk before cleanup, and its next real startup is the next walk
+generation, including an identity-retired refusal. A natural terminal exit never
+claims a target and has no after-return boundary. No response is invented for an
+interrupted request; the stopped disk is read independently before further work.
+
+Once that chain has terminated, an additional restart audit verifies stop replay
+or retirement refusal. It is explicitly separate from recovery: `TerminalAudit`
+retains its actual trace, startup error and exit error for the domain judge, and
+logs them with `phase=audit`. Its writes are checked against the complete table,
+but supply neither coverage nor Reached. An already-retired recovery generation
+is retained in the walk trace and needs no additional audit attempt. Signed
+retirement records are verified and bound to the actual initialized node. The
+audit also compares the key, certificate and serial bytes to detect signing
+changes. Audit errors and domain-check failures become violations.

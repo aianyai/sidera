@@ -826,3 +826,21 @@ parameters. Both its local wrapper and its remote control knob share one adapter
 implementation that calls the existing `checkpoint.put` protocol method, records
 the knob hit and returns the daemon's answer. It does not forward arbitrary
 protocol methods. The acceptance session binding uses that same controller.
+
+
+Terminal lifecycle walks use `harness.TerminalWalkScenario` for real
+`daemon.stop` and `identity.retire` requests through the management HTTP client.
+They observe the actual exit, read the original persistent result before any
+subsequent attempt, and return facts to a domain judgement. A selected crash is
+followed by a real next walk generation; a retirement rejection during that
+recovery remains that generation's actual trace. Natural exit never marks a
+crash target reached.
+
+After the chain has already terminated, a separate `TerminalAudit` retains an
+additional restart attempt's trace and startup/exit errors. Stop queries its
+original operation result and replays the same request; retirement verifies a
+signed node-bound revocation, identity-retired rejection and unchanged signing
+files. Audit traces are checked against the complete table and logged with
+`phase=audit`, but never supply walk coverage, targets or additional walk
+generations. Audit and domain failures become violations. An actual recovery
+refusal is never reclassified as an audit to hide a generation.
