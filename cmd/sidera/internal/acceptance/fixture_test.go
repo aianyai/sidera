@@ -2,6 +2,7 @@ package acceptance
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 )
@@ -171,6 +173,85 @@ func TestRealBinaryDaemonTargetWaitsForItsOwnExit(t *testing.T) {
 	}
 	if err = f.Stop(ctx); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRealBinaryBootstrapResumesCommittedPreset(t *testing.T) {
+	f, ctx := fixture(t)
+	if err := f.Init(ctx, GenerationSpec{Number: 1}); err != nil {
+		t.Fatal(err)
+	}
+	target := "presets-change/commit#1"
+	if err := f.Start(ctx, GenerationSpec{Number: 2, Target: target}); err != nil {
+		t.Fatal(err)
+	}
+	trace, err := f.ReadTrace(2)
+	if err != nil || !trace.Reached || trace.Crash != target {
+		t.Fatalf("bootstrap target: %+v, %v", trace, err)
+	}
+	// The daemon died before answering. Its committed file is the evidence of
+	// the original request and result that the next generation must retain.
+	raw, err := os.ReadFile(filepath.Join(f.home, "config", "presets.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var committed struct {
+		Version       admin.Version `json:"version"`
+		LastOperation struct {
+			ID     string `json:"id"`
+			Result any    `json:"result"`
+		} `json:"last_operation"`
+	}
+	if err = json.Unmarshal(raw, &committed); err != nil {
+		t.Fatal(err)
+	}
+	if committed.Version != 2 || committed.LastOperation.Result == nil {
+		t.Fatalf("preset was not committed before the kill: %s", raw)
+	}
+	if err = f.Start(ctx, GenerationSpec{Number: 3}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err = f.Manage(ctx, "operation.result", manageapi.Request{Params: map[string]any{"operation_id": committed.LastOperation.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored any
+	if err = resultBody(raw, &stored); err != nil || !reflect.DeepEqual(stored, committed.LastOperation.Result) {
+		t.Fatalf("original result changed: %s, %v", raw, err)
+	}
+	id, err := hex.DecodeString(committed.LastOperation.ID)
+	if err != nil || len(id) != len(admin.OperationID{}) {
+		t.Fatalf("committed operation identifier: %q, %v", committed.LastOperation.ID, err)
+	}
+	var operationID admin.OperationID
+	copy(operationID[:], id)
+	version := admin.Version(1)
+	raw, err = f.Manage(ctx, "presets.add", manageapi.Request{OperationID: operationID, ExpectedVersion: &version, Params: map[string]any{"name": "fixture", "preset": map[string]any{"local_sources": "allow"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replay struct {
+		Replayed bool `json:"replayed"`
+		Result   any  `json:"result"`
+	}
+	if err = json.Unmarshal(raw, &replay); err != nil || !replay.Replayed || !reflect.DeepEqual(replay.Result, stored) {
+		t.Fatalf("original request did not replay: %s, %v", raw, err)
+	}
+	if v, err := f.collectionVersion(ctx, "presets.list"); err != nil || v != 2 {
+		t.Fatalf("preset collection changed again: %d, %v", v, err)
+	}
+	if err = f.Stop(ctx); err != nil {
+		t.Fatal(err)
+	}
+	trace, err = f.ReadTrace(3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range trace.Hits {
+		switch h.Point.Key.Tag.Tx {
+		case "presets-change", "adapter-stage", "adapter-install", "adapter-enable":
+			t.Fatalf("completed bootstrap stage ran again: %s", h.Point)
+		}
 	}
 }
 

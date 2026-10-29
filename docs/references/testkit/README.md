@@ -35,8 +35,12 @@ these packages and are not part of them.
 The root package of `cmd/sidera/internal/acceptance` owns the foreground-process
 fixture. It runs real initialization and daemon commands, bootstraps a direct
 fake adapter through public management after public status reports `running`,
-compares the complete tagged transaction
-table, advances the shared clock daemon first, and requires stable fake progress
+retains bootstrap requests with their IDs and expected versions across daemon
+generations, and skips stages whose successful replies were received. A change
+committed before a targeted kill returns its stored result when the unanswered
+request is resent, rather than becoming a new mutation. The fixture compares the
+complete tagged transaction table, advances the shared clock daemon first, and
+requires stable fake progress
 around the daemon's quiet report. Each node process has one `Wait` owner and
 separate file output and trace. Setup marks a complete-line prefix without
 renumbering observations. Final traces are read only after exit; orderly stop

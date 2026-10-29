@@ -53,23 +53,24 @@ type generation struct {
 // Fixture owns a foreground daemon, input packages and a control listener across
 // daemon generations. Calls are serialized by the caller; Now is safe for writers.
 type Fixture struct {
-	root, home   string
-	binaries     Binaries
-	opts         Options
-	clockMu      sync.Mutex
-	now          time.Time
-	control      *fakectl.Server
-	client       *manageapi.Client
-	table        *txn.Table
-	files        *ledger.Dir
-	writer       *ledger.Writer
-	gens         map[int]*generation
-	current      *generation
-	steps        map[string]bool
-	step         string
-	op           uint64
-	bootstrapped bool
-	inputs       []adapterInput
+	root, home     string
+	binaries       Binaries
+	opts           Options
+	clockMu        sync.Mutex
+	now            time.Time
+	control        *fakectl.Server
+	client         *manageapi.Client
+	table          *txn.Table
+	files          *ledger.Dir
+	writer         *ledger.Writer
+	gens           map[int]*generation
+	current        *generation
+	steps          map[string]bool
+	step           string
+	op             uint64
+	inputs         []adapterInput
+	bootstrapSteps []bootstrapStep
+	bootstrapNext  int
 }
 
 func NewFixture(ctx context.Context, root string, binaries Binaries, opts Options) (*Fixture, error) {
@@ -280,11 +281,8 @@ func (f *Fixture) Start(ctx context.Context, spec GenerationSpec) (err error) {
 	if err = f.checkTable(ctx); err != nil {
 		return err
 	}
-	if !f.bootstrapped {
-		if err = f.bootstrap(ctx); err != nil {
-			return err
-		}
-		f.bootstrapped = true
+	if err = f.bootstrap(ctx); err != nil {
+		return err
 	}
 	if err = f.waitProbes(ctx); err != nil {
 		return err
@@ -318,11 +316,15 @@ func (f *Fixture) Manage(ctx context.Context, method string, in manageapi.Reques
 }
 
 func (f *Fixture) change(ctx context.Context, method string, version *admin.Version, params any) error {
+	_, err := f.Manage(ctx, method, f.changeRequest(version, params))
+	return err
+}
+
+func (f *Fixture) changeRequest(version *admin.Version, params any) manageapi.Request {
 	f.op++
 	var id admin.OperationID
 	binary.BigEndian.PutUint64(id[8:], f.op)
-	_, err := f.Manage(ctx, method, manageapi.Request{OperationID: id, ExpectedVersion: version, Params: params})
-	return err
+	return manageapi.Request{OperationID: id, ExpectedVersion: version, Params: params}
 }
 
 func (f *Fixture) Stop(ctx context.Context) error {

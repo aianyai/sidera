@@ -18,6 +18,11 @@ type adapterInput struct {
 	process        fakeadapter.ProcessConfig
 }
 
+type bootstrapStep struct {
+	method, collection string
+	request            manageapi.Request
+}
+
 func (f *Fixture) prepareInputs() error {
 	// Direct endpoints need no runtime-spawned CLI. That path must first have a
 	// public input seam for clearing inherited daemon crash controls.
@@ -36,6 +41,13 @@ func (f *Fixture) prepareInputs() error {
 		return err
 	}
 	f.inputs = []adapterInput{{source: source, config: config, process: fakeadapter.ProcessConfig{InstanceID: "fake", Manifest: opts, LedgerDir: filepath.Join(f.root, "l"), RuntimeDir: filepath.Join(f.root, "r"), RuntimeBinary: f.binaries.Runtime, RuntimeSeed: 1, RuntimeTestSeed: f.opts.Seed + "/runtime", Control: f.control.Addr()}}}
+	for _, in := range f.inputs {
+		f.bootstrapSteps = append(f.bootstrapSteps,
+			bootstrapStep{method: "adapters.install", request: manageapi.Request{Params: map[string]any{"source": in.source}}},
+			bootstrapStep{method: "adapters.enable", collection: "adapters.list", request: manageapi.Request{Params: map[string]any{"adapter": in.process.Manifest.ID, "instance": in.process.InstanceID}}},
+		)
+	}
+	f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "presets.add", collection: "presets.list", request: manageapi.Request{Params: map[string]any{"name": "fixture", "preset": map[string]any{"local_sources": "allow"}}}})
 	return f.writeInputs()
 }
 
@@ -67,21 +79,25 @@ func (f *Fixture) collectionVersion(ctx context.Context, method string) (admin.V
 }
 
 func (f *Fixture) bootstrap(ctx context.Context) error {
-	for _, in := range f.inputs {
-		if err := f.change(ctx, "adapters.install", nil, map[string]any{"source": in.source}); err != nil {
-			return fmt.Errorf("acceptance: install: %w", err)
+	for f.bootstrapNext < len(f.bootstrapSteps) {
+		step := &f.bootstrapSteps[f.bootstrapNext]
+		if step.request.OperationID.IsZero() {
+			var version *admin.Version
+			if step.collection != "" {
+				v, err := f.collectionVersion(ctx, step.collection)
+				if err != nil {
+					return err
+				}
+				version = &v
+			}
+			// Retain the whole request before sending: a killed daemon may have
+			// committed it even when no reply reached this fixture.
+			step.request = f.changeRequest(version, step.request.Params)
 		}
-		v, err := f.collectionVersion(ctx, "adapters.list")
-		if err != nil {
-			return err
+		if _, err := f.Manage(ctx, step.method, step.request); err != nil {
+			return fmt.Errorf("acceptance: bootstrap %s: %w", step.method, err)
 		}
-		if err = f.change(ctx, "adapters.enable", &v, map[string]any{"adapter": in.process.Manifest.ID, "instance": in.process.InstanceID}); err != nil {
-			return err
-		}
+		f.bootstrapNext++
 	}
-	v, err := f.collectionVersion(ctx, "presets.list")
-	if err != nil {
-		return err
-	}
-	return f.change(ctx, "presets.add", &v, map[string]any{"name": "fixture", "preset": map[string]any{"local_sources": "allow"}})
+	return nil
 }

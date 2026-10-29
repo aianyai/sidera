@@ -27,8 +27,12 @@ new foreground daemon, waits for public status to report `running`, checks the
 complete tagged crash-point table, and waits for enabled-instance probes and
 quiet. A tagged ping alone may answer while recovery is still running. Its first start
 installs the caller-owned fake package, enables the `fake` instance and adds the
-`fixture` preset through management. Later starts reuse the installed package;
-only the separate input configuration's clock origin is updated. The default
+`fixture` preset through management. Bootstrap retains each complete request,
+including its operation ID and expected version, before sending it. A later
+generation resumes at the first unanswered stage with that same request, so a
+committed change replays its stored result; completed stages are not repeated.
+Later starts reuse the installed package; only the separate input configuration's
+clock origin is updated. The default
 adapter provides direct endpoints. Runtime-driven CLI actions are not connected:
 the current fake process inputs cannot clear inherited daemon crash variables
 from the CLI a runtime starts.
@@ -67,7 +71,8 @@ The first `BeginStep` marks the setup prefix without resetting any ordinal.
 Tests build the four programs once per outer test process, from that checkout.
 The child builds follow the outer race build. They cover actual targeted
 termination, unexpected exits, restart after kill, clock and quiet, setup
-ordinals, trace rejection, and ordinary builds rejecting tagged controls while
-ignoring their environment variables. Their short roots are removed after each
+ordinals, bootstrap replay after a committed preset's response is lost, trace
+rejection, and ordinary builds rejecting tagged controls while ignoring their
+environment variables. Their short roots are removed after each
 run. Domain recipes, offline damage and crash-walk binding are separate callers
 of this process fixture.
