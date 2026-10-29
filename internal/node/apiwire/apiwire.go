@@ -15,6 +15,7 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/internal/node/daemonerr"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
@@ -197,8 +198,8 @@ func Malformed(message, path string) *Error {
 }
 
 // FromError maps an error to its words on the wire: the error of the wire itself
-// as it is, a refusal of the engine, a refused change of the configuration, a
-// fault in a request, a failure of the way to the daemon, an ended request
+// as it is, a fatal daemon failure, a refusal of the engine, a refused change of
+// the configuration, a fault in a request, a daemon or IPC failure, an ended request
 // context, and everything else as an internal error whose text stays out of the
 // answer. nil is nil.
 func FromError(err error) *Error {
@@ -206,6 +207,8 @@ func FromError(err error) *Error {
 		return nil
 	}
 	var we *Error
+	var fatal *daemonerr.FatalError
+	var pathErr *ipc.PathTooLongError
 	var ref *engine.Refusal
 	var ce *config.ChangeError
 	var se *strictjson.Error
@@ -213,6 +216,9 @@ func FromError(err error) *Error {
 	switch {
 	case errors.As(err, &we):
 		return we
+	// A stopped daemon takes precedence over the request refusal it may wrap.
+	case errors.As(err, &fatal):
+		return New(CategoryUnavailable, "daemon_storage_fatal", "a disk failure stopped the daemon; check the storage and restart the daemon so it can recover the data directory")
 	case errors.As(err, &ref):
 		return fromRefusal(ref)
 	case errors.As(err, &ce):
@@ -223,6 +229,20 @@ func FromError(err error) *Error {
 		return New(CategoryUnavailable, "peer_check_failed", pe.Error())
 	case errors.Is(err, ipc.ErrDaemonNotRunning):
 		return New(CategoryUnavailable, "daemon_not_running", "the daemon is not running; start it with `sidera daemon`")
+	case errors.As(err, &pathErr):
+		return New(CategoryInvalidArgument, "socket_path_too_long", pathErr.Error())
+	case errors.Is(err, daemonerr.ErrAlreadyRunning):
+		return New(CategoryConflict, "daemon_already_running", "another daemon or initialization holds this data directory's instance lock; wait for it to finish or use another data directory")
+	case errors.Is(err, daemonerr.ErrAlreadyInitialized):
+		return New(CategoryConflict, "data_directory_already_initialized", "this data directory is already initialized; start it with `sidera daemon` or use another data directory")
+	case errors.Is(err, daemonerr.ErrNotInitialized):
+		return New(CategoryUnavailable, "data_directory_not_initialized", "this data directory is not initialized; run `sidera init` for the selected data directory")
+	case errors.Is(err, daemonerr.ErrPermissions):
+		return New(CategoryRefused, "data_directory_unusable", "the data directory cannot be verified as a real directory private to its owner; check its ownership, permissions and path; symbolic links are not accepted")
+	case errors.Is(err, daemonerr.ErrEngineNotStopped):
+		return New(CategoryInternal, "engine_not_stopped", "the engine did not stop in time; the instance lock remains held until this process exits")
+	case errors.Is(err, ipc.ErrLockNotHeld):
+		return New(CategoryInternal, "instance_lock_not_held", "the local listener was opened without the data directory's instance lock; this is an internal startup error")
 	case errors.Is(err, context.Canceled):
 		return New(CategoryUnavailable, "request_canceled", "the request context was canceled")
 	case errors.Is(err, context.DeadlineExceeded):

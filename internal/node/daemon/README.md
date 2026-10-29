@@ -27,6 +27,12 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `Table`, `Declarations`, `Transactions`, `LayoutWork`, `RepairLayout` | The one table of the program's transactions, the two this package declares (`init` and `layout`), and the layout rule. |
 | `ClockStateEvery`, `CertificateCheckEvery`, `ArchiveSweepEvery` | The period of the clock state, of the look at the certificate, and of the archive sweep (the engine's: the daemon names only the period). |
 
+The five sentinel values are re-exported from the standard-library-only
+`daemonerr` leaf, and `FatalError` is a type alias to its declaration. Their
+identities, original text and unwrap chains are preserved. This lets `apiwire`
+recognize lifecycle failures without importing this composition root; all wire
+mapping stays in `apiwire`, and process exit policy stays here.
+
 ## Rules
 
 - **The order of the start is the log.** Every step logs `startup step N begin` and

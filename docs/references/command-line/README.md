@@ -134,6 +134,16 @@ including `--json`; no error body is emitted for usage errors. Human initializat
 and foreground-daemon failures print `error: <err>` on stderr, retaining the
 daemon's original explanation.
 
+Their JSON failures use the shared
+`apiwire` mapping for typed daemon and IPC errors: stable codes identify a held
+instance lock, an initialized or uninitialized directory, an unusable directory,
+a socket path that is too long, an engine that did not stop, a fatal daemon
+storage failure, or a listener missing its lock. Messages retain actionable
+advice without arbitrary wrapper or cause text; the
+[daemon reference](../daemon/README.md#errors-and-command-output) lists them.
+These local commands keep lifecycle exits in both modes: 0 for normal
+completion, 1 for ordinary failure and 74 for fatal storage failure.
+
 `mcp` reserves stdout for MCP messages even when `--json` is set. Process failures
 are diagnostics on stderr with the shared category exit code; a normal stdin
 EOF exits zero. Tool and RPC failures remain in MCP responses and do not terminate

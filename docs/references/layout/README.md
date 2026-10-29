@@ -35,6 +35,13 @@ Import directions:
   layers. This layering is a convention recorded, with its table and the
   exceptions, in [`internal/node/README.md`](../../../internal/node/README.md);
   no test checks it yet.
+- Error declarations needed by a composition root and a lower-layer mapper can
+  live in a standard-library-only leaf. `daemonerr` is such a layer 1 package:
+  `daemon` keeps its public exports through the same sentinel values and a type
+  alias, while `apiwire` imports the declarations directly. Lifecycle operations
+  remain in `daemon`; wire categories, codes and messages remain in `apiwire`.
+  This avoids a reverse import of the composition root without a registry or a
+  second mapping.
 - `cmd/sidera/...` may import any runtime package.
 
 Three rules bind every runtime package:

@@ -19,6 +19,7 @@ import (
 
 	cliagent "github.com/aianyai/sidera/cmd/sidera/internal/acceptance/agent/cli"
 	"github.com/aianyai/sidera/internal/node/agentapi"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/internal/node/manageapi"
@@ -629,15 +630,49 @@ func TestInitPrintsIdentityAndBackupInstructions(t *testing.T) {
 	if !strings.HasPrefix(string(out), "Back up your self-revocation outside this device.") || !strings.Contains(string(out), "home "+home+"\n") || !strings.Contains(string(out), "sidera identity export-revocation") {
 		t.Fatalf("init output: %q", out)
 	}
-	cmd = exec.Command(binary(t), "--json", "--home", home, "init")
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err == nil {
-		t.Fatal("second init succeeded")
+	for _, jsonMode := range []bool{false, true} {
+		for _, tc := range []struct {
+			command string
+			home    string
+			code    string
+			action  string
+			human   string
+		}{
+			{"init", home, "data_directory_already_initialized", "start it with `sidera daemon`", "daemon: this data directory is already initialized"},
+			{"daemon", parent, "data_directory_not_initialized", "run `sidera init`", "daemon: this data directory is not initialized; run `sidera init`"},
+		} {
+			args := []string{"--home", tc.home, tc.command}
+			if jsonMode {
+				args = append(args, "--json")
+			}
+			cmd = exec.Command(binary(t), args...)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			if err := cmd.Run(); err == nil || cmd.ProcessState.ExitCode() != 1 {
+				t.Fatalf("%v: exit = %v; want 1", args, err)
+			}
+			if jsonMode {
+				var body apiwire.Body
+				if err := json.Unmarshal(stdout.Bytes(), &body); err != nil || body.Error.Code != tc.code || !strings.Contains(body.Error.Message, tc.action) || stderr.Len() != 0 {
+					t.Fatalf("%v: output %q %q: %v", args, &stdout, &stderr, err)
+				}
+			} else if stdout.Len() != 0 || !strings.HasPrefix(stderr.String(), "error: ") || !strings.Contains(stderr.String(), tc.human) {
+				t.Fatalf("%v: output %q %q", args, &stdout, &stderr)
+			}
+		}
 	}
-	if !strings.Contains(stdout.String(), `"error"`) || stderr.Len() != 0 {
-		t.Fatalf("second init output %q %q", &stdout, &stderr)
+	if runtime.GOOS != "windows" {
+		longHome := filepath.Join(parent, strings.Repeat("x", 110))
+		cmd = exec.Command(binary(t), "--json", "--home", longHome, "init")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		if err := cmd.Run(); err == nil || cmd.ProcessState.ExitCode() != 1 {
+			t.Fatalf("long home: exit = %v; want 1", err)
+		}
+		var body apiwire.Body
+		if err := json.Unmarshal(stdout.Bytes(), &body); err != nil || body.Error.Code != "socket_path_too_long" || !strings.Contains(body.Error.Message, longHome) || !strings.Contains(body.Error.Message, "use a shorter data directory (--home or SIDERA_HOME)") || stderr.Len() != 0 {
+			t.Fatalf("long home: output %q %q: %v", &stdout, &stderr, err)
+		}
 	}
 }
 
@@ -992,6 +1027,20 @@ func startDaemon(t *testing.T) (string, <-chan error) {
 
 func TestManagementDaemonLifecycleAndAdapterCommands(t *testing.T) {
 	home, done := startDaemon(t)
+	for _, args := range [][]string{{"daemon"}, {"daemon", "--json"}} {
+		code, out, diag := runHome(t, home, args...)
+		if code != 1 {
+			t.Fatalf("second daemon: %d %q %q", code, out, diag)
+		}
+		if len(args) == 2 {
+			var body apiwire.Body
+			if err := json.Unmarshal([]byte(out), &body); err != nil || body.Error.Code != "daemon_already_running" || !strings.Contains(body.Error.Message, "wait for it to finish or use another data directory") || diag != "" {
+				t.Fatalf("second daemon: %d %q %q: %v", code, out, diag, err)
+			}
+		} else if out != "" || !strings.Contains(diag, "daemon: a daemon is already running on this data directory") {
+			t.Fatalf("second daemon: %d %q %q", code, out, diag)
+		}
+	}
 	code, out, diag := runHome(t, home, "status")
 	if code != 0 || diag != "" || !strings.Contains(out, "daemon.state running") || !strings.HasPrefix(out, "The statement that can retire this node") {
 		t.Fatalf("status: %d %q %q", code, out, diag)

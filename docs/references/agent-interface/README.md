@@ -194,15 +194,24 @@ producers must keep request bodies, credentials and private keys out of them.
 
 | Category | HTTP | Command exit | Representative codes |
 | --- | --- | --- | --- |
-| `invalid_argument` | 400 | 3 | `malformed_request`, `request_too_large`, `single_recipient_only`, `empty_patch`, `cursor_invalid`, `probe_frontend_mismatch` |
+| `invalid_argument` | 400 | 3 | `malformed_request`, `request_too_large`, `single_recipient_only`, `empty_patch`, `cursor_invalid`, `probe_frontend_mismatch`, `socket_path_too_long` |
 | `unauthenticated` | 401 | 4 | `token_missing`, `token_malformed`, `token_unknown`, `probe_token_used`, `probe_token_expired` |
 | `not_found` | 404 | 5 | `method_unknown`, `message_unknown`, `lease_unknown`, `endpoint_unknown`, `instance_unknown` |
-| `conflict` | 409 | 6 | `idempotency_conflict` |
-| `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind` |
+| `conflict` | 409 | 6 | `idempotency_conflict`, `daemon_already_running`, `data_directory_already_initialized` |
+| `refused` | 422 | 7 | Delivery refusals such as `too_large`, `endpoint_kind`; `data_directory_unusable` |
 | `backpressure` | 429 | 8 | `node_queue_full`, `storage_full`, `storage_unavailable`, `clock_rollback`, `loop_busy` |
-| `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable`, `request_canceled`, `request_timeout` |
-| `internal` | 500 | 1 | `internal` |
+| `unavailable` | 503 | 9 | `daemon_not_running`, `peer_check_failed`, `recovering`, `probe_only`, `shutting_down`, `directory_unavailable`, `request_canceled`, `request_timeout`, `data_directory_not_initialized`, `daemon_storage_fatal` |
+| `internal` | 500 | 1 | `internal`, `engine_not_stopped`, `instance_lock_not_held` |
 | `outcome_unknown` | 500 | 10 | `outcome_unknown`, `storage_fatal` |
+
+The command exits above are the shared category defaults. Local `init` and
+foreground `daemon` use their lifecycle exits instead: 0 for normal completion,
+1 for ordinary failure and 74 for fatal storage failure, including with `--json`.
+Their typed failures share this mapping; they are not Agent endpoint methods.
+The [daemon reference](../daemon/README.md#errors-and-command-output) describes
+the codes and actionable messages. `daemon_storage_fatal` means the daemon
+stopped and must recover on restart; an engine request with an uncertain outcome
+retains `outcome_unknown/storage_fatal`.
 
 An emitted stable code is never renamed, removed or reused for another meaning.
 Directory timeout is a known unavailable result, not an unknown message outcome.

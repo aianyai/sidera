@@ -161,6 +161,43 @@ What the owner can do to the directory afterwards, and what follows:
   that cannot leave a result for an effect that did not happen; an operation is
   written so that doing it again is harmless.
 
+### Errors and command output
+
+The daemon retains its five exported sentinel values and `FatalError` type.
+Their declarations live in the standard-library-only `daemonerr` leaf; `daemon`
+re-exports the same sentinel values and aliases the type, preserving `errors.Is`,
+`errors.As`, original error text and `Unwrap`. The lower-layer `apiwire` mapper
+can therefore recognize them without importing the composition root.
+
+`apiwire.FromError` owns these shared mappings, including wrapped errors:
+
+| Error | Category | Stable code | Action described by the message |
+| --- | --- | --- | --- |
+| `*ipc.PathTooLongError` | `invalid_argument` | `socket_path_too_long` | Use a shorter `--home` or `SIDERA_HOME`; the extracted error names the path, byte length and platform limit. |
+| `ErrAlreadyRunning` | `conflict` | `daemon_already_running` | Wait for the daemon or initialization holding the instance lock, or use another data directory. |
+| `ErrAlreadyInitialized` | `conflict` | `data_directory_already_initialized` | Start with `sidera daemon`, or use another data directory. |
+| `ErrNotInitialized` | `unavailable` | `data_directory_not_initialized` | Run `sidera init` for the selected directory. |
+| `ErrPermissions` | `refused` | `data_directory_unusable` | Check ownership, permissions and path; the root must be a real directory private to its owner, and symbolic links are refused. |
+| `ErrEngineNotStopped` | `internal` | `engine_not_stopped` | The instance lock stays held until this process exits. |
+| `*FatalError` | `unavailable` | `daemon_storage_fatal` | Check storage and restart the daemon to recover the data directory. |
+| `ipc.ErrLockNotHeld` | `internal` | `instance_lock_not_held` | The listener was opened without the instance lock: an internal startup error. |
+
+An existing wire error takes precedence. A `FatalError` takes precedence over
+an engine refusal in its cause: a daemon that stopped requires recovery, while
+a standalone engine storage-fatal refusal still means
+`outcome_unknown/storage_fatal` for a request. All new daemon and missing-lock
+messages are fixed, without outer wrapper text or underlying causes. IPC
+path-length errors use only the extracted typed error's explanation; the
+existing peer-check mapping is unchanged. Untyped filesystem and hook errors
+retain their existing mapping or the fixed `internal/internal` fallback.
+
+The local `init` and foreground `daemon` commands use these mappings for JSON
+failures; human failures retain the original daemon explanation on stderr.
+Their exit policy remains `daemon.ExitCode`: normal completion 0, ordinary
+failure 1, fatal storage failure 74, independent of the JSON category's generic
+command exit code. The [command-line reference](../command-line/README.md)
+describes the output streams.
+
 ### The instance lock and the permissions
 
 The root and `keys/` are checked before anything is written, before the lock is

@@ -12,6 +12,7 @@ import (
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/ipc"
 	"github.com/aianyai/sidera/sdk/go/strictjson"
@@ -231,6 +232,37 @@ func TestTheClientSideFailuresOfTheWayToTheDaemon(t *testing.T) {
 	}
 }
 
+func TestDaemonAndListenerFailuresKeepActionableMessages(t *testing.T) {
+	pathErr := &ipc.PathTooLongError{Path: "/selected/home/agent.sock", Length: 180, Limit: 103}
+	for _, tc := range []struct {
+		name    string
+		err     error
+		want    want
+		message string
+	}{
+		{"socket path", pathErr, want{"invalid_argument", "socket_path_too_long"}, `ipc: socket path "/selected/home/agent.sock" is 180 bytes, the limit on this platform is 103; use a shorter data directory (--home or SIDERA_HOME)`},
+		{"instance lock", daemon.ErrAlreadyRunning, want{"conflict", "daemon_already_running"}, "another daemon or initialization holds this data directory's instance lock; wait for it to finish or use another data directory"},
+		{"initialized", daemon.ErrAlreadyInitialized, want{"conflict", "data_directory_already_initialized"}, "this data directory is already initialized; start it with `sidera daemon` or use another data directory"},
+		{"not initialized", daemon.ErrNotInitialized, want{"unavailable", "data_directory_not_initialized"}, "this data directory is not initialized; run `sidera init` for the selected data directory"},
+		{"permissions", daemon.ErrPermissions, want{"refused", "data_directory_unusable"}, "the data directory cannot be verified as a real directory private to its owner; check its ownership, permissions and path; symbolic links are not accepted"},
+		{"engine not stopped", daemon.ErrEngineNotStopped, want{"internal", "engine_not_stopped"}, "the engine did not stop in time; the instance lock remains held until this process exits"},
+		{"fatal storage", &daemon.FatalError{Err: errors.New("secret-token")}, want{"unavailable", "daemon_storage_fatal"}, "a disk failure stopped the daemon; check the storage and restart the daemon so it can recover the data directory"},
+		{"fatal engine cause", &daemon.FatalError{Err: &engine.Refusal{Reason: engine.ReasonStorageFatal, Err: errors.New("secret-token")}}, want{"unavailable", "daemon_storage_fatal"}, "a disk failure stopped the daemon; check the storage and restart the daemon so it can recover the data directory"},
+		{"listener lock", ipc.ErrLockNotHeld, want{"internal", "instance_lock_not_held"}, "the local listener was opened without the data directory's instance lock; this is an internal startup error"},
+		{"bare peer sentinel", ipc.ErrPeerCheckFailed, want{"internal", "internal"}, "internal error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, err := range []error{tc.err, fmt.Errorf("secret-token: %w", tc.err)} {
+				got := apiwire.FromError(err)
+				check(t, got, tc.want)
+				if got.Message != tc.message || strings.Contains(got.Message, "secret-token") || got.Details != nil {
+					t.Errorf("mapped error = %+v; want message %q without wrapper or cause text or details", got, tc.message)
+				}
+			}
+		})
+	}
+}
+
 func TestTheDenialOfAnAdministrativeOperation(t *testing.T) {
 	for _, tc := range []struct {
 		reason admin.Reason
@@ -266,7 +298,7 @@ func TestAnUnknownErrorIsInternalAndKeepsItsTextOffTheWire(t *testing.T) {
 // wrapped on the way.
 func TestAnErrorOfTheWireIsReturnedAsItIs(t *testing.T) {
 	e := &apiwire.Error{Category: apiwire.CategoryNotFound, Code: "method_unknown", Message: "no such method"}
-	got := apiwire.FromError(fmt.Errorf("serving: %w", e))
+	got := apiwire.FromError(&daemon.FatalError{Err: fmt.Errorf("serving: %w", e)})
 	if got != e {
 		t.Errorf("got %+v, want the error that was wrapped", got)
 	}
@@ -352,7 +384,7 @@ func TestNoTwoCategoriesShareAnExitCode(t *testing.T) {
 var listedInvalidArgumentCodes = []string{
 	"malformed_request", "request_too_large", "single_recipient_only", "empty_patch", "cursor_invalid",
 	"probe_frontend_mismatch", "node_mismatch", "digest_mismatch", "unexpected_version", "method_not_allowed",
-	"config_invalid", "source_unreadable",
+	"config_invalid", "source_unreadable", "socket_path_too_long",
 }
 
 func TestAnInvalidArgumentIsAnsweredWithACodeTheCategoryListsAndNeverAMadeUpOne(t *testing.T) {
@@ -373,6 +405,7 @@ func TestAnInvalidArgumentIsAnsweredWithACodeTheCategoryListsAndNeverAMadeUpOne(
 		{"a value of the configuration that is not acceptable", &config.ChangeError{Reason: config.ChangeInvalid, Field: "settings.x"}, "config_invalid"},
 		{"a patch that names nothing", &config.ChangeError{Reason: config.ChangeNothingToChange}, "empty_patch"},
 		{"a fault in the request", &strictjson.Error{Path: "params.x", Msg: "unknown field"}, "malformed_request"},
+		{"a socket path that is too long", &ipc.PathTooLongError{Path: "/x", Length: 2, Limit: 1}, "socket_path_too_long"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := apiwire.FromError(tc.err)

@@ -20,6 +20,7 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | ----- | -------- | ---------- |
 | 0 | contract packages in `internal/` (this tree excluded), `sdk/go/...` | the standard library, each other, approved third-party dependencies |
 | 1 | `fsx`, `clock` | layer 0, the standard library, `golang.org/x/sys`; `fsx` may import `clock` only to obtain the real clock |
+| 1 | `daemonerr` | the standard library only: daemon error declarations shared with the wire mapper; no lifecycle or wire policy |
 | 1, test support | `fsx/fsxtest`, `clock/clocktest` | their parent package, layer 0 |
 | 2 | `txn` | `fsx` |
 | 2 | `recfile` | the standard library only: the framing of a record file (first line, checksum, file name), shared by the owners of records |
@@ -27,7 +28,7 @@ fits what it imports, and packages that are not in the tree yet are planned.
 | 3 | `store`, `keys`, `config` | `txn`, `recfile`, layer 0; from `fsx` and `clock` only types, so none of them can obtain a writable file system or read the time |
 | 4 | `transport`, `adapterhost`, `ipc` | layers 0 to 3; `ipc` checks directories only through the read-only part of `fsx` |
 | 5 | `engine` | layers 0 to 4; it reaches `store`, `transport` and `clock` through interfaces |
-| 6 | `apiwire` | `engine`, `config`, `ipc`, `adapterhost`, layer 0: the words of the wire (category, code, exit code; the adapter protocol's codes for the requests of an adapter) for what the engine and the layers below say; the engine never speaks them |
+| 6 | `apiwire` | `engine`, `config`, `ipc`, `adapterhost`, `daemonerr`, layer 0: the words of the wire (category, code, exit code; the adapter protocol's codes for the requests of an adapter) for what the engine and the layers below say; the engine never speaks them |
 | 7 | `localhttp` | `apiwire`, `ipc`, layer 0: the shared local HTTP transport, exact method routing, bounded bodies and responses |
 | 8 | `agentapi`, `manageapi` | the `engine` service interface, `localhttp`, `ipc`, `apiwire`, layer 0 |
 | 9 | `daemon` | everything above; the composition root that wires the packages together |

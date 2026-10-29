@@ -252,8 +252,8 @@ made, and `Listen` takes only the address of the management interface; a scan in
 | ----------------------- | --------------------------------------------------------------------- | ------------------------------------- |
 | `ErrDaemonNotRunning`   | Socket or directory absent, `ECONNREFUSED`, pipe not found            | `unavailable`/`daemon_not_running`    |
 | `*PeerCheckError`       | A check failed; carries the `Failure`, the path and the system error  | `unavailable`/`peer_check_failed`     |
-| `*PathTooLongError`     | The socket path exceeds the platform limit                            | `init`, start and connect each report it |
-| `ErrLockNotHeld`        | `Listen` without the caller's assertion that it holds the instance lock | programming error                   |
+| `*PathTooLongError`     | The socket path exceeds the platform limit                            | `invalid_argument`/`socket_path_too_long`; the extracted error keeps the path, byte length, limit and shorter-directory advice |
+| `ErrLockNotHeld`        | `Listen` without the caller's assertion that it holds the instance lock | `internal`/`instance_lock_not_held`, with a fixed startup-error explanation |
 
 The `Failure` values of a `*PeerCheckError` are stable strings:
 

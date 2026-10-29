@@ -20,6 +20,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/internal/node/daemonerr"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/ipc"
@@ -40,29 +41,24 @@ const ExitFatal = 74
 var (
 	// ErrAlreadyRunning: another daemon, or an init, holds the instance lock of the
 	// data directory.
-	ErrAlreadyRunning = errors.New("daemon: a daemon is already running on this data directory")
+	ErrAlreadyRunning = daemonerr.ErrAlreadyRunning
 	// ErrAlreadyInitialized: init finished on this data directory; it is not made
 	// again and nothing is changed.
-	ErrAlreadyInitialized = errors.New("daemon: this data directory is already initialized")
+	ErrAlreadyInitialized = daemonerr.ErrAlreadyInitialized
 	// ErrNotInitialized: there is no data directory that init finished; run init.
-	ErrNotInitialized = errors.New("daemon: this data directory is not initialized; run `sidera init`")
+	ErrNotInitialized = daemonerr.ErrNotInitialized
 	// ErrPermissions: the data directory is not a directory only its owner can
 	// reach. Nothing is narrowed: the owner decides what becomes of it.
-	ErrPermissions = errors.New("daemon: the data directory is not private to its owner")
+	ErrPermissions = daemonerr.ErrPermissions
 	// ErrEngineNotStopped: the engine did not end within the grace of the shutdown,
 	// so it may still be writing, and the instance lock stays held until the
 	// process exits. Whoever gets this ends the process.
-	ErrEngineNotStopped = errors.New("daemon: the engine did not stop in time; the instance lock is held until the process exits")
+	ErrEngineNotStopped = daemonerr.ErrEngineNotStopped
 )
 
 // FatalError is how a daemon that ended because of a fatal failure of the disk
-// reports it.
-type FatalError struct{ Err error }
-
-func (e *FatalError) Error() string {
-	return "daemon: stopped by a failure of the disk: " + e.Err.Error()
-}
-func (e *FatalError) Unwrap() error { return e.Err }
+// reports it. The alias preserves the error type shared with the wire mapper.
+type FatalError = daemonerr.FatalError
 
 // ExitCode is the exit code of a process whose daemon ended with err: 0 for a
 // normal shutdown, ExitFatal for a fatal failure of the disk, 1 for anything else.
