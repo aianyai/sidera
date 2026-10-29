@@ -6,13 +6,14 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 func deliveryRecipes(b Bindings) []ScriptRecipe {
-	return []ScriptRecipe{sendRecipe(), replyRecipe(), registrationRecipe(), secondCheckRecipe(), expiryRecipe(), redeliveryRecipe(), replyAfterFailureRecipe(b)}
+	return []ScriptRecipe{sendRecipe(), replyRecipe(), registrationRecipe(), secondCheckRecipe(), expiryRecipe(), redeliveryRecipe(), replyAfterFailureRecipe(b), unreachableRecipe()}
 }
 
 func sendRecipe() ScriptRecipe {
@@ -203,4 +204,29 @@ func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
 		}
 		return b.Recovery.CheckClosedRecords(e)
 	}}
+}
+
+func unreachableRecipe() ScriptRecipe {
+	facts := &DeliveryEvidence{}
+	return ScriptRecipe{Script: scenario.Script{Name: "delivery-unreachable", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 48}, Steps: []scenario.Step{
+		{Name: "send-to-an-absent-node", Do: func(e scenario.Env) error {
+			target, err := ident.ParseAddress(e.Addr("receiver"))
+			if err != nil {
+				return err
+			}
+			bytes := target.Node.Bytes()
+			bytes[0] ^= 0x80
+			node, err := ident.NodeIDFromBytes(bytes)
+			if err != nil {
+				return err
+			}
+			target.Node = node
+			r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{target.String()}, Body: "An unreachable node must produce real deadline feedback."})
+			if err == nil {
+				facts.Accepted(r, "An unreachable node must produce real deadline feedback.")
+				facts.RequireFeedback(r.MessageID, target.String(), delivery.KindExpiredUnconfirmed)
+			}
+			return err
+		}}, scenario.Advance("report-deadline", 4*time.Hour),
+	}}, Drain: func(e scenario.Env) error { return drainFeedback(e, facts, "sender") }, Check: facts.Check}
 }

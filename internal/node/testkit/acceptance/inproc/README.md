@@ -75,3 +75,9 @@ recipe calls the clock writer or reproduces the daemon's periodic task.
 at the first source-update create, before any visible source-record replacement.
 The recipe checks the sender's real queued status, then completes receive and
 reply through the ordinary Agent entry points without transport controls.
+
+Retention recipes enable the existing periodic archive sweep on the fixture.
+`newMaintenanceOps` reduces real records and parsed archive files to the requested
+retention facts; malformed archive lines fail the audit. The mutation that omits
+archive expiry must fail, and representative real cuts before and during the
+sweep must still finish the bounded drain and pass its domain judgement.

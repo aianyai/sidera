@@ -24,7 +24,7 @@ type SessionOps struct {
 }
 
 func sessionRecipes(b Bindings) []ScriptRecipe {
-	return []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b), sessionExpiryRecipe(b), blockedRecipe(b)}
+	return []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}, 62), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", nil, 24), sessionExpiryRecipe(b), blockedRecipe(b)}
 }
 
 type createdSession struct {
@@ -169,24 +169,28 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 	}}
 }
 
-func failedCreationRecipe(b Bindings) ScriptRecipe {
+func failedCreationRecipe(b Bindings, name, preset string, failure *fakeadapter.Outcome, pointBudget int) ScriptRecipe {
 	var message adapterproto.MessageID
-	return ScriptRecipe{Script: scenario.Script{Name: "session-create-failure", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 62}, Steps: []scenario.Step{
-		{Name: "refuse-create", Do: func(e scenario.Env) error {
+	var steps []scenario.Step
+	if failure != nil {
+		steps = append(steps, scenario.Step{Name: "refuse-create", Do: func(e scenario.Env) error {
 			c, err := e.Adapter("chat")
 			if err != nil {
 				return err
 			}
-			return c.SetOutcome(e.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)})
-		}},
+			return c.SetOutcome(e.Ctx(), fakeadapter.RequestCreate, *failure)
+		}})
+	}
+	steps = append(steps, []scenario.Step{
 		{Name: "create", Do: func(e scenario.Env) error {
-			r, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: "A failed creation must not deliver this body."})
+			r, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: preset, Body: "A failed creation must not deliver this body."})
 			if err == nil {
 				message = r.MessageID
 			}
 			return err
 		}}, scenario.Advance("reply-pull", time.Minute),
-	}}, Drain: func(e scenario.Env) error { return drainFeedback(e, &DeliveryEvidence{}, "sender") }, Check: func(e scenario.Env) error {
+	}...)
+	return ScriptRecipe{Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: pointBudget}, Steps: steps}, Drain: func(e scenario.Env) error { return drainFeedback(e, &DeliveryEvidence{}, "sender") }, Check: func(e scenario.Env) error {
 		if message == "" {
 			return nil
 		}
@@ -225,7 +229,7 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 				message = r.MessageID
 			}
 			return err
-		}}, scenario.Advance("control-deadline", 31*time.Minute),
+		}}, scenario.Advance("control-deadline", 4*time.Hour),
 	}}, Drain: func(e scenario.Env) error {
 		c, err := e.Adapter("chat")
 		if err != nil {
@@ -246,8 +250,25 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 		if err != nil {
 			return err
 		}
-		if status.ControlReply != nil && status.ControlReply.Create != nil && status.ControlReply.Create.Outcome == adapterproto.CreateReplyCreated {
-			return fmt.Errorf("expired held creation falsely returned created")
+		if status.ControlReply == nil || status.ControlReply.Create == nil || status.ControlReply.Create.Outcome != adapterproto.CreateReplyUnconfirmed || status.ControlReply.Create.Reason != adapterproto.CreateReasonReadyTimeout {
+			return fmt.Errorf("expired held creation has no unconfirmed ready_timeout reply: %+v", status)
+		}
+		endpoint := string(status.ControlReply.Create.SessionEndpoint)
+		runtime, err := ident.ParseAddress(b.Sessions.RuntimeAddr(e, "chat"))
+		if err != nil {
+			return err
+		}
+		id, err := ident.ParseEndpointID(endpoint)
+		if err != nil {
+			return err
+		}
+		target := ident.Address{Node: runtime.Node, Endpoint: id}.String()
+		// The control reply itself was delivered. Its initial body is a separate
+		// derived delivery to the allocated session, whose report window expired.
+		facts.Accepted(fakeagent.SendResult{MessageID: message, To: []string{target}}, "An expired control must not claim a successful creation.")
+		facts.RequireFeedback(message, target, delivery.KindAcceptedUnconfirmed)
+		if err := b.Sessions.CheckClosedSession(e, endpoint); err != nil {
+			return err
 		}
 		return facts.Check(e)
 	}}

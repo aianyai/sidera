@@ -107,3 +107,25 @@ before explicitly ending the turn. Ending it earlier races an idle-triggered
 prompt against the drain and changes the recording. A repeated drain may find the
 turn already ended and accepts only the named `ErrNoTurn`; other failures remain
 errors. The final domain check rejects an extra prompt or an unfinished turn.
+
+A synchronous unknown-preset refusal includes the failed control reply in the
+first receipt, releasing the source's initial body in the control-reply write.
+The adapter-refusal and unknown-preset variants have 41 and 16 main points, with
+fixed budgets of 62 and 24. A held creation past its report window must return
+`unconfirmed/ready_timeout` naming a closed session with no token. Its control
+signal can be delivered while its separate initial-message delivery is still
+unknown: the exact `accepted_unconfirmed` notice must name the derived session,
+not the runtime control target. The creation-expiry budget is 104 from 69 points.
+
+An absent-node delivery exercises the source's report deadline without a
+transport knob. The real sender receives its exact `expired_unconfirmed` notice;
+the source cannot be treated as expired merely because no call was answered at
+the earlier delivery deadline. Its 32-point recording has a fixed budget of 48.
+
+The retention recipe reads a created session's initial body, sends and reads a
+message from it, and closes the native session. Actual periodic sweeps must leave
+intact archive summaries after the live records, bodies and closed endpoint are
+gone, then remove those files after archive retention. `MaintenanceOps` returns
+only these final facts from a read-only audit. A drain interrupted before the
+sweep resumes from external creation results and performs bounded retention
+advances. Its 140-point recording has a fixed budget of 210.

@@ -554,3 +554,18 @@ so an early idle notification cannot race another prompt against the drain. The
 drain is repeatable after crashes and accepts an already-ended turn only through
 the fake runtime's named `ErrNoTurn`. Its domain check requires every started
 round to end and rejects prompts outside that explicit round.
+
+Acceptance distinguishes a control signal's delivery from the initial message
+it derives. An overdue held creation returns the real unconfirmed timeout reply;
+its allocated endpoint must be closed with its token cleared. If the initial
+message passed its report window while accepted, its actual uncertainty notice
+must name that derived session endpoint. A delivered control reply does not prove
+the initial body reached a model. Synchronous preset refusal is a separate variant
+whose first receipt can release the retained initial body.
+
+The retention acceptance path creates, reads from, sends from and closes a real
+session, then advances through record and archive retention using the existing
+periodic sweep. Read-only evidence requires real intact summaries after live
+records are swept, and no remaining archive files after their retention. Its
+bounded drain completes representative real interruptions without synthesizing
+records, summaries or cleanup effects.
