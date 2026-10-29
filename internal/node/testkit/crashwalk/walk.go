@@ -48,6 +48,9 @@ type Backend interface {
 type Options struct {
 	Mode  Mode
 	Shard Shard
+	// Coverage assigns this layer's coverage responsibility on the complete table.
+	// Nil requires every declaration, as does CheckRecoveryCases.
+	Coverage *CoveragePartition
 	// RecoveryTriggers adds trigger-only recordings to those supplied by cases.
 	RecoveryTriggers []RecoveryTrigger
 	// Observe receives run start/end pairs and a Skipped notification for the
@@ -76,6 +79,9 @@ type Event struct {
 
 // Report counts what a walk did.
 type Report struct {
+	// Coverage is a copy of the validated partition; nil means the whole table.
+	// Normal and Recovery still count actual hits against the complete table.
+	Coverage     *CoveragePartition
 	Recordings   int
 	MainRuns     int
 	BoundaryRuns int
@@ -123,14 +129,19 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 	if opts.Shard.Count == 0 {
 		opts.Shard = Shard{Index: 1, Count: 1}
 	}
-	if err := CheckRecoveryCases(table, scenarios); err != nil {
+	coverage, required, err := coveragePartition(table, opts.Coverage, len(scenarios) > 0)
+	if err != nil {
+		return rep, err
+	}
+	rep.Coverage = coverage
+	if err := checkRecoveryCases(table, scenarios, required); err != nil {
 		return rep, err
 	}
 	kinds := map[fsx.Key]txn.Kind{}
 	for _, k := range table.Keys() {
 		kinds[k.Key] = k.Kind
 	}
-	w := walker{ctx: ctx, b: b, opts: opts, kinds: kinds, rep: &rep, chosen: chosenRecovery(scenarios, opts.Mode)}
+	w := walker{ctx: ctx, b: b, opts: opts, kinds: kinds, required: required, rep: &rep, chosen: chosenRecovery(scenarios, opts.Mode)}
 	triggers, err := recordingTriggers(scenarios, opts.RecoveryTriggers)
 	if err != nil {
 		return rep, err
@@ -161,11 +172,11 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 	rep.Sources = analysis.Sources
 	rep.Normal, rep.Recovery = analysis.Coverage.Normal, analysis.Coverage.Recovery
 	rep.RecoveryNormalPlanned = len(analysis.Targets)
-	if len(analysis.Coverage.MissingNormal) > 0 {
-		return rep, missingWrites("declared writes were never reached by any recording", analysis.Coverage.MissingNormal)
+	if missing := requiredKeys(analysis.Coverage.MissingNormal, required); len(missing) > 0 {
+		return rep, missingWrites("declared writes were never reached by any recording", missing)
 	}
-	if opts.Mode == Full && len(analysis.Coverage.MissingRecovery) > 0 {
-		return rep, missingWrites("recovery writes were never reached by any complete generation-2 recording", analysis.Coverage.MissingRecovery)
+	if missing := requiredKeys(analysis.Coverage.MissingRecovery, required); opts.Mode == Full && len(missing) > 0 {
+		return rep, missingWrites("recovery writes were never reached by any complete generation-2 recording", missing)
 	}
 	for _, s := range scenarios {
 		if err := w.mainRuns(s, recordings[s.Name()]); err != nil {
@@ -195,12 +206,13 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 }
 
 type walker struct {
-	ctx   context.Context
-	b     Backend
-	opts  Options
-	kinds map[fsx.Key]txn.Kind
-	rep   *Report
-	next  int // runs planned so far, for sharding
+	ctx      context.Context
+	b        Backend
+	opts     Options
+	kinds    map[fsx.Key]txn.Kind
+	required map[fsx.Key]bool
+	rep      *Report
+	next     int // runs planned so far, for sharding
 	// chosen are the recovery writes the mode runs a case for, over all scenarios.
 	chosen    map[fsx.Key]bool
 	recovered []RecoveryRecord
@@ -241,18 +253,26 @@ func (w *walker) run(phase string, s Scenario, p RunPlan, tg Target, c RecoveryC
 	// A write that no declaration lists ends the walk at once: it means a write
 	// that does not go through a declared transaction, and running thousands of
 	// kills before saying so would waste the time of whoever reads the failure.
-	var undeclared []string
+	var undeclared, elsewhere []string
 	seen := map[fsx.Key]bool{}
 	for _, gen := range res.Hits {
 		for _, h := range gen {
-			if _, declared := w.kinds[h.Point.Key]; !declared && !seen[h.Point.Key] {
-				seen[h.Point.Key] = true
+			if seen[h.Point.Key] {
+				continue
+			}
+			seen[h.Point.Key] = true
+			if _, declared := w.kinds[h.Point.Key]; !declared {
 				undeclared = append(undeclared, h.Point.Key.String())
+			} else if !w.required[h.Point.Key] {
+				elsewhere = append(elsewhere, h.Point.Key.String())
 			}
 		}
 	}
 	if len(undeclared) > 0 {
 		return res, fmt.Errorf("crashwalk: scenario %q made undeclared writes: %s; every write goes through a declared transaction", s.Name(), strings.Join(undeclared, ", "))
+	}
+	if len(elsewhere) > 0 {
+		return res, fmt.Errorf("crashwalk: scenario %q reached CoveredElsewhere writes: %s; coverage partition disagrees with actual sources", s.Name(), strings.Join(elsewhere, ", "))
 	}
 	return res, nil
 }

@@ -19,6 +19,7 @@ the runs through `Options.Observe`.
 | ---- | ------- |
 | `Walk(ctx, backend, table, scenarios, options)` | The whole walk: a recording per scenario, the planned runs that belong to the shard, the recovery cases, the checks below. Returns a `Report` of what it ran. |
 | `Backend`, `RunPlan`, `RunResult`, `Target`, `Trigger` | The interface a backend implements and what it is asked and answers. |
+| `CoveragePartition`, `Options.Coverage` | Assign every key of the full table to this layer or another layer; nil retains whole-table coverage. |
 | `Scenario` | What the walk needs of a script: its name, its step names, its budget and its recovery cases. |
 | `Plan`, `PlanRecovery` | The targets of a mode, in the canonical order that sharding numbers by. |
 | `AnalyzeSources`, `CheckRecoveryTarget` | Derive the three coverage sources and actual recovery-only Normal targets; verify a second interruption against its complete baseline. |
@@ -81,6 +82,20 @@ the runs through `Options.Observe`.
   sets: Normal in clean runs, Normal only in complete recovery, and Recovery in
   complete recovery. Normal coverage is the union of the first two. Full also
   requires every Recovery key, including syncs, in complete generation 2.
+- **A layer can partition responsibility, never evidence.** `Options.Coverage` is
+  copied before any backend call. Its `Required` and `CoveredElsewhere` lists must
+  be duplicate-free, disjoint, declared by the complete table and together cover
+  every declaration. A nonempty scenario catalog needs a nonempty Required set.
+  Unclassified new declarations fail immediately. Nil keeps the whole-table
+  contract. Every generation of every run is still checked against the full
+  table; reaching a CoveredElsewhere key fails because the partition disagrees
+  with actual sources. Normal coverage requires all Required Normal keys; Full
+  also requires all Required Recovery keys, including syncs. Static cases assign
+  each Required non-sync Recovery key exactly once and cannot assign a
+  CoveredElsewhere key. The public `CheckRecoveryCases` keeps its whole-table
+  contract through the same internal check. Dynamic Normal targets come only
+  from this layer's complete recordings, so they too must belong to Required.
+  Main, boundary, recovery, mode and shard planning retain their original rules.
 - **Record all sources before deriving targets.** Every static case's trigger and
   `Options.RecoveryTriggers` are deduplicated by scenario and the complete trigger.
   Unknown scenario names and invalid triggers fail before any backend call. Each
@@ -126,6 +141,9 @@ the runs through `Options.Observe`.
   shard, and `RecoveryNormalRuns` counts executed dynamic interruptions. Smoke
   plans but does not select or execute that group. `Report.Triggers` remains
   diagnostic: later generations after a main crash do not add coverage evidence.
+  `Report.Coverage` holds the copied partition (or nil); `Normal` and `Recovery`
+  always keep their actual reached/declared meaning against the complete table.
+  CoveredElsewhere keys supply no reached evidence or synthetic run counts.
   `Event.Phase` distinguishes `recovery-record` and `recovery-normal`; `Trigger`
   identifies the source. Observe receives real run start/end pairs and one
   `Skipped` notification for Smoke's dynamic group. A skipped notification must
@@ -164,3 +182,9 @@ that budget. No new backend driver, clock or dependency is needed.
 `…FailsWhenADeclaredNormalWriteIsNeverReached`, `…FailsWhenTheScenarioOutgrowsItsBudget`,
 `…SecondLayerCrashesTheRecoveryAfterTheMainCrash`, `…ShardsRunDisjointTargetsAndTogetherAllOfThem`).
 The backends are tested with the walk they serve.
+
+Partition regressions cover complete/disjoint validation before any backend run,
+new unclassified declarations, input ownership, missing Required observations,
+actual CoveredElsewhere hits in every run kind and later generations, unchanged
+mode selection and full-table report counts. Third-generation evidence and an
+observed dynamic target that was never interrupted remain failures with a partition.

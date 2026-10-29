@@ -533,6 +533,42 @@ per-endpoint drains. Those keys are discovered from the complete second window,
 then interrupted separately; their declaration kind stays Normal.
 
 
+### Coverage responsibility across execution layers
+
+`Walk` can accept `Options.Coverage`, a `CoveragePartition` with `Required` and
+`CoveredElsewhere` key lists. Nil retains the complete-table contract. A partition
+assigns responsibility only: it cannot supply observations, target results or
+successful runs. Walk copies both lists before running anything and verifies that
+each declared key appears exactly once, neither list contains an unknown key and
+the two lists cover the entire transaction table. A nonempty scenario catalog
+cannot have an empty Required list. Adding a declaration without classifying it
+therefore fails instead of silently moving it out of this layer's obligations.
+
+The complete `txn.Table` remains the authority for every run and generation.
+Undeclared writes, wrong generations, clean Recovery writes, missed targets,
+incorrect cutoffs, changed paths, domain failures and budgets retain their original
+checks. A real hit of a CoveredElsewhere key also fails: the responsibility
+partition disagrees with the layer's actual sources and must be reconsidered.
+Normal coverage requires every Required Normal key; Full also requires every
+Required Recovery key, including sync steps. Static cases must assign every
+Required non-sync Recovery key once and may not assign CoveredElsewhere keys.
+Public `CheckRecoveryCases` still checks the whole table, sharing the same internal
+assignment algorithm with Walk.
+
+Dynamic recovery-only Normal targets are derived afresh from this layer's clean
+and complete generation-2 records, whose hits must all belong to Required. Main
+points and step boundaries still follow the selected scenarios' real recordings;
+Full, Smoke and stable shard numbering keep their original selection rules.
+Every shard records all of its layer's sources and validates the full partition.
+No other layer's observations or target ordinals enter the walk.
+
+`Report.Coverage` contains the copied partition. Existing `Normal` and `Recovery`
+fields still count actual observations against all declarations in the complete
+table, so their reached counts can be lower than their declared counts in a
+successful partitioned walk. Required and CoveredElsewhere counts can be derived
+from the validated keys and declaration kinds without another stored counter.
+Sources, triggers and executed-run fields contain only this walk's real evidence.
+
 ### Shared source analysis and complete recovery recordings
 
 `crashwalk.AnalyzeSources` owns the three source columns and the recovery-only

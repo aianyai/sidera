@@ -181,6 +181,11 @@ func Assess(table *txn.Table, hits []Hit) Coverage {
 // without running any scenario, so a missing case shows when a recovery write is
 // declared and not on the day a walk happens to be run in full.
 func CheckRecoveryCases(table *txn.Table, scenarios []Scenario) error {
+	return checkRecoveryCases(table, scenarios, nil)
+}
+
+// A nil required set retains the public complete-table contract.
+func checkRecoveryCases(table *txn.Table, scenarios []Scenario, required map[fsx.Key]bool) error {
 	want := map[fsx.Key]bool{}
 	for _, k := range table.Keys() {
 		if k.Kind == txn.Recovery && !IsSync(k.Step) {
@@ -194,6 +199,8 @@ func CheckRecoveryCases(table *txn.Table, scenarios []Scenario) error {
 			switch {
 			case !want[c.Item]:
 				problems = append(problems, fmt.Sprintf("scenario %q lists %v, which is not a recovery write or is a sync step", s.Name(), c.Item))
+			case required != nil && !required[c.Item]:
+				problems = append(problems, fmt.Sprintf("scenario %q assigns CoveredElsewhere recovery write %v", s.Name(), c.Item))
 			case got[c.Item] != "":
 				problems = append(problems, fmt.Sprintf("%v is listed by %q and by %q", c.Item, got[c.Item], s.Name()))
 			default:
@@ -203,7 +210,7 @@ func CheckRecoveryCases(table *txn.Table, scenarios []Scenario) error {
 	}
 	var missing []string
 	for k := range want {
-		if got[k] == "" {
+		if (required == nil || required[k]) && got[k] == "" {
 			missing = append(missing, k.String())
 		}
 	}
