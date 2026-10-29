@@ -69,7 +69,7 @@ func TestRecvAndAckRecoverFromACrashAtEveryPoint(t *testing.T) {
 		}
 		for _, td := range taker.disks {
 			t.Run(td.where, func(t *testing.T) {
-				checkPulled(t, restarted(t, td.disk, "a", "b", "c"), ends)
+				checkPulled(t, restarted(t, td, "a", "b", "c"), ends)
 			})
 		}
 	}

@@ -6,7 +6,6 @@ import (
 	"github.com/aianyai/sidera/internal/delivery"
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/fsx"
-	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -26,9 +25,9 @@ import (
 // restartedWithRuntime starts a node with an adapter and a runtime on a disk a crash
 // left, registers the endpoint of the scenario and lets it go on until nothing is
 // left to do.
-func restartedWithRuntime(t *testing.T, disk *fsxtest.Mem) *harness.H {
+func restartedWithRuntime(t *testing.T, td takenDisk) *harness.H {
 	t.Helper()
-	h := harness.New(t, harness.Options{Disk: disk, Adapter: &harness.AdapterOptions{Host: sessionHostParams(), Runtime: true}})
+	h := harness.New(t, harness.Options{Disk: td.disk, Start: td.at, Adapter: &harness.AdapterOptions{Host: sessionHostParams(), Runtime: true}})
 	quiet(t, h)
 	h.MustDirect("a")
 	quiet(t, h)
@@ -165,7 +164,7 @@ func TestSessionCreationRecoversFromACrashAtEveryPoint(t *testing.T) {
 			h.Stop()
 			for _, td := range taker.disks {
 				t.Run(td.where, func(t *testing.T) {
-					checkCreationSettled(t, restartedWithRuntime(t, td.disk), msg, want, initial != "")
+					checkCreationSettled(t, restartedWithRuntime(t, td), msg, want, initial != "")
 				})
 			}
 		})
@@ -189,7 +188,7 @@ func TestSessionCreationRecoversFromACrashAtEveryPoint(t *testing.T) {
 		}
 		h.Stop()
 		for _, td := range taker.disks {
-			t.Run(td.where, func(t *testing.T) { checkCloseSettled(t, restartedWithRuntime(t, td.disk), msg, id) })
+			t.Run(td.where, func(t *testing.T) { checkCloseSettled(t, restartedWithRuntime(t, td), msg, id) })
 		}
 	})
 	declared := 0

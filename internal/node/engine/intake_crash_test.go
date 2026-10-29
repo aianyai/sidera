@@ -82,9 +82,9 @@ func (d *diskTaker) Reached(observation fsx.Observation, _ txn.Kind) {
 
 // restarted starts a node on a disk a crash left, registers the endpoints of the
 // scenario under the same keys, and lets it go on until nothing is left to do.
-func restarted(t *testing.T, disk *fsxtest.Mem, names ...string) *harness.H {
+func restarted(t *testing.T, td takenDisk, names ...string) *harness.H {
 	t.Helper()
-	h := harness.New(t, harness.Options{Disk: disk})
+	h := harness.New(t, harness.Options{Disk: td.disk, Start: td.at})
 	for _, n := range names {
 		h.MustDirect(n)
 	}
@@ -195,7 +195,7 @@ func walkDisks(t *testing.T, taker *diskTaker, check func(t *testing.T, h *harne
 	}
 	for _, td := range taker.disks {
 		t.Run(td.where, func(t *testing.T) {
-			check(t, restarted(t, td.disk, "a", "b"))
+			check(t, restarted(t, td, "a", "b"))
 		})
 	}
 }

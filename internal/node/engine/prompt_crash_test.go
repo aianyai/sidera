@@ -35,7 +35,7 @@ func TestAPromptIsSettledOnceAfterACrashAtEveryPoint(t *testing.T) {
 	h.Stop()
 	for _, td := range taker.disks {
 		t.Run(td.where, func(t *testing.T) {
-			n := restartedWithRuntime(t, td.disk)
+			n := restartedWithRuntime(t, td)
 			sc := scanOf(t, n)
 			for _, a := range sc.Attempts {
 				if a.InFlight != nil {

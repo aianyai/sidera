@@ -422,7 +422,7 @@ func TestNoRecordKeepsABlockMarkAfterACrashWhenTheCauseIsGone(t *testing.T) {
 	h.Stop()
 	for _, td := range taker.disks {
 		t.Run(td.where, func(t *testing.T) {
-			n := restartedWithRuntime(t, td.disk)
+			n := restartedWithRuntime(t, td)
 			for _, m := range []adapterproto.MessageID{m1, m2} {
 				for _, in := range inRecords(t, n, m) {
 					if in.Record.Blocked {

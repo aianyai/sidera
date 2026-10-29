@@ -281,7 +281,7 @@ func TestARefusedControlSignalRecoversFromACrashAtEveryPoint(t *testing.T) {
 	var never, settled int // the disks of a crash before the source held the signal, and after
 	for _, td := range taker.disks {
 		t.Run(td.where, func(t *testing.T) {
-			r := restarted(t, td.disk, "a", "b")
+			r := restarted(t, td, "a", "b")
 			sc := scanOf(t, r)
 			var outs []store.OutRecord
 			for _, o := range sc.Out {
