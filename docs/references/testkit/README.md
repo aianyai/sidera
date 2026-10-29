@@ -547,3 +547,10 @@ serving with a queued source and retained body after the target accepted it.
 A real target receive and reply carries the arrival evidence that releases the
 source body in the reply transaction. The recipe uses no transport fault or
 raw-envelope callback, and judges the received bodies and final closure.
+
+Recovery-creation recipes hold the native first turn open until their real
+session receive and acknowledgement finish. They then end that turn explicitly,
+so an early idle notification cannot race another prompt against the drain. The
+drain is repeatable after crashes and accepts an already-ended turn only through
+the fake runtime's named `ErrNoTurn`. Its domain check requires every started
+round to end and rejects prompts outside that explicit round.

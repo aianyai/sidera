@@ -100,3 +100,10 @@ the body while the sender still reports it queued; a real reply then carries the
 evidence that releases the sender's retained body. `DeliveryOps` names this
 preparation fault without exposing a file system or a transport to the recipe.
 Its 60-point recording has a fixed budget of 90.
+
+Recovery creation keeps its first native turn working while the initial message
+becomes readable. The repeatable drain receives and acknowledges that real body
+before explicitly ending the turn. Ending it earlier races an idle-triggered
+prompt against the drain and changes the recording. A repeated drain may find the
+turn already ended and accepts only the named `ErrNoTurn`; other failures remain
+errors. The final domain check rejects an extra prompt or an unfinished turn.

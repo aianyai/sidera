@@ -1,6 +1,8 @@
 package recipes
 
 import (
+	"errors"
+	"fmt"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -79,7 +81,10 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 			if err != nil {
 				return err
 			}
-			if err = rt.SetFirstTurn(fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{{Kind: fakeruntime.ActionRecv}, {Kind: fakeruntime.ActionAck}}, EndAfter: true}); err != nil {
+			// Creation starts a real turn before its initial delivery is readable.
+			// Keep it working until the drain reads and acknowledges that delivery;
+			// announcing idle earlier races a second prompt against the direct receive.
+			if err = rt.SetFirstTurn(fakeruntime.TurnPlan{}); err != nil {
 				return err
 			}
 			if held {
@@ -93,7 +98,25 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 			}
 			_, err = e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: "A real initial message."})
 			return err
-		}}}}, Drain: recoveryDrain(b, true, &DeliveryEvidence{}), Check: b.Recovery.CheckClosedRecords})
+		}}}}, Drain: recoveryDrain(b, true, &DeliveryEvidence{}), Check: func(e scenario.Env) error {
+			log, err := e.Ledger()
+			if err != nil {
+				return err
+			}
+			if len(log.Kind(ledger.KindPromptDeliverReceived)) != 0 {
+				return errors.New("recovery creation emitted an unplanned prompt before its drain")
+			}
+			ended := map[string]bool{}
+			for _, entry := range log.Kind(ledger.KindRuntimeTurnEnded) {
+				ended[entry.Writer+"/"+entry.Attrs.Turn] = true
+			}
+			for _, entry := range log.Kind(ledger.KindRuntimeTurnStarted) {
+				if !ended[entry.Writer+"/"+entry.Attrs.Turn] {
+					return fmt.Errorf("recovery creation left runtime turn %s/%s unfinished", entry.Writer, entry.Attrs.Turn)
+				}
+			}
+			return b.Recovery.CheckClosedRecords(e)
+		}})
 	}
 	return out
 }
@@ -119,17 +142,27 @@ func recoveryDrain(b Bindings, runtime bool, evidence *DeliveryEvidence) func(sc
 					return err
 				}
 				seen := map[string]bool{}
-				completed := map[string]bool{}
+				completed := map[string]string{}
 				for _, created := range log.Kind(ledger.KindRuntimeSessionCreated) {
-					completed[created.Attrs.Attempt] = true
+					completed[created.Attrs.Attempt] = created.Attrs.NativeRef
 				}
 				for _, created := range log.Kind(ledger.KindSessionCreateReceived) {
 					endpoint := created.Attrs.Endpoint
-					if !completed[created.Attrs.Attempt] || endpoint == "" || seen[endpoint] {
+					native := completed[created.Attrs.Attempt]
+					if native == "" || endpoint == "" || seen[endpoint] {
 						continue
 					}
 					seen[endpoint] = true
 					if err := evidence.RecvAndAck(e, b.Sessions.Session(e, endpoint)); err != nil {
+						return err
+					}
+					controller, err := e.Runtime()
+					if err != nil {
+						return err
+					}
+					// A restart can repeat this drain after the same turn already ended.
+					// Every other failure still means the promised runtime round did not finish.
+					if err := controller.EndTurn(native, fakeruntime.FinalCompleted); err != nil && !errors.Is(err, fakeruntime.ErrNoTurn) {
 						return err
 					}
 				}
