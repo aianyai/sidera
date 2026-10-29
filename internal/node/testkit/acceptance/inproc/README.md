@@ -90,7 +90,18 @@ archive cleanup; the final audit still requires the endpoint to be absent.
 The control-expiry preparation fails a current-process control-result create
 before any visible replacement. The resulting deadline path is judged through
 real Status and receive results, actual management closure, and the owner alert
-for the endpoint the adapter's real create request named.
+for the endpoint the adapter's real create request named. The clean judgement
+rejects removal of either its write failure or its owner-alert evidence. Named
+boundaries include rule installation, the held request, creation and the report
+deadline. If restart finishes creation before the deadline phase starts, the
+original result must resolve to a real native session; the drain reads that
+session and closes it through management before auditing its cleared token and
+the matching native runtime's external close. A cut before the closing tick
+commits can instead recover the precise `unconfirmed/ready_timeout` reply. That
+case still requires its actual owner alert and no native creation; completing the
+script's deadline step keeps the stricter no-reply result and exact runtime
+uncertainty notice. Repeated-drain tests interrupt actual writes on each side of
+that closing commit, then apply the shared third-generation recovery checker.
 
 `configureBodyRecoveryScenario` damages only an intact, actually retained source
 body on the stopped disk. It verifies the existing reference before flipping a

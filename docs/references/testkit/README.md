@@ -623,6 +623,21 @@ window closes before a reply commits, its sender reads the precise uncertainty
 notice and the owner closes the alerted endpoint through management. The audit
 requires the actual owner alert, closed endpoint, empty token, absence of a native
 creation and drained records, rather than treating those writes alone as success.
+A crash before the closing tick commits can let startup retry the failed result
+replacement and deliver the exact `unconfirmed/ready_timeout` reply naming the
+allocated endpoint. This known reply establishes the uncertain result without
+requiring an additional notice; the unique owner alert, absence of native
+creation and closed-session requirements remain. The recipe separately remembers
+the clock advance and successful quiescence of the script's deadline step, so
+this interrupted result cannot weaken the complete clean recording's no-reply
+oracle or repeat the report-window advance.
+A cut before that deadline phase can instead let restart finish the real
+creation. The original returned control result must then satisfy the shared
+creation judgement, including a delivered reply associated with external native
+creation. This request has no initial body. The drain receives from the resolved
+session and closes it through the real management operation. An already-closed
+result permits repeated cleanup; the same native session's external close, final
+closed endpoint, cleared token and drained-record requirements still apply.
 
 Body-cleanup acceptance variants keep declaration kind distinct from observation
 source. Their healthy absent-node sends end in exact expiry notices. A complete

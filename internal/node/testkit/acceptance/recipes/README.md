@@ -150,7 +150,23 @@ exact uncertainty notice for the runtime target. The owner closes the alerted
 creating endpoint through management. Final checks require its unique real
 `control_unknown` alert, cleared token, no native creation and no active records.
 This is distinct from a timeout reply that was committed successfully. Its
-59-point recording has a fixed budget of 89.
+59-point recording has a fixed budget of 89. A cut during the deadline step,
+before its closing tick commits, can instead let restart retry the failed result
+write and deliver an exact `unconfirmed/ready_timeout` reply naming the allocated
+session. That reply proves the uncertain result without an additional notice;
+the unique owner alert, no native creation and closed-session audit still apply.
+The recipe remembers both the clock move and whether the script's deadline step
+fully quiesced. Completing that step still requires the strict no-reply result;
+repeating a drain never advances the four-hour window again.
+
+A cut before the deadline phase may let restart finish creation. That branch
+retains the original control result and
+uses the shared creation judgement to require its delivered reply and matching
+external native creation. The original request has no initial body. Its drain
+receives through that actual session before closing it through management, and
+requires the same native session's external close, the closed endpoint with no
+token and no active records. Repeating the drain accepts the real management
+result that the endpoint is already closed.
 
 Body-cleanup variants send a nonempty message to an absent node. Their clean
 recordings require the exact deadline notice. An additional offline-damage

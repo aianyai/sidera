@@ -16,8 +16,24 @@ import (
 
 func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 	var message adapterproto.MessageID
-	var endpoint string
+	var result fakeagent.SendResult
+	var endpoint, native string
+	var deadlineAdvanced, deadlineCompleted, creationPulled, createdBeforeDeadline, closeRequested bool
 	facts := &DeliveryEvidence{}
+	advanceDeadline := func(e scenario.Env) error {
+		if !deadlineAdvanced {
+			deadlineAdvanced = true
+			e.Advance(4 * time.Hour)
+		}
+		return e.Quiesce()
+	}
+	deadline := scenario.Step{Name: "control-report-deadline", Do: func(e scenario.Env) error {
+		if err := advanceDeadline(e); err != nil {
+			return err
+		}
+		deadlineCompleted = true
+		return nil
+	}}
 	return ScriptRecipe{Script: scenario.Script{Name: "session-control-write-expiry", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 89}, Steps: []scenario.Step{
 		{Name: "fail-create-settlement", Do: b.Sessions.FailCreateSettlement},
 		{Name: "hold-create", Do: func(e scenario.Env) error {
@@ -30,11 +46,41 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 		{Name: "create", Do: func(e scenario.Env) error {
 			r, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
 			if err == nil {
-				message = r.MessageID
+				message, result = r.MessageID, r
 			}
 			return err
-		}}, scenario.Advance("control-report-deadline", 4*time.Hour),
+		}}, deadline,
 	}}, Drain: func(e scenario.Env) error {
+		if message != "" && !deadlineAdvanced && !createdBeforeDeadline {
+			if !creationPulled {
+				creationPulled = true
+				e.Advance(time.Minute)
+			}
+			if err := e.Quiesce(); err != nil {
+				return err
+			}
+			creation, err := readCreation(e, "sender", b.Sessions.RuntimeAddr(e, "chat"), message)
+			if err != nil {
+				return err
+			}
+			// A restart can finish creation before the held request's deadline.
+			// Retain its original control result and prove that actual success.
+			if creation.status.ControlReply != nil && creation.status.ControlReply.Create.Outcome == adapterproto.CreateReplyCreated {
+				createdBeforeDeadline = true
+				endpoint, native = creation.endpoint, creation.native
+				facts.AcceptedCreation(result, "", "sender")
+			}
+		}
+		if message != "" && !createdBeforeDeadline {
+			if err := advanceDeadline(e); err != nil {
+				return err
+			}
+		}
+		if createdBeforeDeadline && !closeRequested {
+			if err := facts.RecvAndAck(e, b.Sessions.Session(e, endpoint)); err != nil {
+				return err
+			}
+		}
 		log, err := e.Ledger()
 		if err != nil {
 			return err
@@ -52,13 +98,14 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 				return err
 			}
 			address := ident.Address{Node: runtime.Node, Endpoint: id}.String()
-			// A control closed before its reply can settle cannot settle itself later.
-			// The owner closes the alerted endpoint through the real management entry.
+			// Finish cleanup through management even if recovery already closed it
+			// or a previous drain committed the close before recording its result.
+			closeRequested = true
 			result, err := b.Management.CloseEndpoint(e, ManagementRequest{ID: admin.OperationID{90}}, address)
 			if err != nil {
 				return err
 			}
-			if result.Code != "" || result.Value != "closing" {
+			if result.Code != "" || (result.Value != "closing" && result.Value != "already_closed") {
 				return fmt.Errorf("owner could not close the uncontrolled endpoint: %+v", result)
 			}
 		}
@@ -74,17 +121,57 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 		}
 		return drainFeedback(e, facts, "sender")
 	}, Check: func(e scenario.Env) error {
+		if createdBeforeDeadline {
+			if err := facts.Check(e); err != nil {
+				return err
+			}
+			log, err := e.Ledger()
+			if err != nil {
+				return err
+			}
+			released := false
+			for _, closed := range log.Kind(ledger.KindRuntimeClosed) {
+				if closed.Writer == "runtime/"+native {
+					released = true
+				}
+			}
+			if !released {
+				return fmt.Errorf("created native session %s was not really closed", native)
+			}
+			if err := b.Sessions.CheckClosedSession(e, endpoint); err != nil {
+				return err
+			}
+			return b.Recovery.CheckClosedRecords(e)
+		}
 		if message == "" {
 			return b.Recovery.CheckClosedRecords(e)
 		}
-		status, err := e.Agent("sender").Status(e.Ctx(), fakeagent.StatusInput{MessageID: message})
+		creation, err := readCreation(e, "sender", b.Sessions.RuntimeAddr(e, "chat"), message)
 		if err != nil {
 			return err
 		}
-		if status.ControlReply != nil || len(status.Recipients) != 1 || status.Recipients[0].State != adapterproto.DeliveryClosedUnconfirmed {
+		status := creation.status
+		if len(status.Recipients) != 1 || string(status.Recipients[0].To) != b.Sessions.RuntimeAddr(e, "chat") {
 			return fmt.Errorf("control whose reply could not commit has an unexpected result: %+v", status)
 		}
-		facts.RequireFeedback(message, b.Sessions.RuntimeAddr(e, "chat"), delivery.KindAcceptedUnconfirmed)
+		if status.ControlReply != nil {
+			// Before the closing tick commits, restart may retry the failed result
+			// write and deliver the precise timeout reply. A completed deadline step
+			// still owes the original no-reply result and its actual runtime notice.
+			reply := status.ControlReply.Create
+			recoveredTimeout := !deadlineCompleted && deadlineAdvanced &&
+				status.Recipients[0].State == adapterproto.DeliveryDelivered &&
+				reply.Outcome == adapterproto.CreateReplyUnconfirmed &&
+				reply.Reason == adapterproto.CreateReasonReadyTimeout && creation.endpoint == endpoint
+			if !recoveredTimeout {
+				return fmt.Errorf("control whose reply could not commit has an unexpected result: %+v", status)
+			}
+		} else {
+			if status.Recipients[0].State != adapterproto.DeliveryClosedUnconfirmed {
+				return fmt.Errorf("control whose reply could not commit has an unexpected result: %+v", status)
+			}
+			facts.RequireFeedback(message, b.Sessions.RuntimeAddr(e, "chat"), delivery.KindAcceptedUnconfirmed)
+		}
 		if err := facts.Check(e); err != nil {
 			return err
 		}

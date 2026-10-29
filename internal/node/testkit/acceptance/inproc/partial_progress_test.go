@@ -17,6 +17,10 @@ func TestRecipeDrainPreservesCompletedPrefixObligations(t *testing.T) {
 		{"session-lifecycle", "send-for-prompt"},
 		{"session-create-expiry", "create"},
 		{"session-create-expiry", "control-deadline"},
+		{"session-control-write-expiry", "fail-create-settlement"},
+		{"session-control-write-expiry", "hold-create"},
+		{"session-control-write-expiry", "create"},
+		{"session-control-write-expiry", "control-report-deadline"},
 		{"delivery-unreachable", "send-to-an-absent-node"},
 		{"delivery-unreachable", "report-deadline"},
 	} {
@@ -34,15 +38,25 @@ func TestRecipeDrainPreservesCompletedPrefixObligations(t *testing.T) {
 
 func TestRecipeDrainPreservesClockProgressAfterAnotherCrash(t *testing.T) {
 	for _, tc := range []struct {
-		name, after string
-		points      []string
+		name, after, at string
+		points          []string
 	}{
-		{"session-create-expiry", "create", []string{"control-reply/out.create#1", "ack/body.remove#1"}},
-		{"delivery-unreachable", "send-to-an-absent-node", []string{"tick/out.create#1", "feedback-form/notice.create#1"}},
-		{"maintenance-retention", "send-from-session", []string{"archive-summaries/archive.open#1", "archive-sweep/endpoint.remove#1", "archive-expire/file.remove#1"}},
+		{"session-create-expiry", "create", "", []string{"control-reply/out.create#1", "ack/body.remove#1"}},
+		{"session-control-write-expiry", "create", "", []string{"control-reply/out.create#1", "endpoint-close/result.create#1"}},
+		{"session-control-write-expiry", "", "tick/ctl.create#1", []string{"control-result/ctl.create#1", "control-reply/out.create#1"}},
+		{"session-control-write-expiry", "", "tick/out.create#1", []string{"tick/out.create#1", "feedback-form/notice.create#1", "ack/body.remove#1"}},
+		{"delivery-unreachable", "send-to-an-absent-node", "", []string{"tick/out.create#1", "feedback-form/notice.create#1"}},
+		{"maintenance-retention", "send-from-session", "", []string{"archive-summaries/archive.open#1", "archive-sweep/endpoint.remove#1", "archive-expire/file.remove#1"}},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.name+"/"+tc.after+tc.at, func(t *testing.T) {
 			first := crashwalk.Target{Gen: 1, AfterStep: tc.after}
+			if tc.at != "" {
+				point, err := fsx.ParsePoint(tc.at)
+				if err != nil {
+					t.Fatal(err)
+				}
+				first.Point = point
+			}
 			baseline, err := harness.NewWalkBackend(t).Run(context.Background(), freshScenario(t, tc.name), crashwalk.RunPlan{Targets: []crashwalk.Target{first}})
 			if err != nil {
 				t.Fatal(err)
