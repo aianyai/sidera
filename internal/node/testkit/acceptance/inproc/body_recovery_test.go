@@ -42,3 +42,47 @@ func TestBodyCleanupDrainsASendCutBeforeItsResult(t *testing.T) {
 		})
 	}
 }
+
+func TestBodyRetentionPreparationSurvivesAnotherCrash(t *testing.T) {
+	const name = "recovery-body-archive"
+	trigger := crashwalk.CorruptOffline("source-body", "flip-body")
+	clean, err := recordScenario(t, freshScenario(t, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseline, err := harness.NewWalkBackend(t).Run(context.Background(), freshScenario(t, name), crashwalk.RunPlan{Trigger: &trigger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertDeclaredWrites(t, baseline)
+	if err := crashwalk.CheckRecoveryRecord(clean.Hits[0], trigger, baseline); err != nil {
+		t.Fatal(err)
+	}
+	// These early writes interrupt the prepared process before it closes its
+	// sender. Startup may replay its feedback before the next drain resumes.
+	for _, pointName := range []string{
+		"clock-high-water/clock.create#1",
+		"clock-high-water/clock.write#1",
+		"clock-high-water/clock.rename#1",
+		"clock-high-water/commit#1",
+	} {
+		t.Run(pointName, func(t *testing.T) {
+			point, err := fsx.ParsePoint(pointName)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target := crashwalk.Target{Gen: 2, Point: point}
+			r, err := harness.NewWalkBackend(t).Run(context.Background(), freshScenario(t, name), crashwalk.RunPlan{Trigger: &trigger, Targets: []crashwalk.Target{target}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertDeclaredWrites(t, r)
+			if err := crashwalk.CheckRecoveryTrigger(clean.Hits[0], trigger, r); err != nil {
+				t.Fatal(err)
+			}
+			if err := crashwalk.CheckRecoveryTarget(baseline.Hits[1], target, r); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

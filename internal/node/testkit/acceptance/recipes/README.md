@@ -228,8 +228,13 @@ One variant lets feedback clearing remove the retained body. The other uses
 source creates before replacement, preserving the real lost record for the
 periodic archive sweep. It reads and acknowledges the loss notice before closing
 its sender through management, then requires intact summaries and no live records
-or bodies after retention. The drain remembers completed clock advances so a
-second crash cannot advance past the unread notice's lifetime. These are complete
+or bodies after retention. Successful fault preparation is remembered across
+drains: these faults belong to the process in which they were installed. After a
+crash, startup may already replay and clear the feedback before the drain resumes,
+so installing the old rules again would require an action that no longer exists.
+The restarted process instead performs ordinary recovery. The drain remembers
+completed clock advances so a second crash cannot advance past the unread notice's
+lifetime. These are complete
 recovery recordings; their Normal observations remain separate from clean ones
 and supply actual additional interruption targets. The clean recordings have
 32 and 49 main points, with fixed budgets of 48 and 74.

@@ -132,6 +132,10 @@ object identities to `acceptance/disk.InspectDamage` after actual damage. The
 binding obtains the current record scan; the recipe owns the judgement.
 The archive variant's named preparation arms recoverable create failures in the current process's
 existing fault wrapper; it does not hold transport reports or manufacture state.
+The recipe remembers successful preparation across generations, so a resumed
+drain never rearms old faults after startup has replayed the feedback. The
+uninterrupted prepared process must still exercise both fault rules and the real
+archive body removal; strict unused-rule cleanup remains in force.
 A negative test moves the real periodic sweep beyond the bounded drain and
 requires the domain audit to reject the retained body and records.
 

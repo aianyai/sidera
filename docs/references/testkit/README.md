@@ -754,6 +754,12 @@ supply the additional second-generation interruptions through shared source
 analysis; the recipes do not assign them Recovery ownership or add fixed counts.
 Their repeatable drains preserve already-executed clock advances, so a second
 crash does not skip the actual unread notice's lifetime.
+The archive variant also remembers successful fault preparation across generations.
+Those faults belong to the prepared process; startup after a real crash can replay
+and clear the feedback before the next drain. Reinstalling its old rules would
+then require feedback clearing that no longer exists. The next process performs
+ordinary recovery, while the uninterrupted prepared process still has to hit its
+strict fault rules and leave body removal to the real archive sweep.
 
 Recovery-creation acceptance retains actual successful control results and reads
 their public status. A validated creation reply supplies the initial message's

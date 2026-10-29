@@ -27,6 +27,7 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 	var message adapterproto.MessageID
 	var target string
 	classified, accepted, lost, closed, advanced := false, false, false, false, false
+	retentionPrepared := false
 	const body = "A damaged source must be reported before its retained bytes disappear."
 	needs := Needs{Damage: DamageSourceBody, ArchiveSweepEvery: time.Hour}
 	if archive {
@@ -76,12 +77,14 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 				}
 				classified, accepted = true, true
 			}
-			if archive && lost && !closed {
+			if archive && lost && !retentionPrepared {
 				// These creates precede any visible record replacement. Keep the
-				// real lost source and its body until the archive sweep owns them.
+				// real lost source and its body for this process's archive sweep.
+				// A restart may already replay the feedback before Drain resumes.
 				if err := b.Delivery.RetainLostSourceBody(e); err != nil {
 					return err
 				}
+				retentionPrepared = true
 			}
 			if !closed {
 				if !advanced {
