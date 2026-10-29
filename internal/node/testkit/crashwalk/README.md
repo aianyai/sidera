@@ -22,6 +22,7 @@ the runs through `Options.Observe`.
 | `Scenario` | What the walk needs of a script: its name, its step names, its budget and its recovery cases. |
 | `Plan`, `PlanRecovery` | The targets of a mode, in the canonical order that sharding numbers by. |
 | `AnalyzeSources`, `CheckRecoveryTarget` | Derive the three coverage sources and actual recovery-only Normal targets; verify a second interruption against its complete baseline. |
+| `CheckRecoveryRecord`, `CheckRecoveryTrigger` | Validate a complete two-generation recovery recording, including its crash trigger's first-generation prefix; check that prefix alone for an interrupted recovery. |
 | `CheckBudget`, `CompareRuns`, `Assess`, `CheckRecoveryCases` | The individual checks, usable alone. |
 | `Mode`, `Shard`, `ParseMode`, `ParseShard`, `EnvMode`, `EnvShard` | `full` or `smoke`, and the part of the walk a CI job takes. |
 | `Hit`, `NewHit`, `NormalizePath`, `IsSync` | A reached crash point, the shared conversion from an observation to normalized path fingerprints, and the sync steps. |
@@ -83,7 +84,10 @@ the runs through `Options.Observe`.
 - **Record all sources before deriving targets.** Every static case's trigger and
   `Options.RecoveryTriggers` are deduplicated by scenario and the complete trigger.
   Unknown scenario names and invalid triggers fail before any backend call. Each
-  trigger-only run must finish generation 2 without domain violations. All clean
+  trigger-only run passes `CheckRecoveryRecord`: exactly two generations, no target
+  results, no domain violations, and every hit in its own generation. A crash
+  trigger's first-generation prefix must match the clean recording through
+  `CheckRecoveryTrigger`; offline damage has no crash cutoff to compare. All clean
   recordings finish before the difference is calculated: a later clean source
   removes a key's dynamic responsibility. Every non-sync Normal key in that
   difference gets one target, from the first actual sighting in its stable source
@@ -99,6 +103,7 @@ the runs through `Options.Observe`.
   at the target, exactly three generations must exist, domain violations must be
   empty, and the prefix must match its corresponding complete generation-2
   baseline using `CompareRuns`, including rename sources.
+  `CheckRecoveryTrigger` also holds their first generation to the clean recording.
 - **Sharding partitions the runs.** Runs are numbered across scenarios and kinds,
   and a shard takes those whose number is its residue. The number follows an order
   that no shard's own recording can change: the scenarios by name; within a

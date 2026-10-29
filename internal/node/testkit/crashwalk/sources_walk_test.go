@@ -2,6 +2,7 @@ package crashwalk_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -69,6 +70,9 @@ func TestWalkRecordsDuplicateTriggersOnceAndPartitionsAllTargets(t *testing.T) {
 		if rep.RecoveryRecordings != 2 {
 			t.Fatalf("recordings %d, want 2 unique sources", rep.RecoveryRecordings)
 		}
+		if rep.RecoveryNormalSelected != rep.RecoveryNormalRuns {
+			t.Fatalf("shard %d/%d selected %d recovery-only Normal targets but executed %d", index, count, rep.RecoveryNormalSelected, rep.RecoveryNormalRuns)
+		}
 		got := map[string]bool{}
 		for _, p := range b.runs {
 			if len(p.Targets) == 0 {
@@ -84,9 +88,12 @@ func TestWalkRecordsDuplicateTriggersOnceAndPartitionsAllTargets(t *testing.T) {
 	}
 	whole := run(1, 1, false)
 	union := map[string]bool{}
-	for shard := 1; shard <= 3; shard++ {
-		targets := run(shard, 3, false)
-		if !reflect.DeepEqual(targets, run(shard, 3, true)) {
+	// The preceding target groups do not fill whole rounds of five shards.
+	// Dynamic allocations must continue their numbering rather than start over.
+	const shards = 5
+	for shard := 1; shard <= shards; shard++ {
+		targets := run(shard, shards, false)
+		if !reflect.DeepEqual(targets, run(shard, shards, true)) {
 			t.Fatal("trigger input order changed shard membership")
 		}
 		for target := range targets {
@@ -124,6 +131,38 @@ func TestWalkRejectsInvalidTriggerInputsBeforeRunning(t *testing.T) {
 	}
 }
 
+func TestWalkComparesRecoveryTriggerFirstGenerationForEveryRun(t *testing.T) {
+	for _, phase := range []string{"recovery-record", "recovery", "recovery-normal"} {
+		t.Run(phase, func(t *testing.T) {
+			b, s := recoveryOnlySystem(t)
+			changed := false
+			backend := backendFunc(func(ctx context.Context, sc crashwalk.Scenario, p crashwalk.RunPlan) (crashwalk.RunResult, error) {
+				r, err := b.Run(ctx, sc, p)
+				if p.Trigger == nil {
+					return r, err
+				}
+				current := "recovery-record"
+				if len(p.Targets) > 0 {
+					current = "recovery"
+					if p.Targets[0].Point.Tag.Tx == "status" {
+						current = "recovery-normal"
+					}
+				}
+				if current == phase {
+					r.Hits[0][len(r.Hits[0])-1].Path += ".changed"
+					changed = true
+				}
+				return r, err
+			})
+			_, err := crashwalk.Walk(context.Background(), backend, table(t), []crashwalk.Scenario{s}, crashwalk.Options{Mode: crashwalk.Full})
+			var divergence *crashwalk.Divergence
+			if !changed || !errors.As(err, &divergence) || divergence.Target.Gen != 1 {
+				t.Fatalf("changed=%v error=%v, want first-generation divergence", changed, err)
+			}
+		})
+	}
+}
+
 func TestWalkRejectsThirdGenerationEvidenceAndObservedButUninterruptedTargets(t *testing.T) {
 	for _, fault := range []string{"third generation", "observation only", "complete recording domain failure"} {
 		t.Run(fault, func(t *testing.T) {
@@ -132,10 +171,7 @@ func TestWalkRejectsThirdGenerationEvidenceAndObservedButUninterruptedTargets(t 
 				r, err := b.Run(ctx, sc, p)
 				if p.Trigger != nil && len(p.Targets) == 0 {
 					if fault == "third generation" {
-						for i := range r.Hits[1] {
-							r.Hits[1][i].Gen = 3
-						}
-						r.Hits = append(r.Hits[:1], nil, r.Hits[1])
+						r.Hits = append(r.Hits, nil)
 					}
 					if fault == "complete recording domain failure" {
 						r.Violations = []string{"message lost"}
@@ -151,6 +187,9 @@ func TestWalkRejectsThirdGenerationEvidenceAndObservedButUninterruptedTargets(t 
 				t.Fatal("invalid provenance or unexecuted interruption accepted")
 			}
 			if fault == "observation only" && !strings.Contains(err.Error(), "not reached") {
+				t.Fatalf("wrong failure: %v", err)
+			}
+			if fault == "third generation" && !strings.Contains(err.Error(), "complete recovery recording must end in generation 2 without targets") {
 				t.Fatalf("wrong failure: %v", err)
 			}
 		})

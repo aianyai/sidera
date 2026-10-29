@@ -148,7 +148,7 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 		recorded = append(recorded, hits...)
 	}
 	for _, tr := range triggers {
-		r, err := w.recoveryRecord(byName[tr.Scenario], tr.After)
+		r, err := w.recoveryRecord(byName[tr.Scenario], recordings[tr.Scenario], tr.After)
 		if err != nil {
 			return rep, err
 		}
@@ -171,7 +171,7 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 		if err := w.mainRuns(s, recordings[s.Name()]); err != nil {
 			return rep, err
 		}
-		if err := w.recoveryRuns(s); err != nil {
+		if err := w.recoveryRuns(s, recordings[s.Name()]); err != nil {
 			return rep, err
 		}
 	}
@@ -185,7 +185,7 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 			}
 		}
 		for _, tg := range analysis.Targets {
-			if err := w.recoveryNormalRun(byName[tg.Scenario], tg); err != nil {
+			if err := w.recoveryNormalRun(byName[tg.Scenario], recordings[tg.Scenario], tg); err != nil {
 				return rep, err
 			}
 		}
@@ -338,7 +338,7 @@ func (w *walker) noteTriggers(tg Target, res RunResult) {
 	}
 }
 
-func (w *walker) recoveryRuns(s Scenario) error {
+func (w *walker) recoveryRuns(s Scenario, clean []Hit) error {
 	for _, c := range PlanRecovery(s.Recovery(), Full) {
 		if !w.chosen[c.Item] {
 			continue
@@ -355,6 +355,9 @@ func (w *walker) recoveryRuns(s Scenario) error {
 			return err
 		}
 		w.rep.RecoveryRuns++
+		if err := CheckRecoveryTrigger(clean, trigger, res); err != nil {
+			return fmt.Errorf("crashwalk: scenario %q: %w", s.Name(), err)
+		}
 		if err := CheckRecoveryTarget(w.baseline(s.Name(), trigger), tg, res); err != nil {
 			return fmt.Errorf("crashwalk: scenario %q: %w", s.Name(), err)
 		}
@@ -409,25 +412,15 @@ func recordingTriggers(scenarios []Scenario, extra []RecoveryTrigger) ([]Recover
 	return out, nil
 }
 
-func (w *walker) recoveryRecord(s Scenario, trigger Trigger) (RecoveryRecord, error) {
+func (w *walker) recoveryRecord(s Scenario, clean []Hit, trigger Trigger) (RecoveryRecord, error) {
 	r := RecoveryRecord{Scenario: s.Name(), After: trigger}
 	res, err := w.run("recovery-record", s, RunPlan{Trigger: &trigger}, Target{}, RecoveryCase{})
 	if err != nil {
 		return r, err
 	}
 	w.rep.RecoveryRecordings++
-	if len(res.Hits) != 2 || len(res.Reached) != 0 {
-		return r, fmt.Errorf("crashwalk: scenario %q complete recovery recording must end in generation 2 without targets", s.Name())
-	}
-	if len(res.Violations) > 0 {
-		return r, fmt.Errorf("crashwalk: scenario %q failed its complete recovery recording: %s", s.Name(), strings.Join(res.Violations, "; "))
-	}
-	for i, hits := range res.Hits {
-		for _, h := range hits {
-			if h.Gen != i+1 {
-				return r, fmt.Errorf("crashwalk: scenario %q recovery recording generation %d contains generation-%d evidence", s.Name(), i+1, h.Gen)
-			}
-		}
+	if err := CheckRecoveryRecord(clean, trigger, res); err != nil {
+		return r, fmt.Errorf("crashwalk: scenario %q: %w", s.Name(), err)
 	}
 	r.Hits = append([]Hit(nil), res.Hits[1]...)
 	return r, nil
@@ -442,7 +435,7 @@ func (w *walker) baseline(scenario string, trigger Trigger) []Hit {
 	return nil
 }
 
-func (w *walker) recoveryNormalRun(s Scenario, t RecoveryNormalTarget) error {
+func (w *walker) recoveryNormalRun(s Scenario, clean []Hit, t RecoveryNormalTarget) error {
 	k := w.next
 	w.next++
 	if !w.opts.Shard.Keep(k) {
@@ -454,6 +447,9 @@ func (w *walker) recoveryNormalRun(s Scenario, t RecoveryNormalTarget) error {
 		return err
 	}
 	w.rep.RecoveryNormalRuns++
+	if err := CheckRecoveryTrigger(clean, trigger, res); err != nil {
+		return fmt.Errorf("crashwalk: scenario %q: %w", s.Name(), err)
+	}
 	if err := CheckRecoveryTarget(w.baseline(s.Name(), trigger), t.Target, res); err != nil {
 		return fmt.Errorf("crashwalk: scenario %q: %w", s.Name(), err)
 	}

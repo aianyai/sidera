@@ -17,7 +17,7 @@ type RecoveryTrigger struct {
 }
 
 // RecoveryRecord holds only generation 2 of a completed trigger-only run.
-// The caller must establish completion and domain invariants before supplying it.
+// Call CheckRecoveryRecord before supplying it to AnalyzeSources.
 type RecoveryRecord struct {
 	Scenario string
 	After    Trigger
@@ -101,7 +101,7 @@ func AnalyzeSources(table *txn.Table, clean []Hit, recovered []RecoveryRecord) (
 			}
 			all = append(all, h)
 			recoveryKeys[h.Point.Key] = true
-			if kind, ok := kinds[h.Point.Key]; ok && kind == txn.Normal && !cleanKeys[h.Point.Key] && !IsSync(h.Point.Step) {
+			if kind, ok := kinds[h.Point.Key]; ok && kind == txn.Normal && !IsSync(h.Point.Step) {
 				if _, chosen := owners[h.Point.Key]; !chosen {
 					owners[h.Point.Key] = RecoveryNormalTarget{Scenario: r.Scenario, After: r.After, Target: Target{Gen: 2, Point: h.Point}}
 				}
@@ -128,6 +128,37 @@ func AnalyzeSources(table *txn.Table, clean []Hit, recovered []RecoveryRecord) (
 		}
 	}
 	return out, nil
+}
+
+// CheckRecoveryTrigger compares a crash trigger's first generation with the clean
+// recording. Offline damage has no first-generation cutoff to compare.
+func CheckRecoveryTrigger(clean []Hit, trigger Trigger, res RunResult) error {
+	if trigger.Kind != TriggerCrashAt {
+		return nil
+	}
+	if len(res.Hits) == 0 {
+		return fmt.Errorf("crashwalk: recovery trigger has no first-generation evidence")
+	}
+	return CompareRuns(clean, res.Hits[0], Target{Gen: 1, Point: trigger.CrashAt})
+}
+
+// CheckRecoveryRecord validates a complete trigger-only run before its second
+// generation supplies coverage or a baseline for another interruption.
+func CheckRecoveryRecord(clean []Hit, trigger Trigger, res RunResult) error {
+	if len(res.Hits) != 2 || len(res.Reached) != 0 {
+		return fmt.Errorf("crashwalk: complete recovery recording must end in generation 2 without targets")
+	}
+	if len(res.Violations) > 0 {
+		return fmt.Errorf("crashwalk: failed complete recovery recording: %s", strings.Join(res.Violations, "; "))
+	}
+	for i, hits := range res.Hits {
+		for _, h := range hits {
+			if h.Gen != i+1 {
+				return fmt.Errorf("crashwalk: recovery recording generation %d contains generation-%d evidence", i+1, h.Gen)
+			}
+		}
+	}
+	return CheckRecoveryTrigger(clean, trigger, res)
 }
 
 // CheckRecoveryTarget establishes an actual second interruption and final third

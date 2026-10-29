@@ -11,7 +11,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
-	"github.com/aianyai/sidera/internal/node/txn"
 )
 
 func TestCatalogRecoveryAssignments(t *testing.T) {
@@ -19,22 +18,19 @@ func TestCatalogRecoveryAssignments(t *testing.T) {
 	if err := crashwalk.CheckRecoveryCases(harness.ProgramTable(t), scenarios); err != nil {
 		t.Fatal(err)
 	}
-	expected, assigned := 0, 0
-	for _, key := range harness.ProgramTable(t).Keys() {
-		if key.Kind == txn.Recovery && !crashwalk.IsSync(key.Key.Step) {
-			expected++
-		}
-	}
-	for _, s := range scenarios {
-		assigned += len(s.Recovery())
-	}
-	t.Logf("recovery assigned=%d/%d", assigned, expected)
 }
 
 // recoveryEvidence records each recipe/trigger once, then reuses that complete
 // second generation for all of its independently interrupted recovery points.
 func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult, cleanHits []crashwalk.Hit) crashwalk.SourceAnalysis {
 	t.Helper()
+	cleanRecordings := map[string][]crashwalk.Hit{}
+	for name, r := range clean {
+		if len(r.Hits) != 1 {
+			t.Fatalf("clean recording %s has %d generations, want 1", name, len(r.Hits))
+		}
+		cleanRecordings[name] = r.Hits[0]
+	}
 	recordings := map[crashwalk.RecoveryTrigger][]crashwalk.Hit{}
 	planned := map[crashwalk.RecoveryTrigger]bool{}
 	expectedTargets := 0
@@ -67,14 +63,11 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult, cleanH
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(r.Hits) != 2 || len(r.Violations) != 0 {
-					t.Fatalf("complete recovery requires two generations without violations: generations=%d violations=%v", len(r.Hits), r.Violations)
+				if err := crashwalk.CheckRecoveryRecord(cleanRecordings[s.Name()], trigger, r); err != nil {
+					t.Fatal(err)
 				}
 				hits := r.Hits[1]
 				assertDeclaredWrites(t, r)
-				if err := compareFirstCrash(clean, id, r); err != nil {
-					t.Fatal(err)
-				}
 				recordings[id] = hits
 				recovered = append(recovered, crashwalk.RecoveryRecord{Scenario: s.Name(), After: trigger, Hits: hits})
 				all = append(all, hits...)
@@ -98,7 +91,7 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult, cleanH
 					t.Fatal(err)
 				}
 				assertDeclaredWrites(t, r)
-				if err := compareFirstCrash(clean, crashwalk.RecoveryTrigger{Scenario: s.Name(), After: c.After}, r); err != nil {
+				if err := crashwalk.CheckRecoveryTrigger(cleanRecordings[s.Name()], c.After, r); err != nil {
 					t.Fatal(err)
 				}
 				if err := crashwalk.CheckRecoveryTarget(recordings[crashwalk.RecoveryTrigger{Scenario: s.Name(), After: c.After}], target, r); err != nil {
@@ -122,7 +115,7 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult, cleanH
 				t.Fatal(err)
 			}
 			assertDeclaredWrites(t, r)
-			if err := compareFirstCrash(clean, id, r); err != nil {
+			if err := crashwalk.CheckRecoveryTrigger(cleanRecordings[derived.Scenario], derived.After, r); err != nil {
 				t.Fatal(err)
 			}
 			if err := crashwalk.CheckRecoveryTarget(recordings[id], target, r); err != nil {
@@ -175,15 +168,4 @@ func TestRecoveryJudgementRejectsAnUnreadLossNotice(t *testing.T) {
 	if len(r.Violations) != 1 || !strings.Contains(r.Violations[0], "has no visible body or corresponding loss feedback") {
 		t.Fatalf("unread loss notice violations=%v", r.Violations)
 	}
-}
-
-func compareFirstCrash(clean map[string]crashwalk.RunResult, id crashwalk.RecoveryTrigger, r crashwalk.RunResult) error {
-	if id.After.Kind != crashwalk.TriggerCrashAt {
-		return nil
-	}
-	recorded, ok := clean[id.Scenario]
-	if !ok || len(recorded.Hits) != 1 || len(r.Hits) == 0 {
-		return fmt.Errorf("missing clean first-generation evidence for %s", id.Scenario)
-	}
-	return crashwalk.CompareRuns(recorded.Hits[0], r.Hits[0], crashwalk.Target{Gen: 1, Point: id.After.CrashAt})
 }

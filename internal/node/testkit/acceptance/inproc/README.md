@@ -22,13 +22,17 @@ token and absent session checkpoint. Session recipes run with the real adapter
 host and its fake native runtime; callbacks do not cache an engine across restarts.
 
 Recovery evidence is recorded once per recipe and complete trigger. The finite
-runner establishes completion and domain invariants, then supplies all clean hits
+runner uses `crashwalk.CheckRecoveryRecord` to establish complete two-generation
+evidence, empty target results, domain invariants and the crash trigger's
+first-generation prefix, then supplies all clean hits
 and the complete second generations to `crashwalk.AnalyzeSources`. That shared
 function owns generation validation, the three source columns and stable actual
 recovery-only Normal targets. Both static and derived interruptions use
 `crashwalk.CheckRecoveryTarget` for Reached, exact cutoff, generation count,
 violations and path-prefix comparison. The acceptance runner keeps no second
-source-classification or target-verification algorithm.
+source-classification or target-verification algorithm. Interrupted recovery runs
+also use `crashwalk.CheckRecoveryTrigger` to compare their first generation with
+the clean recording; offline damage has no crash cutoff to compare.
 
 Offline damage reads the stopped disk directly and changes only records the
 product wrote. The stopped creating endpoint is checked before its real control

@@ -540,6 +540,14 @@ generation are errors. Coverage and missing/undeclared keys use `Assess`;
 synchronous steps count only when actually observed. Third-generation hits and
 interrupted prefixes cannot fill complete second-generation coverage.
 
+`CheckRecoveryRecord` validates every complete trigger-only run before it supplies
+coverage or a baseline: exactly two generations, no target results, no domain
+violations, and each hit's generation agrees with its window. It calls
+`CheckRecoveryTrigger` to compare a crash trigger's first-generation prefix with
+the clean recording through `CompareRuns`. Offline damage has no first-generation
+crash cutoff to compare. Whole walks and bounded runners use the same check, so
+neither can admit provenance or a divergent trigger the other would reject.
+
 `Walk` records all clean scenarios before analyzing that difference. It also
 records every unique `(scenario, complete trigger)` from static recovery cases
 and `Options.RecoveryTriggers`, on every shard. Unknown names or invalid triggers
@@ -562,12 +570,15 @@ no domain violations, and a prefix matching the corresponding complete baseline
 through `CompareRuns`. The comparison retains both normalized path operands and
 its existing per-transaction/role interleaving rule. Static recovery cases keep
 their original exactly-once declaration responsibility and ordinal-1 target rule.
+Both kinds of interruption also pass `CheckRecoveryTrigger` against their clean
+recording. This keeps the first crash reproducible independently of the second
+generation's own prefix comparison.
 
 The bounded in-process acceptance runner uses these same source and target
-checks directly. It owns only catalog execution, complete-run/domain validation,
-first-crash comparison and diagnostics. Its cost is the clean catalog plus unique
-complete recovery triggers, static Recovery interruptions and derived Normal
-interruptions; it does not run every clean main point. The source key sets and
+checks directly. It owns only catalog execution and diagnostics. Its cost is the
+clean catalog plus unique complete recovery triggers, static Recovery
+interruptions and derived Normal interruptions; it does not run every clean main
+point. The source key sets and
 actual interruption targets therefore have one owner across bounded acceptance
 and whole walks. The bounded runner requires the resulting missing Normal,
 missing Recovery and undeclared key sets to be empty against the complete daemon

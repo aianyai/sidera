@@ -2,10 +2,48 @@ package crashwalk_test
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 )
+
+func TestCheckRecoveryRecordRequiresCompleteConsistentEvidence(t *testing.T) {
+	first := crashwalk.Hit{Gen: 1, Point: point(t, "status/file.rename#1"), Path: "state/status.rec", From: "state/.tmp-*"}
+	second := crashwalk.Hit{Gen: 2, Point: point(t, "orphans/body.remove#1"), Path: "state/body/m1.tmp"}
+	clean := []crashwalk.Hit{first}
+	trigger := crashwalk.CrashAt(first.Point)
+	good := func() crashwalk.RunResult {
+		return crashwalk.RunResult{Hits: [][]crashwalk.Hit{{first}, {second}}}
+	}
+	if err := crashwalk.CheckRecoveryRecord(clean, trigger, good()); err != nil {
+		t.Fatal(err)
+	}
+	if err := crashwalk.CheckRecoveryRecord(nil, crashwalk.CorruptOffline("state/x", "bad"), good()); err != nil {
+		t.Fatalf("offline damage has no first-generation cutoff: %v", err)
+	}
+	for _, tc := range []struct {
+		name   string
+		mutate func(*crashwalk.RunResult)
+		want   string
+	}{
+		{"missing recovery", func(r *crashwalk.RunResult) { r.Hits = r.Hits[:1] }, "must end in generation 2 without targets"},
+		{"target result", func(r *crashwalk.RunResult) { r.Reached = []bool{false} }, "must end in generation 2 without targets"},
+		{"domain failure", func(r *crashwalk.RunResult) { r.Violations = []string{"message lost"} }, "failed complete recovery recording: message lost"},
+		{"first provenance", func(r *crashwalk.RunResult) { r.Hits[0][0].Gen = 2 }, "generation 1 contains generation-2 evidence"},
+		{"second provenance", func(r *crashwalk.RunResult) { r.Hits[1][0].Gen = 3 }, "generation 2 contains generation-3 evidence"},
+		{"trigger cutoff", func(r *crashwalk.RunResult) { r.Hits[0] = nil }, "did not end at its target"},
+		{"trigger prefix", func(r *crashwalk.RunResult) { r.Hits[0][0].From = "state/other" }, "another path operand"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := good()
+			tc.mutate(&r)
+			if err := crashwalk.CheckRecoveryRecord(clean, trigger, r); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("CheckRecoveryRecord = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
 
 func TestAnalyzeSourcesUsesOnlyCompleteSecondGenerationsAndAllCleanSources(t *testing.T) {
 	h := crashwalk.Hit{Gen: 2, Point: point(t, "status/file.write#4"), Path: "state/status.rec"}
