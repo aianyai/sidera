@@ -263,3 +263,118 @@ func TestStartupWalkInitCrashesItsActualTransactionRecovery(t *testing.T) {
 		t.Fatal("actual init recovery did not remove the interrupted key's temporary file")
 	}
 }
+
+func TestStartupWalkAdvancesTheRealPeriodicClockAfterStart(t *testing.T) {
+	for _, advance := range []time.Duration{0, daemon.ClockStateEvery, 10 * daemon.ClockStateEvery} {
+		t.Run(advance.String(), func(t *testing.T) {
+			s := startupWalk(harness.StartupStart)
+			s.StartAfter = 5 * time.Minute
+			s.AdvanceAfterStart = advance
+			want := harness.DefaultStart
+			if advance != 0 {
+				want = want.Add(s.StartAfter + advance)
+			}
+			s.Check = func(r fsx.Reader) error {
+				state, err := keys.ReadClock(r)
+				if err != nil {
+					return err
+				}
+				if !state.HighWater.Equal(want) {
+					return fmt.Errorf("high water = %s, want %s", state.HighWater, want)
+				}
+				return nil
+			}
+			out := startupResult(t, harness.NewWalkBackend(t), s, crashwalk.RunPlan{Record: true})
+			var points []string
+			for _, hit := range out.Hits[0] {
+				if hit.Point.Tag.Tx == "clock-high-water" {
+					points = append(points, hit.Point.String())
+				}
+			}
+			var wantPoints []string
+			if advance != 0 {
+				wantPoints = []string{
+					"clock-high-water/clock.create#1", "clock-high-water/clock.write#1",
+					"clock-high-water/clock.sync#1", "clock-high-water/clock.rename#1",
+					"clock-high-water/clock.sync-dir#1", "clock-high-water/commit#1",
+				}
+			}
+			if !reflect.DeepEqual(points, wantPoints) {
+				t.Fatalf("periodic clock observations = %v, want %v", points, wantPoints)
+			}
+		})
+	}
+}
+
+func TestStartupWalkRejectsInvalidPostStartAdvancesBeforeAllocating(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		op      harness.StartupOperation
+		advance time.Duration
+	}{
+		{"start-negative", harness.StartupStart, -time.Second},
+		{"init-negative", harness.StartupInit, -time.Second},
+		{"init-positive", harness.StartupInit, time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := startupWalk(tc.op)
+			s.AdvanceAfterStart = tc.advance
+			_, err := harness.NewWalkBackend(noStartupResources{t}).Run(context.Background(), s, crashwalk.RunPlan{Record: true})
+			if err == nil || err.Error() != "harness: AdvanceAfterStart requires StartupStart and a non-negative duration" {
+				t.Fatalf("invalid advance = %v", err)
+			}
+		})
+	}
+}
+
+type noStartupResources struct{ testing.TB }
+
+func (t noStartupResources) TempDir() string {
+	t.Fatal("invalid startup scenario allocated resources")
+	return ""
+}
+
+func TestStartupWalkRecoversAndAdvancesAfterAPeriodicClockCrash(t *testing.T) {
+	b := harness.NewWalkBackend(t)
+	s := startupWalk(harness.StartupStart)
+	s.StartAfter = 5 * time.Minute
+	s.AdvanceAfterStart = daemon.ClockStateEvery
+	rec := startupResult(t, b, s, crashwalk.RunPlan{Record: true})
+	for _, point := range []string{"clock-high-water/clock.write#1", "clock-high-water/commit#1"} {
+		t.Run(point, func(t *testing.T) {
+			s := *s
+			s.Check = func(r fsx.Reader) error {
+				state, err := keys.ReadClock(r)
+				if err != nil {
+					return err
+				}
+				want := harness.DefaultStart.Add(7 * time.Minute)
+				if !state.HighWater.Equal(want) {
+					return fmt.Errorf("recovered high water = %s, want %s", state.HighWater, want)
+				}
+				return nil
+			}
+			target := crashwalk.Target{Gen: 1, Point: walkPoint(t, point)}
+			out := startupResult(t, b, &s, crashwalk.RunPlan{Targets: []crashwalk.Target{target}})
+			if len(out.Hits) != 2 || !out.Reached[0] {
+				t.Fatalf("periodic clock crash not recovered: %+v", out)
+			}
+			if err := crashwalk.CompareRuns(rec.Hits[0], out.Hits[0], target); err != nil {
+				t.Fatal(err)
+			}
+			last := out.Hits[0][len(out.Hits[0])-1]
+			if last.Point != target.Point {
+				t.Fatalf("periodic clock trace passed its cutoff: %+v", last)
+			}
+			clockWrites := 0
+			for _, hit := range out.Hits[1] {
+				if hit.Point.Tag.Tx == "clock-high-water" {
+					clockWrites++
+				}
+			}
+			if clockWrites != 6 {
+				t.Fatalf("recovered generation recorded %d clock writes, want 6", clockWrites)
+			}
+		})
+	}
+}

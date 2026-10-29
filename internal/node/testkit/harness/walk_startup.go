@@ -40,9 +40,14 @@ type StartupWalkScenario struct {
 	// StartAfter advances the fixed clock after Start's unobserved Init and
 	// before its first observed generation. It must be non-negative and is only
 	// valid for StartupStart; zero leaves the freshly initialized clock unchanged.
-	StartAfter    time.Duration
-	PointBudget   int
-	RecoveryCases []crashwalk.RecoveryCase
+	StartAfter time.Duration
+	// AdvanceAfterStart advances the shared clock once after each successful
+	// Start has quiesced, then waits for the resulting work before stopping.
+	// It must be non-negative and is only valid for StartupStart; zero keeps
+	// the startup-only run.
+	AdvanceAfterStart time.Duration
+	PointBudget       int
+	RecoveryCases     []crashwalk.RecoveryCase
 	// Damage changes only the stopped disk, outside every observation window.
 	Damage func(fsx.FS, crashwalk.Trigger) error
 	// Check reads the completed disk after every process resource was reclaimed.
@@ -62,6 +67,9 @@ func (s *StartupWalkScenario) validate() error {
 	}
 	if s.StartAfter < 0 || (s.Operation != StartupStart && s.StartAfter != 0) {
 		return errors.New("harness: StartAfter requires StartupStart and a non-negative duration")
+	}
+	if s.AdvanceAfterStart < 0 || (s.Operation != StartupStart && s.AdvanceAfterStart != 0) {
+		return errors.New("harness: AdvanceAfterStart requires StartupStart and a non-negative duration")
 	}
 	return nil
 }
@@ -107,9 +115,7 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 			var d *daemon.Daemon
 			d, err = daemon.Start(startCtx, cfg)
 			if err == nil {
-				_, err = d.Engine().Quiesce(startCtx, engine.Expect{})
-				d.RequestStop("startup walk complete")
-				err = errors.Join(err, d.Wait())
+				err = finishStartup(startCtx, d, clk, s.AdvanceAfterStart)
 			}
 		}
 		cancel()
@@ -164,6 +170,29 @@ func runStartup(ctx context.Context, t *walkTest, s *StartupWalkScenario, r *wal
 		}
 	}
 	return nil
+}
+
+// finishStartup owns a serving generation through its last quiescence and stop,
+// including when the caller is canceled or a selected point cuts off its disk.
+func finishStartup(ctx context.Context, d *daemon.Daemon, clk *clocktest.Fake, advance time.Duration) (err error) {
+	defer func() {
+		d.RequestStop("startup walk complete")
+		err = errors.Join(err, d.Wait())
+	}()
+	if _, err = d.Engine().Quiesce(ctx, engine.Expect{}); err != nil {
+		return err
+	}
+	if advance != 0 {
+		if err = ctx.Err(); err != nil {
+			return err
+		}
+		clk.Advance(advance)
+		_, err = d.Engine().Quiesce(ctx, engine.Expect{})
+		if err == nil {
+			err = ctx.Err()
+		}
+	}
+	return err
 }
 
 // startupAttempt keeps selection in the shared recorder. The callback only

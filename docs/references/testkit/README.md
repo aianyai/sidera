@@ -263,7 +263,15 @@ coverage dimensions.
   A fixed clock and synchronized seeded reader keep recordings reproducible;
   `StartAfter` optionally advances that clock after preparation and before
   observation, so a scenario can make certificate renewal due at Start. The
-  default is zero; negative values or use with Init are refused. Socket homes
+  default is zero. `AdvanceAfterStart` optionally advances the same clock once
+  after each successful Start has quiesced, then quiesces the resulting work
+  before RequestStop/Wait. It reaches the daemon's real periodic tasks and does
+  not promise to execute every tick crossed by a large jump. Each successful
+  later generation advances again from the clock the previous attempt left;
+  an attempt interrupted during startup does not advance. Cancellation during
+  the post-start work still reclaims the daemon before returning. Both fields
+  require non-negative durations and refuse nonzero use with Init before
+  allocating resources; zero retains a startup-only run. Socket homes
   are separate short private temporary directories and daemon data stays in
   memory. Representative Init, renewal and layout replays verify this capability;
   they do not assert complete transaction-table coverage.

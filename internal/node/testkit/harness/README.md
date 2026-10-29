@@ -19,7 +19,7 @@ layer.
 | `NewStopped(t, Options)` | Prepares the same initialized disk, clock, ledger and fakes as `New`, leaving the node down so the first generation can use controlled startup. |
 | `H.TryStart(ctx, StartOptions)` | Synchronously starts a down node or reclaims everything that startup acquired before returning `(crashed, err)`. `Arm` installs ordinary fault rules before transaction recovery; `CrashAt` selects a startup point and crash mode while the fixture owns the cutoff and cleanup. |
 | `NewWalkBackend(t)`, `WalkScenario` | Runs a script for `crashwalk.Backend` on a fresh in-memory fixture, with per-generation observations, process crashes, recovery triggers, a repeatable drain and ledger judgements. `WalkScenario.Options` configures the fixture; `Damage` interprets an offline trigger on its stopped disk, and `Check` adds a final judgement. |
-| `StartupWalkScenario`, `StartupOperation` | Runs actual `daemon.Init` from an empty disk (`StartupInit`) or actual `daemon.Start` after an unobserved Init (`StartupStart`). Names, budgets, recovery cases, offline damage and read-only checks are scenario data. `StartAfter` advances the same fixed clock between Init and the first observed Start; default zero, non-negative and only valid for Start. |
+| `StartupWalkScenario`, `StartupOperation` | Runs actual `daemon.Init` from an empty disk (`StartupInit`) or actual `daemon.Start` after an unobserved Init (`StartupStart`). Names, budgets, recovery cases, offline damage and read-only checks are scenario data. `StartAfter` advances the same fixed clock between Init and the first observed Start. `AdvanceAfterStart` advances it once after each successful Start has quiesced, then quiesces again before stopping. Both default to zero, are non-negative and are only valid for Start. |
 | `Options` | The origin of the clock, the seed of the random source, the adapter's direct limit, the engine's `Params`, an observer of every write step, whether the engine starts with the clock-rollback pause, whether it runs the archive sweep and how often (`ArchiveSweepEvery`), the file system (`FS`: in memory or the real one), a disk to start on (`Disk`), the node's rules (`Policy`) and a patch of its settings (`NodeSettings`) applied before the first start, the presets the node has besides the one `init` makes (`Presets`, by name, each the JSON `presets add` takes, added through the configuration's own change), and a stand-in for the free space (`DiskFree`), and `Adapter`: the adapter host (below). |
 | `H.Loopback`, `H.DropReceipt`, `H.Unreachable`, `H.UnreachableNode`, `H.HoldReports`, `H.Release`, `H.Delay`, `H.Mutate`, `H.Mutated`, `H.VerifyReport`, `H.VerifyControlReply` | The loopback of the running process, its knobs, and the check of a report or a control reply the node signed. Each hit of a knob is a `knob.hit` entry of the ledger. |
 | `Options.OpenPackage` | Opens a named adapter package as an `fsx.Reader` rooted at its source. Each generation receives the same callback through `engine.Deps.OpenPackage`; nil leaves installation without a package reader. |
@@ -70,7 +70,14 @@ By default the node has one instance, `Instance`, and every accessor without a n
   generation opens its window before its one writer exists. Start's preparatory
   Init is unobserved, so two writers never share one generation's counters.
   `complete` is the one step boundary, after Init returns or Start has quiesced
-  and stopped. Start's ordinary shutdown stays inside the observation window.
+  and stopped. With `AdvanceAfterStart`, each successful Start first quiesces,
+  advances the shared clock once, quiesces its due work, and stops through
+  RequestStop/Wait even after cancellation. The jump uses the daemon's real
+  periodic tasks; it does not replay each crossed tick. Every successful later
+  generation advances again from the current clock, including after a crash in
+  periodic work; a generation interrupted during startup does not advance.
+  The clock never goes back between generations. Invalid durations are refused
+  before allocating resources. Start's ordinary shutdown stays inside the observation window.
   Selection uses the same recorder and `NewHit` conversion as engine scripts;
   the startup callback only cuts off access, clones the disk and cancels startup
   waits. Failed Start reclaims its own resources; successful Start is stopped with
