@@ -105,8 +105,9 @@ that closing commit, then apply the shared third-generation recovery checker.
 
 `acceptance/disk.Damage` changes only an intact, actually retained source body
 on the stopped disk. It verifies the existing reference before flipping a byte;
-`RecoveryOps.InspectDamage` returns read-only owner-alert counts and the identity
-of the actual damaged body or creating endpoint. The recipe owns their judgement.
+`RecoveryOps.InspectDamage` delegates read-only owner-alert counting and damaged
+object identities to `acceptance/disk.InspectDamage` after actual damage. The
+binding obtains the current record scan; the recipe owns the judgement.
 The archive variant's named preparation arms recoverable create failures in the current process's
 existing fault wrapper; it does not hold transport reports or manufacture state.
 A negative test moves the real periodic sweep beyond the bounded drain and

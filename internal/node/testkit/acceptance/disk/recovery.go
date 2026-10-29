@@ -14,12 +14,29 @@ import (
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
 // DamageResult identifies the actual product-created objects changed offline.
 type DamageResult struct{ Endpoint, Body string }
+
+// InspectDamage extracts owner-alert facts from the current real record scan.
+// The caller must have actually applied the damage, so Applied is always true.
+// Recipes decide whether the observations satisfy their recovery obligations.
+func InspectDamage(sc *store.Scan, damage DamageResult) recipes.DamageFacts {
+	facts := recipes.DamageFacts{Applied: true, Endpoint: damage.Endpoint, Body: damage.Body, OwnerAlerts: len(sc.Alerts)}
+	for _, alert := range sc.Alerts {
+		if alert.Kind == "control_unknown" {
+			facts.ControlUnknownAlerts++
+		}
+		if alert.Kind == "corrupt_body" && alert.Subject == facts.Body {
+			facts.CorruptBodyAlerts++
+		}
+	}
+	return facts
+}
 
 // Damage changes an existing record, retained body or empty layout directory.
 // The caller must stop the node first and must not count these writes as evidence.

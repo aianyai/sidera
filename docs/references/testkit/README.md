@@ -711,7 +711,11 @@ observed it reachable.
 
 Recovery recipes own quarantine and body-corruption owner-alert judgements.
 `RecoveryOps.InspectDamage` supplies read-only counts and the actual damaged
-object identity; the binding never decides whether those facts satisfy recovery.
+object identity through `acceptance/disk.InspectDamage`, which accepts the current
+real record scan and the result of damage actually applied. It counts all owner
+alerts and `control_unknown` alerts, and only `corrupt_body` alerts matching the
+damaged body. Bindings retain lifecycle ownership and scan errors; recipes decide
+whether the facts satisfy recovery.
 The final closed-record audit uses `acceptance/disk.CheckClosed`, including the
 real recovery plan and unresolved deliveries. Failed-creation notification drains
 retain the recipe's own `DeliveryEvidence` through repeated runs and validate it

@@ -36,16 +36,7 @@ func recoveryBindings(state *damageState) recipes.RecoveryOps {
 			if err != nil {
 				return facts, err
 			}
-			facts.OwnerAlerts = len(scan.Alerts)
-			for _, alert := range scan.Alerts {
-				if alert.Kind == "control_unknown" {
-					facts.ControlUnknownAlerts++
-				}
-				if alert.Kind == "corrupt_body" && alert.Subject == facts.Body {
-					facts.CorruptBodyAlerts++
-				}
-			}
-			return facts, nil
+			return disk.InspectDamage(scan, state.result), nil
 		},
 	}
 }
