@@ -67,6 +67,41 @@ func online(t *testing.T, h *harness.H) bool {
 	return v.Online
 }
 
+func TestStartAndRestartsWaitForEveryLatestAdapterProbe(t *testing.T) {
+	instances := []string{harness.Instance, "other"}
+	h := harness.NewStopped(t, harness.Options{Adapter: &harness.AdapterOptions{
+		Host: hostParams(), Runtime: true, ExtraInstances: instances[1:],
+	}})
+	starts := []struct {
+		name string
+		run  func()
+	}{
+		{"Start", h.Start},
+		{"Restart", h.Restart},
+		{"ProcessCrash", func() { h.Crash(harness.ProcessCrash) }},
+		{"PowerLoss", func() { h.Crash(harness.PowerLoss(17)) }},
+		{"TryStart", func() {
+			h.Stop()
+			if crashed, err := h.TryStart(context.Background(), harness.StartOptions{}); crashed || err != nil {
+				t.Fatalf("TryStart = %v, %v", crashed, err)
+			}
+		}},
+	}
+	for i, start := range starts {
+		start.run()
+		for _, instance := range instances {
+			launches := h.AdapterLaunches(instance)
+			if len(launches) != i+1 {
+				t.Fatalf("%s: %s has %d launches, want %d", start.name, instance, len(launches), i+1)
+			}
+			latest := launches[len(launches)-1]
+			if !latest.Ended() && !slices.Contains(latest.Methods(), adapterproto.MethodAdapterProbe) {
+				t.Fatalf("%s returned before %s's latest launch received adapter.probe: %v", start.name, instance, latest.Methods())
+			}
+		}
+	}
+}
+
 // A hung adapter that nobody can end holds its instance lock. The host judges it
 // offline after two unanswered pings, starts the instance again as often as its
 // backoff says, and the replacement is refused the lock every time: it is never

@@ -278,7 +278,9 @@ coverage dimensions.
   Init finishes the interrupted disk. Retry checks preserve the existing keys,
   self-revocation, clock record and owner configuration. Offline damage is applied
   after shutdown and window closure, and final checks read without a writer.
-  A fixed clock and synchronized seeded reader keep recordings reproducible;
+  A fixed clock and synchronized seeded reader keep recordings reproducible.
+  The startup runner supplies no adapter host and runs no agent script, so its
+  reader is not shared by asynchronous adapter probes and scripted registrations;
   `StartAfter` optionally advances that clock after preparation and before
   observation, so a scenario can make certificate renewal due at Start. The
   default is zero. `AdvanceAfterStart` optionally advances the same clock once
@@ -406,7 +408,15 @@ coverage dimensions.
   instance again after its backoff, and every replacement is refused the lock and never
   controls a session beside it. The launcher is one implementation shared with the
   tests of the daemon, so that the code that starts fakes is not written twice. The
-  quiet check adds the fakes' own numbers: with a host, the engine is asked against the
+  fixture's startup waits beyond the host's `adapter.start` boundary until every
+  enabled instance's latest launch has received `adapter.probe` or ended. The
+  probe draws tokens from the same seeded engine reader that registrations and
+  controls use; without this barrier, scheduling changes the identifiers and
+  paths of crash recordings. The wait uses the launcher's predecessor-ordering
+  condition, observes cancellation and has a ten-second real-clock limit.
+  Disabled instances are not awaited. Quiet uses the same readiness condition
+  for later relaunches, and counts launches to detect replacement between rounds.
+  The quiet check adds the fakes' own numbers: with a host, the engine is asked against the
   notifications the latest launch has sent and the requests it holds, made again each
   round, and the fixture waits for that launch to have no request of its own that is not
   answered. With a runtime it also waits for the runtime to have no turn whose actions are

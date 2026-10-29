@@ -90,7 +90,9 @@ By default the node has one instance, `Instance`, and every accessor without a n
   means verification with an empty next trace, with no synthetic Init events.
   Existing keys, self-revocation, clock and owner configuration must survive
   retries unchanged. Each run has its own short private socket home and in-memory
-  disk, fixed clock and synchronized seeded random source. Damage runs only on
+  disk, fixed clock and synchronized seeded random source. This runner supplies
+  no adapter host and runs no agent script, so no asynchronous adapter probe
+  competes with scripted registrations for that source. Damage runs only on
   the stopped disk after the window closes; final checks read without a writer.
 - **The node is made by the program's own code.** The keys and the configuration are
   written by the `init` plan (the keys are real, from a seeded source, so the node
@@ -107,7 +109,8 @@ By default the node has one instance, `Instance`, and every accessor without a n
   validates packages and caches no reader: the engine and configuration still own
   staging, validation and installation.
 - **With an adapter host, quiet also means the adapter is.** The fixture adds a condition
-  for the latest launch of each instance: it has no request of its own that the daemon
+  for the latest launch of each instance: it has received `adapter.probe` or ended,
+  and it has no request of its own that the daemon
   has not answered (`Controller.Stats().Outstanding` is zero), and its progress is the
   notifications it has sent. The engine is asked with `Expect.Adapters[instance]` set to
   the notifications the latest launch has sent and the requests it holds on purpose
@@ -119,6 +122,18 @@ By default the node has one instance, `Instance`, and every accessor without a n
   stay where the process left them, so the fixture's quiet does not return while any
   instance's adapter is away: a test that keeps one away waits with the engine's own
   `Quiesce` until the host has started another.
+  Probe readiness counts launches, so a replacement between quiet's two looks
+  requires another round even if both processes have already received their probes.
+- **Startup waits for probe token draws.** `New`, `Start`, `StartWith`, `TryStart`
+  and all restarts return success only after every enabled instance's latest
+  launch has received `adapter.probe` or ended. The host's `Start` returns at
+  `adapter.start`, before its asynchronous probe draws tokens from the same
+  seeded stream that script registrations and controls use. Waiting for the
+  latest launch keeps those draws before the script, including when older
+  probed processes remain in the launch history. The launcher uses the same
+  condition for predecessor ordering and quiet; quiet also covers relaunches
+  caused by `Advance`. Startup's wait is bounded by cancellation and a ten-second
+  real-clock limit, and ignores disabled instances.
 - **With a fake runtime, quiet also means no turn of it has actions in progress.** The
   fixture adds a condition for the runtime of each instance made with
   `AdapterOptions.Runtime`: `fakeruntime.Runtime.Activity` says it is idle (no turn has
@@ -135,7 +150,7 @@ By default the node has one instance, `Instance`, and every accessor without a n
   random source, so one seed gave each instance other identifiers from run to run, and
   with them another order of the endpoints a model run picks from. `LauncherConfig.Order`
   (the fixture passes the instances in the order it lists them) makes a launch wait until
-  the latest process of the instance before it has been sent `adapter.probe`, which comes
+  the latest process of the instance before it has been sent `adapter.probe` or ended. A probe comes
   after the engine has admitted the instance and drawn what it needs. A restart starts the
   instances at once, since the latest process of the one before is then the previous run's.
 - **Quiet is a round in which no count moved.** A condition of the fixture's parts
@@ -304,6 +319,12 @@ points, host cleanup, ordinary errors and cooperative cancellation.
 at runtime and controlled-start crash boundaries, strict next generations and
 ordinary stop, restart, cleanup, startup error and cancellation. Its runtime
 walk checks the target, two generations and the actual crash ledger entry.
+
+`TestStartAndRestartsWaitForEveryLatestAdapterProbe` asserts probe readiness
+immediately after Start, clean Restart, process crash, power loss and TryStart,
+with two runtime-capable instances and no intervening quiescence.
+`TestProbeWaitFollowsTheLatestLaunchAndAcceptsItsEnd` checks that an older probe
+cannot release a newer launch's wait and that an ended launch releases it.
 
 `install_test.go`: `TestPackageSourceCanInstallAndUpgradeAfterRestart` installs a
 package through the engine's management entry and upgrades it after a restart using

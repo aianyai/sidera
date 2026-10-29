@@ -119,7 +119,7 @@ type LauncherConfig struct {
 	Arm func(instance string, n int, k *fakeadapter.Knobs)
 	// Order, which may be nil, is the order the instances of a first boot are taken on
 	// in: a launch of an instance waits until the latest process of the one before it
-	// has been sent adapter.probe, which the engine does after it has admitted the
+	// has been sent adapter.probe or ended. The engine probes after it has admitted the
 	// instance and drawn what the admission needs from its random source. Without an
 	// order the host starts the instances at once and the admissions reach the engine
 	// in whichever order the processes answer, so each instance gets other identifiers
@@ -193,13 +193,13 @@ func (l *AdapterLauncher) Launch(ctx context.Context, inst adapterhost.Instance)
 	return &launchedProcess{launch}, nil
 }
 
-// predecessorWait is how long, on the real clock, a launch waits for the instance before
-// it in Order; a predecessor that never comes (kept away on purpose) must not hold a
-// node up.
-const predecessorWait = 10 * time.Second
+// adapterProbeWait bounds probe waits on the real clock. Predecessor ordering
+// proceeds after this limit if an instance was deliberately kept away; startup
+// instead fails rather than releasing a script before the probe's random draws.
+const adapterProbeWait = 10 * time.Second
 
 // awaitPredecessor holds the launch of an instance until the latest process of the one
-// before it in Order has been probed. After a restart the latest process of the
+// before it in Order has been probed or ended. After a restart the latest process of the
 // predecessor is the one of the run before, which was probed long ago, so the restart
 // of a node starts its instances at once.
 func (l *AdapterLauncher) awaitPredecessor(ctx context.Context, id string) {
@@ -207,22 +207,38 @@ func (l *AdapterLauncher) awaitPredecessor(ctx context.Context, id string) {
 	if i <= 0 {
 		return
 	}
-	prev := l.c.Order[i-1]
-	sys := clock.System()
-	limit := sys.NewTimer(predecessorWait)
-	defer limit.Stop()
-	for ctx.Err() == nil {
-		if ls := l.Launches(prev); len(ls) > 0 && slices.Contains(ls[len(ls)-1].Methods(), adapterproto.MethodAdapterProbe) {
-			return
+	waitCtx, cancel := context.WithTimeout(ctx, adapterProbeWait)
+	defer cancel()
+	_ = l.awaitProbe(waitCtx, l.c.Order[i-1])
+}
+
+// probeState reports whether the latest launch has received its probe or ended,
+// and counts launches so quiet detects a replacement between its two looks.
+// Probe tokens are drawn before adapter.probe is written; until then an adapter
+// can still consume the engine's seeded random stream ahead of the next script call.
+func (l *AdapterLauncher) probeState(instance string) (bool, uint64) {
+	ls := l.Launches(instance)
+	if len(ls) == 0 {
+		return false, 0
+	}
+	last := ls[len(ls)-1]
+	return last.Ended() || slices.Contains(last.Methods(), adapterproto.MethodAdapterProbe), uint64(len(ls))
+}
+
+func (l *AdapterLauncher) awaitProbe(ctx context.Context, instance string) error {
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		poll := sys.NewTimer(time.Millisecond)
+		if settled, _ := l.probeState(instance); settled {
+			return nil
+		}
+		poll := clock.System().NewTimer(quietPoll)
 		select {
 		case <-poll.C():
-		case <-limit.C():
-			poll.Stop()
-			return
 		case <-ctx.Done():
 			poll.Stop()
+			return ctx.Err()
 		}
 	}
 }

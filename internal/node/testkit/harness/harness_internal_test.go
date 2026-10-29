@@ -474,3 +474,30 @@ func TestEveryLaunchOfAnInstanceWritesThroughTheSameLedgerWriter(t *testing.T) {
 		t.Errorf("%d ledger writers for one instance, want 1", writers)
 	}
 }
+
+func TestProbeWaitFollowsTheLatestLaunchAndAcceptsItsEnd(t *testing.T) {
+	l := NewAdapterLauncher(LauncherConfig{
+		T: t, Ctx: context.Background(), Now: clocktest.NewFake(DefaultStart).Now,
+		Ledgers: ledger.NewMemory(), Manifest: AdapterManifest(adapterproto.MaxDirectEndpoints),
+	})
+	t.Cleanup(l.Close)
+	inst := adapterhost.Instance{ID: Instance, LockPath: t.TempDir() + "/adapter-chat.lock"}
+	for range 2 {
+		if _, err := l.Launch(context.Background(), inst); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ls := l.Launches(Instance)
+	ls[0].wrote([]byte(`{"method":"adapter.probe"}`))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	if err := l.awaitProbe(ctx, Instance); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unprobed latest launch with a probed predecessor: %v", err)
+	}
+	ls[1].End()
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := l.awaitProbe(ctx, Instance); err != nil {
+		t.Fatalf("ended latest launch: %v", err)
+	}
+}

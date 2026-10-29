@@ -471,6 +471,18 @@ func (h *H) boot(ctx context.Context, p *process, check func() error) error {
 		if err := p.host.Start(ctx, env); err != nil {
 			return fmt.Errorf("starting the adapter host: %w", err)
 		}
+		// Host.Start ends at adapter.start, before the asynchronous probe draws
+		// tokens. Finish those draws before recovery or a script uses the same
+		// seeded stream, including after a restart with older launches retained.
+		waitCtx, cancel := context.WithTimeout(ctx, adapterProbeWait)
+		defer cancel()
+		for instance, in := range cfg.Instances().Items {
+			if in.Enabled {
+				if err := h.launcher.awaitProbe(waitCtx, instance); err != nil {
+					return fmt.Errorf("waiting for the adapter probe of %s: %w", instance, err)
+				}
+			}
+		}
 	} else {
 		info := adapterproto.InitializeResult{
 			ProtocolVersion: 1,
@@ -968,11 +980,18 @@ func (h *H) AdapterLaunches(instance string) []*AdapterLaunch {
 }
 
 // addAdapterQuiet registers what the fixture asks of the latest process of an
-// adapter instance for the system to be quiet: it has no request of its own that
-// the daemon has not answered. Its progress is the notifications it has sent. A
+// adapter instance for the system to be quiet: it has received its probe or ended,
+// and has no request of its own that the daemon has not answered. Its progress
+// counts launches and the notifications sent by the latest one. A
 // process that is hung or that was abandoned is not the latest once the host has
 // started another, so it can make the fixture wait for ever only until then.
 func (h *H) addAdapterQuiet(instance string) {
+	h.addQuiet("the adapter of "+instance+" has not received its probe or ended", func() (bool, uint64) {
+		settled, launches := h.launcher.probeState(instance)
+		// A disabled instance may never have launched. Startup separately waits
+		// for enabled instances, including their first launch.
+		return launches == 0 || settled, launches
+	})
 	h.addQuiet("the adapter of "+instance+" has requests of its own that are not answered", func() (bool, uint64) {
 		st, ok := h.latestAdapterStats(instance)
 		if !ok {
