@@ -99,6 +99,12 @@ the ledger entries. What a layer cannot provide (a runtime that sessions can use
 adapter host in a fixture made without one) is an error that is
 `scenario.ErrNotAvailable`, never a stand-in.
 
+## Acceptance recipes
+
+[`acceptance`](acceptance/README.md) separates reusable domain recipes from their
+in-process binding. Each run constructs a fresh catalog, uses the existing walk
+backend and reports actual observations against the complete daemon table.
+
 ## Identifiers of crash points
 
 A crash point is `tx/role.step#n`: a transaction, the role of the file in it, a step

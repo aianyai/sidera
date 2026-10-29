@@ -19,6 +19,7 @@ document gives the reasons and says where the tests are.
 | `scenario` | The language of test scripts, the same in every layer: scripts, the driver, the environment interface a fixture implements, and the judgements that read the ledger. |
 | `harness` | The engine-layer fixture: the engine on the real store, configuration and transaction layer over the in-memory file system, one test clock, the ledger, the agents, quiet, process and power-loss crashes and restarts, fault injection, the in-process crash-walk backend, and the generator of control signals for model tests. |
 | `acceptance/agent/mcp` | The MCP backend of the fake agent: independently encoded exchanges for both supported revisions, exact receive text, and tool errors mapped to the scenario categories. It takes process pipes and imports neither the production MCP server nor an MCP SDK. |
+| `acceptance/recipes`, `acceptance/inproc` | Fixture-independent acceptance descriptions and their in-process binding; fresh closures per run, real lifecycle entry points and externally evidenced domain checks. |
 | `crashwalk` | The core of the crash-point walk: which points to kill at in each mode, how a rerun is held to its recording, scenario budgets, coverage of the declared writes, and the crashing of recovery itself. |
 
 The first four, with the two programs, are the **third-party side**: they import the
@@ -30,6 +31,24 @@ nor a fixture.
 The backends of the fake agent that run the command-line client and speak to the MCP
 server, the binary-layer fixture and the binary backend of the crash walk build on
 these packages and are not part of them.
+
+The acceptance catalog currently describes actual Init, certificate-renewing Start
+and direct send/receive/acknowledgement. Its domain check requires the body of a
+successfully accepted send to appear in the external ledger. A normal recording
+uses the complete daemon table for diagnostics, includes observed setup only in
+coverage, excludes setup from the main-point budget, and rejects undeclared or
+Recovery writes. Declaration kind and observation source are separate dimensions. A clean first
+generation must not contain Recovery declarations. Normal coverage can also come
+from Normal declarations in a complete second-generation recovery recording;
+Recovery coverage comes only from those complete second-generation recordings.
+A recovery-only Normal key is one observed there but absent from every clean
+recording, and each such non-sync key requires its own actual second-generation
+crash and successful third-generation recovery, reported separately from the
+Recovery-declaration targets. Later-generation hits cannot substitute for
+second-generation evidence, and observing a point cannot prove it was crashed.
+Fixed budgets give half a recording of growth allowance; they
+are never enlarged dynamically. The catalog and its bindings add no generic
+driver or shared environment capability.
 
 ## Why
 
