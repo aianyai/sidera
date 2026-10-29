@@ -195,6 +195,15 @@ file opened with `O_APPEND`; raw hit and crash-marker JSON lines are described i
 reaches `proc/cli.recv-after-response` only after the HTTP page is complete and
 before any model stdout.
 
+The daemon role reads its record, target and generation together and immediately
+removes `SIDERA_CRASH_RECORD`, `SIDERA_CRASH_AT` and `SIDERA_CRASH_GEN` from its
+own process environment. This happens before validation and before any adapter
+starts. The adapter host takes the current environment on each launch, so
+adapters, native runtimes and their CLI descendants cannot reuse the daemon's
+record or target. Test seed and clock inputs remain inherited. An explicitly
+configured CLI process still accepts its own crash variables; ordinary builds
+retain their existing environment behavior.
+
 Only `testclock` builds read `SIDERA_TEST_CLOCK_START_MS`. A supplied signed Unix
 millisecond origin selects one fake clock shared by the daemon and adapter host;
 without it they use system time. Management `test.clock.set` changes this clock

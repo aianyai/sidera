@@ -74,7 +74,13 @@ reader derived with a SHA-256 domain containing the seed, command role
 call-specific seeds; the fake runtime already derives `<base>/<native-ref>/<n>`
 for its CLI calls. Empty seeds retain system randomness. The command opens the
 record with `O_APPEND`, installs the daemon's observer explicitly, and closes the
-record after completion. Each process owns a separate record file. Invalid
+record after completion. Each process owns a separate record file. The daemon
+role reads its record, target and generation together, then immediately removes
+those three crash variables
+from its process environment before validation or startup. Adapter processes,
+native runtimes and their CLI tools therefore inherit none of the daemon
+generation's controls. Seed and clock variables remain available, and separately
+configured CLI invocations still accept their own crash controls. Invalid
 explicit generation or target values fail before the command runs; a target
 requires a record. A receive reaches `proc/cli.recv-after-response` after the
 complete HTTP page arrives and before its first stdout write.
@@ -83,3 +89,9 @@ Only a `testclock` build reads `SIDERA_TEST_CLOCK_START_MS`, a signed Unix
 millisecond origin. It injects one fake clock into the daemon and adapter host.
 An absent origin leaves system time in place. Ordinary builds ignore every test
 variable and install neither a crash observer nor a process hook.
+
+`TestDaemonCrashEnvironmentStaysWithItsOwner` performs the environment mutation
+only in a helper process. It launches the real fake adapter through the host's
+exec launcher, then a native runtime whose exec action starts the tagged CLI.
+The native CLI must succeed without appending to the daemon's record; a CLI
+with explicitly supplied controls must still reach its own crash target.

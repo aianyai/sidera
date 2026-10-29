@@ -29,8 +29,18 @@ func (r *lockedRandom) Read(p []byte) (int, error) {
 }
 
 func (c *command) configureTestProcess(role string) (func() error, error) {
+	// These controls belong to this daemon generation. Read them together before
+	// removing them from the environment inherited by adapters and native tools.
+	record, target, generation := c.Getenv("SIDERA_CRASH_RECORD"), c.Getenv("SIDERA_CRASH_AT"), c.Getenv("SIDERA_CRASH_GEN")
+	if role == "daemon" {
+		for _, name := range []string{"SIDERA_CRASH_RECORD", "SIDERA_CRASH_AT", "SIDERA_CRASH_GEN"} {
+			if err := os.Unsetenv(name); err != nil {
+				return nil, err
+			}
+		}
+	}
 	gen := 1
-	if value := c.Getenv("SIDERA_CRASH_GEN"); value != "" {
+	if value := generation; value != "" {
 		parsed, err := strconv.Atoi(value)
 		if err != nil || parsed < 1 {
 			return nil, fmt.Errorf("SIDERA_CRASH_GEN must be a positive integer")
@@ -43,7 +53,6 @@ func (c *command) configureTestProcess(role string) (func() error, error) {
 		source := randv2.NewChaCha8(sha256.Sum256([]byte(domain)))
 		c.random = &lockedRandom{source: source}
 	}
-	record, target := c.Getenv("SIDERA_CRASH_RECORD"), c.Getenv("SIDERA_CRASH_AT")
 	if record == "" {
 		if target != "" {
 			return nil, fmt.Errorf("SIDERA_CRASH_AT requires SIDERA_CRASH_RECORD")
