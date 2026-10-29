@@ -562,15 +562,30 @@ it derives. An overdue held creation returns the real unconfirmed timeout reply;
 its allocated endpoint must be closed with its token cleared. If the initial
 message passed its report window while accepted, its actual uncertainty notice
 must name that derived session endpoint. A delivered control reply does not prove
-the initial body reached a model. Synchronous preset refusal is a separate variant
-whose first receipt can release the retained initial body.
+the initial body reached a model. Before that deadline phase starts, a restart may
+instead finish the real creation. Its created reply must name a native session
+with the original control's initial-body evidence, obtained through actual
+receive and acknowledgement. Once the deadline phase has started, the strict
+timeout reply, closed endpoint and exact feedback remain required. A returned
+absent-node send likewise retains its full report-window obligation after an
+interruption. Deadline moves are remembered before their resulting writes can
+be cut, so repeated drains do not expire unread evidence by advancing again.
+Synchronous preset refusal is a separate variant whose first receipt can release
+the retained initial body.
 
 The retention acceptance path creates, reads from, sends from and closes a real
 session, then advances through record and archive retention using the existing
 periodic sweep. Read-only evidence requires real intact summaries after live
 records are swept, and no remaining archive files after their retention. Its
 bounded drain completes representative real interruptions without synthesizing
-records, summaries or cleanup effects.
+records, summaries or cleanup effects. It receives and acknowledges pending
+session sends and settles their sources before retention begins. Large retention
+advances are remembered across interruptions. A resumed drain allows one further
+ordinary sweep period because restart rearms the periodic task, and removing the
+last source intentionally leaves its session endpoint until a following pass.
+Real second-generation interruptions during source summarizing, endpoint sweeping
+and archive expiry must reach their exact cutoffs and finish a third generation
+with no retained endpoint, body, live record or expired archive.
 
 The control-expiry acceptance variant also covers a recoverable failure before
 its create-result replacement becomes visible. If the control's own report

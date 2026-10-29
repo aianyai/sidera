@@ -81,7 +81,11 @@ Retention recipes enable the existing periodic archive sweep on the fixture.
 `newMaintenanceOps` reduces real records and parsed archive files to the requested
 retention facts; malformed archive lines fail the audit. The mutation that omits
 archive expiry must fail, and representative real cuts before and during the
-sweep must still finish the bounded drain and pass its domain judgement.
+sweep must still finish the bounded drain and pass its domain judgement. Pending
+session sends are received and acknowledged before their source is settled and
+retention begins. Repeated drains preserve large clock advances and allow the
+rearmed periodic task a further ordinary pass to complete dependent endpoint or
+archive cleanup; the final audit still requires the endpoint to be absent.
 
 The control-expiry preparation fails a current-process control-result create
 before any visible replacement. The resulting deadline path is judged through
@@ -105,3 +109,12 @@ through public status, its real session target and external model evidence.
 receives and acknowledges its actual initial body, and compares matching and
 different expected bodies. Only the matching body can satisfy the creation
 obligation.
+
+Deadline boundary regressions cover a returned absent-node send and creation both
+before and after their deadline steps. A creation completed by restart before its
+deadline phase owes its actual native session and original initial body through
+`AcceptedCreation`; an already-started timeout phase keeps its strict reply and
+feedback requirements. `TestRecipeDrainPreservesClockProgressAfterAnotherCrash`
+records complete second generations, interrupts representative actual body,
+feedback and retention writes, and uses the shared recovery-target checker to
+require exact cutoffs, matching prefixes and final third-generation convergence.

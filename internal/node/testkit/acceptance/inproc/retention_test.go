@@ -27,7 +27,7 @@ func TestRetentionJudgementRejectsAnArchiveThatWasNeverExpired(t *testing.T) {
 }
 
 func TestRetentionDrainCompletesARealCutBeforeAndDuringTheSweep(t *testing.T) {
-	for _, step := range []string{"creation-pull", "record-retention"} {
+	for _, step := range []string{"creation-pull", "send-from-session", "record-retention", "archive-retention"} {
 		t.Run(step, func(t *testing.T) {
 			s := freshScenario(t, "maintenance-retention")
 			r, err := harness.NewWalkBackend(t).Run(context.Background(), s, crashwalk.RunPlan{Targets: []crashwalk.Target{{Gen: 1, AfterStep: step}}})

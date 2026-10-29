@@ -203,7 +203,18 @@ func failedCreationRecipe(b Bindings, name, preset string, failure *fakeadapter.
 
 func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 	var message adapterproto.MessageID
+	var result fakeagent.SendResult
+	var deadlineAdvanced, creationPulled, createdBeforeDeadline bool
+	session := &createdSession{}
 	facts := &DeliveryEvidence{}
+	const body = "An expired control must not claim a successful creation."
+	deadline := scenario.Step{Name: "control-deadline", Do: func(e scenario.Env) error {
+		if !deadlineAdvanced {
+			deadlineAdvanced = true
+			e.Advance(4 * time.Hour)
+		}
+		return nil
+	}}
 	return ScriptRecipe{Script: scenario.Script{Name: "session-create-expiry", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 104}, Steps: []scenario.Step{
 		{Name: "hold-create", Do: func(e scenario.Env) error {
 			c, err := e.Adapter("chat")
@@ -213,13 +224,49 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 			return c.SetOutcome(e.Ctx(), fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeHold})
 		}},
 		{Name: "create", Do: func(e scenario.Env) error {
-			r, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: "An expired control must not claim a successful creation."})
+			r, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: body})
 			if err == nil {
-				message = r.MessageID
+				message, result = r.MessageID, r
 			}
 			return err
-		}}, scenario.Advance("control-deadline", 4*time.Hour),
+		}}, deadline,
 	}}, Drain: func(e scenario.Env) error {
+		if !deadlineAdvanced && message != "" {
+			if !creationPulled {
+				creationPulled = true
+				e.Advance(time.Minute)
+			}
+			if err := e.Quiesce(); err != nil {
+				return err
+			}
+			status, err := e.Agent("sender").Status(e.Ctx(), fakeagent.StatusInput{MessageID: message})
+			if err != nil {
+				return err
+			}
+			// Restart may complete a held creation before its deadline phase began.
+			// That actual success still owes the original body at its native session.
+			if !createdBeforeDeadline && status.ControlReply != nil && status.ControlReply.Create != nil && status.ControlReply.Create.Outcome == adapterproto.CreateReplyCreated {
+				createdBeforeDeadline = true
+				session.control = message
+				facts.AcceptedCreation(result, body, "sender")
+			}
+		}
+		if createdBeforeDeadline {
+			if session.endpoint == "" {
+				if err := session.resolve(b, "", facts).Do(e); err != nil {
+					return err
+				}
+			}
+			return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint))
+		}
+		if message != "" {
+			if err := deadline.Do(e); err != nil {
+				return err
+			}
+			if err := e.Quiesce(); err != nil {
+				return err
+			}
+		}
 		c, err := e.Adapter("chat")
 		if err != nil {
 			return err
@@ -232,6 +279,9 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 		}
 		return drainFeedback(e, facts, "sender")
 	}, Check: func(e scenario.Env) error {
+		if createdBeforeDeadline {
+			return facts.Check(e)
+		}
 		if message == "" {
 			return nil
 		}
@@ -254,7 +304,7 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 		target := ident.Address{Node: runtime.Node, Endpoint: id}.String()
 		// The control reply itself was delivered. Its initial body is a separate
 		// derived delivery to the allocated session, whose report window expired.
-		facts.Accepted(fakeagent.SendResult{MessageID: message, To: []string{target}}, "An expired control must not claim a successful creation.")
+		facts.Accepted(fakeagent.SendResult{MessageID: message, To: []string{target}}, body)
 		facts.RequireFeedback(message, target, delivery.KindAcceptedUnconfirmed)
 		if err := b.Sessions.CheckClosedSession(e, endpoint); err != nil {
 			return err

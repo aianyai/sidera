@@ -221,6 +221,14 @@ func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
 
 func unreachableRecipe() ScriptRecipe {
 	facts := &DeliveryEvidence{}
+	var sent, advanced bool
+	deadline := scenario.Step{Name: "report-deadline", Do: func(e scenario.Env) error {
+		if !advanced {
+			advanced = true
+			e.Advance(4 * time.Hour)
+		}
+		return nil
+	}}
 	return ScriptRecipe{Script: scenario.Script{Name: "delivery-unreachable", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 48}, Steps: []scenario.Step{
 		{Name: "send-to-an-absent-node", Do: func(e scenario.Env) error {
 			target, err := absentNodeAddress(e.Addr("receiver"))
@@ -231,10 +239,21 @@ func unreachableRecipe() ScriptRecipe {
 			if err == nil {
 				facts.Accepted(r, "An unreachable node must produce real deadline feedback.")
 				facts.RequireFeedback(r.MessageID, target, delivery.KindExpiredUnconfirmed)
+				sent = true
 			}
 			return err
-		}}, scenario.Advance("report-deadline", 4*time.Hour),
-	}}, Drain: func(e scenario.Env) error { return drainFeedback(e, facts, "sender") }, Check: facts.Check}
+		}}, deadline,
+	}}, Drain: func(e scenario.Env) error {
+		if sent {
+			if err := deadline.Do(e); err != nil {
+				return err
+			}
+			if err := e.Quiesce(); err != nil {
+				return err
+			}
+		}
+		return drainFeedback(e, facts, "sender")
+	}, Check: facts.Check}
 }
 
 func absentNodeAddress(address string) (string, error) {

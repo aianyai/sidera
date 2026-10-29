@@ -115,20 +115,33 @@ fixed budgets of 62 and 24. A held creation past its report window must return
 `unconfirmed/ready_timeout` naming a closed session with no token. Its control
 signal can be delivered while its separate initial-message delivery is still
 unknown: the exact `accepted_unconfirmed` notice must name the derived session,
-not the runtime control target. The creation-expiry budget is 104 from 69 points.
+not the runtime control target. If a restart completes creation before the deadline
+phase began, the actual created reply must resolve to native creation evidence and
+the original initial body received and acknowledged at that session. This does not
+replace the timeout judgement once its deadline phase started. The creation-expiry
+budget is 104 from 69 points.
 
 An absent-node delivery exercises the source's report deadline without a
 transport knob. The real sender receives its exact `expired_unconfirmed` notice;
 the source cannot be treated as expired merely because no call was answered at
-the earlier delivery deadline. Its 32-point recording has a fixed budget of 48.
+the earlier delivery deadline. Its repeatable drain completes a returned send's
+report-window advance if the script was interrupted before it, and remembers that
+clock move before waiting for its resulting writes. A second crash cannot repeat
+the four-hour advance past unread feedback. Its 32-point recording has a fixed
+budget of 48.
 
 The retention recipe reads a created session's initial body, sends and reads a
 message from it, and closes the native session. Actual periodic sweeps must leave
 intact archive summaries after the live records, bodies and closed endpoint are
 gone, then remove those files after archive retention. `MaintenanceOps` returns
 only these final facts from a read-only audit. A drain interrupted before the
-sweep resumes from external creation results and performs bounded retention
-advances. Its 140-point recording has a fixed budget of 210.
+sweep resumes from external creation results, receives and acknowledges pending
+session messages, and completes their source settlement before retention. Each
+large clock move is remembered before its writes can be interrupted. The resumed
+drain also runs one further ordinary sweep period: restart rearms the periodic
+task, and the pass removing a session's last source deliberately leaves its
+endpoint for the following pass. The original endpoint-removal and archive-expiry
+requirements remain mandatory. Its 140-point recording has a fixed budget of 210.
 
 A separate control-expiry variant fails the first create-result replacement at
 its recoverable create point. The control reaches its report deadline before a
