@@ -82,8 +82,16 @@ no recipe writes node state. Each recipe records 74 main points and has a fixed
 budget of 111.
 
 Management recipes cover versioned node, preset and endpoint changes; a stale
-version is refused without changing the setting. They also cover alert raising
-and acknowledgement, backup confirmation, clearing a real clock rollback pause,
+version is refused without changing the setting. The maintenance recipe enables
+an installed, disabled warning adapter inside its first step and waits for its
+real probe to report a runtime version outside the manifest's tested range.
+`ManagementOps.CreateVersionAlert` returns the resulting owner alert's actual
+identifier. `RequireVersionAlert` judges all owner-alert facts together: exactly
+one alert, with kind `version_untested` and the enabled instance as subject. The
+same request identifier and expected version survive interruption; repeating the
+drain resumes the real enable and probe instead of raising another alert.
+The remaining actions cover acknowledgement, backup confirmation, clearing a
+real clock rollback pause,
 endpoint closure, and adapter disable/enable with pending messages and control
 work. Named callbacks return real results after checking the same request's
 persistent replay. The recipe then compares the result with the requested effect.
@@ -112,9 +120,9 @@ feedback, and checks that disabled endpoints are closed with empty tokens.
 Its normal record writes the instance head; recovery may also write normal
 transaction roles, whose observation source is reported separately.
 
-The management recordings have 16, 25, 4, 7, 55 and 130 main points for settings,
+The management recordings have 16, 36, 4, 7, 55 and 130 main points for settings,
 maintenance, stop, retirement, endpoint close and instance disable/enable. Their
-fixed budgets are 24, 38, 6, 11, 83 and 195 respectively.
+fixed budgets are 24, 54, 6, 11, 83 and 195 respectively.
 
 The instance-management recipe also records a crash after the disabled
 configuration is stored but before its first endpoint rewrite. Recovery then
@@ -249,9 +257,12 @@ acknowledges pending session bodies until closure has been requested, when real
 closure feedback can discharge the outstanding delivery instead.
 
 `Needs` declares runtime-adapter use, extra instances, sweep period, package input,
-offline damage kind and each required filesystem fault. `Capabilities.Supports`
+an installed but disabled probe-warning adapter (`ProbeWarning`), offline damage
+kind and each required filesystem fault. `Capabilities.Supports`
 and `Catalog.Select` choose recipes before execution. `BinaryCapabilities`
-includes offline damage on the stopped real disk and no filesystem fault injection.
+includes probe-warning input and offline damage on the stopped real disk, with no
+filesystem fault injection. Unknown damage and filesystem-fault kinds are never
+supported, even if a capability list contains the same unknown name.
 
 `Catalog.AnalyzeLayer` derives observed reachable keys from all complete clean and
 recovery records of supported recipes. A key seen by any supported source is

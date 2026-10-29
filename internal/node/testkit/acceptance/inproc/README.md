@@ -73,6 +73,13 @@ walk.
 `newManagementOps` binds each named action to its public engine operation.
 Every call resolves its process once, executes the request, reads the persistent
 result and resends the exact request. No engine handle survives a callback.
+The warning callback enables the installed disabled `warning-probe` instance with
+one deterministic request, waits for the current host's real probe and passes all
+actual owner-alert records to the shared `RequireVersionAlert` judgement.
+`recipeOptions` supplies only declarative per-instance input: the runtime reports
+`1.0.0` while the installed manifest tests `2.0.0` through `2.9.9`. Harness owns
+installation and initial disabling; neither catalog construction nor the binding
+starts a preparation fixture. No arbitrary alert is raised through the engine.
 Read-only inspections decode configuration and clock files or reduce a record
 scan to the requested endpoint, instance or alert facts. They do not write state.
 The instance preparation uses the existing extra-instance fixture and real

@@ -873,3 +873,22 @@ installed, enabled and disabled through the existing configuration operations
 before any host starts, and has no process or probe until real management enables
 it. Initially disabled instances are omitted from first-boot predecessor ordering,
 so another enabled instance cannot wait for their nonexistent processes.
+
+
+The maintenance acceptance recipe creates its warning through real adapter
+enablement and probing, inside the recipe step. Its fixture input is an installed,
+disabled adapter whose actual runtime version falls outside its manifest's tested
+range. `ManagementOps.CreateVersionAlert` retains a deterministic enable request
+across interruptions, waits for the current process's probe and returns the real
+alert identifier. `RequireVersionAlert` owns the shared judgement of all owner
+alerts: exactly one `version_untested` alert, naming that enabled instance. Missing,
+additional, wrong-kind and wrong-subject facts all fail. A resumed drain completes
+the same request and reads persistent facts, so it cannot create a second warning
+just to regain an identifier. Alert acknowledgement, backup confirmation and clock
+rollback clearance retain their durable-result and effect checks. Its real recording
+contains 36 main points and has a fixed budget of 54.
+
+Both execution layers explicitly support the `ProbeWarning` input need. Unknown
+damage or filesystem-fault names are unsupported even when a capability list
+contains the same unknown value. Package inputs and their real installation stay
+with each fixture; the callback adds no arbitrary-alert API or test RPC.

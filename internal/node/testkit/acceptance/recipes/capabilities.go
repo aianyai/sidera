@@ -38,29 +38,45 @@ type Needs struct {
 	ExtraInstances    []string
 	ArchiveSweepEvery time.Duration
 	PackageInput      bool
-	Damage            DamageKind
-	FSFaults          []FSFault
+
+	// ProbeWarning requires an installed, disabled adapter whose probe reports a
+	// runtime version outside its manifest's tested range. The recipe enables it.
+	ProbeWarning bool
+
+	Damage   DamageKind
+	FSFaults []FSFault
 }
 
 // Capabilities describes what an execution layer can supply.
 type Capabilities struct {
-	RuntimeAdapter, ExtraInstances, ArchiveSweep, PackageInput bool
-	Damage                                                     []DamageKind
-	FSFaults                                                   []FSFault
+	RuntimeAdapter, ExtraInstances, ArchiveSweep, PackageInput, ProbeWarning bool
+
+	Damage   []DamageKind
+	FSFaults []FSFault
 }
 
 // BinaryCapabilities intentionally provides no filesystem fault injection.
 func BinaryCapabilities() Capabilities {
-	return Capabilities{RuntimeAdapter: true, ExtraInstances: true, ArchiveSweep: true, PackageInput: true,
+	return Capabilities{RuntimeAdapter: true, ExtraInstances: true, ArchiveSweep: true, PackageInput: true, ProbeWarning: true,
 		Damage: []DamageKind{DamageSource, DamageTarget, DamageCreatingControl, DamageSourceBody, DamageLayout}}
 }
 
 // Supports selects from declarations, before a callback can fail at runtime.
 func (c Capabilities) Supports(n Needs) bool {
-	if n.RuntimeAdapter && !c.RuntimeAdapter || len(n.ExtraInstances) != 0 && !c.ExtraInstances || n.ArchiveSweepEvery != 0 && !c.ArchiveSweep || n.PackageInput && !c.PackageInput || n.Damage != "" && !slices.Contains(c.Damage, n.Damage) {
+	switch n.Damage {
+	case "", DamageSource, DamageTarget, DamageCreatingControl, DamageSourceBody, DamageLayout:
+	default:
+		return false
+	}
+	if n.RuntimeAdapter && !c.RuntimeAdapter || len(n.ExtraInstances) != 0 && !c.ExtraInstances || n.ArchiveSweepEvery != 0 && !c.ArchiveSweep || n.PackageInput && !c.PackageInput || n.ProbeWarning && !c.ProbeWarning || n.Damage != "" && !slices.Contains(c.Damage, n.Damage) {
 		return false
 	}
 	for _, fault := range n.FSFaults {
+		switch fault {
+		case FaultSourceUpdate, FaultRetainLostBody, FaultCreateSettlement, FaultInstallPointer:
+		default:
+			return false
+		}
 		if !slices.Contains(c.FSFaults, fault) {
 			return false
 		}

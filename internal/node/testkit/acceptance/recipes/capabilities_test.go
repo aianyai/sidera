@@ -1,17 +1,18 @@
 package recipes_test
 
 import (
+	"testing"
+	"time"
+
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 	"github.com/aianyai/sidera/internal/node/txn"
-	"testing"
-	"time"
 )
 
 func TestSelectRequiresEveryDeclaredCapability(t *testing.T) {
-	needs := []recipes.Needs{{RuntimeAdapter: true}, {ExtraInstances: []string{"extra"}}, {ArchiveSweepEvery: time.Hour}, {PackageInput: true}, {Damage: recipes.DamageSource}, {FSFaults: []recipes.FSFault{recipes.FaultSourceUpdate, recipes.FaultRetainLostBody}}}
+	needs := []recipes.Needs{{RuntimeAdapter: true}, {ExtraInstances: []string{"extra"}}, {ArchiveSweepEvery: time.Hour}, {PackageInput: true}, {ProbeWarning: true}, {Damage: recipes.DamageSource}, {FSFaults: []recipes.FSFault{recipes.FaultSourceUpdate, recipes.FaultRetainLostBody}}}
 	catalog := recipes.Catalog{}
 	for i, n := range needs {
 		catalog.Scripts = append(catalog.Scripts, recipes.ScriptRecipe{Needs: n, Script: scenario.Script{Name: string(rune('a' + i))}})
@@ -64,5 +65,16 @@ func TestTerminalDescriptionsParticipateInSelection(t *testing.T) {
 	catalog := recipes.Catalog{Terminals: []recipes.TerminalRecipe{{Name: "terminal", Needs: recipes.Needs{RuntimeAdapter: true}}}}
 	if len(catalog.Select(recipes.Capabilities{}).Terminals) != 0 || len(catalog.Select(recipes.BinaryCapabilities()).Terminals) != 1 {
 		t.Fatal("terminal capability selection was skipped")
+	}
+}
+
+func TestUnrecognizedNeedsAreUnsupported(t *testing.T) {
+	unknownDamage := recipes.DamageKind("unknown")
+	unknownFault := recipes.FSFault("unknown")
+	capabilities := recipes.Capabilities{Damage: []recipes.DamageKind{unknownDamage}, FSFaults: []recipes.FSFault{unknownFault}}
+	for _, needs := range []recipes.Needs{{Damage: unknownDamage}, {FSFaults: []recipes.FSFault{unknownFault}}} {
+		if capabilities.Supports(needs) {
+			t.Fatalf("unrecognized needs supported: %+v", needs)
+		}
 	}
 }

@@ -6,6 +6,8 @@ import (
 
 	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+	"github.com/aianyai/sidera/sdk/go/manifest"
 
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
@@ -80,6 +82,7 @@ func freshScenario(t testing.TB, name string) crashwalk.Scenario {
 
 func inProcessCapabilities() recipes.Capabilities {
 	capabilities := recipes.BinaryCapabilities()
+	capabilities.ProbeWarning = true
 	capabilities.FSFaults = []recipes.FSFault{recipes.FaultSourceUpdate, recipes.FaultRetainLostBody, recipes.FaultCreateSettlement, recipes.FaultInstallPointer}
 	return capabilities
 }
@@ -91,6 +94,17 @@ func recipeOptions(needs recipes.Needs) harness.Options {
 	}
 	if needs.PackageInput {
 		options.OpenPackage = installationOptions().OpenPackage
+	}
+	if needs.ProbeWarning {
+		if options.Adapter == nil {
+			options.Adapter = &harness.AdapterOptions{}
+		}
+		warning := harness.RuntimeAdapterManifestOf(versionWarningInstance, adapterproto.MaxDirectEndpoints)
+		warning.Tested = []manifest.TestedRange{{Runtime: warning.RuntimeName, Min: "2.0.0", Max: "2.9.9"}}
+		options.Adapter.ExtraInstances = append(options.Adapter.ExtraInstances, versionWarningInstance)
+		options.Adapter.InstanceOptions = map[string]harness.AdapterInstanceOptions{
+			versionWarningInstance: {Manifest: warning, Disabled: true},
+		}
 	}
 	return options
 }

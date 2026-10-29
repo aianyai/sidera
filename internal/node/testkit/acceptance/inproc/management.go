@@ -78,10 +78,7 @@ func newManagementOps() recipes.ManagementOps {
 			node := e.(*harness.H).Engine()
 			return runManagement(e, node, q, "adapters.disable", instance, engine.DisableAdapterOp(instance, encodeManagementInstance))
 		},
-		RaiseAlert: func(e scenario.Env, kind, subject, detail string) (string, error) {
-			id, err := e.(*harness.H).Engine().RaiseAlert(e.Ctx(), kind, subject, detail)
-			return id.String(), err
-		},
+		CreateVersionAlert: newVersionAlertOp(),
 		AcknowledgeAlert: func(e scenario.Env, q recipes.ManagementRequest, name string) (recipes.ManagementOutcome, error) {
 			id, err := store.ParseAlertID(name)
 			if err != nil {
