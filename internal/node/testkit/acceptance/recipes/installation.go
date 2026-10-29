@@ -6,8 +6,6 @@ import (
 	"slices"
 
 	"github.com/aianyai/sidera/internal/admin"
-	"github.com/aianyai/sidera/internal/node/fsx"
-	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 )
 
@@ -41,6 +39,10 @@ type InstallOps struct {
 var ErrInstallationEffect = errors.New("acceptance: installation result and effect disagree")
 
 func installationRecipes(b Bindings) []ScriptRecipe {
+	return []ScriptRecipe{installationRecipe(b, false), installationRecipe(b, true)}
+}
+
+func installationRecipe(b Bindings, rollback bool) ScriptRecipe {
 	const id = "acceptance-package"
 	v1 := PackageSpec{ID: id, Version: "1.0.0"}
 	v2 := PackageSpec{ID: id, Version: "2.0.0", NestedFile: true}
@@ -73,30 +75,32 @@ func installationRecipes(b Bindings) []ScriptRecipe {
 			return checkInstalled(e, b.Installation, id, v1.Version, versions)
 		}
 	}
-	return []ScriptRecipe{{
-		Script: scenario.Script{Name: "installation-rollback", Crash: scenario.CrashPlan{MaxPoints: 162, Recovery: []crashwalk.RecoveryCase{
-			{Item: fsx.Key{Tag: fsx.Tag{Tx: "adapter-gc", Role: "dir"}, Step: fsx.StepRenameDir}, After: crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "adapter-stage", Role: "file"}, Step: fsx.StepWrite}, Hit: 1})},
-			{Item: fsx.Key{Tag: fsx.Tag{Tx: "adapter-gc", Role: "dir"}, Step: fsx.StepRemoveAll}, After: crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "adapter-stage", Role: "file"}, Step: fsx.StepWrite}, Hit: 1})},
-			{Item: fsx.Key{Tag: fsx.Tag{Tx: "adapter-gc"}, Step: fsx.StepCommit}, After: crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "adapter-stage", Role: "file"}, Step: fsx.StepWrite}, Hit: 1})},
-			{Item: fsx.Key{Tag: fsx.Tag{Tx: "txn-cleanup", Role: "trash"}, Step: fsx.StepRemoveAll}, After: crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "adapter-unstage", Role: "stage"}, Step: fsx.StepRemoveAll}, Hit: 1})},
-		}}, Steps: []scenario.Step{
-			{Name: "install-first-version", Do: func(e scenario.Env) error { return install(e, 31, v1, false) }},
-			{Name: "rollback-failed-pointer", Do: failed(false, 32)},
-			{Name: "leave-failed-cleanup", Do: failed(true, 33)},
-			{Name: "discard-stale-and-upgrade", Do: func(e scenario.Env) error { return install(e, 34, v2, false) }},
-			{Name: "install-current-version", Do: func(e scenario.Env) error { return install(e, 35, v2, true) }},
-			{Name: "reject-unsupported-package", Do: func(e scenario.Env) error {
-				spec := PackageSpec{ID: "acceptance-foreign", Version: "1.0.0", Unsupported: true}
-				out, err := b.Installation.Install(e, admin.OperationID{36}, spec)
-				if err != nil {
-					return err
-				}
-				if out.Code != "platform_unsupported" {
-					return fmt.Errorf("%w: unsupported package returned %+v", ErrInstallationEffect, out)
-				}
-				return checkInstalled(e, b.Installation, spec.ID, "", nil)
-			}},
-		}},
+
+	needs := Needs{PackageInput: true}
+	name, budget := "installation-upgrade", 111
+	cases := append(recoveryCases(recoveryCrash("adapter-stage/file.write#1"), "adapter-gc/dir.rename-dir", "adapter-gc/dir.remove-all", "adapter-gc/commit"), recoveryCases(recoveryCrash("adapter-unstage/stage.remove-all#1"), "txn-cleanup/trash.remove-all")...)
+	steps := []scenario.Step{{Name: "install-first-version", Do: func(e scenario.Env) error { return install(e, 31, v1, false) }}}
+	if rollback {
+		name, budget = "installation-rollback", 111
+		needs.FSFaults = []FSFault{FaultInstallPointer}
+		cases = nil
+		steps = append(steps, scenario.Step{Name: "rollback-failed-pointer", Do: failed(false, 32)}, scenario.Step{Name: "leave-failed-cleanup", Do: failed(true, 33)})
+	}
+	steps = append(steps, scenario.Step{Name: "upgrade", Do: func(e scenario.Env) error { return install(e, 34, v2, false) }})
+	if !rollback {
+		steps = append(steps, scenario.Step{Name: "install-current-version", Do: func(e scenario.Env) error { return install(e, 35, v2, true) }}, scenario.Step{Name: "reject-unsupported-package", Do: func(e scenario.Env) error {
+			spec := PackageSpec{ID: "acceptance-foreign", Version: "1.0.0", Unsupported: true}
+			out, err := b.Installation.Install(e, admin.OperationID{36}, spec)
+			if err != nil {
+				return err
+			}
+			if out.Code != "platform_unsupported" {
+				return fmt.Errorf("%w: unsupported package returned %+v", ErrInstallationEffect, out)
+			}
+			return checkInstalled(e, b.Installation, spec.ID, "", nil)
+		}})
+	}
+	return ScriptRecipe{Needs: needs, Script: scenario.Script{Name: name, Crash: scenario.CrashPlan{MaxPoints: budget, Recovery: cases}, Steps: steps},
 		Drain: func(e scenario.Env) error {
 			out, err := b.Installation.Install(e, admin.OperationID{34}, v2)
 			if err != nil {
@@ -110,7 +114,7 @@ func installationRecipes(b Bindings) []ScriptRecipe {
 		Check: func(e scenario.Env) error {
 			return checkInstalled(e, b.Installation, id, v2.Version, []string{v2.Version})
 		},
-	}}
+	}
 }
 
 func checkInstalled(e scenario.Env, ops InstallOps, id, current string, versions []string) error {

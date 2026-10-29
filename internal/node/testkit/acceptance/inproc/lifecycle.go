@@ -9,7 +9,7 @@ import (
 )
 
 func configureLifecycleStartup(s *harness.StartupWalkScenario) {
-	if s.Name() != "startup-clock" {
+	if s.AdvanceAfterStart == 0 {
 		return
 	}
 	minimum := harness.DefaultStart.Add(s.StartAfter + s.AdvanceAfterStart)

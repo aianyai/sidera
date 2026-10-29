@@ -19,7 +19,7 @@ document gives the reasons and says where the tests are.
 | `scenario` | The language of test scripts, the same in every layer: scripts, the driver, the environment interface a fixture implements, and the judgements that read the ledger. |
 | `harness` | The engine-layer fixture: the engine on the real store, configuration and transaction layer over the in-memory file system, one test clock, the ledger, the agents, quiet, process and power-loss crashes and restarts, fault injection, the in-process crash-walk backend, and the generator of control signals for model tests. |
 | `acceptance/agent/mcp` | The MCP backend of the fake agent: independently encoded exchanges for both supported revisions, exact receive text, and tool errors mapped to the scenario categories. It takes process pipes and imports neither the production MCP server nor an MCP SDK. |
-| `acceptance/recipes`, `acceptance/inproc` | Fixture-independent acceptance descriptions and their in-process binding; fresh closures per run, real lifecycle entry points and externally evidenced domain checks. |
+| `acceptance/recipes`, `acceptance/disk`, `acceptance/inproc` | Fixture-independent acceptance descriptions and their in-process binding; fresh closures per run, real lifecycle entry points and externally evidenced domain checks. |
 | `crashwalk` | The core of the crash-point walk: which points to kill at in each mode, how a rerun is held to its recording, scenario budgets, coverage of the declared writes, and the crashing of recovery itself. |
 
 The first four, with the two programs, are the **third-party side**: they import the
@@ -53,10 +53,12 @@ Fixed budgets give half a recording of growth allowance; they
 are never enlarged dynamically. The catalog and its bindings add no generic
 driver or shared environment capability.
 
-The installation acceptance recipe exercises a real first installation, an
-upgrade, reinstalling the current version, platform refusal, and recoverable
-pointer and cleanup failures. Its package inputs pass through the fixture's
-package-source callback. The engine remains responsible for every node write.
+The installation acceptance recipes separate ordinary install, upgrade,
+current-version reinstall and platform refusal from pointer-failure rollback,
+sharing typed actions and installed-state checks. The normal recipe requires
+package input only; rollback additionally requires the named pointer filesystem
+fault. Each records 74 main points with a fixed budget of 111. Package inputs pass
+through the fixture's package-source callback; the engine owns every node write.
 Each successful result is replayed and read back from the operation-result entry;
 the current pointer and actual version directories must agree with it. Failed
 pointer updates leave no successful stored result, keep the old current version,
@@ -706,3 +708,16 @@ a key reachable. Each layer derives its recovery-only Normal targets through
 `crashwalk.AnalyzeSources` using its own supported source records, preserving the
 actual recipe, trigger and ordinal. A shared key never makes every trigger that
 observed it reachable.
+
+Recovery recipes own quarantine and body-corruption owner-alert judgements.
+`RecoveryOps.InspectDamage` supplies read-only counts and the actual damaged
+object identity; the binding never decides whether those facts satisfy recovery.
+The final closed-record audit uses `acceptance/disk.CheckClosed`, including the
+real recovery plan and unresolved deliveries. Failed-creation notification drains
+retain the recipe's own `DeliveryEvidence` through repeated runs and validate it
+in the final judgement.
+
+Ordinary interrupted staging reaches adapter garbage collection; current-version
+unstaging reaches transaction trash cleanup without a filesystem fault. Keeping
+those recovery responsibilities on the normal recipe prevents an unrelated fault
+later in a combined script from hiding binary-reachable writes.

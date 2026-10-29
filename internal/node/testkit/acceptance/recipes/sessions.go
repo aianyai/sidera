@@ -26,7 +26,11 @@ type SessionOps struct {
 }
 
 func sessionRecipes(b Bindings) []ScriptRecipe {
-	return []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}, 62), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", nil, 24), sessionExpiryRecipe(b), controlWriteExpiryRecipe(b), blockedRecipe(b)}
+	out := []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}, 62), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", nil, 24), sessionExpiryRecipe(b), controlWriteExpiryRecipe(b), blockedRecipe(b)}
+	for i := range out {
+		out[i].Needs.RuntimeAdapter = true
+	}
+	return out
 }
 
 type createdSession struct {
@@ -159,6 +163,7 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 }
 
 func failedCreationRecipe(b Bindings, name, preset string, failure *fakeadapter.Outcome, pointBudget int) ScriptRecipe {
+	facts := &DeliveryEvidence{}
 	var message adapterproto.MessageID
 	var steps []scenario.Step
 	if failure != nil {
@@ -179,7 +184,10 @@ func failedCreationRecipe(b Bindings, name, preset string, failure *fakeadapter.
 			return err
 		}}, scenario.Advance("reply-pull", time.Minute),
 	}...)
-	return ScriptRecipe{Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: pointBudget}, Steps: steps}, Drain: func(e scenario.Env) error { return drainFeedback(e, &DeliveryEvidence{}, "sender") }, Check: func(e scenario.Env) error {
+	return ScriptRecipe{Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: pointBudget}, Steps: steps}, Drain: func(e scenario.Env) error { return drainFeedback(e, facts, "sender") }, Check: func(e scenario.Env) error {
+		if err := facts.Check(e); err != nil {
+			return err
+		}
 		if message == "" {
 			return nil
 		}

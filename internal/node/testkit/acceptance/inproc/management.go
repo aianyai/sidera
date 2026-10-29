@@ -290,10 +290,3 @@ func inspectManagedNode(e scenario.Env) (recipes.NodeFacts, error) {
 	}
 	return out, nil
 }
-
-func managementOptions(name string) harness.Options {
-	if name == "management-instance" {
-		return harness.Options{Adapter: &harness.AdapterOptions{Runtime: true, ExtraInstances: []string{"management-target"}}}
-	}
-	return harness.Options{}
-}

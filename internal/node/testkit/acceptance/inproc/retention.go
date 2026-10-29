@@ -3,17 +3,12 @@ package inproc
 import (
 	"fmt"
 	"path"
-	"time"
 
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 )
-
-func retentionOptions() harness.Options {
-	return harness.Options{Adapter: &harness.AdapterOptions{Runtime: true}, ArchiveSweepEvery: time.Hour}
-}
 
 func newMaintenanceOps() recipes.MaintenanceOps {
 	return recipes.MaintenanceOps{InspectRetention: func(e scenario.Env, endpoint string) (recipes.RetentionFacts, error) {

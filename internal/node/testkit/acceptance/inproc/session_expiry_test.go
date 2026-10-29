@@ -96,7 +96,7 @@ func TestUncontrolledCreationJudgementRequiresItsFailureAndOwnerAlert(t *testing
 				if r.Script.Name != "session-control-write-expiry" {
 					continue
 				}
-				s := &harness.WalkScenario{Script: r.Script, Options: sessionOptions(r.Script.Name), Drain: func(h *harness.H) error { return r.Drain(h) }, Check: func(h *harness.H) error { return r.Check(h) }}
+				s := &harness.WalkScenario{Script: r.Script, Options: recipeOptions(r.Needs), Drain: func(h *harness.H) error { return r.Drain(h) }, Check: func(h *harness.H) error { return r.Check(h) }}
 				result, err := harness.NewWalkBackend(t).Run(context.Background(), s, crashwalk.RunPlan{Record: true})
 				if err != nil {
 					t.Fatal(err)

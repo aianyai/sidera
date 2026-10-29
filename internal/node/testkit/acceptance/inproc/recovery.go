@@ -1,106 +1,82 @@
 package inproc
 
 import (
-	"errors"
-	"github.com/aianyai/sidera/internal/ident"
+	"fmt"
+
 	"github.com/aianyai/sidera/internal/node/fsx"
-	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/disk"
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
-	"strings"
 )
 
-func recoveryBindings() recipes.RecoveryOps {
-	return recipes.RecoveryOps{CheckClosedRecords: func(e scenario.Env) error { return checkRecoveryClosed(e.(*harness.H)) }}
+type damageState struct {
+	applied bool
+	result  disk.DamageResult
 }
 
-func configureRecoveryScenario(s *harness.WalkScenario, extraRecovery bool) {
-	if extraRecovery {
-		domainCheck := s.Check
-		s.Check = func(h *harness.H) error {
-			if domainCheck != nil {
-				if err := domainCheck(h); err != nil {
-					return err
+func recoveryBindings(state *damageState) recipes.RecoveryOps {
+	return recipes.RecoveryOps{
+		CheckClosedRecords: func(e scenario.Env) error {
+			h := e.(*harness.H)
+			scan, err := h.Records()
+			if err != nil {
+				return err
+			}
+			enabled := func(instance string) bool { return h.Config().Instances().Items[instance].Enabled }
+			return disk.CheckClosed(h.Disk(), scan, h.Clock().Now(), enabled)
+		},
+		InspectDamage: func(e scenario.Env) (recipes.DamageFacts, error) {
+			facts := recipes.DamageFacts{Applied: state.applied, Endpoint: state.result.Endpoint, Body: state.result.Body}
+			if !state.applied {
+				return facts, nil
+			}
+			scan, err := e.(*harness.H).Records()
+			if err != nil {
+				return facts, err
+			}
+			facts.OwnerAlerts = len(scan.Alerts)
+			for _, alert := range scan.Alerts {
+				if alert.Kind == "control_unknown" {
+					facts.ControlUnknownAlerts++
+				}
+				if alert.Kind == "corrupt_body" && alert.Subject == facts.Body {
+					facts.CorruptBodyAlerts++
 				}
 			}
-			return checkRecoveryClosed(h)
-		}
+			return facts, nil
+		},
 	}
-	if !strings.HasPrefix(s.Name(), "recovery-") {
+}
+
+func configureRecoveryScenario(s *harness.WalkScenario, kind recipes.DamageKind, state *damageState) {
+	if kind == "" {
 		return
 	}
-	if s.Name() == "recovery-create" || s.Name() == "recovery-creating" {
-		s.Options.Adapter = &harness.AdapterOptions{Runtime: true}
-	}
-	var original store.EndpointRecord
-	var damaged bool
 	s.Damage = func(h *harness.H, tr crashwalk.Trigger) error {
+		if tr.Pattern != string(kind) {
+			return fmt.Errorf("undeclared damage kind %q, want %q", tr.Pattern, kind)
+		}
 		result, err := disk.Damage(h.Disk(), tr)
 		if err != nil {
 			return err
 		}
-		if result.Endpoint != "" {
-			id, err := ident.ParseEndpointID(result.Endpoint)
-			if err != nil {
-				return err
-			}
-			original.ID = id
-		}
-		damaged = true
-		return nil
-	}
-	previous := s.Check
-	s.Check = func(h *harness.H) error {
-		if previous != nil {
-			if err := previous(h); err != nil {
-				return err
-			}
-		}
-		if !damaged {
-			return nil
-		}
-		sc, err := h.Records()
-		if err != nil {
-			return err
-		}
-		if len(sc.Alerts) == 0 {
-			return errors.New("quarantined record has no owner alert")
-		}
-		if original.ID.IsZero() {
-			return nil
-		}
-		if err := checkClosedSession(h, original.ID.String()); err != nil {
-			return err
-		}
-		alert := false
-		for _, a := range sc.Alerts {
-			if a.Kind == "control_unknown" {
-				alert = true
-			}
-		}
-		if !alert {
-			return errors.New("creating quarantine did not report control uncertainty")
-		}
+		state.result, state.applied = result, true
 		return nil
 	}
 }
 
-func configureRecoveryStartup(s *harness.StartupWalkScenario) {
-	if s.Name() != "recovery-layout" {
+func configureRecoveryStartup(s *harness.StartupWalkScenario, kind recipes.DamageKind) {
+	if kind == "" {
 		return
 	}
-	s.Damage = func(d fsx.FS, tr crashwalk.Trigger) error { _, err := disk.Damage(d, tr); return err }
-	s.Check = disk.CheckLayout
-}
-
-func checkRecoveryClosed(h *harness.H) error {
-	sc, err := h.Records()
-	if err != nil {
+	s.Damage = func(d fsx.FS, tr crashwalk.Trigger) error {
+		if tr.Pattern != string(kind) {
+			return fmt.Errorf("undeclared damage kind %q, want %q", tr.Pattern, kind)
+		}
+		_, err := disk.Damage(d, tr)
 		return err
 	}
-	enabled := func(instance string) bool { return h.Config().Instances().Items[instance].Enabled }
-	return disk.CheckClosed(h.Disk(), sc, h.Clock().Now(), enabled)
+	s.Check = disk.CheckLayout
 }

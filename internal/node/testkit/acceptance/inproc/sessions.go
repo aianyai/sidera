@@ -2,7 +2,6 @@ package inproc
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
@@ -40,13 +39,6 @@ func newSessionOps() recipes.SessionOps {
 		},
 		CheckClosedSession: func(e scenario.Env, endpoint string) error { return checkClosedSession(e.(*harness.H), endpoint) },
 	}
-}
-
-func sessionOptions(name string) harness.Options {
-	if strings.HasPrefix(name, "session-") {
-		return harness.Options{Adapter: &harness.AdapterOptions{Runtime: true}}
-	}
-	return harness.Options{}
 }
 
 func checkClosedSession(h *harness.H, endpoint string) error {

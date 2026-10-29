@@ -42,7 +42,7 @@ func retentionRecipe(b Bindings) ScriptRecipe {
 	endpointSweep := advanceOnce("endpoint-sweep", time.Hour)
 	archiveRetention := advanceOnce("archive-retention", 31*24*time.Hour)
 	const initial = "Read this before the session and its records are retired."
-	return ScriptRecipe{Script: scenario.Script{Name: "maintenance-retention", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 210}, Steps: []scenario.Step{
+	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true, ArchiveSweepEvery: time.Hour}, Script: scenario.Script{Name: "maintenance-retention", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 210}, Steps: []scenario.Step{
 		session.create(b, initial), scenario.Advance("creation-pull", time.Minute), session.resolve(b, initial, facts),
 		{Name: "read-initial", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)) }},
 		{Name: "send-from-session", Do: func(e scenario.Env) error {

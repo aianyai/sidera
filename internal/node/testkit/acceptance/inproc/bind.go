@@ -11,30 +11,28 @@ import (
 
 func bindCatalog(t testing.TB) []crashwalk.Scenario {
 	t.Helper()
-	catalog := recipes.New(newBindings())
+	state := &damageState{}
+	catalog := recipes.New(bindingsWithRecovery(state))
+	capabilities := inProcessCapabilities()
 	var out []crashwalk.Scenario
 	for _, r := range catalog.Scripts {
-		s := &harness.WalkScenario{Script: r.Script, Options: sessionOptions(r.Script.Name)}
-		if r.Script.Name == "maintenance-retention" {
-			s.Options = retentionOptions()
+		if !capabilities.Supports(r.Needs) {
+			t.Fatalf("unsupported in-process recipe %q: %+v", r.Script.Name, r.Needs)
 		}
-		if r.Script.Name == "installation-rollback" {
-			s.Options = installationOptions()
-		}
-		if r.Script.Name == "management-instance" {
-			s.Options = managementOptions(r.Script.Name)
-		}
+		s := &harness.WalkScenario{Script: r.Script, Options: recipeOptions(r.Needs)}
 		if r.Drain != nil {
 			s.Drain = func(h *harness.H) error { return r.Drain(h) }
 		}
 		if r.Check != nil {
 			s.Check = func(h *harness.H) error { return r.Check(h) }
 		}
-		configureRecoveryScenario(s, len(r.RecoveryTriggers) != 0)
-		configureBodyRecoveryScenario(s)
+		configureRecoveryScenario(s, r.Needs.Damage, state)
 		out = append(out, s)
 	}
 	for _, r := range catalog.Startups {
+		if !(recipes.Capabilities{Damage: []recipes.DamageKind{recipes.DamageLayout}}).Supports(r.Needs) {
+			t.Fatalf("unsupported in-process startup %q: %+v", r.Name, r.Needs)
+		}
 		var op harness.StartupOperation
 		switch r.Kind {
 		case recipes.Init:
@@ -45,15 +43,17 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 			t.Fatalf("unknown startup kind %d", r.Kind)
 		}
 		s := &harness.StartupWalkScenario{Label: r.Name, Operation: op, StartAfter: r.StartAfter, AdvanceAfterStart: r.AdvanceAfterStart, PointBudget: r.MaxPoints, RecoveryCases: r.Recovery}
-		configureRecoveryStartup(s)
+		configureRecoveryStartup(s, r.Needs.Damage)
 		configureLifecycleStartup(s)
 		out = append(out, s)
 	}
 	return out
 }
 
-func newBindings() recipes.Bindings {
-	return recipes.Bindings{Delivery: newDeliveryOps(), Sessions: newSessionOps(), Installation: newInstallOps(), Management: newManagementOps(), Maintenance: newMaintenanceOps(), Recovery: recoveryBindings()}
+func newBindings() recipes.Bindings { return bindingsWithRecovery(&damageState{}) }
+
+func bindingsWithRecovery(state *damageState) recipes.Bindings {
+	return recipes.Bindings{Delivery: newDeliveryOps(), Sessions: newSessionOps(), Installation: newInstallOps(), Management: newManagementOps(), Maintenance: newMaintenanceOps(), Recovery: recoveryBindings(state)}
 }
 
 func freshScenario(t testing.TB, name string) crashwalk.Scenario {
@@ -65,4 +65,21 @@ func freshScenario(t testing.TB, name string) crashwalk.Scenario {
 	}
 	t.Fatalf("unknown acceptance recipe %q", name)
 	return nil
+}
+
+func inProcessCapabilities() recipes.Capabilities {
+	capabilities := recipes.BinaryCapabilities()
+	capabilities.FSFaults = []recipes.FSFault{recipes.FaultSourceUpdate, recipes.FaultRetainLostBody, recipes.FaultCreateSettlement, recipes.FaultInstallPointer}
+	return capabilities
+}
+
+func recipeOptions(needs recipes.Needs) harness.Options {
+	options := harness.Options{ArchiveSweepEvery: needs.ArchiveSweepEvery}
+	if needs.RuntimeAdapter || len(needs.ExtraInstances) != 0 {
+		options.Adapter = &harness.AdapterOptions{Runtime: needs.RuntimeAdapter, ExtraInstances: needs.ExtraInstances}
+	}
+	if needs.PackageInput {
+		options.OpenPackage = installationOptions().OpenPackage
+	}
+	return options
 }

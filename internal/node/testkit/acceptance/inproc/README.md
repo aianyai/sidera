@@ -54,10 +54,6 @@ cost is one clean run per catalog entry, one complete run per unique trigger,
 one interruption per static Recovery responsibility and one per derived Normal
 target. It calls `Backend.Run` directly; it does not execute the full main-point
 walk.
-`newSessionOps` binds session callbacks to the current fixture process.
-`checkClosedSession` is the final read-only audit of a closed endpoint, its cleared
-token and absent session checkpoint. Session recipes run with the real adapter
-host and its fake native runtime; callbacks do not cache an engine across restarts.
 
 `newManagementOps` binds each named action to its public engine operation.
 Every call resolves its process once, executes the request, reads the persistent
@@ -107,10 +103,11 @@ script's deadline step keeps the stricter no-reply result and exact runtime
 uncertainty notice. Repeated-drain tests interrupt actual writes on each side of
 that closing commit, then apply the shared third-generation recovery checker.
 
-`configureBodyRecoveryScenario` damages only an intact, actually retained source
-body on the stopped disk. It verifies the existing reference before flipping a
-byte and later requires that precise body's owner alert. The archive variant's
-named preparation arms recoverable create failures in the current process's
+`acceptance/disk.Damage` changes only an intact, actually retained source body
+on the stopped disk. It verifies the existing reference before flipping a byte;
+`RecoveryOps.InspectDamage` returns read-only owner-alert counts and the identity
+of the actual damaged body or creating endpoint. The recipe owns their judgement.
+The archive variant's named preparation arms recoverable create failures in the current process's
 existing fault wrapper; it does not hold transport reports or manufacture state.
 A negative test moves the real periodic sweep beyond the bounded drain and
 requires the domain audit to reject the retained body and records.
@@ -133,3 +130,15 @@ feedback requirements. `TestRecipeDrainPreservesClockProgressAfterAnotherCrash`
 records complete second generations, interrupts representative actual body,
 feedback and retention writes, and uses the shared recovery-target checker to
 require exact cutoffs, matching prefixes and final third-generation convergence.
+
+`recipeOptions` reads each recipe's `Needs`; script names never choose fixture
+behavior. The binding explicitly supplies runtime adapters, extra instances,
+sweep periods and package readers, and rejects unsupported capabilities before
+execution. Startup binding supports the existing offline layout damage only.
+Filesystem fault callbacks remain on the in-process binding; binary capabilities
+provide none.
+
+`reportLayerEvidence` uses the same complete clean and recovery recordings to
+report both execution layers. It verifies the reachable/in-process-only partition
+of the full table. The shared catalog analysis computes keys and actual derived
+target sources from declarations; the binding keeps no handwritten exclusion list.

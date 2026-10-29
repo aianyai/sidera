@@ -28,7 +28,12 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 	var target string
 	classified, accepted, lost, closed, advanced := false, false, false, false, false
 	const body = "A damaged source must be reported before its retained bytes disappear."
+	needs := Needs{Damage: DamageSourceBody, ArchiveSweepEvery: time.Hour}
+	if archive {
+		needs.FSFaults = []FSFault{FaultRetainLostBody}
+	}
 	return ScriptRecipe{
+		Needs: needs,
 		Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: budget}, Steps: []scenario.Step{
 			{Name: "send-to-absent-node", Do: func(e scenario.Env) error {
 				var err error
@@ -119,6 +124,9 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 			}
 			if got.Bodies != 0 || archive && (got.Records != 0 || accepted && got.Summaries == 0 || !closed) {
 				return fmt.Errorf("retained source body or unswept records: %+v closed=%v", got, closed)
+			}
+			if err := checkRecoveryDamage(b, e); err != nil {
+				return err
 			}
 			return b.Recovery.CheckClosedRecords(e)
 		},

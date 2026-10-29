@@ -175,7 +175,7 @@ var ErrSourceAlreadyConfirmed = errors.New("acceptance: source receipt already c
 func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
 	facts := &DeliveryEvidence{}
 	var original adapterproto.MessageID
-	return ScriptRecipe{Script: scenario.Script{Name: "delivery-reply-after-write-failure", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 90}, Steps: []scenario.Step{
+	return ScriptRecipe{Needs: Needs{FSFaults: []FSFault{FaultSourceUpdate}}, Script: scenario.Script{Name: "delivery-reply-after-write-failure", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 90}, Steps: []scenario.Step{
 		{Name: "fail-receipt-write", Do: b.Delivery.FailSourceUpdate},
 		{Name: "send", Do: func(e scenario.Env) error {
 			r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("receiver")}, Body: "The reply must prove this body arrived."})

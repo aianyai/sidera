@@ -414,7 +414,7 @@ func managementInstance(b Bindings) ScriptRecipe {
 		}),
 	}
 	var drainRequest ManagementRequest
-	return ScriptRecipe{RecoveryTriggers: []crashwalk.Trigger{crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "instance-drain", Role: "endpoint"}, Step: fsx.StepCreate}, Hit: 1})}, Script: scenario.Script{Name: "management-instance", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 195}, Steps: steps}, Drain: func(e scenario.Env) error {
+	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true, ExtraInstances: []string{instance}}, RecoveryTriggers: []crashwalk.Trigger{crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "instance-drain", Role: "endpoint"}, Step: fsx.StepCreate}, Hit: 1})}, Script: scenario.Script{Name: "management-instance", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 195}, Steps: steps}, Drain: func(e scenario.Env) error {
 		if err := r.drain(e); err != nil {
 			return err
 		}
@@ -442,6 +442,9 @@ func managementInstance(b Bindings) ScriptRecipe {
 		if f.Enabled || f.OpenEndpoints != 0 {
 			return fmt.Errorf("%w: disabled instance retains open endpoints: %+v", ErrManagementEffect, f)
 		}
-		return facts.Check(e)
+		if err := facts.Check(e); err != nil {
+			return err
+		}
+		return b.Recovery.CheckClosedRecords(e)
 	}}
 }

@@ -15,10 +15,49 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// RecoveryOps exposes the final disk audit after the external drain.
+// RecoveryOps exposes read-only damage facts and the final disk audit.
 // The binding resolves the current process each time, including after a crash.
 type RecoveryOps struct {
 	CheckClosedRecords func(scenario.Env) error
+	InspectDamage      func(scenario.Env) (DamageFacts, error)
+}
+
+// DamageFacts contains read-only observations about the actual offline damage.
+type DamageFacts struct {
+	Applied              bool
+	Endpoint             string
+	Body                 string
+	OwnerAlerts          int
+	ControlUnknownAlerts int
+	CorruptBodyAlerts    int
+}
+
+func checkRecoveryDamage(b Bindings, e scenario.Env) error {
+	facts, err := b.Recovery.InspectDamage(e)
+	if err != nil {
+		return err
+	}
+	if !facts.Applied {
+		return nil
+	}
+	if facts.Body != "" {
+		if facts.CorruptBodyAlerts != 1 {
+			return fmt.Errorf("damaged source body has %d corresponding owner alerts", facts.CorruptBodyAlerts)
+		}
+		return nil
+	}
+	if facts.OwnerAlerts == 0 {
+		return errors.New("quarantined record has no owner alert")
+	}
+	if facts.Endpoint != "" {
+		if err := b.Sessions.CheckClosedSession(e, facts.Endpoint); err != nil {
+			return err
+		}
+		if facts.ControlUnknownAlerts == 0 {
+			return errors.New("creating quarantine did not report control uncertainty")
+		}
+	}
+	return nil
 }
 
 func recoveryCases(trigger crashwalk.Trigger, names ...string) []crashwalk.RecoveryCase {
@@ -44,16 +83,17 @@ func recoveryCrash(name string) crashwalk.Trigger {
 func recoveryRecipes(b Bindings) []ScriptRecipe {
 	var out []ScriptRecipe
 	for _, variant := range []struct {
-		name  string
-		cases []crashwalk.RecoveryCase
+		name   string
+		damage DamageKind
+		cases  []crashwalk.RecoveryCase
 	}{
-		{"recovery-send", append(recoveryCases(recoveryCrash("intake/out.create#1"), "orphan-gc/body.remove", "orphan-gc/commit"), recoveryCases(recoveryCrash("intake/out.write#1"), "txn-cleanup/tmp.remove", "txn-cleanup/commit")...)},
-		{"recovery-source-trusted", recoveryCases(crashwalk.CorruptOffline("source", "preserve-header"), "quarantine/seq-floor.create", "quarantine/seq-floor.write", "quarantine/seq-floor.rename", "quarantine/overwrite.create", "quarantine/overwrite.write", "quarantine/overwrite.rename", "quarantine/alert.create", "quarantine/alert.write", "quarantine/alert.rename", "quarantine/commit")},
-		{"recovery-source-unreadable", recoveryCases(crashwalk.CorruptOffline("source", "unreadable"), "quarantine/out-lost.create", "quarantine/out-lost.write", "quarantine/out-lost.rename")},
-		{"recovery-target", recoveryCases(crashwalk.CorruptOffline("target", "unreadable"), "quarantine/record.remove")},
+		{"recovery-send", "", append(recoveryCases(recoveryCrash("intake/out.create#1"), "orphan-gc/body.remove", "orphan-gc/commit"), recoveryCases(recoveryCrash("intake/out.write#1"), "txn-cleanup/tmp.remove", "txn-cleanup/commit")...)},
+		{"recovery-source-trusted", DamageSource, recoveryCases(crashwalk.CorruptOffline("source", "preserve-header"), "quarantine/seq-floor.create", "quarantine/seq-floor.write", "quarantine/seq-floor.rename", "quarantine/overwrite.create", "quarantine/overwrite.write", "quarantine/overwrite.rename", "quarantine/alert.create", "quarantine/alert.write", "quarantine/alert.rename", "quarantine/commit")},
+		{"recovery-source-unreadable", DamageSource, recoveryCases(crashwalk.CorruptOffline("source", "unreadable"), "quarantine/out-lost.create", "quarantine/out-lost.write", "quarantine/out-lost.rename")},
+		{"recovery-target", DamageTarget, recoveryCases(crashwalk.CorruptOffline("target", "unreadable"), "quarantine/record.remove")},
 	} {
 		var evidence DeliveryEvidence
-		out = append(out, ScriptRecipe{Script: scenario.Script{Name: variant.name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 54, Recovery: variant.cases}, Steps: []scenario.Step{{Name: "send", Do: func(e scenario.Env) error {
+		out = append(out, ScriptRecipe{Needs: Needs{Damage: variant.damage}, Script: scenario.Script{Name: variant.name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 54, Recovery: variant.cases}, Steps: []scenario.Step{{Name: "send", Do: func(e scenario.Env) error {
 			result, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("receiver")}, Body: "Recovery must retain a real delivery obligation."})
 			if err == nil {
 				evidence.Accepted(result, "Recovery must retain a real delivery obligation.")
@@ -61,6 +101,9 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 			return err
 		}}}}, Drain: recoveryDrain(b, false, &evidence), Check: func(e scenario.Env) error {
 			if err := evidence.Check(e); err != nil {
+				return err
+			}
+			if err := checkRecoveryDamage(b, e); err != nil {
 				return err
 			}
 			return b.Recovery.CheckClosedRecords(e)
@@ -77,7 +120,11 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 			cases = recoveryCases(crashwalk.CorruptOffline("creating-control", "unreadable"), "quarantine/session.create", "quarantine/session.write", "quarantine/session.rename")
 		}
 		facts := &DeliveryEvidence{}
-		out = append(out, ScriptRecipe{Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: budget, Recovery: cases}, Steps: []scenario.Step{{Name: "create", Do: func(e scenario.Env) error {
+		needs := Needs{RuntimeAdapter: true}
+		if held {
+			needs.Damage = DamageCreatingControl
+		}
+		out = append(out, ScriptRecipe{Needs: needs, Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: budget, Recovery: cases}, Steps: []scenario.Step{{Name: "create", Do: func(e scenario.Env) error {
 			rt, err := e.Runtime()
 			if err != nil {
 				return err
@@ -121,6 +168,9 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 				if !ended[entry.Writer+"/"+entry.Attrs.Turn] {
 					return fmt.Errorf("recovery creation left runtime turn %s/%s unfinished", entry.Writer, entry.Attrs.Turn)
 				}
+			}
+			if err := checkRecoveryDamage(b, e); err != nil {
+				return err
 			}
 			return b.Recovery.CheckClosedRecords(e)
 		}})
@@ -189,5 +239,5 @@ func recoveryDrain(b Bindings, runtime bool, evidence *DeliveryEvidence) func(sc
 }
 
 func recoveryStartupRecipes() []StartupRecipe {
-	return []StartupRecipe{{Name: "recovery-layout", Kind: Start, MaxPoints: 2, Recovery: recoveryCases(crashwalk.CorruptOffline("state/checkpoints", "remove-empty-directory"), "layout/dir.mkdir", "layout/commit")}}
+	return []StartupRecipe{{Needs: Needs{Damage: DamageLayout}, Name: "recovery-layout", Kind: Start, MaxPoints: 2, Recovery: recoveryCases(crashwalk.CorruptOffline("state/checkpoints", "remove-empty-directory"), "layout/dir.mkdir", "layout/commit")}}
 }

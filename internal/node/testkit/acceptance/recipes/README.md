@@ -50,13 +50,19 @@ requests and associate real creation requests with native creation confirmations
 by attempt, then receive through the resulting session agent. Final disk audits
 check recovery work, queued or accepted deliveries and control records, and the original
 quarantined creating session's closed state and cleared token.
-The installation recipe installs a package, observes two recoverable pointer
-failures with successful and failed version cleanup, and retries through the real
-stale-version discard. It also reinstalls the current version and rejects a
-package for another platform. Every observed success is replayed and checked
-against its stored result and the installed current pointer and version directories.
-Package specifications describe caller-owned input files; no recipe writes node
-state. Its fixed budget is 162 from 108 recorded main points.
+
+The installation recipes share typed actions and final installed-version checks.
+The ordinary recipe installs, upgrades and reinstalls the current version, then
+rejects a package for another platform, without filesystem faults. Its interrupted
+staging and unstaging supply adapter-garbage and transaction-trash recovery cases.
+The rollback recipe observes two recoverable pointer failures with successful and
+failed version cleanup, then retries through the real stale-version discard. Only
+that recipe requires the pointer-failure capability. Every observed success is
+replayed and checked against its stored result, installed current pointer and
+version directories. Package specifications describe caller-owned input files;
+no recipe writes node state. Each recipe records 74 main points and has a fixed
+budget of 111.
+
 Management recipes cover versioned node, preset and endpoint changes; a stale
 version is refused without changing the setting. They also cover alert raising
 and acknowledgement, backup confirmation, clearing a real clock rollback pause,
@@ -221,3 +227,14 @@ full observed set minus that reachable union. Recovery-only Normal targets are
 recomputed from the supported recordings, keeping each actual source recipe,
 complete trigger and point ordinal. A reachable key does not make an unsupported
 source's trigger reachable.
+
+`RecoveryOps.InspectDamage` returns the actual damaged endpoint/body identity and
+read-only alert counts. Recipes require an owner alert after record quarantine,
+control uncertainty and a closed session after creation-control damage, and one
+matching `corrupt_body` alert after source-body damage. These judgements run in
+both layers. Recovery and extra-trigger recipes explicitly invoke the shared
+closing audit through `RecoveryOps.CheckClosedRecords`.
+
+Failed-creation drains share their recipe's `DeliveryEvidence` across restarts;
+the final check validates those accumulated notifications before inspecting the
+control reply and external absence of a native creation.

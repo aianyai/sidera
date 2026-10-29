@@ -81,6 +81,7 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult, cleanH
 	if err != nil {
 		t.Fatal(err)
 	}
+	reportLayerEvidence(t, clean, recovered)
 	for _, s := range bindCatalog(t) {
 		for _, c := range s.Recovery() {
 			t.Run("target/"+s.Name()+"/"+c.Item.String(), func(t *testing.T) {
