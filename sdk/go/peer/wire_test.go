@@ -159,7 +159,7 @@ func TestMissingOrWrongVersionIsInvalidRequest(t *testing.T) {
 		{"a number", `42`, "null"},
 		{"null", `null`, "null"},
 		{"empty method", `{"jsonrpc":"2.0","id":6,"method":""}`, "6"},
-		{"method is not a string", `{"jsonrpc":"2.0","id":7,"method":5}`, "7"},
+		{"method is not a string", `{"jsonrpc":"2.0","id":7,"method":5}`, "null"},
 		{"request with a result", `{"jsonrpc":"2.0","id":8,"method":"echo","result":{}}`, "8"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

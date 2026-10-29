@@ -48,9 +48,9 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   line cannot be trusted); repeats inside `params` and `result` are the business
   of the layer that decodes them.
   The error reply to an invalid line carries the line's id only when the line
-  has a `method` and a valid id; any other malformed line, which may have been
-  meant as a response, is answered with a null id, so the error can never be
-  taken for the answer to a call of the other side.
+  has a string `method` and a valid id; any other malformed line, which may
+  have been meant as a response, is answered with a null id, so the error can
+  never be taken for the answer to a call of the other side.
 - **Document checks are opt-in.** `RejectDuplicateKeysAndInvalidUnicode` rejects
   duplicate member names and unpaired UTF-16 surrogate escapes anywhere in a
   frame, including unknown extensions, params, results and ignored notifications.
@@ -58,7 +58,9 @@ itself is the cancel notification: `$/cancel_request` unless the owner's
   accepted. A refusal is `-32600` with the fixed message `duplicate member or
   invalid Unicode`; it neither logs input paths or values nor closes the connection.
   The reply echoes the raw top-level id only when it occurs exactly once and is
-  valid, even in a rejected response; otherwise the id is null. These document
+  valid, and the frame has exactly one string `method`. Every other rejected
+  frame, including a response, gets a null id: a response's id belongs to the
+  other side's call-id space and cannot identify a request here. These document
   checks precede method lookup, overload, handlers and cancellation. Invalid
   JSON or UTF-8 stays `-32700`; parameter shape and meaning stay with the layers
   that interpret them. The zero-value dialect keeps the classification and

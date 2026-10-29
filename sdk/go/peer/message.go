@@ -47,8 +47,7 @@ type message struct {
 }
 
 // classifyError is a line that is not a valid message, together with the
-// error response it earns. id is nil when no id can be echoed safely; the
-// document-check dialect recovers a unique valid id even on rejected responses.
+// error response it earns. id is nil when no request id can be echoed safely.
 type classifyError struct {
 	id  json.RawMessage
 	err *Error
@@ -82,7 +81,7 @@ func (d Dialect) classify(line []byte) (message, *classifyError) {
 	var top map[string]json.RawMessage
 	if d.RejectDuplicateKeysAndInvalidUnicode {
 		if strictjson.Decode(line, &top) != nil {
-			return message{}, invalidRequest(unambiguousID(line), "duplicate member or invalid Unicode")
+			return message{}, invalidRequest(unambiguousRequestID(line), "duplicate member or invalid Unicode")
 		}
 	} else {
 		// The adapter convention checks only the frame's own members. The
@@ -101,16 +100,16 @@ func (d Dialect) classify(line []byte) (message, *classifyError) {
 	resultRaw, hasResult := top["result"]
 	errRaw, hasErr := top["error"]
 
-	// Only a message with "method" is recognisably a request, and only a request
-	// is answered with its own id. Anything else that is malformed may be meant
-	// as a response to a call of the other side, and an error carrying its id
+	// Only a message with a string "method" is recognisably a request, and only
+	// a request is answered with its own id. Anything else that is malformed may
+	// be meant as a response to a call of the other side; an error carrying its id
 	// would land in that side's own call-id space: it would fail a call of
 	// theirs that this side received and may have executed, with a code that
 	// says "no effect", and so invite them to send it again. JSON-RPC sends no
 	// reply to a response; the error for such a message carries a null id,
 	// which is never the answer to a call.
 	var replyID json.RawMessage
-	if hasMethod && idOK {
+	if hasStringMethod(methodRaw) && idOK {
 		replyID = idRaw
 	}
 
@@ -167,16 +166,17 @@ func (d Dialect) classify(line []byte) (message, *classifyError) {
 	return m, nil
 }
 
-// unambiguousID recovers the reply id of a syntactically valid object whose
-// document checks failed. Walk every top-level member: an earlier duplicate in
-// an unrelated extension must not hide a later duplicate id. Decode whole raw
-// values so nested id members and large unknown numbers do not affect the count.
-func unambiguousID(line []byte) json.RawMessage {
+// unambiguousRequestID recovers the reply id of a syntactically valid object
+// whose document checks failed. Only a unique string method identifies a request:
+// a response's id belongs to the other side's call-id space. Walk every top-level
+// member so an unrelated duplicate cannot hide a later duplicate id or method.
+// Whole raw values keep nested members and large unknown numbers out of the check.
+func unambiguousRequestID(line []byte) json.RawMessage {
 	dec := json.NewDecoder(bytes.NewReader(line))
 	if _, err := dec.Token(); err != nil {
 		return nil
 	}
-	var id json.RawMessage
+	var id, method json.RawMessage
 	for dec.More() {
 		name, err := dec.Token()
 		if err != nil {
@@ -186,12 +186,21 @@ func unambiguousID(line []byte) json.RawMessage {
 		if dec.Decode(&value) != nil {
 			return nil
 		}
-		if name == "id" {
+		switch name {
+		case "id":
 			if id != nil {
 				return nil
 			}
 			id = value
+		case "method":
+			if method != nil {
+				return nil
+			}
+			method = value
 		}
+	}
+	if !hasStringMethod(method) {
+		return nil
 	}
 	// RequestID owns the id rule; strict decoding also prevents Go's tolerant
 	// string decoder from replacing an invalid surrogate in an otherwise legal id.
@@ -200,6 +209,12 @@ func unambiguousID(line []byte) json.RawMessage {
 		return nil
 	}
 	return id
+}
+
+// hasStringMethod identifies a request even when its method name is invalid.
+// Both callers have valid JSON, so an opening quote identifies a string value.
+func hasStringMethod(method json.RawMessage) bool {
+	return len(method) > 0 && method[0] == '"'
 }
 
 // parseErrorObject decodes an error member. It requires an integer "code" and

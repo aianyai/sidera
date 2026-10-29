@@ -51,8 +51,8 @@ Behaviour under the default dialect, each point pinned by the tests named in "Wh
   batch, a member name that occurs twice in the frame, a null or malformed
   request id, or an id already in flight are `-32600`. After any of these except the overlong line the connection
   continues. The reply carries the id of the line only when the line has a
-  `method` and a valid id, that is, when it is recognisably a request; every
-  other malformed line, which may have been meant as a response, is answered
+  string `method` and a valid id, that is, when it is recognisably a request;
+  every other malformed line, which may have been meant as a response, is answered
   with a null id.
 - **Request routing.** `Handle` registers a named handler; `HandleDefault`
   optionally registers one `DefaultRequestHandler(ctx, method, params)` for
@@ -100,10 +100,12 @@ Behaviour under the default dialect, each point pinned by the tests named in "Wh
   enabling it rejects duplicate members and unpaired UTF-16 surrogate escapes
   anywhere in the frame before dispatch or overload, with `-32600` and a fixed
   message. Unknown members and their values stay accepted. The rejection keeps
-  the connection, runs no handler or cancel target, and echoes a unique valid
-  top-level id (including on rejected responses), otherwise null. JSON syntax
-  and UTF-8 errors remain `-32700`. The adapter protocol leaves this option off;
-  its nested content remains the responsibility of the decoding layer.
+  the connection and runs no handler or cancel target. It echoes the raw
+  top-level id only when it occurs exactly once and is valid, and the frame has
+  exactly one string `method`; every other rejected frame, including a response,
+  gets a null id. JSON syntax and UTF-8 errors remain `-32700`. The adapter
+  protocol leaves this option off; its nested content remains the responsibility
+  of the decoding layer.
 - **Write timeout.** A timer per write closes the transport when a line is not
   written within `WriteTimeout`.
 - **Backpressure.** When the outbound queue is full, local `Call` and `Notify`
@@ -236,9 +238,10 @@ anything not listed, including unknown codes, counts as unknown.
   because that is what the schema counts. Null ids stay reserved for errors that
   cannot name a request.
 - **An error reply carries an id only for a request.** A malformed line without
-  `method` may be a response to a call of the other side. Answering it with its
-  id would land in that side's own call-id space: the error would fail one of
-  their calls that this side received and may have executed, and a code that
+  a unique string `method` may be a response to a call of the other side.
+  Answering it with its id would land in that side's own call-id space: the error
+  would fail one of their calls that this side received and may have executed,
+  and a code that
   says "no effect" can make them send it again. JSON-RPC sends no reply to a
   response, so the line earns an error with a null id, which is never the
   answer to a call and which the other side's peer logs and drops. The reply

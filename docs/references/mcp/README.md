@@ -49,11 +49,13 @@ UTF-16 surrogate escapes anywhere in a frame are `-32600`, including unknown
 extensions, unknown methods, notifications and responses. This check precedes
 method and parameter validation, overload and cancellation. The error message
 is fixed (`duplicate member or invalid Unicode`), without paths or input values;
-no handler or cancel target runs and the connection stays open. A unique legal
-top-level id is echoed exactly as received; a duplicated, absent or invalid id
-becomes null. JSON syntax and UTF-8 errors stay `-32700`, and ordinary parameter
-errors stay `-32602`. Unknown fields and values remain accepted. Output follows
-the selected version's schema.
+no handler or cancel target runs and the connection stays open. The raw
+top-level id is echoed only when it occurs exactly once and is legal, and the
+frame has exactly one string `method`. Every other rejected frame, including a
+response, gets a null id: a response's id belongs to the other side's call-id
+space and cannot identify a request here. JSON syntax and UTF-8 errors stay
+`-32700`, and ordinary parameter errors stay `-32602`. Unknown fields and values
+remain accepted. Output follows the selected version's schema.
 
 `notifications/cancelled` reads `requestId`, ignores invalid or unknown targets
 and cancels the matching handler without answering it. The peer supplies this
