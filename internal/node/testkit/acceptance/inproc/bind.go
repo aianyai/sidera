@@ -14,7 +14,7 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 	catalog := recipes.New(newBindings())
 	var out []crashwalk.Scenario
 	for _, r := range catalog.Scripts {
-		s := &harness.WalkScenario{Script: r.Script}
+		s := &harness.WalkScenario{Script: r.Script, Options: sessionOptions(r.Script.Name)}
 		if r.Drain != nil {
 			s.Drain = func(h *harness.H) error { return r.Drain(h) }
 		}
@@ -38,7 +38,7 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 	return out
 }
 
-func newBindings() recipes.Bindings { return recipes.Bindings{} }
+func newBindings() recipes.Bindings { return recipes.Bindings{Sessions: newSessionOps()} }
 
 func freshScenario(t testing.TB, name string) crashwalk.Scenario {
 	t.Helper()

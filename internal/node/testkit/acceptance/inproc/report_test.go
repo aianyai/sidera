@@ -15,12 +15,14 @@ import (
 func recordCatalog(t *testing.T) map[string]crashwalk.RunResult {
 	records := make(map[string]crashwalk.RunResult)
 	for _, listed := range bindCatalog(t) {
-		t.Run(listed.Name(), func(t *testing.T) {
+		if !t.Run(listed.Name(), func(t *testing.T) {
 			if _, exists := records[listed.Name()]; exists {
 				t.Fatalf("duplicate recipe %q", listed.Name())
 			}
 			records[listed.Name()] = recordScenario(t, freshScenario(t, listed.Name()))
-		})
+		}) {
+			t.FailNow()
+		}
 	}
 	return records
 }

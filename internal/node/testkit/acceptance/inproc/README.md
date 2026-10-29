@@ -14,3 +14,8 @@ without asserting that every declared family is represented.
 
 `TestSendJudgementRejectsAnAcceptedBodyThatWasNotRead` removes the real receive
 and acknowledgement drain and requires the domain judgement to reject the run.
+
+`newSessionOps` binds session callbacks to the current fixture process.
+`checkClosedSession` is the final read-only audit of a closed endpoint, its cleared
+token and absent session checkpoint. Session recipes run with the real adapter
+host and its fake native runtime; callbacks do not cache an engine across restarts.

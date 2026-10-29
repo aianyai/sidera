@@ -41,5 +41,7 @@ type StartupRecipe struct {
 
 // New constructs closures without invoking bindings or creating resources.
 func New(b Bindings) Catalog {
-	return Catalog{Scripts: deliveryRecipes(b), Startups: startupRecipes()}
+	scripts := deliveryRecipes(b)
+	scripts = append(scripts, sessionRecipes(b)...)
+	return Catalog{Scripts: scripts, Startups: startupRecipes()}
 }

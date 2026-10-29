@@ -1,0 +1,56 @@
+package inproc
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/internal/node/testkit/scenario"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
+)
+
+func newSessionOps() recipes.SessionOps {
+	return recipes.SessionOps{
+		RuntimeAddr: func(e scenario.Env, instance string) string { return e.(*harness.H).RuntimeAddrOf(instance) },
+		Session:     func(e scenario.Env, endpoint string) fakeagent.Agent { return e.(*harness.H).Session(endpoint) },
+		CheckpointPut: func(e scenario.Env, instance string, p adapterproto.CheckpointPutParams) error {
+			return e.(*harness.H).Engine().CheckpointPut(e.Ctx(), instance, p)
+		},
+		CheckClosedSession: func(e scenario.Env, endpoint string) error { return checkClosedSession(e.(*harness.H), endpoint) },
+	}
+}
+
+func sessionOptions(name string) harness.Options {
+	if strings.HasPrefix(name, "session-") {
+		return harness.Options{Adapter: &harness.AdapterOptions{Runtime: true}}
+	}
+	return harness.Options{}
+}
+
+func checkClosedSession(h *harness.H, endpoint string) error {
+	scan, err := h.Records()
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, ep := range scan.Endpoints {
+		if ep.ID.String() == endpoint {
+			found = true
+			if ep.Status != store.EndpointClosed || len(ep.Token) != 0 {
+				return fmt.Errorf("session %s is not closed with an empty token", endpoint)
+			}
+		}
+	}
+	if !found {
+		return fmt.Errorf("closed session %s is missing before retention", endpoint)
+	}
+	for _, cp := range scan.Checkpoints {
+		if cp.Key.Scope == store.CheckpointScopeSession && cp.Key.ID == endpoint {
+			return fmt.Errorf("closed session %s retains a checkpoint", endpoint)
+		}
+	}
+	return nil
+}

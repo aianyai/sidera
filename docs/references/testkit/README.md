@@ -421,3 +421,13 @@ directory and is replaced), is answered with a result the schema accepts.
 - The program path of a fake adapter has the extension of an executable of the platform
   (`.exe` on Windows, where a path that names a program is used as it is), written for
   Windows and cross-compiled: pending verification by CI on main.
+
+Acceptance delivery judgements relate successful call results to the exact body
+shown to the intended endpoint, or to a real terminal feedback notice naming that
+message and target. The notice must originate at the receiving endpoint's local
+system address and match the committed header and public feedback-kind summary.
+The judgement groups feedback by original message, target and kind, deduplicating
+legitimate rereads by the notice's own identifier. Its receive drain acknowledges
+only returned parts and checks the real per-part outcomes. Session recipes use
+explicit instance addresses and actual control replies; final closed-session
+checks read only the endpoint status, cleared token and checkpoint absence.
