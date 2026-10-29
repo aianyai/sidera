@@ -22,8 +22,11 @@ type drainTrace struct {
 	*harness.H
 	waitBeforeAdvanceReturn bool
 	events                  *[]drainEvent
-	advanceErr              error
 }
+
+// advanceInterrupted carries only the real fixture's Quiesce failure. Unwinding
+// prevents the recipe from doing bookkeeping after an advance that never returned.
+type advanceInterrupted struct{ err error }
 
 type drainEvent struct {
 	operation string
@@ -42,18 +45,30 @@ func (e *drainTrace) Advance(d time.Duration) {
 	e.note("advance")
 	e.H.Advance(d)
 	if e.waitBeforeAdvanceReturn {
-		// Advance has no error result. The following real Quiesce in the recipe
-		// still propagates a killed process's failure to the walk owner.
-		e.advanceErr = e.H.Quiesce()
+		if err := e.H.Quiesce(); err != nil {
+			e.note("advance-interrupted")
+			panic(advanceInterrupted{err: err})
+		}
 	}
 	e.note("advance-return")
 }
 
+func (e *drainTrace) drain(run func(scenario.Env) error) (err error) {
+	defer func() {
+		if interrupted := recover(); interrupted != nil {
+			cut, ok := interrupted.(advanceInterrupted)
+			if !ok {
+				panic(interrupted)
+			}
+			// Preserve the real failure for WalkBackend's selected-cut handling.
+			err = cut.err
+		}
+	}()
+	return run(e)
+}
+
 func (e *drainTrace) Quiesce(opts ...scenario.QuiesceOption) error {
 	e.note("quiesce")
-	if e.advanceErr != nil {
-		return e.advanceErr
-	}
 	err := e.H.Quiesce(opts...)
 	if err == nil {
 		e.note("quiet")
@@ -79,7 +94,8 @@ func feedbackScenario(t *testing.T, name string, waitBeforeReturn bool, events *
 			continue
 		}
 		return &harness.WalkScenario{Script: r.Script, Options: recipeOptions(r.Needs), Drain: func(h *harness.H) error {
-			return r.Drain(&drainTrace{H: h, waitBeforeAdvanceReturn: waitBeforeReturn, events: events})
+			traced := &drainTrace{H: h, waitBeforeAdvanceReturn: waitBeforeReturn, events: events}
+			return traced.drain(r.Drain)
 		}, Check: func(h *harness.H) error {
 			*final = h.Clock().Now()
 			if err := r.Check(h); err != nil {
@@ -120,9 +136,12 @@ func TestFeedbackDrainResumesAnIssuedMinute(t *testing.T) {
 			if waitBeforeReturn {
 				interruptedBeforeReturn := false
 				for _, event := range events {
-					if event.operation == "advance-return" {
+					if event.operation == "advance-interrupted" {
 						interruptedBeforeReturn = event.crashes == 2
 						break
+					}
+					if event.operation == "advance-return" {
+						t.Fatalf("Advance returned before the real clock cut unwound its caller: %+v", events)
 					}
 				}
 				if !interruptedBeforeReturn {
