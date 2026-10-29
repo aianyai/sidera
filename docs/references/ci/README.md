@@ -303,7 +303,7 @@ checked locally with `actionlint`, and each command was run on macOS against a
 stand-in package, which proved that the flags, the `-skip` and `-run` split, the
 guard and both environment variables work together. Until a run on `main` shows
 otherwise these are not verified, and each is pending verification by CI on
-`main`: that the three Windows shards fit in 60 minutes and the others in 45;
+`main`: that the four Windows shards fit in 60 minutes and the others in 45;
 the time of a rerun on each platform and so whether the shard counts are right;
 that the five macOS jobs of a run start together; that `-race` on the Linux
 walk costs what was assumed; that `inputs.crashwalk` is empty on a push and a
