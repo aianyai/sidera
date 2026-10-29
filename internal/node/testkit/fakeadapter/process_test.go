@@ -439,6 +439,31 @@ func TestProcessAdapterKnobsOverTheControlChannel(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), waitLimit)
 	defer cancel()
 
+	// The control channel carries typed parameters to the actual adapter peer.
+	checkpoints := make(chan adapterproto.CheckpointPutParams, 1)
+	a.daemon.Handle(adapterproto.MethodCheckpointPut, func(_ context.Context, raw json.RawMessage) (any, error) {
+		var p adapterproto.CheckpointPutParams
+		if err := adapterproto.Decode(raw, &p); err != nil {
+			return nil, err
+		}
+		checkpoints <- p
+		return nil, peer.NewError(adapterproto.CodeUnknownAttempt, "unknown attempt")
+	})
+	want := adapterproto.CheckpointPutParams{Scope: adapterproto.ScopeSession, ID: "sess-checkpoint", State: json.RawMessage(`{"cursor":7}`)}
+	err := k.CheckpointPut(ctx, want)
+	var response *peer.Error
+	if !errors.As(err, &response) || response.Code != adapterproto.CodeUnknownAttempt {
+		t.Fatalf("checkpoint reply: %v; want the daemon's protocol error", err)
+	}
+	select {
+	case got := <-checkpoints:
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("checkpoint %+v, want %+v", got, want)
+		}
+	case <-ctx.Done():
+		t.Fatal("checkpoint never reached the daemon's adapter peer")
+	}
+	a.daemon.Handle(adapterproto.MethodCheckpointPut, func(context.Context, json.RawMessage) (any, error) { return adapterproto.Empty{}, nil })
 	// A one-shot outcome.
 	if err := k.QueueOutcome(ctx, fakeadapter.RequestCreate, fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: "preset_unknown"}); err != nil {
 		t.Fatal(err)
@@ -505,6 +530,7 @@ var goldenArgs = []struct {
 	json  string
 	value any
 }{
+	{"checkpoint", fakeadapter.KnobCheckpointPut, `{"scope":"session","id":"sess-1","state":{"cursor":7}}`, adapterproto.CheckpointPutParams{Scope: adapterproto.ScopeSession, ID: "sess-1", State: json.RawMessage(`{"cursor":7}`)}},
 	{"outcome", fakeadapter.KnobOutcome, `{"request":"create","mode":"queue","kind":"fail","reason":"preset_unknown"}`, fakeadapter.OutcomeArgs{Request: "create", Mode: "queue", Kind: "fail", Reason: "preset_unknown"}},
 	{"outcome with a code after the effect", fakeadapter.KnobOutcome, `{"request":"prompt","mode":"set","kind":"error","code":-32603,"after_effect":true}`, fakeadapter.OutcomeArgs{Request: "prompt", Mode: "set", Kind: "error", Code: -32603, AfterEffect: true}},
 	{"pause points", fakeadapter.KnobPauseAt, `{"points":["create.after-native","start.before-reply"]}`, fakeadapter.PointsArgs{Points: []string{"create.after-native", "start.before-reply"}}},
@@ -551,6 +577,8 @@ func TestKnobArgumentsReject(t *testing.T) {
 		{"a condition that is not one", fakeadapter.KnobAvailability, `{"conditions":[{"condition":"sulking"}]}`},
 		{"an attempt that is not a UUID v4", fakeadapter.KnobPersist, `{"endpoint":"e","attempt":"a"}`},
 		{"a disposition that is not one", fakeadapter.KnobNativeReq, `{"endpoint":"e","method":"m","disposition":"shrug"}`},
+		{"a checkpoint with an unknown member", fakeadapter.KnobCheckpointPut, `{"scope":"session","id":"sess-1","state":{},"extra":1}`},
+		{"a checkpoint with an invalid scope", fakeadapter.KnobCheckpointPut, `{"scope":"endpoint","id":"sess-1","state":{}}`},
 		{"a knob that takes no arguments", fakeadapter.KnobHang, `{}`},
 	}
 	for _, r := range rows {

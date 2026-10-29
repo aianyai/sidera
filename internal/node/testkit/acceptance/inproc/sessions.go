@@ -18,7 +18,11 @@ func newSessionOps() recipes.SessionOps {
 		RuntimeAddr: func(e scenario.Env, instance string) string { return e.(*harness.H).RuntimeAddrOf(instance) },
 		Session:     func(e scenario.Env, endpoint string) fakeagent.Agent { return e.(*harness.H).Session(endpoint) },
 		CheckpointPut: func(e scenario.Env, instance string, p adapterproto.CheckpointPutParams) error {
-			return e.(*harness.H).Engine().CheckpointPut(e.Ctx(), instance, p)
+			adapter, err := e.Adapter(instance)
+			if err != nil {
+				return err
+			}
+			return adapter.CheckpointPut(e.Ctx(), p)
 		},
 		FailCreateSettlement: func(e scenario.Env) error {
 			e.(*harness.H).Faults().Fail(fsxtest.Match{Tx: "control-result", Role: "ctl", Step: fsx.StepCreate, Hit: 1}, fsxtest.DiskFull)

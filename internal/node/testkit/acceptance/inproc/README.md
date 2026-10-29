@@ -26,7 +26,9 @@ through `Bindings.LocalNode`; evidence resolves it on its first receive and
 retains only the value across restarts. Direct agents need no `Me` for notice
 validation.
 
-`newSessionOps` binds session callbacks to the current fixture process.
+`newSessionOps` binds session callbacks to the current fixture process. Its
+checkpoint callback uses the adapter Controller and the real `checkpoint.put`
+protocol rather than submitting directly to the engine.
 `checkClosedSession` is the final read-only audit of a closed endpoint, its cleared
 token and absent session checkpoint. Session recipes run with the real adapter
 host and its fake native runtime; callbacks do not cache an engine across restarts.

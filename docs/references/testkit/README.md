@@ -802,3 +802,9 @@ sender. Another node's system endpoint therefore cannot discharge a local delive
 obligation; existing header, message, recipient and duplicate checks remain the
 same. The direct-registration, session-declaration and second-receive recordings
 contain 7, 40 and 88 main points, with fixed budgets 11, 60 and 132.
+
+The adapter Controller exposes typed `CheckpointPut` with the SDK's checkpoint
+parameters. Both its local wrapper and its remote control knob share one adapter
+implementation that calls the existing `checkpoint.put` protocol method, records
+the knob hit and returns the daemon's answer. It does not forward arbitrary
+protocol methods. The acceptance session binding uses that same controller.

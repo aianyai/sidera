@@ -94,7 +94,7 @@ setting. A kind a request does not take is refused when it is set.
 result faithfully, cut short (with the manifest's truncation notice) or replaced
 (with its replacement notice). `Availability`, `Persist`, `NativeRequest`, `Ping`
 and the direct methods (`Register`, `Recv`, `Ack`, `Send`, `MessageStatus`,
-`Unregister`) send what the name says and return the daemon's answer. `Held`,
+`Unregister`), and `CheckpointPut` send what the name says and return the daemon's answer. `Held`,
 `NotificationsSent` and `Outstanding` tell a fixture which unanswered requests are
 expected and how many notifications the daemon must have handled before the system
 counts as quiet. `Held` is a multiset of methods (`session.create`, …), one per held
@@ -104,6 +104,10 @@ the multiset of methods the daemon has in flight to the adapter. A request leave
 `Held` before `Release` or `ReleaseHeld` returns, so a fixture that asks for quiet
 right after letting it go waits for its answer instead of counting it as still held.
 `HeldPoints` names the pause points some of them stopped at.
+
+`CheckpointPut` takes the SDK checkpoint parameters and sends the existing
+`checkpoint.put` request through the adapter peer. Local and remote controllers
+share that implementation; daemon errors return to the caller unchanged.
 
 Every use of a knob that changes behaviour writes a `knob.hit` entry, so a test can
 assert that its injection point was reached.

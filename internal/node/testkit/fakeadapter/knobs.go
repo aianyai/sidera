@@ -679,3 +679,17 @@ func (k *Knobs) observedMode() ObservedMode {
 	}
 	return k.observed
 }
+
+// CheckpointPut saves or clears an attempt or session checkpoint through the
+// adapter protocol, just as the adapter does while creating a session.
+func (k *Knobs) CheckpointPut(ctx context.Context, p adapterproto.CheckpointPutParams) error {
+	a := k.bound()
+	if a == nil {
+		return ErrNotServing
+	}
+	if err := a.hit("checkpoint.put", p.ID); err != nil {
+		return err
+	}
+	var res adapterproto.Empty
+	return a.call(ctx, adapterproto.MethodCheckpointPut, p, &res)
+}

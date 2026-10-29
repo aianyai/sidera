@@ -33,7 +33,8 @@ type Controller interface {
 	// SetObserved sets what recv results are reported as.
 	SetObserved(ctx context.Context, m ObservedMode) error
 
-	// Availability, Persist, NativeRequest and Ping send what the name says.
+	// CheckpointPut, Availability, Persist, NativeRequest and Ping send what the name says.
+	CheckpointPut(ctx context.Context, p adapterproto.CheckpointPutParams) error
 	Availability(ctx context.Context, conditions []adapterproto.Availability) error
 	Persist(ctx context.Context, endpoint adapterproto.EndpointRef, attempt adapterproto.AttemptID) error
 	NativeRequest(ctx context.Context, endpoint adapterproto.EndpointRef, method string, d adapterproto.Disposition) error
@@ -173,4 +174,8 @@ func (c localController) MessageStatus(ctx context.Context, p adapterproto.Messa
 
 func (c localController) Unregister(ctx context.Context, p adapterproto.UnregisterParams) error {
 	return c.k.Unregister(ctx, p)
+}
+
+func (c localController) CheckpointPut(ctx context.Context, p adapterproto.CheckpointPutParams) error {
+	return c.k.CheckpointPut(ctx, p)
 }

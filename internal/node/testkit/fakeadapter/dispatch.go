@@ -16,20 +16,21 @@ import (
 // under another spelling: a fixture in another process turns the knobs of a fake
 // adapter by sending these names with their arguments.
 const (
-	KnobOutcome      = "outcome"
-	KnobClear        = "outcome.clear"
-	KnobPauseAt      = "pause.at"
-	KnobPauseWait    = "pause.wait"
-	KnobPauseRelease = "pause.release"
-	KnobHoldRelease  = "hold.release"
-	KnobHang         = "hang"
-	KnobDisconnect   = "disconnect"
-	KnobObserved     = "observed"
-	KnobAvailability = "availability"
-	KnobPersist      = "persist"
-	KnobNativeReq    = "native-request"
-	KnobPing         = "ping"
-	KnobStats        = "stats"
+	KnobOutcome       = "outcome"
+	KnobClear         = "outcome.clear"
+	KnobPauseAt       = "pause.at"
+	KnobPauseWait     = "pause.wait"
+	KnobPauseRelease  = "pause.release"
+	KnobHoldRelease   = "hold.release"
+	KnobHang          = "hang"
+	KnobDisconnect    = "disconnect"
+	KnobObserved      = "observed"
+	KnobAvailability  = "availability"
+	KnobPersist       = "persist"
+	KnobNativeReq     = "native-request"
+	KnobPing          = "ping"
+	KnobCheckpointPut = "checkpoint.put"
+	KnobStats         = "stats"
 
 	KnobDirectRegister      = "direct.register"
 	KnobDirectRecv          = "direct.recv"
@@ -196,9 +197,15 @@ func decodeArgs[T validated](data []byte) (any, error) {
 // DecodeKnobArgs strictly decodes the arguments of a knob that has any, and the
 // answer of the stats knob (named "stats.reply"). The value is the type itself,
 // not a pointer. The direct knobs take the protocol's own parameter types and are
-// decoded by the protocol package.
+// decoded by the protocol package. CheckpointPut uses its protocol type too.
 func DecodeKnobArgs(name string, data []byte) (any, error) {
 	switch name {
+	case KnobCheckpointPut:
+		var p adapterproto.CheckpointPutParams
+		if err := adapterproto.Decode(data, &p); err != nil {
+			return nil, err
+		}
+		return p, nil
 	case KnobOutcome:
 		return decodeArgs[OutcomeArgs](data)
 	case KnobPauseAt:
@@ -234,6 +241,12 @@ func (k *Knobs) Dispatch(ctx context.Context, name string, args json.RawMessage)
 		return nil, err
 	}
 	switch name {
+	case KnobCheckpointPut:
+		v, err := DecodeKnobArgs(name, args)
+		if err != nil {
+			return invalid(err)
+		}
+		return failed(k.CheckpointPut(ctx, v.(adapterproto.CheckpointPutParams)))
 	case KnobOutcome:
 		v, err := DecodeKnobArgs(name, args)
 		if err != nil {
@@ -491,4 +504,9 @@ func (r RemoteKnobs) MessageStatus(ctx context.Context, p adapterproto.MessageSt
 // Unregister closes a direct endpoint.
 func (r RemoteKnobs) Unregister(ctx context.Context, p adapterproto.UnregisterParams) error {
 	return r.Do(ctx, KnobDirectUnregister, p, nil)
+}
+
+// CheckpointPut saves or clears an attempt or session checkpoint.
+func (r RemoteKnobs) CheckpointPut(ctx context.Context, p adapterproto.CheckpointPutParams) error {
+	return r.Do(ctx, KnobCheckpointPut, p, nil)
 }
