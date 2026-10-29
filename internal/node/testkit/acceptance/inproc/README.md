@@ -86,3 +86,11 @@ The control-expiry preparation fails a current-process control-result create
 before any visible replacement. The resulting deadline path is judged through
 real Status and receive results, actual management closure, and the owner alert
 for the endpoint the adapter's real create request named.
+
+`configureBodyRecoveryScenario` damages only an intact, actually retained source
+body on the stopped disk. It verifies the existing reference before flipping a
+byte and later requires that precise body's owner alert. The archive variant's
+named preparation arms recoverable create failures in the current process's
+existing fault wrapper; it does not hold transport reports or manufacture state.
+A negative test moves the real periodic sweep beyond the bounded drain and
+requires the domain audit to reject the retained body and records.

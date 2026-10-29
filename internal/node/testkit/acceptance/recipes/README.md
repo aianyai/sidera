@@ -138,3 +138,27 @@ creating endpoint through management. Final checks require its unique real
 `control_unknown` alert, cleared token, no native creation and no active records.
 This is distinct from a timeout reply that was committed successfully. Its
 59-point recording has a fixed budget of 89.
+
+Body-cleanup variants send a nonempty message to an absent node. Their clean
+recordings require the exact deadline notice. An additional offline-damage
+recording flips bytes only in the source body the product actually retained;
+the next process discovers the mismatch through its normal lazy read. Public
+Status distinguishes that lost source and requires its exact `lost_at_sender`
+notice, including the original identifier and target. A read-only binding audit
+also requires the corresponding `corrupt_body` owner alert.
+
+One variant lets feedback clearing remove the retained body. The other uses
+`DeliveryOps.RetainLostSourceBody` to fail the existing feedback-clear and tick
+source creates before replacement, preserving the real lost record for the
+periodic archive sweep. It reads and acknowledges the loss notice before closing
+its sender through management, then requires intact summaries and no live records
+or bodies after retention. The drain remembers completed clock advances so a
+second crash cannot advance past the unread notice's lifetime. These are complete
+recovery recordings; their Normal observations remain separate from clean ones
+and supply actual additional interruption targets. The clean recordings have
+32 and 49 main points, with fixed budgets of 48 and 74.
+A send interrupted before returning creates no guessed message or summary
+obligation. Its bounded drain still receives actual feedback, closes the sender
+and requires all live records and bodies to be gone. Summary presence is required
+only for a returned new message whose resolved target and public Status confirm
+the actual accepted delivery.

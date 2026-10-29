@@ -576,3 +576,18 @@ window closes before a reply commits, its sender reads the precise uncertainty
 notice and the owner closes the alerted endpoint through management. The audit
 requires the actual owner alert, closed endpoint, empty token, absence of a native
 creation and drained records, rather than treating those writes alone as success.
+
+Body-cleanup acceptance variants keep declaration kind distinct from observation
+source. Their healthy absent-node sends end in exact expiry notices. A complete
+second-generation recording damages only the existing source body's bytes while
+the process is stopped. Normal lazy validation then records a body-corruption
+alert and a lost source; the sender must actually receive its precise loss notice.
+Feedback clearing can remove that source's retained bytes. A second variant
+uses the existing nonfatal source-create faults for feedback clearing and ticking,
+reads the notice, closes its sender through management, and leaves final cleanup
+to the real periodic archive sweep. Intact summaries and absence of live records
+and bodies are the final facts. Complete recordings of these Normal writes
+supply the additional second-generation interruptions through shared source
+analysis; the recipes do not assign them Recovery ownership or add fixed counts.
+Their repeatable drains preserve already-executed clock advances, so a second
+crash does not skip the actual unread notice's lifetime.

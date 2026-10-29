@@ -154,8 +154,11 @@ func drainFeedback(e scenario.Env, facts *DeliveryEvidence, sender string) error
 	return facts.RecvAndAck(e, e.Agent(sender))
 }
 
-// DeliveryOps names the recoverable preparation fault of the reply recipe.
-type DeliveryOps struct{ FailSourceUpdate func(scenario.Env) error }
+// DeliveryOps names recoverable source-write preparation faults.
+type DeliveryOps struct {
+	FailSourceUpdate     func(scenario.Env) error
+	RetainLostSourceBody func(scenario.Env) error
+}
 
 var ErrSourceAlreadyConfirmed = errors.New("acceptance: source receipt already committed")
 

@@ -9,7 +9,7 @@ import (
 )
 
 func newDeliveryOps() recipes.DeliveryOps {
-	return recipes.DeliveryOps{FailSourceUpdate: func(e scenario.Env) error {
+	return recipes.DeliveryOps{RetainLostSourceBody: retainLostSourceBody, FailSourceUpdate: func(e scenario.Env) error {
 		// This recipe's first source update follows its first send. A failed create
 		// is before any visible replacement, so the engine keeps serving and retries.
 		e.(*harness.H).Faults().Fail(fsxtest.Match{Tx: "source-update", Role: "out", Step: fsx.StepCreate, Hit: 1}, fsxtest.DiskFull)
