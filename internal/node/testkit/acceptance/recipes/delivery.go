@@ -223,23 +223,30 @@ func unreachableRecipe() ScriptRecipe {
 	facts := &DeliveryEvidence{}
 	return ScriptRecipe{Script: scenario.Script{Name: "delivery-unreachable", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 48}, Steps: []scenario.Step{
 		{Name: "send-to-an-absent-node", Do: func(e scenario.Env) error {
-			target, err := ident.ParseAddress(e.Addr("receiver"))
+			target, err := absentNodeAddress(e.Addr("receiver"))
 			if err != nil {
 				return err
 			}
-			bytes := target.Node.Bytes()
-			bytes[0] ^= 0x80
-			node, err := ident.NodeIDFromBytes(bytes)
-			if err != nil {
-				return err
-			}
-			target.Node = node
-			r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{target.String()}, Body: "An unreachable node must produce real deadline feedback."})
+			r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{target}, Body: "An unreachable node must produce real deadline feedback."})
 			if err == nil {
 				facts.Accepted(r, "An unreachable node must produce real deadline feedback.")
-				facts.RequireFeedback(r.MessageID, target.String(), delivery.KindExpiredUnconfirmed)
+				facts.RequireFeedback(r.MessageID, target, delivery.KindExpiredUnconfirmed)
 			}
 			return err
 		}}, scenario.Advance("report-deadline", 4*time.Hour),
 	}}, Drain: func(e scenario.Env) error { return drainFeedback(e, facts, "sender") }, Check: facts.Check}
+}
+
+func absentNodeAddress(address string) (string, error) {
+	target, err := ident.ParseAddress(address)
+	if err != nil {
+		return "", err
+	}
+	bits := target.Node.Bytes()
+	bits[0] ^= 0x80
+	target.Node, err = ident.NodeIDFromBytes(bits)
+	if err != nil {
+		return "", err
+	}
+	return target.String(), nil
 }

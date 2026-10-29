@@ -6,7 +6,6 @@ import (
 
 	"github.com/aianyai/sidera/internal/admin"
 	"github.com/aianyai/sidera/internal/delivery"
-	"github.com/aianyai/sidera/internal/ident"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
@@ -32,17 +31,11 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 	return ScriptRecipe{
 		Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: budget}, Steps: []scenario.Step{
 			{Name: "send-to-absent-node", Do: func(e scenario.Env) error {
-				to, err := ident.ParseAddress(e.Addr("receiver"))
+				var err error
+				target, err = absentNodeAddress(e.Addr("receiver"))
 				if err != nil {
 					return err
 				}
-				bits := to.Node.Bytes()
-				bits[0] ^= 0x80
-				to.Node, err = ident.NodeIDFromBytes(bits)
-				if err != nil {
-					return err
-				}
-				target = to.String()
 				r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{target}, Body: body})
 				if err == nil {
 					if invalid := r.MessageID.Validate(); invalid != nil {
