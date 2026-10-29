@@ -18,6 +18,9 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 		if r.Script.Name == "installation-rollback" {
 			s.Options = installationOptions()
 		}
+		if r.Script.Name == "management-instance" {
+			s.Options = managementOptions(r.Script.Name)
+		}
 		if r.Drain != nil {
 			s.Drain = func(h *harness.H) error { return r.Drain(h) }
 		}
@@ -45,7 +48,7 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 }
 
 func newBindings() recipes.Bindings {
-	return recipes.Bindings{Sessions: newSessionOps(), Installation: newInstallOps(), Recovery: recoveryBindings()}
+	return recipes.Bindings{Sessions: newSessionOps(), Installation: newInstallOps(), Management: newManagementOps(), Recovery: recoveryBindings()}
 }
 
 func freshScenario(t testing.TB, name string) crashwalk.Scenario {

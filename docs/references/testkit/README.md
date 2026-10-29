@@ -60,6 +60,22 @@ pointer updates leave no successful stored result, keep the old current version,
 and either remove or retain the prepared version as the observed cleanup permits.
 A retained version is discarded by the next real installation before promotion.
 
+Management acceptance actions use public operations and retain the complete
+request identity and expected version for an interrupted request. Each binding
+returns the actual result only after checking its stored form and an identical
+resend; recipes compare settings, presets, alerts, backup and clock state,
+revocation, endpoint closure and instance state with the requested effects.
+Version refusals leave neither a successful stored result nor a changed setting.
+Stop requests are checked as requests to the composition root, including replay,
+and do not call the fixture's stop method from a script step.
+
+The disabled-instance recipe queues both real target messages and control work,
+keeps the sender enabled in another instance, then receives and acknowledges the
+corresponding feedback. Its clean record writes the instance endpoints first and
+the endpoint drains separately. Normal declarations that run during recovery
+remain normal declarations: declaration kind and observation source are separate
+coverage dimensions.
+
 ## Why
 
 - **The fakes are third parties.** The point of testing against a fake adapter is to

@@ -44,3 +44,16 @@ complete recoveries, all owned recovery interruptions and the derived Normal
 interruptions in one sequence. It logs the first real observation of each key with
 scenario, trigger, generation, point and both path operands. The three coverage
 columns remain separate, and run totals include the derived interruptions.
+`newSessionOps` binds session callbacks to the current fixture process.
+`checkClosedSession` is the final read-only audit of a closed endpoint, its cleared
+token and absent session checkpoint. Session recipes run with the real adapter
+host and its fake native runtime; callbacks do not cache an engine across restarts.
+
+`newManagementOps` binds each named action to its public engine operation.
+Every call resolves its process once, executes the request, reads the persistent
+result and resends the exact request. No engine handle survives a callback.
+Read-only inspections decode configuration and clock files or reduce a record
+scan to the requested endpoint, instance or alert facts. They do not write state.
+The instance preparation uses the existing extra-instance fixture and real
+registration, send and held session-create calls; its sender remains enabled so
+failure feedback is received and acknowledged through the ordinary agent API.

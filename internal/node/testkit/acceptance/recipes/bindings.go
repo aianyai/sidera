@@ -8,4 +8,5 @@ type Bindings struct {
 	Sessions     SessionOps
 	Installation InstallOps
 	Recovery     RecoveryOps
+	Management   ManagementOps
 }

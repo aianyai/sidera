@@ -57,3 +57,22 @@ package for another platform. Every observed success is replayed and checked
 against its stored result and the installed current pointer and version directories.
 Package specifications describe caller-owned input files; no recipe writes node
 state. Its fixed budget is 162 from 108 recorded main points.
+Management recipes cover versioned node, preset and endpoint changes; a stale
+version is refused without changing the setting. They also cover alert raising
+and acknowledgement, backup confirmation, clearing a real clock rollback pause,
+endpoint closure, and adapter disable/enable with pending messages and control
+work. Named callbacks return real results after checking the same request's
+persistent replay. The recipe then compares the result with the requested effect.
+An interrupted request is retried with its original identifier and expected version.
+
+Stop and identity retirement check the returned stop request and its replay.
+The script does not stop the fixture: shutdown belongs to the composition root.
+Retirement additionally requires the verified self-revocation on disk.
+The instance recipe keeps its sender in another instance, drains actual loss
+feedback, and checks that disabled endpoints are closed with empty tokens.
+Its normal record writes the instance head; recovery may also write normal
+transaction roles, whose observation source is reported separately.
+
+The management recordings have 16, 25, 4, 7, 55 and 130 main points for settings,
+maintenance, stop, retirement, endpoint close and instance disable/enable. Their
+fixed budgets are 24, 38, 6, 11, 83 and 195 respectively.

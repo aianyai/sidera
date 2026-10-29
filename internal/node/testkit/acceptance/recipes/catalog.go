@@ -46,6 +46,7 @@ func New(b Bindings) Catalog {
 	scripts := deliveryRecipes(b)
 	scripts = append(scripts, sessionRecipes(b)...)
 	scripts = append(scripts, installationRecipes(b)...)
+	scripts = append(scripts, managementRecipes(b)...)
 	scripts = append(scripts, recoveryRecipes(b)...)
 	return Catalog{Scripts: scripts, Startups: append(startupRecipes(), recoveryStartupRecipes()...)}
 }
