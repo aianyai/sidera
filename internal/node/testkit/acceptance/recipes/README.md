@@ -6,7 +6,7 @@ closures remember returned message identifiers only for that run.
 
 `ScriptRecipe` owns the ordinary `scenario.Script`, its repeatable `Drain` and
 its final domain `Check`. `StartupRecipe` describes actual Init or Start, including
-an optional advance before Start. Names, steps, budgets and recovery responsibilities
+optional advances before Start and after each successful Start has quiesced. Names, steps, budgets and recovery responsibilities
 have one source in these descriptions. Bindings contain named, typed operations
 only for capabilities absent from `scenario.Env`; there is no generic dispatcher.
 
@@ -88,3 +88,8 @@ A delivery that remains correctable may end the drain as `delivery_unknown`; its
 matching actual system notice is evidence of the uncertainty. Instance management
 requires that notice for the held creation as well as the pending message. Final
 audits reject queued or accepted work and never infer feedback from disk state.
+
+The periodic-clock startup advances one minute while the actual daemon serves,
+then waits for its own periodic task and stops. Its final read-only check requires
+the persisted high-water mark to retain that advance without a rollback pause.
+The recording has five main points and a fixed budget of eight.

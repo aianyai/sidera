@@ -34,11 +34,12 @@ const (
 
 // StartupRecipe describes actual Init or Start, ending at the complete boundary.
 type StartupRecipe struct {
-	Name       string
-	Kind       StartupKind
-	StartAfter time.Duration
-	MaxPoints  int
-	Recovery   []crashwalk.RecoveryCase
+	Name              string
+	Kind              StartupKind
+	StartAfter        time.Duration
+	AdvanceAfterStart time.Duration
+	MaxPoints         int
+	Recovery          []crashwalk.RecoveryCase
 }
 
 // New constructs closures without invoking bindings or creating resources.

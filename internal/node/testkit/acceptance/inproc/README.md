@@ -61,3 +61,7 @@ Additional recovery-record sources retain their domain checks and receive the
 same final owner-predicate audit as recovery recipes. The instance-disable
 recording therefore proves the pending records converge as well as the visible
 management result and feedback.
+
+`configureLifecycleStartup` binds the periodic-clock recipe's final read-only
+clock-record audit. It checks the daemon's persisted state after shutdown; no
+recipe calls the clock writer or reproduces the daemon's periodic task.

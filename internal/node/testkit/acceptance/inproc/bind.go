@@ -40,8 +40,9 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 		default:
 			t.Fatalf("unknown startup kind %d", r.Kind)
 		}
-		s := &harness.StartupWalkScenario{Label: r.Name, Operation: op, StartAfter: r.StartAfter, PointBudget: r.MaxPoints, RecoveryCases: r.Recovery}
+		s := &harness.StartupWalkScenario{Label: r.Name, Operation: op, StartAfter: r.StartAfter, AdvanceAfterStart: r.AdvanceAfterStart, PointBudget: r.MaxPoints, RecoveryCases: r.Recovery}
 		configureRecoveryStartup(s)
+		configureLifecycleStartup(s)
 		out = append(out, s)
 	}
 	return out

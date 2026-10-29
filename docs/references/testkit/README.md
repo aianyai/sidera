@@ -32,8 +32,11 @@ The backends of the fake agent that run the command-line client and speak to the
 server, the binary-layer fixture and the binary backend of the crash walk build on
 these packages and are not part of them.
 
-The acceptance catalog currently describes actual Init, certificate-renewing Start
-and direct send/receive/acknowledgement. Its domain check requires the body of a
+The acceptance catalog describes actual Init, certificate-renewing Start, a
+serving daemon whose clock advances to its periodic persistence task, and direct
+send/receive/acknowledgement. The periodic-clock recipe reads the final clock
+record after shutdown and requires the advanced high-water mark without a pause;
+it neither calls the clock writer nor copies the periodic task. Its domain check requires the body of a
 successfully accepted send to appear in the external ledger. A normal recording
 uses the complete daemon table for diagnostics, includes observed setup only in
 coverage, excludes setup from the main-point budget, and rejects undeclared or
