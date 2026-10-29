@@ -25,7 +25,7 @@ func TestCatalogEvidence(t *testing.T) {
 		all = append(all, recorded.Hits[0]...)
 	}
 	reportCoverage(t, "clean-gen1", all)
-	recoveryEvidence(t, records)
+	recoveryEvidence(t, records, all)
 	t.Logf("runs elapsed=%s", clock.System().Now().Sub(started))
 }
 

@@ -523,6 +523,14 @@ through `CompareRuns`. The comparison retains both normalized path operands and
 its existing per-transaction/role interleaving rule. Static recovery cases keep
 their original exactly-once declaration responsibility and ordinal-1 target rule.
 
+The bounded in-process acceptance runner uses these same source and target
+checks directly. It owns only catalog execution, complete-run/domain validation,
+first-crash comparison and diagnostics. Its cost is the clean catalog plus unique
+complete recovery triggers, static Recovery interruptions and derived Normal
+interruptions; it does not run every clean main point. The source key sets and
+actual interruption targets therefore have one owner across bounded acceptance
+and whole walks.
+
 `Report.Sources`, `Normal` and `Recovery` describe observations;
 `RecoveryRecordings` counts complete trigger-only runs. `RecoveryRuns` remains the
 static interruption count. `RecoveryNormalPlanned` is global,

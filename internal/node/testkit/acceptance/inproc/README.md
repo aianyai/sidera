@@ -20,13 +20,14 @@ and acknowledgement drain and requires the domain judgement to reject the run.
 token and absent session checkpoint. Session recipes run with the real adapter
 host and its fake native runtime; callbacks do not cache an engine across restarts.
 
-Recovery evidence is recorded once per recipe and complete trigger. Only its
-second generation contributes recovery coverage. Each owned target is then
-actually interrupted in generation two: `Reached`, the exact last point, its
-recorded path operands, a third generation and the domain judgement must all
-agree. Observation alone proves no crash. When clean recordings are supplied,
-Normal keys absent from every clean recording are derived from complete second
-generations; each non-sync key receives a separate second-generation crash.
+Recovery evidence is recorded once per recipe and complete trigger. The finite
+runner establishes completion and domain invariants, then supplies all clean hits
+and the complete second generations to `crashwalk.AnalyzeSources`. That shared
+function owns generation validation, the three source columns and stable actual
+recovery-only Normal targets. Both static and derived interruptions use
+`crashwalk.CheckRecoveryTarget` for Reached, exact cutoff, generation count,
+violations and path-prefix comparison. The acceptance runner keeps no second
+source-classification or target-verification algorithm.
 
 Offline damage reads the stopped disk directly and changes only records the
 product wrote. The stopped creating endpoint is checked before its real control
@@ -43,7 +44,11 @@ version-directory inspection hold the installation result to its durable effect.
 complete recoveries, all owned recovery interruptions and the derived Normal
 interruptions in one sequence. It logs the first real observation of each key with
 scenario, trigger, generation, point and both path operands. The three coverage
-columns remain separate, and run totals include the derived interruptions.
+columns remain separate, and run totals include the derived interruptions. The
+cost is one clean run per catalog entry, one complete run per unique trigger,
+one interruption per static Recovery responsibility and one per derived Normal
+target. It calls `Backend.Run` directly; it does not execute the full main-point
+walk.
 `newSessionOps` binds session callbacks to the current fixture process.
 `checkClosedSession` is the final read-only audit of a closed endpoint, its cleared
 token and absent session checkpoint. Session recipes run with the real adapter
