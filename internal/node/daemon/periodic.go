@@ -44,18 +44,6 @@ const certificateTask = "certificate-renewal"
 // that meet the stall are told loop_busy and retry.
 const ArchiveSweepEvery = time.Hour
 
-// clockTask makes the high water mark and the pause durable, as the engine
-// reports them: the engine alone knows when a pause began, and it keeps that time
-// while the pause lasts, so a state with another start is never made. The owner's
-// clearing of the pause is the only thing that lifts it.
-func (d *Daemon) clockTask(in engine.TaskInput) error {
-	st := keys.ClockState{HighWater: in.HighWater}
-	if in.RollbackPaused {
-		st.RollbackPausedSince = in.PausedSince
-	}
-	return d.keys.SaveClock(st)
-}
-
 // certificateTask is the hourly look at the certificate. It runs in the loop, as
 // does everything that signs, and the clock it judges by is the one of the command.
 // Whether it may sign is the engine's judgement and nothing else.

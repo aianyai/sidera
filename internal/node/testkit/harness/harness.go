@@ -26,6 +26,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/clock/clocktest"
 	"github.com/aianyai/sidera/internal/node/config"
+	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
@@ -85,9 +86,8 @@ type Options struct {
 	// ArchiveSweepEvery, when positive, has the node run the archive sweep every
 	// period on the fixture's clock, as the daemon does. Zero runs none.
 	ArchiveSweepEvery time.Duration
-	// RollbackPaused starts the engine as if the persisted state said the wall
-	// clock was set back and not cleared. It applies to every start, restarts
-	// included, because a process has no memory of the last one.
+	// RollbackPaused forces a durable rollback pause at every start, restarts
+	// included. An existing pause keeps its original start time.
 	RollbackPaused bool
 	// Presets are presets the node has besides the one `init` makes, by name, each
 	// the JSON object `presets add` takes, added through the configuration's own
@@ -407,10 +407,8 @@ func (h *H) loopbackQuiet() (bool, uint64) {
 // the fixture has one, otherwise by the fixture itself), the recovery of deliveries
 // and the switch to serving.
 //
-// RollbackPaused and the clock's high-water mark are applied from zero at every start,
-// as a daemon that was just launched has no memory of the last run: a restart does not
-// carry the high-water mark over, and a node that Options made start paused starts
-// paused every time.
+// Every start restores the clock through the daemon's lifecycle. An explicit
+// RollbackPaused option forces a durable pause when none was restored.
 func (h *H) boot(ctx context.Context, p *process, check func() error) error {
 	m := p.mounted
 	if err := check(); err != nil {
@@ -434,14 +432,29 @@ func (h *H) boot(ctx context.Context, p *process, check func() error) error {
 	if err := check(); err != nil {
 		return err
 	}
+	now, log := h.clk.Now(), slog.New(p.log)
+	clockState, err := daemon.RestoreClock(m.Writer.Reader(), k, now, log)
+	if err != nil {
+		return fmt.Errorf("RestoreClock: %w", err)
+	}
+	if h.opts.RollbackPaused && !clockState.RollbackPaused {
+		if err := k.SaveClock(keys.ClockState{HighWater: clockState.HighWater.Value(), RollbackPausedSince: now}); err != nil {
+			return fmt.Errorf("persisting the forced clock pause: %w", err)
+		}
+		clockState.RollbackPaused, clockState.RollbackPausedSince = true, now
+	}
+	if err := check(); err != nil {
+		return err
+	}
 	var st engine.Store = m.Store
 	if h.opts.DiskFree != nil {
 		st = freeSpace{Store: m.Store, free: h.opts.DiskFree}
 	}
 	deps := engine.Deps{
-		Node: NodeID(), Clock: h.clk, HighWater: clock.NewHighWater(time.Time{}), RollbackPaused: h.opts.RollbackPaused,
+		Node: NodeID(), Clock: h.clk, HighWater: clockState.HighWater,
+		RollbackPaused: clockState.RollbackPaused, RollbackPausedSince: clockState.RollbackPausedSince,
 		Writer: m.Writer, Store: st, Config: cfg, Keys: k, Rand: RandReader(h.opts.Seed + uint64(h.gen)),
-		OpenPackage: h.opts.OpenPackage, Log: slog.New(p.log),
+		OpenPackage: h.opts.OpenPackage, Log: log,
 	}
 	if h.launcher != nil {
 		// The host runs on the test clock: its pings, its backoff and its waits for a
@@ -465,6 +478,9 @@ func (h *H) boot(ctx context.Context, p *process, check func() error) error {
 	p.lb = transport.NewLoopback(NodeID(), p.eng, h.knobs)
 	if err := p.eng.SetTransport(p.lb); err != nil {
 		return fmt.Errorf("SetTransport: %w", err)
+	}
+	if err := daemon.AddClockState(p.eng, k); err != nil {
+		return fmt.Errorf("AddClockState: %w", err)
 	}
 	if h.opts.ArchiveSweepEvery > 0 {
 		if err := p.eng.AddArchiveSweep(h.opts.ArchiveSweepEvery); err != nil {

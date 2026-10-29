@@ -25,6 +25,7 @@ touches files only through `fsx`, and reads time only through the injected clock
 | `ErrAlreadyRunning`, `ErrAlreadyInitialized`, `ErrNotInitialized`, `ErrPermissions`, `ErrEngineNotStopped`, `FatalError`, `ExitCode`, `ExitFatal` | How a start or an init is refused and how a daemon ends; 74 is a fatal failure of the disk, in the start as in a running daemon. |
 | `DefaultShutdownGrace`, `FatalGrace`, `Config.ShutdownGrace` | How long each step of the shutdown has to stop in. |
 | `Table`, `Declarations`, `Transactions`, `LayoutWork`, `RepairLayout` | The one table of the program's transactions, the two this package declares (`init` and `layout`), and the layout rule. |
+| `ClockState`, `RestoreClock`, `AddClockState` | Restore the persisted clock before signing, durably pause a newly detected rollback, and register persistence of the engine's live state before it starts. |
 | `ClockStateEvery`, `CertificateCheckEvery`, `ArchiveSweepEvery` | The period of the clock state, of the look at the certificate, and of the archive sweep (the engine's: the daemon names only the period). |
 
 The five sentinel values are re-exported from the standard-library-only

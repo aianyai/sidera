@@ -8,7 +8,6 @@ import (
 	"github.com/aianyai/sidera/internal/node/adapterhost"
 	"github.com/aianyai/sidera/internal/node/agentapi"
 	"github.com/aianyai/sidera/internal/node/apiwire"
-	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -185,24 +184,11 @@ func (d *Daemon) stepKeys(context.Context) error {
 // is not trusted: the pause is made durable at once, together with the mark that
 // was, which is never lowered, and the owner clears it.
 func (d *Daemon) stepClock(context.Context) error {
-	st, err := keys.ReadClock(d.w.Reader())
+	st, err := RestoreClock(d.w.Reader(), d.keys, d.cfg.Clock.Now(), d.log)
 	if err != nil {
 		return err
 	}
-	hw := clock.NewHighWater(st.HighWater)
-	paused, since := st.Paused(), st.RollbackPausedSince
-	now := d.cfg.Clock.Now()
-	if v, _ := hw.Observe(now); v == clock.WallRolledBack {
-		d.log.Warn("the wall clock was set back; new work that depends on a deadline is refused until the owner clears it",
-			"now", now, "high_water", hw.Value())
-		if !paused {
-			paused, since = true, now
-			if err := d.keys.SaveClock(keys.ClockState{HighWater: hw.Value(), RollbackPausedSince: now}); err != nil {
-				return fmt.Errorf("making the pause durable: %w", err)
-			}
-		}
-	}
-	d.clockHW, d.clockPaused, d.clockPausedSince = hw, paused, since
+	d.clockHW, d.clockPaused, d.clockPausedSince = st.HighWater, st.RollbackPaused, st.RollbackPausedSince
 	return nil
 }
 
@@ -253,7 +239,7 @@ func (d *Daemon) stepScan(ctx context.Context) error {
 	if err := e.SetTransport(transport.NewLoopback(d.keys.Node(), e, nil)); err != nil {
 		return err
 	}
-	if err := e.AddClockState(clockStateTask, ClockStateEvery, d.clockTask); err != nil {
+	if err := AddClockState(e, d.keys); err != nil {
 		return err
 	}
 	if err := e.AddPeriodic(certificateTask, CertificateCheckEvery, d.certificateTask); err != nil {

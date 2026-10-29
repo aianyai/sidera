@@ -220,10 +220,15 @@ By default the node has one instance, `Instance`, and every accessor without a n
   a disk the test may change (`Disk()`); `Start` and `StartWith` run a process on it. A
   scenario that corrupts a file between two runs, or that crashes the recovery of a
   crash, is built from these and not from a mode of `Crash`.
-- **A start forgets the last run's in-memory state.** `Options.RollbackPaused` and the
-  clock's high-water mark are applied from zero at every start, as a daemon that was
-  just launched has no memory of the last run: a restart does not carry the high-water
-  mark over, and a node made to start paused starts paused every time.
+- **Every start restores the durable clock.** After transaction recovery and loading
+  configuration and keys, boot calls `daemon.RestoreClock` with one clock reading.
+  A persisted pause keeps its start time even when the wall clock is normal again.
+  Before the engine starts, `daemon.AddClockState` registers minute persistence and
+  immediate persistence of a newly observed rollback, using the engine's live state.
+  `Options.RollbackPaused` forces a pause on every start when none is restored: boot
+  saves that explicit condition before opening the engine, and fails if saving fails.
+  False never removes a persisted pause. The owner's clear survives normal restarts;
+  with the forced option, the next start pauses again.
 - **A starting generation owns its disk before recovery writes.** `TryStart` allocates
   the generation and its cutoff before transaction recovery, then runs startup on the
   caller's goroutine until serving or cleanup completes. The generation number is
@@ -407,3 +412,8 @@ changes. Audit errors and domain-check failures become violations.
 `adapter_inputs_test.go` checks installed disabled runtime input on memory and real
 file systems, absence of a pre-enable process or alert, real enable/probe warning,
 and cache separation for changed manifests and disabled states.
+
+`clock_test.go` covers durable rollback at refusal, preservation of the pause's
+start across normal wall time and restart, clear followed by restart and periodic
+saving, a new pause, forced pause on each start and startup write failure, and a
+minute mark used to detect rollback on the next start.

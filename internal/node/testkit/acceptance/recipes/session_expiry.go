@@ -34,7 +34,7 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 		deadlineCompleted = true
 		return nil
 	}}
-	return ScriptRecipe{Needs: Needs{FSFaults: []FSFault{FaultCreateSettlement}}, Script: scenario.Script{Name: "session-control-write-expiry", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 89}, Steps: []scenario.Step{
+	return ScriptRecipe{Needs: Needs{FSFaults: []FSFault{FaultCreateSettlement}}, Script: scenario.Script{Name: "session-control-write-expiry", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 107}, Steps: []scenario.Step{
 		{Name: "fail-create-settlement", Do: b.Sessions.FailCreateSettlement},
 		{Name: "hold-create", Do: func(e scenario.Env) error {
 			c, err := e.Adapter("chat")

@@ -64,7 +64,7 @@ func registrationRecipe(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
 	session := &createdSession{}
 	var declared bool
-	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true}, Script: scenario.Script{Name: "delivery-register-declare", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 60}, Steps: []scenario.Step{
+	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true}, Script: scenario.Script{Name: "delivery-register-declare", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 78}, Steps: []scenario.Step{
 		session.create(b, ""), scenario.Advance("creation-pull", time.Minute), session.resolve(b, "", facts),
 		{Name: "declare", Do: func(e scenario.Env) error {
 			hidden := true
@@ -131,7 +131,7 @@ func secondCheckRecipe(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
 	session := &createdSession{}
 	var message adapterproto.MessageID
-	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true}, Script: scenario.Script{Name: "delivery-second-check", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 132}, Steps: []scenario.Step{
+	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true}, Script: scenario.Script{Name: "delivery-second-check", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 150}, Steps: []scenario.Step{
 		runtimePlan(fakeruntime.TurnPlan{}), session.create(b, ""), scenario.Advance("creation-pull", time.Minute), session.resolve(b, "", facts),
 		{Name: "send", Do: func(e scenario.Env) error {
 			const body = "Queued before the declaration narrows."
@@ -157,7 +157,7 @@ func secondCheckRecipe(b Bindings) ScriptRecipe {
 
 func expiryRecipe(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
-	return ScriptRecipe{Script: scenario.Script{Name: "delivery-expiry", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 72}, Steps: []scenario.Step{
+	return ScriptRecipe{Script: scenario.Script{Name: "delivery-expiry", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 90}, Steps: []scenario.Step{
 		{Name: "send", Do: sendBody(facts, "sender", "receiver", "The queue deadline must not silently discard this body.")},
 		scenario.Advance("queue-deadline", delivery.DefaultEndpointMaxQueue+time.Minute),
 	}}, Drain: func(e scenario.Env) error {
@@ -177,7 +177,7 @@ func redeliveryRecipe(b Bindings) ScriptRecipe {
 			return err
 		}}, scenario.Advance(fmt.Sprintf("lease-expiry-%d", i+1), delivery.LeaseDuration))
 	}
-	return ScriptRecipe{Script: scenario.Script{Name: "delivery-redelivery", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 144}, Steps: steps}, Drain: func(e scenario.Env) error {
+	return ScriptRecipe{Script: scenario.Script{Name: "delivery-redelivery", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 180}, Steps: steps}, Drain: func(e scenario.Env) error {
 		if err := facts.RecvAndAck(e, e.Agent("receiver")); err != nil {
 			return err
 		}
@@ -208,7 +208,7 @@ var ErrSourceAlreadyConfirmed = errors.New("acceptance: source receipt already c
 func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
 	var original adapterproto.MessageID
-	return ScriptRecipe{Needs: Needs{FSFaults: []FSFault{FaultSourceUpdate}}, Script: scenario.Script{Name: "delivery-reply-after-write-failure", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 90}, Steps: []scenario.Step{
+	return ScriptRecipe{Needs: Needs{FSFaults: []FSFault{FaultSourceUpdate}}, Script: scenario.Script{Name: "delivery-reply-after-write-failure", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 102}, Steps: []scenario.Step{
 		{Name: "fail-receipt-write", Do: b.Delivery.FailSourceUpdate},
 		{Name: "send", Do: func(e scenario.Env) error {
 			r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("receiver")}, Body: "The reply must prove this body arrived."})
@@ -262,7 +262,7 @@ func unreachableRecipe(b Bindings) ScriptRecipe {
 		}
 		return nil
 	}}
-	return ScriptRecipe{Script: scenario.Script{Name: "delivery-unreachable", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 48}, Steps: []scenario.Step{
+	return ScriptRecipe{Script: scenario.Script{Name: "delivery-unreachable", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 66}, Steps: []scenario.Step{
 		{Name: "send-to-an-absent-node", Do: func(e scenario.Env) error {
 			target, err := absentNodeAddress(e.Addr("receiver"))
 			if err != nil {

@@ -45,8 +45,8 @@ same way. Its message is queued before the session narrows its accepted senders;
 a completed narrowing requires the exact rejection notice. A cut before narrowing
 still owes the accepted body. Both session drains finish a returned creation
 before receiving, without declaring an operation the interrupted script never
-reached. Their fresh main-point counts are 7, 40 and 88 respectively, with fixed
-budgets of 11, 60 and 132.
+reached. Their fresh main-point counts are 7, 52 and 100 respectively, with fixed
+budgets of 11, 78 and 150.
 
 Session recipes bind `SessionOps` for runtime addresses by explicit instance,
 session agents, checkpoint writes and final closed-session checks. They exercise
@@ -120,9 +120,9 @@ feedback, and checks that disabled endpoints are closed with empty tokens.
 Its normal record writes the instance head; recovery may also write normal
 transaction roles, whose observation source is reported separately.
 
-The management recordings have 16, 36, 4, 7, 55 and 130 main points for settings,
+The management recordings have 16, 44, 4, 7, 63 and 138 main points for settings,
 maintenance, stop, retirement, endpoint close and instance disable/enable. Their
-fixed budgets are 24, 54, 6, 11, 83 and 195 respectively.
+fixed budgets are 24, 66, 6, 11, 95 and 207 respectively.
 
 The instance-management recipe also records a crash after the disabled
 configuration is stored but before its first endpoint rewrite. Recovery then
@@ -146,7 +146,7 @@ failure before its visible replacement. The target has really accepted and read
 the body while the sender still reports it queued; a real reply then carries the
 evidence that releases the sender's retained body. `DeliveryOps` names this
 preparation fault without exposing a file system or a transport to the recipe.
-Its 60-point recording has a fixed budget of 90.
+Its 68-point recording has a fixed budget of 102.
 
 Recovery creation keeps its first native turn working while the initial message
 becomes readable. The repeatable drain receives and acknowledges that real body
@@ -157,8 +157,8 @@ errors. The final domain check rejects an extra prompt or an unfinished turn.
 
 A synchronous unknown-preset refusal includes the failed control reply in the
 first receipt, releasing the source's initial body in the control-reply write.
-The adapter-refusal and unknown-preset variants have 41 and 16 main points, with
-fixed budgets of 62 and 24. A held creation past its report window must return
+The adapter-refusal and unknown-preset variants have 53 and 28 main points, with
+fixed budgets of 80 and 42. A held creation past its report window must return
 `unconfirmed/ready_timeout` naming a closed session with no token. Its control
 signal can be delivered while its separate initial-message delivery is still
 unknown: the exact `accepted_unconfirmed` notice must name the derived session,
@@ -166,7 +166,7 @@ not the runtime control target. If a restart completes creation before the deadl
 phase began, the actual created reply must resolve to native creation evidence and
 the original initial body received and acknowledged at that session. This does not
 replace the timeout judgement once its deadline phase started. The creation-expiry
-budget is 104 from 69 points.
+budget is 122 from 81 points.
 
 An absent-node delivery exercises the source's report deadline without a
 transport knob. The real sender receives its exact `expired_unconfirmed` notice;
@@ -174,8 +174,8 @@ the source cannot be treated as expired merely because no call was answered at
 the earlier delivery deadline. Its repeatable drain completes a returned send's
 report-window advance if the script was interrupted before it, and remembers that
 clock move before waiting for its resulting writes. A second crash cannot repeat
-the four-hour advance past unread feedback. Its 32-point recording has a fixed
-budget of 48.
+the four-hour advance past unread feedback. Its 44-point recording has a fixed
+budget of 66.
 
 The retention recipe reads a created session's initial body, sends and reads a
 message from it, and closes the native session. Actual periodic sweeps must leave
@@ -188,7 +188,7 @@ large clock move is remembered before its writes can be interrupted. The resumed
 drain also runs one further ordinary sweep period: restart rearms the periodic
 task, and the pass removing a session's last source deliberately leaves its
 endpoint for the following pass. The original endpoint-removal and archive-expiry
-requirements remain mandatory. Its 140-point recording has a fixed budget of 210.
+requirements remain mandatory. Its 164-point recording has a fixed budget of 246.
 
 A separate control-expiry variant fails the first create-result replacement at
 its recoverable create point. The control reaches its report deadline before a
@@ -197,7 +197,7 @@ exact uncertainty notice for the runtime target. The owner closes the alerted
 creating endpoint through management. Final checks require its unique real
 `control_unknown` alert, cleared token, no native creation and no active records.
 This is distinct from a timeout reply that was committed successfully. Its
-59-point recording has a fixed budget of 89. A cut during the deadline step,
+71-point recording has a fixed budget of 107. A cut during the deadline step,
 before its closing tick commits, can instead let restart retry the failed result
 write and deliver an exact `unconfirmed/ready_timeout` reply naming the allocated
 session. That reply proves the uncertain result without an additional notice;
@@ -282,3 +282,23 @@ closing audit through `RecoveryOps.CheckClosedRecords`.
 Failed-creation drains share their recipe's `DeliveryEvidence` across restarts;
 the final check validates those accumulated notifications before inspecting the
 control reply and external absence of a native creation.
+
+The engine fixture shares the daemon's durable clock lifecycle. Recipes that
+advance time therefore include the actual minute saves, and maintenance includes
+the immediate pause and post-clear saves. Re-recorded main-point counts and fixed
+budgets for the remaining affected recipes are:
+
+| Recipe | Main points | Budget |
+| --- | --- | --- |
+| `delivery-expiry` | 60 | 90 |
+| `delivery-redelivery` | 120 | 180 |
+| `session-lifecycle` | 216 | 324 |
+| `session-blocked-recovered` | 190 | 285 |
+| `recovery-send`, `recovery-source-trusted`, `recovery-source-unreadable`, `recovery-target` | 48 each | 72 each |
+| `recovery-create` | 71 | 107 |
+| `recovery-creating` | 75 | 113 |
+| `recovery-body-feedback` | 44 | 66 |
+| `recovery-body-archive` | 65 | 98 |
+
+Unaffected budgets retain their existing values. Counts include all main targets;
+clock writes are never filtered out, and domain judgements are unchanged.

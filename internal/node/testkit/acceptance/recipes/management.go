@@ -281,7 +281,7 @@ func managementMaintenance(b Bindings) ScriptRecipe {
 				return nil
 			}),
 	}
-	return ScriptRecipe{Needs: Needs{ProbeWarning: true}, Script: scenario.Script{Name: "management-maintenance", Crash: scenario.CrashPlan{MaxPoints: 54}, Steps: steps}, Drain: r.drain, Check: r.check}
+	return ScriptRecipe{Needs: Needs{ProbeWarning: true}, Script: scenario.Script{Name: "management-maintenance", Crash: scenario.CrashPlan{MaxPoints: 66}, Steps: steps}, Drain: r.drain, Check: r.check}
 }
 
 func managementClose(b Bindings) ScriptRecipe {
@@ -302,7 +302,7 @@ func managementClose(b Bindings) ScriptRecipe {
 		}
 		return nil
 	}
-	return ScriptRecipe{Script: scenario.Script{Name: "management-close", Setup: scenario.Setup{Direct: []string{"sender", "managed"}}, Crash: scenario.CrashPlan{MaxPoints: 83}, Steps: []scenario.Step{
+	return ScriptRecipe{Script: scenario.Script{Name: "management-close", Setup: scenario.Setup{Direct: []string{"sender", "managed"}}, Crash: scenario.CrashPlan{MaxPoints: 95}, Steps: []scenario.Step{
 		{Name: "queue-before-close", Do: func(e scenario.Env) error {
 			target = e.Addr("managed")
 			return sendBody(facts, "sender", "managed", "Close this endpoint with its body still queued.")(e)
@@ -391,7 +391,7 @@ func managementInstance(b Bindings) ScriptRecipe {
 		}),
 	}
 	var drainRequest ManagementRequest
-	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true, ExtraInstances: []string{instance}}, RecoveryTriggers: []crashwalk.Trigger{crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "instance-drain", Role: "endpoint"}, Step: fsx.StepCreate}, Hit: 1})}, Script: scenario.Script{Name: "management-instance", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 195}, Steps: steps}, Drain: func(e scenario.Env) error {
+	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true, ExtraInstances: []string{instance}}, RecoveryTriggers: []crashwalk.Trigger{crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "instance-drain", Role: "endpoint"}, Step: fsx.StepCreate}, Hit: 1})}, Script: scenario.Script{Name: "management-instance", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 207}, Steps: steps}, Drain: func(e scenario.Env) error {
 		if err := r.drain(e); err != nil {
 			return err
 		}

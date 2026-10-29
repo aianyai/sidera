@@ -55,11 +55,6 @@ func TestManagementMaintenanceUsesRealVersionWarning(t *testing.T) {
 		t.Fatalf("alert writes missing from recipe window: raised=%v acknowledged=%v", raised, acknowledged)
 	}
 	for _, point := range points {
-		switch point.Point.Key.Tag.Tx {
-		case "adapter-enable", "runtime-admit", "alert-raise", "alert-ack":
-		default:
-			continue
-		}
 		t.Run(point.Point.String(), func(t *testing.T) {
 			scenario := versionWarningScenario(t)
 			target := point

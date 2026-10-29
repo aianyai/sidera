@@ -276,9 +276,15 @@ coverage dimensions.
   down on a disk the test can change and a start whose fault wrapper is armed before its
   recovery runs. `Stop` and `Kill` leave the node down (calls to it are unavailable, as to
   a daemon that is not running), `Start` and `StartWith` run a process on the disk; a
-  restart and a crash are those two in a row. The in-memory state a process starts with
-  (the clock's high-water mark, the rollback pause an option asks for) is applied from
-  zero at each start, because a process has no memory of the last one.
+  restart and a crash are those two in a row. Each boot restores the durable clock
+  through `daemon.RestoreClock` after transaction recovery and loading configuration
+  and keys. Before starting the loop it registers `daemon.AddClockState`, which saves
+  the engine's live mark and pause every minute and immediately on a new rollback.
+  A persisted pause and its start survive even a return to normal wall time.
+  `Options.RollbackPaused` forces a durable pause at every start when none is restored;
+  saving it must succeed before the engine opens. False leaves the restored state
+  alone. An owner clear therefore survives ordinary restart and periodic saving,
+  while a forced fixture pauses again on its next start.
 - **Fallible fixture calls share one current-process lookup.** `onProcess`,
   `Records`, `VerifyReport`, `VerifyControlReply` and `quiesce` return
   `engineagent.ErrNodeNotRunning` when there is no running process, before the
@@ -819,7 +825,7 @@ use this independent identity, never direct-agent `Me` or the message's claimed
 sender. Another node's system endpoint therefore cannot discharge a local delivery
 obligation; existing header, message, recipient and duplicate checks remain the
 same. The direct-registration, session-declaration and second-receive recordings
-contain 7, 40 and 88 main points, with fixed budgets 11, 60 and 132.
+contain 7, 52 and 100 main points, with fixed budgets 11, 78 and 150.
 
 The adapter Controller exposes typed `CheckpointPut` with the SDK's checkpoint
 parameters. Both its local wrapper and its remote control knob share one adapter
@@ -886,7 +892,7 @@ additional, wrong-kind and wrong-subject facts all fail. A resumed drain complet
 the same request and reads persistent facts, so it cannot create a second warning
 just to regain an identifier. Alert acknowledgement, backup confirmation and clock
 rollback clearance retain their durable-result and effect checks. Its real recording
-contains 36 main points and has a fixed budget of 54.
+contains 44 main points and has a fixed budget of 66.
 
 Both execution layers explicitly support the `ProbeWarning` input need. Unknown
 damage or filesystem-fault names are unsupported even when a capability list

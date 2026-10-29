@@ -55,6 +55,20 @@ held (what `ipc.Listen` asks of whoever listens on an address of this home), the
 handle for adapter logs, and `RequestStop`. It holds no transaction writer: the
 engine is the single writer, and a hook that changes state asks it.
 
+`RestoreClock(reader, keys, now, log)` owns step 4's clock lifecycle and returns
+`ClockState`, the startup snapshot passed to the engine. Its reader and loaded keys
+belong to the same recovered node, the logger is non-nil, and `now` is one injected
+clock reading. It can write: a new rollback is made durable before it returns;
+read errors propagate and save errors retain the `making the pause durable`
+context. A persisted pause is never cleared or moved when the clock becomes normal.
+Normal forward movement raises only the in-memory mark at startup.
+
+`AddClockState(engine, keys)` registers `clock-high-water` at `ClockStateEvery`
+before the loop starts. Its task reads each `TaskInput`, so an owner clear or a new
+pause cannot be overwritten by a captured startup snapshot. The daemon uses these
+two entries in its existing startup steps; the engine-layer fixture shares the
+same lifecycle without taking on the daemon's other periodic tasks.
+
 ### The adapter host
 
 `Config.AdapterHost` is the host that runs the adapter instances the owner enabled

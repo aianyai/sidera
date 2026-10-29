@@ -188,3 +188,9 @@ full-table and source checks as other entries. Full terminal regressions cut
 every writing point and compare the actual first-generation cutoff and path
 prefix, retain the real recovery generation, and reject invented responses at
 irreversible retirement cuts with no durable operation result.
+
+`TestClockClearInterruptedResultKeepsTheDurableClock` retains the clock record's
+create, write and rename interruptions through the maintenance recipe's original
+result/effect judgement. `TestManagementMaintenanceUsesRealVersionWarning` walks
+every main point of that recipe, including immediate pause and post-clear clock
+persistence, and compares the actual interrupted prefix with the clean recording.

@@ -93,7 +93,7 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 		{"recovery-target", DamageTarget, recoveryCases(crashwalk.CorruptOffline("target", "unreadable"), "quarantine/record.remove")},
 	} {
 		evidence := newDeliveryEvidence(b)
-		out = append(out, ScriptRecipe{Needs: Needs{Damage: variant.damage}, Script: scenario.Script{Name: variant.name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 54, Recovery: variant.cases}, Steps: []scenario.Step{{Name: "send", Do: func(e scenario.Env) error {
+		out = append(out, ScriptRecipe{Needs: Needs{Damage: variant.damage}, Script: scenario.Script{Name: variant.name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 72, Recovery: variant.cases}, Steps: []scenario.Step{{Name: "send", Do: func(e scenario.Env) error {
 			result, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("receiver")}, Body: "Recovery must retain a real delivery obligation."})
 			if err == nil {
 				evidence.Accepted(result, "Recovery must retain a real delivery obligation.")
@@ -111,12 +111,12 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 	}
 	for _, held := range []bool{false, true} {
 		name := "recovery-create"
-		budget := 89
+		budget := 107
 		cases := append(recoveryCases(recoveryCrash("control-intake/ctl.create#1"), "orphan-gc-endpoint/endpoint.remove", "orphan-gc-endpoint/commit"), recoveryCases(recoveryCrash("control-intake/derived.create#1"), "derived-replay/derived.create", "derived-replay/derived.write", "derived-replay/derived.rename", "derived-replay/commit")...)
 		cases = append(cases, recoveryCases(recoveryCrash("control-result/endpoint.create#1"), "ctl-effect-replay/endpoint.create", "ctl-effect-replay/endpoint.write", "ctl-effect-replay/endpoint.rename", "ctl-effect-replay/commit")...)
 		if held {
 			name = "recovery-creating"
-			budget = 111
+			budget = 113
 			cases = recoveryCases(crashwalk.CorruptOffline("creating-control", "unreadable"), "quarantine/session.create", "quarantine/session.write", "quarantine/session.rename")
 		}
 		facts := newDeliveryEvidence(b)

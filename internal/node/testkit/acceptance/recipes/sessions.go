@@ -26,7 +26,7 @@ type SessionOps struct {
 }
 
 func sessionRecipes(b Bindings) []ScriptRecipe {
-	out := []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}, 62), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", nil, 24), sessionExpiryRecipe(b), controlWriteExpiryRecipe(b), blockedRecipe(b)}
+	out := []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}, 80), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", nil, 42), sessionExpiryRecipe(b), controlWriteExpiryRecipe(b), blockedRecipe(b)}
 	for i := range out {
 		out[i].Needs.RuntimeAdapter = true
 	}
@@ -151,7 +151,7 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 			return err
 		}}, scenario.Advance("close-pull", time.Minute),
 	}
-	return ScriptRecipe{Script: scenario.Script{Name: "session-lifecycle", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 288}, Steps: steps}, Drain: func(e scenario.Env) error {
+	return ScriptRecipe{Script: scenario.Script{Name: "session-lifecycle", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 324}, Steps: steps}, Drain: func(e scenario.Env) error {
 		if session.control != "" && session.endpoint == "" {
 			if err := drainFeedback(e, facts, "sender"); err != nil {
 				return err
@@ -245,7 +245,7 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 		}
 		return nil
 	}}
-	return ScriptRecipe{Script: scenario.Script{Name: "session-create-expiry", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 104}, Steps: []scenario.Step{
+	return ScriptRecipe{Script: scenario.Script{Name: "session-create-expiry", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 122}, Steps: []scenario.Step{
 		{Name: "hold-create", Do: func(e scenario.Env) error {
 			c, err := e.Adapter("chat")
 			if err != nil {
@@ -348,7 +348,7 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 	session := &createdSession{}
 	facts := newDeliveryEvidence(b)
 	var message adapterproto.MessageID
-	return ScriptRecipe{Script: scenario.Script{Name: "session-blocked-recovered", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 249}, Steps: []scenario.Step{
+	return ScriptRecipe{Script: scenario.Script{Name: "session-blocked-recovered", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 285}, Steps: []scenario.Step{
 		runtimePlan(fakeruntime.TurnPlan{EndAfter: true}), session.create(b, ""), scenario.Advance("creation-pull", time.Minute), session.resolve(b, "", facts),
 		{Name: "refuse-prompts", Do: func(e scenario.Env) error {
 			c, err := e.Adapter("chat")

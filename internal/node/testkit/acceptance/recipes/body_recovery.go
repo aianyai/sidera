@@ -18,10 +18,10 @@ func bodyRecoveryRecipes(b Bindings) []ScriptRecipe {
 
 func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 	name := "recovery-body-feedback"
-	budget := 48
+	budget := 66
 	if archive {
 		name = "recovery-body-archive"
-		budget = 74
+		budget = 98
 	}
 	facts := newDeliveryEvidence(b)
 	var message adapterproto.MessageID
