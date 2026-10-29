@@ -1530,6 +1530,12 @@ so that the double cannot drift from what it stands for.
 
 ## Known gaps
 
+- **Inherited extended ACLs on macOS.** The Unix `ownerOnly` check reads the
+  effective user's ownership and the mode bits; on macOS it does not reject an
+  inherited extended ACL. This limitation applies both to private files created
+  with `CreatePrivateFile` and to the data directory checked through
+  `Info.OwnerOnly`. An inherited ACL may grant access despite 0600 or 0700 mode
+  bits; those checks do not establish that such an ACL is absent.
 - **Symbolic links.** The test that `Stat` does not follow a final symbolic link
   and the tests that a link is not owner-only skip where the platform refuses to
   create one without privilege.
