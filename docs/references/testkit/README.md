@@ -692,3 +692,17 @@ before delivery is restored. Lifecycle drains receive and acknowledge pending
 session messages, or obtain the real feedback caused by a requested closure.
 Ordinary session resolution captures evidence while its source exists, so later
 retention does not create a dependency on an already removed status record.
+
+Acceptance recipes declare fixture requirements as `recipes.Needs`, including
+runtime adapters, extra instances, archive sweep period, package input, offline
+damage kind and named filesystem faults. Bindings select through capabilities
+before executing callbacks. Binary capabilities include stopped-disk damage but
+no filesystem fault injection.
+
+`Catalog.AnalyzeLayer` uses the complete clean and second-generation recordings
+for supported recipes. Reachable keys are their observed union; in-process-only
+keys are the full observed union minus that set. Any supported observation makes
+a key reachable. Each layer derives its recovery-only Normal targets through
+`crashwalk.AnalyzeSources` using its own supported source records, preserving the
+actual recipe, trigger and ordinal. A shared key never makes every trigger that
+observed it reachable.

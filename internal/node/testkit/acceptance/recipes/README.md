@@ -208,3 +208,16 @@ both blocked notices remain mandatory for a completed blocking phase. A send
 before that phase still owes its accepted body. The lifecycle drain receives and
 acknowledges pending session bodies until closure has been requested, when real
 closure feedback can discharge the outstanding delivery instead.
+
+`Needs` declares runtime-adapter use, extra instances, sweep period, package input,
+offline damage kind and each required filesystem fault. `Capabilities.Supports`
+and `Catalog.Select` choose recipes before execution. `BinaryCapabilities`
+includes offline damage on the stopped real disk and no filesystem fault injection.
+
+`Catalog.AnalyzeLayer` derives observed reachable keys from all complete clean and
+recovery records of supported recipes. A key seen by any supported source is
+reachable, even when another source requires a fault. `InProcessOnly` is the
+full observed set minus that reachable union. Recovery-only Normal targets are
+recomputed from the supported recordings, keeping each actual source recipe,
+complete trigger and point ordinal. A reachable key does not make an unsupported
+source's trigger reachable.

@@ -18,6 +18,7 @@ type Catalog struct {
 
 // ScriptRecipe adds a repeatable drain and a domain judgement to a script.
 type ScriptRecipe struct {
+	Needs  Needs
 	Script scenario.Script
 	Drain  func(scenario.Env) error
 	Check  func(scenario.Env) error
@@ -34,6 +35,7 @@ const (
 
 // StartupRecipe describes actual Init or Start, ending at the complete boundary.
 type StartupRecipe struct {
+	Needs             Needs
 	Name              string
 	Kind              StartupKind
 	StartAfter        time.Duration
