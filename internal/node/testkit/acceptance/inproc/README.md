@@ -101,3 +101,7 @@ blocking, and a lifecycle send before its prompt interval. They use the existing
 backend's actual step boundaries and retain every successful send's body
 obligation. Recovery creation also judges the successful control's initial body
 through public status, its real session target and external model evidence.
+`TestCreationJudgementRequiresTheRequestedInitialBody` creates a real session,
+receives and acknowledges its actual initial body, and compares matching and
+different expected bodies. Only the matching body can satisfy the creation
+obligation.
