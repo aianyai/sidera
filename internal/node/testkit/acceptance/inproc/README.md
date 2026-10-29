@@ -19,3 +19,16 @@ and acknowledgement drain and requires the domain judgement to reject the run.
 `checkClosedSession` is the final read-only audit of a closed endpoint, its cleared
 token and absent session checkpoint. Session recipes run with the real adapter
 host and its fake native runtime; callbacks do not cache an engine across restarts.
+
+Recovery evidence is recorded once per recipe and complete trigger. Only its
+second generation contributes recovery coverage. Each owned target is then
+actually interrupted in generation two: `Reached`, the exact last point, its
+recorded path operands, a third generation and the domain judgement must all
+agree. Observation alone proves no crash. When clean recordings are supplied,
+Normal keys absent from every clean recording are derived from complete second
+generations; each non-sync key receives a separate second-generation crash.
+
+Offline damage reads the stopped disk directly and changes only records the
+product wrote. The stopped creating endpoint is checked before its real control
+record is damaged. Final recovery work uses the owners' existing predicates, and
+closed-session checks share the session binding's audit.

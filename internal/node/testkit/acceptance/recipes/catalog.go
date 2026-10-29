@@ -21,6 +21,8 @@ type ScriptRecipe struct {
 	Script scenario.Script
 	Drain  func(scenario.Env) error
 	Check  func(scenario.Env) error
+	// RecoveryTriggers lists extra complete recovery recordings, without assigning declarations.
+	RecoveryTriggers []crashwalk.Trigger
 }
 
 type StartupKind uint8
@@ -43,5 +45,6 @@ type StartupRecipe struct {
 func New(b Bindings) Catalog {
 	scripts := deliveryRecipes(b)
 	scripts = append(scripts, sessionRecipes(b)...)
-	return Catalog{Scripts: scripts, Startups: startupRecipes()}
+	scripts = append(scripts, recoveryRecipes(b)...)
+	return Catalog{Scripts: scripts, Startups: append(startupRecipes(), recoveryStartupRecipes()...)}
 }

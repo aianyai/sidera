@@ -21,6 +21,7 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 		if r.Check != nil {
 			s.Check = func(h *harness.H) error { return r.Check(h) }
 		}
+		configureRecoveryScenario(s)
 		out = append(out, s)
 	}
 	for _, r := range catalog.Startups {
@@ -33,12 +34,16 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 		default:
 			t.Fatalf("unknown startup kind %d", r.Kind)
 		}
-		out = append(out, &harness.StartupWalkScenario{Label: r.Name, Operation: op, StartAfter: r.StartAfter, PointBudget: r.MaxPoints, RecoveryCases: r.Recovery})
+		s := &harness.StartupWalkScenario{Label: r.Name, Operation: op, StartAfter: r.StartAfter, PointBudget: r.MaxPoints, RecoveryCases: r.Recovery}
+		configureRecoveryStartup(s)
+		out = append(out, s)
 	}
 	return out
 }
 
-func newBindings() recipes.Bindings { return recipes.Bindings{Sessions: newSessionOps()} }
+func newBindings() recipes.Bindings {
+	return recipes.Bindings{Sessions: newSessionOps(), Recovery: recoveryBindings()}
+}
 
 func freshScenario(t testing.TB, name string) crashwalk.Scenario {
 	t.Helper()

@@ -36,3 +36,17 @@ creation with an initial body, failed and expired creation, interrupt, prompting
 checkpoint removal on close and blocked/recovered notices. External runtime and
 agent evidence proves visibility; the final closed-session audit alone reads the
 endpoint's status, token and remaining checkpoint facts.
+
+Recovery descriptions explicitly own non-sync Recovery declarations and their real
+first-crash or offline-damage trigger. `RecoveryTriggers` adds complete recovery
+recordings without assigning a declaration; the binding deduplicates these with
+owned triggers by recipe name and the entire trigger. Offline damage names select
+existing source, target or creating-control records, or an existing empty layout
+directory. Input preparation never manufactures recovery debris.
+
+Recovery delivery variants use `DeliveryEvidence` for accepted-body obligations,
+loss notices and acknowledgement evidence. Their drains release held adapter
+requests and associate real creation requests with native creation confirmations
+by attempt, then receive through the resulting session agent. Final disk audits
+check recovery work, terminal deliveries and control records, and the original
+quarantined creating session's closed state and cleared token.

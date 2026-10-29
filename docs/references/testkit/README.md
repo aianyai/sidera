@@ -431,3 +431,13 @@ legitimate rereads by the notice's own identifier. Its receive drain acknowledge
 only returned parts and checks the real per-part outcomes. Session recipes use
 explicit instance addresses and actual control replies; final closed-session
 checks read only the endpoint status, cleared token and checkpoint absence.
+
+Acceptance recovery descriptions assign each non-sync Recovery declaration to
+one real trigger. Additional trigger metadata requests complete recovery records
+without claiming target ownership. The runner deduplicates by scenario and the
+whole trigger, keeps second-generation provenance, and compares each actual
+second crash against that complete window with the existing crash-walk path
+comparison. A terminal third generation alone cannot demonstrate either the
+second-generation observation or its interruption. The offline binding modifies
+only product-created records after shutdown; final owner predicates establish
+that quarantine, replay, orphan collection and transaction cleanup have settled.
