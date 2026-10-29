@@ -33,9 +33,12 @@ generation resumes at the first unanswered stage with that same request, so a
 committed change replays its stored result; completed stages are not repeated.
 Later starts reuse the installed package; only the separate input configuration's
 clock origin is updated. The default
-adapter provides direct endpoints. Runtime-driven CLI actions are not connected:
-the current fake process inputs cannot clear inherited daemon crash variables
-from the CLI a runtime starts.
+adapter provides direct endpoints. A private fixture profile supplies the catalog
+instance and preset names, runtime declarations, extra instances, and an installed
+warning package that remains disabled until a recipe enables it. Runtime processes
+use the actual fake-runtime program. The tagged daemon consumes and clears its
+crash controls before launching adapters, so descendant CLI processes do not
+inherit the daemon generation's target or record file.
 
 `Manage`, `Adapter` and `Runtime` expose the existing external clients. The
 fixture owns one logical `Now` across daemon generations. `SetTime` retains the
@@ -80,3 +83,47 @@ rejection, and ordinary builds rejecting tagged controls while ignoring their
 environment variables. Their short roots are removed after each
 run. Domain recipes, offline damage and crash-walk binding are separate callers
 of this process fixture.
+
+## Scenario environment
+
+The private `environment` implements the unchanged `scenario.Env` contract.
+`envFrom` gives domain bindings access to the same current fixture. Logical
+`Advance` and `Set` use `Fixture.SetTime`; because those methods return no error,
+the environment retains the first clock failure and returns it from subsequent
+operations. Only the backend may call `resetGeneration`, after judging the prior
+process's trace and actual exit and starting a distinct daemon generation.
+Neither quiet nor a successful later RPC clears the error.
+
+Normal scripts initialize through private `prepare` before observed generation 1.
+It runs the actual tagged CLI with a dedicated deterministic initialization seed
+and the shared logical clock, removing all three crash observer variables. The
+command uses the same launch and single-Wait owner as observed commands, including
+output files and cancellation cleanup, but creates no generation or trace entry.
+Public `Init` remains the observed startup operation with positive unique ids.
+Node process seeds include the scenario seed, role and observed generation. Native
+runtime seeds include the scenario and instance, remain stable across daemon
+restarts, and never depend on a process id or temporary path.
+
+Direct agents use the current fake adapter Controller for each call, including
+reconnects after a daemon restart. Registration and addresses come from real
+protocol replies and public node status. The driver sends text, control and
+replies through `endpoint.send`; status supplies actual resolved recipients.
+Reply routing and implicit acknowledgement parts come only from pages actually
+received. The bridge renders each typed page for its own reader; `Raw` contains
+that rendered display, without claiming to retain the daemon's JSON formatting.
+The existing `fakeagent.Recording` wrapper records the bridge's calls and what
+its reader saw. Direct endpoints use the product's direct receive budget even
+when a shared script names the CLI reader. The session-only `Me`, `Declare`,
+`Peers`, `Directory` and `Probe` methods return `ErrNotAvailable`.
+
+The adapter send result does not report whether an idempotency key replayed a
+message. Until that fact is available, the direct driver explicitly rejects
+nonempty keys rather than inventing a replay flag. Missing public protocol
+implementations remain real call failures, and runtime profiles must pass the
+same strict public probe checks as the base fixture. These support types do not
+replace either boundary with in-process engine calls.
+
+Package sources belong to the fixture's input directory. The private
+`packageInput` helper writes an actual fake-adapter package there; an installation
+binding can extend that source before invoking public installation. Installed
+node packages and node state are never edited to prepare an input.

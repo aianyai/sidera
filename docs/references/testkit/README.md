@@ -935,3 +935,40 @@ Both execution layers explicitly support the `ProbeWarning` input need. Unknown
 damage or filesystem-fault names are unsupported even when a capability list
 contains the same unknown value. Package inputs and their real installation stay
 with each fixture; the callback adds no arbitrary-alert API or test RPC.
+
+
+The binary fixture's private scenario environment retains endpoint identities and
+recording clients across real daemon generations. Every direct-agent call obtains
+the current fake adapter Controller; it never saves an old connection or uses a
+session token for a direct endpoint. Addresses use actual registration replies
+and public status. Resolved recipients come from actual protocol message status,
+and reply routes and implicit acknowledgement parts come only from received
+pages. A direct bridge renders the typed page it presents to its reader; that
+rendering is its `fakeagent.RecvResult.Raw`, not the daemon's original JSON bytes.
+The shared recording wrapper remains the only writer of bridge model observations.
+Session-only Agent operations are explicitly unavailable on direct endpoints.
+The current adapter send result carries no replay flag, so a nonempty direct
+idempotency key is explicitly unavailable instead of being reported as fresh.
+Real protocol errors and incomplete runtime probes continue to fail the run.
+
+An environment clock change uses the fixture's retained logical target and real
+clock RPC. The first RPC failure is retained because `scenario.Env.Set` and
+`Advance` cannot return it; quiet and subsequent operations return that error.
+The backend alone resets this per-generation failure, after validating an actual
+exit and selecting a distinct daemon process. No successful RPC silently clears
+an earlier failure or serves as evidence of a crash target.
+
+Normal binary scripts use a private real CLI initialization before observed
+generation 1. It owns Start, one Wait, file output and cancellation cleanup through
+the same process launcher as observed commands, with observer variables removed
+and no observed-generation registration. Public observed `Init` still requires
+positive unique generation numbers. Deterministic node seeds distinguish scenario,
+process role and observed generation; native runtime seeds distinguish scenario
+and adapter instance while remaining stable across daemon restarts.
+
+Private binary input profiles preserve the public fixture's direct-only default.
+They describe runtime declarations, extra instance packages and a warning package
+installed but not enabled. Bootstrap still retains each exact management request
+and its progress across generations. Package inputs are real caller-owned source
+directories, extensible before installation; no profile writes installed packages
+or daemon business state directly.

@@ -56,6 +56,8 @@ type Fixture struct {
 	root, home     string
 	binaries       Binaries
 	opts           Options
+	profile        fixtureProfile
+	agentWriters   []*ledger.Writer
 	clockMu        sync.Mutex
 	now            time.Time
 	control        *fakectl.Server
@@ -74,6 +76,10 @@ type Fixture struct {
 }
 
 func NewFixture(ctx context.Context, root string, binaries Binaries, opts Options) (*Fixture, error) {
+	return newFixture(ctx, root, binaries, opts, fixtureProfile{})
+}
+
+func newFixture(ctx context.Context, root string, binaries Binaries, opts Options, profile fixtureProfile) (*Fixture, error) {
 	if !filepath.IsAbs(root) {
 		return nil, fmt.Errorf("acceptance: root must be absolute")
 	}
@@ -86,7 +92,7 @@ func NewFixture(ctx context.Context, root string, binaries Binaries, opts Option
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return nil, err
 	}
-	f := &Fixture{root: root, home: filepath.Join(root, "n"), binaries: binaries, opts: opts, now: opts.ClockStart, gens: map[int]*generation{}, steps: map[string]bool{}}
+	f := &Fixture{root: root, home: filepath.Join(root, "n"), binaries: binaries, opts: opts, profile: profile, now: opts.ClockStart, gens: map[int]*generation{}, steps: map[string]bool{}}
 	var err error
 	f.table, err = daemon.Table()
 	if err != nil {
@@ -160,22 +166,8 @@ func (f *Fixture) begin(spec GenerationSpec, command string) (*generation, error
 		return nil, err
 	}
 	g := &generation{spec: spec, stdout: filepath.Join(f.root, fmt.Sprintf("g%d.out", spec.Number)), stderr: filepath.Join(f.root, fmt.Sprintf("g%d.err", spec.Number))}
-	out, err := os.OpenFile(g.stdout, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	defer out.Close()
-	errout, err := os.OpenFile(g.stderr, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return nil, err
-	}
-	defer errout.Close()
-	cmd := exec.Command(f.binaries.Tagged, "--home", f.home, command)
-	cmd.Dir = f.root
-	cmd.Stdout = out
-	cmd.Stderr = errout
-	cmd.Env = processEnv(map[string]string{"SIDERA_TEST_SEED": f.opts.Seed + "/" + command, "SIDERA_TEST_CLOCK_START_MS": strconv.FormatInt(f.Now().UnixMilli(), 10), "SIDERA_CRASH_RECORD": spec.Record, "SIDERA_CRASH_AT": spec.Target, "SIDERA_CRASH_GEN": strconv.Itoa(spec.Number)})
-	g.p, err = startProcess(cmd)
+	values := map[string]string{"SIDERA_TEST_SEED": f.processSeed(command, spec.Number), "SIDERA_TEST_CLOCK_START_MS": strconv.FormatInt(f.Now().UnixMilli(), 10), "SIDERA_CRASH_RECORD": spec.Record, "SIDERA_CRASH_AT": spec.Target, "SIDERA_CRASH_GEN": strconv.Itoa(spec.Number)}
+	g.p, err = f.launch(command, g.stdout, g.stderr, values)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +187,9 @@ func processEnv(values map[string]string) []string {
 		}
 	}
 	for key, value := range values {
-		out = append(out, key+"="+value)
+		if value != "" {
+			out = append(out, key+"="+value)
+		}
 	}
 	return out
 }
@@ -439,6 +433,10 @@ func (f *Fixture) Close() error {
 		}
 	}
 	f.client.Close()
-	errs = append(errs, f.control.Close(), f.writer.Close())
+	errs = append(errs, f.control.Close())
+	for _, w := range f.agentWriters {
+		errs = append(errs, w.Close())
+	}
+	errs = append(errs, f.writer.Close())
 	return errors.Join(errs...)
 }
