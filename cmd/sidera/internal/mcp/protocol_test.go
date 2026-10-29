@@ -2,6 +2,7 @@ package mcp_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 
 func TestProtocolFailureGoldens(t *testing.T) {
 	for _, tc := range []struct{ name, request, response string }{
+		{"modern initialize", `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}`, `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}`},
 		{"uninitialized list", `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`, `{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"send initialize first, or carry io.modelcontextprotocol/protocolVersion in _meta"}}`},
 		{"missing capabilities", `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28"}}}`, `{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"client capabilities must be an object"}}`},
 		{"unsupported version", `{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2099-01-01","io.modelcontextprotocol/clientCapabilities":{}}}}`, `{"jsonrpc":"2.0","id":1,"error":{"code":-32022,"message":"unsupported protocol version","data":{"supported":["2026-07-28"],"requested":"2099-01-01"}}}`},
@@ -105,5 +107,73 @@ func TestOversizedInputUsesTheMCPErrorAndCloses(t *testing.T) {
 	}
 	if _, err := s.output.ReadByte(); err != io.EOF {
 		t.Fatalf("after oversized input: %v", err)
+	}
+}
+
+func TestCancellingOneConcurrentReceiveLeavesTheOtherRunning(t *testing.T) {
+	entered := make(chan int, 2)
+	cancelled := make(chan struct{})
+	release := make(chan struct{})
+	c := httpAgent(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var args struct {
+			WaitS int `json:"wait_s"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&args); err != nil {
+			t.Error(err)
+			return
+		}
+		entered <- args.WaitS
+		if args.WaitS == 30 {
+			<-r.Context().Done()
+			close(cancelled)
+			return
+		}
+		select {
+		case <-release:
+			io.WriteString(w, `{"lease":"lease_1234567890123456","messages":[],"more":0}`)
+		case <-r.Context().Done():
+			t.Error("cancelling the first receive also cancelled the second")
+		}
+	}))
+	s := start(t, mcp.Config{Agent: c, Version: "test"})
+	for id, wait := range []int{30, 31} {
+		fmt.Fprintf(s.input, "{\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":\"tools/call\",\"params\":{\"name\":\"recv\",\"arguments\":{\"wait_s\":%d},\"_meta\":{\"io.modelcontextprotocol/protocolVersion\":\"2026-07-28\",\"io.modelcontextprotocol/clientCapabilities\":{}}}}\n", id+1, wait)
+	}
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the two receives did not run concurrently")
+		}
+	}
+	fmt.Fprintln(s.input, `{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}`)
+	select {
+	case <-cancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first receive was not cancelled")
+	}
+	close(release)
+	line, err := s.output.ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		ID     int `json:"id"`
+		Result struct {
+			IsError bool `json:"isError"`
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(line, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.ID != 2 || response.Result.IsError || len(response.Result.Content) != 1 || response.Result.Content[0].Text != `{"lease":"lease_1234567890123456","messages":[],"more":0}` {
+		t.Fatalf("the surviving receive did not complete: %s", line)
+	}
+	s.input.Close()
+	if rest, err := io.ReadAll(s.output); err != nil || len(rest) != 0 {
+		t.Fatalf("cancelled receive was answered: %s, %v", rest, err)
 	}
 }

@@ -16,13 +16,15 @@ output contains MCP messages only; diagnostics go to standard error.
 Legacy clients send `initialize` with `protocolVersion`, `capabilities` and
 `clientInfo`. The response selects `2025-06-18`, advertises only `tools: {}` and
 identifies the server as `sidera` with the binary's version. The subsequent
-`notifications/initialized` is ignored. `ping` returns `{}` at any time.
+`notifications/initialized` is ignored. A legacy `ping` returns `{}` at any time.
 
 Modern requests carry `params._meta.io.modelcontextprotocol/protocolVersion`
 and `params._meta.io.modelcontextprotocol/clientCapabilities`. Only `2026-07-28`
 is accepted there. An unsupported version returns `-32022` with `supported` and
 `requested` in `data`; missing or malformed required metadata returns `-32602`.
 This selection is per request, so a modern request can share a legacy process.
+The modern revision has no `initialize` or `ping` method: either method with
+valid modern metadata returns `-32601`.
 Without modern metadata, requests other than `initialize` and `ping` require
 legacy initialization. MCP registers one default peer request handler so unknown
 methods pass through the same era validation before method dispatch. Framing,
@@ -69,7 +71,10 @@ When requested by the caller, the first valid legacy `initialize` or modern
 request (including `server/discover`) starts one independent Agent probe. A legacy
 `ping` does not establish initialization and leaves the probe available. The probe
 uses the client's separate probe credential, reports only on standard error, and
-does not delay or alter an MCP response.
+does not delay or alter an MCP response. On shutdown, `Run` cancels and joins
+the automatic probe before returning, so its final diagnostic finishes while
+the borrowed diagnostic writer is still available. A synchronized stop marker
+prevents a late request handler from starting a probe after shutdown begins.
 
 ## Agent tools
 
@@ -84,7 +89,16 @@ The catalogue's JSON schemas use common object, array, scalar, required, enum an
 numeric-bound keywords without `$ref` or `$schema`. They are both the advertised
 input description and the validator's source of truth. Extra input properties
 are ignored even though `additionalProperties: false` guides models to send only
-known arguments. The Agent interface alone enforces its single-recipient limit.
+known arguments. Integer schemas accept exact integral JSON numbers regardless
+of notation (`1`, `1.0` and `1e0`), as defined by
+[JSON Schema](https://json-schema.org/understanding-json-schema/reference/numeric#integer),
+within signed 64-bit bounds and the schema's
+minimum and maximum. Projection writes the equivalent integer lexeme before
+calling the Agent interface, whose decoder requires that notation. The standard
+library's [`math/big.Rat`](https://pkg.go.dev/math/big#Rat.SetString) preserves exact values: floating-point conversion could
+silently round a fractional or large value, and a separate decimal library adds
+scope without a capability needed here. Non-numbers and fractional values are
+rejected. The Agent interface alone enforces its single-recipient limit.
 
 `tools/call` returns one text item and explicit `isError`. It adds modern result
 metadata only for a modern request. JSON text uses the same encoding as the Agent

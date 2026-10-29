@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -217,4 +218,59 @@ func httpAgent(t testing.TB, handler http.Handler) *agentapi.Client {
 	}
 	t.Cleanup(c.Close)
 	return c
+}
+
+func TestIntegralNumbersReachTheAgent(t *testing.T) {
+	_, c, _ := agentNode(t)
+	s := start(t, mcp.Config{Agent: c, Version: "test"})
+	for i, tc := range []struct {
+		value string
+		valid bool
+	}{
+		{"1.0", true}, {"1e0", true}, {"256.0", true},
+		{"0.0", false}, {"1.5", false}, {"257e0", false}, {"1.00000000000000000001", false},
+		{`"1"`, false}, {"null", false}, {"9223372036854775808", false},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			text, isError := s.call(t, i+1, "directory", json.RawMessage(`{"limit":`+tc.value+`}`))
+			if isError == tc.valid {
+				t.Fatalf("directory limit %s: isError=%v, %s", tc.value, isError, text)
+			}
+		})
+	}
+}
+
+func TestIntegerProjectionIsExact(t *testing.T) {
+	calls := make(chan string, 1)
+	c := httpAgent(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		calls <- string(raw)
+		io.WriteString(w, `{"lease":"lease_1234567890123456","messages":[],"more":0}`)
+	}))
+	s := start(t, mcp.Config{Agent: c, Version: "test"})
+	for i, tc := range []struct{ value, want string }{
+		{"0.0", "0"}, {"1e0", "1"},
+		{"9223372036854775807.0", "9223372036854775807"},
+		{"9.223372036854775807e18", "9223372036854775807"},
+		{"9223372036854775808", ""}, {"1.5", ""}, {"1.00000000000000000001", ""},
+		{"-9223372036854775809", ""}, {"1e1000001", ""},
+	} {
+		t.Run(tc.value, func(t *testing.T) {
+			text, isError := s.call(t, i+1, "recv", json.RawMessage(`{"wait_s":`+tc.value+`}`))
+			if isError != (tc.want == "") {
+				t.Fatalf("recv wait_s %s: isError=%v, %s", tc.value, isError, text)
+			}
+			if tc.want != "" {
+				if got := <-calls; got != "{\"frontend\":\"mcp\",\"wait_s\":"+tc.want+"}\n" {
+					t.Fatalf("Agent request: %s", got)
+				}
+			} else {
+				select {
+				case got := <-calls:
+					t.Fatalf("invalid number reached Agent: %s", got)
+				default:
+				}
+			}
+		})
+	}
 }

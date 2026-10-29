@@ -34,11 +34,14 @@ type Config struct {
 }
 
 type server struct {
-	cfg         Config
-	initialized atomic.Bool
-	probe       sync.Once
-	ctx         context.Context
-	log         *slog.Logger
+	cfg          Config
+	initialized  atomic.Bool
+	probeMu      sync.Mutex
+	probeStarted bool
+	stopping     bool
+	probeWG      sync.WaitGroup
+	ctx          context.Context
+	log          *slog.Logger
 }
 
 // Run serves until stdin closes, the context ends or a transport fails.
@@ -65,13 +68,21 @@ func Run(ctx context.Context, cfg Config) error {
 	if err != nil {
 		return err
 	}
-	defer p.Close()
+	defer func() {
+		// Peer handlers can still enter after Close, so the same lock orders
+		// every probe Add before the stop marker and the subsequent Wait.
+		s.probeMu.Lock()
+		s.stopping = true
+		s.probeMu.Unlock()
+		cancel()
+		p.Close()
+		s.probeWG.Wait()
+	}()
 	p.HandleDefault(s.handle)
 	p.HandleNotification("notifications/initialized", func(context.Context, json.RawMessage) {})
 	p.Start()
 	select {
 	case <-ctx.Done():
-		p.Close()
 		return ctx.Err()
 	case <-p.Done():
 		if errors.Is(p.Err(), peer.ErrRemoteClosed) {
@@ -101,21 +112,13 @@ func (s *server) handle(ctx context.Context, method string, raw json.RawMessage)
 		s.initialized.Store(true)
 	}
 	if method == "initialize" || modern {
-		s.probe.Do(func() {
-			if s.cfg.ProbeOnConnect && s.cfg.Agent != nil {
-				go func() {
-					result, err := s.cfg.Agent.Probe(s.ctx, adapterproto.FrontendMCP)
-					if err != nil {
-						s.log.Warn("MCP probe failed", "error", err)
-						return
-					}
-					s.log.Info("MCP probe succeeded", "preset", result.Preset, "frontend", result.Frontend)
-				}()
-			}
-		})
+		s.startProbe()
 	}
 	switch method {
 	case "ping":
+		if modern {
+			return nil, peer.NewError(-32601, "method not found")
+		}
 		return struct{}{}, nil
 	case "initialize":
 		return map[string]any{"protocolVersion": legacyVersion, "capabilities": map[string]any{"tools": struct{}{}}, "serverInfo": s.info(), "instructions": instructions}, nil
@@ -132,6 +135,25 @@ func (s *server) handle(ctx context.Context, method string, raw json.RawMessage)
 		return s.callTool(ctx, fields, modern)
 	}
 	return nil, peer.NewError(-32601, "method not found")
+}
+
+func (s *server) startProbe() {
+	s.probeMu.Lock()
+	defer s.probeMu.Unlock()
+	if s.stopping || s.probeStarted || !s.cfg.ProbeOnConnect || s.cfg.Agent == nil {
+		return
+	}
+	s.probeStarted = true
+	s.probeWG.Add(1)
+	go func() {
+		defer s.probeWG.Done()
+		result, err := s.cfg.Agent.Probe(s.ctx, adapterproto.FrontendMCP)
+		if err != nil {
+			s.log.Warn("MCP probe failed", "error", err)
+			return
+		}
+		s.log.Info("MCP probe succeeded", "preset", result.Preset, "frontend", result.Frontend)
+	}()
 }
 
 func (s *server) info() map[string]string {

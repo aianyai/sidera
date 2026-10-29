@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math/big"
 
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/sdk/go/peer"
@@ -107,10 +108,27 @@ func (s schema) project(raw json.RawMessage, path string) (json.RawMessage, erro
 			return bad()
 		}
 	case "integer":
-		var value int64
-		if json.Unmarshal(raw, &value) != nil || (s.Minimum != nil && value < *s.Minimum) || (s.Maximum != nil && value > *s.Maximum) {
+		decoder := json.NewDecoder(bytes.NewReader(raw))
+		decoder.UseNumber()
+		var decoded any
+		if decoder.Decode(&decoded) != nil {
 			return bad()
 		}
+		number, ok := decoded.(json.Number)
+		if !ok {
+			return bad()
+		}
+		// JSON Schema integers describe values, including decimal and exponent
+		// spellings. Keep the value exact before the Agent's int64 decoding.
+		value, ok := new(big.Rat).SetString(number.String())
+		if !ok || !value.IsInt() || !value.Num().IsInt64() {
+			return bad()
+		}
+		integer := value.Num().Int64()
+		if (s.Minimum != nil && integer < *s.Minimum) || (s.Maximum != nil && integer > *s.Maximum) {
+			return bad()
+		}
+		return json.RawMessage(value.Num().String()), nil
 	default:
 		panic("mcp: unsupported schema type")
 	}
