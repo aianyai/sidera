@@ -861,3 +861,15 @@ Init and terminal operations have no after-return boundary. Start's `complete`
 boundary occurs after quiescence while the daemon is still serving, before
 shutdown. Full still selects every recorded non-sync writing point; this removes
 only nonexistent process boundaries, never writing-point coverage.
+
+The in-process fixture accepts per-instance `AdapterOptions.InstanceOptions`.
+Each entry names an instance already listed by the fixture and supplies its full
+manifest and initial disabled state. One normalized descriptor supplies disk
+installation, the fake adapter declaration and runtime ownership. Existing
+`Runtime` and `ExtraInstances` defaults remain. Memory and real-file-system
+preparation use the same descriptors; memory seed keys include each manifest and
+disabled state, while an explicit disk is used as supplied. Disabled input is
+installed, enabled and disabled through the existing configuration operations
+before any host starts, and has no process or probe until real management enables
+it. Initially disabled instances are omitted from first-boot predecessor ordering,
+so another enabled instance cannot wait for their nonexistent processes.

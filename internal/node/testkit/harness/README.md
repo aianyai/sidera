@@ -26,6 +26,7 @@ layer.
 | `Options.OpenPackage` | Opens a named adapter package as an `fsx.Reader` rooted at its source. Each generation receives the same callback through `engine.Deps.OpenPackage`; nil leaves installation without a package reader. |
 | `Options.Adapter`, `AdapterOptions` | Gives the node an adapter host, on the fixture's test clock, that starts a fake adapter for `Instance` in the test process and admits the instance through it as the daemon does. `AdapterOptions.Host` is the host's `Params`; a zero field takes the default. `AdapterOptions.Runtime` makes the adapter declare a runtime beside its direct endpoints and drive one fake runtime that the fixture owns and that outlives every process of the adapter (the manifest installed is `RuntimeAdapterManifest`, so the node makes the runtime endpoint of the instance). `AdapterOptions.ExtraInstances` names further instances, each installed, enabled and run like `Instance` with an adapter, controller, presets and (with `Runtime`) runtime and runtime endpoint of its own (below). Nil: no host, and the fixture admits the instance itself through the engine's entry. |
 | `H.Adapter(instance)`, `H.AdapterLaunches(instance)`, `AdapterLaunch` | The controller of the latest fake adapter process (`scenario.ErrNotAvailable` without a host or before a launch), and every process the host started, in order, across restarts of the node: `Methods()` (what the daemon wrote to it), `Controller()`, `Survive()`, `End()`, `Ended()`. Both take the name of any instance of the fixture. |
+| `AdapterInstanceOptions`, `AdapterOptions.InstanceOptions` | Replaces the full manifest and initial enabled state for an already listed instance. One normalized descriptor supplies installation, launching and runtime ownership; disabled instances stay installed without launching until a real enable. |
 | `AdapterLauncher`, `NewAdapterLauncher`, `LauncherConfig`, `LauncherInstance`, `AdapterManifest`, `AdapterManifestOf`, `RuntimeAdapterManifestOf` | The one launcher the fixture and a test of the daemon share (`daemon`'s tests start fake adapters with it), and the declaration of the fake adapter, from which both the installed manifest and the capabilities the fake answers `initialize` with are made. `LauncherConfig.Instances` gives an instance a manifest and runtime other than the default pair. |
 | `H.Direct`, `H.DirectOn`, `H.MustDirect`, `H.Addr`, `H.Agent` | A direct endpoint registered through the engine's own entry (`DirectOn` on a named instance of the fixture), its address, and its agent: `engineagent` wrapped in `fakeagent.Recording`, calling as the endpoint's own instance. A name stands for one endpoint of the whole fixture. |
 | `H.Session` | The agent of a session endpoint the node made by a creation, by the identifier the reply to the creation names. The token is read from the endpoint's record on the disk, so a session is reached only through what the node made. Every agent of the fixture also writes a `model.saw` entry for each message or part a page showed, the notices of the node's own system endpoint told from the messages of others. The fake runtimes of the fixture carry out the actions of a turn (`recv`, `recv_part`, `ack`) by calling the engine as the session the turn belongs to, with the token of its tool access, so the adapter is told what the model was shown and acknowledges on the agent's behalf. |
@@ -136,8 +137,7 @@ By default the node has one instance, `Instance`, and every accessor without a n
   caused by `Advance`. Startup's wait is bounded by cancellation and a ten-second
   real-clock limit, and ignores disabled instances.
 - **With a fake runtime, quiet also means no turn of it has actions in progress.** The
-  fixture adds a condition for the runtime of each instance made with
-  `AdapterOptions.Runtime`: `fakeruntime.Runtime.Activity` says it is idle (no turn has
+  fixture adds a condition for the runtime of each instance whose normalized declaration includes one: `fakeruntime.Runtime.Activity` says it is idle (no turn has
   actions running or waiting to run) and counts how often a turn's actions began or
   finished. What a turn does after it started (a receive through the engine, the report
   of what the model read, its end when its plan says `EndAfter`) runs in a goroutine of
@@ -145,6 +145,16 @@ By default the node has one instance, `Instance`, and every accessor without a n
   way, so a quiet without this condition returns in the gap before the turn's next call
   and the run that follows depends on the speed of that goroutine. A test that holds such
   a turn on purpose cannot wait for quiet until it lets the turn go.
+- **Instance input has one owner.** `InstanceOptions` may name only `Instance` or
+  `ExtraInstances`; every replacement is a complete valid declaration whose ID
+  matches that instance. Unspecified entries keep the existing defaults. One
+  normalized list determines the installed manifest, fake adapter declaration,
+  runtime ownership and initial disabled state. Initialization uses the existing
+  install, enable and disable configuration operations before any host starts.
+  Both memory and real-file-system fixtures consume this list. Memory seed keys
+  include each installed manifest and disabled state; a supplied `Disk` is kept
+  as supplied. The first-boot launch order omits initially disabled instances,
+  so enabled instances never wait for a predecessor that has no process.
 - **The instances of a first boot are taken on in order.** The adapter host starts every
   instance at once and their admissions reach the engine in whichever order the processes
   answer, and the engine draws the identifiers and tokens of each admission from one
@@ -261,7 +271,7 @@ By default the node has one instance, `Instance`, and every accessor without a n
   session endpoint; sessions come from a session creation, which the agent of a direct
   endpoint asks for with `Control` and the runtime endpoint (`RuntimeAddr`) answers.
 - **No stand-in for what is missing.** `Adapter` (without `Options.Adapter`) and
-  `Runtime` (without `AdapterOptions.Runtime`) return an error that is `scenario.ErrNotAvailable`; a script that needs them
+  `Runtime` (when that instance declares no runtime) return an error that is `scenario.ErrNotAvailable`; a script that needs them
   fails with that and says what is missing.
 - **Fallible process operations report a down node.** `Records`, `VerifyReport`,
   `VerifyControlReply` and `Direct` return `engineagent.ErrNodeNotRunning` when no
@@ -393,3 +403,7 @@ is retained in the walk trace and needs no additional audit attempt. Signed
 retirement records are verified and bound to the actual initialized node. The
 audit also compares the key, certificate and serial bytes to detect signing
 changes. Audit errors and domain-check failures become violations.
+
+`adapter_inputs_test.go` checks installed disabled runtime input on memory and real
+file systems, absence of a pre-enable process or alert, real enable/probe warning,
+and cache separation for changed manifests and disabled states.

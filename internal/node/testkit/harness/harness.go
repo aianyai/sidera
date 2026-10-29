@@ -233,18 +233,27 @@ func NewStopped(t testing.TB, o Options) *H {
 	}
 	h.knobs.Observe(h.knobHit)
 	h.addQuiet("loopback", h.loopbackQuiet)
+	packages := adapterPackages(t, o.Adapter, o.MaxDirect)
 	if o.Adapter != nil {
 		h.adapterHome = t.TempDir() // before the cleanup of the fixture: it is removed after the fixture has stopped
-		h.instances = append(h.instances, checkedExtraInstances(t, o.Adapter.ExtraInstances)...)
+		for _, p := range packages[1:] {
+			h.instances = append(h.instances, p.instance)
+		}
 		h.runtimes = map[string]*fakeruntime.Runtime{}
+		var launchOrder []string
+		for _, p := range packages {
+			if !p.disabled {
+				launchOrder = append(launchOrder, p.instance)
+			}
+		}
 		lc := LauncherConfig{
 			T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect),
-			Instances: map[string]LauncherInstance{}, Order: h.instances,
+			Instances: map[string]LauncherInstance{}, Order: launchOrder,
 		}
-		for i, name := range h.instances {
-			own := LauncherInstance{Manifest: AdapterManifestOf(name, o.MaxDirect)}
-			if o.Adapter.Runtime {
-				own.Manifest = RuntimeAdapterManifestOf(name, o.MaxDirect)
+		for i, p := range packages {
+			name := p.instance
+			own := LauncherInstance{Manifest: p.options}
+			if own.Manifest.Runtime {
 				// The seed names the native sessions, so each runtime has one of its own.
 				rt, err := fakeruntime.New(fakeruntime.Config{Now: h.clk.Now, Ledgers: h.led, Dir: t.TempDir(), Seed: o.Seed + uint64(i), Runner: engineRunner{h}})
 				if err != nil {
@@ -268,13 +277,13 @@ func NewStopped(t testing.TB, o Options) *H {
 	t.Cleanup(h.close)
 	var base fsx.FS
 	if o.FS == RealFS {
-		h.real = realDisk(t, o)
+		h.real = realDisk(t, o, packages)
 		base = h.real
 	} else if o.Disk != nil {
 		h.disk = o.Disk
 		base = h.disk
 	} else {
-		h.disk = seededDisk(t, o.Start, o.Adapter != nil && o.Adapter.Runtime, h.extraInstances())
+		h.disk = seededDisk(t, o.Start, packages)
 		base = h.disk
 	}
 	if o.Disk == nil {
@@ -282,9 +291,6 @@ func NewStopped(t testing.TB, o Options) *H {
 	}
 	return h
 }
-
-// extraInstances are the instances of the node besides Instance.
-func (h *H) extraInstances() []string { return h.instances[1:] }
 
 // checkedExtraInstances fails the test when a name of AdapterOptions.ExtraInstances
 // is not a valid adapter identifier, is Instance, or is given twice: the node
@@ -307,7 +313,7 @@ func checkedExtraInstances(t testing.TB, names []string) []string {
 // realDisk makes an initialised node in a directory of the real file system. It
 // is made for the test, since nothing of it is shared the way the in-memory
 // snapshot is.
-func realDisk(t testing.TB, o Options) fsx.FS {
+func realDisk(t testing.TB, o Options, packages []adapterPackage) fsx.FS {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "home")
 	if err := fsx.MakeRoot(root); err != nil {
@@ -319,7 +325,7 @@ func realDisk(t testing.TB, o Options) fsx.FS {
 	}
 	MakeLayout(t, base)
 	m := MountOn(t, ProgramTable(t), base, nil, nil)
-	SeedNode(t, m.Writer, o.Start)
+	seedNode(t, m.Writer, o.Start, packages)
 	return base
 }
 
@@ -1027,7 +1033,7 @@ func (h *H) latestAdapterStats(instance string) (fakeadapter.StatsReply, bool) {
 }
 
 // Runtime is the controller of the fake native runtime of the adapter Instance,
-// which exists when the fixture was made with Options.Adapter.Runtime. Native
+// which exists when that instance's declaration includes a runtime. Native
 // sessions exist only through a session creation.
 func (h *H) Runtime() (fakeruntime.Controller, error) { return h.RuntimeOf(Instance) }
 
@@ -1037,7 +1043,7 @@ func (h *H) Runtime() (fakeruntime.Controller, error) { return h.RuntimeOf(Insta
 func (h *H) RuntimeOf(instance string) (fakeruntime.Controller, error) {
 	rt := h.runtimes[instance]
 	if rt == nil {
-		return nil, scenario.NotAvailable("the fixture has no runtime of " + instance + " (Options.Adapter.Runtime, and the instance must be one of the fixture's)")
+		return nil, scenario.NotAvailable("the fixture has no runtime of " + instance + " (the instance must be listed and declare a runtime)")
 	}
 	return rt, nil
 }
@@ -1052,7 +1058,7 @@ func (h *H) RuntimeAddrOf(instance string) string {
 	h.t.Helper()
 	id := h.Config().EndpointIDs(instance).Runtime
 	if id.IsZero() {
-		h.t.Fatalf("harness: the instance %s has no runtime endpoint: the fixture needs Options.Adapter.Runtime, and the adapter must have been taken on", instance)
+		h.t.Fatalf("harness: the instance %s has no runtime endpoint: the instance must declare a runtime and its adapter must have been taken on", instance)
 	}
 	return ident.Address{Node: NodeID(), Endpoint: id}.String()
 }

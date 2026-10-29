@@ -50,6 +50,17 @@ type AdapterOptions struct {
 	// RuntimeAddr) stay on Instance. Options.Disk is used as it is, so a disk
 	// handed in must already have these instances installed and enabled.
 	ExtraInstances []string
+	// InstanceOptions replaces the default declaration and initial enabled state
+	// of Instance or an ExtraInstances entry. Names outside that set are refused.
+	InstanceOptions map[string]AdapterInstanceOptions
+}
+
+// AdapterInstanceOptions describes one installed fixture-owned adapter instance.
+// Manifest is its complete declaration, shared by installation and its fake.
+// Disabled leaves the installed instance disabled until a real management enable.
+type AdapterInstanceOptions struct {
+	Manifest fakeadapter.ManifestOptions
+	Disabled bool
 }
 
 // adapterProgram is the program of the installed package; no launcher runs it.
