@@ -32,6 +32,20 @@ The backends of the fake agent that run the command-line client and speak to the
 server, the binary-layer fixture and the binary backend of the crash walk build on
 these packages and are not part of them.
 
+The root package of `cmd/sidera/internal/acceptance` owns the foreground-process
+fixture. It runs real initialization and daemon commands, bootstraps a direct
+fake adapter through public management after public status reports `running`,
+compares the complete tagged transaction
+table, advances the shared clock daemon first, and requires stable fake progress
+around the daemon's quiet report. Each node process has one `Wait` owner and
+separate file output and trace. Setup marks a complete-line prefix without
+renumbering observations. Final traces are read only after exit; orderly stop
+freezes the scenario prefix before the stop operation writes. A target is reached
+only with both its matching termination marker and an abnormal process exit.
+Runtime-driven CLI actions remain unconnected because the fake process inputs
+do not yet let a fixture clear inherited daemon crash controls. The fixture's
+README states this boundary and the existing runtime creation-step limitation.
+
 The CLI Agent driver takes optional per-call `KEY=value` environment overrides.
 It replaces matching inherited values, so each call can have a seed or process
 crash target without changing the fixture's global environment. Calls use
