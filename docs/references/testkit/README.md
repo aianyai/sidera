@@ -953,7 +953,8 @@ Real protocol errors and incomplete runtime probes continue to fail the run.
 
 An environment clock change uses the fixture's retained logical target and real
 clock RPC. The first RPC failure is retained because `scenario.Env.Set` and
-`Advance` cannot return it; quiet and subsequent operations return that error. Further clock changes are
+`Advance` cannot return it; quiet and subsequent operations return that error.
+Further clock changes are
 ignored in that failed generation rather than advancing recovery time.
 The backend alone resets this per-generation failure, after validating an actual
 exit and selecting a distinct daemon process. No successful RPC silently clears
@@ -968,7 +969,7 @@ process role and observed generation; native runtime seeds distinguish scenario
 and adapter instance while remaining stable across daemon restarts.
 
 Private binary input profiles preserve the public fixture's direct-only default.
-They describe runtime declarations, extra instance packages and a warning package
+They describe CLI-only runtime declarations, extra instance packages and a warning package
 installed but not enabled. Bootstrap still retains each exact management request
 and its progress across generations. Package inputs are real caller-owned source
 directories, extensible before installation; no profile writes installed packages

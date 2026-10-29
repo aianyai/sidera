@@ -72,6 +72,17 @@ func (f *Fixture) packageInput(name string, opts fakeadapter.ManifestOptions) (s
 func inputManifest(runtime bool) fakeadapter.ManifestOptions {
 	opts := fakeadapter.DefaultManifestOptions()
 	if runtime {
+		// These binary profiles exercise the real CLI and HTTP paths. An MCP
+		// declaration would promise a probe and receive path this profile does not run.
+		opts.Frontends = []adapterproto.Frontend{adapterproto.FrontendCLI}
+		delete(opts.RecvWaitS, adapterproto.FrontendMCP)
+		budgets := opts.Budgets[:0]
+		for _, budget := range opts.Budgets {
+			if budget.Frontend != manifest.FrontendMCP {
+				budgets = append(budgets, budget)
+			}
+		}
+		opts.Budgets = budgets
 		return opts
 	}
 	opts.Runtime = false

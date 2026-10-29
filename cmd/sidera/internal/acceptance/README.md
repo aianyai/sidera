@@ -35,7 +35,8 @@ Later starts reuse the installed package; only the separate input configuration'
 clock origin is updated. The default
 adapter provides direct endpoints. A private fixture profile supplies the catalog
 instance and preset names, runtime declarations, extra instances, and an installed
-warning package that remains disabled until a recipe enables it. Runtime processes
+warning package that remains disabled until a recipe enables it. Runtime profiles declare only the CLI front end, with its actual wait limit and
+budget; they make no MCP coverage claim. Runtime processes
 use the actual fake-runtime program. The tagged daemon consumes and clears its
 crash controls before launching adapters, so descendant CLI processes do not
 inherit the daemon generation's target or record file.
@@ -90,7 +91,8 @@ The private `environment` implements the unchanged `scenario.Env` contract.
 `envFrom` gives domain bindings access to the same current fixture. Logical
 `Advance` and `Set` use `Fixture.SetTime`; because those methods return no error,
 the environment retains the first clock failure and returns it from subsequent
-operations. Further clock changes in that failed generation do not advance time. Only the backend may call `resetGeneration`, after judging the prior
+operations. Further clock changes in that failed generation do not advance time.
+Only the backend may call `resetGeneration`, after judging the prior
 process's trace and actual exit and starting a distinct daemon generation.
 Neither quiet nor a successful later RPC clears the error.
 
