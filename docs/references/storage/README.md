@@ -1159,9 +1159,13 @@ yet, so the endpoint is not owed a release until that answer arrives. Administra
 results are kept 7 days, acknowledged alerts 7 days after the acknowledgement, and
 archive files for the retention the owner sets (30 days by default; `ExpiredArchiveFiles`
 takes it as a duration and names the files whose date is older, `Store.ArchiveExpire`
-removes them), uncompressed. Archive space depends on the number and size of
-summaries kept for that period. The archive is not part of the free-space reserve
-a node keeps for new work.
+removes them), uncompressed. Each message produces two summaries. With S bytes
+per summary, archive capacity is `2 * S * messages/hour * 24 * retention_days` bytes. As a sizing
+assumption, not a fixed or measured size, 1 KiB per summary at 3,000
+messages/hour needs about 141 MiB per day or 4.1 GiB for 30 days; at 500
+messages/hour it needs about 0.69 GiB for 30 days. These estimates exclude
+file system allocation and metadata overhead. The archive is not part of the
+free-space reserve a node keeps for new work.
 
 **Retained facts are single files.** A segment file per hour would need a second
 representation, its own compaction and crash rules, and a records index fed from
