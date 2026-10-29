@@ -48,18 +48,28 @@ type Backend interface {
 type Options struct {
 	Mode  Mode
 	Shard Shard
-	// Observe, when set, is called when a run starts and when it ends, so that the
-	// caller can time each run and print the times: the walk reads no clock.
+	// RecoveryTriggers adds trigger-only recordings to those supplied by cases.
+	RecoveryTriggers []RecoveryTrigger
+	// Observe receives run start/end pairs and a Skipped notification for the
+	// dynamic group omitted by Smoke. Only non-Skipped events time real runs;
+	// the walk reads no clock.
 	Observe func(Event)
 }
 
-// Event tells the observer of a run.
+// Event tells the observer of a run or an explicitly skipped group.
 type Event struct {
-	// Phase is "record", "main", "boundary" or "recovery".
+	// Phase is "record", "recovery-record", "main", "boundary", "recovery"
+	// or "recovery-normal". A skipped event describes a group, not a run.
 	Phase    string
 	Scenario string
 	Target   Target
 	Case     RecoveryCase
+	Trigger  *Trigger
+	// Skipped marks the dynamic group omitted by Smoke; Planned is the global
+	// target count for that notification. Both are zero for real run events.
+	// A Skipped event is a single notification, with no corresponding run start.
+	Skipped bool
+	Planned int
 	// Done is false when the run starts and true when it ends.
 	Done bool
 }
@@ -70,11 +80,13 @@ type Report struct {
 	MainRuns     int
 	BoundaryRuns int
 	RecoveryRuns int
-	// Normal counts the declared writes of normal transactions and how many the
-	// recordings reached; Recovery counts those of recovery transactions and how
-	// many the generations restarted after a crash reached. A smoke walk reaches
-	// only the recovery writes it chose, so only a full walk can reach all.
-	Normal, Recovery PathCount
+	// Sources and coverage use all clean and complete second-generation records.
+	Sources            Sources
+	RecoveryRecordings int
+	// Planned is global, Selected belongs to this shard, Runs counts executions.
+	RecoveryNormalPlanned, RecoveryNormalSelected, RecoveryNormalRuns int
+	RecoveryNormalSkipped                                             bool
+	Normal, Recovery                                                  PathCount
 	// Triggers, in a full walk only, say which main crash point made the system
 	// write which recovery writes when it restarted: what a scenario's author
 	// needs to fill its recovery cases. Only the runs of the shard are in it.
@@ -88,15 +100,12 @@ type Triggered struct {
 	Items []fsx.Key
 }
 
-// Walk runs every scenario: a recording without a crash, then the planned runs of
-// the mode that belong to the shard, then the recovery cases. It fails on the first
-// run that does not reach its target, whose rerun differs from the recording or
-// that breaks an invariant, and, after all runs, on a write no declaration lists
-// and on a declared write of a normal transaction that the recordings never
-// reached.
-//
-// Every shard records every scenario, however the runs are shared: the recording is
-// cheap, and the coverage assertion is about the whole program.
+// Walk first records every scenario cleanly and every unique recovery trigger
+// completely. All shards use those same sources to analyze coverage and dynamic
+// targets. It then runs the shard's main, boundary and static recovery targets;
+// Full also runs recovery-only Normal targets and requires complete coverage of
+// both declaration kinds. Smoke reports but skips the dynamic group.
+// A target miss, divergent prefix, undeclared write or domain failure ends the walk.
 func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario, opts Options) (Report, error) {
 	var rep Report
 	// The runs are numbered in the order of the scenarios' names, so that every
@@ -122,31 +131,66 @@ func Walk(ctx context.Context, b Backend, table *txn.Table, scenarios []Scenario
 		kinds[k.Key] = k.Kind
 	}
 	w := walker{ctx: ctx, b: b, opts: opts, kinds: kinds, rep: &rep, chosen: chosenRecovery(scenarios, opts.Mode)}
+	triggers, err := recordingTriggers(scenarios, opts.RecoveryTriggers)
+	if err != nil {
+		return rep, err
+	}
+	recordings := map[string][]Hit{}
+	byName := map[string]Scenario{}
 	var recorded []Hit
 	for _, s := range scenarios {
+		byName[s.Name()] = s
 		hits, err := w.record(s)
 		if err != nil {
 			return rep, err
 		}
+		recordings[s.Name()] = hits
 		recorded = append(recorded, hits...)
-		if err := w.mainRuns(s, hits); err != nil {
+	}
+	for _, tr := range triggers {
+		r, err := w.recoveryRecord(byName[tr.Scenario], tr.After)
+		if err != nil {
+			return rep, err
+		}
+		w.recovered = append(w.recovered, r)
+	}
+	analysis, err := AnalyzeSources(table, recorded, w.recovered)
+	if err != nil {
+		return rep, err
+	}
+	rep.Sources = analysis.Sources
+	rep.Normal, rep.Recovery = analysis.Coverage.Normal, analysis.Coverage.Recovery
+	rep.RecoveryNormalPlanned = len(analysis.Targets)
+	if len(analysis.Coverage.MissingNormal) > 0 {
+		return rep, missingWrites("declared writes were never reached by any recording", analysis.Coverage.MissingNormal)
+	}
+	if opts.Mode == Full && len(analysis.Coverage.MissingRecovery) > 0 {
+		return rep, missingWrites("recovery writes were never reached by any complete generation-2 recording", analysis.Coverage.MissingRecovery)
+	}
+	for _, s := range scenarios {
+		if err := w.mainRuns(s, recordings[s.Name()]); err != nil {
 			return rep, err
 		}
 		if err := w.recoveryRuns(s); err != nil {
 			return rep, err
 		}
 	}
-	cov := Assess(table, recorded)
-	rep.Normal = cov.Normal
-	rep.Recovery = Assess(table, w.afterCrash).Recovery
-	sort.Slice(rep.Triggers, func(i, j int) bool { return pointLess(rep.Triggers[i].At, rep.Triggers[j].At) })
-	if len(cov.MissingNormal) > 0 {
-		var names []string
-		for _, k := range cov.MissingNormal {
-			names = append(names, k.String())
+	if opts.Mode == Smoke {
+		rep.RecoveryNormalSkipped = true
+		w.observe(Event{Phase: "recovery-normal", Skipped: true, Planned: len(analysis.Targets), Done: true})
+	} else {
+		for i := range analysis.Targets {
+			if opts.Shard.Keep(w.next + i) {
+				rep.RecoveryNormalSelected++
+			}
 		}
-		return rep, fmt.Errorf("crashwalk: declared writes were never reached by any recording: %s", strings.Join(names, ", "))
+		for _, tg := range analysis.Targets {
+			if err := w.recoveryNormalRun(byName[tg.Scenario], tg); err != nil {
+				return rep, err
+			}
+		}
 	}
+	sort.Slice(rep.Triggers, func(i, j int) bool { return pointLess(rep.Triggers[i].At, rep.Triggers[j].At) })
 	return rep, nil
 }
 
@@ -158,10 +202,8 @@ type walker struct {
 	rep   *Report
 	next  int // runs planned so far, for sharding
 	// chosen are the recovery writes the mode runs a case for, over all scenarios.
-	chosen map[fsx.Key]bool
-	// afterCrash are the hits of every generation after the first, in every run:
-	// the writes of a restart.
-	afterCrash []Hit
+	chosen    map[fsx.Key]bool
+	recovered []RecoveryRecord
 }
 
 // chosenRecovery picks the recovery writes a walk of the mode crashes. The choice
@@ -190,9 +232,9 @@ func (w *walker) run(phase string, s Scenario, p RunPlan, tg Target, c RecoveryC
 	if err := w.ctx.Err(); err != nil {
 		return RunResult{}, err
 	}
-	w.observe(Event{Phase: phase, Scenario: s.Name(), Target: tg, Case: c})
+	w.observe(Event{Phase: phase, Scenario: s.Name(), Target: tg, Case: c, Trigger: p.Trigger})
 	res, err := w.b.Run(w.ctx, s, p)
-	w.observe(Event{Phase: phase, Scenario: s.Name(), Target: tg, Case: c, Done: true})
+	w.observe(Event{Phase: phase, Scenario: s.Name(), Target: tg, Case: c, Trigger: p.Trigger, Done: true})
 	if err != nil {
 		return res, fmt.Errorf("crashwalk: scenario %q: %w", s.Name(), err)
 	}
@@ -278,22 +320,12 @@ func (w *walker) mainRuns(s Scenario, rec []Hit) error {
 	return nil
 }
 
-// restartHits keeps the hits of the generations after the first: the writes of a
-// restart, which are the recovery path's coverage.
-func (w *walker) restartHits(res RunResult) [][]Hit {
-	later := res.Hits[min(1, len(res.Hits)):]
-	for _, gen := range later {
-		w.afterCrash = append(w.afterCrash, gen...)
-	}
-	return later
-}
-
 // noteTriggers records, in a full walk, the recovery writes the restart after a
 // main crash point reached.
 func (w *walker) noteTriggers(tg Target, res RunResult) {
 	var items []fsx.Key
 	seen := map[fsx.Key]bool{}
-	for _, gen := range w.restartHits(res) {
+	for _, gen := range res.Hits[min(1, len(res.Hits)):] {
 		for _, h := range gen {
 			if w.kinds[h.Point.Key] == txn.Recovery && !seen[h.Point.Key] {
 				seen[h.Point.Key] = true
@@ -323,13 +355,107 @@ func (w *walker) recoveryRuns(s Scenario) error {
 			return err
 		}
 		w.rep.RecoveryRuns++
-		w.restartHits(res)
-		if len(res.Reached) != 1 || !res.Reached[0] {
-			return fmt.Errorf("crashwalk: scenario %q: the recovery write %v was not reached after its trigger: the trigger no longer causes it, or the recovery code changed", s.Name(), c.Item)
+		if err := CheckRecoveryTarget(w.baseline(s.Name(), trigger), tg, res); err != nil {
+			return fmt.Errorf("crashwalk: scenario %q: %w", s.Name(), err)
 		}
-		if len(res.Violations) > 0 {
-			return fmt.Errorf("crashwalk: scenario %q, a crash in the recovery write %v: %s", s.Name(), c.Item, strings.Join(res.Violations, "; "))
+	}
+	return nil
+}
+
+func missingWrites(message string, keys []fsx.Key) error {
+	var names []string
+	for _, k := range keys {
+		names = append(names, k.String())
+	}
+	return fmt.Errorf("crashwalk: %s: %s", message, strings.Join(names, ", "))
+}
+
+// recordingTriggers validates all input before any backend call and fixes record
+// order independently of scenario order or repeated trigger metadata.
+func recordingTriggers(scenarios []Scenario, extra []RecoveryTrigger) ([]RecoveryTrigger, error) {
+	names := map[string]bool{}
+	var inputs []RecoveryTrigger
+	for _, s := range scenarios {
+		names[s.Name()] = true
+		for _, c := range s.Recovery() {
+			inputs = append(inputs, RecoveryTrigger{s.Name(), c.After})
 		}
+	}
+	inputs = append(inputs, extra...)
+	seen := map[RecoveryTrigger]bool{}
+	var out []RecoveryTrigger
+	for _, tr := range inputs {
+		if !names[tr.Scenario] {
+			return nil, fmt.Errorf("crashwalk: recovery trigger names unknown scenario %q", tr.Scenario)
+		}
+		t := tr.After
+		valid := false
+		switch t.Kind {
+		case TriggerCrashAt:
+			_, err := fsx.ParsePoint(t.CrashAt.String())
+			valid = err == nil && t.Pattern == "" && t.Damage == ""
+		case TriggerCorrupt:
+			valid = t.CrashAt == (fsx.Point{}) && t.Pattern != "" && t.Damage != ""
+		}
+		if !valid {
+			return nil, fmt.Errorf("crashwalk: scenario %q has an invalid recovery trigger: %+v", tr.Scenario, t)
+		}
+		if !seen[tr] {
+			seen[tr] = true
+			out = append(out, tr)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return sourceLess(out[i], out[j]) })
+	return out, nil
+}
+
+func (w *walker) recoveryRecord(s Scenario, trigger Trigger) (RecoveryRecord, error) {
+	r := RecoveryRecord{Scenario: s.Name(), After: trigger}
+	res, err := w.run("recovery-record", s, RunPlan{Trigger: &trigger}, Target{}, RecoveryCase{})
+	if err != nil {
+		return r, err
+	}
+	w.rep.RecoveryRecordings++
+	if len(res.Hits) != 2 || len(res.Reached) != 0 {
+		return r, fmt.Errorf("crashwalk: scenario %q complete recovery recording must end in generation 2 without targets", s.Name())
+	}
+	if len(res.Violations) > 0 {
+		return r, fmt.Errorf("crashwalk: scenario %q failed its complete recovery recording: %s", s.Name(), strings.Join(res.Violations, "; "))
+	}
+	for i, hits := range res.Hits {
+		for _, h := range hits {
+			if h.Gen != i+1 {
+				return r, fmt.Errorf("crashwalk: scenario %q recovery recording generation %d contains generation-%d evidence", s.Name(), i+1, h.Gen)
+			}
+		}
+	}
+	r.Hits = append([]Hit(nil), res.Hits[1]...)
+	return r, nil
+}
+
+func (w *walker) baseline(scenario string, trigger Trigger) []Hit {
+	for _, r := range w.recovered {
+		if r.Scenario == scenario && r.After == trigger {
+			return r.Hits
+		}
+	}
+	return nil
+}
+
+func (w *walker) recoveryNormalRun(s Scenario, t RecoveryNormalTarget) error {
+	k := w.next
+	w.next++
+	if !w.opts.Shard.Keep(k) {
+		return nil
+	}
+	trigger := t.After
+	res, err := w.run("recovery-normal", s, RunPlan{Trigger: &trigger, Targets: []Target{t.Target}}, t.Target, RecoveryCase{})
+	if err != nil {
+		return err
+	}
+	w.rep.RecoveryNormalRuns++
+	if err := CheckRecoveryTarget(w.baseline(s.Name(), trigger), t.Target, res); err != nil {
+		return fmt.Errorf("crashwalk: scenario %q: %w", s.Name(), err)
 	}
 	return nil
 }

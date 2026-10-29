@@ -24,7 +24,7 @@ func system(t *testing.T) (*fakeBackend, scenario) {
 		case strings.HasPrefix(item, "orphans"):
 			recoveryRuns[item] = []rawHit{{"orphans/body.remove", "state/body/m1.tmp"}, {"orphans/dir.sync-dir", "state/body"}, {"orphans/commit", ""}}
 		default:
-			recoveryRuns[item] = cat(replaced("replay", "state", "state/replay.rec")[:4], []rawHit{commit("replay")})
+			recoveryRuns[item] = cat(replaced("replay", "state", "state/replay.rec"), []rawHit{commit("replay")})
 		}
 	}
 	b := &fakeBackend{t: t, progs: map[string]program{"send": p}, recovery: recoveryRuns}
@@ -59,7 +59,7 @@ func TestWalkFullRunsEveryPlannedTargetAndTheSecondLayer(t *testing.T) {
 			mainTargets++
 		}
 	}
-	if rep.Recordings != 1 || rep.MainRuns != mainTargets || rep.BoundaryRuns != boundary || rep.RecoveryRuns != len(sc.recovery) {
+	if rep.Recordings != 1 || rep.RecoveryRecordings != 1 || rep.MainRuns != mainTargets || rep.BoundaryRuns != boundary || rep.RecoveryRuns != len(sc.recovery) {
 		t.Fatalf("report %+v: want 1 recording, %d main runs, %d boundary runs, %d recovery runs", rep, mainTargets, boundary, len(sc.recovery))
 	}
 	// The backend was asked exactly that: the recording, the planned targets and
@@ -92,7 +92,7 @@ func TestWalkSecondLayerCrashesTheRecoveryAfterTheMainCrash(t *testing.T) {
 	}
 	seen := 0
 	for _, r := range b.runs {
-		if r.Trigger == nil {
+		if r.Trigger == nil || len(r.Targets) == 0 {
 			continue
 		}
 		seen++
@@ -242,13 +242,16 @@ func TestWalkReportsEveryRunToTheObserver(t *testing.T) {
 	}
 	starts, ends := 0, 0
 	for _, e := range events {
+		if e.Skipped {
+			continue
+		}
 		if e.Done {
 			ends++
 		} else {
 			starts++
 		}
 	}
-	runs := rep.Recordings + rep.MainRuns + rep.BoundaryRuns + rep.RecoveryRuns
+	runs := rep.Recordings + rep.RecoveryRecordings + rep.MainRuns + rep.BoundaryRuns + rep.RecoveryRuns
 	if starts != runs || ends != runs {
 		t.Fatalf("%d starts and %d ends for %d runs: the caller times each run from these", starts, ends, runs)
 	}
@@ -448,17 +451,12 @@ func TestWalkFullReportsWhichMainCrashPointMadeWhichRecoveryWrites(t *testing.T)
 // no restart reached.
 func TestWalkReportsCoverageOfNormalAndRecoveryPathsApart(t *testing.T) {
 	b, sc := system(t)
+	b.recoveryRecord = cat([]rawHit{{"orphans/body.remove", "state/body/m1.tmp"}, {"orphans/dir.sync-dir", "state/body"}, commit("orphans")}, replaced("replay", "state", "state/replay.rec")[:4], []rawHit{commit("replay")})
 	rep, err := walk(t, b, sc, crashwalk.Full, wholeRun)
-	if err != nil {
-		t.Fatal(err)
+	if err == nil || !strings.Contains(err.Error(), "replay/state.sync-dir") {
+		t.Fatalf("incomplete full recovery recording accepted: %+v %v", rep, err)
 	}
-	// The table declares 9 recovery writes (orphans: remove, dir sync, commit;
-	// replay: create, write, sync, rename, dir sync, commit) and the scripted
-	// restarts of system() write all but the directory sync of the replay: 8. The normal writes are all reached by the recording.
-	if rep.Normal.Declared != rep.Normal.Reached || rep.Normal.Declared == 0 {
-		t.Errorf("normal paths %+v, want all declared writes reached", rep.Normal)
-	}
-	if rep.Recovery.Declared != 9 || rep.Recovery.Reached != 8 {
-		t.Errorf("recovery paths %+v, want 8 of 9", rep.Recovery)
+	if rep.Normal.Declared != rep.Normal.Reached || rep.Recovery.Declared != 9 || rep.Recovery.Reached != 8 {
+		t.Fatalf("coverage %+v", rep)
 	}
 }

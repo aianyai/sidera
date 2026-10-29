@@ -485,3 +485,47 @@ configuration has disabled the instance. Its restart supplies a nonempty drain
 batch, reaching Normal declarations that the ordinary disable path delegates to
 per-endpoint drains. Those keys are discovered from the complete second window,
 then interrupted separately; their declaration kind stays Normal.
+
+
+### Shared source analysis and complete recovery recordings
+
+`crashwalk.AnalyzeSources` owns the three source columns and the recovery-only
+Normal difference for both whole walks and bounded acceptance runners. Callers
+supply all clean generation-1 hits and only generation 2 from completed
+trigger-only runs. Recovery declarations in clean runs and hits from the wrong
+generation are errors. Coverage and missing/undeclared keys use `Assess`;
+synchronous steps count only when actually observed. Third-generation hits and
+interrupted prefixes cannot fill complete second-generation coverage.
+
+`Walk` records all clean scenarios before analyzing that difference. It also
+records every unique `(scenario, complete trigger)` from static recovery cases
+and `Options.RecoveryTriggers`, on every shard. Unknown names or invalid triggers
+fail before running anything. This adds one complete recovery run per unique
+static trigger even when additional triggers are nil; the clean scenario budget
+continues to count only first-generation window targets.
+
+Each non-sync Normal key absent from all clean recordings gets one actual
+second-generation target. Source selection is stable by scenario name and trigger
+fields; the first sighting in that source preserves the observed ordinal. Full
+appends these targets in key order after the existing target groups and requires
+both declaration kinds to have complete coverage. Recordings do not consume shard
+numbers. Shards share the full source set and partition target execution without
+duplicates. Smoke keeps its existing main and static recovery selection, reports
+the observed dynamic set, and explicitly skips its execution.
+
+Static and derived generation-2 targets use `CheckRecoveryTarget`: one true
+Reached result, exactly three generations, an exact final point in generation 2,
+no domain violations, and a prefix matching the corresponding complete baseline
+through `CompareRuns`. The comparison retains both normalized path operands and
+its existing per-transaction/role interleaving rule. Static recovery cases keep
+their original exactly-once declaration responsibility and ordinal-1 target rule.
+
+`Report.Sources`, `Normal` and `Recovery` describe observations;
+`RecoveryRecordings` counts complete trigger-only runs. `RecoveryRuns` remains the
+static interruption count. `RecoveryNormalPlanned` is global,
+`RecoveryNormalSelected` is this shard's allocation and `RecoveryNormalRuns` is its
+executed count. `RecoveryNormalSkipped` marks Smoke's omitted group. Observer
+phases `recovery-record` and `recovery-normal` carry the source `Trigger` for run
+timing. Smoke emits one `Skipped` notification with the planned count; it is not
+a run start/end pair and cannot count as execution. Diagnostic `Triggers` after
+main crashes remain useful for writing cases but cannot supply coverage evidence.

@@ -130,9 +130,10 @@ func (s scenario) Recovery() []crashwalk.RecoveryCase { return s.recovery }
 // fakeBackend is a Backend over a program: it records, kills at a target, and
 // plays the recovery of a trigger, and says what it was asked.
 type fakeBackend struct {
-	t        testing.TB
-	progs    map[string]program
-	recovery map[string][]rawHit // by case item key: hits a recovery run makes
+	t              testing.TB
+	progs          map[string]program
+	recovery       map[string][]rawHit // by case item key: hits a recovery run makes
+	recoveryRecord []rawHit            // complete second-generation baseline
 	// misbehaviours, switched on by tests
 	skipTarget func(crashwalk.Target) bool              // the target is never reached
 	alter      func(crashwalk.Target, *[]crashwalk.Hit) // change the rerun's hits
@@ -163,20 +164,36 @@ func (b *fakeBackend) Run(_ context.Context, s crashwalk.Scenario, p crashwalk.R
 		// A main crash, then a recovery run that must reach the target.
 		gen1, _ := prog.run(b.t, 1, p.Trigger.CrashAt, "")
 		res.Hits = append(res.Hits, gen1)
-		var gen2 []crashwalk.Hit
-		for _, tg := range p.Targets {
-			item := tg.Point.Key
-			counts := map[fsx.Key]int{}
-			for _, h := range b.recovery[item.String()] {
-				k := key(b.t, h.key)
-				counts[k]++
-				gen2 = append(gen2, crashwalk.Hit{Gen: 2, Point: fsx.Point{Key: k, Hit: counts[k]}, Path: h.path})
+		raw := b.recoveryRecord
+		if raw == nil {
+			for _, c := range s.Recovery() {
+				raw = append(raw, b.recovery[c.Item.String()]...)
 			}
+		}
+		// A complete baseline has each real recovery transaction once.
+		var gen2 []crashwalk.Hit
+		counts := map[fsx.Key]int{}
+		seen := map[string]bool{}
+		for _, h := range raw {
+			if b.recoveryRecord == nil && seen[h.key] {
+				continue
+			}
+			seen[h.key] = true
+			k := key(b.t, h.key)
+			counts[k]++
+			gen2 = append(gen2, crashwalk.Hit{Gen: 2, Point: fsx.Point{Key: k, Hit: counts[k]}, Path: h.path})
+		}
+		for _, tg := range p.Targets {
 			reached := false
-			for _, h := range gen2 {
+			for i, h := range gen2 {
 				if h.Point == tg.Point {
+					gen2 = gen2[:i+1]
 					reached = true
+					break
 				}
+			}
+			if b.alter != nil {
+				b.alter(tg, &gen2)
 			}
 			if b.skipTarget != nil && b.skipTarget(tg) {
 				reached = false
@@ -184,6 +201,9 @@ func (b *fakeBackend) Run(_ context.Context, s crashwalk.Scenario, p crashwalk.R
 			res.Reached = append(res.Reached, reached)
 		}
 		res.Hits = append(res.Hits, gen2)
+		if len(p.Targets) > 0 {
+			res.Hits = append(res.Hits, nil)
+		}
 		if b.violate != nil {
 			res.Violations = b.violate(p)
 		}

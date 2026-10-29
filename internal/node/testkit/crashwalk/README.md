@@ -21,6 +21,7 @@ the runs through `Options.Observe`.
 | `Backend`, `RunPlan`, `RunResult`, `Target`, `Trigger` | The interface a backend implements and what it is asked and answers. |
 | `Scenario` | What the walk needs of a script: its name, its step names, its budget and its recovery cases. |
 | `Plan`, `PlanRecovery` | The targets of a mode, in the canonical order that sharding numbers by. |
+| `AnalyzeSources`, `CheckRecoveryTarget` | Derive the three coverage sources and actual recovery-only Normal targets; verify a second interruption against its complete baseline. |
 | `CheckBudget`, `CompareRuns`, `Assess`, `CheckRecoveryCases` | The individual checks, usable alone. |
 | `Mode`, `Shard`, `ParseMode`, `ParseShard`, `EnvMode`, `EnvShard` | `full` or `smoke`, and the part of the walk a CI job takes. |
 | `Hit`, `NewHit`, `NormalizePath`, `IsSync` | A reached crash point, the shared conversion from an observation to normalized path fingerprints, and the sync steps. |
@@ -44,7 +45,8 @@ the runs through `Options.Observe`.
   is covered by the startup scenario; repeating it in every scenario would only
   repeat it.
 - **Full** takes every point of the window except the sync steps, a kill after
-  every script step, and every recovery case. A killed process leaves its page
+  every script step, every recovery case, and each dynamically derived
+  recovery-only Normal target. A killed process leaves its page
   cache, so a kill before a sync and a kill after the step before it leave the same
   disk; the power-loss model on the in-memory file system is what a sync is for.
   The commit point is a point: nothing has been acknowledged yet.
@@ -52,7 +54,10 @@ the runs through `Options.Observe`.
   visible step (rename, remove, make directory) of the last file it writes before
   its commit, or, for an appended file, its first append. That is the point at
   which the transaction is most nearly done and not done. It takes the first case
-  of each recovery transaction.
+  of each recovery transaction. It still records every recovery trigger completely
+  for coverage and target discovery, but skips the dynamic Normal group.
+  `RecoveryNormalSkipped` and an observer notification state this explicitly;
+  observing a key does not count as interrupting it.
 - **No point is skipped silently.** A target that the run never reached fails the
   walk and says which. A scenario whose window has more points than its budget
   fails, so that growth is put in front of a reviewer instead of being sampled
@@ -68,16 +73,32 @@ the runs through `Options.Observe`.
 - **A clean run reaches no recovery write.** A clean state has nothing to
   recover; if the clean run hits one, the code writes where it should not or the
   declaration is wrong.
-- **Every write is declared.** A hit that no declaration of the table lists ends the
-  walk at once. Every declared write of a normal transaction must be reached by
-  some recording, whatever the shard, or the walk fails: a declared write that
-  nothing exercises is a hole in the crash tests.
+- **Every write is declared.** A hit that no declaration lists ends the walk at
+  once. Coverage comes from clean generation 1 and complete generation 2 only.
+  `AnalyzeSources` rejects Recovery declarations in clean records, clean hits from
+  other generations and recovery hits outside generation 2. It reports three key
+  sets: Normal in clean runs, Normal only in complete recovery, and Recovery in
+  complete recovery. Normal coverage is the union of the first two. Full also
+  requires every Recovery key, including syncs, in complete generation 2.
+- **Record all sources before deriving targets.** Every static case's trigger and
+  `Options.RecoveryTriggers` are deduplicated by scenario and the complete trigger.
+  Unknown scenario names and invalid triggers fail before any backend call. Each
+  trigger-only run must finish generation 2 without domain violations. All clean
+  recordings finish before the difference is calculated: a later clean source
+  removes a key's dynamic responsibility. Every non-sync Normal key in that
+  difference gets one target, from the first actual sighting in its stable source
+  (scenario name, then trigger fields). Its real ordinal is preserved.
 - **Recovery is crashed too.** Each case names a recovery write and a trigger that
   makes the system need it: a crash at a point, or damage to a file while the system
   is stopped. The walk brings the system to that state, restarts it, kills it at the
   first time it reaches the write, restarts it again and has the backend drain and
   check. The cases of all scenarios together must be exactly the recovery writes
   that are not sync steps, each once; that is checked before anything runs.
+  Static cases still target ordinal 1. Static and dynamic second interruptions
+  share `CheckRecoveryTarget`: Reached must be true, generation 2 must end exactly
+  at the target, exactly three generations must exist, domain violations must be
+  empty, and the prefix must match its corresponding complete generation-2
+  baseline using `CompareRuns`, including rename sources.
 - **Sharding partitions the runs.** Runs are numbered across scenarios and kinds,
   and a shard takes those whose number is its residue. The number follows an order
   that no shard's own recording can change: the scenarios by name; within a
@@ -86,16 +107,29 @@ the runs through `Options.Observe`.
   write they name. Writes of different transactions may interleave differently in
   two recordings (the comparison of a rerun allows it), so numbering by the order of
   a shard's own recording would run one target twice and another never. Every shard
-  records every scenario. Two scenarios must not share a name.
+  records every scenario and unique recovery trigger. Recordings do not consume
+  target numbers. Dynamic targets, sorted by key, follow all existing groups.
+  Two scenarios must not share a name.
 - **Recovery cases are chosen over all scenarios.** In smoke the first listed case
   of each recovery transaction is run once, however the scenarios share the writes
   of that transaction.
-- **A walk reports what it reached.** `Report.Normal` and `Report.Recovery` count the
-  declared writes of each kind and how many the recordings (normal) or the
-  restarted generations (recovery) reached, apart because different runs reach
-  them. In a full walk `Report.Triggers` says which main crash point made the
-  restart write which recovery writes, which is what the author of a scenario
-  needs to fill its recovery cases.
+- **Reports distinguish observations and executions.** `Report.Sources` contains
+  the three source sets; `Normal` counts their Normal union and `Recovery` counts
+  only complete generation-2 evidence. `RecoveryRecordings` counts completed
+  trigger-only runs. `RecoveryRuns` still counts static recovery interruptions.
+  `RecoveryNormalPlanned` is global, `RecoveryNormalSelected` belongs to this
+  shard, and `RecoveryNormalRuns` counts executed dynamic interruptions. Smoke
+  plans but does not select or execute that group. `Report.Triggers` remains
+  diagnostic: later generations after a main crash do not add coverage evidence.
+  `Event.Phase` distinguishes `recovery-record` and `recovery-normal`; `Trigger`
+  identifies the source. Observe receives real run start/end pairs and one
+  `Skipped` notification for Smoke's dynamic group. A skipped notification must
+  not start a timer or increment executed runs.
+
+Adding complete recovery recordings increases even a walk with nil additional
+triggers by one run per unique static trigger. Clean `MaxPoints` budgets are
+unchanged; neither unique declaration counts nor generation-2 points consume
+that budget. No new backend driver, clock or dependency is needed.
 
 ## What the caller must guarantee
 
