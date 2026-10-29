@@ -24,6 +24,7 @@ func maintenanceRecipes(b Bindings) []ScriptRecipe { return []ScriptRecipe{reten
 func retentionRecipe(b Bindings) ScriptRecipe {
 	session := &createdSession{}
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	var closing adapterproto.MessageID
 	summarized := false
 	// A clock move takes effect before its resulting writes can be interrupted.
@@ -127,7 +128,7 @@ func retentionRecipe(b Bindings) ScriptRecipe {
 		if err := facts.RecvAndAck(e, e.Agent("sender")); err != nil {
 			return err
 		}
-		if err := drainFeedback(e, facts, "sender"); err != nil {
+		if err := feedback.run(e, facts, "sender"); err != nil {
 			return err
 		}
 		for _, step := range []scenario.Step{recordRetention, endpointSweep} {

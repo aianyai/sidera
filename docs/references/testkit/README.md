@@ -677,6 +677,27 @@ timing. Smoke emits one `Skipped` notification with the planned count; it is not
 a run start/end pair and cannot count as execution. Diagnostic `Triggers` after
 main crashes remain useful for writing cases but cannot supply coverage evidence.
 
+Feedback waits in acceptance recipes have one private owner, `feedbackDrain`,
+and separate state for each phase. Two one-minute advances allow a pull and then
+feedback merging. Issuance is remembered before `Advance` because the selected
+time can already have caused a real write when a process dies before the call
+returns. Only successful quiescence completes that step; reentry resumes the
+issued minute before issuing the next. Repeating the wait after a crash could
+cross a creation reply deadline and create additional correction feedback.
+A completed timed phase still receives and acknowledges on every reentry, since
+those actual calls can themselves be interrupted. Phases never share progress
+merely because they share a sender or evidence object. No clock read or extra
+waiting period is added to `scenario.Env`.
+
+The in-process feedback regressions use real recipe drains, `WalkBackend` cuts
+and the shared exact recovery-target checks. They compare actual logical time
+and audit real feedback and records after clock, receive and acknowledgement
+interruptions. A wrapper can hold an advance's return through real due work to
+exercise its response window; it manufactures neither time nor write targets.
+A real creation checks distinct phase durations, and the instance-management
+regression cuts every non-sync clock write of its complete second generation.
+The existing unread-body and missing-feedback counterexamples remain required.
+
 A reply acceptance variant fails a source-record create before its visible
 replacement, using the existing filesystem-fault facility. The engine continues
 serving with a queued source and retained body after the target accepted it.

@@ -203,3 +203,14 @@ create, write and rename interruptions through the maintenance recipe's original
 result/effect judgement. `TestManagementMaintenanceUsesRealVersionWarning` walks
 every main point of that recipe, including immediate pause and post-clear clock
 persistence, and compares the actual interrupted prefix with the clean recording.
+
+`feedback_drain_test.go` runs actual recipes through `WalkBackend` and checks
+selected second-generation clock, receive and acknowledgement writes with the
+shared recovery-target checker. Its timing wrapper delegates to the real
+fixture and can delay `Advance`'s return until its actual clock write is cut.
+Final logical time, the original feedback/body judgement and the real closed-record
+audit detect repeated waits or skipped receipt. A creation interrupted after
+its returned control proves that resolution and post-receive phases each retain
+their own two minutes. The instance regression interrupts every actual non-sync
+clock write in its complete recovery record, retaining the original strict
+feedback and final-instance checks.

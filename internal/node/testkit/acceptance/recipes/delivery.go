@@ -157,6 +157,7 @@ func secondCheckRecipe(b Bindings) ScriptRecipe {
 
 func expiryRecipe(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	return ScriptRecipe{Script: scenario.Script{Name: "delivery-expiry", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 90}, Steps: []scenario.Step{
 		{Name: "send", Do: sendBody(facts, "sender", "receiver", "The queue deadline must not silently discard this body.")},
 		scenario.Advance("queue-deadline", delivery.DefaultEndpointMaxQueue+time.Minute),
@@ -164,12 +165,13 @@ func expiryRecipe(b Bindings) ScriptRecipe {
 		if err := facts.RecvAndAck(e, e.Agent("receiver")); err != nil {
 			return err
 		}
-		return drainFeedback(e, facts, "sender")
+		return feedback.run(e, facts, "sender")
 	}, Check: facts.Check}
 }
 
 func redeliveryRecipe(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	steps := []scenario.Step{{Name: "send", Do: sendBody(facts, "sender", "receiver", "A lease expires without acknowledgement.")}}
 	for i := 0; i < delivery.MaxLeases; i++ {
 		steps = append(steps, scenario.Step{Name: fmt.Sprintf("handout-%d", i+1), Do: func(e scenario.Env) error {
@@ -181,20 +183,8 @@ func redeliveryRecipe(b Bindings) ScriptRecipe {
 		if err := facts.RecvAndAck(e, e.Agent("receiver")); err != nil {
 			return err
 		}
-		return drainFeedback(e, facts, "sender")
+		return feedback.run(e, facts, "sender")
 	}, Check: facts.Check}
-}
-
-// Pulls run once a minute and feedback merges for a minute. Two bounded advances
-// let the source learn a final result, then let its notice become readable.
-func drainFeedback(e scenario.Env, facts *DeliveryEvidence, sender string) error {
-	for range 2 {
-		e.Advance(time.Minute)
-		if err := e.Quiesce(); err != nil {
-			return err
-		}
-	}
-	return facts.RecvAndAck(e, e.Agent(sender))
 }
 
 // DeliveryOps names recoverable source-write preparation faults.
@@ -207,6 +197,7 @@ var ErrSourceAlreadyConfirmed = errors.New("acceptance: source receipt already c
 
 func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	var original adapterproto.MessageID
 	return ScriptRecipe{Needs: Needs{FSFaults: []FSFault{FaultSourceUpdate}}, Script: scenario.Script{Name: "delivery-reply-after-write-failure", Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: 102}, Steps: []scenario.Step{
 		{Name: "fail-receipt-write", Do: b.Delivery.FailSourceUpdate},
@@ -243,7 +234,7 @@ func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
 		if err := facts.RecvAndAck(e, e.Agent("sender")); err != nil {
 			return err
 		}
-		return drainFeedback(e, facts, "sender")
+		return feedback.run(e, facts, "sender")
 	}, Check: func(e scenario.Env) error {
 		if err := facts.Check(e); err != nil {
 			return err
@@ -254,6 +245,7 @@ func replyAfterFailureRecipe(b Bindings) ScriptRecipe {
 
 func unreachableRecipe(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	var sent, advanced bool
 	deadline := scenario.Step{Name: "report-deadline", Do: func(e scenario.Env) error {
 		if !advanced {
@@ -285,7 +277,7 @@ func unreachableRecipe(b Bindings) ScriptRecipe {
 				return err
 			}
 		}
-		return drainFeedback(e, facts, "sender")
+		return feedback.run(e, facts, "sender")
 	}, Check: facts.Check}
 }
 

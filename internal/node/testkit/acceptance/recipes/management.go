@@ -288,6 +288,7 @@ func managementClose(b Bindings) ScriptRecipe {
 	ops := b.Management
 	r := &managementRun{}
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	var target string
 	close := func(e scenario.Env, q ManagementRequest) (ManagementOutcome, error) {
 		return ops.CloseEndpoint(e, q, target)
@@ -322,7 +323,7 @@ func managementClose(b Bindings) ScriptRecipe {
 		if err := check(e, out); err != nil {
 			return err
 		}
-		return drainFeedback(e, facts, "sender")
+		return feedback.run(e, facts, "sender")
 	}, Check: func(e scenario.Env) error {
 		if err := r.check(e); err != nil {
 			return err
@@ -336,6 +337,7 @@ func managementInstance(b Bindings) ScriptRecipe {
 	ops := b.Management
 	r := &managementRun{}
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	var target string
 	checkDisabled := func(e scenario.Env, o ManagementOutcome) error {
 		f, err := ops.InspectInstance(e, instance)
@@ -410,7 +412,7 @@ func managementInstance(b Bindings) ScriptRecipe {
 			return err
 		}
 		delete(r.checks, "instance")
-		return drainFeedback(e, facts, "sender")
+		return feedback.run(e, facts, "sender")
 	}, Check: func(e scenario.Env) error {
 		f, err := ops.InspectInstance(e, instance)
 		if err != nil {

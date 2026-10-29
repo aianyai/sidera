@@ -31,6 +31,17 @@ summaries, and exact original message and target references. Repeated reads of o
 notice identifier are one logical notification; another identifier for the same
 message, target and kind is a duplicate. Acknowledgements name only the parts just
 returned by that receive, and their real outcomes must accept those parts.
+
+Each feedback phase owns a separate zero-value private `feedbackDrain`. It
+issues two one-minute advances, remembering issuance before calling `Advance`
+and counting a step only after `Quiesce` succeeds. A crash during an advance's
+response or its resulting writes therefore resumes quiescence at the selected
+time instead of advancing again. Repeating completed waits could otherwise pass
+a creation's reply deadline and create additional feedback during cleanup.
+Different phases, including those sharing a sender and evidence object, retain
+their own two minutes. After both steps, every reentry still calls real
+`RecvAndAck`: an interrupted receive or acknowledgement is unfinished work.
+
 `Bindings.LocalNode` supplies the actual node identity. `newDeliveryEvidence`
 constructs every recipe's evidence object; `NewDeliveryEvidence` also permits
 independent counterexamples. The first receive resolves and caches the identity.

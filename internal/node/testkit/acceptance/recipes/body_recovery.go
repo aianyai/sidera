@@ -24,6 +24,7 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 		budget = 98
 	}
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	var message adapterproto.MessageID
 	var target string
 	classified, accepted, lost, closed, advanced := false, false, false, false, false
@@ -95,7 +96,7 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 						return err
 					}
 				}
-				if err := drainFeedback(e, facts, "sender"); err != nil {
+				if err := feedback.run(e, facts, "sender"); err != nil {
 					return err
 				}
 				if archive {

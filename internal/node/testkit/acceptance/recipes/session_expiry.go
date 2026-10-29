@@ -20,6 +20,7 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 	var endpoint, native string
 	var deadlineAdvanced, deadlineCompleted, creationPulled, createdBeforeDeadline, closeRequested bool
 	facts := newDeliveryEvidence(b)
+	var feedback feedbackDrain
 	advanceDeadline := func(e scenario.Env) error {
 		if !deadlineAdvanced {
 			deadlineAdvanced = true
@@ -119,7 +120,7 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 		if err := c.ReleaseHeld(e.Ctx()); err != nil {
 			return err
 		}
-		return drainFeedback(e, facts, "sender")
+		return feedback.run(e, facts, "sender")
 	}, Check: func(e scenario.Env) error {
 		if createdBeforeDeadline {
 			if err := facts.Check(e); err != nil {
