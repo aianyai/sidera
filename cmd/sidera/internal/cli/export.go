@@ -77,7 +77,17 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 	if _, err = fmt.Fprintf(c.Stderr, "Keep this self-revocation outside this device, then run `sidera identity confirm-backup %s`.\n", response.Result.Digest); err != nil {
 		return err
 	}
-	if c.json {
+	if c.json && output != nil {
+		var result struct {
+			Result struct {
+				Digest string `json:"digest"`
+				File   string `json:"file"`
+			} `json:"result"`
+		}
+		result.Result.Digest = response.Result.Digest
+		result.Result.File = *output
+		err = c.encode(result)
+	} else if c.json {
 		_, err = c.Stdout.Write(raw)
 	} else if output != nil {
 		_, err = fmt.Fprintln(c.Stdout, response.Result.Digest)

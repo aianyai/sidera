@@ -49,6 +49,11 @@ A human unknown-outcome error prints the retained identifier from its error
 details. Human adapter-enable output explains that probing continues in the
 background and directs the owner to `sidera adapter list`.
 
+With `--out`, JSON export reports only the digest and supplied file path under
+`result`; the armored statement stays out of stdout. Without `--out`, JSON keeps
+the complete response. Online and offline export use the same management result
+type.
+
 An export's armor is parsed only by `keys.ParseRevocationExport`, and its verified
 digest must match the response before an output file is created. The shared
 private-file boundary owns exclusive creation and platform permission checks;

@@ -23,6 +23,9 @@ process has its own token and runs in the same directory as the other sessions.
 The fixture reads the created endpoint's stored token; it never invents a
 session endpoint or credential.
 
+A checked-IPC HTTP peer also serves a deliberately noncanonical receive page;
+the real executable must print its exact bytes in both human and JSON modes.
+
 The receive interruption test pauses an actual HTTP response after its first
 byte, kills its CLI process, and reads the unacknowledged message again. It
 does not depend on pipe capacity or a process winning a timing race.
@@ -34,7 +37,8 @@ operation identifier, version and body unchanged. The decoder and settings
 argument fuzz tests live in `internal/cli`, alongside a parser fuzz target that
 checks local/global arities, preserved values and unchanged argv.
 
-Export tests compare online and offline raw copies with the source record,
+Export tests compare online and offline raw copies with the source record and
+keep the armored statement out of JSON stdout when writing a file. They
 refuse invalid armor and mismatched digests before file creation, protect
 pre-existing files, and make the child's own stdout/stderr writes fail to check
 that its newly created copy is cleaned up. Private-file creation and Windows ACL

@@ -90,9 +90,9 @@ reports the probe outcome. JSON keeps the complete management response.
 The identity export first uses the management interface. Only
 `daemon_not_running` permits the offline path through `keys.ReadSelfRevocation`
 and `keys.FormatRevocationExport`; peer-check failures and unknown outcomes are
-reported without an offline read. Human export writes the armored statement to
-stdout. Both modes print the digest and offline-backup instructions to stderr;
-JSON export has the same complete `result` shape online and offline.
+reported without an offline read. Without `--out`, human export writes the
+armored statement to stdout. Both modes print the digest and offline-backup instructions to stderr;
+JSON export has the same `result` shape online and offline.
 
 Before reporting an export, `keys.ParseRevocationExport` verifies the armor and
 the CLI compares the verified record digest with the response's digest. Invalid
@@ -116,20 +116,23 @@ remote failures and invalid export responses keep the shared error mapping.
 A pre-existing file is never overwritten or removed. Direct process termination cannot run cleanup;
 no power-loss durability is promised. The source statement in the node is kept.
 
-Human `--out` prints only the digest to stdout. `--json`, with or without
-`--out`, always prints the complete management response, including both
-`armored` and `digest`; the flag adds the file write without removing response
-fields. Backup instructions remain on stderr in both modes.
+Human `--out` prints only the digest to stdout. With `--out`, `--json` prints
+`{"result":{"digest":"...","file":"..."}}`, using the supplied file path.
+The armored statement never goes to stdout in this case: possession of it can
+retire the node, so selecting a file also keeps it out of captured output and
+conversation records. Without `--out`, `--json` preserves the complete response,
+including `armored` and `digest`. Backup instructions remain on stderr in both
+modes.
 
 ## Output and errors
 
-Human success goes to stdout; human errors go to stderr as
+Human success goes to stdout. Agent and management failures go to stderr as
 `error: <category>/<code>: <message>`. Missing-daemon errors tell the caller to
-run `sidera daemon`; commands never start it automatically. Usage errors write
-a diagnostic to stderr and return 2 before any method call, in every mode,
-including `--json`; no error body is emitted for usage errors.
-Initialization and foreground-daemon diagnostics retain the daemon's original
-explanation on stderr.
+run `sidera daemon`; commands never start it automatically. Usage errors print
+`error: <message>` on stderr and return 2 before any method call, in every mode,
+including `--json`; no error body is emitted for usage errors. Human initialization
+and foreground-daemon failures print `error: <err>` on stderr, retaining the
+daemon's original explanation.
 
 `mcp` reserves stdout for MCP messages even when `--json` is set. Process failures
 are diagnostics on stderr with the shared category exit code; a normal stdin
@@ -139,8 +142,8 @@ owns and closes stdin/stdout. A separate probe credential enables the connection
 probe without granting access to endpoint methods.
 
 With `--json`, Agent success is its response object, management success is the
-complete response including `operation_id` and `replayed`, and method errors are
-`{"error":{...}}` on stdout. A receive is the exception in both modes: its page
+complete response including `operation_id` and `replayed` (except the file-export
+summary above), and method errors are `{"error":{...}}` on stdout. A receive is the exception in both modes: its page
 is written unchanged, including the node's existing newline, without a wrapper
 or re-encoding. Receiving never acknowledges the new page. `--ack` asks the node
 to acknowledge a previous lease before the receive.
