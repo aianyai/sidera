@@ -515,8 +515,9 @@ without claiming target ownership. The runner deduplicates by scenario and the
 whole trigger, keeps second-generation provenance, and compares each actual
 second crash against that complete window with the existing crash-walk path
 comparison. A terminal third generation alone cannot demonstrate either the
-second-generation observation or its interruption. The offline binding modifies
-only product-created records after shutdown; final owner predicates establish
+second-generation observation or its interruption. `acceptance/disk` shares offline damage and closing audits across execution
+layers, accepting `fsx.FS` for stopped-disk damage and `fsx.Reader` for audits.
+It modifies only product-created records after shutdown; final owner predicates establish
 that quarantine, replay, orphan collection and transaction cleanup have settled.
 The in-process acceptance suite uses one recording sequence for all three source
 columns. Each recorded key retains its scenario, complete trigger, generation and

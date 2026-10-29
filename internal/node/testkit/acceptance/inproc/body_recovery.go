@@ -2,12 +2,11 @@ package inproc
 
 import (
 	"fmt"
-	"path"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
-	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/acceptance/disk"
 	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
@@ -49,26 +48,11 @@ func configureBodyRecoveryScenario(s *harness.WalkScenario) {
 		if trigger != crashwalk.CorruptOffline("source-body", "flip-body") {
 			return fmt.Errorf("unsupported body damage: %+v", trigger)
 		}
-		scan, err := readStoppedRecoveryRecords(h.Disk())
+		result, err := disk.Damage(h.Disk(), trigger)
 		if err != nil {
 			return err
 		}
-		if len(scan.Out) != 1 || scan.Out[0].Body == nil || !scan.Out[0].NeedsBody() {
-			return fmt.Errorf("body damage requires one actual source retaining its body")
-		}
-		file := path.Join(store.BodiesDir, store.BodyFileName(scan.Out[0].Name()))
-		data, err := h.Disk().ReadFile(file)
-		if err != nil {
-			return err
-		}
-		if len(data) == 0 || store.BodyRefOf(data) != *scan.Out[0].Body {
-			return fmt.Errorf("body damage requires the actual intact source body")
-		}
-		data[0] ^= 1
-		if err := fsx.Replace(h.Disk(), fsx.Tag{Tx: "offline", Role: "body"}, file, data, fsx.ModePrivate); err != nil {
-			return err
-		}
-		damagedBody = file
+		damagedBody = result.Body
 		return nil
 	}
 }
