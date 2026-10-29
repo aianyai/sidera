@@ -38,3 +38,9 @@ the engine owns staging, validation, installation and cleanup. The binding injec
 ordinary current-pointer failures and a version-cleanup failure through the current
 process's existing `Faults` wrapper. Result lookup, current-pointer decoding and
 version-directory inspection hold the installation result to its durable effect.
+
+`TestCatalogEvidence` runs one clean recording per catalog entry, the deduplicated
+complete recoveries, all owned recovery interruptions and the derived Normal
+interruptions in one sequence. It logs the first real observation of each key with
+scenario, trigger, generation, point and both path operands. The three coverage
+columns remain separate, and run totals include the derived interruptions.

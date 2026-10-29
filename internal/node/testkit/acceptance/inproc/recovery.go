@@ -21,7 +21,7 @@ import (
 )
 
 func recoveryBindings() recipes.RecoveryOps {
-	return recipes.RecoveryOps{RuntimeAddr: func(e scenario.Env) string { return e.(*harness.H).RuntimeAddr() }, CheckClosedRecords: func(e scenario.Env) error { return checkRecoveryClosed(e.(*harness.H)) }}
+	return recipes.RecoveryOps{CheckClosedRecords: func(e scenario.Env) error { return checkRecoveryClosed(e.(*harness.H)) }}
 }
 
 func configureRecoveryScenario(s *harness.WalkScenario) {
@@ -55,7 +55,7 @@ func configureRecoveryScenario(s *harness.WalkScenario) {
 				return errors.New("damage requires a real creation intent")
 			}
 			for _, ep := range sc.Endpoints {
-				if ep.Status == store.EndpointCreating {
+				if ep.Status == store.EndpointCreating && ep.CreatedBy+".rec" == sc.Ctl[0].Name() {
 					original = ep
 				}
 			}
@@ -108,19 +108,14 @@ func configureRecoveryScenario(s *harness.WalkScenario) {
 		if err := checkClosedSession(h, original.ID.String()); err != nil {
 			return err
 		}
-		closed, alert := false, false
-		for _, ep := range sc.Endpoints {
-			if ep.ID == original.ID {
-				closed = ep.Status == store.EndpointClosed && len(ep.Token) == 0
-			}
-		}
+		alert := false
 		for _, a := range sc.Alerts {
 			if a.Kind == "control_unknown" {
 				alert = true
 			}
 		}
-		if !closed || !alert {
-			return fmt.Errorf("creating quarantine did not close the original endpoint and report uncertainty: closed=%v alert=%v", closed, alert)
+		if !alert {
+			return errors.New("creating quarantine did not report control uncertainty")
 		}
 		return nil
 	}

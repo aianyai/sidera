@@ -451,3 +451,8 @@ comparison. A terminal third generation alone cannot demonstrate either the
 second-generation observation or its interruption. The offline binding modifies
 only product-created records after shutdown; final owner predicates establish
 that quarantine, replay, orphan collection and transaction cleanup have settled.
+The in-process acceptance suite uses one recording sequence for all three source
+columns. Each recorded key retains its scenario, complete trigger, generation and
+normalized path operands in diagnostics; the derived Normal interruptions have
+the same exact-cutoff and convergence checks as Recovery interruptions and their
+own count.

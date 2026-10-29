@@ -8,6 +8,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/txn"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/aianyai/sidera/internal/node/fsx"
@@ -61,8 +62,21 @@ func verifyRecoveryTarget(recorded []crashwalk.Hit, r crashwalk.RunResult, targe
 	return crashwalk.CompareRuns(comparison, r.Hits[1], target)
 }
 
-func TestRecoveryRecordingsAndTargets(t *testing.T) {
-	recoveryEvidence(t, nil)
+func TestCatalogRecoveryAssignments(t *testing.T) {
+	scenarios := bindCatalog(t)
+	if err := crashwalk.CheckRecoveryCases(harness.ProgramTable(t), scenarios); err != nil {
+		t.Fatal(err)
+	}
+	expected, assigned := 0, 0
+	for _, key := range harness.ProgramTable(t).Keys() {
+		if key.Kind == txn.Recovery && !crashwalk.IsSync(key.Key.Step) {
+			expected++
+		}
+	}
+	for _, s := range scenarios {
+		assigned += len(s.Recovery())
+	}
+	t.Logf("recovery assigned=%d/%d", assigned, expected)
 }
 
 type recoveryRecordID struct {
@@ -75,8 +89,14 @@ type recoveryRecordID struct {
 func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult) []crashwalk.Hit {
 	t.Helper()
 	recordings := map[recoveryRecordID][]crashwalk.Hit{}
+	planned := map[recoveryRecordID]bool{}
+	expectedTargets := 0
+	for _, s := range bindCatalog(t) {
+		expectedTargets += len(s.Recovery())
+	}
 	var all []crashwalk.Hit
 	count := 0
+	derivedCount := 0
 	for _, s := range bindCatalog(t) {
 		triggers := []crashwalk.Trigger{}
 		for _, c := range s.Recovery() {
@@ -90,9 +110,10 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult) []cras
 		for _, trigger := range triggers {
 			c := crashwalk.RecoveryCase{After: trigger}
 			id := recoveryRecordID{s.Name(), c.After}
-			if _, ok := recordings[id]; ok {
+			if planned[id] {
 				continue
 			}
+			planned[id] = true
 			t.Run("record/"+s.Name()+"/"+fmt.Sprint(c.After), func(t *testing.T) {
 				started := clock.System().Now()
 				r, err := harness.NewWalkBackend(t).Run(context.Background(), freshScenario(t, s.Name()), crashwalk.RunPlan{Trigger: &c.After})
@@ -104,15 +125,14 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult) []cras
 					t.Fatal(err)
 				}
 				assertDeclaredGenerations(t, r)
-				if c.After.Kind == crashwalk.TriggerCrashAt && clean != nil {
-					if err := crashwalk.CompareRuns(clean[s.Name()].Hits[0], r.Hits[0], crashwalk.Target{Gen: 1, Point: c.After.CrashAt}); err != nil {
-						t.Fatal(err)
-					}
+				if err := compareFirstCrash(clean, id, r); err != nil {
+					t.Fatal(err)
 				}
 				recordings[id] = hits
 				all = append(all, hits...)
 				t.Logf("recovery-record scenario=%s trigger=%+v gen2_keys=%d elapsed=%s", s.Name(), c.After, len(hitKeys(hits)), clock.System().Now().Sub(started))
 				t.Logf("recovery-record scenario=%s gen=2 keys=%v", s.Name(), hitKeys(hits))
+				reportProvenance(t, s.Name(), fmt.Sprint(c.After), hits)
 			})
 		}
 	}
@@ -126,6 +146,9 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult) []cras
 					t.Fatal(err)
 				}
 				assertDeclaredGenerations(t, r)
+				if err := compareFirstCrash(clean, recoveryRecordID{s.Name(), c.After}, r); err != nil {
+					t.Fatal(err)
+				}
 				if err := verifyRecoveryTarget(recordings[recoveryRecordID{s.Name(), c.After}], r, target); err != nil {
 					t.Fatal(err)
 				}
@@ -166,12 +189,14 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult) []cras
 		}
 		sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
 		derived := 0
+		expectedDerived := 0
 		for _, key := range keys {
 			id := owner[key]
 			t.Logf("recovery-only-normal key=%s scenario=%s trigger=%+v gen=2", key, id.Scenario, id.Trigger)
 			if crashwalk.IsSync(key.Step) {
 				continue
 			}
+			expectedDerived++
 			t.Run("derived/"+key.String(), func(t *testing.T) {
 				target := crashwalk.Target{Gen: 2, Point: fsx.Point{Key: key, Hit: 1}}
 				started := clock.System().Now()
@@ -180,22 +205,43 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult) []cras
 					t.Fatal(err)
 				}
 				assertDeclaredGenerations(t, r)
+				if err := compareFirstCrash(clean, id, r); err != nil {
+					t.Fatal(err)
+				}
 				if err := verifyRecoveryTarget(recordings[id], r, target); err != nil {
 					t.Fatal(err)
 				}
 				derived++
+				derivedCount++
 				t.Logf("recovery-normal-crash scenario=%s target=%s reached=true generations=3 elapsed=%s", id.Scenario, target.Point, clock.System().Now().Sub(started))
 			})
+		}
+		if derived != expectedDerived {
+			t.Errorf("recovery-only Normal targets completed=%d expected=%d", derived, expectedDerived)
 		}
 		var cleanHits []crashwalk.Hit
 		for _, r := range clean {
 			cleanHits = append(cleanHits, r.Hits[0]...)
 		}
 		union := append(append([]crashwalk.Hit(nil), cleanHits...), all...)
+		cleanCoverage := crashwalk.Assess(harness.ProgramTable(t), cleanHits)
+		recoveryCoverage := crashwalk.Assess(harness.ProgramTable(t), all)
+		t.Logf("coverage-columns clean_gen1_normal=%d recovery_only_gen2_normal=%d complete_gen2_recovery=%d", cleanCoverage.Normal.Reached, len(keys), recoveryCoverage.Recovery.Reached)
 		c := crashwalk.Assess(harness.ProgramTable(t), union)
 		t.Logf("coverage normal=%d/%d recovery=%d/%d recovery_completed=%d recovery_only_normal_keys=%d recovery_only_normal_completed=%d missing_normal=%v missing_recovery=%v", c.Normal.Reached, c.Normal.Declared, c.Recovery.Reached, c.Recovery.Declared, count, len(keys), derived, c.MissingNormal, c.MissingRecovery)
 	}
+	if len(recordings) != len(planned) {
+		t.Errorf("complete recovery recordings=%d expected=%d", len(recordings), len(planned))
+	}
+	if count != expectedTargets {
+		t.Errorf("Recovery targets completed=%d expected=%d", count, expectedTargets)
+	}
+	coverage := crashwalk.Assess(harness.ProgramTable(t), all)
+	if len(coverage.MissingRecovery) != 0 {
+		t.Errorf("incomplete second-generation recovery evidence: %v", coverage.MissingRecovery)
+	}
 	t.Logf("recovery completed=%d records=%d", count, len(recordings))
+	t.Logf("runs record=%d recovery_record=%d recovery_crash=%d recovery_normal_crash=%d total=%d", len(clean), len(recordings), count, derivedCount, len(clean)+len(recordings)+count+derivedCount)
 	reportCoverage(t, "complete-gen2", all)
 	return all
 }
@@ -203,9 +249,38 @@ func recoveryEvidence(t *testing.T, clean map[string]crashwalk.RunResult) []cras
 func assertDeclaredGenerations(t testing.TB, r crashwalk.RunResult) {
 	t.Helper()
 	for i, hits := range r.Hits {
+		for _, h := range hits {
+			if h.Gen != i+1 {
+				t.Fatalf("trace %d contains generation %d", i+1, h.Gen)
+			}
+		}
 		c := crashwalk.Assess(harness.ProgramTable(t), hits)
 		if len(c.Undeclared) != 0 {
 			t.Fatalf("generation %d undeclared=%v", i+1, c.Undeclared)
 		}
 	}
+}
+
+func TestRecoveryJudgementRejectsAnUnreadLossNotice(t *testing.T) {
+	s := freshScenario(t, "recovery-target").(*harness.WalkScenario)
+	s.Drain = func(*harness.H) error { return nil }
+	trigger := crashwalk.CorruptOffline("target", "unreadable")
+	r, err := harness.NewWalkBackend(t).Run(context.Background(), s, crashwalk.RunPlan{Trigger: &trigger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Violations) != 1 || !strings.Contains(r.Violations[0], "has no visible body or corresponding loss feedback") {
+		t.Fatalf("unread loss notice violations=%v", r.Violations)
+	}
+}
+
+func compareFirstCrash(clean map[string]crashwalk.RunResult, id recoveryRecordID, r crashwalk.RunResult) error {
+	if id.Trigger.Kind != crashwalk.TriggerCrashAt {
+		return nil
+	}
+	recorded, ok := clean[id.Scenario]
+	if !ok || len(recorded.Hits) != 1 || len(r.Hits) == 0 {
+		return fmt.Errorf("missing clean first-generation evidence for %s", id.Scenario)
+	}
+	return crashwalk.CompareRuns(recorded.Hits[0], r.Hits[0], crashwalk.Target{Gen: 1, Point: id.Trigger.CrashAt})
 }

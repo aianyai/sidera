@@ -13,10 +13,9 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
-// RecoveryOps exposes only the missing domain address and final disk audit.
+// RecoveryOps exposes the final disk audit after the external drain.
 // The binding resolves the current process each time, including after a crash.
 type RecoveryOps struct {
-	RuntimeAddr        func(scenario.Env) string
 	CheckClosedRecords func(scenario.Env) error
 }
 
@@ -92,7 +91,7 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 					return err
 				}
 			}
-			_, err = e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Recovery.RuntimeAddr(e), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: "A real initial message."})
+			_, err = e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: "A real initial message."})
 			return err
 		}}}}, Drain: recoveryDrain(b, true, &DeliveryEvidence{}), Check: b.Recovery.CheckClosedRecords})
 	}

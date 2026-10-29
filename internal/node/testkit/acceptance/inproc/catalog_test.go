@@ -2,6 +2,7 @@ package inproc
 
 import (
 	"context"
+	"github.com/aianyai/sidera/internal/node/clock"
 	"strings"
 	"testing"
 
@@ -9,13 +10,23 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
 )
 
-func TestCatalogNormalRecordings(t *testing.T) {
+func TestCatalogEvidence(t *testing.T) {
+	started := clock.System().Now()
 	records := recordCatalog(t)
+	if t.Failed() {
+		return
+	}
 	var all []crashwalk.Hit
 	for _, listed := range bindCatalog(t) {
-		all = append(all, records[listed.Name()].Hits[0]...)
+		recorded, ok := records[listed.Name()]
+		if !ok {
+			t.Fatalf("missing clean recording for %s", listed.Name())
+		}
+		all = append(all, recorded.Hits[0]...)
 	}
 	reportCoverage(t, "clean-gen1", all)
+	recoveryEvidence(t, records)
+	t.Logf("runs elapsed=%s", clock.System().Now().Sub(started))
 }
 
 func TestSendJudgementRejectsAnAcceptedBodyThatWasNotRead(t *testing.T) {

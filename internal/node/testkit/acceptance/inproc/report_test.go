@@ -56,6 +56,7 @@ func recordScenario(t testing.TB, s crashwalk.Scenario) crashwalk.RunResult {
 	}
 	t.Logf("record scenario=%s points=%d budget=%d boundaries=%d setup_hits=%d normal_keys=%d elapsed=%s", s.Name(), len(crashwalk.Plan(r.Hits[0], crashwalk.Full, nil)), s.MaxPoints(), len(s.Steps()), setup, cov.Normal.Reached, elapsed)
 	t.Logf("record scenario=%s keys=%v", s.Name(), hitKeys(r.Hits[0]))
+	reportProvenance(t, s.Name(), "clean", r.Hits[0])
 	return r
 }
 
@@ -76,4 +77,19 @@ func reportCoverage(t testing.TB, path string, hits []crashwalk.Hit) {
 	t.Helper()
 	c := crashwalk.Assess(harness.ProgramTable(t), hits)
 	t.Logf("coverage path=%s normal=%d/%d recovery=%d/%d missing_normal=%v missing_recovery=%v undeclared=%v", path, c.Normal.Reached, c.Normal.Declared, c.Recovery.Reached, c.Recovery.Declared, c.MissingNormal, c.MissingRecovery, c.Undeclared)
+}
+
+func reportProvenance(t testing.TB, scenario, trigger string, hits []crashwalk.Hit) {
+	t.Helper()
+	first := map[string]crashwalk.Hit{}
+	for _, h := range hits {
+		key := h.Point.Key.String()
+		if _, exists := first[key]; !exists {
+			first[key] = h
+		}
+	}
+	for _, key := range hitKeys(hits) {
+		h := first[key]
+		t.Logf("evidence scenario=%s trigger=%s gen=%d point=%s path=%q from=%q setup=%v", scenario, trigger, h.Gen, h.Point, h.Path, h.From, h.Setup)
+	}
 }
