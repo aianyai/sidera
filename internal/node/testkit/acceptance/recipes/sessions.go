@@ -46,42 +46,14 @@ func (s *createdSession) create(b Bindings, body string) scenario.Step {
 
 func (s *createdSession) resolve(b Bindings, body string, facts *DeliveryEvidence) scenario.Step {
 	return scenario.Step{Name: "created-reply", Do: func(e scenario.Env) error {
-		status, err := e.Agent("sender").Status(e.Ctx(), fakeagent.StatusInput{MessageID: s.control})
+		r, err := readCreation(e, "sender", b.Sessions.RuntimeAddr(e, "chat"), s.control)
 		if err != nil {
 			return err
 		}
-		if status.ControlReply == nil || status.ControlReply.Create == nil || status.ControlReply.Create.Outcome != adapterproto.CreateReplyCreated {
-			return fmt.Errorf("creation has no real created reply: %+v", status)
+		if r.status.ControlReply == nil || r.status.ControlReply.Create.Outcome != adapterproto.CreateReplyCreated {
+			return fmt.Errorf("creation has no real created reply: %+v", r.status)
 		}
-		s.endpoint = string(status.ControlReply.Create.SessionEndpoint)
-		runtime, err := ident.ParseAddress(b.Sessions.RuntimeAddr(e, "chat"))
-		if err != nil {
-			return err
-		}
-		endpoint, err := ident.ParseEndpointID(s.endpoint)
-		if err != nil {
-			return err
-		}
-		s.address = ident.Address{Node: runtime.Node, Endpoint: endpoint}.String()
-		log, err := e.Ledger()
-		if err != nil {
-			return err
-		}
-		var attempt string
-		for _, entry := range log.Kind(ledger.KindSessionCreateReceived) {
-			if entry.Attrs.Endpoint == s.endpoint {
-				attempt = entry.Attrs.Attempt
-			}
-		}
-		for _, entry := range log.Kind(ledger.KindRuntimeSessionCreated) {
-			if entry.Attrs.Attempt == attempt {
-				s.native = entry.Attrs.NativeRef
-			}
-		}
-
-		if s.native == "" {
-			return fmt.Errorf("created reply %s has no real native creation", s.endpoint)
-		}
+		s.endpoint, s.address, s.native = r.endpoint, r.address, r.native
 		if body != "" {
 			facts.Accepted(fakeagent.SendResult{MessageID: s.control, To: []string{s.address}}, body)
 		}
@@ -104,6 +76,7 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 	session := &createdSession{}
 	facts := &DeliveryEvidence{}
 	var interrupt, closeID adapterproto.MessageID
+	var closeAttempted bool
 	steps := []scenario.Step{
 		runtimePlan(fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{{Kind: fakeruntime.ActionRecv}}}),
 		session.create(b, initial), scenario.Advance("creation-pull", time.Minute), session.resolve(b, initial, facts),
@@ -144,6 +117,7 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 			return b.Sessions.CheckpointPut(e, "chat", adapterproto.CheckpointPutParams{Scope: adapterproto.ScopeSession, ID: session.endpoint, State: []byte(`{"cursor":7}`)})
 		}},
 		{Name: "close", Do: func(e scenario.Env) error {
+			closeAttempted = true
 			r, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: session.address, Signal: adapterproto.SignalSessionClose})
 			if err == nil {
 				closeID = r.MessageID
@@ -152,6 +126,19 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 		}}, scenario.Advance("close-pull", time.Minute),
 	}
 	return ScriptRecipe{Script: scenario.Script{Name: "session-lifecycle", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 288}, Steps: steps}, Drain: func(e scenario.Env) error {
+		if session.control != "" && session.endpoint == "" {
+			if err := drainFeedback(e, facts, "sender"); err != nil {
+				return err
+			}
+			if err := session.resolve(b, initial, facts).Do(e); err != nil {
+				return err
+			}
+		}
+		if session.endpoint != "" && !closeAttempted {
+			if err := facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)); err != nil {
+				return err
+			}
+		}
 		return drainFeedback(e, facts, "sender")
 	}, Check: func(e scenario.Env) error {
 		if err := facts.Check(e); err != nil {
@@ -277,6 +264,7 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 }
 
 func blockedRecipe(b Bindings) ScriptRecipe {
+	var blocking, blocked bool
 	session := &createdSession{}
 	facts := &DeliveryEvidence{}
 	var message adapterproto.MessageID
@@ -309,11 +297,20 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 			if err == nil {
 				message = r.MessageID
 				facts.Accepted(r, "Read after credentials recover.")
-				facts.RequireFeedback(message, session.address, delivery.KindDeliveryBlocked)
 			}
 			return err
-		}}, scenario.Advance("blocked-threshold", handoff.DefaultBlockedThreshold+time.Second), scenario.Advance("blocked-pull", time.Minute), scenario.Advance("blocked-merge", time.Minute),
-		{Name: "read-block-notice", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, e.Agent("sender")) }},
+		}}, {Name: "blocked-threshold", Do: func(e scenario.Env) error {
+			blocking = true
+			e.Advance(handoff.DefaultBlockedThreshold + time.Second)
+			return nil
+		}}, scenario.Advance("blocked-pull", time.Minute), scenario.Advance("blocked-merge", time.Minute),
+		{Name: "read-block-notice", Do: func(e scenario.Env) error {
+			if err := facts.RecvAndAck(e, e.Agent("sender")); err != nil {
+				return err
+			}
+			blocking, blocked = false, true
+			return nil
+		}},
 		{Name: "restore-prompt", Do: func(e scenario.Env) error {
 			c, err := e.Adapter("chat")
 			if err != nil {
@@ -330,6 +327,16 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 		}},
 		{Name: "read", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)) }},
 	}}, Drain: func(e scenario.Env) error {
+		if blocking {
+			e.Advance(handoff.DefaultBlockedThreshold + time.Second)
+			if err := e.Quiesce(); err != nil {
+				return err
+			}
+			if err := drainFeedback(e, facts, "sender"); err != nil {
+				return err
+			}
+			blocking, blocked = false, true
+		}
 		c, err := e.Adapter("chat")
 		if err != nil {
 			return err
@@ -347,7 +354,8 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 		}
 		return drainFeedback(e, facts, "sender")
 	}, Check: func(e scenario.Env) error {
-		if message != "" {
+		if blocked {
+			facts.RequireFeedback(message, session.address, delivery.KindDeliveryBlocked)
 			facts.RequireFeedback(message, session.address, delivery.KindBlockedRecovered)
 		}
 		return facts.Check(e)

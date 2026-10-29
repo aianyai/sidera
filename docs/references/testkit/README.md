@@ -591,3 +591,20 @@ supply the additional second-generation interruptions through shared source
 analysis; the recipes do not assign them Recovery ownership or add fixed counts.
 Their repeatable drains preserve already-executed clock advances, so a second
 crash does not skip the actual unread notice's lifetime.
+
+Recovery-creation acceptance retains actual successful control results and reads
+their public status. A validated creation reply supplies the initial message's
+session target; the external creation attempt must confirm a native session for
+a created outcome. The requested body must appear there with that control's
+identifier, or the sender must have received the corresponding terminal notice.
+An absent reply requires both a terminal control result and actual feedback for
+the runtime target. Final disk convergence remains an additional audit.
+
+Interrupted acceptance scripts distinguish completed calls from future steps.
+A successful registration does not imply a declaration was requested. A session
+send owes its body immediately, while blocked/recovered feedback is required
+only for a blocking phase that began; an interrupted blocking phase is finished
+before delivery is restored. Lifecycle drains receive and acknowledge pending
+session messages, or obtain the real feedback caused by a requested closure.
+Ordinary session resolution captures evidence while its source exists, so later
+retention does not create a dependency on an already removed status record.

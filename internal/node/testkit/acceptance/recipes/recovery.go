@@ -76,6 +76,7 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 			budget = 111
 			cases = recoveryCases(crashwalk.CorruptOffline("creating-control", "unreadable"), "quarantine/session.create", "quarantine/session.write", "quarantine/session.rename")
 		}
+		facts := &DeliveryEvidence{}
 		out = append(out, ScriptRecipe{Script: scenario.Script{Name: name, Setup: scenario.Setup{Direct: []string{"sender", "receiver"}}, Crash: scenario.CrashPlan{MaxPoints: budget, Recovery: cases}, Steps: []scenario.Step{{Name: "create", Do: func(e scenario.Env) error {
 			rt, err := e.Runtime()
 			if err != nil {
@@ -96,9 +97,15 @@ func recoveryRecipes(b Bindings) []ScriptRecipe {
 					return err
 				}
 			}
-			_, err = e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: "A real initial message."})
+			result, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, "chat"), Signal: adapterproto.SignalSessionCreate, Preset: "default", Body: "A real initial message."})
+			if err == nil {
+				facts.AcceptedCreation(result, "A real initial message.", "sender")
+			}
 			return err
-		}}}}, Drain: recoveryDrain(b, true, &DeliveryEvidence{}), Check: func(e scenario.Env) error {
+		}}}}, Drain: recoveryDrain(b, true, facts), Check: func(e scenario.Env) error {
+			if err := facts.Check(e); err != nil {
+				return err
+			}
 			log, err := e.Ledger()
 			if err != nil {
 				return err

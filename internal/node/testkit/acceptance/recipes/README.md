@@ -162,3 +162,20 @@ obligation. Its bounded drain still receives actual feedback, closes the sender
 and requires all live records and bodies to be gone. Summary presence is required
 only for a returned new message whose resolved target and public Status confirm
 the actual accepted delivery.
+
+Recovery creation retains each successful control result. `DeliveryEvidence`
+reads its public status and validated creation reply, associates the reply's
+session with external creation-attempt evidence, and requires the requested
+initial body at that session or its actual terminal feedback. A control without
+a reply must have a terminal public result and matching runtime feedback. These
+checks precede the additional disk-convergence audit. The shared creation-result
+reader also serves the ordinary session resolver; resolved body evidence remains
+valid after retention removes the source record.
+
+An interrupted script owes only operations it actually reached. Registration
+checks a declaration only after its successful call. The blocked-session drain
+finishes a blocking period only when that phase began, then restores delivery;
+both blocked notices remain mandatory for a completed blocking phase. A send
+before that phase still owes its accepted body. The lifecycle drain receives and
+acknowledges pending session bodies until closure has been requested, when real
+closure feedback can discharge the outstanding delivery instead.

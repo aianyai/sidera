@@ -39,18 +39,28 @@ func sendBody(facts *DeliveryEvidence, from, to, body string) func(scenario.Env)
 }
 
 func registrationRecipe() ScriptRecipe {
+	var registered, declared bool
 	return ScriptRecipe{Script: scenario.Script{Name: "delivery-register-declare", Crash: scenario.CrashPlan{MaxPoints: 17}, Steps: []scenario.Step{
-		{Name: "register", Do: func(e scenario.Env) error { _, err := e.Direct("declared"); return err }},
+		{Name: "register", Do: func(e scenario.Env) error {
+			_, err := e.Direct("declared")
+			registered = err == nil
+			return err
+		}},
 		{Name: "declare", Do: func(e scenario.Env) error {
 			hidden := true
-			return e.Agent("declared").Declare(e.Ctx(), fakeagent.DeclareInput{HiddenFromDirectory: &hidden})
+			err := e.Agent("declared").Declare(e.Ctx(), fakeagent.DeclareInput{HiddenFromDirectory: &hidden})
+			declared = err == nil
+			return err
 		}},
 	}}, Check: func(e scenario.Env) error {
+		if !registered {
+			return nil
+		}
 		me, err := e.Agent("declared").Me(e.Ctx())
 		if err != nil {
 			return err
 		}
-		if !me.Declaration.HiddenFromDirectory {
+		if declared && !me.Declaration.HiddenFromDirectory {
 			return fmt.Errorf("declaration was not applied")
 		}
 		return nil

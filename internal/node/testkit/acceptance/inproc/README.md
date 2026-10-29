@@ -94,3 +94,9 @@ named preparation arms recoverable create failures in the current process's
 existing fault wrapper; it does not hold transport reports or manufacture state.
 A negative test moves the real periodic sweep beyond the bounded drain and
 requires the domain audit to reject the retained body and records.
+
+Partial-progress regression checks interrupt registration, a session send before
+blocking, and a lifecycle send before its prompt interval. They use the existing
+backend's actual step boundaries and retain every successful send's body
+obligation. Recovery creation also judges the successful control's initial body
+through public status, its real session target and external model evidence.

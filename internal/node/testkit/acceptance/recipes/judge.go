@@ -22,12 +22,18 @@ type feedbackRef struct {
 	kind      delivery.Kind
 }
 
+type creationObligation struct {
+	result       fakeagent.SendResult
+	sender, body string
+}
+
 // DeliveryEvidence relates successful calls to externally visible bodies and
 // actual system notices. The zero value belongs to one backend run only.
 type DeliveryEvidence struct {
-	accepted []deliveryObligation
-	notices  map[feedbackRef]adapterproto.MessageID
-	required []feedbackRef
+	accepted  []deliveryObligation
+	notices   map[feedbackRef]adapterproto.MessageID
+	required  []feedbackRef
+	creations []creationObligation
 }
 
 // Accepted records only a call that returned success, never a guessed identifier
@@ -36,6 +42,71 @@ func (d *DeliveryEvidence) Accepted(r fakeagent.SendResult, body string) {
 	for _, recipient := range r.To {
 		d.accepted = append(d.accepted, deliveryObligation{r.MessageID, recipient, body})
 	}
+}
+
+// AcceptedCreation retains the actual successful control result. Its initial
+// body targets the session named by the public reply, not the runtime address.
+func (d *DeliveryEvidence) AcceptedCreation(r fakeagent.SendResult, body, sender string) {
+	d.creations = append(d.creations, creationObligation{r, sender, body})
+}
+
+type creationResult struct {
+	status                    fakeagent.StatusResult
+	endpoint, address, native string
+}
+
+// readCreation associates only a public creation reply with the external native
+// creation. Record scans cannot establish either the reply or body visibility.
+func readCreation(e scenario.Env, sender, runtime string, message adapterproto.MessageID) (creationResult, error) {
+	status, err := e.Agent(sender).Status(e.Ctx(), fakeagent.StatusInput{MessageID: message})
+	if err != nil {
+		return creationResult{}, err
+	}
+	r := creationResult{status: status}
+	if status.ControlReply == nil {
+		return r, nil
+	}
+	if err := status.ControlReply.Validate(); err != nil {
+		return r, err
+	}
+	if status.ControlReply.Signal != adapterproto.SignalSessionCreate || status.ControlReply.Create == nil {
+		return r, fmt.Errorf("creation %s has another control reply: %+v", message, status.ControlReply)
+	}
+	reply := status.ControlReply.Create
+	if reply.SessionEndpoint == "" {
+		return r, nil
+	}
+	r.endpoint = string(reply.SessionEndpoint)
+	address, err := ident.ParseAddress(runtime)
+	if err != nil {
+		return r, err
+	}
+	endpoint, err := ident.ParseEndpointID(r.endpoint)
+	if err != nil {
+		return r, err
+	}
+	r.address = ident.Address{Node: address.Node, Endpoint: endpoint}.String()
+	if reply.Outcome != adapterproto.CreateReplyCreated {
+		return r, nil
+	}
+	log, err := e.Ledger()
+	if err != nil {
+		return r, err
+	}
+	for _, received := range log.Kind(ledger.KindSessionCreateReceived) {
+		if received.Attrs.Endpoint != r.endpoint {
+			continue
+		}
+		for _, created := range log.Kind(ledger.KindRuntimeSessionCreated) {
+			if created.Attrs.Attempt == received.Attrs.Attempt {
+				r.native = created.Attrs.NativeRef
+			}
+		}
+	}
+	if r.native == "" {
+		return r, fmt.Errorf("created reply %s has no real native creation", r.endpoint)
+	}
+	return r, nil
 }
 
 func (d *DeliveryEvidence) RequireFeedback(message adapterproto.MessageID, recipient string, kind delivery.Kind) {
@@ -167,7 +238,53 @@ func (d *DeliveryEvidence) Check(e scenario.Env) error {
 	if err != nil {
 		return err
 	}
-	for _, obligation := range d.accepted {
+	accepted := append([]deliveryObligation(nil), d.accepted...)
+	for _, creation := range d.creations {
+		if len(creation.result.To) != 1 {
+			return fmt.Errorf("creation %s resolved %d runtime recipients", creation.result.MessageID, len(creation.result.To))
+		}
+		runtime := creation.result.To[0]
+		r, err := readCreation(e, creation.sender, runtime, creation.result.MessageID)
+		if err != nil {
+			return err
+		}
+		if r.status.ControlReply == nil {
+			// Without a committed reply even the outcome of the control is unknown.
+			// It still owes a real notice naming that exact control and runtime.
+			var kinds []delivery.Kind
+			for _, recipient := range r.status.Recipients {
+				if string(recipient.To) == runtime {
+					switch recipient.State {
+					case adapterproto.DeliveryRejected:
+						kinds = []delivery.Kind{delivery.KindRejected}
+					case adapterproto.DeliveryExpiredUnconfirmed:
+						kinds = []delivery.Kind{delivery.KindExpiredUnconfirmed}
+					case adapterproto.DeliveryUnknown:
+						kinds = []delivery.Kind{delivery.KindDeliveryUnknown, delivery.KindLostAtSender, delivery.KindLostAtTarget}
+					case adapterproto.DeliveryClosedUnconfirmed:
+						kinds = []delivery.Kind{delivery.KindExpiredUnconfirmed, delivery.KindAcceptedUnconfirmed, delivery.KindDeliveryUnknown, delivery.KindLostAtSender, delivery.KindLostAtTarget}
+					}
+				}
+			}
+			if !d.hasNotice(creation.result.MessageID, runtime, kinds...) {
+				return fmt.Errorf("creation %s has no control reply with corresponding terminal feedback: %+v", creation.result.MessageID, r.status)
+			}
+			continue
+		}
+		controlDelivered := false
+		for _, recipient := range r.status.Recipients {
+			if string(recipient.To) == runtime && recipient.State == adapterproto.DeliveryDelivered {
+				controlDelivered = true
+			}
+		}
+		if !controlDelivered {
+			return fmt.Errorf("creation %s reply has no delivered control result: %+v", creation.result.MessageID, r.status)
+		}
+		if creation.body != "" && r.address != "" {
+			accepted = append(accepted, deliveryObligation{creation.result.MessageID, r.address, creation.body})
+		}
+	}
+	for _, obligation := range accepted {
 		visible := false
 		target, err := ident.ParseAddress(obligation.recipient)
 		if err != nil {
@@ -182,14 +299,7 @@ func (d *DeliveryEvidence) Check(e scenario.Env) error {
 		if visible {
 			continue
 		}
-		terminal := false
-		for _, kind := range []delivery.Kind{delivery.KindRejected, delivery.KindExpiredUnconfirmed, delivery.KindDeliveryUnknown, delivery.KindLostAtSender, delivery.KindLostAtTarget, delivery.KindAcceptedUnconfirmed} {
-			if _, ok := d.notices[feedbackRef{obligation.message, obligation.recipient, kind}]; ok {
-				terminal = true
-				break
-			}
-		}
-		if !terminal {
+		if !d.hasNotice(obligation.message, obligation.recipient, delivery.KindRejected, delivery.KindExpiredUnconfirmed, delivery.KindDeliveryUnknown, delivery.KindLostAtSender, delivery.KindLostAtTarget, delivery.KindAcceptedUnconfirmed) {
 			return fmt.Errorf("accepted message %s to %s has no visible body or corresponding loss feedback", obligation.message, obligation.recipient)
 		}
 	}
@@ -199,4 +309,13 @@ func (d *DeliveryEvidence) Check(e scenario.Env) error {
 		}
 	}
 	return nil
+}
+
+func (d *DeliveryEvidence) hasNotice(message adapterproto.MessageID, recipient string, kinds ...delivery.Kind) bool {
+	for _, kind := range kinds {
+		if _, ok := d.notices[feedbackRef{message, recipient, kind}]; ok {
+			return true
+		}
+	}
+	return false
 }
