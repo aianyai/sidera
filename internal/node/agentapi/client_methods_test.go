@@ -142,6 +142,8 @@ func TestClientRejectsInvalidAckItemsWithoutAcknowledgingThePage(t *testing.T) {
 		items string
 	}{
 		{"typed empty", ""},
+		{"call struct empty", ""},
+		{"call pointer empty", ""},
 		{"raw empty", `[]`},
 		{"raw null", `null`},
 		{"raw empty item", `[{}]`},
@@ -171,9 +173,14 @@ func TestClientRejectsInvalidAckItemsWithoutAcknowledgingThePage(t *testing.T) {
 			if len(page.Messages) != 1 || page.Messages[0].ID != sent.MessageID {
 				t.Fatalf("initial page: %+v", page)
 			}
-			if tc.items == "" {
+			switch tc.name {
+			case "typed empty":
 				_, err = c.Ack(h.Ctx(), agentapi.AckRequest{Lease: page.Lease, Items: []adapterproto.PartRef{}})
-			} else {
+			case "call struct empty":
+				_, err = c.Call(h.Ctx(), "ack", agentapi.AckRequest{Lease: page.Lease, Items: []adapterproto.PartRef{}})
+			case "call pointer empty":
+				_, err = c.Call(h.Ctx(), "ack", &agentapi.AckRequest{Lease: page.Lease, Items: []adapterproto.PartRef{}})
+			default:
 				items := strings.ReplaceAll(tc.items, "%s", string(sent.MessageID))
 				_, err = c.Call(h.Ctx(), "ack", json.RawMessage(`{"lease":"`+string(page.Lease)+`","items":`+items+`}`))
 			}

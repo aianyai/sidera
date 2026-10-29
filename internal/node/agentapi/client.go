@@ -55,6 +55,13 @@ func (c *Client) Probe(ctx context.Context, frontend adapterproto.Frontend) (Pro
 	}{frontend})
 }
 
+// ackWireRequest preserves an explicit empty list, which the server must reject
+// rather than interpreting as a whole-page acknowledgement.
+type ackWireRequest struct {
+	Lease adapterproto.LeaseRef  `json:"lease"`
+	Items []adapterproto.PartRef `json:"items,omitzero"`
+}
+
 // Call preserves the supplied JSON members, including explicit empty values.
 // Input supports json.RawMessage or ordinary structs, string-key maps, slices,
 // pointers, interfaces and JSON scalars; other custom marshalers are unsupported.
@@ -86,6 +93,12 @@ func (c *Client) call(ctx context.Context, method string, in any) (any, error) {
 		decode = clientDecodePage
 	case "ack":
 		decode = clientDecode[AckResult]
+		switch request := in.(type) {
+		case AckRequest:
+			in = ackWireRequest(request)
+		case *AckRequest:
+			in = (*ackWireRequest)(request)
+		}
 	case "status":
 		decode = clientDecode[adapterproto.MessageStatusResult]
 	case "control":

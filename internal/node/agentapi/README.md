@@ -81,10 +81,11 @@ Unknown methods fail locally with `not_found/method_unknown`. Only `probe` uses
 Object encoding follows its JSON tags. Existing typed requests keep their
 optional scalar zero-as-omitted behavior, including an empty `ControlRequest.Body`.
 To express presence, use `Call` with raw JSON, a map containing the member, or a
-caller-owned struct whose fields and tags retain it. The typed `Ack` method
-distinguishes nil `Items` (whole page) from a non-nil empty slice (explicit `[]`,
-rejected by the server without acknowledgement). Its private encoding leaves
-the server's request type and presence rules unchanged.
+caller-owned struct whose fields and tags retain it. For `ack`, both the typed
+`Ack` method and `Call` with `AckRequest` or `*AckRequest` share a private wire
+shape: nil `Items` means the whole page, while a non-nil empty slice sends
+explicit `[]`, rejected by the server without acknowledgement. This encoding
+leaves the server's request type and presence rules unchanged.
 
 Successful `Call` results have these concrete Go types. Every response is
 strictly decoded before success; `recv` returns its original bytes after that

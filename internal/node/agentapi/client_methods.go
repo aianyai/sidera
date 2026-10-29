@@ -39,12 +39,7 @@ func (c *Client) Recv(ctx context.Context, in RecvRequest) ([]byte, error) {
 
 // Ack acknowledges this endpoint's page or the explicitly named parts.
 func (c *Client) Ack(ctx context.Context, in AckRequest) (AckResult, error) {
-	// Nil means the whole page. A non-nil empty list must reach the server as
-	// an explicit empty list, where it is rejected without confirming anything.
-	return clientResult[AckResult](c, ctx, "ack", struct {
-		Lease adapterproto.LeaseRef  `json:"lease"`
-		Items []adapterproto.PartRef `json:"items,omitzero"`
-	}{in.Lease, in.Items})
+	return clientResult[AckResult](c, ctx, "ack", in)
 }
 
 // Reply answers a message received by this endpoint, to its original sender.

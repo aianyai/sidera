@@ -254,10 +254,12 @@ deadlines and strict successful-result decoding.
 Struct encoding follows its JSON tags. Existing typed optional scalar fields
 still use zero for omission, including an empty typed control body. Callers
 that need explicit emptiness use raw JSON, a map with that member, or their own
-struct fields and tags that preserve it. The typed `Ack` method alone uses a
-private encoding where nil `Items` omits the member and a non-nil empty slice
-sends `[]`; the server rejects the latter without confirming any messages.
-The server's request DTOs and strict presence rules are unchanged.
+struct fields and tags that preserve it. For `ack`, the typed `Ack` method and
+`Call` with `AckRequest` or `*AckRequest` share a private wire shape where nil
+`Items` omits the member and a non-nil empty slice sends `[]`; the server rejects
+the latter without confirming any messages. Otherwise, omitting an explicitly
+empty list would silently acknowledge the whole page. The server's request DTOs
+and strict presence rules are unchanged.
 
 `Call` returns the following concrete Go result types after complete strict
 decoding. `recv` is validated as a page but returned as the original `[]byte`,
@@ -314,6 +316,6 @@ adapter acknowledges on the model's behalf identical across tool front ends.
 while retaining enabling, Bearer syntax and the ordering of body reads.
 `methods.go` owns endpoint request/result types and conversion to the
 engine service. `client.go` owns the shared method dispatch, credential selection,
-receive deadlines and result decoding, using `localhttp` for safe encoding,
-checked dialing and transport outcomes. `client_methods.go` supplies the typed
-endpoint wrappers, including the private acknowledgement encoding.
+private acknowledgement encoding, receive deadlines and result decoding, using
+`localhttp` for safe encoding, checked dialing and transport outcomes.
+`client_methods.go` supplies the typed endpoint wrappers.
