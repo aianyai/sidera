@@ -472,3 +472,8 @@ columns. Each recorded key retains its scenario, complete trigger, generation an
 normalized path operands in diagnostics; the derived Normal interruptions have
 the same exact-cutoff and convergence checks as Recovery interruptions and their
 own count.
+An instance-disable source interrupts the first endpoint rewrite after the
+configuration has disabled the instance. Its restart supplies a nonempty drain
+batch, reaching Normal declarations that the ordinary disable path delegates to
+per-endpoint drains. Those keys are discovered from the complete second window,
+then interrupted separately; their declaration kind stays Normal.

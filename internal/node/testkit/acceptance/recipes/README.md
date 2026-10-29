@@ -48,7 +48,7 @@ Recovery delivery variants use `DeliveryEvidence` for accepted-body obligations,
 loss notices and acknowledgement evidence. Their drains release held adapter
 requests and associate real creation requests with native creation confirmations
 by attempt, then receive through the resulting session agent. Final disk audits
-check recovery work, terminal deliveries and control records, and the original
+check recovery work, queued or accepted deliveries and control records, and the original
 quarantined creating session's closed state and cleared token.
 The installation recipe installs a package, observes two recoverable pointer
 failures with successful and failed version cleanup, and retries through the real
@@ -76,3 +76,15 @@ transaction roles, whose observation source is reported separately.
 The management recordings have 16, 25, 4, 7, 55 and 130 main points for settings,
 maintenance, stop, retirement, endpoint close and instance disable/enable. Their
 fixed budgets are 24, 38, 6, 11, 83 and 195 respectively.
+
+The instance-management recipe also records a crash after the disabled
+configuration is stored but before its first endpoint rewrite. Recovery then
+closes the instance and drains its pending delivery and control records in the
+same Normal transaction. Its extra trigger owns no Recovery declaration; the
+observed Normal difference from all clean recordings determines the additional
+interruptions.
+
+A delivery that remains correctable may end the drain as `delivery_unknown`; its
+matching actual system notice is evidence of the uncertainty. Instance management
+requires that notice for the held creation as well as the pending message. Final
+audits reject queued or accepted work and never infer feedback from disk state.

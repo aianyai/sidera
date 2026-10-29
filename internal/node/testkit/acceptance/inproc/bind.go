@@ -27,7 +27,7 @@ func bindCatalog(t testing.TB) []crashwalk.Scenario {
 		if r.Check != nil {
 			s.Check = func(h *harness.H) error { return r.Check(h) }
 		}
-		configureRecoveryScenario(s)
+		configureRecoveryScenario(s, len(r.RecoveryTriggers) != 0)
 		out = append(out, s)
 	}
 	for _, r := range catalog.Startups {

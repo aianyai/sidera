@@ -57,3 +57,7 @@ scan to the requested endpoint, instance or alert facts. They do not write state
 The instance preparation uses the existing extra-instance fixture and real
 registration, send and held session-create calls; its sender remains enabled so
 failure feedback is received and acknowledged through the ordinary agent API.
+Additional recovery-record sources retain their domain checks and receive the
+same final owner-predicate audit as recovery recipes. The instance-disable
+recording therefore proves the pending records converge as well as the visible
+management result and feedback.

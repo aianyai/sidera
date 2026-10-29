@@ -24,7 +24,18 @@ func recoveryBindings() recipes.RecoveryOps {
 	return recipes.RecoveryOps{CheckClosedRecords: func(e scenario.Env) error { return checkRecoveryClosed(e.(*harness.H)) }}
 }
 
-func configureRecoveryScenario(s *harness.WalkScenario) {
+func configureRecoveryScenario(s *harness.WalkScenario, extraRecovery bool) {
+	if extraRecovery {
+		domainCheck := s.Check
+		s.Check = func(h *harness.H) error {
+			if domainCheck != nil {
+				if err := domainCheck(h); err != nil {
+					return err
+				}
+			}
+			return checkRecoveryClosed(h)
+		}
+	}
 	if !strings.HasPrefix(s.Name(), "recovery-") {
 		return
 	}
@@ -174,12 +185,12 @@ func checkRecoveryClosed(h *harness.H) error {
 		}
 	}
 	for _, c := range sc.Ctl {
-		if !c.Record.State.IsTerminal() {
+		if c.Record.State == delivery.StateQueued || c.Record.State == delivery.StateAccepted {
 			return fmt.Errorf("unsettled control %s", c.Record.State)
 		}
 	}
 	for _, in := range sc.In {
-		if !in.Record.State.IsTerminal() {
+		if in.Record.State == delivery.StateQueued || in.Record.State == delivery.StateAccepted {
 			return fmt.Errorf("unsettled target %+v", in)
 		}
 	}

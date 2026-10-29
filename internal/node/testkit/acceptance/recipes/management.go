@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/delivery"
+	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/testkit/crashwalk"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
@@ -386,7 +389,12 @@ func managementInstance(b Bindings) ScriptRecipe {
 				return err
 			}
 			facts.Accepted(out, "Disable this instance with pending deliveries.")
-			_, err = e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, instance), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
+			control, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, instance), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
+			if err == nil {
+				for _, to := range control.To {
+					facts.RequireFeedback(control.MessageID, to, delivery.KindDeliveryUnknown)
+				}
+			}
 			return err
 		}},
 		r.step("instance", "disable-instance", 71, func(v ManagementVersions) admin.Version { return v.Instances }, ops, func(e scenario.Env, q ManagementRequest) (ManagementOutcome, error) {
@@ -406,7 +414,7 @@ func managementInstance(b Bindings) ScriptRecipe {
 		}),
 	}
 	var drainRequest ManagementRequest
-	return ScriptRecipe{Script: scenario.Script{Name: "management-instance", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 195}, Steps: steps}, Drain: func(e scenario.Env) error {
+	return ScriptRecipe{RecoveryTriggers: []crashwalk.Trigger{crashwalk.CrashAt(fsx.Point{Key: fsx.Key{Tag: fsx.Tag{Tx: "instance-drain", Role: "endpoint"}, Step: fsx.StepCreate}, Hit: 1})}, Script: scenario.Script{Name: "management-instance", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 195}, Steps: steps}, Drain: func(e scenario.Env) error {
 		if err := r.drain(e); err != nil {
 			return err
 		}
