@@ -129,3 +129,12 @@ gone, then remove those files after archive retention. `MaintenanceOps` returns
 only these final facts from a read-only audit. A drain interrupted before the
 sweep resumes from external creation results and performs bounded retention
 advances. Its 140-point recording has a fixed budget of 210.
+
+A separate control-expiry variant fails the first create-result replacement at
+its recoverable create point. The control reaches its report deadline before a
+reply can commit, so it closes unconfirmed and the actual sender must read the
+exact uncertainty notice for the runtime target. The owner closes the alerted
+creating endpoint through management. Final checks require its unique real
+`control_unknown` alert, cleared token, no native creation and no active records.
+This is distinct from a timeout reply that was committed successfully. Its
+59-point recording has a fixed budget of 89.

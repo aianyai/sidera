@@ -17,14 +17,16 @@ import (
 
 // SessionOps binds only session operations missing from scenario.Env.
 type SessionOps struct {
-	RuntimeAddr        func(scenario.Env, string) string
-	Session            func(scenario.Env, string) fakeagent.Agent
-	CheckpointPut      func(scenario.Env, string, adapterproto.CheckpointPutParams) error
-	CheckClosedSession func(scenario.Env, string) error
+	RuntimeAddr             func(scenario.Env, string) string
+	Session                 func(scenario.Env, string) fakeagent.Agent
+	CheckpointPut           func(scenario.Env, string, adapterproto.CheckpointPutParams) error
+	FailCreateSettlement    func(scenario.Env) error
+	HasUnknownCreationAlert func(scenario.Env, string) (bool, error)
+	CheckClosedSession      func(scenario.Env, string) error
 }
 
 func sessionRecipes(b Bindings) []ScriptRecipe {
-	return []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}, 62), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", nil, 24), sessionExpiryRecipe(b), blockedRecipe(b)}
+	return []ScriptRecipe{sessionLifecycleRecipe(b), failedCreationRecipe(b, "session-create-failure", "default", &fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: string(adapterproto.CreateFailPresetInvalid)}, 62), failedCreationRecipe(b, "session-create-unknown-preset", "unconfigured-preset", nil, 24), sessionExpiryRecipe(b), controlWriteExpiryRecipe(b), blockedRecipe(b)}
 }
 
 type createdSession struct {

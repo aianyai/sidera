@@ -569,3 +569,10 @@ periodic sweep. Read-only evidence requires real intact summaries after live
 records are swept, and no remaining archive files after their retention. Its
 bounded drain completes representative real interruptions without synthesizing
 records, summaries or cleanup effects.
+
+The control-expiry acceptance variant also covers a recoverable failure before
+its create-result replacement becomes visible. If the control's own report
+window closes before a reply commits, its sender reads the precise uncertainty
+notice and the owner closes the alerted endpoint through management. The audit
+requires the actual owner alert, closed endpoint, empty token, absence of a native
+creation and drained records, rather than treating those writes alone as success.

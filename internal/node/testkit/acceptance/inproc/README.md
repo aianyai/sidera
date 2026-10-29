@@ -81,3 +81,8 @@ Retention recipes enable the existing periodic archive sweep on the fixture.
 retention facts; malformed archive lines fail the audit. The mutation that omits
 archive expiry must fail, and representative real cuts before and during the
 sweep must still finish the bounded drain and pass its domain judgement.
+
+The control-expiry preparation fails a current-process control-result create
+before any visible replacement. The resulting deadline path is judged through
+real Status and receive results, actual management closure, and the owner alert
+for the endpoint the adapter's real create request named.

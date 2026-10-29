@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
 	"github.com/aianyai/sidera/internal/node/store"
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
@@ -18,6 +20,23 @@ func newSessionOps() recipes.SessionOps {
 		Session:     func(e scenario.Env, endpoint string) fakeagent.Agent { return e.(*harness.H).Session(endpoint) },
 		CheckpointPut: func(e scenario.Env, instance string, p adapterproto.CheckpointPutParams) error {
 			return e.(*harness.H).Engine().CheckpointPut(e.Ctx(), instance, p)
+		},
+		FailCreateSettlement: func(e scenario.Env) error {
+			e.(*harness.H).Faults().Fail(fsxtest.Match{Tx: "control-result", Role: "ctl", Step: fsx.StepCreate, Hit: 1}, fsxtest.DiskFull)
+			return nil
+		},
+		HasUnknownCreationAlert: func(e scenario.Env, endpoint string) (bool, error) {
+			scan, err := e.(*harness.H).Records()
+			if err != nil {
+				return false, err
+			}
+			count := 0
+			for _, alert := range scan.Alerts {
+				if alert.Kind == "control_unknown" && alert.Subject == endpoint {
+					count++
+				}
+			}
+			return count == 1, nil
 		},
 		CheckClosedSession: func(e scenario.Env, endpoint string) error { return checkClosedSession(e.(*harness.H), endpoint) },
 	}
