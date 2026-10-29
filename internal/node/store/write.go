@@ -859,32 +859,6 @@ func PutAdminResult(tx *txn.Tx, role string, p PreparedAdminResult) error {
 	return tx.Replace(role, p.f.path, p.f.data, fsx.ModePrivate)
 }
 
-// ArchiveEvent is one diagnostic event of the archive.
-type ArchiveEvent struct {
-	At    time.Time
-	File  string // the file name hash of the record, 64 hex digits
-	Event string
-	N     *int
-}
-
-// ArchiveEvents appends a batch of events to the archive file of the day of at.
-// Nothing is synced: events are diagnostics, and a later sync of the same
-// file makes them durable.
-func (s *Store) ArchiveEvents(at time.Time, events []ArchiveEvent) error {
-	if len(events) == 0 {
-		return nil
-	}
-	lines := []byte("\n")
-	for _, e := range events {
-		l, err := eventLine(e)
-		if err != nil {
-			return err
-		}
-		lines = append(lines, l...)
-	}
-	return s.appendArchive(&declArchiveEvents, at, lines)
-}
-
 // ArchiveSummaries appends the summaries of records that are about to leave the
 // live files to the archive file of the day of at. It is a transaction of its own,
 // never a part of the sweep: the archive is best effort and nothing reads it back to

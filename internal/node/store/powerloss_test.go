@@ -124,8 +124,8 @@ func (w *powerLossWorld) next() *operation {
 		return &operation{name: "alert-raise", call: func() error { return r.st.AlertRaise(a) },
 			writes: map[string][]byte{path.Join(store.AlertsDir, a.Name()): w.enc(a)}}
 	case 6:
-		return &operation{name: "archive-events", call: func() error {
-			return r.st.ArchiveEvents(base.Add(time.Duration(w.rng(3))*24*time.Hour), []store.ArchiveEvent{eventAccepted(), eventChunk()})
+		return &operation{name: "archive-summaries", call: func() error {
+			return r.st.ArchiveSummaries(base.Add(time.Duration(w.rng(3))*24*time.Hour), []store.ArchiveSummary{summaryDelivered(), summaryQuarantined()})
 		}}
 	case 7:
 		res := adminResult(1 + w.rng(5))
@@ -461,7 +461,7 @@ func TestPowerLossCloneKeepsAcknowledgedWrites(t *testing.T) {
 	}
 	sort.Strings(names)
 	t.Logf("%d clones judged, %d of them in the middle of an operation; an operation in flight was whole in %d judgments and absent in %d; operations: %v", total.clones, total.mid, total.ahead, total.behind, counts)
-	for _, n := range []string{"intake", "deliver", "lease", "ack", "source-update", "endpoint-update", "checkpoint-put", "alert-raise", "archive-events", "daemon-stop", "cross-owner", "archive-sweep"} {
+	for _, n := range []string{"intake", "deliver", "lease", "ack", "source-update", "endpoint-update", "checkpoint-put", "alert-raise", "archive-summaries", "daemon-stop", "cross-owner", "archive-sweep"} {
 		if counts[n] < 6 {
 			t.Errorf("operation %s ran %d times in all, want at least 6: the generator does not cover it", n, counts[n])
 		}

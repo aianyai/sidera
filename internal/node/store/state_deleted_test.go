@@ -62,7 +62,7 @@ func TestMissingStateDirsListsWhatIsMissingParentFirst(t *testing.T) {
 func TestDeletingStateIsALossOfInFlightDataAndNothingMore(t *testing.T) {
 	r := newRig(t)
 	mustDo(t, r.st.Intake(bodyBytes(1), withSeq(1, 41, true)))
-	mustDo(t, r.st.ArchiveEvents(base, []store.ArchiveEvent{eventAccepted()}))
+	mustDo(t, r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered()}))
 	pe, err := store.PrepareEndpoint(directEndpoint(7, "chat"))
 	mustDo(t, err)
 	tx := r.w.Begin(&declXAdmit)

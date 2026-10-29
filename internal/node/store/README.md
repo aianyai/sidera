@@ -33,6 +33,7 @@ engine applies the delivery rules and calls the writes.
 | `CoverOf`, `CoverRef.Covers` | The one constructor of the cover of a feedback item and the one rule by which a cover is matched to an item: the notice's writer, the sweep, the replays and the clearing of the items all call them. |
 | `NewOutLostRecord`, `OutLostKey`, `OutLostReplays`, `Store.OutLostClear` | The notice that a file of `out/` was lost unread, built in one place; the work of the replay that clears its feedback item once a notice covers it, and the write that does. |
 | `PlanSweep`, `SweepPlan.Chunk`, `Store.ArchiveSummaries`, `Store.ArchiveSweep`, `RetainUntil` | What leaves the live files, and how it leaves: the summaries first in a transaction of their own, which the caller logs and goes on without, then the removals. |
+| `ParseArchive`, `Store.ReadArchive` | Read archive summaries, skipping damaged lines and torn tails. |
 | `ExpiredArchiveFiles`, `Store.ArchiveExpire` | The archive files older than a retention given as a duration (the node's setting, read only through `config.NodeSettings.ArchiveRetention`), and their removal. |
 | `Store.CheckpointPut` | The state an adapter asks the node to keep, one file per scope and id. `Store.CheckpointDrop` removes it: the state of a closed session, and the checkpoint of an attempt once it has settled; a key whose checkpoint is not there is dropped without an error, and none being there writes nothing. |
 | `BodyFileName`, `Store.ReadBody`, `Store.Available` | The name of a record's own body file, a body read checked against the digest and length its record holds, and free space. |
@@ -170,6 +171,9 @@ engine applies the delivery rules and calls the writes.
   writes: a read that failed after the commit point would be an ordinary error on
   a disk that already changed.
 - **A removal is checked.** The sweep refuses a name that is not a record file.
+- **The archive holds final record summaries, not diagnostic events.** The
+  summaries keep the final state and its recorded times; no event catalogue or
+  event writer is defined.
 - **A sweep writes nothing to the archive.** The summaries of what it removes are
   `ArchiveSummaries`, a transaction of the caller's choosing and best effort: a sweep
   that waited for them could not run on a full disk, where it is needed. The store

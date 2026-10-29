@@ -51,8 +51,6 @@ func TestEveryMethodRunsItsOwnTransaction(t *testing.T) {
 		}, nil},
 		{"daemon-stop", nil, func(r *rig) error { return r.st.DaemonStop(adminResult(2)) },
 			[]string{path.Join(store.AdminDir, adminResult(2).Name())}},
-		{"archive-events", nil, func(r *rig) error { return r.st.ArchiveEvents(base, []store.ArchiveEvent{eventAccepted()}) },
-			[]string{dayFile}},
 		{"archive-summaries", nil, func(r *rig) error { return r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered()}) },
 			[]string{dayFile}},
 		{"feedback-form", nil, func(r *rig) error {
@@ -234,9 +232,6 @@ func TestRecordsThatCannotBeEncodedAreRefusedBeforeAnyWrite(t *testing.T) {
 		"an endpoint among the records of a sweep": func(r *rig) error {
 			return r.st.ArchiveSweep(store.SweepChunk{Records: []store.FileRef{{Dir: store.EndpointsDir, Name: session(5, store.EndpointClosed, "").Name()}}})
 		},
-		"an archive event without a file": func(r *rig) error {
-			return r.st.ArchiveEvents(base, []store.ArchiveEvent{{At: base, Event: "x"}})
-		},
 		"an archive file name outside the archive": func(r *rig) error {
 			return r.st.ArchiveExpire([]string{"../keys/identity.key"})
 		},
@@ -336,7 +331,7 @@ func TestTheNameOfABodyFileIsTheNameOfItsRecord(t *testing.T) {
 func TestEveryFileIsOwnerOnly(t *testing.T) {
 	r := newRig(t)
 	mustDo(t, r.st.Intake(bodyBytes(1), srcOut(1, true)))
-	mustDo(t, r.st.ArchiveEvents(base, []store.ArchiveEvent{eventAccepted()}))
+	mustDo(t, r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered()}))
 	for p := range snapshot(t, r.mem, store.StateDir) {
 		info, err := r.mem.Stat(p)
 		if err != nil || !info.OwnerOnly {

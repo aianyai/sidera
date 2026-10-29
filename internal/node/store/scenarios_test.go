@@ -671,34 +671,10 @@ func scenarios() []scenario {
 			return r.st.DaemonStop(adminResult(7))
 		}),
 		{
-			// The file already holds a summary that an earlier transaction appended and
-			// a later sync made durable. The append of events is not synced, so what it
-			// leaves is anything from nothing to every line, and a damaged block can
-			// leave any number of broken lines: the reader's number of dropped lines is
-			// not bounded, and the checks do not bound it.
-			name:  "archive-events",
-			setup: seedArchiveDay(archiveLines.summaryDelivered),
-			mode:  batch,
-			run: func(t *testing.T, r *rig, s *sim) error {
-				return r.st.ArchiveEvents(base, []store.ArchiveEvent{eventAccepted(), eventChunk()})
-			},
-			ignore: func(p string) bool { return true }, // events are diagnostics; the check is the reader's, below
-			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
-				data := fin[dayFile]
-				cut, kept := checkTornAppend(t, where, data, archiveLines.summaryDelivered, archiveLines.event, archiveLines.eventN)
-				got := store.ParseArchive([]byte(data))
-				if len(got.Summaries) != 1 || !equalRecords(got.Summaries[0], summaryDelivered()) {
-					t.Errorf("%s: the summary made durable before the append reads as %#v", where, got.Summaries)
-				}
-				checkAppendedRecords(t, where, got.Events, eventAccepted(), eventChunk())
-				if cut && (got.Dropped != 0 || len(got.Events) != kept) {
-					t.Errorf("%s: the file is a cut of what was written with %d complete lines of the append, and reads as %d events, %d dropped", where, kept, len(got.Events), got.Dropped)
-				}
-			},
-		},
-		{
+			// A previously synced summary stays intact. The unsynced append can
+			// leave any subset of its lines or arbitrarily many damaged lines.
 			name:  "archive-summaries",
-			setup: seedArchiveDay(archiveLines.event),
+			setup: seedArchiveDay(archiveLines.summaryQuarantined),
 			mode:  batch,
 			run: func(t *testing.T, r *rig, s *sim) error {
 				return r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered(), summaryQuarantined()})
@@ -706,14 +682,14 @@ func scenarios() []scenario {
 			ignore: func(p string) bool { return true }, // summaries are diagnostics; the check is the reader's, below
 			extra: func(t *testing.T, where string, crashed, fin map[string]string) {
 				data := fin[dayFile]
-				cut, kept := checkTornAppend(t, where, data, archiveLines.event, archiveLines.summaryDelivered, archiveLines.summaryQuarantined)
+				cut, kept := checkTornAppend(t, where, data, archiveLines.summaryQuarantined, archiveLines.summaryDelivered, archiveLines.summaryQuarantined)
 				got := store.ParseArchive([]byte(data))
-				if len(got.Events) != 1 || !equalRecords(got.Events[0], eventAccepted()) {
-					t.Errorf("%s: the event made durable before the append reads as %#v", where, got.Events)
+				if len(got.Summaries) == 0 || !equalRecords(got.Summaries[0], summaryQuarantined()) {
+					t.Fatalf("%s: the summary made durable before the append reads as %#v", where, got.Summaries)
 				}
-				checkAppendedRecords(t, where, got.Summaries, summaryDelivered(), summaryQuarantined())
-				if cut && (got.Dropped != 0 || len(got.Summaries) != kept) {
-					t.Errorf("%s: the file is a cut of what was written with %d complete lines of the append, and reads as %d summaries, %d dropped", where, kept, len(got.Summaries), got.Dropped)
+				checkAppendedRecords(t, where, got.Summaries[1:], summaryDelivered(), summaryQuarantined())
+				if cut && (got.Dropped != 0 || len(got.Summaries)-1 != kept) {
+					t.Errorf("%s: the file is a cut of what was written with %d complete lines of the append, and reads as %d summaries, %d dropped", where, kept, len(got.Summaries)-1, got.Dropped)
 				}
 			},
 		},
@@ -723,7 +699,7 @@ func scenarios() []scenario {
 			name: "archive-expire",
 			setup: func(t *testing.T, mem *fsxtest.Mem) {
 				for _, n := range []string{"2026-09-01.jsonl", "2026-09-02.jsonl", "2026-10-24.jsonl"} {
-					seedRaw(t, mem, store.ArchiveDir, n, []byte("\n"+archiveLines.event))
+					seedRaw(t, mem, store.ArchiveDir, n, []byte("\n"+archiveLines.summaryQuarantined))
 				}
 			},
 			durable: "archive-expire/dir.sync-dir#1",

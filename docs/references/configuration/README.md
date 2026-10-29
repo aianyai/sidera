@@ -112,7 +112,7 @@ patch is merged into the current settings and the result is validated whole.
 
 **The reserve rule.** `disk_reserve_bytes ≥ log_total_bytes + 4 KiB ×
 node_queue_limit` (`config.OpenDeliveryDiskGrowth`). An unfinished delivery adds
-its archive summary and events, and the feedback notification it may cause,
+its archive summary and the feedback notification it may cause,
 before it is finished; with the logs that is what can still be written after the
 reserve is reached, and the reserve must hold it. With the defaults the sum is
 about 190 MiB, under the 256 MiB reserve; with the default logs and reserve the

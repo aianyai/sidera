@@ -271,7 +271,7 @@ func runScenario(t *testing.T, sc *scenario, sink *coverageSink, seed uint64) sc
 	if sc.verify != nil {
 		sc.verify(t, ref)
 	}
-	if equalMaps(sc.filter(before), sc.filter(after), nil) == "" && !strings.HasPrefix(sc.name, "archive-events") && !strings.HasPrefix(sc.name, "archive-summaries") {
+	if equalMaps(sc.filter(before), sc.filter(after), nil) == "" && !strings.HasPrefix(sc.name, "archive-summaries") {
 		t.Fatalf("the workflow changes nothing: the scenario proves nothing")
 	}
 	st.points = ref.rec.count()

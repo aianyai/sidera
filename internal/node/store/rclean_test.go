@@ -135,8 +135,8 @@ func TestCleanScenariosLeaveNoRecoveryWork(t *testing.T) {
 	// The rest of the single-file writes, then the sweep and an acknowledged alert.
 	mustDo(t, r.st.CheckpointPut(store.CheckpointRecord{Key: store.CheckpointKey{Scope: "session", ID: ep(5).String()}, State: []byte(`{}`)}))
 	mustDo(t, r.st.AlertRaise(store.AlertRecord{ID: store.AlertID{1}, Kind: "version_untested", At: base, Detail: "d"}))
-	mustDo(t, r.st.ArchiveEvents(base, []store.ArchiveEvent{eventAccepted()}))
-	check("checkpoint, alert, events")
+	mustDo(t, r.st.ArchiveSummaries(base, []store.ArchiveSummary{summaryDelivered()}))
+	check("checkpoint, alert, summaries")
 	sc := r.scan()
 	plan := store.PlanSweep(sc, base.Add(farAway))
 	if len(plan.Records)+len(plan.Outs) == 0 {

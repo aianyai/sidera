@@ -136,7 +136,6 @@ var (
 	// again, which costs space and no record, so no rule finishes it.
 	declCheckpointDrop = txn.Decl{Name: "checkpoint-drop", Kind: txn.Normal, Writes: []txn.Write{rm("checkpoint", many), syncDir("checkpoint-dir")}}
 	declAlertRaise     = txn.Decl{Name: "alert-raise", Kind: txn.Normal, Writes: []txn.Write{rep("alert")}}
-	declArchiveEvents  = txn.Decl{Name: "archive-events", Kind: txn.Normal, Writes: []txn.Write{w("archive", txn.OpAppend, many)}}
 	// archive-summaries: the summaries of the records a sweep is about to remove, in a
 	// transaction of their own so that a failure to append them is the caller's to
 	// log and never stops the sweep that frees the space.
@@ -197,7 +196,7 @@ func Transactions() []*txn.Decl {
 		&declControlResult, &declControlReply, &declPromptBegin, &declPromptEnd, &declBlocked,
 		&declLease, &declAck, &declTick, &declEndpointUpdate, &declEndpointClose,
 		&declEndpointDrain, &declInstanceDrain, &declFeedbackForm, &declFeedbackClear,
-		&declCheckpointPut, &declCheckpointDrop, &declAlertRaise, &declArchiveEvents, &declArchiveSummaries, &declArchiveSweep,
+		&declCheckpointPut, &declCheckpointDrop, &declAlertRaise, &declArchiveSummaries, &declArchiveSweep,
 		&declArchiveExpire, &declAlertAck, &declDaemonStop,
 		&declQuarantine, &declOrphanGC, &declOrphanGCEndpoint, &declCtlEffectReplay, &declDerivedReplay,
 	}

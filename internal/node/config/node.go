@@ -22,7 +22,7 @@ const (
 	// DefaultArchiveRetentionDays is how long the archive keeps its summaries.
 	DefaultArchiveRetentionDays = 30
 	// OpenDeliveryDiskGrowth is what an unfinished delivery adds to the disk
-	// before it is finished and archived: its summary, its events and the
+	// before it is finished and archived: its summary and the
 	// feedback it may give rise to. The disk reserve must cover this for as many
 	// deliveries as the queue holds, plus the logs.
 	OpenDeliveryDiskGrowth = 4 << 10

@@ -31,7 +31,7 @@ make a write durable are functions over any `FS`, not methods of it:
 | --------- | --------------- | -------- |
 | `Replace` | `create`, `write`, `sync`, `rename`, `sync-dir` | every single-file replacement: records, configuration, keys, manifests |
 | `ReplaceDeferred` | `create`, `write`, `sync`, `rename`; no `sync-dir` | several files of one directory, made durable together by one `SyncDir` after the last of them |
-| `OpenAppend`, `Append` | `open` once, then `write` per call; no sync | appended event and digest files |
+| `OpenAppend`, `Append` | `open` once, then `write` per call; no sync | appended archive summaries |
 | `SyncFile` | `sync` (on the handle that appended), `sync-dir` | making a batch of appends durable |
 | `RenameFile` | `rename`, `sync-dir` | no transaction of the store declares it |
 | `Remove` | `remove` | one deletion; a batch of them is followed by one `SyncDir` |
@@ -419,11 +419,10 @@ see (`Tx.run` sets it at the first such completion, whatever the writes before i
 | `SyncDir` (a write of its own) | `sync-dir` |
 | `Append` | none |
 
-A write without a commit step does not commit. `archive-events` and
-`archive-summaries` only append, with no sync that follows, so they have no commit
-point and a failure of either never becomes fatal by this rule. `archive-sweep`
-writes nothing to the archive: its commit point is the first sequence floor or
-removal.
+A write without a commit step does not commit. `archive-summaries` only appends,
+with no sync that follows, so it has no commit point and its failure never becomes
+fatal by this rule. `archive-sweep` writes nothing to the archive: its commit
+point is the first sequence floor or removal.
 
 Before it, a failure has the class `fsx` gave it. From it on, every failure, in
 the same operation or in a later write, is `Fatal`: the disk is in one of the
@@ -580,7 +579,7 @@ state/
   admin/<h>.rec        result and fingerprint of an administrative operation
   alerts/<h>.rec       owner alerts
   seq/<h>.rec          sequence floors of one sending endpoint
-  archive/<date>.jsonl summaries and events of records that left the live files
+  archive/<date>.jsonl summaries of records that left the live files
 ```
 
 `<h>` is the SHA-256 of the kind, a space and the key, in lowercase hex. The
@@ -1088,8 +1087,12 @@ damaged file as the scan lists it, so that the caller settles it by the usual ru
 and tries again. The scan lists floor files first for that reason. Deleting
 `state/` starts every pair at 1.
 
-**Archive.** A line is `{"crc":"<8 hex>","rec":<compact JSON>}` and a newline; the
-checksum covers the record. A transaction that appends starts with a newline, so
+**Archive.** The archive holds summaries of records that left the live files:
+record kind and key, final state and reason, recorded acceptance, closure and
+delivery times, body size and digest, and quarantine status (`ArchiveSummary`).
+The compact JSON record has `k: "summary"`; no diagnostic event catalogue or
+event records are defined. A line is
+`{"crc":"<8 hex>","rec":<compact JSON>}` and a newline; the checksum covers the record. A transaction that appends starts with a newline, so
 the torn tail a crash leaves, and the half line a failed append leaves in the
 middle of a file, are lines of their own and cannot swallow the first line that
 follows. A reader resumes at every newline, skips empty lines, drops and counts a
@@ -1098,9 +1101,10 @@ cuts an append leaves no dropped line, but a power loss can also damage the byte
 of an append that was not synced, and damaged bytes can hold any number of
 newlines: the number of lines a reader drops after a crash has no bound, and the
 bytes that were synced before the append are never touched
-(`archive-events` and `archive-summaries` of the crash walks). Events are not
-synced, and neither is a summary: the archive is best effort. The summaries of a
-sweep are a transaction of their own, `archive-summaries` (`Store.ArchiveSummaries`),
+(`archive-summaries` of the crash walks).
+
+**Best-effort archive.** Summaries are not synced: the archive is best effort.
+The summaries of a sweep are a transaction of their own, `archive-summaries` (`Store.ArchiveSummaries`),
 which the caller runs before the sweep and does not wait for: a sweep that failed to
 append them would not free the space of a full disk, which is when it is most
 needed, and nothing in the node reads them back to decide anything. The store has no
@@ -1155,11 +1159,9 @@ yet, so the endpoint is not owed a release until that answer arrives. Administra
 results are kept 7 days, acknowledged alerts 7 days after the acknowledgement, and
 archive files for the retention the owner sets (30 days by default; `ExpiredArchiveFiles`
 takes it as a duration and names the files whose date is older, `Store.ArchiveExpire`
-removes them), uncompressed. An archived message costs about 2.4 KiB (two
-summaries and about eight events), so at 3,000 messages an hour, the upper scale
-the design assumes, a day is about 169 MiB and 30 days about 4.9 GiB; at 500 an
-hour about 0.8 GiB. The archive is not part of the free-space reserve a node keeps
-for new work.
+removes them), uncompressed. Archive space depends on the number and size of
+summaries kept for that period. The archive is not part of the free-space reserve
+a node keeps for new work.
 
 **Retained facts are single files.** A segment file per hour would need a second
 representation, its own compaction and crash rules, and a records index fed from

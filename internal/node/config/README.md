@@ -130,7 +130,7 @@ declared here or in the package that composes it. It reads no clock.
 | `disk_reserve_bytes` | 256 MiB | Covers the log total and 4 KiB for each of 10,000 deliveries (about 190 MiB) with room. |
 | `log_total_bytes` | 150 MiB | Shared by the daemon and every adapter instance; the size at which each log rotates follows from it and from the number of instances. |
 | `archive_retention_days` | 30, at most 106,751 | How long summaries stay; the archive is not counted in the reserve. The upper bound is the number of days a `time.Duration` holds: above it the conversion would wrap around to a negative or short retention and the archive would discard its summaries at once. Consumers read the retention only through `ArchiveRetention()`. |
-| `OpenDeliveryDiskGrowth` | 4 KiB | An unfinished delivery adds its archive summary and events and the feedback notification it may cause before it is archived. |
+| `OpenDeliveryDiskGrowth` | 4 KiB | An unfinished delivery adds its archive summary and the feedback notification it may cause before it is archived. |
 
 The prompt turns and the endpoint defaults are not here: they are
 `handoff.DefaultMaxConcurrentTurns`, `delivery.DefaultEndpointBacklogLimit` and

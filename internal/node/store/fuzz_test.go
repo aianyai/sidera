@@ -99,7 +99,7 @@ func FuzzParseArchive(f *testing.F) {
 	f.Add([]byte("\n\n{\"crc\":\"00000000\",\"rec\":{}}\n\x00\x00\x00"))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		got := store.ParseArchive(data)
-		if n := len(got.Summaries) + len(got.Events) + got.Dropped; n > bytes.Count(data, []byte("\n"))+1 {
+		if n := len(got.Summaries) + got.Dropped; n > bytes.Count(data, []byte("\n"))+1 {
 			t.Fatalf("%d records and drops out of %d lines", n, bytes.Count(data, []byte("\n"))+1)
 		}
 	})

@@ -32,7 +32,6 @@ type ArchiveSummary struct {
 // ArchiveContents is what an archive file holds that can be read.
 type ArchiveContents struct {
 	Summaries []ArchiveSummary
-	Events    []ArchiveEvent
 	// Dropped counts the lines that are neither empty nor intact.
 	Dropped int
 }
@@ -60,14 +59,6 @@ type summaryRec struct {
 	Quarantined bool   `json:"quarantined"`
 }
 
-type eventRec struct {
-	K  string `json:"k"`
-	At wtime  `json:"at"`
-	F  string `json:"f"`
-	E  string `json:"e"`
-	N  *int   `json:"n,omitempty"`
-}
-
 func archiveLine(rec any) ([]byte, error) {
 	b, err := marshal(rec)
 	if err != nil {
@@ -91,17 +82,6 @@ func summaryLine(s ArchiveSummary) ([]byte, error) {
 	}
 	return archiveLine(summaryRec{K: "summary", At: at, Kind: string(s.Kind), Key: s.Key, State: s.State, Reason: s.Reason,
 		AcceptedAt: tptr(s.AcceptedAt), ClosedAt: tptr(s.ClosedAt), DeliveredAt: tptr(s.DeliveredAt), Size: s.Size, Digest: s.Digest, Quarantined: s.Quarantined})
-}
-
-func eventLine(e ArchiveEvent) ([]byte, error) {
-	at, err := wreq(e.At, "the time of an event")
-	if err != nil {
-		return nil, err
-	}
-	if !isHashName(e.File) || e.Event == "" || (e.N != nil && *e.N < 0) {
-		return nil, fmt.Errorf("store: an event %q of file %q", e.Event, e.File)
-	}
-	return archiveLine(eventRec{K: "ev", At: at, F: e.File, E: e.Event, N: e.N})
 }
 
 // ParseArchive reads the contents of an archive file. A newline is a point
@@ -134,14 +114,6 @@ func ParseArchive(data []byte) ArchiveContents {
 					continue
 				}
 			}
-		case "ev":
-			var e eventRec
-			if strictjson.Decode(rec, &e) == nil && e.K == "ev" {
-				if ev, ok := fromEvent(e); ok {
-					out.Events = append(out.Events, ev)
-					continue
-				}
-			}
 		}
 		out.Dropped++
 	}
@@ -171,11 +143,6 @@ func fromSummary(s summaryRec) (ArchiveSummary, bool) {
 		AcceptedAt: tval(s.AcceptedAt), ClosedAt: tval(s.ClosedAt), DeliveredAt: tval(s.DeliveredAt), Size: s.Size, Digest: s.Digest, Quarantined: s.Quarantined}
 	ok := slices.Contains([]Kind{KindOut, KindOutCtl, KindIn, KindCtl}, sm.Kind) && sm.Key != "" && sm.State != "" && sm.Size >= 0
 	return sm, ok
-}
-
-func fromEvent(e eventRec) (ArchiveEvent, bool) {
-	ev := ArchiveEvent{At: time.Time(e.At), File: e.F, Event: e.E, N: e.N}
-	return ev, isHashName(ev.File) && ev.Event != "" && (ev.N == nil || *ev.N >= 0)
 }
 
 // ReadArchive reads the archive file of the given name.
