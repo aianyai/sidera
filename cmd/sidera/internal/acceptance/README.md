@@ -38,8 +38,12 @@ the current fake process inputs cannot clear inherited daemon crash variables
 from the CLI a runtime starts.
 
 `Manage`, `Adapter` and `Runtime` expose the existing external clients. The
-fixture owns one logical `Now`. `SetTime` sets the daemon first, then waits for
-every connected fake's clock update. `BeginStep` records a unique step and
+fixture owns one logical `Now` across daemon generations. `SetTime` retains the
+requested target before sending it to the daemon, even if the RPC fails: a
+daemon may have changed its clock before losing its response, and the next
+generation starts at the retained target. An RPC failure remains an error and
+does not synchronize the fakes. After a successful daemon RPC, `SetTime` waits
+for every connected fake's clock update. `BeginStep` records a unique step and
 synchronizes connected fakes. Handles and quiet checks synchronize connections
 again before returning. No runtime session is created by this base fixture;
 the fake runtime currently records its creation before its fixture control

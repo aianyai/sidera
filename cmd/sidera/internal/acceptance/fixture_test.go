@@ -33,6 +33,43 @@ func fixture(t *testing.T) (*Fixture, context.Context) {
 	return f, ctx
 }
 
+func TestRealBinaryRestartRetainsTimeAfterClockRPCFails(t *testing.T) {
+	f, ctx := fixture(t)
+	if err := f.Init(ctx, GenerationSpec{Number: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Start(ctx, GenerationSpec{Number: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Kill(ctx); err != nil {
+		t.Fatal(err)
+	}
+	to := f.Now().Add(2 * time.Minute)
+	// A stopped daemon makes the clock RPC fail deterministically. Whether
+	// that request reached the daemon must not decide the next generation's time.
+	if err := f.SetTime(ctx, to); err == nil {
+		t.Fatal("setting the stopped daemon's clock succeeded")
+	}
+	if err := f.Start(ctx, GenerationSpec{Number: 3}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := f.Manage(ctx, "status", manageapi.Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status struct {
+		Daemon struct {
+			StartedAt time.Time `json:"started_at"`
+		} `json:"daemon"`
+	}
+	if err = resultBody(raw, &status); err != nil {
+		t.Fatal(err)
+	}
+	if !status.Daemon.StartedAt.Equal(to) {
+		t.Fatalf("restarted daemon began at %s, want retained target %s", status.Daemon.StartedAt, to)
+	}
+}
+
 func TestRealBinaryLifecycleClockAndSetupOrdinals(t *testing.T) {
 	f, ctx := fixture(t)
 	if err := f.Init(ctx, GenerationSpec{Number: 1}); err != nil {

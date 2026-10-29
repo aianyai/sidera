@@ -8,12 +8,14 @@ import (
 )
 
 func (f *Fixture) SetTime(ctx context.Context, to time.Time) error {
-	if _, err := f.Manage(ctx, "test.clock.set", manageapi.Request{Params: map[string]any{"to_ms": to.UnixMilli()}}); err != nil {
-		return err
-	}
+	// The fixture owns time across generations. A lost response must not make
+	// the next daemon start before a clock change the previous one may have seen.
 	f.clockMu.Lock()
 	f.now = to
 	f.clockMu.Unlock()
+	if _, err := f.Manage(ctx, "test.clock.set", manageapi.Request{Params: map[string]any{"to_ms": to.UnixMilli()}}); err != nil {
+		return err
+	}
 	return f.syncConnections(ctx)
 }
 

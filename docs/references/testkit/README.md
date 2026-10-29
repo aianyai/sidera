@@ -39,10 +39,13 @@ retains bootstrap requests with their IDs and expected versions across daemon
 generations, and skips stages whose successful replies were received. A change
 committed before a targeted kill returns its stored result when the unanswered
 request is resent, rather than becoming a new mutation. The fixture compares the
-complete tagged transaction table, advances the shared clock daemon first, and
-requires stable fake progress
-around the daemon's quiet report. Each node process has one `Wait` owner and
-separate file output and trace. Setup marks a complete-line prefix without
+complete tagged transaction table and owns the logical clock across generations.
+It retains each `SetTime` target before the daemon RPC, because a failed response
+cannot establish whether the daemon changed time. The next generation starts at
+that target even after an error. Fakes are synchronized only after a successful
+daemon clock RPC; failure still propagates to the caller. It requires stable
+fake progress around the daemon's quiet report. Each node process has one `Wait`
+owner and separate file output and trace. Setup marks a complete-line prefix without
 renumbering observations. Final traces are read only after exit; orderly stop
 freezes the scenario prefix before the stop operation writes. A target is reached
 only with both its matching termination marker and an abnormal process exit.
