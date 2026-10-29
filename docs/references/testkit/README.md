@@ -303,7 +303,8 @@ coverage dimensions.
 - **A startup observer selects the cutoff; its caller reclaims the process.** The
   fixture serializes `CrashAt` calls from program goroutines and accepts one decision
   at most. The callback must not block, call `Kill`, or do cleanup. Its decision uses
-  the same crash barrier as `Kill`: abandon, cutoff, snapshot, then one crash ledger
+  the same crash barrier as `Kill`: mark the process abandoned, cut off its disk,
+  install the snapshot, end its fault-injection scope, then write one crash ledger
   entry. Only after the snapshot is installed are startup waits cancelled. The
   observer returns normally so filesystem errors unwind production transactions;
   panic and `Goexit` would bypass that behavior. Stage boundaries and publication
@@ -328,6 +329,20 @@ coverage dimensions.
   logical commits. The startup selector still takes `observation.Point` and kind.
   The caller's context bounds startup alone, not a successfully serving generation's
   lifetime.
+- **Only a real crash ends a fault scope's future expectations.** An ordinary
+  `Faulty` reports every rule that never fired, including after Stop, Restart,
+  cleanup, startup failure or cancellation. A crash can instead end a valid
+  prefix after a rule was armed and before its target call: the dead generation
+  has no opportunity to inject that future fault. Only `cutCrash` calls the old
+  wrapper's `Abandon`, after fencing its disk calls and installing the next disk.
+  This ends matching and unused-rule checks without changing actual hit counts;
+  existing handles pass through to their already cut-off base and cannot write
+  either disk. New rules on that wrapper fail loudly. Every next generation has
+  a fresh strict wrapper. A failure required before a crash still needs actual
+  hits or observable outcome evidence; ending a scope proves no injection.
+  Runtime walk and controlled-start tests retain real crash ledger entries,
+  target selection and recovery, while test subprocesses prove ordinary
+  interruptions and unhit next-generation rules still fail cleanup.
 - **The loopback and its knobs belong to the fixture.** One set of knobs lives as long as
   the fixture and each process gets a loopback made over it, so a knob set before a
   restart is still set after it. Every hit is written to the ledger as a `knob.hit` entry

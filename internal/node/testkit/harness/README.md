@@ -206,8 +206,8 @@ By default the node has one instance, `Instance`, and every accessor without a n
   serialized across program goroutines and accepts at most one decision per attempt.
   It must only select a point and mode: it must not block, call `Kill`, or reclaim
   resources. The fixture marks the generation abandoned, cuts it off, installs the
-  `Clone` or seeded `CrashClone` snapshot and writes one `fixture.crash` before
-  cancelling startup waits. The callback then returns normally, so the production
+  `Clone` or seeded `CrashClone` snapshot, ends the old fault scope and writes one
+  `fixture.crash` before cancelling startup waits. The callback then returns normally, so the production
   filesystem error unwinds its transactions. Startup checks the cutoff between stages
   and before serving, including at a commit with no subsequent filesystem call.
   The outer call aborts any host, cuts adapter pipes and waits for the engine to stop
@@ -229,8 +229,15 @@ By default the node has one instance, `Instance`, and every accessor without a n
 - **A seed is a disk.** The power-loss source is `rand.NewPCG(seed, 0x5ce)`: the same
   seed on the same history leaves the same disk.
 - **Faults go through the file layer.** `Faults()` is the `fsxtest.Faulty` the running
-  process writes through (`fsxtest.DiskFull` is the full-disk error); a rule that never
-  fires fails the test. A new process has a new wrapper with no rules.
+  process writes through (`fsxtest.DiskFull` is the full-disk error). Every rule
+  must fire unless a real crash ends its generation. Only `cutCrash`, after the
+  old disk's cutoff barrier and installation of the next disk, calls the old
+  wrapper's `Abandon`. A crash can legally interrupt the prefix after arming a
+  rule but before its target; that dead process cannot satisfy a future-hit
+  expectation. Actual hits remain unchanged, so a required pre-crash failure
+  still needs its own hit or outcome evidence. Ordinary Stop, Restart, cleanup,
+  startup failure and cancellation keep unused-rule checks. A new process has a
+  fresh strict wrapper with no rules; recipes and bindings never abandon it.
 - **No test-only session registration.** The fixture has no method that registers a
   session endpoint; sessions come from a session creation, which the agent of a direct
   endpoint asks for with `Control` and the runtime endpoint (`RuntimeAddr`) answers.
@@ -275,6 +282,11 @@ suite.
 `startup_test.go` checks cutoff snapshots, generation seeds and unpublished starts
 across transaction recovery, scan recovery and delivery recovery, including commit
 points, host cleanup, ordinary errors and cooperative cancellation.
+
+`fault_lifecycle_test.go` uses real test subprocesses to check unused-rule cleanup
+at runtime and controlled-start crash boundaries, strict next generations and
+ordinary stop, restart, cleanup, startup error and cancellation. Its runtime
+walk checks the target, two generations and the actual crash ledger entry.
 
 `install_test.go`: `TestPackageSourceCanInstallAndUpgradeAfterRestart` installs a
 package through the engine's management entry and upgrades it after a restart using

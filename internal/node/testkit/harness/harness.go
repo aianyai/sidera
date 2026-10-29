@@ -1137,7 +1137,7 @@ func (h *H) Start() {
 // StartWith is Start with a chance to arm the fault wrapper the new process will
 // write through: arm is called with it before the process's recovery runs, so a
 // rule can target a write that only a recovery makes. A rule that never fires
-// fails the test, as always.
+// fails the test unless a real crash ends that generation.
 func (h *H) StartWith(arm func(*fsxtest.Faulty)) {
 	h.t.Helper()
 	if _, err := h.TryStart(h.ctx, StartOptions{Arm: arm}); err != nil {

@@ -17,6 +17,7 @@ for the crash model, its sources and what it can and cannot prove.
 | `Mem.CrashCloneWorst()` | Deterministic power loss: only what was synced survives. |
 | `Mem.SetAvailable(n)`, `Mem.SetOwnerOnly(path, bool)` | Stand-ins for the free space of the volume and for file permissions. |
 | `NewFaulty(t, base)`, `Faulty.Fail`, `Faulty.FailShortWrite`, `Rule.Hits` | Fails chosen calls of any `FS`; the test fails if a rule never fired. |
+| `Faulty.Abandon()` | Ends injection and future-hit expectations after the owner has been forcibly interrupted, preserving actual hits. |
 | `Match` | Selects calls by transaction, role, step, ordinal of the key and path. |
 | `RunConformance(t, newFS)` | The behaviour `Mem` and the real file system must share. |
 | `DiskFull` | The fault a test injects for a full disk: `ENOSPC` on Unix, `ERROR_DISK_FULL` on Windows (pending verification by CI on main). `fsx.IsNoSpace` recognises it, so such a test means the same on both. |
@@ -57,6 +58,15 @@ for the crash model, its sources and what it can and cannot prove.
   fully durable: losing power again changes nothing.
 - **Every fault rule must fire.** `NewFaulty` checks in `t.Cleanup` that each rule
   fired at least once. A fault that was never injected proves nothing.
+- **A forcibly interrupted owner has no future calls.** Only after establishing
+  that interruption may its owner call `Abandon`. This one-way, idempotent
+  transition ends injection and unused-rule checks for that instance, preserving
+  zero and nonzero actual hit counts. New rules fail loudly; existing handles
+  and later FS calls pass through to the base. Matching, abandonment and cleanup
+  checks serialize under one mutex. An already selected fault is not undone.
+  `Abandon` neither stops the owner nor fences base calls: the owner supplies
+  that barrier. A clone, normal stop, startup error or cancellation alone is no
+  reason to call it. A fresh wrapper remains strict.
 - **Faults go through the interface, never through build tags.** `Faulty` can
   wrap `Mem` or the real file system.
 - **Cleanup is not selected by accident.** Steps tagged with the reserved

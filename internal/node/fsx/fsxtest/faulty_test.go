@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 
@@ -222,6 +223,109 @@ func TestFaultyWithAllRulesFiredReportsNothing(t *testing.T) {
 	rec.finish()
 	if len(rec.errors) != 0 {
 		t.Errorf("reported %v, want nothing", rec.errors)
+	}
+}
+
+func TestAbandonPreservesRealHitsAndEndsInjectionThroughExistingHandles(t *testing.T) {
+	rec := &recorder{TB: t}
+	mem := fsxtest.NewMem()
+	faulty := fsxtest.NewFaulty(rec, mem)
+	tag := fsx.Tag{Tx: "t", Role: "r"}
+	file, err := faulty.OpenAppend(tag, "log")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	write := faulty.FailShortWrite(fsxtest.Match{Step: fsx.StepWrite}, 1, syscall.EIO)
+	sync := faulty.Fail(fsxtest.Match{Step: fsx.StepSync}, syscall.EIO)
+	read := faulty.Fail(fsxtest.Match{Path: "log"}, syscall.EIO)
+	unused := faulty.Fail(fsxtest.Match{Step: fsx.StepMkdir}, syscall.EIO)
+	if n, err := file.Write([]byte("ab")); n != 1 || !errors.Is(err, syscall.EIO) {
+		t.Fatalf("Write = %d, %v, want one byte and EIO", n, err)
+	}
+	if err := file.Sync(); !errors.Is(err, syscall.EIO) {
+		t.Fatalf("Sync = %v, want EIO", err)
+	}
+	if _, err := faulty.ReadFile("log"); !errors.Is(err, syscall.EIO) {
+		t.Fatalf("ReadFile = %v, want EIO", err)
+	}
+
+	faulty.Abandon()
+	faulty.Abandon()
+	if n, err := file.Write([]byte("bc")); n != 2 || err != nil {
+		t.Fatalf("Write after Abandon = %d, %v", n, err)
+	}
+	if err := file.Sync(); err != nil {
+		t.Fatal(err)
+	}
+	if err := faulty.Mkdir(tag, "after"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := faulty.ReadFile("log"); err != nil || string(got) != "abc" {
+		t.Fatalf("ReadFile after Abandon = %q, %v", got, err)
+	}
+	if write.Hits() != 1 || sync.Hits() != 1 || read.Hits() != 1 || unused.Hits() != 0 {
+		t.Fatalf("hits after Abandon = %d/%d/%d/%d, want 1/1/1/0", write.Hits(), sync.Hits(), read.Hits(), unused.Hits())
+	}
+	rec.finish()
+	if len(rec.errors) != 0 {
+		t.Fatalf("abandoned scope reported %v", rec.errors)
+	}
+
+	next := &recorder{TB: t}
+	fsxtest.NewFaulty(next, mem).Fail(fsxtest.Match{Step: fsx.StepMkdir}, syscall.EIO)
+	next.finish()
+	if len(next.errors) != 1 || !strings.Contains(next.errors[0], "never fired") {
+		t.Fatalf("next scope reported %v, want an unused-rule failure", next.errors)
+	}
+}
+
+func TestAbandonRefusesNewRules(t *testing.T) {
+	for _, short := range []bool{false, true} {
+		t.Run(fmt.Sprint(short), func(t *testing.T) {
+			rec := &recorder{TB: t}
+			faulty := fsxtest.NewFaulty(rec, fsxtest.NewMem())
+			faulty.Abandon()
+			func() {
+				defer func() {
+					if recover() != rec {
+						t.Error("installing a rule after Abandon did not stop the test")
+					}
+				}()
+				if short {
+					faulty.FailShortWrite(fsxtest.Match{Step: fsx.StepWrite}, 1, syscall.EIO)
+				} else {
+					faulty.Fail(fsxtest.Match{Step: fsx.StepWrite}, syscall.EIO)
+				}
+			}()
+			rec.finish()
+			if len(rec.errors) != 1 || !strings.Contains(rec.errors[0], "abandoned") {
+				t.Fatalf("reported %v, want an abandoned-scope error", rec.errors)
+			}
+		})
+	}
+}
+
+func TestAbandonSerializesWithConcurrentFaultSelection(t *testing.T) {
+	faulty := fsxtest.NewFaulty(t, fsxtest.NewMem())
+	rule := faulty.Fail(fsxtest.Match{Path: "f"}, syscall.EIO)
+	faulty.Stat("f")
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for range 4 {
+		wg.Go(func() {
+			<-start
+			for range 100 {
+				faulty.Stat("f")
+			}
+		})
+	}
+	close(start)
+	faulty.Abandon()
+	hits := rule.Hits()
+	wg.Wait()
+	if rule.Hits() != hits {
+		t.Fatalf("hits advanced after Abandon returned: %d to %d", hits, rule.Hits())
 	}
 }
 

@@ -77,26 +77,31 @@ func (r *Rule) String() string {
 // every other call to the FS it wraps. If several rules select a call, the
 // first one added fires.
 //
-// A test using Faulty fails if any rule never fired: a fault that was never
-// injected proves nothing about how the code under test handles it.
+// Unless its owner was forcibly interrupted and calls Abandon, a test using
+// Faulty fails if any rule never fired: a fault that was never injected proves
+// nothing about how the code under test handles it.
 type Faulty struct {
 	t       testing.TB
 	base    fsx.FS
 	counter fsx.Counter
 
-	mu    sync.Mutex
-	rules []*Rule
+	mu        sync.Mutex
+	rules     []*Rule
+	abandoned bool
 }
 
 var _ fsx.FS = (*Faulty)(nil)
 
 // NewFaulty wraps base. At the end of the test it reports every rule that
-// never fired.
+// never fired, unless Abandon ended the scope after a forced interruption.
 func NewFaulty(t testing.TB, base fsx.FS) *Faulty {
 	f := &Faulty{t: t, base: base}
 	t.Cleanup(func() {
 		f.mu.Lock()
 		defer f.mu.Unlock()
+		if f.abandoned {
+			return
+		}
 		for _, r := range f.rules {
 			if r.Hits() == 0 {
 				t.Errorf("fsxtest: %v never fired: the fault was not injected", r)
@@ -104,6 +109,18 @@ func NewFaulty(t testing.TB, base fsx.FS) *Faulty {
 		}
 	})
 	return f
+}
+
+// Abandon ends this fault-injection scope after its owner has been forcibly
+// interrupted. The caller must establish that interruption first: Abandon does
+// not stop the owner or the underlying FS. It preserves actual rule hits, ends
+// the requirement that unused rules eventually fire, and refuses new rules.
+// Later calls, including through existing file handles, pass to the wrapped FS.
+// It is idempotent; a fault already selected before Abandon is not undone.
+func (f *Faulty) Abandon() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.abandoned = true
 }
 
 // Fail makes the calls selected by m return err without running.
@@ -121,8 +138,12 @@ func (f *Faulty) FailShortWrite(m Match, written int, err error) *Rule {
 }
 
 func (f *Faulty) add(r *Rule) *Rule {
+	f.t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.abandoned {
+		f.t.Fatalf("fsxtest: cannot install a fault rule in an abandoned scope")
+	}
 	f.rules = append(f.rules, r)
 	return r
 }
@@ -137,6 +158,9 @@ func (f *Faulty) check(tag fsx.Tag, step fsx.Step, paths ...string) *Rule {
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.abandoned {
+		return nil
+	}
 	for _, r := range f.rules {
 		if r.match.selects(p, paths...) {
 			r.hits.Add(1)
@@ -149,6 +173,9 @@ func (f *Faulty) check(tag fsx.Tag, step fsx.Step, paths ...string) *Rule {
 func (f *Faulty) checkRead(path string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.abandoned {
+		return nil
+	}
 	for _, r := range f.rules {
 		if r.match.selectsRead(path) {
 			r.hits.Add(1)

@@ -16,7 +16,7 @@ import (
 // StartOptions controls one synchronous start of a node that is down.
 type StartOptions struct {
 	// Arm installs ordinary fault rules before transaction recovery. An unhit
-	// rule still fails the test, as it does with StartWith.
+	// rule fails the test unless a selected crash ends this generation.
 	Arm func(*fsxtest.Faulty)
 	// CrashAt selects the first startup point to crash at. It may run on any
 	// program goroutine; the fixture serializes calls and owns the cutoff,
@@ -160,6 +160,7 @@ func (h *H) cutCrash(p *process, mode CrashMode) error {
 	h.mu.Lock()
 	h.disk = disk
 	h.mu.Unlock()
+	p.mounted.Faulty.Abandon()
 	return h.fixture.Append(ledger.KindFixtureCrash, ledger.Attrs{CrashPoint: mode.describe()})
 }
 

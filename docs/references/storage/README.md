@@ -1359,6 +1359,17 @@ probability below 10^-38.
 transaction, role, step, ordinal of the key, or path, with an error or after a
 short write that leaves a partial tail. A test using `Faulty` fails if any of
 its rules never fired, because a fault that was not injected proves nothing.
+After its owner has been forcibly interrupted, `Faulty.Abandon` may end that
+instance's injection and future-hit expectations. It is one-way and idempotent,
+preserves actual hit counts (including zero), and rejects further rule
+installation. Matching and cleanup checks share its mutex. Later calls and
+existing file handles pass through to the base; an already selected fault is
+not undone. This API supplies neither process interruption nor a disk barrier.
+The harness owns both and calls it only after a real crash has cut off the old
+disk and installed the next disk. Normal stops, errors and cancellations retain
+strict unused-rule checks, and a fresh wrapper remains strict. This distinction
+lets crash walks stop a legitimate prefix between arming a rule and reaching
+its future target without pretending that the fault fired.
 Faults go through the `FS` interface, never through build tags. `RunConformance`
 runs the same behavioural cases against `Mem` and against the real file system
 so that the double cannot drift from what it stands for.
