@@ -11,6 +11,10 @@ root), [`manageapi`](../../../internal/node/manageapi/README.md),
 administrative rules is in [engine](../engine/README.md); the rules themselves in
 [administration](../administration/README.md).
 
+The management server and offline CLI share `manageapi.RevocationExportResult`
+for the armored self-revocation and its backup digest, keeping the export result
+shape in the interface that owns it.
+
 ## What
 
 ### The start

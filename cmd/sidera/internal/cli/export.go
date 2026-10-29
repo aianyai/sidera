@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -11,16 +12,11 @@ import (
 	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/keys"
-	"github.com/aianyai/sidera/internal/node/localhttp"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 )
 
-type revocationExport struct {
-	Armored string `json:"armored"`
-	Digest  string `json:"digest"`
-}
 type exportResponse struct {
-	Result revocationExport `json:"result"`
+	Result manageapi.RevocationExportResult `json:"result"`
 }
 
 func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client, output *string) (err error) {
@@ -38,10 +34,13 @@ func (c *command) exportRevocation(ctx context.Context, client *manageapi.Client
 			return err
 		}
 		armor, digest := keys.FormatRevocationExport(statement)
-		raw, err = localhttp.EncodeRequest(exportResponse{Result: revocationExport{Armored: string(armor), Digest: digest.String()}})
-		if err != nil {
+		var document bytes.Buffer
+		encoder := json.NewEncoder(&document)
+		encoder.SetEscapeHTML(false)
+		if err := encoder.Encode(exportResponse{Result: manageapi.RevocationExportResult{Armored: string(armor), Digest: digest.String()}}); err != nil {
 			return err
 		}
+		raw = document.Bytes()
 	}
 	var response exportResponse
 	if err := json.Unmarshal(raw, &response); err != nil || response.Result.Armored == "" || response.Result.Digest == "" {

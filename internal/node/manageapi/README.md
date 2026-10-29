@@ -21,6 +21,7 @@ reading a body.
 | `Listen(addr, lock, opts)`, `Listener` | Listens on the address of the management interface and on no other: it refuses the address of the Agent interface. Only it makes a `Listener`. |
 | `New(Config)`, `Server.Serve`, `Shutdown`, `Close` | The server over a `Listener`. `Shutdown` waits for the requests being served and then closes what is left. |
 | `NewClient(ClientConfig)`, `Client.Call`, `Client.Close` | Call one node as its local owner; return the complete management response without retrying. |
+| `RevocationExportResult` | The shared online and offline export result: the armored statement and its backup digest. |
 | `Request` | The caller's operation identifier, optional expected version and params; zero identifier and nil members are omitted. |
 | `Config` | The engine's `ManageService`, this node's identifier, the clock, the stop entry of the composition root, the version of the program for the status, and the log. |
 

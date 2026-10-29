@@ -13,6 +13,13 @@ import (
 	"github.com/aianyai/sidera/internal/record"
 )
 
+// RevocationExportResult is the self-revocation document and the digest used to
+// confirm its offline backup. Possession of the document can retire the node.
+type RevocationExportResult struct {
+	Armored string `json:"armored"`
+	Digest  string `json:"digest"`
+}
+
 // identity.export_revocation: the statement that retires this node, armored, with
 // the digest the backup is confirmed by. It is authorized as an operation of the
 // owner's alone and is not stored: it is a read that the catalogue does not let
@@ -29,10 +36,7 @@ var identityExportRevocation = &method{
 			if err != nil {
 				return nil, err
 			}
-			return struct {
-				Armored string `json:"armored"`
-				Digest  string `json:"digest"`
-			}{string(ex.Armor), ex.Digest.String()}, nil
+			return RevocationExportResult{Armored: string(ex.Armor), Digest: ex.Digest.String()}, nil
 		}}, nil
 	},
 }
