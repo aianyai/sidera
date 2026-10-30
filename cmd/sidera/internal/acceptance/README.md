@@ -216,12 +216,29 @@ The run's recovery callbacks use the current read-only store scan and the shared
 node transaction. Binary profiles provide no filesystem fault injection; an
 explicit archive-sweep period must equal the executable's existing hourly period.
 
+The private `bindCatalog` selects the shared recipe descriptions through
+`BinaryCapabilities`. Each script factory captures only its name and constructs
+fresh domain bindings and recipe closures for each run, using that run's backend
+recovery callbacks. Startup and terminal descriptions use their existing wrappers;
+extra recovery triggers come only from the selected scripts.
+
+`TestCrashAtEveryCrashPointPreservesInvariants` is an external test selected by
+the `acceptance` build tag. It collects the current in-process catalog once for
+responsibility analysis, then calls `crashwalk.Walk` once with the complete binary
+catalog and complete `daemon.Table`. Only the external test imports `inproc`;
+the test-only bridge exposes catalog construction and a backend using the existing
+single binary build pipeline. No in-process hits or targets enter that backend.
+`SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` select the existing mode and shard
+rules. Logs distinguish responsibility evidence, the Required/elsewhere partition,
+three actual binary coverage sources, full-table and Required differences, run
+counts, dynamic planned/selected/executed counts, timings and smoke skips.
+
 Focused contract tests cover fresh binding and caller-directory preservation,
 online domain checks, metadata drift, a real direct exchange's main and step
 cuts, complete recovery and second/third-generation recovery cuts, interrupted
 Init, offline layout repair, periodic-clock persistence, certificate renewal,
-and stop/retirement exit and restart behavior. They do not compose or execute a
-complete binary catalog walk.
+and stop/retirement exit and restart behavior. These tests complement the external
+catalog walk; they do not replace a complete full-mode execution.
 
 ## Management and package bindings
 
@@ -317,8 +334,8 @@ on both sides of an actual kill, wait and replacement. Every Agent method retain
 the failed generation's original error until explicit reset. Two complete runs
 with the same scenario seed must return the same actual CLI message identifiers,
 despite different process IDs and directories; calls on different generations
-must still have distinct identifiers. These domain bindings do not constitute a
-complete binary catalog or crash-walk backend.
+must still have distinct identifiers. The private catalog composes these bindings
+with the crash-walk backend.
 
 `TestSessionEnvDrivesRealCLIAcrossDaemonGeneration` creates a native session
 through public runtime endpoints and `session.create`, obtains its actual native

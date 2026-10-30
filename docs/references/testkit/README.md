@@ -951,6 +951,26 @@ never count as binary execution evidence. The binary layer derives interruption
 ordinals from its own actual complete second-generation records. Each test
 binary collects from its current source; no evidence file or cache is used.
 
+The `acceptance`-tagged external
+`cmd/sidera/internal/acceptance.TestCrashAtEveryCrashPointPreservesInvariants`
+is that orchestration entry point. It selects the complete supported catalog,
+uses the unchanged full `daemon.Table` and passes `LayerEvidence.Reachable` and
+`InProcessOnly` as `CoveragePartition.Required` and `CoveredElsewhere`. Each
+script's private factory rebuilds every domain binding and recipe closure per run,
+retaining only its immutable name between runs. The backend supplies that run's
+recovery operations; their damage state survives its daemon generations.
+Startup and terminal descriptions use the existing binary wrappers. Additional
+recovery recordings come from the selected scripts' declared triggers.
+
+One call to `Walk` owns every clean and complete generation-2 recording and all
+mode/shard planning. Its actual binary records alone determine ordinals and
+dynamic targets. The entry point logs the separate responsibility source and
+partition, the three actual binary source sets, complete-table denominators and
+missing Required keys, interruption counts, dynamic planned/selected/executed
+counts, per-run and total elapsed times, and the explicit smoke skip reason.
+This entry point defines how to execute the full catalog; its presence is not
+evidence that a full-mode walk has completed.
+
 `Catalog.AnalyzeLayer` uses the complete clean and second-generation recordings
 for supported recipes. Reachable keys are their observed union; in-process-only
 keys are the full observed union minus that set. Any supported observation makes
