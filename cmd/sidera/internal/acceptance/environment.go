@@ -24,6 +24,7 @@ type environment struct {
 	clockErr   error
 	endpoints  map[string]directEndpoint
 	agents     map[string]fakeagent.Agent
+	sessions   map[string]fakeagent.Agent
 	node       ident.NodeID
 }
 
@@ -36,7 +37,7 @@ type directEndpoint struct {
 var _ scenario.Env = (*environment)(nil)
 
 func newEnvironment(ctx context.Context, f *Fixture) *environment {
-	return &environment{fixture: f, ctx: ctx, generation: f.current, endpoints: map[string]directEndpoint{}, agents: map[string]fakeagent.Agent{}}
+	return &environment{fixture: f, ctx: ctx, generation: f.current, endpoints: map[string]directEndpoint{}, agents: map[string]fakeagent.Agent{}, sessions: map[string]fakeagent.Agent{}}
 }
 func envFrom(e scenario.Env) *environment   { return e.(*environment) }
 func (e *environment) Ctx() context.Context { return e.ctx }

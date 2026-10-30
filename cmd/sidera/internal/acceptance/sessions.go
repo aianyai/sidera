@@ -13,6 +13,17 @@ import (
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
+func newSessionOps() recipes.SessionOps {
+	return recipes.SessionOps{
+		RuntimeAddr:             runtimeAddress,
+		Session:                 sessionAgentFor,
+		CheckpointPut:           checkpointPut,
+		FailCreateSettlement:    failCreateSettlement,
+		HasUnknownCreationAlert: hasUnknownCreationAlert,
+		CheckClosedSession:      checkClosedSession,
+	}
+}
+
 func runtimeAddress(e scenario.Env, instance string) string {
 	env := envFrom(e)
 	if err := env.check(); err != nil {

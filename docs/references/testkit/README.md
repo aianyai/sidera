@@ -59,9 +59,9 @@ one `Wait` owner and separate file output and trace. Setup marks a complete-line
 prefix without renumbering observations. Final traces are read only after exit; orderly stop
 freezes the scenario prefix before the stop operation writes. A target is reached
 only with both its matching termination marker and an abnormal process exit.
-Runtime-driven CLI actions remain unconnected because the fake process inputs
-do not yet let a fixture clear inherited daemon crash controls. The fixture's
-README states this boundary and the existing runtime creation-step limitation.
+Tagged daemons clear their process crash controls before launching adapters,
+so fake native runtimes and their CLI descendants cannot inherit a daemon target.
+The fixture's README describes the runtime creation-step limitation.
 
 The CLI Agent driver takes optional per-call `KEY=value` environment overrides.
 It replaces matching inherited values, so each call can have a seed or process
@@ -81,8 +81,25 @@ and returns a retained generation failure before reading. The scan neither
 recovers transactions nor writes node state. The binary callbacks for source
 update, lost-body retention and creation-settlement filesystem faults explicitly
 return `scenario.ErrNotAvailable`; capability selection excludes those recipes.
-These observations do not yet supply a binary session Agent: the native runtime
-Controller has no credential read for the existing real CLI driver.
+`newSessionOps` supplies a real CLI session Agent alongside these callbacks.
+Before every call its private proxy checks the retained generation error, resolves
+the open session's instance from public `endpoints.list`, and matches the fake
+runtime's published `ProcessInfo` with exactly one current control connection by
+endpoint, native reference, role and PID. The current Controller's `SessionEnv`
+then provides the actual injected environment. Read, decode, ownership and getter
+errors return before a CLI starts. This query establishes live process ownership;
+the shared recipes separately judge creation replies and native creation receipts.
+The binding does not infer credentials from node state or cache environments.
+
+Session calls run the existing CLI driver against the actual tagged program.
+Their deterministic seeds include the scenario, a separate `session-cli` role,
+the actual endpoint and a per-endpoint call ordinal that continues across daemon
+generations. They pass the current logical clock and clear inherited process
+crash controls. The existing recording wrapper writes actual CLI call results
+and model-visible page receipts. A regression runs the shared registration and
+declaration recipe, real send/receive/acknowledgement across kill, wait and restart,
+and repeats the run to compare actual message IDs. The full binary catalog and
+crash-walk backend are separate from these bindings.
 
 The acceptance catalog describes actual Init, certificate-renewing Start, a
 serving daemon whose clock advances to its periodic persistence task, and direct

@@ -193,7 +193,7 @@ daemon. They also kill and replace the daemon before replaying a settings or
 installation request, and cut warning enable at its real commit point before
 resuming probe and acknowledgement in the next generation.
 
-## Session and retention observations
+## Session and retention bindings
 
 `runtimeAddress` selects the unique open runtime endpoint of the requested
 instance from public `endpoints.list`; it never derives an endpoint identifier.
@@ -218,10 +218,34 @@ and observes the daemon's periodic archival and expiration.
 `newDeliveryOps` and `failCreateSettlement` explicitly reject filesystem fault
 injection with `scenario.ErrNotAvailable`, as declared by `BinaryCapabilities`.
 They preserve a retained generation error before reporting missing capability.
-The session helpers do not yet form `SessionOps`. The runtime Controller now
-provides the actual session environment through `SessionEnv`, but the full recipe
-binding remains to be composed. Session credentials are never inferred or read
-from node records by these bindings.
+`newSessionOps` composes these callbacks with a real CLI session Agent. Each
+Agent call first checks the retained environment error, resolves the requested
+open session and instance through public `endpoints.list`, and reads the fake
+runtime's published `ProcessInfo` from that instance's caller-owned runtime
+directory. The native reference, endpoint and PID must identify exactly one live
+runtime control connection. The current Controller then supplies `SessionEnv`;
+lookup and getter failures return before any CLI starts. This is a live process
+ownership query, separate from the shared recipes' creation-reply judgement.
+Credentials are never inferred or read from node records and are never cached
+between calls.
+
+The existing CLI driver starts the actual tagged program with that session's
+injected tool environment. Its private proxy and recording writer survive daemon
+replacement; only the endpoint's CLI call counter persists, with no native
+reference or environment retained. Per-call seeds combine the scenario seed,
+`session-cli` role, actual endpoint and call ordinal, in a namespace separate from
+native turn commands. Counts continue across daemon generations. Each call also
+receives the current logical clock and clears inherited process crash controls.
+`fakeagent.Recording` records real CLI results and the pages its reader saw.
+
+`TestBinarySessionBindingRunsSharedRecipeAcrossGeneration` executes the shared
+registration and declaration recipe, then sends and receives through this binding
+on both sides of an actual kill, wait and replacement. Every Agent method retains
+the failed generation's original error until explicit reset. Two complete runs
+with the same scenario seed must return the same actual CLI message identifiers,
+despite different process IDs and directories; calls on different generations
+must still have distinct identifiers. These domain bindings do not constitute a
+complete binary catalog or crash-walk backend.
 
 `TestSessionEnvDrivesRealCLIAcrossDaemonGeneration` creates a native session
 through public runtime endpoints and `session.create`, obtains its actual native
@@ -230,4 +254,5 @@ existing CLI Agent performs real `Me`, declaration, receive and acknowledgement
 calls before and after a daemon kill, wait and replacement. It queries the runtime
 again after replacement and checks ledger, runtime records, static inputs, traces
 and diagnostic output for leaked session credentials. This focused regression
-does not bind the full session recipe operations.
+checks the getter and driver directly, independently of the composed session
+binding.
