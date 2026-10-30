@@ -64,7 +64,7 @@ func newTransactionBenchmarkStoreRecords(b *testing.B) transactionBenchmarkStore
 	ctlKey.Recipient = transactionBenchmarkStoreEndpoint(b, 4)
 	ctl := store.CtlRecord{Key: ctlKey, Record: delivery.NewTargetControlRecord(at, accept, reportBy),
 		Dedup: delivery.NewDedupRecord(ctlKey.Dedup(), delivery.BodyDigest(ref.Digest), reportBy),
-		Kind:  envelope.KindSessionCreate, Preset: "default", SessionEndpoint: target, AcceptedAt: at, SentAt: at,
+		Kind:  envelope.KindSessionCreate, Preset: "default", SessionEndpoint: target, AcceptedAt: at, SentAt: at, EndpointMaxQueue: delivery.DefaultEndpointMaxQueue,
 		Initial: &store.InitialMessage{ContentType: "text/plain", Body: ref},
 		Intent:  &store.CreateIntent{Attempt: adapterproto.AttemptID("0b4d6e1a-2f3c-4d5e-8f60-718293a4b5c6"), Endpoint: target, State: store.IntentCreating}}
 	ep := store.EndpointRecord{ID: target, Kind: adapterreg.KindDirect, Instance: "benchmark",
