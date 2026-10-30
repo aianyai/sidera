@@ -349,6 +349,7 @@ func sessionExpiryRecipe(b Bindings) ScriptRecipe {
 
 func blockedRecipe(b Bindings) ScriptRecipe {
 	var blocking, blocked bool
+	var inputs fakeadapter.ExternalInputs
 	session := &createdSession{}
 	facts := newDeliveryEvidence(b)
 	var blockingFeedback, recoveredFeedback feedbackDrain
@@ -356,11 +357,8 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 	return ScriptRecipe{Script: scenario.Script{Name: "session-blocked-recovered", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 285}, Steps: []scenario.Step{
 		runtimePlan(fakeruntime.TurnPlan{EndAfter: true}), session.create(b, ""), scenario.Advance("creation-pull", time.Minute), session.resolve(b, "", facts),
 		{Name: "refuse-prompts", Do: func(e scenario.Env) error {
-			c, err := e.Adapter("chat")
-			if err != nil {
-				return err
-			}
-			return c.SetOutcome(e.Ctx(), fakeadapter.RequestPrompt, fakeadapter.Outcome{Kind: fakeadapter.OutcomeRefuse, Reason: string(adapterproto.RefusalRuntimeAuth)})
+			inputs.PromptRefusal = adapterproto.RefusalRuntimeAuth
+			return e.SetAdapterInputs("chat", inputs)
 		}},
 		{Name: "auth-unavailable", Do: func(e scenario.Env) error {
 			log, err := e.Ledger()
@@ -371,11 +369,8 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 			if len(entries) == 0 {
 				return fmt.Errorf("runtime has no clock evidence")
 			}
-			c, err := e.Adapter("chat")
-			if err != nil {
-				return err
-			}
-			return c.Availability(e.Ctx(), []adapterproto.Availability{{Condition: adapterproto.ConditionRuntimeAuth, SinceMS: entries[len(entries)-1].AtMS}})
+			inputs.Availability = []adapterproto.Availability{{Condition: adapterproto.ConditionRuntimeAuth, SinceMS: entries[len(entries)-1].AtMS}}
+			return e.SetAdapterInputs("chat", inputs)
 		}},
 		{Name: "send", Do: func(e scenario.Env) error {
 			r, err := e.Agent("sender").Send(e.Ctx(), fakeagent.SendInput{To: []string{session.address}, Body: "Read after credentials recover."})
@@ -397,18 +392,12 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 			return nil
 		}},
 		{Name: "restore-prompt", Do: func(e scenario.Env) error {
-			c, err := e.Adapter("chat")
-			if err != nil {
-				return err
-			}
-			return c.ClearOutcomes(e.Ctx())
+			inputs.PromptRefusal = ""
+			return e.SetAdapterInputs("chat", inputs)
 		}},
 		{Name: "restore-credentials", Do: func(e scenario.Env) error {
-			c, err := e.Adapter("chat")
-			if err != nil {
-				return err
-			}
-			return c.Availability(e.Ctx(), nil)
+			inputs.Availability = nil
+			return e.SetAdapterInputs("chat", inputs)
 		}},
 		{Name: "read", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)) }},
 	}}, Drain: func(e scenario.Env) error {
@@ -422,14 +411,8 @@ func blockedRecipe(b Bindings) ScriptRecipe {
 			}
 			blocking, blocked = false, true
 		}
-		c, err := e.Adapter("chat")
-		if err != nil {
-			return err
-		}
-		if err := c.ClearOutcomes(e.Ctx()); err != nil {
-			return err
-		}
-		if err := c.Availability(e.Ctx(), nil); err != nil {
+		inputs = fakeadapter.ExternalInputs{}
+		if err := e.SetAdapterInputs("chat", inputs); err != nil {
 			return err
 		}
 		if session.endpoint != "" {

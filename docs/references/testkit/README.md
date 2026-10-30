@@ -1057,6 +1057,25 @@ send owes its body immediately, while blocked/recovered feedback is required
 only for a blocking phase that began; an interrupted blocking phase is finished
 before delivery is restored. Lifecycle drains receive and acknowledge pending
 session messages, or obtain the real feedback caused by a requested closure.
+
+The blocked-session recipe declares its complete external prompt refusal and
+authentication availability through `Env.SetAdapterInputs`. The recipe captures
+availability's `SinceMS` once from the existing real ledger and keeps that value
+across generations. The run-owned declaration is installed before each adapter
+serves requests; reconnecting therefore cannot silently remove the scripted
+refusal and forward the pending body before its blocking phase finishes.
+`restore-prompt` clears only refusal and `restore-credentials` clears availability.
+The repeatable drain finishes an interrupted blocking phase before explicitly
+clearing both. All fourteen steps, the 285-point budget, original clock advances
+and both mandatory real blocked/recovered notices remain unchanged.
+Focused in-process and binary regressions interrupt the original
+`blocked/attempts.rename#1`, then a real blocked rewrite from the complete second
+generation, and require third-generation convergence through the shared recovery
+checker. A restart after successful credential restoration uses the original
+drain with repeated empty declarations suppressed only in that test; this keeps
+another clear from hiding stale startup inputs. Actual body and notice judgement
+still runs unchanged.
+
 Ordinary session resolution captures evidence while its source exists, so later
 retention does not create a dependency on an already removed status record.
 

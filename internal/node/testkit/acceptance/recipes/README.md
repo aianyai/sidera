@@ -283,6 +283,16 @@ before that phase still owes its accepted body. The lifecycle drain receives and
 acknowledges pending session bodies until closure has been requested, when real
 closure feedback can discharge the outstanding delivery instead.
 
+The blocked-session recipe owns a complete `fakeadapter.ExternalInputs`
+declaration through `Env.SetAdapterInputs`. Its prompt refusal and authentication
+availability survive adapter generations without changing the product's rebuilt
+connection state. The availability `SinceMS` is captured once from the real
+ledger before the send and reused unchanged. `restore-prompt` clears only the
+refusal; `restore-credentials` clears availability. An interrupted blocking phase
+finishes before the drain explicitly clears both inputs, so startup cannot
+forward the pending prompt before the strict blocked/recovered obligations are
+established. The fourteen steps, clock advances and 285-point budget are retained.
+
 `Needs` declares runtime-adapter use, extra instances, sweep period, package input,
 an installed but disabled probe-warning adapter (`ProbeWarning`), offline damage
 kind and each required filesystem fault. `Capabilities.Supports`

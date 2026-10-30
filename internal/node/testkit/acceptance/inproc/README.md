@@ -161,6 +161,15 @@ receives and acknowledges its actual initial body, and compares matching and
 different expected bodies. Only the matching body can satisfy the creation
 obligation.
 
+`TestBlockedSessionInputsSurviveAdapterRestarts` interrupts the real
+`blocked/attempts.rename#1`, records the replacement's blocking drain, and cuts its
+actual blocked rewrite again. The shared recovery checker requires both actual
+interruptions, the matching second-generation prefix and a complete third
+generation under the recipe's unchanged body and feedback judgement.
+`TestBlockedSessionClearedInputsStayClearedAfterRestart` kills after the successful
+`restore-credentials` boundary. Only its drain suppresses repeated empty input
+declarations, so successful delivery cannot depend on clearing stale inputs again.
+
 Deadline boundary regressions cover a returned absent-node send and creation both
 before and after their deadline steps. A creation completed by restart before its
 deadline phase owes its actual native session and original initial body through

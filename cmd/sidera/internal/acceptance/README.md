@@ -384,3 +384,11 @@ again after replacement and checks ledger, runtime records, static inputs, trace
 and diagnostic output for leaked session credentials. This focused regression
 checks the getter and driver directly, independently of the composed session
 binding.
+
+Blocked-session regressions execute the shared recipe with the crash-walk seed
+at `blocked/attempts.rename#1`. They retain the two real blocked/recovered notice
+obligations, interrupt a real blocked rewrite from the complete second generation
+and require the shared recovery checker to validate the third generation.
+A separate restart after successful `restore-credentials` suppresses repeated
+empty declarations only in that test's drain: the original real delivery and
+feedback judgement must succeed without another clear hiding stale startup inputs.
