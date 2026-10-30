@@ -1058,3 +1058,28 @@ command that never presents the token pending. Bootstrap still retains each exac
 and its progress across generations. Package inputs are real caller-owned source
 directories, extensible before installation; no profile writes installed packages
 or daemon business state directly.
+
+The binary management and installation bindings use the real management client.
+Each successful change is checked against public `operation.result`, then resent
+with its original identifier, expected version and params to require an unchanged
+persistent replay. Version-conflict and unsupported-platform refusals must leave
+that identifier unknown. Facts come from public lists or read-only decoding of
+actual configuration, clock, package and endpoint files; a token is checked only
+on disk because the management interface never publishes one.
+
+The warning callback retains its enable request before sending it and resumes
+that same request after an interrupted commit. It waits for the real warning
+adapter's probe and quiet, then applies the shared unique `version_untested`
+judgement. Installation retains completed caller-owned source paths and extends
+only those inputs with nested data or a foreign platform. The public installer
+owns installed state. Pointer-fault callbacks explicitly fail as unavailable in
+the binary layer, consistent with capability selection.
+
+`TestBinaryManagementBindingsPreserveRequestsAndEffects` exercises changes and
+refusals through the running daemon, including same-request replay after actual
+kill and replacement. `TestBinaryVersionAlertResumesCommittedEnable` cuts the
+real adapter enable commit, verifies the target and abnormal exit, and resumes
+the original request before acknowledging its real alert.
+`TestBinaryInstallationBindingsUpgradeAndReplayAcrossGeneration` checks real
+upgrades, current-version installation, platform refusal without residue and
+persistent replay after kill and restart.

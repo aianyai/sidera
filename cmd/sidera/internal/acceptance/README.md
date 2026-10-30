@@ -150,3 +150,41 @@ Package sources belong to the fixture's input directory. The private
 `packageInput` helper writes an actual fake-adapter package there; an installation
 binding can extend that source before invoking public installation. Installed
 node packages and node state are never edited to prepare an input.
+
+## Management and package bindings
+
+`newManagementOps` and `newInstallOps` bind domain callbacks to the current
+fixture's management client. Changes carry the recipe's exact operation identifier,
+expected version where required, and public params. Before returning a successful
+first result, the binding queries `operation.result` and repeats the same request,
+requiring an unchanged result and an explicit replay. Version-conflict and
+unsupported-platform refusals require `operation_unknown` for that identifier.
+No engine or in-process acceptance handle enters these bindings.
+
+Inspection reads public collection lists and actual configuration, clock and
+endpoint files through read-only interfaces. The private `diskReader` checks the
+environment and exposes only `fsx.Reader` for the fixture's current data directory.
+Its private `diskFilesystem` opener retains the full interface only for constructing
+the existing store scanner; binding audits never begin transactions, recover or
+write node state. Closed endpoint token checks use the
+persisted endpoint record because public lists intentionally expose no token.
+Package inspection requires the actual current pointer and version directories;
+a refused installation must leave no adapter directory.
+
+The warning callback enables the profile's installed, disabled warning package
+inside the step, retaining its original operation identifier and expected version
+before the first send. After real probes and quiet, the shared recipe judgement
+requires the unique `version_untested` alert for that instance. A restart resumes
+the original request. Acknowledgement uses the public alert operation and list.
+
+Installation creates real caller-owned package sources with the fake program,
+optional nested data, and an explicitly foreign platform for refusal. Each binding
+instance retains its completed input paths across reentry. The public installer
+alone copies or changes installed package state. Filesystem pointer-fault
+preparation returns an explicit unsupported error, matching binary capabilities.
+
+Focused tests exercise settings, stale versions, presets, endpoint closure,
+instance disable/enable, backup confirmation and clock clearing through the real
+daemon. They also kill and replace the daemon before replaying a settings or
+installation request, and cut warning enable at its real commit point before
+resuming probe and acknowledgement in the next generation.
