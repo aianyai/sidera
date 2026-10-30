@@ -173,7 +173,8 @@ By default the node has one instance, `Instance`, and every accessor without a n
   still has something the engine has not seen. It fails on the real clock's limit (60 s
   unless `WithTimeout`) with the engine's last report, whether the engine was asked at
   all, and the names of the conditions that did not hold. A loop that was asked and
-  answered neither with a report nor with a refusal is reported as inside a command.
+  answered neither with a report nor with a refusal is reported as inside a command
+  only while its process is still live; an abandoned process is diagnosed as ended.
 - **A crash cuts the process off, and what it was doing has no visible effect.** `Crash`
   closes a layer of the fixture's own between the process's fault wrapper and its disk
   (every later file-system call of the old process fails, and the close waits for the
@@ -284,8 +285,13 @@ By default the node has one instance, `Instance`, and every accessor without a n
   Agent calls map it to `unavailable/daemon_not_running`; `Quiesce` wraps it in
   its report. These operations do not fail the test internally or
   return empty success. Each operation selects its process once; quiet probes keep
-  using that process's engine if a concurrent cutoff removes it. Accessors without
-  an error result, such as `Engine`, remain strict and fail the test when down.
+  using that process's engine if a concurrent cutoff removes it. The entire quiet
+  result uses the same abandoned-process check as other calls: if that process is
+  abandoned before the wait returns, even a satisfied final round fails with a
+  `QuiesceError` wrapping `engineagent.ErrProcessEnded`. Its report still describes
+  the interrupted wait. A replacement process cannot satisfy the old wait.
+  Accessors without an error result, such as `Engine`, remain strict and fail the
+  test when down.
 - **Records are read, not written.** `Records` is the store's scan, for the scenarios
   whose judgement is the records; everything else is judged from the ledger. It reads
   what the engine has written by now, so read it after `Quiesce`.
@@ -388,6 +394,7 @@ fixture's own quiet conditions
 `TestQuiesceDoesNotReturnOnAConditionThatStoppedHoldingWhileTheEngineSettled`,
 `TestQuiesceDoesNotReturnWhileAConditionThatKeepsHoldingStillMakesProgress`,
 `TestQuiesceReturnsAfterOneRoundWhenNoCountMoves`,
+`TestQuiesceRejectsAQuietRoundWhoseProcessWasKilled`,
 `TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer`), the leak check
 (`TestTheLeakCheckReportsAGoroutineOfTheMarkedPackages`) and
 `TestADirectCallThatWasInFlightAtACrashIsNotRecordedUnderItsName`.

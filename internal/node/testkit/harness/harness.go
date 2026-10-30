@@ -1271,7 +1271,7 @@ func (h *H) expect() engine.Expect {
 	return engine.Expect{Adapters: adapters}
 }
 
-// QuiesceError says why the system did not go quiet in time.
+// QuiesceError says why the wait for quiet failed.
 type QuiesceError struct {
 	// Waited is how long the wait lasted, on the real clock.
 	Waited time.Duration
@@ -1279,13 +1279,13 @@ type QuiesceError struct {
 	// the fixture does not hold.
 	Asked bool
 	// Engine is the last report of the engine, and Answered whether there was one.
-	// An engine that was asked and neither answered nor refused has a loop that is
-	// inside a command.
+	// A live engine that was asked and neither answered nor refused has a loop that
+	// is inside a command.
 	Engine   engine.Report
 	Answered bool
 	// Unmet names the conditions of the fixture that did not hold.
 	Unmet []string
-	// Err is why the wait ended: the context, or the engine's refusal.
+	// Err is why the wait ended: the context, the engine's refusal, or abandonment.
 	Err error
 }
 
@@ -1298,6 +1298,8 @@ func (e *QuiesceError) Error() string {
 		s += fmt.Sprintf(": the engine reports %+v", e.Engine)
 	case refused:
 		s += ": the engine refused the probe"
+	case errors.Is(e.Err, engineagent.ErrProcessEnded):
+		s += ": the selected process ended"
 	default:
 		s += ": the engine's loop did not answer the probe, so a command is still running"
 	}
@@ -1324,7 +1326,8 @@ const quietPoll = time.Millisecond
 // at the fixture's again: what the engine did may have made a fake busy, and a fake
 // that took work during the round, finished it and went idle again holds on both
 // looks, so the counts of the two looks must be equal as well. It fails with a
-// *QuiesceError when the limit, on the real clock, ends first.
+// *QuiesceError when the real-clock limit ends first or the selected process is
+// abandoned before the wait returns. A replacement process cannot satisfy it.
 func (h *H) Quiesce(opts ...scenario.QuiesceOption) error {
 	o := scenario.ResolveQuiesce(opts)
 	ctx, cancel := context.WithTimeout(h.ctx, o.Timeout)
@@ -1352,38 +1355,52 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 	if err != nil {
 		return fail(false, engine.Report{}, nil, err)
 	}
+	var asked bool
+	var rep engine.Report
 	var unmet []string
-	for {
-		before := h.look()
-		if unmet = before.unmet; len(unmet) > 0 {
-			timer := sys.NewTimer(quietPoll)
-			select {
-			case <-timer.C():
-			case <-ctx.Done():
-				timer.Stop()
-				return fail(false, engine.Report{}, unmet, ctx.Err())
-			}
-			continue
-		}
-		round, endRound := ctx, context.CancelFunc(func() {})
-		if h.launcher != nil {
-			// What the adapter has sent grows while the engine is asked, and the
-			// engine holds the numbers it was given: a round that takes long is made
-			// again with the numbers of now.
-			round, endRound = context.WithTimeout(ctx, adapterRound)
-		}
-		rep, err := p.eng.Quiesce(round, h.expect())
-		roundOver := round.Err() != nil // before endRound, which ends it too
-		endRound()
-		if err != nil {
-			if roundOver && ctx.Err() == nil {
+	// The whole quiet round belongs to this process, including the final fixture
+	// look. Keep diagnostics outside the call whose result abandonment discards.
+	_, err = unlessAbandoned(&p.abandoned, func() (struct{}, error) {
+		for {
+			asked, rep = false, engine.Report{}
+			before := h.look()
+			if unmet = before.unmet; len(unmet) > 0 {
+				timer := sys.NewTimer(quietPoll)
+				select {
+				case <-timer.C():
+				case <-ctx.Done():
+					timer.Stop()
+					return struct{}{}, ctx.Err()
+				}
 				continue
 			}
-			return fail(true, rep, nil, err)
+			round, endRound := ctx, context.CancelFunc(func() {})
+			if h.launcher != nil {
+				// What the adapter has sent grows while the engine is asked, and the
+				// engine holds the numbers it was given: a round that takes long is made
+				// again with the numbers of now.
+				round, endRound = context.WithTimeout(ctx, adapterRound)
+			}
+			asked = true
+			var err error
+			rep, err = p.eng.Quiesce(round, h.expect())
+			roundOver := round.Err() != nil // before endRound, which ends it too
+			endRound()
+			if err != nil {
+				if roundOver && ctx.Err() == nil {
+					continue
+				}
+				unmet = nil
+				return struct{}{}, err
+			}
+			after := h.look()
+			if unmet = after.unmet; len(unmet) == 0 && slices.Equal(before.progress, after.progress) {
+				return struct{}{}, nil
+			}
 		}
-		after := h.look()
-		if unmet = after.unmet; len(unmet) == 0 && slices.Equal(before.progress, after.progress) {
-			return nil
-		}
+	})
+	if err != nil {
+		return fail(asked, rep, unmet, err)
 	}
+	return nil
 }

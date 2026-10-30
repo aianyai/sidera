@@ -229,6 +229,40 @@ func TestQuiesceReturnsAfterOneRoundWhenNoCountMoves(t *testing.T) {
 	}
 }
 
+// A quiet engine does not make a whole round valid if the process dies during
+// the final fixture check, even if another process has already started.
+func TestQuiesceRejectsAQuietRoundWhoseProcessWasKilled(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("restart=%t", restart), func(t *testing.T) {
+			h := New(t, Options{})
+			checks := 0
+			h.addQuiet("idle across a crash", func() (bool, uint64) {
+				checks++
+				if checks == 2 {
+					h.Kill(ProcessCrash)
+					if restart {
+						h.Start()
+					}
+				}
+				return true, 0
+			})
+			err := h.Quiesce()
+			var qe *QuiesceError
+			if !errors.As(err, &qe) || !errors.Is(err, engineagent.ErrProcessEnded) {
+				t.Fatalf("Quiesce returned %v, want a *QuiesceError wrapping ErrProcessEnded", err)
+			}
+			if !qe.Asked || !qe.Answered || !qe.Engine.Satisfied || len(qe.Unmet) != 0 {
+				t.Errorf("lost the interrupted round's quiet report: %+v", qe)
+			}
+			if restart {
+				if err := h.Quiesce(); err != nil {
+					t.Fatalf("Quiesce of the replacement process: %v", err)
+				}
+			}
+		})
+	}
+}
+
 // The report says what was found. A loop that never answered is inside a command;
 // an engine that refused the probe (it is shutting down) answered, and a fixture
 // condition that did not hold never reached the engine at all: neither is a
@@ -236,25 +270,42 @@ func TestQuiesceReturnsAfterOneRoundWhenNoCountMoves(t *testing.T) {
 func TestAQuiesceErrorSaysACommandIsRunningOnlyWhenTheLoopDidNotAnswer(t *testing.T) {
 	const running = "a command is still running"
 
-	h := New(t, Options{})
-	if err := h.Engine().Stop(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	err := h.Quiesce(scenario.WithTimeout(time.Second))
-	var qe *QuiesceError
-	if !errors.As(err, &qe) {
-		t.Fatalf("Quiesce on a stopped engine returned %v, want a *QuiesceError", err)
-	}
-	if strings.Contains(err.Error(), running) {
-		t.Errorf("error %q blames a running command for the engine's refusal", err)
-	}
-	if r, ok := engine.ReasonOf(err); !ok || r != engine.ReasonShuttingDown {
-		t.Errorf("error %v does not carry the engine's refusal", err)
+	for _, abandoned := range []bool{false, true} {
+		t.Run(fmt.Sprintf("refusal/abandoned=%t", abandoned), func(t *testing.T) {
+			h := New(t, Options{})
+			if err := h.Engine().Stop(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			if abandoned {
+				h.addQuiet("crash before probe", func() (bool, uint64) {
+					h.Kill(ProcessCrash)
+					return true, 0
+				})
+			}
+			err := h.Quiesce(scenario.WithTimeout(time.Second))
+			var qe *QuiesceError
+			if !errors.As(err, &qe) {
+				t.Fatalf("Quiesce on a stopped engine returned %v, want a *QuiesceError", err)
+			}
+			if !qe.Asked || qe.Answered || len(qe.Unmet) != 0 {
+				t.Errorf("lost the refused probe's diagnostics: %+v", qe)
+			}
+			if strings.Contains(err.Error(), running) {
+				t.Errorf("error %q blames a running command for the engine's refusal", err)
+			}
+			if abandoned {
+				if !errors.Is(err, engineagent.ErrProcessEnded) {
+					t.Errorf("error %v does not carry ErrProcessEnded", err)
+				}
+			} else if r, ok := engine.ReasonOf(err); !ok || r != engine.ReasonShuttingDown {
+				t.Errorf("error %v does not carry the engine's refusal", err)
+			}
+		})
 	}
 
-	h = New(t, Options{})
+	h := New(t, Options{})
 	h.addQuiet("a fake that is busy", func() (bool, uint64) { return false, 0 })
-	err = h.Quiesce(scenario.WithTimeout(50 * time.Millisecond))
+	err := h.Quiesce(scenario.WithTimeout(50 * time.Millisecond))
 	if strings.Contains(err.Error(), running) {
 		t.Errorf("error %q blames a running command although the engine was never asked", err)
 	}
