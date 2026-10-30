@@ -48,4 +48,6 @@ MCP binary tests use an independent handwritten JSON-RPC driver to launch the
 built executable in both supported protocol eras. They exercise all Agent tools,
 probe-only credentials, process errors, and five 60 KiB messages in Chinese and
 English, reconstructing each body and acknowledging only visible parts. The
-built child follows the outer test's race build.
+built child follows the outer test's race build. These real CLI, management and
+MCP tests and their build helpers require the `acceptance` build tag; ordinary
+package tests do not build or start the executable.

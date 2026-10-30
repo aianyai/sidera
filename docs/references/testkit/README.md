@@ -133,6 +133,21 @@ declaration recipe, real send/receive/acknowledgement across kill, wait and rest
 and repeats the run to compare actual message IDs. The full binary catalog
 remains separate from these bindings.
 
+Binary test execution is selected by `acceptance`; the ordinary fixture and
+driver sources stay available without that tag. Plain child builds have no test
+tags. A plain smoke starts the real daemon, installs the real fake adapter and
+runtime, creates a session through public control, and authenticates its actual
+plain CLI. Public readiness and result polling replace test clock and quiet
+calls. The smoke checks exact receive text, a completed acknowledgement, an empty
+next receive and normal exit. It does not claim sender status refresh, which is
+governed by the normal one-minute pull schedule. A separate plain test requires
+the public unknown-method error for every test control, ignores invalid observer
+environment without producing a trace, and proves independent identities under
+an identical test seed. The real retention regression kills and waits for the
+daemon after closing a native session, replaces the daemon, checks unchanged
+retention facts and the closed-session audit, then observes periodic archival
+and expiration in the replacement generation.
+
 The acceptance catalog describes actual Init, certificate-renewing Start, a
 serving daemon whose clock advances to its periodic persistence task, and direct
 send/receive/acknowledgement. The periodic-clock recipe reads the final clock

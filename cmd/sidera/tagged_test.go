@@ -1,4 +1,4 @@
-//go:build crashtest && testclock
+//go:build acceptance && crashtest && testclock
 
 package main_test
 

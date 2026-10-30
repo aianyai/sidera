@@ -1,3 +1,5 @@
+//go:build acceptance
+
 package acceptance
 
 import (
@@ -102,6 +104,22 @@ func TestSessionInspectionTracksRealCloseAndRetention(t *testing.T) {
 	before, err := maintenance.InspectRetention(e, endpoint)
 	if err != nil || !before.SessionPresent || before.Records == 0 {
 		t.Fatalf("closed session before retention: %+v %v", before, err)
+	}
+	if err := f.Kill(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Start(ctx, GenerationSpec{Number: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.resetGeneration(ctx); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := maintenance.InspectRetention(e, endpoint)
+	if err != nil || restarted != before {
+		t.Fatalf("closed session after actual daemon replacement: %+v, want %+v: %v", restarted, before, err)
+	}
+	if err := checkClosedSession(e, endpoint); err != nil {
+		t.Fatal(err)
 	}
 	// The real periodic task writes summaries before removing these records.
 	for _, delay := range []time.Duration{3 * 24 * time.Hour, time.Hour} {

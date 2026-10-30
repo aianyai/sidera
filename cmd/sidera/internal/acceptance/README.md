@@ -85,7 +85,11 @@ A matching second crash-marker line is termination evidence, not another hit.
 points are returned separately and never count toward transaction coverage.
 The first `BeginStep` marks the setup prefix without resetting any ordinal.
 
-Tests build the four programs once per outer test process, from that checkout.
+Real-process tests and their `TestMain` require the `acceptance` build tag.
+Pure trace parsing and in-memory contract tests remain ordinary package tests.
+The tag selects execution only: fixture, backend and binding sources compile
+without it. Tests build the four programs once per outer test process, from
+that checkout.
 The child builds follow the outer race build. They cover actual targeted
 termination, unexpected exits, restart after kill, clock and quiet, setup
 ordinals, bootstrap replay after a committed preset's response is lost, trace
@@ -93,6 +97,19 @@ rejection, and ordinary builds rejecting tagged controls while ignoring their
 environment variables. Their short roots are removed after each
 run. Domain recipes, offline damage and crash-walk binding are separate callers
 of this process fixture.
+
+Plain-build tests require precise `not_found/method_unknown` replies to all four
+test controls while public requests through the same management client succeed.
+Two independent plain initializations under one test seed must report different
+public identities; invalid clock/crash controls are ignored and create no trace.
+The plain business smoke reuses the fixture's input packages, public management
+bootstrap and single-Wait process owner, with the plain program for daemon and
+CLI. It polls public daemon status, adapter probes and the unique open session,
+checks that session with CLI `me`, then receives the exact body, acknowledges it
+with `completed` and requires an empty next page before normal daemon exit.
+It calls no test clock or quiet controls. These are local delivery results;
+the sender's cached status, refreshed by the ordinary one-minute pull interval,
+is not part of this smoke's evidence.
 
 ## Scenario environment
 
@@ -266,7 +283,10 @@ and no session checkpoint. Retention counts real delivery records, body files,
 archive files and parsed summaries, and rejects damaged archive lines.
 `TestSessionInspectionTracksRealCloseAndRetention` creates and closes a native
 session through the adapter protocol, checks its actual checkpoint and closure,
-and observes the daemon's periodic archival and expiration.
+and observes the daemon's periodic archival and expiration. The retention test
+kills and waits for the daemon after closing the real session, starts a new
+generation, requires identical persisted retention facts and a closed-session
+audit, then observes archival and expiration from that replacement.
 
 `newDeliveryOps` and `failCreateSettlement` explicitly reject filesystem fault
 injection with `scenario.ErrNotAvailable`, as declared by `BinaryCapabilities`.

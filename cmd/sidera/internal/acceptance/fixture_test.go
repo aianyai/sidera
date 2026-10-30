@@ -1,3 +1,5 @@
+//go:build acceptance
+
 package acceptance
 
 import (
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/node/apiwire"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
 )
@@ -331,10 +334,24 @@ func TestRealBinaryPlainRejectsControlsAndIgnoresTestEnvironment(t *testing.T) {
 	home := filepath.Join(root, "n")
 	record := filepath.Join(root, "bad-record")
 	env := processEnv(map[string]string{"SIDERA_TEST_SEED": "plain", "SIDERA_TEST_CLOCK_START_MS": "invalid", "SIDERA_CRASH_GEN": "invalid", "SIDERA_CRASH_RECORD": record, "SIDERA_CRASH_AT": "not-a-point"})
-	init := exec.CommandContext(ctx, testBinaries.Plain, "--home", home, "init")
-	init.Env = env
-	if output, err := init.CombinedOutput(); err != nil {
-		t.Fatalf("plain init: %v: %s", err, output)
+	var nodes []string
+	for _, dir := range []string{home, filepath.Join(root, "independent")} {
+		init := exec.CommandContext(ctx, testBinaries.Plain, "--json", "--home", dir, "init")
+		init.Env = env
+		output, err := init.CombinedOutput()
+		if err != nil {
+			t.Fatalf("plain init: %v: %s", err, output)
+		}
+		var initialized struct {
+			Node string `json:"node"`
+		}
+		if err := json.Unmarshal(output, &initialized); err != nil || initialized.Node == "" {
+			t.Fatalf("plain init identity: %s: %v", output, err)
+		}
+		nodes = append(nodes, initialized.Node)
+	}
+	if nodes[0] == nodes[1] {
+		t.Fatal("plain init reused its identity under the same test seed")
 	}
 	out, err := os.Create(filepath.Join(root, "plain.out"))
 	if err != nil {
@@ -369,10 +386,21 @@ func TestRealBinaryPlainRejectsControlsAndIgnoresTestEnvironment(t *testing.T) {
 		case <-tick.C:
 		}
 	}
-	for _, method := range []string{"test.clock.set", "test.quiesce", "test.crashpoints"} {
-		if raw, err := client.Call(ctx, method, manageapi.Request{Params: json.RawMessage(`{}`)}); err == nil {
-			t.Fatalf("plain accepted %s: %s", method, raw)
+	for _, method := range []string{"test.clock.set", "test.quiesce", "test.crashpoints", "test.ping"} {
+		_, err := client.Call(ctx, method, manageapi.Request{Params: json.RawMessage(`{}`)})
+		var wire *apiwire.Error
+		if !errors.As(err, &wire) || wire.Category != apiwire.CategoryNotFound || wire.Code != apiwire.CodeMethodUnknown {
+			t.Fatalf("plain %s: want not_found/method_unknown, got %v", method, err)
 		}
+	}
+	if _, err := client.Call(ctx, "node.show", manageapi.Request{}); err != nil {
+		t.Fatalf("plain public request after rejected controls: %v", err)
+	}
+	if _, err := client.Call(ctx, "daemon.stop", manageapi.Request{OperationID: admin.OperationID{1}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.wait(ctx); err != nil {
+		t.Fatalf("plain normal exit: %v", err)
 	}
 	if _, err = os.Stat(record); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("plain read test record controls: %v", err)

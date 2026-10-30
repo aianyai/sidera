@@ -158,7 +158,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
       - name: go test with the acceptance tag
-        run: go test -race="$RACE" -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+        run: go test -race="$RACE" -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
 
   # The crash walk of the built binary: it kills a real process at each crash
   # point and checks what the restart finds. It is split into shards that run in

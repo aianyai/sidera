@@ -18,7 +18,7 @@ test, the crash walks of `internal/node/store` included.
 | `format` | Linux | `gofmt -l .` must print nothing |
 | `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
 | `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
-| `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
+| `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows (4) | the crash walk of the built binary: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -race="$RACE" -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
 | `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64 |
@@ -46,10 +46,12 @@ five platforms are the ones Sidera ships binaries for.
 
 ### Build tags
 
-Three tags exist. `crashtest` and `testclock` select the test methods of the
-management interface (`internal/node/manageapi`) and, later, the crash points and
-the clock of the binaries; no file carries `acceptance` until the tests that
-drive binaries land.
+Three tags select separate concerns. `crashtest` and `testclock` select the
+crash observer, deterministic source, controllable clock and their management
+methods. `acceptance` selects the tests that build and drive real programs,
+including the CLI and MCP tests in `cmd/sidera` and the foreground-process tests
+in `cmd/sidera/internal/acceptance`. The ordinary tooling sources and pure trace,
+pipe and helper-reexecution tests remain available without `acceptance`.
 
 | Tag | Selects | Compiled by |
 | --- | ------- | ----------- |
@@ -93,16 +95,12 @@ Dispatch is used on `main` only. The local default is the other way round: a
 walk run without the variable takes `smoke`, so that a walk on a development
 machine is fast unless it asks for `full`.
 
-Today no test reads either variable: the walks of `internal/node/store`,
-`internal/node/engine`, `internal/node/config`, `internal/node/keys` and
-`internal/node/daemon` walk every crash point of their transactions and assert that every declared
-point was crashed at, which a subset could not, and they run in every `test` and
-`test-tags` job. The variables are read by the walk of the
-built binary and by any walk that is driven by `crashwalk.Walk`; until the
-walk of the binary exists, the `crashwalk` job fails at its first step, and the
-`acceptance` job at its only one, because the package they name is not there.
-That is the intended state: a job that passed without running anything would
-hide a missing walk.
+The package-local walks of `internal/node/store`, `internal/node/engine`,
+`internal/node/config`, `internal/node/keys` and `internal/node/daemon` retain
+complete transaction coverage and run in `test` and `test-tags`. Binary walk
+selection belongs to the outer catalog test; the package and its process fixture
+are present. A missing formal walk remains an error caught by the name guard,
+not a reason to skip the job.
 
 The first step of `crashwalk` exists because `go test -run` with a pattern that
 matches no test in an existing package passes: a renamed walk would otherwise
@@ -307,10 +305,9 @@ otherwise these are not verified, and each is pending verification by CI on
 the time of a rerun on each platform and so whether the shard counts are right;
 that the five macOS jobs of a run start together; that `-race` on the Linux
 walk costs what was assumed; that `inputs.crashwalk` is empty on a push and a
-pull request, so that the mode is `full`. The package under
-`./cmd/sidera/internal/acceptance/` does not exist yet, so the commands of the
-`acceptance` and `crashwalk` jobs are those of the walk-to-be and nothing of the
-walk was timed.
+pull request, so that the mode is `full`. The foreground-process acceptance
+package exists and its focused tests run locally. A complete binary catalog walk
+and its hosted timings must be verified separately; focused tests do not establish the full-walk budget.
 
 ## Where
 
@@ -332,9 +329,8 @@ go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...
 go test -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 
-# the jobs of the binary; they need ./cmd/sidera/internal/acceptance, which comes with
-# the tests that drive binaries
-go test -race=false -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
+# the jobs of the binary; CLI/MCP tests and the foreground-process fixture
+go test -race=false -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
 SIDERA_CRASHWALK=smoke go test -count=1 -v -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
 
 # the whole walk, or one shard of it, as a CI job takes it (on Linux add -race)
