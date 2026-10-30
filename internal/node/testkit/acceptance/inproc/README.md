@@ -29,8 +29,9 @@ validation.
 `newSessionOps` binds session callbacks to the current fixture process. Its
 checkpoint callback uses the adapter Controller and the real `checkpoint.put`
 protocol rather than submitting directly to the engine.
-`checkClosedSession` is the final read-only audit of a closed endpoint, its cleared
-token and absent session checkpoint. Session recipes run with the real adapter
+`checkClosedSession` obtains the current record scan and delegates the read-only
+closed-endpoint, cleared-token and absent-checkpoint audit to
+`acceptance/disk.CheckClosedSession`. Session recipes run with the real adapter
 host and its fake native runtime; callbacks do not cache an engine across restarts.
 
 Recovery evidence is recorded once per recipe and complete trigger, deduplicating
@@ -56,7 +57,8 @@ from each recipe's package specification. Only package input files are prepared;
 the engine owns staging, validation, installation and cleanup. The binding injects
 ordinary current-pointer failures and a version-cleanup failure through the current
 process's existing `Faults` wrapper. Result lookup, current-pointer decoding and
-version-directory inspection hold the installation result to its durable effect.
+version-directory inspection through `acceptance/disk.InspectInstalledPackage`
+hold the installation result to its durable effect.
 
 `TestCatalogEvidence` calls `RecordCatalog` once, then reuses its evidence for
 all owned recovery interruptions and the derived Normal interruptions in one
@@ -100,10 +102,10 @@ The recipe checks the sender's real queued status, then completes receive and
 reply through the ordinary Agent entry points without transport controls.
 
 Retention recipes enable the existing periodic archive sweep on the fixture.
-`newMaintenanceOps` reduces real records and parsed archive files to the requested
-retention facts; malformed archive lines fail the audit. The mutation that omits
-archive expiry must fail, and representative real cuts before and during the
-sweep must still finish the bounded drain and pass its domain judgement. Pending
+`newMaintenanceOps` passes the current record scan and disk reader to
+`acceptance/disk.InspectRetention` for retention facts; malformed archive lines
+fail the audit. The mutation that omits archive expiry must fail, and
+representative real cuts before and during the sweep must still finish the bounded drain and pass its domain judgement. Pending
 session sends are received and acknowledged before their source is settled and
 retention begins. Repeated drains preserve large clock advances and allow the
 rearmed periodic task a further ordinary pass to complete dependent endpoint or

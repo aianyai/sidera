@@ -168,8 +168,10 @@ Its private `diskFilesystem` opener retains the full interface only for construc
 the existing store scanner; binding audits never begin transactions, recover or
 write node state. Closed endpoint token checks use the
 persisted endpoint record because public lists intentionally expose no token.
-Package inspection requires the actual current pointer and version directories;
-a refused installation must leave no adapter directory.
+Package inspection passes that reader to
+`acceptance/disk.InspectInstalledPackage`, which requires the actual current
+pointer and version directories; a refused installation must leave no adapter
+directory.
 
 The warning callback enables the profile's installed, disabled warning package
 inside the step, retaining its original operation identifier and expected version
@@ -202,8 +204,10 @@ acknowledged entries, and requires exactly one matching kind and subject.
 store's existing scanner. The private `readSessionRecords` checks the retained
 generation error and requires a running daemon; callers quiesce before inspecting.
 The temporary store only scans: it never recovers, begins a transaction or writes.
-The closed-session audit requires a retained closed endpoint, an empty token and
-no session checkpoint. Retention counts real delivery records, body files,
+The callbacks pass that current scan and reader to
+`acceptance/disk.CheckClosedSession` and `acceptance/disk.InspectRetention`. The
+shared closed-session audit requires a retained closed endpoint, an empty token
+and no session checkpoint. Retention counts real delivery records, body files,
 archive files and parsed summaries, and rejects damaged archive lines.
 `TestSessionInspectionTracksRealCloseAndRetention` creates and closes a native
 session through the adapter protocol, checks its actual checkpoint and closure,

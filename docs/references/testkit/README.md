@@ -897,6 +897,23 @@ real record scan and the result of damage actually applied. It counts all owner
 alerts and `control_unknown` alerts, and only `corrupt_body` alerts matching the
 damaged body. Bindings retain lifecycle ownership and scan errors; recipes decide
 whether the facts satisfy recovery.
+
+The session, retention and installed-package disk rules also belong to
+`acceptance/disk`, so both execution layers judge the same evidence.
+`CheckClosedSession` takes the current real scan and endpoint identifier and
+requires the retained endpoint to be closed with an empty token and no session
+checkpoint. `InspectRetention` takes a read-only filesystem, that scan and an
+endpoint identifier. Its `recipes.RetentionFacts` count every source, lost source,
+target and control record, all bodies and archive files, every parsed summary
+and the requested endpoint's presence. Archive read failures and damaged lines
+return the facts accumulated so far with their error. `InspectInstalledPackage`
+takes a read-only filesystem and package identifier and returns the decoded
+current pointer and every sorted version name as `recipes.InstalledPackage`.
+An absent current pointer requires an absent package directory; unfinished
+version directories and read or decode failures remain errors. Bindings obtain
+their own current reader and scan, preserving their existing process checks;
+the shared helpers neither acquire a store nor recover or write state.
+
 The final closed-record audit uses `acceptance/disk.CheckClosed`, including the
 real recovery plan and unresolved deliveries. Failed-creation notification drains
 retain the recipe's own `DeliveryEvidence` through repeated runs and validate it

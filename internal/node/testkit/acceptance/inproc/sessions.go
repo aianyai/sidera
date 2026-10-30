@@ -1,11 +1,9 @@
 package inproc
 
 import (
-	"fmt"
-
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/fsx/fsxtest"
-	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/acceptance/disk"
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeagent"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
@@ -50,22 +48,5 @@ func checkClosedSession(h *harness.H, endpoint string) error {
 	if err != nil {
 		return err
 	}
-	found := false
-	for _, ep := range scan.Endpoints {
-		if ep.ID.String() == endpoint {
-			found = true
-			if ep.Status != store.EndpointClosed || len(ep.Token) != 0 {
-				return fmt.Errorf("session %s is not closed with an empty token", endpoint)
-			}
-		}
-	}
-	if !found {
-		return fmt.Errorf("closed session %s is missing before retention", endpoint)
-	}
-	for _, cp := range scan.Checkpoints {
-		if cp.Key.Scope == store.CheckpointScopeSession && cp.Key.ID == endpoint {
-			return fmt.Errorf("closed session %s retains a checkpoint", endpoint)
-		}
-	}
-	return nil
+	return disk.CheckClosedSession(scan, endpoint)
 }
