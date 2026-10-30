@@ -11,7 +11,9 @@ import (
 	"github.com/aianyai/sidera/internal/node/clock"
 	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/engine"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/harness"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 	"github.com/aianyai/sidera/sdk/go/manifest"
 )
 
@@ -25,6 +27,10 @@ func TestInstanceInputsInstallDisabledRuntimeAndProbeOnlyAfterEnable(t *testing.
 				ExtraInstances:  []string{warning, "after-warning"},
 				InstanceOptions: map[string]harness.AdapterInstanceOptions{warning: {Manifest: declaration, Disabled: true}},
 			}})
+			inputs := fakeadapter.ExternalInputs{Availability: []adapterproto.Availability{{Condition: adapterproto.ConditionRuntimeAuth, SinceMS: h.Clock().Now().Add(-time.Minute).UnixMilli()}}}
+			if err := h.SetAdapterInputs(warning, inputs); err != nil {
+				t.Fatal(err)
+			}
 			if len(h.AdapterLaunches(warning)) != 0 {
 				t.Fatal("disabled input launched before enable")
 			}
@@ -75,6 +81,28 @@ func TestInstanceInputsInstallDisabledRuntimeAndProbeOnlyAfterEnable(t *testing.
 			if err != nil || len(scan.Alerts) != 1 || scan.Alerts[0].Kind != "version_untested" || scan.Alerts[0].Subject != warning {
 				t.Fatalf("actual owner alert: %v err=%v", scan.Alerts, err)
 			}
+			for generation := 0; generation < 2; generation++ {
+				if err := h.Quiesce(); err != nil {
+					t.Fatal(err)
+				}
+				view, err := h.Engine().Adapter(bg(), warning)
+				if err != nil || len(view.Conditions) != 1 || view.Conditions[0].SinceMS != inputs.Availability[0].SinceMS {
+					t.Fatalf("late-enabled input after restart %d: %+v, %v", generation, view.Conditions, err)
+				}
+				h.Restart()
+			}
+			if err := h.SetAdapterInputs(warning, fakeadapter.ExternalInputs{}); err != nil {
+				t.Fatal(err)
+			}
+			h.Restart()
+			if err := h.Quiesce(); err != nil {
+				t.Fatal(err)
+			}
+			cleared, err := h.Engine().Adapter(bg(), warning)
+			if err != nil || len(cleared.Conditions) != 0 {
+				t.Fatalf("cleared inputs revived: %+v, %v", cleared.Conditions, err)
+			}
+
 		})
 	}
 }

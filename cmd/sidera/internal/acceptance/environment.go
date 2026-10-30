@@ -88,6 +88,12 @@ func (e *environment) Adapter(instance string) (fakeadapter.Controller, error) {
 	}
 	return e.fixture.Adapter(e.ctx, instance)
 }
+func (e *environment) SetAdapterInputs(instance string, inputs fakeadapter.ExternalInputs) error {
+	if err := e.check(); err != nil {
+		return err
+	}
+	return e.fixture.SetAdapterInputs(e.ctx, instance, inputs)
+}
 func (e *environment) Runtime() (fakeruntime.Controller, error) {
 	if err := e.check(); err != nil {
 		return nil, err

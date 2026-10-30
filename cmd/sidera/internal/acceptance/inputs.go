@@ -104,6 +104,12 @@ func (f *Fixture) prepareInputs() error {
 	if f.profile.probeWarning {
 		names = append(names, versionWarningInstance)
 	}
+	var err error
+	f.adapterInputs, err = fakeadapter.NewInputRegistry(names, f.opts.AdapterInputs)
+	if err != nil {
+		return err
+	}
+	f.adapterInputs.HandleControl(f.control)
 	seen := map[string]bool{}
 	for _, name := range names {
 		if seen[name] {
@@ -134,7 +140,7 @@ func (f *Fixture) prepareInputs() error {
 				adapterproto.FrontendCLI: {f.binaries.Plain, "probe", "--json"},
 			}}
 		}
-		f.inputs = append(f.inputs, adapterInput{source: source, config: config, process: fakeadapter.ProcessConfig{InstanceID: name, Manifest: opts, ToolProbe: toolProbe, LedgerDir: filepath.Join(f.root, "l"), RuntimeDir: filepath.Join(f.root, "r"), RuntimeBinary: f.binaries.Runtime, RuntimeSeed: f.runtimeSeed(name), RuntimeTestSeed: f.opts.Seed + "/runtime/" + name, Control: f.control.Addr()}})
+		f.inputs = append(f.inputs, adapterInput{source: source, config: config, process: fakeadapter.ProcessConfig{RestoreInputs: true, InstanceID: name, Manifest: opts, ToolProbe: toolProbe, LedgerDir: filepath.Join(f.root, "l"), RuntimeDir: filepath.Join(f.root, "r"), RuntimeBinary: f.binaries.Runtime, RuntimeSeed: f.runtimeSeed(name), RuntimeTestSeed: f.opts.Seed + "/runtime/" + name, Control: f.control.Addr()}})
 		f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "adapters.install", request: manageapi.Request{Params: map[string]any{"source": source}}})
 		if !warning {
 			f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "adapters.enable", collection: "adapters.list", request: manageapi.Request{Params: map[string]any{"adapter": opts.ID, "instance": name}}})

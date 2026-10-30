@@ -118,16 +118,19 @@ type outcomeRule struct {
 // a knob that changes what the adapter does writes a knob.hit entry to the
 // ledger, so a test can assert that its injection point was reached.
 type Knobs struct {
-	mu       sync.Mutex
-	adapter  *adapter
-	rules    map[string]*outcomeRule
-	pauses   map[string]*pausePoint // armed, nobody has stopped here yet
-	stopped  map[string]*pausePoint // a request is stopped here, waiting for Release
-	holds    []*heldRequest
-	holdOpen chan struct{} // closed by ReleaseHeld, replaced afterwards
-	hang     bool
-	observed ObservedMode
-	onPause  func(point string)
+	inputsMu      sync.Mutex
+	inputs        ExternalInputs
+	inputsStarted *adapter
+	mu            sync.Mutex
+	adapter       *adapter
+	rules         map[string]*outcomeRule
+	pauses        map[string]*pausePoint // armed, nobody has stopped here yet
+	stopped       map[string]*pausePoint // a request is stopped here, waiting for Release
+	holds         []*heldRequest
+	holdOpen      chan struct{} // closed by ReleaseHeld, replaced afterwards
+	hang          bool
+	observed      ObservedMode
+	onPause       func(point string)
 }
 
 // heldRequest is a request of the daemon that the adapter is holding on purpose:
@@ -489,6 +492,11 @@ func (k *Knobs) bind(a *adapter) {
 }
 
 func (k *Knobs) unbind(a *adapter) {
+	k.inputsMu.Lock()
+	defer k.inputsMu.Unlock()
+	if k.inputsStarted == a {
+		k.inputsStarted = nil
+	}
 	k.mu.Lock()
 	if k.adapter == a {
 		k.adapter = nil

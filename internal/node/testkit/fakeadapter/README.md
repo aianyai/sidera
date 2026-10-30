@@ -19,6 +19,7 @@ three operating systems and both tag sets.
 | `Serve(ctx, r, w, Config)` | The adapter side of the protocol over a reader and a writer: in a test process the two ends of an `io.Pipe`, in a program standard input and output. |
 | `Config`, `ManifestOptions`, `DefaultManifestOptions` | What the adapter is given and what it declares. `ManifestOptions` makes both the manifest (`Manifest`, `Encode`, `WritePackage`) and the capabilities it answers `initialize` with, so they cannot disagree. |
 | `ToolProbeConfig` | Optional static commands for real tool probes, shared by `Config` and `ProcessConfig`. |
+| `ExternalInputs`, `InputReceiver`, `InputRegistry`, `NewInputRegistry` | Explicit per-instance conditions owned by a test run; `Set` replaces them and `Attach` installs them before publishing a generation. `HandleControl` supplies the process handshake. |
 | `Knobs`, `Outcome`, `NewKnobs` | The test's handles. |
 | `Controller`, `Knobs.Controller`, `RemoteKnobs` | One interface, with a context, over the knobs of both layers: a script written against it turns the same knobs of an adapter in the test process and of the program, as one written against `fakeruntime.Controller` does for the turns. |
 | `RunProcess`, `ProcessConfig`, `DecodeProcessConfig`, `ReadProcessConfig`, `ConfigArgs` | The body of the adapter program; the program is `cmd/sidera-fake-adapter`. |
@@ -134,6 +135,59 @@ share that implementation; daemon errors return to the caller unchanged.
 
 Every use of a knob that changes behaviour writes a `knob.hit` entry, so a test can
 assert that its injection point was reached.
+
+## External inputs
+
+`ExternalInputs` contains only `PromptRefusal` and the complete `Availability`
+snapshot. A zero value clears both. It is separate from contemporary outcomes:
+explicit refusal takes priority without consuming a queued outcome, and
+`ClearOutcomes` does not clear it. Existing `Availability` remains one notification,
+not a retained declaration. Inputs are validated with the SDK's refusal enum and
+availability rules, and nested endpoint slices are copied.
+
+A fixture constructs one `InputRegistry` for its whole run, listing every instance,
+including initially disabled ones. Unknown instances fail. Each instance has its
+own cancellable serial boundary for `Set`, `Attach` and detach, including the
+installation acknowledgement. `Set` stores desired state before applying it;
+errors remain errors and retain the new desired state. `Attach` installs the latest
+state before publishing the receiver. Failed installation leaves the prior binding
+in place. Its detach only removes its own binding, so an old process cannot remove
+a replacement, and never removes desired state. Receivers must not call back into
+the registry. No scripts, credentials, observed daemon state or arbitrary knobs are
+saved.
+
+`Knobs.ApplyInputs` works before `Serve`. Refusal is visible before business
+requests can run. Availability is first sent after session reattachment in
+`adapter.start`, before its successful response; ordinary starts with no conditions
+send no extra snapshot. Startup and online replacement send under the same input
+lock, preserving order. Every online replacement sends its complete snapshot,
+including an empty one, so a failed clear can be retried with the same value.
+A successful apply confirms installation and notification enqueueing, not daemon
+consumption. A prompt decision already made is not cancelled retroactively.
+
+The optional `ProcessConfig.RestoreInputs` enables the process handshake after
+hello and before `Serve`. `InputRegistry.HandleControl` owns request
+`adapter.inputs.attach`, with strict empty-object params and result. The instance
+comes from the connection's adapter-role hello. The handler installs inputs by a
+reverse `external-inputs` knob call and waits for its acknowledgement while holding
+the instance boundary. The knob takes the complete `ExternalInputs` value and
+answers `{}`. The generic control protocol requires a nonempty `args` object:
+`RemoteKnobs.ApplyInputs` sends an explicit `availability: []` for the zero value;
+the adapter's strict decoder accepts that empty snapshot and the standalone `{}`
+value as equivalent clears. Unknown members and invalid conditions are errors.
+Control closure cancels an in-flight install independently of detach. Failed or
+cancelled attach never enters `Serve`; connection death detaches the binding.
+False preserves standalone process behavior.
+
+`inputs_test.go` checks replacement, cancellation, copy isolation, reconnection,
+instance isolation, failed installation and the concurrent Attach/Set and stale
+detach boundaries. `inputs_contract_test.go` runs one protocol/ledger script in
+process and against the actual fake programs, including first-prompt refusal,
+startup snapshots, clearing, queued outcomes and unchanged empty-input behavior.
+A controlled outbound queue failure requires a same-value clear retry to actually
+enqueue and send the empty snapshot.
+`inputs_lifecycle_test.go` checks cancellation and control closure before serving,
+including a real binary waiting behind an installation.
 
 ## The program
 

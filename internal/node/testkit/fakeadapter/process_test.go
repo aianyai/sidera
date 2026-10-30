@@ -543,6 +543,8 @@ var goldenArgs = []struct {
 	{"availability", fakeadapter.KnobAvailability, `{"conditions":[{"condition":"runtime_auth","since_ms":5}]}`, fakeadapter.AvailabilityArgs{Conditions: []adapterproto.Availability{{Condition: adapterproto.ConditionRuntimeAuth, SinceMS: 5}}}},
 	{"persist", fakeadapter.KnobPersist, `{"endpoint":"sess-1","attempt":"00000000-0000-4000-8000-000000000003"}`, fakeadapter.PersistArgs{Endpoint: "sess-1", Attempt: "00000000-0000-4000-8000-000000000003"}},
 	{"native request", fakeadapter.KnobNativeReq, `{"endpoint":"sess-1","method":"item/tool/call","disposition":"preset"}`, fakeadapter.NativeRequestArgs{Endpoint: "sess-1", Method: "item/tool/call", Disposition: adapterproto.DispositionPreset}},
+	{"external inputs", fakeadapter.KnobExternalInputs, `{"prompt_refusal":"runtime_auth","availability":[{"condition":"runtime_auth","since_ms":1792832400000}]}`, fakeadapter.ExternalInputs{PromptRefusal: adapterproto.RefusalRuntimeAuth, Availability: []adapterproto.Availability{{Condition: adapterproto.ConditionRuntimeAuth, SinceMS: 1792832400000}}}},
+	{"external clear", fakeadapter.KnobExternalInputs, `{}`, fakeadapter.ExternalInputs{}},
 	{"stats reply", fakeadapter.KnobStats + ".reply", `{"notifications_sent":3,"outstanding":1,"held":["session.create"],"held_points":["create.after-native"]}`, fakeadapter.StatsReply{NotificationsSent: 3, Outstanding: 1, Held: []string{"session.create"}, HeldPoints: []string{"create.after-native"}}},
 }
 
@@ -569,6 +571,10 @@ func TestGoldenKnobArguments(t *testing.T) {
 
 func TestKnobArgumentsReject(t *testing.T) {
 	rows := []struct{ rule, knob, json string }{
+		{"unknown external input", fakeadapter.KnobExternalInputs, `{"unknown":true}`},
+		{"unknown external refusal", fakeadapter.KnobExternalInputs, `{"prompt_refusal":"invalid"}`},
+		{"invalid external snapshot", fakeadapter.KnobExternalInputs, `{"availability":[{"condition":"invalid"}]}`},
+		{"null external snapshot", fakeadapter.KnobExternalInputs, `{"availability":null}`},
 		{"an unknown member", fakeadapter.KnobOutcome, `{"request":"create","mode":"set","kind":"hold","extra":1}`},
 		{"a request that is not one", fakeadapter.KnobOutcome, `{"request":"dance","mode":"set","kind":"hold"}`},
 		{"a mode that is neither set nor queue", fakeadapter.KnobOutcome, `{"request":"create","mode":"always","kind":"hold"}`},

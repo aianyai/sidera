@@ -41,6 +41,22 @@ layer.
 | `H.Runtime`, `H.RuntimeAddr`, `H.RuntimeOf`, `H.RuntimeAddrOf` | The controller of the fake runtime of an adapter made with `AdapterOptions.Runtime` (`scenario.ErrNotAvailable` without), and the address of the runtime endpoint of the instance, the target of a session creation. The first two are `Instance`'s; the others take the name of any instance of the fixture. |
 | `ProgramTable`, `MakeLayout`, `Mount`, `SeedNode`, `AdapterAdmission`, `RandReader`, `LogCapture`, `NoLeaks`, `DefaultStart`, `NodeID`, `Instance` | The building blocks the fixture is made of, exported so that a test of a package that needs a node but not the fixture (the engine's own tests) makes it the same way. |
 
+## Run-owned adapter inputs
+
+`AdapterOptions.Inputs` supplies initial `fakeadapter.ExternalInputs` by listed
+instance. The fixture constructs one registry before any launch, including for
+initially disabled instances. `H.SetAdapterInputs` replaces a declaration using
+the fixture context, even while that instance is disabled or the node is down;
+without an adapter host it returns `scenario.ErrNotAvailable`. Desired state
+survives daemon and adapter replacement until explicitly changed.
+
+`LauncherConfig.Inputs` optionally provides that registry to a standalone
+launcher. Each launch creates knobs, runs `Arm`, attaches the inputs and only
+then starts its pipe. Failed attach starts no pipe. The process watcher detaches
+its binding when the actual pipe process ends; a late watcher cannot remove a
+newer binding. Nil preserves the existing launcher behavior. Apply success does
+not replace `Quiesce`: it confirms installation, not daemon snapshot consumption.
+
 ## Several adapter instances
 
 By default the node has one instance, `Instance`, and every accessor without a name belongs to it. `AdapterOptions.ExtraInstances` adds instances for a test of what the node does when one adapter is away while another serves (the node-wide cap on prompt turns counts only adapters that are online). Each extra instance is its own adapter package, named for the instance and installed and enabled through the same entries as `Instance`, so the host starts one fake adapter process for it and its sessions are those of a fake runtime of its own (seeded `Seed` plus its place in the list, so no two runtimes name a native session alike). A session is made by a creation at `RuntimeAddrOf(instance)`, and a session agent (`H.Session`) is reached by the identifier as for `Instance`. The names must be valid adapter identifiers, different from `Instance` and from each other, or `New` fails the test; `Options.Disk` is used as it is, so a disk handed in must already have the instances installed and enabled.

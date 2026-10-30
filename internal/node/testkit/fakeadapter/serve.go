@@ -472,6 +472,9 @@ func (a *adapter) start(ctx context.Context, raw json.RawMessage) (any, error) {
 		}
 		states = append(states, st)
 	}
+	if err := a.knobs.startInputs(ctx, a); err != nil {
+		return nil, err
+	}
 	return answer(adapterproto.StartResult{Sessions: states})
 }
 
@@ -645,6 +648,9 @@ func (a *adapter) promptDeliver(ctx context.Context, raw json.RawMessage) (any, 
 			return nil, peer.NewError(adapterproto.CodeAttemptConflict, "the attempt was made with other parameters")
 		}
 		return answer(earlier.result)
+	}
+	if reason := a.knobs.promptRefusal(); reason != "" {
+		return answer(adapterproto.PromptDeliverResult{Stage: adapterproto.PromptRefused, Reason: reason})
 	}
 	o, has, err := a.outcome(ctx, forPrompt, adapterproto.MethodPromptDeliver)
 	if err != nil {

@@ -28,6 +28,8 @@ import (
 // instance the way the daemon does, through the host, and not by calling the
 // engine's entry itself.
 type AdapterOptions struct {
+	// Inputs are run-owned external conditions, installed before each adapter serves.
+	Inputs map[string]fakeadapter.ExternalInputs
 	// Host are the tunables of the host; a zero field takes the host's default.
 	// The host runs on the fixture's test clock, so Advance moves its pings, its
 	// backoff and its waits for a process to end.
@@ -106,6 +108,9 @@ func RuntimeAdapterManifestOf(instance string, maxDirect int) fakeadapter.Manife
 
 // LauncherConfig configures an AdapterLauncher.
 type LauncherConfig struct {
+	// Inputs restores run-owned conditions before starting each adapter pipe.
+	// Nil preserves standalone launcher behavior.
+	Inputs *fakeadapter.InputRegistry
 	// T receives the failures of the launcher itself.
 	T testing.TB
 	// Ctx bounds every adapter the launcher starts.
@@ -188,8 +193,16 @@ func (l *AdapterLauncher) Launch(ctx context.Context, inst adapterhost.Instance)
 	if l.c.Arm != nil {
 		l.c.Arm(inst.ID, n, knobs)
 	}
+	var detach func()
+	if l.c.Inputs != nil {
+		var err error
+		detach, err = l.c.Inputs.Attach(ctx, inst.ID, knobs)
+		if err != nil {
+			return nil, err
+		}
+	}
 	launch := &AdapterLaunch{
-		t: l.c.T, knobs: knobs, ctl: knobs.Controller(),
+		t: l.c.T, knobs: knobs, ctl: knobs.Controller(), detach: detach,
 		endReq: make(chan struct{}), done: make(chan struct{}),
 	}
 	own := LauncherInstance{Manifest: l.c.Manifest, Runtime: l.c.Runtime}
@@ -304,10 +317,11 @@ const endWait = 10 * time.Second
 
 // AdapterLaunch is one adapter process the host started.
 type AdapterLaunch struct {
-	t     testing.TB
-	knobs *fakeadapter.Knobs
-	ctl   fakeadapter.Controller
-	proc  *fakeadapter.PipeProcess
+	detach func()
+	t      testing.TB
+	knobs  *fakeadapter.Knobs
+	ctl    fakeadapter.Controller
+	proc   *fakeadapter.PipeProcess
 
 	survive atomic.Bool
 	endOnce sync.Once
@@ -381,6 +395,9 @@ func (l *AdapterLaunch) waitEnded() {
 // only when End says so, even if its connection is over.
 func (l *AdapterLaunch) watch() {
 	_ = l.proc.Wait()
+	if l.detach != nil {
+		l.detach()
+	}
 	if l.survive.Load() {
 		<-l.endReq
 	}

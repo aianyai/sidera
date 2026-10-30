@@ -19,6 +19,7 @@ import (
 	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/fsx"
 	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
 	"github.com/aianyai/sidera/internal/node/testkit/fakectl"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeruntime"
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
@@ -29,9 +30,10 @@ import (
 type Binaries struct{ Tagged, Plain, Adapter, Runtime string }
 
 type Options struct {
-	Seed       string
-	ClockStart time.Time
-	Log        *slog.Logger
+	AdapterInputs map[string]fakeadapter.ExternalInputs
+	Seed          string
+	ClockStart    time.Time
+	Log           *slog.Logger
 }
 
 // GenerationSpec gives each process its own generation and record file. Target
@@ -61,6 +63,7 @@ type Fixture struct {
 	clockMu        sync.Mutex
 	now            time.Time
 	control        *fakectl.Server
+	adapterInputs  *fakeadapter.InputRegistry
 	client         *manageapi.Client
 	table          *txn.Table
 	files          *ledger.Dir
@@ -444,4 +447,10 @@ func (f *Fixture) Close() error {
 	}
 	errs = append(errs, f.writer.Close())
 	return errors.Join(errs...)
+}
+
+// SetAdapterInputs replaces explicit inputs for this run, including while the
+// instance is disabled. It confirms adapter installation, not daemon consumption.
+func (f *Fixture) SetAdapterInputs(ctx context.Context, instance string, inputs fakeadapter.ExternalInputs) error {
+	return f.adapterInputs.Set(ctx, instance, inputs)
 }

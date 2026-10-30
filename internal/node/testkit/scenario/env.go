@@ -42,6 +42,9 @@ type Env interface {
 	// Adapter returns the knobs of the fake adapter of an instance and Runtime the
 	// turns of the fake runtime. A layer that cannot provide one yet returns an
 	// error that is ErrNotAvailable, never a stand-in.
+	// SetAdapterInputs replaces explicit run-owned conditions before future
+	// adapters serve and on the current one, independently of outcome knobs.
+	SetAdapterInputs(instance string, inputs fakeadapter.ExternalInputs) error
 	Adapter(instance string) (fakeadapter.Controller, error)
 	Runtime() (fakeruntime.Controller, error)
 

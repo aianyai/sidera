@@ -6,6 +6,70 @@ native runtime that it did not write, judge it from a record the daemon did not 
 walk its crash points. Each package has a README with its entry points and rules; this
 document gives the reasons and says where the tests are.
 
+## Explicit adapter inputs across generations
+
+A test run may own `fakeadapter.ExternalInputs`: a typed prompt refusal and a
+complete availability snapshot. Both fields empty revoke the declaration. These
+are external conditions, separate from process-local outcomes and observed daemon
+state. Refusal takes priority without consuming queued outcomes; `ClearOutcomes`
+and the one-shot `Availability` Controller operation keep their previous meanings.
+The SDK validates refusals and availability, and all nested slices are copied.
+No arbitrary knob, script, credential or daemon observation is retained.
+
+`InputRegistry` fixes the run's instance names at construction, including disabled
+instances, and rejects unknown names. Each instance independently serializes Set,
+Attach and detach through a cancellable boundary that includes installation and
+its acknowledgement. Set retains the complete desired value before applying it;
+failed application propagates its error and keeps the new desired state. Attach
+installs the latest declaration before publishing its receiver; failure preserves
+the existing binding. Detach removes only its own binding and never desired state,
+so an old process's exit cannot disconnect its replacement. Receivers cannot call
+back into the registry.
+
+The in-process fixture constructs this owner once from `AdapterOptions.Inputs`.
+`LauncherConfig.Inputs` attaches after knob creation and `Arm`, before `StartPipe`;
+failed attachment starts no pipe, and actual process exit detaches the binding.
+The binary fixture constructs its owner once from `Options.AdapterInputs` while
+preparing every installed instance. `Fixture.SetAdapterInputs(ctx, instance,
+inputs)` and `H.SetAdapterInputs(instance, inputs)` replace the same declaration.
+`scenario.Env` exposes only the latter operation; its binary implementation uses
+the current environment context. There are no script callbacks or fixture handles
+in scenario data. Initial disablement and later real enablement use the same
+attachment path as every restart.
+
+A binary `ProcessConfig.RestoreInputs` opts into the fake adapter's own
+`adapter.inputs.attach` request after hello and before Serve. Params and result
+are strict `{}`. The server selects the instance from the adapter-role hello,
+then calls its `external-inputs` knob in reverse and waits for the `{}` install
+acknowledgement inside the same boundary. The knob's params are the complete
+ExternalInputs value. To preserve generic fakectl's nonempty-args rule, its remote
+sender encodes a clear with explicit `availability: []`; the strict adapter-owned
+decoder accepts this and standalone `{}` as equivalent clears. The generic hello,
+clock and knob protocol does not change. Control closure cancels the pending
+install independently of detach; failure or cancellation cannot enter Serve.
+Standalone programs with RestoreInputs false and launchers with nil Inputs keep
+their old behavior.
+
+Knobs installs refusal before Serve can make a prompt decision. After session
+reattachment, `adapter.start` sends the currently declared availability before its
+successful response. This is a legal notification window after admission; an
+ordinary start with no conditions sends no extra empty snapshot. Startup and
+online replacement read and send under one input lock, so new snapshots cannot
+be overtaken by old ones. Every online replacement sends its complete snapshot,
+including an empty one; retrying a failed clear therefore still enqueues the clear.
+Successful apply proves local installation and notification enqueueing, not daemon
+consumption. Existing quiet and real feedback remain responsible for convergence.
+A decision already made is not cancelled retroactively. Product reconnection
+still clears observed availability; these fakes re-report an external condition.
+
+`fakeadapter/inputs_test.go` covers desired state, copies, isolation, reconnects,
+failed and cancelled application, concurrent Attach/Set and stale detach.
+`inputs_contract_test.go` runs the same protocol and ledger assertions in process
+and against the actual fake programs. `inputs_lifecycle_test.go` requires attach
+cancellation and control closure to terminate without premature Serve or leaked
+processes. The harness's disabled-instance test exercises later real enablement,
+replacement and explicit clearing through its run-owned registry.
+
 ## What
 
 | Part | Is |

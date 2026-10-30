@@ -142,6 +142,9 @@ type notification struct {
 }
 
 type rigOptions struct {
+	peer      peer.Params
+	output    func(io.WriteCloser) io.WriteCloser
+	inputs    *fakeadapter.InputRegistry
 	toolProbe *fakeadapter.ToolProbeConfig
 	manifest  func(*fakeadapter.ManifestOptions)
 	// refuseObserved makes the daemon side refuse every recv.observed.
@@ -189,6 +192,13 @@ func newRig(t *testing.T, ro rigOptions) *rig {
 		t.Fatalf("fakeruntime.New: %v", err)
 	}
 	r.runtime = rt
+	if ro.inputs != nil {
+		detach, err := ro.inputs.Attach(context.Background(), "fake", r.knobs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(detach)
+	}
 	r.connect()
 	t.Cleanup(func() {
 		r.disconnect()
@@ -213,15 +223,20 @@ func (r *rig) connect() {
 	}
 	toAdapterR, toAdapterW := io.Pipe()
 	fromAdapterR, fromAdapterW := io.Pipe()
+	output := io.WriteCloser(&tap{dst: fromAdapterW, log: r.log})
+	if r.ro.output != nil {
+		output = r.ro.output(output)
+	}
 	served := r.served
 	go func() {
-		served <- fakeadapter.Serve(ctx, toAdapterR, &tap{dst: fromAdapterW, log: r.log}, fakeadapter.Config{
+		served <- fakeadapter.Serve(ctx, toAdapterR, output, fakeadapter.Config{
 			InstanceID: "fake",
 			Now:        r.clock.Now,
 			Ledger:     adapterWriter,
 			Runtime:    r.runtime,
 			Manifest:   r.opts,
 			ToolProbe:  r.ro.toolProbe,
+			Peer:       r.ro.peer,
 			Knobs:      r.knobs,
 			Logger:     slog.New(slog.NewTextHandler(testWriter{r.t}, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		})

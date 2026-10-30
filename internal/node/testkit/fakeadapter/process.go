@@ -20,8 +20,10 @@ import (
 // ProcessConfig is everything a fake adapter program is told when it is started,
 // as the JSON the fixture hands over in the environment.
 type ProcessConfig struct {
-	InstanceID string          `json:"instance_id"`
-	Manifest   ManifestOptions `json:"manifest"`
+	// RestoreInputs requires the fixture-owned input handshake before Serve.
+	RestoreInputs bool            `json:"restore_inputs,omitempty"`
+	InstanceID    string          `json:"instance_id"`
+	Manifest      ManifestOptions `json:"manifest"`
 	// ToolProbe contains only static commands, never request credentials.
 	ToolProbe *ToolProbeConfig `json:"tool_probe,omitempty"`
 	// LedgerDir is the directory of the file ledger, shared with the fixture and
@@ -161,6 +163,15 @@ func RunProcess(ctx context.Context, cfg ProcessConfig, stdin io.Reader, stdout 
 		case <-ctx.Done():
 		}
 	}()
+	if cfg.RestoreInputs {
+		var raw json.RawMessage
+		if err := client.Call(ctx, MethodInputsAttach, struct{}{}, &raw); err != nil {
+			return err
+		}
+		if err := strictjson.Decode(raw, &struct{}{}); err != nil {
+			return err
+		}
+	}
 	err = Serve(ctx, stdin, stdout, Config{
 		InstanceID: cfg.InstanceID, Now: clock.Now, Ledger: led, Runtime: launcher,
 		Manifest: cfg.Manifest, ToolProbe: cfg.ToolProbe, Knobs: knobs, Logger: logger,

@@ -206,6 +206,8 @@ func DecodeKnobArgs(name string, data []byte) (any, error) {
 			return nil, err
 		}
 		return p, nil
+	case KnobExternalInputs:
+		return decodeExternalInputs(data)
 	case KnobOutcome:
 		return decodeArgs[OutcomeArgs](data)
 	case KnobPauseAt:
@@ -241,6 +243,15 @@ func (k *Knobs) Dispatch(ctx context.Context, name string, args json.RawMessage)
 		return nil, err
 	}
 	switch name {
+	case KnobExternalInputs:
+		v, err := DecodeKnobArgs(name, args)
+		if err != nil {
+			return invalid(err)
+		}
+		if err := k.ApplyInputs(ctx, v.(ExternalInputs)); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
 	case KnobCheckpointPut:
 		v, err := DecodeKnobArgs(name, args)
 		if err != nil {

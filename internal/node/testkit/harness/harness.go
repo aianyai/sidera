@@ -139,7 +139,8 @@ type H struct {
 	// launcher starts the fake adapters of the host, nil without Options.Adapter.
 	// It is the fixture's and not a process's: the launches are kept across
 	// restarts, and the ledger writer of the adapter is one for all of them.
-	launcher *AdapterLauncher
+	launcher      *AdapterLauncher
+	adapterInputs *fakeadapter.InputRegistry
 	// instances are the adapter instances of the node, Instance first; without
 	// Options.Adapter Instance alone, which the fixture then admits itself.
 	instances []string
@@ -239,6 +240,10 @@ func NewStopped(t testing.TB, o Options) *H {
 		for _, p := range packages[1:] {
 			h.instances = append(h.instances, p.instance)
 		}
+		h.adapterInputs, err = fakeadapter.NewInputRegistry(h.instances, o.Adapter.Inputs)
+		if err != nil {
+			t.Fatalf("harness: adapter inputs: %v", err)
+		}
 		h.runtimes = map[string]*fakeruntime.Runtime{}
 		var launchOrder []string
 		for _, p := range packages {
@@ -248,7 +253,7 @@ func NewStopped(t testing.TB, o Options) *H {
 		}
 		lc := LauncherConfig{
 			T: t, Ctx: h.ctx, Now: h.clk.Now, Ledgers: h.led, Manifest: AdapterManifest(o.MaxDirect),
-			Instances: map[string]LauncherInstance{}, Order: launchOrder,
+			Instances: map[string]LauncherInstance{}, Order: launchOrder, Inputs: h.adapterInputs,
 		}
 		for i, p := range packages {
 			name := p.instance
@@ -1403,4 +1408,13 @@ func (h *H) quiesce(ctx context.Context, _ scenario.QuiesceOptions) error {
 		return fail(asked, rep, unmet, err)
 	}
 	return nil
+}
+
+// SetAdapterInputs replaces the run-owned inputs of a listed adapter instance.
+// Inputs survive node and adapter replacement until explicitly changed.
+func (h *H) SetAdapterInputs(instance string, inputs fakeadapter.ExternalInputs) error {
+	if h.adapterInputs == nil {
+		return scenario.NotAvailable("an adapter host")
+	}
+	return h.adapterInputs.Set(h.Ctx(), instance, inputs)
 }

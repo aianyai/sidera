@@ -61,6 +61,10 @@ func (e *recEnv) BeginStep(name string) error { e.note("begin %s", name); return
 func (e *recEnv) Adapter(string) (fakeadapter.Controller, error) {
 	return nil, scenario.NotAvailable("an adapter host")
 }
+func (e *recEnv) SetAdapterInputs(instance string, inputs fakeadapter.ExternalInputs) error {
+	e.note("adapter inputs %s %+v", instance, inputs)
+	return nil
+}
 func (e *recEnv) Runtime() (fakeruntime.Controller, error) {
 	return nil, scenario.NotAvailable("a runtime")
 }

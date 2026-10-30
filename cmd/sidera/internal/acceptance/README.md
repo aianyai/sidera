@@ -118,9 +118,27 @@ It calls no test clock or quiet controls. These are local delivery results;
 the sender's cached status, refreshed by the ordinary one-minute pull interval,
 is not part of this smoke's evidence.
 
+## Run-owned adapter inputs
+
+`Options.AdapterInputs` supplies initial `fakeadapter.ExternalInputs` by installed
+instance. Preparation constructs one registry for the fixture's entire run and
+registers its control handler before launching any fake. The instance list also
+includes the installed, initially disabled warning instance. Every generated
+`ProcessConfig` explicitly enables `RestoreInputs`, so hello is followed by
+confirmed installation before the adapter enters `Serve` on every generation.
+
+`Fixture.SetAdapterInputs(ctx, instance, inputs)` replaces that run's declaration;
+unknown instances fail and a zero value clears it. It works without a currently
+running adapter. The scenario environment delegates with its current context and
+preserves its existing generation-error checks. The registry retains desired
+state after apply failure and releases only the old connection's binding when it
+ends. Existing Controller operations remain confined to their current adapter.
+Notification enqueueing does not prove daemon consumption; normal quiet and
+feedback checks still supply that evidence.
+
 ## Scenario environment
 
-The private `environment` implements the unchanged `scenario.Env` contract.
+The private `environment` implements the `scenario.Env` contract.
 `envFrom` gives domain bindings access to the same current fixture. Logical
 `Advance` and `Set` use `Fixture.SetTime`; because those methods return no error,
 the environment retains the first clock failure and returns it from subsequent
