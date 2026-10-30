@@ -91,6 +91,10 @@ Additional recovery-record sources retain their domain checks and receive the
 same final owner-predicate audit as recovery recipes. The instance-disable
 recording therefore proves the pending records converge as well as the visible
 management result and feedback.
+`TestInstanceDisableJudgesTheActualCreationOutcome` retains the normal unknown
+result and real pre-disable recovery creation. Its evidence counterexamples remove
+the unknown notice, public creation reply or native creation, and mismatch the
+creation attempt or returned endpoint; each must fail the shared judgement.
 
 `configureLifecycleStartup` binds the periodic-clock recipe's final read-only
 clock-record audit. It checks the daemon's persisted state after shutdown; no

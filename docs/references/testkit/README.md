@@ -192,7 +192,14 @@ and do not call the fixture's stop method from a script step.
 
 The disabled-instance recipe queues both real target messages and control work,
 keeps the sender enabled in another instance, then receives and acknowledges the
-corresponding feedback. Its clean record writes the instance endpoints first and
+corresponding feedback. The returned creation request is judged by its actual
+public result: an unknown outcome requires the exact `delivery_unknown` notice
+for that message and runtime target. Before disable commits, recovery may instead
+complete creation. The shared creation judgement requires a delivered public
+reply whose returned endpoint resolves to the same external creation attempt
+and its real native reference. Missing or mismatched proof fails. Both branches
+still require the pending-message evidence, disabled instance, zero open endpoints
+and closed-record audit. Its clean record writes the instance endpoints first and
 the endpoint drains separately. Normal declarations that run during recovery
 remain normal declarations: declaration kind and observation source are separate
 coverage dimensions.

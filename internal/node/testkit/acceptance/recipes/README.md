@@ -144,8 +144,14 @@ interruptions.
 
 A delivery that remains correctable may end the drain as `delivery_unknown`; its
 matching actual system notice is evidence of the uncertainty. Instance management
-requires that notice for the held creation as well as the pending message. Final
-audits reject queued or accepted work and never infer feedback from disk state.
+retains the returned creation request and judges its actual result. An unknown
+creation still requires the exact `delivery_unknown` notice for its message and
+runtime target. Recovery before disable commits can instead finish creation;
+`DeliveryEvidence` then requires the delivered public creation reply and the
+returned session endpoint's matching external creation attempt and native
+reference. Both branches retain the pending-message evidence, disabled instance,
+zero open endpoints and closed-record audits. Final audits reject queued or
+accepted work and never infer feedback from disk state.
 
 The periodic-clock startup advances one minute while the actual daemon serves,
 then waits for its own periodic task and stops. Its final read-only check requires

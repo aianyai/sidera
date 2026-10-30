@@ -339,6 +339,7 @@ func managementInstance(b Bindings) ScriptRecipe {
 	facts := newDeliveryEvidence(b)
 	var feedback feedbackDrain
 	var target string
+	var control fakeagent.SendResult
 	checkDisabled := func(e scenario.Env, o ManagementOutcome) error {
 		f, err := ops.InspectInstance(e, instance)
 		if err != nil {
@@ -368,11 +369,10 @@ func managementInstance(b Bindings) ScriptRecipe {
 				return err
 			}
 			facts.Accepted(out, "Disable this instance with pending deliveries.")
-			control, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, instance), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
+			result, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: b.Sessions.RuntimeAddr(e, instance), Signal: adapterproto.SignalSessionCreate, Preset: "default"})
 			if err == nil {
-				for _, to := range control.To {
-					facts.RequireFeedback(control.MessageID, to, delivery.KindDeliveryUnknown)
-				}
+				control = result
+				facts.AcceptedCreation(control, "", "sender")
 			}
 			return err
 		}},
@@ -420,6 +420,21 @@ func managementInstance(b Bindings) ScriptRecipe {
 		}
 		if f.Enabled || f.OpenEndpoints != 0 {
 			return fmt.Errorf("%w: disabled instance retains open endpoints: %+v", ErrManagementEffect, f)
+		}
+		if control.MessageID != "" {
+			status, err := e.Agent("sender").Status(e.Ctx(), fakeagent.StatusInput{MessageID: control.MessageID})
+			if err != nil {
+				return err
+			}
+			// Recovery can finish creation before the disable has committed.
+			// AcceptedCreation checks that reply against real native creation.
+			if status.ControlReply == nil {
+				for _, to := range control.To {
+					facts.RequireFeedback(control.MessageID, to, delivery.KindDeliveryUnknown)
+				}
+			} else if status.ControlReply.Create == nil || status.ControlReply.Create.Outcome != adapterproto.CreateReplyCreated {
+				return fmt.Errorf("instance creation %s has an unexpected control reply: %+v", control.MessageID, status.ControlReply)
+			}
 		}
 		if err := facts.Check(e); err != nil {
 			return err
