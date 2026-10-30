@@ -65,6 +65,21 @@ crash target without changing the fixture's global environment. Calls use
 `Cmd.Run`, which waits for each started child. An abnormal exit without a wire
 error preserves `*exec.ExitError` for verification alongside the crash record.
 
+Binary session observations use public `endpoints.list` to select an actual open
+runtime endpoint and public `alerts.list`, including acknowledged entries, to
+count an unknown-creation alert by kind and subject. Checkpoints travel through
+the current fake adapter Controller's typed `checkpoint.put`. The closed-session
+and retention callbacks inspect the real disk through the store's scanner after
+quiet: they require the retained closed endpoint's empty token and absent
+checkpoint, and count actual delivery records, bodies, archive files and parsed
+summaries. Damaged archive lines are errors. Inspection requires a running node
+and returns a retained generation failure before reading. The scan neither
+recovers transactions nor writes node state. The binary callbacks for source
+update, lost-body retention and creation-settlement filesystem faults explicitly
+return `scenario.ErrNotAvailable`; capability selection excludes those recipes.
+These observations do not yet supply a binary session Agent: the native runtime
+Controller has no credential read for the existing real CLI driver.
+
 The acceptance catalog describes actual Init, certificate-renewing Start, a
 serving daemon whose clock advances to its periodic persistence task, and direct
 send/receive/acknowledgement. The periodic-clock recipe reads the final clock

@@ -188,3 +188,30 @@ instance disable/enable, backup confirmation and clock clearing through the real
 daemon. They also kill and replace the daemon before replaying a settings or
 installation request, and cut warning enable at its real commit point before
 resuming probe and acknowledgement in the next generation.
+
+## Session and retention observations
+
+`runtimeAddress` selects the unique open runtime endpoint of the requested
+instance from public `endpoints.list`; it never derives an endpoint identifier.
+Its callback shape has no error result, so missing or ambiguous endpoints and
+failed calls fail loudly. `checkpointPut` uses the current adapter Controller's
+real `checkpoint.put`. `hasUnknownCreationAlert` reads `alerts.list`, including
+acknowledged entries, and requires exactly one matching kind and subject.
+
+`checkClosedSession` and `newMaintenanceOps` inspect actual node files with the
+store's existing scanner. The private `readSessionRecords` checks the retained
+generation error and requires a running daemon; callers quiesce before inspecting.
+The temporary store only scans: it never recovers, begins a transaction or writes.
+The closed-session audit requires a retained closed endpoint, an empty token and
+no session checkpoint. Retention counts real delivery records, body files,
+archive files and parsed summaries, and rejects damaged archive lines.
+`TestSessionInspectionTracksRealCloseAndRetention` creates and closes a native
+session through the adapter protocol, checks its actual checkpoint and closure,
+and observes the daemon's periodic archival and expiration.
+
+`newDeliveryOps` and `failCreateSettlement` explicitly reject filesystem fault
+injection with `scenario.ErrNotAvailable`, as declared by `BinaryCapabilities`.
+They preserve a retained generation error before reporting missing capability.
+The session helpers do not yet form `SessionOps`: the native runtime's current
+Controller exposes no session credential for the real CLI Agent driver. Session
+credentials are never inferred or read from node records by these bindings.
