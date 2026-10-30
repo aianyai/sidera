@@ -222,8 +222,9 @@ clock write in its complete recovery record, retaining the original strict
 feedback and final-instance checks.
 
 `BenchmarkTransactionWrites` and its private owner fixtures are test-only real
-filesystem measurements. The runner enumerates the complete daemon declaration
-table through the six owners, so a new declaration immediately needs a nonempty
+filesystem measurements of all 53 declarations across the six owners. The runner
+enumerates the complete daemon declaration table through the six owners, so a new
+declaration immediately needs a nonempty
 successful fixture in the unfiltered suite. Unknown and duplicate fixture names
 fail at entry, and missing fixtures fail their named declaration sub-benchmarks.
 Go's ordinary sub-benchmark selector can run a development subset without claiming

@@ -622,9 +622,10 @@ filesystem writes and syncs, intermediate owner code, observer overhead and any
 scheduling delay between those boundaries; it is not a pure syscall duration.
 
 The suite derives its denominator from `daemon.Table`, partitions it by the six
-owners' declarations, and runs one named sub-benchmark per declaration, including
-Recovery declarations. Every selected declaration must have a fixture and at
-least one nonempty successful commit through its owner's existing entry point on
+owners' declarations, and implements all 53 declarations: txn 2, config 8, keys 2,
+store 32, engine 7 and daemon 2. It runs one named sub-benchmark per declaration,
+including Recovery declarations. Every selected declaration must have a fixture
+and at least one nonempty successful commit through its owner's existing entry point on
 a real filesystem. An unknown or duplicate fixture fails immediately; a missing
 fixture fails its declaration's sub-benchmark. Ordinary Go sub-benchmark filters
 can run one owner while implementations are developed, but only an unfiltered
@@ -638,10 +639,16 @@ and windows without a closing commit fail the benchmark. Results report
 `ns/write-window` averaged over successful windows and `commits/op`; default
 `ns/op` is suppressed because a trigger operation can also include engine queueing
 and waiting. Each fixture uses a fixed small input rather than a workload-size
-matrix: configuration changes replace one collection, staging copies one manifest
-and a 128-byte program, renewal advances one certificate serial, settle syncs a
-root and child, and cleanup removes one temporary file and one discarded directory
-containing a file.
+matrix:
+
+| Owner | Input profile |
+| ----- | ------------- |
+| txn | settle syncs a root and one child; cleanup removes one temporary file and one discarded directory containing one file |
+| config | one setting, preset, endpoint override or adapter instance; staging copies one manifest and a 128-byte program; recovery repairs one interrupted installation |
+| keys | renewal advances one certificate serial; clock saving advances one clock record by one minute |
+| store | one source/target endpoint and record per operation, with a 29-byte message body, 20-byte feedback body, 12-byte checkpoint or 16-byte administrative result where applicable; archive operations select one record or day file; recovery handles one damaged record, orphan body/endpoint or control-derived effect |
+| engine | one direct/runtime registration, clock clear, backup confirmation, identity retirement or adapter installation; installation uses the same manifest and 128-byte program, including an already-current sample |
+| daemon | initialize one default node, or repair one missing empty layout directory |
 
 Run the complete transaction suite once with:
 

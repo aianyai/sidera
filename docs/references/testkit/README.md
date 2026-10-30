@@ -1260,8 +1260,9 @@ The storage reference defines the [measurement boundary](../storage/README.md#tr
 No shared measurement API or crash-walk backend is involved.
 
 The denominator is the complete `daemon.Table`, grouped by each owner's existing
-declarations. A selected declaration without a fixture, nonempty write window or
-successful commit fails. Unknown and duplicate fixture names fail as well.
+declarations. All 53 declarations have fixtures: txn 2, config 8, keys 2, store 32,
+engine 7 and daemon 2. A selected declaration without a fixture, nonempty write
+window or successful commit fails. Unknown and duplicate fixture names fail as well.
 Ordinary Go sub-benchmark selectors can validate an owner subset, such as
 `-bench '^BenchmarkTransactionWrites$/txn$'`; a subset is not complete-table
 sampling or crash coverage. Run without a sub-benchmark filter for the complete
