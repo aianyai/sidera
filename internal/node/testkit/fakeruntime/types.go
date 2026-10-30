@@ -216,10 +216,13 @@ type Launcher interface {
 	Find(ref string) (Session, bool)
 }
 
-// Controller is the script's hold on the turns of the sessions: the fixture
-// starts and ends turns and sets the plan of the next one. A Runtime is one, in
+// Controller is the script's hold on native sessions: it reads their injected
+// environment, starts and ends turns and sets the next plan. A Runtime is one, in
 // process; RemoteController drives a runtime process.
 type Controller interface {
+	// SessionEnv returns a copy of the environment actually given to a live
+	// session. Unknown or ended sessions return an error and no environment.
+	SessionEnv(ref string) (map[string]string, error)
 	SetPlan(ref string, plan TurnPlan) error
 	StartTurn(ref string) error
 	EndTurn(ref string, final string) error

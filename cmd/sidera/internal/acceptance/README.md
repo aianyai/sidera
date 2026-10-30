@@ -216,6 +216,16 @@ and observes the daemon's periodic archival and expiration.
 `newDeliveryOps` and `failCreateSettlement` explicitly reject filesystem fault
 injection with `scenario.ErrNotAvailable`, as declared by `BinaryCapabilities`.
 They preserve a retained generation error before reporting missing capability.
-The session helpers do not yet form `SessionOps`: the native runtime's current
-Controller exposes no session credential for the real CLI Agent driver. Session
-credentials are never inferred or read from node records by these bindings.
+The session helpers do not yet form `SessionOps`. The runtime Controller now
+provides the actual session environment through `SessionEnv`, but the full recipe
+binding remains to be composed. Session credentials are never inferred or read
+from node records by these bindings.
+
+`TestSessionEnvDrivesRealCLIAcrossDaemonGeneration` creates a native session
+through public runtime endpoints and `session.create`, obtains its actual native
+reference from the external ledger and queries `Controller.SessionEnv`. The
+existing CLI Agent performs real `Me`, declaration, receive and acknowledgement
+calls before and after a daemon kill, wait and replacement. It queries the runtime
+again after replacement and checks ledger, runtime records, static inputs, traces
+and diagnostic output for leaked session credentials. This focused regression
+does not bind the full session recipe operations.

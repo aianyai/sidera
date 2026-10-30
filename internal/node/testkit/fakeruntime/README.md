@@ -15,7 +15,8 @@ A session is driven through `Session`, and sessions are made and found through a
 
 - `Runtime` holds sessions in the test process. It is also the script's
   `Controller`: it starts and ends turns, sets the plan of the next turn and of the
-  first turn of later sessions, kills the native process and says whether it is idle.
+  first turn of later sessions, kills the native process, reads a live session's
+  actual environment and says whether it is idle.
 - `ProcessLauncher` starts a program (`cmd/sidera-fake-runtime`) per session,
   detached, and drives it over the control channel. `RemoteController` is its
   script side. A runtime process outlives the adapter that started it, so a
@@ -29,7 +30,7 @@ A session is driven through `Session`, and sessions are made and found through a
 
 | Name | Purpose |
 | ---- | ------- |
-| `New(Config)`, `Runtime` | The in-process runtime. `Create`, `Find`, `SetPlan`, `SetFirstTurn`, `StartTurn`, `EndTurn`, `KillNative`, `Idle`, `Activity` (idle with a count of how often a turn's actions began or finished, read together, for a fixture's quiet), `Close`. `Config.FirstTurn` is the plan of the first turn of every session. |
+| `New(Config)`, `Runtime` | The in-process runtime. `Create`, `Find`, `SetPlan`, `SetFirstTurn`, `StartTurn`, `EndTurn`, `KillNative`, `SessionEnv`, `Idle`, `Activity` (idle with a count of how often a turn's actions began or finished, read together, for a fixture's quiet), `Close`. `Config.FirstTurn` is the plan of the first turn of every session. |
 | `Session`, `Launcher`, `Controller`, `Watcher` | The interfaces. A watcher gets `TurnStarted`, `TurnEnded` and `ToolResult` one at a time and in order. `Session.Created` names the runtime's own ledger entry for the session. |
 | `TurnPlan`, `TurnAction`, `ActionRunner`, `ActionResult`, `SessionInfo` | What the model does inside a turn, and who does it. |
 | `ExecRunner` | An `ActionRunner` that runs a real command with the session's tool access. An `exec` action that names a `frontend` in its arguments is a receive: its output is the page the command printed, and it is recorded like the page of a `recv` action. With a `Seed` every command gets `SIDERA_TEST_SEED=<seed>/<native ref>/<n>`, so a client that draws its message numbers from it makes the same ones when a crash walk reruns a scenario. |
@@ -94,6 +95,18 @@ A session is driven through `Session`, and sessions are made and found through a
 - **A process ends with its control connection** and writes its address to
   `<native ref>.json` in one atomic step.
 
+`Controller.SessionEnv(ref)` returns an independent environment map from an
+actually created, live native session. `Runtime` clones the held map under the
+session lock; unknown references return `ErrUnknownSession`, and closed or killed
+sessions return `ErrNotAlive`. `RemoteController` queries the existing runtime
+control connection on every call, checks its role and matching native reference,
+and strictly decodes the typed `session.env` reply. A disconnected process follows
+the existing unknown-session or not-alive error path. A session with no environment
+has an empty wire map. Nothing reads node state or keeps a credential cache.
+Environment replies never enter the ledger, session record, static process input
+or diagnostics. Callers pass credentials only through the existing CLI driver's
+process environment, never through command arguments.
+
 ## What the caller must guarantee
 
 - Give the shared test clock as `Now`; a runtime never reads another.
@@ -118,3 +131,7 @@ session its info file names, a killed process and its record, the end of a proce
 with its control connection, the busy state until an adapter has handed an event
 on, `ExecRunner` and its seeds, golden
 messages and `FuzzDecodeLink`, `FuzzDecodeProcessSpecAndInfo`).
+
+`session_env_test.go` checks the same environment contract in process and in a
+real runtime process: actual values, independent maps, two-session routing,
+unknown and closed sessions, strict replies, runtime role and private outputs.

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sync"
@@ -153,6 +154,21 @@ func (r *Runtime) session(ref string) (*session, error) {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownSession, ref)
 	}
 	return s, nil
+}
+
+// SessionEnv returns the live session's actual environment, without exposing
+// the map owned by the runtime.
+func (r *Runtime) SessionEnv(ref string) (map[string]string, error) {
+	s, err := r.session(ref)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.alive {
+		return nil, ErrNotAlive
+	}
+	return maps.Clone(s.env), nil
 }
 
 // SetFirstTurn sets the plan of the first turn of the sessions created from now on.

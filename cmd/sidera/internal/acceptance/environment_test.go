@@ -82,7 +82,8 @@ func TestEnvironmentRetainsClockFailureUntilNewGeneration(t *testing.T) {
 
 func profiledFixture(t *testing.T, profile fixtureProfile) (*Fixture, context.Context) {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Real CLI calls in race builds also wait for each instrumented child to exit.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
 	f, err := newFixture(ctx, runRoot(t), testBinaries, Options{Seed: t.Name()}, profile)
 	if err != nil {

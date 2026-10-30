@@ -227,8 +227,9 @@ coverage dimensions.
   file it writes atomically, and a process that is gone is still a session whose record
   can be read.
 - **Loopback TCP for the control channel,** not a Unix socket or a named pipe: it is the
-  same on all three platforms, has no path-length limit, and nothing on the channel needs
-  protecting. A fake whose control connection ends exits, so no test leaves an orphan.
+  same on all three platforms, has no path-length limit, and stays on the local host.
+  Session environment responses contain credentials and must not be copied to arguments, static inputs, records or
+  diagnostics. A fake whose control connection ends exits, so no test leaves an orphan.
 - **`testing/synctest` is not the definition of quiet.** It fakes all time inside a
   bubble, so the real-time behaviour that other tests depend on (pings, write timeouts)
   would differ between layers; it cannot reach other processes; and the binary layer would
@@ -1115,3 +1116,30 @@ the original request before acknowledging its real alert.
 `TestBinaryInstallationBindingsUpgradeAndReplayAcrossGeneration` checks real
 upgrades, current-version installation, platform refusal without residue and
 persistent replay after kill and restart.
+
+The runtime Controller's read-only `SessionEnv(ref)` returns a copy of the
+actual environment injected into an existing live native session. The local
+runtime clones under its session lock with `maps.Clone`; unknown references
+return `ErrUnknownSession`, and closed or killed sessions return `ErrNotAlive`.
+The remote controller selects the existing runtime control connection by native
+reference, rejects other process roles and strictly decodes `session.env`'s typed
+`{ref, env}` response, including a matching reference. Missing connections follow
+the controller's existing bounded unknown-session error path; there is no cached
+fallback. An absent environment is represented by an empty map on the wire.
+The getter neither starts a turn nor changes plans, and adds no daemon or adapter
+production method. Returned credentials go only to the existing CLI Agent's
+process environment; the getter writes no ledger entry, record or diagnostic,
+and decoding failures expose no response contents.
+
+`TestSessionEnvReturnsOnlyTheLiveSessionsActualEnvironment` exercises actual
+values, copy isolation, two live sessions, unknown and closed references and
+private outputs against both implementations. `TestSessionEnvRejectsUntrustedControlReplies`
+and `TestSessionEnvDoesNotQueryAnAdapterWithTheSameID` cover the control boundary;
+the new golden link replies also seed the existing decoder fuzz target.
+`TestSessionEnvDrivesRealCLIAcrossDaemonGeneration` creates a real native session
+through public endpoints and control, then uses its actual environment for real
+CLI `Me`, declaration, receive and acknowledgement on two daemon generations.
+The transition kills and waits for the first daemon before starting its replacement;
+the native runtime remains the credential owner. The regression scans the external
+ledger, native records, static inputs, traces and diagnostic output for the token.
+It makes no claim that complete session recipe bindings are implemented.

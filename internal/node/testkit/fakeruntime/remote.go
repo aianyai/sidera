@@ -2,6 +2,7 @@ package fakeruntime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -39,6 +40,35 @@ func (c RemoteController) knob(ref, name string, args, result any) error {
 		return err
 	}
 	return remoteError(conn.Knob(ctx, name, args, result))
+}
+
+// SessionEnv queries the actual runtime on each call. No environment is kept
+// across calls or daemon generations.
+func (c RemoteController) SessionEnv(ref string) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), reach)
+	defer cancel()
+	conn, err := c.conn(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	if conn.Hello().Role != fakectl.RoleRuntime {
+		return nil, ErrUnknownSession
+	}
+	var raw json.RawMessage
+	if err := conn.Knob(ctx, KnobSessionEnv, nil, &raw); err != nil {
+		return nil, remoteError(err)
+	}
+	v, err := DecodeLink("knob."+KnobSessionEnv+".reply", raw)
+	if err != nil {
+		// Decoder paths may contain environment keys; keep private response
+		// contents out of errors that a caller may report.
+		return nil, errors.New("fakeruntime: invalid session environment response")
+	}
+	reply := v.(SessionEnvReply)
+	if reply.Ref != ref {
+		return nil, ErrUnknownSession
+	}
+	return reply.Env, nil
 }
 
 // planArgs are the arguments of a knob that carries a plan: none for the zero

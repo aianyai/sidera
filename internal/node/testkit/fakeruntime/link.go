@@ -32,11 +32,12 @@ const (
 	MethodTurnEnded   = "runtime.turn.ended"
 	MethodToolResult  = "runtime.tool.result"
 
-	KnobPlan      = "plan"
-	KnobTurnStart = "turn.start"
-	KnobTurnEnd   = "turn.end"
-	KnobKill      = "kill"
-	KnobIdle      = "idle"
+	KnobPlan       = "plan"
+	KnobTurnStart  = "turn.start"
+	KnobTurnEnd    = "turn.end"
+	KnobKill       = "kill"
+	KnobIdle       = "idle"
+	KnobSessionEnv = "session.env"
 	// KnobFirstTurn is sent to an adapter, not to a runtime process: it sets the
 	// plan of the first turn of the sessions the adapter creates from then on.
 	KnobFirstTurn = "first-turn"
@@ -101,6 +102,20 @@ type TurnEndKnob struct {
 // IdleReply is the answer of the idle knob.
 type IdleReply struct {
 	Idle bool `json:"idle"`
+}
+
+// SessionEnvReply carries the actual environment of the named live session.
+// It is a private test control response, never a record or diagnostic.
+type SessionEnvReply struct {
+	Ref string            `json:"ref"`
+	Env map[string]string `json:"env"`
+}
+
+func (r SessionEnvReply) validate() error {
+	if !refPattern.MatchString(r.Ref) {
+		return fmt.Errorf("session environment needs a native reference")
+	}
+	return nil
 }
 
 // PlanKnob is the argument of the knob that sets the plan of the next turn.
@@ -310,6 +325,8 @@ func DecodeLink(name string, data []byte) (any, error) {
 		return decode[TurnEndKnob](data)
 	case "knob." + KnobIdle + ".reply":
 		return decode[IdleReply](data)
+	case "knob." + KnobSessionEnv + ".reply":
+		return decode[SessionEnvReply](data)
 	case "knob." + KnobFirstTurn:
 		return decode[PlanKnob](data)
 	case MethodTurnStarted:

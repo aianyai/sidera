@@ -335,6 +335,8 @@ var goldenLinks = []struct {
 	{"reconcile reply", fakeruntime.MethodReconcile + ".reply", `{"found":true,"turn":"t1","turn_state":"completed","turn_running":false,"writer_stopped":false}`, fakeruntime.ReconcileReply{Found: true, Turn: "t1", TurnState: "completed"}},
 	{"plan knob", "knob." + fakeruntime.KnobPlan, `{"manual_start":true,"actions":[{"kind":"recv","args":{"frontend":"cli"}}],"end_after":true}`, fakeruntime.PlanKnob{ManualStart: true, Actions: []fakeruntime.TurnAction{{Kind: "recv", Args: map[string]string{"frontend": "cli"}}}, EndAfter: true}},
 	{"turn end knob", "knob." + fakeruntime.KnobTurnEnd, `{"final":"interrupted"}`, fakeruntime.TurnEndKnob{Final: "interrupted"}},
+	{"session environment reply", "knob." + fakeruntime.KnobSessionEnv + ".reply", `{"ref":"n-0123abcd","env":{"SIDERA_TOKEN":"t"}}`, fakeruntime.SessionEnvReply{Ref: "n-0123abcd", Env: map[string]string{"SIDERA_TOKEN": "t"}}},
+	{"empty session environment reply", "knob." + fakeruntime.KnobSessionEnv + ".reply", `{"ref":"n-0123abcd","env":{}}`, fakeruntime.SessionEnvReply{Ref: "n-0123abcd", Env: map[string]string{}}},
 	{"idle reply", "knob." + fakeruntime.KnobIdle + ".reply", `{"idle":true}`, fakeruntime.IdleReply{Idle: true}},
 	{"turn started", fakeruntime.MethodTurnStarted, `{"turn":"t1","attempt":"00000000-0000-4000-8000-000000000002","at_ms":5}`, fakeruntime.TurnStartedParams{Turn: "t1", Attempt: "00000000-0000-4000-8000-000000000002", AtMS: 5}},
 	{"turn ended", fakeruntime.MethodTurnEnded, `{"turn":"t1","final":"completed","at_ms":6}`, fakeruntime.TurnEndedParams{Turn: "t1", Final: "completed", AtMS: 6}},

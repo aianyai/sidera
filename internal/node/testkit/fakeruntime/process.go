@@ -186,6 +186,15 @@ func (h *processHost) knob(_ context.Context, name string, args json.RawMessage)
 		return nil, nil
 	case KnobIdle:
 		return IdleReply{Idle: h.rt.Idle()}, nil
+	case KnobSessionEnv:
+		env, err := h.rt.SessionEnv(h.sess.ref)
+		if err != nil {
+			return nil, linkError(err)
+		}
+		if env == nil {
+			env = map[string]string{}
+		}
+		return SessionEnvReply{Ref: h.sess.ref, Env: env}, nil
 	}
 	return nil, peer.NewError(peer.CodeMethodNotFound, "no such knob")
 }
