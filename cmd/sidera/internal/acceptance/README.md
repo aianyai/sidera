@@ -54,7 +54,13 @@ generation starts at the retained target. An RPC failure remains an error and
 does not synchronize the fakes. After a successful daemon RPC, `SetTime` waits
 for every connected fake's clock update. `BeginStep` records a unique step and
 synchronizes connected fakes. Handles and quiet checks synchronize connections
-again before returning. No runtime session is created by this base fixture;
+again before returning. The connection list is a momentary snapshot: a member
+that closes during clock or step dispatch leaves the synchronization obligation
+only after its exact connection's `Done` closes, confirmed within the caller's
+context. `peer.ErrClosed` alone is insufficient; an unconfirmed departure,
+cancelled call or any other control error remains a failure. This handling belongs
+only to synchronization fanout; explicit-target controller calls retain their
+ordinary errors. No runtime session is created by this base fixture;
 the fake runtime currently records its creation before its fixture control
 connection exists, so that initial event cannot acquire a current step here.
 

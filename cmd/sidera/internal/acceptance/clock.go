@@ -2,9 +2,11 @@ package acceptance
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/manageapi"
+	"github.com/aianyai/sidera/sdk/go/peer"
 )
 
 func (f *Fixture) SetTime(ctx context.Context, to time.Time) error {
@@ -23,11 +25,23 @@ func (f *Fixture) SetTime(ctx context.Context, to time.Time) error {
 // returned or quiet is accepted, every connection is synchronized again.
 func (f *Fixture) syncConnections(ctx context.Context) error {
 	for _, c := range f.control.Conns() {
-		if err := c.SetClock(ctx, f.Now().UnixMilli()); err != nil {
-			return err
+		err := c.SetClock(ctx, f.Now().UnixMilli())
+		if err == nil && f.step != "" {
+			err = c.SetStep(ctx, f.step)
 		}
-		if f.step != "" {
-			if err := c.SetStep(ctx, f.step); err != nil {
+		if err != nil {
+			if !errors.Is(err, peer.ErrClosed) {
+				return err
+			}
+			// Conns is a snapshot, not a liveness lease. A member whose
+			// transport has ended no longer owes a clock or step response.
+			// ErrClosed can arrive before Done, so confirm within this call.
+			select {
+			case <-c.Done():
+			case <-ctx.Done():
+				return err
+			}
+			if ctx.Err() != nil {
 				return err
 			}
 		}

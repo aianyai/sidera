@@ -49,8 +49,18 @@ complete tagged transaction table and owns the logical clock across generations.
 It retains each `SetTime` target before the daemon RPC, because a failed response
 cannot establish whether the daemon changed time. The next generation starts at
 that target even after an error. Fakes are synchronized only after a successful
-daemon clock RPC; failure still propagates to the caller. It requires stable
-fake progress around the daemon's quiet report. With no enabled adapters, its
+daemon clock RPC; failure still propagates to the caller. Clock and step fanout
+synchronize a momentary snapshot of live control connections. A member can close
+after that snapshot, for example while an adapter is stopping after disablement.
+A `peer.ErrClosed` synchronization failure is discarded only after that exact
+connection's `Done` closes within the existing caller context. This confirms
+departure, not synchronization or clean process exit. An unconfirmed departure,
+cancellation and all other control errors remain failures; explicit-target
+controller calls are unchanged. `TestSyncConnectionsRequiresOnlyLiveMembers`
+checks clock and step departures, continued synchronization of a live member and
+ordinary remote refusals through real control peers.
+The fixture requires stable fake progress around the daemon's quiet report.
+With no enabled adapters, its
 typed quiet request omits the optional expectation map; an explicitly empty map
 violates the strict decoder's existing wire rule. A real empty-daemon regression
 uses that same request type for one `test.quiesce` call and requires a satisfied
