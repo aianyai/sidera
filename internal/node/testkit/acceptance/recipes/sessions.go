@@ -161,13 +161,21 @@ func runtimePlan(plan fakeruntime.TurnPlan) scenario.Step {
 	}}
 }
 
+func nativeSessionClosed(log *ledger.Log, native string) bool {
+	for _, closed := range log.Kind(ledger.KindRuntimeClosed) {
+		if closed.Writer == "runtime/"+native {
+			return true
+		}
+	}
+	return false
+}
+
 func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 	const initial = "Start by reading this initial body."
 	session := &createdSession{}
 	facts := newDeliveryEvidence(b)
 	var creationFeedback, finalFeedback feedbackDrain
 	var interrupt, closeID adapterproto.MessageID
-	var closeAttempted bool
 	steps := []scenario.Step{
 		runtimePlan(fakeruntime.TurnPlan{Actions: []fakeruntime.TurnAction{{Kind: fakeruntime.ActionRecv}}}),
 		session.create(b, initial), scenario.Advance("creation-pull", time.Minute), session.resolve(b, initial, facts),
@@ -208,7 +216,6 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 			return b.Sessions.CheckpointPut(e, "chat", adapterproto.CheckpointPutParams{Scope: adapterproto.ScopeSession, ID: session.endpoint, State: []byte(`{"cursor":7}`)})
 		}},
 		{Name: "close", Do: func(e scenario.Env) error {
-			closeAttempted = true
 			r, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: session.address, Signal: adapterproto.SignalSessionClose})
 			if err == nil {
 				closeID = r.MessageID
@@ -225,9 +232,15 @@ func sessionLifecycleRecipe(b Bindings) ScriptRecipe {
 				return err
 			}
 		}
-		if session.endpoint != "" && !closeAttempted {
-			if err := facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)); err != nil {
+		if session.endpoint != "" {
+			log, err := e.Ledger()
+			if err != nil {
 				return err
+			}
+			if !nativeSessionClosed(log, session.native) {
+				if err := facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)); err != nil {
+					return err
+				}
 			}
 		}
 		return finalFeedback.run(e, facts, "sender")

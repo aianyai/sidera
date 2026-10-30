@@ -304,8 +304,11 @@ declaration is checked only after its successful call. The blocked-session drain
 finishes a blocking period only when that phase began, then restores delivery;
 both blocked notices remain mandatory for a completed blocking phase. A send
 before that phase still owes its accepted body. The lifecycle drain receives and
-acknowledges pending session bodies until closure has been requested, when real
-closure feedback can discharge the outstanding delivery instead.
+acknowledges pending session bodies unless the external ledger records an actual
+close by that exact native runtime. A close attempt alone does not establish that
+the reader is unavailable. Native closure selects the reader only; outstanding
+deliveries still require real body receipts or matching closure feedback, and a
+returned close identifier still requires its actual reply and closed-session audit.
 
 The blocked-session recipe owns a complete `fakeadapter.ExternalInputs`
 declaration through `Env.SetAdapterInputs`. Its prompt refusal and authentication

@@ -130,13 +130,7 @@ func controlWriteExpiryRecipe(b Bindings) ScriptRecipe {
 			if err != nil {
 				return err
 			}
-			released := false
-			for _, closed := range log.Kind(ledger.KindRuntimeClosed) {
-				if closed.Writer == "runtime/"+native {
-					released = true
-				}
-			}
-			if !released {
+			if !nativeSessionClosed(log, native) {
 				return fmt.Errorf("created native session %s was not really closed", native)
 			}
 			if err := b.Sessions.CheckClosedSession(e, endpoint); err != nil {

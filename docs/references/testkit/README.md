@@ -1117,7 +1117,11 @@ feedback. A successful creation does not imply a declaration was requested. A se
 send owes its body immediately, while blocked/recovered feedback is required
 only for a blocking phase that began; an interrupted blocking phase is finished
 before delivery is restored. Lifecycle drains receive and acknowledge pending
-session messages, or obtain the real feedback caused by a requested closure.
+session messages unless the external ledger records `runtime.closed` from that
+exact native runtime. An attempted close can be interrupted before taking effect,
+so it cannot suppress the real receive. Native closure only selects the available
+reader; it never stands in for a body receipt or matching loss feedback. Actual
+returned close results retain their closed reply and closed-session audit checks.
 
 The blocked-session recipe declares its complete external prompt refusal and
 authentication availability through `Env.SetAdapterInputs`. The recipe captures
