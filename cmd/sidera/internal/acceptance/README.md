@@ -153,6 +153,59 @@ Package sources belong to the fixture's input directory. The private
 binding can extend that source before invoking public installation. Installed
 node packages and node state are never edited to prepare an input.
 
+## Crash-walk backend
+
+`NewWalkBackend(root, binaries, options)` implements `crashwalk.Backend` over the
+real-process fixture. Its root must be an existing absolute short directory owned
+by the caller. Each `Run` creates a distinct child, closes its fixture and waits
+for its processes before removing that child. Cleanup errors are joined with the
+run error; the caller's directory and other contents remain its responsibility.
+The backend does not build programs or import the in-process binding, harness or
+engine Agent.
+
+`NewWalkScenario(descriptor, bind)` copies only the descriptor's name, step names,
+budget, recovery cases, extra recovery triggers and needs. Every run invokes
+`bind(RecoveryOps)` anew and rejects different metadata. The factory must recreate
+all mutable script closures, domain evidence and drain progress. Only that run's
+recipe and recovery state survive its daemon generations. After a crash, later
+generations resume the drain rather than replaying ordinary steps. Final script
+and domain judgements run after quiet while the daemon still serves; the ordinary
+stop then freezes the trace before its own cleanup writes.
+
+A selected transaction interruption requires the fixture's actual matching trace
+marker and abnormal exit. A failed RPC alone is an error. An after-step target
+requires successful `Process.Kill` and completed `Wait`, and records that exact
+PID in the external ledger. Recovery runs retain the first-generation trigger,
+the complete second generation, or a second-generation cut followed by a third
+generation. Shared crash-walk checkers compare those actual cutoffs and paths.
+
+`StartupWalkScenario{Recipe: ...}` runs actual observed CLI Init or bare daemon
+Start, without script package bootstrap. Only a serving Start declares the
+`complete` boundary. Init retries compare the existing protected files through
+`diskfacts.InitPreservation`; final startup checks initialization and layout.
+Start retains the requested startup clock offset, advances after each successful
+start when requested, and checks the final periodic clock record after exit.
+
+`TerminalWalkScenario{Recipe: ...}` performs the real stop or retirement management
+request and waits for natural exit; it declares no after-return boundary. It
+passes actual responses, stopped-disk results, verified revocations and restart
+facts to `TerminalRecipe.Check`. A retired node must actually refuse another
+start with the identity-retired diagnostic and unchanged signing files. The
+extra stop replay or retirement refusal audit is kept outside walk coverage.
+
+Offline damage is applied only after process exit through `acceptance/disk.Damage`.
+The run's recovery callbacks use the current read-only store scan and the shared
+`InspectDamage` and `CheckClosed` audits. They never invoke recovery or begin a
+node transaction. Binary profiles provide no filesystem fault injection; an
+explicit archive-sweep period must equal the executable's existing hourly period.
+
+Focused contract tests cover fresh binding and caller-directory preservation,
+online domain checks, metadata drift, a real direct exchange's main and step
+cuts, complete recovery and second/third-generation recovery cuts, interrupted
+Init, offline layout repair, periodic-clock persistence, certificate renewal,
+and stop/retirement exit and restart behavior. They do not compose or execute a
+complete binary catalog walk.
+
 ## Management and package bindings
 
 `newManagementOps` and `newInstallOps` bind domain callbacks to the current

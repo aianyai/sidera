@@ -63,6 +63,38 @@ Tagged daemons clear their process crash controls before launching adapters,
 so fake native runtimes and their CLI descendants cannot inherit a daemon target.
 The fixture's README describes the runtime creation-step limitation.
 
+`NewWalkBackend` in that same binary support package runs scripts and actual
+startup and terminal lifecycles through this fixture. It accepts prebuilt programs
+and an existing absolute short directory owned by its caller; each run creates,
+closes and removes only its own child. Fixture and removal errors remain visible.
+`NewWalkScenario` copies descriptor metadata and invokes a binding factory on
+every run, rejecting changes in name, steps, budget, needs or recovery metadata.
+The fresh recipe's closures and recovery evidence survive that run's generations
+only. After the initial interrupted script, later generations resume its drain.
+Final script judgements run while the daemon still serves; only then is the
+ordinary stop performed, with its cleanup writes outside the recorded window.
+
+`StartupWalkScenario` invokes real Init or bare Start without adapter bootstrap.
+Init has no boundary after its command exits; only Start has a live `complete`
+boundary. Protected initialization bytes, final layout and the periodic clock
+record are read through the existing disk fact and audit helpers. A
+`TerminalWalkScenario` sends the actual stop or retirement request, waits for exit
+and supplies actual responses and stopped-disk results to the shared terminal
+judgement. Its independent restart audit proves stop replay or identity-retired
+refusal without signing; that audit never contributes coverage. A natural exit
+cannot satisfy a selected target or a fabricated after-return boundary.
+
+The backend accepts a transaction cut only with the matching trace marker and
+actual abnormal exit. Step boundaries require a successful real kill and wait.
+Offline damage happens only on the stopped disk through `acceptance/disk.Damage`;
+per-run recovery callbacks reuse `InspectDamage` and `CheckClosed` over actual
+read-only scans. No binary fixture, environment, backend or domain binding imports
+the in-process binding or harness. Profiles reject filesystem fault needs and
+archive periods different from the executable's existing hourly task. Focused
+real-process tests exercise these contracts, including complete second-generation
+records and second-generation cuts with third-generation convergence. Complete
+binary catalog composition and a full walk remain separate callers.
+
 The CLI Agent driver takes optional per-call `KEY=value` environment overrides.
 It replaces matching inherited values, so each call can have a seed or process
 crash target without changing the fixture's global environment. Calls use
@@ -98,8 +130,8 @@ generations. They pass the current logical clock and clear inherited process
 crash controls. The existing recording wrapper writes actual CLI call results
 and model-visible page receipts. A regression runs the shared registration and
 declaration recipe, real send/receive/acknowledgement across kill, wait and restart,
-and repeats the run to compare actual message IDs. The full binary catalog and
-crash-walk backend are separate from these bindings.
+and repeats the run to compare actual message IDs. The full binary catalog
+remains separate from these bindings.
 
 The acceptance catalog describes actual Init, certificate-renewing Start, a
 serving daemon whose clock advances to its periodic persistence task, and direct

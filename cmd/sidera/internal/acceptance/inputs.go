@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/aianyai/sidera/internal/admin"
+	"github.com/aianyai/sidera/internal/node/daemon"
 	"github.com/aianyai/sidera/internal/node/manageapi"
 	"github.com/aianyai/sidera/internal/node/testkit/acceptance/recipes"
 	"github.com/aianyai/sidera/internal/node/testkit/fakeadapter"
@@ -37,6 +38,9 @@ type fixtureProfile struct {
 const versionWarningInstance = "warning-probe"
 
 func profileFromNeeds(needs recipes.Needs) (fixtureProfile, error) {
+	if needs.ArchiveSweepEvery != 0 && needs.ArchiveSweepEvery != daemon.ArchiveSweepEvery {
+		return fixtureProfile{}, fmt.Errorf("acceptance: archive sweep period %s differs from the executable period %s", needs.ArchiveSweepEvery, daemon.ArchiveSweepEvery)
+	}
 	if !recipes.BinaryCapabilities().Supports(needs) {
 		return fixtureProfile{}, fmt.Errorf("acceptance: unsupported needs: %+v", needs)
 	}
