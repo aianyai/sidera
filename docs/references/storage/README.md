@@ -41,6 +41,11 @@ make a write durable are functions over any `FS`, not methods of it:
 | `RemoveAll` | `remove-all` | only a directory already renamed to a garbage name |
 | `Discard` | `rename-dir` to `.trash-<hex>`, `sync-dir`, `remove-all` | deleting a directory tree; if the removal fails the directory is already gone from its name and startup removes the leftover |
 
+`MakeRoot` creates the data directory before transactions exist, and
+`CreatePrivateFile` creates a private file outside the rooted file system.
+They are separate OS boundaries, not members of this transaction write operation
+group. The table and its benchmarks do not enumerate every OS write entry point.
+
 Paths are relative to the data directory root, separated by `/`, and valid in
 the sense of `io/fs.ValidPath` (no `..`, no leading `/`, no empty segment); `.`
 is the root. No element may hold a backslash, a colon or NUL, on any platform:
@@ -110,6 +115,53 @@ content beyond the limit is refused without returning a prefix.
 There is no overwrite in place, no truncate, no rename across directories, no
 replacing a directory, no chmod, and no long-held read handle. Each is left out
 for a reason in the Why section.
+
+### Filesystem write benchmarks
+
+`BenchmarkFilesystemWrites` in `internal/node/fsx/bench_test.go` uses `OpenOS`
+on a private temporary directory on the real file system. Its twelve named
+sub-benchmarks cover the eleven operation classes above; `OpenAppend` and
+`Append` are measured separately so opening is not charged to appending.
+Each iteration starts from the same input state and leaves no growing file or
+directory tree for the next iteration:
+
+| Sample | Input and effect |
+| ------ | ---------------- |
+| `Replace` | overwrite an existing empty file with 4 KiB |
+| `ReplaceDeferred` | the same replacement, without the final directory sync |
+| `OpenAppend` | open an existing 4 KiB file; no append |
+| `Append` | append 4 KiB through an already open handle to an empty file |
+| `SyncFile` | sync a newly created file with 4 KiB appended through the same handle, then its directory |
+| `RenameFile` | move a 4 KiB file to an absent name in the same directory |
+| `Remove` | unlink a 4 KiB file |
+| `SyncDir` | sync the root directory after unlinking a 4 KiB file |
+| `MakeDir` | create an empty directory and sync its parent |
+| `RenameDir` | move a directory containing one 4 KiB file to an absent name in the same parent |
+| `RemoveAll` | remove a directory containing one 4 KiB file, already renamed to a garbage name |
+| `Discard` | discard a directory containing one 4 KiB file, including choosing the garbage name, renaming, syncing the parent and removing the tree |
+
+The standard `testing.B` timer surrounds only the named public function call.
+All preparation, error and result checks, handle closes and cleanup are outside
+the timer. Initial files and trees are made durable during preparation;
+`SyncFile` instead creates and appends before timing, leaving dirty contents
+for the measured sync. `SyncDir` similarly has a pending removal to flush.
+`ReplaceDeferred`, `OpenAppend`, `Append`, `Remove` and `RemoveAll` are measured
+with their own durability boundaries: no extra sync is added to those calls.
+Successful return and visible results are checked; this benchmark does not
+simulate power loss or prove durability.
+
+Run one iteration per sample from the repository root:
+
+```sh
+go test -run='^$' -bench='^BenchmarkFilesystemWrites$' -benchtime=1x -count=1 -timeout=10m ./internal/node/fsx
+```
+
+Record the Go version, OS, CPU, temporary-directory volume and cache conditions
+with results. The benchmark uses the current OS page cache and does not evict
+it. A single iteration records platform costs, not stable performance, a
+regression threshold or coverage of all input sizes. Named sub-benchmarks and
+timer boundaries use the standard [Go testing package](https://pkg.go.dev/testing);
+no additional benchmark library is needed.
 
 ### Private files outside the data directory
 

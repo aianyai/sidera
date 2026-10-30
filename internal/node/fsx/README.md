@@ -133,3 +133,13 @@ unexported function, `sleepSystem`, which waits on a timer of `clock.System()`.
 `os_unix.go` (macOS and Linux), `os_windows.go`. Platform tests are ordinary
 tests in `os_unix_test.go` and the `_windows_test.go` files; the Windows ones
 run only in Windows CI.
+
+## Benchmarks
+
+`BenchmarkFilesystemWrites` in `bench_test.go` runs the twelve public operation
+functions on a real file system, with a separate named sub-benchmark for each.
+Only the target call is timed; preparation, result checks, closing handles and
+cleanup are excluded. The [storage reference](../../../docs/references/storage/README.md#filesystem-write-benchmarks)
+defines the fixed inputs, durability boundaries and reproduction command.
+`MakeRoot` and `CreatePrivateFile` are separate OS boundaries and are outside
+this transaction write operation group.
