@@ -36,6 +36,11 @@ func sessionRecipes(b Bindings) []ScriptRecipe {
 type createdSession struct {
 	control                   adapterproto.MessageID
 	endpoint, address, native string
+	recovered                 *creationIdentity
+}
+
+type creationIdentity struct {
+	attempt, endpoint, native string
 }
 
 func (s *createdSession) create(b Bindings, body string) scenario.Step {
@@ -48,6 +53,59 @@ func (s *createdSession) create(b Bindings, body string) scenario.Step {
 	}}
 }
 
+// recoverIdentity discovers an unanswered creation only through its real initial
+// body receipt. Native creation evidence locates the reader; it is not a reply.
+func (s *createdSession) recoverIdentity(e scenario.Env, b Bindings, body string, facts *DeliveryEvidence) error {
+	if s.control != "" {
+		return nil
+	}
+	log, err := e.Ledger()
+	if err != nil {
+		return err
+	}
+	var candidate creationIdentity
+	for _, received := range log.Kind(ledger.KindSessionCreateReceived) {
+		if received.Attrs.Endpoint == "" {
+			continue
+		}
+		for _, created := range log.Kind(ledger.KindRuntimeSessionCreated) {
+			if created.Attrs.Attempt != received.Attrs.Attempt {
+				continue
+			}
+			identity := creationIdentity{attempt: received.Attrs.Attempt, endpoint: received.Attrs.Endpoint, native: created.Attrs.NativeRef}
+			if candidate != (creationIdentity{}) && candidate != identity {
+				return fmt.Errorf("unanswered creation has ambiguous native associations: %+v and %+v", candidate, identity)
+			}
+			candidate = identity
+		}
+	}
+	if candidate.endpoint == "" {
+		return nil
+	}
+	if err := facts.RecvAndAck(e, b.Sessions.Session(e, candidate.endpoint)); err != nil {
+		return err
+	}
+	log, err = e.Ledger()
+	if err != nil {
+		return err
+	}
+	var message adapterproto.MessageID
+	for _, seen := range log.Kind(ledger.KindModelSaw) {
+		if seen.Attrs.Endpoint != candidate.endpoint || seen.Attrs.From != e.Addr("sender") || seen.Attrs.BodyDigest != ledger.Digest([]byte(body)) {
+			continue
+		}
+		id := adapterproto.MessageID(seen.Attrs.MessageID)
+		if message != "" && message != id {
+			return fmt.Errorf("unanswered creation has ambiguous initial-body identifiers: %s and %s", message, id)
+		}
+		message = id
+	}
+	if message != "" {
+		s.control, s.recovered = message, &candidate
+	}
+	return nil
+}
+
 func (s *createdSession) resolve(b Bindings, body string, facts *DeliveryEvidence) scenario.Step {
 	return scenario.Step{Name: "created-reply", Do: func(e scenario.Env) error {
 		r, err := readCreation(e, "sender", b.Sessions.RuntimeAddr(e, "chat"), s.control)
@@ -57,8 +115,13 @@ func (s *createdSession) resolve(b Bindings, body string, facts *DeliveryEvidenc
 		if r.status.ControlReply == nil || r.status.ControlReply.Create.Outcome != adapterproto.CreateReplyCreated {
 			return fmt.Errorf("creation has no real created reply: %+v", r.status)
 		}
+		if s.recovered != nil && (r.endpoint != s.recovered.endpoint || r.native != s.recovered.native) {
+			return fmt.Errorf("created reply does not match recovered receipt identity: endpoint=%s native=%s receipt=%+v", r.endpoint, r.native, *s.recovered)
+		}
 		s.endpoint, s.address, s.native = r.endpoint, r.address, r.native
-		if body != "" {
+		// An unanswered send has no successful SendResult obligation. Recovery
+		// already proved its exact initial body through an actual receive.
+		if body != "" && s.recovered == nil {
 			facts.Accepted(fakeagent.SendResult{MessageID: s.control, To: []string{s.address}}, body)
 		}
 		return nil

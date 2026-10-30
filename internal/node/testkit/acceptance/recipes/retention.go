@@ -98,6 +98,9 @@ func retentionRecipe(b Bindings) ScriptRecipe {
 		}
 		// A cut abandons the remaining steps. Resume only from externally known
 		// creation/close results, then finish the bounded retention periods.
+		if err := session.recoverIdentity(e, b, initial, facts); err != nil {
+			return err
+		}
 		if session.endpoint == "" && session.control != "" {
 			e.Advance(time.Minute)
 			if err := e.Quiesce(); err != nil {

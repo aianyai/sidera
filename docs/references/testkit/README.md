@@ -1007,7 +1007,20 @@ periodic sweep. Read-only evidence requires real intact summaries after live
 records are swept, and no remaining archive files after their retention. Its
 bounded drain completes representative real interruptions without synthesizing
 records, summaries or cleanup effects. It receives and acknowledges pending
-session sends and settles their sources before retention begins. Large retention
+session sends and settles their sources before retention begins. A committed
+unkeyed creation may lose its response before returning an identifier. Retention's
+private creation owner then locates a reader through a unique actual creation
+attempt and native-session association. It reuses the ordinary receive and
+acknowledgement owner, recovering identity only from a real `model.saw` at that
+endpoint with the exact initial sender and body digest and one distinct message
+identifier. A same-run sighting remains evidence after acknowledgement removes
+the body. No native association or matching receipt preserves the unknown path;
+multiple distinct associations or identifiers are errors. The existing one-minute
+creation pull, public Status and shared creation resolver still require a real
+created reply matching that endpoint and native. Receipt provenance stays inside
+the creation owner, so an unanswered send does not acquire an invented successful
+SendResult or its obligation; returned creations keep their existing body
+obligations. Other recipes keep their original drain semantics. Large retention
 advances are remembered across interruptions. A resumed drain allows one further
 ordinary sweep period because restart rearms the periodic task, and removing the
 last source intentionally leaves its session endpoint until a following pass.

@@ -207,7 +207,18 @@ intact archive summaries after the live records, bodies and closed endpoint are
 gone, then remove those files after archive retention. `MaintenanceOps` returns
 only these final facts from a read-only audit. A drain interrupted before the
 sweep resumes from external creation results, receives and acknowledges pending
-session messages, and completes their source settlement before retention. Each
+session messages, and completes their source settlement before retention. If an
+unkeyed creation committed without returning its identifier, the private creation
+owner uses a unique real create-attempt/native association only to locate a
+session reader. It reuses `DeliveryEvidence.RecvAndAck` and recovers the identifier
+only from that endpoint's actual initial-body sighting, matching the exact sender
+and body digest. A prior sighting from the same run remains valid after its body
+was acknowledged. Missing native or body evidence leaves the outcome unknown;
+distinct associations or identifiers fail as ambiguous. The original creation-pull,
+public Status and creation resolver still require a real created reply naming the
+same endpoint and native. The owner retains receipt provenance: an unanswered
+send gains no fabricated successful-send obligation, while returned creations
+retain their original body obligation. Other recipes' drains are unchanged. Each
 large clock move is remembered before its writes can be interrupted. The resumed
 drain also runs one further ordinary sweep period: restart rearms the periodic
 task, and the pass removing a session's last source deliberately leaves its

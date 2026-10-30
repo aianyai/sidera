@@ -348,6 +348,10 @@ and observes the daemon's periodic archival and expiration. The retention test
 kills and waits for the daemon after closing the real session, starts a new
 generation, requires identical persisted retention facts and a closed-session
 audit, then observes archival and expiration from that replacement.
+`TestBinaryRetentionResumesInterruptedIntakeCommit` retains the complete recipe
+and interrupts the original unkeyed creation at its committed intake. The shared
+creation owner recovers identity through an actual initial-body receive, then
+the original public reply, closure and retention checks must pass on the replacement.
 
 `newDeliveryOps` and `failCreateSettlement` explicitly reject filesystem fault
 injection with `scenario.ErrNotAvailable`, as declared by `BinaryCapabilities`.
