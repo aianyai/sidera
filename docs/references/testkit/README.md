@@ -1020,8 +1020,16 @@ creation pull, public Status and shared creation resolver still require a real
 created reply matching that endpoint and native. Receipt provenance stays inside
 the creation owner, so an unanswered send does not acquire an invented successful
 SendResult or its obligation; returned creations keep their existing body
-obligations. Other recipes keep their original drain semantics. Large retention
-advances are remembered across interruptions. A resumed drain allows one further
+obligations. Other recipes keep their original drain semantics. The ordinary
+initial receive and pre-close drain share one private phase, completed only after
+the real receive and acknowledgement return successfully. An interrupted read
+still resumes through the live session. A committed close may lose its response
+and recovery can already close the native; a completed read must not access that
+closed session again. The unchanged keyed close is repeated until its real response
+supplies the close identifier. Both bindings retain committed creation and close
+intake regressions; an interrupted read followed by a recovery close interruption
+must finish a third generation. Large retention advances are remembered across
+interruptions. A resumed drain allows one further
 ordinary sweep period because restart rearms the periodic task, and removing the
 last source intentionally leaves its session endpoint until a following pass.
 Real second-generation interruptions during source summarizing, endpoint sweeping

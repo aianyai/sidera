@@ -223,7 +223,13 @@ large clock move is remembered before its writes can be interrupted. The resumed
 drain also runs one further ordinary sweep period: restart rearms the periodic
 task, and the pass removing a session's last source deliberately leaves its
 endpoint for the following pass. The original endpoint-removal and archive-expiry
-requirements remain mandatory. Its 164-point recording has a fixed budget of 246.
+requirements remain mandatory. The ordinary initial read and pre-close drain share
+one private phase, completed only after the real receive and acknowledgement
+succeed. Interrupted reads remain unfinished. A close may commit without returning
+its result and recovery can already close the native; a completed read is therefore
+not repeated through that closed session. The drain still repeats the identical
+`retention-close` request and retains its identifier only after a successful real
+response. Its 164-point recording has a fixed budget of 246.
 
 A separate control-expiry variant fails the first create-result replacement at
 its recoverable create point. The control reaches its report deadline before a

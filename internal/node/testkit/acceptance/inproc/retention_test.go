@@ -44,7 +44,7 @@ func TestRetentionDrainCompletesARealCutBeforeAndDuringTheSweep(t *testing.T) {
 	}
 }
 
-func TestRetentionDrainRecoversAnUnansweredCreation(t *testing.T) {
+func TestRetentionDrainResumesInterruptedSessionOperations(t *testing.T) {
 	clean, err := harness.NewWalkBackend(t).Run(t.Context(), freshScenario(t, "maintenance-retention"), crashwalk.RunPlan{Record: true})
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +55,13 @@ func TestRetentionDrainRecoversAnUnansweredCreation(t *testing.T) {
 	if err := crashwalk.CheckBudget(freshScenario(t, "maintenance-retention"), clean.Hits[0]); err != nil {
 		t.Fatal(err)
 	}
-	for _, at := range []string{"intake/out.create#1", "intake/commit#1"} {
+	for _, cut := range []struct{ first, second string }{
+		{"intake/out.create#1", ""},
+		{"intake/commit#1", "ack/body.remove#1"},
+		{"intake/commit#3", ""},
+		{"ack/body.remove#1", "intake/commit#1"},
+	} {
+		at := cut.first
 		t.Run(at, func(t *testing.T) {
 			point, err := fsx.ParsePoint(at)
 			if err != nil {
@@ -82,27 +88,27 @@ func TestRetentionDrainRecoversAnUnansweredCreation(t *testing.T) {
 				t.Fatal(err)
 			}
 			if len(baseline.Reached) != 1 || !baseline.Reached[0] || len(baseline.Hits) != 2 || len(baseline.Violations) != 0 {
-				t.Fatalf("creation cut reached=%v generations=%d violations=%v", baseline.Reached, len(baseline.Hits), baseline.Violations)
+				t.Fatalf("retention cut reached=%v generations=%d violations=%v", baseline.Reached, len(baseline.Hits), baseline.Violations)
 			}
 			if err := crashwalk.CompareRuns(clean.Hits[0], baseline.Hits[0], first); err != nil {
 				t.Fatal(err)
 			}
-			if at != "intake/commit#1" {
+			if cut.second == "" {
 				return
 			}
-			// The receive is already on record when acknowledgement is cut. The
-			// next drain must recover that same identity even if the body is gone.
-			ack, err := fsx.ParsePoint("ack/body.remove#1")
+			// An unanswered creation must retain its real receipt after body removal.
+			// An interrupted initial read must finish before a later close is cut.
+			next, err := fsx.ParsePoint(cut.second)
 			if err != nil {
 				t.Fatal(err)
 			}
-			second := crashwalk.Target{Gen: 2, Point: ack}
+			second := crashwalk.Target{Gen: 2, Point: next}
 			r, err := backend.Run(t.Context(), freshScenario(t, "maintenance-retention"), crashwalk.RunPlan{Targets: []crashwalk.Target{first, second}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			if len(r.Reached) != 2 || !r.Reached[0] || !r.Reached[1] {
-				t.Fatalf("creation and receipt cuts reached=%v", r.Reached)
+				t.Fatalf("retention recovery cuts reached=%v", r.Reached)
 			}
 			r.Reached = r.Reached[1:]
 			if err := crashwalk.CheckRecoveryTarget(baseline.Hits[1], second, r); err != nil {

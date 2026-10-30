@@ -111,10 +111,12 @@ Retention recipes enable the existing periodic archive sweep on the fixture.
 fail the audit. The mutation that omits archive expiry must fail, and
 representative real cuts before and during the sweep must still finish the bounded drain and pass its domain judgement. Pending
 session sends are received and acknowledged before their source is settled and
-retention begins. `TestRetentionDrainRecoversAnUnansweredCreation` retains a
-real committed intake whose response was lost, repeats after an acknowledgement
-body removal, and requires third-generation convergence. Its pre-commit cut
-requires no native creation or body sighting, preserving the legal unknown path.
+retention begins. `TestRetentionDrainResumesInterruptedSessionOperations` retains
+real committed creation and close intakes whose responses were lost. It repeats
+a creation recovery after acknowledgement body removal, and an unfinished initial
+read after a later close intake, requiring third-generation convergence. Its
+pre-commit cut requires no native creation or body sighting, preserving the legal
+unknown path.
 Repeated drains preserve large clock advances and allow the
 rearmed periodic task a further ordinary pass to complete dependent endpoint or
 archive cleanup; the final audit still requires the endpoint to be absent.

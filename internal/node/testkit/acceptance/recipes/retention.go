@@ -27,6 +27,19 @@ func retentionRecipe(b Bindings) ScriptRecipe {
 	var feedback feedbackDrain
 	var closing adapterproto.MessageID
 	summarized := false
+	// A close can take effect without returning its result. Do not repeat an
+	// already completed read through the session that recovery has closed.
+	readInitialCompleted := false
+	readInitial := scenario.Step{Name: "read-initial", Do: func(e scenario.Env) error {
+		if readInitialCompleted {
+			return nil
+		}
+		if err := facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)); err != nil {
+			return err
+		}
+		readInitialCompleted = true
+		return nil
+	}}
 	// A clock move takes effect before its resulting writes can be interrupted.
 	// Preserve that progress so another drain cannot age out unread evidence.
 	advanceOnce := func(name string, delay time.Duration) scenario.Step {
@@ -45,7 +58,7 @@ func retentionRecipe(b Bindings) ScriptRecipe {
 	const initial = "Read this before the session and its records are retired."
 	return ScriptRecipe{Needs: Needs{RuntimeAdapter: true, ArchiveSweepEvery: time.Hour}, Script: scenario.Script{Name: "maintenance-retention", Setup: scenario.Setup{Direct: []string{"sender"}}, Crash: scenario.CrashPlan{MaxPoints: 246}, Steps: []scenario.Step{
 		session.create(b, initial), scenario.Advance("creation-pull", time.Minute), session.resolve(b, initial, facts),
-		{Name: "read-initial", Do: func(e scenario.Env) error { return facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)) }},
+		readInitial,
 		{Name: "send-from-session", Do: func(e scenario.Env) error {
 			r, err := b.Sessions.Session(e, session.endpoint).Send(e.Ctx(), fakeagent.SendInput{To: []string{e.Addr("sender")}, Body: "Keep my sender sequence until every source record is swept."})
 			if err == nil {
@@ -117,7 +130,7 @@ func retentionRecipe(b Bindings) ScriptRecipe {
 			}
 		}
 		if session.endpoint != "" && closing == "" {
-			if err := facts.RecvAndAck(e, b.Sessions.Session(e, session.endpoint)); err != nil {
+			if err := readInitial.Do(e); err != nil {
 				return err
 			}
 			r, err := e.Agent("sender").Control(e.Ctx(), fakeagent.ControlInput{To: session.address, Signal: adapterproto.SignalSessionClose, IdemKey: "retention-close"})
