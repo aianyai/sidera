@@ -1248,3 +1248,24 @@ The transition kills and waits for the first daemon before starting its replacem
 the native runtime remains the credential owner. The regression scans the external
 ledger, native records, static inputs, traces and diagnostic output for the token.
 It makes no claim that complete session recipe bindings are implemented.
+
+### Real-filesystem transaction benchmarks
+
+`BenchmarkTransactionWrites` lives entirely in the in-process acceptance
+package's test files. Its private fixture table invokes existing owner operations
+on `fsx.OpenOS` or `harness.RealFS`; preparation and read-back checks run outside
+the measurement. The existing `txn.Observer` measures the first actual filesystem
+step through logical commit, and reports `ns/write-window` with `commits/op`.
+The storage reference defines the [measurement boundary](../storage/README.md#transaction-write-window-benchmarks).
+No shared measurement API or crash-walk backend is involved.
+
+The denominator is the complete `daemon.Table`, grouped by each owner's existing
+declarations. A selected declaration without a fixture, nonempty write window or
+successful commit fails. Unknown and duplicate fixture names fail as well.
+Ordinary Go sub-benchmark selectors can validate an owner subset, such as
+`-bench '^BenchmarkTransactionWrites$/txn$'`; a subset is not complete-table
+sampling or crash coverage. Run without a sub-benchmark filter for the complete
+set, using `-run '^$' -benchtime=1x -count=1`. The benchmark suppresses the default
+trigger-latency `ns/op`, whose engine scheduling and waiting would describe a
+different interval. One iteration is a platform cost record with no performance
+threshold.

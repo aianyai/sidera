@@ -220,3 +220,19 @@ its returned control proves that resolution and post-receive phases each retain
 their own two minutes. The instance regression interrupts every actual non-sync
 clock write in its complete recovery record, retaining the original strict
 feedback and final-instance checks.
+
+`BenchmarkTransactionWrites` and its private owner fixtures are test-only real
+filesystem measurements. The runner enumerates the complete daemon declaration
+table through the six owners, so a new declaration immediately needs a nonempty
+successful fixture in the unfiltered suite. Unknown and duplicate fixture names
+fail at entry, and missing fixtures fail their named declaration sub-benchmarks.
+Go's ordinary sub-benchmark selector can run a development subset without claiming
+complete-table coverage. Fixtures separate preparation, owner invocation, read-back
+verification and cleanup; only invocation arms the one concurrency-safe private
+observer. It measures the first filesystem step to logical commit, reports
+`ns/write-window` and `commits/op`, and suppresses the unrelated default trigger
+latency. The [storage reference](../../../../../docs/references/storage/README.md#transaction-write-window-benchmarks)
+defines the boundary and command. These timings are independent of crash-walk
+coverage and never use its memory filesystem. Low-level preparation uses the
+existing `harness.MakeLayout` and `SeedNode` on a private real disk; the measured
+operation always calls its existing owner entry point.

@@ -558,6 +558,49 @@ returns nil; do not read back a path written in the same `Tx`; an append that no
 `SyncFile` followed is not durable even after `Commit` returns nil; exit and
 rescan on `IsFatal`; serialise the transactions of one declaration.
 
+### Transaction write-window benchmarks
+
+`BenchmarkTransactionWrites` in `internal/node/testkit/acceptance/inproc`
+measures each transaction from the observation immediately before its first
+actual filesystem step through its logical `commit` observation. The logical
+commit follows the last filesystem step and precedes `Commit` returning. This
+is a **write window**, not a complete transaction lifetime: it excludes preparation
+before the first write and work after the logical commit. The interval includes
+filesystem writes and syncs, intermediate owner code, observer overhead and any
+scheduling delay between those boundaries; it is not a pure syscall duration.
+
+The suite derives its denominator from `daemon.Table`, partitions it by the six
+owners' declarations, and runs one named sub-benchmark per declaration, including
+Recovery declarations. Every selected declaration must have a fixture and at
+least one nonempty successful commit through its owner's existing entry point on
+a real filesystem. An unknown or duplicate fixture fails immediately; a missing
+fixture fails its declaration's sub-benchmark. Ordinary Go sub-benchmark filters
+can run one owner while implementations are developed, but only an unfiltered
+successful run establishes complete-table sampling. These samples are independent
+of crash-point coverage and do not reuse the memory filesystem's timings.
+
+One private, concurrency-safe `txn.Observer` records the first filesystem step
+and each logical commit for the selected declaration. Preparation, verification
+and cleanup run outside the timing window. Failed owner calls, empty operations
+and windows without a closing commit fail the benchmark. Results report
+`ns/write-window` averaged over successful windows and `commits/op`; default
+`ns/op` is suppressed because a trigger operation can also include engine queueing
+and waiting. Each fixture uses a fixed small input rather than a workload-size
+matrix: configuration changes replace one collection, staging copies one manifest
+and a 128-byte program, renewal advances one certificate serial, settle syncs a
+root and child, and cleanup removes one temporary file and one discarded directory
+containing a file.
+
+Run the complete transaction suite once with:
+
+```sh
+go test -run '^$' -bench '^BenchmarkTransactionWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/testkit/acceptance/inproc
+```
+
+A single iteration records platform costs without a performance threshold; it
+is not a stable regression estimate. Record the Go version, OS, CPU, filesystem
+and cache conditions with the raw output when comparing results.
+
 ### The records of `state/`
 
 `state/` is the runtime data of a node and is owned by the `store` package;

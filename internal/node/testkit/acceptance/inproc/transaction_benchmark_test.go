@@ -1,15 +1,19 @@
 package inproc
 
 import (
-	"crypto/rand"
 	"fmt"
-	"slices"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/aianyai/sidera/internal/node/config"
 	"github.com/aianyai/sidera/internal/node/daemon"
+	"github.com/aianyai/sidera/internal/node/engine"
 	"github.com/aianyai/sidera/internal/node/fsx"
+	"github.com/aianyai/sidera/internal/node/keys"
+	"github.com/aianyai/sidera/internal/node/store"
+	"github.com/aianyai/sidera/internal/node/testkit/harness"
 	"github.com/aianyai/sidera/internal/node/txn"
 )
 
@@ -43,6 +47,8 @@ func (o *transactionWindowObserver) Reached(ob fsx.Observation, _ txn.Kind) {
 	if !o.active || ob.Point.Tag.Tx != o.target {
 		return
 	}
+	// Benchmark durations use the real monotonic clock, independently of the
+	// logical clock that drives owner state.
 	now := time.Now()
 	if ob.Point.Step == fsx.StepCommit {
 		if o.started.IsZero() {
@@ -83,7 +89,11 @@ func (o *transactionWindowObserver) finish() (time.Duration, int, error) {
 
 func newTransactionBenchmarkWriter(b *testing.B, observer txn.Observer) (fsx.FS, *txn.Writer) {
 	b.Helper()
-	fs, err := fsx.OpenOS(b.TempDir(), rand.Reader)
+	root := filepath.Join(b.TempDir(), "home")
+	if err := fsx.MakeRoot(root); err != nil {
+		b.Fatal(err)
+	}
+	fs, err := fsx.OpenOS(root, harness.RandReader(200))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -110,55 +120,58 @@ func BenchmarkTransactionWrites(b *testing.B) {
 		declared[key.Tag.Tx] = true
 	}
 	groups := []struct {
-		name  string
-		cases []transactionBenchmarkCase
+		name         string
+		declarations []*txn.Decl
+		cases        []transactionBenchmarkCase
 	}{
-		{"txn", transactionBenchmarkTxnCases()},
-		{"config", transactionBenchmarkConfigCases()},
-		{"keys", transactionBenchmarkKeysCases()},
-		{"store", transactionBenchmarkStoreCases()},
-		{"engine", transactionBenchmarkEngineCases()},
-		{"daemon", transactionBenchmarkDaemonCases()},
+		{"txn", txn.Internal(), transactionBenchmarkTxnCases()},
+		{"config", config.Transactions(), transactionBenchmarkConfigCases()},
+		{"keys", keys.Transactions(), transactionBenchmarkKeysCases()},
+		{"store", store.Transactions(), transactionBenchmarkStoreCases()},
+		{"engine", engine.Transactions(), transactionBenchmarkEngineCases()},
+		{"daemon", daemon.Transactions(), transactionBenchmarkDaemonCases()},
 	}
-	listed := map[string]bool{}
+	listed := map[string]transactionBenchmarkCase{}
+	assigned := map[string]bool{}
 	for _, group := range groups {
-		for _, c := range group.cases {
-			if !declared[c.name] {
-				b.Fatalf("unknown transaction benchmark %q", c.name)
+		owned := map[string]bool{}
+		for _, d := range group.declarations {
+			if !declared[d.Name] || assigned[d.Name] {
+				b.Fatalf("invalid declaration group assignment %q", d.Name)
 			}
-			if listed[c.name] {
+			owned[d.Name], assigned[d.Name] = true, true
+		}
+		for _, c := range group.cases {
+			if !owned[c.name] {
+				b.Fatalf("unknown transaction benchmark %q in owner %s", c.name, group.name)
+			}
+			if _, ok := listed[c.name]; ok {
 				b.Fatalf("duplicate transaction benchmark %q", c.name)
 			}
 			if c.prepare == nil {
 				b.Fatalf("transaction benchmark %q has no fixture", c.name)
 			}
-			listed[c.name] = true
+			listed[c.name] = c
 		}
 	}
+	if len(assigned) != len(declared) {
+		b.Fatalf("owner groups cover %d/%d daemon declarations", len(assigned), len(declared))
+	}
+	// Run the declarations rather than the fixtures: an absent fixture fails its
+	// real sub-benchmark. Go's selector can still run an owner subset directly.
 	for _, group := range groups {
 		b.Run(group.name, func(b *testing.B) {
-			for _, c := range group.cases {
-				b.Run(c.name, func(b *testing.B) { runTransactionBenchmark(b, c) })
+			for _, d := range group.declarations {
+				b.Run(d.Name, func(b *testing.B) {
+					c, ok := listed[d.Name]
+					if !ok {
+						b.Fatalf("missing fixture for declared transaction %q", d.Name)
+					}
+					runTransactionBenchmark(b, c)
+				})
 			}
 		})
 	}
-	// Go's ordinary sub-benchmark selector can run an owner subset while the
-	// unfiltered suite always checks the complete, dynamically derived table.
-	b.Run("_coverage", func(b *testing.B) {
-		b.StopTimer()
-		var missing []string
-		for name := range declared {
-			if !listed[name] {
-				missing = append(missing, name)
-			}
-		}
-		slices.Sort(missing)
-		if len(missing) != 0 {
-			b.Fatalf("transaction benchmark fixtures missing %d/%d declarations: %v", len(missing), len(declared), missing)
-		}
-		b.ReportMetric(float64(len(listed)), "declarations")
-		b.ReportMetric(0, "ns/op")
-	})
 }
 
 func runTransactionBenchmark(b *testing.B, c transactionBenchmarkCase) {
@@ -196,4 +209,18 @@ func runTransactionBenchmark(b *testing.B, c transactionBenchmarkCase) {
 	// Trigger latency includes owner scheduling and waiting; the requested cost
 	// is the observed write window, so suppress the ambiguous default ns/op.
 	b.ReportMetric(0, "ns/op")
+}
+
+// SeedNode prepares the existing owner-written keys/configuration and one
+// installed, enabled adapter; no engine or background timer is involved.
+func newTransactionBenchmarkNode(b *testing.B, observer txn.Observer) (fsx.FS, *txn.Writer, *config.Config, *keys.Keys) {
+	b.Helper()
+	fs, w := newTransactionBenchmarkWriter(b, observer)
+	harness.MakeLayout(b, fs)
+	cfg := harness.SeedNode(b, w, harness.DefaultStart)
+	key, err := keys.Load(w)
+	if err != nil {
+		b.Fatal(err)
+	}
+	return fs, w, cfg, key
 }
