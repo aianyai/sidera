@@ -559,6 +559,20 @@ that can be answered); the caller names
 neither. The deadlines are whole seconds, because that is what an envelope can say and
 the target's record must agree with it.
 
+**Direct adapter sends.** `SendDirect` takes `adapterproto.SendParams` and
+resolves the caller, validates the complete request, parses recipient addresses
+and accepts the message in one loop command. The caller must be an open direct
+endpoint of that connection's instance; a session, runtime or closed endpoint
+cannot use this door. Ordinary sends preserve every supplied field. A direct
+reply must identify one non-rejected incoming message held by that endpoint and
+name exactly its original sender as the sole recipient. This lookup is shared
+with `Reply`, so neither interface can grant reply permission to another
+recipient. A wrong recipient, multiple recipients or an unknown reply source
+leaves no outgoing message. Replies retain the requested thread, deadline and
+idempotency key. Controls preserve their applicable fields, including thread
+and any initial body, and refuse `ReplyTo`. The normal Agent request shapes do
+not change. All paths use the existing `accept` transaction and idempotency check.
+
 **Asking about a message.** `MessageStatus` answers from the sender's record of the message, which the reports of the targets bring up to date: one entry for each recipient in the order the sender gave them, with the state and, for a rejection, the reason, named as the delivery rules name them. A message the caller's endpoint did not send is `message_unknown`, whoever sent it, so no endpoint learns what became of another's. For a control signal the status carries its control reply once the node has taken one in, in the values of the adapter protocol; it is read from the record the node verified when it took the reply in, and verified again, so that an agent is never told what nobody checked.
 
 **Sending.** One worker, outside the loop, makes the calls to the transport in the order

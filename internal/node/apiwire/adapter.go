@@ -2,7 +2,10 @@ package apiwire
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
+	"time"
 
 	"github.com/aianyai/sidera/internal/adapterreg"
 	"github.com/aianyai/sidera/internal/node/adapterhost"
@@ -70,6 +73,61 @@ func (a adapterEngine) RecvObserved(ctx context.Context, instance string, p adap
 	return res, adapterError(err)
 }
 
+// EndpointSend maps only the direct intake's errors; older adapter methods keep
+// their existing error contract.
+func (a adapterEngine) EndpointSend(ctx context.Context, instance string, p adapterproto.SendParams) (adapterproto.SendResult, error) {
+	res, err := a.e.SendDirect(ctx, instance, p)
+	return adapterproto.SendResult{MessageID: adapterproto.MessageID(res.Message)}, directSendError(err)
+}
+
+func (a adapterEngine) EndpointRecv(ctx context.Context, instance string, p adapterproto.RecvParams) (adapterproto.RecvResult, error) {
+	r := engine.RecvRequest{Msg: p.MessageID, Part: p.Part}
+	if p.WaitS != nil {
+		r.Wait = time.Duration(*p.WaitS) * time.Second
+	}
+	raw, err := a.e.Recv(ctx, engine.ByAdapter(instance, p.Endpoint), r)
+	if err != nil {
+		return adapterproto.RecvResult{}, adapterError(err)
+	}
+	var page adapterproto.RecvPage
+	if err := json.Unmarshal(raw, &page); err != nil {
+		return adapterproto.RecvResult{}, err
+	}
+	return adapterproto.RecvResult{Page: page}, nil
+}
+
+func (a adapterEngine) EndpointAck(ctx context.Context, instance string, p adapterproto.AckParams) (adapterproto.AckResult, error) {
+	items, err := a.e.Ack(ctx, engine.ByAdapter(instance, p.Endpoint), engine.AckRequest{Lease: p.Lease, Items: p.Items})
+	return adapterproto.AckResult{Items: items}, adapterError(err)
+}
+
+func (a adapterEngine) EndpointMessageStatus(ctx context.Context, instance string, p adapterproto.MessageStatusParams) (adapterproto.MessageStatusResult, error) {
+	res, err := a.e.MessageStatus(ctx, engine.ByAdapter(instance, p.Endpoint), p.MessageID)
+	var ref *engine.Refusal
+	if errors.As(err, &ref) && ref.Reason == engine.ReasonMessageUnknown {
+		return res, peer.NewError(peer.CodeInvalidParams, "the message_id is not available")
+	}
+	return res, adapterError(err)
+}
+
+func directSendError(err error) error {
+	var ref *engine.Refusal
+	if !errors.As(err, &ref) {
+		return err
+	}
+	switch ref.Reason {
+	case engine.ReasonInvalidArgument:
+		if strings.HasPrefix(ref.Field, "to[") {
+			return peer.NewError(adapterproto.CodeInvalidAddress, "an address is not valid").WithData(map[string]any{"field": ref.Field})
+		}
+		fallthrough
+	case engine.ReasonTooLarge, engine.ReasonIdempotencyConflict, engine.ReasonMessageUnknown:
+		return peer.NewError(adapterproto.CodeSendRefused, "the message was not accepted").WithData(map[string]any{"reason": ref.Reason.String()})
+	default:
+		return adapterError(err)
+	}
+}
+
 // adapterCode is what an adapter is told for one reason of the engine.
 type adapterCode struct {
 	code    int
@@ -117,10 +175,8 @@ var adapterCodes = map[engine.Reason]adapterCode{
 	engine.ReasonOperationIDReused: internalCode,
 	// Whether the request took effect is not known, which is what -32603 says.
 	engine.ReasonStorageFatal: internalCode,
-	// The refusals of the messages, of an alert and of a retired identity answer
-	// requests an adapter does not make through this door: the adapter protocol has
-	// no code for them, and what the adapter would do with one is the protocol's to
-	// say when it carries such a request.
+	// These reasons keep the historical mapping of the older adapter methods.
+	// Direct send and status have their own intake-specific mapping above.
 	engine.ReasonIdempotencyConflict: internalCode,
 	engine.ReasonMessageConflict:     internalCode,
 	engine.ReasonMessageUnknown:      internalCode,

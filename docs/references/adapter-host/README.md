@@ -122,6 +122,28 @@ it hands a `*peer.Error` on as it is.
 | instance unknown, unauthenticated, operation identifier reused, storage fatal | `-32603` internal_error | nothing an adapter could act on; a fatal failure of the disk is a request whose outcome is not known, which is what `-32603` says |
 | node queue full, storage full, storage unavailable, clock rollback, loop busy, recovering | `1012` node_busy | `data`: `{"reason":"<name>"}`, the engine's name for the reason; see below |
 
+The production `apiwire.AdapterEngine` also implements `EndpointCalls`, so
+`endpoint.send`, `endpoint.recv`, `endpoint.ack` and `endpoint.message_status`
+reach the engine through this same host. Each operation binds `ByAdapter` to the
+connection's instance and the requested endpoint, with ownership checked inside
+its loop command. Direct sends use `SendDirect` to keep parsing, reply routing
+and acceptance in that command. Receive pages are decoded from the engine's
+JSON page into the protocol's typed result; no page fields are reconstructed.
+
+For direct send intake, invalid address syntax is `1008` with `data.field` naming
+`to[index]`; content and reply-rule refusals and idempotency conflicts are `1009`
+with the engine's stable reason in `data.reason`. The existing back pressure,
+ownership and lease codes remain `1012`, `1001` and `1010`. A status query for a
+message the caller did not send, including an unknown id, always returns the
+same fixed `-32602` response without data. Unknown effects and fatal storage
+failures remain `-32603`. These method-specific mappings do not change the
+previously reachable registration, checkpoint or observed-receive methods.
+`TestDirectProtocolPreservesSendControlAndReplyFields` and
+`TestDirectProtocolRefusalsLeaveMessagesAndAcknowledgementsUnchanged` exercise
+these paths through a real host and compare persisted message and acknowledgement
+records after refusals. The binary acceptance lifecycle test repeats the real
+send/receive/ack/status round trip after replacing the daemon generation.
+
 The text of a refusal never carries what the engine says about its cause (a path, an
 identifier): that is for the log. An error that is no refusal reaches the host
 untouched and is `-32603` with a fixed text.

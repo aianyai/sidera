@@ -89,7 +89,9 @@ handle the daemon gives it.
   on the engine and the peer's own queue refuses with `-32001`, which therefore
   still means that the handler did not run. `EndpointCalls` and `ObservedCalls` are
   used when the engine given to `Start` implements them, and are `-32601`
-  otherwise.
+  otherwise. The production `apiwire.AdapterEngine` supplies both optional
+  interfaces and maps their errors before they reach this layer; endpoint
+  ownership stays in the engine.
 - **Notifications** are decoded and validated; an invalid one is logged and
   dropped. They go into a buffer of `NotificationBuffer` in arrival order and one
   forwarder per connection hands them to `Engine.AdapterNotified` one at a time,

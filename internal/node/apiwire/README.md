@@ -19,7 +19,7 @@ not import it: the words of the wire never enter the engine.
 | ---- | ------- |
 | `FromError(err)` | The one mapping: an error of the wire as it is, a fatal daemon failure, an `*engine.Refusal` by its reason, a `*config.ChangeError` by its reason, a `*strictjson.Error`, a typed daemon or IPC failure, an ended request context, and any other error as an internal one. |
 | `BudgetUnitName(unit)` | A calculated output-budget unit as its existing wire name, `chars` or `tokens`; an unknown unit is an error. |
-| `AdapterEngine(engine)` | The engine behind the interface the adapter host asks of it (`adapterhost.Engine`): the four methods that answer a request of an adapter (`RegisterDirect`, `UnregisterDirect`, `CheckpointPut` and `RecvObserved`, the one optional part it offers) turn an `*engine.Refusal` into the `*peer.Error` the adapter is answered with, by one row per reason; every other error is passed on untouched. What each code means is in [docs/references/adapter-host](../../../docs/references/adapter-host/README.md). |
+| `AdapterEngine(engine)` | The engine behind the interface the adapter host asks of it (`adapterhost.Engine`): the adapter request methods (`RegisterDirect`, `UnregisterDirect`, `CheckpointPut`, `RecvObserved` and the four `EndpointCalls`) turn an `*engine.Refusal` into the `*peer.Error` the adapter is answered with, by one row per reason; every other error is passed on untouched. What each code means is in [docs/references/adapter-host](../../../docs/references/adapter-host/README.md). |
 | `FromAdmin(reason)` | The refusal of a request by the administrative rules. |
 | `Error`, `Body`, `New`, `Malformed` | An error as the wire carries it, `{"error":{"category","code","message","details?"}}`. |
 | `EndpointUnknown()`, `OperationUnknown()` | The answers an interface gives without an error of the engine behind them: an address that is no endpoint of this node, and an operation identifier with no stored result. |
@@ -40,9 +40,17 @@ not import it: the words of the wire never enter the engine.
   of the engine; a test fails when a reason has none. The cause a refusal carries is
   never sent. An error that is no refusal is returned as it is: the host answers it
   `-32603` and keeps its text off the wire. The value it returns has the host's methods
-  and `ObservedCalls`, which it maps, and nothing else of the engine, on purpose: the host
-  finds the optional parts of the engine (`endpoint.send` and its kin) by asking the value,
+  and both optional interfaces, `ObservedCalls` and `EndpointCalls`, which it maps,
+  and nothing else of the engine, on purpose: the host finds the optional parts
+  of the engine by asking the value,
   and a method of the engine that was promoted would be answered in the engine's words.
+- **Direct sends have a method-specific intake mapping.** Invalid recipient address
+  syntax is `1008` with `data.field`; invalid content, a missing reply source or
+  an idempotency conflict is `1009` with the engine reason in `data.reason`.
+  Back pressure remains `1012`, ownership `1001`, and leases `1010`.
+  `endpoint.message_status` answers an unknown or foreign message with the same
+  fixed `-32602` response, revealing no ownership. Unknown effects remain
+  `-32603`. Other adapter methods retain their existing mappings.
 - **Refusals with no effect are `node_busy` on the adapter side.** The six that mean
   "not now, nothing was recorded" (node queue full, storage full, storage unavailable,
   clock rollback, loop busy, recovering) are `1012` with data `{"reason":"<name>"}`, the
@@ -118,10 +126,14 @@ not import it: the words of the wire never enter the engine.
 `adapter_internal_test.go`: the table of codes for the requests of an adapter (every
 reason of the engine against rows written out by hand, the limit and the field, the
 cause kept off the wire, errors that are no refusal, and `node_busy` with the
-protocol's own rules, effect rule and list of reasons); `adapter_test.go`: the three requests that answer a refusal through a real engine, a
-stopping engine, the absence of the optional parts the wrapper does not map
-(`EndpointCalls`), and `recv.observed`, the optional part it offers and maps
-(`ObservedCalls`). `apiwire_test.go`: every reason of the engine and of `config` against a table
+protocol's own rules, effect rule and list of reasons); `adapter_test.go`: the
+requests that answer a refusal through a real engine, a stopping engine, both
+explicitly mapped optional interfaces (`EndpointCalls` and `ObservedCalls`), and
+`recv.observed` refusals. `direct_test.go`: complete direct send, control and reply
+fields, replay and conflict, endpoint ownership, reply routing, lease and part
+refusals, and nondisclosing status errors through the real host, with persisted
+messages and acknowledgements checked after refusals. `apiwire_test.go`: every
+reason of the engine and of `config` against a table
 written out by hand, the listed codes of `invalid_argument`, the outcome that is not
 known (from a fatal failure of the disk, and judged by a client), the answers an
 interface gives on its own, the details a refusal carries, the faults

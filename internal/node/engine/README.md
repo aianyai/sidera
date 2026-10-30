@@ -40,7 +40,7 @@ delivery to a session: when it is judged and how the verdict is recorded.
 | `RegisterDirect`, `UnregisterDirect`, `CheckpointPut` | What the adapter host calls to answer the requests of an adapter: the registration and unregistration of its direct endpoints, and the state it asks the node to keep. |
 | `Adapter`, `AdapterView`, `AdapterSignals`, `ProbeTokenView` | Reads of what the engine knows of an instance (admission, online or offline since when, probe result, availability, busy turns), and the availability as `handoff.Signals` for one endpoint. |
 | `ProbeTokenEnv`, `TokenEnv`, `HomeEnv`, `ProbeTokenLifetime` | The names of the environment variables that carry a probe token, an endpoint's token and the data directory, and the lifetime of the probe tokens; the Agent interface refers to them. |
-| `Send`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
+| `Send`, `SendDirect`, `Reply`, `SendRequest`, `ReplyRequest`, `SendResult`, `DefaultContentType` | Accept a message from the endpoint a caller is: the body and the source record are on disk before the call returns, and what the recipients' nodes make of it is learned from the state of the deliveries. |
 | `Recv`, `RecvRequest`, `Ack`, `AckRequest` | Hand the page of the queue of the caller's endpoint out under a lease (the bytes the recv command prints), and acknowledge parts of a page. The second check is made again at the hand-out, the budget and the longest wait are the adapter's declaration for the front end, and a wait is a waiter the loop owns. |
 | `RecvObserved` | What the adapter host calls for `recv.observed`: acknowledges a page for the agent when the text the adapter read from the runtime's record contains the page the node printed in full, and refuses with the reason otherwise (a cut or replaced result, a page the node does not hold). |
 | `Control`, `ControlRequest` | Accept a control signal (`session.create`, `session.close`, `session.interrupt`, `endpoint.status`) from the endpoint a caller is, as `Send` does; a creation may carry an initial message (`Body`, `ContentType`). What the target made of it is read from the status of the message. |
@@ -267,6 +267,14 @@ delivery to a session: when it is judged and how the verdict is recorded.
   of the value it decodes to is not read, and a record whose field cannot be read
   stops `Open`. The display name and description the adapter gave are the
   record's own `DisplayName` and `Description`.
+- **A direct send is authorized and accepted in one command.** `SendDirect`
+  takes the adapter's complete `SendParams`, resolves its open direct endpoint
+  against the authenticated instance, parses recipients and reuses message
+  intake, capacity, idempotency and storage. Replies resolve the unique accepted
+  incoming message through the same helper as `Reply` and may name only its
+  original sender as their sole recipient. Control signals refuse `ReplyTo`.
+  Thread, deadline, body, content type, disclosure and idempotency keep their
+  envelope meaning; the ordinary Agent `Send` and `Reply` shapes are unchanged.
 - **A recv that waits is a waiter the loop owns.** It is registered in the same
   command that found the queue empty, so no arrival can slip between the check and
   the registration. Any later command that makes a message of the endpoint ready

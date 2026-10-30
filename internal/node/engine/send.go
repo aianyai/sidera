@@ -134,19 +134,27 @@ func (e *Engine) reply(now time.Time, c Caller, r ReplyRequest) (SendResult, err
 	if err != nil {
 		return SendResult{}, err
 	}
-	keys := e.heldBy(st.rec.ID, r.Message)
-	if len(keys) != 1 {
-		// Nothing was received under that id, or two senders used it: it is not one
-		// message that can be answered.
-		return SendResult{}, refuse(ReasonMessageUnknown)
-	}
-	if keys[0].Sender.IsSystem() {
-		return SendResult{}, invalidArgument("message_id", errors.New("a notice of the node itself is not answered"))
+	to, err := e.replySender(st.rec.ID, r.Message)
+	if err != nil {
+		return SendResult{}, err
 	}
 	return e.accept(now, st, outgoing{
-		to: []ident.Address{{Node: keys[0].SenderNode, Endpoint: keys[0].Sender}}, replyTo: r.Message,
+		to: []ident.Address{to}, replyTo: r.Message,
 		body: r.Body, ctype: r.ContentType, thread: r.Thread, idemKey: r.IdempotencyKey,
 	})
+}
+
+// replySender resolves the unique message this endpoint took in to its original
+// sender. Both Agent replies and direct replies use the same authorization rule.
+func (e *Engine) replySender(endpoint ident.EndpointID, message delivery.MessageID) (ident.Address, error) {
+	keys := e.heldBy(endpoint, message)
+	if len(keys) != 1 {
+		return ident.Address{}, refuse(ReasonMessageUnknown)
+	}
+	if keys[0].Sender.IsSystem() {
+		return ident.Address{}, invalidArgument("message_id", errors.New("a notice of the node itself is not answered"))
+	}
+	return ident.Address{Node: keys[0].SenderNode, Endpoint: keys[0].Sender}, nil
 }
 
 // heldBy are the target records of the messages the endpoint has under the id: the

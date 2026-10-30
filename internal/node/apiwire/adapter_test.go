@@ -99,19 +99,18 @@ func TestAnEngineThatIsStoppingAnswersShuttingDownAndAnAnsweredRequestIsPassedOn
 	}
 }
 
-// The host answers endpoint.send and its kin through the optional interfaces of
-// the engine it is given, and an engine that has them answers with its own errors.
-// What the wrapper does not map must not reach the host by being promoted from the
-// engine: it would be answered with the engine's words.
+// The host discovers both optional parts on the explicit wire wrapper. The
+// wrapper implements each method itself, so no unconverted engine error leaks
+// through a promoted method.
 func TestTheEngineBehindTheHostOffersNoOptionalPartThatItDoesNotMap(t *testing.T) {
 	h := harness.New(t, harness.Options{})
 	var e adapterhost.Engine = apiwire.AdapterEngine(h.Engine())
-	if _, ok := e.(adapterhost.EndpointCalls); ok {
-		t.Error("the engine behind the host offers EndpointCalls, with no mapping of its refusals")
+	if _, ok := e.(adapterhost.EndpointCalls); !ok {
+		t.Error("the engine behind the host does not offer mapped EndpointCalls")
 	}
 }
 
-// recv.observed is the one optional part the wrapper maps: a refusal of the engine
+// recv.observed is an optional part the wrapper maps: a refusal of the engine
 // reaches the adapter as the code the protocol names for it.
 func TestRecvObservedRefusalsAreMappedForTheAdapter(t *testing.T) {
 	h := harness.New(t, harness.Options{})

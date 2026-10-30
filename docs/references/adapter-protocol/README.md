@@ -416,6 +416,19 @@ signal, and `SendParams.Validate` the same. `TestEndpointSendRules` (the rows on
 the body) and the golden messages `invalid/endpoint-send--body-empty.json` and
 `invalid/endpoint-send--control-*-with-body.json`, `invalid/endpoint-send--content-type-missing.json` and `invalid/endpoint-send--control-*-with-content-type.json` hold both sides to the rule.
 
+**Direct reply routing.** A nonempty `reply_to` must name the unique message
+this endpoint actually took in, excluding rejected intake records. `to` must
+contain exactly that message's original sender. Unknown reply sources, other
+recipients and multi-recipient replies are refused with no effect. A successful
+reply retains its thread, deadline and idempotency key; disclosure with one
+recipient is normalized away as in every envelope. A control signal cannot carry
+`reply_to`, and otherwise preserves its applicable fields, including thread.
+These checks belong to the daemon's engine rather than the SDK string schema.
+`endpoint.message_status` returns the same `-32602` for an unknown message and
+one the endpoint did not send, so it cannot disclose another endpoint's traffic.
+The production error mapping and its no-effect tests are described in the
+[adapter-host reference](../adapter-host/README.md).
+
 The `display_name` of `endpoint.register` is 1 to `MaxDisplayName` (128)
 characters and a `description`, when given, 1 to `MaxDescription` (1024); a
 character is a Unicode code point, not a byte. The two constants are exported so

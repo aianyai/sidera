@@ -196,3 +196,47 @@ func TestBackPressureOfAnAdapterRequestIsNodeBusyWithItsReason(t *testing.T) {
 		t.Errorf("a fatal storage error is code %d data %q, want an internal error without data whose outcome is unknown", pe.Code, pe.Data)
 	}
 }
+
+// The direct intake adds only no-effect business errors. Fatal and unknown
+// failures retain the peer's unknown-outcome classification.
+func TestDirectSendErrorMappingKeepsNoEffectSeparateFromUnknown(t *testing.T) {
+	for _, tc := range []struct {
+		reason engine.Reason
+		field  string
+		code   int
+		data   string
+	}{
+		{engine.ReasonInvalidArgument, "to[1]", 1008, `{"field":"to[1]"}`},
+		{engine.ReasonInvalidArgument, "thread", 1009, `{"reason":"invalid_argument"}`},
+		{engine.ReasonTooLarge, "body", 1009, `{"reason":"too_large"}`},
+		{engine.ReasonMessageUnknown, "", 1009, `{"reason":"message_unknown"}`},
+		{engine.ReasonIdempotencyConflict, "", 1009, `{"reason":"idempotency_conflict"}`},
+		{engine.ReasonEndpointUnknown, "", 1001, ""},
+		{engine.ReasonStorageFatal, "", -32603, ""},
+	} {
+		t.Run(tc.reason.String()+"/"+tc.field, func(t *testing.T) {
+			pe := asPeerError(t, directSendError(&engine.Refusal{Reason: tc.reason, Field: tc.field, Err: errors.New("secret-path")}))
+			if pe.Code != tc.code || string(pe.Data) != tc.data {
+				t.Fatalf("%+v", pe)
+			}
+			if peer.NoEffect(pe) != (tc.code != -32603) || strings.Contains(pe.Message, "secret-path") {
+				t.Fatalf("effect or disclosure: %+v", pe)
+			}
+			if err := adapterproto.ErrorObject(*pe).Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+	for _, reason := range engine.Reasons() {
+		if adapterCodes[reason].code == 1012 {
+			pe := asPeerError(t, directSendError(&engine.Refusal{Reason: reason}))
+			if pe.Code != 1012 || !peer.NoEffect(pe) {
+				t.Fatalf("back pressure %s: %+v", reason, pe)
+			}
+		}
+	}
+	plain := errors.New("unknown storage failure")
+	if directSendError(plain) != plain || directSendError(nil) != nil {
+		t.Fatal("unknown error or success changed")
+	}
+}
