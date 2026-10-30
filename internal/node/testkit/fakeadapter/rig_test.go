@@ -145,6 +145,7 @@ type rigOptions struct {
 	peer      peer.Params
 	output    func(io.WriteCloser) io.WriteCloser
 	inputs    *fakeadapter.InputRegistry
+	launcher  func(fakeruntime.Launcher) fakeruntime.Launcher
 	toolProbe *fakeadapter.ToolProbeConfig
 	manifest  func(*fakeadapter.ManifestOptions)
 	// refuseObserved makes the daemon side refuse every recv.observed.
@@ -228,12 +229,16 @@ func (r *rig) connect() {
 		output = r.ro.output(output)
 	}
 	served := r.served
+	var launcher fakeruntime.Launcher = r.runtime
+	if r.ro.launcher != nil {
+		launcher = r.ro.launcher(launcher)
+	}
 	go func() {
 		served <- fakeadapter.Serve(ctx, toAdapterR, output, fakeadapter.Config{
 			InstanceID: "fake",
 			Now:        r.clock.Now,
 			Ledger:     adapterWriter,
-			Runtime:    r.runtime,
+			Runtime:    launcher,
 			Manifest:   r.opts,
 			ToolProbe:  r.ro.toolProbe,
 			Peer:       r.ro.peer,

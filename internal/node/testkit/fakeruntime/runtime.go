@@ -95,6 +95,9 @@ func (r *Runtime) Create(ctx context.Context, req CreateRequest) (Session, error
 	if s, ok := r.byAttempt[req.Attempt]; ok {
 		return s, nil
 	}
+	if req.Refusal != "" {
+		return nil, &CreateRefusedError{Reason: req.Refusal}
+	}
 	ref := nativeRef(r.cfg.Seed, req.Attempt)
 	if _, dup := r.sessions[ref]; dup {
 		return nil, fmt.Errorf("fakeruntime: native reference %s is taken", ref)

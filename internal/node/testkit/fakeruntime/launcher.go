@@ -88,6 +88,9 @@ func (l *ProcessLauncher) Create(ctx context.Context, req CreateRequest) (Sessio
 	if claimed {
 		return l.waitForProcessInfo(ctx, ref, nil)
 	}
+	if req.Refusal != "" {
+		return nil, &CreateRefusedError{Reason: req.Refusal}
+	}
 	l.mu.Lock()
 	first := l.firstTurn
 	l.mu.Unlock()

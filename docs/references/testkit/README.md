@@ -8,13 +8,36 @@ document gives the reasons and says where the tests are.
 
 ## Explicit adapter inputs across generations
 
-A test run may own `fakeadapter.ExternalInputs`: a typed prompt refusal and a
-complete availability snapshot. Both fields empty revoke the declaration. These
+A test run may own `fakeadapter.ExternalInputs`: typed creation and prompt refusals
+and a complete availability snapshot. All fields empty revoke the declaration. These
 are external conditions, separate from process-local outcomes and observed daemon
 state. Refusal takes priority without consuming queued outcomes; `ClearOutcomes`
 and the one-shot `Availability` Controller operation keep their previous meanings.
-The SDK validates refusals and availability, and all nested slices are copied.
+`fakeruntime.ValidateCreateRefusal` owns the creation rule: empty or an SDK-valid
+creation failure other than `control_unknown`. The SDK validates prompt refusals
+and availability, and all nested slices are copied.
 No arbitrary knob, script, credential or daemon observation is retained.
+
+Creation refusal reaches the existing runtime `Create` owner through the optional
+`CreateRequest.Refusal`. The in-process owner returns an existing session for that
+attempt first; the process launcher first recovers published ProcessInfo or waits
+on an existing native claim. Existing-native retries therefore still return that
+native after adapter replacement, even without a checkpoint. Only a currently
+absent attempt is refused, with `CreateRefusedError` and no runtime file, spawn or
+ledger effect from the call. Refusal is not persisted or terminal: clearing it
+allows the same attempt to create. This does not arbitrate a candidate started
+before the absence check; such a candidate can still arrive afterward. Native
+record formats and publication waits are unchanged. Controller `OutcomeFail`
+remains a contemporary outcome with its previous semantics.
+
+The adapter maps typed creation refusal to its exact failed reason. An ordinary
+runtime `Create` error does not prove that no native session exists and returns
+the protocol's internal error with unknown effect instead of a fictional
+`native_error` failure. Even an underlying native protocol application's error
+code cannot establish the outer creation's effect. The existing peer logs the
+cause internally and sends its generic error response; cancellation remains
+cancellation. An explicit `native_error` is still available through the external
+input or Controller `OutcomeFail`.
 
 `InputRegistry` fixes the run's instance names at construction, including disabled
 instances, and rejects unknown names. Each instance independently serializes Set,
@@ -50,7 +73,7 @@ install independently of detach; failure or cancellation cannot enter Serve.
 Standalone programs with RestoreInputs false and launchers with nil Inputs keep
 their old behavior.
 
-Knobs installs refusal before Serve can make a prompt decision. After session
+Knobs installs refusals before Serve can make a creation or prompt decision. After session
 reattachment, `adapter.start` sends the currently declared availability before its
 successful response. This is a legal notification window after admission; an
 ordinary start with no conditions sends no extra empty snapshot. Startup and
@@ -65,7 +88,12 @@ still clears observed availability; these fakes re-report an external condition.
 `fakeadapter/inputs_test.go` covers desired state, copies, isolation, reconnects,
 failed and cancelled application, concurrent Attach/Set and stale detach.
 `inputs_contract_test.go` runs the same protocol and ledger assertions in process
-and against the actual fake programs. `inputs_lifecycle_test.go` requires attach
+and against the actual fake programs. `create_inputs_test.go` does the same for
+creation refusal across generations, queued outcomes, clearing the same attempt
+and existing-native retries without checkpoints. The runtime's
+`create_refusal_test.go` covers the rule and absence of native side effects;
+`create_error_test.go` covers unknown-effect errors and cancellation around real
+creation. `inputs_lifecycle_test.go` requires attach
 cancellation and control closure to terminate without premature Serve or leaked
 processes. The harness's disabled-instance test exercises later real enablement,
 replacement and explicit clearing through its run-owned registry.

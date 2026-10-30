@@ -59,9 +59,10 @@ func (r RemoteKnobs) ApplyInputs(ctx context.Context, in ExternalInputs) error {
 	// fakectl requires a nonempty args object. An explicit empty snapshot
 	// encodes the complete zero value without changing that generic rule.
 	wire := struct {
+		CreateRefusal adapterproto.CreateFailure  `json:"create_refusal,omitempty"`
 		PromptRefusal adapterproto.PromptRefusal  `json:"prompt_refusal,omitempty"`
 		Availability  []adapterproto.Availability `json:"availability"`
-	}{in.PromptRefusal, append([]adapterproto.Availability{}, in.Availability...)}
+	}{in.CreateRefusal, in.PromptRefusal, append([]adapterproto.Availability{}, in.Availability...)}
 	if err := r.Do(ctx, KnobExternalInputs, wire, &raw); err != nil {
 		return err
 	}
@@ -75,13 +76,14 @@ var _ InputReceiver = RemoteKnobs{}
 // as absence: fakectl requires a nonempty argument object for the zero value.
 func decodeExternalInputs(raw []byte) (any, error) {
 	var wire struct {
+		CreateRefusal adapterproto.CreateFailure   `json:"create_refusal,omitempty"`
 		PromptRefusal adapterproto.PromptRefusal   `json:"prompt_refusal,omitempty"`
 		Availability  *[]adapterproto.Availability `json:"availability,omitempty"`
 	}
 	if err := strictjson.Decode(raw, &wire); err != nil {
 		return nil, err
 	}
-	in := ExternalInputs{PromptRefusal: wire.PromptRefusal}
+	in := ExternalInputs{CreateRefusal: wire.CreateRefusal, PromptRefusal: wire.PromptRefusal}
 	if wire.Availability != nil && len(*wire.Availability) != 0 {
 		in.Availability = *wire.Availability
 	}

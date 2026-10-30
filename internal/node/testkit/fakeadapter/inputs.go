@@ -5,18 +5,23 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/aianyai/sidera/internal/node/testkit/fakeruntime"
 	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // ExternalInputs are explicit conditions owned by a test run, independent of an
 // adapter process's outcomes. Each value completely replaces the previous one;
-// the zero value clears both conditions.
+// the zero value clears all conditions.
 type ExternalInputs struct {
+	CreateRefusal adapterproto.CreateFailure  `json:"create_refusal,omitempty"`
 	PromptRefusal adapterproto.PromptRefusal  `json:"prompt_refusal,omitempty"`
 	Availability  []adapterproto.Availability `json:"availability,omitempty"`
 }
 
 func (in ExternalInputs) validate() error {
+	if err := fakeruntime.ValidateCreateRefusal(in.CreateRefusal); err != nil {
+		return err
+	}
 	if in.PromptRefusal != "" && !in.PromptRefusal.Valid() {
 		return fmt.Errorf("fakeadapter: invalid external prompt refusal %q", in.PromptRefusal)
 	}
@@ -175,4 +180,10 @@ func (k *Knobs) promptRefusal() adapterproto.PromptRefusal {
 	k.inputsMu.Lock()
 	defer k.inputsMu.Unlock()
 	return k.inputs.PromptRefusal
+}
+
+func (k *Knobs) createRefusal() adapterproto.CreateFailure {
+	k.inputsMu.Lock()
+	defer k.inputsMu.Unlock()
+	return k.inputs.CreateRefusal
 }

@@ -172,6 +172,7 @@ func TestCreateOutcomes(t *testing.T) {
 	}{
 		{"a refused preset leaves no session", fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: "preset_unknown"}, adapterproto.CreateFailed, adapterproto.CreateFailPresetUnknown, "", 0, 0},
 		{"a runtime that refuses the credentials leaves no session", fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: "runtime_auth"}, adapterproto.CreateFailed, adapterproto.CreateFailRuntimeAuth, "", 0, 0},
+		{"an explicit native error leaves no session", fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: "native_error"}, adapterproto.CreateFailed, adapterproto.CreateFailNativeError, "", 0, 0},
 		{"control_unknown fails the attempt but a native session remains", fakeadapter.Outcome{Kind: fakeadapter.OutcomeFail, Reason: "control_unknown"}, adapterproto.CreateFailed, adapterproto.CreateFailControlUnknown, "", 0, 1},
 		{"an unknown outcome has a native session and its grounds", fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate, Reason: "turn_running"}, adapterproto.CreateIndeterminate, "", adapterproto.GroundsTurnRunning, 0, 1},
 		{"an unknown outcome without grounds says the native side is unreachable", fakeadapter.Outcome{Kind: fakeadapter.OutcomeIndeterminate}, adapterproto.CreateIndeterminate, "", adapterproto.GroundsNativeUnreachable, 0, 1},

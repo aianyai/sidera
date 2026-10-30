@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/aianyai/sidera/internal/node/testkit/ledger"
+	"github.com/aianyai/sidera/sdk/go/adapterproto"
 )
 
 // Errors a session reports. They are values, not strings, so the adapter that
@@ -162,6 +163,28 @@ type CreateRequest struct {
 	FirstPrompt  string `json:"first_prompt"`
 	// Env is the tool access of the session.
 	Env map[string]string `json:"env,omitempty"`
+	// Refusal rejects an absent attempt without recording an effect. An existing
+	// session or pending process creation takes precedence over this condition.
+	Refusal adapterproto.CreateFailure `json:"refusal,omitempty"`
+}
+
+// CreateRefusedError reports an explicit refusal with no native creation effect
+// observed by this call. It is not retained: a later call uses its current input.
+type CreateRefusedError struct {
+	Reason adapterproto.CreateFailure
+}
+
+func (e *CreateRefusedError) Error() string {
+	return fmt.Sprintf("fakeruntime: creation refused: %s", e.Reason)
+}
+
+// ValidateCreateRefusal accepts no condition or a definite pre-creation refusal.
+// control_unknown cannot establish absence of a native session.
+func ValidateCreateRefusal(reason adapterproto.CreateFailure) error {
+	if reason != "" && (!reason.Valid() || reason == adapterproto.CreateFailControlUnknown) {
+		return fmt.Errorf("fakeruntime: invalid creation refusal %q", reason)
+	}
+	return nil
 }
 
 func (r CreateRequest) validate() error {
@@ -170,7 +193,7 @@ func (r CreateRequest) validate() error {
 			return fmt.Errorf("fakeruntime: create request has no %s", name)
 		}
 	}
-	return nil
+	return ValidateCreateRefusal(r.Refusal)
 }
 
 // Session is a native session as an adapter drives it.

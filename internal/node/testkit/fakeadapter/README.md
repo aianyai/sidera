@@ -138,12 +138,31 @@ assert that its injection point was reached.
 
 ## External inputs
 
-`ExternalInputs` contains only `PromptRefusal` and the complete `Availability`
-snapshot. A zero value clears both. It is separate from contemporary outcomes:
+`ExternalInputs` contains `CreateRefusal`, `PromptRefusal` and the complete
+`Availability` snapshot. A zero value clears all three. It is separate from
+contemporary outcomes:
 explicit refusal takes priority without consuming a queued outcome, and
 `ClearOutcomes` does not clear it. Existing `Availability` remains one notification,
-not a retained declaration. Inputs are validated with the SDK's refusal enum and
-availability rules, and nested endpoint slices are copied.
+not a retained declaration. `fakeruntime.ValidateCreateRefusal` owns creation
+refusal validation: empty, or an SDK-valid creation failure other than
+`control_unknown`. The SDK validates prompt refusals and availability, and nested
+endpoint slices are copied.
+
+Creation refusal is passed to the runtime's existing `Create` owner. An existing
+native session takes precedence, including after adapter replacement when the
+retry carries no checkpoint; a pending native claim keeps its existing recovery
+wait. Only a currently absent attempt is refused. The refusal writes no runtime
+record and does not finalize the attempt: clearing the input lets the same attempt
+create. A candidate already started before the absence check can still arrive;
+this input does not arbitrate that race. Contemporary Controller `OutcomeFail`
+keeps its existing behavior.
+
+A typed `fakeruntime.CreateRefusedError` produces the exact failed reason. An
+ordinary runtime `Create` error cannot establish absence of a native effect, so
+it returns the existing internal-error response with unknown effect; request
+cancellation remains cancellation. The peer's internal log retains the cause,
+while its wire response is generic. Explicit `native_error` remains available
+through `CreateRefusal` or Controller `OutcomeFail`.
 
 A fixture constructs one `InputRegistry` for its whole run, listing every instance,
 including initially disabled ones. Unknown instances fail. Each instance has its
@@ -184,6 +203,10 @@ instance isolation, failed installation and the concurrent Attach/Set and stale
 detach boundaries. `inputs_contract_test.go` runs one protocol/ledger script in
 process and against the actual fake programs, including first-prompt refusal,
 startup snapshots, clearing, queued outcomes and unchanged empty-input behavior.
+`create_inputs_test.go` checks creation refusal across generations, same-attempt
+clearing and existing-native retries in both layers. `create_error_test.go` checks
+unknown-effect errors before and after real creation, nested native error codes
+and cancellation after creation.
 A controlled outbound queue failure requires a same-value clear retry to actually
 enqueue and send the empty snapshot.
 `inputs_lifecycle_test.go` checks cancellation and control closure before serving,

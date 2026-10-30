@@ -546,9 +546,15 @@ func (a *adapter) sessionCreate(ctx context.Context, raw json.RawMessage) (any, 
 		return nil, peer.NewError(adapterproto.CodeAttemptConflict, "the attempt was made with other parameters")
 	}
 
-	o, has, err := a.outcome(ctx, forCreate, adapterproto.MethodSessionCreate)
-	if err != nil {
-		return nil, err
+	refusal := a.knobs.createRefusal()
+	var o Outcome
+	var has bool
+	if refusal == "" {
+		var err error
+		o, has, err = a.outcome(ctx, forCreate, adapterproto.MethodSessionCreate)
+		if err != nil {
+			return nil, err
+		}
 	}
 	failedBeforeEffect := has && o.Kind == OutcomeFail && o.Reason != string(adapterproto.CreateFailControlUnknown)
 	if failedBeforeEffect {
@@ -566,15 +572,23 @@ func (a *adapter) sessionCreate(ctx context.Context, raw json.RawMessage) (any, 
 	sess, err := a.cfg.Runtime.Create(ctx, fakeruntime.CreateRequest{
 		Attempt: string(p.Attempt), Endpoint: string(p.SessionEndpoint), Preset: p.Preset,
 		FirstAttempt: string(p.FirstPrompt.Attempt), FirstPrompt: p.FirstPrompt.Text, Env: p.ToolAccess.Env,
+		Refusal: refusal,
 	})
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
+		var refused *fakeruntime.CreateRefusedError
+		if !errors.As(err, &refused) {
+			// A launcher error cannot prove that no native session was created.
+			// Keep the cause for peer's internal log, without unwrapping a native
+			// protocol error whose code describes a different request's effect.
+			return nil, fmt.Errorf("native creation result is unknown: %v", err)
+		}
 		if lerr := a.log(ledger.KindNativeCreateReturned, ledger.Attrs{Attempt: string(p.Attempt), Outcome: string(adapterproto.CreateFailed)}); lerr != nil {
 			return nil, lerr
 		}
-		return answer(adapterproto.SessionCreateResult{Outcome: adapterproto.CreateFailed, Reason: adapterproto.CreateFailNativeError})
+		return answer(adapterproto.SessionCreateResult{Outcome: adapterproto.CreateFailed, Reason: refused.Reason})
 	}
 	a.adopt(p.SessionEndpoint, sess)
 	outcome := adapterproto.CreateCreated

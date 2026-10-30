@@ -32,6 +32,7 @@ A session is driven through `Session`, and sessions are made and found through a
 | ---- | ------- |
 | `New(Config)`, `Runtime` | The in-process runtime. `Create`, `Find`, `SetPlan`, `SetFirstTurn`, `StartTurn`, `EndTurn`, `KillNative`, `SessionEnv`, `Idle`, `Activity` (idle with a count of how often a turn's actions began or finished, read together, for a fixture's quiet), `Close`. `Config.FirstTurn` is the plan of the first turn of every session. |
 | `Session`, `Launcher`, `Controller`, `Watcher` | The interfaces. A watcher gets `TurnStarted`, `TurnEnded` and `ToolResult` one at a time and in order. `Session.Created` names the runtime's own ledger entry for the session. |
+| `CreateRequest`, `CreateRefusedError`, `ValidateCreateRefusal` | Creation with an optional current refusal; a typed refusal without a creation effect from this call, and the shared validation rule. |
 | `TurnPlan`, `TurnAction`, `ActionRunner`, `ActionResult`, `SessionInfo` | What the model does inside a turn, and who does it. |
 | `ExecRunner` | An `ActionRunner` that runs a real command with the session's tool access. An `exec` action that names a `frontend` in its arguments is a receive: its output is the page the command printed, and it is recorded like the page of a `recv` action. With a `Seed` every command gets `SIDERA_TEST_SEED=<seed>/<native ref>/<n>`, so a client that draws its message numbers from it makes the same ones when a crash walk reruns a scenario. |
 | `ModelSaw` | The ledger attributes of what a page showed the model, one entry per message. |
@@ -75,6 +76,16 @@ A session is driven through `Session`, and sessions are made and found through a
 - **Native references are deterministic.** The reference of the session of an attempt
   is derived from the seed and the attempt, so the same attempt, asked again, is the
   same session, and tests can name it.
+- **Creation refusal is a current input.** `CreateRequest.Refusal` is optional;
+  `ValidateCreateRefusal` accepts empty or an SDK-valid creation failure other
+  than `control_unknown`, which cannot prove absence of a native session. The
+  request validator and adapter input validator share that rule. `Runtime.Create`
+  first returns a session already held for the attempt. `ProcessLauncher.Create`
+  first recovers published ProcessInfo or waits on an existing native record.
+  Only a currently absent attempt returns `CreateRefusedError`, before spawning
+  or writing runtime files or ledger entries. Refusal is not retained: clearing
+  the input allows the same attempt to create. It adds no claim arbitration;
+  a candidate started before the absence check can still arrive afterward.
 - **The record is a file of the runtime.** One JSON line per event, strict and
   canonical (`seq` from 1, `at_ms` from the test clock), appended without a sync: a
   killed process leaves its page cache. It holds the text the model saw, because an
@@ -163,6 +174,9 @@ messages and `FuzzDecodeLink`, `FuzzDecodeProcessSpecAndInfo`).
 `session_env_test.go` checks the same environment contract in process and in a
 real runtime process: actual values, independent maps, two-session routing,
 unknown and closed sessions, strict replies, runtime role and private outputs.
+`create_refusal_test.go` checks the allowed input values, no native effects on
+refusal, same-attempt creation after clearing and existing-native priority in
+both launchers.
 `startup_test.go` holds the real control hello response after exclusive creation
 and before publication, then loses the launcher parent or cancels its caller.
 Replay must return the same actual live identity and environment with one real
