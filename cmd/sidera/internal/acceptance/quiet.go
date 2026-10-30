@@ -17,6 +17,16 @@ import (
 // notifications can make its exact expected counts stale before it answers.
 const quietRound = 100 * time.Millisecond
 
+type quiesceExpectation struct {
+	Notifications int      `json:"notifications"`
+	Held          []string `json:"held,omitempty"`
+}
+
+type quiesceParams struct {
+	Expect    map[string]quiesceExpectation `json:"expect,omitempty"`
+	TimeoutMS int64                         `json:"timeout_ms"`
+}
+
 func (f *Fixture) sample(ctx context.Context) (map[string]fakeadapter.StatsReply, error) {
 	instances, err := f.instances(ctx)
 	if err != nil {
@@ -67,20 +77,16 @@ func (f *Fixture) Quiesce(ctx context.Context) error {
 		}
 		last = before
 		if noOutstanding(before) && f.Runtime().Idle() {
-			type expected struct {
-				Notifications int      `json:"notifications"`
-				Held          []string `json:"held,omitempty"`
-			}
-			expect := map[string]expected{}
+			expect := map[string]quiesceExpectation{}
 			for name, s := range before {
-				expect[name] = expected{s.NotificationsSent, s.Held}
+				expect[name] = quiesceExpectation{s.NotificationsSent, s.Held}
 			}
 			deadline, _ := ctx.Deadline()
 			timeout := min(time.Until(deadline), quietRound).Milliseconds()
 			if timeout < 1 {
 				timeout = 1
 			}
-			report, err = f.Manage(ctx, "test.quiesce", manageapi.Request{Params: map[string]any{"expect": expect, "timeout_ms": timeout}})
+			report, err = f.Manage(ctx, "test.quiesce", manageapi.Request{Params: quiesceParams{Expect: expect, TimeoutMS: timeout}})
 			lastErr = err
 			if err == nil {
 				var r struct {

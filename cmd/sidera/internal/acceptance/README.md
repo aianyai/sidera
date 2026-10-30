@@ -60,8 +60,10 @@ connection exists, so that initial event cannot acquire a current step here.
 `Quiesce` samples every enabled adapter's notification count, held-method
 multiset and outstanding requests, requires the remote runtime to be idle,
 submits the expectations to `test.quiesce`, and samples again. It succeeds only
-when both samples agree and the daemon and fakes are satisfied. Its timeout is
-the scenario default, bounded by the caller's context. Each daemon wait is capped
+when both samples agree and the daemon and fakes are satisfied. With no enabled
+adapters, the request omits the optional `expect` field: the strict wire decoder
+rejects an explicitly empty map. Its timeout is the scenario default, bounded by
+the caller's context. Each daemon wait is capped
 at 100 ms within that same deadline, so asynchronous notifications cannot leave
 it waiting against stale counts for the whole budget. An unsatisfied round is
 sampled again; a round timeout never counts as quiet. Diagnostic failures name

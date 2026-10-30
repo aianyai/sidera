@@ -50,9 +50,13 @@ It retains each `SetTime` target before the daemon RPC, because a failed respons
 cannot establish whether the daemon changed time. The next generation starts at
 that target even after an error. Fakes are synchronized only after a successful
 daemon clock RPC; failure still propagates to the caller. It requires stable
-fake progress around the daemon's quiet report. Each node process has one `Wait`
-owner and separate file output and trace. Setup marks a complete-line prefix without
-renumbering observations. Final traces are read only after exit; orderly stop
+fake progress around the daemon's quiet report. With no enabled adapters, its
+typed quiet request omits the optional expectation map; an explicitly empty map
+violates the strict decoder's existing wire rule. A real empty-daemon regression
+uses that same request type for one `test.quiesce` call and requires a satisfied
+response, without a retry loop hiding a malformed request. Each node process has
+one `Wait` owner and separate file output and trace. Setup marks a complete-line
+prefix without renumbering observations. Final traces are read only after exit; orderly stop
 freezes the scenario prefix before the stop operation writes. A target is reached
 only with both its matching termination marker and an abnormal process exit.
 Runtime-driven CLI actions remain unconnected because the fake process inputs
