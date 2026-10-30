@@ -276,9 +276,14 @@ func TestMCPAgentDriverExchangesAllToolsThroughTheRealProgram(t *testing.T) {
 			if err != nil || len(directory.Endpoints) != 1 || directory.NextCursor == "" {
 				t.Fatalf("directory: %+v %v", directory, err)
 			}
-			sent, err := a.Send(n.h.Ctx(), fakeagent.SendInput{To: []string{n.first.address}, Body: "driver message", IdemKey: "driver-send"})
-			if err != nil {
-				t.Fatal(err)
+			input := fakeagent.SendInput{To: []string{n.first.address}, Body: "driver message", IdemKey: "driver-send"}
+			sent, err := a.Send(n.h.Ctx(), input)
+			if err != nil || sent.Replay != fakeagent.ReplayFresh {
+				t.Fatalf("fresh send: %+v %v", sent, err)
+			}
+			again, err := a.Send(n.h.Ctx(), input)
+			if err != nil || again.Replay != fakeagent.ReplayRepeated || again.MessageID != sent.MessageID {
+				t.Fatalf("repeated send: %+v %v", again, err)
 			}
 			status, err := a.Status(n.h.Ctx(), fakeagent.StatusInput{MessageID: sent.MessageID})
 			if err != nil || len(status.Recipients) != 1 || string(status.Recipients[0].To) != n.first.address {

@@ -257,7 +257,7 @@ and supply actual additional interruption targets. The clean recordings have
 A send interrupted before returning creates no guessed message or summary
 obligation. Its bounded drain still receives actual feedback, closes the sender
 and requires all live records and bodies to be gone. Summary presence is required
-only for a returned new message whose resolved target and public Status confirm
+only for a returned message with `ReplayFresh` whose resolved target and public Status confirm
 the actual accepted delivery.
 
 Recovery creation retains each successful control result. `DeliveryEvidence`

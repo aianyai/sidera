@@ -140,7 +140,7 @@ func (a *Agent) Send(ctx context.Context, in fakeagent.SendInput) (fakeagent.Sen
 	}
 	var r agentapi.SendResult
 	_, err := a.call(ctx, args, &in.Body, &r)
-	return sendResult(r), err
+	return sendResult(r, err)
 }
 
 func (a *Agent) Reply(ctx context.Context, in fakeagent.ReplyInput) (fakeagent.SendResult, error) {
@@ -150,7 +150,7 @@ func (a *Agent) Reply(ctx context.Context, in fakeagent.ReplyInput) (fakeagent.S
 	args = option(args, "key", in.IdemKey)
 	var r agentapi.SendResult
 	_, err := a.call(ctx, args, &in.Body, &r)
-	return sendResult(r), err
+	return sendResult(r, err)
 }
 
 func (a *Agent) Recv(ctx context.Context, in fakeagent.RecvInput) (fakeagent.RecvResult, error) {
@@ -187,7 +187,7 @@ func (a *Agent) Control(ctx context.Context, in fakeagent.ControlInput) (fakeage
 	args = option(args, "key", in.IdemKey)
 	var r agentapi.ControlResult
 	_, err := a.call(ctx, args, nil, &r)
-	return fakeagent.SendResult{MessageID: r.MessageID, To: []string{r.To}, Replayed: r.Replayed}, err
+	return sendResult(agentapi.SendResult{MessageID: r.MessageID, To: []string{r.To}, Replayed: r.Replayed}, err)
 }
 
 func (a *Agent) Declare(ctx context.Context, in fakeagent.DeclareInput) error {
@@ -220,6 +220,9 @@ func option(args []string, name, value string) []string {
 	}
 	return args
 }
-func sendResult(r agentapi.SendResult) fakeagent.SendResult {
-	return fakeagent.SendResult{MessageID: r.MessageID, To: r.To, Replayed: r.Replayed}
+func sendResult(r agentapi.SendResult, err error) (fakeagent.SendResult, error) {
+	if err != nil {
+		return fakeagent.SendResult{}, err
+	}
+	return fakeagent.SendResult{MessageID: r.MessageID, To: r.To, Replay: fakeagent.ReplayStateFrom(r.Replayed)}, nil
 }

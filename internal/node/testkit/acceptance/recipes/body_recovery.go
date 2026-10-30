@@ -49,7 +49,7 @@ func bodyCleanupRecipe(b Bindings, archive bool) ScriptRecipe {
 					if invalid := r.MessageID.Validate(); invalid != nil {
 						return fmt.Errorf("source send returned an invalid message: %w", invalid)
 					}
-					if len(r.To) != 1 || r.To[0] != target || r.Replayed {
+					if len(r.To) != 1 || r.To[0] != target || r.Replay != fakeagent.ReplayFresh {
 						return fmt.Errorf("source send did not create the requested delivery: %+v", r)
 					}
 					message = r.MessageID

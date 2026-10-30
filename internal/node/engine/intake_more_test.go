@@ -550,13 +550,13 @@ func TestAnIdempotencyKeyIsRememberedUntilItsRetentionEnds(t *testing.T) {
 	h.Advance(time.Minute)
 	quiet(t, h)
 	again, err := trySend(h, "a", "b", "x", "k")
-	if err != nil || !again.Replayed || again.MessageID != first.MessageID {
+	if err != nil || again.Replay != fakeagent.ReplayRepeated || again.MessageID != first.MessageID {
 		t.Fatalf("a repeat inside the retention: %+v, %v", again, err)
 	}
 	h.Advance(delivery.IdempotencyKeyRetainUntil(delivery.ReportBy(h.Clock().Now().Add(delivery.DefaultAcceptBefore))).Sub(h.Clock().Now()) + time.Hour)
 	quiet(t, h)
 	late, err := trySend(h, "a", "b", "x", "k")
-	if err != nil || late.Replayed || late.MessageID == first.MessageID {
+	if err != nil || late.Replay != fakeagent.ReplayFresh || late.MessageID == first.MessageID {
 		t.Errorf("a repeat after the retention: %+v, %v; want a new message", late, err)
 	}
 }

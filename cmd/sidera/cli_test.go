@@ -700,9 +700,14 @@ func TestCLIAgentDriverExchangesMessagesThroughTheRealProgram(t *testing.T) {
 	if err != nil || me.Address != n.first.address || me.Frontends[adapterproto.FrontendCLI].Budget.Limit != 27000 {
 		t.Fatalf("me: %+v %v", me, err)
 	}
-	sent, err := a.Send(n.h.Ctx(), fakeagent.SendInput{To: []string{n.first.address}, Body: "driver message", IdemKey: "driver-send"})
-	if err != nil {
-		t.Fatal(err)
+	input := fakeagent.SendInput{To: []string{n.first.address}, Body: "driver message", IdemKey: "driver-send"}
+	sent, err := a.Send(n.h.Ctx(), input)
+	if err != nil || sent.Replay != fakeagent.ReplayFresh {
+		t.Fatalf("fresh send: %+v %v", sent, err)
+	}
+	again, err := a.Send(n.h.Ctx(), input)
+	if err != nil || again.Replay != fakeagent.ReplayRepeated || again.MessageID != sent.MessageID {
+		t.Fatalf("repeated send: %+v %v", again, err)
 	}
 	if err := n.h.Quiesce(); err != nil {
 		t.Fatal(err)

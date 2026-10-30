@@ -26,6 +26,8 @@ over).
   content type means `engine.DefaultContentType`, and a control body is the initial
   message of a session creation. `Me` presents the declaration and frontend limits;
   `Peers` maps the engine's node and self marker; `Directory` preserves continuation cursors.
+- **Send replay evidence comes from the engine response.** Its replay flag maps
+  to `ReplayFresh` or `ReplayRepeated`; failures retain `ReplayUnknown`.
 - **Probe needs a credential this backend does not hold.** `New` binds an opaque
   `engine.Caller`, not a raw probe token. `Probe` therefore retains
   `not_found/method_unknown` with `fakeagent.ErrNotAvailable`; the real local HTTP

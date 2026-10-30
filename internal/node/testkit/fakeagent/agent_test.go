@@ -61,12 +61,18 @@ func (s *scripted) Send(_ context.Context, in fakeagent.SendInput) (fakeagent.Se
 	if s.send != nil {
 		return s.send(in)
 	}
-	return fakeagent.SendResult{MessageID: "m1", To: in.To}, s.err
+	if s.err != nil {
+		return fakeagent.SendResult{}, s.err
+	}
+	return fakeagent.SendResult{MessageID: "m1", To: in.To, Replay: fakeagent.ReplayFresh}, nil
 }
 
 func (s *scripted) Reply(context.Context, fakeagent.ReplyInput) (fakeagent.SendResult, error) {
 	s.note("reply")
-	return fakeagent.SendResult{MessageID: "m2"}, s.err
+	if s.err != nil {
+		return fakeagent.SendResult{}, s.err
+	}
+	return fakeagent.SendResult{MessageID: "m2", Replay: fakeagent.ReplayFresh}, nil
 }
 
 func (s *scripted) Recv(_ context.Context, in fakeagent.RecvInput) (fakeagent.RecvResult, error) {
@@ -84,7 +90,10 @@ func (s *scripted) Ack(context.Context, fakeagent.AckInput) (fakeagent.AckResult
 
 func (s *scripted) Control(context.Context, fakeagent.ControlInput) (fakeagent.SendResult, error) {
 	s.note("control")
-	return fakeagent.SendResult{MessageID: "m3"}, s.err
+	if s.err != nil {
+		return fakeagent.SendResult{}, s.err
+	}
+	return fakeagent.SendResult{MessageID: "m3", Replay: fakeagent.ReplayFresh}, nil
 }
 
 func (s *scripted) Declare(context.Context, fakeagent.DeclareInput) error {

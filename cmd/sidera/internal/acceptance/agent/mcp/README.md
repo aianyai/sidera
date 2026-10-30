@@ -17,3 +17,6 @@ A receive's nonzero wait is preserved even when a part is requested, so the Agen
 boundary can reject incompatible inputs rather than the driver silently changing
 the request. `Recv` and `Probe` accept only the MCP front end (or an unspecified
 front end); an explicit different front end returns an error before sending.
+
+Send, reply and control results map the real response replay flag to
+`ReplayFresh` or `ReplayRepeated`. A failed call retains `ReplayUnknown`.

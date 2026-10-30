@@ -64,26 +64,26 @@ func (a *directAgent) send(ctx context.Context, p adapterproto.SendParams) (fake
 	if err := a.env.check(); err != nil {
 		return fakeagent.SendResult{}, err
 	}
-	if p.IdempotencyKey != "" {
-		return fakeagent.SendResult{}, scenario.NotAvailable("direct protocol replay result")
-	}
 	ctl, err := a.controller(ctx)
 	if err != nil {
 		return fakeagent.SendResult{}, err
 	}
+	return sendDirect(ctx, ctl, p)
+}
+
+func sendDirect(ctx context.Context, ctl fakeadapter.Controller, p adapterproto.SendParams) (fakeagent.SendResult, error) {
 	sent, err := ctl.Send(ctx, p)
 	if err != nil {
 		return fakeagent.SendResult{}, directError(err)
 	}
-	// endpoint.send reports only the id. The actual status supplies resolved
-	// recipients; the protocol exposes no replay bit, so none is inferred locally.
-	status, err := ctl.MessageStatus(ctx, adapterproto.MessageStatusParams{Endpoint: a.endpoint.ref, MessageID: sent.MessageID})
-	if err != nil {
-		return fakeagent.SendResult{}, directError(err)
+	res := fakeagent.SendResult{MessageID: sent.MessageID, Replay: fakeagent.ReplayUnknown}
+	if p.IdempotencyKey == "" {
+		res.Replay = fakeagent.ReplayFresh
 	}
-	res := fakeagent.SendResult{MessageID: sent.MessageID}
-	for _, r := range status.Recipients {
-		res.To = append(res.To, string(r.To))
+	// A successful endpoint.send confirms these canonical recipients in order;
+	// the daemon rejects aliases and never rewrites the accepted addresses.
+	for _, to := range p.To {
+		res.To = append(res.To, string(to))
 	}
 	return res, nil
 }

@@ -494,6 +494,14 @@ coverage dimensions.
   `fakeagent`, re-exported by `scenario`), because an opaque endpoint caller cannot
   present a raw probe token. The real HTTP interface supports probe credentials.
   The sentinel distinguishes this backend limitation from a server's own response.
+- **Send replay evidence has three states.** `fakeagent.SendResult.Replay` is
+  `ReplayUnknown` when the backend has no replay evidence, `ReplayFresh` for a
+  known new message, and `ReplayRepeated` for a response that found the earlier
+  message under its idempotency key. Zero means unknown rather than fresh.
+  Engine, CLI and MCP backends convert the actual response flag through
+  `ReplayStateFrom`; an unsuccessful response supplies no replay evidence.
+  Body-cleanup recipes require exactly `ReplayFresh` before treating their
+  returned message as a new source delivery; unknown is insufficient.
 - **Rejected: a text language for scenarios, an assertion library, a goroutine-leak
   library.** Scenarios are Go code so the reader reads what runs and the compiler checks
   names; the checks are a few lines of the standard library; the leak check is a scan of
@@ -993,15 +1001,33 @@ The binary fixture's private scenario environment retains endpoint identities an
 recording clients across real daemon generations. Every direct-agent call obtains
 the current fake adapter Controller; it never saves an old connection or uses a
 session token for a direct endpoint. Addresses use actual registration replies
-and public status. Resolved recipients come from actual protocol message status,
-and reply routes and implicit acknowledgement parts come only from received
-pages. A direct bridge renders the typed page it presents to its reader; that
-rendering is its `fakeagent.RecvResult.Raw`, not the daemon's original JSON bytes.
+and public status. A successful direct send confirms the request's canonical
+recipients in their original order: the daemon rejects aliases and never rewrites
+accepted addresses, including replies, control and keyed repeats. The driver
+copies those confirmed recipients without a follow-up status request, preserving
+the accepted message identifier even if a later query would fail. Reply routes
+and implicit acknowledgement parts come only from received pages. A direct bridge
+renders the typed page it presents to its reader; that rendering is its `fakeagent.RecvResult.Raw`, not the daemon's original JSON bytes.
 The shared recording wrapper remains the only writer of bridge model observations.
 Session-only Agent operations are explicitly unavailable on direct endpoints.
-The current adapter send result carries no replay flag, so a nonempty direct
-idempotency key is explicitly unavailable instead of being reported as fresh.
+The adapter send result carries no replay flag, so a nonempty direct idempotency
+key returns `ReplayUnknown`. An empty key returns `ReplayFresh` because no
+idempotency lookup occurs. Keyed calls are sent unchanged and no local cache
+infers replay. Recording keeps the real call and confirmed result without
+inventing replay evidence.
 Real protocol errors and incomplete runtime probes continue to fail the run.
+
+`TestDirectProtocolLifecycleAcrossGeneration` requires fresh evidence from real
+unkeyed binary sends on both generations. The real binary regression
+`TestDirectControlReplayAcrossGenerationClosesNativeSessionOnce` creates a native
+session and sends the unchanged keyed close twice, then kills and waits for the
+daemon, starts its replacement and resets the environment before repeating it.
+The public control reply must remain closed under the original message identifier,
+with `ReplayUnknown` on every keyed response. The external ledger must show the
+created native session closed exactly once and no additional adapter close
+dispatch after replacement. This preserves the same keyed request used by the
+retention close step and its recovery drain. Controller contract tests separately
+cover recipient order, reply, control and no follow-up status dependency.
 
 An environment clock change uses the fixture's retained logical target and real
 clock RPC. The first RPC failure is retained because `scenario.Env.Set` and

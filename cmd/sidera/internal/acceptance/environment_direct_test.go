@@ -35,8 +35,8 @@ func TestDirectProtocolLifecycleAcrossGeneration(t *testing.T) {
 	sendAndRead := func(body string) {
 		t.Helper()
 		sent, err := e.Agent("sender").Send(ctx, fakeagent.SendInput{To: []string{receiver}, Body: body})
-		if err != nil {
-			t.Fatal(err)
+		if err != nil || sent.Replay != fakeagent.ReplayFresh {
+			t.Fatalf("unkeyed send: %+v %v", sent, err)
 		}
 		if err := e.Quiesce(); err != nil {
 			t.Fatal(err)

@@ -149,7 +149,7 @@ func sendResult(res engine.SendResult, err error) (fakeagent.SendResult, error) 
 	if err != nil {
 		return fakeagent.SendResult{}, MapError(err)
 	}
-	out := fakeagent.SendResult{MessageID: adapterproto.MessageID(res.Message), Replayed: res.Replayed}
+	out := fakeagent.SendResult{MessageID: adapterproto.MessageID(res.Message), Replay: fakeagent.ReplayStateFrom(res.Replayed)}
 	for _, a := range res.To {
 		out.To = append(out.To, a.String())
 	}

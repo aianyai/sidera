@@ -27,3 +27,6 @@ flag for it. These restrictions return clear errors and never erase requested
 fields. `Control.Body` follows the fake Agent contract: an empty string omits the
 optional initial message, and a non-empty value supplies one. No driver changes the production
 front end's public command tree.
+
+Send, reply and control results map the real response replay flag to
+`ReplayFresh` or `ReplayRepeated`. A failed call retains `ReplayUnknown`.

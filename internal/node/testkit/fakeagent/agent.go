@@ -58,13 +58,30 @@ type ReplyInput struct {
 	IdemKey     string
 }
 
-// SendResult names the message that was created.
+// ReplayState is what the backend knows about send idempotency.
+type ReplayState uint8
+
+const (
+	ReplayUnknown ReplayState = iota
+	ReplayFresh
+	ReplayRepeated
+)
+
+// ReplayStateFrom converts a replay flag supplied by the actual send response.
+func ReplayStateFrom(replayed bool) ReplayState {
+	if replayed {
+		return ReplayRepeated
+	}
+	return ReplayFresh
+}
+
+// SendResult names the message that was accepted.
 type SendResult struct {
 	MessageID adapterproto.MessageID
 	// To is the recipients as the channel resolved them.
 	To []string
-	// Replayed is true when an idempotency key found the message it names.
-	Replayed bool
+	// Replay distinguishes a new message, an idempotent repeat and no evidence.
+	Replay ReplayState
 }
 
 // RecvInput asks for a page.

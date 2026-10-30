@@ -37,7 +37,10 @@ func (c *Client) Control(ctx context.Context, in fakeagent.ControlInput) (fakeag
 		Replayed  bool                   `json:"replayed"`
 	}
 	_, err := c.call(ctx, "control", args, &wire)
-	return fakeagent.SendResult{MessageID: wire.MessageID, To: []string{wire.To}, Replayed: wire.Replayed}, err
+	if err != nil {
+		return fakeagent.SendResult{}, err
+	}
+	return fakeagent.SendResult{MessageID: wire.MessageID, To: []string{wire.To}, Replay: fakeagent.ReplayStateFrom(wire.Replayed)}, nil
 }
 func (c *Client) sent(ctx context.Context, name string, args map[string]any) (fakeagent.SendResult, error) {
 	var wire struct {
@@ -46,7 +49,10 @@ func (c *Client) sent(ctx context.Context, name string, args map[string]any) (fa
 		Replayed  bool                   `json:"replayed"`
 	}
 	_, err := c.call(ctx, name, args, &wire)
-	return fakeagent.SendResult{MessageID: wire.MessageID, To: wire.To, Replayed: wire.Replayed}, err
+	if err != nil {
+		return fakeagent.SendResult{}, err
+	}
+	return fakeagent.SendResult{MessageID: wire.MessageID, To: wire.To, Replay: fakeagent.ReplayStateFrom(wire.Replayed)}, nil
 }
 func (c *Client) Recv(ctx context.Context, in fakeagent.RecvInput) (fakeagent.RecvResult, error) {
 	if in.Frontend != "" && in.Frontend != adapterproto.FrontendMCP {

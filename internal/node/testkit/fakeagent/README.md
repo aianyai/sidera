@@ -20,6 +20,7 @@ and, for `Recording`, the ledger and the fake runtime of the testkit.
 | ---- | ------- |
 | `Agent` | The eleven methods of the agent interface: `Me`, `Declare`, `Peers`, `Directory`, `Send`, `Reply`, `Recv`, `Ack`, `Status`, `Control`, `Probe`. |
 | `SendInput`, `ReplyInput`, `RecvInput`, `AckInput`, `ControlInput`, `DeclareInput`, `StatusInput`, `DirectoryInput`, `ProbeInput` | The inputs. A `DeclareInput` is a patch: a nil field does not change. |
+| `ReplayState`, `ReplayStateFrom` | Send idempotency evidence: `ReplayUnknown`, `ReplayFresh` or `ReplayRepeated`; conversion of an actual response flag. |
 | `SendResult`, `RecvResult`, `AckResult`, `StatusResult`, `MeResult`, `PeersResult`, `DirectoryResult`, `ProbeResult` | The results. `RecvResult.Raw` is the page exactly as the backend printed it; `Page` is the same page decoded. |
 | `Error`, `Category`, `CategoryOf`, `CodeOf`, `Categories` | The failure of a call: a category (invalid argument, unauthenticated, not found, conflict, refused, backpressure, unavailable, internal, and the client's own "outcome unknown"), a code, a message. |
 | `ErrNotAvailable` | The cause an error carries when the layer a call is made in lacks the capability (a backend's unimplemented method). `scenario.ErrNotAvailable` is the same value, so a test written before the capability exists asserts it is gone. |
@@ -31,6 +32,9 @@ and, for `Recording`, the ledger and the fake runtime of the testkit.
   maps the exit code and the JSON output back to these types; a backend that calls
   the engine maps the engine's typed reasons. The mapping is the backend's, and a
   difference between two backends for one scenario is a finding.
+- **Replay evidence is explicit.** A backend without a replay flag returns
+  `ReplayUnknown`. A known false response flag means `ReplayFresh`, and true
+  means `ReplayRepeated`. A zero result never claims a fresh send.
 - **`Status` takes a message id.** The status of a message cannot be asked
   without naming it.
 - **A page is printed exactly as the backend returned it.** The daemon's check

@@ -116,7 +116,10 @@ restarts, and never depend on a process id or temporary path.
 Direct agents use the current fake adapter Controller for each call, including
 reconnects after a daemon restart. Registration and addresses come from real
 protocol replies and public node status. The driver sends text, control and
-replies through `endpoint.send`; status supplies actual resolved recipients.
+replies through `endpoint.send`. Its successful response confirms the request's
+canonical recipients in their original order; the daemon rejects aliases and
+never rewrites accepted recipient addresses. No follow-up status query is needed
+to complete the send result.
 Reply routing and implicit acknowledgement parts come only from pages actually
 received. The bridge renders each typed page for its own reader; `Raw` contains
 that rendered display, without claiming to retain the daemon's JSON formatting.
@@ -126,11 +129,22 @@ when a shared script names the CLI reader. The session-only `Me`, `Declare`,
 `Peers`, `Directory` and `Probe` methods return `ErrNotAvailable`.
 
 The adapter send result does not report whether an idempotency key replayed a
-message. Until that fact is available, the direct driver explicitly rejects
-nonempty keys rather than inventing a replay flag. Missing public protocol
-implementations remain real call failures, and runtime profiles must pass the
-same strict public probe checks as the base fixture. These support types do not
+message. The direct driver returns `ReplayUnknown` for nonempty keys and
+`ReplayFresh` for an empty key, which never looks up the idempotency table.
+Keyed calls reach the real protocol unchanged, including after a restart.
+Missing public protocol implementations remain real call failures, and runtime
+profiles must pass the same strict public probe checks as the base fixture. These support types do not
 replace either boundary with in-process engine calls.
+
+`TestDirectProtocolLifecycleAcrossGeneration` checks real unkeyed sends are
+fresh on both daemon generations. `TestDirectControlReplayAcrossGenerationClosesNativeSessionOnce`
+creates a real native session and repeats the unchanged keyed close in the same
+generation and after an actual daemon kill, wait and replacement. Each response
+must retain the original message identifier and unknown replay evidence; the
+public closed reply and external ledger must show one native close and no extra
+adapter close dispatch after replacement. `TestDirectSendReportsOnlyAvailableReplayEvidence`
+separately checks the controller contract, including canonical recipient order,
+reply and control, without a follow-up status lookup.
 
 Package sources belong to the fixture's input directory. The private
 `packageInput` helper writes an actual fake-adapter package there; an installation

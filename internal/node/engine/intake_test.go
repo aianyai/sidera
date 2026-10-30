@@ -255,7 +255,7 @@ func TestSameIDDifferentBodyConflicts(t *testing.T) {
 			t.Fatal(err)
 		}
 		again, err := trySend(h, "a", "b", "one body", "key-1")
-		if err != nil || again.MessageID != first.MessageID || !again.Replayed {
+		if err != nil || again.MessageID != first.MessageID || again.Replay != fakeagent.ReplayRepeated {
 			t.Fatalf("the same content again: %+v, %v; want the first message, replayed", again, err)
 		}
 		_, err = trySend(h, "a", "b", "another body", "key-1")
@@ -351,7 +351,7 @@ func TestTheSameIdempotencyKeyForOtherRecipientsIsAConflict(t *testing.T) {
 		})
 	}
 	again, err := trySend(h, "a", "b", "the same words", "key-1")
-	if err != nil || !again.Replayed || again.MessageID != first.MessageID {
+	if err != nil || again.Replay != fakeagent.ReplayRepeated || again.MessageID != first.MessageID {
 		t.Errorf("the same request again: %+v, %v; want the first message, replayed", again, err)
 	}
 	// Two recipients are one request in the order they were given.
@@ -362,7 +362,7 @@ func TestTheSameIdempotencyKeyForOtherRecipientsIsAConflict(t *testing.T) {
 	if _, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("c"), h.Addr("b")}, Body: "to two", IdemKey: "key-2"}); fakeagent.CodeOf(err) != "idempotency_conflict" {
 		t.Errorf("the recipients in another order: %v, want idempotency_conflict", err)
 	}
-	if got, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b"), h.Addr("c")}, Body: "to two", IdemKey: "key-2"}); err != nil || got.MessageID != pair.MessageID || !got.Replayed {
+	if got, err := h.Agent("a").Send(h.Ctx(), fakeagent.SendInput{To: []string{h.Addr("b"), h.Addr("c")}, Body: "to two", IdemKey: "key-2"}); err != nil || got.MessageID != pair.MessageID || got.Replay != fakeagent.ReplayRepeated {
 		t.Errorf("the same two recipients again: %+v, %v; want the first message, replayed", got, err)
 	}
 }
@@ -380,7 +380,7 @@ func TestTheSameIdempotencyKeyDisclosingTheRecipientsDifferentlyIsAConflict(t *t
 	if _, err := send(false); fakeagent.CodeOf(err) != "idempotency_conflict" {
 		t.Errorf("the key again without the disclosure: %v, want idempotency_conflict", err)
 	}
-	if again, err := send(true); err != nil || !again.Replayed || again.MessageID != first.MessageID {
+	if again, err := send(true); err != nil || again.Replay != fakeagent.ReplayRepeated || again.MessageID != first.MessageID {
 		t.Errorf("the same request again: %+v, %v; want the first message, replayed", again, err)
 	}
 }
@@ -451,7 +451,7 @@ func TestNodeQueueFullBackpressuresNewSends(t *testing.T) {
 	// A resend of a request already accepted takes in no new work, so a full
 	// queue does not refuse it: it is answered with the first message.
 	again, err := trySend(h, "a", "b", "message 0", "key-0")
-	if err != nil || !again.Replayed || again.MessageID != keyed {
+	if err != nil || again.Replay != fakeagent.ReplayRepeated || again.MessageID != keyed {
 		t.Errorf("a resend of an accepted request while the queue is full: %+v, %v; want the first message, replayed", again, err)
 	}
 }
