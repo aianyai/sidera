@@ -126,8 +126,10 @@ jobs:
 
   # The tests that drive built binaries, one job per platform. Their files carry
   # the acceptance tag, which no other job runs tests with (test-tags only vets
-  # it), so they have their own job, limit and timeout. The crash walk is left to
-  # the crash-walk jobs; the walk and these tests are told apart by name, and the
+  # it), so they have their own job, limit and timeout. The outer test also needs
+  # crashtest,testclock to run the tagged process prerequisite regression; child
+  # builds select their own tags, so the plain child stays untagged. The crash
+  # walk is left to the crash-walk jobs; the walk and these tests are told apart by name, and the
   # walk's test names all start with TestCrashAtEveryCrashPoint.
   #
   # The test binary builds the binaries it drives, and builds them with -race
@@ -158,7 +160,7 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: "**/go.sum"
       - name: go test with the acceptance tag
-        run: go test -race="$RACE" -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
+        run: go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
 
   # The crash walk of the built binary: it kills a real process at each crash
   # point and checks what the restart finds. It is split into shards that run in

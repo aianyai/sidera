@@ -18,7 +18,7 @@ test, the crash walks of `internal/node/store` included.
 | `format` | Linux | `gofmt -l .` must print nothing |
 | `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
 | `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
-| `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
+| `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows (4) | the crash walk of the built binary: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -race="$RACE" -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
 | `sdk-standalone` | Linux | in `sdk/go` with `GOWORK=off`: `go build ./...`, `go test ./...`, `go mod tidy -diff` |
 | `cross-compile` | Linux | `go build ./... ./sdk/go/...` with `CGO_ENABLED=0` for darwin/arm64, darwin/amd64, linux/amd64, linux/arm64 and windows/amd64 |
@@ -55,13 +55,20 @@ pipe and helper-reexecution tests remain available without `acceptance`.
 
 | Tag | Selects | Compiled by |
 | --- | ------- | ----------- |
-| `crashtest` | binary-level crash points, which stop a real process at a named step | `test-tags` |
-| `testclock` | the test clock a binary reads from its environment | `test-tags` |
+| `crashtest` | binary-level crash points, which stop a real process at a named step | `test-tags`, `acceptance` |
+| `testclock` | the test clock a binary reads from its environment | `test-tags`, `acceptance` |
 | `acceptance` | the test files that drive built binaries | `go vet` in `test-tags`; their tests run only in `acceptance` and `crashwalk` |
 
 `go test` in `test-tags` leaves `acceptance` off on purpose: those tests start
 binaries and have their own jobs, limits and timeouts. `go vet` in `test-tags`
 adds it so the files are at least type-checked on every platform.
+
+The regular `acceptance` job enables all three outer test tags, so
+`TestTaggedProcessPrerequisites` executes alongside the other binary tests.
+The child build commands choose their own tags explicitly: the tagged program
+uses `crashtest,testclock`, and the plain program receives no test tags. Outer
+tags do not change this child selection. The crash-walk job needs only
+`acceptance`, because it does not run that separate prerequisite regression.
 
 ### The crash walk of the binary
 
@@ -330,7 +337,7 @@ go test -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 go test -race -count=1 -timeout 30m -tags crashtest,testclock ./... ./sdk/go/...
 
 # the jobs of the binary; CLI/MCP tests and the foreground-process fixture
-go test -race=false -count=1 -timeout 25m -tags acceptance -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
+go test -race=false -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...
 SIDERA_CRASHWALK=smoke go test -count=1 -v -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...
 
 # the whole walk, or one shard of it, as a CI job takes it (on Linux add -race)
