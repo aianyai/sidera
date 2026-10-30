@@ -1167,6 +1167,16 @@ positive unique generation numbers. Deterministic node seeds distinguish scenari
 process role and observed generation; native runtime seeds distinguish scenario
 and adapter instance while remaining stable across daemon restarts.
 
+The binary backend finishes each interrupted generation by recording the existing
+`fixture.crash` event before starting the replacement. A writing-point crash
+requires its matching actual trace marker and abnormal process exit; an
+after-step crash requires the successful actual kill and completed wait. The event
+names that point or step and the exact daemon PID. The separate `fixture.kill`
+fact remains for an after-step kill. Natural exit, an ordinary stop for offline
+damage and a failed or unreached target produce no crash event. This lets the
+shared retention recipe recognize its interrupted script and run its existing
+recovery drain; final record, endpoint and archive judgements remain unchanged.
+
 Private binary input profiles preserve the public fixture's direct-only default.
 They describe CLI-only runtime declarations, extra instance packages and a warning package
 installed but not enabled. Runtime inputs execute the built `sidera probe --json`

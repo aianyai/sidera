@@ -195,6 +195,12 @@ requires successful `Process.Kill` and completed `Wait`, and records that exact
 PID in the external ledger. Recovery runs retain the first-generation trigger,
 the complete second generation, or a second-generation cut followed by a third
 generation. Shared crash-walk checkers compare those actual cutoffs and paths.
+Finishing an interrupted generation records `fixture.crash` with its verified
+point or after-step description and actual daemon PID before any next-generation
+drain. An after-step interruption also retains its `fixture.kill` fact. Natural
+exit, ordinary stop for offline damage and an unproven target write no crash
+event. Recipes can therefore distinguish interrupted scripts and resume their
+existing recovery drains through the same ledger contract as the in-process layer.
 
 `StartupWalkScenario{Recipe: ...}` runs actual observed CLI Init or bare daemon
 Start, without script package bootstrap. Only a serving Start declares the

@@ -168,6 +168,19 @@ func (r *binaryRun) finish(g *generation) error {
 	if err != nil {
 		return err
 	}
+	// The replacement's drain must see the interruption that abandoned its script.
+	crashPoint := ""
+	if trace.Reached {
+		crashPoint = trace.Crash
+	}
+	if i, ok := r.targets[g.spec.Number]; ok && r.plan.Targets[i].AfterStep != "" && r.result.Reached[i] {
+		crashPoint = "after step " + r.plan.Targets[i].AfterStep
+	}
+	if crashPoint != "" {
+		if err := r.fixture.writer.Append(ledger.KindFixtureCrash, ledger.Attrs{CrashPoint: crashPoint, PIDs: []int64{int64(g.p.cmd.Process.Pid)}}); err != nil {
+			return err
+		}
+	}
 	r.result.Hits = append(r.result.Hits, trace.Hits)
 	if i, ok := r.targets[g.spec.Number]; ok && r.plan.Targets[i].AfterStep == "" {
 		r.result.Reached[i] = trace.Reached
