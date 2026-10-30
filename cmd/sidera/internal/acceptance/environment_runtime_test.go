@@ -110,7 +110,7 @@ func TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe(t *testing.T)
 	startCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	err := f.Start(startCtx, GenerationSpec{Number: 1})
-	if !errors.Is(err, context.DeadlineExceeded) || f.bootstrapNext != len(f.bootstrapSteps) {
+	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("successful command without presentation must remain pending: %v", err)
 	}
 	// The static input persists commands only, never the opaque request Env.

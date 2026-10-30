@@ -1368,8 +1368,15 @@ environment. A new generation must present its newly issued tokens; CLI success
 makes no MCP claim. `TestRuntimeProfileProbesAcrossGeneration` verifies both the
 first start and the replacement generation, with default and additional presets;
 `TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe` keeps a successful
-command that never presents the token pending. Bootstrap still retains each exact management request
-and its progress across generations. Package inputs are real caller-owned source
+command that never presents the token pending. Bootstrap prepares any additional
+preset before enabling instances so their first probe covers every required
+preset. It retains each exact management request across generations and finishes
+the current enabled instances'
+public probes before advancing to the next management change. Probe tokens and
+runtime identities draw from the same seeded engine reader, so this boundary
+keeps their allocations in a stable order across recordings. A crash during that
+wait leaves the stage unfinished: the next generation replays the same operation
+identifier and request before waiting again. Package inputs are real caller-owned source
 directories, extensible before installation; no profile writes installed packages
 or daemon business state directly.
 

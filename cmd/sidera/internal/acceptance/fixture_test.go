@@ -287,9 +287,10 @@ func TestRealBinaryBootstrapResumesCommittedPreset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Preset preparation precedes package installation and enablement. Only
+	// the committed preset stage is complete before this interruption.
 	for _, h := range trace.Hits {
-		switch h.Point.Key.Tag.Tx {
-		case "presets-change", "adapter-stage", "adapter-install", "adapter-enable":
+		if h.Point.Key.Tag.Tx == "presets-change" {
 			t.Fatalf("completed bootstrap stage ran again: %s", h.Point)
 		}
 	}

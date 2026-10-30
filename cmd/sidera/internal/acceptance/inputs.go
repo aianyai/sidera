@@ -110,6 +110,11 @@ func (f *Fixture) prepareInputs() error {
 		return err
 	}
 	f.adapterInputs.HandleControl(f.control)
+	// init owns the default preset. Add any separate named preset before
+	// enabling instances so their first probe presents every required preset.
+	if f.profile.presetName() != "default" {
+		f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "presets.add", collection: "presets.list", request: manageapi.Request{Params: map[string]any{"name": f.profile.presetName(), "preset": map[string]any{"local_sources": "allow"}}}})
+	}
 	seen := map[string]bool{}
 	for _, name := range names {
 		if seen[name] {
@@ -145,11 +150,6 @@ func (f *Fixture) prepareInputs() error {
 		if !warning {
 			f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "adapters.enable", collection: "adapters.list", request: manageapi.Request{Params: map[string]any{"adapter": opts.ID, "instance": name}}})
 		}
-	}
-	// init already owns the default preset. The base fixture adds its separate
-	// named preset; catalog profiles use the real default without re-adding it.
-	if f.profile.presetName() != "default" {
-		f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "presets.add", collection: "presets.list", request: manageapi.Request{Params: map[string]any{"name": f.profile.presetName(), "preset": map[string]any{"local_sources": "allow"}}}})
 	}
 	return f.writeInputs()
 }
@@ -199,6 +199,13 @@ func (f *Fixture) bootstrap(ctx context.Context) error {
 		}
 		if _, err := f.Manage(ctx, step.method, step.request); err != nil {
 			return fmt.Errorf("acceptance: bootstrap %s: %w", step.method, err)
+		}
+		// Admission and probes share the seeded engine reader. Finish them
+		// before the next change can allocate another instance's identity.
+		if err := f.waitProbes(ctx); err != nil || f.current.p.exited() {
+			// A reached crash target can return nil without readiness. Keep
+			// this request pending so the next generation replays and waits.
+			return err
 		}
 		f.bootstrapNext++
 	}

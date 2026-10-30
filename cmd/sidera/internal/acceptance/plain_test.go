@@ -41,16 +41,18 @@ func TestPlainBinaryCreatesSessionAndReceivesThroughCLI(t *testing.T) {
 	if err := init.wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	p, err := f.launch("daemon", filepath.Join(root, "plain-daemon.out"), filepath.Join(root, "plain-daemon.err"), nil)
+	g, err := f.begin(GenerationSpec{Number: 1}, "daemon")
 	if err != nil {
 		t.Fatal(err)
 	}
+	f.current = g
+	p := g.p
 	defer p.killAndWait()
 	defer func() {
 		if t.Failed() {
-			for _, name := range []string{"plain-daemon.out", "plain-daemon.err"} {
-				raw, err := os.ReadFile(filepath.Join(root, name))
-				t.Logf("%s: %s (%v)", name, raw, err)
+			for _, path := range []string{g.stdout, g.stderr} {
+				raw, err := os.ReadFile(path)
+				t.Logf("%s: %s (%v)", filepath.Base(path), raw, err)
 			}
 			log, err := f.Ledger()
 			if err != nil {

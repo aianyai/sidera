@@ -27,11 +27,17 @@ new foreground daemon, waits for public status to report `running`, checks the
 complete tagged crash-point table, and waits for enabled-instance probes and
 quiet before binding actual runtime addresses from public `endpoints.list`.
 A tagged ping alone may answer while recovery is still running. Its first start
-installs the caller-owned fake package, enables the `fake` instance and adds the
-`fixture` preset through management. Bootstrap retains each complete request,
-including its operation ID and expected version, before sending it. A later
-generation resumes at the first unanswered stage with that same request, so a
-committed change replays its stored result; completed stages are not repeated.
+adds the `fixture` preset, installs the caller-owned fake package and enables the
+`fake` instance through management. Any additional preset is prepared before
+enabling instances so their first probe covers every required preset. Bootstrap
+retains each complete request,
+including its operation ID and expected version, before sending it. Each stage
+waits for all currently enabled instances to finish their public probes before
+advancing to the next management change. Admission and probes draw from the same
+seeded engine reader; this boundary keeps probe token allocation from racing the
+next instance's identity allocation. A later generation resumes at the first
+unfinished stage with that same request, so a committed change replays its stored
+result and finishes its readiness wait; completed stages are not repeated.
 Later starts reuse the installed package; only the separate input configuration's
 clock origin is updated. The default
 adapter provides direct endpoints. A private fixture profile supplies the catalog
