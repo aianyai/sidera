@@ -61,7 +61,10 @@ connection exists, so that initial event cannot acquire a current step here.
 multiset and outstanding requests, requires the remote runtime to be idle,
 submits the expectations to `test.quiesce`, and samples again. It succeeds only
 when both samples agree and the daemon and fakes are satisfied. Its timeout is
-the scenario default, bounded by the caller's context. Diagnostic failures name
+the scenario default, bounded by the caller's context. Each daemon wait is capped
+at 100 ms within that same deadline, so asynchronous notifications cannot leave
+it waiting against stale counts for the whole budget. An unsatisfied round is
+sampled again; a round timeout never counts as quiet. Diagnostic failures name
 the daemon report and fake progress. Wall-clock tickers pace external readiness
 queries; they never move logical time.
 

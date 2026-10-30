@@ -13,6 +13,10 @@ import (
 	"github.com/aianyai/sidera/internal/node/testkit/scenario"
 )
 
+// quietRound bounds how long the daemon waits against one sample: asynchronous
+// notifications can make its exact expected counts stale before it answers.
+const quietRound = 100 * time.Millisecond
+
 func (f *Fixture) sample(ctx context.Context) (map[string]fakeadapter.StatsReply, error) {
 	instances, err := f.instances(ctx)
 	if err != nil {
@@ -72,7 +76,7 @@ func (f *Fixture) Quiesce(ctx context.Context) error {
 				expect[name] = expected{s.NotificationsSent, s.Held}
 			}
 			deadline, _ := ctx.Deadline()
-			timeout := time.Until(deadline).Milliseconds()
+			timeout := min(time.Until(deadline), quietRound).Milliseconds()
 			if timeout < 1 {
 				timeout = 1
 			}
