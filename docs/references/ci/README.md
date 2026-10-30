@@ -16,7 +16,7 @@ test, the crash walks of `internal/node/store` included.
 | Job | Runs on | Steps |
 | --- | ------- | ----- |
 | `format` | Linux | `gofmt -l .` must print nothing |
-| `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` |
+| `test` | Linux, macOS, Windows | no build tags: `go vet ./... ./sdk/go/...`, `go test -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, `go test -race -count=1 -timeout 30m [-skip …] ./... ./sdk/go/...`, then `go test -count=1 -v -timeout 30m [-skip …] ./internal/node/fsx ./internal/node/ipc` and the three single-sample benchmark commands below |
 | `test-tags` | Linux, macOS, Windows | tagged: `go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...`, then the two `go test` runs of `test` again with `-tags crashtest,testclock` |
 | `acceptance` | Linux, macOS, Windows | the tests that drive built binaries, without the crash walk: `go test -race="$RACE" -count=1 -timeout 25m -tags acceptance,crashtest,testclock -skip '^TestCrashAtEveryCrashPoint' ./cmd/sidera ./cmd/sidera/internal/acceptance/...`, with `RACE` true on Linux only |
 | `crashwalk` | Linux (3 shards), macOS (2), Windows (4) | the crash walk of the built binary: first `go test -tags acceptance -list '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...`, which must name the walk, then `go test -race="$RACE" -count=1 -v -timeout <limit> -tags acceptance -run '^TestCrashAtEveryCrashPoint' ./cmd/sidera/internal/acceptance/...` with `SIDERA_CRASHWALK` and `SIDERA_CRASHWALK_SHARD` set |
@@ -29,7 +29,7 @@ the job's limit so that a hang ends with the goroutine dump of the test binary:
 | Job | Instances | `timeout-minutes` | `go test -timeout` |
 | --- | --------- | ----------------- | ------------------ |
 | `format` | 1 | 10 | none |
-| `test` | 3 | 40 | 30m per step |
+| `test` | 3 | 40 | 30m per test step; benchmarks 10m, 10m, 30m |
 | `test-tags` | 3 | 40 | 30m per step |
 | `acceptance` | 3 | 30 | 25m |
 | `crashwalk` | 9: Linux 3, macOS 2, Windows 4 | 45 on Linux and macOS, 60 on Windows | 40m on Linux and macOS, 55m on Windows |
@@ -69,6 +69,31 @@ The child build commands choose their own tags explicitly: the tagged program
 uses `crashtest,testclock`, and the plain program receives no test tags. Outer
 tags do not change this child selection. The crash-walk job needs only
 `acceptance`, because it does not run that separate prerequisite regression.
+
+### Single-sample benchmarks
+
+Each platform's existing `test` job runs these three benchmark commands once,
+without build tags or the race detector. `-run '^$'` omits ordinary tests and
+`-benchtime=1x -count=1` takes one iteration of every named sub-benchmark:
+
+| Benchmark | Package | Command timeout |
+| --- | --- | --- |
+| `BenchmarkFilesystemWrites` | `internal/node/fsx` | 10m |
+| `BenchmarkTransactionWrites` | `internal/node/testkit/acceptance/inproc` | 10m |
+| `BenchmarkColdStartScan` | `internal/node/store` | 30m |
+
+These are platform cost records with no performance threshold or statistical
+regression claim. Transaction results use `ns/write-window` for the interval
+from the first actual write observation to the logical commit observation,
+alongside `commits/op`. Work before the first write and after logical commit
+falls outside the window, including preparation before `Begin` and the remaining
+return path of `Commit`; this is not the complete transaction duration.
+The cold scan uses the real filesystem with a warm page cache and includes
+opening the filesystem and constructing the table, writer and store for each
+scan; it does not measure a cold page cache or complete daemon startup.
+The existing 40-minute job limit remains unchanged; command timeouts do not
+establish that the combined job fits that limit. Hosted timings must establish
+the remaining margin.
 
 ### The crash walk of the binary
 
@@ -330,6 +355,11 @@ gofmt -l .   # must print nothing
 go vet ./... ./sdk/go/...
 go test -count=1 -timeout 30m ./... ./sdk/go/...
 go test -race -count=1 -timeout 30m ./... ./sdk/go/...
+
+# one cost sample per platform, without tags or -race
+go test -run '^$' -bench '^BenchmarkFilesystemWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/fsx
+go test -run '^$' -bench '^BenchmarkTransactionWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/testkit/acceptance/inproc
+go test -run '^$' -bench '^BenchmarkColdStartScan$' -benchtime=1x -count=1 -timeout 30m ./internal/node/store
 
 # the tagged job; on macOS and Windows CI also adds -skip '^TestPowerLossClone'
 go vet -tags crashtest,testclock,acceptance ./... ./sdk/go/...

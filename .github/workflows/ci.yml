@@ -91,6 +91,13 @@ jobs:
       # tests that log or skip must be added here.
       - name: go test -v (platform packages)
         run: go test -count=1 -v -timeout 30m -skip "$SKIP_TESTS" ./internal/node/fsx ./internal/node/ipc
+      # One untagged, non-race sample records each platform's real filesystem
+      # costs. These are measurements, not performance thresholds.
+      - name: single-sample benchmarks
+        run: |
+          go test -run '^$' -bench '^BenchmarkFilesystemWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/fsx
+          go test -run '^$' -bench '^BenchmarkTransactionWrites$' -benchtime=1x -count=1 -timeout 10m ./internal/node/testkit/acceptance/inproc
+          go test -run '^$' -bench '^BenchmarkColdStartScan$' -benchtime=1x -count=1 -timeout 30m ./internal/node/store
 
   # The same checks again with the build tags that select binary-level crash
   # points and the test clock, which the untagged job never compiles. vet also
