@@ -27,6 +27,9 @@ type Config struct {
 	Runtime RuntimeLauncher
 	// Manifest says what the adapter declares.
 	Manifest ManifestOptions
+	// ToolProbe optionally executes the requested tool probes. Nil only reports
+	// that they ran; the daemon still needs each token presented independently.
+	ToolProbe *ToolProbeConfig
 	// Knobs are the test's handles on the adapter; nil gives knobs that change
 	// nothing and that nobody holds.
 	Knobs *Knobs

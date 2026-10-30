@@ -32,18 +32,21 @@ func Serve(ctx context.Context, r io.Reader, w io.WriteCloser, cfg Config) error
 	if err != nil {
 		return err
 	}
+	probeCtx, cancelProbes := context.WithCancel(ctx)
 	a := &adapter{
 		cfg: cfg, opts: cfg.Manifest, knobs: cfg.Knobs, led: cfg.Ledger, p: p,
 		sessions: map[adapterproto.EndpointRef]*nativeSession{},
 		attempts: map[adapterproto.AttemptID]adapterproto.SessionCreateParams{},
 		prompts:  map[adapterproto.AttemptID]promptRecord{},
 		failed:   make(chan struct{}),
+		probeCtx: probeCtx, cancelProbes: cancelProbes,
 	}
 	a.ctx = ctx
 	a.register()
 	cfg.Knobs.bind(a)
 	defer cfg.Knobs.unbind(a)
 	defer a.releaseLock()
+	defer a.stopToolProbes()
 
 	if err := a.log(ledger.KindAdapterStarted, ledger.Attrs{Instance: cfg.InstanceID}); err != nil {
 		_ = p.Close()
@@ -85,12 +88,16 @@ type promptRecord struct {
 }
 
 type adapter struct {
-	cfg   Config
-	opts  ManifestOptions
-	knobs *Knobs
-	led   *ledger.Writer
-	p     *peer.Peer
-	ctx   context.Context
+	cfg          Config
+	opts         ManifestOptions
+	knobs        *Knobs
+	led          *ledger.Writer
+	p            *peer.Peer
+	ctx          context.Context
+	probeCtx     context.Context
+	cancelProbes context.CancelFunc
+	probes       sync.WaitGroup
+	probesClosed bool
 
 	failed chan struct{}
 
@@ -338,6 +345,7 @@ func (a *adapter) shutdown(_ context.Context, _ json.RawMessage) (any, error) {
 	a.mu.Lock()
 	a.shuttingDown = true
 	a.mu.Unlock()
+	a.stopToolProbes()
 	return adapterproto.Empty{}, nil
 }
 
@@ -467,11 +475,23 @@ func (a *adapter) start(ctx context.Context, raw json.RawMessage) (any, error) {
 	return answer(adapterproto.StartResult{Sessions: states})
 }
 
-func (a *adapter) probe(_ context.Context, raw json.RawMessage) (any, error) {
+func (a *adapter) probe(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p adapterproto.ProbeParams
 	if err := decodeParams(raw, &p); err != nil {
 		return nil, err
 	}
+	a.mu.Lock()
+	if a.probesClosed {
+		a.mu.Unlock()
+		return nil, peer.NewError(peer.CodeShuttingDown, "shutting down")
+	}
+	a.probes.Add(1)
+	a.mu.Unlock()
+	defer a.probes.Done()
+	ctx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(a.probeCtx, cancel)
+	defer stop()
+	defer cancel()
 	res := adapterproto.ProbeResult{
 		Auth:         adapterproto.AuthValid,
 		Dependencies: []adapterproto.Dependency{},
@@ -488,9 +508,7 @@ func (a *adapter) probe(_ context.Context, raw json.RawMessage) (any, error) {
 			seen[tp.Preset] = true
 			res.Presets = append(res.Presets, adapterproto.PresetStatus{Name: tp.Preset, Usable: true})
 		}
-		res.ToolProbes = append(res.ToolProbes, adapterproto.ToolProbeResult{
-			Preset: tp.Preset, Frontend: tp.Frontend, Outcome: adapterproto.ProbeRan, Method: adapterproto.ProbeUnsandboxed,
-		})
+		res.ToolProbes = append(res.ToolProbes, a.runToolProbe(ctx, tp))
 	}
 	return answer(res)
 }

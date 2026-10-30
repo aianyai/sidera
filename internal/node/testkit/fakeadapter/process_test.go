@@ -35,6 +35,7 @@ type procFixture struct {
 	ctrl    fakeruntime.RemoteController
 	lock    string
 	started []*procAdapter
+	stderr  io.Writer
 }
 
 func newProcFixture(t *testing.T) *procFixture {
@@ -119,7 +120,10 @@ func (f *procFixture) startAdapter() *procAdapter {
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	cmd.Stderr = testWriter{f.t}
+	cmd.Stderr = f.stderr
+	if cmd.Stderr == nil {
+		cmd.Stderr = testWriter{f.t}
+	}
 	if err := cmd.Start(); err != nil {
 		f.t.Fatalf("start the adapter program: %v", err)
 	}

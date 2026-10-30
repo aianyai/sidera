@@ -22,6 +22,8 @@ import (
 type ProcessConfig struct {
 	InstanceID string          `json:"instance_id"`
 	Manifest   ManifestOptions `json:"manifest"`
+	// ToolProbe contains only static commands, never request credentials.
+	ToolProbe *ToolProbeConfig `json:"tool_probe,omitempty"`
 	// LedgerDir is the directory of the file ledger, shared with the fixture and
 	// with the runtime processes.
 	LedgerDir string `json:"ledger_dir"`
@@ -161,7 +163,7 @@ func RunProcess(ctx context.Context, cfg ProcessConfig, stdin io.Reader, stdout 
 	}()
 	err = Serve(ctx, stdin, stdout, Config{
 		InstanceID: cfg.InstanceID, Now: clock.Now, Ledger: led, Runtime: launcher,
-		Manifest: cfg.Manifest, Knobs: knobs, Logger: logger,
+		Manifest: cfg.Manifest, ToolProbe: cfg.ToolProbe, Knobs: knobs, Logger: logger,
 	})
 	if errors.Is(err, context.Canceled) {
 		return nil // the fixture ended the control connection, or a signal came

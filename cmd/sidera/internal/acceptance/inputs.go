@@ -124,7 +124,13 @@ func (f *Fixture) prepareInputs() error {
 		if err != nil {
 			return err
 		}
-		f.inputs = append(f.inputs, adapterInput{source: source, config: config, process: fakeadapter.ProcessConfig{InstanceID: name, Manifest: opts, LedgerDir: filepath.Join(f.root, "l"), RuntimeDir: filepath.Join(f.root, "r"), RuntimeBinary: f.binaries.Runtime, RuntimeSeed: f.runtimeSeed(name), RuntimeTestSeed: f.opts.Seed + "/runtime/" + name, Control: f.control.Addr()}})
+		var toolProbe *fakeadapter.ToolProbeConfig
+		if opts.Runtime {
+			toolProbe = &fakeadapter.ToolProbeConfig{Commands: map[adapterproto.Frontend][]string{
+				adapterproto.FrontendCLI: {f.binaries.Plain, "probe", "--json"},
+			}}
+		}
+		f.inputs = append(f.inputs, adapterInput{source: source, config: config, process: fakeadapter.ProcessConfig{InstanceID: name, Manifest: opts, ToolProbe: toolProbe, LedgerDir: filepath.Join(f.root, "l"), RuntimeDir: filepath.Join(f.root, "r"), RuntimeBinary: f.binaries.Runtime, RuntimeSeed: f.runtimeSeed(name), RuntimeTestSeed: f.opts.Seed + "/runtime/" + name, Control: f.control.Addr()}})
 		f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "adapters.install", request: manageapi.Request{Params: map[string]any{"source": source}}})
 		if !warning {
 			f.bootstrapSteps = append(f.bootstrapSteps, bootstrapStep{method: "adapters.enable", collection: "adapters.list", request: manageapi.Request{Params: map[string]any{"adapter": opts.ID, "instance": name}}})

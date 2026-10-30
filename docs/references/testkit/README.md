@@ -189,6 +189,23 @@ coverage dimensions.
   environment variable is the fallback. A configuration field that was left out must
   not turn into a process nobody can end (the control address is required) or into
   1970 (the clock start must be positive).
+- **A real tool probe is an optional adapter responsibility.** `fakeadapter.Config`
+  and `ProcessConfig` share `ToolProbeConfig`: an exact frontend-to-argv map, with
+  no shell or fallback between frontends. Missing or empty commands report
+  `not_run`, failed commands report `failed`, and only successful completion
+  reports `ran/unsandboxed`. Each request's opaque environment overrides inherited
+  values; tokens are never copied to arguments, configuration, logs or the ledger.
+  Both command outputs are discarded and failure details contain only fixed text.
+  Standard-library `exec.CommandContext` and `Run` own cancellation and waiting:
+  request cancellation, shutdown and the end of the adapter cancel and wait for
+  their commands. A probe precedes native session creation, so it has no fabricated
+  runtime session identity or record. Nil configuration keeps report-only behavior;
+  neither that report nor a successful configured command proves passage. The node
+  still requires every token to arrive through its matching frontend. The same
+  command, environment, failure, cancellation and secrecy contract is tested in
+  process and in the standalone fake adapter by `TestToolProbeCommandsUseEachFrontendAndPresetEnvironment`
+  and `TestToolProbeCancellationReapsItsCommand`; `TestToolProbeConfigContainsOnlyStaticCommands`
+  rejects request credential fields in static process input.
 - **A runtime process outlives its adapter.** A native session does not die when its
   adapter does; what the daemon must survive is an adapter that restarts and finds the
   session still there, or gone. So each session is a detached process, found again by a
@@ -999,7 +1016,13 @@ and adapter instance while remaining stable across daemon restarts.
 
 Private binary input profiles preserve the public fixture's direct-only default.
 They describe CLI-only runtime declarations, extra instance packages and a warning package
-installed but not enabled. Bootstrap still retains each exact management request
+installed but not enabled. Runtime inputs execute the built `sidera probe --json`
+for every requested preset, including init's existing default, with each request's
+environment. A new generation must present its newly issued tokens; CLI success
+makes no MCP claim. `TestRuntimeProfileProbesAcrossGeneration` verifies both the
+first start and the replacement generation, with default and additional presets;
+`TestSuccessfulCommandWithoutTokenPresentationDoesNotPassProbe` keeps a successful
+command that never presents the token pending. Bootstrap still retains each exact management request
 and its progress across generations. Package inputs are real caller-owned source
 directories, extensible before installation; no profile writes installed packages
 or daemon business state directly.

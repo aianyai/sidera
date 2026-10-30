@@ -18,6 +18,7 @@ three operating systems and both tag sets.
 | `StartPipe(ctx, Config)` → `PipeProcess` | `Serve` on a pair of pipes with the shape of a child process (`Stream`, `PID`, `Kill`, `Wait`), for an engine-layer fixture that hands the adapter host a process to supervise. |
 | `Serve(ctx, r, w, Config)` | The adapter side of the protocol over a reader and a writer: in a test process the two ends of an `io.Pipe`, in a program standard input and output. |
 | `Config`, `ManifestOptions`, `DefaultManifestOptions` | What the adapter is given and what it declares. `ManifestOptions` makes both the manifest (`Manifest`, `Encode`, `WritePackage`) and the capabilities it answers `initialize` with, so they cannot disagree. |
+| `ToolProbeConfig` | Optional static commands for real tool probes, shared by `Config` and `ProcessConfig`. |
 | `Knobs`, `Outcome`, `NewKnobs` | The test's handles. |
 | `Controller`, `Knobs.Controller`, `RemoteKnobs` | One interface, with a context, over the knobs of both layers: a script written against it turns the same knobs of an adapter in the test process and of the program, as one written against `fakeruntime.Controller` does for the turns. |
 | `RunProcess`, `ProcessConfig`, `DecodeProcessConfig`, `ReadProcessConfig`, `ConfigArgs` | The body of the adapter program; the program is `cmd/sidera-fake-adapter`. |
@@ -76,6 +77,28 @@ a `ProcessLauncher` in the program.
 - **Capabilities are honoured both ways.** A method of a capability that was not
   declared is `1003` (the daemon would never send it); a knob that needs a
   capability that was not declared returns `ErrNotDeclared`.
+
+## Tool probes
+
+`Config.ToolProbe` and `ProcessConfig.ToolProbe` take the same optional
+`ToolProbeConfig`. Its `commands` map selects an argv by the request's exact
+frontend. A missing or empty command reports `not_run`; a command that fails
+reports `failed`; only a command that finishes successfully reports `ran` with
+`unsandboxed`. There is no fallback from MCP to CLI. Commands do not run through a
+shell. They contain only executable paths and public arguments, never credentials.
+
+Every command inherits the adapter's environment, with the request's opaque `Env`
+values overriding inherited values. The received environment is used only for that
+command and is never copied into process configuration or the ledger. Standard
+output and error are discarded; failure details are fixed text so a command cannot
+leak a token by printing it. Request cancellation, shutdown and the end of `Serve`
+cancel and wait for the commands the adapter started. Probe commands are not native
+sessions and do not use the runtime's session identities or records.
+
+Nil preserves report-only behavior: the adapter reports `ran` without executing a
+tool. That report never proves the daemon's probe passed. The daemon independently
+requires every issued token to be presented through its matching frontend, even
+when a configured command exits successfully.
 
 ## The knobs
 

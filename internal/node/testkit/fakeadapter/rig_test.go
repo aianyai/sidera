@@ -142,7 +142,8 @@ type notification struct {
 }
 
 type rigOptions struct {
-	manifest func(*fakeadapter.ManifestOptions)
+	toolProbe *fakeadapter.ToolProbeConfig
+	manifest  func(*fakeadapter.ManifestOptions)
 	// refuseObserved makes the daemon side refuse every recv.observed.
 	refuseObserved bool
 	// autoFirstTurn leaves the runtime's first turn as a real runtime has it: the
@@ -220,6 +221,7 @@ func (r *rig) connect() {
 			Ledger:     adapterWriter,
 			Runtime:    r.runtime,
 			Manifest:   r.opts,
+			ToolProbe:  r.ro.toolProbe,
 			Knobs:      r.knobs,
 			Logger:     slog.New(slog.NewTextHandler(testWriter{r.t}, &slog.HandlerOptions{Level: slog.LevelDebug})),
 		})

@@ -36,7 +36,11 @@ clock origin is updated. The default
 adapter provides direct endpoints. A private fixture profile supplies the catalog
 instance and preset names, runtime declarations, extra instances, and an installed
 warning package that remains disabled until a recipe enables it. Runtime profiles declare only the CLI front end, with its actual wait limit and
-budget; they make no MCP coverage claim. Runtime processes
+budget; they make no MCP coverage claim. Their fake adapters execute the actual
+`sidera probe --json` command for every requested preset, including init's default,
+using only that request's environment. Each generation must present its newly
+issued tokens before `Start` succeeds. Static process inputs contain only command
+paths and public arguments. Runtime processes
 use the actual fake-runtime program. The tagged daemon consumes and clears its
 crash controls before launching adapters, so descendant CLI processes do not
 inherit the daemon generation's target or record file.
