@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -259,7 +260,8 @@ func TestToolProbeCancellationReapsItsCommand(t *testing.T) {
 					a.stop()
 				}
 				_ = conn.SetReadDeadline(time.Now().Add(waitLimit))
-				if n, err := conn.Read(make([]byte, 1)); n != 0 || err != io.EOF {
+				// A killed command can close its socket with EOF or a TCP reset.
+				if n, err := conn.Read(make([]byte, 1)); n != 0 || !(errors.Is(err, io.EOF) || errors.Is(err, probeConnectionReset)) {
 					t.Fatalf("owned command survived cancellation: %d %v", n, err)
 				}
 				select {
